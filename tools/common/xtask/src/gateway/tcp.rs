@@ -28,7 +28,15 @@
 //! * retransmission of everything unacknowledged on a fixed timer, with no
 //!   round-trip estimate, and of one segment on three duplicate
 //!   acknowledgments;
-//! * no congestion control, no SACK, no window scaling and no timestamps.
+//! * no congestion control, no SACK and no timestamps.
+//!
+//! It does scale the guest's window (RFC 7323), when the guest's SYN offers
+//! to: a guest that keeps more than 64 KiB for a connection can say so, and
+//! the gateway keeps sending into that room while the program on the guest is
+//! busy elsewhere -- writing what it read to a disk, say. The gateway's own
+//! window is never scaled; its shift is zero. And it probes a window the
+//! guest has shut ([`PERSIST`], RFC 9293 section 3.8.6.1), since the update
+//! that opens it again is a frame like any other and can be lost.
 //!
 //! The path between the two ends is a loopback socket to this machine's own
 //! kernel and a virtio-net device: it does not reorder packets and has no
@@ -54,6 +62,10 @@
 //! driver's ring and queue at 128 entries (2026-10-01, `x86_64` under KVM, three
 //! runs each of a 32 MiB download): 8 in flight 3.6 to 12.4 MB/s, 16 5.5 to
 //! 14.3, 24 10.8 to 15.5, and 44 (the guest's whole window) collapses again.
+//! On 2026-10-14 (`x86_64` under KVM, 4 processors, host load 13 to 37), 24
+//! in flight carried a guest's download at the host's own rate: 70 MB/s from
+//! this machine's loopback, 29 to 37 MB/s from a CDN the host itself reaches
+//! at 31 to 38 MB/s, over HTTP and HTTPS, alone or four at once.
 //!
 //! # Forwarded connections
 //!
@@ -121,6 +133,21 @@ const REDIAL: Duration = Duration::from_millis(200);
 /// before the guest sees them, which the numbers at the top of this file
 /// measure.
 pub(super) const MAX_IN_FLIGHT: usize = 24;
+
+/// The largest shift a window scale option may name (RFC 7323 section 2.3).
+const MAX_WINDOW_SCALE: u8 = 14;
+
+/// How long the guest's window stays shut, with data waiting for it and
+/// nothing outstanding, before it is probed; each probe the window stays shut
+/// for doubles it, up to [`PERSIST_MAX`]. RFC 9293 makes probing the sender's
+/// duty: an update that opens the window is not retransmitted by the guest,
+/// and lost, it would leave the connection standing still for good. Longer
+/// than [`RETRANSMIT`], because a shut window is usually a program on the
+/// guest that has not read yet, and asking again does not make it read.
+pub(super) const PERSIST: Duration = Duration::from_millis(200);
+
+/// The longest a shut window goes between probes.
+const PERSIST_MAX: Duration = Duration::from_millis(1_600);
 
 /// How many acknowledgments of the same byte, with nothing new in them, mean a
 /// segment was lost: RFC 5681's three.
@@ -221,8 +248,11 @@ struct Outgoing {
     acknowledgment: u32,
     /// What the gateway can still receive.
     window: u16,
-    /// The maximum segment size option, on the SYN-ACK only.
+    /// The maximum segment size option, on the SYN and the SYN-ACK only.
     mss: Option<u16>,
+    /// The window scale option (RFC 7323), on the SYN and the SYN-ACK only:
+    /// the shift this end applies to its own window, which is always zero.
+    scale: Option<u8>,
     /// Its data.
     payload: Vec<u8>,
 }
@@ -243,8 +273,15 @@ pub(super) struct Connection {
     /// Everything from `snd_una` onwards that the guest has not acknowledged,
     /// whether or not it has been sent yet.
     pending: Vec<u8>,
-    /// What the guest says it can receive.
-    snd_wnd: u16,
+    /// What the guest says it can receive, in bytes: its window field shifted
+    /// by [`Connection::snd_wscale`].
+    snd_wnd: u32,
+    /// The shift the guest applies to its window, from its window scale
+    /// option, or `None` when the handshake did not agree to scale: RFC 7323
+    /// scales only when both SYNs carry the option.
+    snd_wscale: Option<u8>,
+    /// How many probes the guest's shut window has had without opening.
+    probes: u32,
     /// The sequence number of this end's FIN, once the host has closed.
     fin: Option<u32>,
     /// Whether the SYN-ACK is still unacknowledged. Like the FIN, its sequence
@@ -291,7 +328,14 @@ impl Connection {
             snd_una: iss,
             snd_nxt: iss,
             pending: Vec::new(),
-            snd_wnd: segment.header.window,
+            // A SYN's window is never scaled (RFC 7323 section 2.2).
+            snd_wnd: u32::from(segment.header.window),
+            snd_wscale: segment
+                .header
+                .options
+                .window_scale
+                .map(|shift| shift.min(MAX_WINDOW_SCALE)),
+            probes: 0,
             fin: None,
             syn_pending: false,
             host_eof: false,
@@ -326,6 +370,8 @@ impl Connection {
             snd_nxt: iss,
             pending: Vec::new(),
             snd_wnd: 0,
+            snd_wscale: None,
+            probes: 0,
             fin: None,
             syn_pending: true,
             host_eof: false,
@@ -354,6 +400,7 @@ impl Connection {
             acknowledgment: 0,
             window: self.window(),
             mss: Some(mss),
+            scale: Some(0),
             payload: Vec::new(),
         });
         self.snd_nxt = self.iss.wrapping_add(1);
@@ -375,6 +422,7 @@ impl Connection {
             acknowledgment: self.rcv_nxt,
             window: self.window(),
             mss: None,
+            scale: None,
             payload: Vec::new(),
         }
     }
@@ -397,6 +445,8 @@ impl Connection {
             acknowledgment: self.rcv_nxt,
             window: self.window(),
             mss: Some(mss),
+            // Only in answer to the guest's own (RFC 7323 section 1.3).
+            scale: self.snd_wscale.map(|_| 0),
             payload: Vec::new(),
         });
         self.sent_at = Instant::now();
@@ -431,6 +481,7 @@ impl Connection {
             acknowledgment: self.rcv_nxt,
             window: 0,
             mss: None,
+            scale: None,
             payload: Vec::new(),
         });
         self.close();
@@ -486,7 +537,10 @@ impl Connection {
         if header.flags.contains(Flags::ACK) {
             self.on_ack(header.acknowledgment, !segment.payload.is_empty());
         }
-        self.snd_wnd = header.window;
+        self.snd_wnd = u32::from(header.window) << self.snd_wscale.unwrap_or(0);
+        if self.snd_wnd != 0 {
+            self.probes = 0;
+        }
         if self.state == State::Handshaking && self.snd_una != self.iss {
             self.state = State::Open;
         }
@@ -513,7 +567,13 @@ impl Connection {
             return;
         }
         self.rcv_nxt = header.sequence.wrapping_add(1);
-        self.snd_wnd = header.window;
+        // This end's SYN offered to scale, so the guest's option, if it sent
+        // one, is the agreement; its SYN-ACK's own window is not scaled.
+        self.snd_wnd = u32::from(header.window);
+        self.snd_wscale = header
+            .options
+            .window_scale
+            .map(|shift| shift.min(MAX_WINDOW_SCALE));
         self.mss = header
             .options
             .mss
@@ -615,6 +675,41 @@ impl Connection {
         if std::mem::take(&mut self.resend_first) {
             self.resend_una(out);
         }
+        self.probe_window(out);
+    }
+
+    /// Probe a window the guest has shut, when it has been shut for
+    /// [`PERSIST`], doubled for each probe it stayed shut through, with
+    /// nothing outstanding and data waiting (RFC 9293 section 3.8.6.1).
+    ///
+    /// The probe is the first byte waiting, at `snd_una`, and `snd_nxt` does
+    /// not move for it. A guest whose window is still shut drops the byte and
+    /// acknowledges `snd_una` with its window; one whose window has opened
+    /// takes it, and its acknowledgment of one byte nobody counted as sent is
+    /// ignored but for the window it carries, which is all the probe is for.
+    /// The byte goes again at the start of the next segment, and the guest
+    /// drops the part of that it already has.
+    fn probe_window(&mut self, out: &mut Vec<Outgoing>) {
+        let wait = PERSIST
+            .saturating_mul(1 << self.probes.min(4))
+            .min(PERSIST_MAX);
+        if self.snd_wnd != 0 || self.snd_nxt != self.snd_una || self.sent_at.elapsed() < wait {
+            return;
+        }
+        let Some(payload) = self.pending.get(..1) else {
+            return;
+        };
+        out.push(Outgoing {
+            flags: Flags::ACK,
+            sequence: self.snd_una,
+            acknowledgment: self.rcv_nxt,
+            window: self.window(),
+            mss: None,
+            scale: None,
+            payload: payload.to_vec(),
+        });
+        self.probes = self.probes.saturating_add(1);
+        self.sent_at = Instant::now();
     }
 
     /// How many segments this connection has unacknowledged on the wire.
@@ -643,15 +738,16 @@ impl Connection {
     /// What may be outstanding to the guest: its window, and no more than
     /// [`MAX_IN_FLIGHT`] segments of it.
     ///
-    /// A window of zero stops everything, which is what it is for. The
-    /// retransmission timer doubles as the persist timer: whatever is
-    /// outstanding goes again, and its acknowledgment carries the guest's
-    /// new window. With nothing outstanding there is nothing to probe with
-    /// and nothing to lose by waiting for the guest's own window update.
+    /// A window of zero stops everything, which is what it is for. While
+    /// anything is outstanding, the retransmission timer sends it again and
+    /// its acknowledgment carries the guest's new window; with nothing
+    /// outstanding, [`Connection::probe_window`] asks.
     /// The guest's window says what its socket has room for; what its
     /// driver can take off the wire is less, and is the bound here.
     fn send_window(&self) -> usize {
-        usize::from(self.snd_wnd).min(MAX_IN_FLIGHT * self.mss)
+        usize::try_from(self.snd_wnd)
+            .unwrap_or(usize::MAX)
+            .min(MAX_IN_FLIGHT * self.mss)
     }
 
     /// Send a forwarded connection's SYN again if it has gone unanswered for
@@ -751,6 +847,7 @@ impl Connection {
             acknowledgment: self.rcv_nxt,
             window: self.window(),
             mss: None,
+            scale: None,
             payload: payload.to_vec(),
         });
     }
@@ -776,6 +873,7 @@ impl Connection {
             acknowledgment: self.rcv_nxt,
             window: self.window(),
             mss: None,
+            scale: None,
             payload: payload.to_vec(),
         });
         self.snd_nxt = self.snd_nxt.wrapping_add(span(len));
@@ -795,6 +893,7 @@ impl Connection {
             acknowledgment: self.rcv_nxt,
             window: self.window(),
             mss: None,
+            scale: None,
             payload: Vec::new(),
         });
         self.snd_nxt = self.snd_nxt.wrapping_add(1);
@@ -1089,6 +1188,7 @@ impl Core {
             urgent_pointer: 0,
             options: wire::Options {
                 mss: out.mss,
+                window_scale: out.scale,
                 ..wire::Options::default()
             },
         };
@@ -1121,6 +1221,7 @@ fn stray_reset(segment: &wire::Segment<'_>) -> Outgoing {
             acknowledgment: 0,
             window: 0,
             mss: None,
+            scale: None,
             payload: Vec::new(),
         }
     } else {
@@ -1132,6 +1233,7 @@ fn stray_reset(segment: &wire::Segment<'_>) -> Outgoing {
                 .wrapping_add(span(header.sequence_len(segment.payload.len()))),
             window: 0,
             mss: None,
+            scale: None,
             payload: Vec::new(),
         }
     }

@@ -489,17 +489,36 @@ struct Stream<'a> {
     sequence: u32,
     /// The next sequence number the guest expects from the gateway.
     expected: u32,
+    /// The window field of every segment the guest sends.
+    window: u16,
+    /// The window scale option its SYN carries, if any (RFC 7323).
+    scale: Option<u8>,
 }
 
 impl Stream<'_> {
     /// Open a connection: SYN, SYN-ACK, ACK.
     fn open(guest: &Guest, peer: SocketAddrV4, port: u16) -> Stream<'_> {
+        Stream::open_offering(guest, peer, port, None, u16::MAX).0
+    }
+
+    /// [`Stream::open`], its SYN offering the window scale `scale` and every
+    /// segment after it carrying the window field `window`, and the SYN-ACK
+    /// that answered.
+    fn open_offering(
+        guest: &Guest,
+        peer: SocketAddrV4,
+        port: u16,
+        scale: Option<u8>,
+        window: u16,
+    ) -> (Stream<'_>, tcp::Header) {
         let mut stream = Stream {
             guest,
             port,
             peer,
             sequence: 0x0BAD_0000,
             expected: 0,
+            window: u16::MAX,
+            scale,
         };
         stream.send(Flags::SYN, &[]);
         stream.sequence = stream.sequence.wrapping_add(1);
@@ -518,8 +537,9 @@ impl Stream<'_> {
             "and offers a maximum segment size"
         );
         stream.expected = header.sequence.wrapping_add(1);
+        stream.window = window;
         stream.send(Flags::ACK, &[]);
-        stream
+        (stream, header)
     }
 
     /// Put one segment on the wire.
@@ -534,12 +554,16 @@ impl Stream<'_> {
             sequence: self.sequence,
             acknowledgment: self.expected,
             flags,
-            window: u16::MAX,
+            window: self.window,
             urgent_pointer: 0,
-            options: tcp::Options::default(),
+            options: tcp::Options {
+                window_scale: self.scale.filter(|_| flags.contains(Flags::SYN)),
+                ..tcp::Options::default()
+            },
         };
-        let mut bytes = vec![0_u8; tcp::MIN_HEADER_LEN + payload.len()];
-        let _ = header.emit(payload, pseudo, &mut bytes).unwrap();
+        let mut bytes = vec![0_u8; tcp::MAX_HEADER_LEN + payload.len()];
+        let len = header.emit(payload, pseudo, &mut bytes).unwrap();
+        bytes.truncate(len);
         self.guest
             .send_ipv4(ipv4::protocol::TCP, GUEST_IP, *self.peer.ip(), &bytes);
     }
@@ -741,6 +765,8 @@ fn an_acknowledgment_later_than_the_retransmission_timer_opens_the_connection() 
         peer: address,
         sequence: 0x0BAD_0000,
         expected: 0,
+        window: u16::MAX,
+        scale: None,
     };
     stream.send(Flags::SYN, &[]);
     stream.sequence = stream.sequence.wrapping_add(1);
@@ -774,6 +800,8 @@ fn a_lost_syn_ack_is_sent_again_for_a_second_syn_and_on_a_timer() {
         peer: address,
         sequence: 0x0BAD_0000,
         expected: 0,
+        window: u16::MAX,
+        scale: None,
     };
     stream.send(Flags::SYN, &[]);
     let (first, _) = stream.segment();
@@ -856,6 +884,8 @@ fn forwards_a_host_connection_to_the_guest_and_closes_it() {
         peer: SocketAddrV4::new(GATEWAY_IP, syn.source_port),
         sequence: 0x5EED_0000,
         expected: syn.sequence.wrapping_add(1),
+        window: u16::MAX,
+        scale: None,
     };
     stream.send(Flags::SYN.union(Flags::ACK), &[]);
     stream.sequence = stream.sequence.wrapping_add(1);
@@ -911,6 +941,8 @@ fn closes_the_host_connection_when_the_guest_refuses_a_forward() {
         peer: SocketAddrV4::new(GATEWAY_IP, syn.source_port),
         sequence: 0,
         expected: syn.sequence.wrapping_add(1),
+        window: u16::MAX,
+        scale: None,
     };
     refusal.send(Flags::RST.union(Flags::ACK), &[]);
 
@@ -959,6 +991,8 @@ fn resets_a_connection_to_a_port_nothing_listens_on() {
         peer: dead,
         sequence: 1,
         expected: 0,
+        window: u16::MAX,
+        scale: None,
     };
     stream.send(Flags::SYN, &[]);
 
@@ -998,6 +1032,8 @@ fn resets_a_segment_for_a_connection_that_does_not_exist() {
         peer: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9),
         sequence: 500,
         expected: 900,
+        window: u16::MAX,
+        scale: None,
     };
     // Data on a connection the gateway has never heard of, which is what a
     // guest that rebooted mid-connection sends.
@@ -1167,6 +1203,149 @@ fn a_held_download(
         let _ = stream.read_to_end(&mut rest);
     });
     (Stream::open(guest, address, port), go, server)
+}
+
+/// [`a_held_download`] opened by [`Stream::open_offering`], and the SYN-ACK.
+fn a_held_download_offering(
+    guest: &Guest,
+    port: u16,
+    scale: Option<u8>,
+    window: u16,
+) -> (
+    Stream<'_>,
+    tcp::Header,
+    std::sync::mpsc::Sender<()>,
+    std::thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = match listener.local_addr().unwrap() {
+        std::net::SocketAddr::V4(address) => address,
+        other => panic!("a listener bound to 127.0.0.1 is not {other}"),
+    };
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = wait.recv();
+        let _ = stream.write_all(&[7_u8; 200_000]);
+        let mut rest = Vec::new();
+        let _ = stream.read_to_end(&mut rest);
+    });
+    let (stream, syn_ack) = Stream::open_offering(guest, address, port, scale, window);
+    (stream, syn_ack, go, server)
+}
+
+/// How many bytes of data the gateway puts on the wire for `stream` before
+/// it goes quiet for [`SILENCE`], each segment counted once.
+fn bytes_in_flight(stream: &Stream<'_>) -> usize {
+    let mut seen: Vec<(u32, usize)> = Vec::new();
+    let mut wait = PATIENCE;
+    while let Some(segment) = stream.data_within(wait) {
+        if !seen.contains(&segment) {
+            seen.push(segment);
+        }
+        wait = SILENCE;
+    }
+    seen.iter().map(|(_, len)| len).sum()
+}
+
+/// A guest whose SYN offers to scale its window gets a SYN-ACK that agrees
+/// with a shift of its own of zero, and its window field counts in units of
+/// its shift from then on: 100 with a shift of 4 is 1,600 bytes. Without
+/// that, a guest's window stops at 64 KiB, and a guest busy writing what it
+/// read to a disk leaves the gateway waiting with the host's data in hand.
+#[test]
+fn scales_the_guest_window_when_its_syn_offers_to() {
+    // No retransmission: everything sent is new data, once.
+    let guest = Guest::start_retransmitting(&[], Duration::MAX).unwrap();
+    let (stream, syn_ack, go, _server) = a_held_download_offering(&guest, 40_030, Some(4), 100);
+    assert_eq!(
+        syn_ack.options.window_scale,
+        Some(0),
+        "the SYN-ACK answers a window scale offer with a shift of zero"
+    );
+    go.send(()).unwrap();
+    assert_eq!(
+        bytes_in_flight(&stream),
+        100 << 4,
+        "a window field of 100 shifted by 4 puts exactly 1,600 bytes in flight"
+    );
+}
+
+/// A guest whose SYN does not offer to scale gets no offer back (RFC 7323
+/// section 1.3: the SYN-ACK may carry the option only in answer to one), and
+/// its window is counted in bytes.
+#[test]
+fn leaves_the_guest_window_unscaled_when_its_syn_does_not_offer() {
+    let guest = Guest::start_retransmitting(&[], Duration::MAX).unwrap();
+    let (stream, syn_ack, go, _server) = a_held_download_offering(&guest, 40_031, None, 100);
+    assert_eq!(
+        syn_ack.options.window_scale, None,
+        "a SYN without the option is answered without it"
+    );
+    go.send(()).unwrap();
+    assert_eq!(
+        bytes_in_flight(&stream),
+        100,
+        "a window field of 100 unscaled puts exactly 100 bytes in flight"
+    );
+}
+
+/// A window the guest has shut, with data waiting, is probed with one byte at
+/// the next sequence number once it has been shut for [`super::tcp::PERSIST`],
+/// and again after twice that while it stays shut; when the guest opens it,
+/// full segments follow from the same place. The guest's update that opens
+/// the window is never retransmitted, so lost, it would stop the connection
+/// for good without the probe.
+#[test]
+fn probes_a_shut_window_and_resumes_when_it_opens() {
+    let persist = super::tcp::PERSIST;
+    // No retransmission either: anything that comes while the window is shut
+    // is the probe.
+    let guest = Guest::start_retransmitting(&[], Duration::MAX).unwrap();
+    let (mut stream, _, go, _server) = a_held_download_offering(&guest, 40_032, None, 0);
+    let shut = std::time::Instant::now();
+    go.send(()).unwrap();
+
+    let first = stream.data_within(PATIENCE);
+    let first_at = std::time::Instant::now();
+    assert_eq!(
+        first,
+        Some((stream.expected, 1)),
+        "a shut window with data waiting is probed with one byte at the next sequence number"
+    );
+    assert!(
+        first_at.duration_since(shut) >= persist,
+        "and not before the window has been shut for {persist:?}: after {:?}",
+        first_at.duration_since(shut)
+    );
+
+    // Still shut: the probe's byte is dropped, and the acknowledgment says so.
+    stream.send(Flags::ACK, &[]);
+    let second = stream.data_within(PATIENCE);
+    let second_at = std::time::Instant::now();
+    assert_eq!(
+        second,
+        Some((stream.expected, 1)),
+        "a window that stays shut is probed again, at the same place"
+    );
+    assert!(
+        second_at.duration_since(first_at) >= persist * 2,
+        "after twice as long: {:?}",
+        second_at.duration_since(first_at)
+    );
+
+    // Open: what follows is data from where the probes were, in full segments.
+    stream.window = u16::MAX;
+    stream.send(Flags::ACK, &[]);
+    let (sequence, len) = stream.data_within(PATIENCE).expect("the download resumes");
+    assert_eq!(
+        sequence, stream.expected,
+        "the window opened, data resumes at the next sequence number"
+    );
+    assert!(
+        len > 1,
+        "in full segments, not probes: the first was {len} bytes"
+    );
 }
 
 /// Three duplicate acknowledgments send the missing segment again, and only
