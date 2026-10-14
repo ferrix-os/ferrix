@@ -68,6 +68,7 @@ members = [
     "src/lib/drivers/input/virtio-input",
     "src/lib/drivers/sound/virtio-snd",
     "src/lib/drivers/net/virtio-net",
+    "src/lib/drivers/net/dwmac",
     "src/lib/kernel/vma",
     "src/lib/kernel/paging",
     "src/lib/fs/procfs",
@@ -197,6 +198,7 @@ ferrix-vport = { path = "src/user/system/native/drivers/console/vport" }
 ferrix-virtio-input = { path = "src/lib/drivers/input/virtio-input" }
 ferrix-virtio-snd = { path = "src/lib/drivers/sound/virtio-snd" }
 ferrix-virtio-net = { path = "src/lib/drivers/net/virtio-net" }
+ferrix-dwmac = { path = "src/lib/drivers/net/dwmac" }
 ferrix-vma = { path = "src/lib/kernel/vma" }
 ferrix-qr = { path = "src/lib/kernel/qr" }
 ferrix-vfs = { path = "src/lib/fs/vfs" }

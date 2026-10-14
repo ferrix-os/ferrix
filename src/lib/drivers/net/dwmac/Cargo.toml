@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-dwmac"
+description = "A Synopsys DesignWare Ethernet QoS (GMAC4/5) core as logic over registers and DMA memory: reset, MDIO and the PHY's link, one transmit and one receive descriptor ring, frames and completions"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
