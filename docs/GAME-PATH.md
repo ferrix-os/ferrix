@@ -941,7 +941,7 @@ the row says so and gives no points.
 |---|---|---|---|---|
 | R1 | The frame recorder: per-swap times and Present completions in the preload library, the summariser, both brought into the tree under `tools/common/` with the baseline's scripts | 5 | the same binary's record on both guests; negative control: a 50 ms sleep injected every ten seconds is counted exactly, as three missed refreshes each (at 60 Hz; at hyprix's 75 Hz 50 ms is 3.75 refreshes, three or four by the frame's own work) | nothing; no card. Built 2026-10-14 (§12) |
 | R2 | The latency probe and the injector's log: input to scan-out on both systems | 5 | the probe on both; control: a 16.7 ms delay added in the probe moves the median by one refresh; a gate without the card (`test-xwindow`'s boot, counting *frames* from injection to the frame that shows it) | nothing; no card. **Built 2026-10-14.** The probe is `xlatency`, a static X client in the compositor's workspace speaking X11 itself (raw motion on the root, one frame in flight, `PresentPixmap` for the refresh after the last completion, each frame's colour the count of events it carries); the injector is `vptr` there too, logging each motion's `CLOCK_MONOTONIC` send time; `xlatency summarize` pairs the two. Linux: `tools/common/test/latency-sway.sh`, headless sway 1.10 with Xwayland at 60 Hz on nazuna (measured refresh 16.3 to 16.9 ms), 211 motions paired one to one: send to scan-out median 24.3 ms, arrival to scan-out 23.2 ms, 2 refreshes; with `--delay-us 16700` 40.9 and 40.8 ms, 3 refreshes. Ferrix: `cargo xtask test-xlatency`, `test-xwindow`'s boot, 40 QMP tablet motions each timed on the host to the probe's line for its frame, then `vptr` with the probe in the guest; on R1's yserver clock (2966c377; hyprix's virtual screen at 75 Hz, 13.4 to 14.7 ms measured while drawing): host-timed median 23.9 ms, arrival to scan-out 20.6 ms, 2 refreshes, in-guest send to scan-out 23.2 ms; with the delay 44.1, 37.3 and 38.0 ms, 3 refreshes. The delay moves each median by one refresh on both, in the probe's own count. The 99th percentiles (up to 400 ms) were taken with nazuna's load at 30 to 60 and are the host's, not the systems'. The pinned yserver (1a8752e8) panics on the first `PresentPixmap` (`get_semaphore_fd_khr` on lavapipe), which R1's yserver fixes: the gate passes from that pin on |
-| R3 | The load script, the launch timer, the sleep and wake-up program, and both guests defined with pinned processors and an invariant TSC | 3 | the load holds every processor at 100% on both; the clock line says TSC | nothing |
+| R3 | The load script, the launch timer, the sleep and wake-up program, and both guests defined with pinned processors and an invariant TSC | 3 | the load holds every processor at 100% on both; the clock line says TSC. **Built 2026-10-14**: §12 | nothing |
 | R4 | The baseline: M1 to M9 on both guests as they are, the system-call breakdown of §6.1, and the record written into §12 | 3 | the table, with its logs | the card (the product owner's word); the Linux guest; `nv-present` or its successor on the card |
 | R5 | The software measure checked against light, once | 3, or 5 with a built device | the two agree within the device's error on both systems | question 6 of §10 |
 
@@ -1232,3 +1232,42 @@ preload `libframerec.so` and were not run (they need the card). A
 pipelined driver (NVIDIA, swap returning before the frame shows) has not
 been recorded; its per-pair counts may move a miss to the next pair while
 the sum stays, which R4 will see.
+
+2026-10-14: R3 is built, in `tools/common/game/`. `rig.c` is one static program for both guests: the
+load's writer and holder, a cyclictest-shaped timed sleep (`rig wake`, an
+absolute `CLOCK_MONOTONIC` time every millisecond), each processor's busy
+share from `/proc/stat`, and the launch timer (`rig launch`, which passes
+the preload library `RIG_LAUNCH_FD` and takes back one line, `ctor <ns>
+swap <ns>`: the interface R1's library is to implement). `load.sh` is the
+load, `load-crate.rs` the crate it compiles as an rlib with the rustc
+volume's compiler on both systems, `measure.sh` the check inside a guest.
+`linux-3060.xml` is the Linux guest, and `nvidia.rs` writes ferrix-3060
+with the same processor, topology (four cores of the second CCD, both
+threads: host processors 6 to 9 and 18 to 21, QEMU on 10, 11, 22, 23) and
+invtsc; a test holds the two equal. Neither domain is redefined in
+libvirt: the card's guests need the customer.
+
+Measured without the card, on nazuna under the gate pool's load:
+
+| | Ferrix (`test-game-rig`, KVM, 4 processors, 8 GiB) | Linux guest (`linux-guest.sh`, KVM pinned, 8 processors, 16 GiB) |
+|---|---|---|
+| Clock line | `TSC, calibrated against the HPET at 4400.017 MHz` | `tsc` |
+| Without invtsc (control) | `HPET at 100.000 MHz`, the gate fails | `kvm-clock` |
+| Busy under the load, least and mean, of the time the host gave | 97.9%, 99.4% | 99.5%, 99.8% (twice) |
+| Without the compile loops (control) | about 22%, the gate fails | — |
+| Holder | 80% of 8,093 MiB in use | 80% of 15,992 MiB |
+| Timed 1 ms sleep, idle: median, 99th, max (µs) | 14.5, 28.0, 771 | 64 to 67, 1,331 to 1,928, 3,632 to 8,746 |
+| The same under the load | 13.6, 892, 206,392 | 60.0 to 62.4, 79 to 3,004, 10,320 to 146,450 |
+| Launch timer, a stand-in swapping 100 ms after its constructor | +1.8 and +101.8 ms | +0.3 and +100.4 ms |
+
+The overshoot is printed, not judged: its bound is G2's. Linux's median is
+its 50 µs timer slack; Ferrix has none. Both guests' tails under the load
+reach 137 ms at the 99.99th percentile in one run each, so they are the
+host's: the pinned host processors are not isolated, and the gate pool's
+boots ran on them. Tails are compared only once the host keeps those
+processors for the guest (`isolcpus` or a cgroup partition, the customer's
+host). Two findings of the rig's own: a cold compiler started together with the writer and the holder made
+no build in 50 s on Ferrix (`/proc/meminfo` counts no page cache, and the
+holder takes what is free), so `load.sh` builds once alone first; and the
+load runs as root on Ferrix's gate, whose initramfs has no ordinary user,
+and as the image's user `ferrix` on Linux.

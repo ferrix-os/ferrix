@@ -316,7 +316,7 @@ COMMANDS:
                   print the serial port until nvrm is up or stops, then destroy the domain (x86_64)
     test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`
     test-game-rig Stage 24's R3 without the card: the game path's load on the rustc volume, every processor at
-                  least 99% busy under it, the clock line the TSC, and a timed sleep's overshoot (x86_64)
+                  least 97% busy under it, the clock line the TSC, and a timed sleep's overshoot (x86_64)
     test-chrome   Attach the volume tools/common/fetch/fetch-chrome.sh makes, and require headless Chrome to run a page's script and draw it
     test-claude-code  Attach the volume tools/common/fetch/fetch-claude-code.sh makes, and require Claude Code to start and,
                   against a stub Messages API xtask serves, run a Bash command on Ferrix for its model

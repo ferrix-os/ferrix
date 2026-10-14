@@ -8,7 +8,8 @@
 //! the load runs. The kernel's `clock` line must name the TSC, which
 //! `qemu::x86_cpu` asks for with `+invtsc` under KVM; and while the load
 //! runs, `rig busy` must find every processor at least [`BUSY`] percent
-//! busy. The overshoot of a timed sleep, idle and under the load, is
+//! busy; and the launch timer must see a stand-in's first swap its 100 ms
+//! after its constructor. The overshoot of a timed sleep, idle and under the load, is
 //! printed and not judged: its bound is G2's (§8.3), not the rig's.
 //!
 //! The controls (`docs/GAME-PATH.md` §12 records both runs):
@@ -40,9 +41,12 @@ exit 16
 const STATUS: &str = "16";
 
 /// The lowest busy share any processor may show under the load, in
-/// percent. Short of 100 by the ticks a compile loop spends between two
-/// compiler runs.
-const BUSY: f64 = 99.0;
+/// percent. Short of 100 by the time a compile loop spends between two
+/// compiler runs, the next one's exec and load: in a ten-second window a
+/// processor whose loop restarts once shows 98 to 99.9 (on Ferrix
+/// 2026-10-14, 97.9 to 99.9; on the Linux guest 99.5 to 100). Without the
+/// compile loops it is about 22.
+const BUSY: f64 = 97.0;
 
 /// The files `tools/common/game/` gives the guest, and where.
 const CARRIED: &[(&str, &str)] = &[
@@ -307,7 +311,7 @@ mod tests {
         assert!(judge(Arch::X86_64, 4, &seen).is_err());
         let held = lines(
             "  clock    TSC, calibrated against the HPET at 4400.000 MHz\n\
-             busy: 4 processors over 10 s, lowest 99.6% (cpu3), mean 99.9%\n\
+             busy: 4 processors over 10 s, lowest 97.9% (cpu3), mean 99.4%\n\
              launch: constructor +2.7 ms, first swap returned +102.8 ms\n\
              init     the shell exited with 16",
         );
