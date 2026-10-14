@@ -408,6 +408,17 @@ logged into and nothing of the game was downloaded.
   Ferrix, in Open Sans for the Segoe UI the launcher names (`docs/WINE.md`
   §10). Proton needed two kernel fixes (f0c812f01): `mprotect` kept no
   `MAP_SHARED`, and a write-only region refused a read.
+* *Done (2026-10-14):* E4.1 for a comparison run in the VM: a 160 GB
+  btrfs image on the SN720's `ferrix-root` partition, attached writable.
+  The download first failed at once: Wine's Schannel lacked GnuTLS, and
+  the launcher's download SDK (libcurl over OpenSSL, roots from the
+  Windows store) found no roots, because Wine's `crypt32` reads
+  `/etc/ssl/certs/ca-certificates.crt` and the boot had the bundle only on
+  `/data`. With GnuTLS on the volume and the bundle linked, the download
+  runs at about 3.4 MB/s through xtask's gateway, against 31 MB/s from the
+  host (E4.4; `docs/WINE.md` §10). Wine, Proton and the launcher are on
+  the `--everything` desktop as `gryphlink`
+  (`test-endfield-proton --everything`).
 * *Still to do:* the image path of another process (`ptrace` and
   `/proc/<pid>/mem`, E5.2, which the launcher asks for every five seconds
   and Wine cannot give it on Ferrix); the current launcher version; and,

@@ -690,3 +690,49 @@ which Ferrix does not have (stage 23's E5.2; the certification
 consultant's answer, ledger line 877, is OK IF P1 to P8, with a design and
 the customer's word on the Security Target first). The version 1.6.0.1607
 pinned here asks for no update; the current launcher on Windows does.
+
+**The game's download (2026-10-14).** For the comparison with the
+customer's Windows install, the game goes to a 160 GB sparse btrfs image
+on the SN720's `ferrix-root` partition (mounted on nazuna at
+`/mnt/ferrix-root`, the filesystem grown to the partition's 190 GB),
+attached to Ferrix writable; the launcher sees 154.52 GB free for its
+111.18 GB. The download failed twice within seconds, with "Download
+Error" on the button and `OnGameDownloadSdkError nCode=206` in the
+launcher's log:
+
+* Wine said it could not load `libgnutls`, so its Schannel had no TLS.
+  `fetch-proton.sh` now carries Debian's GnuTLS and what it loads, and the
+  CA certificates as `/etc/ssl/certs/ca-certificates.crt` on the volume.
+* The download SDK's own log (`HGDownloadLog.log`, beside the launcher's)
+  then gave curl's error 60 for every file on `beyond.hg-cdn.com`: the
+  server's chain was not verified. The SDK is `hgdownloadsdk.dll` over the
+  launcher's own `libcurl.dll` 7.88.1 and OpenSSL 1.1; it names no CA file,
+  and libcurl imports `CertOpenSystemStoreA`, so its roots are the Windows
+  root store -- which Wine's `crypt32` fills from
+  `/etc/ssl/certs/ca-certificates.crt` and a few other absolute paths.
+  The boot linked none of them: the bundle was on the volume at `/data`,
+  not at `/etc`, so the store held only Wine's built-in roots, and the CDN's
+  chain (TrustAsia DV TLS RSA CA 2025 under DigiCert Global Root G2, which
+  the bundle has) did not verify. `test-endfield-proton` now links
+  `/etc/ssl/certs/ca-certificates.crt` to the volume's, as the Steam boots
+  do, and the download runs. Verification stays on.
+
+With the link, the launcher downloads its 54 files (the game 1.5.3 in
+`.zip.NNN` parts). Through xtask's gateway Ferrix takes about 3.4 MB/s,
+steadily; nazuna itself fetches a part from the same CDN at 31 MB/s, so the
+gateway, not the guest, is the limit (`docs/STEAM.md` §7, stage 23's E4.4).
+At that rate the 60 GB take about five hours, then the unpacking.
+
+**On the `--everything` desktop.** `run-compositor --everything` merges the
+Proton launcher volume last (`crate::everything`); where it carries
+another build of a file an earlier volume has -- yserver, and libpng and
+liblzma in another Debian security revision -- the earlier one is kept,
+and any other difference still stops the merge. The volume's
+`/usr/bin/gryphlink` makes a prefix under the user's home the first time,
+as the gate does (Proton's fonts before `wineboot`, Open Sans for Segoe
+UI), and starts the launcher on the desktop's X server; the desktop links
+it as `/bin/gryphlink`, with Wine's and Proton's links and the
+certificate bundle, and fuzzel lists it as GRYPHLINK.
+`cargo xtask test-endfield-proton --everything --accel kvm` boots on the
+merged volume, starts the launcher with `gryphlink`, and requires the
+same window, button and server answer.
