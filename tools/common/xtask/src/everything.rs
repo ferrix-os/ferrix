@@ -39,6 +39,11 @@
 //! it. Where it holds libstdc++'s gdb pretty-printers of gcc 14 beside the
 //! rustc volume's of gcc 16, the ones of the newer libstdc++ the volume keeps
 //! are kept ([`pretty_printers`]).
+//!
+//! After Endfield's launcher comes Anthropic's Claude desktop app
+//! (`docs/CLAUDE-CODE.md` §7): its package's files, GTK 3 and the client
+//! library of `pipewire`, and only what of theirs no tree before it holds,
+//! so it adds files and clashes with none.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -70,6 +75,11 @@ const STEAM_SPARE_MIB: u64 = 4096;
 /// Room for what Endfield's launcher writes beside itself (its logs, its
 /// web engine's cache); its prefix, `gryphlink` makes under the home.
 const ENDFIELD_SPARE_MIB: u64 = 1024;
+
+/// Room for what the Claude desktop app keeps when its home is on the
+/// volume: its profile, its caches, and the Claude Code it downloads for
+/// its Code tab.
+const CLAUDE_DESKTOP_SPARE_MIB: u64 = 512;
 
 /// `--steam-preinstall`: merge the Steam library
 /// `tools/common/fetch/fetch-steam-preinstall.sh` installed on the host
@@ -315,13 +325,41 @@ fn sources() -> Result<(Vec<(PathBuf, PathBuf)>, u64)> {
     let endfield = beside(endfield, "fetch-endfield-launcher.sh", |tree| {
         tree.join("usr/bin/gryphlink").is_file() && tree.join("proton/files/bin/wine").is_file()
     })?;
+    // Then Anthropic's Claude desktop app (docs/CLAUDE-CODE.md §7), with only
+    // the libraries the trees before it lack: its fetch checks every library
+    // the app and those need against them, so it is told which they are. It
+    // keeps a stamp where the others keep an image.
+    let earlier: Vec<String> = [&rustc, &chrome, &steamcmd, &claude_code, &steam, &endfield]
+        .iter()
+        .map(|(_, tree)| tree.display().to_string())
+        .collect();
+    let earlier = earlier.join(":");
+    let claude_desktop = fetched_with(
+        crate::compositor::claude_desktop::volume,
+        "fetch-claude-desktop.sh",
+        &[("CLAUDE_DESKTOP_BASE_TREES", earlier.as_str())],
+    )?;
+    let claude_desktop = beside(
+        claude_desktop,
+        "fetch-claude-desktop.sh",
+        crate::compositor::claude_desktop::is_tree,
+    )?;
     let spare = SPARE_MIB
         + STEAMCMD_SPARE_MIB
         + CLAUDE_CODE_SPARE_MIB
         + YSERVER_SPARE_MIB
         + STEAM_SPARE_MIB
-        + ENDFIELD_SPARE_MIB;
-    let mut sources = vec![rustc, chrome, steamcmd, claude_code, steam, endfield];
+        + ENDFIELD_SPARE_MIB
+        + CLAUDE_DESKTOP_SPARE_MIB;
+    let mut sources = vec![
+        rustc,
+        chrome,
+        steamcmd,
+        claude_code,
+        steam,
+        endfield,
+        claude_desktop,
+    ];
     // Last, under Steam's tree: only `steam/steamapps`, which no other tree has.
     if STEAM_PREINSTALL.load(std::sync::atomic::Ordering::Relaxed) {
         sources.push(steam_preinstall()?);

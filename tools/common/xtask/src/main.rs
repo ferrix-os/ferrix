@@ -329,6 +329,9 @@ COMMANDS:
                   against a stub Messages API xtask serves, run a Bash command on Ferrix for its model
                   (--everything: as `claude` on run-compositor --everything's merged volume, on ferrousli's
                   loader and libc.so.6 as that desktop runs it, unless --interpreter glibc)
+    test-claude-desktop  Anthropic's Claude desktop app, which tools/common/fetch/fetch-claude-desktop.sh fetches,
+                  started on the run-compositor --everything desktop: require its window, class com.anthropic.Claude,
+                  and its sign-in screen drawn in it; no account is used (docs/CLAUDE-CODE.md §7, x86_64)
     test-steamcmd Attach the volume tools/common/fetch/fetch-steamcmd.sh makes, and require Valve's 32-bit steamcmd to update itself
                   and log in to Steam anonymously, over the network
     test-steam-bootstrap  Attach the volume tools/common/fetch/fetch-steam.sh makes, and require Valve's steam.sh to update the
@@ -761,6 +764,7 @@ fn run() -> Result<()> {
         "test-rustc" | "test-game-rig" => rustc::run(command, &args),
         "test-chrome" | "test-chrome-window" | "test-chrome-audio" => chrome::run(command, &args),
         "test-claude-code" => claude_code::test_claude_code(&args),
+        "test-claude-desktop" => compositor::test_claude_desktop(&args),
         "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),
         "test-bwrap" => bwrap::test_bwrap(&args),
         name if WINE_GATES.contains(&name) => wine_gate(command, &args),
