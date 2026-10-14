@@ -191,6 +191,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `tools/common/debug/` | Post-mortem tools run on the host after a failed boot: `ferrix-postmortem.sh` reads a Ferrix disk read-only and prints the loader's and the kernel's logs, the A/B record and `/var/log` (`docs/POSTMORTEM.md`). |
 | `tools/common/test/` | Test drivers run by hand: the self-host matrix, the host `btrfs check` oracle. |
 | `tools/common/bench/` | Benches for kernels other than Ferrix: `board/` holds Linux's and seL4's sides of the DK1 comparison and the timing contract all three follow (`docs/BOARD-BENCH.md`). |
+| `tools/common/game/` | Stage 24's rig (`docs/GAME-PATH.md` §2.4), the same on Ferrix and on the Linux baseline guest: the frame recorder `framerec.c`, an `LD_PRELOAD` library, and its paced test client `framegl.c`, which `cargo xtask frames` builds and summarises and `test-frames` gates; and the baseline's measuring scripts, `ferrix-side/` and `linux-side/`. |
 | `tools/common/steam/` | What `cargo xtask run-steam`, `test-steam-window` and `test-steam-store` carry into the guest: the scripts that start and watch Steam, its stand-ins, and in `workarounds/` the C shims for kernel gaps, each headed with its gap and the owner of the real fix (`docs/STEAM.md`). |
 | `tools/common/data/` | The allow-lists, baselines and registers the checks read. |
 | `tools/common/release/` | One-off GitHub repository settings, run by the owner (`github-setup.sh`). |

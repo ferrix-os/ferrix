@@ -52,7 +52,8 @@
 //! `idle` are the boots in [`BOOTS`], each with the pictures, the
 //! configuration and the verdict it needs. `run` and `desktop` are the
 //! desktops a person watches; `browser`, `apps`, `bench`, `steam_window` and
-//! `steam_store` are the other commands that boot the compositor.
+//! `steam_store` are the other commands that boot the compositor, as are
+//! `frames`, `unity`, `wine` and `dxvk`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -66,6 +67,7 @@ mod drawing;
 mod drawn_here;
 pub(crate) mod dxvk;
 mod effects;
+pub(crate) mod frames;
 mod hyprlock;
 mod idle;
 mod layout;
