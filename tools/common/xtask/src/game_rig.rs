@@ -33,7 +33,11 @@ export RIG_CRATE=/usr/share/game/load-crate.rs
 export RIG_WORK=/tmp/rig-load
 export RIG_DISK=/data
 export RIG_WRITE_MIB=256
-sh /usr/share/game/measure.sh 30 || exit $?
+sh /usr/share/game/diag.sh 1
+RIG_WARM=${RIG_WARM_DIAG:-0} sh /usr/share/game/load.sh start
+sh /usr/share/game/diag.sh 40
+sh /usr/share/game/load.sh stop
+sh /usr/share/game/diag.sh 1
 exit 16
 "#;
 
@@ -59,6 +63,7 @@ const CARRIED: &[(&str, &str)] = &[
     ("usr/share/game/load.sh", "load.sh"),
     ("usr/share/game/measure.sh", "measure.sh"),
     ("usr/share/game/load-crate.rs", "load-crate.rs"),
+    ("usr/share/game/diag.sh", "diag.sh"),
 ];
 
 /// Guest memory unless `--memory` says otherwise: four compilers at about

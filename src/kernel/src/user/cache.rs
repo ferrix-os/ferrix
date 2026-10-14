@@ -106,6 +106,65 @@ pub(crate) struct Reclaimed {
 ///
 /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
 pub(crate) fn reclaim(scope: u32, want: u64) -> Reclaimed {
+    let started = crate::timer::now_nanos();
+    let done = reclaim_inner(scope, want);
+    use core::sync::atomic::Ordering::Relaxed;
+    let _ = DIAG_CALLS.fetch_add(1, Relaxed);
+    let _ = DIAG_SCANNED.fetch_add(done.scanned, Relaxed);
+    let _ = DIAG_STOLEN.fetch_add(done.stolen, Relaxed);
+    if done.stolen == 0 {
+        let _ = DIAG_EMPTY.fetch_add(1, Relaxed);
+    }
+    let _ = DIAG_NANOS.fetch_add(crate::timer::now_nanos().saturating_sub(started), Relaxed);
+    done
+}
+
+static DIAG_CALLS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static DIAG_EMPTY: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static DIAG_SCANNED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static DIAG_STOLEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static DIAG_NANOS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Diagnostic line: reclaim totals and the cache's size.
+pub(crate) fn diag_line() -> alloc::string::String {
+    use core::sync::atomic::Ordering::Relaxed;
+    let (mut disk, mut memory, mut mapped_disk, mut objects, mut reclaimable) =
+        (0u64, 0u64, 0u64, 0u64, 0u64);
+    for vmo in live() {
+        objects += 1;
+        let is_disk = vmo.is_disk_file();
+        let rec = vmo.reclaimable();
+        let mapped = Arc::strong_count(&vmo) > 2;
+        vmo.for_each_page(&mut |_| {
+            if is_disk {
+                disk += 1;
+                if mapped {
+                    mapped_disk += 1;
+                }
+                if rec {
+                    reclaimable += 1;
+                }
+            } else {
+                memory += 1;
+            }
+        });
+    }
+    alloc::format!(
+        "rcl calls {} empty {} scanned {} stolen {} ms {} | objs {} diskpg {} recl {} mappedobjpg {} mempg {}",
+        DIAG_CALLS.load(Relaxed),
+        DIAG_EMPTY.load(Relaxed),
+        DIAG_SCANNED.load(Relaxed),
+        DIAG_STOLEN.load(Relaxed),
+        DIAG_NANOS.load(Relaxed) / 1_000_000,
+        objects,
+        disk,
+        reclaimable,
+        mapped_disk,
+        memory
+    )
+}
+
+fn reclaim_inner(scope: u32, want: u64) -> Reclaimed {
     let mut done = Reclaimed::default();
     let objects = live();
     // Once sparing what `memory.low` protects, then without.
