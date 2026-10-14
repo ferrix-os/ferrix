@@ -33,6 +33,7 @@ export RIG_CRATE=/usr/share/game/load-crate.rs
 export RIG_WORK=/tmp/rig-load
 export RIG_DISK=/data
 export RIG_WRITE_MIB=256
+export RIG_PARTS="compile"
 sh /usr/share/game/diag.sh 1
 RIG_WARM=${RIG_WARM_DIAG:-0} sh /usr/share/game/load.sh start
 sh /usr/share/game/diag.sh 30
