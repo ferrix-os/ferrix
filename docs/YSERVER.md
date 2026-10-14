@@ -376,6 +376,18 @@ Still open:
 
 ## 9. Where it stands
 
+2026-10-15: **the Present clock keeps one refresh.**
+`fetch-yserver.sh` pins the fork at d2bf56e2. The clock no longer takes a
+frame callback's time as its MSC's: hyprix draws when the server's commit
+comes, so a callback came after the MSC it was taken for by the server's
+readback and hand-over, and while a client drew each MSC the clock ran at
+15.7 ms rather than hyprix's 13.33. It is now a timer at the rate hyprix
+reports, its period kept in nanoseconds, and hyprix's frames follow it
+(`docs/GAME-PATH.md` §12 has the measurements, before and after).
+`cargo xtask test-frames` now fails a clock whose longest MSC is more
+than 1% of a refresh longer than its shortest. The fork's next commit,
+f1d6cc18, adds a test of the clock and nothing else.
+
 2026-10-14: **a Present clock on the Wayland backend.** `fetch-yserver.sh`
 pins the fork at 2966c377. The backend had no clock for the Present
 extension: a client's `NotifyMSC` stayed at 0, and its first
