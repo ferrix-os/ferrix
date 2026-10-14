@@ -91,13 +91,35 @@ design's §5, G0 to G5) and of P1 is owed before any code.
 
 | # | Landing | Points | Proved by |
 |---|---|---|---|
-| R1 | The frame recorder: per-swap times and Present completions in the preload library, and the summariser, brought into the tree under `tools/common/` with the baseline's scripts | 5 | the same binary's record on both guests; a 50 ms sleep injected every ten seconds is counted exactly. No card |
+| R1 | The frame recorder: per-swap times and Present completions in the preload library, and the summariser, brought into the tree under `tools/common/` with the baseline's scripts | 5 | the same binary's record on both guests; a 50 ms sleep injected every ten seconds is counted exactly. No card. **Built 2026-10-14** (below) |
 | R2 | The latency probe and the injector's log: input to scan-out on both systems | 5 | the probe on both; a 16.7 ms delay added in the probe moves the median by one refresh; a gate without the card. No card |
 | R3 | The load script, the launch timer, the sleep and wake-up program, and both guests defined with pinned processors and an invariant TSC | 3 | the load holds every processor at 100% on both; the clock line says TSC |
 | R4 | The baseline: M1 to M9 on both guests as they are, the system-call breakdown, and the record written into the design's §12 | 3 | the table, with its logs. Needs the card, the Linux guest, and `nv-present` or its successor on the card |
 | R5 | The software measure checked against light, once | 3, or 5 with a built device | the two agree within the device's error on both systems. Needs question 6 |
 
 R1 to R3 need nobody's decision and no card, and are the next step.
+
+**R1, 2026-10-14.** `tools/common/game/`: `framerec.c`, the recorder
+(`LD_PRELOAD`; per swap the monotonic entry and return, and a
+`PresentNotifyMSC` sent after it on a connection of its own, whose
+`CompleteNotify` gives the msc and ust whatever way the program draws; a
+`FRAMEREC_STALL_MS` sleep every ten seconds as the negative control),
+`framegl.c`, a GLX client paced to the msc, and the baseline's scripts
+with `linux-side/measure-frames.sh`. `cargo xtask frames` builds both
+binaries and summarises a record: median, 99th, 99.9th percentile and worst
+frame, missed refreshes by msc and by time, and each stall's count.
+`cargo xtask test-frames` is the gate on Ferrix (hyprix, yserver, llvmpipe;
+it needs yserver's Present clock, pin 2966c377). The same binaries
+(libframerec.so `c28129b3`) recorded on both guests: on Ferrix the three
+stalls were 3, 3 and 3 missed refreshes at hyprix's 75 Hz (50 ms is 3.75
+refreshes there, so three or four; by msc and by time alike; gate
+`r1-frames-clock3`), on the Linux guest 3, 3 and 3 by time at
+a headless sway's 60 Hz. **Xwayland's msc is not a clock:** it counts the
+compositor's frame events only while a presentation waits, so a stall
+there misses no msc (0, 0 and 0); the design's definition by msc
+undercounts on the Linux baseline, and the summariser's count by time,
+anchored at the server's refresh, is the one to compare. The details and
+what is open are in the design's §12.
 
 ### Step 2: the first cut that can be compared with Linux  ·  47 points
 

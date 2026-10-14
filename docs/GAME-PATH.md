@@ -939,7 +939,7 @@ the row says so and gives no points.
 
 | # | Landing | Points | Proved by | Needs |
 |---|---|---|---|---|
-| R1 | The frame recorder: per-swap times and Present completions in the preload library, the summariser, both brought into the tree under `tools/common/` with the baseline's scripts | 5 | the same binary's record on both guests; negative control: a 50 ms sleep injected every ten seconds is counted exactly, as three missed refreshes each | nothing; no card |
+| R1 | The frame recorder: per-swap times and Present completions in the preload library, the summariser, both brought into the tree under `tools/common/` with the baseline's scripts | 5 | the same binary's record on both guests; negative control: a 50 ms sleep injected every ten seconds is counted exactly, as three missed refreshes each (at 60 Hz; at hyprix's 75 Hz 50 ms is 3.75 refreshes, three or four by the frame's own work) | nothing; no card. Built 2026-10-14 (§12) |
 | R2 | The latency probe and the injector's log: input to scan-out on both systems | 5 | the probe on both; control: a 16.7 ms delay added in the probe moves the median by one refresh; a gate without the card (`test-xwindow`'s boot, counting *frames* from injection to the frame that shows it) | nothing; no card |
 | R3 | The load script, the launch timer, the sleep and wake-up program, and both guests defined with pinned processors and an invariant TSC | 3 | the load holds every processor at 100% on both; the clock line says TSC | nothing |
 | R4 | The baseline: M1 to M9 on both guests as they are, the system-call breakdown of §6.1, and the record written into §12 | 3 | the table, with its logs | the card (the product owner's word); the Linux guest; `nv-present` or its successor on the card |
@@ -1161,3 +1161,74 @@ be written: Settings' game-mode page and the launcher's mark
 (`docs/SETTINGS.md`). It is a list and a mark with no effect; G0 to G5 and
 every question of §10 stand as they were, and `docs/SETTINGS.md` §8 adds
 the decisions the switch raises.
+
+2026-10-14: R1, the frame recorder, in `tools/common/game/` (`docs/LAYOUT.md`).
+`framerec.c` is §2.4's library: the baseline's swap counter, its
+`swap-fps` lines kept, with a record of every swap's monotonic entry and
+return, written from a ring at exit, on SIGTERM or when full, and for a GLX
+window the msc and ust of a `PresentNotifyMSC` (target 0) it sends after
+each swap on an X connection of its own, `libxcb` and `libxcb-present`
+opened at run time; the same connection selects `CompleteNotify`, so a
+program's own `PresentPixmap` completions are recorded too. Its serials
+carry the top bit, because the server sends every NotifyMSC completion to
+every client that selected them on the window. It costs about 10 µs a
+swap (Xvfb, an unpaced client: 8,480 frames a second without it, 7,700 to
+7,930 with it). `framegl.c` is a GLX client paced to the msc: after each
+swap it waits for the first later msc, as a driver with vsync on waits,
+with at most one frame in flight; Xorg answers a NotifyMSC for now + 1 at
+the next refresh, Xwayland one refresh early (its copies complete a frame
+after they run), so it asks again for now + 2. `cargo xtask frames` builds
+both with the host's `cc` and nothing else (reproducibly: the same SHA-256
+each time) and summarises a record; `cargo xtask test-frames` is the gate
+on Ferrix; `linux-side/measure-frames.sh` runs the same binaries on the
+Linux guest.
+
+Missed refreshes are counted two ways. By msc, as §2.4 defines them. By
+time: from the refresh the server said the earlier swap fell in (its ust)
+to the later swap's return, in refreshes, less one; the refresh is the
+median ust step of swaps one msc apart. **On Xwayland, the Linux
+baseline's server, the msc is not a clock**: it counts the compositor's
+frame events while a presentation waits and stands still while none does
+(`xwl_present_msc_bump`, Xwayland 24.1), so a program that stalls misses
+no msc there. Measured, not argued: on the Linux guest the three 50 ms
+stalls were 0, 0 and 0 by msc and 3, 3 and 3 by time. By msc §2.4's
+definition undercounts on exactly the system Ferrix is compared with; M3
+and M4 should be read by time on both, with msc as the cross-check where
+the server's msc is a clock (Xorg, Xvfb, yserver).
+
+The records, libframerec.so `c28129b3…` and framegl `68c9f69c…` on both:
+
+| | Ferrix (`test-frames`, KVM, llvmpipe through yserver on hyprix; gate `r1-frames-clock3`) | Linux guest (Debian 13, Xwayland of a headless sway at 60 Hz, llvmpipe; no card) |
+|---|---|---|
+| Plain, 30 s: swaps | 1,909 | 1,844 |
+| Frame time, median / 99th / 99.9th / worst | 15.68 / 17.13 / 18.29 / 18.70 ms | 16.22 / 19.26 / 24.90 / 25.44 ms |
+| Refresh from the completions | 15.679 ms | 16.241 ms |
+| Missed refreshes, by msc / by time | 0 / 0 | 0 / 2 |
+| 50 ms stalls, missed by msc / by time | 3/3, 3/3, 3/3 at 13.342 ms | 0/3, 0/3, 0/3 at 16.322 ms |
+
+Two earlier runs on Ferrix of the same binaries are kept for what they
+show of yserver's clock: one outside the pool (stalls 4/4, 3/3, 4/4 at
+13.376 ms; the plain run's refresh 15.297 ms with 41 misses by msc and 18
+by time), and `r1-frames-clock2` (stalls 4/3, 3/3, 3/3 at 13.979 ms),
+which failed a judge that wanted the two counts equal; the gate now wants
+the msc count in the range the refresh allows and the time count within
+one of it (`compositor/frames.rs` says why).
+
+On Xvfb on the host, whose msc is a clock at 16.35 ms, the two stalls were
+3/3 and 3/3. The Linux guest's own session could not serve: without the
+card it shows on virtio-gpu, whose flips complete at once (frames every
+5.5 ms, no refresh to count), so `frames.sh` with `HEADLESS=1` starts a
+second sway on wlroots' headless backend for the run.
+
+Open: yserver's clock (pin 2966c377) runs at hyprix's 75 Hz when nothing
+draws and follows hyprix's frame callbacks, about 16 ms apart, while
+something does, so a paced client's refresh reads 15.3 or 15.7 ms in one
+run and 13.3 to 14.0 ms in the next, and misses by msc can be the clock
+stepping between the two; it is a clock, but not yet one refresh, and the
+count by time is only as good as one refresh period.
+The figures above are under KVM on a loaded host and say nothing of M3
+or M4 yet: that is R4, on the card. The baseline's Teeworlds scripts now
+preload `libframerec.so` and were not run (they need the card). A
+pipelined driver (NVIDIA, swap returning before the frame shows) has not
+been recorded; its per-pair counts may move a miss to the next pair while
+the sum stays, which R4 will see.
