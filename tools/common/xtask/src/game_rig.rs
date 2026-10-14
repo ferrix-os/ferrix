@@ -5,16 +5,16 @@
 //! on the machine Ferrix runs on under KVM: the same `tools/common/game/`
 //! files the Linux guest runs (`linux-guest.sh`), here carried in the
 //! initramfs, with the rustc volume `test-rustc` attaches for the compiler
-//! the load runs. The kernel's `clock` line must name the TSC, which
-//! `qemu::x86_cpu` asks for with `+invtsc` under KVM; and while the load
+//! the load runs. The kernel's `clock` line must name the invariant TSC,
+//! which `qemu::x86_cpu` asks for with `+invtsc` under KVM; and while the load
 //! runs, `rig busy` must find every processor at least [`BUSY`] percent
 //! busy; and the launch timer must see a stand-in's first swap its 100 ms
 //! after its constructor. The overshoot of a timed sleep, idle and under the load, is
 //! printed and not judged: its bound is G2's (§8.3), not the rig's.
 //!
 //! The controls (`docs/GAME-PATH.md` §12 records both runs):
-//! `FERRIX_X86_CPU` set to [`qemu::x86_cpu`]'s model without `+invtsc`
-//! makes the clock the HPET and fails the clock check; and `load.sh` edited
+//! [`qemu::x86_cpu`] without `+invtsc` makes the clock the TSC as KVM's
+//! paravirtual clock vouches for it, and fails the clock check; and `load.sh` edited
 //! to start no compile loop leaves the processors idle and fails the busy
 //! check.
 
@@ -36,6 +36,12 @@ export RIG_WRITE_MIB=256
 sh /usr/share/game/measure.sh 30 || exit $?
 exit 16
 "#;
+
+/// How the kernel's `clock` line starts when the processor itself reports
+/// an invariant TSC (`arch/x86_64/clock.rs`, row 1). Without invtsc under
+/// KVM the counter is still the TSC, "vouched for and rated by KVM's
+/// paravirtual clock", which is not what the rig's guests are defined with.
+const INVARIANT: &str = "TSC, calibrated against the HPET";
 
 /// The status the script exits with when `measure.sh` got to its end.
 const STATUS: &str = "16";
@@ -213,9 +219,9 @@ fn judge(arch: Arch, smp: u32, lines: &[String]) -> Result<()> {
         .iter()
         .find_map(|line| line.trim().strip_prefix(shell::EXITED))
         .map(str::trim);
-    if !clock.starts_with("TSC") {
+    if !clock.starts_with(INVARIANT) {
         return Err(Error::new(format!(
-            "{arch}: the clock is not the TSC: `{clock}`"
+            "{arch}: the clock is not the invariant TSC: `{clock}`"
         )));
     }
     if exited != Some(STATUS) {
@@ -290,9 +296,9 @@ mod tests {
     }
 
     #[test]
-    fn a_clock_other_than_the_tsc_fails() {
+    fn a_clock_other_than_the_invariant_tsc_fails() {
         let seen = lines(
-            "  clock    HPET at 100.000 MHz\n\
+            "  clock    TSC, vouched for and rated by KVM's paravirtual clock at 4400.017 MHz\n\
              busy: 4 processors over 10 s, lowest 100.0% (cpu0), mean 100.0%\n\
              launch: constructor +2.7 ms, first swap returned +102.8 ms\n\
              init     the shell exited with 16",
