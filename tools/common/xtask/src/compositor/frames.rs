@@ -161,6 +161,8 @@ pub(crate) fn test_frames(args: &Args) -> Result<()> {
         args.timeout = PATIENCE.as_secs() + 300;
     }
     let (image, kernel, sha) = desktop(arch, &args)?;
+    // The screen hyprix draws on, as `test-xwindow` and `test-unity` give it.
+    args.display = true;
     println!(
         "  {arch}: framegl on llvmpipe through yserver on hyprix, with the frame recorder \
          (libframerec.so {sha}), {PLAIN} s plain and {STALLED} s with a 50 ms stall every 10 s \
