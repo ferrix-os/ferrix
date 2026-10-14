@@ -1,7 +1,7 @@
 # Where it stands, in full
 
 *Reviewed 2026-10-09, to `main` d884add58; the stage 23 and 24 paragraphs
-2026-10-14, to `main` dc3a11a7a.* The short version is on the [overview](README.md).
+2026-10-15, to `main` e31ba0c8e.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -581,8 +581,20 @@ region to read, f0c812f01). Its download's certificate roots are in
 (GnuTLS and the CA bundle where Wine's `crypt32` reads them), and Wine,
 Proton and the launcher are on the `--everything` desktop as `gryphlink`
 (2026-10-14); the game's download is not done: it stopped on ENOSPC from
-Ferrix's btrfs after about 5.8 GB with about 150 GB unallocated, and is
-being worked. A window of an X
+Ferrix's btrfs after about 5.8 GB with about 150 GB unallocated, because
+the 8 GiB guest ran out of frames and a writable mount's page cache is not
+reclaimed. The fix is the branch `mm-pcache`; its requirement ids
+L.object.188-190 are reserved on `main` (2026-10-14) and its code is not
+landed. On 2026-10-15 a download on a scratch image reached about 9.5 GB
+of 56.9 GB at 2.5 MB/s and died at 00:22: the guest's virtio-net driver
+stopped sending after two `devmgr` restarts of it, a bug in the driver
+restart (branch `net-restart-stall`, in progress). What took the CPU was
+the launcher's looping background video, not the download; a click on its
+STATIC switch pauses it. The next download (8 vCPUs, a fresh image, from
+a scratch branch that is not for `main`) runs at about 3.7 MB/s. A restart
+starts a download over, because the launcher keeps its state in a Wine
+prefix on tmpfs; the scratch branch keeps the prefix on the volume, which
+is not yet shown to make the launcher resume. A window of an X
 program drawn by the card exists on unlanded branches only: on 2026-10-10
 Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a
 second between stalls of about 5 s, whose cause is found and whose fix is
@@ -597,7 +609,9 @@ invariant TSC, landed on 2026-10-14 (`test-frames`, `test-xlatency`,
 `test-game-rig`), and the same binaries ran on
 Ferrix and on a Linux guest with no card; they stand on yserver's Present
 clock (pin 2966c377, eb7ad7411, which also fixed a lavapipe
-`PresentPixmap` crash). Nothing of what its exit is judged by is measured on
+`PresentPixmap` crash); since 2026-10-15 the clock keeps one refresh (pin
+d2bf56e2: every msc 13.334 ms, where an msc had lasted 12.2 to 19.4 ms),
+and `test-frames` fails a clock that steps. Nothing of what its exit is judged by is measured on
 the card yet. Its first step is the rig that measures it (R1 to R5, 19 to
 21 points; R1 to R3 are built, R4 and R5 need the card), then a first cut of 47
 points; the game domain (52) is stage 14's ground and waits on the

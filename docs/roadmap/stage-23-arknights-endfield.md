@@ -422,11 +422,33 @@ logged into and nothing of the game was downloaded.
   reclaimed (open; reclaim for its clean pages is a certified-core change).
   Wine, Proton and the launcher are on the `--everything` desktop as
   `gryphlink` (`test-endfield-proton --everything`).
+* *Found, 2026-10-15 (a scratch run on the volume, not on `main`):* the
+  reclaim is the branch `mm-pcache`; L.object.188-190 (reclaim of a
+  writable mount's clean pages, the write that reclaims before it answers
+  `ENOSPC`, the cache's totals in `/proc/meminfo`) are reserved on `main`
+  (77e87403a) and the code is not landed. A second download (install5, 4
+  vCPUs, 56.9 GB in 54 parts) ran at 2.0 to 3.3 MB/s and stopped at 00:22
+  after 9.5 GB, with the button reading "Download Error": the guest's
+  virtio-net driver had been restarted twice by `devmgr` (status 7, the
+  serve loop stopped on a fault, about 23:29 and 00:06) and after the
+  second restart sent nothing (the process at 13 to 25% CPU, xtask's
+  gateway idle). A bug in the driver restart, not the disk; branch
+  `net-restart-stall`, in progress. The launcher's looping background
+  video, not the download, was taking about 2.6 of the 4 vCPUs; its
+  STATIC switch (a pill at the top of the window, in memory only, so
+  clicked after every launcher start) pauses it. install6 (8 vCPUs, a
+  fresh image, from the scratch branch `ef-night`, which never lands)
+  downloads at about 3.7 MB/s. A restart starts the download over: the
+  Wine prefix is on tmpfs, so a new launcher has no download path and
+  clears its tasks; `ef-night` keeps the prefix on the volume
+  (`FERRIX_ENDFIELD_KEEP`), and that the launcher then resumes is
+  unproven.
 * *Still to do:* the image path of another process (`ptrace` and
   `/proc/<pid>/mem`, E5.2, which the launcher asks for every five seconds
-  and Wine cannot give it on Ferrix); the current launcher version; and,
-  when Ferrix runs on the machine, E4.1, the installer itself (E4.2), then
-  E4.4 to E4.6.
+  and Wine cannot give it on Ferrix); the current launcher version; the network driver's restart
+  (`net-restart-stall`) and `mm-pcache` on `main`; a resumed download
+  shown after a restart; and, when Ferrix runs on the machine, E4.1, the
+  installer itself (E4.2), then E4.4 to E4.6.
 
 ### Step 5: past the anti-cheat  ·  29 points as a guess; unknown
 

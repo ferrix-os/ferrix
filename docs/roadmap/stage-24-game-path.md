@@ -109,7 +109,7 @@ with `linux-side/measure-frames.sh`. `cargo xtask frames` builds both
 binaries and summarises a record: median, 99th, 99.9th percentile and worst
 frame, missed refreshes by msc and by time, and each stall's count.
 `cargo xtask test-frames` is the gate on Ferrix (hyprix, yserver, llvmpipe;
-it needs yserver's Present clock, pin 2966c377). The same binaries
+it needs yserver's Present clock kept to one refresh, pin d2bf56e2). The same binaries
 (libframerec.so `c28129b3`) recorded on both guests: on Ferrix the three
 stalls were 3, 3 and 3 missed refreshes at hyprix's 75 Hz (50 ms is 3.75
 refreshes there, so three or four; by msc and by time alike; gate
