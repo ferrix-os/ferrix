@@ -860,43 +860,82 @@ why §3.3 puts the hook in front of the architecture's own `rt_sigreturn`.
 
 For `seccomp(SET_MODE_FILTER, TSYNC [| TSYNC_ESRCH])`, after steps 1 to 9
 of §3.5 have succeeded, and with the new filter made and charged but
-attached to nobody:
+attached to nobody, in rounds:
 
-1. **Take the process's thread-list lock.** It is what
-   `Thread::sibling` / `add_thread` hold to publish a new thread, and what
-   `Process::threads` holds to list them.
-2. **If an `execve` has claimed the process** (`exec_thread`), answer
-   `EAGAIN`. The exec is about to end this thread anyway. Linux serialises
-   the two with `cred_guard_mutex`, and the program sees nothing.
-3. **Check every other live thread** under its leaf lock. A thread whose
-   mode is `Disabled` passes. So does one whose chain is an ancestor of the
-   caller's current chain, where none counts as an ancestor of any chain.
-   Linux's `is_ancestor` compares pointers down the caller's chain.
-   * A thread in strict mode fails, and so does one with a chain that is
-     not an ancestor.
-   * **On the first failure,** release everything, drop the new filter,
-     and answer that thread's tid as a positive number. With
-     `TSYNC_ESRCH`, answer `ESRCH` instead.
+1. **Look, under the process's thread-list lock.** It is what
+   `Thread::sibling` / `add_thread_from` hold to publish a new thread, what
+   `Process::threads` holds to list them, and -- since the consultant's B1
+   on S5 (2026-10-14) -- what every change of a thread's mode or chain holds:
+   `attach` and `set_strict` take it before the thread's leaf lock, as Linux's
+   `seccomp_attach_filter` and `seccomp_set_mode_strict` run under
+   `sighand->siglock`. Every live thread's mode and newest filter are taken,
+   one reference each, and the caller's newest filter.
+2. **Test every other thread, under no lock.** A thread whose mode is
+   `Disabled` passes. So does one whose chain is an ancestor of the caller's
+   current chain, where none counts as an ancestor of any chain. Linux's
+   `is_ancestor` compares pointers down the caller's chain: up to 6,554 of
+   them, preemptible. A filter's `previous` is set before anyone else can see
+   it and never after, so the walk needs no lock, and the references step 1
+   took keep every filter it compares alive, so an equal pointer is the same
+   filter.
+   * A thread in strict mode or `Dead` fails, and so does one with a chain
+     that is not an ancestor.
+   * **On the first failure,** drop the new filter and answer that thread's
+     tid as a positive number. With `TSYNC_ESRCH`, answer `ESRCH` instead.
+     Nothing has changed.
+3. **Confirm, under the thread-list lock again.** If an `execve` has claimed
+   the process (`exec_thread`), answer `EAGAIN`: the exec is about to end
+   this thread anyway, and Linux serialises the two with
+   `cred_guard_mutex`. The caller's newest filter must be the one step 1
+   took, and every other live thread must have no seccomp, or a newest
+   filter that is the caller's or one step 2 found to be an ancestor (by
+   pointer: one comparison, then a binary search of the tested addresses,
+   sorted before the lock), and not be in strict mode. A thread listed since
+   step 1 is judged the same way: it copied its creator's chain. If anything
+   fails, some other thread of the process changed itself, or made a thread,
+   between the two looks: nothing is changed, and the round is made again
+   from step 1, which then answers that thread's id if it can no longer take
+   the filter.
 4. **Attach.** Attach the filter to the caller as in §3.5 step 10. Then,
    for every other live thread under its leaf lock, set its chain to the
    caller's new one (one `Arc` each; the old chain is dropped *after* the
-   locks are released), set its mode to `Filter` if it was `Disabled`, and
-   set `filtered`.
+   locks are released), set its mode to `Filter`, and set `filtered`. A
+   thread its own filter marked `Dead` since step 1 is left `Dead`, with its
+   chain as it was.
 5. **Release the lock and return 0.**
 
 **Races, each closed by the thread-list lock:**
 * **A thread being made during the sync** either is already in the list,
   so step 4 reaches it, or copies its creator's chain after step 4, so it
   gets the new one. `clone(CLONE_THREAD)` reads the creator's filter *under
-  the thread-list lock* in `add_thread` for exactly this reason.
+  the thread-list lock* in `add_thread_from` for exactly this reason. One
+  made between steps 1 and 3 is confirmed in step 3 by the chain it copied.
+* **A thread that changes itself during the sync** (the consultant's B1 on
+  S5): it installs a filter of its own, enters strict mode, or is killed by
+  its filter. The first two take the thread-list lock, so between steps 3
+  and 4 they wait for the sync and then act on what it made (a filter goes
+  on top of the new chain; strict mode is refused, a filter being in);
+  between steps 1 and 3 step 3 sees them and the round is made again. A
+  sync that tested a thread and changed it under another hold of the lock,
+  as S5 first did, would take a filter off it (SR5) or put a strict thread
+  back to filter mode. The kill marks the thread `Dead` under its leaf lock
+  alone, on its own way out; step 4 leaves it `Dead`.
 * **A thread that is ending** is either in the list and set, which is
   harmless, or gone.
-* **An `execve`** is step 2.
+* **An `execve`** is step 3.
+
+A round is made again only after another thread of the same process changed
+its own seccomp state or made a thread between steps 1 and 3; the calling
+thread pays for that, preemptibly, and nothing else waits on it. Under the
+lock a round costs, for each thread, one leaf lock and a comparison or a
+binary search: the order of listing the threads, which `Process::threads`
+does under the same lock.
 
 **No-new-privs** needs no step: it is per process here (§3.4).
 
 **Allocation.** Nothing is allocated under the spin locks: the filter and
-its charge exist before step 1, and the old chains are dropped after
+its charge, the lists of step 1 and the sorted addresses exist before step
+3, and the old chains and the references step 1 took are dropped after
 step 5 (the lock rule of NAMESPACES §6).
 
 ### 3.8 Signals and restarted calls
@@ -1037,12 +1076,12 @@ names the landing that brings it. The vulnerability analysis's entry
 | **SR2** the number filtered is the number dispatched | a filter judging one number while another runs | host test: every table's number round-trips; boot check: `RAX = 1<<32 \| getpid` is `ENOSYS` whatever the filter allows (S2) |
 | **SR3** every entry is filtered, early answers included | a sandbox that denies `rt_sigreturn` or `arch_prctl` and is not obeyed | the `seccomp` line: a filter answering `ERRNO` for each of `arch_prctl` (x86-64), `set_tls` (ARM), and `KILL_PROCESS` for `rt_sigreturn`, each obeyed on its architecture; negative control: the hook moved into `dispatch_with` (S2) |
 | **SR4** no-new-privs before an unprivileged filter, and inherited by every child | a filter confusing a set-uid program (the reason for the rule, `Documentation/userspace-api/no_new_privs.rst`); a child escaping no-new-privs by being forked | `EACCES` without it; a forked child of a no-new-privs parent reads `NoNewPrivs: 1` and runs a set-uid file as its caller; negative control: `fork` not copying it (S3) |
-| **SR5** filters only accumulate, and the strictest wins | a later filter loosening an earlier one | a chain of `ALLOW` over `ERRNO` stays `ERRNO`; a tie keeps the newest filter's data; host tests of the order with every action pair (S1, S3) |
+| **SR5** filters only accumulate, and the strictest wins | a later filter loosening an earlier one; a `TSYNC` replacing a chain a thread grew, or a strict mode it entered, after the sync tested it (the consultant's B1 on S5) | a chain of `ALLOW` over `ERRNO` stays `ERRNO`; a tie keeps the newest filter's data; host tests of the order with every action pair (S1, S3); a thread that installs a filter of its own or enters strict mode in either window of a `TSYNC` keeps what it did (S5, §3.7) |
 | **SR6** a filtered process's children are filtered: `fork`, `clone`, `execve`, native `process_create` | leaving the sandbox through a native child (NAMESPACES §2.5's class) | the `seccomp` line: a native child of a filtered creator is refused the call its creator's filter refuses; negative control: `load_native` passing no filter (S3) |
 | **SR7** a filter's errno is returned as is: capped at 4095, never a restart | `ERRNO` of 512 (`ERESTARTSYS`) turning into a restart loop or an internal code leaking | a filter returning `ERRNO\|512` gets `-512` to the program, once (S3) |
 | **SR8** the verifier is Linux's, and runs are bounded | unbounded or out-of-range programs; reads of uninitialised scratch (CVE-2010-4158) | the crate's host tests, Miri, the fuzzer's properties (S1) |
 | **SR9** `TRAP` cannot be blocked or ignored, and the program runs no instruction past the call | a sandbox whose traps can be switched off by `sigprocmask` | `SIGSYS` blocked and ignored, then a trapped call: the handler runs, or the process dies of `SIGSYS`; never the next instruction (S4) |
-| **SR10** `TSYNC` is all or nothing, and no thread is left behind or made during it without the filter | Linux's `TSYNC` races with `clone` and `exec` | the `seccomp` line: eight threads, one of them `clone`ing in a loop during the sync, then every thread refused; a thread with a foreign filter makes `TSYNC` fail with its tid and changes no thread; negative control: the creator's filter read outside the thread-list lock, shown to leave a thread unfiltered with a delay inserted there (S5) |
+| **SR10** `TSYNC` is all or nothing, and no thread is left behind or made during it without the filter | Linux's `TSYNC` races with `clone` and `exec` | the `seccomp` line: eight threads, one of them `clone`ing in a loop during the sync, then every thread refused; a thread with a foreign filter makes `TSYNC` fail with its tid and changes no thread; negative control: the creator's filter read outside the thread-list lock, shown to leave a thread unfiltered with a delay inserted there (S5); the sync paused in each of its two windows while one thread installs a filter of its own, one enters strict mode and one is killed by its filter: each keeps what it did, and the sync answers the changed thread's id or acts before it; negative controls: the confirmation skipped, `attach` or `set_strict` without the thread-list lock, a killed thread put back to filter mode (S5, the consultant's B1) |
 | **SR11** a chain is released without recursion | kernel stack overflow on a long chain's `Drop` | the longest allowed chain (6,554 one-instruction filters) made in a child that then exits (S3) |
 | **SR12** a filter's memory is charged | F-37's class: kernel heap a program keeps without bound | the `kmem` line: filters installed in a loop until `ENOMEM` at the job's limit, a sibling installs one, both read zero after (S3) |
 | **SR13** unbuilt actions fail closed | `TRACE` or `USER_NOTIF` read as "allow" by a kernel without a tracer or listener | each returns `ENOSYS`, and the call does not run (S4) |
@@ -1073,8 +1112,8 @@ its own calls slower than its chain's length allows.
 
 | Lock | Kind | Guards | Taken after |
 |---|---|---|---|
-| a process's thread list | `SpinLock` (exists) | the list; with it, `TSYNC` and `add_thread`'s copy of the creator's chain | nothing new |
-| a thread's `Seccomp` | `SpinLock`, per thread (new) | `mode`, `filter` | the thread list, or nothing; a leaf |
+| a process's thread list | `SpinLock` (exists) | the list; with it, `TSYNC`'s two looks and its change, `add_thread_from`'s copy of the creator's chain, and every thread's own change of its mode or chain (`attach`, `set_strict`; the consultant's B1 on S5) | nothing new |
+| a thread's `Seccomp` | `SpinLock`, per thread (new) | `mode`, `filter`; changed under the thread list too, but for a filter marking its own thread `Dead` | the thread list, or nothing; a leaf |
 | `filtered` | `AtomicBool` | the fast path's "has a chain" | written under the leaf lock, after `filter` and `mode`, with release; read with acquire |
 | `Process::no_new_privs` | `AtomicBool`, set-only (moved) | -- | -- |
 
@@ -1150,6 +1189,7 @@ committed. Each stops the boot with its own message.
 | `TRAP` with `SIGSYS` blocked, then ignored: the process dies of `SIGSYS`; with `SA_NODEFER`, a trap inside the handler traps again | `force` replaced by `post`: "a blocked SIGSYS let a trapped call return" | S4 |
 | `TRACE` and `USER_NOTIF` results are `ENOSYS` and the call does not run | `TRACE` read as `ALLOW`: "a TRACE result let the call run" | S4 |
 | `TSYNC`: §5 SR10's three cases | the creator's chain read outside the thread-list lock, with a delay inserted: "a thread made during TSYNC was not filtered" | S5 |
+| `TSYNC`'s two windows (§3.7, the consultant's B1): a thread installs a filter of its own and one enters strict mode after the test, and, with the sync paused under the lock after its confirmation, two running threads race it and a third is killed by its filter | the confirmation skipped: "a filter a thread installed while TSYNC tested was taken off it"; `attach` without the thread-list lock: "a filter a thread installed during TSYNC's change was taken off it"; `set_strict` without it: "a thread that entered strict mode during TSYNC's change was put back to filter mode"; the killed thread changed: "TSYNC brought a thread its filter had killed back to filter mode" | S5 |
 
 ### 8.2 `cargo xtask test-seccomp`: the user-space test plan
 
