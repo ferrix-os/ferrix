@@ -173,6 +173,7 @@ mod wallpaper;
 mod waybar;
 mod window;
 mod wine;
+mod wine_sync;
 mod workspace;
 mod wsl;
 mod yserver;
@@ -355,6 +356,9 @@ COMMANDS:
     test-wine     Attach the volume tools/common/fetch/fetch-wine.sh makes, and require Debian's 64-bit Wine to make a
                   prefix with wineboot, its cmd to print the Windows version, and its notepad to draw a window on
                   hyprix through yserver (docs/WINE.md)
+    test-wine-sync  Attach the volume tools/common/fetch/fetch-proton.sh makes, and require GE-Proton's Wine to take
+                  fsync (futex_waitv) with WINEFSYNC=1 and its 64-bit and 32-bit waits to go through it; prints the
+                  bench's turn times and wineserver's processor time with fsync off and on (docs/WINE.md §11)
     test-dxvk     The same volume, with DXVK and a Direct3D 11 program from tools/common/fetch/fetch-dxvk.sh: require the
                   program's frame, drawn through DXVK on lavapipe with no card, to be the one xtask draws, then its
                   frames presented through a swap chain in a window on hyprix through yserver (docs/WINE.md §6)
@@ -1188,7 +1192,8 @@ fn driver_gate(command: &str, args: &Args) -> Result<()> {
 }
 
 /// The gates of the X server and the Windows programs on it: yserver's and
-/// Wine's (`test-yserver`, `test-xwindow`, `test-wine`), stage 24's latency
+/// Wine's (`test-yserver`, `test-xwindow`, `test-wine`), Proton's fsync
+/// (`test-wine-sync`), stage 24's latency
 /// probe on yserver (`test-xlatency`), DXVK's (`test-dxvk`), Unity's
 /// Spaceship Demo (`test-unity`), and Endfield's launcher in Debian's Wine
 /// (`test-endfield-launcher`) and in GE-Proton's (`test-endfield-proton`).
@@ -1197,6 +1202,7 @@ const WINE_GATES: &[&str] = &[
     "test-xwindow",
     "test-xlatency",
     "test-wine",
+    "test-wine-sync",
     "test-dxvk",
     "test-unity",
     "test-endfield-launcher",
@@ -1210,6 +1216,7 @@ fn wine_gate(command: &str, args: &Args) -> Result<()> {
         "test-yserver" | "test-xwindow" | "test-xlatency" | "test-wine" => {
             yserver::run(command, args)
         }
+        "test-wine-sync" => wine_sync::test_wine_sync(args),
         "test-dxvk" => dxvk::test_dxvk(args),
         "test-unity" => compositor::unity::test_unity(args),
         "test-endfield-launcher" => test_endfield_launcher(args, Wine::Debian),

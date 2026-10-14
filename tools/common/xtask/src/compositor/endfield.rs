@@ -51,7 +51,7 @@ pub(crate) enum Wine {
 impl Wine {
     /// The lines that name the loader and the server, and Proton's
     /// environment (what its `proton` script sets for Wine).
-    fn prelude(self) -> &'static str {
+    pub(crate) fn prelude(self) -> &'static str {
         match self {
             Wine::Debian => {
                 "WINE=/usr/lib/wine/wine64\nexport WINESERVER=/usr/lib/wine/wineserver64\n"
@@ -239,7 +239,7 @@ fn pinned() -> &'static str {
 }
 
 /// The Proton version `fetch-proton.sh` pins.
-fn proton_pinned() -> &'static str {
+pub(crate) fn proton_pinned() -> &'static str {
     FETCH_PROTON
         .lines()
         .find_map(|line| line.strip_prefix("PROTON_VERSION="))
