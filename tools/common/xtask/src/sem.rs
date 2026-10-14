@@ -140,14 +140,15 @@ fn starts(line: &str, want: &str) -> bool {
     line.contains(want)
 }
 
-/// `test-sem`, and `test-threads`, `test-shm` and `test-procfs`, the other
-/// musl programs booted as init, and `test-uvm`, `test-nvrm` and
+/// `test-sem`, and `test-threads`, `test-shm`, `test-container` and
+/// `test-procfs`, the other musl programs booted as init, and `test-uvm`, `test-nvrm` and
 /// `test-nvrm-link`, booted the
 /// same way, which share its arm of `main`'s dispatch.
 pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     match command {
         "test-sem" => test_sem(args),
         "test-shm" => crate::shm::test_shm(args),
+        "test-container" => crate::container::run(args),
         "test-pipewait" => crate::pipe_bench::test_pipewait(args),
         "test-procfs" => crate::procfs::test_procfs(args),
         "test-uvm" => crate::uvm::test_uvm(args),

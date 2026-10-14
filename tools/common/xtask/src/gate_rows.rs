@@ -49,6 +49,9 @@ impl Rows {
     }
 }
 
+/// Stage 13's exit test (`docs/BACKLOG.md`, *What a landing runs*).
+const TEST_CONTAINER: &str = "test-container --arch all";
+
 /// The table's image row: anything the image contains, and the default.
 /// Both `x86_64` accelerators are named, so the row means the same thing on
 /// every host (`docs/BACKLOG.md`, *Name the accelerator*).
@@ -136,6 +139,16 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
             "authd: does it change what authd refuses? then test-auth --arch x86_64 \
              --sabotage NAME for each name in src/user/system/linux/auth/authd/src/sabotage.rs",
         );
+    } else if under("src/tests/container/") {
+        rows.add(&["check", TEST_CONTAINER]);
+        reason(rows, "stage 13's exit program: check, then test-container");
+    } else if path == "tools/common/xtask/src/container.rs" {
+        rows.add(IMAGE_ROW);
+        rows.add(&[TEST_CONTAINER]);
+        reason(
+            rows,
+            "test-container's judge: the image row, then test-container",
+        );
     } else if under("src/kernel/")
         || under("src/boot/common/uefi/")
         || under("tools/common/xtask/")
@@ -151,6 +164,10 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
              the glibc busybox) and test-vfs --arch x86_64 (ferrousli and musl busybox)",
         );
         rows.ask("stage 7? then test-threads --arch all");
+        rows.ask(
+            "stage 13 (namespaces, cgroups, reclaim, the OOM kill, seccomp)? then \
+             test-container --arch all",
+        );
         rows.ask("the loader, exec or ferrousli? then test-shell with Debian's dynamic busybox");
     } else if under("src/lib/") {
         rows.add(&["check", "test-boot --arch armv7a --smp 2"]);
@@ -489,6 +506,25 @@ mod tests {
         assert_eq!(
             rows.commands.last().map(String::as_str),
             Some("test-auth --arch all")
+        );
+    }
+
+    #[test]
+    fn stage_13s_exit_program_and_its_judge_run_test_container() {
+        assert_eq!(
+            rows_of(&["src/tests/container/src/main.rs"]).commands,
+            ["check", "test-container --arch all"]
+        );
+        let judge = rows_of(&["tools/common/xtask/src/container.rs"]);
+        assert_eq!(
+            judge.commands.last().map(String::as_str),
+            Some("test-container --arch all")
+        );
+        assert!(
+            judge
+                .commands
+                .iter()
+                .any(|c| c == "build --arch all --release")
         );
     }
 
