@@ -36,7 +36,7 @@
 //! `cpu MHz`, as `test-steamcmd`) and the internet, so neither is in
 //! `cargo xtask check`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::boot::{build_image, undithered};
@@ -151,6 +151,16 @@ pub(super) const TIMEOUT: u64 = 2400;
 
 /// Where `tools/common/fetch/fetch-steam-window.sh` writes, unless
 /// `FERRIX_STEAM_WINDOW_VOLUME` names another directory.
+///
+/// It carries yserver, built by the script's own run of `fetch-yserver.sh`
+/// into `yserver/` beside the image, and must carry the one that script
+/// pins, as yserver's and Wine's volumes must ([`crate::yserver::volume`],
+/// `crate::wine::volume`): one made before the pin moved boots and draws
+/// Steam's window with the older server, and says nothing of it.
+///
+/// # Errors
+///
+/// The volume has not been made, or was made with another yserver.
 pub(crate) fn volume() -> Result<PathBuf> {
     let directory = match std::env::var_os("FERRIX_STEAM_WINDOW_VOLUME") {
         Some(directory) => PathBuf::from(directory),
@@ -163,7 +173,28 @@ pub(crate) fn volume() -> Result<PathBuf> {
             image.display()
         )));
     }
-    Ok(image)
+    let stamp = directory.join("yserver").join("yserver.commit");
+    let carried = std::fs::read_to_string(&stamp).unwrap_or_default();
+    carries_the_pin(image, &stamp, carried.trim(), crate::yserver::pinned())
+}
+
+/// `image` when the yserver its `stamp` names, `carried`, is `pinned`;
+/// otherwise what is wrong and the script that makes it again.
+fn carries_the_pin(image: PathBuf, stamp: &Path, carried: &str, pinned: &str) -> Result<PathBuf> {
+    match carried {
+        commit if !commit.is_empty() && commit == pinned => Ok(image),
+        "" => Err(Error::new(format!(
+            "{} does not say which yserver it carries ({} is not there): \
+             tools/common/fetch/fetch-steam-window.sh makes it again",
+            image.display(),
+            stamp.display()
+        ))),
+        commit => Err(Error::new(format!(
+            "{} carries yserver {commit}: tools/common/fetch/fetch-steam-window.sh makes it again \
+             with {pinned}, the commit tools/common/fetch/fetch-yserver.sh pins",
+            image.display()
+        ))),
+    }
 }
 
 /// The files the image carries beside the compositor's.
@@ -321,7 +352,7 @@ pub(crate) fn run(args: &Args, gate: bool) -> Result<()> {
 fn watch(
     watching: &mut Watching<'_>,
     qmp: &mut Qmp,
-    shots: &std::path::Path,
+    shots: &Path,
     every: u64,
     timeout: u64,
     gate: bool,
@@ -375,7 +406,7 @@ fn watch(
 
 /// Give the listed window [`PAINT`] to be drawn, dump the screen to
 /// `login-window.ppm`, and pass when it has [`DRAWN_COLOURS`].
-fn judge(watching: &mut Watching<'_>, qmp: &mut Qmp, shots: &std::path::Path) -> Result<()> {
+fn judge(watching: &mut Watching<'_>, qmp: &mut Qmp, shots: &Path) -> Result<()> {
     watching.read_what_was_said(PAINT)?;
     let dump = shots.join("login-window.ppm");
     qmp.screendump(Some(DEVICE_ID), &dump)?;
@@ -410,6 +441,50 @@ pub(super) fn colours(screen: &Image) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A volume whose yserver is the pin is taken; one with another
+    /// commit, or with no stamp, is refused with the script that makes it
+    /// again.
+    #[test]
+    fn a_volume_with_another_yserver_is_refused() {
+        let image = PathBuf::from("/v/steam-window/steam-window.img");
+        let stamp = Path::new("/v/steam-window/yserver/yserver.commit");
+        let pinned = crate::yserver::pinned();
+        assert!(!pinned.is_empty());
+        assert_eq!(
+            carries_the_pin(image.clone(), stamp, pinned, pinned).unwrap(),
+            image
+        );
+        let stale = carries_the_pin(image.clone(), stamp, "1a8752e8", pinned)
+            .unwrap_err()
+            .to_string();
+        assert!(stale.contains("carries yserver 1a8752e8"), "{stale}");
+        assert!(
+            stale.contains("fetch-steam-window.sh makes it again"),
+            "{stale}"
+        );
+        assert!(stale.contains(pinned), "{stale}");
+        let unsaid = carries_the_pin(image.clone(), stamp, "", pinned)
+            .unwrap_err()
+            .to_string();
+        assert!(unsaid.contains("yserver.commit is not there"), "{unsaid}");
+        assert!(unsaid.contains("fetch-steam-window.sh"), "{unsaid}");
+        assert!(
+            carries_the_pin(image, stamp, "", "").is_err(),
+            "no pin read"
+        );
+    }
+
+    /// The stamp is the one fetch-steam-window.sh's run of fetch-yserver.sh
+    /// writes: yserver's directory under the volume's.
+    #[test]
+    fn the_stamp_is_where_the_script_writes_it() {
+        let script = include_str!("../../../fetch/fetch-steam-window.sh");
+        assert!(script.contains("yserver=$out/yserver\n"));
+        assert!(script.contains(
+            r#"FERRIX_YSERVER_VOLUME=$yserver "$repo/tools/common/fetch/fetch-yserver.sh""#
+        ));
+    }
 
     /// Every script is carried, the lsof wrapper where the client looks,
     /// and each link has one place to point.

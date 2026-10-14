@@ -401,6 +401,10 @@ It now takes such a file from snapshot.debian.org at 2026-09-27, the day
 of the pins, under the same SHA-256. Of the other fetch scripts, only
 `fetch-chromium-arm64.sh` pinned files that have left (Chromium
 `154.0.8037.57-1~deb13u1`), and it does the same at 2026-09-26.
+`test-steam-window` and `--everything` now refuse a Steam window volume
+whose `yserver/yserver.commit` is not the pin, as `test-yserver` and
+`test-wine` refuse theirs; `--everything` makes it again with
+`fetch-steam-window.sh` first.
 
 2026-10-14: **a Present clock on the Wayland backend.** `fetch-yserver.sh`
 pins the fork at 2966c377. The backend had no clock for the Present
