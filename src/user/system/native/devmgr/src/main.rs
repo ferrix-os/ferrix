@@ -111,6 +111,12 @@ const ANY_VENDOR: u16 = 0xFFFF;
 /// bus it sits: on a root port, or below a switch as a chipset's slot is.
 const NVME_INTERFACE: PciMatch = PciMatch::Interface(0x01, 0x08, 0x02);
 
+/// Motorcomm's YT6801 PCIe gigabit adapter, driven by `yt6801` over a net
+/// ring as virtio-net is (`docs/roadmap/networking.md`). The kernel holds
+/// its MSI-X off and offers its one MSI vector (`docs/DEVMGR.md` §3).
+const MOTORCOMM_VENDOR: u16 = 0x1F0A;
+const YT6801_IDS: [u16; 1] = [0x6801];
+
 /// How a PCI function that is not virtio is matched.
 #[derive(Clone, Copy)]
 enum PciMatch {
@@ -128,8 +134,14 @@ enum PciMatch {
 ///
 /// An xHCI USB host controller, class 0C:03:30 whoever made it, is a bus
 /// host driven by `usbhid`, as the STM32MP15's EHCI is (`docs/XHCI.md`).
-const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 4] = [
+const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 5] = [
     (ANY_VENDOR, NVME_INTERFACE, b"nvme", Kind::Block),
+    (
+        MOTORCOMM_VENDOR,
+        PciMatch::Devices(&YT6801_IDS),
+        b"yt6801",
+        Kind::Net,
+    ),
     (
         NVIDIA_VENDOR,
         PciMatch::Class(DISPLAY_CLASS),
@@ -1785,9 +1797,9 @@ fn start_block(
     )
 }
 
-/// A virtio-net driver, over a net ring. The kernel names the interface, so
-/// START carries no name: only which device it is, and index zero for
-/// "choose one".
+/// A net driver -- virtio-net's `net`, or a YT6801's `yt6801` -- over a
+/// net ring. The kernel names the interface, so START carries no name: only
+/// which device it is, and index zero for "choose one".
 fn start_net(
     job: &Job<Kernel>,
     device: Device<Kernel>,
@@ -1811,10 +1823,15 @@ fn start_net(
         .map_err(|_| ())?;
     let mut bytes = [0_u8; MAX_MESSAGE];
     let written = NetRing::Start(start).encode(&mut bytes).map_err(|_| ())?;
+    let program = if info.vendor_id == MOTORCOMM_VENDOR {
+        "yt6801"
+    } else {
+        "net"
+    };
     launch(
         job,
         image,
-        "net",
+        program,
         port,
         key,
         bytes.get(..written).unwrap_or_default(),

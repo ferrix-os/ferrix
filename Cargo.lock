@@ -780,6 +780,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-yt6801-driver"
+version = "0.1.0"
+dependencies = [
+ "ferrix-dwmac",
+ "ferrix-native-abi",
+ "ferrix-netring",
+ "ferrix-netserve",
+ "ferrix-rt",
+ "ferrix-virtio-net",
+ "ferrix-yt6801",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -173,6 +173,8 @@ forbid ferrix-btrfs-vfs "btrfs mount" "$K|ferrix-boot"
 forbid ferrix-blkring  "block ring protocol" "$K|ferrix-boot"
 forbid ferrix-virtio-blk "virtio-blk driver logic" "$K|ferrix-boot"
 forbid ferrix-virtio-net "virtio-net driver logic" "$K|ferrix-boot"
+forbid ferrix-dwmac "DesignWare QoS core logic" "$K|ferrix-boot"
+forbid ferrix-yt6801 "YT6801 glue logic" "$K|ferrix-boot"
 forbid ferrix-blkserve "block driver serve loop" "$K|ferrix-boot"
 
 # ---------------------------------------------------------------------------

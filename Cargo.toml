@@ -105,6 +105,7 @@ members = [
     "src/user/system/native/drivers/block/stm32-sdmmc",
     "src/user/system/native/drivers/block/nvme",
     "src/user/system/native/drivers/net/virtio-net",
+    "src/user/system/native/drivers/net/yt6801",
     "src/user/system/native/drivers/display/virtio-gpu",
     "src/user/system/native/drivers/display/efifb",
     "src/user/system/native/drivers/display/stm32-ltdc",
@@ -187,6 +188,7 @@ ferrix-netlink = { path = "src/lib/network/netlink" }
 ferrix-rt = { path = "src/user/system/native/rt" }
 ferrix-driver = { path = "src/user/system/native/driver" }
 ferrix-net-driver = { path = "src/user/system/native/drivers/net/virtio-net" }
+ferrix-yt6801-driver = { path = "src/user/system/native/drivers/net/yt6801" }
 ferrix-objects = { path = "src/lib/kernel/objects" }
 ferrix-sync = { path = "src/lib/kernel/sync" }
 ferrix-ustack = { path = "src/lib/kernel/ustack" }

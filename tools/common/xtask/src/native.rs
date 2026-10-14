@@ -89,6 +89,11 @@ pub(crate) const PROGRAMS: &[Program] = &[
         directory: DRIVERS,
     },
     Program {
+        package: "ferrix-yt6801-driver",
+        binary: "yt6801",
+        directory: DRIVERS,
+    },
+    Program {
         package: "ferrix-gpu",
         binary: "gpu",
         directory: DRIVERS,

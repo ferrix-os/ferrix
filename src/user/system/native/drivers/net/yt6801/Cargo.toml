@@ -1,0 +1,26 @@
+[package]
+name = "ferrix-yt6801-driver"
+description = "The Motorcomm YT6801 driver process: the net ring's driver end over the chip's DesignWare QoS core, on ferrix-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "yt6801"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-dwmac.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-netring.workspace = true
+ferrix-netserve.workspace = true
+ferrix-rt.workspace = true
+ferrix-virtio-net.workspace = true
+ferrix-yt6801.workspace = true
+
+[lints]
+workspace = true
