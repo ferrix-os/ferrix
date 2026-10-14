@@ -7,7 +7,8 @@ wind-down's branches are in the sections after this introduction, and
 *2026-10-05: refreshed* and *2026-10-05, evening: refreshed* say what of them
 has landed since, and which branches origin no longer has; *2026-10-05,
 wind-down* and *2026-10-07* say the rest; *2026-10-09* says what landed on the
-night of 2026-10-08. It is where the next session starts.
+night of 2026-10-08; *2026-10-15* lists the branches of the night of
+2026-10-14. It is where the next session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
 family's branches to resume from.
@@ -33,6 +34,40 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 `docs/BACKLOG.md`: rebase onto `main`, `cargo xtask gate-rows --since main`
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
+
+## 2026-10-15: the night's branches
+
+Against `main` a0cc65477. This section reconciles the page to 2026-10-15 for
+the lines of work of the night of 2026-10-14 to -15; it does not recount the
+older sections below, whose branch tips and *unlanded* counts are as of their
+dates (the repository holds over 800 local branches, and `git cherry main
+<branch>` is the way to ask about any one). Tips and counts are read from
+`git branch` on 2026-10-15; the state, the gates and the scratch are in each
+branch's handover, `~/.local/share/ferrix/handover/<branch>.md`. Nothing
+below is landed unless it says so, and the coordinator lands.
+
+Landed on `main` since the last section (209 commits after d884add58 in all)
+and named by this night's work: `mm-pcache`'s reservation of
+L.object.188-190 (77e87403a), the yserver pin d2bf56e2 and `test-frames`' one
+refresh per msc (e34851de3, e31ba0c8e), `netboot` (da37eb541, `docs/NETBOOT.md`,
+`git cherry` 0), the roadmap index fix (42d2dca8a), `cc-aarch64` (72ab80693, `test-claude-code --arch aarch64` under TCG, xtask and docs only), `rig-fu2` (a0cc65477, stage 24's R1 and R3 follow-up), `rig-fu3` (9b12ccad8, the snapshot.debian.org fallback for four more fetch scripts), and the roll-ups `docs-1015` (4a8a54517). `docs-gen-fix`
+(42f31a1d6) is the index fix by another hash and counts 0.
+
+| Branch | Tip | Base | Unlanded | Kind | What it carries, and what is left |
+|---|---|---|---|---|---|
+| `mm-pcache` | efcfb8785 | 77e87403a | 1 | work | The fix for the Endfield download's ENOSPC: a writable mount's clean pages are reclaimed, `/proc/meminfo` is truthful, writebacks go in slices (L.object.188-190, reserved on `main`). Its handover (written at d4378e691) records the rig comparison: fill wait 149,230 ms before and 20,538 after. Gates were queued under `pc2-*`; it changes kernel code (37 files), so a consultant review precedes landing. `pc2-dd-before` and `pc2-dd-after` are measurement refs that never land. |
+| `net-gw` | 7c1dcb538 | 17ebb8a4e | 1 | work | The gateway in `xtask` scales the guest's TCP window and probes a shut one (persist timer). Its findings: the gateway is not the limit (guest downloads to tmpfs run at host line rate, 29-38 MB/s), the btrfs root is (8-32 MB/s and noisy, window-0 stalls of 0.9-4.6 s), which is `mm-pcache`'s. Left, per the handover: tests and negative controls, nettcp's 64 KiB receive capacity measured, BACKLOG row 547's figures. |
+| `g24-i1` | d5d2e13a0 | da37eb541 | 3 | work | Stage 24's I1: hyprix reads input on a thread of its own, a pointer lock's relative motion goes straight to the client with the device's stamp, `test-compositor --boot lane`, per-hop ages in `test-xlatency`. The branch holds the pin to yserver's `i1-input-time` fork (6dbdc78f5, e13992e3), which is pushed to origin but not merged into yserver's `ferrix` branch; landing the per-hop numbers in CI needs that merge and a pin bump (the product owner's call). |
+| `claude-desktop` | 79995c949 | 42d2dca8a | 5 | work | Stage C1 to C4 of `docs/CLAUDE-CODE.md` §7: the Claude desktop app on the `--everything` desktop (`test-claude-desktop`), natively on ferrousli, to its sign-in screen, no account used; C5 to C7 are not built. Two landings in order: ferrousli's `ld-rpath-origin` (113c587, not on GitHub when written) first, then this branch with the pin commit (7cf531a27). The consultant's OK IF has three conditions, the first a PASSED `check --ferrousli` on the landing hash, which failed twice only on ferrousli's `c_mount` 30 s limit under host load. |
+| `claude-desktop-assess` | e27e97494 | 170ea1572 | 0 | history | Its one commit assesses the desktop app (CLAUDE-CODE §7, 2026-10-14); `git cherry` counts 0, so it is landed under another hash or dropped. |
+| `net-yt6801` | 7911a8616 | 17ebb8a4e | 5 | work | The Motorcomm YT6801's driver (`ferrix-dwmac`, `ferrix-yt6801`, the ring-3 process, devmgr's row) and the kernel item change that holds MSI-X off for `MSI_PREFERRED` function 1F0A:6801 and grants its table page (L.device.35-37). Consultant: design OK IF D1-D9, variant V accepted under V1-V6 (ledger lines 1097 and 1110-1116). `9dcbc66e7`, the reservation, lands alone and first (also as `net-yt6801-reserve`). Nothing has run on the box; that needs the product owner's hardware approval. Its SysML structure parts are not written. |
+| `net-restart-stall` | 18e60878d | 77e87403a | 4 | work | The virtio-net driver's stall after a `devmgr` restart on the Endfield download (2026-10-15 00:22): the net ring's indices were composed from bytes and tore across a byte boundary (status 7 about every 35 minutes), and a ring the kernel ended made the driver spin without exiting. The fix makes every shared index one aligned load or store in the driver, `ferrix-netring` and the kernel's `net_ring`, and the driver leaves with status 9 when its ring is ended; `test-net` gains a fault-armed driver. It changes kernel code (`net_ring/mod.rs`), so a consultant review precedes landing; NET-RING.md §3 carries a ledger line. `net-restart-stall-stress-before` and `-after` are scratch stress runs and never land. |
+| `ef-night` | 67390a52e | 77e87403a | 3 | never land | Three SCRATCH commits to `endfield.rs`: parity mode, a kept volume, the launcher's `/tmp/wine` on the volume so a restart can resume the download (not shown to do so), and a kept volume booting with the yserver it was made with. The running Endfield download boot (xtask 2500808, QEMU 2504549, worktree `endfield-install`) is left alone. |
+| `endfield-esync` | c26938824 | da37eb541 | 1 | work | Stage 23 E1.4: Debian's Wine 10.0 has no esync, fsync or ntsync (checked against its source and the volume's `wineserver64`), so `WINEESYNC=1` is ignored; E1.4's esync stays open, moved to a Wine that has it (Proton's builds). Docs only (WINE.md and the stage page). |
+| `bm-h6-gop` | 44177cea9 | 42d2dca8a | 2 | work in progress | Stage 21's H6: the firmware framebuffer as a card behind `ferrix.efifb`, with a new ring-3 driver `efifb`, gated by `test-compositor --boot firmware-screen`. Its own commit says "not built yet". |
+| `btrfs-enospc` | 3491d9c86 | 170ea1572 | 1 | never land | A SCRATCH large-volume write through the writable mount, the evidence for `mm-pcache`. |
+
+The older sections below are unchanged by this reconciliation.
 
 ## 2026-10-09: what landed on the night of 2026-10-08
 

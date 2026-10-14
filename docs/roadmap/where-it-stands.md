@@ -1,7 +1,7 @@
 # Where it stands, in full
 
 *Reviewed 2026-10-09, to `main` d884add58; the stage 23 and 24 paragraphs
-2026-10-15, to `main` e31ba0c8e.* The short version is on the [overview](README.md).
+2026-10-15, to `main` e31ba0c8e; the installer entries to 4a8a54517.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -14,7 +14,9 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   in `remote-desktop`'s. It needed AVX: the kernel saves it with `XSAVE`
   now, and every x86-64 guest's model has x86-64-v3. On that desktop it
   runs on ferrousli, as every glibc program there does, since ferrousli got
-  the POSIX timers on 2026-10-01. The Claude desktop app was assessed
+  the POSIX timers on 2026-10-01. On 2026-10-15 (72ab80693) the linux-arm64
+  release runs too, under QEMU TCG on AArch64 (`cargo xtask test-claude-code
+  --arch aarch64`), with no kernel change. The Claude desktop app was assessed
   on 2026-10-14 (`docs/CLAUDE-CODE.md` §7). Anthropic now publishes a
   Linux build, and running it natively is 12–18 points as first guesses,
   ordered by the customer the same day (C1 to C4; C5 to C7 are not ordered,
@@ -257,6 +259,21 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   `ferrix-install` partitions a VM's disk and installs the system, and
   `cargo xtask test-install` boots the result through OVMF. The customer
   approved the full design the same day.
+* **Netboot for a bare-metal PC** (2026-10-15, da37eb541, `docs/NETBOOT.md`):
+  `cargo xtask netboot-stick --server HOST` writes a USB stick holding iPXE
+  2.0.0's `snp.efi`, which takes the PC's firmware network driver and an
+  address from the network's DHCP server and chains `boot.ipxe` from `cargo
+  xtask netboot`; that serves the image `build` makes, so the unchanged
+  loader reads `\FERRIX\KERNEL.ELF` from the file system iPXE gives it, and
+  the PC's disk is not written. `cargo xtask test-netboot` boots the stick
+  under OVMF with `--net` to `FERRIX-BOOT-OK`, with a negative control that
+  serves under a wrong path. It has not run on a real PC (the first is an
+  Intel N150, whose Motorcomm YT6801 card iPXE has no driver for), and a
+  netbooted run leaves no post-mortem record (NETBOOT.md §6, owed).
+* **The roadmap index is checked** (2026-10-15, 42d2dca8a): the generator
+  lists `ipc-round-trip.md` in `SUMMARY.md`, which every `index` run had
+  dropped, and `check-docs` runs `split-roadmap.py check` as the audit
+  "roadmap index and links".
 * **Test run time**, cut 2 (2026-09-28, `docs/TEST-TIME.md`): a finished
   guest is stopped rather than given its grace, and `test-compositor --arch
   x86_64` went from 900 s to 512-616 s. Cut 3 (2026-09-30): `--arch all` of
@@ -498,6 +515,9 @@ An installer MVP puts Ferrix on a VM's own disk (`docs/INSTALLER.md`,
 2026-09-28): `cargo xtask build --installer` carries `ferrix-install`, which
 writes a GPT with an ESP and the btrfs root, and `cargo xtask test-install`
 boots the installed disk alone through OVMF.
+A netboot (2026-10-15, `docs/NETBOOT.md`) boots a bare-metal PC from this
+host through an iPXE stick (`cargo xtask netboot-stick`, `netboot`,
+`test-netboot`) without writing its disk; it has run under QEMU only.
 
 Networking is done: sockets, a net core and a ring-3 virtio-net driver, with
 `curl` fetching over HTTPS and `git` cloning inside the guest.
