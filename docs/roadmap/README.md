@@ -151,7 +151,7 @@ single file across.
 | 12 | [btrfs, write](stage-12-btrfs-write.md) | ✓ done | ≈ 60 points, spent |
 |  | [sysfs — the device tree, fed by the services that own it](sysfs.md) | ✓ done | 26 points, spent |
 |  | [Chrome — a browser on Ferrix](chrome.md) | ◐ in progress | headless and in a window, 2026-09-24; the DK1 ≈ 45–55 points |
-|  | [Claude Code — Anthropic's coding agent on Ferrix](claude-code.md) | ◐ in progress | the command line, 2026-09-30; the desktop app being assessed |
+|  | [Claude Code — Anthropic's coding agent on Ferrix](claude-code.md) | ◐ in progress | the command line, 2026-09-30; the desktop app assessed, 2026-10-14 |
 | 13 | [Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md) | ◐ in progress | month |
 | 14 | [Real-time domains](stage-14-real-time-domains.md) | ○ not started | month |
 | 15 | [A real userland](stage-15-real-userland.md) | ◐ in progress | week |

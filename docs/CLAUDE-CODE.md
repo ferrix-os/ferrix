@@ -27,7 +27,7 @@ an API xtask serves itself (§4), in about two seconds of the guest's time.
 | A real account | the network, TLS and the browser hand-off work up to the sign-in page; the sign-in itself is the customer's (§5.2) |
 | AVX state in a 32-bit program's signal frame | a first attempt backed out; what it takes is in §3 |
 | On AArch64 with the linux-arm64 build | not started (§6) |
-| The Claude desktop app, which Anthropic builds for macOS and Windows only | assessment next (§7) |
+| The Claude desktop app | **assessed** 2026-10-14. Anthropic now publishes a Linux build, a beta, 2.37337.1 on Electron 44.7.0. Running it natively is recommended over Wine and over repackaging. 12–18 points, first guesses, to run it with sign-in by hand; 21–33 with a saved sign-in and notifications (§7) |
 
 **Certification review (consultant, 2026-09-30): OK**, on b0db74ef, after a
 first round on 672611b6. The change is core ring (arch/x86_64: cpu.rs,
@@ -406,11 +406,229 @@ What is left:
 * **AArch64**: Anthropic publishes linux-arm64, for the Pixel 7's VM; its
   Bun build needs no AVX.
 
-## 7. The desktop app
+## 7. The desktop app (assessed 2026-10-14)
 
-Asked for second. Anthropic builds the Claude desktop app for macOS and
-Windows only: an Electron application. The customer chose, on 2026-09-30,
-the Electron app itself over Claude Code in a desktop window or claude.ai
-in Chrome, knowing it has no Linux build; the next step is an assessment
-of what running its Windows bundle's JavaScript on Linux's Electron on
-Ferrix would take, before anything is built.
+Asked for second. The Claude desktop app is an Electron application. On
+2026-09-30 the customer chose the Electron app itself over Claude Code in
+a desktop window or claude.ai in Chrome. At that time the app had no Linux
+build, so the plan was to run its Windows bundle's JavaScript on Linux's
+Electron. This section is the assessment that was to come first, before
+anything is built. Nothing was built, nothing of Anthropic's was run, and
+no account was used.
+
+**The first finding changes the question: Anthropic now publishes a Linux
+build.** It is a beta for Debian 12 or later and Ubuntu 22.04 or later, on
+x86-64 and arm64, from an apt repository of Anthropic's own
+(`code.claude.com/docs/en/desktop-linux`; its `postinst` says the
+repository has served a signed index since a July 2026 launch). It is the
+same release as the Windows one, 2.37337.1, on the same Electron. So the
+Electron app on Ferrix is now the same job as Chrome on Ferrix (§7.3, (d)),
+and it is the recommendation. Repackaging the Windows bundle, (b), is
+moot.
+
+### 7.1 What was fetched, and how it was checked
+
+Both downloads are on nazuna, under `~/.local/share/ferrix/claude-desktop/`,
+each in a new directory of its own. They were read as data only: no
+maintainer script ran, no program ran, and nothing was started on the host.
+
+| | Linux (`fetch-2026-10-14/`) | Windows (`fetch-win-2026-10-14/`) |
+|---|---|---|
+| Where from | `downloads.claude.ai/claude-desktop/apt/stable`: the `InRelease` file, the `binary-amd64/Packages` index, the key at `downloads.claude.ai/claude-desktop/key.asc`, and `pool/main/c/claude-desktop/claude-desktop_2.37337.1_amd64.deb` | `claude.ai/api/desktop/win32/x64/msix/latest/redirect`, which redirects to `downloads.claude.ai/releases/win32/x64/2.37337.1/Claude-ba51ab579cc4029765083ec9f9f0bd23d37a32ee.msix`. The download page's `setup` installer link answers 403 to curl, so the MSIX was fetched instead |
+| File | `claude-desktop_2.37337.1_amd64.deb`, 182,483,892 bytes, SHA-256 `41745b0914f0ff51631a1ff1bb403b836bf5c995845cca6742dd39bca3a2da14` | `Claude-2.37337.1-x64.msix`, 296,634,861 bytes, SHA-256 `30dcf402755d734c5a06d7f1061ed80d1e0b33d0fed6cfc048e5164a46f3b704` |
+| Checked | **The whole chain.** The key's fingerprint is `31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE` ("Anthropic Claude Code Release Signing"), the one Anthropic's page names. `gpgv` against that key alone gives `GOODSIG` on `InRelease`, signed 2026-10-13. The `Packages` index matches the SHA-256 `InRelease` lists for it, and the `.deb` matches the SHA-256 the index lists for it | **The signer only.** `AppxSignature.p7x` holds Anthropic, PBC's EV code-signing certificate under DigiCert's Trusted G4 code-signing CA, and the manifest's publisher is the same. The signature over the block map, and the block map over the files, were not verified |
+| Version | `claude-desktop` 2.37337.1. Electron 44.7.0 (`version`), whose Chromium is 152.0.7977.130 (the user agent in the binary) | the package's `Version="2.37337.1.0"`, Electron 44.7.0 (`app/version`) |
+
+The index lists 2.31226.0, 2.31226.1 and 2.37337.1, so earlier versions
+stay in the pool and a fetch script can pin one.
+
+### 7.2 What the Linux build is, to Ferrix
+
+* **`claude-desktop`**: a 229 MB position-independent glibc program on
+  `/lib64/ld-linux-x86-64.so.2`. It is Chromium plus Node, like Chrome for
+  Testing's `chrome`, with SwiftShader, `libvulkan` and `libffmpeg` beside
+  it. Unlike Chrome, it links GTK 3 directly.
+* **Its libraries against what Ferrix already carries.** A closure check
+  read the `NEEDED` entries of every ELF file in the package (39
+  libraries) and looked for each on the `--everything` volume's tree on
+  nazuna. Four are missing:
+  * `libgtk-3.so.0`, for the program itself;
+  * `libpipewire-0.3.so.0`, for the `@ant/claude-native` binding;
+  * `libcap-ng.so.0` and `libseccomp.so.2`, which only `virtiofsd` needs,
+    and so only Cowork.
+
+  Against Chrome's own volume, `libstdc++.so.6` is missing too, for
+  node-pty. GTK 3's own dependencies come on top of these and were not
+  counted: gdk-pixbuf, epoxy, Xcursor, Xinerama, its schemas and an icon
+  theme. That list is an assumption until the fetch script's check runs.
+* **`resources/`.**
+  * `app.asar`, 47 MB: the main process's JavaScript.
+  * `ion-dist/`, 198 MB: the interface, served locally.
+  * Native modules: `@ant/claude-native` for Linux (a PipeWire stream and
+    reads of the process tree) and node-pty's `pty.node`, for the
+    terminals of the Code tab.
+  * A static `github-mcp-server`.
+  * The helpers: `chrome-native-host` (Claude in Chrome's native
+    messaging), `disclaimer` and `claude-browser-shim.js`.
+  * Cowork's virtual machine: `cowork-linux-helper`, `virtiofsd` and a
+    28 MB disk image, `smol-bin.x64.img`.
+* **Claude Code is not in the package.** For the Code tab, the app fetches
+  it from `downloads.claude.ai/claude-code-releases`, checking it against
+  digests written in the app's own code. That is the linux-x64 native build
+  §4 gates.
+* **The maintainer scripts** write an AppArmor profile, register
+  Anthropic's apt repository and unattended upgrades, register a GNOME
+  search provider and the MIME types for `.mcpb`, `.dxt` and `.skill`, and
+  link `/usr/bin/ccd` when the build ships one (this one does not). Ferrix
+  runs none of them (`docs/APPS.md` §4, rule 4). What matters of them is
+  declarative: `com.anthropic.Claude.desktop`, with
+  `MimeType=x-scheme-handler/claude;…` and `StartupWMClass=com.anthropic.Claude`,
+  and the MIME file.
+* **What the main process asks of the platform**, counted in its code.
+  * Uses: `safeStorage` 138, `Notification(` 100, `powerMonitor` 79,
+    `autoUpdater` 38, `globalShortcut` 16, and `setAsDefaultProtocolClient`
+    once.
+  * Secret storage: the app reads `safeStorage.getSelectedStorageBackend()`
+    and counts `basic_text` as having no secure store. Anthropic's page
+    says that with no unlocked keyring "your sign-in isn't saved and you
+    sign in again each time you launch the app".
+  * Updates: the Linux build does not update itself, by design. Updates
+    come through apt.
+  * Account: the app takes no API key. It signs in with a claude.ai
+    subscription or SSO only.
+  * Not in the Linux beta at all: computer use and dictation. The Quick
+    Entry hotkey needs X11, or a GlobalShortcuts portal on Wayland.
+
+### 7.3 The ways compared
+
+| | What runs | What it gets | What Ferrix lacks for it | Size | Verdict |
+|---|---|---|---|---|---|
+| **(a)** The Windows build under Wine 10 or GE-Proton11-7 | Chromium 152's Windows build and Node, from the unpacked MSIX, under Wine on yserver | The app, without Cowork, notifications or a sandbox | Wine installs no MSIX, so the zip is unpacked by hand and the app runs outside its package identity (`getCurrentPackageFamilyName`, the `Claude-Data` move). Its Chromium sandbox has to be off. ANGLE's D3D11 goes through DXVK or SwiftShader. Cowork is `cowork-svc.exe`, a LocalSystem service on Hyper-V's compute service, and there is nothing to run it on. The Code tab runs `conpty.node` on Wine's pseudo-console, with Claude Code's Windows build and a Windows bash under it. Wine on Ferrix still lacks `ptrace` and `/proc/<pid>/mem` (`docs/WINE.md` §10; stage 23's E5.2) | 30–60, a guess with the widest spread here | **No.** Two translation layers to reach what Ferrix runs natively, and the Chromium under Wine is 65 versions newer than the QtWebEngine Wine was proven with (87, `docs/WINE.md` §8) |
+| **(b)** The Windows `app.asar` on Linux's Electron 44.7.0 | GitHub's `electron-v44.7.0-linux-x64.zip`, which exists (SHA-256 `3ae7d5bd…555a` in its `SHASUMS256.txt`), with the Windows bundle's JavaScript | What (d) gets, less what the stubs remove | The Windows native modules (`claude-native`, `conpty`, `msal-node-runtime`) replaced by stubs, and the code that branches on the platform patched, again for every release | 15–25, then some at every release (a guess) | **No.** (d) is the same `app.asar`, built for Linux by Anthropic with Linux native modules. (b) would also mean modifying Anthropic's proprietary code (§7.5) |
+| **(c)** claude.ai in Chrome | Chrome 154, which runs on the desktop | Chat, projects, artifacts and claude.ai's Claude Code on the web. Not: local Code sessions, local MCP servers and `.mcpb` extensions, Cowork, Quick Entry | Nothing. Chrome reaches claude.ai's sign-in page on Ferrix already (§5.2) | 1, a launcher entry with `--app=https://claude.ai` (a guess) | **The baseline**, and the fallback while (d) is built |
+| **(d)** Anthropic's Linux build, natively | `claude-desktop` 2.37337.1 on the volume's glibc, or on ferrousli in its place, as a Wayland client of hyprix (or an X client of yserver) | The app as on Debian, less Cowork (§7.4) | §7.4 | 12–18 to run it with sign-in by hand; 21–33 with a saved sign-in and notifications (§7.6) | **Recommended** |
+
+### 7.4 What Ferrix lacks for (d)
+
+* **The kernel.** Nothing is known to be missing. Chromium 154 runs on
+  Ferrix already, and this app is Chromium 152. What Electron adds is Node
+  in the main process. Its libuv uses `io_uring` where the kernel offers
+  it (assumed to fall back on `ENOSYS`), `inotify` (Ferrix has it) and
+  ptys (term uses them). Chrome's first run found four small calls (§8 of
+  `docs/CHROME.md`), so expect a few here too. That is the guess in C2.
+* **Libraries.** GTK 3 and its closure, and PipeWire's client library
+  (§7.2). The binding is loaded at start, so the library must be present
+  even with no PipeWire running. That is assumed, not tried.
+* **The GPU.** Software rendering, as Chrome draws on the desktop:
+  `--ozone-platform=wayland` and `wl_shm`. The app's own switch
+  (`disable-gpu`) is set only when its settings turn acceleration off.
+  When Chrome's GPU path lands, it serves this app too.
+* **Sandboxing.** `--no-sandbox`, as Chrome runs. Anthropic's page names
+  the switch, for running as root. Stage 13 has user, pid and network
+  namespaces and seccomp filters, but Chromium's own sandbox does not run
+  on Ferrix yet (`docs/SECCOMP.md`, S7 and S8). Until it does, a
+  compromised renderer of claude.ai's content has the user's rights, as in
+  Chrome on Ferrix today. When Chrome's sandbox runs, this app's does.
+* **Auto-update.** None is needed: the Linux build has no updater.
+  Ferrix's fetch script pins a version and its SHA-256, as
+  `fetch-claude-code.sh` does. It could also follow `stable` by checking
+  `InRelease` against the pinned key fingerprint, as apt does, so a new
+  release needs no Ferrix commit.
+* **Secret storage.**
+  * What the app needs: Electron's `safeStorage` on Linux wants a Secret
+    Service (GNOME Keyring or KWallet) over D-Bus. Ferrix has no D-Bus
+    (`docs/WRITE-DOMAINS.md` §3).
+  * What happens without one: the backend is `basic_text`, the app runs,
+    and the sign-in is not kept (§7.2). The person signs in at every start.
+  * What would fix it: a session bus and a Secret Service (C6). That is a
+    decision for the customer, since `docs/DEV-ON-FERRIX.md` §9 points
+    secrets at an `authd` keyring later.
+* **Notifications and the tray.** libnotify needs
+  `org.freedesktop.Notifications`, and the tray needs StatusNotifierItem.
+  Both go over D-Bus, and hyprix has no notification daemon. Without them
+  the app shows no notifications and no tray icon. It is assumed to run
+  regardless.
+* **Protocol handlers.** `claude://` carries the desktop actions, the
+  return from MCP servers' OAuth, and claude.ai's "open in the app" links.
+  Electron registers the scheme on Linux through `xdg-settings`, which
+  Ferrix lacks. Ferrix's `/bin/xdg-open` (`chrome.rs`, `opener`) hands
+  every argument to Chrome. It has to dispatch by scheme: `claude:` to
+  `claude-desktop`, the web to Chrome. A second start hands its URL to the
+  first through Electron's singleton, a Unix socket in the profile, which
+  Ferrix has.
+* **The file chooser.** No portal, so Electron falls back to GTK's own
+  dialog (assumed).
+* **Cowork.** Cowork needs QEMU with `/dev/kvm` and `/dev/vhost-vsock` on
+  the machine the app runs on, meaning a hypervisor in Ferrix
+  (`docs/DEV-ON-FERRIX.md` §9, 2: months, in the certified item). It is
+  not in this plan. Without it the tab says "Cowork requires hardware
+  virtualization (KVM)".
+* **The account.** The desktop app takes no API key, so no gate can get
+  past its sign-in screen without an account. The sign-in is the
+  customer's, as in §5.2.
+
+### 7.5 Licensing and terms
+
+* **The licence.** The package's `copyright` says `Files: *`,
+  `Copyright: 2026 Anthropic PBC`, `License: Proprietary`. Electron is
+  under the MIT licence, and Chromium's licences are in
+  `LICENSES.chromium.html`. Nothing in the package grants a right to
+  redistribute the app.
+* **So Ferrix carries none of it.** It goes in no image, no Ferrix
+  repository and no `.fxpkg` Ferrix publishes. A fetch script downloads
+  it on the person's own machine from `downloads.claude.ai`, verified as
+  in §7.1, the way Claude Code's volume and Steam come. The person agrees
+  to Anthropic's terms when they sign in.
+* **Not modifying it.** Patching the app, as (b) needs, is assumed not to
+  be permitted. That reading was not checked by counsel.
+* **Not taking over the host.** Ferrix does not run the `postinst`. That
+  script would make the machine follow Anthropic's apt repository.
+
+### 7.6 The plan for (d), sized
+
+| Step | What | Points |
+|---|---|---|
+| C1 | `fetch-claude-desktop.sh`. It pins the `.deb` by version and SHA-256 and checks it through `InRelease` against the pinned key fingerprint. It adds Debian 13's GTK 3 closure, PipeWire's client library and `libstdc++6`, pinned, and runs the ELF closure check `fetch-chrome.sh` has. The tree is merged into the `--everything` volume, as Claude Code's is | 3 (a guess, from `fetch-claude-code.sh`) |
+| C2 | First start on hyprix: `claude-desktop --no-sandbox --ozone-platform=wayland`, through the gateway, to the sign-in screen, plus whatever running it finds (§7.4) | 4–10 (a guess) |
+| C3 | `cargo xtask test-claude-desktop`: the window by its app id `com.anthropic.Claude`, and its sign-in screen on the screen, with a negative control | 3 (a guess) |
+| C4 | The desktop: `/bin/claude-desktop` with its flags, the launcher entry and icon, `xdg-open` dispatching `claude:` to the app, and the MIME file | 2 (a guess) |
+| C5 | After the customer signs in: the Code tab fetches Claude Code and runs it in a pty, and a chat works | 1, and the customer's sign-in (a guess) |
+| C6 | A sign-in that is kept. Either a D-Bus session bus and Debian's `gnome-keyring` on the volume, started and unlocked with the session, or a Secret Service on `authd`. The customer decides which | 6–10 (a guess) |
+| C7 | Notifications: a daemon on that bus, drawn by hyprix or a client | 3–5 (a guess) |
+| C8 | Chromium's sandbox on, once Chrome's runs (`docs/SECCOMP.md` S7, S8) | 1 (a guess) |
+
+C1 to C4 (12–18) give the app on the desktop, with sign-in by hand at
+every start. With C5 to C7 the total is 21–33. Every number here is a
+first guess, and C2's spread is the one to watch. The GPU comes with
+Chrome's GPU path, and the sandbox with Chrome's (C8). Cowork is not
+planned. The `.deb` also exists for arm64, for the Pixel 7 later.
+
+**Recommendation.** Start with (c) at once (1 point), so claude.ai is in
+the launcher. Then build (d), C1 to C4. Ask the customer about C6 before
+it is built. Do not build (a) or (b).
+
+### 7.7 What was verified, and what was assumed
+
+**Verified, 2026-10-14, on nazuna, reading files only:**
+* Anthropic's Linux build exists, and its documentation was read.
+* The apt chain verifies, from the key fingerprint down to the `.deb`.
+* The version, Electron and Chromium of both builds.
+* The MSIX's signer.
+* The Linux build's files, its native modules and helpers.
+* Its 39 libraries, and the four the `--everything` volume lacks.
+* The maintainer scripts.
+* The counts of platform APIs in the main process's code.
+* That the app fetches Claude Code at run time.
+* That Electron 44.7.0's Linux build is published.
+* Ferrix's `xdg-open`, which sends everything to Chrome.
+
+**Assumed, and not tried:**
+* Everything about running either build. Neither ran anywhere, and no
+  Ferrix boot was made: (a) is not cheap to try, and (d) needs C1 first.
+* Wine's behaviour with this Chromium.
+* GTK 3's closure.
+* That the app runs without D-Bus, a keyring, PipeWire running or a
+  notification daemon.
+* libuv's `io_uring` fallback.
+* The reading of the terms.
+* Every size above.

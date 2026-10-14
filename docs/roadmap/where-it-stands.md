@@ -13,8 +13,9 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   in `remote-desktop`'s. It needed AVX: the kernel saves it with `XSAVE`
   now, and every x86-64 guest's model has x86-64-v3. On that desktop it
   runs on ferrousli, as every glibc program there does, since ferrousli got
-  the POSIX timers on 2026-10-01. The Claude desktop app is next, as an
-  assessment.
+  the POSIX timers on 2026-10-01. The Claude desktop app was assessed
+  on 2026-10-14 (`docs/CLAUDE-CODE.md` §7). Anthropic now publishes a
+  Linux build, and running it natively is 12–18 points as first guesses.
 
 * **The trip to ring 3 is being cut** (2026-09-30, `docs/OPAQUE-KERNEL.md`
   § 8). The customer's direction is Linux software beside safety functions
