@@ -73,6 +73,13 @@
       "branch": "s13f/memcg",
       "date": "2026-10-14",
       "purpose": "Stage 13's memory controller: a program's page tables charged apart from its pages, for memory.stat's pagetables and anon; memory.reclaim's proactive reclaim, EAGAIN when short (docs/CGROUPS.md section 10)"
+    },
+    {
+      "ids": ["L.object.184-187"],
+      "owner": "s13f-cpuio",
+      "branch": "s13f/cpuio",
+      "date": "2026-10-14",
+      "purpose": "Stage 13's cpu.max.burst (unused quota carried up to the burst), cpu.idle (a cgroup at the idle weight) and io.weight (a disk's dispatch shared among sibling cgroups by weight) (docs/CGROUPS.md sections 12 and 13)"
     }
   ]
 }
