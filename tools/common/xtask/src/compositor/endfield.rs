@@ -355,7 +355,15 @@ pub(crate) fn volume(wine: Wine) -> Result<PathBuf> {
         )));
     }
     let yserver = read("yserver.commit");
-    if yserver != crate::yserver::pinned() {
+    // SCRATCH: a kept volume (the game's install) keeps the yserver it was
+    // made with; making it again would throw the install away.
+    if yserver != crate::yserver::pinned() && std::env::var_os("FERRIX_ENDFIELD_KEEP").is_some() {
+        println!(
+            "  endfield: kept volume {} carries yserver {yserver:?}, not {}: booted as it is",
+            image.display(),
+            crate::yserver::pinned()
+        );
+    } else if yserver != crate::yserver::pinned() {
         return Err(Error::new(format!(
             "{} carries yserver {yserver:?}, not {}: {again}",
             image.display(),
