@@ -103,6 +103,7 @@ mod everything;
 mod fat;
 mod ferrousli;
 mod flash;
+mod frames;
 mod fuzzel;
 mod gate_rows;
 mod gateway;
@@ -345,6 +346,11 @@ COMMANDS:
                   its first screen drawn, and Gryphline's server answering it; it never logs in (docs/WINE.md §8)
     test-endfield-proton  The same in GE-Proton's Wine, on the volume FERRIX_ENDFIELD_WINE=proton
                   tools/common/fetch/fetch-endfield-launcher.sh makes, after the 32-bit cmd /c ver (docs/WINE.md §10)
+    test-frames   yserver's volume, and stage 24's frame recorder (tools/common/game) on a paced GLX client through
+                  yserver on hyprix: require yserver's msc to move as a clock, and a 50 ms stall every ten seconds to be
+                  counted as the refreshes it missed, by msc and by time alike (docs/GAME-PATH.md §2.4, R1)
+    frames        Build the frame recorder and its test client and print their SHA-256; with --from <RECORD>, summarise
+                  a record from either system: frame times, and missed refreshes by msc and by time (--fps: the refresh)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
@@ -638,6 +644,13 @@ fn builds_execute(args: &Args) -> Result<()> {
     builds::execute(std::path::Path::new(plan)).map(|_| ())
 }
 
+/// `flash`: build the board's files and write them to its card.
+fn flash_board(args: &Args) -> Result<()> {
+    let arch = args.single_arch()?;
+    let files = build_board_files(arch, args)?;
+    flash::run(arch, &files, args)
+}
+
 /// The command `args` name, with the parts of the tree that live in
 /// repositories of their own at their pins first: before anything reaches
 /// for them, and before `--arch all` starts children that would each clone
@@ -729,6 +742,8 @@ fn run() -> Result<()> {
         "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),
         "test-bwrap" => bwrap::test_bwrap(&args),
         name if WINE_GATES.contains(&name) => wine_gate(command, &args),
+        "test-frames" => compositor::frames::test_frames(&args),
+        "frames" => frames::run(&args),
         "run-nvidia" => nvidia::run_nvidia(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),
@@ -751,11 +766,7 @@ fn run() -> Result<()> {
         "new-app" => apps::new_app(&args),
         "omz" => omz::install(args.from.as_deref()),
         "zsh-functions" => omz::install_functions(args.from.as_deref()),
-        "flash" => {
-            let arch = args.single_arch()?;
-            let files = build_board_files(arch, &args)?;
-            flash::run(arch, &files, &args)
-        }
+        "flash" => flash_board(&args),
         "watch-serial" => serial::watch(None, &args),
         // The whole of a board round-trip. Separate commands exist because
         // each half is useful alone — reflashing without watching, watching a
