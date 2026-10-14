@@ -208,7 +208,7 @@ the userland Ferrix is measured with: the gates run it first, with `--init
 ferrousli`, and keep Alpine's musl build and the glibc one as compatibility
 checks. Its test programs already boot as Ferrix's first process with `cargo
 xtask test-shell --init`, `src/user/system/linux/ferrousli/tests/c/thread/on_ferrix.c` among them for
-`CLONE_THREAD`. Its own status is in [src/user/system/linux/ferrousli/README.md](../../src/user/system/linux/ferrousli/README.md),
+`CLONE_THREAD`. Its own status is in [ferrousli's README](https://github.com/ferrix-os/ferrousli/blob/main/README.md),
 and its distance from POSIX.1-2024, interface by interface, in
 [POSIX-2024.md](../POSIX-2024.md).
 

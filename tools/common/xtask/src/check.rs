@@ -184,6 +184,16 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
             &["tools/common/gen/gen-arch-doc.py", "--check"],
         ],
     ),
+    // The roadmap's SUMMARY.md, the overview's stage index and the
+    // docs/ROADMAP.md stub are generated from docs/roadmap/ by
+    // split-roadmap.py, and every link into the roadmap has to land on a
+    // heading. A page added by hand to SUMMARY.md and not to the
+    // generator's table is dropped by the next `index`, silently; this
+    // says so before it lands.
+    (
+        "roadmap index and links",
+        &[&["tools/common/gen/split-roadmap.py", "check"]],
+    ),
     // The compositor's interface tables are generated from the protocol
     // XML vendored beside them. A table edited by hand is a compositor
     // that reads a client's message with the wrong signature, which is
