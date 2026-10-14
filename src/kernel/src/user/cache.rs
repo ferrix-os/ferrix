@@ -14,9 +14,11 @@
 //!
 //! A page of a file on a disk, that the file's source can read again and the
 //! filesystem has no newer copy of. The source says which ([`Filler::
-//! reclaimable`]): a read-only mount always, a writable one never yet, since
-//! its dirty pages are in its inodes and not in the object, and a page taken
-//! between a write's copy and its dirty mark would lose the write. A file on
+//! reclaimable`], [`Filler::reclaim_clean`]): a read-only mount every page;
+//! a writable one the pages written back since they were last written, and
+//! of those not one a write is copying into or a writeback is reading, which
+//! it holds still while they go -- a page taken between a write's copy and
+//! its dirty mark would lose the write. A file on
 //! a memory filesystem (tmpfs, `memfd`) has no source and nothing to read its
 //! pages back from, and there is no swap: its pages are never reclaimed. Nor
 //! is an object a shared mapping may write through, whose writes mark
@@ -39,7 +41,20 @@
 //! The choice of page and its removal are two steps with no lock between
 //! them, so a page that changed hands in between (truncated and filled again
 //! for another job) is taken all the same: a clean cache page evicted a
-//! little early, which costs a read and never data.
+//! little early, which costs a read and never data. A page a writable file
+//! wrote to meanwhile is not taken: the source's answer, and the stillness it
+//! holds while the page goes, come after the pick. Nor is any page of an
+//! object a shared mapping that may write was made of meanwhile: the take
+//! looks at that under the pages lock it takes under
+//! ([`Vmo::take_clean_range`]).
+//!
+//! # What `/proc/meminfo` reads
+//!
+//! [`totals`] counts every cached file's pages, whoever they are charged to:
+//! a disk file's, a memory filesystem's, and of the first those reclaim could
+//! give back now, for `Cached`, `Shmem` and `MemAvailable`. A count of each
+//! object's pages, not a walk of them, so a program polling the file costs
+//! the list and no more.
 
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -155,14 +170,9 @@ fn take_from(vmo: &Arc<Vmo>, scope: u32, want: u64, low: bool) -> Reclaimed {
             done.scanned += 1;
             takes(mm::frame_owner(frame), scope, low)
         });
-        let mut runs = picked.iter().copied().peekable();
-        while let Some(first) = runs.next() {
-            let mut length = 1;
-            while runs.next_if_eq(&(first + length)).is_some() {
-                length += 1;
-            }
-            done.stolen += vmo.decommit_range(first, length) as u64;
-        }
+        // Only the pages the source still holds clean, while it holds them
+        // still: a writable file's written pages stay.
+        done.stolen += vmo.reclaim_clean(&mut picked);
         match next {
             Some(index) => from = index,
             None => break,
@@ -189,4 +199,55 @@ pub(crate) fn resident(scope: u32) -> (u64, u64) {
         });
     }
     (file, memory)
+}
+
+/// Every cached file's pages, whoever they are charged to ([`totals`]).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(crate) struct Totals {
+    /// Pages of files on a disk.
+    pub(crate) disk: u64,
+    /// Pages of files on a memory filesystem: tmpfs, the initramfs, `memfd`.
+    pub(crate) memory: u64,
+    /// Of the disk pages, those written and not yet written back: a
+    /// writable file's, which reclaim leaves.
+    pub(crate) dirty: u64,
+    /// Of the disk pages, those reclaim may take now: every page of an
+    /// object [`Vmo::reclaimable`] says so of, less its dirty ones. A page a
+    /// write or a writeback holds still for the moment is among them.
+    pub(crate) reclaimable: u64,
+}
+
+impl Totals {
+    /// `/proc/meminfo`'s `Cached`: every cached file's pages, a disk file's
+    /// and a memory filesystem's, as Linux counts them.
+    pub(crate) fn cached(&self) -> u64 {
+        self.disk.saturating_add(self.memory)
+    }
+
+    /// `/proc/meminfo`'s `MemAvailable`, with `free` frames free: those and
+    /// the pages reclaim may take now, never a dirty one or a memory
+    /// filesystem's.
+    pub(crate) fn available(&self, free: u64) -> u64 {
+        free.saturating_add(self.reclaimable)
+    }
+}
+
+/// What the page cache holds now, for `/proc/meminfo`: each live object's
+/// page count, which it keeps, rather than a walk of its pages.
+pub(crate) fn totals() -> Totals {
+    let mut out = Totals::default();
+    for vmo in live() {
+        let pages = vmo.committed() as u64;
+        if vmo.is_disk_file() {
+            let dirty = vmo.dirty_pages().min(pages);
+            out.disk += pages;
+            out.dirty += dirty;
+            if vmo.reclaimable() {
+                out.reclaimable += pages - dirty;
+            }
+        } else {
+            out.memory += pages;
+        }
+    }
+    out
 }

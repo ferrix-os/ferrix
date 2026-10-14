@@ -175,9 +175,12 @@ pub trait Pages: Send + Sync + fmt::Debug {
 ///
 /// # Reclaim
 ///
-/// Nothing evicts a cached page yet. When eviction arrives, a frame
-/// allocation made inside a fill must not wait on writeback through the same
-/// queue the fill is waiting on, or a fill that needs memory waits on itself.
+/// The kernel's reclaim drops clean cached pages and fills them again from
+/// here (`docs/CGROUPS.md` §10). It never waits for a writeback: a page a
+/// source cannot vouch for is skipped, not cleaned, so a frame allocation
+/// made inside a fill or a writeback never waits on itself.
+/// [`PageSource::reclaim_clean`] is where a source that can be written says
+/// which pages are clean, and holds them still while they go.
 pub trait PageSource: Send + Sync + fmt::Debug {
     /// Fill `pages` — each exactly [`PAGE_SIZE`] bytes — with the file's pages
     /// starting at page `first`. Returns how many leading pages were filled,
@@ -211,14 +214,40 @@ pub trait PageSource: Send + Sync + fmt::Debug {
         false
     }
 
-    /// Whether the pages this source filled can be dropped from memory and
-    /// filled again, as they were: the source is the file's only copy and
-    /// nothing in memory is newer. A read-only mount says so; a source whose
-    /// file can be written, whose newer bytes live in the page cache until a
-    /// writeback, does not. `false` unless a source says so; reclaim takes
-    /// nothing from a file it cannot rely on (`docs/CGROUPS.md` §10).
+    /// Whether some of the pages this source filled can be dropped from
+    /// memory and filled again as they were. A read-only mount says so for
+    /// every page; a writable one says so too, and answers page by page in
+    /// [`PageSource::reclaim_clean`]. `false` unless a source says so;
+    /// reclaim takes nothing from a file it cannot rely on (`docs/CGROUPS.md`
+    /// §10).
     fn reclaimable(&self) -> bool {
         false
+    }
+
+    /// Reclaim's question, page by page: keep in `pages` (indices, lowest
+    /// first) only those whose bytes the source holds as the cache does --
+    /// none written since its last writeback, none a write is copying into
+    /// or a writeback is reading -- and call `drop` with them while the file
+    /// holds them still, so that no write or writeback reaches one of them
+    /// before `drop` returns. Answers what `drop` answered, the pages it gave
+    /// back; 0 without calling it when none is clean.
+    ///
+    /// Called with no spin lock held; `drop` takes the pages out of every
+    /// mapping, so the source holds none of its own across the call either.
+    /// The default is for a source whose every page is clean whenever
+    /// [`PageSource::reclaimable`] says so: a read-only mount's.
+    fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        if self.reclaimable() && !pages.is_empty() {
+            drop(pages)
+        } else {
+            0
+        }
+    }
+    /// How many pages of the file are written and not yet written back,
+    /// which the cache holds and reclaim leaves: `/proc/meminfo`'s `Dirty`.
+    /// None unless a source says so.
+    fn dirty_pages(&self) -> u64 {
+        0
     }
 }
 

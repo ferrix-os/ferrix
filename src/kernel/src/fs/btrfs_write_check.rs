@@ -32,6 +32,8 @@ use ferrix_vfs::{Errno, FileType, NewNode, RenameMode};
 use crate::fs;
 use crate::interfaces::block_ring::VIRTIO_BLK_MAJOR;
 
+mod reclaim_check;
+
 /// Where the writable disk is mounted.
 const MOUNT_POINT: &[u8] = b"/mnt-rw";
 
@@ -349,6 +351,16 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let filled = fill(&expected)?;
     crate::console::println!(
         "  btrfs-rw vdc filled with {filled} bytes until ENOSPC, synced, emptied and written again"
+    );
+    let reclaim = reclaim_check::run()?;
+    crate::console::println!(
+        "  reclaim  btrfs-rw: {} clean pages of a writable mount given back, {} written and not \
+         written back kept and counted in Dirty, every page read back as last written; a shared \
+         mapping made during a reclaim kept its page; a write at memory.max took back {} pages \
+         and succeeded",
+        reclaim.given,
+        reclaim.dirty,
+        reclaim.stolen_at_max,
     );
     Ok(report)
 }

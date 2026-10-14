@@ -938,3 +938,130 @@ fn memory_running_out_is_enomem_and_the_mount_keeps_its_last_commit() {
     assert!(fs.root().lookup(b"kept").is_ok());
     assert!(fs.root().lookup(b"lost").is_err());
 }
+
+/// A storage that keeps every source it is handed, so a test can ask a
+/// file's source what the kernel's reclaim asks it.
+#[derive(Debug)]
+struct Sources(
+    HeapStorage,
+    Mutex<Vec<Arc<dyn ferrix_vfs::tmpfs::PageSource>>>,
+);
+
+impl Storage for Sources {
+    fn allocate(&self) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        self.0.allocate()
+    }
+    fn allocate_with(
+        &self,
+        source: Arc<dyn ferrix_vfs::tmpfs::PageSource>,
+    ) -> ferrix_vfs::Result<Box<dyn ferrix_vfs::tmpfs::Pages>> {
+        self.1
+            .lock()
+            .map_err(|_| Errno::EIO)?
+            .push(Arc::clone(&source));
+        self.0.allocate_with(source)
+    }
+    fn max_file_size(&self) -> u64 {
+        self.0.max_file_size()
+    }
+}
+
+/// Mount `disk` over a [`Sources`].
+fn mount_keeping_sources(disk: &Disk) -> (Arc<RwBtrfs<Disk>>, Arc<Sources>) {
+    let sources = Arc::new(Sources(HeapStorage::new(1 << 30), Mutex::new(Vec::new())));
+    let fs = RwBtrfs::mount(
+        disk.clone(),
+        0x0800_0010,
+        Arc::clone(&sources) as Arc<dyn Storage>,
+        Arc::new(Fixed),
+        &SpinParker,
+        notice,
+    )
+    .expect("the blank volume mounts for writing");
+    (fs, sources)
+}
+
+/// What reclaim would be handed of pages 0 to 2, and what it gave back.
+fn handed(source: &Arc<dyn ferrix_vfs::tmpfs::PageSource>) -> (Vec<u64>, u64) {
+    let mut seen = Vec::new();
+    let mut pages = vec![0, 1, 2];
+    let stolen = source.reclaim_clean(&mut pages, &mut |clean| {
+        seen.extend_from_slice(clean);
+        clean.len() as u64
+    });
+    (seen, stolen)
+}
+
+#[test]
+fn reclaim_is_handed_only_pages_written_back_and_not_written_since() {
+    let disk = Disk::new(BLANK);
+    let (fs, sources) = mount_keeping_sources(&disk);
+    let file = make_file(&fs.root(), b"f", &[3u8; 3 * 4096]);
+    let source = sources.1.lock().unwrap().last().cloned().unwrap();
+    assert!(source.reclaimable());
+    // Written and not written back: reclaim gets none of them.
+    assert_eq!(source.dirty_pages(), 3);
+    assert_eq!(handed(&source), (Vec::new(), 0));
+    fs.sync().unwrap();
+    // Written back: every one.
+    assert_eq!(source.dirty_pages(), 0);
+    assert_eq!(handed(&source), (vec![0, 1, 2], 3));
+    // The middle page written again: the other two.
+    let _ = file.write_at(4096, &[9u8; 10], false).unwrap();
+    assert_eq!(source.dirty_pages(), 1);
+    assert_eq!(handed(&source), (vec![0, 2], 2));
+    fs.sync().unwrap();
+    assert_eq!(handed(&source), (vec![0, 1, 2], 3));
+}
+
+#[test]
+fn a_write_waits_until_a_reclaim_of_its_file_is_done() {
+    use core::sync::atomic::{AtomicBool, Ordering};
+    let disk = Disk::new(BLANK);
+    let (fs, sources) = mount_keeping_sources(&disk);
+    let file = make_file(&fs.root(), b"f", &[3u8; 3 * 4096]);
+    let source = sources.1.lock().unwrap().last().cloned().unwrap();
+    fs.sync().unwrap();
+    let written = Arc::new(AtomicBool::new(false));
+    let mut writer = None;
+    let mut pages = vec![0, 1, 2];
+    let stolen = source.reclaim_clean(&mut pages, &mut |clean| {
+        let (target, flag) = (Arc::clone(&file), Arc::clone(&written));
+        writer = Some(std::thread::spawn(move || {
+            let _ = target.write_at(0, b"x", false).unwrap();
+            flag.store(true, Ordering::SeqCst);
+        }));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !written.load(Ordering::SeqCst),
+            "a write copied into the file while reclaim gave its pages back"
+        );
+        clean.len() as u64
+    });
+    assert_eq!(stolen, 3);
+    writer.unwrap().join().unwrap();
+    assert!(written.load(Ordering::SeqCst));
+    assert_eq!(read_all(&file)[..2], *b"x\x03");
+}
+
+#[test]
+fn a_commit_written_back_in_slices_reads_back_whole() {
+    // More than a few slices of WRITEBACK_PAGES, and a tail of part of one.
+    let disk = Disk::new(BLANK);
+    let data: Vec<u8> = (0..5 * 1024 * 1024 + 1000)
+        .map(|i: u32| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect();
+    let (fs, sources) = mount_keeping_sources(&disk);
+    let file = make_file(&fs.root(), b"big", &data);
+    let source = sources.1.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(source.dirty_pages(), data.len().div_ceil(4096) as u64);
+    fs.sync().unwrap();
+    assert_eq!(source.dirty_pages(), 0);
+    assert_eq!(read_all(&file), data);
+    drop((file, source, sources, fs));
+    let fs = mount(&disk);
+    let file = fs.root().lookup(b"big").unwrap();
+    assert_eq!(read_all(&file), data);
+    let meta = read_back_with_the_reader(&disk, &[b"big"]).unwrap();
+    assert_eq!(meta.size, data.len() as u64);
+}

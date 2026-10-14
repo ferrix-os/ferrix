@@ -33,6 +33,7 @@
     "vmap"
   ],
   "check_code_in_product": {
+    "user::vmo::run_reclaim_hook": "Runs the hook only stage 12's reclaim check arms (fs/btrfs_write_check/reclaim_check.rs, reclaim_beside_a_mapping, L.object.188) between a reclaim's source answer and its take; nothing when disarmed, and main.rs's require_hooks_disarmed stops the boot (FX-0908) if it is still armed after stage 12. Called from Vmo::reclaim_clean, so it stays beside it.",
     "sched::ask_for_a_decision_here": "Marks this processor's reschedule flag without making the decision: only stage 9's parked-block case (check_an_end_before_the_park, L.sched.72) asks, to have the decision pending as it parks. mark_resched is sched's own, so it stays beside it.",
     "sched::decision_pending_here": "Whether this processor's reschedule flag is still set: only stage 9's parked-block case asks, to count the tries that reached the park with the decision pending. resched_asked is sched's own, so it stays beside it.",
     "sched::direct::uncount": "Takes back one count of the fast path's per-processor counters: only stage 9's parked-block case calls it, for the park it makes itself, so that test-ipc-equiv finds every count zero with the fast path off (L.sched.61). COUNTED is direct.rs's own, so it stays beside it.",

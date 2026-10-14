@@ -224,7 +224,7 @@ fn pattern(at: usize) -> u8 {
 /// Write across pages, read back, truncate into a page, grow again, rename,
 /// and remove. Returns the pages the file had committed.
 ///
-/// Verifies: L.user.41
+/// Verifies: L.user.41, L.object.190
 fn check_tmpfs_stores_pages() -> Result<u64, &'static str> {
     let ns = fs::namespace();
     let ctx = ns.context();

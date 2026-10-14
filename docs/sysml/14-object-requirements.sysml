@@ -1452,7 +1452,8 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::cache::reclaim", "user::cache::take_from",
                 "user::cache::takes", "object::quota::protected",
-                "user::vmo::Vmo::decommit_range", "object::quota::within",
+                "user::vmo::Vmo::reclaim_clean", "user::vmo::Vmo::take_clean_range",
+                "object::quota::within",
                 "object::job::Job::mark", "object::quota::Quota::set_mark",
                 "object::quota::Mark::at", "user::cache::register", "user::cache::live",
                 "user::vmo::Vmo::reclaimable", "user::vmo::Vmo::pick_pages",
@@ -1489,6 +1490,76 @@ package FerrixObjectRequirements {
                 fault.";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::space::copy_or_zero", "user::vmo::Vmo::read_present");
+        }
+        requirement <'L.object.188'> reclaimTakesOnlyCleanPages : ItemLowLevel {
+            attribute :>> statement = "reclaim shall give back a page of a disk
+                file only through reclaim_clean: only the pages the file's source
+                hands it, only while the object is reclaimable at the take --
+                no shared mapping that may write the file made since its owner
+                last took its writes, looked at under the pages lock the take is
+                made under -- and a page written and not yet written back shall
+                stay and read back as last written.";
+            attribute :>> criterion = "On a writable btrfs mount a file synced
+                and then written again in one page loses its clean pages to a
+                reclaim of the whole cache, keeps the written one, and reads back
+                as it was last written, every page; a shared mapping that may
+                write, made and written between the source's answer and the
+                take, keeps the page it wrote, and the write reads back through the
+                file (the `reclaim` line of test-btrfs).";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::take_from", "user::vmo::Vmo::reclaim_clean",
+                "user::vmo::reclaim_clean", "user::vmo::Vmo::decommit_clean_range",
+                "user::vmo::Vmo::take_clean_range", "user::vmo::Vmo::take_range_if",
+                "user::vmo::Vmo::unwritten_by_mappings", "user::vmo::Vmo::decommit_in_chunks");
+        }
+        // The parent is L.object.111's: these are the counts of the cache
+        // H.QUOTA.12's reclaim takes, machine-wide rather than per job, and
+        // MemAvailable is the room that reclaim makes before anything is
+        // killed. No high-level requirement covers /proc's reports as such.
+        requirement <'L.object.189'> theWholeCacheIsCounted : ItemLowLevel {
+            attribute :>> statement = "totals shall count every live cached
+                file's pages, whoever they are charged to: a disk file's, a
+                memory filesystem's, of the first those written and not yet
+                written back, and those reclaim may take now -- a reclaimable
+                object's pages less its dirty ones -- each from the object's own
+                count of its pages, for /proc/meminfo's Cached (both kinds),
+                Shmem (a memory filesystem's), Dirty and MemAvailable (free and
+                what reclaim may take).";
+            attribute :>> criterion = "A file written on a writable mount and
+                synced is in Cached and in MemAvailable; a page of it written
+                again and not synced is in Dirty and not in MemAvailable; a
+                tmpfs file's pages are in Cached and Shmem (the `reclaim` line of
+                test-btrfs).";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::cache::totals", "user::vmo::Vmo::dirty_pages",
+                "user::vmo::Vmo::committed",
+                "user::cache::Totals::cached", "user::cache::Totals::available");
+        }
+        // The write's reclaim and retry (at most eight reclaims, then
+        // ENOSPC) are fs/pages.rs's write_reclaiming, load, whose evidence
+        // is the stage 12 check and its control K3 (ledger 2026-10-15). This
+        // states what the core does for it. That the commit and the copy are
+        // made under one hold of the pages lock is verified by inspection
+        // (the consultant's code review, reviews.md line 1154), not by a
+        // check: no boot can show a frame given back mid-copy.
+        requirement <'L.object.190'> aWriteIsCopiedUnderThePagesLock : ItemLowLevel {
+            attribute :>> statement = "commit_and_write shall commit the page,
+                zeroed, if the object lacks it, and copy the bytes at the offset
+                into it under one hold of the object's pages lock, writing a
+                frame another holder shares in place; with no frame or no room
+                to record it, it shall answer OutOfMemory and leave the object as
+                it was, so that its caller may reclaim and try again. zero_from
+                shall zero a page from the offset to its end under the same lock,
+                and leave a page the object lacks absent.";
+            attribute :>> criterion = "A 16-page write on a writable btrfs mount,
+                in a job at its memory.max holding 32 pages of clean cache of that
+                mount, succeeds after its commit was refused and reclaim gave
+                pages back, and both files read back as written (the `reclaim`
+                line of test-btrfs); a tmpfs file written across pages, cut into
+                its second page and grown again reads back its head and zeros
+                after the cut (stage 8's tmpfs check).";
+            attribute :>> parent = "H.QUOTA.12";
+            attribute :>> unit = ("user::vmo::Vmo::commit_and_write", "user::vmo::Vmo::zero_from");
         }
     }
 

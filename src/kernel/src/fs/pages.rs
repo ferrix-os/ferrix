@@ -32,11 +32,17 @@
 //! A read copies each page under the VMO's own lock, so a truncation cannot
 //! release a frame part-way through the copy: a filesystem on a disk holds no
 //! lock of its own across a read, because the read may wait for the disk.
-//! Writes and truncations still copy into and clear frames directly, which is
-//! safe only while the filesystem serialises them against each other: tmpfs
-//! holds the inode's lock across both, and a disk filesystem writes nothing
-//! before stage 12. A file mapping will reach the same VMO without either, and
-//! the release path takes the care a copy-on-write fault already takes.
+//! A write commits and copies each page under that lock too
+//! ([`Vmo::commit_and_write`]), and a truncation zeroes the page its cut
+//! falls in under it ([`Vmo::zero_from`]): reclaim takes a writable mount's
+//! clean pages, so the lock, and not the filesystem, is what keeps a frame
+//! the object's while it is written. What the filesystem serialises is the
+//! file's bytes: tmpfs holds the inode's lock across a write and a
+//! truncation, and btrfs holds the pages a write touches still against
+//! reclaim from the copy to their dirty mark, so that no written page is
+//! dropped before it is marked. A file mapping reaches the same VMO without
+//! either, and the release path takes the care a copy-on-write fault already
+//! takes.
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -183,6 +189,42 @@ fn allocate_reclaiming() -> Option<Frame> {
     })
 }
 
+/// Write `bytes` into page `index` of `vmo` at `within`, committing the page
+/// first if it is absent ([`Vmo::commit_and_write`]), and reclaiming when
+/// there is no frame for it as a fill does ([`allocate_reclaiming`]): clean
+/// cache inside the job whose `memory.max` refused it, or anywhere when the
+/// machine is out, tried again while a reclaim gives some back, at most
+/// [`WRITE_RECLAIMS`] times. Without it a write found the machine full of
+/// clean cache and answered `ENOSPC` (docs/WINE.md §10). Called with no lock
+/// held, as a write into a store is.
+///
+/// # Errors
+///
+/// As [`refused`]: `ENOSPC` when nothing more could be given back.
+fn write_reclaiming(vmo: &Vmo, index: u64, within: usize, bytes: &[u8]) -> Result<()> {
+    let mut tries = 0;
+    loop {
+        match vmo.commit_and_write(index, within, bytes) {
+            Ok(()) => return Ok(()),
+            Err(VmoError::OutOfMemory) if tries < WRITE_RECLAIMS => {
+                tries += 1;
+                let group = crate::sched::running_group();
+                let scope = quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE)
+                    .unwrap_or(quota::NONE);
+                if crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen == 0 {
+                    return Err(Errno::ENOSPC);
+                }
+            }
+            Err(error) => return Err(refused(error)),
+        }
+    }
+}
+
+/// How many reclaims one page of a write tries before it answers `ENOSPC`:
+/// each gives back up to a fill's run, and another task may take the room
+/// between a reclaim and the retry.
+const WRITE_RECLAIMS: u32 = 8;
+
 /// Give back frames no page kept.
 fn release_all(frames: impl IntoIterator<Item = Frame>) {
     for frame in frames {
@@ -239,6 +281,15 @@ impl VmoPages {
 impl Filler for Fill {
     fn reclaimable(&self) -> bool {
         self.source.reclaimable()
+    }
+
+    /// The source's own answer: a writable file keeps the pages it wrote.
+    fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        self.source.reclaim_clean(pages, drop)
+    }
+
+    fn dirty_pages(&self) -> u64 {
+        self.source.dirty_pages()
     }
 
     fn is_sourced(&self, index: u64) -> bool {
@@ -462,20 +513,12 @@ impl Pages for VmoPages {
                 self.fill_from(index, index)?;
             }
             let bytes = data.get(done..done + take).ok_or(Errno::EIO)?;
-            let frame = self.vmo.commit(index).map_err(refused)?;
-            // SAFETY: the frame is committed in this object; the filesystem
-            // serialises writes against truncation (see the module), so
-            // nothing releases it meanwhile; `bytes` fits in the page because
-            // `piece` stops at its end, and is kernel memory the page cannot
-            // overlap. A frame committed fresh was zeroed, so the bytes around
-            // the ones written are zeros rather than an old owner's data.
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    bytes.as_ptr(),
-                    byte_of(frame, within) as *mut u8,
-                    bytes.len(),
-                );
-            }
+            // Committed and copied under the object's lock: nothing gives
+            // the frame back during the copy, reclaim included, whatever the
+            // filesystem holds still. A frame committed fresh was zeroed, so
+            // the bytes around the ones written are zeros rather than an old
+            // owner's data.
+            write_reclaiming(&self.vmo, index, within, bytes)?;
             done += take;
         }
         Ok(())
@@ -499,14 +542,9 @@ impl Pages for VmoPages {
         if within == 0 {
             return;
         }
-        if let Some(frame) = self.vmo.page(offset / PAGE_SIZE) {
-            // SAFETY: the frame is committed in this object and the filesystem
-            // serialises truncation against writes (see the module); the range
-            // runs from `within` to the page's end.
-            unsafe {
-                core::ptr::write_bytes(byte_of(frame, within) as *mut u8, 0, PAGE_BYTES - within);
-            }
-        }
+        // Under the object's lock, so reclaim cannot give the frame back
+        // while it is zeroed.
+        let _ = self.vmo.zero_from(offset / PAGE_SIZE, within);
     }
 
     fn committed_bytes(&self) -> u64 {
