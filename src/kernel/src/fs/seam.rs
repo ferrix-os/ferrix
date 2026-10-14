@@ -105,5 +105,6 @@ pub(crate) fn render() -> Vec<u8> {
         COMPLETED.load(Ordering::Relaxed),
     );
     let _ = writeln!(line, "{}", crate::user::cache::diag_line());
+    let _ = writeln!(line, "{}", ferrix_btrfs_vfs::rw::diag_line());
     line.into_bytes()
 }
