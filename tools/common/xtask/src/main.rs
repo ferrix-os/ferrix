@@ -344,7 +344,8 @@ COMMANDS:
                   Arknights: Endfield's Windows launcher in Wine on hyprix through yserver, on the network: its window,
                   its first screen drawn, and Gryphline's server answering it; it never logs in (docs/WINE.md §8)
     test-endfield-proton  The same in GE-Proton's Wine, on the volume FERRIX_ENDFIELD_WINE=proton
-                  tools/common/fetch/fetch-endfield-launcher.sh makes, after the 32-bit cmd /c ver (docs/WINE.md §10)
+                  tools/common/fetch/fetch-endfield-launcher.sh makes, after the 32-bit cmd /c ver (docs/WINE.md §10;
+                  --everything: on run-compositor --everything's merged volume, started by its gryphlink)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window

@@ -350,8 +350,8 @@ fn chrome_links(arch: Arch, carried: &[crate::ports::File]) -> Vec<crate::ports:
 }
 
 /// What `--everything` carries beside Chrome: the compiler's links, and
-/// steamcmd, Claude Code, yserver and Steam's window where each volume has
-/// been made.
+/// steamcmd, Claude Code, yserver, Steam's window and Endfield's launcher
+/// in Proton where each volume has been made.
 fn carry_everything(arch: Arch, args: &Args, carried: &mut Carried) {
     let links = rustc_links(&carried.ports);
     carried.ports.extend(links);
@@ -370,6 +370,12 @@ fn carry_everything(arch: Arch, args: &Args, carried: &mut Carried) {
     }
     if steam {
         let files = steam_window::desktop_files(&carried.ports);
+        carried.ports.extend(files);
+    }
+    // Wine, GE-Proton and Endfield's launcher, merged last
+    // (`crate::everything`): `gryphlink` and its links (docs/WINE.md §10).
+    if arch == Arch::X86_64 && super::endfield::proton_volume().is_ok() {
+        let files = super::endfield::desktop_files(&carried.ports);
         carried.ports.extend(files);
     }
 }

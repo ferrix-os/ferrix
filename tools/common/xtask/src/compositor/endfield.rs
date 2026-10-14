@@ -201,9 +201,33 @@ $WINESERVER -k
 echo "endfield: end"
 "#;
 
-/// [`SCRIPT`] after the lines that name `wine`'s loader and server.
-fn script(wine: Wine) -> String {
-    format!("{}{SCRIPT}", wine.prelude())
+/// Where [`SCRIPT`]'s own start of the launcher begins: the prefix, the
+/// fonts' names, the 32-bit `cmd`, and `Launcher.exe` in the background.
+const OWN_START: &str = "mkdir -p /tmp/wine\n$WINE wineboot";
+
+/// What ends [`SCRIPT`]'s own start of the launcher.
+const OWN_END: &str = "> /tmp/wine/launcher.log &\n";
+
+/// What starts the launcher instead with `--everything`: the volume's
+/// `gryphlink`, as a user of that desktop starts it, which makes the prefix
+/// its own way (`fetch-endfield-launcher.sh`) at [`SCRIPT`]'s
+/// `WINEPREFIX`.
+const GRYPHLINK_START: &str = "mkdir -p /tmp/wine\necho \"endfield: gryphlink from the merged volume\"\n\
+     /data/usr/bin/gryphlink 2>&1 | grep -E 'err:' > /tmp/wine/launcher.log &\n";
+
+/// [`SCRIPT`] after the lines that name `wine`'s loader and server; with
+/// `gryphlink`, its own start of the launcher replaced by
+/// [`GRYPHLINK_START`].
+fn script(wine: Wine, gryphlink: bool) -> String {
+    let replaced = SCRIPT
+        .split_once(OWN_START)
+        .and_then(|(before, rest)| {
+            rest.split_once(OWN_END)
+                .map(|(_, after)| format!("{before}{GRYPHLINK_START}{after}"))
+        })
+        .filter(|_| gryphlink);
+    let body = replaced.unwrap_or_else(|| SCRIPT.to_owned());
+    format!("{}{body}", wine.prelude())
 }
 
 /// The launcher version `fetch-endfield-launcher.sh` pins.
@@ -228,11 +252,6 @@ fn proton_pinned() -> &'static str {
 ///
 /// It has not been made, or was made with another launcher or another
 /// yserver than the ones the scripts pin.
-/// [`volume`] for Proton, as `--everything` merges it.
-pub(crate) fn proton_volume() -> Result<PathBuf> {
-    volume(Wine::Proton)
-}
-
 pub(crate) fn volume(wine: Wine) -> Result<PathBuf> {
     let directory = match std::env::var_os("FERRIX_ENDFIELD_VOLUME") {
         Some(directory) => PathBuf::from(directory),
@@ -283,6 +302,58 @@ pub(crate) fn volume(wine: Wine) -> Result<PathBuf> {
     Ok(image)
 }
 
+/// [`volume`] for Proton, the one `--everything` merges.
+///
+/// # Errors
+///
+/// As [`volume`].
+pub(crate) fn proton_volume() -> Result<PathBuf> {
+    volume(Wine::Proton)
+}
+
+/// Where `run-compositor --everything`'s launcher entry for GRYPHLINK is.
+const ENTRY_PATH: &str = "usr/share/applications/gryphlink.desktop";
+
+/// fuzzel's entry for GRYPHLINK, with Steam's games icon.
+const ENTRY: &str = "[Desktop Entry]\nType=Application\nName=GRYPHLINK\n\
+     GenericName=Game Launcher\nComment=Arknights: Endfield's launcher, in GE-Proton's Wine\n\
+     Exec=/bin/gryphlink\nIcon=ferrix-games\nTerminal=false\nKeywords=endfield;arknights;gryphline;wine;proton;\n\
+     Categories=Game;\n";
+
+/// What `run-compositor --everything` adds to the archive for GRYPHLINK,
+/// when the Proton launcher volume is merged into its own: Wine's and
+/// Proton's links less any path `carried` already has (Steam's name the
+/// same i386 paths), `/bin/gryphlink`, a link to the volume's, and fuzzel's
+/// entry for it.
+pub(crate) fn desktop_files(carried: &[File]) -> Vec<File> {
+    let taken = |path: &str| {
+        carried.iter().any(|file| {
+            file.path == path
+                || file
+                    .path
+                    .strip_prefix(path)
+                    .is_some_and(|rest| rest.starts_with('/'))
+                || path
+                    .strip_prefix(&file.path)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+    };
+    let links: Vec<(&str, &str)> = crate::wine::LINKS
+        .iter()
+        .chain(PROTON_LINKS)
+        .chain(&[("bin/gryphlink", "/data/usr/bin/gryphlink")])
+        .copied()
+        .filter(|(path, _)| !taken(path))
+        .collect();
+    let mut files = crate::rustc::files(&links);
+    files.push(File {
+        path: ENTRY_PATH.to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(ENTRY.as_bytes().to_vec()),
+    });
+    files
+}
+
 /// The part of `screen`, in thousandths, that is the main button's yellow.
 fn yellow_permille(screen: &Image) -> usize {
     let (pixels, _) = screen.pixels.as_chunks::<3>();
@@ -320,6 +391,32 @@ fn screen(qmp: &mut Qmp, dump: &Path) -> Result<Image> {
     parse_ppm(&bytes)
 }
 
+/// The gate's boot: the network, no 3D card, [`MEMORY`] unless one was
+/// given, and the launcher's volume -- or, with `--everything`, the volume
+/// run-compositor --everything attaches, whose `gryphlink` then starts the
+/// launcher (said by the `bool`). Only Proton's launcher is merged there.
+fn boot_args(args: &Args, wine: Wine) -> Result<(Args, bool)> {
+    let gryphlink = args.everything;
+    if gryphlink && wine != Wine::Proton {
+        return Err(Error::new(
+            "--everything carries the launcher in Proton: test-endfield-proton --everything",
+        ));
+    }
+    let mut args = args.clone();
+    args.gl = false;
+    args.net = true;
+    args.data_image = Some(if gryphlink {
+        let _ = proton_volume()?;
+        crate::everything::volume()?
+    } else {
+        volume(wine)?
+    });
+    if !args.memory_given {
+        args.memory = MEMORY;
+    }
+    Ok((args, gryphlink))
+}
+
 /// Boot hyprix with yserver, the network and [`SCRIPT`], and require the
 /// launcher's window, its main button and its server's answer.
 ///
@@ -332,13 +429,7 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
         [Arch::X86_64] => Arch::X86_64,
         _ => return Err(Error::new("test-endfield-launcher runs on x86-64")),
     };
-    let mut args = args.clone();
-    args.gl = false;
-    args.net = true;
-    args.data_image = Some(volume(wine)?);
-    if !args.memory_given {
-        args.memory = MEMORY;
-    }
+    let (args, gryphlink) = boot_args(args, wine)?;
     let busybox = gates_busybox(arch).ok_or_else(|| {
         Error::new("test-endfield-launcher needs a static busybox: Alpine's busybox-static at ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static, or ferrousli's from `cargo xtask busybox`")
     })?;
@@ -351,7 +442,7 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
     ports.push(File {
         path: SCRIPT_PATH.to_owned(),
         mode: 0o644,
-        content: Content::Bytes(script(wine).into_bytes()),
+        content: Content::Bytes(script(wine, gryphlink).into_bytes()),
     });
     let carried = Carried {
         busybox: Some(PathBuf::from(busybox)),
@@ -371,6 +462,10 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
     let dump = paths::build_dir(arch).join("endfield-launcher.ppm");
     let which = match wine {
         Wine::Debian => "Debian's Wine".to_owned(),
+        Wine::Proton if gryphlink => format!(
+            "{}, started by gryphlink on run-compositor --everything's volume",
+            proton_pinned()
+        ),
         Wine::Proton => proton_pinned().to_owned(),
     };
     println!(
@@ -510,5 +605,40 @@ mod tests {
             pixels,
         };
         assert_eq!(yellow_permille(&screen), 1);
+    }
+
+    /// With `gryphlink`, the script's own start of the launcher -- wineboot
+    /// to `Launcher.exe` -- is replaced by the volume's `gryphlink`, and
+    /// the rest (the wait for the window, the logs, the end) is kept.
+    #[test]
+    fn gryphlink_replaces_only_the_scripts_own_start() {
+        let own = script(Wine::Proton, false);
+        assert!(own.contains("wineboot -i") && own.contains("Launcher.exe"));
+        assert!(!own.contains("gryphlink"));
+        let everything = script(Wine::Proton, true);
+        assert!(everything.contains("/data/usr/bin/gryphlink 2>&1"));
+        assert!(!everything.contains("wineboot") && !everything.contains("Launcher.exe"));
+        assert!(!everything.contains("cmd32"));
+        for kept in [
+            "nslookup launcher.gryphline.com",
+            "title: GRYPHLINK",
+            "echo \"endfield: window\"",
+            "echo \"endfield: end\"",
+        ] {
+            assert!(everything.contains(kept), "{kept}");
+        }
+    }
+
+    /// The `--everything` archive gets `/bin/gryphlink` and the entry, and
+    /// no link a path already carried has.
+    #[test]
+    fn the_desktop_files_skip_what_is_carried() {
+        let carried = crate::rustc::files(&[("lib/i386-linux-gnu", "/data/elsewhere")]);
+        let files = desktop_files(&carried);
+        let paths: Vec<&str> = files.iter().map(|file| file.path.as_str()).collect();
+        assert!(paths.contains(&"bin/gryphlink"));
+        assert!(paths.contains(&ENTRY_PATH));
+        assert!(paths.contains(&"etc/ssl/certs/ca-certificates.crt"));
+        assert!(!paths.contains(&"lib/i386-linux-gnu"));
     }
 }
