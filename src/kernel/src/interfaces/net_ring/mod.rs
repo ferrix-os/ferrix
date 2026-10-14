@@ -587,7 +587,7 @@ impl Pages {
             // as long as this `Pages` is used, reached through the direct map.
             // The driver may write the byte at any moment, so it is read
             // volatilely and whatever it holds is taken as data.
-            *byte = unsafe { core::ptr::read_volatile(address) };
+            *byte = unsafe { load(address) };
         }
         true
     }
@@ -602,10 +602,33 @@ impl Pages {
             // SAFETY: as in `Pages::copy_out`; the driver's own mapping is the
             // only other writer, and the protocol gives each slot one writer
             // at a time -- whoever holds it.
-            unsafe { core::ptr::write_volatile(address, *byte) };
+            unsafe { store(address, *byte) };
         }
         true
     }
+}
+
+/// One volatile load from the pages the driver shares: every load this file
+/// makes from them is this one, and every store [`store`] (as `block_ring`'s).
+///
+/// # Safety
+///
+/// `at` must be aligned for a `T` and readable for one, for the whole call.
+/// The driver may write it meanwhile; whatever it held is what is loaded.
+unsafe fn load<T: Copy>(at: *const T) -> T {
+    // SAFETY: the caller's.
+    unsafe { core::ptr::read_volatile(at) }
+}
+
+/// One volatile store to the pages the driver shares.
+///
+/// # Safety
+///
+/// `at` must be aligned for a `T` and writable for one, for the whole call,
+/// with no Rust reference to it anywhere.
+unsafe fn store<T: Copy>(at: *mut T, value: T) {
+    // SAFETY: the caller's.
+    unsafe { core::ptr::write_volatile(at, value) }
 }
 
 impl RingMemory for Pages {
@@ -614,7 +637,7 @@ impl RingMemory for Pages {
             return 0;
         };
         // SAFETY: as in `Pages::copy_out`.
-        unsafe { core::ptr::read_volatile(address) }
+        unsafe { load(address) }
     }
 
     fn write_u8(&mut self, offset: usize, value: u8) {
@@ -622,7 +645,7 @@ impl RingMemory for Pages {
             return;
         };
         // SAFETY: as in `Pages::copy_in`.
-        unsafe { core::ptr::write_volatile(address, value) };
+        unsafe { store(address, value) };
     }
 
     // The wider accessors are one access each, never composed from bytes:
@@ -637,7 +660,7 @@ impl RingMemory for Pages {
     fn read_u16(&self, offset: usize) -> u16 {
         match self.word::<u16>(offset) {
             // SAFETY: an aligned `u16` inside a held frame, as in `read_u8`.
-            Some(at) => u16::from_le(unsafe { core::ptr::read_volatile(at) }),
+            Some(at) => u16::from_le(unsafe { load(at) }),
             None => {
                 u16::from_le_bytes([self.read_u8(offset), self.read_u8(offset.wrapping_add(1))])
             }
@@ -647,7 +670,7 @@ impl RingMemory for Pages {
     fn read_u32(&self, offset: usize) -> u32 {
         match self.word::<u32>(offset) {
             // SAFETY: an aligned `u32` inside a held frame, as in `read_u8`.
-            Some(at) => u32::from_le(unsafe { core::ptr::read_volatile(at) }),
+            Some(at) => u32::from_le(unsafe { load(at) }),
             None => {
                 u32::from(self.read_u16(offset))
                     | (u32::from(self.read_u16(offset.wrapping_add(2))) << 16)
@@ -658,7 +681,7 @@ impl RingMemory for Pages {
     fn write_u16(&mut self, offset: usize, value: u16) {
         match self.word::<u16>(offset) {
             // SAFETY: an aligned `u16` inside a held frame, as in `write_u8`.
-            Some(at) => unsafe { core::ptr::write_volatile(at, value.to_le()) },
+            Some(at) => unsafe { store(at, value.to_le()) },
             None => {
                 let [low, high] = value.to_le_bytes();
                 self.write_u8(offset, low);
@@ -670,7 +693,7 @@ impl RingMemory for Pages {
     fn write_u32(&mut self, offset: usize, value: u32) {
         match self.word::<u32>(offset) {
             // SAFETY: an aligned `u32` inside a held frame, as in `write_u8`.
-            Some(at) => unsafe { core::ptr::write_volatile(at, value.to_le()) },
+            Some(at) => unsafe { store(at, value.to_le()) },
             None => {
                 self.write_u16(offset, value as u16);
                 self.write_u16(offset.wrapping_add(2), (value >> 16) as u16);
