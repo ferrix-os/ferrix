@@ -277,7 +277,7 @@ conditions are in `~/.local/share/ferrix/cert-consultant/reviews.md` there.
 | `stage13-n5` 7a0c04fdd | unprivileged mounting | on fdinfo; consultant asked for changes, built (remount by the superblock's owner, the bottom mount locked, a sleeping write-out), not gated; earlier tip's boots, `test-vfs`, `test-shell`, `test-bwrap` PASSED |
 | `stage13-bwrap-user` dad30e7f2 | `test-bwrap` as uid 1000 | passes (a new tmpfs is now 1777 and the mounter's); needs a rebase onto N5, a control for the tmpfs case, review |
 | `stage13-netns` | network namespaces, veth, per-namespace stacks | **landed 2026-10-04 in 22384874f**: every row PASSED on 2428b0d95 (`l13ns-*`, `test-init` on its third run), kmem controls nn20/24/28-30 and b1, 31c re-run and FIRED; the consultant's OK (ledger line 333) |
-| `stage13-timens` 88b073c3a | time namespaces | on netns; boots on x86_64; native child gets its creator's time namespace (c25, c26); gate and 26 controls stopped mid-run (c01, c03-c07 FIRED); not reviewed |
+| `stage13-timens` 88b073c3a | time namespaces | **2026-10-14:** carried onto main and finished as `s13f/timens` (see below); the 2026-10-01 row failures were clippy on a slice the carry removed and a slot without `sshdt` |
 | `stage13-container` cda83faef | `cargo xtask test-container`, the exit criterion as a program | written, never built or run; needs cgctl and S3 on `main` |
 
 Every namespace and seccomp review found the same hole: `launch::load_native`
@@ -340,6 +340,23 @@ the namespace ends. Abstract unix names are per namespace. The `netns` boot line
 (FX-0893) and 30 negative controls prove it on x86_64 and the tables are
 charged (three more `kmem` fills); `docs/NETNS.md` has the design, the
 controls and what is open.
+
+**Done -- time namespaces (built 2026-09-30, finished 2026-10-14, branch
+`s13f/timens`):** `CLONE_NEWTIME` through `unshare`, `clone3` and `setns`
+gives a namespace of two offsets, for `CLOCK_MONOTONIC` (and its raw and
+coarse forms) and `CLOCK_BOOTTIME`, copied from the namespace it was made
+from; `/proc/<pid>/timens_offsets` writes them until a process is in it, in
+Linux's order of refusals. A child enters its parent's namespace for children,
+and so does `execve`; while the two differ, `CLONE_VM` and `CLONE_THREAD` are
+`EINVAL`, as on Linux. `ns/time` and `ns/time_for_children` open as nsfs
+files, and `setns` on one or on a pidfd joins it. Clock reads, `sysinfo`,
+`/proc/uptime`, `times` and the absolute deadlines of `clock_nanosleep`,
+`timerfd_settime` and `FUTEX_WAIT_BITSET` shift and unshift by the caller's
+offsets. A process in such a namespace maps a second vDSO object whose
+functions all make the system call, and a swap that cannot have it fails
+closed. The `timens` boot line (FX-0910) and 37 negative controls prove it on
+x86_64, and the `kmem` line fills time namespaces (F-37);
+`docs/NAMESPACES.md` §12.1 has the design, the controls and what is open.
 
 **Done -- M2, F1, S2 and B1, the rest of the controllers (built 2026-09-30, landed 2026-10-07).** A
 charge past `memory.max` reclaims inside the job before it kills: the clean

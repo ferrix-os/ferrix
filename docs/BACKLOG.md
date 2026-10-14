@@ -332,12 +332,16 @@ may one day need the relaxation.
 | **No limit on the number of network namespaces**: each is charged to its job, and the net task ticks every one that exists, so a user who may make namespaces (any user, through a user namespace) makes the tick slower without bound but their job's memory. Add `max_net_namespaces` like N5's other sysctls (global or per user), with a boot check and control (consultant's F3) | open | 13 |
 | The neighbour cache (256 entries x 3 queued packets, about 1.1 MB per namespace) and the reassembler (32 KiB) grow on traffic and are charged to the job only at the namespace's next change (`fit`), against NETNS section 5's "charged as it fills". Close by charging on fill or per tick; until then the per-namespace bound is the limit (consultant's C2) | open | 13 |
 | `setns(CLONE_NEWNET)` is not wired: `net/netns_file.rs` is the seam, to become the network arm of the namespace files in `fs/nsfs.rs` | open | 13 |
+| **A time namespace's offsets file answers `EACCES` once a process is in the namespace**, where the work's brief said `EPERM`; Linux's `proc_timens_set_offset` answers `EACCES` (`frozen_offsets`), and Ferrix follows Linux. Recorded so a program or test written to the brief is not surprised | open, deliberate | 13 |
+| **`times` is shifted by the boot-time offset in a time namespace**; Linux does not shift it, so a program reading `times` beside `/proc/uptime` agrees here and disagrees with Linux. Close by removing the shift in `time::sys_times` if a program is found to depend on Linux's | open, deliberate | 13 |
+| **`CAP_SYS_TIME` joins the capabilities a child user namespace honours** (`userns::HONOURED`), for writing a time namespace's offsets over the namespace its user namespace owns and for nothing else (`capable_over` is unchanged, so it never reaches the first namespace's clocks, `settimeofday` or `clock_settime`). A change to U8's list, boot-checked in the `timens` line (fake root writes its own offsets and the first's are refused) | open, relax on demand | 13 |
+| A time namespace pair belongs to the process, not the thread (`unshare(CLONE_NEWTIME)` from a multithreaded process moves the whole process's children; `clone3(CLONE_NEWTIME \| CLONE_THREAD)` is `EINVAL`); Linux gives each task its own. `setns`'s `EUSERS` for a process of several threads has no boot check. `timer_create` and `mq_timedreceive` do not exist, so nothing is shifted for them. No program can make a time namespace under the gates (busybox's `unshare` has no `--time`): `execve`'s entry into the namespace for children is checked through `exec::program_time`, not by a program. Time namespaces number from the UTS, IPC and cgroup counter (`docs/NAMESPACES.md` §12.1) | open | 13 |
 | Not boot-checked for network namespaces: the `/sys/class/net` listing per reader, IPv6 over a veth pair, ARP growth past the table limit, `unshare` from several threads | open | 13 |
 | Raw and packet sockets are reachable by a user who owns a network namespace (`CAP_NET_RAW` over an owned namespace is honoured): safe Rust with no ring-buffer interface, recorded as a residual in the vulnerability analysis | open, accepted | 13 |
 | **Pid namespaces** (`docs/PIDNS.md` §8): one machine-wide pool of 32768 kernel numbers with each namespace also numbering to 32768 locally, `pid_max` neither writable nor per namespace; an init's namespace is killed when its last thread ends, not after it reaped its children; only `SIGKILL` and `SIGSTOP` from an ancestor are forced through to a protected init, and faults bypass the protection; procfs file contents tell numbers for the reading process, not the instance's namespace; `setns` into a pid namespace and `clone3`'s `set_tid` are not built | open | 13 |
 | **Pid namespaces, from the consultant's review (2026-10-01):** `si_pid` and `SO_PEERCRED` are translated when read (`pidns::show_pid`), not stamped when sent, so a sender that has ended reads 0 and a reused kernel number reads as its new owner; `process_give` takes machine pids, and its `NO_PROCESS` against `NOT_CHILD` tells a native caller in a namespace whether a machine pid exists; `PidNamespace` has no owning user namespace (harmless until `setns` into a pid namespace is built) | open | 13 |
 | **A frame budget for the fork path:** nothing stops `sys_clone` (3,712 bytes), `Process::with_context` (1,592), `shared_with_context` (3,728, transient), `forked_into` (600) and `fork_into` (80) growing again on a four-page kernel stack; `xtask check` could read the `sub rsp` of each from the built kernel with objdump, as the assembly budget counts lines, and fail past a budget per function and per path (a double fault in `test-vfs` on x86-64 was this, 2026-10-01; `docs/PIDNS.md` §10) | open | 13 |
-| Time namespaces and the cgroup controllers (M2's reclaim, `cgroup.freeze`, `cpu.max`, `io`): their own differences are added here when those landings report | open | 13 |
+| The cgroup controllers (M2's reclaim, `cgroup.freeze`, `cpu.max`, `io`): their own differences are added here when those landings report | open | 13 |
 
 ## Red on `main`
 
@@ -1691,9 +1695,9 @@ listed below, and three needed a human call, also below.
   staged (30 files, `fs/timens_check.rs`, `syscall/timens.rs`, vdso, futex,
   timerfd and procfs integration), blocked on an unresolved merge conflict
   in `src/kernel/src/panic/catalog.rs` — both sides add an adjacent catalog
-  entry, FX-0907 and FX-0910. Left: take both entries, then regenerate
-  `docs/generated/PANICS.md` and the two certification coverage JSONs that
-  depend on it, before this can be committed.
+  entry, FX-0907 and FX-0910. 2026-10-14: carried onto main as
+  `s13f/timens` (both entries kept, the generated pages and coverage
+  regenerated) and finished there (`docs/NAMESPACES.md` §12.1).
 - A detached-HEAD worktree (`display-show`, at `d9c5658ed`) has one
   uncommitted line: `compositor/blank/src/modeset.rs`'s `BACKGROUND`
   changed from a dark slate to pure blue, while the adjacent comment still
