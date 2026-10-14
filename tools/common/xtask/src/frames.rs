@@ -139,7 +139,7 @@ pub(crate) fn run(args: &Args) -> Result<()> {
 pub(crate) fn sha256_of(path: &Path) -> Result<String> {
     let bytes = std::fs::read(path)
         .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
-    Ok(crate::sha256::hex(&crate::sha256::digest(&bytes)))
+    Ok(crate::sha256::hex(&bytes))
 }
 
 /// One swap: its number and the monotonic nanoseconds it was entered and
@@ -258,18 +258,34 @@ pub(crate) struct Summary {
 }
 
 impl Summary {
-    /// Missed refreshes a minute: by msc where the server answered, else by
-    /// time.
-    pub(crate) fn per_minute(&self) -> Option<f64> {
-        let misses = self.by_msc.or(self.by_time)?;
+    /// `misses` (by msc or by time) a minute.
+    pub(crate) fn per_minute(&self, misses: Option<u64>) -> Option<f64> {
+        let misses = misses?;
         (self.seconds > 0.0).then(|| misses as f64 * 60.0 / self.seconds)
     }
 }
 
-/// The refreshes between two swaps' returns `apart` nanoseconds apart, at
-/// a refresh of `refresh` microseconds.
-fn refreshes(apart: u64, refresh: f64) -> u64 {
-    (apart as f64 / 1000.0 / refresh).round() as u64
+/// The part of a refresh by which [`missed_by_time`] may count a return as
+/// after the refresh it came just before.
+const SLACK: f64 = 0.01;
+
+/// The refreshes missed between swaps `a` and `b` by time, at a refresh of
+/// `refresh` microseconds: the refreshes that began from the one the
+/// server said `a` fell in (its completion's ust) to `b`'s return, less
+/// one. Anchored at the server's refresh and not at `a`'s return, so a
+/// stall that is not a whole number of refreshes is not rounded up: at 75
+/// Hz a 50 ms stall is 3.75 refreshes, and the frame after it still shows
+/// at the fourth. A return within [`SLACK`] of a refresh counts as after
+/// it: the refresh is a median of the server's steps, a microsecond off,
+/// which four refreshes on would put a frame that returned just after one
+/// before it. Without `a`'s completion, the time between the two returns,
+/// rounded.
+fn missed_by_time(a: &Swap, b: &Swap, after_a: Option<&Completion>, refresh: f64) -> u64 {
+    let refreshes = match after_a {
+        Some(at) => ((b.back as f64 / 1000.0 - at.ust as f64) / refresh + SLACK).floor(),
+        None => (b.back.saturating_sub(a.back) as f64 / 1000.0 / refresh).round(),
+    };
+    (refreshes.max(0.0) as u64).saturating_sub(1)
 }
 
 /// The value at `percentile` (0 to 1) of `sorted`, by nearest rank.
@@ -329,7 +345,7 @@ pub(crate) fn summarise(record: &Record, refresh: Option<f64>) -> Result<Summary
             (Some(a), Some(b)) => Some(b.msc.saturating_sub(a.msc).saturating_sub(1)),
             _ => None,
         };
-        let time = refresh.map(|refresh| refreshes(apart, refresh).saturating_sub(1));
+        let time = refresh.map(|refresh| missed_by_time(a, b, record.after.get(&a.index), refresh));
         by_msc += msc.unwrap_or_default();
         by_time += time.unwrap_or_default();
         if record.stalls.contains_key(&b.index) {
@@ -361,6 +377,10 @@ pub(crate) fn summarise(record: &Record, refresh: Option<f64>) -> Result<Summary
 impl std::fmt::Display for Summary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let count = |value: Option<u64>| value.map_or_else(|| "-".to_owned(), |v| v.to_string());
+        let rate = |value: Option<u64>| {
+            self.per_minute(value)
+                .map_or_else(|| "-".to_owned(), |rate| format!("{rate:.1}"))
+        };
         let mut stalls = String::new();
         for (swap, msc, time) in &self.stalls {
             let _ = write!(stalls, " {swap}:{}/{}", count(*msc), count(*time));
@@ -377,15 +397,15 @@ impl std::fmt::Display for Summary {
         )?;
         writeln!(
             f,
-            "  refresh {}; missed refreshes {} by msc, {} by time; {} a minute",
+            "  refresh {}; missed refreshes {} by msc ({} a minute), {} by time ({} a minute)",
             self.refresh.map_or_else(
                 || "unknown".to_owned(),
                 |us| format!("{:.3} ms", us / 1000.0)
             ),
             count(self.by_msc),
+            rate(self.by_msc),
             count(self.by_time),
-            self.per_minute()
-                .map_or_else(|| "-".to_owned(), |rate| format!("{rate:.1}"))
+            rate(self.by_time)
         )?;
         write!(
             f,
@@ -400,24 +420,51 @@ impl std::fmt::Display for Summary {
 mod tests {
     use super::*;
 
-    /// A record of `count` swaps a refresh apart, each answered one msc on,
-    /// with a stall of `stall` refreshes more before each swap in `stalled`.
-    fn record(count: u32, stalled: &[u32], stall: u64) -> String {
-        let refresh = 16_667_000;
+    /// The record of a paced client on a server whose msc is a clock of
+    /// `period` nanoseconds: each frame is drawn when the refresh it waited
+    /// for begins, swapped 2 ms later -- `stall` nanoseconds later still
+    /// before each swap in `stalled` -- and answered with the refresh the
+    /// swap fell in; then the client waits for the next one.
+    fn simulate(period: u64, count: u32, stalled: &[u32], stall: u64) -> String {
+        let start = 1_000_000_000_u64;
         let mut text = String::from("framerec 1 pid 7\n");
-        let (mut at, mut msc) = (1_000_000_000_u64, 100_u64);
+        let mut waited = 100_u64;
         for index in 0..count {
+            let mut back = start + waited * period + 2_000_000;
             if stalled.contains(&index) {
-                at += stall * refresh;
-                msc += stall;
-                let _ = writeln!(text, "x {index} 50");
+                back += stall;
+                let _ = writeln!(text, "x {index} {}", stall / 1_000_000);
             }
-            let _ = writeln!(text, "s {index} {} {}", at - 1_000_000, at);
-            let _ = writeln!(text, "c {index} n {} {msc}", at / 1000);
-            at += refresh;
-            msc += 1;
+            let msc = (back - start) / period;
+            let _ = writeln!(text, "s {index} {} {back}", back - 1_000_000);
+            let _ = writeln!(text, "c {index} n {} {msc}", (start + msc * period) / 1000);
+            waited = msc + 1;
         }
         text
+    }
+
+    /// A record at 60 Hz with a stall of `stall` refreshes before each swap
+    /// in `stalled`.
+    fn record(count: u32, stalled: &[u32], stall: u64) -> String {
+        simulate(16_666_667, count, stalled, stall * 16_666_667)
+    }
+
+    /// At 75 Hz a 50 ms stall is 3.75 refreshes: the frame after it shows
+    /// at the fourth, three missed, by msc and by time alike.
+    #[test]
+    fn a_stall_of_a_fraction_of_refreshes_is_not_rounded_up() {
+        let text = simulate(13_334_000, 3000, &[750, 1500, 2250], 50_000_000);
+        let summary = summarise(&Record::parse(text.lines(), ""), None).unwrap();
+        assert_eq!(
+            summary.stalls,
+            vec![
+                (750, Some(3), Some(3)),
+                (1500, Some(3), Some(3)),
+                (2250, Some(3), Some(3))
+            ]
+        );
+        assert_eq!(summary.by_msc, Some(9));
+        assert_eq!(summary.by_time, Some(9));
     }
 
     /// A steady record misses nothing; its frame time is the refresh.
