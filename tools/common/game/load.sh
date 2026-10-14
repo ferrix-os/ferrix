@@ -51,7 +51,7 @@ start)
 		# a cold start under both made no build in 50 s (docs/GAME-PATH.md
 		# §12, 2026-10-14).
 		mkdir -p "$work/warm"
-		"$rustc" --edition 2021 --crate-type lib -C opt-level=2 -C codegen-units=1 \
+		[ "${RIG_WARM:-1}" = 0 ] || "$rustc" --edition 2021 --crate-type lib -C opt-level=2 -C codegen-units=1 \
 			--out-dir "$work/warm" "$crate" || exit 1
 		;;
 	esac

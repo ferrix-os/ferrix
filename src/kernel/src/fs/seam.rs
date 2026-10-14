@@ -104,5 +104,6 @@ pub(crate) fn render() -> Vec<u8> {
         SUBMITTED.load(Ordering::Relaxed),
         COMPLETED.load(Ordering::Relaxed),
     );
+    let _ = writeln!(line, "{}", ferrix_btrfs_vfs::rw::diag_line());
     line.into_bytes()
 }

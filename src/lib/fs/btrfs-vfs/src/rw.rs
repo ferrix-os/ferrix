@@ -133,6 +133,28 @@ use ferrix_vfs::{
 
 use crate::{BTRFS_SUPER_MAGIC, NAME_MAX, SpinLock};
 
+/// Diagnostic counters (not for landing): fills, their wait and hold (ns).
+pub static DIAG: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+
+fn diag_ns(clock: &dyn Clock) -> u64 {
+    let t = clock.now();
+    t.tv_sec
+        .cast_unsigned()
+        .wrapping_mul(1_000_000_000)
+        .wrapping_add(t.tv_nsec.cast_unsigned())
+}
+
+/// The diagnostic line.
+pub fn diag_line() -> alloc::string::String {
+    let v = |i: usize| DIAG[i].load(Ordering::Relaxed);
+    alloc::format!(
+        "rwlock fills {} wait_ms {} hold_ms {}",
+        v(0),
+        v(1) / 1_000_000,
+        v(2) / 1_000_000
+    )
+}
+
 /// Pages a writeback turns into extents at a time: 256, a mebibyte, which
 /// bounds the buffer it copies them through. More would be fewer, larger
 /// extents; a kernel heap of a few megabytes is what says no.
@@ -1010,9 +1032,16 @@ impl<D: WriteHandle> PageSource for Source<D> {
         let page = usize::try_from(PAGE_SIZE).map_err(|_| Errno::EIO)?;
         let mut run = vec![0u8; page.saturating_mul(pages.len())];
         let ino = self.ino;
-        let read = self
-            .shared
-            .with(|volume| volume.read_file(ino, offset, &mut run));
+        let clock = Arc::clone(&self.shared.clock);
+        let t0 = diag_ns(clock.as_ref());
+        let read = self.shared.with(|volume| {
+            let t1 = diag_ns(clock.as_ref());
+            let out = volume.read_file(ino, offset, &mut run);
+            let _ = DIAG[0].fetch_add(1, Ordering::Relaxed);
+            let _ = DIAG[1].fetch_add(t1.saturating_sub(t0), Ordering::Relaxed);
+            let _ = DIAG[2].fetch_add(diag_ns(clock.as_ref()).saturating_sub(t1), Ordering::Relaxed);
+            out
+        });
         match read {
             Ok(_) => {
                 for (target, filled) in pages.iter_mut().zip(run.chunks_exact(page)) {
