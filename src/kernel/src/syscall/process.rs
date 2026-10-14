@@ -175,6 +175,11 @@ pub(crate) struct Process {
     /// The status its first thread left with through `exit`, which is the
     /// process's status when its last thread ends the same way.
     leader_status: AtomicI32,
+    /// Zero, except in a process a boot check armed: then one more than the
+    /// number of its threads that have reached the meet in
+    /// [`Process::thread_gone`], with [`EXIT_MET`] set once a waiting thread
+    /// saw its partner arrive in time. See [`Process::arm_exit_meet`].
+    exit_meet: AtomicU32,
     /// Its threads, each listed before it can run -- and a fork child's before
     /// the child can be found -- so that a signal sent to the process is
     /// judged against the mask of the thread that will take it. Weak, as
@@ -430,6 +435,7 @@ impl Process {
             released: AtomicBool::new(false),
             release_finished: AtomicBool::new(false),
             leader_status: AtomicI32::new(0),
+            exit_meet: AtomicU32::new(0),
             threads: SpinLock::new(Vec::new()),
             parent: SpinLock::new(Weak::new()),
             // A process the kernel starts leads its own group and session.
@@ -841,6 +847,18 @@ impl Process {
 /// the mode it would get on Linux.
 const DEFAULT_UMASK: u32 = 0o022;
 
+/// How long a thread waits at an armed exit meet for the other one
+/// ([`Process::arm_exit_meet`]). Long beside the two threads' spin-meet in
+/// user mode, which puts them a few microseconds apart, and short beside the
+/// check's patience, so that a partner that never comes is reported by the
+/// check and does not hold the boot.
+const EXIT_MEET_PATIENCE_NANOS: u64 = 2_000_000_000;
+
+/// The bit of `Process::exit_meet` a thread waiting at the meet sets when the
+/// other arrived before its patience ran out: two threads that both reached
+/// the meet, one of them after the other had given up, raced nothing.
+const EXIT_MET: u32 = 1 << 31;
+
 impl Process {
     /// The permission bits new files and directories are made without.
     pub(crate) fn umask(&self) -> u32 {
@@ -1050,12 +1068,31 @@ impl Process {
     /// sees no thread live, since each reads what the other writes after
     /// writing its own. A thread that never started ends nothing, so a start
     /// that failed leaves the process to be started again.
+    ///
+    /// The count is read, then written back one lower only if no other thread
+    /// moved it in between, and the thread that wrote it from one is the last.
+    /// Between the read and the write is the meet a boot check arms
+    /// ([`Process::arm_exit_meet`]), which holds two leaving threads there
+    /// until both have read: the window where a decision taken from the read
+    /// alone would see the other thread still live, each of them.
     pub(crate) fn thread_gone(&self, ended: bool) {
-        let before = self
-            .live_threads
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |live| {
-                live.checked_sub(1)
-            });
+        use Ordering::{AcqRel, Acquire};
+        let count = &self.live_threads;
+        let mut met = false;
+        let mut live = count.load(Acquire);
+        let before = loop {
+            if !met {
+                met = true;
+                self.exit_meet();
+            }
+            let Some(next) = live.checked_sub(1) else {
+                break Err(live);
+            };
+            match count.compare_exchange(live, next, AcqRel, Acquire) {
+                Ok(_) => break Ok(live),
+                Err(now) => live = now,
+            }
+        };
         self.thread_left.wake_all();
         // A thread that leaves a frozen cgroup's process may have been the
         // last one the cgroup waited for.
@@ -1070,8 +1107,45 @@ impl Process {
         } else if ended {
             // With the status its first thread left with. `end` finds no
             // thread live and releases.
-            let _ = self.end(self.leader_status.load(Ordering::Acquire), 0);
+            let _ = self.end(self.leader_status.load(Acquire), 0);
         }
+    }
+
+    /// Arm the meet in [`Process::thread_gone`], for a boot check that makes
+    /// two of its threads leave at once: each leaving thread waits there, after
+    /// it has read the live count and before it writes it, until two have
+    /// arrived or [`EXIT_MEET_PATIENCE_NANOS`] has passed. Before the process
+    /// starts; a process never armed never waits.
+    pub(crate) fn arm_exit_meet(&self) {
+        self.exit_meet.store(1, Ordering::Release);
+    }
+
+    /// How many of its threads reached the armed meet, and whether two were
+    /// there at once: for the check, which is only a race when they were.
+    pub(crate) fn exit_meet_arrivals(&self) -> (u32, bool) {
+        let meet = self.exit_meet.load(Ordering::Acquire);
+        ((meet & !EXIT_MET).saturating_sub(1), meet & EXIT_MET != 0)
+    }
+
+    /// [`Process::arm_exit_meet`]'s wait. One load and nothing more in a
+    /// process that was not armed.
+    fn exit_meet(&self) {
+        if self.exit_meet.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        // The second to arrive finds the first waiting, or given up, and goes
+        // on; only the first waits, and only it can say they met in time.
+        if self.exit_meet.fetch_add(1, Ordering::AcqRel) & !EXIT_MET >= 2 {
+            return;
+        }
+        let deadline = crate::timer::now_nanos().saturating_add(EXIT_MEET_PATIENCE_NANOS);
+        while self.exit_meet.load(Ordering::Acquire) & !EXIT_MET < 3 {
+            if crate::timer::now_nanos() >= deadline {
+                return;
+            }
+            core::hint::spin_loop();
+        }
+        let _ = self.exit_meet.fetch_or(EXIT_MET, Ordering::AcqRel);
     }
 
     /// End it with `status`, unless something already has. Answers whether
