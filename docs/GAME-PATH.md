@@ -1298,3 +1298,29 @@ no build in 50 s on Ferrix (`/proc/meminfo` counts no page cache, and the
 holder takes what is free), so `load.sh` builds once alone first; and the
 load runs as root on Ferrix's gate, whose initramfs has no ordinary user,
 and as the image's user `ferrix` on Linux.
+
+2026-10-14: R1 and R3 meet at the launch timer. `framerec.c` implements
+the protocol `rig launch` defines: with `RIG_LAUNCH_FD` naming an open
+pipe it takes `CLOCK_MONOTONIC` in a constructor and when the first swap
+returns, writes `ctor <ns> swap <ns>` and closes the pipe; without it, or
+when the number is no pipe, it writes nothing (the library still asks only
+for `GLIBC_2.2.5`). `test-frames` starts each framegl run with `rig
+launch`, so M6 on Ferrix is framegl under the real recorder, through
+yserver on hyprix, with llvmpipe, from yserver's volume: cold is the first
+run after the boot, warm the second. Gate `rf-frames` (KVM, commit
+`7fa46130`):
+
+| | Constructor | First swap returned |
+|---|---|---|
+| Cold (first launch after the boot) | +2.56 ms | +395.6 ms |
+| Warm | +2.28 ms | +67.6 ms |
+
+The constructor is the exec, the loader and glibc; the rest is the X
+connection, GLX on llvmpipe and the first frame, so cold is mostly the
+volume's libraries read for the first time. The control, the library
+without its report (`rf-frames-ctl2`), fails the gate: the plain run
+printed no `launch:` line with a first swap. `test-game-rig` keeps its
+stand-in (+1.7 and +101.8 ms, `rf-rig`): its boot is the console's, with
+no X server and no Mesa on the rustc volume. `measure.sh` times a real
+program where a guest names one in `RIG_GAME`; the Linux guest's M6 is not
+taken yet, and with it whether Ferrix is within §2.3's 10%.

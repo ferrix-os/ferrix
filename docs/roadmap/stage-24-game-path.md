@@ -121,6 +121,14 @@ undercounts on the Linux baseline, and the summariser's count by time,
 anchored at the server's refresh, is the one to compare. The details and
 what is open are in the design's §12.
 
+**R1 and R3, 2026-10-14: the launch timer on the real recorder.**
+`framerec.c` answers R3's `rig launch` (`ctor <ns> swap <ns>` on
+`RIG_LAUNCH_FD`), and `test-frames` starts both framegl runs with it: M6 on
+Ferrix, framegl through yserver on hyprix with llvmpipe, is +395.6 ms to
+the first swap cold and +67.6 ms warm (constructor +2.6 and +2.3 ms; gate
+`rf-frames`). `test-game-rig`'s console boot has no X server and keeps the
+stand-in. The Linux guest's M6 is still to be taken.
+
 **yserver's clock kept to one refresh, 2026-10-15.** At pin 2966c377 the
 clock took hyprix's frame callbacks for its mscs, and they came after each
 msc by yserver's readback and hand-over: an msc lasted 12.2 to 19.4 ms
