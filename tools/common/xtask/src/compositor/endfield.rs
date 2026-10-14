@@ -150,7 +150,10 @@ const MEMORY: u32 = 8192;
 const SCRIPT: &str = r#"export PATH=/bin:/data/usr/bin HOME=/tmp/wine XDG_RUNTIME_DIR=/tmp
 export WINEPREFIX=/tmp/wine/prefix
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
-echo "endfield: start"
+# fsync, as Proton's own script turns it on; Debian's Wine has none and
+# ignores it (docs/WINE.md §11).
+export WINEFSYNC=@FSYNC@
+echo "endfield: start, WINEFSYNC=$WINEFSYNC"
 waited=0
 while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do
     sleep 1
@@ -191,7 +194,27 @@ echo "endfield: the launcher's window was viewable after ${waited}s"
 xwininfo -name "GRYPHLINK" 2>&1 | grep -E "Width|Height|Map State" | sed 's/^/endfield: launcher: /'
 /bin/hyprctl clients | sed 's/^/endfield: clients: /'
 echo "endfield: window"
-sleep 240
+# Processor time, in 10 ms ticks, of wineserver and of the Windows
+# programs, summed over /proc, across the last two minutes of the wait.
+sample() {
+    server=0
+    programs=0
+    for d in /proc/[0-9]*; do
+        c=$(tr '\0' ' ' < $d/cmdline 2>/dev/null)
+        t=$(awk '{ print $14 + $15 }' $d/stat 2>/dev/null)
+        case "$c" in
+            *wineserver*) server=$((server + ${t:-0})) ;;
+            *.exe*|*.EXE*) programs=$((programs + ${t:-0})) ;;
+        esac
+    done
+    echo "$server $programs"
+}
+sleep 120
+first=$(sample)
+sleep 120
+second=$(sample)
+echo "endfield: cpu over 120s: wineserver $(( ${second% *} - ${first% *} )) ticks, Windows programs $(( ${second#* } - ${first#* } )) ticks, WINEFSYNC=$WINEFSYNC"
+grep -h 'fsync: up and running' /tmp/wine/*.log 2>/dev/null | head -n 1 | sed 's/^/endfield: server: /'
 logs=$(echo /tmp/wine/prefix/drive_c/users/*/AppData/LocalLow/Gryphline/*/logs)
 cut -c1-400 "$logs/games.log" | sed 's/^/endfield: games.log: /'
 grep -v ':fixme:' /tmp/wine/launcher.log | sort | uniq -c | sort -rn | head -n 40 | cut -c1-300 | sed 's/^/endfield: wine: /'
@@ -227,7 +250,20 @@ fn script(wine: Wine, gryphlink: bool) -> String {
         })
         .filter(|_| gryphlink);
     let body = replaced.unwrap_or_else(|| SCRIPT.to_owned());
-    format!("{}{body}", wine.prelude())
+    format!("{}{body}", wine.prelude()).replace(FSYNC_PLACE, fsync())
+}
+
+/// Where [`SCRIPT`] says whether fsync is on.
+const FSYNC_PLACE: &str = "@FSYNC@";
+
+/// `WINEFSYNC` for the launcher: `1`, as Proton's own script sets it, or `0`
+/// when `FERRIX_WINEFSYNC=0` asks for wineserver's synchronisation alone, to
+/// compare the two (docs/WINE.md §11).
+fn fsync() -> &'static str {
+    match std::env::var("FERRIX_WINEFSYNC").as_deref() {
+        Ok("0") => "0",
+        _ => "1",
+    }
 }
 
 /// The launcher version `fetch-endfield-launcher.sh` pins.
@@ -517,7 +553,22 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
     report_cmd32(arch, &said);
+    report_cpu(arch, &said);
     judge(arch, &said, yellow, &dump)
+}
+
+/// What the script puts before the processor time it measured.
+const CPU: &str = "endfield: cpu over ";
+
+/// Say what processor time wineserver and the Windows programs took over
+/// the last two minutes, with fsync on or off: a figure, not judged.
+fn report_cpu(arch: Arch, said: &[String]) {
+    if let Some(cpu) = said
+        .iter()
+        .find_map(|line| line.split_once(CPU).map(|(_, said)| said.trim()))
+    {
+        println!("  {arch}: processor time over {cpu} (10 ms ticks)");
+    }
 }
 
 /// Say whether the 32-bit `cmd` answered with a Windows version.
@@ -573,6 +624,12 @@ mod tests {
         assert!(!pinned().is_empty());
         assert!(SCRIPT.contains(&format!("xwininfo -name \"{TITLE}\"")));
         assert!(SCRIPT.contains(&format!("sed 's/^/{LOG}/'")));
+        assert!(SCRIPT.contains(&format!("echo \"{CPU}120s")));
+        let launcher = script(Wine::Proton, false);
+        assert!(
+            launcher.contains("export WINEFSYNC=1\n") || launcher.contains("export WINEFSYNC=0\n")
+        );
+        assert!(!launcher.contains(FSYNC_PLACE));
     }
 
     /// The window is found by its title in hyprix's list, and the server's
