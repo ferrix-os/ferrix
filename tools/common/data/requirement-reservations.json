@@ -68,6 +68,13 @@
       "purpose": "Stage 13's memory controller: a program's page tables charged apart from its pages, for memory.stat's pagetables and anon; memory.reclaim's proactive reclaim, EAGAIN when short (docs/CGROUPS.md section 10)"
     },
     {
+      "ids": ["L.object.188-189"],
+      "owner": "mm-pcache",
+      "branch": "mm-pcache",
+      "date": "2026-10-14",
+      "purpose": "Reclaim of a writable mount's clean pages (reclaim_clean: never a dirty page or one a write, truncation or writeback holds still), and the page cache's totals for /proc/meminfo's Cached, Shmem, Dirty and MemAvailable (stage 24 R3's Cached: 0; Endfield's ENOSPC, docs/WINE.md §10)"
+    },
+    {
       "ids": ["L.object.184-187"],
       "owner": "s13f-cpuio",
       "branch": "s13f/cpuio",
