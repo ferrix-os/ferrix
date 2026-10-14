@@ -9,8 +9,8 @@
  * (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as
  * root. Time namespaces answer as a Linux built without them does. Seccomp's
  * classic-BPF checker and interpreter, its hook at the four system-call
- * entries and its filters are built (S1 to S3, docs/SECCOMP.md);
- * SECCOMP_RET_TRAP and TSYNC are not.
+ * entries, its filters, SECCOMP_RET_TRAP and TSYNC are built (S1 to S5,
+ * docs/SECCOMP.md), and test-seccomp runs a guest program on four ABIs (S6).
  */
 package FerrixIsolation {
     private import ScalarValues::*;
@@ -89,9 +89,10 @@ package FerrixIsolation {
         doc /* Classic BPF filters evaluated on syscall entry. The interpreter
              * is a pure function over bytes in src/lib/, fuzzable and Miri-able.
              * Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per
-             * thread, the actions but SECCOMP_RET_TRAP, and the hook at all
-             * four entries; the fast path's quiet predicate reads a live count
-             * of filtered threads. */
+             * thread, every action but TRACE and USER_NOTIF (ENOSYS), TSYNC
+             * under the thread-list lock, and the hook at all four entries;
+             * the fast path's quiet predicate reads a live count of filtered
+             * threads. */
         part interpreter : ClassicBpfInterpreter;
         action installFilter;
         action evaluate;
