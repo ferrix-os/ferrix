@@ -239,7 +239,17 @@ fn script(wine: Wine, gryphlink: bool) -> String {
         })
         .filter(|_| gryphlink);
     let body = replaced.unwrap_or_else(|| SCRIPT.to_owned());
-    let script = format!("{}{body}", wine.prelude());
+    // SCRATCH: with FERRIX_ENDFIELD_KEEP the whole of /tmp/wine -- HOME, the
+    // prefix with the launcher's AppData and registry -- lives on the kept
+    // volume, so a later boot's launcher still knows its download task and
+    // resumes it; on tmpfs a new boot's launcher finds no current download
+    // path and clears the task's parts (ClearAllTasks).
+    let keep = if std::env::var_os("FERRIX_ENDFIELD_KEEP").is_some() {
+        "mkdir -p /data/wine && ln -sfn /data/wine /tmp/wine\necho \"endfield: /tmp/wine is /data/wine (kept)\"\n"
+    } else {
+        ""
+    };
+    let script = format!("{keep}{}{body}", wine.prelude());
     if parity().is_none() {
         return script;
     }
