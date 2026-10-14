@@ -261,7 +261,14 @@ and the workspace no arithmetic lint, so "every length is checked
 arithmetic" rests on care rather than on a gate (`L.btrfs.23`, F-56, the
 crates' missing evidence; `FINDINGS.md`). What it does not vouch for is that the
 load calls it correctly: the VFS's locking, its caching of what btrfs returned,
-and the Linux calls that reach it.
+and the Linux calls that reach it. Since 2026-10-15 the core's reclaim takes a
+writable mount's clean pages on the glue's word (`PageSource::reclaim_clean`,
+`L.object.188`): the item relies on that answer for the file's data -- that no
+page written and not written back is handed over -- and for nothing else. A
+frame's lifetime does not rest on it: a write commits and copies under the
+object's pages lock (`Vmo::commit_and_write`, `L.object.190`), and the take
+refuses an object a shared mapping that may write has been made of, under the
+same lock, whatever the glue answered.
 
 The boundary gate holds the crates at their manifests: an item crate may
 depend only on item and core crates or on an allowlisted piece of `no_std`

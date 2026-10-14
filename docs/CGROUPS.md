@@ -574,10 +574,15 @@ out of every mapping, a shootdown, then the frame and its charge).
   are proportional, these are whole-or-nothing).
 * **What may be dropped.** A file's source says whether its pages can be read
   again as they were (`PageSource::reclaimable`). A read-only btrfs mount
-  does. A writable one does not yet: its dirty pages are in its inodes and
-  not in the object, and a page taken between a write's copy and its dirty
-  mark would lose the write. An object a shared mapping may write through
-  does not either.
+  does. A writable one does since 2026-10-15, page by page
+  (`PageSource::reclaim_clean`): the pages written back and not written
+  since, and none a write is copying into, a truncation cutting or a
+  writeback reading, which the mount holds still (a page taken between a
+  write's copy and its dirty mark would lose the write). An object a shared
+  mapping may write through does not, and the take looks at that again under
+  the object's pages lock, since such a mapping can be made after the
+  source's answer and marks no page dirty. A write's page commit that finds
+  no frame reclaims as a fill does before it answers `ENOSPC` (WINE.md §10).
 * **When.** A fault that finds `memory.max` full reclaims in the job before it
   asks for the kill of §6 (`object::oom`); a page-cache fill that finds it
   full does, and with room for part of a run fills that part; with no limit

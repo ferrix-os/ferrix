@@ -405,10 +405,13 @@ pub(crate) static CHECK_HOOK_LEFT_ARMED: Explanation = Explanation {
               record a domain between a leave's scan and its grace period \
               (`arch::speculation::leaving_domain`, the certification finding F-60), and the \
               wake row's check needs `sched::work::notify` to say when a poster is between \
-              its post and its wake. Each does that through a hook only stage 9 arms, which \
-              records the check that armed it and which stage 9 disarms before init starts \
+              its post and its wake; stage 12's write check makes and writes a shared \
+              mapping between a reclaim's source answer and its take (`user::vmo`'s reclaim \
+              hook, armed only by stage 12). Each does that through a hook only its stage \
+              arms, which records the check that armed it and which that stage disarms \
+              before init starts \
               (`docs/OPAQUE-KERNEL.md` §9.7's rules for such a hook). A hook left armed would \
-              run that check's code in every later leave or wake, on a machine running \
+              run that check's code in every later leave, wake or reclaim, on a machine running \
               programs. So boot stops before the success marker, naming the check and the \
               hook, if one still is.",
     causes: &[
@@ -418,7 +421,8 @@ pub(crate) static CHECK_HOOK_LEFT_ARMED: Explanation = Explanation {
     ],
     see: "src/kernel/src/arch/speculation.rs CheckHook; src/kernel/src/object/domain_check.rs; \
           src/kernel/src/main.rs; docs/OPAQUE-KERNEL.md §9.7; \
-          src/kernel/src/sched/work.rs hook_armed_by",
+          src/kernel/src/sched/work.rs hook_armed_by; src/kernel/src/user/vmo.rs \
+          ReclaimHook; src/kernel/src/fs/btrfs_write_check.rs",
 };
 
 /// For `kmain` in `main.rs`, when `self_check` fails.

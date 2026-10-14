@@ -217,9 +217,12 @@ frames always took: clean cache reclaimed first, then the fault fails
   handled: a page-cache fill (`fs/pages.rs`, `allocate_reclaiming`), made
   by whichever task reads the file, kernel tasks at boot included,
   reclaims clean cache machine-wide and tries again before it fails, and
-  its failure is the read's error; a memory filesystem's write
-  (`fs/pages.rs`, `Vmo::commit`) answers `ENOSPC`, as Linux's tmpfs does
-  when it is full; `Vmo::commit_run` behind `PIN_CONTIGUOUS`
+  its failure is the read's error; a file's write (`fs/pages.rs`,
+  `write_reclaiming` over `Vmo::commit_and_write`, since 2026-10-15)
+  reclaims the same way, in the job whose `memory.max` refused it or
+  machine-wide, at most 8 times while a reclaim gives pages back, and then
+  answers `ENOSPC`, as Linux's tmpfs does when it is full -- a memory
+  filesystem's write finds nothing to reclaim and answers it at once; `Vmo::commit_run` behind `PIN_CONTIGUOUS`
   (`syscall/native.rs`) is a ring-3 driver's request and answers
   `NO_MEMORY`. Faults, copy-on-write and a fork's copies (`user/space.rs`,
   `user/vmo.rs`) are a program's own demand. `quota::charging_nobody`
@@ -1124,6 +1127,31 @@ after the lock is let go; and, since 2026-10-12, `unlist`, which a reap
 runs once for the reaped process, clearing the `listed` flag of every
 entry naming it and allocating nothing (`L.object.181`). Nothing is
 waited for or locked under it.
+
+### 2.2n Reclaim of a writable mount and the cache totals (2026-10-15)
+
+Bounds of the locks the writable mount's reclaim adds (`L.object.188-190`):
+
+* `Vmo::commit_and_write` and `Vmo::zero_from` hold an object's pages lock
+  for one lookup, at most one frame allocation and zeroing, and one copy of
+  at most a page; `Vmo::take_clean_range` adds two atomic loads to
+  `take_range` under the same lock.
+* `user::vmo`'s `RECLAIM_HOOK` is a leaf spin lock, held to copy one
+  `Option` out, once per object chunk a reclaim takes, never while the hook
+  runs. Only stage 12's check arms it, and the boot stops (FX-0908) if it is
+  still armed after.
+* The btrfs glue's `Source::reclaim_clean` (load) runs a `retain` over the
+  pages picked (at most `CHUNK`) with `Still::holds`, a linear scan of the
+  file's busy ranges, under its `dirty` and then `still` spin locks: O(picked
+  x writers of that file at once), each step bounded. It calls the take with
+  neither held.
+* `user::cache::totals` takes each live cached object's pages lock once, for
+  its page count: O(objects) per read of `/proc/meminfo`, nothing allocated
+  but the list of live objects.
+* `Shared::give_way` and `Node::hold_still` (load) wait with no lock held:
+  parked on the mount's `Parking` when it has one, and spinning without one
+  (no memory for it at mount), which then needs the waiting task to be
+  preempted in task context for the writeback or reclaim it waits for to run.
 
 ### 2.3 What is missing, per standard
 

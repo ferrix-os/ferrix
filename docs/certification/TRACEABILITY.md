@@ -15,15 +15,15 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 131 | 80 | 51 |
-| Low (`L.*`) | 891 | 627 | 264 |
+| Low (`L.*`) | 894 | 630 | 264 |
 
-1872 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1884 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1874 |
-| Accessors, covered by the requirement they serve | 910 |
-| Check code in a product file | 80 |
+| Named by a low-level requirement | 1886 |
+| Accessors, covered by the requirement they serve | 914 |
+| Check code in a product file | 81 |
 | Named by none | 897 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
@@ -112,6 +112,7 @@ Functions that are checks, or serve only checks, and live in a product file, so 
 | `sched::trip::store` | Writes a stamp slot; reached only from stamp points while the trace is armed. |
 | `smp::next_job` | The work run_everywhere handed out that a secondary has not done yet. Only stage 4's checks hand work out (smp/check.rs); secondary_main, product code, calls this in its wait loop until the scheduler takes the processor over, so it stays beside that loop and the JOB state both read. |
 | `smp::run_everywhere` | Runs a function on every online processor at once and waits for each: how stage 4's checks run on every processor, and nothing else calls it. It writes the JOB state secondary_main's product loop reads through next_job, so moving it into smp/check.rs would leave the product loop reading a check file's state. |
+| `user::vmo::run_reclaim_hook` | Runs the hook only stage 12's reclaim check arms (fs/btrfs_write_check/reclaim_check.rs, reclaim_beside_a_mapping, L.object.188) between a reclaim's source answer and its take; nothing when disarmed, and main.rs's require_hooks_disarmed stops the boot (FX-0908) if it is still armed after stage 12. Called from Vmo::reclaim_clean, so it stays beside it. |
 | `vmap::check_failed_device_map` | A check, called from mm/check.rs's check_vmap, that a device mapping failing part way leaves nothing mapped. It uses vmap.rs's private reserve, release and map_reserved; moved into a check file it verifies L.mm.52. |
 | `vmap::check_invariants` | The arena's consistency check, called from mm/check.rs's check_vmap; it reads the private ARENA. Moved into a check file it verifies L.mm.53. |
 
@@ -554,6 +555,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.110` | job_ended shall be true for a quota slot from the moment its job goes, though a task still holds the slot, and false again once the slot is claimed anew, so that state kept per slot is not started for a job that has gone. | A task of a cgroup that was removed under it reads the disk, and the quota slots in use are back to what they were before the cgroup. | H.QUOTA.4 | `object::quota::job_ended`, `object::quota::on_job_release` | `src/kernel/src/fs/cgroupfs/io_check.rs::after_its_job_went` | not built | not built | not built |
 | `L.object.111` | resident shall count the pages of cached files charged to a job and the jobs beneath it, apart from those of memory filesystems, for memory.stat's file and shmem. | memory.stat's file equals the cache that memory.current holds, and its shmem the memory filesystem's. | H.QUOTA.12 | `user::cache::resident` | `src/kernel/src/fs/cgroupfs/reclaim_check.rs::high` | not built | not built | not built |
 | `L.object.112` | A page of a disk file that was filled before a private mapping's fault took its lock and was reclaimed since shall not be copied or read as zeros: copy_or_zero shall hand the frame back and ask for the fault to be made again, and read_present shall answer that the page is absent. | A page reclaim took reads back as the source has it, never as zeros, through a read and through a fault. | H.QUOTA.12 | `user::space::copy_or_zero`, `user::vmo::Vmo::read_present` | `src/kernel/src/fs/cgroupfs/reclaim_check.rs::high` | not built | not built | not built |
+| `L.object.188` | reclaim shall give back a page of a disk file only through reclaim_clean: only the pages the file's source hands it, only while the object is reclaimable at the take -- no shared mapping that may write the file made since its owner last took its writes, looked at under the pages lock the take is made under -- and a page written and not yet written back shall stay and read back as last written. | On a writable btrfs mount a file synced and then written again in one page loses its clean pages to a reclaim of the whole cache, keeps the written one, and reads back as it was last written, every page; a shared mapping that may write, made and written between the source's answer and the take, keeps every page of its file, and its write reads back (the `reclaim` line of test-btrfs). | H.QUOTA.12 | `user::cache::take_from`, `user::vmo::Vmo::reclaim_clean`, `user::vmo::reclaim_clean`, `user::vmo::Vmo::decommit_clean_range`, `user::vmo::Vmo::take_clean_range`, `user::vmo::Vmo::take_range_if`, `user::vmo::Vmo::unwritten_by_mappings` | `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::reclaim_written`, `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::reclaim_beside_a_mapping` | not built | not built | not built |
+| `L.object.189` | totals shall count every live cached file's pages, whoever they are charged to: a disk file's, a memory filesystem's, of the first those written and not yet written back, and those reclaim may take now -- a reclaimable object's pages less its dirty ones -- each from the object's own count of its pages, for /proc/meminfo's Cached (both kinds), Shmem (a memory filesystem's), Dirty and MemAvailable (free and what reclaim may take). | A file written on a writable mount and synced is in Cached and in MemAvailable; a page of it written again and not synced is in Dirty and not in MemAvailable; a tmpfs file's pages are in Cached and Shmem; and reclaim leaves Dirty as it was (the `reclaim` line of test-btrfs). | H.QUOTA.12 | `user::cache::totals`, `user::vmo::Vmo::dirty_pages`, `user::vmo::Vmo::committed`, `user::cache::Totals::cached`, `user::cache::Totals::available` | `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::reclaim_written` | not built | not built | not built |
+| `L.object.190` | A write's page commit into a file's page cache refused for want of a frame shall reclaim clean cache, as a fill's does -- inside the job whose memory limit refused it, or anywhere when the machine is out -- and try again while a reclaim gives pages back, at most eight times, before it answers ENOSPC; the commit and the copy shall be made under one hold of the object's pages lock. | A write of 16 pages on a writable btrfs mount, in a job at its memory.max that holds 32 pages of clean cache of that mount, succeeds, the job's limit having refused a charge and its reclaim having given pages back, and both files read back as written (the `reclaim` line of test-btrfs). | H.QUOTA.12 | `user::vmo::Vmo::commit_and_write`, `user::vmo::Vmo::zero_from` | `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::write_reclaims_at_max` | not built | not built | not built |
 
 ### SpeculationDomains
 
@@ -1775,6 +1779,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/device/config_check.rs::reads` | kernel | L.device.25 |
 | `src/kernel/src/device/config_check.rs::spanning` | kernel | L.device.25 |
 | `src/kernel/src/device/config_check.rs::writable` | kernel | L.device.25, L.device.26 |
+| `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::reclaim_beside_a_mapping` | kernel | L.object.188 |
+| `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::reclaim_written` | kernel | L.object.188, L.object.189 |
+| `src/kernel/src/fs/btrfs_write_check/reclaim_check.rs::write_reclaims_at_max` | kernel | L.object.190 |
 | `src/kernel/src/fs/cgroupfs/controllers_check.rs::check_the_files` | kernel | L.object.52, L.object.61 |
 | `src/kernel/src/fs/cgroupfs/cpu_check.rs::killed_throttled` | kernel | L.sched.3, H.QUOTA.10 |
 | `src/kernel/src/fs/cgroupfs/cpu_check.rs::pending` | kernel | L.object.180 |

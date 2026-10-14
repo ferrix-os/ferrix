@@ -184,17 +184,40 @@ pub(crate) trait Filler: Send + Sync + fmt::Debug {
     /// As [`Filler::fill`].
     fn fill_one(&self, vmo: &Vmo, index: u64) -> Result<(), ferrix_vfs::Errno>;
 
-    /// Whether every page this object holds can be dropped and filled again
-    /// from the source, as it is: the file has no newer copy in memory. False
-    /// unless a source says so (`user::cache`).
+    /// Whether pages this object holds may be dropped and filled again from
+    /// the source, as they are: every page, for a read-only file; the clean
+    /// ones, for a writable file, which [`Filler::reclaim_clean`] names.
+    /// False unless a source says so (`user::cache`).
     fn reclaimable(&self) -> bool {
         false
+    }
+
+    /// Keep in `pages` those the source holds as the object does, and call
+    /// `drop` with them while the file holds them still: no write copies into
+    /// one and no writeback reads one until `drop` returns. What `drop` gave
+    /// back. The default, for a source whose every page is clean whenever
+    /// [`Filler::reclaimable`] says so, drops them all; never with none.
+    ///
+    /// Called with no spin lock held, as `drop`, which is
+    /// [`Vmo::decommit_range`]'s caller, must be.
+    fn reclaim_clean(&self, pages: &mut Vec<u64>, drop: &mut dyn FnMut(&[u64]) -> u64) -> u64 {
+        if self.reclaimable() && !pages.is_empty() {
+            drop(pages)
+        } else {
+            0
+        }
     }
 
     /// Whether page `index`, if the object lacks it, is the source's to
     /// fill: it is not a hole the file was cut to, which reads as zeros.
     fn is_sourced(&self, _index: u64) -> bool {
         false
+    }
+
+    /// How many of the object's pages the file has written and not yet
+    /// written back, for `/proc/meminfo`'s `Dirty`. None by default.
+    fn dirty_pages(&self) -> u64 {
+        0
     }
 }
 
@@ -486,6 +509,60 @@ impl Vmo {
             .is_some_and(|filler| filler.reclaimable())
             && !self.writably_mapped()
             && !self.mapped_written.load(Ordering::SeqCst)
+    }
+
+    /// How many of this object's pages its file has written and not yet
+    /// written back ([`Filler::dirty_pages`]); none for an object that is not
+    /// a disk file's.
+    pub(crate) fn dirty_pages(&self) -> u64 {
+        self.filler
+            .as_ref()
+            .map_or(0, |filler| filler.dirty_pages())
+    }
+
+    /// Give back those of `picked` (page indices, lowest first) the source
+    /// still holds clean, as [`Filler::reclaim_clean`] says, each run of them
+    /// by [`Vmo::decommit_clean_range`] while the source holds them still.
+    /// How many pages went; none for an object that is not
+    /// [`Vmo::reclaimable`] now.
+    ///
+    /// The look at [`Vmo::reclaimable`] here is only the early way out. A
+    /// shared mapping that may write can be made after it and after the
+    /// source's answer, fault a picked page in and write it, and such a write
+    /// marks no page dirty; so the take itself looks again, under the pages
+    /// lock ([`Vmo::take_clean_range`]), and takes nothing if one was.
+    ///
+    /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
+    pub(crate) fn reclaim_clean(&self, picked: &mut Vec<u64>) -> u64 {
+        if !self.reclaimable() {
+            return 0;
+        }
+        let Some(filler) = self.filler.as_ref() else {
+            return 0;
+        };
+        filler.reclaim_clean(picked, &mut |clean| {
+            // Between the source's answer and the take: where stage 12's
+            // check makes and writes a shared mapping (`reclaim_hook`).
+            run_reclaim_hook(self);
+            let mut stolen = 0_u64;
+            let mut runs = clean.iter().copied().peekable();
+            while let Some(first) = runs.next() {
+                let mut length = 1;
+                while runs.next_if_eq(&(first + length)).is_some() {
+                    length += 1;
+                }
+                stolen += self.decommit_clean_range(first, length) as u64;
+            }
+            stolen
+        })
+    }
+
+    /// Whether no shared mapping that may write has been made since the
+    /// file's owner last took its writes: what a page reclaim takes must not
+    /// have been written through one. Read under the pages lock by
+    /// [`Vmo::take_clean_range`].
+    fn unwritten_by_mappings(&self) -> bool {
+        !self.writably_mapped() && !self.mapped_written.load(Ordering::SeqCst)
     }
 
     /// Note, in `out`, the index of each committed page from `from` whose
@@ -1058,6 +1135,71 @@ impl Vmo {
         Ok(())
     }
 
+    /// Copy `data` into page `index`, starting `offset` into it, committing
+    /// the page (zeroed) first if the object lacks it: commit and copy under
+    /// one hold of the object's lock, as [`Vmo::read_present`] reads. What a
+    /// file's write does.
+    ///
+    /// Under the lock because reclaim may take a writable file's clean pages:
+    /// a frame committed and then written with the lock let go could be given
+    /// back in between and handed to another job, and the write would land
+    /// in it. The lock is what keeps the frame this object's for the copy,
+    /// whatever the filesystem holds still (`docs/certification/ITEM.md`: it
+    /// holds pages still for the file's integrity, not for the frame's).
+    ///
+    /// Unlike [`Vmo::write_page`], a frame another holder shares is written
+    /// in place, not copied: a file's page is shared with the mappings of the
+    /// file, which must see the write.
+    ///
+    /// # Errors
+    ///
+    /// [`VmoError::OutOfRange`] past the end of the object or of the page,
+    /// and [`VmoError::OutOfMemory`] when there is no frame for an absent
+    /// page, or no room to record it.
+    pub(crate) fn commit_and_write(
+        &self,
+        index: u64,
+        offset: usize,
+        data: &[u8],
+    ) -> Result<(), VmoError> {
+        self.check_span(index, offset, data.len())?;
+        let mut pages = self.pages.lock();
+        let frame = match pages.frames.get(&index) {
+            Some(&frame) => frame,
+            None => {
+                let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
+                let frame = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
+                mm::zero_frame(frame);
+                let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
+                frame
+            }
+        };
+        let at = mm::direct_map(frame * PAGE_SIZE) as usize + offset;
+        // SAFETY: (FRAME) the object holds a reference on `frame` while its
+        // lock is held, and the lock is held across the copy; `check_span`
+        // kept the write inside the page; the direct map is writable for all
+        // of RAM, and `data` is kernel memory the page cannot overlap.
+        unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), at as *mut u8, data.len()) };
+        Ok(())
+    }
+
+    /// Zero page `index` from byte `from` to its end, if the object holds
+    /// it, under the object's lock: what a truncation does to the page its
+    /// cut falls in. A page the object lacks is left absent.
+    pub(crate) fn zero_from(&self, index: u64, from: usize) -> Result<(), VmoError> {
+        let len = (PAGE_SIZE as usize).saturating_sub(from);
+        self.check_span(index, from, len)?;
+        let pages = self.pages.lock();
+        if let Some(&frame) = pages.frames.get(&index) {
+            let at = mm::direct_map(frame * PAGE_SIZE) as usize + from;
+            // SAFETY: (FRAME) as in `commit_and_write`: the frame is the
+            // object's while its lock is held, and `check_span` kept the
+            // range inside the page.
+            unsafe { core::ptr::write_bytes(at as *mut u8, 0, len) };
+        }
+        Ok(())
+    }
+
     /// Refuse a byte range that leaves page `index` or the object.
     fn check_span(&self, index: u64, offset: usize, len: usize) -> Result<(), VmoError> {
         let end = offset.checked_add(len);
@@ -1138,20 +1280,45 @@ impl Vmo {
                 self.retire(retired, None);
                 given
             }
-            Err(AllocError) => self.decommit_in_chunks(first, first.saturating_add(pages)),
+            Err(AllocError) => self.decommit_in_chunks(first, first.saturating_add(pages), false),
+        }
+    }
+
+    /// [`Vmo::decommit_range`] for reclaim: the pages are taken only if no
+    /// shared mapping that may write has been made, looked at under the same
+    /// hold of the pages lock as the take ([`Vmo::take_clean_range`]). How
+    /// many pages went.
+    ///
+    /// Must not be called holding a spin lock.
+    pub(crate) fn decommit_clean_range(&self, first: u64, pages: u64) -> usize {
+        match self.take_clean_range(first, pages) {
+            Ok(retired) => {
+                let given = retired.frames.len();
+                self.retire(retired, None);
+                given
+            }
+            Err(AllocError) => self.decommit_in_chunks(first, first.saturating_add(pages), true),
         }
     }
 
     /// [`Vmo::decommit_range`] over `first..end` with no memory for the list
     /// of what it takes: [`CHUNK`] pages at a time, each chunk through all
     /// three phases before the next is taken. Slower -- a shootdown a chunk
-    /// -- and the same in the end.
-    fn decommit_in_chunks(&self, first: u64, end: u64) -> usize {
+    /// -- and the same in the end. With `clean`, for reclaim, each chunk is
+    /// taken only while [`Vmo::unwritten_by_mappings`] holds, under the lock
+    /// it is taken under.
+    fn decommit_in_chunks(&self, first: u64, end: u64, clean: bool) -> usize {
         let mut given = 0;
         let mut from = Some(first);
         while let Some(start) = from {
             let mut chunk = [(0, 0); CHUNK];
-            let (taken, next) = self.pages.lock().take_into(start, end, &mut chunk);
+            let (taken, next) = {
+                let mut state = self.pages.lock();
+                if clean && !self.unwritten_by_mappings() {
+                    break;
+                }
+                state.take_into(start, end, &mut chunk)
+            };
             let frames = chunk.get(..taken).unwrap_or(&[]);
             given += frames.len();
             let mut runs = [(0, 0); RUNS];
@@ -1256,8 +1423,41 @@ impl Vmo {
     /// nothing is. The list's room is had first, so that a frame once out of
     /// the object is never lost (finding F-23).
     pub(crate) fn take_range(&self, first: u64, pages: u64) -> Result<Retired, AllocError> {
+        self.take_range_if(first, pages, false)
+    }
+
+    /// [`Vmo::take_range`] for reclaim: nothing is taken if a shared mapping
+    /// that may write the file has been made ([`Vmo::unwritten_by_mappings`]),
+    /// looked at under the same hold of the pages lock as the take.
+    ///
+    /// Why under that lock is enough: such a mapping is counted
+    /// ([`Vmo::raise_shared_may_write`]) under its space's lock, before that
+    /// lock is let go and so before any fault through it, and a fault puts a
+    /// page in a space's tables only under this object's pages lock. So a
+    /// look that finds no such mapping is made before any fault through one
+    /// could map a page taken here: a later fault finds the page gone and
+    /// fills it again from the file, as it holds it -- clean, which is why it
+    /// was handed over. A mapping counted before the look takes nothing,
+    /// whether or not it has written yet, since its writes mark no page.
+    ///
+    /// # Errors
+    ///
+    /// As [`Vmo::take_range`].
+    pub(crate) fn take_clean_range(&self, first: u64, pages: u64) -> Result<Retired, AllocError> {
+        self.take_range_if(first, pages, true)
+    }
+
+    /// [`Vmo::take_range`], taking nothing when `clean` and a shared mapping
+    /// that may write has been made.
+    fn take_range_if(&self, first: u64, pages: u64, clean: bool) -> Result<Retired, AllocError> {
         let end = first.saturating_add(pages);
         let mut state = self.pages.lock();
+        if clean && !self.unwritten_by_mappings() {
+            return Ok(Retired {
+                frames: Vec::new(),
+                release: true,
+            });
+        }
         // Held pages are skipped before anything is taken: a held page is
         // never among what the invalidation is told about.
         let count = state
@@ -1933,5 +2133,48 @@ impl Drop for Vmo {
         for frame in self.pages.get_mut().frames.values() {
             let _ = mm::release_frame(*frame);
         }
+    }
+}
+
+/// A check's hook inside the item, at a point no program can aim at, as
+/// `arch::CheckHook` is for stage 9: [`Vmo::reclaim_clean`] calls it with
+/// the object between the source's answer and the take, where stage 12's
+/// check makes and writes a shared mapping (`fs::btrfs_write_check`). Only
+/// that check arms it, it disarms it before it returns, and the boot stops
+/// (FX-0908) if it is still armed after.
+#[derive(Debug)]
+pub(crate) struct ReclaimHook {
+    /// The check that armed it, for the boot check's message.
+    pub(crate) armed_by: &'static str,
+    /// What it does there.
+    pub(crate) run: fn(&Vmo),
+}
+
+/// The hook [`Vmo::reclaim_clean`] calls, if a check armed one: a leaf lock,
+/// held to copy the `Option` out and never while the hook runs, once a
+/// reclaim of one object's chunk.
+static RECLAIM_HOOK: SpinLock<Option<&'static ReclaimHook>> = SpinLock::new(None);
+
+/// Arm `hook` in [`Vmo::reclaim_clean`]: stage 12's check only.
+pub(crate) fn arm_reclaim_hook(hook: &'static ReclaimHook) {
+    *RECLAIM_HOOK.lock() = Some(hook);
+}
+
+/// Disarm it.
+pub(crate) fn disarm_reclaim_hook() {
+    *RECLAIM_HOOK.lock() = None;
+}
+
+/// The check that armed the hook, if one still has: for the boot check
+/// before init (`main.rs`'s `require_hooks_disarmed`).
+pub(crate) fn reclaim_hook_armed_by() -> Option<&'static str> {
+    RECLAIM_HOOK.lock().map(|hook| hook.armed_by)
+}
+
+/// Run the hook, if armed, with no lock held.
+fn run_reclaim_hook(vmo: &Vmo) {
+    let hook = *RECLAIM_HOOK.lock();
+    if let Some(hook) = hook {
+        (hook.run)(vmo);
     }
 }
