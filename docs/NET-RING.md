@@ -90,15 +90,16 @@ virtio-net driver stopped on a "corrupt" ring about every 35 minutes.
 
 An emulator runs one store at a time and cannot show a torn read, so the
 kernel's side is shown by its object code. In release kernels built from
-d497b8aec, the aligned path of `Pages::read_u32` and `Pages::write_u32` (each
-kept out of line) is one 32-bit access to the frame: `movl (%rax,%rsi),%eax` and
-`movl %edx,(%rax,%rsi)` on x86-64, `ldr w0,[x8,x9]` and `str w2,[x8,x9]` on
-AArch64, `ldr r0,[r0,r1]` and `str r2,[r0,r1]` on ARMv7-A, each naturally
-aligned and so single-copy atomic. Their 16-bit (`movzwl`/`movw`, `ldrh`/`strh`)
-and byte accesses are the fallback for an unaligned offset only, which the
-netring host test `every_shared_index_is_aligned_to_its_size` keeps out of
-every honest ring (`llvm-objdump -d` of the two symbols; the certification
-consultant's condition 2, ledger line 1141).
+18e60878d (and d497b8aec before it), the aligned path of `Pages::read_u32` and
+`Pages::write_u32` (each kept out of line) is one 32-bit access to the frame:
+`movl (%rax,%rsi),%eax` and `movl %edx,(%rax,%rsi)` on x86-64, `ldr w0,[x8,x9]`
+and `str w2,[x8,x9]` on AArch64, `ldr r0,[r0,r1]` and `str r2,[r0,r1]` on
+ARMv7-A, each naturally aligned and so single-copy atomic. Their 16-bit
+(`movzwl`/`movw`, `ldrh`/`strh`) and byte accesses are the fallback for an
+unaligned offset only, which the netring host test
+`every_shared_index_is_aligned_to_its_size` keeps out of every honest ring
+(`llvm-objdump -d` of the two symbols; the certification consultant's condition
+2, ledger line 1141).
 
 ## 4. The two operations
 
