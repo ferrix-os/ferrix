@@ -140,6 +140,19 @@ fn starts(line: &str, want: &str) -> bool {
     line.contains(want)
 }
 
+/// The commands [`run`] answers: one arm of `main`'s dispatch.
+pub(crate) const COMMANDS: &[&str] = &[
+    "test-threads",
+    "test-sem",
+    "test-shm",
+    "test-pipewait",
+    "test-seccomp",
+    "test-procfs",
+    "test-uvm",
+    "test-nvrm",
+    "test-nvrm-link",
+];
+
 /// `test-sem`, and `test-threads`, `test-shm`, `test-seccomp` and `test-procfs`, the other
 /// musl programs booted as init, and `test-uvm`, `test-nvrm` and
 /// `test-nvrm-link`, booted the
