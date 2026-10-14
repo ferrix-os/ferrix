@@ -39,9 +39,12 @@ start)
 	i=0
 	while [ "$i" -lt "$n" ]; do
 		mkdir -p "$work/c$i"
+		builds=0
 		while [ ! -e "$work/stop" ]; do
 			"$rustc" --edition 2021 --crate-type lib -C opt-level=2 -C codegen-units=1 \
 				--out-dir "$work/c$i" "$crate" || break
+			builds=$((builds + 1))
+			echo "compile: loop $i, $builds builds" >"$work/c$i.count"
 		done >"$work/c$i.log" 2>&1 &
 		echo $! >>"$work/pids"
 		i=$((i + 1))

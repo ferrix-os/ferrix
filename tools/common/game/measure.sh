@@ -28,6 +28,9 @@ echo "measure: loaded, warming up for $warm s"
 sleep "$warm"
 "$rig" busy 10 || exit 5
 "$rig" wake -n 10000 || exit 6
-cat "${RIG_WORK:-/tmp/rig-load}/hold.log" "${RIG_WORK:-/tmp/rig-load}/write.log"
+work=${RIG_WORK:-/tmp/rig-load}
+cat "$work/hold.log" "$work/write.log" "$work"/c*.count
+# A compiler's complaint, if any loop stopped on one.
+cat "$work"/c*.log
 sh "$load" stop
 echo "measure: done"
