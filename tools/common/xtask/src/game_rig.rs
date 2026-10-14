@@ -169,6 +169,23 @@ fn busy(lines: &[String]) -> Option<(u32, f64)> {
     })
 }
 
+/// The launch timer's line: the constructor's and the first swap's time
+/// after the exec, in milliseconds.
+fn launch(lines: &[String]) -> Option<(f64, f64)> {
+    lines.iter().find_map(|line| {
+        let rest = line.trim().strip_prefix("launch: constructor +")?;
+        let (constructor, rest) = rest.split_once(" ms, first swap returned +")?;
+        let swap = rest.strip_suffix(" ms")?;
+        Some((constructor.parse().ok()?, swap.parse().ok()?))
+    })
+}
+
+/// Whether the launch timer saw the stand-in's first swap its 100 ms after
+/// its constructor, give or take what a loaded machine adds.
+fn launch_timed(lines: &[String]) -> bool {
+    launch(lines).is_some_and(|(constructor, swap)| (100.0..150.0).contains(&(swap - constructor)))
+}
+
 /// Whether the clock is the TSC, the script ran to its end, and every
 /// processor was busy under the load; the rig's figures printed either way.
 fn judge(arch: Arch, smp: u32, lines: &[String]) -> Result<()> {
@@ -201,6 +218,11 @@ fn judge(arch: Arch, smp: u32, lines: &[String]) -> Result<()> {
         return Err(Error::new(format!(
             "{arch}: measure.sh did not get to its end (the shell exited with {})",
             exited.unwrap_or("nothing")
+        )));
+    }
+    if !launch_timed(lines) {
+        return Err(Error::new(format!(
+            "{arch}: the launch timer did not see the stand-in's swap 100 ms after its constructor"
         )));
     }
     match busy(lines) {
@@ -244,6 +266,16 @@ mod tests {
     }
 
     #[test]
+    fn the_launch_line_parses() {
+        let seen = lines("launch: constructor +2.728 ms, first swap returned +102.795 ms");
+        assert_eq!(launch(&seen), Some((2.728, 102.795)));
+        assert!(launch_timed(&seen));
+        let early = lines("launch: constructor +2.728 ms, first swap returned +3.0 ms");
+        assert!(!launch_timed(&early));
+        assert!(!launch_timed(&lines("launch: no first swap reported")));
+    }
+
+    #[test]
     fn the_busy_summary_parses() {
         let seen = lines("busy: 8 processors over 10 s, lowest 99.5% (cpu2), mean 99.8%");
         assert_eq!(busy(&seen), Some((8, 99.5)));
@@ -258,6 +290,7 @@ mod tests {
         let seen = lines(
             "  clock    HPET at 100.000 MHz\n\
              busy: 4 processors over 10 s, lowest 100.0% (cpu0), mean 100.0%\n\
+             launch: constructor +2.7 ms, first swap returned +102.8 ms\n\
              init     the shell exited with 16",
         );
         assert!(judge(Arch::X86_64, 4, &seen).is_err());
@@ -268,12 +301,14 @@ mod tests {
         let seen = lines(
             "  clock    TSC, calibrated against the HPET at 4400.000 MHz\n\
              busy: 4 processors over 10 s, lowest 3.0% (cpu3), mean 76.0%\n\
+             launch: constructor +2.7 ms, first swap returned +102.8 ms\n\
              init     the shell exited with 16",
         );
         assert!(judge(Arch::X86_64, 4, &seen).is_err());
         let held = lines(
             "  clock    TSC, calibrated against the HPET at 4400.000 MHz\n\
              busy: 4 processors over 10 s, lowest 99.6% (cpu3), mean 99.9%\n\
+             launch: constructor +2.7 ms, first swap returned +102.8 ms\n\
              init     the shell exited with 16",
         );
         assert!(judge(Arch::X86_64, 4, &held).is_ok());
