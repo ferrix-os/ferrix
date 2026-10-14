@@ -26,14 +26,34 @@ use std::process::Command;
 /// The script the shell runs: `measure.sh`, as the Linux guest runs it,
 /// with the compiler on the volume and the writer's file on its disk.
 const SCRIPT: &str = r#"export PATH=/data/rust/bin:/bin
-export RIG=/bin/rig
-export RIG_RUSTC=/data/rust/bin/rustc
-export RIG_HERE=/usr/share/game
-export RIG_CRATE=/usr/share/game/load-crate.rs
-export RIG_WORK=/tmp/rig-load
-export RIG_DISK=/data
-export RIG_WRITE_MIB=256
-sh /usr/share/game/measure.sh 30 || exit $?
+up() { set -- $(cat /proc/uptime); echo $1; }
+phase() {
+	i=1
+	while [ "$i" -le "$2" ]; do
+		a=$(up)
+		dd if=/tmp/dd-src of=/data/dd-$1-$i.bin bs=1M count=174 2>/dev/null
+		r=$?
+		b=$(up)
+		sync
+		c=$(up)
+		echo "ddsync: $1 run $i dd_rc $r start $a dd_end $b sync_end $c"
+		[ "$3" = keep ] || rm -f /data/dd-$1-$i.bin
+		i=$((i + 1))
+	done
+}
+dd if=/dev/urandom of=/tmp/dd-src bs=1M count=174 2>/dev/null
+grep -E 'MemTotal|MemFree|MemAvailable|^Cached|Dirty' /proc/meminfo
+phase plain 4 drop
+/bin/rig hold 93 >/tmp/hold.log 2>&1 &
+h=$!
+sleep 8
+cat /tmp/hold.log
+grep -E 'MemFree|MemAvailable|^Cached|Dirty' /proc/meminfo
+phase held 5 keep
+grep -E 'MemFree|MemAvailable|^Cached|Dirty' /proc/meminfo
+kill $h
+rm -f /data/dd-held-1.bin /data/dd-held-2.bin /data/dd-held-3.bin /data/dd-held-4.bin /data/dd-held-5.bin
+sync
 exit 16
 "#;
 
