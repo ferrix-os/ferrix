@@ -2774,7 +2774,7 @@ fn attach_display(command: &mut Command, arch: Arch, args: &Args, binary: &Path)
         }
     }
     // A mouse, for a boot that moves the pointer by distances as a game's
-    // locked pointer is moved (`test-compositor --boot locked`).
+    // locked pointer is moved (`test-compositor --boot locked`, `--boot lane`).
     if args.mouse {
         let _ = command.args(["-device", &format!("virtio-mouse-pci,{flags}")]);
     }

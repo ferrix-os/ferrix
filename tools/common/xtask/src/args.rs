@@ -389,7 +389,7 @@ pub(crate) struct Args {
     pub(crate) input: bool,
     /// A virtio mouse beside them, whose relative motions QMP's
     /// `input-send-event` drives: the tablet takes only absolute ones. No
-    /// flag sets it: `test-compositor --boot locked` does.
+    /// flag sets it: `test-compositor --boot locked` and `--boot lane` do.
     pub(crate) mouse: bool,
     /// A `qemu-xhci` controller with a hub, a keyboard behind the hub, a
     /// mouse and a memory stick holding this image (`docs/XHCI.md` §7). No

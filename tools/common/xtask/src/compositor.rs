@@ -73,6 +73,7 @@ mod firmware_screen;
 pub(crate) mod frames;
 mod hyprlock;
 mod idle;
+mod lane;
 mod latency;
 mod layout;
 mod locked;
@@ -502,7 +503,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 45] = [
+const BOOTS: [(&str, Boot); 46] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -548,6 +549,7 @@ const BOOTS: [(&str, Boot); 45] = [
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
     ("firmware-screen", firmware_screen::test_firmware_screen),
+    ("lane", lane::test_lane),
 ];
 
 /// The boot that always skips the self-checks, whatever its place: the

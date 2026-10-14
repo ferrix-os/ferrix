@@ -83,6 +83,9 @@ pub struct Slot {
     /// this does not, which is what something kept across frames for one of
     /// its surfaces -- a texture -- has to be kept by.
     serial: u64,
+    /// The input thread's lane, told before each flush which of this
+    /// client's relative pointers are left (`crate::front`).
+    lane: Option<crate::front::LaneHandle>,
 }
 
 impl Slot {
@@ -121,6 +124,7 @@ impl Slot {
             pid: 0,
             gone: false,
             serial: 1,
+            lane: None,
         }
     }
 
@@ -151,6 +155,11 @@ impl Slot {
     /// take yet, so letting go after this is safe even then. Gives whether
     /// the connection is still there.
     pub fn flush(&mut self) -> bool {
+        // A relative pointer the client destroyed leaves the input thread's
+        // lane before the `delete_id` that frees its id is sent.
+        if let Some(lane) = &self.lane {
+            lane.sync(self.serial, self.client.relative_pointers());
+        }
         let outgoing = self.client.take_outgoing();
         let sent = if !outgoing.bytes.is_empty() {
             self.connection.send(&outgoing.bytes, &outgoing.descriptors)
@@ -298,8 +307,15 @@ struct Compositor<'r> {
     method: Option<Method>,
     /// The Wayland socket.
     listener: Listener,
-    /// The input devices: none for a `--headless` compositor.
-    devices: Devices,
+    /// The input devices, read on their own thread: none for a
+    /// `--headless` compositor.
+    devices: crate::front::Front,
+    /// The stamp of the input being carried out, in microseconds of
+    /// `CLOCK_MONOTONIC`; 0 for none. What a relative motion is sent with.
+    stamp: u64,
+    /// The stamps of the pointer motions sent to clients in this pass, whose
+    /// ages are said once they are flushed (`HYPRIX_INPUT_AGES`).
+    aged: Vec<u64>,
     /// What the seat has announced to the clients.
     capabilities: u32,
     /// When `/dev/input` is looked at again: devices found after the first
@@ -610,7 +626,9 @@ impl<'r> Compositor<'r> {
             lock_grace,
             method: None,
             listener,
-            devices,
+            devices: crate::front::Front::new(devices, options.headless.is_none()),
+            stamp: 0,
+            aged: Vec::new(),
             capabilities,
             rescan,
             seat,
@@ -690,6 +708,7 @@ impl<'r> Compositor<'r> {
         for slot in &mut self.slots {
             let _ = slot.flush();
         }
+        self.say_ages();
 
         // What the screen protocols asked for this pass, drained below: a
         // client's own borrow holds the screens and the layout, and each of
@@ -870,6 +889,7 @@ impl<'r> Compositor<'r> {
                         unsized_dialogs: std::collections::BTreeSet::new(),
                         answered: BTreeMap::new(),
                         gone: false,
+                        lane: Some(self.devices.handle()),
                     }),
                     Err(_) => continue,
                 }
@@ -888,7 +908,7 @@ impl<'r> Compositor<'r> {
             &as_reported(
                 &self.config,
                 &self.seat,
-                &self.devices,
+                &self.devices.devices(),
                 &self.placed_layers,
                 &self.plugins,
                 &self.fixed.said,
@@ -986,11 +1006,44 @@ impl<'r> Compositor<'r> {
             &mut self.slots,
             &self.sources,
             now,
+            self.stamp,
             self.fixed.follow_mouse,
             self.carried
                 .as_ref()
                 .is_some_and(crate::dragging::Carried::holding),
         )
+    }
+
+    /// Say how old each pointer motion sent in this pass was when it went,
+    /// and what the input thread said, when `HYPRIX_INPUT_AGES` asks.
+    fn say_ages(&mut self) {
+        for line in self.devices.said() {
+            (self.report)(&line);
+        }
+        if self.aged.is_empty() {
+            return;
+        }
+        let now = crate::front::monotonic_us();
+        for at in std::mem::take(&mut self.aged) {
+            (self.report)(&crate::front::age_line(at, now, "loop"));
+        }
+    }
+
+    /// Where a locked pointer's motion goes, for the input thread: the
+    /// client whose surface under the pointer holds a lock, and its
+    /// relative pointers; none while no lock is in force.
+    fn set_lane(&mut self) {
+        let lane = (self.seat.hold() == crate::seat::Hold::Locked)
+            .then(|| self.focus.pointer_on())
+            .flatten()
+            .and_then(|(client, _)| self.slots.get(client))
+            .filter(|slot| !slot.client().relative_pointers().is_empty())
+            .map(|slot| crate::front::Lane {
+                serial: slot.serial,
+                sender: slot.connection.sender(),
+                pointers: slot.client().relative_pointers().to_vec(),
+            });
+        self.devices.set_lane(lane);
     }
 
     /// Input, before the clients are read: a key that fires a dispatcher
@@ -1018,7 +1071,7 @@ impl<'r> Compositor<'r> {
         // `wl_pointer`, and what the virtual pointer moves reaches nobody --
         // which is every headless compositor's case, whose real devices are
         // none.
-        let wanted = seat_capabilities(&self.devices) | virtual_capabilities(&self.slots);
+        let wanted = seat_capabilities(&self.devices.devices()) | virtual_capabilities(&self.slots);
         if wanted != self.capabilities {
             self.capabilities = wanted;
             for slot in &mut self.slots {
@@ -1026,13 +1079,22 @@ impl<'r> Compositor<'r> {
                     .change_seat_capabilities(self.capabilities);
             }
         }
-        let inputs = match self.ready.as_deref() {
-            Some(fds) => self.devices.read_ready(fds),
-            None => self.devices.read(),
+        // The devices' fds are the loop's only without the input thread;
+        // with it, the pipe it wakes the loop through is, and what it read
+        // is queued whichever woke the wait.
+        let ready = if self.devices.threaded() {
+            None
+        } else {
+            self.ready.as_deref()
         };
+        let inputs = self.devices.take(ready);
         if crate::knobs::trace_input() {
             let ready = self.ready.as_deref().map_or(usize::MAX, |fds| {
-                self.devices.raw_fds().filter(|fd| fds.contains(fd)).count()
+                self.devices
+                    .raw_fds()
+                    .into_iter()
+                    .filter(|fd| fds.contains(fd))
+                    .count()
             });
             if ready > 0 {
                 (self.report)(&format!(
@@ -1042,9 +1104,20 @@ impl<'r> Compositor<'r> {
             }
         }
         let mut changed = false;
-        for input in inputs.into_iter().chain(std::mem::take(&mut self.injected)) {
-            changed |= self.take_one(input, now, placements);
+        for taken in inputs {
+            changed |= self.take_one(taken, now, placements);
         }
+        // A virtual pointer's input has no report and no stamp; its
+        // relative motion is sent with the time it is carried out.
+        for input in std::mem::take(&mut self.injected) {
+            let taken = crate::front::Taken {
+                input,
+                at: 0,
+                forwarded: false,
+            };
+            changed |= self.take_one(taken, now, placements);
+        }
+        self.stamp = 0;
         changed
     }
 
@@ -1055,14 +1128,15 @@ impl<'r> Compositor<'r> {
             && Instant::now() >= due
         {
             self.rescan = Some(Instant::now() + rescan_period(self.fixed.started.elapsed()));
-            let (added, refused) = self.devices.rescan();
+            let (added, refused) = self.devices.devices().rescan();
             for reason in refused {
                 (self.report)(&format!("hyprix: {reason}"));
             }
             if !added.is_empty() {
                 (self.report)(&format!("hyprix: seat found [{}]", added.join(", ")));
             }
-            let now_has = seat_capabilities(&self.devices) | virtual_capabilities(&self.slots);
+            let now_has =
+                seat_capabilities(&self.devices.devices()) | virtual_capabilities(&self.slots);
             if now_has != self.capabilities {
                 self.capabilities = now_has;
                 for slot in &mut self.slots {
@@ -1077,7 +1151,7 @@ impl<'r> Compositor<'r> {
     /// its binds fire. Gives whether anything changed.
     fn take_one(
         &mut self,
-        input: crate::seat::Input,
+        taken: crate::front::Taken,
         now: u32,
         placements: &[(String, Rect)],
     ) -> bool {
@@ -1085,8 +1159,23 @@ impl<'r> Compositor<'r> {
         // measures, and what `forceidle` was pretending about.
         self.last_input = Instant::now();
         self.forced = None;
-        let actions = self.seat.input(input);
-        self.devices.show_locks(self.seat.modifiers().locked);
+        self.stamp = taken.at;
+        let mut actions = self.seat.input(taken.input);
+        // The input thread wrote a locked pointer's motion to its client
+        // already: the seat has taken it, and nobody is sent it again.
+        if taken.forwarded {
+            actions.retain(|action| !matches!(action, crate::seat::Action::Relative { .. }));
+        } else if self.devices.ages()
+            && taken.at != 0
+            && actions
+                .iter()
+                .any(|action| matches!(action, crate::seat::Action::Relative { .. }))
+        {
+            self.aged.push(taken.at);
+        }
+        self.devices
+            .devices()
+            .show_locks(self.seat.modifiers().locked);
         // Where the pointer is, for the layout: Hyprland's dwindle tree
         // asks the input manager for it at the moment a window opens,
         // and `dwindle:use_active_for_splits`, `force_split = 0` and
@@ -1309,6 +1398,7 @@ impl<'r> Compositor<'r> {
             &self.state,
             &self.sources,
         );
+        self.set_lane();
         self.seat.set_shortcuts_inhibited(
             self.focus
                 .keyboard()
@@ -1739,8 +1829,7 @@ impl<'r> Compositor<'r> {
     /// what is ready now for a pass that follows on at once.
     fn look(&mut self, timeout: Option<Duration>) -> Result<(), String> {
         let mut fds = Vec::with_capacity(
-            1 + self.slots.len()
-                + self.devices.len()
+            2 + self.slots.len()
                 + usize::from(self.control.is_some())
                 + usize::from(self.events.is_some())
                 + self.plugins.len()

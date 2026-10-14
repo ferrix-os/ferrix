@@ -51,7 +51,7 @@ impl Compositor<'_> {
         // its frames to its plane, or back, owes a frame that draws it or
         // takes it away.
         let pointer = (self.lock.is_none()
-            && self.devices.has_pointer()
+            && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
             at: (0, 0),
@@ -476,7 +476,7 @@ impl Compositor<'_> {
         let cursor = (!dark
             && !screen.plane.on
             && self.lock.is_none()
-            && self.devices.has_pointer()
+            && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
             at: with.cursor_at,
