@@ -7,7 +7,7 @@ four assurance ratings attach to. That file is the scope of every artifact in
 item, the traceability matrix, the coverage obligation. A boundary that lives
 only in a document is a boundary that has already moved.
 
-So this gate asserts four things.
+So this gate asserts five things.
 
   1. **Every kernel source file is classified.** A file in no ring fails the
      build. Without this the item grows by accretion -- somebody writes
@@ -45,6 +45,20 @@ So this gate asserts four things.
      edge to that crate's ring, under the same rules as rule 2. The
      item-scoped gates (complexity, fallible allocation, the unsafe trace)
      read the item crates' product files through `item_crate_product_files`.
+
+  5. **The profile rule** (docs/BUILD-FLAGS.md rule 3, since M0). The flag
+     file, tools/common/data/build-flags.toml, defines each level as its full
+     set of targets, and "covers" compares them standard by standard, so
+     `present` and `sc2` are incomparable, which is tested. Each value's
+     `allows` is closed under that comparison. Each profile in
+     tools/common/data/profiles/ sets every flag (rule 4) to a declared value
+     its level allows -- a below-level value only by a dated exception, in
+     `present` alone (BF1) -- permits only declared boot options, records the
+     build settings the tree really has, and links into ring 0 only
+     components at its level or above: each ring and crate here names its
+     `level`. `max` and `fast` are checked statically and reported not yet
+     buildable, their component levels as what must hold once they build.
+     reference_configuration is held to present.toml.
 
 Product code and in-kernel test code are counted apart. A standard asks
 different questions of each, and conflating them flatters the item's size
@@ -125,6 +139,7 @@ import fnmatch
 import json
 import re
 import sys
+import tomllib
 from collections import defaultdict
 from pathlib import Path
 
@@ -1705,6 +1720,338 @@ def _kernel_self_test() -> list[str]:
     return failures
 
 
+# --- the profile rule (docs/BUILD-FLAGS.md rule 3) ---------------------------
+
+FLAG_FILE = ROOT / "tools" / "common" / "data" / "build-flags.toml"
+PROFILE_DIR = ROOT / "tools" / "common" / "data" / "profiles"
+ARCH_TRIPLES = {"x86_64": "x86_64-unknown-none", "aarch64": "aarch64-unknown-none-softfloat",
+                "armv7a": "armv7a-none-eabi"}
+BUILD_RS_ARCH = {"x86_64": "x86_64", "aarch64": "aarch64", "armv7a": "arm"}
+BUILT = ("yes", "stand-in", "no")
+
+
+def covers(levels: dict, standards: dict, a: str, b: str) -> bool:
+    """Whether level `a` covers level `b`: for every standard in b's set, a
+    names a target at least as high on that standard's scale (BF10)."""
+    mine = levels.get(a, {}).get("targets", {})
+    for standard, target in levels.get(b, {}).get("targets", {}).items():
+        scale = standards.get(standard, {}).get("scale", [])
+        if standard not in mine or target not in scale or mine[standard] not in scale:
+            return False
+        if scale.index(mine[standard]) < scale.index(target):
+            return False
+    return True
+
+
+def flag_file_problems(flags: dict) -> list[str]:
+    """The flag file's own consistency: levels as target sets on declared
+    scales, the present/sc2 pair incomparable, and each value's allows
+    closed under coverage, its build state and its requirements."""
+    problems = []
+    standards, levels = flags.get("standards", {}), flags.get("levels", {})
+    for name, level in levels.items():
+        for standard, target in level.get("targets", {}).items():
+            if target not in standards.get(standard, {}).get("scale", []):
+                problems.append(f"level {name}: {standard} = {target!r} is on no declared scale")
+    for needed in ("none", "present", "sc2", "sc4"):
+        if needed not in levels:
+            problems.append(f"level {needed} is not declared")
+    if covers(levels, standards, "present", "sc2") or covers(levels, standards, "sc2", "present"):
+        problems.append("levels present and sc2 must be incomparable, standard by standard (BF10), "
+                        "and one covers the other")
+    for higher, lower in (("sc4", "present"), ("sc4", "sc2"), ("present", "none"), ("sc2", "none")):
+        if higher in levels and lower in levels and not covers(levels, standards, higher, lower):
+            problems.append(f"level {higher} must cover {lower}")
+    declared = {flag: set(entry.get("values", {})) for flag, entry in flags.get("flags", {}).items()}
+    for flag, entry in flags.get("flags", {}).items():
+        values = entry.get("values", {})
+        if len(values) < 2:
+            problems.append(f"{flag}: a flag has two values at least")
+        for value, spec in values.items():
+            where = f"{flag}={value}"
+            allows = spec.get("allows", [])
+            for level in allows:
+                if level not in levels:
+                    problems.append(f"{where} allows the undeclared level {level}")
+            for level in allows:
+                for other in levels:
+                    if other not in allows and covers(levels, standards, level, other):
+                        problems.append(f"{where} allows {level} but not {other}, which {level} covers")
+            built = spec.get("built")
+            if built not in BUILT:
+                problems.append(f"{where}: built is one of {', '.join(BUILT)}")
+            if built == "stand-in":
+                instead = spec.get("stands_in")
+                if values.get(instead, {}).get("built") != "yes":
+                    problems.append(f"{where}: a stand-in names a built value of its flag in stands_in")
+            if built == "no" and spec.get("lands") == "today":
+                problems.append(f"{where}: a value that lands today is built")
+            if not spec.get("lands"):
+                problems.append(f"{where} names no lands")
+            for pair in spec.get("requires", []) + spec.get("conflicts", []):
+                other, _, other_value = pair.partition("=")
+                if other_value not in declared.get(other, set()):
+                    problems.append(f"{where} names {pair}, which is not declared")
+    return problems
+
+
+def profile_problems(name: str, profile: dict, flags: dict) -> tuple[list[str], list[str]]:
+    """A profile file against the flag file: (problems, the reasons it does not
+    build yet). Every flag set (rule 4), each value declared and allowed at
+    the profile's level or by a dated exception in `present` alone (rule 3,
+    BF1), requirements met, and the boot options it permits declared, with
+    `ferrix.checks` running and no test-only option in a certified one."""
+    problems, waiting = [], []
+    standards, levels = flags.get("standards", {}), flags.get("levels", {})
+    declared = flags.get("flags", {})
+    level = profile.get("level")
+    if profile.get("profile") != name:
+        problems.append(f"its profile is {profile.get('profile')!r}, not its file's name")
+    if level not in levels:
+        problems.append(f"level {level!r} is not declared")
+    values = profile.get("flags", {})
+    for flag in declared:
+        if flag not in values:
+            problems.append(f"does not set {flag} (rule 4: every flag, explicitly)")
+    exceptions = {(e.get("flag"), e.get("value")) for e in profile.get("exceptions", [])}
+    if exceptions and name != "present":
+        problems.append("only present may carry dated exceptions (BF1)")
+    for exception in profile.get("exceptions", []):
+        if not exception.get("ends") or not exception.get("why"):
+            problems.append(f"exception {exception.get('flag')}={exception.get('value')} names no end or reason")
+    for flag, value in values.items():
+        spec = declared.get(flag, {}).get("values", {}).get(value)
+        if spec is None:
+            problems.append(f"{flag}={value} is not declared in build-flags.toml")
+            continue
+        for pair in spec.get("requires", []):
+            other, _, other_value = pair.partition("=")
+            if values.get(other) != other_value:
+                problems.append(f"{flag}={value} requires {pair}")
+        for pair in spec.get("conflicts", []):
+            other, _, other_value = pair.partition("=")
+            if values.get(other) == other_value:
+                problems.append(f"{flag}={value} conflicts with {pair}")
+        allowed = level in spec.get("allows", [])
+        if not allowed and (flag, value) in exceptions and name == "present":
+            allowed = True
+        if not allowed:
+            problems.append(f"{flag}={value} does not allow level {level} (it allows "
+                            f"{', '.join(spec.get('allows', []))}): refused (rule 3)")
+        if spec.get("built") == "no" or (spec.get("built") == "stand-in" and level != "none"):
+            waiting.append(f"{flag}={value} lands at {spec.get('lands')}")
+    for flag, value in exceptions:
+        spec = declared.get(flag, {}).get("values", {}).get(value, {})
+        if values.get(flag) != value or level in spec.get("allows", []):
+            problems.append(f"exception {flag}={value} excuses nothing this profile uses")
+    registry = flags.get("boot_options", {})
+    for option, permitted in profile.get("boot_options", {}).items():
+        entry = registry.get(option)
+        if entry is None:
+            problems.append(f"permits the boot option {option}, which the registry does not declare")
+            continue
+        if entry.get("kind") == "flag":
+            if permitted is not True:
+                problems.append(f"{option} is a bare word: permit it as true")
+        elif not isinstance(permitted, list) or not set(permitted) <= set(entry.get("values", [])) | {"*"} \
+                or ("*" in permitted and "*" not in entry.get("values", [])):
+            problems.append(f"{option}: permits values the registry does not declare")
+        if level != "none" and entry.get("test_only"):
+            problems.append(f"a certified profile permits the test-only option {option}")
+    if level != "none" and profile.get("boot_options", {}).get("ferrix.checks", ["run"]) != ["run"]:
+        problems.append("a certified profile permits ferrix.checks only with the checks running")
+    for arch in profile.get("claim_architectures", []):
+        if arch not in ARCH_TRIPLES:
+            problems.append(f"claims the unknown architecture {arch}")
+    return problems, waiting
+
+
+def build_record_problems(profile: dict) -> list[str]:
+    """The profile's build record against the tree (BF4): the toolchain, the
+    release profile's codegen, the kernel targets' rustflags and build.rs's
+    link arguments."""
+    problems = []
+    build = profile.get("build", {})
+    with (ROOT / "rust-toolchain.toml").open("rb") as handle:
+        channel = tomllib.load(handle).get("toolchain", {}).get("channel")
+    if build.get("toolchain") != channel:
+        problems.append(f"build.toolchain {build.get('toolchain')} is not rust-toolchain.toml's {channel}")
+    with (ROOT / "Cargo.toml").open("rb") as handle:
+        cargo_profiles = tomllib.load(handle).get("profile", {})
+    release = cargo_profiles.get(build.get("cargo_profile"), {})
+    for key, value in build.get("codegen", {}).items():
+        if release.get(key) != value:
+            problems.append(f"build.codegen.{key} = {value!r}, Cargo.toml's profile says {release.get(key)!r}")
+    with (ROOT / ".cargo" / "config.toml").open("rb") as handle:
+        targets = tomllib.load(handle).get("target", {})
+    for arch, triple in ARCH_TRIPLES.items():
+        if build.get("rustflags", {}).get(arch) != targets.get(triple, {}).get("rustflags"):
+            problems.append(f"build.rustflags.{arch} is not .cargo/config.toml's [target.{triple}]")
+    script = (ROOT / "src" / "kernel" / "build.rs").read_text(encoding="utf-8")
+    for arch, key in BUILD_RS_ARCH.items():
+        found = re.search(rf'"{key}"\s*=>\s*&\[([^\]]*)\]', script)
+        args = re.findall(r'"([^"]*)"', found.group(1)) if found else None
+        if build.get("link", {}).get(arch, {}).get("args") != args:
+            problems.append(f"build.link.{arch}.args is not what src/kernel/build.rs links {arch} with")
+    return problems
+
+
+def component_problems(name: str, profile: dict, flags: dict, manifest: dict) -> list[str]:
+    """Rule 3's second half: each component linked into ring 0 under the
+    profile is at its level or above. Core and item are always linked; a ring
+    with `in_ring0_when` only when one of those flag values is chosen, and
+    then a dated exception for that value covers it if it is in the load
+    ring, and never if it is in the core or the item. A crate's own `level`
+    and `in_ring0_when` override its ring's."""
+    standards, levels = flags.get("standards", {}), flags.get("levels", {})
+    level = profile.get("level")
+    values = profile.get("flags", {})
+    exceptions = {f"{e.get('flag')}={e.get('value')}" for e in profile.get("exceptions", [])}
+    problems = []
+    rings = manifest["rings"]
+    components = [(f"ring {ring}", ring, entry.get("level"), entry.get("in_ring0_when", []))
+                  for ring, entry in rings.items()]
+    components += [(f"crate {crate}", entry.get("ring"),
+                    entry.get("level", rings.get(entry.get("ring"), {}).get("level")),
+                    entry.get("in_ring0_when", rings.get(entry.get("ring"), {}).get("in_ring0_when", [])))
+                   for crate, entry in manifest["crates"]["members"].items()]
+    for what, ring, component_level, when in components:
+        chosen = [pair for pair in when if values.get(pair.partition("=")[0]) == pair.partition("=")[2]]
+        if when and not chosen:
+            continue
+        if component_level not in levels:
+            problems.append(f"{what} names no declared level")
+        elif not covers(levels, standards, component_level, level):
+            # The exception excuses the uncertified load a value brings into
+            # ring 0, never a component the item claims: a core or item one
+            # below the level is refused whatever brought it in.
+            if ring == "load" and any(pair in exceptions for pair in chosen):
+                continue
+            problems.append(f"{what} is at level {component_level}, below the profile's {level}, "
+                            f"and is linked into ring 0 (rule 3)")
+    return problems
+
+
+def reference_problems(manifest: dict, present: dict) -> list[str]:
+    """reference_configuration is the `present` profile's (BF1), not a second
+    copy that can drift from it."""
+    reference = manifest.get("reference_configuration", {})
+    build = present.get("build", {})
+    pairs = [
+        ("kernel_profile", reference.get("kernel_profile"), "present"),
+        ("toolchain", reference.get("toolchain"), build.get("toolchain")),
+        ("profile", reference.get("profile"), build.get("cargo_profile")),
+        ("architectures", reference.get("architectures"), present.get("claim_architectures")),
+        ("mitigations", reference.get("mitigations"), present.get("flags", {}).get("mitigations")),
+        ("driver_updates", reference.get("driver_updates"), present.get("image", {}).get("driver_updates")),
+        ("devmgr", [reference.get("devmgr")], present.get("boot_options", {}).get("ferrix.devmgr")),
+    ]
+    return [f"reference_configuration.{key} is {mine!r}, profiles/present.toml says {theirs!r}"
+            for key, mine, theirs in pairs if mine != theirs]
+
+
+def judge_profile(name: str, profile: dict, flags: dict, manifest: dict) -> tuple[list[str], list[str]]:
+    """One profile under the rule: (problems, notes). A component below the
+    profile's level is a note only while some value of the profile is refused
+    by `lands` -- nothing it would link is built then -- and a failure as soon
+    as every value builds, by the `lands` state alone, never by a later edit
+    (ledger 1039, condition 4)."""
+    found, waiting = profile_problems(name, profile, flags)
+    components = component_problems(name, profile, flags, manifest)
+    if waiting:
+        return found, [f"profile {name}: valid statically, not yet buildable ({'; '.join(waiting)})"] + \
+            [f"profile {name}: once buildable, {p}" for p in components]
+    return found + components, [f"profile {name}: level {profile.get('level')}, buildable"]
+
+
+def profile_rule(manifest: dict) -> tuple[list[str], list[str]]:
+    """Every check above over the tree's files: (problems, notes)."""
+    with FLAG_FILE.open("rb") as handle:
+        flags = tomllib.load(handle)
+    problems = [f"build-flags.toml: {p}" for p in flag_file_problems(flags)]
+    notes = []
+    profiles = {}
+    for path in sorted(PROFILE_DIR.glob("*.toml")):
+        with path.open("rb") as handle:
+            profiles[path.stem] = tomllib.load(handle)
+    for needed in ("present", "desktop", "fast", "max"):
+        if needed not in profiles:
+            problems.append(f"profiles/{needed}.toml is missing")
+    for name, profile in profiles.items():
+        found, said = judge_profile(name, profile, flags, manifest)
+        found += build_record_problems(profile)
+        notes += said
+        problems += [f"profiles/{name}.toml: {p}" for p in found]
+    if "present" in profiles:
+        problems += reference_problems(manifest, profiles["present"])
+    return problems, notes
+
+
+def _profile_self_test() -> list[str]:
+    """The rule's cases, on files written here: the incomparable pair, a
+    below-level value, an exception outside present, a QM component."""
+    failures = []
+    flags = {
+        "standards": {"s": {"scale": ["1", "2"]}, "t": {"scale": ["1", "2"]}, "u": {"scale": ["1"]}},
+        "levels": {
+            "none": {"targets": {}},
+            "present": {"targets": {"s": "2", "u": "1"}},
+            "sc2": {"targets": {"s": "2", "t": "2"}},
+            "sc4": {"targets": {"s": "2", "t": "2", "u": "1"}},
+        },
+        "flags": {"f": {"values": {
+            "a": {"allows": ["sc4", "present", "sc2", "none"], "lands": "today", "built": "yes"},
+            "b": {"allows": ["sc2", "none"], "lands": "M3", "built": "yes"},
+            "c": {"allows": ["none"], "lands": "M0", "built": "stand-in", "stands_in": "a"},
+        }}},
+        "boot_options": {"ferrix.checks": {"values": ["run", "skip"]}},
+    }
+    if flag_file_problems(flags):
+        failures.append(f"a consistent flag file was refused: {flag_file_problems(flags)}")
+    levels, standards = flags["levels"], flags["standards"]
+    if covers(levels, standards, "present", "sc2") or covers(levels, standards, "sc2", "present"):
+        failures.append("present and sc2 compare, where each lacks a standard of the other")
+    if not covers(levels, standards, "sc4", "present") or not covers(levels, standards, "sc4", "sc2"):
+        failures.append("sc4 does not cover present and sc2")
+    broken = json.loads(json.dumps(flags))
+    broken["levels"]["sc2"]["targets"]["u"] = "1"
+    if not any("incomparable" in p for p in flag_file_problems(broken)):
+        failures.append("a level table where sc2 covers present was accepted")
+    def profile(level, value, exceptions=(), name="p"):
+        return {"profile": name, "level": level, "flags": {"f": value},
+                "exceptions": [dict(e) for e in exceptions], "boot_options": {"ferrix.checks": ["run"]}}
+    if profile_problems("p", profile("sc2", "b"), flags)[0]:
+        failures.append("a value allowing sc2 was refused at sc2")
+    if not profile_problems("p", profile("present", "b"), flags)[0]:
+        failures.append("a value allowing sc2 was accepted at present, which sc2 does not cover")
+    if not profile_problems("p", profile("sc4", "c"), flags)[0]:
+        failures.append("a below-level value was accepted in a certified profile")
+    excepted = [{"flag": "f", "value": "c", "ends": "M5", "why": "w"}]
+    if profile_problems("present", profile("present", "c", excepted, "present"), flags)[0]:
+        failures.append("present's dated exception was not honoured")
+    if not profile_problems("p", profile("present", "c", excepted), flags)[0]:
+        failures.append("an exception outside present was honoured")
+    manifest = {"rings": {"item": {"level": "present"}, "load": {"level": "none", "in_ring0_when": ["f=c"]}},
+                "crates": {"members": {"k": {"ring": "item", "level": "none", "in_ring0_when": ["f=c"]}}}}
+    found = component_problems("present", profile("present", "c", excepted, "present"), flags, manifest)
+    if found != ["crate k is at level none, below the profile's present, and is linked into ring 0 (rule 3)"]:
+        failures.append(f"a QM crate in the item, or the excepted load, was judged wrong: {found}")
+    # A profile whose values all build today, with its item below its level,
+    # FAILS: the note "once buildable" holds only while `lands` refuses one of
+    # its values (ledger 1039, condition 4). The same profile with one value
+    # not built yet is a note, and no problem.
+    below = {"rings": {"item": {"level": "present"}}, "crates": {"members": {}}}
+    problems, notes = judge_profile("p", profile("sc2", "a"), flags, below)
+    if problems != ["ring item is at level present, below the profile's sc2, and is linked into ring 0 (rule 3)"]:
+        failures.append(f"a buildable profile over components below its level did not fail: {problems}, {notes}")
+    waiting = json.loads(json.dumps(flags))
+    waiting["flags"]["f"]["values"]["a"]["built"] = "no"
+    problems, notes = judge_profile("p", profile("sc2", "a"), waiting, below)
+    if problems or not any("once buildable, ring item" in n for n in notes):
+        failures.append(f"a profile refused by lands was failed, not noted: {problems}, {notes}")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1719,7 +2066,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    failures = self_test()
+    failures = self_test() + _profile_self_test()
     if failures:
         for failure in failures:
             print(f"item-boundary: self-test: {failure}", file=sys.stderr)
@@ -1765,6 +2112,17 @@ def main() -> int:
         )
         for ring, pattern in stale:
             print(f"    {ring}: {pattern}", file=sys.stderr)
+        status = 1
+
+    rule_problems, rule_notes = profile_rule(manifest)
+    if rule_problems:
+        print(
+            f"item-boundary: {len(rule_problems)} problem(s) with the build flags and profiles\n"
+            f"  (docs/BUILD-FLAGS.md rule 3, the profile rule, and rules 4 and 7):",
+            file=sys.stderr,
+        )
+        for problem in rule_problems:
+            print(f"    {problem}", file=sys.stderr)
         status = 1
 
     modules, edges, problems = measure(manifest, ring_of)
@@ -1885,6 +2243,8 @@ def main() -> int:
         f"{len(root.get('hooks', []))} link-time hook(s)"
     )
     for note in crate_notes:
+        print(f"  {note}")
+    for note in rule_notes:
         print(f"  {note}")
     return status
 

@@ -335,7 +335,8 @@ functions -- **the start-up record, and, as the last record before a power
 action, the power action**; b) **the TOE's configuration at start-up:
 `ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, whether the
 kernel log is kept across a reset (`ferrix.pstore`) and
-`ferrix.efifb`**; c) **a
+`ferrix.efifb`, and the build
+flags the kernel was compiled with**; c) **a
 native call its handle's rights refused, a widening of rights refused, a
 charge a job's limit refused, a native process made, a job handle given for
 a cgroup, a device's control channel given, `devmgr` started through the
@@ -461,8 +462,9 @@ nothing else is claimed to meet it.
 ### 8.3 Why EAL5 is the right claim
 §2.2. The three arguments that carry it: the TOE is 51,525 lines and 100%
 first-party source, so `ADV_IMP.1` is satisfiable; the reference configuration
-has zero Cargo features and one two-valued build switch, `--mitigations`, of
-which only `on` is evaluated, so the configuration space is enumerated in a
+has zero Cargo features and is one kernel profile, `present`, whose build
+flags are each fixed, read only in the kernel crate and printed and recorded
+by the kernel at start-up, so the configuration space is enumerated in a
 sentence; and
 eleven build-time gates support `ADV_INT.2`'s well-structuredness in a way
 review notes cannot.

@@ -183,6 +183,26 @@ why = "what the machine does when init exits"
 kind = "flag"
 why = "the framebuffer console"
 
+[boot_options."ferrix.fbcon.small"]
+kind = "flag"
+why = "single-size glyphs on the framebuffer console whatever the screen's width (console/screen.rs, L.console.37)"
+
+[boot_options."ferrix.pstore"]
+values = ["on", "off"]
+why = "whether the loader keeps the kernel log across a reset (docs/POSTMORTEM.md §3; read by the loader through ferrix_bootinfo::pstore::switch); any other value is said and taken as off"
+
+[boot_options."ferrix.efifb"]
+kind = "flag"
+why = "lend the firmware framebuffer to a ring-3 driver on x86-64 (discovery/firmware.rs, docs/DISPLAY.md §8); never in a configuration a claim is made of (SAFETY-MANUAL AoU-31)"
+
+[boot_options."ferrix.apic"]
+values = ["x2apic", "xapic"]
+why = "x86-64: the local APICs' mode where firmware neither locked nor left x2APIC on (arch/x86_64/apic.rs, L.x86_64.131)"
+
+[boot_options."ferrix.panic"]
+values = ["halt", "reset"]
+why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the reference; reset, a stop-gap for the N150 box set by no loader, outside the reference configuration (SAFETY-MANUAL AoU-32, certification-item.json `panic`)"
+
 [boot_options."ferrix.btrfs"]
 values = ["*"]
 test_only = true

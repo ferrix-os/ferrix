@@ -26,20 +26,27 @@
   "reference_configuration": {
     "//": [
       "A certificate attaches to a configuration, not to a repository. This is",
-      "the one under evaluation: three architectures, release profile, the",
-      "gate set cargo xtask check runs, and the toolchain rust-toolchain.toml",
-      "pins. Seven Cargo features exist in the whole workspace and none is in",
-      "src/kernel/ or src/boot/common/uefi/, so there is no Cargo configuration space to enumerate",
-      "-- which is most of why this item is analysable at all.",
+      "the one under evaluation: the `present` kernel profile",
+      "(tools/common/data/profiles/present.toml, docs/BUILD-FLAGS.md BF1), on",
+      "three architectures, release profile, the gate set cargo xtask check",
+      "runs, and the toolchain rust-toolchain.toml pins. Seven Cargo features",
+      "exist in the whole workspace and none is in src/kernel/ or",
+      "src/boot/common/uefi/, so there is no Cargo configuration space to",
+      "enumerate -- which is most of why this item is analysable at all.",
       "",
-      "One build setting exists, and it is not a Cargo feature: `cargo xtask",
-      "--mitigations on|off`. `off` builds with `--cfg ferrix_mitigations_off`,",
-      "which only xtask sets, and compiles out every side-channel defence",
-      "(docs/certification/SPECULATION.md). The certified setting is `on`, the",
-      "default -- what a plain `cargo build` makes and every gate boots. `off`",
-      "exists and is built by `cargo xtask check` on every architecture so it",
-      "cannot rot, and no claim is made of it."
+      "The kernel's configuration is its build flags (build-flags.toml): each",
+      "chosen at compile time as `cfg(ferrix_<flag> = \"<value>\")`, set only by",
+      "xtask from a profile file, read only in the kernel crate, and printed by",
+      "the kernel on its `build` boot line, which the gate compares with the",
+      "profile. `present` sets every one; a build changed by `--set` is ad hoc",
+      "and carries no claim. `mitigations=off` and `checks=off` are such builds.",
+      "`cargo xtask check` type-checks (clippy, no link) the kernel in every",
+      "buildable profile, checks=off and mitigations=off on every architecture",
+      "so none can rot; `cargo xtask test-flags` links and boots each buildable",
+      "profile, and `test-boot --mitigations off --no-claim` the off build.",
+      "check-item-boundary.py holds the values below to present.toml's."
     ],
+    "kernel_profile": "present",
     "architectures": [
       "x86_64",
       "aarch64",
@@ -128,6 +135,23 @@
       "the certification consultant's C1, 2026-10-07)."
     ]
   },
+  "build_flags": {
+    "//": [
+      "The levels, the flags and each value's levels are defined once, in",
+      "the flag file (docs/BUILD-FLAGS.md BF2), and each profile in its own",
+      "file; this manifest names them rather than copying them. Each ring",
+      "above carries its `level`, the level its components are certified",
+      "at: core and item at `present` (today's four targets), the load at",
+      "`none`, linked into ring 0 only when `in_ring0_when` holds, which in",
+      "`present` is by the dated exception that ends at M5's flip. A crate",
+      "may name a `level` of its own. check-item-boundary.py's profile rule",
+      "requires every component a profile links into ring 0 to be at the",
+      "profile's level or above (rule 3), standard by standard."
+    ],
+    "flag_file": "tools/common/data/build-flags.toml",
+    "profiles": "tools/common/data/profiles",
+    "reference_profile": "present"
+  },
   "test_file_patterns": [
     "check.rs",
     "checks.rs",
@@ -153,6 +177,7 @@
         "DAL B"
       ],
       "status": "aspirational -- the ratchet's destination, not a current claim",
+      "level": "present",
       "why": [
         "The minimal trusted computing base: the code that must be correct for",
         "memory protection, scheduling and capability enforcement to mean",
@@ -214,6 +239,7 @@
         "EN 50716 SIL 2"
       ],
       "status": "the boundary the current artifacts are written against",
+      "level": "present",
       "why": [
         "The core, plus the code that brings it up, dispatches into it and",
         "enumerates the hardware it hands to ring 3. This is the item all four",
@@ -256,12 +282,18 @@
         "syscall/native_check.rs",
         "syscall/program.rs",
         "syscall/program_check.rs",
-        "syscall/unmap_check.rs"
+        "syscall/unmap_check.rs",
+        "build_flags.rs"
       ]
     },
     "load": {
       "targets": [],
       "status": "uncertified -- carries no assurance claim",
+      "level": "none",
+      "in_ring0_when": [
+        "personality=kernel",
+        "fs=kernel"
+      ],
       "why": [
         "Everything the item runs but does not vouch for. A defect here is",
         "bounded by the item's own enforcement: a ring-3 driver fault is a",
@@ -373,12 +405,18 @@
       "ferrix-btrfs": {
         "ring": "item",
         "path": "src/lib/fs/btrfs",
+        "in_ring0_when": [
+          "fs=kernel"
+        ],
         "below": "the `Device` trait (ferrix_btrfs::volume::Device): sector reads the kernel's block layer answers (src/kernel/src/fs/btrfs.rs, `Disk`); and caller-lent memory, `ExtentBuffers` and `ChunkStorage`",
         "above": "`Volume` and the on-disk format types it returns (superblock, chunk map, keys, items, the fs and compress modules' readers), called by ferrix-btrfs-write, ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
       },
       "ferrix-btrfs-write": {
         "ring": "item",
         "path": "src/lib/fs/btrfs-write",
+        "in_ring0_when": [
+          "fs=kernel"
+        ],
         "below": "the `WriteDevice` trait (ferrix_btrfs_write::WriteDevice, a `Device` that also writes and flushes), implemented by the kernel's `Disk`; and ferrix-btrfs, item",
         "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
       },
@@ -391,6 +429,9 @@
       "ferrix-btrfs-vfs": {
         "ring": "load",
         "path": "src/lib/fs/btrfs-vfs",
+        "in_ring0_when": [
+          "fs=kernel"
+        ],
         "below": "`Volume` and `WriteVolume`, the item's interface above btrfs; it implements `Device` over a cache for them",
         "above": "ferrix-vfs's `FileSystem` and `Inode`: it is written against the VFS, which is load, and so is load itself"
       }

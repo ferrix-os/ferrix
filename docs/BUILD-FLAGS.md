@@ -2,9 +2,10 @@
 
 **Design for review, 2026-10-13.** This is M0's configuration system from
 `docs/MICROKERNEL.md` §12: the flags that select what a Ferrix kernel
-contains, and the three profiles built from them. Nothing here is built yet.
-It gets the certification consultant's design review before any code, as
-`MICROKERNEL.md` requires of M0's configuration system.
+contains, and the three profiles built from them. It passed the
+certification consultant's design review before any code, as
+`MICROKERNEL.md` requires of M0's configuration system; what is built is in
+*Where it stands*, at the end.
 
 The customer's words (2026-10-13): "3 builds sounds good, so a good start
 would then be to define the build time flags?", and "yes desktop build is a
@@ -186,12 +187,37 @@ Not flags, and why:
   `runtime_trades=game_mode` in `fast`, both refused); no certified image
   contains a run-time relaxation path, since the code is absent, not
   switched off; and the boot line and its audit record name every value.
+* **Stand-ins until each value's own landing** (ledger 1039, condition 2).
+  `desktop` names `ipc_fastpath=on`, `program_barrier=session`,
+  `ssbd=on_request` and `runtime_trades=game_mode`, whose code is not built
+  yet; `build-flags.toml` marks each `built = "stand-in"` with the value it
+  `stands_in`. **Desktop's `build` line and its `FAU_GEN.1` b) record
+  (`Config::Build`, `docs/certification/AUDIT.md`) name the declared value
+  while the image runs the stand-in, today's stricter code**: `off`,
+  `switch`, `always` and `none`. A stand-in is allowed only at level `none`,
+  so no certified profile carries one, and the line overstates what the
+  image relaxes, never understates it. Each value's own landing replaces its
+  stand-in and this sentence's entry; DF8's check that desktop's line names
+  `session`, `on_request` and `game_mode` stays throughout.
 * **The boot options that stay** are a **registry** in `build-flags.toml`
   (BF4): `ferrix.checks`, `ferrix.root`, `ferrix.init`, `ferrix.onexit`,
   `ferrix.fbcon`, `ferrix.btrfs` and `ferrix.btrfs.seed` (test-only),
   `console=` (ARMv7-A, `arch/armv7a/console.rs`), `drm.edid_firmware`
   (`interfaces/display/edid.rs`), `nokaslr`, `nosmp`, and `ferrix.devmgr`
-  until M5. Each profile names the **values** of each it permits, not only
+  until M5; and, read since the design, `ferrix.fbcon.small`,
+  `ferrix.pstore` (read by the loader, through
+  `ferrix_bootinfo::pstore::switch`), `ferrix.efifb`, `ferrix.apic`
+  (x86-64) and `ferrix.panic` (`halt` in every certified profile; `reset`,
+  SAFETY-MANUAL AoU-32's stop-gap, in `desktop` alone). Beside the scan of
+  reads, `check-build-flags.py` scans every `"ferrix.` string literal in
+  `src/lib` and `src/boot` outside their tests: each is a declared option,
+  in a file its `LIBRARY_READERS` names, or on its `NOT_OPTIONS` list with
+  a reason (the loader's `ferrix.slot` words for `bootctl`,
+  `ferrix.devmgr.update`, `ferrix.test`). **What the scan cannot see** is an
+  option a library reads whose name does not start with `ferrix.` and is
+  not yet a registry key, such as a new Linux-style word like `console=`;
+  such an option is found only by a reviewer, or by the scan of reads once
+  the reading file is in `LIBRARY_READERS`. Each profile names the **values** of each it permits, not only
   the names: a certified profile permits `ferrix.checks` only with the
   checks running, and never `ferrix.btrfs.seed`. A check fails on any read
   of an option the registry does not declare, with a planted reader as its
@@ -376,5 +402,77 @@ Design on branch `microkernel-plan`, 2026-10-13.
   `ssbd=on_request`, `runtime_trades=game_mode`, and Zenbleed's and GDS's
   fixes out of the `mitigations` flag. **The four new flags need this
   document's design review before any code** (sent).
-* M0's code may start (the consultant: BF1 to BF4 written in) (the consultant: BF1
-  to BF4 written in). The fast-path move gets its own item review (BF6).
+* M0's code may start (the consultant: BF1 to BF4 written in). The
+  fast-path move gets its own item review (BF6).
+* **M0's parts A and D, built** (branch `m0-flags`, 2026-10-13, for the
+  consultant's review before landing): the flag file and the four profiles
+  (§5); the resolver, `--kernel-profile`, `--set` and `cargo xtask flags`;
+  the flags reach the kernel crate alone, as `cargo::rustc-cfg` from its
+  build script, with `--check-cfg` from the flag file and `unexpected_cfgs`
+  denied; `mitigations` moved, with byte-identical kernels for `present` and
+  `desktop` on all three architectures; the `build` boot line and its audit
+  record (`Config::Build`); the gate, `tools/common/check/check-boot-line.py`,
+  which reads the profile with its own parser; the profile rule in
+  `check-item-boundary.py`, with each ring's and crate's `level` in
+  `certification-item.json`; the source checks (`check-build-flags.py`);
+  `checks=off`; `cargo xtask test-flags`; the load ratchet
+  (`check-load-ring.py`). Decided where this document is silent, and open
+  to review: (1) a value `desktop` names whose code is not built yet
+  (`ipc_fastpath=on`, `program_barrier=session`, `ssbd=on_request`,
+  `runtime_trades=game_mode`) builds as a *stand-in* for today's stricter
+  value, only at level `none`, and the line still names it, which
+  overstates what the image relaxes and never understates it; (2) the
+  registry also declares `noactlr` (ARMv7-A, read today) and
+  `ferrix.fastpath` (until BF6 moves it); (3) `ferrix-sync`'s clamp reads no
+  cfg any more (rule 6 b), so `mitigations=off` keeps the two library
+  clamps; (4) `max` has `restricted_fastpath=off` until K1's review; (5) a
+  `--set` boot is refused by the gate unless `--no-claim` names it ad hoc.
+* Landing review: **OK IF** (1) to (5), ledger line 1039, each of those
+  decisions accepted. Met on the landing commit: (1) `xtask check`'s
+  Ferrocene step (`check-ferrocene-rust.py`, M0 E) type-checks the kernel
+  with the flags xtask resolves for each certified profile that builds,
+  `present` today; (2) the stand-ins are said in words, in §3.1's list and
+  in `AUDIT.md`; (3) `ITEM.md` §5 and `certification-item.json` say
+  "type-checks (clippy)" and name the boots that link those builds; (4) the
+  profile rule's self-test fails a buildable profile whose components sit
+  below its level, so the note becomes a failure by `lands` alone; (5) the
+  rows on the landing commit, named in its message. Owed: one L id for
+  `build_flags::report` and `audit_words` before part B's first landing
+  (`docs/BACKLOG.md`).
+* Conditions check: **OK** on 9c22baf4a, ledger line 1051, transferring to
+  a rebase under its R1 to R4. The branch was rebased twice more without
+  conflict (onto 42e7bd521 and 17ebb8a4e, cited in the commit message).
+* **Rebased onto main bf33c4cf9 (2026-10-17), with conflicts**, so R1 does
+  not hold and the rows and the changed checks' controls run again. What
+  main brought that the branch had to take in: xtask's command registry
+  (`flags` and `test-flags` are now `Task`s), the kernel's lint over every
+  package under `src/kernel`, the coverage profile and `--gdb`; the core's
+  `boot_checks` (the `checks=off` constant moved there, so the core's own
+  checks, the APIC's and the IOMMU's, compile out with the rest); the audit
+  store's `Config::Pstore` and `Config::Efifb`, so `Config::Build` is 7,
+  bring-up records seven configuration items, and the pinned boot records
+  grow from eight to nine (`audit::BOOT_RECORDS`, H.AUD.2 restated), since
+  the start-up record and seven items would otherwise push "the boot brought
+  up" out of them; and four boot options read
+  since the design, declared in the registry (above). `present` permits
+  `ferrix.fbcon.small`, `ferrix.pstore=on` (the reference) and
+  `ferrix.apic`, not `ferrix.efifb` (SAFETY-MANUAL AoU-31); `desktop` permits
+  all four; `fast` and `max` none of them. Then rebased onto main 3a29477a7
+  (panic-reboot): `ferrix.panic` declared, `halt` permitted in `present`,
+  `max` and `fast`, `halt` and `reset` in `desktop`.
+* Diff check of that rebase: **OK IF** (1) to (5), ledger line 2208 (on
+  90084bf64). Accepted: `BOOT_RECORDS` 9 with H.AUD.2 restated (this branch,
+  landing first, keeps `Config::Build` = 7; vtd-n150 renumbers to 8 and 10,
+  ledger 2179 (4)); the permits as proposed; `checks=off`'s constant in the
+  core's `boot_checks.rs`. Owed and done on the landing commit: (1) rebased
+  onto main 241b704d5, conflicts in derived files alone, regenerated; (2)
+  the general `"ferrix.` literal scan in `check-build-flags.py`, with its
+  `NOT_OPTIONS` list, a self-test case and a control; (3) a boot control
+  for H.AUD.2 with `BOOT_RECORDS` left at 8; (4) `coverage-owed.json`
+  names `pinned()`'s edited lines and the new units for the next coverage
+  run; (5) this entry. The landing hash and the rows' tags are in the
+  landing commit's message. `check-build-flags.py` now
+  follows `module::CONST` to the reader file of that module, and reads the
+  library files named in its `LIBRARY_READERS` (`ferrix_bootinfo::pstore`),
+  each with a self-test case. For the consultant's diff check before
+  landing.

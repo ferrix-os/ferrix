@@ -160,6 +160,7 @@ pub(crate) fn test_boot_lines(
                     "the {arch} kernel reported success but QEMU exited {code}"
                 )));
             }
+            boot_line(arch, &watched.log, kernel, args)?;
             let off = crate::cargo::mitigations_off();
             if let Some(problem) =
                 crate::kaslr::problem(&watched.lines, off, crate::kaslr::declined(args))
@@ -1118,6 +1119,42 @@ struct Watched {
     ended: Ended,
     /// Where the serial output was saved.
     log: PathBuf,
+}
+
+/// The gate's comparison of the kernel's `build` line with its profile file
+/// (`docs/BUILD-FLAGS.md`, rule 6): `tools/common/check/check-boot-line.py`
+/// reads the profile the command line named with a parser of its own --
+/// never this run's resolution of it (BF3 a) -- compares the line word for
+/// word, refuses a build `--set` changed unless `--no-claim` says the run is
+/// ad hoc (BF3 c), and ties the kernel's sha256 to the run.
+fn boot_line(arch: Arch, log: &Path, kernel: &Path, args: &Args) -> Result<()> {
+    let profile = args
+        .kernel_profile
+        .clone()
+        .unwrap_or_else(|| crate::flags::DEFAULT_PROFILE.to_owned());
+    let mut arguments = vec![
+        "--profile".to_owned(),
+        profile,
+        "--arch".to_owned(),
+        arch.name().to_owned(),
+        "--log".to_owned(),
+        log.display().to_string(),
+        "--kernel".to_owned(),
+        kernel.display().to_string(),
+    ];
+    for (flag, value) in &args.sets {
+        arguments.extend(["--set".to_owned(), format!("{flag}={value}")]);
+    }
+    if args.no_claim {
+        arguments.push("--no-claim".to_owned());
+    }
+    let borrowed: Vec<&str> = arguments.iter().map(String::as_str).collect();
+    crate::check::python_with("tools/common/check/check-boot-line.py", &borrowed).map_err(|_| {
+        Error::new(format!(
+            "{arch}: the gate refused the kernel's build line (said above).\n  Serial output is in {}",
+            log.display()
+        ))
+    })
 }
 
 /// How QEMU ended: [`finish`]'s answer.

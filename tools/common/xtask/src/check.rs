@@ -139,6 +139,15 @@ pub(crate) const TASKS: &[Task] = &[
         help: &["model-doc     Regenerate docs/generated/ from the SysML model"],
         run: |_, _| model_doc(),
     },
+    Task {
+        name: "test-flags",
+        help_at: 196,
+        help: &[
+            "test-flags    test-boot, then the build flags' static checks: the profile rule, where flags",
+            "              and boot options are read, the load ring's growth (docs/BUILD-FLAGS.md)",
+        ],
+        run: command,
+    },
 ];
 
 /// `check`, or one of its steps run alone, by the command's name
@@ -167,6 +176,7 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "check-audit" => check_audit(),
         "check-docs" => docs(),
         "check-ferrocene" => ferrocene_rust(),
+        "test-flags" => test_flags(args),
         _ => run(args),
     }
 }
@@ -238,6 +248,25 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
     (
         "certification item boundary",
         &[&["tools/common/check/check-item-boundary.py"]],
+    ),
+    // The build flags (docs/BUILD-FLAGS.md): read in the kernel crate alone
+    // (rule 6 b), and no boot option read that the registry does not
+    // declare (BF4); and the gate's comparison of a kernel's `build` line
+    // with its profile, self-tested here, since only a boot runs it whole.
+    // The profile rule itself is the item boundary's, above.
+    (
+        "build flags",
+        &[
+            &["tools/common/check/check-build-flags.py"],
+            &["tools/common/check/check-boot-line.py", "--self-test"],
+        ],
+    ),
+    // The load ratchet (docs/roadmap/microkernel-m0.md, D): how much this
+    // change grows what the microkernel switch must lift out of ring 0.
+    // Reported, never failed: the customer allows load growth as now.
+    (
+        "load ring size",
+        &[&["tools/common/check/check-load-ring.py"]],
     ),
     // A coding standard with metrics, which EN 50716 requires and the
     // other gates did not supply: how complicated one function in the
@@ -1029,8 +1058,68 @@ impl Beside {
 /// `docs/MICROKERNEL.md` section 6.5). Not Ferrocene's own compiler: that
 /// needs the customer's subscription. The script says which version, why,
 /// and what it cannot see; `cargo xtask check-ferrocene` runs it alone.
+///
+/// The kernel crate builds only with its build flags (`src/kernel/build.rs`
+/// refuses a build without them), so the step runs once for each certified
+/// profile that builds today -- `present` until M5 -- with that profile's
+/// flags as xtask's resolver gives them (the certification consultant,
+/// ledger 1039, condition 1). A profile refused by `lands` is not built, so
+/// it is not type-checked either; none at all is a failure.
 fn ferrocene_rust() -> Result<()> {
-    python_with("tools/common/check/check-ferrocene-rust.py", &[])
+    let mut checked = 0_usize;
+    for profile in crate::flags::profile_names()? {
+        let resolved = match crate::flags::resolve(Some(&profile), &[]) {
+            Ok(resolved) if resolved.level != "none" => resolved,
+            _ => continue,
+        };
+        println!("   -- profile {profile}: {}", resolved.cfg_words());
+        python_env(
+            "tools/common/check/check-ferrocene-rust.py",
+            &[],
+            &cargo::flag_environment(&resolved),
+        )?;
+        checked += 1;
+    }
+    if checked == 0 {
+        return Err(Error::new(
+            "no certified profile builds today, so none was type-checked with Ferrocene's Rust",
+        ));
+    }
+    Ok(())
+}
+
+/// `test-flags`: the build flags' checks in one command, which their negative
+/// controls run under `gate.sh control` (`docs/BUILD-FLAGS.md` §6): build
+/// and boot `--kernel-profile` on each `--arch`, as `test-boot` does, whose
+/// gate compares the kernel's `build` line with the profile file; then the
+/// static checks -- the profile rule (`check-item-boundary.py`), where flags
+/// and boot options are read (`check-build-flags.py`) and the load ratchet
+/// (`check-load-ring.py`, failing on growth only with `--fail-on-growth`).
+/// The boot comes first, so a control of a static check shows a guest that
+/// started before the check fired. Every static check runs whichever fails.
+fn test_flags(args: &Args) -> Result<()> {
+    crate::test_boot(args)?;
+    let growth: &[&str] = if args.fail_on_growth {
+        &["--fail-on-growth"]
+    } else {
+        &[]
+    };
+    let checks: [(&str, &[&str]); 3] = [
+        ("tools/common/check/check-item-boundary.py", &[]),
+        ("tools/common/check/check-build-flags.py", &[]),
+        ("tools/common/check/check-load-ring.py", growth),
+    ];
+    let failed: Vec<String> = checks
+        .iter()
+        .filter_map(|(script, arguments)| python_with(script, arguments).err())
+        .map(|error| error.to_string())
+        .collect();
+    if failed.is_empty() {
+        println!("test-flags: the boot's build line and every static flag check passed");
+        Ok(())
+    } else {
+        Err(Error::new(format!("test-flags: {}", failed.join("; "))))
+    }
 }
 
 /// The item crates that must make every allocation fallibly, by package.
@@ -2410,6 +2499,15 @@ fn clippy(arguments: &[&str]) -> Result<()> {
 /// prints an advertisement for the Microsoft Store and exits 9009. Looking the
 /// name up on PATH finds it, so the only reliable test is to run it.
 pub(crate) fn python_with(script: &str, arguments: &[&str]) -> Result<()> {
+    python_env(script, arguments, &[])
+}
+
+/// [`python_with`], with `environment` added to the script's environment.
+pub(crate) fn python_env(
+    script: &str,
+    arguments: &[&str],
+    environment: &[(&str, String)],
+) -> Result<()> {
     let interpreter = python_interpreter().ok_or_else(|| {
         Error::new("no working Python interpreter on PATH (tried python3, python)")
     })?;
@@ -2418,7 +2516,8 @@ pub(crate) fn python_with(script: &str, arguments: &[&str]) -> Result<()> {
     let _ = command
         .current_dir(paths::workspace_root())
         .arg(script)
-        .args(arguments);
+        .args(arguments)
+        .envs(environment.iter().map(|(key, value)| (*key, value)));
     cargo::run(command, script)
 }
 

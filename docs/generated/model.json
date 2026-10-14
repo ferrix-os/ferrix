@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "45896ef2f697f2f1adf6faa706783ff2f1b406733b556c1093c53e930b0ff515",
+  "digest": "a09000445dc87dc45e17f0bd85647bd7114ac060ae58898fc1f692ed285daa1b",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -25221,7 +25221,7 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theBootsRecordsPinned",
                               "kind": "attribute",
                               "redefines": "statement",
-                              "value": "\"The first eight system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
+                              "value": "\"The first nine system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
                                 "line": 1305
@@ -25232,7 +25232,7 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theBootsRecordsPinned",
                               "kind": "attribute",
                               "redefines": "criterion",
-                              "value": "\"Nine system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, the ring reports records lost, and a read of the boot records from 6 copies 3 and resumes at 9.\"",
+                              "value": "\"Ten system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, the ring reports records lost, and a read of the boot records from 6 copies 4 and resumes at 10.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
                                 "line": 1309
@@ -25451,10 +25451,10 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theConfigurationRecorded",
                               "kind": "attribute",
                               "redefines": "statement",
-                              "value": "\"The boot shall start its audit record with the start-up record of the id reads answer, and record whether its self-checks run, who starts devmgr, the mitigations it was built with and the KASLR state, as bring-up read them.\"",
+                              "value": "\"The boot shall start its audit record with the start-up record of the id reads answer, and record whether its self-checks run, who starts devmgr, the mitigations it was built with, the KASLR state and the build flags it was compiled with, as bring-up read them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1356
+                                "line": 1357
                               }
                             },
                             {
@@ -25462,10 +25462,10 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theConfigurationRecorded",
                               "kind": "attribute",
                               "redefines": "criterion",
-                              "value": "\"The kernel's boot records begin with the start-up record, its id the one reads answer and its lengths 512 and 4096, and hold the 4 configuration records with bring-up's values; the boot is not yet recorded as brought up.\"",
+                              "value": "\"The kernel's boot records begin with the start-up record, its id the one reads answer and its lengths 512 and 4096, and hold the 5 configuration records with bring-up's values; the boot is not yet recorded as brought up.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1360
+                                "line": 1361
                               }
                             },
                             {
@@ -25476,7 +25476,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1361
+                                "line": 1362
                               }
                             }
                           ]
@@ -25489,7 +25489,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1363
+                            "line": 1364
                           },
                           "children": [
                             {
@@ -25500,7 +25500,7 @@
                               "value": "\"Each decision the TSF makes at a recording site -- a call its rights refused, a widening refused, a limit's refusal, a process made, a job given for a cgroup, a control channel given, a job killed, a cgroup killed, an OOM kill, a device quiesced, a limit set by handle or by cgroup file, a DMA fault -- shall be recorded with its outcome and the subject that made it, the kernel for the decisions it makes alone.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1370
+                                "line": 1371
                               }
                             },
                             {
@@ -25511,7 +25511,7 @@
                               "value": "\"At the end of a boot with checks, the record holds each of the 12 events the boot's checks provoke, and DMA_FAULT where a unit reported a DMA fault, with the outcome of its class and its subject; none of the OOM kill, the quiesce and the fault names a process; the boot is recorded as brought up.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1375
+                                "line": 1376
                               }
                             },
                             {
@@ -25522,7 +25522,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1376
+                                "line": 1377
                               }
                             }
                           ]
@@ -25535,7 +25535,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1378
+                            "line": 1379
                           },
                           "children": [
                             {
@@ -25546,7 +25546,7 @@
                               "value": "\"The audit record shall be read only through the audit handle with READ, which can be neither duplicated nor sent; a read shall copy whole records from a cursor, and a read that copies none or cannot copy them out shall leave the cursor, the buffer and the reader's position where they were.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1383
+                                "line": 1384
                               }
                             },
                             {
@@ -25557,7 +25557,7 @@
                               "value": "\"A handle with pid 1's rights reads the boot records, the start-up record first with the kernel's id; a count of 0 copies nothing and moves nothing; a read into unmapped memory is FAULT and counts nothing read; a handle without READ, a channel end and a ring that does not exist are refused; the handle is not duplicated and not sent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1389
+                                "line": 1390
                               }
                             },
                             {
@@ -25568,7 +25568,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1390
+                                "line": 1391
                               }
                             }
                           ]
@@ -25581,7 +25581,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1392
+                            "line": 1393
                           },
                           "children": [
                             {
@@ -25592,7 +25592,7 @@
                               "value": "\"A boot with init shall keep its audit record on the root volume in a file named by the boot's audit id, holding the start-up record, the configuration, and the decisions only a boot with init makes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1396
+                                "line": 1397
                               }
                             },
                             {
@@ -25603,7 +25603,7 @@
                               "value": "\"svc audit reads back the start-up record with the id init named the file by, the checks' configuration as run, STARTER_GIVEN, READER_GIVEN, DEVMGR_STARTED by pid 1 and ROOT_SWITCHED with pid 1 moved.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1400
+                                "line": 1401
                               }
                             },
                             {
@@ -25614,7 +25614,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1401
+                                "line": 1402
                               }
                             }
                           ]
@@ -25627,7 +25627,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1403
+                            "line": 1404
                           },
                           "children": [
                             {
@@ -25638,7 +25638,7 @@
                               "value": "\"Every record up to a power action shall be in the reader's file or on the console: the kernel shall record the power action last, say how far the reader read, and print every record past that, and a run the ring overwrote as one line.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1407
+                                "line": 1408
                               }
                             },
                             {
@@ -25649,7 +25649,7 @@
                               "value": "\"At test-init's power-off, init's last read is where the kernel saw it stop, and every number from there to the power action is printed as unread or in a lost run.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1410
+                                "line": 1411
                               }
                             },
                             {
@@ -25660,7 +25660,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1411
+                                "line": 1412
                               }
                             }
                           ]
@@ -25673,7 +25673,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1413
+                            "line": 1414
                           },
                           "children": [
                             {
@@ -25684,7 +25684,7 @@
                               "value": "\"A boot that skips its self-checks shall record that it did, where a reader outside it can see.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1415
+                                "line": 1416
                               }
                             },
                             {
@@ -25695,7 +25695,7 @@
                               "value": "\"A boot with ferrix.checks=skip, read back through svc audit, holds the checks' configuration record with value 0.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1418
+                                "line": 1419
                               }
                             },
                             {
@@ -25706,7 +25706,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1419
+                                "line": 1420
                               }
                             }
                           ]
@@ -25719,7 +25719,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1421
+                            "line": 1422
                           },
                           "children": [
                             {
@@ -25730,7 +25730,7 @@
                               "value": "\"An audit record shall be 64 bytes, each field little-endian at a fixed offset, so that a reader decodes what the kernel wrote.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1424
+                                "line": 1425
                               }
                             },
                             {
@@ -25741,7 +25741,7 @@
                               "value": "\"A record of distinct bytes encodes to them in order at the offsets the layout names and decodes back equal.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1426
+                                "line": 1427
                               }
                             },
                             {
@@ -25752,7 +25752,7 @@
                               "value": "\"O.AUDIT\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1427
+                                "line": 1428
                               }
                             }
                           ]
@@ -25766,7 +25766,7 @@
                       "doc": "The safe state and what brings the kernel to it: O.FAILSAFE and ASR-6 (FPT_FLS.1). SAFETY-MANUAL.md §3 defines the safe state.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1431
+                        "line": 1432
                       },
                       "children": [
                         {
@@ -25777,7 +25777,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1435
+                            "line": 1436
                           },
                           "children": [
                             {
@@ -25788,7 +25788,7 @@
                               "value": "\"On a failed internal consistency check the kernel shall stop every other processor, print a diagnostic naming the failure and its catalogued explanation, and halt without returning to user mode, or, where H.FAIL.5 applies, reset the machine after the report.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1440
+                                "line": 1441
                               }
                             },
                             {
@@ -25799,7 +25799,7 @@
                               "value": "\"A boot told to panic at its end (`ferrix.onexit=panic`) ends with the FX-1501 report and no program output after it; every panic site in the item has a catalogue entry (`check-panic-audit.py`).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1444
+                                "line": 1445
                               }
                             },
                             {
@@ -25810,7 +25810,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1445
+                                "line": 1446
                               }
                             }
                           ]
@@ -25823,7 +25823,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1447
+                            "line": 1448
                           },
                           "children": [
                             {
@@ -25834,7 +25834,7 @@
                               "value": "\"The allocator every kernel stack comes from shall give each an unmapped guard page directly below and above it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1450
+                                "line": 1451
                               }
                             },
                             {
@@ -25845,7 +25845,7 @@
                               "value": "\"A kernel stack allocated, written at its first and last word and freed has the page below and the page above it untranslated, and gives back every frame it took.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1453
+                                "line": 1454
                               }
                             },
                             {
@@ -25856,7 +25856,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1454
+                                "line": 1455
                               }
                             }
                           ]
@@ -25869,7 +25869,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1457
+                            "line": 1458
                           },
                           "children": [
                             {
@@ -25880,7 +25880,7 @@
                               "value": "\"A kernel stack overflow shall end in the halt and diagnostic of the safe state, never in a write below the stack.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1459
+                                "line": 1460
                               }
                             },
                             {
@@ -25891,7 +25891,7 @@
                               "value": "\"A kernel thread that recurses past its stack ends the boot in a report naming the fault -- on x86-64 a double fault taken on its own stack (FX-9004) -- on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1462
+                                "line": 1463
                               }
                             },
                             {
@@ -25902,7 +25902,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1463
+                                "line": 1464
                               }
                             }
                           ]
@@ -25915,7 +25915,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1467
+                            "line": 1468
                           },
                           "children": [
                             {
@@ -25926,7 +25926,7 @@
                               "value": "\"Once a failure report has begun, a line the kernel writes shall reach the console port after a bounded wait even when the port's lock is held and will never be released.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1470
+                                "line": 1471
                               }
                             },
                             {
@@ -25937,7 +25937,7 @@
                               "value": "\"A report begun while another context holds the port's lock for good reaches the port whole, after at most 10,000,000 attempts at the lock, on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1473
+                                "line": 1474
                               }
                             },
                             {
@@ -25948,7 +25948,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1474
+                                "line": 1475
                               }
                             }
                           ]
@@ -25961,7 +25961,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1478
+                            "line": 1479
                           },
                           "children": [
                             {
@@ -25972,7 +25972,7 @@
                               "value": "\"With ferrix.panic=reset read after stage 1's check, the first failure report shall, once its diagnostic and the reset line are on the port, in the pstore record and on the screen, wait 10 seconds on the free-running counter where its rate is known and reset the machine; with no value, halt, any other value, or in a report on another processor, it shall halt.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1484
+                                "line": 1485
                               }
                             },
                             {
@@ -25983,7 +25983,7 @@
                               "value": "\"In cargo xtask test-postmortem (x86-64 under KVM, AArch64): a boot with ferrix.onexit=panic ferrix.panic=reset prints the reset line and the loader's banner comes again at least 9.5 s and at most 60 s later, quoting the panic; the same boot without the option and with ferrix.panic=Reset says it halts and prints no reset line.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1490
+                                "line": 1491
                               }
                             },
                             {
@@ -25994,7 +25994,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1491
+                                "line": 1492
                               }
                             }
                           ]
@@ -26008,7 +26008,7 @@
                       "doc": "The btrfs reader and write path, `ferrix-btrfs` and `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the `Device` and `WriteDevice` traits the kernel's block layer answers, above it `Volume` and `WriteVolume`; the VFS glue on top (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so these promise what the two crates do at `Volume` and `WriteVolume`, not what a program sees through a mount. The low-level requirements are part 24. Some sit under a requirement here by decomposition rather than as a case of its criterion: L.btrfs.31 and .70 (a node's address and generation) refine H.STORE.2, whose criterion tests a data sector, and L.btrfs.16 and .92 (superblock stripes) refine H.STORE.5, whose criterion tests the trees' consistency.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1495
+                        "line": 1496
                       },
                       "children": [
                         {
@@ -26019,7 +26019,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1511
+                            "line": 1512
                           },
                           "children": [
                             {
@@ -26030,7 +26030,7 @@
                               "value": "\"The btrfs reader and writer shall answer every volume image, whatever its bytes, with a value or an error, without reading or writing outside a buffer, panicking or looping without bound.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1515
+                                "line": 1516
                               }
                             },
                             {
@@ -26041,7 +26041,7 @@
                               "value": "\"Each of 4,096 single-byte patches of a superblock, and of a leaf, parses or is refused, and every accessor of what parses answers, 0 panics. The decoders' own totality, and the `btrfs_read` fuzzer's resealed images, are their low-level requirements' and outside this criterion; the write path, which parses every node through the reader, has no hostile-image check of its own yet (TODO.md).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1522
+                                "line": 1523
                               }
                             },
                             {
@@ -26052,7 +26052,7 @@
                               "value": "\"O.MEDIA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1523
+                                "line": 1524
                               }
                             }
                           ]
@@ -26065,7 +26065,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1525
+                            "line": 1526
                           },
                           "children": [
                             {
@@ -26076,7 +26076,7 @@
                               "value": "\"A block whose checksum disagrees with its contents shall never be returned as valid: the reader shall read another copy where the chunk keeps one, and otherwise answer an error.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1529
+                                "line": 1530
                               }
                             },
                             {
@@ -26087,7 +26087,7 @@
                               "value": "\"With the first copy of a DUP data sector damaged, a file read returns the file's bytes from the second; with both damaged, it answers DataChecksum and hands back none of the sector's bytes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1533
+                                "line": 1534
                               }
                             },
                             {
@@ -26098,7 +26098,7 @@
                               "value": "(\"O.MEDIA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1534
+                                "line": 1535
                               }
                             }
                           ]
@@ -26111,7 +26111,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1536
+                            "line": 1537
                           },
                           "children": [
                             {
@@ -26122,7 +26122,7 @@
                               "value": "\"Until a commit's superblock is written, the volume on the device shall be exactly the last commit, whatever of the commit's other writes have reached it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1539
+                                "line": 1540
                               }
                             },
                             {
@@ -26133,7 +26133,7 @@
                               "value": "\"500 inserts committed, and the commit's writes replayed without its superblocks onto the volume as it was, leave a volume that checks clean and holds exactly the last commit's items.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1542
+                                "line": 1543
                               }
                             },
                             {
@@ -26144,7 +26144,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1543
+                                "line": 1544
                               }
                             }
                           ]
@@ -26157,7 +26157,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1545
+                            "line": 1546
                           },
                           "children": [
                             {
@@ -26168,7 +26168,7 @@
                               "value": "\"What a commit or a log commit returned success for shall be found, no older, when the volume is opened after a power cut at any later point, the log replayed if the superblock names one.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1549
+                                "line": 1550
                               }
                             },
                             {
@@ -26179,7 +26179,7 @@
                               "value": "\"Of 100 cuts over 4 random scenarios of writes, logs and commits, each rebuilt as the device may have left the disk, every one opens, checks clean down to free space and checksums, and rolls back no completed promise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1553
+                                "line": 1554
                               }
                             },
                             {
@@ -26190,7 +26190,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1554
+                                "line": 1555
                               }
                             }
                           ]
@@ -26203,7 +26203,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1556
+                            "line": 1557
                           },
                           "children": [
                             {
@@ -26214,7 +26214,7 @@
                               "value": "\"Each commit shall leave the extent tree, the block groups' usage, the free-space tree and the superblock's totals agreeing with the trees, so that no block in use is free.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1559
+                                "line": 1560
                               }
                             },
                             {
@@ -26225,7 +26225,7 @@
                               "value": "\"After 3,000 random edits on the blank fixture, committed as they go, the writer's checker finds every tree block's and data extent's references, each block group's usage and free space and the superblock's total consistent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1563
+                                "line": 1564
                               }
                             },
                             {
@@ -26236,7 +26236,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1564
+                                "line": 1565
                               }
                             }
                           ]
@@ -26249,7 +26249,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1566
+                            "line": 1567
                           },
                           "children": [
                             {
@@ -26260,7 +26260,7 @@
                               "value": "\"An operation the volume has no room for shall be refused with no space before it changes anything, leaving the transaction able to commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1569
+                                "line": 1570
                               }
                             },
                             {
@@ -26271,7 +26271,7 @@
                               "value": "\"On a 128 MiB volume, creates until its trees are full end in NoSpace with the transaction not aborted, its commit succeeds, and a deletion still makes room for another create.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1572
+                                "line": 1573
                               }
                             },
                             {
@@ -26282,7 +26282,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1573
+                                "line": 1574
                               }
                             }
                           ]
@@ -26295,7 +26295,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1575
+                            "line": 1576
                           },
                           "children": [
                             {
@@ -26306,7 +26306,7 @@
                               "value": "\"An allocation the btrfs writer cannot make shall be answered to its caller as an error, aborting the transaction if an edit had begun, and never as a panic or a stop of the element.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1578
+                                "line": 1579
                               }
                             },
                             {
@@ -26317,7 +26317,7 @@
                               "value": "\"With every allocation of the writer's operations failed in turn, each operation succeeds or answers an error, no panic is taken, and the volume reopened from the device is the last commit and checks clean.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1582
+                                "line": 1583
                               }
                             },
                             {
@@ -26328,7 +26328,7 @@
                               "value": "(\"O.QUOTA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1583
+                                "line": 1584
                               }
                             }
                           ]
@@ -26341,7 +26341,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1585
+                            "line": 1586
                           },
                           "children": [
                             {
@@ -26352,7 +26352,7 @@
                               "value": "\"An operation that fails after it changed something shall abort its transaction, so that none of it is committed, and the volume reloaded at its last commit shall take no further change.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1589
+                                "line": 1590
                               }
                             },
                             {
@@ -26363,7 +26363,7 @@
                               "value": "\"Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1593
+                                "line": 1594
                               }
                             },
                             {
@@ -26374,7 +26374,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1594
+                                "line": 1595
                               }
                             }
                           ]

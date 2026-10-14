@@ -46,6 +46,12 @@ const RUN: &str = "run";
 /// safe default, and a misspelt option should cost a slow boot rather than
 /// an unchecked one.
 pub(crate) fn init(view: &BootView<'_>) {
+    if !crate::boot_checks::COMPILED_IN {
+        println!(
+            "  checks   compiled out (checks=off): stages 2 to 12 are brought up and not checked; \
+             this boot is not a boot test"
+        );
+    }
     let value = view.option(OPTION).or_else(|| {
         crate::discovery::fdt::open(view)
             .ok()
@@ -78,7 +84,12 @@ pub(crate) fn init(view: &BootView<'_>) {
 }
 
 /// Whether the self-checks run on this boot: true unless [`init`] read
-/// `ferrix.checks=skip`. The flag is the core's (`crate::boot_checks`).
+/// `ferrix.checks=skip`, and never in a kernel built with the build flag
+/// `checks=off`, where it is the constant `false` and every check it gates is
+/// compiled out of the image (`docs/BUILD-FLAGS.md` §3, BF7). Such a kernel
+/// is an ad-hoc build: no profile carries `checks=off`, and it ends with
+/// `FERRIX-BOOT-UNCHECKED`, as a skipped boot does. The flag is the core's
+/// (`crate::boot_checks`).
 pub(crate) fn run() -> bool {
     crate::boot_checks::run()
 }

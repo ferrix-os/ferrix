@@ -107,7 +107,7 @@ const FAIR_SLOTS: usize = 32;
 const SECOND: u64 = 1_000_000_000;
 
 /// How many of the first system records are pinned ([`Which::Boot`]).
-pub(crate) const BOOT_RECORDS: usize = 8;
+pub(crate) const BOOT_RECORDS: usize = 9;
 
 /// Who a record is about: the process and its job, which the TSF attests,
 /// and beside them the uid the personality says, which it does not.
@@ -200,7 +200,7 @@ pub(crate) enum Which {
     Refusals,
     /// The first [`BOOT_RECORDS`] system records, numbered as the
     /// high-value ring numbered them, which never wraps: a record past the
-    /// first eight is kept in the high-value ring alone.
+    /// first nine is kept in the high-value ring alone.
     Boot,
 }
 

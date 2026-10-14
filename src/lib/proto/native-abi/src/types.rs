@@ -140,7 +140,7 @@ pub const AUDIT_HIGH: u64 = 0;
 /// [`crate::nr::NativeCall::AuditRead`]'s `which`: the refusal ring.
 pub const AUDIT_REFUSALS: u64 = 1;
 
-/// [`crate::nr::NativeCall::AuditRead`]'s `which`: the first eight system
+/// [`crate::nr::NativeCall::AuditRead`]'s `which`: the first nine system
 /// records, pinned where nothing else reaches them, numbered as the
 /// high-value ring numbered them.
 pub const AUDIT_BOOT: u64 = 2;

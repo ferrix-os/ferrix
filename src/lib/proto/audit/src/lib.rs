@@ -284,6 +284,12 @@ pub enum Config {
     /// framebuffer to be lent to a driver (`docs/DISPLAY.md` §8), 0 when it
     /// did not.
     Efifb = 6,
+    /// The build flags the kernel was compiled with (`docs/BUILD-FLAGS.md`):
+    /// each flag's place in its list of values, two bits a flag in the flag
+    /// file's order; in the third detail word the profile's place in bits 0
+    /// to 3 and the level's in bits 4 to 7. The same set as the `build`
+    /// boot line, from the same `cfg`s.
+    Build = 7,
 }
 
 /// Whether the decision recorded went for the subject or against it.

@@ -28,23 +28,25 @@ setting [SAFETY-MANUAL.md](SAFETY-MANUAL.md) AoU-8 and AoU-11 cover. **`off`
 is an explicit opt-out**, for measuring what the defences cost and for a
 machine whose owner has decided it runs nothing that distrusts anything else.
 
-`off` builds with `--cfg ferrix_mitigations_off`, and that one `cfg` is the
-whole of the configuration space. It is not a Cargo feature, deliberately: the
-reference configuration's claim of zero Cargo features in `src/kernel/` and `src/boot/common/uefi/`
-stands, and a `cfg` that only `xtask` sets, with two values and one of them the
-default, is a configuration an evaluator can enumerate in a sentence.
+Since M0 the switch is the build flag `mitigations` (`docs/BUILD-FLAGS.md`):
+`off` builds the kernel crate with `cfg(ferrix_mitigations = "off")`, set
+only by `xtask` from a profile file or `--set mitigations=off` (which
+`--mitigations off` is by its older name), and an `off` build is ad hoc:
+`profile=none`, no claim. It is not a Cargo feature, deliberately: the
+reference configuration's claim of zero Cargo features in `src/kernel/` and
+`src/boot/common/uefi/` stands, and every profile names `on`.
 
 | Where | What the switch does |
 |---|---|
-| `tools/common/xtask/src/cargo.rs` | `--mitigations off` adds `--config target.<triple>.rustflags=["--cfg","ferrix_mitigations_off","-C","relocation-model=static"]` to every kernel build, and builds into `target/mitigations-off` so neither setting's cache is thrown away for the other's. A `--config` array is appended to `.cargo/config.toml`'s, where `RUSTFLAGS` would have replaced the linker flags the image needs. |
-| `src/kernel/build.rs` | links the kernel so the loader can move it (§6) unless the `cfg` is set: a static PIE on x86-64 and AArch64, `--emit-relocs` on ARMv7-A. Built `off`, it is the static fixed-address image it always was. |
-| `tools/common/xtask/src/check.rs` | `cargo xtask check` runs clippy over the kernel for all three architectures in both settings, so code only one setting compiles cannot rot in the other. |
-| `Cargo.toml` | declares the `cfg` to `unexpected_cfgs`, so a misspelt one is a warning. |
+| `tools/common/xtask/src/flags.rs`, `cargo.rs` | the resolver hands the flag to the kernel's build script; `mitigations=off` also adds `--config target.<triple>.rustflags=["-C","relocation-model=static"]` to every crate of the kernel build, and builds into `target/mitigations-off` so neither setting's cache is thrown away for the other's. A `--config` array is appended to `.cargo/config.toml`'s, where `RUSTFLAGS` would have replaced the linker flags the image needs. |
+| `src/kernel/build.rs` | turns the flags into the kernel crate's `cfg`s and their `--check-cfg`, and links the kernel so the loader can move it (§6) unless `mitigations=off`: a static PIE on x86-64 and AArch64, `--emit-relocs` on ARMv7-A. Built `off`, it is the static fixed-address image it always was. |
+| `tools/common/xtask/src/check.rs` | `cargo xtask check` runs clippy over the kernel for all three architectures in every buildable profile and in the ad-hoc `mitigations=off` and `checks=off` builds, so code only one setting compiles cannot rot in the other. |
+| `Cargo.toml` | denies `unexpected_cfgs`; the kernel's build script declares the flag's two values, so a misspelt one fails the build, and no other crate can name it. |
 | `src/kernel/src/arch/speculation.rs` | `HARDENED`, the one constant every defence tests. |
-| `src/lib/kernel/sync/src/nospec.rs` | the libraries' clamp, the identity when the `cfg` is set. |
+| `src/lib/kernel/sync/src/nospec.rs` | the libraries' clamp, the same in every build since M0: a library reads no build flag (BUILD-FLAGS.md rule 6 b), so `off` keeps these two clamps. |
 
-**What `off` removes:** every clamp (they become the identity after the
-ordinary bounds check), every write to a speculation control, every switch
+**What `off` removes:** every clamp of the kernel's own (they become the
+identity after the ordinary bounds check; the two libraries' clamps in §2 stay), every write to a speculation control, every switch
 barrier, the extra instructions on the entry and exit paths, which the
 assembler leaves out (`.if` on a constant), KASLR — the kernel is linked at
 its fixed address with the static relocation model, and the loader leaves the

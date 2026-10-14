@@ -16,6 +16,7 @@ mod arch;
 mod audit;
 mod backtrace;
 mod boot_checks;
+mod build_flags;
 mod checks;
 mod claim;
 mod console;
@@ -1281,6 +1282,7 @@ fn start_audit(view: &BootView<'_>) {
     random::fill(&mut id);
     let _ = audit::start(u128::from_le_bytes(id));
     let kaslr = view.raw().kaslr;
+    let (build, profile_and_level) = build_flags::audit_words();
     let expected = audit::check::Expected {
         checks: u32::from(checks::run()),
         devmgr: u32::from(devmgr::by_init()),
@@ -1288,6 +1290,7 @@ fn start_audit(view: &BootView<'_>) {
         kaslr: kaslr.state,
         pstore: u32::from(console::pstore::attached().is_some()),
         efifb: u32::from(firmware::asked(view)),
+        build,
     };
     audit::config(audit::Config::Checks, expected.checks, 0);
     audit::config(audit::Config::Devmgr, expected.devmgr, 0);
@@ -1299,8 +1302,9 @@ fn start_audit(view: &BootView<'_>) {
     );
     audit::config(audit::Config::Pstore, expected.pstore, 0);
     audit::config(audit::Config::Efifb, expected.efifb, 0);
+    audit::config(audit::Config::Build, build, profile_and_level);
     println!(
-        "  audit    started: {} high-value and {} refusal records, 6 configuration items recorded",
+        "  audit    started: {} high-value and {} refusal records, 7 configuration items recorded",
         audit::HIGH_RECORDS,
         audit::REFUSAL_RECORDS
     );
@@ -1745,6 +1749,9 @@ fn verify_hand_off(view: &BootView<'_>, memory: &mut EarlyMemory) {
     console::screen::milestone(0);
     println!();
     println!("Ferrix {} on {}", env!("CARGO_PKG_VERSION"), arch::NAME);
+    // What this kernel was built as, from its own `cfg`s, before anything
+    // else it says (`docs/BUILD-FLAGS.md`, rule 6).
+    build_flags::report();
 
     report(view);
     console::screen::milestone(1);

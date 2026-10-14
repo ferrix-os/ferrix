@@ -183,10 +183,11 @@ decomposed to the item's modules.
 *In place:* statement coverage is now measurable and measured (F-10 at 84.5–90.1% across the three architectures),
 which was the objective everyone assumes is impossible for a kernel. 492 lines
 of assembly across 22 allow-listed sites makes the source-to-object question
-tractable. Zero Cargo features in the item, and one two-valued build switch of
-which only `on` is claimed, mean the configuration space is enumerated in a
-sentence. Deactivated code is confined to three architectures behind `cfg`,
-and to the side-channel defences behind `ferrix_mitigations_off`.
+tractable. Zero Cargo features in the item, and one kernel profile, `present`, whose
+build flags are each fixed (`docs/BUILD-FLAGS.md`), mean the configuration
+space is enumerated in a sentence. Deactivated code is confined to three
+architectures behind `cfg`, and to what the ad-hoc flag values compile out,
+the side-channel defences behind `ferrix_mitigations = "off"` among them.
 
 *Missing:* every planning document — PSAC, SDP, SVP, SCMP, SQAP — none drafted.
 Low-level requirements (F-15) and requirements-to-test traceability (F-14),

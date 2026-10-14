@@ -1299,14 +1299,14 @@ package FerrixItemRequirements {
             attribute :>> parent = "O.AUDIT";
         }
         requirement <'H.AUD.2'> theBootsRecordsPinned : ItemHighLevel {
-            attribute :>> statement = "The first eight system records shall stay
+            attribute :>> statement = "The first nine system records shall stay
                 readable, numbered as the high-value ring numbered them, however
                 far that ring has wrapped, and no record after them shall join
                 them.";
-            attribute :>> criterion = "Nine system records and a grant in a ring
-                of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, the
+            attribute :>> criterion = "Ten system records and a grant in a ring
+                of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, the
                 ring reports records lost, and a read of the boot records from 6
-                copies 3 and resumes at 9.";
+                copies 4 and resumes at 10.";
             attribute :>> parent = "O.AUDIT";
         }
         requirement <'H.AUD.3'> refusalsKeptApart : ItemHighLevel {
@@ -1353,10 +1353,11 @@ package FerrixItemRequirements {
             attribute :>> statement = "The boot shall start its audit record with
                 the start-up record of the id reads answer, and record whether its
                 self-checks run, who starts devmgr, the mitigations it was built
-                with and the KASLR state, as bring-up read them.";
+                with, the KASLR state and the build flags it was compiled with,
+                as bring-up read them.";
             attribute :>> criterion = "The kernel's boot records begin with the
                 start-up record, its id the one reads answer and its lengths 512
-                and 4096, and hold the 4 configuration records with bring-up's
+                and 4096, and hold the 5 configuration records with bring-up's
                 values; the boot is not yet recorded as brought up.";
             attribute :>> parent = "O.AUDIT";
         }

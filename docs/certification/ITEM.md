@@ -444,8 +444,8 @@ A certificate attaches to a configuration, not to a repository.
 | Unstable features | none in `src/kernel/` or `src/boot/common/uefi/` |
 | Cargo features | 7 in the workspace, **0** in `src/kernel/` or `src/boot/common/uefi/` |
 | Where the loader boots from | the ESP's `FERRIX/` files, or on a disk with A/B system slots the slot its boot control record selects, verified, with the ESP's files as the rescue path (`docs/AB-BOOT.md`; SECURITY-TARGET A.FIRMWARE, SAFETY-MANUAL AoU-29). The loader has **no Cargo feature and no `cfg`** of its own; the A/B gate's negative controls are source sabotages run by `fleet/gate.sh control`. A netboot (the loader and its files from iPXE's read-only file system, `docs/NETBOOT.md`), where the loader sends its boot log to the server, is a development path, not the reference configuration |
-| Build settings | **one**, `cargo xtask --mitigations on\|off`; the reference is `on`, the default |
-| Boot options that change the item's work | **four**: `ferrix.devmgr=kernel\|init`, the reference `kernel`, the default; `ferrix.pstore=on\|off`, the reference `on`, the default (the kernel log kept across a reset, `docs/POSTMORTEM.md` §3; any other value is said and taken as `off`); and `ferrix.efifb`, which lends the firmware framebuffer to a ring-3 driver on x86-64, the reference **off**, the default (SAFETY-MANUAL AoU-31); and `ferrix.panic=halt\|reset`, the reference `halt`, the default (any other value is said and taken as `halt`; `reset`, a stop-gap for the N150 box set by no loader, resets the machine 10 s after a panic's report and is outside the reference configuration, H.FAIL.5, SAFETY-MANUAL AoU-32) |
+| Kernel profile | **`present`** (`tools/common/data/profiles/present.toml`, `docs/BUILD-FLAGS.md` BF1): every build flag set, each `cfg(ferrix_<flag> = "<value>")` read in the kernel crate alone, printed on the kernel's `build` boot line and compared with the profile by the gate; `mitigations=on`, `checks=on`. A build changed by `--set` (`--mitigations off` among them) is ad hoc and carries no claim |
+| Boot options that change the item's work | **four**: `ferrix.devmgr=kernel\|init`, the reference `kernel`, the default; `ferrix.pstore=on\|off`, the reference `on`, the default (the kernel log kept across a reset, `docs/POSTMORTEM.md` §3; any other value is said and taken as `off`); and `ferrix.efifb`, which lends the firmware framebuffer to a ring-3 driver on x86-64, the reference **off**, the default (SAFETY-MANUAL AoU-31); and `ferrix.panic=halt\|reset`, the reference `halt`, the default (any other value is said and taken as `halt`; `reset`, a stop-gap for the N150 box set by no loader, resets the machine 10 s after a panic's report and is outside the reference configuration, H.FAIL.5, SAFETY-MANUAL AoU-32). Every option the kernel or the loader reads is declared in `build-flags.toml`'s registry, and `present` permits: `ferrix.checks=run`, `ferrix.root`, `ferrix.init`, `ferrix.onexit`, `ferrix.fbcon`, `ferrix.fbcon.small`, `ferrix.pstore=on`, `ferrix.apic`, `ferrix.panic=halt`, `console`, `drm.edid_firmware`, `ferrix.devmgr=kernel`, `ferrix.fastpath=off`: 13 of the 19 declared; `desktop` permits all 19, `fast` and `max` 6 each |
 | Driver updates at run time | **absent**: no reference image carries `drvupdated` (`docs/DEVMGR.md` §4.1); only `cargo xtask test-restart --update`'s images do, xtask refuses it in any other, and no claim is made of them (SAFETY-MANUAL AoU-26) |
 | Test platform | QEMU; on x86-64 the patched 10.2.1 `(ferrix-cfi)`, whose VT-d blocks compatibility-format interrupts, with `intel-iommu,intremap=on,eim=off` and, under KVM, the split interrupt controller ([TOOLS.md](TOOLS.md)) |
 | Kernel link (`on`) | a static PIE on x86-64 (PIC code model, every x86-64 crate) and AArch64 (static code model, `-pie -z notext`); on ARMv7-A a fixed-address link that keeps its relocations (`--emit-relocs`). The loader moves it each boot (KASLR). `off`: the static fixed-address image |
@@ -458,14 +458,21 @@ Kconfig symbols are why that objective is unmeetable there at any budget. Here
 the configuration space is three architectures and one switch with two
 settings, which is most of why this item is analysable at all.
 
-The switch is the side-channel defences and KASLR
-([SPECULATION.md](SPECULATION.md)). `off` builds with
-`--cfg ferrix_mitigations_off` and the static relocation model, set only by
-`xtask`, compiles every defence out and links the kernel at its fixed address; it exists to measure what they cost and for owners
-who have decided they need none. It is not a Cargo feature, and the claims
-here are made of `on` alone (SAFETY-MANUAL AoU-8). `cargo xtask check` builds
-the kernel in both settings on all three architectures so that `off` cannot
-stop compiling unnoticed, and the running kernel says which it is.
+The build flag that matters most here is `mitigations`, the side-channel
+defences and KASLR ([SPECULATION.md](SPECULATION.md)). `mitigations=off`
+builds with `cfg(ferrix_mitigations = "off")` and the static relocation
+model, set only by `xtask`, compiles the kernel's defences out and links the
+kernel at its fixed address; it exists to measure what they cost and for
+owners who have decided they need none. It is not a Cargo feature, it is an
+ad-hoc build with no claim, and the claims here are made of `present` alone
+(SAFETY-MANUAL AoU-8). `cargo xtask check` type-checks the kernel (clippy,
+no link) in every buildable profile and in the ad-hoc `mitigations=off` and
+`checks=off` builds on all three architectures, so that none can stop
+compiling unnoticed; the images are linked and booted by `cargo xtask
+test-flags` (each buildable profile, on each architecture) and by
+`cargo xtask test-boot --mitigations off --no-claim`. The running kernel
+prints what it was built as on its `build` line, which every test boot's
+gate compares with the profile file (`tools/common/check/check-boot-line.py`).
 
 The second boot option is whether the kernel keeps its log across a reset
 (`docs/POSTMORTEM.md` §3). Under `on`, the reference, the loader gives the

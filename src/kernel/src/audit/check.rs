@@ -16,9 +16,9 @@
 //! * **the two rings**: a refusal goes to the refusal ring and every one of
 //!   the five other classes to the high-value ring, so a flood of refusals
 //!   leaves every grant readable;
-//! * **pinned**: the first eight system records are still readable after
+//! * **pinned**: the first nine system records are still readable after
 //!   the high-value ring has wrapped past them, numbered as it numbered
-//!   them, and a ninth is kept in the ring alone;
+//!   them, and a tenth is kept in the ring alone;
 //! * **budgets**: on a job tree of the check's own, each job keeps the
 //!   budget its maker gave it -- an anonymous job and one inside that take
 //!   their unit's, a delegatee's cgroup its delegated unit's, and a cgroup
@@ -95,6 +95,8 @@ pub(crate) struct Expected {
     pub(crate) pstore: u32,
     /// `ferrix.efifb`: 1 when the firmware framebuffer was asked to be lent.
     pub(crate) efifb: u32,
+    /// The build flags, packed (`crate::build_flags::audit_words`).
+    pub(crate) build: u32,
 }
 
 /// What the check established, for the boot log.
@@ -284,16 +286,16 @@ fn start_and_wrap() -> Result<(usize, u64), &'static str> {
     Ok((read_all.copied, read_all.lost))
 }
 
-/// Nine system records and a grant in a ring of four, on [`PINNED`]: the
-/// first eight system records stay readable as the boot records, numbered
-/// as the ring numbered them, the ninth and the grant do not join them, and
+/// Ten system records and a grant in a ring of four, on [`PINNED`]: the
+/// first nine system records stay readable as the boot records, numbered
+/// as the ring numbered them, the tenth and the grant do not join them, and
 /// the ring itself has moved on.
 ///
 /// Verifies: H.AUD.2
 fn pinned() -> Result<(), &'static str> {
     let _ = PINNED.start(0, CHECK_ID);
     let system = Event::new(Class::System, 7);
-    for at in 1..=9_u64 {
+    for at in 1..=10_u64 {
         let event = if at == 4 { GRANT } else { system };
         let _ = PINNED.record_at(
             at,
@@ -305,25 +307,25 @@ fn pinned() -> Result<(), &'static str> {
             [at as u32, 0, 0],
         );
     }
-    let (boot, out) = read(&PINNED, 10, Which::Boot, 0, 16);
+    let (boot, out) = read(&PINNED, 11, Which::Boot, 0, 16);
     let kept_in_order = out
         .iter()
         .map(|record| record.sequence)
-        .eq([0, 1, 2, 3, 5, 6, 7, 8]);
+        .eq([0, 1, 2, 3, 5, 6, 7, 8, 9]);
     let started = out
         .first()
         .is_some_and(|record| record.start_fields().is_some());
     if boot.copied != BOOT_RECORDS || !kept_in_order || !started {
         return Err(
-            "the first eight system records were not kept apart, numbered as the ring numbered them",
+            "the first nine system records were not kept apart, numbered as the ring numbered them",
         );
     }
-    let (ring, _) = read(&PINNED, 10, Which::High, 0, 8);
+    let (ring, _) = read(&PINNED, 11, Which::High, 0, 8);
     if ring.lost == 0 {
         return Err("the pinned check's ring did not wrap, so it proved nothing");
     }
-    let (later, _) = read(&PINNED, 10, Which::Boot, 6, 16);
-    if later.copied != 3 || later.next != 9 {
+    let (later, _) = read(&PINNED, 11, Which::Boot, 6, 16);
+    if later.copied != 4 || later.next != 10 {
         return Err("a read of the boot records from a number did not resume there");
     }
     Ok(())
@@ -573,6 +575,7 @@ fn kernel_store(expected: &Expected) -> Result<usize, &'static str> {
         (Config::Kaslr, expected.kaslr),
         (Config::Pstore, expected.pstore),
         (Config::Efifb, expected.efifb),
+        (Config::Build, expected.build),
     ];
     for (key, value) in wants {
         match config(key) {

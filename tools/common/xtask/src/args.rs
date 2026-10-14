@@ -28,6 +28,12 @@ pub(crate) struct Args {
     /// stands for: single flags changed for an ad-hoc build, which carries
     /// no claim.
     pub(crate) sets: Vec<(String, String)>,
+    /// `--no-claim`: a boot of an ad-hoc build, which the gate then compares
+    /// with its profile and `--set`s and passes as carrying no claim.
+    pub(crate) no_claim: bool,
+    /// `--fail-on-growth`: `test-flags` fails when the load ring grew, the
+    /// load ratchet's negative control's mode; nothing else passes it.
+    pub(crate) fail_on_growth: bool,
     /// `--gdb`: stop and wait for a debugger before the first instruction.
     pub(crate) gdb: bool,
     /// `--fast`: skip the slow half of `check`.
@@ -610,6 +616,15 @@ impl Args {
         Ok(())
     }
 
+    /// `--no-claim` and `--fail-on-growth`.
+    fn flag_switch(&mut self, flag: &str) {
+        if flag == "--no-claim" {
+            self.no_claim = true;
+        } else {
+            self.fail_on_growth = true;
+        }
+    }
+
     /// `--kernel-profile NAME`, `--set flag=value`, and `--mitigations on|off`,
     /// which is `--set mitigations=on|off` by its older name.
     fn flags(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
@@ -820,6 +835,7 @@ impl Args {
                 "-h" | "--help" => args.help = true,
                 "--release" | "--strip-kernel" | "--iterate" => args.build(&item),
                 "--mitigations" | "--kernel-profile" | "--set" => args.flags(&item, &mut items)?,
+                "--no-claim" | "--fail-on-growth" => args.flag_switch(&item),
                 "--gdb" => args.gdb = true,
                 "--fast" => args.fast = true,
                 "--ferrousli" => args.ferrousli = true,

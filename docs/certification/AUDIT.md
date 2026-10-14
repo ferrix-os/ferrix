@@ -35,7 +35,7 @@ changes nothing about the decision.
 | `DEVICE` | A device quiesced; a DMA fault the IOMMU reported for a device | `native::quiesce`; `iommu` fault handlers |
 | `CHANGED` | TSF data changed by a call that succeeded: a job's limit set (`job_set_limit`), a cgroup's limit file written, a device's pin budget set (`DEVICE_LIMIT_SET`, with the old and new values) | `syscall/native.rs` `job_set_limit` and `device_set_limit`; cgroupfs limit writes |
 | `SYSTEM` | The audit function's own start-up, with the ring sizes; and its shutdown, the last record before a power action | `audit::start` at bring-up; `power` |
-| `SYSTEM` | The boot's configuration: `--mitigations`, the KASLR state (randomised or not, and why), `ferrix.devmgr=kernel\|init`, whether `ferrix.efifb` asked for the firmware framebuffer to be lent, and **`ferrix.checks=skip`** -- a boot that skipped its self-tests leaves a record of it -- and each self-check stage's verdict | bring-up in `main.rs` |
+| `SYSTEM` | The boot's configuration: `--mitigations`, the KASLR state (randomised or not, and why), `ferrix.devmgr=kernel\|init`, whether `ferrix.efifb` asked for the firmware framebuffer to be lent, **`ferrix.checks=skip`** -- a boot that skipped its self-tests leaves a record of it -- the **build flags** the kernel was compiled with (`Config::Build`, the same set as its `build` boot line, from the same `cfg`s: in the second detail word each flag's place in its list of values, two bits a flag in `build-flags.toml`'s order; in the third the profile's place among present, desktop, fast, max, none in bits 0 to 3 and the level's among none, present, sc2, sc4 in bits 4 to 7; `docs/BUILD-FLAGS.md` rule 6 d). In `desktop` the record names `ipc_fastpath=on`, `program_barrier=session`, `ssbd=on_request` and `runtime_trades=game_mode` while the image runs their stand-ins, today's stricter `off`, `switch`, `always` and `none` (`build-flags.toml`'s `stands_in`), until each value's own landing; a stand-in is allowed only at level `none` (`BUILD-FLAGS.md` §3.1), and each self-check stage's verdict | bring-up in `main.rs`, `build_flags.rs` |
 | `SYSTEM` | The root switch and pid 1's re-root; a power action | `fs::root_disk`; `power` |
 
 Not recorded: successful calls in general (a mapping, a message), because
@@ -119,10 +119,12 @@ needs, its subject among it, is worked out before a ring's lock is taken --
 on the heap's path without a lock of its own: a refused charge names the job
 its quota slot keeps the id and budget of, and no process.
 
-**The boot's own records.** The first eight system records -- the start-up
+**The boot's own records.** The first nine system records -- the start-up
 record, the boot's configuration and the boot brought up -- are also pinned
 where nothing else reaches them (`Which::Boot`), numbered as the high-value
-ring numbered them. That array never wraps and holds at most eight; a system
+ring numbered them. That array never wraps and holds at most nine (eight
+until the build flags' record, `Config::Build`, made the configuration
+seven items); a system
 record after them is kept in the high-value ring alone. The boot's own
 checks make processes, kill jobs and set limits by the dozen, and a longer
 run could wrap the high-value ring past the records that say what the boot
@@ -271,7 +273,8 @@ Three slices, each reviewed before it lands:
    in, since the generator is the item's and the core may not name it --
    and bring-up's records: the start-up record and the boot's configuration
    (`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, whether the
-   log is kept across a reset, `ferrix.pstore`, and `ferrix.efifb`) right after
+   log is kept across a reset, `ferrix.pstore`, `ferrix.efifb`, and the
+   build flags, `Config::Build`) right after
    the generator's check, and one when the boot is brought up. Its boot
    check, `audit::check`, is §6's first half on stores of its own and on a
    job tree of its own, and the kernel's store read back (FX-0309). The

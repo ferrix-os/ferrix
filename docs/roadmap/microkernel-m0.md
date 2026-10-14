@@ -196,9 +196,16 @@ agents*); B waits on A.
 
 ## Where it stands
 
-Planned, 2026-10-13, on branch `microkernel-plan`. Nothing is built. The
-plan (`docs/MICROKERNEL.md`) and the flag design (`docs/BUILD-FLAGS.md`)
-passed the certification consultant's reviews with every condition folded
-in (ledger lines 812 to 941, and 950 for landing); each kernel mechanism,
-the `ipc_fastpath` move and the Zenbleed/GDS change still get their own
-reviews before code. The customer, 2026-10-13: "ok go with m0".
+Planned, 2026-10-13, on branch `microkernel-plan`, with nothing built
+then. The plan (`docs/MICROKERNEL.md`) and the flag design
+(`docs/BUILD-FLAGS.md`) passed the certification consultant's reviews with
+every condition folded in (ledger lines 812 to 941, and 950 for landing);
+each kernel mechanism, the `ipc_fastpath` move and the Zenbleed/GDS change
+still get their own reviews before code. The customer, 2026-10-13: "ok go
+with m0".
+
+A and D done (branch `m0-flags`, 2026-10-13 and 14): the flag system and
+the load ratchet, as `docs/BUILD-FLAGS.md`'s "Where it stands" lists,
+passed by the certification consultant's landing review (ledger 1039, its
+five conditions met). B's values are declared and build as stand-ins in
+`desktop` until their own landings.

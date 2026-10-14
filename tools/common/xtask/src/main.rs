@@ -262,6 +262,9 @@ OPTIONS:
     --set <FLAG=VALUE>                   Change one build flag, as often as needed: an ad-hoc
                                          build, profile=none level=none, which carries no claim
                                          and which the gate refuses as its profile's evidence
+    --no-claim                           test-boot of a --set build: the gate compares its line
+                                         with the profile and the --sets, and passes it as an
+                                         ad-hoc run that carries no claim
     --mitigations <on|off>              --set mitigations=on|off by its older name. off builds
                                          with ferrix_mitigations=\"off\" and the static relocation
                                          model into target/mitigations-off: no index clamps in
@@ -717,7 +720,7 @@ fn run_machine(mut args: Args) -> Result<()> {
     qemu::run(arch, &image, &args)
 }
 
-fn test_boot(args: &Args) -> Result<()> {
+pub(crate) fn test_boot(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let (image, kernel) = build_image(arch, args)?;
         qemu::test_boot(arch, &image, &kernel, args)?;
