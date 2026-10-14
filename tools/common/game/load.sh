@@ -43,7 +43,18 @@ start)
 	mkdir -p "$work" || exit 1
 	: >"$work/pids"
 	n=0
-	case $parts in *" compile "*) n=$("$rig" cpus) || exit 1 ;; esac
+	case $parts in *" compile "*)
+		n=$("$rig" cpus) || exit 1
+		# One build first, alone, so that the compiler and its libraries
+		# are read from the disk before the writer and the holder compete
+		# for it: the load is the steady state, not a cold start. On Ferrix
+		# a cold start under both made no build in 50 s (docs/GAME-PATH.md
+		# §12, 2026-10-14).
+		mkdir -p "$work/warm"
+		"$rustc" --edition 2021 --crate-type lib -C opt-level=2 -C codegen-units=1 \
+			--out-dir "$work/warm" "$crate" || exit 1
+		;;
+	esac
 	echo "$n" >"$work/loops"
 	i=0
 	while [ "$i" -lt "$n" ]; do
