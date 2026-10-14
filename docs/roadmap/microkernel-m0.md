@@ -135,8 +135,29 @@ planted file is its control.
   proofs, Ferrocene's qualifications and targets, Verus's compiler pin.
 * **A CI build of `core` and `item` with Ferrocene's compiler**, so no Rust
   feature newer than Ferrocene's creeps into the code to be certified.
+  **Built 2026-10-14 against upstream Rust 1.95.0, not yet with Ferrocene's
+  binary**: `cargo xtask check` (alone: `cargo xtask check-ferrocene`) runs
+  `tools/common/check/check-ferrocene-rust.py`, which type-checks
+  `ferrix-kernel` and the item's library crates (ferrix-btrfs,
+  ferrix-btrfs-write, ferrix-fallible, ferrix-sync) for the three kernel
+  targets with Rust 1.95.0, the upstream release Ferrocene 26.05.0, the
+  newest, is built from (its `release/1.95` branch's `src/version`; 26.08 is
+  still "upcoming" in its release notes), with `RUSTC_BOOTSTRAP` cleared and
+  every `#![feature]` refused, and names each error's ring. Ferrocene's own
+  binaries need a login at `customers.ferrocene.dev` (`releases.ferrocene.dev`
+  answered HTTP 302 to it on 2026-10-14), so **the real Ferrocene compiler is
+  owed by the customer's subscription** (the Individual seat is enough for
+  this build; `RESEARCH-CHECK.md` §9, route A); the script then runs it
+  through criticalup in place of `rustup run`. The kernel is one crate, so a
+  load file's newer feature fails the step too. Its control, a 1.97 API
+  (`u64::bit_width`) planted in the item file `random.rs`, fails it.
 * **The Pixel 7's cores**: read MIDR_EL1 on the device to confirm Cortex-A78,
-  for early barrier, CSV2 and timing measurements.
+  for early barrier, CSV2 and timing measurements. **Not read yet**: on
+  2026-10-14 no phone was attached, `adb devices` listing none on the
+  Windows PC (the Android SDK's platform-tools) or on nazuna. The read is
+  `adb shell cat /sys/devices/system/cpu/cpu*/regs/identification/midr_el1`
+  and `/proc/cpuinfo` (no root), filed as a measurement in the mode
+  "Android host, not Ferrix" (ledger 959).
 * **The boards** (the customer: about €200; a used Orin Nano was €450):
   **the Pixel 7**, already owned, for the A78 family's measurements, and
   **no board bought in M0**: a CIX P1 board (Orange Pi 6 Plus 16 GB,

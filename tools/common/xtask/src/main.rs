@@ -372,6 +372,9 @@ COMMANDS:
     host-doc      check's documentation step alone, as CI runs it
     check-docs    check's commit hooks, audits and generated-document checks alone, no cargo
                   step: the gate of a change to docs/ and top-level Markdown only
+    check-ferrocene
+                  check's build of the kernel and the item's crates with Rust 1.95.0, the
+                  upstream Rust of Ferrocene 26.05 (not Ferrocene's own compiler), alone
     gate-rows --since <ref> [--moved <old main>]
                   The gate rows docs/BACKLOG.md asks of the changes since <ref>; with
                   --moved, whether a rebase from <old main> asks for a gate again

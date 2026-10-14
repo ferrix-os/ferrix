@@ -26,6 +26,7 @@ pub(crate) const COMMANDS: &[&str] = &[
     "check-apps",
     "check-side",
     "check-docs",
+    "check-ferrocene",
     "gate-rows",
     "components",
     "pin-components",
@@ -44,6 +45,7 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "check-apps" => apps(),
         "check-side" => side_workspaces(&paths::workspace_root()),
         "check-docs" => docs(),
+        "check-ferrocene" => ferrocene_rust(),
         "gate-rows" => crate::gate_rows::run(args),
         "components" | "pin-components" => crate::components::command(name),
         _ => run(args),
@@ -274,6 +276,10 @@ fn run(args: &Args) -> Result<()> {
 fn main_workspace(root: &std::path::Path, args: &Args) -> Result<bool> {
     step("terminal font", terminal_font)?;
     step("btrfs allocates fallibly", item_crates_allocate_fallibly)?;
+    step(
+        "the item with Ferrocene's Rust (1.95.0, upstream)",
+        ferrocene_rust,
+    )?;
 
     step("crate layering", || {
         let mut command = Command::new("bash");
@@ -386,6 +392,17 @@ impl Beside {
             "the workspaces of their own (cargo xtask check-side)",
         )
     }
+}
+
+/// The kernel and the item's library crates, type-checked for every kernel
+/// target with the upstream Rust that Ferrocene's newest release is built
+/// from, so that no language or library feature newer than Ferrocene's
+/// enters the code to be certified (`docs/roadmap/microkernel-m0.md`, E;
+/// `docs/MICROKERNEL.md` section 6.5). Not Ferrocene's own compiler: that
+/// needs the customer's subscription. The script says which version, why,
+/// and what it cannot see; `cargo xtask check-ferrocene` runs it alone.
+fn ferrocene_rust() -> Result<()> {
+    python_with("tools/common/check/check-ferrocene-rust.py", &[])
 }
 
 /// The item crates that must make every allocation fallibly, by package.

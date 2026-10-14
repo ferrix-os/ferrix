@@ -641,7 +641,10 @@ are items for the vendor (F-17) before any SIL 4 claim. Consequences:
 * **The compiler that builds the certified kernel is Ferrocene's**, on the
   reference platform's target. Today Ferrocene is at Rust 1.95 (26.05; 26.08, with Rust 1.96 to 1.97, is in preparation), the tree
   pins 1.97.1 and Verus pins 1.98.1. From M0, CI builds `core` and `item`
-  with Ferrocene's compiler, so no language feature newer than it creeps in.
+  with Ferrocene's compiler, so no language feature newer than it creeps in;
+  until the customer's subscription brings that binary, `cargo xtask check`
+  builds them with upstream Rust 1.95.0, the Rust Ferrocene 26.05 is built
+  from (`tools/common/check/check-ferrocene-rust.py`, 2026-10-14).
 * **Whether a compiler qualified to SIL 3 suffices for SC 4** is a question
   for the pre-assessment (`CLAIM.md` M2), with V2's object-code verification
   named as the compensating measure.

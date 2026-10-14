@@ -36,6 +36,15 @@ the qualified target list. `armv7a-none-eabi` and the three UEFI targets are
 the ones expected to fall outside it, and the reference configuration would
 have to say so.
 
+**Ferrocene's language level is held already** (2026-10-14, M0 E):
+`cargo xtask check` type-checks the kernel and the item's library crates for
+every kernel target with Rust 1.95.0, the upstream Rust of Ferrocene 26.05.0,
+with `RUSTC_BOOTSTRAP` cleared and every `#![feature]` refused
+(`tools/common/check/check-ferrocene-rust.py`). It is upstream's compiler, not
+Ferrocene's qualified binary, which comes with a paid subscription; it says
+only that nothing newer than Ferrocene's Rust is used, and is no
+qualification evidence.
+
 ---
 
 ## 2. Generators that emit product code
