@@ -416,8 +416,10 @@ logged into and nothing of the game was downloaded.
   `/etc/ssl/certs/ca-certificates.crt` and the boot had the bundle only on
   `/data`. With GnuTLS on the volume and the bundle linked, the download
   ran at about 3.4 MB/s through xtask's gateway, against 31 MB/s from the
-  host (E4.4; `docs/WINE.md` §10), until, after about 5.8 GB, Ferrix's
-  btrfs answered every write `ENOSPC` with some 150 GB unallocated (open).
+  host (E4.4; `docs/WINE.md` §10), until, after about 5.8 GB, every write
+  was answered `ENOSPC` with some 150 GB unallocated: the 8 GiB guest ran
+  out of frames, because a writable btrfs mount's page cache is never
+  reclaimed (open; reclaim for its clean pages is a certified-core change).
   Wine, Proton and the launcher are on the `--everything` desktop as
   `gryphlink` (`test-endfield-proton --everything`).
 * *Still to do:* the image path of another process (`ptrace` and

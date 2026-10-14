@@ -725,14 +725,21 @@ gateway, not the guest, is the limit (`docs/STEAM.md` §7, stage 23's E4.4).
 **Where it stopped (open).** After 36 minutes and about 5.8 GB, every
 write of the downloader failed with Windows' error 112, the disk is full
 (`FlushBufferToFile ... Can not write file with 112`, then curl's 23), and
-the launcher showed "Download Error". Wine maps `ENOSPC` to 112, so
-Ferrix's btrfs refused the writes, with about 150 GB of the volume still
-unallocated: read from the host, the image's chunk tree has the 612 8 MiB
-data chunks `mkfs.btrfs --rootdir` made, four 1 GiB data chunks Ferrix
-made, and one 1 GiB metadata chunk 3 % used. Which of the write path's
-measures (`btrfs-vfs` `rw.rs`'s reservation against `data_room`, or
-`btrfs-write`'s admission) answered `ENOSPC` is not known yet; the boot
-has no shell to ask it.
+the launcher showed "Download Error". Wine maps `ENOSPC` to 112, but the
+volume was not full: about 150 GB of it was still unallocated (read from
+the host, its chunk tree has the 612 8 MiB data chunks `mkfs.btrfs
+--rootdir` made, four 1 GiB data chunks Ferrix made, and a 1 GiB metadata
+chunk 3 % used). Neither btrfs measure refused: the same volume, written
+through the same writable mount on the host (`btrfs-vfs`, four files
+round-robin, 10 GiB), takes every byte, and `statfs` falls by what was
+written. What ran out is the guest's memory. A writable btrfs mount's page
+cache is never reclaimed (`user::cache`: "a writable one never yet"), so
+every page a file writes stays in memory while the file is open, written
+back or not; the downloader keeps its parts open, and when the 8 GiB guest
+had no frame left, the write's page commit failed and `fs/pages.rs`
+answers that as tmpfs does, `ENOSPC`. A boot with more memory goes further
+before it stops (the download was started again with 24 GiB); the fix is
+reclaim for a writable mount's clean pages, in the certified core.
 
 
 **On the `--everything` desktop.** `run-compositor --everything` merges the
