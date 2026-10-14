@@ -780,3 +780,68 @@ with 47 periods throttled. Those failing runs are the cpu-arm-order row's
 control: the code before the fix is its sabotage. The fast path's three
 exits now wait out a used quota as the general way out does; the boot with
 `ferrix.fastpath=on` that would prove it is owed (BACKLOG, step 4's F9).
+
+## 15. Stage 13's exit test (2026-10-12)
+
+`cargo xtask test-container` (`tools/common/xtask/src/container.rs`) boots
+`src/tests/container/` as init and requires the stage's exit criterion, one
+printed line a clause, in order, and exit status 0. Init, as root, mounts the
+btrfs test disk (`vdb`) read-only on a mount of its own at `/tmp/ro`, mounts
+cgroup2, makes `ctn` with `memory.max` of 8 MiB, `chown`s it to uid 1000 and
+puts a child in it. That child, the owner:
+
+| Line | What it shows |
+|---|---|
+| `delegation ok` | the cgroup and its limit are made and handed to uid 1000 |
+| `unprivileged ok` | the user namespace is made by a process whose uid and euid are 1000 and whose `CapEff` is all zero, with `no_new_privs` set |
+| `pid ok` | after `unshare` of the mount, UTS, IPC, cgroup, network and pid namespaces, the owner's fork reads `getpid` 1 and `getppid` 0, and the owner's `/proc/<pid>/status` lists its `NSpid` as `<pid> 1` (read by the owner, since `status` is told in the reader's namespace, `docs/PIDNS.md` §6) |
+| `namespaces ok` | each of the seven `/proc/self/ns/*` links differs from init's |
+| `ids ok` | uid 0 inside; `sethostname` changes its own UTS namespace only |
+| `seccomp ok` | a filter answering `getsid` with `ERRNO(EPERM)` does; a fork under one answering `KILL_PROCESS` dies of `SIGSYS` |
+| `reclaim ok` | pid 1 reads `big.txt` (140,000 bytes) through the read-only mount, 35 pages charged to `ctn` (`memory.stat`'s `file` 143360), then touches up to four times `memory.max`; `memory.stat` counts `pgsteal` 35 before the kill |
+| `oom ok` | pid 1 ends by `SIGKILL`, `memory.events` counts `oom_kill 1`, and the owner, in the same cgroup with nothing of its own, is alive to say so |
+| `isolation ok` | init, outside the cgroup, sees its own host name and the owner's exit 0 |
+
+The time namespace is not among them: `CLONE_NEWTIME` is not on `main` (the
+`stage13-timens` branch, `docs/BACKLOG.md`). The criterion does not need it.
+
+Passed in direct runs on 2026-10-12, and through the gate pool on
+2026-10-14 on f231cdf09 with no kernel change (INDEX tags `s13fx-*`, logs
+`~/.local/share/ferrix/logs/queue/<tag>.log` on nazuna), every row
+`run: PASSED`:
+
+| Row | Tag | Accelerator |
+|---|---|---|
+| `test-container --arch x86_64 --accel kvm` | `s13fx-ctn-x86-2` | x86_64:kvm |
+| `test-container --arch aarch64` | `s13fx-ctn-a64-2` | aarch64:tcg |
+| `test-container --arch armv7a --smp 2` | `s13fx-ctn-a32-smp2-2` | armv7a:tcg |
+| `test-container --arch armv7a` (four processors) | `s13fx-ctn-a32-2` | armv7a:tcg |
+| `check` | `s13fx-check-2` | -- |
+| `build --arch all --release` | `s13fx-release` | -- |
+| `test-boot`: x86_64 under KVM and TCG, aarch64, armv7a, armv7a `--smp 2` | `s13fx-boot-x86-kvm-2`, `s13fx-boot-x86-tcg-2`, `s13fx-boot-a64-2`, `s13fx-boot-a32-2`, `s13fx-boot-a32-smp2-2` | as named |
+
+The x86_64 run reads `memory.stat pgscan 35 pgsteal 35`, `memory.events max 3
+oom 1 oom_kill 1`. Each judged line has a negative control, a one-line edit of
+the program run with `fleet/gate.sh control ... --expect-line` on x86_64 under
+KVM, which must make the test fail with the message named; each said
+`control: FIRED (line, no panic)` on f231cdf09:
+
+| Control | Sabotage | Message | Tag |
+|---|---|---|---|
+| unpriv | the owner stays root (`let dropped = true;`) | the user namespace's maker was not an unprivileged user | `s13fx-ctl-unpriv` |
+| pid | no `CLONE_NEWPID` | pid N's status did not show it as 1 in a namespace below | `s13fx-ctl-pid` |
+| max | `memory.max` written as `max` | four times memory.max was touched and nothing ended it | `s13fx-ctl-max` |
+| reclaim | pid 1 opens `big.txt` and reads none of it (`file.take(0)`), so nothing reclaimable is charged to `ctn` | memory.stat counted no page reclaimed in the cgroup before the kill | `s13fx-ctl-reclaim-2` |
+| scope | the owner touches 6 MiB of its own after the fork, so the cgroup's largest process is pid 1's parent | the container's owner did not exit 0 | `s13fx-ctl-scope` |
+| seccomp | the `EPERM` filter is not installed | a call the filter blocks was not refused EPERM | `s13fx-ctl-seccomp` |
+
+With nothing reclaimable of its own (reclaim control: `pgscan 0 pgsteal 0`,
+`oom_kill 1`) the cgroup goes straight to the kill: anonymous memory has no
+swap to go to. The reclaim control first written read `big.txt` through the
+boot check's mount at `/mnt`, on the premise that those pages were cached
+and charged to the root job; it did not fire (`s13fx-ctl-reclaim`, `DID NOT
+FIRE`): the read charged `file 143360` to `ctn` as the `/tmp/ro` read does,
+so the boot check leaves no cached pages of that file, and the program's
+comment on `MOUNT` overstates why `/tmp/ro` is needed. Scope is shown by the
+scope control instead, and by the reclaim and kill being counted in
+`ctn`'s own `memory.stat` and `memory.events` while init, outside it, lives.
