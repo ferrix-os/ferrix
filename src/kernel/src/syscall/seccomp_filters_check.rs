@@ -56,6 +56,12 @@ pub(crate) struct Report {
     /// What `TSYNC`'s test of one other thread costs against the longest
     /// chain, walked whole, in nanoseconds.
     pub(crate) ancestor: u64,
+    /// What the whole `TSYNC` of the running-threads case took, in
+    /// nanoseconds: both holds of the thread-list lock and the test between
+    /// them, so an upper bound on each hold.
+    pub(crate) sync_nanos: u64,
+    /// How many threads the process had as that `TSYNC` began.
+    pub(crate) sync_threads: usize,
     /// Traps delivered as a signal with the call's information, read back, and
     /// a blocked and ignored one that ended its process.
     pub(crate) traps: usize,
@@ -593,6 +599,10 @@ struct Seen {
     threads: usize,
     /// Threads that raced a `TSYNC`'s second window while it was open.
     raced: usize,
+    /// What the running-threads case's `TSYNC` took, in nanoseconds.
+    sync_nanos: u64,
+    /// How many threads its process had as it began.
+    sync_threads: usize,
 }
 
 /// How the task ends its process when it was not killed: it must have been.
@@ -932,6 +942,8 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
         return Err("the synchronised threads' process did not end as the check ended it");
     }
     report.synced = seen.threads;
+    report.sync_nanos = seen.sync_nanos;
+    report.sync_threads = seen.sync_threads;
     // `TSYNC` while threads change themselves in its second window.
     let (seen, status) = scenario(Ending::Race, false)?;
     if status != SURVIVED {
@@ -1190,7 +1202,7 @@ fn ended_early(
         }
         Some(Ending::Sync) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
-            seen.threads = synchronised(env)?;
+            (seen.threads, seen.sync_nanos, seen.sync_threads) = synchronised(env)?;
             Ok(Some(Then::Report(Ok(seen))))
         }
         Some(Ending::Race) => {
@@ -1541,7 +1553,7 @@ fn cloner(_argument: usize) {
 /// `TSYNC` among threads of a process that are being made while it runs: eight
 /// threads and a ninth that makes [`CLONES`] more, one of them in the middle of
 /// the sync. Every thread, those too, must hold the chain after (SR10).
-fn synchronised(env: &Env) -> Result<usize, &'static str> {
+fn synchronised(env: &Env) -> Result<(usize, u64, usize), &'static str> {
     use core::sync::atomic::Ordering;
     let getppid = number(Syscall::Getppid)?;
     CLONED.store(0, Ordering::Release);
@@ -1564,7 +1576,12 @@ fn synchronised(env: &Env) -> Result<usize, &'static str> {
         sched::yield_now();
     }
     let at = env.put(&answering(&[(getppid, ERRNO | EPERM)]), None)?;
+    // Timed whole: both holds of the thread-list lock and the test between
+    // them (`docs/certification/MEMORY-AND-TIMING.md` §2.2b).
+    let threads_then = env.process.threads().len();
+    let start = crate::timer::now_nanos();
     let synced = env.seccomp(SET_MODE_FILTER, TSYNC, at);
+    let took = crate::timer::now_nanos().saturating_sub(start);
     // Wait for the rest to be made.
     while CLONED.load(Ordering::Acquire) < 1_000 {
         if crate::timer::now_nanos() > patience {
@@ -1591,7 +1608,7 @@ fn synchronised(env: &Env) -> Result<usize, &'static str> {
     if count < 9 + CLONES as usize {
         return Err("the threads of the TSYNC check were not all there");
     }
-    Ok(count)
+    Ok((count, took, threads_then))
 }
 
 /// What `TSYNC`'s first window hook changes: set before the call, taken by the
