@@ -1253,16 +1253,16 @@ Measured without the card, on nazuna under the gate pool's load:
 |---|---|---|
 | Clock line | `TSC, calibrated against the HPET at 4400.017 MHz` | `tsc` |
 | Without invtsc (control) | `TSC, vouched for and rated by KVM's paravirtual clock`, the gate fails | `kvm-clock` |
-| Busy under the load, least and mean, of the time the host gave | 97.9%, 99.4% | 99.5%, 99.8% (twice) |
+| Busy under the load, least and mean, of the time the host gave | 97.5 to 97.9%, 99.3 to 99.4% (twice) | 99.5%, 99.8% (twice) |
 | Without the compile loops (control) | about 22%, the gate fails | — |
 | Holder | 80% of 8,093 MiB in use | 80% of 15,992 MiB |
-| Timed 1 ms sleep, idle: median, 99th, max (µs) | 14.5, 28.0, 771 | 64 to 67, 1,331 to 1,928, 3,632 to 8,746 |
-| The same under the load | 13.6, 892, 206,392 | 60.0 to 62.4, 79 to 3,004, 10,320 to 146,450 |
-| Launch timer, a stand-in swapping 100 ms after its constructor | +1.8 and +101.8 ms | +0.3 and +100.4 ms |
+| Timed 1 ms sleep, idle: median, 99th, max (µs) | 14.5 to 16.4, 28 to 133, 771 to 20,987 | 64 to 67, 1,331 to 1,928, 3,632 to 8,746 |
+| The same under the load | 13.6 to 17.4, 892 to 3,977, 206,392 to 550,785 | 60.0 to 62.4, 79 to 3,004, 10,320 to 146,450 |
+| Launch timer, a stand-in swapping 100 ms after its constructor | +1.8 and +101.8 ms; +2.0 and +102.0 ms | +0.3 and +100.4 ms |
 
 The overshoot is printed, not judged: its bound is G2's. Linux's median is
 its 50 µs timer slack; Ferrix has none. Both guests' tails under the load
-reach 137 ms at the 99.99th percentile in one run each, so they are the
+reach 70 to 137 ms at the 99.99th percentile, so they are the
 host's: the pinned host processors are not isolated, and the gate pool's
 boots ran on them. Tails are compared only once the host keeps those
 processors for the guest (`isolcpus` or a cgroup partition, the customer's
