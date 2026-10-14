@@ -82,10 +82,19 @@ impl Wine {
     }
 }
 
-/// Proton's paths the boot links into the volume: Proton itself, and
-/// glibc's i386 loader and directory, which its 32-bit half names.
+/// Proton's paths the boot links into the volume: Proton itself, glibc's
+/// i386 loader and directory, which its 32-bit half names, and the
+/// certificate bundle. Wine's `crypt32` fills the Windows root store from
+/// `/etc/ssl/certs/ca-certificates.crt` (and a few other absolute paths);
+/// without it the store holds only Wine's built-in roots, and the
+/// launcher's download SDK -- libcurl over OpenSSL, taking its roots from
+/// that store -- fails every file with curl's error 60 (docs/WINE.md §10).
 pub(crate) const PROTON_LINKS: &[(&str, &str)] = &[
     ("proton", "/data/proton"),
+    (
+        "etc/ssl/certs/ca-certificates.crt",
+        "/data/etc/ssl/certs/ca-certificates.crt",
+    ),
     (
         "lib/ld-linux.so.2",
         "/data/usr/lib/i386-linux-gnu/ld-linux.so.2",
