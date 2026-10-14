@@ -49,8 +49,9 @@ const STALLED: u64 = 35;
 /// The stalls the second run must hold.
 const STALLS: usize = 3;
 
-/// The refreshes each stall must be counted as.
-const MISSED: u64 = 3;
+/// The stall injected every ten seconds of the second run, in
+/// milliseconds.
+const STALL_MS: u64 = 50;
 
 /// What the script prints last, whatever happened.
 const END: &str = "frames: end";
@@ -192,8 +193,8 @@ pub(crate) fn test_frames(args: &Args) -> Result<()> {
     println!("  {arch}: the plain record, libframerec.so {sha}:\n{plain}");
     println!("  {arch}: the stalled record:\n{stalled}");
     println!(
-        "  {arch}: yserver's msc moved as a clock, and each of the {STALLS} stalls of 50 ms was \
-         counted as {MISSED} missed refreshes, by msc and by time"
+        "  {arch}: yserver's msc moved as a clock, and each of the {STALLS} stalls of {STALL_MS} \
+         ms was counted as the refreshes it missed, by msc and by time alike"
     );
     Ok(())
 }
@@ -229,9 +230,9 @@ fn judge_clock(run: &str, summary: &Summary) -> Result<()> {
              backend has no Present clock\n{summary}"
         )));
     };
-    if !(15_000.0..18_500.0).contains(&refresh) {
+    if !(10_000.0..20_000.0).contains(&refresh) {
         return Err(Error::new(format!(
-            "the {run} run's refresh is {:.3} ms, not about 16.7 ms\n{summary}",
+            "the {run} run's refresh is {:.3} ms, not that of a screen at 50 to 100 Hz\n{summary}",
             refresh / 1000.0
         )));
     }
@@ -272,19 +273,41 @@ fn judge(said: &[String]) -> Result<(Summary, Summary)> {
             stalled.stalls.len()
         )));
     }
+    let refresh = stalled.refresh.unwrap_or(1.0);
+    let allowed = allowed(refresh);
     let wrong: Vec<String> = stalled
         .stalls
         .iter()
-        .filter(|(_, msc, time)| *msc != Some(MISSED) || *time != Some(MISSED))
+        .filter(|(_, msc, time)| msc.is_none_or(|msc| !allowed.contains(&msc)) || time != msc)
         .map(|(swap, msc, time)| format!("swap {swap}: {msc:?} by msc, {time:?} by time"))
         .collect();
     if !wrong.is_empty() {
         return Err(Error::new(format!(
-            "a 50 ms stall must be {MISSED} missed refreshes, by msc and by time: {}\n{stalled}",
+            "a {STALL_MS} ms stall at a refresh of {:.3} ms must be {} to {} missed refreshes \
+             by msc, and the same by time: {}\n{stalled}",
+            refresh / 1000.0,
+            allowed.start(),
+            allowed.end(),
             wrong.join("; ")
         )));
     }
     Ok((plain, stalled))
+}
+
+/// The refreshes a stall of [`STALL_MS`] may miss at a refresh of
+/// `refresh` microseconds. The frame after it shows at the first refresh
+/// that begins after the stall and the frame's own work, which is less
+/// than a refresh for a paced client: so a stall of a whole number of
+/// refreshes misses that many, and one of 3.75 (50 ms at 75 Hz) misses
+/// three or four, by how long the frame took besides.
+fn allowed(refresh: f64) -> std::ops::RangeInclusive<u64> {
+    let refreshes = STALL_MS as f64 * 1000.0 / refresh;
+    let whole = refreshes.round();
+    if (refreshes - whole).abs() < 0.02 {
+        whole as u64..=whole as u64
+    } else {
+        refreshes.floor() as u64..=refreshes.ceil() as u64
+    }
 }
 
 #[cfg(test)]
@@ -296,7 +319,7 @@ mod tests {
     #[test]
     fn the_script_matches_the_judge() {
         assert!(SCRIPT.contains(&format!("run plain 0 {PLAIN}\n")));
-        assert!(SCRIPT.contains(&format!("run stall 50 {STALLED}\n")));
+        assert!(SCRIPT.contains(&format!("run stall {STALL_MS} {STALLED}\n")));
         assert!(SCRIPT.contains(&format!("echo \"{END}\"")));
         assert!(SCRIPT.contains(&format!("--preload /{RECORDER_PATH} /{CLIENT_PATH} ")));
         assert_eq!(STALLED / 10, STALLS as u64);
@@ -340,5 +363,14 @@ mod tests {
         let frozen = judge(&transcript(3, false)).unwrap_err().to_string();
         assert!(frozen.contains("no Present clock"), "{frozen}");
         assert!(judge(&[]).is_err(), "nothing");
+    }
+
+    /// 50 ms is three refreshes at 60 Hz, and three or four at 75 Hz.
+    #[test]
+    fn the_misses_allowed_follow_the_refresh() {
+        assert_eq!(allowed(16_666.667), 3..=3);
+        assert_eq!(allowed(16_680.0), 3..=3);
+        assert_eq!(allowed(13_334.0), 3..=4);
+        assert_eq!(allowed(10_000.0), 5..=5);
     }
 }
