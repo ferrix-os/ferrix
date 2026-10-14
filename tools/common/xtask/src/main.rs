@@ -347,7 +347,9 @@ COMMANDS:
                   the linux-arm64 build on fetch-claude-code.sh arm64's volume)
     test-claude-desktop  Anthropic's Claude desktop app, which tools/common/fetch/fetch-claude-desktop.sh fetches,
                   started on the run-compositor --everything desktop: require its window, class com.anthropic.Claude,
-                  and its sign-in screen drawn in it; no account is used (docs/CLAUDE-CODE.md §7, x86_64)
+                  and its sign-in screen drawn in it; network-dependent: the screen is claude.ai's, over the
+                  gateway, and is not a landing row outside the app's own files; no account is used
+                  (docs/CLAUDE-CODE.md §7.8, x86_64)
     test-steamcmd Attach the volume tools/common/fetch/fetch-steamcmd.sh makes, and require Valve's 32-bit steamcmd to update itself
                   and log in to Steam anonymously, over the network
     test-steam-bootstrap  Attach the volume tools/common/fetch/fetch-steam.sh makes, and require Valve's steam.sh to update the
