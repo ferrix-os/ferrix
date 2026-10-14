@@ -376,6 +376,20 @@ Still open:
 
 ## 9. Where it stands
 
+2026-10-14: **a Present clock on the Wayland backend.** `fetch-yserver.sh`
+pins the fork at 2966c377. The backend had no clock for the Present
+extension: a client's `NotifyMSC` stayed at 0, and its first
+`PresentPixmap` ended the server on lavapipe. The root's RandR output now
+has a clock, as Xwayland's does (`fcc145c4`): its MSC and UST advance at
+each frame hyprix sends and, between frames, once a refresh period of the
+rate hyprix reports, about 75 Hz on Ferrix (74.992 Hz). yserver logs the
+rate at startup ("the Present clock runs at"). On the way: on a Vulkan
+device without `VK_KHR_external_semaphore_fd`, lavapipe's, a completion
+polls its fence instead (`c56a5e57`), which is the crash; and a parked
+`PresentPixmap` completes at its MSC, not early in a blackout flush, while
+the Wayland link is attached (`2966c377`). Every volume built over
+yserver's tree is made again for the pin.
+
 2026-10-12: **what Wine's X driver needed** (stage 23, E1.5;
 `docs/WINE.md` §5). `fetch-yserver.sh` pins the fork at 1a8752e8, which
 since 2026-10-13 also answers a local client's XVidMode gamma writes as

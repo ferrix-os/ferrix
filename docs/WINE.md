@@ -482,7 +482,7 @@ kernel's; both are fixed:
   hooks do (`hw/xwayland/xwayland-vidmode.c`): `SetGamma` and
   `LockModeSwitch` succeed and apply nothing, so `GetGamma` still reads
   1.0, and `SetGammaRamp` is `BadValue`; mode setting stays RandR's
-  (fork commit 1a8752e8, which `fetch-yserver.sh` pins). The launcher
+  (fork commit 1a8752e8; `fetch-yserver.sh` pins a later one). The launcher
   starts with no Wine setting added.
 * **The launcher's own queries never connected.** Its Qt side resolved
   `launcher.gryphline.com` and `game-config.gryphline.com` again and again
