@@ -414,7 +414,7 @@ pub(crate) fn sys_sysinfo_at_width(
         Some(bytes) if bytes <= word_max => (1_u32, bytes, free_pages * PAGE_SIZE),
         _ => (PAGE_SIZE as u32, total_pages, free_pages),
     };
-    let live = crate::object::process::live().map_err(|_| Errno::ENOMEM)?;
+    let live = crate::object::process::listed().map_err(|_| Errno::ENOMEM)?;
     let procs = u16::try_from(live.len()).unwrap_or(u16::MAX);
     drop(live);
 

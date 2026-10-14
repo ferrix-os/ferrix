@@ -1318,6 +1318,22 @@ package FerrixObjectRequirements {
             attribute :>> parent = ("H.OBJ.13", "H.OBJ.9");
             attribute :>> unit = "object::process::live";
         }
+        requirement <'L.object.181'> aReapedPidFindsNothing : ItemLowLevel {
+            attribute :>> statement = "Once unlist has been called for a process as
+                it is reaped, find shall answer its pid with nothing and listed shall
+                leave it out, while live still lists it and its pid stays taken
+                until the process is dropped.";
+            attribute :>> criterion = "A child reaped by wait4 and still held is
+                found by none of kill(pid, 0), getpgid, getsid, pidfd_open, find
+                and the listed processes, all ESRCH or absent, where before the
+                reap each found it; object::process::live still lists it; its pid
+                is not free until the process is dropped, and free after. A child
+                let go by a parent that ignores SIGCHLD is found by neither
+                kill(pid, 0) nor find, where before its end both found it.";
+            attribute :>> parent = "H.OBJ.13";
+            attribute :>> unit = ("object::process::unlist", "object::process::find",
+                "object::process::listed", "object::process::gather");
+        }
     }
 
     package OomKill {

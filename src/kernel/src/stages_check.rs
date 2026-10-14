@@ -884,7 +884,7 @@ pub(super) fn check_syscalls() {
         arch::NAME,
     );
     println!(
-        "  pids     {} processes numbered, found by pid, listed in order and let go",
+        "  pids     {} processes numbered, found, listed in order, let go, unfound once reaped",
         report.pids,
     );
     println!(

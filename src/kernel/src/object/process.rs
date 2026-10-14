@@ -1097,11 +1097,36 @@ pub(crate) const INIT_PID: u32 = 1;
 /// The pid table.
 #[derive(Debug)]
 struct Table {
-    /// Every number in use. `None` for one reserved for a process still being
-    /// built; an entry that does not upgrade is held by one being dropped.
-    live: BTreeMap<u32, Option<Weak<dyn Host>>>,
+    /// Every number in use.
+    live: BTreeMap<u32, Entry>,
     /// The number handed out last.
     last: u32,
+}
+
+/// What one number of the table holds.
+#[derive(Debug)]
+struct Entry {
+    /// The process it names. `None` for one reserved for a process still
+    /// being built; one that does not upgrade is held by one being dropped.
+    host: Option<Weak<dyn Host>>,
+    /// Whether a lookup by number finds it. Cleared when its process is
+    /// reaped ([`unlist`]): from then on the number answers as a free one
+    /// does, though it stays taken until the process is dropped, so it is
+    /// not handed out again while the ended process still holds it.
+    listed: bool,
+}
+
+impl Entry {
+    /// A number chosen for a process still being built.
+    const RESERVED: Entry = Entry {
+        host: None,
+        listed: true,
+    };
+
+    /// The process it names, if a lookup may find it.
+    fn findable(&self) -> Option<&Weak<dyn Host>> {
+        self.host.as_ref().filter(|_| self.listed)
+    }
 }
 
 /// The one table: numbers are global until stage 13's pid namespaces.
@@ -1124,7 +1149,7 @@ pub(crate) fn allocate() -> Option<u32> {
             candidate + 1
         };
         if !table.live.contains_key(&candidate) {
-            let _ = fallible::insert(&mut table.live, candidate, None).ok()?;
+            let _ = fallible::insert(&mut table.live, candidate, Entry::RESERVED).ok()?;
             table.last = candidate;
             return Some(candidate);
         }
@@ -1139,7 +1164,7 @@ pub(crate) fn allocate_init() -> Option<u32> {
     if guard.live.contains_key(&INIT_PID) {
         return None;
     }
-    let _ = fallible::insert(&mut guard.live, INIT_PID, None).ok()?;
+    let _ = fallible::insert(&mut guard.live, INIT_PID, Entry::RESERVED).ok()?;
     Some(INIT_PID)
 }
 
@@ -1160,11 +1185,15 @@ pub(crate) fn is_free(number: u32) -> bool {
 /// it.
 pub(crate) fn name(number: u32, process: Weak<dyn Host>) -> Result<(), AllocError> {
     let mut table = TABLE.lock();
+    let named = Entry {
+        host: Some(process),
+        listed: true,
+    };
     if let Some(entry) = table.live.get_mut(&number) {
-        *entry = Some(process);
+        *entry = named;
         return Ok(());
     }
-    fallible::insert(&mut table.live, number, Some(process)).map(|_| ())
+    fallible::insert(&mut table.live, number, named).map(|_| ())
 }
 
 /// Give `number` back, whatever it names. Called by a process as it is
@@ -1179,7 +1208,7 @@ pub(crate) fn release_naming<H: Host>(number: u32, process: &H) {
     if table
         .live
         .get(&number)
-        .is_some_and(|entry| names(entry.as_ref(), process))
+        .is_some_and(|entry| names(entry.host.as_ref(), process))
     {
         let _ = table.live.remove(&number);
     }
@@ -1192,7 +1221,7 @@ pub(crate) fn numbers_naming<H: Host>(process: &H) -> usize {
         .lock()
         .live
         .values()
-        .filter(|entry| names(entry.as_ref(), process))
+        .filter(|entry| names(entry.host.as_ref(), process))
         .count()
 }
 
@@ -1203,17 +1232,37 @@ fn names<H: Host>(entry: Option<&Weak<dyn Host>>, process: &H) -> bool {
     entry.is_some_and(|entry| core::ptr::addr_eq(entry.as_ptr(), process))
 }
 
-/// The live process `number` names.
+/// Make every number naming `process` unfindable, at once: its pid and its
+/// threads' numbers. Called as it is reaped, so that a `kill(pid, 0)` the
+/// moment `wait4` has returned answers `ESRCH`, as Linux's does, although
+/// the ended process is dropped -- and its number given back -- only once
+/// the reaper has let go of its last task.
+///
+/// The numbers stay taken: [`allocate`] does not hand one out again until
+/// the process is dropped and [`release`] or [`release_naming`] removes it.
+/// [`live`] still lists the process, for the core's own walks that must see
+/// an ended process whose memory is not yet freed (`object::oom`); [`find`]
+/// and [`listed`] do not.
+pub(crate) fn unlist<H: Host>(process: &H) {
+    for entry in TABLE.lock().live.values_mut() {
+        if names(entry.host.as_ref(), process) {
+            entry.listed = false;
+        }
+    }
+}
+
+/// The live process `number` names, unless it has been reaped ([`unlist`]).
 pub(crate) fn find(number: u32) -> Option<Arc<dyn Host>> {
     TABLE
         .lock()
         .live
         .get(&number)
-        .and_then(Option::as_ref)
+        .and_then(Entry::findable)
         .and_then(Weak::upgrade)
 }
 
-/// Every live process, in ascending pid order, each once.
+/// Every live process, in ascending pid order, each once -- the reaped ones
+/// not yet dropped included, which a lookup no longer finds ([`unlist`]).
 ///
 /// The strong references are taken under the lock and the lock released
 /// before they are returned, so a caller that drops the last reference to a
@@ -1223,16 +1272,34 @@ pub(crate) fn find(number: u32) -> Option<Arc<dyn Host>> {
 ///
 /// [`AllocError`].
 pub(crate) fn live() -> Result<Vec<Arc<dyn Host>>, AllocError> {
+    gather(false)
+}
+
+/// [`live`] without the processes already reaped ([`unlist`]): every process
+/// a lookup by number would find, as `/proc`, `kill(-1, ..)` and a process
+/// group's signal see them.
+///
+/// # Errors
+///
+/// [`AllocError`].
+pub(crate) fn listed() -> Result<Vec<Arc<dyn Host>>, AllocError> {
+    gather(true)
+}
+
+/// [`live`], or [`listed`] when `listed_only` is set.
+fn gather(listed_only: bool) -> Result<Vec<Arc<dyn Host>>, AllocError> {
     // Each process once, under its pid and not under its threads' numbers.
     // Filtered after the lock is let go, since a reference dropped here may be
     // a process's last, and dropping a process takes the lock.
     let mut entries: Vec<(u32, Arc<dyn Host>)> = {
         let table = TABLE.lock();
         fallible::try_collect(table.live.iter().filter_map(|(&number, entry)| {
-            entry
-                .as_ref()
-                .and_then(Weak::upgrade)
-                .map(|host| (number, host))
+            let host = if listed_only {
+                entry.findable()
+            } else {
+                entry.host.as_ref()
+            };
+            host.and_then(Weak::upgrade).map(|host| (number, host))
         }))?
     };
     // In place: the pairs whose number is not their process's pid go, and

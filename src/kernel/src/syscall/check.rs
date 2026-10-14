@@ -11903,3 +11903,105 @@ fn load_exits_racer(file: &[u8]) -> Result<Arc<Process>, &'static str> {
 /// end: two threads that exit at once end their process within milliseconds,
 /// and the boot's own two minutes must still hold a failure's name.
 const EXITS_PATIENCE_NANOS: u64 = 10_000_000_000;
+
+/// A child `wait4` has reaped is found by no lookup at once, though the
+/// ended process is still held -- as the lazy reaper holds one until it lets
+/// go of its last task -- and its number is not given back until it goes:
+/// `kill(pid, 0)`, `getpgid`, `getsid` and `pidfd_open` answer `ESRCH`, and
+/// neither `registry::find` nor `registry::live` has it. Its control is the
+/// same child before the reap, ended and not yet waited for, which every one
+/// of them still finds, as Linux's do for a zombie. The core's own list
+/// (`object::process::live`), which the OOM killer walks for ended processes
+/// whose memory is not yet free, still has it. Called from the pids check
+/// (`registry::check`), whose boot line it adds to.
+///
+/// Verifies: L.object.181
+pub(crate) fn check_a_reaped_pid_finds_nothing() -> Result<(), &'static str> {
+    use crate::syscall::registry::{find, is_free, live};
+    use crate::syscall::{family, kill};
+
+    let parent = process::new_for_check().map_err(|_| "no address space for the reap check")?;
+    let child = reap_check_child(&parent)?;
+    let pid = child.pid();
+    let number = pid as i32;
+    process::kill(&child, 0);
+    let listed = |pid: u32| live().is_ok_and(|all| all.iter().any(|process| process.pid() == pid));
+    let found = |parent: &Process| {
+        [
+            kill::sys_kill(parent, number, 0).map(|_| ()),
+            family::sys_getpgid(parent, number).map(|_| ()),
+            family::sys_getsid(parent, number).map(|_| ()),
+        ]
+    };
+
+    if found(&parent).iter().any(Result::is_err) || find(pid).is_none() || !listed(pid) {
+        return Err("an ended child not yet reaped was not found by its pid");
+    }
+    let reaped = family::sys_wait4(&parent, number, 0, 0, 0, crate::trap::Abi::Native)
+        .map_err(|_| "wait4 refused to reap the reap check's ended child")?;
+    if reaped != pid as usize {
+        return Err("wait4 did not reap the reap check's child");
+    }
+    if found(&parent)
+        .iter()
+        .any(|answer| *answer != Err(Errno::ESRCH))
+    {
+        return Err("kill(pid, 0), getpgid or getsid found a child wait4 had reaped");
+    }
+    if family::sys_pidfd_open(&parent, number, 0) != Err(Errno::ESRCH) {
+        return Err("pidfd_open opened a child wait4 had reaped");
+    }
+    if find(pid).is_some() || listed(pid) {
+        return Err("a reaped child is still found or listed by its pid");
+    }
+    let in_core = crate::object::process::live()
+        .is_ok_and(|all| all.iter().any(|host| host.core().pid() == pid));
+    if !in_core {
+        return Err("the core's live list lost a reaped child that is still held");
+    }
+    if is_free(pid) {
+        return Err("a reaped child's pid was given back while the ended process was held");
+    }
+    drop(child);
+    if !is_free(pid) {
+        return Err("a reaped child's pid was not given back once the process was dropped");
+    }
+    check_an_automatic_reap_finds_nothing()
+}
+
+/// A child let go at its end by a parent that ignores `SIGCHLD` -- the
+/// automatic reap, through `disown` -- is found by no pid either, while it
+/// is still held.
+///
+/// Verifies: L.object.181
+fn check_an_automatic_reap_finds_nothing() -> Result<(), &'static str> {
+    use crate::syscall::kill;
+    use crate::syscall::registry::find;
+    use ferrix_linux_abi::types::{SIG_IGN, SIGCHLD};
+
+    let ignorer = process::new_for_check().map_err(|_| "no address space for the reap check")?;
+    ignorer.with_signals(|signals| signals.install_action(SIGCHLD, SIG_IGN, 0));
+    let child = reap_check_child(&ignorer)?;
+    let pid = child.pid();
+    if kill::sys_kill(&ignorer, pid as i32, 0) != Ok(0) || find(pid).is_none() {
+        return Err("a running child of a parent ignoring SIGCHLD was not found by its pid");
+    }
+    process::kill(&child, 0);
+    if kill::sys_kill(&ignorer, pid as i32, 0) != Err(Errno::ESRCH) || find(pid).is_some() {
+        return Err("a child let go by a parent ignoring SIGCHLD is still found by its pid");
+    }
+    Ok(())
+}
+
+/// A child of `parent` for the reap checks: registered and adopted, with no
+/// thread, ready to end.
+fn reap_check_child(parent: &Arc<Process>) -> Result<Arc<Process>, &'static str> {
+    let space = crate::user::space::AddressSpace::new()
+        .map_err(|_| "no address space for the reap check's child")?;
+    let child = crate::syscall::registry::register(
+        Process::forked(parent, space, false, false)
+            .map_err(|_| "no memory for the reap check's child")?,
+    );
+    parent.adopt(Arc::clone(&child));
+    Ok(child)
+}

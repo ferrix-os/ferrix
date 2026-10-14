@@ -203,6 +203,17 @@ orphan to reach it with their statuses, a reaping ancestor to take them first
 and to pass them on once it has ended itself, and, as its control, the same
 orphan to be left with no parent when there is no init.
 
+**A reaped pid is gone at once (2026-10-12).** The task of an ended
+process is freed lazily, by the reaper, a few milliseconds after `wait4`
+has taken it, and until then `kill(pid, 0)` answered 0 where Linux answers
+`ESRCH`. Reaping now unlists the process's numbers from the pid table, so
+every lookup by pid -- `kill`, `/proc/<pid>`, `pidfd_open`, `getpgid`,
+`getsid`, `setpgid` -- answers as for a free pid from that moment, while the
+number stays taken until the process is dropped. The `pids` boot line checks
+it with a child it still holds, and `test-sem`'s reopen step no longer waits:
+
+      pids     4 processes numbered, found, listed in order, let go, unfound once reaped
+
 **`futex` and `clone3`.** `futex` waits, wakes and requeues, plain and with a
 bitset, with the word compared under the table's lock so no wake is lost. It
 was keyed by address space and user address, so a futex in `MAP_SHARED`

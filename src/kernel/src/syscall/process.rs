@@ -1949,11 +1949,13 @@ impl Process {
 
     /// Let `child` go from its list of children, if it is there.
     ///
-    /// Reaped, so its tasks leave its job's `pids` count now.
+    /// Reaped, so its tasks leave its job's `pids` count now, and nothing
+    /// finds it by its pid any more.
     pub(crate) fn disown(&self, child: &Process) {
         self.children
             .lock()
             .retain(|held| !core::ptr::eq(Arc::as_ptr(held), child));
+        registry::unlist(child);
         child.uncharge_tasks();
     }
 
@@ -2005,7 +2007,10 @@ impl Process {
             Some(at) if remove => {
                 let reaped = children.remove(at);
                 // Reaped: its tasks leave its job's `pids` count here, as
-                // Linux's `release_task` uncharges them.
+                // Linux's `release_task` uncharges them, and its pid finds
+                // nothing from here, as `release_task`'s `detach_pid` makes
+                // it: the reaper that frees it may come milliseconds later.
+                registry::unlist(&reaped);
                 reaped.uncharge_tasks();
                 Ok(Some(reaped))
             }

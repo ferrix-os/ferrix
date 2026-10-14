@@ -436,21 +436,16 @@ fn second_owner(first: libc::pid_t, keys: (libc::key_t, libc::key_t)) -> c_int {
     if ctl(mutex_id, 0, GETNCNT, 0) != 0 || ctl(mutex_id, 0, GETPID, 0) != first {
         return 17;
     }
+    // Reaped before this process was forked, so gone at once, as on Linux:
+    // no wait for a lazy reaper (BACKLOG, done 2026-10-12).
     // SAFETY: a probe of a pid that has gone.
-    let start = Instant::now();
-    loop {
-        // SAFETY: a probe of a pid that has gone.
-        let answer = unsafe { libc::kill(first, 0) };
-        if answer == -1 && errno() == libc::ESRCH {
-            break;
-        }
-        if start.elapsed() > Duration::from_secs(3) {
-            say(&format!("sem: kill(first, 0) answered {answer} for 3 s after its reap"));
-            return 18;
-        }
-        std::thread::sleep(Duration::from_millis(1));
+    let answer = unsafe { libc::kill(first, 0) };
+    if answer != -1 || errno() != libc::ESRCH {
+        say(&format!(
+            "sem: kill(first, 0) answered {answer} after its reap"
+        ));
+        return 18;
     }
-    say(&format!("sem: kill(first, 0) was ESRCH after {:?}", start.elapsed()));
     if ctl(mutex_id, 0, IPC_RMID, 0) != 0 {
         return 19;
     }
