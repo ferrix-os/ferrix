@@ -84,8 +84,8 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 - **Stage 24 (the game path):** where a fullscreen game can be faster on
   Ferrix than on a stock Linux desktop: input to scan-out, and even frames
   under a background load. A design (`docs/GAME-PATH.md`) the customer made a
-  stage on 2026-10-10; its rig's R1, the frame recorder, and R2, the latency
-  probe, landed on 2026-10-14, and nothing is measured on the card yet. About
+  stage on 2026-10-10; its rig's R1 to R3 (the frame recorder, the latency
+  probe, the load and the pinned guests) landed on 2026-10-14, and nothing is measured on the card yet. About
   68 points before the game domain; the game domain (52) is stage 14's
   ground and an open decision, as eight more are. It stands on stage 21's
   unlanded zero-copy work ([its page](stage-24-game-path.md)).

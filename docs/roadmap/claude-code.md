@@ -55,6 +55,7 @@ both are fixed (§5.1).
   to run that natively, as Chrome runs. It is C1 to C4, 12–18 points as
   first guesses, with sign-in by hand at every start. A kept sign-in and
   notifications (C5 to C7) make it 21–33, and they need D-Bus and a Secret
-  Service, which is the customer's decision. Wine and repackaging the
+  Service, which the customer decided on 2026-10-14 `authd` will serve, not
+  gnome-keyring. C1 to C4 are ordered; C5 to C7 are not yet. Wine and repackaging the
   Windows bundle are rejected. claude.ai in Chrome, 1 point, is the
   stopgap. Not started.

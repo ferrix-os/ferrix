@@ -9,7 +9,7 @@ decided the same day that it is a roadmap stage (its §10, question 1), and
 this page is that plan as a stage. The rows and points below are the
 document's §8, taken as they are and not estimated again.
 
-**Nothing of it is built, and nothing of it is measured.** Every figure the
+**R1 to R3 of the rig are built, and nothing is measured on the card yet.** Every figure the
 design quotes was measured by another session for another purpose, or is an
 estimate and says so. Nobody has measured, on either system, the time from
 an input to the frame that shows it, a distribution of frame times, or
@@ -97,7 +97,7 @@ design's §5, G0 to G5) and of P1 is owed before any code.
 | R4 | The baseline: M1 to M9 on both guests as they are, the system-call breakdown, and the record written into the design's §12 | 3 | the table, with its logs. Needs the card, the Linux guest, and `nv-present` or its successor on the card |
 | R5 | The software measure checked against light, once | 3, or 5 with a built device | the two agree within the device's error on both systems. Needs question 6 |
 
-R1 to R3 need nobody's decision and no card, and are the next step.
+R1 to R3 needed nobody's decision and no card, and are built.
 
 **R1, 2026-10-14.** `tools/common/game/`: `framerec.c`, the recorder
 (`LD_PRELOAD`; per swap the monotonic entry and return, and a

@@ -809,8 +809,8 @@ package FerrixRoadmap {
              * input to the picture that shows it and in how even the frames
              * are under a background load. docs/GAME-PATH.md is the design
              * and the build plan, written on 2026-10-10; the customer made
-             * it a stage the same day. R1, the frame recorder, and R2, the
-             * latency probe, landed on 2026-10-14; nothing is measured on
+             * it a stage the same day. R1, the frame recorder, R2, the
+             * latency probe, and R3, the load and the pinned guests, landed on 2026-10-14; nothing is measured on
              * the card yet. In order: the measuring rig (R1 to R5, 19 to 21
              * points), the same binaries on both systems; then the first
              * cut that can be compared with Linux, 47 points: the flip's

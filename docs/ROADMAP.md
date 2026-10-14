@@ -82,7 +82,7 @@ Now [`docs/roadmap/sysfs.md`](roadmap/sysfs.md).
 
 Now [`docs/roadmap/chrome.md`](roadmap/chrome.md).
 
-## Claude Code — Anthropic's coding agent on Ferrix  ·  *the command line, 2026-09-30; the desktop app being assessed*
+## Claude Code — Anthropic's coding agent on Ferrix  ·  *the command line, 2026-09-30; the desktop app assessed, 2026-10-14*
 
 Now [`docs/roadmap/claude-code.md`](roadmap/claude-code.md).
 

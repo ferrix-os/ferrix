@@ -16,7 +16,9 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   runs on ferrousli, as every glibc program there does, since ferrousli got
   the POSIX timers on 2026-10-01. The Claude desktop app was assessed
   on 2026-10-14 (`docs/CLAUDE-CODE.md` §7). Anthropic now publishes a
-  Linux build, and running it natively is 12–18 points as first guesses.
+  Linux build, and running it natively is 12–18 points as first guesses,
+  ordered by the customer the same day (C1 to C4; C5 to C7 are not ordered,
+  and C6's Secret Service will be served by `authd`).
 
 * **The trip to ring 3 is being cut** (2026-09-30, `docs/OPAQUE-KERNEL.md`
   § 8). The customer's direction is Linux software beside safety functions
@@ -589,13 +591,15 @@ game path: where a fullscreen game can be faster on Ferrix than on a stock
 Linux desktop on the same hardware, which is the time from an input to the
 picture and the evenness of frames under a background load. It is a design,
 `docs/GAME-PATH.md`, that the customer made a stage on 2026-10-10, and its rig is
-begun: R1, the frame recorder, and R2, the input-to-scan-out probe, landed on
-2026-10-14 (`test-frames`, `test-xlatency`), and the same binaries ran on
+begun: R1, the frame recorder, R2, the input-to-scan-out probe, and R3, the
+load, the timed sleep and the launch timer with both guests pinned on an
+invariant TSC, landed on 2026-10-14 (`test-frames`, `test-xlatency`,
+`test-game-rig`), and the same binaries ran on
 Ferrix and on a Linux guest with no card; they stand on yserver's Present
 clock (pin 2966c377, eb7ad7411, which also fixed a lavapipe
 `PresentPixmap` crash). Nothing of what its exit is judged by is measured on
 the card yet. Its first step is the rig that measures it (R1 to R5, 19 to
-21 points; R3 is not yet on `main`, R4 and R5 need the card), then a first cut of 47
+21 points; R1 to R3 are built, R4 and R5 need the card), then a first cut of 47
 points; the game domain (52) is stage 14's ground and waits on the
 customer, as eight more decisions do. Its card work stands on displayctl
 v9, yserver's dmabuf hand-over and a hardware cursor, none landed

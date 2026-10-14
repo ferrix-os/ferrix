@@ -593,7 +593,7 @@ stay in the pool and a fetch script can pin one.
 | C3 | `cargo xtask test-claude-desktop`: the window by its app id `com.anthropic.Claude`, and its sign-in screen on the screen, with a negative control | 3 (a guess) |
 | C4 | The desktop: `/bin/claude-desktop` with its flags, the launcher entry and icon, `xdg-open` dispatching `claude:` to the app, and the MIME file | 2 (a guess) |
 | C5 | After the customer signs in: the Code tab fetches Claude Code and runs it in a pty, and a chat works | 1, and the customer's sign-in (a guess) |
-| C6 | A sign-in that is kept. Either a D-Bus session bus and Debian's `gnome-keyring` on the volume, started and unlocked with the session, or a Secret Service on `authd`. The customer decides which | 6–10 (a guess) |
+| C6 | A sign-in that is kept. Either a D-Bus session bus and Debian's `gnome-keyring` on the volume, started and unlocked with the session, or a Secret Service on `authd`. The customer decided on 2026-10-14: `authd` | 6–10 (a guess) |
 | C7 | Notifications: a daemon on that bus, drawn by hyprix or a client | 3–5 (a guess) |
 | C8 | Chromium's sandbox on, once Chrome's runs (`docs/SECCOMP.md` S7, S8) | 1 (a guess) |
 
@@ -604,8 +604,8 @@ Chrome's GPU path, and the sandbox with Chrome's (C8). Cowork is not
 planned. The `.deb` also exists for arm64, for the Pixel 7 later.
 
 **Recommendation.** Start with (c) at once (1 point), so claude.ai is in
-the launcher. Then build (d), C1 to C4. Ask the customer about C6 before
-it is built. Do not build (a) or (b).
+the launcher. Then build (d), C1 to C4. The customer ordered C1 to C4 on
+2026-10-14 and chose `authd` for C6's Secret Service. Do not build (a) or (b).
 
 ### 7.7 What was verified, and what was assumed
 
