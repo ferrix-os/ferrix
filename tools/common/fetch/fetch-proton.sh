@@ -112,6 +112,28 @@ security_debs=(
     "pool/updates/main/libp/libpng1.6/libpng16-16t64_1.6.48-1+deb13u6_i386.deb 087f92b31fa6c4ff047e539c944a3f97432d15b6b8e5ef4127a7e13b72643847"
 )
 
+# Wine's Schannel, which a Windows program's own HTTPS goes through
+# (WinHTTP, WinINet): GnuTLS and what it loads, and the CA certificates
+# crypt32 checks a server's chain against. Without them Wine says "secure
+# connections will not be available", and the launcher's download SDK,
+# which fetches the game that way, ends at once (nCode 206) where the
+# launcher's own libcurl and its web view, which carry their own TLS,
+# reach the same servers. amd64 only: the downloader is the 64-bit
+# Games.exe. The closure is what trixie's Packages give libgnutls30t64
+# beyond what the Wine volume has, 2026-10-14; the certificates are
+# fetch-steam.sh's pin.
+tls_debs=(
+    "pool/main/g/gmp/libgmp10_6.3.0+dfsg-3_amd64.deb d0d0265eb01770f17afd0f7c8c0622f80479dcfbbe13653a0debeec61464e622"
+    "pool/main/g/gnutls28/libgnutls30t64_3.8.9-3+deb13u4_amd64.deb 18a8bdfd91c7e3bcb01719d55a2b56849c7160b34f1f52b1c4fdfdd41bf1352b"
+    "pool/main/n/nettle/libhogweed6t64_3.10.1-1_amd64.deb b059ed155115ac09da295322de48ee1ed58ef5fa45edcc9e12ff0e94636ef25f"
+    "pool/main/libi/libidn2/libidn2-0_2.3.8-2_amd64.deb 90b039bcdc4578f8e1c4935adf8dbb525e36a164deefdbbb8c45bac347d48278"
+    "pool/main/n/nettle/libnettle8t64_3.10.1-1_amd64.deb 1b03d4a9cd9c8143ba50fe6396f36937e901a317d492d179f4596862c1731cfe"
+    "pool/main/p/p11-kit/libp11-kit0_0.25.5-3_amd64.deb 784bf2063e166c8bc851a32623b74ebd85c499043a9d57c5bbd64fa63447f45a"
+    "pool/main/libt/libtasn1-6/libtasn1-6_4.20.0-2+deb13u1_amd64.deb 23fec6e06583ce2bad9b2c04c9b485e90440e259b1abf8677cd80d3ce60831ad"
+    "pool/main/libu/libunistring/libunistring5_1.3-2_amd64.deb 6dd3490bef06ea1096f32d10766b7e016cf579bfae8451d1b7df15ce05b8aa46"
+    "pool/main/c/ca-certificates/ca-certificates_20250419_all.deb ef590f89563aa4b46c8260d49d1cea0fc1b181d19e8df3782694706adf05c184"
+)
+
 for tool in curl sha256sum sha512sum tar dpkg-deb readelf mkfs.btrfs; do
     command -v "$tool" > /dev/null || { echo "fetch-proton: $tool is not installed" >&2; exit 1; }
 done
@@ -180,6 +202,18 @@ cp -a "$i386/usr/lib/ld-linux.so.2" "$tree/usr/lib/ld-linux.so.2"
 mkdir -p "$tree/etc/ld.so.conf.d"
 cp -a "$i386/etc/ld.so.conf.d/." "$tree/etc/ld.so.conf.d/"
 rm -rf "$i386"
+for entry in "${tls_debs[@]}"; do
+    read -r deb sum <<< "$entry"
+    dpkg-deb -x "$(fetch "$deb" "$debian" "$sum")" "$tree"
+done
+# The bundle `update-ca-certificates` would write, which crypt32 reads.
+mkdir -p "$tree/etc/ssl/certs"
+find "$tree/usr/share/ca-certificates" -name '*.crt' -print0 | sort -z \
+    | xargs -0 cat > "$tree/etc/ssl/certs/ca-certificates.crt"
+test -s "$tree/etc/ssl/certs/ca-certificates.crt" \
+    || { echo "fetch-proton: the certificate bundle is empty" >&2; exit 1; }
+test -e "$tree/usr/lib/x86_64-linux-gnu/libgnutls.so.30" \
+    || { echo "fetch-proton: no libgnutls.so.30 on the volume" >&2; exit 1; }
 mkdir -p "$tree/proton"
 tar -xzf "$tarball" -C "$tree/proton" --strip-components=1
 dpkg-deb -x "$(fetch "$open_sans_deb" "$debian" "$open_sans_sum")" "$out/open-sans"
