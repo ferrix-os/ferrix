@@ -62,4 +62,7 @@ on Claude Code's linux-arm64 build from a volume of its own
   Service, which the customer decided on 2026-10-14 `authd` will serve, not
   gnome-keyring. C1 to C4 are ordered; C5 to C7 are not yet. Wine and repackaging the
   Windows bundle are rejected. claude.ai in Chrome, 1 point, is the
-  stopgap. Not started.
+  stopgap. C1 to C4 were built on 2026-10-15 (branch `claude-desktop`,
+  §7.8): the app shows its sign-in screen on the `--everything` desktop,
+  natively on ferrousli, once ferrousli's loader read `DT_RPATH`;
+  `cargo xtask test-claude-desktop` requires it.

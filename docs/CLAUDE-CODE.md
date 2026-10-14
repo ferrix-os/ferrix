@@ -27,7 +27,7 @@ an API xtask serves itself (§4), in about two seconds of the guest's time.
 | A real account | the network, TLS and the browser hand-off work up to the sign-in page; the sign-in itself is the customer's (§5.2) |
 | AVX state in a 32-bit program's signal frame | a first attempt backed out; what it takes is in §3 |
 | On AArch64 with the linux-arm64 build | **done** 2026-10-15, under QEMU TCG: `cargo xtask test-claude-code --arch aarch64`, both halves, with no kernel change (§6) |
-| The Claude desktop app | **assessed** 2026-10-14. Anthropic now publishes a Linux build, a beta, 2.37337.1 on Electron 44.7.0. Running it natively is recommended over Wine and over repackaging. 12–18 points, first guesses, to run it with sign-in by hand; 21–33 with a saved sign-in and notifications (§7) |
+| The Claude desktop app | **C1 to C4 built** 2026-10-15, on branch `claude-desktop`: Anthropic's Linux build (2.37337.1, Electron 44.7.0) on the `--everything` desktop, natively on ferrousli, to its sign-in screen; `cargo xtask test-claude-desktop`. Sign-in by hand at every start; C5 to C7 not ordered (§7.8) |
 
 **Certification review (consultant, 2026-09-30): OK**, on b0db74ef, after a
 first round on 672611b6. The change is core ring (arch/x86_64: cpu.rs,
@@ -655,3 +655,44 @@ the launcher. Then build (d), C1 to C4. The customer ordered C1 to C4 on
 * libuv's `io_uring` fallback.
 * The reading of the terms.
 * Every size above.
+
+### 7.8 Where C1 to C4 stand, 2026-10-15
+
+**The app runs on Ferrix and shows its sign-in screen.** On the
+`--everything` desktop, under KVM, it draws claude.ai's "Claude for
+Linux" screen, its mark and its "Get started" button, about four
+seconds after hyprix comes up. It runs as Chrome does there: a Wayland
+client of hyprix, drawing in software, without Chromium's sandbox, on
+ferrousli's loader and `libc.so.6`. No account was used and nothing was
+typed. Built on branch `claude-desktop` (the coordinator lands it).
+
+| Step | State |
+|---|---|
+| C1 | **done**. `tools/common/fetch/fetch-claude-desktop.sh` checks the key's fingerprint, `InRelease`'s signature, `Packages` and the `.deb` against pinned SHA-256s, and adds 21 pinned Debian 13 packages (GTK 3, PipeWire's client library and their closure). Run on nazuna on 2026-10-14; a wrong fingerprint and a wrong `.deb` SHA-256 each stopped it |
+| C2 | **done**. One thing was missing. The app's binary carries its search path, `$ORIGIN`, as `DT_RPATH`, not `DT_RUNPATH` (it is linked without `--enable-new-dtags`), and ferrousli's loader read only `DT_RUNPATH`, so the first start stopped at "library not found: libffmpeg.so". ferrousli 113c587 reads `DT_RPATH` when an object has no `DT_RUNPATH`, as glibc does; glibc's inheritance of a program's `DT_RPATH` by the libraries it loads is not followed. Nothing else had to change |
+| C3 | **done**. `cargo xtask test-claude-desktop` requires a window of class `com.anthropic.Claude` showing the sign-in screen: half of it or more the screen's background, 1000 or more pixels of Claude's orange mark (the app draws 3783), and 5000 or more of the black sign-in button (14017). Negative controls: the wrapper starting a program that is not there, and the mark made unreachable |
+| C4 | **done**. `/bin/claude-desktop` with its flags, the launcher entry `com.anthropic.Claude.desktop` with the app's icon, `mimeapps.list` and the MIME types for `.mcpb`, `.dxt` and `.skill`, and `/bin/xdg-open` handing `claude:` links and those files to the app |
+
+**What the app asks for and does without**, from its log: a D-Bus system
+and session bus (the keyring, notifications and power events are C6, C7),
+`/proc/sys/fs/inotify/max_user_watches`, a DRM render node (it draws in
+software), `libnotify`, and GTK's pixbuf loaders for one symbolic icon.
+
+**The gate is network-dependent.** The sign-in screen is claude.ai's
+page, fetched through the QEMU gateway, as `test-steam-store` fetches
+Steam's store. Its verdict depends on claude.ai being reachable and on
+Anthropic's page still matching `signed_out`'s thresholds, neither of
+which Ferrix controls. So it is a landing row only for changes to
+`claude_desktop.rs`, `fetch-claude-desktop.sh` and the app's carry on the
+`--everything` desktop; when it goes red while the app's window is
+listed, treat it first as possibly external. It is not evidence for any
+requirement, and nothing in `docs/certification` cites it (the
+certification consultant's OK IF, ledger line 1113, 2026-10-15). It uses
+no account, and the app starts on a fresh profile under `/dev/shm` each
+boot.
+
+**Gates** (`~/.local/share/ferrix/logs/queue/<tag>.log` on nazuna): see
+the handover note `~/.local/share/ferrix/handover/claude-desktop.md`.
+
+**Spent:** about 6 points of the 12–18, C2's spread mostly unused: the
+loader's `DT_RPATH` was the only gap.
