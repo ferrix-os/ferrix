@@ -1,0 +1,66 @@
+<domain type='kvm'>
+  <name>linux-3060</name>
+  <description>Debian 13 + NVIDIA 580.173.02 on the RTX 3060, the game path's Linux guest (docs/GAME-PATH.md §2.1, §2.5). Same shape as ferrix-3060, whose processor, pinning and topology tools/common/xtask/src/nvidia.rs writes and checks against this file. Shares the card with it and with GameLab, win11 and the manjaro VMs: start only when those are shut off.</description>
+  <memory unit='MiB'>16384</memory>
+  <vcpu placement='static'>8</vcpu>
+  <cputune>
+    <vcpupin vcpu='0' cpuset='6'/>
+    <vcpupin vcpu='1' cpuset='18'/>
+    <vcpupin vcpu='2' cpuset='7'/>
+    <vcpupin vcpu='3' cpuset='19'/>
+    <vcpupin vcpu='4' cpuset='8'/>
+    <vcpupin vcpu='5' cpuset='20'/>
+    <vcpupin vcpu='6' cpuset='9'/>
+    <vcpupin vcpu='7' cpuset='21'/>
+    <emulatorpin cpuset='10-11,22-23'/>
+  </cputune>
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <loader readonly='yes' type='pflash' format='raw'>/usr/share/OVMF/OVMF_CODE_4M.fd</loader>
+    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.fd' templateFormat='raw' format='raw'>/var/lib/libvirt/qemu/nvram/linux-3060_VARS.fd</nvram>
+  </os>
+  <features><acpi/><apic/><ioapic driver='qemu'/></features>
+  <cpu mode='host-passthrough' check='none' migratable='off'>
+    <topology sockets='1' dies='1' cores='4' threads='2'/>
+    <maxphysaddr mode='passthrough'/>
+    <feature policy='require' name='topoext'/>
+    <feature policy='require' name='invtsc'/>
+  </cpu>
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>destroy</on_reboot>
+  <on_crash>destroy</on_crash>
+  <devices>
+    <emulator>/usr/local/lib/ferrix/qemu/bin/qemu-system-x86_64</emulator>
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' discard='unmap'/>
+      <source file='/home/sebastian/ferrix-nvidia-vm/linux-3060.qcow2'/>
+      <target dev='vda' bus='virtio'/>
+      <boot order='1'/>
+    </disk>
+    <serial type='file'>
+      <source path='/home/sebastian/ferrix-nvidia-vm/linux-3060-serial.log' append='off'/>
+      <target port='0'/>
+    </serial>
+    <rng model='virtio'><backend model='random'>/dev/urandom</backend></rng>
+    <video><model type='none'/></video>
+    <memballoon model='none'/>
+    <interface type='network'>
+      <mac address='52:54:00:11:30:60'/>
+      <source network='default'/>
+      <model type='virtio'/>
+    </interface>
+    <input type='keyboard' bus='virtio'/>
+    <input type='mouse' bus='virtio'/>
+    <input type='evdev'>
+      <source dev='/dev/input/by-id/usb-Logitech_Gaming_Mouse_G303_0F8934563031-event-mouse' grab='all' repeat='on'/>
+    </input>
+    <input type='evdev'>
+      <source dev='/dev/input/by-id/usb-Logitech_Gaming_Mouse_G303_0F8934563031-if01-event-kbd' grab='all' repeat='on'/>
+    </input>
+    <hostdev mode='subsystem' type='pci' managed='no'>
+      <source><address domain='0x0000' bus='0x01' slot='0x00' function='0x0'/></source>
+      <rom bar='off'/>
+    </hostdev>
+  </devices>
+</domain>
