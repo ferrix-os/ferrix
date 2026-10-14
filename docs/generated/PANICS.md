@@ -2446,8 +2446,8 @@ it needs, and refuse a caller without CAP_SYS_ADMIN; NS_GET_NSTYPE,
 NS_GET_PARENT and NS_GET_USERNS must answer for the file (docs/NAMESPACES.md
 §12.1).
 
-1. `Held::for_fork` does not freeze the namespace, or gives the child the
-   parent's own namespace rather than its `time_for_children`.
+1. `Held::enter_children` does not freeze the namespace, or gives the entering
+   process the parent's own namespace rather than its `time_for_children`.
 2. `TimeNamespace::shown` or `host` is skipped, or given the wrong sign, at
    `sys_clock_gettime`, `sys_clock_nanosleep`, `sys_timerfd_settime`, the futex
    wait, `sys_times`, `sys_sysinfo` or `/proc/uptime`.
