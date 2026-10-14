@@ -18,6 +18,7 @@
 //! cargo xtask test-nvrm-link [--arch x86_64] [--accel kvm|tcg] [--timeout SECONDS]
 //! cargo xtask run-nvidia [--timeout SECONDS]
 //! cargo xtask test-rustc [--accel kvm] [--memory M] [--timeout SECONDS]
+//! cargo xtask test-game-rig --init PATH/{arch}/busybox [--accel kvm] [--smp N] [--memory M] [--timeout SECONDS]
 //! cargo xtask test-selfhost [--accel kvm] [--release] [--smp N] [--memory M] [--timeout SECONDS] [--plan DIR]
 //! cargo xtask test-selfhost --arch x86_64|aarch64 --volume IMG [--release]
 //! cargo xtask test-devloop [--accel kvm] [--release] [--interpreter glibc] [--memory M] [--timeout SECONDS]
@@ -105,6 +106,7 @@ mod ferrousli;
 mod flash;
 mod frames;
 mod fuzzel;
+mod game_rig;
 mod gate_rows;
 mod gateway;
 mod hotpath;
@@ -313,6 +315,8 @@ COMMANDS:
                   domains shut off), nvrm as its driver with its core and the GSP firmware on the NVIDIA volume;
                   print the serial port until nvrm is up or stops, then destroy the domain (x86_64)
     test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`
+    test-game-rig Stage 24's R3 without the card: the game path's load on the rustc volume, every processor at
+                  least 99% busy under it, the clock line the TSC, and a timed sleep's overshoot (x86_64)
     test-chrome   Attach the volume tools/common/fetch/fetch-chrome.sh makes, and require headless Chrome to run a page's script and draw it
     test-claude-code  Attach the volume tools/common/fetch/fetch-claude-code.sh makes, and require Claude Code to start and,
                   against a stub Messages API xtask serves, run a Bash command on Ferrix for its model
@@ -743,7 +747,7 @@ fn run() -> Result<()> {
         "test-apps" => apps::test_apps(&args),
         "test-pkg" | "install-app" => pkg::run(command, &args),
         "coverage" => coverage::run(&args),
-        "test-rustc" => rustc::test_rustc(&args),
+        "test-rustc" | "test-game-rig" => rustc::run(command, &args),
         "test-chrome" | "test-chrome-window" | "test-chrome-audio" => chrome::run(command, &args),
         "test-claude-code" => claude_code::test_claude_code(&args),
         "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),

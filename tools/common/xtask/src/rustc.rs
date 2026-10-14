@@ -248,6 +248,20 @@ pub(crate) fn files(links: &[(&str, &str)]) -> Vec<ports::File> {
         .collect()
 }
 
+/// The commands that boot with the rustc volume: `test-rustc`, and the
+/// game path's `test-game-rig`, whose load is compiles.
+///
+/// # Errors
+///
+/// As the command's own.
+pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
+    if command == "test-game-rig" {
+        crate::game_rig::test_game_rig(args)
+    } else {
+        test_rustc(args)
+    }
+}
+
 /// Boot a shell whose script compiles a program with rustc and runs it.
 ///
 /// # Errors

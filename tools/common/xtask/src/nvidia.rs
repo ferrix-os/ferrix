@@ -188,7 +188,37 @@ const VOLUME: &str = "nvidia.img";
 /// `run-compositor --nvidia --everything`'s, kept from run to run.
 const EVERYTHING_VOLUME: &str = "nvidia-everything.img";
 
+/// The host processors the domain's virtual ones run on, virtual processor
+/// *n* on the *n*th: four cores of nazuna's second CCD, both threads of
+/// each, as the guest's topology says (`docs/GAME-PATH.md` §2.5, the rig's
+/// R3). The game path's Linux guest, `tools/common/game/linux-3060.xml`, is
+/// pinned the same, and a test holds the two equal. A machine has an even
+/// number of processors, at most this many.
+const VCPU_PINS: [u32; 8] = [6, 18, 7, 19, 8, 20, 9, 21];
+
+/// Where QEMU's own threads run: the rest of that CCD, so that no virtual
+/// processor shares a host one with the emulator or its I/O.
+const EMULATOR_PINS: &str = "10-11,22-23";
+
+/// Threads to a core in the guest's topology, as on the host.
+const THREADS: u32 = 2;
+
+/// The domain's `<cputune>`: [`VCPU_PINS`] and [`EMULATOR_PINS`].
+fn cputune(vcpus: u32) -> String {
+    let mut out = String::from("  <cputune>\n");
+    for (vcpu, host) in VCPU_PINS.iter().take(vcpus as usize).enumerate() {
+        out.push_str(&format!("    <vcpupin vcpu='{vcpu}' cpuset='{host}'/>\n"));
+    }
+    out.push_str(&format!(
+        "    <emulatorpin cpuset='{EMULATOR_PINS}'/>\n  </cputune>\n"
+    ));
+    out
+}
+
 /// The domain, as libvirt defines it.
+///
+/// **Its processors are pinned** ([`VCPU_PINS`]): smoothness in a guest is
+/// the host's to give, and the game path compares two guests of one shape.
 ///
 /// **The processor carries `invtsc`.** `host-passthrough` alone hides the
 /// invariant-TSC bit (`CPUID.80000007H:EDX[8]`), because a domain with it
@@ -223,15 +253,17 @@ fn domain_xml(dir: &Path, machine: &Machine) -> String {
   <uuid>{UUID}</uuid>
   <description>Ferrix on the RTX 3060 (cargo xtask run-nvidia). Shares the card with {shared}: start only when those are shut off.</description>
   <memory unit='MiB'>{memory}</memory>
-  <vcpu>{vcpus}</vcpu>
-  <os>
+  <vcpu placement='static'>{vcpus}</vcpu>
+{cputune}  <os>
     <type arch='x86_64' machine='q35'>hvm</type>
     <loader readonly='yes' type='pflash' format='raw'>/usr/share/OVMF/OVMF_CODE_4M.fd</loader>
     <nvram template='/usr/share/OVMF/OVMF_VARS_4M.fd' templateFormat='raw' format='raw'>/var/lib/libvirt/qemu/nvram/{DOMAIN}_VARS.fd</nvram>
   </os>
   <features><acpi/><apic/><ioapic driver='qemu'/></features>
   <cpu mode='host-passthrough' check='none' migratable='off'>
+    <topology sockets='1' dies='1' cores='{cores}' threads='{threads}'/>
     <maxphysaddr mode='passthrough'/>
+    <feature policy='require' name='topoext'/>
     <feature policy='require' name='invtsc'/>
   </cpu>
   <clock offset='utc'/>
@@ -271,6 +303,9 @@ fn domain_xml(dir: &Path, machine: &Machine) -> String {
         shared = SHARED.join(", "),
         memory = machine.memory,
         vcpus = machine.vcpus,
+        cputune = cputune(machine.vcpus),
+        cores = machine.vcpus.div_ceil(THREADS),
+        threads = THREADS,
         devices = machine.devices,
         image = file("ferrix.img"),
         vda = virtio("pattern.img", 8, true),
@@ -1199,5 +1234,47 @@ mod tests {
         let xml = domain_xml(Path::new("/vm"), &GATE_MACHINE);
         assert!(xml.contains("<cpu mode='host-passthrough' check='none' migratable='off'>"));
         assert!(xml.contains("<feature policy='require' name='invtsc'/>"));
+    }
+
+    /// The part of a domain between `open` and `close`, both included.
+    fn between<'a>(xml: &'a str, open: &str, close: &str) -> &'a str {
+        let (_, from) = xml.split_once(open).expect("the opening tag is there");
+        let (inside, _) = from.split_once(close).expect("the closing tag is there");
+        let start = xml.len() - from.len() - open.len();
+        xml.get(start..start + open.len() + inside.len() + close.len())
+            .expect("on character boundaries")
+    }
+
+    /// The game path's two guests are the same shape (`docs/GAME-PATH.md`
+    /// §2.5): the desktop's machine has the Linux guest's processor, its
+    /// topology and its pinning, as `tools/common/game/linux-3060.xml`
+    /// defines them, word for word.
+    #[test]
+    fn the_desktop_is_pinned_as_the_linux_guest_is() {
+        let linux = include_str!("../../game/linux-3060.xml");
+        let ferrix = domain_xml(
+            Path::new("/vm"),
+            &Machine {
+                memory: MEMORY,
+                vcpus: 8,
+                devices: String::new(),
+                volume: VOLUME,
+            },
+        );
+        for (open, close) in [("<cputune>", "</cputune>"), ("<cpu ", "</cpu>")] {
+            assert_eq!(between(&ferrix, open, close), between(linux, open, close));
+        }
+        assert!(linux.contains("<vcpu placement='static'>8</vcpu>"));
+        assert!(ferrix.contains("<vcpu placement='static'>8</vcpu>"));
+    }
+
+    /// The gate's two processors are one core's two threads.
+    #[test]
+    fn the_gate_machine_is_one_core_pinned() {
+        let xml = domain_xml(Path::new("/vm"), &GATE_MACHINE);
+        assert!(xml.contains("<vcpupin vcpu='0' cpuset='6'/>"));
+        assert!(xml.contains("<vcpupin vcpu='1' cpuset='18'/>"));
+        assert!(!xml.contains("<vcpupin vcpu='2'"));
+        assert!(xml.contains("<topology sockets='1' dies='1' cores='1' threads='2'/>"));
     }
 }
