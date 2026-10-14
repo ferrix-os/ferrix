@@ -53,7 +53,7 @@ pub use event::Event;
 pub use foreign::{ForeignRequest, ForeignToplevel};
 pub use frames::{Hotkey, Listener};
 pub use hypr::{Export, Shortcut};
-pub use input::{Constraint, Injected};
+pub use input::{Constraint, Injected, relative_motion_message};
 pub use outputs::Configuration;
 pub use outputs::Wanted;
 pub use screen::GAMMA_SIZE;

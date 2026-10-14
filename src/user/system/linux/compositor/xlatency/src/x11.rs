@@ -131,8 +131,9 @@ pub(crate) enum Packet {
     Reply(Vec<u8>),
     /// An error: its code and the request's major and minor opcodes.
     Error(u8, u8, u16),
-    /// `XInput2` raw motion.
-    RawMotion,
+    /// `XInput2` raw motion, and its X time in milliseconds: the server's
+    /// time for the input, which yserver takes from the device's stamp.
+    RawMotion { time: u32 },
     /// Present's completion of the pixmap with `serial`.
     Complete {
         serial: u32,
@@ -166,7 +167,9 @@ pub(crate) fn packet(bytes: &[u8], opcodes: Opcodes) -> Packet {
             let extension = bytes.get(1).copied();
             let kind = half(bytes, 8);
             if extension == Some(opcodes.xi) && kind == Some(XI_RAW_MOTION) {
-                return Packet::RawMotion;
+                return Packet::RawMotion {
+                    time: word(bytes, 12).unwrap_or(0),
+                };
             }
             if extension == Some(opcodes.present) && kind == Some(PRESENT_COMPLETE_NOTIFY) {
                 return Packet::Complete {
@@ -468,10 +471,11 @@ mod tests {
                 msc: 300,
             }
         );
-        let mut raw = vec![GENERIC_EVENT, 131, 0, 0, 4, 0, 0, 0, 17, 0];
+        let mut raw = vec![GENERIC_EVENT, 131, 0, 0, 4, 0, 0, 0, 17, 0, 2, 0];
+        raw.extend_from_slice(&77_000_u32.to_le_bytes());
         raw.resize(48, 0);
         assert_eq!(length_of(&raw), Some(48));
-        assert_eq!(packet(&raw, opcodes), Packet::RawMotion);
+        assert_eq!(packet(&raw, opcodes), Packet::RawMotion { time: 77_000 });
         let mut other = vec![GENERIC_EVENT, 99, 0, 0, 4, 0, 0, 0, 17, 0];
         other.resize(48, 0);
         assert_eq!(packet(&other, opcodes), Packet::Other);

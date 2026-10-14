@@ -2699,6 +2699,11 @@ fn attach_display(command: &mut Command, arch: Arch, args: &Args, binary: &Path)
             let _ = command.args(["-device", &format!("{kind},{flags}")]);
         }
     }
+    // A mouse, for a boot that moves the pointer by distances as a game's
+    // locked pointer is moved (`test-compositor --boot lane`).
+    if args.mouse {
+        let _ = command.args(["-device", &format!("virtio-mouse-pci,{flags}")]);
+    }
     // The head firmware draws on, created after the cards so that QEMU's
     // first console is a card and a window opens on the compositor. On
     // `q35` that is a VGA in place of the machine's own, which

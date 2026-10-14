@@ -24,7 +24,7 @@
 mod connection;
 mod listener;
 
-pub use connection::{Connection, MAX_QUEUED, RecvError, SendError};
+pub use connection::{Connection, MAX_QUEUED, RecvError, SendError, Sender};
 pub use listener::{Listener, ListenerError, socket_path};
 
 /// The most descriptors one `recvmsg` will be told about.

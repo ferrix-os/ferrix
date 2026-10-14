@@ -17,6 +17,23 @@
 //! per report: Chrome, drawing in software, fell tens of seconds behind a
 //! drag and put its selection somewhere the pointer had never been.
 //!
+//! # Except under a pointer lock
+//!
+//! A game that holds a pointer lock is owed every report with its own time
+//! (`docs/GAME-PATH.md` §4.7): it sums the motions itself, and a thousand
+//! reports a second gathered into one a read is a mouse that moves in
+//! steps. So while [`Devices::set_per_report`] says a lock is held, each
+//! `SYN_REPORT` ends a move. The pointer drawn over the desktop is still
+//! drawn once a frame; it is not moving while the lock holds it.
+//!
+//! # Each input's time
+//!
+//! The kernel's input core stamps each report from the monotonic clock
+//! (`docs/INPUT.md` §3.1), and the device is opened on `CLOCK_MONOTONIC`.
+//! Each input carries that stamp in microseconds, a gathered move its last
+//! report's, so the compositor can send it on as the Wayland event's time
+//! and say how old the input was when it passed.
+//!
 //! # Why absolute axes are a fraction
 //!
 //! A tablet reports where it is in its own units -- QEMU's virtio-tablet in
@@ -40,11 +57,16 @@ use std::path::Path;
 
 use compositor_evecho::{Device, event_nodes};
 use ferrix_linux_abi::input::{
-    ABS_X, ABS_Y, BTN_LEFT, BTN_MISC, BTN_TOUCH, EV_ABS, EV_KEY, EV_LED, EV_REL, Event,
+    ABS_X, ABS_Y, BTN_LEFT, BTN_MISC, BTN_TOUCH, EV_ABS, EV_KEY, EV_LED, EV_REL, EV_SYN, Event,
     INPUT_PROP_DIRECT, KEY_MAX, LED_CAPSL, LED_NUML, REL_HWHEEL, REL_WHEEL, REL_X, REL_Y,
+    SYN_REPORT,
 };
 
 use crate::seat::Input;
+
+/// An input and the time its report was stamped with, in microseconds of
+/// `CLOCK_MONOTONIC`.
+pub type Stamped = (Input, u64);
 
 /// The most reads one device is given in one pass round the loop.
 const DRAIN_READS: usize = 64;
@@ -76,6 +98,11 @@ struct Axes {
     /// a finger coming down is a click. Not a pen tablet, which is not
     /// direct, and whose pen coming near must click nothing.
     touch_clicks: bool,
+    /// The stamp of the last report gathered into the move not yet sent.
+    stamp: u64,
+    /// Whether each report is a move of its own: while a pointer lock is
+    /// held.
+    per_report: bool,
 }
 
 /// One open device, with what its absolute axes are worth.
@@ -95,6 +122,9 @@ pub struct Devices {
     /// Nodes that could not be opened, so that a rescan says why once and
     /// not every time it looks.
     refused: Vec<String>,
+    /// Whether each report is sent as a move of its own
+    /// ([`Self::set_per_report`]).
+    per_report: bool,
 }
 
 /// What the keyboards' LEDs were last told: Caps Lock and Num Lock, from the
@@ -316,6 +346,12 @@ impl Devices {
         self.capabilities().1
     }
 
+    /// Send every report as a move of its own, or gather a read's into one:
+    /// the first while a pointer lock is held.
+    pub const fn set_per_report(&mut self, per_report: bool) {
+        self.per_report = per_report;
+    }
+
     /// Read whatever is waiting on every device, in the order it arrived.
     ///
     /// Nothing waiting is an empty answer, not an error. The first pass uses
@@ -330,8 +366,17 @@ impl Devices {
     /// A ready device may have more than one input report waiting, so its
     /// whole non-blocking queue is drained. Other devices are left alone.
     pub fn read_ready(&mut self, ready: &[libc::c_int]) -> Vec<Input> {
+        self.read_stamped(ready)
+            .into_iter()
+            .map(|(input, _)| input)
+            .collect()
+    }
+
+    /// The same, each input with its report's stamp.
+    pub fn read_stamped(&mut self, ready: &[libc::c_int]) -> Vec<Stamped> {
         let mut inputs = Vec::new();
         for open in &mut self.open {
+            open.axes.per_report = self.per_report;
             if !ready.contains(&open.device.raw_fd()) {
                 continue;
             }
@@ -373,19 +418,29 @@ fn node_name(path: &Path) -> String {
 /// One evdev event into `out`: a key or a button after the move gathered so
 /// far, a wheel click the same, and an axis into the move, which
 /// [`Axes::flush`] sends. What the seat has no use for adds nothing.
-fn translate(axes: &mut Axes, event: Event, out: &mut Vec<Input>) {
+fn translate(axes: &mut Axes, event: Event, out: &mut Vec<Stamped>) {
     match event.r#type {
         EV_KEY => {
             axes.flush(out);
-            out.push(key_or_button(event, axes.touch_clicks));
+            out.push((key_or_button(event, axes.touch_clicks), stamp_of(event)));
         }
         EV_REL => axes.relative(event, out),
         EV_ABS => axes.absolute(event),
         // The end of a report: the move goes on gathering until something
         // else happens or the read ends, and `wl_pointer.frame` follows each
-        // thing the compositor sends.
+        // thing the compositor sends -- unless a lock is held, when each
+        // report is a move of its own.
+        EV_SYN if event.code == SYN_REPORT && axes.per_report => axes.flush(out),
         _ => {}
     }
+}
+
+/// An event's stamp in microseconds.
+const fn stamp_of(event: Event) -> u64 {
+    event
+        .sec
+        .saturating_mul(1_000_000)
+        .saturating_add(event.usec)
 }
 
 /// A key, or a pointer button.
@@ -430,15 +485,17 @@ const fn is_pointer_button(code: u16) -> bool {
 impl Axes {
     /// One `EV_REL` event: a distance into the move, or a wheel click after
     /// it.
-    fn relative(&mut self, event: Event, out: &mut Vec<Input>) {
+    fn relative(&mut self, event: Event, out: &mut Vec<Stamped>) {
         let value = f64::from(event.value);
         let wheel = match event.code {
             REL_X => {
                 self.delta.0 += value;
+                self.stamp = stamp_of(event);
                 return;
             }
             REL_Y => {
                 self.delta.1 += value;
+                self.stamp = stamp_of(event);
                 return;
             }
             REL_WHEEL => Input::Axis {
@@ -454,7 +511,7 @@ impl Axes {
             _ => return,
         };
         self.flush(out);
-        out.push(wheel);
+        out.push((wheel, stamp_of(event)));
     }
 
     /// One `EV_ABS` event: where the device now is, for the next move.
@@ -468,26 +525,33 @@ impl Axes {
             // A multi-touch axis, or one the compositor has no use for.
             _ => return,
         }
+        self.stamp = stamp_of(event);
         self.moved = true;
     }
 
     /// Send the move gathered since the last: the distance a relative device
     /// went, and where an absolute one is, as a fraction of its own range.
-    fn flush(&mut self, out: &mut Vec<Input>) {
+    fn flush(&mut self, out: &mut Vec<Stamped>) {
         if self.delta != (0.0, 0.0) {
-            out.push(Input::Motion {
-                dx: self.delta.0,
-                dy: self.delta.1,
-            });
+            out.push((
+                Input::Motion {
+                    dx: self.delta.0,
+                    dy: self.delta.1,
+                },
+                self.stamp,
+            ));
             self.delta = (0.0, 0.0);
         }
         if std::mem::take(&mut self.moved)
             && let Some(((min_x, max_x), (min_y, max_y))) = self.range
         {
-            out.push(Input::Absolute {
-                x: fraction(self.at.0, min_x, max_x),
-                y: fraction(self.at.1, min_y, max_y),
-            });
+            out.push((
+                Input::Absolute {
+                    x: fraction(self.at.0, min_x, max_x),
+                    y: fraction(self.at.1, min_y, max_y),
+                },
+                self.stamp,
+            ));
         }
     }
 }

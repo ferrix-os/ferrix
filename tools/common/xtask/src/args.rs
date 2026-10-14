@@ -378,6 +378,10 @@ pub(crate) struct Args {
     /// QMP's `input-send-event` drives. `test-input` turns it on, and
     /// `--display` brings them as well.
     pub(crate) input: bool,
+    /// A virtio mouse beside them, whose relative motions QMP's
+    /// `input-send-event` drives: the tablet takes only absolute ones. No
+    /// flag sets it: `test-compositor --boot lane` does.
+    pub(crate) mouse: bool,
     /// A `qemu-xhci` controller with a hub, a keyboard behind the hub, a
     /// mouse and a memory stick holding this image (`docs/XHCI.md` §7). No
     /// flag sets it: `test-usb` does.

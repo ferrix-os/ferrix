@@ -357,6 +357,7 @@ pub fn deliver(
     slots: &mut [Slot],
     sources: &BTreeMap<WindowId, Source>,
     time: u32,
+    stamp: u64,
     follow_mouse: bool,
     dragging: bool,
 ) -> Done {
@@ -395,14 +396,18 @@ pub fn deliver(
                 // sent whether or not the pointer moved: the protocol says
                 // the events are "not limited by the surface", and a client
                 // that locked the pointer has no other way to know it moved.
+                // Its time is the report's stamp, in microseconds of
+                // `CLOCK_MONOTONIC`, carried on to the client
+                // (`docs/GAME-PATH.md` §4.7); now, for an input with none.
                 if let Some((client, _)) = focus.pointer
                     && let Some(slot) = slots.get_mut(client)
                 {
-                    slot.client_mut().relative_motion(
-                        u64::from(time).saturating_mul(1_000),
-                        *dx,
-                        *dy,
-                    );
+                    let micros = if stamp == 0 {
+                        crate::front::monotonic_us()
+                    } else {
+                        stamp
+                    };
+                    slot.client_mut().relative_motion(micros, *dx, *dy);
                 }
             }
             Action::Pointer { x, y } => {
