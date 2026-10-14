@@ -3194,13 +3194,15 @@ then the row says what is built. `docs/BACKLOG.md` has the row.
 review of seccomp S4 to S6, ledger line 702; filed by s13f-seccomp under
 that review's follow-up, ledger line 963, condition 2).
 
-**Moderate**, load ring, every architecture; pre-existing since S5
-(`TSYNC`, built 2026-10-01). `seccomp(SECCOMP_SET_MODE_FILTER,
+**Moderate**, load ring, every architecture; introduced by the landing
+of seccomp S4 to S6 (S5, `TSYNC`, written 2026-10-01 and unlanded until
+then). `seccomp(SECCOMP_SET_MODE_FILTER,
 SECCOMP_FILTER_FLAG_TSYNC)` confirms and changes every thread of the
 process in two holds of its thread-list lock, a `PreemptSpinLock`
 (`docs/SECCOMP.md` §3.7). Each hold does a constant amount per thread, so
 a hold lasts the thread count times that. Measured on 816efdf58 among 16
-threads (`s13fs-*-4`): 88 ns a thread on x86-64 under KVM, 55.8 us and
+threads (`s13fs-*-4`), timing the closures run under the lock and so
+leaving out the listing of the threads, lower bounds of each hold: 88 ns a thread on x86-64 under KVM, 55.8 us and
 42.4 us on AArch64 and ARMv7-A under TCG; for 512 threads 45 us, 28.6 ms
 and 21.7 ms, and for `PID_MAX` (32,768) 2.9 ms, 1.83 s and 1.39 s
 (`MEMORY-AND-TIMING.md` §2.2b). While it lasts, preemption is off on the

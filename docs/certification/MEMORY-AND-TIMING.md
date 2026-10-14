@@ -719,11 +719,15 @@ masked, that time would be added to AoU-4's budget.
   x86-64 under KVM, 46,366 ns on AArch64 under TCG and 45,285 ns on
   ARMv7-A under TCG.
 * *The holds.* A round takes the process's thread-list lock twice. Step 1
-  costs, per thread, one thread lock and a reference taken; step 3, per
+  costs, per thread, the list's `Weak::upgrade`, its `is_gone` test and a
+  push into room made before (all in `with_live_threads`), then one thread
+  lock and a reference taken; step 3, per
   thread, one thread lock, a pointer comparison or a binary search of the
   tested heads (at most 15 steps for 32,768 of them) and one chain swap.
   Nothing is allocated or freed under either. The boot check times each
-  hold among 16 running threads: the longest of 2 holds was 1,400 ns on
+  hold among 16 running threads, from the start of the closure
+  `with_live_threads` runs under the lock to its end, so the figures leave
+  out the listing above and are lower bounds of each hold: the longest of 2 holds was 1,400 ns on
   x86-64 under KVM, 892,800 ns on AArch64 under TCG and 679,136 ns on
   ARMv7-A under TCG (the whole call 14.2 us, 25.4 ms and 29.5 ms). Per
   thread that is 88 ns, 55.8 us and 42.4 us; for `PID_MAX`, 32,768
