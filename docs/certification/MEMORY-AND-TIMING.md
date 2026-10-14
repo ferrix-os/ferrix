@@ -706,6 +706,55 @@ the walk of the chain and closes them before it returns, as the dispatcher does
 around the call it serves, so the up to two milliseconds above are preemptible
 and are never added to the item's masked time. If a later body ran a chain
 masked, that time would be added to AoU-4's budget.
+
+**`TSYNC` (S5, 2026-10-14).** A filter installed with
+`SECCOMP_FILTER_FLAG_TSYNC` reaches every thread of the process in rounds
+(`docs/SECCOMP.md` §3.7); its costs, measured by the `seccomp` boot line on
+816efdf58 (`gate.sh` tags `s13fs-x86-4`, `s13fs-a64-4`, `s13fs-a32-4`):
+
+* *The test, under no lock.* Step 2 tests each other thread's chain against
+  the caller's by walking the caller's chain: up to 6,554 comparisons a
+  thread, so threads × 6,554 a round, preemptible and paid by the calling
+  thread alone. One thread against the longest chain costs 7,875 ns on
+  x86-64 under KVM, 46,366 ns on AArch64 under TCG and 45,285 ns on
+  ARMv7-A under TCG.
+* *The holds.* A round takes the process's thread-list lock twice. Step 1
+  costs, per thread, one thread lock and a reference taken; step 3, per
+  thread, one thread lock, a pointer comparison or a binary search of the
+  tested heads (at most 15 steps for 32,768 of them) and one chain swap.
+  Nothing is allocated or freed under either. The boot check times each
+  hold among 16 running threads: the longest of 2 holds was 1,400 ns on
+  x86-64 under KVM, 892,800 ns on AArch64 under TCG and 679,136 ns on
+  ARMv7-A under TCG (the whole call 14.2 us, 25.4 ms and 29.5 ms). Per
+  thread that is 88 ns, 55.8 us and 42.4 us; for `PID_MAX`, 32,768
+  threads, 2.9 ms, 1.83 s and 1.39 s a hold; for 512 threads (no reference
+  `pids.max` is fixed for a user's session; 512 is the `TasksMax=` of
+  `docs/INIT.md`'s getty unit), 45 us, 28.6 ms and 21.7 ms. The emulated
+  figures carry TCG's cost and the gate host's load; no figure on Arm
+  hardware exists.
+* *Who waits.* The lock is a `PreemptSpinLock`: preemption is off on the
+  holder's processor and interrupts stay open. It is waited on by the
+  process's own `clone(CLONE_THREAD)`, its threads' `attach` and
+  `set_strict` (each an O(1) hold of the same lock), a second `TSYNC`, and
+  every caller of `Process::threads`. Among those, another process reaches
+  it when it sends the process a signal (`signal_taker`), reads
+  `/proc/<pid>/task` or a cgroup's `cgroup.threads` (`thread_ids`), or names one
+  of its threads through a pid namespace (`pidns`). Another process can
+  therefore be made to spin, preemption off on its processor, for one hold:
+  the target's thread count × the per-thread figure above.
+* *Rounds.* A round is given up only when a thread changed between the two
+  looks; one given up for a thread's own filter or strict mode is followed
+  by one that answers that thread's id, and the one change that gives a
+  round up and lets the next go on is another thread's completed `TSYNC`,
+  which lengthens a chain capped at 6,554 filters. So a call makes at most
+  6,554 rounds given up for `TSYNC`s, plus one for each thread that changed
+  itself, before it answers.
+
+The stated worst case of one hold passes 10 ms: for 512 threads on the
+emulated Arm boots, and for `PID_MAX` threads on both. That is **F-72**
+(open, `FINDINGS.md` §E), with a BACKLOG row: bound the hold by the
+process's thread count, or confirm in batches that drop the lock between
+them.
 ### 2.2c What the cgroup controllers add to the time claim (2026-10-01)
 
 Four costs the controllers put on paths the claim covers, stated with their

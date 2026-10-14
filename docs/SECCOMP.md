@@ -1209,6 +1209,18 @@ committed. Each stops the boot with its own message.
 | `TSYNC`: §5 SR10's three cases | the creator's chain read outside the thread-list lock, with a delay inserted: "a thread made during TSYNC was not filtered" | S5 |
 | `TSYNC`'s two windows (§3.7, the consultant's B1): a thread installs a filter of its own and one enters strict mode after the test, and, with the sync paused under the lock after its confirmation, two running threads race it and a third is killed by its filter | the confirmation skipped: "a filter a thread installed while TSYNC tested was taken off it"; `attach` without the thread-list lock: "a filter a thread installed during TSYNC's change was taken off it"; `set_strict` without it: "a thread that entered strict mode during TSYNC's change was put back to filter mode"; the killed thread changed: "TSYNC brought a thread its filter had killed back to filter mode" | S5 |
 
+The second window is raced only where a processor is free to run the two
+racers while the sync holds the lock; on one processor nobody can run there
+and the case passes with no racer seen. The boot line counts the threads
+that changed themselves in the two windows: the first window's two always,
+plus the racers seen in the second. On 2026-10-14 (`s13fs-*-4`, on
+816efdf58) x86-64 under KVM with four processors counted 4 and AArch64
+under TCG with four counted 4, both racers seen; ARMv7-A under TCG with
+two counted 3, one racer seen, as on `s13fs-a32-2` (the first run,
+`s13fs-a32`, counted 4). The evidence
+for that window is the b2 and b3 controls on x86-64 under KVM, each FIRED
+on its own message.
+
 ### 8.2 `cargo xtask test-seccomp`: the user-space test plan
 
 This is a gate like `test-sem` (`tools/common/xtask/src/sem.rs`): a guest
@@ -1831,7 +1843,7 @@ in the landing's message):
 | `SIGSYS` posted, not forced | `a blocked and ignored SIGSYS let a trapped call return` |
 | `PR_SPEC_ENABLE` accepted | `PR_SET_SPECULATION_CTRL enabled a mitigation` |
 | the trap's data left out of `si_errno` | `a trapped call's siginfo did not carry the call, its ip and its arch` |
-| a native-range trap raising `SIGSYS` | `a trapped native-range call returned` |
+| a native-range trap raising `SIGSYS` | `a trapped native-range call did not end the process that made it` (2026-10-14: with the sabotage the scenario's task is not killed and its process ends otherwise than by `SIGSYS`; `entry_task`'s exit-status check reports it, not the task's own "a trapped native-range call returned", which ls4b-t6 expected and so DID NOT FIRE) |
 
 **S5 built (2026-10-01, os-7c, `stage13-s5`).** `TSYNC` and `TSYNC_ESRCH`
 (§3.7). `seccomp(SET_MODE_FILTER, TSYNC)` makes and charges the filter, then
@@ -1918,6 +1930,29 @@ changes, beyond resolving text:
 x86-64's signal frame gained the fault's `trapno`, `err` and `cr2` on
 2026-10-10 (5541709f7); they are written only for the five signals an
 exception raises, so a `SIGSYS` frame is as it was.
+
+**B1's fix landed with S4 to S6 (2026-10-14, `s13f-seccomp`).** The
+consultant's NOT YET of 2026-10-11 (ledger line 702: B1, C1, C2) is met as
+§3.7 describes: `TSYNC` in rounds, `attach` and strict mode under the
+thread-list lock, the two windows checked (§8.1). The follow-up's OK IF
+(ledger line 963) added the measured holds (`MEMORY-AND-TIMING.md` §2.2b,
+F-72), why rounds end (§3.7) and the record below. Rows on 816efdf58 (on
+`main` 8cb41c6dc): `check`, `test-boot` x86-64 under KVM, AArch64 and
+ARMv7-A `--smp 2`, `test-threads --arch all`, `test-seccomp --arch all`,
+each `run: PASSED` (`gate.sh` tags `s13fs-*-4`). Negative controls, all
+sixteen through `gate.sh control --expect` on 816efdf58 on x86-64 under
+KVM, each `control: FIRED (panic)` on its own message (tags `s13fs-*-f`):
+S4's t1 to t7 (t6 on the message that fires first, §8.1's row), S3's k6,
+S5's s1 to s4, and B1's b1 (the confirmation skipped), b2 (`attach`
+without the thread-list lock), b3 (strict mode without it) and b4 (the
+`Dead` guard removed). **s1 re-written:** `land-seccomp-s4`'s s1 no longer
+applied after B1 (`ls4b-s1` REFUSED), and the creator's chain read before
+listing with one delay -- 300 us, then 20 ms -- did not fire
+(`s13fs-s1`, `s13fs-s1b`, `s13fs-s1c`), because the sync's first look
+rarely fell in that window. s1 now also delays 5 ms before the
+thread-list lock in `with_live_threads`, which opens the window to every
+look, and fires (`s13fs-s1d` on 173e40ffc, `s13fs-s1e` on 4cd46c706,
+`s13fs-s1-f` on 816efdf58).
 
 **S6, first part, built (2026-10-01, os-7c, `stage13-s6`).** `cargo xtask
 test-seccomp` (§8.2): the guest program `src/tests/seccomp`, Rust with the
