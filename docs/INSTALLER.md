@@ -467,6 +467,12 @@ and a desktop. Stage 21's NVIDIA driver is not needed for any of this.
 Network on a PC (Intel and Realtek Ethernet, Wi-Fi) is not needed to
 install, since the medium carries the system, and is not in this design.
 
+To try a build on a PC without installing it, or between installs, a USB
+stick holding iPXE boots the latest build from the development host over
+the PC's own firmware network driver: [`docs/NETBOOT.md`](NETBOOT.md).
+Nothing on the PC's disk is written, which also means a netbooted run
+leaves no post-mortem record on it (NETBOOT.md §6).
+
 The unknown is bring-up: Ferrix has never booted on an x86 PC, only under
 QEMU and on two Arm boards. ACPI tables, interrupt routing, and firmware
 that behaves unlike OVMF will each cost something no estimate can see. §9's

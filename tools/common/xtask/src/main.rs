@@ -121,6 +121,7 @@ mod kaslr;
 mod keyboard;
 mod native;
 mod net;
+mod netboot;
 mod noise;
 mod nvidia;
 mod nvme;
@@ -224,6 +225,12 @@ COMMANDS:
                   as a system slot, for `bootctl try` (docs/AB-BOOT.md)
     live          Write build/<arch>/ferrix-live.img, the installer's live medium: a GUID partition table and
                   an EFI system partition holding the image with ferrix-install, / in memory (x86_64, aarch64)
+    netboot       Build the x86_64 image and serve it over HTTP to a machine booting the netboot stick, until
+                  stopped; logs every request (docs/NETBOOT.md)
+    netboot-stick Write build/x86_64/ferrix-netboot-stick.img: iPXE on a GUID partition table, chaining
+                  http://<--server>/ferrix/boot.ipxe (tools/common/fetch/fetch-ipxe.sh first)
+    test-netboot  Boot the netboot stick under QEMU from a server this runs, to the boot marker; then the
+                  negative control, the server serving under another path, must fail with iPXE's error
     run           Boot the image under QEMU, attached to the terminal
     run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show
     run-badapple  Boot the badapple app's player as init: all of Bad Apple!! in a window, heard on this host's sound server (tools/common/fetch/fetch-badapple.sh first)
@@ -560,7 +567,10 @@ OPTIONS:
                                          none, its description then only its name, Virtual-1
     --from <WHERE>                       wallpapers: where the pictures are, a directory here or
                                          <host>:<directory> for one `ssh` reaches
-    --scale <N>                          run-compositor, flash --compositor: the monitor's scale, 1 by default
+    --listen <ADDRESS:PORT|PORT>         netboot: where to serve [default: this host's address on its
+                                         default route, port 8086]
+    --server <HOST[:PORT]>               netboot-stick: where the machine finds `netboot` [port 8086]
+    --scale <N>                         run-compositor, flash --compositor: the monitor's scale, 1 by default
     --size <W>x<H>                       run-compositor: the guest's screen; wallpapers: the screen
                                          to cut pictures for (1920x1080 for both)
     --fps <N>                            wallpapers: frames a second kept of a video
@@ -742,6 +752,7 @@ fn run() -> Result<()> {
         "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
+        "netboot" | "netboot-stick" | "test-netboot" => netboot::run(command, &args),
         "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container"
         | "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),

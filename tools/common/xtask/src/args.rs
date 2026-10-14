@@ -143,6 +143,11 @@ pub(crate) struct Args {
     /// enumerates should be the bus it has always enumerated. A watched boot
     /// has one anyway; see `no_net`.
     pub(crate) net: bool,
+    /// `test-netboot`'s network card: in the firmware's boot order after the
+    /// image, so that OVMF connects a driver to it before the stick's iPXE
+    /// looks for one. OVMF connects only the devices QEMU's boot order names
+    /// (`crate::netboot`); never a flag of its own.
+    pub(crate) net_boot: bool,
     /// `--no-net`: take the network away from a boot that would have had one.
     ///
     /// Only `run-compositor` has one to take: somebody watching a screen
@@ -435,6 +440,13 @@ pub(crate) struct Args {
     /// `--from <WHERE>`: where `wallpapers` finds pictures to convert, a
     /// directory of this machine's or `host:directory`.
     pub(crate) from: Option<String>,
+    /// `--listen <ADDRESS:PORT|PORT>`: where `netboot` serves. No address
+    /// is a default: given a port, or nothing, it is this host's own on its
+    /// default route (`crate::netboot`).
+    pub(crate) listen: Option<String>,
+    /// `--server <HOST[:PORT]>`: where the stick `netboot-stick` writes
+    /// finds `netboot`. Never defaulted: the machine's network decides it.
+    pub(crate) server: Option<String>,
     /// `--plan <DIR>`: a plan of builds `FERRIX_BUILDS=record:` wrote, which
     /// `test-selfhost` has Ferrix carry out and `builds-execute` carries out
     /// (see `crate::builds`).
@@ -850,6 +862,8 @@ impl Args {
                 "--wallpaper" => args.wallpaper = Some(value(&mut items, "--wallpaper")?),
                 "--edid" => args.edid = Some(value(&mut items, "--edid")?),
                 "--from" => args.from = Some(value(&mut items, "--from")?),
+                "--listen" => args.listen = Some(value(&mut items, "--listen")?),
+                "--server" => args.server = Some(value(&mut items, "--server")?),
                 "--plan" | "--volume" => args.selfhost(&item, &mut items)?,
                 "--size" => args.size = Some(dimensions(&value(&mut items, "--size")?, "--size")?),
                 flag if SCALE_FLAGS.contains(&flag) => args.scales(flag, &mut items)?,

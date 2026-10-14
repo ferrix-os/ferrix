@@ -184,10 +184,10 @@ Everything that runs on the host. A script is a tool; there is no separate
 
 | Path | What |
 |---|---|
-| `tools/common/xtask/` | The host build driver (`cargo xtask …`). |
+| `tools/common/xtask/` | The host build driver (`cargo xtask …`); `src/netboot.rs` is the network boot of a bare-metal machine (`docs/NETBOOT.md`). |
 | `tools/common/check/` | The quality gates `cargo xtask check` and CI run: layering, assembly budget, unsafe and panic audits, the certification item boundary, complexity, commit authors. `rustlex.py` is their shared Rust lexer. |
 | `tools/common/gen/` | Generators and their `--check` modes: brand images and release notes, the architecture document (with its `sysml/` reader), the panic catalogue, fonts, Wayland protocol tables, XKB tables, SOUP, coverage justification, fuzz corpus seeds. |
-| `tools/common/fetch/` | Fetch pinned downloads: the rustc sysroot, busybox, Chrome, Bad Apple!!, Steam's volumes, NVIDIA's driver. |
+| `tools/common/fetch/` | Fetch pinned downloads: the rustc sysroot, busybox, Chrome, Bad Apple!!, Steam's volumes, NVIDIA's driver, iPXE for the netboot stick (`docs/NETBOOT.md`). |
 | `tools/common/debug/` | Post-mortem tools run on the host after a failed boot: `ferrix-postmortem.sh` reads a Ferrix disk read-only and prints the loader's and the kernel's logs, the A/B record and `/var/log` (`docs/POSTMORTEM.md`). |
 | `tools/common/test/` | Test drivers run by hand: the self-host matrix, the host `btrfs check` oracle. |
 | `tools/common/bench/` | Benches for kernels other than Ferrix: `board/` holds Linux's and seL4's sides of the DK1 comparison and the timing contract all three follow (`docs/BOARD-BENCH.md`). |

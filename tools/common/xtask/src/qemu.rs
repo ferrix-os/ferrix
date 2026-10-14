@@ -2808,9 +2808,12 @@ fn attach_network(command: &mut Command, arch: Arch, args: &Args) -> Result<Netw
     } else {
         "disable-legacy=on,iommu_platform=on"
     };
+    // `test-netboot` boots through the card, under firmware that drives it
+    // only when the boot order names it; one after the image's `bootindex=0`.
+    let order = if args.net_boot { ",bootindex=1" } else { "" };
     let _ = command.args([
         "-device",
-        &format!("virtio-net-pci,netdev=net0,mac={GUEST_MAC},{flags}"),
+        &format!("virtio-net-pci,netdev=net0,mac={GUEST_MAC},{flags}{order}"),
     ]);
     Ok(Some(gateway))
 }

@@ -839,6 +839,17 @@ that directory and are never committed. `cargo xtask test-uvm` builds UVM
 from the tree it unpacks there, unless `FERRIX_NVIDIA_SRC` names another.
 [`docs/NVIDIA.md`](NVIDIA.md) §3 says what the volume holds.
 
+### On a PC, over the network
+
+A PC with UEFI network boot boots the latest build from this host with no
+install and no reflashing: once, `tools/common/fetch/fetch-ipxe.sh` and
+`cargo xtask netboot-stick --server <this host's address>:8086`, written to
+a USB stick whole; then, for every boot, `cargo xtask netboot` here and the
+PC switched on. The stick's iPXE takes an address from the network's DHCP,
+reports the PC's PCI bus to the server's log and fetches the image.
+`cargo xtask test-netboot` proves the path under QEMU.
+[`docs/NETBOOT.md`](NETBOOT.md) has the firmware settings and the limits.
+
 ### On an STM32MP157-DK1 board
 
 The same ARMv7-A image boots the STM32MP157D-DK1 from its SD card, under
