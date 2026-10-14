@@ -1645,10 +1645,47 @@ fn drained_in_its_last_look(how: usize) {
         LAST_LOOK_READY.load(Ordering::Acquire)
     });
     // Made by now: the hold's drop, with the request pending and interrupts
-    // on, decides it, and nothing else asks this processor for one meanwhile.
-    let decided = super::current().is_some_and(|me| returned && !super::resched_asked(me.cpu()));
+    // on, decides it. Another processor can ask again meanwhile, though: see
+    // `left_undecided`.
+    let decided = super::current().is_some_and(|me| returned && !left_undecided(me.cpu()));
     LAST_LOOK_DECIDED.store(decided, Ordering::Release);
     finish();
+}
+
+/// How long [`left_undecided`] waits, masked, for the kick behind a request
+/// it found to show.
+const KICK_SHOWS_NANOS: u64 = 1_000_000;
+
+/// Whether a request for a decision on `cpu`, this processor, is still
+/// pending and is not another processor's.
+///
+/// A `kick` from another processor sets the flag before it marks its
+/// interrupt on its way, and the interrupt can take milliseconds to arrive
+/// on an emulated machine. A flag read in between is a new request whose
+/// interrupt's exit makes it, not the look's request left unmade (seen once
+/// on armv7a TCG with four processors, `fx1012-stk-thr`, 2026-10-12). So a
+/// flag found up is looked at with interrupts masked, which keeps any exit
+/// from taking it, and is the look's own unless the kick's mark shows within
+/// [`KICK_SHOWS_NANOS`]. A kick that comes then as well as an unmade decision
+/// would pass the case; the control removes the decision on every run.
+fn left_undecided(cpu: usize) -> bool {
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    let kicked = || {
+        super::KICK_PENDING
+            .get()
+            .and_then(|marks| marks.get(cpu))
+            .is_some_and(|mark| mark.load(Ordering::Acquire))
+    };
+    let mut pending = super::resched_asked(cpu);
+    if pending {
+        let until = crate::timer::now_nanos().saturating_add(KICK_SHOWS_NANOS);
+        while !kicked() && crate::timer::now_nanos() < until {
+            core::hint::spin_loop();
+        }
+        pending = !kicked();
+    }
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    pending
 }
 
 /// Inside `me`'s last look, `BLOCKED` and listed: a wake drained while it was
