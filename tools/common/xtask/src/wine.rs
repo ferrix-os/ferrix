@@ -27,6 +27,42 @@ pub(crate) const LINKS: &[(&str, &str)] = &[
     ("usr/share/wine", "/data/usr/share/wine"),
 ];
 
+/// Build the Windows program `tools/common/test/<name>.c` with mingw-w64's
+/// `compiler` (`i686-w64-mingw32-gcc` for a 32-bit program,
+/// `x86_64-w64-mingw32-gcc` for a 64-bit one), linked with `libraries`,
+/// into the build directory, and answer its bytes. Stripped: the gates
+/// carry it in the image.
+///
+/// # Errors
+///
+/// No such compiler on the host, or a build that fails.
+pub(crate) fn windows_program(compiler: &str, name: &str, libraries: &[&str]) -> Result<Vec<u8>> {
+    let source = crate::paths::workspace_root().join(format!("tools/common/test/{name}.c"));
+    let out_dir = crate::paths::build_dir(Arch::X86_64).join("windows");
+    std::fs::create_dir_all(&out_dir)
+        .map_err(|error| Error::new(format!("creating {}: {error}", out_dir.display())))?;
+    let suffix = compiler.split('-').next().unwrap_or(compiler);
+    let out = out_dir.join(format!("{name}-{suffix}.exe"));
+    let built = std::process::Command::new(compiler)
+        .args(["-O2", "-Wall", "-Wextra", "-Werror", "-s", "-o"])
+        .arg(&out)
+        .arg(&source)
+        .args(libraries)
+        .status()
+        .map_err(|error| {
+            Error::new(format!(
+                "running {compiler} (mingw-w64, which builds {name}.exe): {error}"
+            ))
+        })?;
+    if !built.success() {
+        return Err(Error::new(format!(
+            "building {} with {compiler} failed ({built})",
+            source.display()
+        )));
+    }
+    std::fs::read(&out).map_err(|error| Error::new(format!("reading {}: {error}", out.display())))
+}
+
 /// Where [`RUN`] is in the image.
 const RUN_PATH: &str = "bin/wine-test";
 

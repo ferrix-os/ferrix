@@ -3,8 +3,13 @@
 //!
 //! The desktop is `test-xwindow`'s: hyprix with yserver started on `:0` as a
 //! Wayland client of it. [`SCRIPT`], started beside the server, makes a
-//! prefix, runs `cmd /c ver`, then starts `notepad` and waits for X to say
-//! its window is viewable. The gate then puts input in through QEMU, as
+//! prefix, runs `cmd /c ver`, then a 32-bit Windows program,
+//! `tools/common/test/window32.c` built with mingw-w64's i686 compiler,
+//! which says it runs as a 32-bit process under `WoW64` and paints a window
+//! in [`WOW64_COLOUR`] (stage 23, E1.6; docs/WINE.md §7). The gate requires
+//! hyprix to list that window by [`WOW64_TITLE`] and the colour to cover
+//! [`WOW64_PERCENT`] of the screen. Once it has closed, the script starts
+//! `notepad` and waits for X to say its window is viewable. The gate then puts input in through QEMU, as
 //! `test-xwindow` does for xev: a click into notepad's page, the keys of
 //! [`LINE`], `Ctrl+A` and `Ctrl+C`, then a double click on the line's first
 //! word and `Ctrl+C`, while the script prints what X's clipboard holds.
@@ -36,11 +41,41 @@ const TITLE: &str = "Untitled - Notepad";
 /// What the script prints once hyprix lists its windows with notepad up.
 const WINDOW: &str = "wine: window";
 
+/// The title the 32-bit program gives its window.
+const WOW64_TITLE: &str = "Ferrix WoW64";
+
+/// The colour the script asks the 32-bit program to paint its window in,
+/// as [`SCRIPT`] passes it (`20c060`).
+const WOW64_COLOUR: [u8; 3] = [0x20, 0xC0, 0x60];
+
+/// What the script prints once hyprix lists its windows with the 32-bit
+/// program's up. Not a line [`WINDOW`] is found in.
+const WOW64_WINDOW: &str = "wine: wow64 window";
+
+/// What the script puts before each line of hyprix's list while the 32-bit
+/// program's window is up.
+const WOW64_CLIENTS: &str = "wine: wow64 clients:";
+
+/// What the script puts before each line the 32-bit program printed.
+const WOW64_SAID: &str = "wine: wow64 said: ";
+
+/// What the 32-bit program prints when it runs as one: four-byte pointers,
+/// `IsWow64Process` true, and `IsWow64Process2`'s i386 process on an x86-64
+/// machine.
+const WOW64_AS: &str = "window32: pointer=4 wow64=1 process=014c native=8664";
+
+/// The part of the screen, in percent, the 32-bit program's colour must
+/// cover: its window fills the tile hyprix gives it, as notepad's does.
+const WOW64_PERCENT: usize = 50;
+
 /// What the script prints before each new content of X's clipboard.
 const CLIPBOARD: &str = "wine: clipboard: ";
 
 /// What the script prints last, whatever happened.
 const END: &str = "wine: end";
+
+/// Where the 32-bit program is in the image.
+const WINDOW32_PATH: &str = "etc/window32.exe";
 
 /// How long the script has to reach [`WINDOW`]: yserver's start on
 /// lavapipe, `wineboot`, `cmd` and notepad's start.
@@ -92,6 +127,18 @@ sed 's/^/wine: wineboot: /' /tmp/wine/wineboot.log
 echo "wine: cmd exited $?"
 sed 's/^/wine: cmd: /' /tmp/wine/ver.txt
 xdpyinfo | grep -E "dimensions|resolution" | sed 's/^/wine: x: /'
+/usr/lib/wine/wine64 /etc/window32.exe 20c060 20 > /tmp/wine/window32.log 2>&1 &
+waited=0
+until xwininfo -name "Ferrix WoW64" 2>/dev/null | grep -q IsViewable || [ $waited -ge 60 ]; do
+    sleep 1
+    waited=$((waited + 1))
+done
+echo "wine: wow64: the 32-bit program's window was viewable after ${waited}s"
+sleep 3
+/bin/hyprctl clients | sed 's/^/wine: wow64 clients: /'
+echo "wine: wow64 window"
+wait
+sed 's/^/wine: wow64 said: /' /tmp/wine/window32.log
 WINEDEBUG="$WINEDEBUG,warn+x11drv" /usr/lib/wine/wine64 notepad > /tmp/wine/notepad.log 2>&1 &
 waited=0
 until xwininfo -name "Untitled - Notepad" 2>/dev/null | grep -q IsViewable || [ $waited -ge 60 ]; do
@@ -229,11 +276,24 @@ fn white_percent(screen: &Image) -> usize {
 
 /// Whether hyprix's list, among the script's lines, has notepad's window.
 fn listed(lines: &[String]) -> bool {
+    listed_under(lines, "wine: clients:", TITLE)
+}
+
+/// Whether hyprix's list, as the script printed it after `prefix`, has a
+/// window titled `title`.
+fn listed_under(lines: &[String], prefix: &str, title: &str) -> bool {
     lines.iter().any(|line| {
-        line.split_once("wine: clients:")
+        line.split_once(prefix)
             .and_then(|(_, rest)| rest.trim().split_once(" -> "))
-            .is_some_and(|(_, title)| title.trim_end_matches(':') == TITLE)
+            .is_some_and(|(_, listed)| listed.trim_end_matches(':') == title)
     })
+}
+
+/// The part of `screen`, in percent, that is exactly `colour`.
+fn colour_percent(screen: &Image, colour: [u8; 3]) -> usize {
+    let (pixels, _) = screen.pixels.as_chunks::<3>();
+    let matching = pixels.iter().filter(|pixel| **pixel == colour).count();
+    matching * 100 / pixels.len().max(1)
 }
 
 /// A rectangle on the screen: left, top, width, height.
@@ -412,6 +472,33 @@ fn type_into(
     Ok(line.map(|_| typed))
 }
 
+/// What the gate's boot carries besides the desktop's programs: yserver's
+/// desktop files, Wine's links, [`SCRIPT`] and the 32-bit program, built
+/// here with mingw-w64.
+///
+/// # Errors
+///
+/// The 32-bit program cannot be built.
+fn gate_files() -> Result<Vec<File>> {
+    let mut files = crate::yserver::desktop_files(&[]);
+    files.extend(crate::rustc::files(crate::wine::LINKS));
+    files.push(File {
+        path: SCRIPT_PATH.to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(SCRIPT.as_bytes().to_vec()),
+    });
+    files.push(File {
+        path: WINDOW32_PATH.to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(crate::wine::windows_program(
+            "i686-w64-mingw32-gcc",
+            "window32",
+            &["-lgdi32"],
+        )?),
+    });
+    Ok(files)
+}
+
 /// Boot hyprix with yserver and [`SCRIPT`], type into notepad, and require
 /// its window listed by hyprix, its page filling the tile, the typed line on
 /// the screen and the clipboard holding what was copied.
@@ -430,16 +517,9 @@ pub(crate) fn test_wine_window(args: &Args, volume: PathBuf) -> Result<()> {
         Error::new("test-wine needs a static busybox: Alpine's busybox-static at ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static, or ferrousli's from `cargo xtask busybox`")
     })?;
     let programs = Programs::build(arch)?;
-    let mut ports = crate::yserver::desktop_files(&[]);
-    ports.extend(crate::rustc::files(crate::wine::LINKS));
-    ports.push(File {
-        path: SCRIPT_PATH.to_owned(),
-        mode: 0o644,
-        content: Content::Bytes(SCRIPT.as_bytes().to_vec()),
-    });
     let carried = Carried {
         busybox: Some(PathBuf::from(busybox)),
-        ports,
+        ports: gate_files()?,
         ..Carried::none()
     };
     let config = format!(
@@ -453,12 +533,14 @@ pub(crate) fn test_wine_window(args: &Args, volume: PathBuf) -> Result<()> {
     qemu_args.display = true;
     qemu_args.qmp_port = Some(port);
     let dump = paths::build_dir(arch).join("wine-notepad.ppm");
+    let wow64_dump = paths::build_dir(arch).join("wine-wow64.ppm");
     let typed_dump = paths::build_dir(arch).join("wine-notepad-typed.ppm");
     println!("  {arch}: Wine's notepad on hyprix through yserver, typed into");
     let mut said: Vec<String> = Vec::new();
     let mut blank: Option<Image> = None;
     let mut typed: Option<Image> = None;
     let mut placed: Option<Rect> = None;
+    let mut wow64_screen: Option<Image> = None;
     let hook = |watching: &mut Watching<'_>| -> Result<()> {
         let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
         let reached = |marker: &'static str| {
@@ -468,6 +550,9 @@ pub(crate) fn test_wine_window(args: &Args, volume: PathBuf) -> Result<()> {
                     .any(|line| line.contains(marker) || line.contains(END))
             }
         };
+        if watching.read_more(Instant::now() + PATIENCE, reached(WOW64_WINDOW))? {
+            wow64_screen = Some(screen(&mut qmp, &wow64_dump)?);
+        }
         let window = watching.read_more(Instant::now() + PATIENCE, reached(WINDOW))?;
         let shown = screen(&mut qmp, &dump)?;
         // The lines since the hook began, where the script's are.
@@ -499,6 +584,12 @@ pub(crate) fn test_wine_window(args: &Args, volume: PathBuf) -> Result<()> {
         "  {arch}: Wine's notepad is a window of hyprix's, its page fills its tile ({white}% \
          white), {}",
         dump.display()
+    );
+    let covered = judge_wow64(arch, &said, wow64_screen.as_ref(), &wow64_dump)?;
+    println!(
+        "  {arch}: a 32-bit Windows program ran under WoW64 (`{WOW64_AS}`) and its window is \
+         hyprix's, painted in its colour over {covered}% of the screen, {}",
+        wow64_dump.display()
     );
     let (Some(blank), Some(at)) = (blank.as_ref(), placed) else {
         return Err(Error::new(format!(
@@ -542,6 +633,37 @@ fn judge_window(
         )));
     }
     Ok(white)
+}
+
+/// Whether the 32-bit program said it ran as one under `WoW64`, hyprix listed
+/// its window, and its colour covered [`WOW64_PERCENT`] of the screen
+/// `shown`; the part it covered.
+fn judge_wow64(arch: Arch, said: &[String], shown: Option<&Image>, dump: &Path) -> Result<usize> {
+    let ran_as: Vec<&str> = said
+        .iter()
+        .filter_map(|line| line.split_once(WOW64_SAID))
+        .map(|(_, rest)| rest.trim())
+        .collect();
+    if !ran_as.iter().any(|line| line.starts_with(WOW64_AS)) {
+        return Err(Error::new(format!(
+            "{arch}: the 32-bit program did not say `{WOW64_AS}`; it said {ran_as:?}"
+        )));
+    }
+    if !listed_under(said, WOW64_CLIENTS, WOW64_TITLE) {
+        return Err(Error::new(format!(
+            "{arch}: hyprix lists no window titled `{WOW64_TITLE}` while the 32-bit program \
+             ran; the `{WOW64_CLIENTS}` lines say what it had"
+        )));
+    }
+    let covered = shown.map_or(0, |shown| colour_percent(shown, WOW64_COLOUR));
+    if covered < WOW64_PERCENT {
+        return Err(Error::new(format!(
+            "{arch}: hyprix lists the 32-bit program's window, but its colour {WOW64_COLOUR:02x?} \
+             covers {covered}% of the screen, less than {WOW64_PERCENT}%: {}",
+            dump.display()
+        )));
+    }
+    Ok(covered)
 }
 
 /// Whether the keys made a line on notepad's page in its tile `at`, between
@@ -652,6 +774,40 @@ mod tests {
         assert!(listed(&lines(TITLE)));
         assert!(!listed(&lines("Event Tester")));
         assert!(!listed(&["wine: notepad: Untitled - Notepad".to_owned()]));
+    }
+
+    /// The 32-bit program's window is found under its own prefix, by its
+    /// title, and its markers are not ones notepad's are found in.
+    #[test]
+    fn the_wow64_window_is_found_apart_from_notepads() {
+        let lines = vec![
+            format!("{WOW64_CLIENTS} Window 5a -> {WOW64_TITLE}:"),
+            format!("{WOW64_CLIENTS}     class: window32.exe"),
+        ];
+        assert!(listed_under(&lines, WOW64_CLIENTS, WOW64_TITLE));
+        assert!(!listed(&lines), "notepad's list is not the 32-bit one's");
+        assert!(!WOW64_WINDOW.contains(WINDOW) && !WOW64_CLIENTS.contains("wine: clients:"));
+        assert!(SCRIPT.contains(&format!("/{WINDOW32_PATH} 20c060 ")));
+        assert_eq!(
+            WOW64_COLOUR,
+            [0x20, 0xC0, 0x60],
+            "the colour the script passes"
+        );
+        assert!(SCRIPT.contains(&format!("xwininfo -name \"{WOW64_TITLE}\"")));
+        assert!(SCRIPT.contains(&format!("echo \"{WOW64_WINDOW}\"")));
+    }
+
+    /// A colour's part of the screen is counted in whole percent, exactly.
+    #[test]
+    fn a_colour_is_counted_exactly() {
+        let mut pixels = WOW64_COLOUR.repeat(3);
+        pixels.extend([0x20, 0xC0, 0x61]);
+        let screen = Image {
+            width: 2,
+            height: 2,
+            pixels,
+        };
+        assert_eq!(colour_percent(&screen, WOW64_COLOUR), 75);
     }
 
     /// A screen's white part is counted in whole percent.
