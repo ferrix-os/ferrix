@@ -1270,6 +1270,35 @@ package FerrixX8664Requirements {
             attribute :>> parent = "H.TRAP.9";
             attribute :>> unit = "arch::x86_64::signal::put_cause";
         }
+        requirement <'L.x86_64.175'> machineCheckTakenOnEveryProcessor : ItemLowLevel {
+            doc /* F-73. With CR4.MCE clear a processor does not take the
+                machine check: it shuts down, a reset with no report on most
+                machines, and an Intel broadcast takes every processor there
+                at once. The loader keeps the firmware's CR4, so the kernel
+                sets the bit itself. The criterion reads the processor's
+                state rather than trusting the firmware: a secondary starts
+                from the boot processor's CR4 with the bit taken out, so one
+                whose bring-up did not set it reads clear whatever firmware
+                did. */
+            attribute :>> statement = "enable_machine_check shall set CR4.MCE on
+                every processor whose CPUID offers the machine-check exception,
+                at its bring-up, after that processor's IDT and its TSS with the
+                machine check's interrupt stack are loaded and before any program
+                runs there, in every build.";
+            attribute :>> criterion = "Every processor's bring-up sets the bit and
+                is counted, and in stage 4 every processor reads its own CR4.MCE
+                set, the count and the readings equalling the processors (the `mce`
+                line), and a processor whose CPUID offers no machine-check exception
+                fails it by name; with the bring-up's set removed, stage 4 fails by
+                name. A
+                machine check injected through QEMU's monitor into each processor in
+                turn after stage 4 (`mce <cpu>`, test-mce) ends the boot in the FX-9005
+                report, under KVM and TCG.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("arch::x86_64::cpu::enable_machine_check",
+                "arch::x86_64::cpu::has_machine_check",
+                "arch::x86_64::take_machine_check");
+        }
         requirement <'L.x86_64.43'> nativeForgedFrameRefused : ItemLowLevel {
             attribute :>> statement = "restore_signal_frame shall refuse a 64-bit
                 frame whose RIP or RSP lies outside the user half, or that gives

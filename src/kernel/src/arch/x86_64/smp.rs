@@ -327,7 +327,9 @@ impl CpuStarter {
         crate::mm::map_in(root, code, code, PAGE_SIZE, flags)
             .map_err(|_| "could not identity map the trampoline")?;
 
-        let boot_cr4 = cpu::read_cr4();
+        // Without `MCE`: a secondary sets its own once its IDT and TSS hold
+        // the machine check's gate and stack (`secondary_start`, F-73).
+        let boot_cr4 = cpu::read_cr4() & !cpu::CR4_MCE;
         BOOT_CR4.store(boot_cr4, Ordering::Relaxed);
         // SAFETY: (SYSREG) `IA32_EFER` exists on every processor that has long mode.
         let efer = unsafe { cpu::read_msr(IA32_EFER) };
@@ -525,6 +527,11 @@ extern "C" fn secondary_start(record: u64) -> ! {
             crate::panic::catalog::SECONDARY_NO_RECORD,
             "a secondary processor had no record after building its GDT"
         ),
+    }
+    // The machine check, now that this processor's IDT has its gate and its
+    // TSS the stack the gate names, and before it runs a program (F-73).
+    if cpu::enable_machine_check() {
+        let _ = super::MACHINE_CHECK_ENABLED.fetch_add(1, Ordering::AcqRel);
     }
     apic::init_this_cpu();
     crate::smp::secondary_main(record)

@@ -395,6 +395,28 @@ pub(crate) const fn check_x87_controls() -> Result<(), &'static str> {
     Ok(())
 }
 
+// That every processor takes a machine check as the exception, checked once
+// all are online: x86-64's `CR4.MCE` (L.x86_64.175, F-73). On the Arm
+// architectures an external abort or SError is taken through the vectors
+// with nothing to enable.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::check_machine_check_enabled;
+
+/// That every processor takes a machine check, checked: nothing to enable
+/// here.
+///
+/// # Errors
+///
+/// None.
+#[cfg(not(target_arch = "x86_64"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "x86-64's check returns what failed, and the caller is shared"
+)]
+pub(crate) const fn check_machine_check_enabled() -> Result<(), &'static str> {
+    Ok(())
+}
+
 // Cache maintenance for a device that does not snoop the caches: the
 // DK board's display controller reads a framebuffer straight from memory, so
 // whatever a program drew has to be written back from the caches to the point
