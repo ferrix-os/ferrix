@@ -219,6 +219,11 @@ fn proton_pinned() -> &'static str {
 ///
 /// It has not been made, or was made with another launcher or another
 /// yserver than the ones the scripts pin.
+/// [`volume`] for Proton, as `--everything` merges it.
+pub(crate) fn proton_volume() -> Result<PathBuf> {
+    volume(Wine::Proton)
+}
+
 pub(crate) fn volume(wine: Wine) -> Result<PathBuf> {
     let directory = match std::env::var_os("FERRIX_ENDFIELD_VOLUME") {
         Some(directory) => PathBuf::from(directory),

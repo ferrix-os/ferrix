@@ -133,6 +133,46 @@ cp -a "$payload" "$tree/GRYPHLINK/$LAUNCHER_DIRECTORY"
 cp -a "$payload/Launcher.exe" "$tree/GRYPHLINK/Launcher.exe"
 rm -rf "$unpacked"
 
+# With Proton, `gryphlink`: the launcher on a desktop with yserver, as
+# `run-compositor --everything` has (docs/WINE.md §10). It makes a prefix
+# under the user's home the first time, as test-endfield-proton's boot
+# does -- Proton's fonts linked in before wineboot, Open Sans for the Segoe
+# UI family -- and starts the launcher in it. busybox's sh, since /bin/sh
+# is zinc, which stops on a glob that matches nothing.
+if [ "$wine_kind" = proton ]; then
+    mkdir -p "$tree/usr/bin"
+    cat > "$tree/usr/bin/gryphlink" << 'GRYPHLINK'
+#!/bin/busybox sh
+# Arknights: Endfield's launcher (GRYPHLINK) in GE-Proton's Wine, on the X
+# server of the desktop it is started from (docs/WINE.md §10).
+export DISPLAY="${DISPLAY:-:0}"
+export WINEPREFIX="${WINEPREFIX:-$HOME/.local/share/gryphlink/prefix}"
+export WINESERVER=/data/proton/files/bin/wineserver
+export LD_LIBRARY_PATH=/data/proton/files/lib/x86_64-linux-gnu:/data/proton/files/lib/i386-linux-gnu
+export WINEDLLPATH=/data/proton/files/lib/vkd3d:/data/proton/files/lib/wine
+export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
+wine=/data/proton/files/bin/wine
+if [ ! -e "$WINEPREFIX/system.reg" ]; then
+    mkdir -p "$WINEPREFIX/drive_c/windows/Fonts"
+    for f in /data/proton/files/share/fonts/*.tt[fc] /data/proton/files/share/wine/fonts/*.tt[fc] \
+        /data/usr/share/fonts/truetype/open-sans/*.ttf; do
+        [ -e "$f" ] && ln -sf "$f" "$WINEPREFIX/drive_c/windows/Fonts/"
+    done
+    "$wine" wineboot -i
+    "$WINESERVER" -w
+    for pair in "Segoe UI=Open Sans" "Segoe UI Semibold=Open Sans Semibold" "Segoe UI Light=Open Sans Light" \
+        "Segoe UI Semilight=Open Sans Light" "Segoe UI Bold=Open Sans"; do
+        "$wine" reg add 'HKCU\Software\Wine\Fonts\Replacements' /v "${pair%%=*}" /d "${pair#*=}" /f > /dev/null 2>&1
+    done
+    "$WINESERVER" -w
+    ln -s /data/GRYPHLINK "$WINEPREFIX/drive_c/GRYPHLINK"
+fi
+cd "$WINEPREFIX/drive_c/GRYPHLINK" || exit 1
+exec "$wine" 'C:\GRYPHLINK\Launcher.exe' "$@"
+GRYPHLINK
+    chmod 755 "$tree/usr/bin/gryphlink"
+fi
+
 # Room for what the launcher writes beside itself (its logs, its web
 # engine's cache) under QEMU's snapshot; the prefix is made on tmpfs.
 size=$(( $(du -sm "$tree" | cut -f1) + 1024 ))

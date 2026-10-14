@@ -67,6 +67,10 @@ const YSERVER_SPARE_MIB: u64 = 256;
 /// browser's cache.
 const STEAM_SPARE_MIB: u64 = 4096;
 
+/// Room for what Endfield's launcher writes beside itself (its logs, its
+/// web engine's cache); its prefix, `gryphlink` makes under the home.
+const ENDFIELD_SPARE_MIB: u64 = 1024;
+
 /// `--steam-preinstall`: merge the Steam library
 /// `tools/common/fetch/fetch-steam-preinstall.sh` installed on the host
 /// (Teeworlds and the Steam Linux Runtime by default) into `/data/steam`,
@@ -300,12 +304,24 @@ fn sources() -> Result<(Vec<(PathBuf, PathBuf)>, u64)> {
     let steam = beside(steam, "fetch-steam-window.sh", |tree| {
         tree.join("steam/ubuntu12_32/steam").is_file() && tree.join("yserver/yserver").is_file()
     })?;
+    // Last: Wine, GE-Proton and Endfield's launcher with `gryphlink`
+    // (docs/WINE.md §10), on yserver's tree like Steam's. Where it differs
+    // from an earlier volume it is only at [`EARLIER_KEPT`].
+    let endfield = fetched_with(
+        crate::compositor::endfield::proton_volume,
+        "fetch-endfield-launcher.sh",
+        &[("FERRIX_ENDFIELD_WINE", "proton")],
+    )?;
+    let endfield = beside(endfield, "fetch-endfield-launcher.sh", |tree| {
+        tree.join("usr/bin/gryphlink").is_file() && tree.join("proton/files/bin/wine").is_file()
+    })?;
     let spare = SPARE_MIB
         + STEAMCMD_SPARE_MIB
         + CLAUDE_CODE_SPARE_MIB
         + YSERVER_SPARE_MIB
-        + STEAM_SPARE_MIB;
-    let mut sources = vec![rustc, chrome, steamcmd, claude_code, steam];
+        + STEAM_SPARE_MIB
+        + ENDFIELD_SPARE_MIB;
+    let mut sources = vec![rustc, chrome, steamcmd, claude_code, steam, endfield];
     // Last, under Steam's tree: only `steam/steamapps`, which no other tree has.
     if STEAM_PREINSTALL.load(std::sync::atomic::Ordering::Relaxed) {
         sources.push(steam_preinstall()?);
@@ -319,6 +335,15 @@ fn sources() -> Result<(Vec<(PathBuf, PathBuf)>, u64)> {
 /// `~/.local/share/ferrix`. A script that fails, or that leaves no image,
 /// stops the run.
 fn fetched(volume: fn() -> Result<PathBuf>, script: &str) -> Result<PathBuf> {
+    fetched_with(volume, script, &[])
+}
+
+/// [`fetched`], running the script with `env` set.
+fn fetched_with(
+    volume: fn() -> Result<PathBuf>,
+    script: &str,
+    env: &[(&str, &str)],
+) -> Result<PathBuf> {
     if let Ok(image) = volume() {
         return Ok(image);
     }
@@ -330,14 +355,18 @@ fn fetched(volume: fn() -> Result<PathBuf>, script: &str) -> Result<PathBuf> {
     // what they make (`crate::wsl`), and `bash` there cannot open a Windows
     // path: the script is named relative to the checkout.
     let mut command = if cfg!(windows) {
+        let exports: String = env
+            .iter()
+            .map(|(key, value)| format!("export {key}={value}; "))
+            .collect();
         crate::wsl::bash(
             &crate::paths::workspace_root(),
-            "exec bash \"tools/common/fetch/$1\"",
+            &format!("{exports}exec bash \"tools/common/fetch/$1\""),
             &[script],
         )
     } else {
         let mut command = Command::new("bash");
-        let _ = command.arg(&path);
+        let _ = command.arg(&path).envs(env.iter().copied());
         command
     };
     let status = command
@@ -480,6 +509,10 @@ fn merge(from: &Path, into: &Path, files: Files) -> Result<u64> {
                     say_kept(&target, "the first volume's, beside the newer libstdc++");
                     continue;
                 }
+                if earlier_kept(&target) {
+                    say_kept(&target, "the earlier volume's, the same build Wine runs on");
+                    continue;
+                }
                 match newer_runtime(&target, &target, &source)? {
                     Some(Keep::There) => {
                         say_kept(&target, "the earlier volume's, the newer runtime");
@@ -553,6 +586,26 @@ const ALTERNATIVES: &[&str] = &["usr/bin/awk"];
 /// Whether `target`, a path in the merged tree, is one of [`ALTERNATIVES`].
 fn is_alternative(target: &Path) -> bool {
     ALTERNATIVES
+        .iter()
+        .any(|path| target.ends_with(Path::new(path)))
+}
+
+/// Paths where the Endfield volume, merged last, carries another build of a
+/// file an earlier volume has, and the earlier one is kept: yserver, which
+/// Steam's tree brings from its own run of `fetch-yserver.sh` at the same
+/// pin; and two of Debian's libraries, the same upstream version in another
+/// security revision (`fetch-wine.sh` pins libpng `+deb13u6` and liblzma
+/// `+deb13u2`, the volumes before it `+deb13u5` and `+deb13u1`). Wine and
+/// Proton run on either. Any other difference stays a clash.
+const EARLIER_KEPT: &[&str] = &[
+    "yserver/yserver",
+    "usr/lib/x86_64-linux-gnu/libpng16.so.16.48.0",
+    "usr/lib/x86_64-linux-gnu/liblzma.so.5.8.1",
+];
+
+/// Whether `target`, a path in the merged tree, is one of [`EARLIER_KEPT`].
+fn earlier_kept(target: &Path) -> bool {
+    EARLIER_KEPT
         .iter()
         .any(|path| target.ends_with(Path::new(path)))
 }
@@ -863,6 +916,44 @@ mod tests {
         for root in [
             rustc, chrome, into, rustc_gcc, chrome_gcc, into_gcc, rustc_z, chrome_z, into_z,
         ] {
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    /// The Endfield volume's other builds of yserver, libpng and liblzma
+    /// keep the earlier volume's copy; another library of its that differs
+    /// still stops the merge.
+    #[test]
+    fn the_endfield_volumes_known_builds_keep_the_earlier() {
+        let png = format!("{LIB}/libpng16.so.16.48.0");
+        let steam = tree(
+            "kept-steam",
+            &[("yserver/yserver", b"steam's build"), (&png, b"deb13u5")],
+            &[],
+        );
+        let endfield = tree(
+            "kept-endfield",
+            &[("yserver/yserver", b"wine's build"), (&png, b"deb13u6")],
+            &[],
+        );
+        let into = tree("kept-into", &[], &[]);
+        create_dir(&into).unwrap();
+        let _ = merge(&steam, &into, Files::Copied).unwrap();
+        let _ = merge(&endfield, &into, Files::Copied).unwrap();
+        assert_eq!(
+            std::fs::read(into.join("yserver/yserver")).unwrap(),
+            b"steam's build"
+        );
+        assert_eq!(std::fs::read(into.join(&png)).unwrap(), b"deb13u5");
+
+        let other = format!("{LIB}/libgnutls.so.30.40.4");
+        let first = tree("kept-other-first", &[(&other, b"one")], &[]);
+        let second = tree("kept-other-second", &[(&other, b"two")], &[]);
+        let into_other = tree("kept-other-into", &[], &[]);
+        create_dir(&into_other).unwrap();
+        let _ = merge(&first, &into_other, Files::Copied).unwrap();
+        assert!(merge(&second, &into_other, Files::Copied).is_err());
+        for root in [steam, endfield, into, first, second, into_other] {
             let _ = std::fs::remove_dir_all(root);
         }
     }
