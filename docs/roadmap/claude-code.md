@@ -1,4 +1,4 @@
-# Claude Code — Anthropic's coding agent on Ferrix  ·  *the command line, 2026-09-30; the desktop app being assessed*
+# Claude Code — Anthropic's coding agent on Ferrix  ·  *the command line, 2026-09-30; the desktop app assessed, 2026-10-14*
 
 Placed after Chrome without a number of its own. The customer asked on
 2026-09-30 for Claude Code on Ferrix, the command line first and then the
@@ -49,6 +49,12 @@ both are fixed (§5.1).
 * An i386 signal frame with the `XSAVE` area: a first attempt backed out,
   what it takes in §3 (`docs/BACKLOG.md`).
 * linux-arm64 on AArch64 (§6).
-* The Claude desktop app, an Electron application Anthropic builds for
-  macOS and Windows only: the customer chose it on 2026-09-30, and an
-  assessment comes before any building (§7).
+* The Claude desktop app, the Electron application the customer chose on
+  2026-09-30. Assessed on 2026-10-14 (§7). Anthropic now publishes a Linux
+  build (a beta, 2.37337.1 on Electron 44.7.0), and the recommendation is
+  to run that natively, as Chrome runs. It is C1 to C4, 12–18 points as
+  first guesses, with sign-in by hand at every start. A kept sign-in and
+  notifications (C5 to C7) make it 21–33, and they need D-Bus and a Secret
+  Service, which is the customer's decision. Wine and repackaging the
+  Windows bundle are rejected. claude.ai in Chrome, 1 point, is the
+  stopgap. Not started.
