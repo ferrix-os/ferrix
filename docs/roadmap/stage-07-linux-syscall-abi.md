@@ -229,7 +229,7 @@ and a waiter in a parent is roused by its fork child waking the same
 `MAP_SHARED` word -- after a wake keyed by the child's own space, which is
 how every wake was keyed before, has been shown to find nobody:
 
-      futex    a changed word got EAGAIN and a timed wait ETIMEDOUT; a wake, a requeue and a wake from a fork child on a MAP_SHARED word roused 3 waiters, and a wake that roused nobody and one keyed by the waker's own space were caught
+      futex    a changed word got EAGAIN and a timed wait ETIMEDOUT; a wake, a requeue and a wake from a fork child on a MAP_SHARED word roused 5 waiters, and a wake that roused nobody and one keyed by the waker's own space were caught
 
 **inotify and pidfds, and real-time futex deadlines (ferrix-e4,
 2026-09-27).** A black-box pass found `inotify_init`, `inotify_init1` and

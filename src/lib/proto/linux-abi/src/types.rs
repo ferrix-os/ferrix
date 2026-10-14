@@ -1162,6 +1162,17 @@ pub const FUTEX_PRIVATE_FLAG: u32 = 128;
 /// Interpret the timeout against `CLOCK_REALTIME` rather than the monotonic
 /// clock.
 pub const FUTEX_CLOCK_REALTIME: u32 = 256;
+/// A `futex_waitv` element's word is 32 bits wide: `FUTEX2_SIZE_U32`, which
+/// `linux/futex.h` also names `FUTEX_32`. The only size `futex_waitv` takes.
+pub const FUTEX_32: u32 = 0x02;
+/// A `futex_waitv` element's word is private to the caller's address space
+/// (`FUTEX2_PRIVATE`, the same bit as [`FUTEX_PRIVATE_FLAG`]).
+pub const FUTEX2_PRIVATE: u32 = FUTEX_PRIVATE_FLAG;
+/// The most words one `futex_waitv` waits on (`FUTEX_WAITV_MAX`).
+pub const FUTEX_WAITV_MAX: usize = 128;
+/// Bytes in one `struct futex_waitv`: `u64 val`, `u64 uaddr`, `u32 flags`,
+/// `u32 __reserved`, the same on every architecture.
+pub const FUTEX_WAITV_SIZE: usize = 24;
 
 // ---------------------------------------------------------------------------
 // The *at family

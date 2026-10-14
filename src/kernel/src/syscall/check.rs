@@ -8015,7 +8015,429 @@ fn check_futexes() -> Result<usize, &'static str> {
 
     let _ = memory::sys_munmap(&process, page, PAGE_SIZE).map_err(|_| "munmap was refused")?;
     woken += a_shared_futex_crosses_a_fork()?;
+    woken += check_futex_waitv()?;
     Ok(woken)
+}
+
+// ---------------------------------------------------------------------------
+// futex_waitv
+//
+// The same way: a kernel task sleeps in `futex_waitv` on words of a process
+// the check builds, and the check wakes one. What is worth checking beyond
+// a single wait is the vector's own: the index it answers, that no word
+// keeps an entry once it has returned, and that a stale entry of a waiter
+// already woken through another word does not swallow a wake meant for a
+// real waiter behind it.
+// ---------------------------------------------------------------------------
+
+use ferrix_linux_abi::types::{CLOCK_MONOTONIC, CLOCK_REALTIME, FUTEX_32, FUTEX2_PRIVATE};
+
+/// `futex_waitv` with five arguments and a 64-bit timespec.
+fn waitv_call(process: &Process, a: [u64; 5]) -> Result<usize, Errno> {
+    let [waiters, count, flags, timeout, clock] = a;
+    futex::sys_futex_waitv(
+        process,
+        &[waiters, count, flags, timeout, clock, 0],
+        time::TimeWidth::Wide,
+    )
+}
+
+/// One `struct futex_waitv`: value, address, flags and the reserved word.
+type WaitvElement = (u64, u64, u32, u32);
+
+/// Write `elements` as a `struct futex_waitv` array at `at`.
+fn write_waitv(process: &Process, at: u64, elements: &[WaitvElement]) -> Result<(), &'static str> {
+    let mut offset = at;
+    for &(value, address, flags, reserved) in elements {
+        let mut bytes = [0_u8; 24];
+        bytes[..8].copy_from_slice(&value.to_le_bytes());
+        bytes[8..16].copy_from_slice(&address.to_le_bytes());
+        bytes[16..20].copy_from_slice(&flags.to_le_bytes());
+        bytes[20..].copy_from_slice(&reserved.to_le_bytes());
+        uaccess::copy_to_user(process.space(), offset, &bytes)
+            .map_err(|_| "could not stage a futex_waitv element")?;
+        offset += 24;
+    }
+    Ok(())
+}
+
+/// Write a `__kernel_timespec`, two 64-bit fields, at `at`.
+fn write_timespec64(
+    process: &Process,
+    at: u64,
+    seconds: i64,
+    nanos: i64,
+) -> Result<(), &'static str> {
+    let mut bytes = [0_u8; 16];
+    bytes[..8].copy_from_slice(&seconds.to_le_bytes());
+    bytes[8..].copy_from_slice(&nanos.to_le_bytes());
+    uaccess::copy_to_user(process.space(), at, &bytes).map_err(|_| "could not stage a timespec")
+}
+
+/// `futex_waitv`'s answers for arguments Linux refuses: `EINVAL` for the
+/// call's and each element's, `EFAULT` for a word or vector in the kernel
+/// half. `timeout` holds a deadline long past when it is called.
+fn waitv_refuses_bad_arguments(
+    process: &Process,
+    words: &[u64; 3],
+    timeout: u64,
+    vector: u64,
+) -> Result<(), &'static str> {
+    let value = u64::from(FUTEX_WORD);
+    let private = FUTEX_32 | FUTEX2_PRIVATE;
+    let one = |address: u64| (value, address, private, 0);
+    write_waitv(process, vector, &[one(words[0])])?;
+    let invalid: [([u64; 5], &str); 5] = [
+        ([vector, 1, 1, 0, 0], "futex_waitv took flags"),
+        ([vector, 0, 0, 0, 0], "futex_waitv took no words"),
+        (
+            [vector, 129, 0, 0, 0],
+            "futex_waitv took more than 128 words",
+        ),
+        ([0, 1, 0, 0, 0], "futex_waitv took a null vector"),
+        (
+            [vector, 1, 0, timeout, 2],
+            "futex_waitv took a timeout on a clock other than the two it knows",
+        ),
+    ];
+    for (a, problem) in invalid {
+        if waitv_call(process, a) != Err(Errno::EINVAL) {
+            return Err(problem);
+        }
+    }
+    for (seconds, nanos) in [(0, 1_000_000_000), (-1, 0)] {
+        write_timespec64(process, timeout, seconds, nanos)?;
+        if waitv_call(process, [vector, 1, 0, timeout, u64::from(CLOCK_MONOTONIC)])
+            != Err(Errno::EINVAL)
+        {
+            return Err("futex_waitv took a malformed timeout");
+        }
+    }
+    write_timespec64(process, timeout, 0, 1)?;
+    let elements: [(WaitvElement, &str); 6] = [
+        (
+            (value, words[0], 0, 0),
+            "a futex_waitv element without FUTEX_32",
+        ),
+        (
+            (value, words[0], 0x03, 0),
+            "a futex_waitv element of 64 bits",
+        ),
+        (
+            (value, words[0], FUTEX_32 | 0x04, 0),
+            "a futex_waitv element with FUTEX2_NUMA",
+        ),
+        (
+            (value, words[0], private, 1),
+            "a futex_waitv element with its reserved word set",
+        ),
+        (
+            (1 << 32, words[0], private, 0),
+            "a futex_waitv value wider than 32 bits",
+        ),
+        (
+            (value, words[0] + 1, private, 0),
+            "a misaligned futex_waitv word",
+        ),
+    ];
+    for (element, problem) in elements {
+        write_waitv(process, vector, &[element])?;
+        if waitv_call(process, [vector, 1, 0, timeout, u64::from(CLOCK_MONOTONIC)])
+            != Err(Errno::EINVAL)
+        {
+            return Err(problem);
+        }
+    }
+    write_waitv(process, vector, &[one(KERNEL_HALF_BASE)])?;
+    if waitv_call(process, [vector, 1, 0, timeout, u64::from(CLOCK_MONOTONIC)])
+        != Err(Errno::EFAULT)
+    {
+        return Err("a futex_waitv word in the kernel half was not EFAULT");
+    }
+    if waitv_call(
+        process,
+        [KERNEL_HALF_BASE, 1, 0, timeout, u64::from(CLOCK_MONOTONIC)],
+    ) != Err(Errno::EFAULT)
+    {
+        return Err("a futex_waitv vector in the kernel half was not EFAULT");
+    }
+
+    Ok(())
+}
+
+/// The failure a vector waiter that keeps an entry once it has returned
+/// produces, which the negative controls require by name.
+const WAITV_LEFT_AN_ENTRY: &str = "a futex_waitv waiter left an entry on the table";
+
+/// The failure a wake spent on a stale entry produces, which the negative
+/// control requires by name.
+const WAKE_SPENT_ON_STALE: &str =
+    "a futex wake was spent on a stale futex_waitv entry and its real waiter slept on";
+
+/// Where the vector check keeps what it stages, in its page: three words at
+/// 0, 4 and 8, a timespec at 16, the vector at 64.
+const WAITV_TIMEOUT: u64 = 16;
+/// See [`WAITV_TIMEOUT`].
+const WAITV_VECTOR: u64 = 64;
+
+/// Whether any of `words` has a waiter on the table.
+fn any_waiter(process: &Process, words: &[u64]) -> bool {
+    words
+        .iter()
+        .any(|&word| futex::waiters_on(process, word) != 0)
+}
+
+/// `futex_waitv` answers Linux's errors for its arguments, `EAGAIN` for a
+/// word that changed -- leaving nothing listed --, `ETIMEDOUT` for a deadline
+/// past on either clock, the index of the word a wake from another process
+/// came through, and does not let a stale entry swallow a wake. Answers how
+/// many waiters were roused.
+fn check_futex_waitv() -> Result<usize, &'static str> {
+    let process = process::new_for_check()
+        .map_err(|_| "could not make a process for the futex_waitv check")?;
+    let page = map_rw(&process, PAGE_SIZE)?;
+    let words = [page, page + 4, page + 8];
+    for word in words {
+        uaccess::copy_to_user(process.space(), word, &FUTEX_WORD.to_le_bytes())
+            .map_err(|_| "could not stage a futex_waitv word")?;
+    }
+    let (timeout, vector) = (page + WAITV_TIMEOUT, page + WAITV_VECTOR);
+    let value = u64::from(FUTEX_WORD);
+    let private = FUTEX_32 | FUTEX2_PRIVATE;
+    let one = |address: u64| (value, address, private, 0);
+    let call = |a: [u64; 5]| waitv_call(&process, a);
+    // A deadline long past on both clocks: one nanosecond after each began.
+    write_timespec64(&process, timeout, 0, 1)?;
+
+    waitv_refuses_bad_arguments(&process, &words, timeout, vector)?;
+
+    // The third word changed: nothing listed is left behind.
+    write_waitv(
+        &process,
+        vector,
+        &[
+            one(words[0]),
+            one(words[1]),
+            (value + 1, words[2], private, 0),
+        ],
+    )?;
+    if call([vector, 3, 0, 0, 0]) != Err(Errno::EAGAIN) {
+        return Err("futex_waitv on a word that had changed did not answer EAGAIN");
+    }
+    if any_waiter(&process, &words) {
+        return Err(WAITV_LEFT_AN_ENTRY);
+    }
+    // A deadline past, on either clock, and the same word twice, as Linux
+    // takes it.
+    write_waitv(
+        &process,
+        vector,
+        &[one(words[0]), one(words[1]), one(words[0])],
+    )?;
+    for clock in [CLOCK_MONOTONIC, CLOCK_REALTIME] {
+        if call([vector, 3, 0, timeout, u64::from(clock)]) != Err(Errno::ETIMEDOUT) {
+            return Err("futex_waitv with a deadline already past did not answer ETIMEDOUT");
+        }
+    }
+    if any_waiter(&process, &words) {
+        return Err(WAITV_LEFT_AN_ENTRY);
+    }
+
+    // A forgotten wake: counted, never roused, so the waiter times out.
+    match waitv_then_wake(
+        &process,
+        &words,
+        (0, FUTEX_FORGOTTEN_NANOS),
+        |waking, word| Ok(futex::forget_waiters(waking, word, 1)),
+    ) {
+        Err(problem) if problem == SLEPT_THROUGH_WAKE => {}
+        Err(_) => {
+            return Err(
+                "the futex_waitv check failed a wake that roused nobody, for another reason",
+            );
+        }
+        Ok(_) => return Err("the futex_waitv check passed a wake that never roused its waiter"),
+    }
+    let _ = memory::sys_munmap(&process, page, PAGE_SIZE).map_err(|_| "munmap was refused")?;
+
+    let mut woken = a_vector_waiter_is_woken_across_a_fork()?;
+    woken += a_stale_entry_does_not_swallow_a_wake()?;
+    Ok(woken)
+}
+
+/// A vector waiter on three words of `MAP_SHARED` memory, keyed shared, is
+/// roused by a fork child's shared `FUTEX_WAKE` of the second, answers 1, and
+/// leaves no entry on any word. Answers one.
+fn a_vector_waiter_is_woken_across_a_fork() -> Result<usize, &'static str> {
+    let parent = process::new_for_check()
+        .map_err(|_| "could not make a process for the futex_waitv fork check")?;
+    let page = map_shared_rw(&parent, PAGE_SIZE)?;
+    let words = [page, page + 4, page + 8];
+    for word in words {
+        uaccess::copy_to_user(parent.space(), word, &FUTEX_WORD.to_le_bytes())
+            .map_err(|_| "could not stage a shared futex_waitv word")?;
+    }
+    let child = process::fork_for_check(&parent)
+        .map_err(|_| "could not fork a process for the futex_waitv check")?;
+    let answer = waitv_then_wake_from(
+        (&parent, &child),
+        &words,
+        FUTEX_32,
+        (FUTEX_LONG_SECONDS, 0),
+        |waking, word| futex_call(waking, [word, u64::from(FUTEX_WAKE), 1, 0, 0, 0]),
+    )?;
+    if answer != 1 {
+        return Err("futex_waitv woken through its second word did not answer 1");
+    }
+    for process in [&child, &parent] {
+        let _ = memory::sys_munmap(process, page, PAGE_SIZE).map_err(|_| "munmap was refused")?;
+    }
+    Ok(1)
+}
+
+/// A wake of one on a word where a stale entry -- a vector waiter's, already
+/// woken through another word and not yet gone -- is listed ahead of a plain
+/// waiter rouses the plain waiter and answers one, and takes the stale entry
+/// off. Linux would count the stale entry and leave the waiter asleep.
+/// Answers one.
+fn a_stale_entry_does_not_swallow_a_wake() -> Result<usize, &'static str> {
+    let process = process::new_for_check()
+        .map_err(|_| "could not make a process for the stale entry check")?;
+    let page = map_rw(&process, PAGE_SIZE)?;
+    let (word, timeout) = (page, page + 16);
+    uaccess::copy_to_user(process.space(), word, &FUTEX_WORD.to_le_bytes())
+        .map_err(|_| "could not stage the stale entry check's word")?;
+    let stale = futex::list_stale_entry(&process, word)
+        .map_err(|_| "could not list a stale futex_waitv entry")?;
+    let woken = wait_then_wake_behind(
+        (&process, &process),
+        word,
+        timeout,
+        (1, 0),
+        FUTEX_WAIT | FUTEX_PRIVATE_FLAG,
+        1,
+        |process, word| {
+            futex_call(
+                process,
+                [word, u64::from(FUTEX_WAKE | FUTEX_PRIVATE_FLAG), 1, 0, 0, 0],
+            )
+        },
+    );
+    let still_listed = stale.remove();
+    let woken = woken.map_err(|problem| {
+        if problem == SLEPT_THROUGH_WAKE || problem == WAKE_MISSED_ITS_WAITER {
+            WAKE_SPENT_ON_STALE
+        } else {
+            problem
+        }
+    })?;
+    if still_listed {
+        return Err("a futex wake left a stale futex_waitv entry it walked past on the table");
+    }
+    let _ = memory::sys_munmap(&process, page, PAGE_SIZE).map_err(|_| "munmap was refused")?;
+    Ok(woken)
+}
+
+/// What the vector-waiting task waits on: the process, the vector, how many
+/// words, and the timespec of its absolute deadline.
+type WaitvSubject = (Arc<Process>, u64, u64, u64);
+
+/// The [`WaitvSubject`] the vector-waiting task takes when it starts.
+static WAITV_SUBJECT: crate::sync::SpinLock<Option<WaitvSubject>> =
+    crate::sync::SpinLock::new(None);
+
+/// [`waitv_then_wake_from`] with both sides in `process`, its words private.
+fn waitv_then_wake(
+    process: &Arc<Process>,
+    words: &[u64; 3],
+    sleep: (u64, u64),
+    wake: FutexWake,
+) -> Result<usize, &'static str> {
+    waitv_then_wake_from(
+        (process, process),
+        words,
+        FUTEX_32 | FUTEX2_PRIVATE,
+        sleep,
+        wake,
+    )
+}
+
+/// Start a task sleeping in `futex_waitv` on `words`, each with `flags`, in
+/// `waiting` for `sleep` (seconds, nanoseconds), wait until every word has
+/// its entry, `wake` the second from `waking`, and require the wake to have
+/// counted it and every word's entry gone once it is back. Answers what the
+/// wait answered.
+fn waitv_then_wake_from(
+    (waiting, waking): (&Arc<Process>, &Arc<Process>),
+    words: &[u64; 3],
+    flags: u32,
+    sleep: (u64, u64),
+    wake: FutexWake,
+) -> Result<usize, &'static str> {
+    let process = waiting;
+    let page = map_rw(process, PAGE_SIZE)?;
+    let (timeout, vector) = (page + WAITV_TIMEOUT, page + WAITV_VECTOR);
+    let elements = words.map(|word| (u64::from(FUTEX_WORD), word, flags, 0));
+    write_waitv(process, vector, &elements)?;
+    let deadline = crate::timer::now_nanos()
+        .saturating_add(sleep.0.saturating_mul(1_000_000_000))
+        .saturating_add(sleep.1);
+    let (seconds, nanos) = (deadline / 1_000_000_000, deadline % 1_000_000_000);
+    write_timespec64(
+        process,
+        timeout,
+        i64::try_from(seconds).unwrap_or(i64::MAX),
+        i64::try_from(nanos).unwrap_or(0),
+    )?;
+    *FUTEX_ANSWER.lock() = None;
+    *WAITV_SUBJECT.lock() = Some((Arc::clone(process), vector, words.len() as u64, timeout));
+    let waiter = crate::sched::spawn("waitv-waiter", waitv_waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
+
+    let patience = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
+    while words
+        .iter()
+        .any(|&word| futex::waiters_on(process, word) == 0)
+    {
+        if FUTEX_ANSWER.lock().is_some() {
+            return Err("a futex_waitv waiter returned without ever waiting");
+        }
+        if crate::timer::now_nanos() >= patience {
+            return Err("a futex_waitv waiter never started waiting on every word");
+        }
+        crate::sched::sleep_for(1_000_000);
+    }
+    let count = wake(waking, words[1]);
+
+    let patience = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
+    let _ = FUTEX_ANSWERED.wait_until_deadline(|| FUTEX_ANSWER.lock().is_some(), patience);
+    let answer = FUTEX_ANSWER.lock().take();
+    drop(waiter);
+    let left = any_waiter(process, words);
+    let _ = memory::sys_munmap(process, page, PAGE_SIZE).map_err(|_| "munmap was refused")?;
+    match (count, answer) {
+        (_, None) => Err("a futex_waitv waiter never came back"),
+        (_, Some(_)) if left => Err(WAITV_LEFT_AN_ENTRY),
+        (Ok(1), Some(Ok(index))) if index == 1 => Ok(index),
+        (Ok(1), Some(Ok(_))) => Err("futex_waitv answered another index than the word woken"),
+        (Ok(1), Some(Err(error))) if error == Errno::ETIMEDOUT => Err(SLEPT_THROUGH_WAKE),
+        (Ok(1), Some(Err(_))) => Err("a woken futex_waitv waiter answered an error"),
+        (_, Some(_)) => Err(WAKE_MISSED_ITS_WAITER),
+    }
+}
+
+/// The vector-waiting task: one `futex_waitv` on what [`WAITV_SUBJECT`]
+/// names, its deadline absolute on `CLOCK_MONOTONIC`.
+fn waitv_waiter(_argument: usize) {
+    let subject = WAITV_SUBJECT.lock().take();
+    let answer = match subject {
+        Some((process, vector, count, timeout)) => waitv_call(
+            &process,
+            [vector, count, 0, timeout, u64::from(CLOCK_MONOTONIC)],
+        ),
+        None => Err(Errno::ESRCH),
+    };
+    *FUTEX_ANSWER.lock() = Some(answer);
+    FUTEX_ANSWERED.wake_all();
 }
 
 /// Bytes the bucket check maps: four pages, a word in which is all but
@@ -8280,6 +8702,20 @@ fn wait_then_wake_from(
     wait: u32,
     wake: FutexWake,
 ) -> Result<usize, &'static str> {
+    wait_then_wake_behind((waiting, waking), word, timeout, sleep, wait, 0, wake)
+}
+
+/// [`wait_then_wake_from`] with `ahead` entries already listed on `word`
+/// before the waiter: it waits until the waiter's own is there too.
+fn wait_then_wake_behind(
+    (waiting, waking): (&Arc<Process>, &Arc<Process>),
+    word: u64,
+    timeout: u64,
+    sleep: (u64, u64),
+    wait: u32,
+    ahead: usize,
+    wake: FutexWake,
+) -> Result<usize, &'static str> {
     let process = waiting;
     write_timespec(process, timeout, sleep.0, sleep.1)?;
     *FUTEX_ANSWER.lock() = None;
@@ -8287,7 +8723,7 @@ fn wait_then_wake_from(
     let waiter = crate::sched::spawn("futex-waiter", futex_waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
 
     let deadline = crate::timer::now_nanos().saturating_add(FUTEX_PATIENCE_NANOS);
-    while futex::waiters_on(process, word) == 0 {
+    while futex::waiters_on(process, word) <= ahead {
         if FUTEX_ANSWER.lock().is_some() {
             return Err("a futex waiter returned without ever waiting");
         }

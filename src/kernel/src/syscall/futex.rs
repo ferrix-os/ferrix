@@ -73,16 +73,53 @@
 //! which bucket its entry is in ([`Sleeper::bucket`]), changed only with both
 //! locks held. A waiter leaving takes the lock of the bucket it reads there
 //! and looks again: if the entry was moved in between, it follows it.
+//!
+//! # Many words at once: `futex_waitv`
+//!
+//! `futex_waitv` (449) sleeps on up to [`FUTEX_WAITV_MAX`] words until any
+//! one of them is woken, and answers which. Proton's Wine waits through it
+//! for its fsync: its objects are words in a POSIX shared-memory file that
+//! wineserver and every Wine process map, and a wait for any of several
+//! objects is one call. A waiter is one [`Sleeper`] with one entry per word
+//! -- its *slot* -- each listed in its own key's bucket, and the sleeper
+//! records per slot which bucket that entry is in, so that leaving and a
+//! requeue work per entry as they did for the one entry before. Setting up
+//! takes one bucket's lock at a time, word by word, and reads each word
+//! under its lock as a single wait does; a word that no longer holds its
+//! value unlists every slot listed so far and answers `EAGAIN`, unless one of
+//! them was woken in between, which is then the answer, as on Linux. Leaving
+//! unlists every slot, again one lock at a time. A single `FUTEX_WAIT` is the
+//! one-slot case of the same wait and behaves as before.
+//!
+//! **One deviation from Linux, on purpose.** Once a vector waiter is woken
+//! through one word, its entries on the others stay listed until it runs and
+//! takes them off. Linux's `futex_wake` counts such a stale entry as a waiter
+//! woken, so a wake of one meant for the next real waiter on that word can
+//! be spent on a task that is already awake. Here a wake, a requeue, a
+//! thread's exit wake and the self-checks' forgetting wake all go through
+//! the same [`Sleeper::rouse`], which takes a stale entry off without
+//! counting it -- neither as roused nor as moved -- and goes on to the next.
+//! A wake therefore never loses a waiter to a stale entry; it may rouse one
+//! real waiter more than Linux would and report a count smaller by the stale
+//! entries. A one-slot waiter's entry always leaves the table with the wake
+//! that rouses it, so for every wait but `futex_waitv` nothing changes.
+//!
+//! Every entry and the copied vector are fallible allocations: memory
+//! refused unlists what was listed and answers `ENOMEM`. A task holds at most
+//! [`FUTEX_WAITV_MAX`] entries, and seccomp sees 449 before it is dispatched,
+//! as it sees every number.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::fallible;
 use crate::sync::SpinLock;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::types::{
-    FUTEX_CLOCK_REALTIME, FUTEX_CMP_REQUEUE, FUTEX_PRIVATE_FLAG, FUTEX_REQUEUE, FUTEX_WAIT,
-    FUTEX_WAIT_BITSET, FUTEX_WAKE, FUTEX_WAKE_BITSET,
+    CLOCK_MONOTONIC, CLOCK_REALTIME, FUTEX_32, FUTEX_CLOCK_REALTIME, FUTEX_CMP_REQUEUE,
+    FUTEX_PRIVATE_FLAG, FUTEX_REQUEUE, FUTEX_WAIT, FUTEX_WAIT_BITSET, FUTEX_WAITV_MAX,
+    FUTEX_WAITV_SIZE, FUTEX_WAKE, FUTEX_WAKE_BITSET, FUTEX2_PRIVATE,
 };
 
 use crate::object::process::{Host, Process};
@@ -165,26 +202,53 @@ impl Key {
     }
 }
 
-/// One task asleep in `FUTEX_WAIT`, as its wakers see it.
+/// What [`Sleeper::woken`] holds until a wake takes the sleeper.
+const NOT_WOKEN: usize = usize::MAX;
+
+/// One task asleep in `FUTEX_WAIT` or `futex_waitv`, as its wakers see it.
 #[derive(Debug)]
 struct Sleeper {
     /// The task to make runnable. `None` only before the scheduler starts,
     /// when a wait spins on `woken` instead.
     task: Option<Arc<Task>>,
-    /// Set by the wake that took it off the table.
-    woken: AtomicBool,
-    /// The bucket of [`TABLE`] its entry is in, or was in last. Changed only
-    /// by a requeue, holding both the old bucket's lock and the new one's.
-    bucket: AtomicUsize,
+    /// The slot whose wake took it, set once by the first wake to come, or
+    /// [`NOT_WOKEN`].
+    woken: AtomicUsize,
+    /// Per slot, the bucket of [`TABLE`] its entry is in, or was in last.
+    /// Changed only by a requeue, holding both the old bucket's lock and the
+    /// new one's. Never empty.
+    buckets: Vec<AtomicUsize>,
 }
 
 impl Sleeper {
-    /// Mark it woken and make its task runnable. Called with [`TABLE`] held.
-    fn rouse(&self) {
-        self.woken.store(true, Ordering::Release);
+    /// Mark it woken through `slot` and make its task runnable, if no wake
+    /// took it before: whether this one did. Called with the lock of the
+    /// bucket the entry for `slot` was in held. A `false` is a stale entry,
+    /// which the caller takes off without counting (the module's
+    /// documentation says why).
+    fn rouse(&self, slot: usize) -> bool {
+        if self
+            .woken
+            .compare_exchange(NOT_WOKEN, slot, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
         if let Some(task) = &self.task {
             sched::wake(task);
         }
+        true
+    }
+
+    /// Whether a wake has taken it.
+    fn is_woken(&self) -> bool {
+        self.woken.load(Ordering::Acquire) != NOT_WOKEN
+    }
+
+    /// Where the bucket of `slot`'s entry is recorded; `None` only for a
+    /// slot past the last, which no caller asks for.
+    fn bucket_of(&self, slot: usize) -> Option<&AtomicUsize> {
+        self.buckets.get(slot)
     }
 }
 
@@ -198,6 +262,18 @@ struct Entry {
     bitset: u32,
     /// Who it is.
     sleeper: Arc<Sleeper>,
+    /// Which of the sleeper's words this entry is: 0 for a single wait, the
+    /// index into the vector for `futex_waitv`.
+    slot: usize,
+}
+
+/// What [`rouse`] does to each matching entry it takes off the table; it
+/// answers whether the entry counts.
+type With = fn(&Entry) -> bool;
+
+/// [`With`] for a real wake.
+fn rouse_entry(entry: &Entry) -> bool {
+    entry.sleeper.rouse(entry.slot)
 }
 
 /// How long a futex wait sleeps between looks of its own: a second, the
@@ -332,6 +408,93 @@ pub(crate) fn sys_futex(
     }
 }
 
+/// `futex_waitv`: sleep on up to [`FUTEX_WAITV_MAX`] words until one is
+/// woken, and answer its index. `width` is the `__kernel_timespec` the
+/// timeout points at, in the caller's ABI ([`TimeWidth::CompatWide`] for an
+/// i386 caller, whose word addresses must also lie below 4 GiB).
+///
+/// The arguments are `waiters`, `nr_futexes`, `flags`, `timeout` and
+/// `clockid`. The timeout, if any, is absolute on `CLOCK_MONOTONIC` or
+/// `CLOCK_REALTIME`.
+///
+/// # Errors
+///
+/// `EINVAL` for flags, no words or more than [`FUTEX_WAITV_MAX`], a null
+/// vector, another clock with a timeout, a malformed timeout, an element
+/// whose flags are not `FUTEX_32` with or without `FUTEX2_PRIVATE`, whose
+/// reserved word is not zero, whose value does not fit 32 bits or whose
+/// address is misaligned; `EFAULT` for a vector, timeout or word that
+/// cannot be read, an i386 caller's word at or above 4 GiB among them;
+/// `ENOMEM` when the vector cannot be copied; and [`wait_on`]'s answers.
+pub(crate) fn sys_futex_waitv(
+    process: &dyn Host,
+    a: &[u64; 6],
+    width: TimeWidth,
+) -> Result<usize, Errno> {
+    let [waiters, count, flags, timeout, clock, _] = *a;
+    // `unsigned int nr_futexes`, `unsigned int flags` and `clockid_t`: the
+    // upper half of a 64-bit register is whatever the caller left there.
+    let (count, flags, clock) = (count as u32 as usize, flags as u32, clock as u32);
+    if flags != 0 || count == 0 || count > FUTEX_WAITV_MAX || waiters == 0 {
+        return Err(Errno::EINVAL);
+    }
+    let deadline = if timeout == 0 {
+        None
+    } else {
+        if clock != CLOCK_MONOTONIC && clock != CLOCK_REALTIME {
+            return Err(Errno::EINVAL);
+        }
+        let absolute = read_timespec(process, timeout, width)?;
+        Some(if clock == CLOCK_REALTIME {
+            let counter =
+                i128::from(absolute) - i128::from(crate::syscall::time::realtime_offset());
+            u64::try_from(counter.max(0)).unwrap_or(u64::MAX)
+        } else {
+            absolute
+        })
+    };
+    let compat = width == TimeWidth::CompatWide;
+    let mut vector =
+        fallible::try_with_capacity::<u8>(count * FUTEX_WAITV_SIZE).map_err(|_| Errno::ENOMEM)?;
+    vector.resize(count * FUTEX_WAITV_SIZE, 0);
+    uaccess::copy_from_user(process.core().space(), waiters, &mut vector)
+        .map_err(|_| Errno::EFAULT)?;
+    let mut words: Vec<Word> = fallible::try_with_capacity(count).map_err(|_| Errno::ENOMEM)?;
+    for element in vector.chunks_exact(FUTEX_WAITV_SIZE) {
+        let field = |at: usize| -> u64 {
+            let mut bytes = [0_u8; 8];
+            if let Some(source) = element.get(at..at + 8) {
+                bytes.copy_from_slice(source);
+            }
+            u64::from_le_bytes(bytes)
+        };
+        let (value, address, tail) = (field(0), field(8), field(16));
+        let (element_flags, reserved) = (tail as u32, (tail >> 32) as u32);
+        if (element_flags != FUTEX_32 && element_flags != FUTEX_32 | FUTEX2_PRIVATE)
+            || reserved != 0
+        {
+            return Err(Errno::EINVAL);
+        }
+        let expected = u32::try_from(value).map_err(|_| Errno::EINVAL)?;
+        if !address.is_multiple_of(4) {
+            return Err(Errno::EINVAL);
+        }
+        if compat && address > u64::from(u32::MAX) {
+            return Err(Errno::EFAULT);
+        }
+        let shared = element_flags & FUTEX2_PRIVATE == 0;
+        words.push(Word {
+            address,
+            expected,
+            key: key(process.core(), address, shared)?,
+            bitset: FUTEX_BITSET_MATCH_ANY,
+        });
+    }
+    // The keys go after the copy; nothing is listed yet.
+    drop(vector);
+    wait_on(process, &words, deadline)
+}
+
 /// The key for a futex word, which must be aligned as a 32-bit word is:
 /// shared if `shared` and a shared region holds it.
 fn key(process: &Process, address: u64, shared: bool) -> Result<Key, Errno> {
@@ -374,24 +537,28 @@ fn read_present_word(process: &Process, address: u64) -> Result<Option<u32>, Err
 fn sleep(sleeper: &Sleeper, process: &dyn Host, deadline: u64) {
     let _ = WaitQueue::wait_on_any(
         &[&SLEEP],
-        || sleeper.woken.load(Ordering::Acquire) || process.wait_interrupted(),
+        || sleeper.is_woken() || process.wait_interrupted(),
         deadline,
         TRUSTED_RECHECK_NANOS,
     );
 }
 
+/// One word a wait sleeps on: its address, the value it must still hold,
+/// its key and the bitset its wakes must share a bit with.
+struct Word {
+    /// The word's user address, aligned.
+    address: u64,
+    /// What it must hold for the wait to sleep.
+    expected: u32,
+    /// What it is keyed by.
+    key: Key,
+    /// Which wakes rouse it.
+    bitset: u32,
+}
+
 /// Sleep on `address` if it holds `expected`, until a wake whose bitset
 /// shares a bit with `bitset`, the caller is ended, or `deadline` passes.
 /// `shared` is whether the call left out `FUTEX_PRIVATE_FLAG`.
-///
-/// **A wait that ends for none of those goes round again**, reading the word
-/// afresh, as Linux's `futex_wait` does after a spurious wakeup. What ended it
-/// can be gone by the time the answer is chosen: a `SIGSTOP` pending for the
-/// process ends the wait, and another thread may take it before this one looks
-/// again -- dequeued, and the process not yet marked stopped -- or the stop may
-/// be over, continued while this thread had not yet run. Answered as a
-/// timeout, a wait with none returned `ETIMEDOUT` from a stop: FX-0701's "a
-/// `FUTEX_WAIT` stopped and continued returned instead of being restarted".
 fn wait(
     process: &dyn Host,
     address: u64,
@@ -401,31 +568,57 @@ fn wait(
     deadline: Option<u64>,
 ) -> Result<usize, Errno> {
     let key = key(process.core(), address, shared)?;
-    let bucket = key.bucket();
-    let sleeper = Arc::new(Sleeper {
-        task: sched::current(),
-        woken: AtomicBool::new(false),
-        bucket: AtomicUsize::new(bucket),
+    let mut words = fallible::try_with_capacity(1).map_err(|_| Errno::ENOMEM)?;
+    words.push(Word {
+        address,
+        expected,
+        key,
+        bitset,
     });
+    wait_on(process, &words, deadline).map(|_| 0)
+}
+
+/// Sleep on every one of `words` that still holds its value, until a wake
+/// of any of them, the caller is ended, or `deadline` passes; answer the
+/// index of the word whose wake took it.
+///
+/// **A wait that ends for none of those goes round again**, reading the words
+/// afresh, as Linux's `futex_wait` does after a spurious wakeup. What ended it
+/// can be gone by the time the answer is chosen: a `SIGSTOP` pending for the
+/// process ends the wait, and another thread may take it before this one looks
+/// again -- dequeued, and the process not yet marked stopped -- or the stop may
+/// be over, continued while this thread had not yet run. Answered as a
+/// timeout, a wait with none returned `ETIMEDOUT` from a stop: FX-0701's "a
+/// `FUTEX_WAIT` stopped and continued returned instead of being restarted".
+///
+/// # Errors
+///
+/// `EAGAIN` if a word no longer holds its value when it is listed and no
+/// word listed before it was woken in between; `EFAULT` for a word that
+/// cannot be read; `ENOMEM` if an entry cannot be listed; `ERESTARTSYS` for
+/// a signal; `ETIMEDOUT` once `deadline` passes.
+fn wait_on(process: &dyn Host, words: &[Word], deadline: Option<u64>) -> Result<usize, Errno> {
+    let mut buckets = fallible::try_with_capacity(words.len()).map_err(|_| Errno::ENOMEM)?;
+    buckets.extend(words.iter().map(|word| AtomicUsize::new(word.key.bucket())));
+    let sleeper = fallible::try_arc(Sleeper {
+        task: sched::current(),
+        woken: AtomicUsize::new(NOT_WOKEN),
+        buckets,
+    })
+    .map_err(|_| Errno::ENOMEM)?;
     let deadline = deadline.unwrap_or(u64::MAX);
     loop {
-        loop {
-            // Faulted in here, outside the lock, and read again under it
-            // without a fault. Round again if the page went in between.
-            let _ = read_word(process.core(), address)?;
-            let mut table = bucket_lock(bucket).lock();
-            match read_present_word(process.core(), address)? {
-                None => {}
-                Some(word) if word != expected => return Err(Errno::EAGAIN),
-                Some(_) => {
-                    sleeper.bucket.store(bucket, Ordering::Relaxed);
-                    table.push(Entry {
-                        key: key.clone(),
-                        bitset,
-                        sleeper: Arc::clone(&sleeper),
-                    });
-                    break;
+        for (slot, word) in words.iter().enumerate() {
+            if let Err(error) = list(process, &sleeper, slot, word) {
+                // Off the table, every slot listed before this one; one woken
+                // in between is the answer, as on Linux.
+                for listed in 0..slot {
+                    drop(unlist(&sleeper, listed));
                 }
+                return match sleeper.woken.load(Ordering::Acquire) {
+                    NOT_WOKEN => Err(error),
+                    woken => Ok(woken),
+                };
             }
         }
 
@@ -433,13 +626,16 @@ fn wait(
 
         // Off the table however it left, and under the lock, so that a waker
         // which found it has finished rousing it before this returns. The
-        // entry goes after the lock, with the key it holds.
-        drop(unlist(&sleeper));
+        // entries go after each lock, with the keys they hold.
+        for slot in 0..words.len() {
+            drop(unlist(&sleeper, slot));
+        }
         // Woken wins over the other two: a wake that took this waiter off the
         // table counted it, and reporting a timeout would lose that wake for
         // whoever the waker meant it for.
-        if sleeper.woken.load(Ordering::Acquire) {
-            return Ok(0);
+        let woken = sleeper.woken.load(Ordering::Acquire);
+        if woken != NOT_WOKEN {
+            return Ok(woken);
         }
         if process.wait_interrupted() {
             // A restart code, not `EINTR`: a futex wait restarts under
@@ -453,20 +649,57 @@ fn wait(
     }
 }
 
-/// Take `sleeper`'s entry off the table if it is still there, holding the
-/// lock of the bucket it is in. A requeue may move it while this waits for
-/// that lock, so the bucket is read again once the lock is held, and if it
-/// changed, the lock of the one it names is taken instead.
-fn unlist(sleeper: &Arc<Sleeper>) -> Option<Entry> {
+/// List `sleeper`'s entry for `slot` on `word`, if the word still holds its
+/// value: read first with nothing held, faulting its page in, then again
+/// under its bucket's lock without a fault, round again if the page went in
+/// between.
+///
+/// # Errors
+///
+/// `EAGAIN` if the word holds another value, `EFAULT` if it cannot be read,
+/// `ENOMEM` if the bucket cannot grow.
+fn list(process: &dyn Host, sleeper: &Arc<Sleeper>, slot: usize, word: &Word) -> Result<(), Errno> {
+    let bucket = word.key.bucket();
     loop {
-        let bucket = sleeper.bucket.load(Ordering::Acquire);
+        let _ = read_word(process.core(), word.address)?;
         let mut table = bucket_lock(bucket).lock();
-        if sleeper.bucket.load(Ordering::Acquire) != bucket {
+        match read_present_word(process.core(), word.address)? {
+            None => {}
+            Some(value) if value != word.expected => return Err(Errno::EAGAIN),
+            Some(_) => {
+                if let Some(recorded) = sleeper.bucket_of(slot) {
+                    recorded.store(bucket, Ordering::Relaxed);
+                }
+                return fallible::try_push(
+                    &mut table,
+                    Entry {
+                        key: word.key.clone(),
+                        bitset: word.bitset,
+                        sleeper: Arc::clone(sleeper),
+                        slot,
+                    },
+                )
+                .map_err(|_| Errno::ENOMEM);
+            }
+        }
+    }
+}
+
+/// Take `sleeper`'s entry for `slot` off the table if it is still there,
+/// holding the lock of the bucket it is in. A requeue may move it while this
+/// waits for that lock, so the bucket is read again once the lock is held,
+/// and if it changed, the lock of the one it names is taken instead.
+fn unlist(sleeper: &Arc<Sleeper>, slot: usize) -> Option<Entry> {
+    let recorded = sleeper.bucket_of(slot)?;
+    loop {
+        let bucket = recorded.load(Ordering::Acquire);
+        let mut table = bucket_lock(bucket).lock();
+        if recorded.load(Ordering::Acquire) != bucket {
             continue;
         }
         let mine = table
             .iter()
-            .position(|entry| Arc::ptr_eq(&entry.sleeper, sleeper))
+            .position(|entry| Arc::ptr_eq(&entry.sleeper, sleeper) && entry.slot == slot)
             .map(|index| table.remove(index));
         drop(table);
         return mine;
@@ -483,22 +716,26 @@ fn wake(
     bitset: u32,
 ) -> Result<usize, Errno> {
     let key = key(process.core(), address, shared)?;
-    Ok(rouse(&[key], count, bitset, Sleeper::rouse))
+    Ok(rouse(&[key], count, bitset, rouse_entry))
 }
 
 /// Take up to `count` waiters on any of `keys` whose bitset shares a bit with
-/// `bitset` off the table, oldest first, calling `with` on each.
+/// `bitset` off the table, oldest first, calling `with` on each; answer how
+/// many it counted.
 ///
 /// A `count` of zero or less still takes one, as Linux's `futex_wake` does:
-/// it counts a waiter before comparing against the limit. What is taken is
-/// dropped after the lock, since a key may hold the last reference to its
-/// object.
+/// it counts a waiter before comparing against the limit. An entry `with`
+/// does not count -- a stale entry of a vector waiter another word's wake
+/// already took -- is taken off all the same and the walk goes on (the
+/// module's documentation). What is taken is dropped after the lock, since a
+/// key may hold the last reference to its object.
 ///
 /// Keys in different buckets are taken bucket by bucket, in the order of
 /// `keys`: oldest first holds within a bucket, which is all a single key
 /// needs. Only the self-checks pass more than one.
-fn rouse(keys: &[Key], count: i32, bitset: u32, with: fn(&Sleeper)) -> usize {
+fn rouse(keys: &[Key], count: i32, bitset: u32, with: With) -> usize {
     let limit = usize::try_from(count.max(1)).unwrap_or(1);
+    let mut counted = 0_usize;
     let mut taken = Vec::new();
     for (at, key) in keys.iter().enumerate() {
         let bucket = key.bucket();
@@ -512,7 +749,7 @@ fn rouse(keys: &[Key], count: i32, bitset: u32, with: fn(&Sleeper)) -> usize {
         }
         let mut table = bucket_lock(bucket).lock();
         let mut index = 0;
-        while taken.len() < limit
+        while counted < limit
             && let Some(entry) = table.get(index)
         {
             if !keys.contains(&entry.key) || entry.bitset & bitset == 0 {
@@ -520,12 +757,15 @@ fn rouse(keys: &[Key], count: i32, bitset: u32, with: fn(&Sleeper)) -> usize {
                 continue;
             }
             let entry = table.remove(index);
-            with(&entry.sleeper);
+            if with(&entry) {
+                counted += 1;
+            }
             taken.push(entry);
         }
         drop(table);
     }
-    taken.len()
+    drop(taken);
+    counted
 }
 
 /// `FUTEX_REQUEUE` and, with `expected`, `FUTEX_CMP_REQUEUE`: rouse up to
@@ -570,11 +810,24 @@ fn requeue(
             Some(_) => break locked,
         }
     };
-    let (source_table, target_table) = match second.as_mut() {
+    let (source_table, mut target_table) = match second.as_mut() {
         None => (&mut *first, None),
         Some(higher) if from_bucket < to_bucket => (&mut *first, Some(&mut **higher)),
         Some(higher) => (&mut **higher, Some(&mut *first)),
     };
+    // Room on `to`'s bucket for every entry that may move, made before any
+    // is taken off, so that memory refused changes nothing. Within one
+    // bucket the entries taken off leave the room.
+    if let Some(target_table) = target_table.as_deref_mut() {
+        let movable = source_table
+            .iter()
+            .filter(|entry| entry.key == source)
+            .count()
+            .min(wake_count.saturating_add(move_count));
+        if fallible::try_reserve(target_table, movable).is_err() {
+            return Err(Errno::ENOMEM);
+        }
+    }
     let mut taken = 0_usize;
     let mut moved = Vec::new();
     // The keys that leave the table, dropped after the lock.
@@ -585,16 +838,26 @@ fn requeue(
             index += 1;
             continue;
         }
-        taken += 1;
         let mut entry = source_table.remove(index);
-        if taken <= wake_count {
-            entry.sleeper.rouse();
+        // A stale entry of a vector waiter already woken through another
+        // word is taken off and counted neither as roused nor as moved.
+        if entry.sleeper.is_woken() {
+            gone.push(entry.key);
+            continue;
+        }
+        if taken < wake_count {
+            if entry.sleeper.rouse(entry.slot) {
+                taken += 1;
+            }
             gone.push(entry.key);
         } else {
+            taken += 1;
             gone.push(core::mem::replace(&mut entry.key, target.clone()));
             // Both locks are held: a waiter leaving reads this after taking
             // the old bucket's lock and follows it to the new one.
-            entry.sleeper.bucket.store(to_bucket, Ordering::Release);
+            if let Some(recorded) = entry.sleeper.bucket_of(entry.slot) {
+                recorded.store(to_bucket, Ordering::Release);
+            }
             moved.push(entry);
         }
     }
@@ -616,7 +879,7 @@ pub(crate) fn wake_address(space: &Arc<AddressSpace>, address: u64, count: i32) 
         &[Key::new(space, address, true)],
         count,
         FUTEX_BITSET_MATCH_ANY,
-        Sleeper::rouse,
+        rouse_entry,
     )
 }
 
@@ -662,8 +925,53 @@ pub(crate) fn forget_waiters(process: &Process, address: u64, count: i32) -> usi
         &either_key(process.space(), address),
         count,
         FUTEX_BITSET_MATCH_ANY,
-        |_| {},
+        |_| true,
     )
+}
+
+/// A private entry on a word of a vector waiter that a wake already took
+/// through another of its words, and that has not yet taken this one off:
+/// what a stale entry is between the wake and its waiter's own unlist.
+///
+/// Exists for the self-check of the rule that a wake does not count a stale
+/// entry, which needs one listed at a moment of its choosing.
+#[derive(Debug)]
+pub(crate) struct StaleEntry(Arc<Sleeper>);
+
+impl StaleEntry {
+    /// Whether it was still on the table, taking it off if it was.
+    pub(crate) fn remove(self) -> bool {
+        unlist(&self.0, 1).is_some()
+    }
+}
+
+/// List a [`StaleEntry`] on `address` in `process`'s space, keyed as a
+/// private wait is: slot 1 of a sleeper woken through slot 0.
+///
+/// # Errors
+///
+/// `EINVAL` for a misaligned word, `ENOMEM` when memory is refused.
+pub(crate) fn list_stale_entry(process: &Process, address: u64) -> Result<StaleEntry, Errno> {
+    let key = key(process, address, false)?;
+    let bucket = key.bucket();
+    let mut buckets = fallible::try_with_capacity(2).map_err(|_| Errno::ENOMEM)?;
+    buckets.extend([AtomicUsize::new(bucket), AtomicUsize::new(bucket)]);
+    let sleeper = fallible::try_arc(Sleeper {
+        task: None,
+        woken: AtomicUsize::new(0),
+        buckets,
+    })
+    .map_err(|_| Errno::ENOMEM)?;
+    let entry = Entry {
+        key,
+        bitset: FUTEX_BITSET_MATCH_ANY,
+        sleeper: Arc::clone(&sleeper),
+        slot: 1,
+    };
+    let mut table = bucket_lock(bucket).lock();
+    fallible::try_push(&mut table, entry).map_err(|_| Errno::ENOMEM)?;
+    drop(table);
+    Ok(StaleEntry(sleeper))
 }
 
 /// The bucket of [`TABLE`] a private wait on `address` in `process`'s space

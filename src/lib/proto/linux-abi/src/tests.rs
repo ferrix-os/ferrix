@@ -177,6 +177,11 @@ const SHARED: &[(usize, usize, Syscall)] = &[
         Syscall::EpollPwait2,
     ),
     (
+        x86_64::FUTEX_WAITV,
+        aarch64::FUTEX_WAITV,
+        Syscall::FutexWaitv,
+    ),
+    (
         x86_64::EPOLL_PWAIT,
         aarch64::EPOLL_PWAIT,
         Syscall::EpollPwait,
@@ -1777,6 +1782,25 @@ fn both_tables_cover_the_calls_musl_startup_makes() {
     }
 }
 
+/// `futex_waitv` is 449 on x86-64 (`asm-x86/unistd_64.h`), i386
+/// (`asm-x86/unistd_32.h`) and AArch64 (`asm-generic/unistd.h`), checked
+/// against the UAPI headers QEMU vendors; ARMv7-A leaves it unmapped. The
+/// numbers between `epoll_pwait2` and it stay `ENOSYS` everywhere.
+#[test]
+fn futex_waitv_is_449_and_the_numbers_below_it_stay_unmapped() {
+    assert_eq!(
+        (x86_64::FUTEX_WAITV, aarch64::FUTEX_WAITV, i386::FUTEX_WAITV),
+        (449, 449, 449)
+    );
+    for translate in [from_x86_64, from_aarch64, from_i386] {
+        assert_eq!(translate(449), Some(Syscall::FutexWaitv));
+        for number in 442..449 {
+            assert!(translate(number).is_none(), "{number} stays unmapped");
+        }
+    }
+    assert!(from_arm(449).is_none(), "ARMv7-A does not map it");
+}
+
 #[test]
 fn table_sizes_are_stable() {
     // A canary, not a specification. The numbers are whatever the tables
@@ -1785,13 +1809,13 @@ fn table_sizes_are_stable() {
     // `socket` being unreachable on AArch64.
     assert_eq!(
         mapped(from_x86_64).len(),
-        257,
-        "the x86-64 table maps 257 calls"
+        258,
+        "the x86-64 table maps 258 calls"
     );
     assert_eq!(
         mapped(from_aarch64).len(),
-        225,
-        "the AArch64 table maps 225 calls"
+        226,
+        "the AArch64 table maps 226 calls"
     );
 }
 /// Calls only ARMv7-A has, because it is the only 32-bit target.
@@ -3649,6 +3673,10 @@ fn the_i386_numbers_are_the_headers_and_mean_what_arm_means() {
     assert_eq!((i386::ALARM, i386::TIME), (27, 13));
     assert_eq!(from_i386(27), Some(Syscall::Alarm));
     assert_eq!(from_i386(13), Some(Syscall::Time));
+    // `futex_waitv`, which this ARMv7-A table does not map: no header here
+    // names its ARM number. 449 in `asm-x86/unistd_32.h`.
+    assert_eq!(i386::FUTEX_WAITV, 449);
+    assert_eq!(from_i386(449), Some(Syscall::FutexWaitv));
     // `socketcall`, which only i386 has among these tables.
     assert_eq!(i386::SOCKETCALL, 102);
     assert_eq!(from_i386(102), Some(Syscall::Socketcall));
@@ -3658,7 +3686,7 @@ fn the_i386_numbers_are_the_headers_and_mean_what_arm_means() {
     let translated = (0..I386_END).filter(|&nr| from_i386(nr).is_some()).count();
     assert_eq!(
         translated,
-        I386_NUMBERS.len() + 6,
+        I386_NUMBERS.len() + 7,
         "no i386 number is mapped unread"
     );
     // The numbers x86-64 gives these calls are other calls, or none, on

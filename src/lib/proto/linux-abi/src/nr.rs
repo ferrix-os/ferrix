@@ -541,6 +541,9 @@ pub mod x86_64 {
     pub const FACCESSAT2: usize = 439;
     /// Wait on an epoll set with a signal mask and a nanosecond timeout.
     pub const EPOLL_PWAIT2: usize = 441;
+    /// Wait on up to 128 futex words at once, until one is woken: what
+    /// Proton's Wine waits through for its fsync.
+    pub const FUTEX_WAITV: usize = 449;
 
     // -- Filesystem control and extended attributes, from `syscall_64.tbl` --
 
@@ -1014,6 +1017,9 @@ pub mod aarch64 {
     pub const FACCESSAT2: usize = 439;
     /// Wait on an epoll set with a signal mask and a nanosecond timeout.
     pub const EPOLL_PWAIT2: usize = 441;
+    /// Wait on up to 128 futex words at once, until one is woken: what
+    /// Proton's Wine waits through for its fsync.
+    pub const FUTEX_WAITV: usize = 449;
 
     // -- Filesystem control and extended attributes, from the generic `unistd.h` --
 
@@ -2121,6 +2127,9 @@ pub mod i386 {
     pub const FACCESSAT2: usize = 439;
     /// Wait on an epoll set with a signal mask and a nanosecond timeout.
     pub const EPOLL_PWAIT2: usize = 441;
+    /// Wait on up to 128 futex words at once, until one is woken: what
+    /// Proton's Wine waits through for its fsync.
+    pub const FUTEX_WAITV: usize = 449;
     /// Report a filesystem's usage by path into the packed 84-byte
     /// `struct statfs64`, which is ARMv7-A's too.
     pub const STATFS64: usize = 268;
@@ -2752,6 +2761,9 @@ pub enum Syscall {
     /// Wait on, or wake, a futex, with a 64-bit `timespec` timeout. ARMv7-A and i386 only,
     /// and the one a time64 musl's locks actually reach.
     FutexTime64,
+    /// Wait on up to 128 futex words at once (`futex_waitv`, x86-64, i386 and
+    /// AArch64): Proton's fsync.
+    FutexWaitv,
     /// Register the address cleared and woken on thread exit.
     SetTidAddress,
     /// Register the robust futex list, walked when a thread dies holding a lock.
@@ -2929,11 +2941,11 @@ pub enum Syscall {
 /// table indexed by the number, once the compiler is done with the match --
 /// past its end (Spectre variant 1). A host test holds it to the table: no
 /// number at or above it translates, and the one below it does.
-pub const X86_64_END: usize = 442;
+pub const X86_64_END: usize = x86_64::FUTEX_WAITV + 1;
 
 /// One past the highest number [`from_aarch64`] translates. As
 /// [`X86_64_END`].
-pub const AARCH64_END: usize = 442;
+pub const AARCH64_END: usize = aarch64::FUTEX_WAITV + 1;
 
 /// One past the highest number [`from_arm`] translates in the shared EABI
 /// table. The ARM-private calls above [`arm::ARM_PRIVATE_BASE`] are bounded
@@ -2945,7 +2957,7 @@ pub const ARM_PRIVATE_END: usize = arm::ARM_SET_TLS + 1;
 
 /// One past the highest number [`from_i386`] translates. As
 /// [`X86_64_END`], and it moves up as calls are mapped.
-pub const I386_END: usize = i386::EPOLL_PWAIT2 + 1;
+pub const I386_END: usize = i386::FUTEX_WAITV + 1;
 
 /// Translate an x86-64 system call number.
 ///
@@ -3163,6 +3175,7 @@ fn x86_64_recent(nr: usize) -> Option<Syscall> {
         x86_64::OPENAT2 => Syscall::Openat2,
         x86_64::FACCESSAT2 => Syscall::Faccessat2,
         x86_64::EPOLL_PWAIT2 => Syscall::EpollPwait2,
+        x86_64::FUTEX_WAITV => Syscall::FutexWaitv,
         x86_64::SETXATTR => Syscall::Setxattr,
         x86_64::LSETXATTR => Syscall::Lsetxattr,
         x86_64::FSETXATTR => Syscall::Fsetxattr,
@@ -3486,6 +3499,7 @@ fn aarch64_recent(nr: usize) -> Option<Syscall> {
         aarch64::OPENAT2 => Syscall::Openat2,
         aarch64::FACCESSAT2 => Syscall::Faccessat2,
         aarch64::EPOLL_PWAIT2 => Syscall::EpollPwait2,
+        aarch64::FUTEX_WAITV => Syscall::FutexWaitv,
         aarch64::SETXATTR => Syscall::Setxattr,
         aarch64::LSETXATTR => Syscall::Lsetxattr,
         aarch64::FSETXATTR => Syscall::Fsetxattr,
@@ -4271,6 +4285,7 @@ fn i386_recent(nr: usize) -> Option<Syscall> {
         i386::OPENAT2 => Syscall::Openat2,
         i386::FACCESSAT2 => Syscall::Faccessat2,
         i386::EPOLL_PWAIT2 => Syscall::EpollPwait2,
+        i386::FUTEX_WAITV => Syscall::FutexWaitv,
         i386::PPOLL => Syscall::Ppoll,
         i386::PSELECT6 => Syscall::Pselect6,
         i386::UTIMENSAT => Syscall::Utimensat,

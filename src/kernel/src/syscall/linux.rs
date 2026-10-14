@@ -406,6 +406,7 @@ fn with_process(call: Syscall, args: &SyscallArgs, process: &Process) -> Result<
         Syscall::Setsid => family::sys_setsid(process),
         Syscall::Futex => futex::sys_futex(process, &a, native),
         Syscall::FutexTime64 => futex::sys_futex(process, &a, wide),
+        Syscall::FutexWaitv => futex::sys_futex_waitv(process, &a, wide),
         Syscall::RtSigaction => {
             signal::sys_rt_sigaction(process, truncate(a[0]), a[1], a[2], a[3], args.abi)
         }
