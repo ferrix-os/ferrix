@@ -7,12 +7,16 @@
 //! Mesa's llvmpipe with the recorder preloaded, twice: [`PLAIN`] seconds as
 //! it is, then [`STALLED`] seconds with `FRAMEREC_STALL_MS=50`, a 50 ms
 //! sleep inside the swap every ten seconds. Each record comes out on the
-//! serial line, and `crate::frames` reads it.
+//! serial line, and `crate::frames` reads it. Each run is started by R3's
+//! launch timer, `rig launch`, which the recorder answers with its
+//! constructor's and its first swap's time: M6, cold for the first run
+//! after the boot and warm for the second ([`launches`]).
 //!
-//! It passes when yserver answered the recorder's `PresentNotifyMSC` for
-//! the swaps, its msc moves as a clock at the screen's refresh with every
-//! msc one refresh long (within [`CLOCK_SPREAD`]), the paced client's
-//! median frame is one refresh, and in the second run each of the
+//! It passes when both runs' launches were reported, yserver answered the
+//! recorder's `PresentNotifyMSC` for the swaps, its msc moves as a clock at
+//! the screen's refresh with every msc one refresh long (within
+//! [`CLOCK_SPREAD`]), the paced client's median frame is one refresh, and in
+//! the second run each of the
 //! [`STALLS`] stalls is counted, by msc at the swap it came before, as the
 //! refreshes a stall of [`STALL_MS`] misses at the refresh measured
 //! ([`allowed`]: three at 60 Hz; three or four at hyprix's 75 Hz, where
@@ -48,6 +52,14 @@ const SCRIPT_PATH: &str = "etc/frames.sh";
 /// Where the recorder and the client are in the image.
 const RECORDER_PATH: &str = "rig/libframerec.so";
 const CLIENT_PATH: &str = "rig/framegl";
+
+/// Where the launch timer is in the image: `tools/common/game/rig.c`,
+/// whose `rig launch` starts each run and prints its M6 line.
+const RIG_PATH: &str = "rig/rig";
+
+/// The runs, in the order the script makes them: the first after the
+/// boot is M6's cold launch, the second its warm one.
+const LAUNCHES: [(&str, &str); 2] = [("plain", "cold"), ("stall", "warm")];
 
 /// Seconds of the run without a stall.
 const PLAIN: u64 = 30;
@@ -93,6 +105,7 @@ done
 echo "frames: the X socket was there after ${waited}s"
 run() {
     FRAMEREC_OUT=/tmp/$1.rec FRAMEREC_STALL_MS=$2 SWAPFPS_LOG=/tmp/$1.fps \
+        /rig/rig launch \
         /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu \
         --preload /rig/libframerec.so /rig/framegl $3 > /tmp/$1.out 2>&1
     echo "frames: $1: exited $?"
@@ -141,6 +154,11 @@ fn desktop(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf, String)> {
     let mut ports = crate::yserver::desktop_files(&[]);
     ports.push(carried(RECORDER_PATH, 0o755, &built.recorder)?);
     ports.push(carried(CLIENT_PATH, 0o755, &built.client)?);
+    ports.push(File {
+        path: RIG_PATH.to_owned(),
+        mode: 0o755,
+        content: Content::Bytes(crate::game_rig::build_rig()?),
+    });
     ports.push(File {
         path: SCRIPT_PATH.to_owned(),
         mode: 0o644,
@@ -208,8 +226,15 @@ pub(crate) fn test_frames(args: &Args) -> Result<()> {
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &args, EITHER, hook)?;
     let (plain, stalled) = judge(&said).map_err(|error| Error::new(format!("{arch}: {error}")))?;
+    let launched = launches(&said).map_err(|error| Error::new(format!("{arch}: {error}")))?;
     println!("  {arch}: the plain record, libframerec.so {sha}:\n{plain}");
     println!("  {arch}: the stalled record:\n{stalled}");
+    for (when, constructor, swap) in launched {
+        println!(
+            "  {arch}: M6, framegl's {when} launch: the recorder's constructor at +{constructor:.3} \
+             ms, its first swap returned at +{swap:.3} ms after the exec"
+        );
+    }
     println!(
         "  {arch}: yserver's msc moved as a clock, and each of the {STALLS} stalls of {STALL_MS} \
          ms was counted as the refreshes it missed, by msc and by time alike"
@@ -326,6 +351,39 @@ fn judge(said: &[String]) -> Result<(Summary, Summary)> {
     Ok((plain, stalled))
 }
 
+/// Each run's launch, as `rig launch` printed it into the run's output:
+/// cold or warm, and the constructor's and the first swap's time after the
+/// exec in milliseconds.
+///
+/// # Errors
+///
+/// A run whose recorder reported no first swap, or whose times are not in
+/// order.
+fn launches(said: &[String]) -> Result<Vec<(&'static str, f64, f64)>> {
+    LAUNCHES
+        .iter()
+        .map(|&(run, when)| {
+            let prefix = format!("frames: {run}: out: ");
+            let found = said
+                .iter()
+                .find_map(|line| crate::game_rig::launch_line(line.split_once(prefix.as_str())?.1));
+            match found {
+                Some((constructor, swap)) if 0.0 <= constructor && constructor <= swap => {
+                    Ok((when, constructor, swap))
+                }
+                Some((constructor, swap)) => Err(Error::new(format!(
+                    "the {run} run's launch is out of order: the constructor at +{constructor} \
+                     ms, the first swap at +{swap} ms"
+                ))),
+                None => Err(Error::new(format!(
+                    "the {run} run printed no `launch:` line with a first swap: the recorder \
+                     did not answer `rig launch` (framerec.c's launch timer)"
+                ))),
+            }
+        })
+        .collect()
+}
+
 /// The refreshes a stall of [`STALL_MS`] may miss at a refresh of
 /// `refresh` microseconds. The frame after it shows at the first refresh
 /// that begins after the stall and the frame's own work, which is less
@@ -354,7 +412,39 @@ mod tests {
         assert!(SCRIPT.contains(&format!("run stall {STALL_MS} {STALLED}\n")));
         assert!(SCRIPT.contains(&format!("echo \"{END}\"")));
         assert!(SCRIPT.contains(&format!("--preload /{RECORDER_PATH} /{CLIENT_PATH} ")));
+        assert!(SCRIPT.contains(&format!("/{RIG_PATH} launch \\\n")));
         assert_eq!(STALLED / 10, STALLS as u64);
+        let order: Vec<usize> = LAUNCHES
+            .iter()
+            .map(|(run, _)| SCRIPT.find(&format!("run {run} ")).unwrap())
+            .collect();
+        assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "cold first");
+    }
+
+    /// Each run's launch line is read from its own output; a run without
+    /// one, or with a swap before the constructor, fails.
+    #[test]
+    fn each_run_has_its_launch() {
+        let both = [
+            "  8.00 | frames: plain: out: launch: constructor +3.100 ms, first swap returned +412.500 ms",
+            "  8.50 | frames: stall: out: launch: constructor +2.000 ms, first swap returned +150.250 ms",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            launches(&both).unwrap(),
+            vec![("cold", 3.1, 412.5), ("warm", 2.0, 150.25)]
+        );
+        let lost = [
+            both[0].clone(),
+            "  8.50 | frames: stall: out: launch: no first swap reported".to_owned(),
+        ];
+        assert!(launches(&lost).is_err());
+        let backwards = [
+            both[0].clone(),
+            "  8.50 | frames: stall: out: launch: constructor +9.0 ms, first swap returned +1.0 ms"
+                .to_owned(),
+        ];
+        assert!(launches(&backwards).is_err());
     }
 
     /// A transcript of both runs at 60 Hz, each stall in the second

@@ -59,6 +59,18 @@
  * libxcb and libxcb-present are opened at run time, so the library has no
  * link-time dependency but the C library, and records times without them.
  *
+ * The launch timer (M6, R3's `rig launch`): with RIG_LAUNCH_FD in its
+ * environment, the write end of a pipe, the library takes CLOCK_MONOTONIC
+ * in its constructor and again when the program's first swap returns,
+ * writes one line to that descriptor,
+ *
+ *     ctor <ns> swap <ns>
+ *
+ * and closes it. Without RIG_LAUNCH_FD, or when the number it names is not
+ * an open pipe, it writes nothing. Each process the library is loaded into
+ * reports for itself, once; the environment is left as it was, so a
+ * launcher's child that swaps reports its own constructor.
+ *
  * Only GLIBC_2.2.5 symbols are used, so it loads on any x86_64 glibc:
  *   cc -O2 -fPIC -shared -fno-stack-protector -U_FORTIFY_SOURCE \
  *       -o libframerec.so framerec.c -ldl
@@ -73,6 +85,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -498,6 +511,45 @@ static uint64_t decimal(const char *s, uint64_t otherwise)
     return v;
 }
 
+/* ---- The launch timer (M6) ----------------------------------------- */
+
+static int launch_fd = -1;   /* the pipe `rig launch` gave, until reported */
+static uint64_t launch_ctor; /* CLOCK_MONOTONIC in the constructor */
+static volatile int launch_done;
+
+__attribute__((constructor)) static void launch_begin(void)
+{
+    uint64_t ctor = now_ns();
+    const char *fd = getenv("RIG_LAUNCH_FD");
+    if (!fd || *fd < '0' || *fd > '9')
+        return;
+    uint64_t number = decimal(fd, 0);
+    /* fstat by the raw system call: glibc 2.33's headers turn fstat into a
+     * symbol of that version. x86-64's struct stat is the kernel's. */
+    struct stat st;
+    if (number > 1024 || syscall(SYS_fstat, (int)number, &st) != 0 || !S_ISFIFO(st.st_mode))
+        return;
+    launch_ctor = ctor;
+    launch_fd = (int)number;
+}
+
+/* When a swap returns at `back`: the first time, the line `rig launch`
+ * waits for. */
+static void launch_report(uint64_t back)
+{
+    if (launch_fd < 0 || __sync_lock_test_and_set(&launch_done, 1))
+        return;
+    char line[64];
+    char *at = put_str(line, "ctor ");
+    at = put_u64(at, launch_ctor);
+    at = put_str(at, " swap ");
+    at = put_u64(at, back);
+    *at++ = '\n';
+    if (write(launch_fd, line, (size_t)(at - line))) { }
+    close(launch_fd);
+    launch_fd = -1;
+}
+
 static void stall_maybe(uint32_t swap)
 {
     if (!stall_read) {
@@ -549,6 +601,7 @@ static uint32_t swap_begin(void)
 static void swap_end(uint32_t swap, uint64_t entry, unsigned long drawable)
 {
     uint64_t back = now_ns();
+    launch_report(back);
     lock();
     rec_add(REC_SWAP, swap, entry, back);
     if (drawable)

@@ -12,6 +12,13 @@
 //! after its constructor. The overshoot of a timed sleep, idle and under the load, is
 //! printed and not judged: its bound is G2's (§8.3), not the rig's.
 //!
+//! The launch timer keeps its stand-in (`rig fake-game`) here, because this
+//! boot is the console's: there is no X server to swap to, and the rustc
+//! volume holds no Mesa. M6 on the real recorder and the paced client,
+//! `framegl` under `libframerec.so`, is timed where both run, on
+//! `test-frames`' desktop (`crate::compositor::frames`); `measure.sh` runs
+//! it on any guest that names it in `RIG_GAME`.
+//!
 //! The controls (`docs/GAME-PATH.md` §12 records both runs):
 //! [`qemu::x86_cpu`] without `+invtsc` makes the clock the TSC as KVM's
 //! paravirtual clock vouches for it, and fails the clock check; and `load.sh` edited
@@ -72,8 +79,8 @@ const SMP: u32 = 4;
 const TIMEOUT: u64 = 900;
 
 /// `tools/common/game/rig.c`, built static with the host's compiler: the
-/// binary the Linux guest runs too.
-fn build_rig() -> Result<Vec<u8>> {
+/// binary the Linux guest runs too, and `test-frames`' launch timer.
+pub(crate) fn build_rig() -> Result<Vec<u8>> {
     let source = crate::paths::workspace_root().join("tools/common/game/rig.c");
     let dir = crate::paths::build_dir(Arch::X86_64);
     std::fs::create_dir_all(&dir)
@@ -179,15 +186,19 @@ fn busy(lines: &[String]) -> Option<(u32, f64)> {
     })
 }
 
-/// The launch timer's line: the constructor's and the first swap's time
-/// after the exec, in milliseconds.
+/// One `rig launch` line, `launch: constructor +<ms> ms, first swap
+/// returned +<ms> ms`: the constructor's and the first swap's time after
+/// the exec, in milliseconds.
+pub(crate) fn launch_line(line: &str) -> Option<(f64, f64)> {
+    let rest = line.trim().strip_prefix("launch: constructor +")?;
+    let (constructor, rest) = rest.split_once(" ms, first swap returned +")?;
+    let swap = rest.strip_suffix(" ms")?;
+    Some((constructor.parse().ok()?, swap.parse().ok()?))
+}
+
+/// The launch timer's first line.
 fn launch(lines: &[String]) -> Option<(f64, f64)> {
-    lines.iter().find_map(|line| {
-        let rest = line.trim().strip_prefix("launch: constructor +")?;
-        let (constructor, rest) = rest.split_once(" ms, first swap returned +")?;
-        let swap = rest.strip_suffix(" ms")?;
-        Some((constructor.parse().ok()?, swap.parse().ok()?))
-    })
+    lines.iter().find_map(|line| launch_line(line))
 }
 
 /// Whether the launch timer saw the stand-in's first swap its 100 ms after
