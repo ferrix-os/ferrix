@@ -407,6 +407,12 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
         }
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
+    report_cmd32(arch, &said);
+    judge(arch, &said, yellow, &dump)
+}
+
+/// Say whether the 32-bit `cmd` answered with a Windows version.
+fn report_cmd32(arch: Arch, said: &[String]) {
     let cmd32 = said
         .iter()
         .filter_map(|line| line.split_once(CMD32).map(|(_, said)| said.trim()))
@@ -415,7 +421,6 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
         Some(version) => println!("  {arch}: the 32-bit cmd answered `{version}`"),
         None => println!("  {arch}: the 32-bit cmd did not answer with a Windows version"),
     }
-    judge(arch, &said, yellow, &dump)
 }
 
 /// Whether hyprix listed the launcher's window, its main button was drawn

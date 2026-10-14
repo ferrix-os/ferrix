@@ -728,15 +728,7 @@ fn run() -> Result<()> {
         "test-claude-code" => claude_code::test_claude_code(&args),
         "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),
         "test-bwrap" => bwrap::test_bwrap(&args),
-        "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, &args),
-        "test-dxvk" => dxvk::test_dxvk(&args),
-        "test-unity" => compositor::unity::test_unity(&args),
-        "test-endfield-launcher" => {
-            compositor::endfield::test_endfield_launcher(&args, compositor::endfield::Wine::Debian)
-        }
-        "test-endfield-proton" => {
-            compositor::endfield::test_endfield_launcher(&args, compositor::endfield::Wine::Proton)
-        }
+        name if WINE_GATES.contains(&name) => wine_gate(command, &args),
         "run-nvidia" => nvidia::run_nvidia(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),
@@ -1139,6 +1131,33 @@ fn driver_gate(command: &str, args: &Args) -> Result<()> {
         nvme::test_nvme(args)
     } else {
         restart::run(command, args)
+    }
+}
+
+/// The gates of the X server and the Windows programs on it: yserver's and
+/// Wine's (`test-yserver`, `test-xwindow`, `test-wine`), DXVK's
+/// (`test-dxvk`), Unity's Spaceship Demo (`test-unity`), and Endfield's
+/// launcher in Debian's Wine (`test-endfield-launcher`) and in GE-Proton's
+/// (`test-endfield-proton`).
+const WINE_GATES: &[&str] = &[
+    "test-yserver",
+    "test-xwindow",
+    "test-wine",
+    "test-dxvk",
+    "test-unity",
+    "test-endfield-launcher",
+    "test-endfield-proton",
+];
+
+/// One of [`WINE_GATES`].
+fn wine_gate(command: &str, args: &Args) -> Result<()> {
+    use compositor::endfield::{Wine, test_endfield_launcher};
+    match command {
+        "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, args),
+        "test-dxvk" => dxvk::test_dxvk(args),
+        "test-unity" => compositor::unity::test_unity(args),
+        "test-endfield-launcher" => test_endfield_launcher(args, Wine::Debian),
+        _ => test_endfield_launcher(args, Wine::Proton),
     }
 }
 
