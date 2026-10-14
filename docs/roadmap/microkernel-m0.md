@@ -71,6 +71,10 @@ the item goes through the consultant as `docs/CONVENTIONS.md` says.
 
 ### B. The flags whose second value lands in M0
 
+BF6's and DF6's item-review notes, and the plans for `smt=off`,
+`ssbd=on_request` and `program_barrier=session`, are in
+`docs/microkernel/M0-B-PROPOSALS.md` (2026-10-14, for the consultant).
+
 * **`ipc_fastpath`** replaces the boot option `ferrix.fastpath`, under the
   customer's rule of 2026-10-02 (`max` off until a coverage run has measured
   the fast path and its vulnerability-analysis entry exists; `fast` and
