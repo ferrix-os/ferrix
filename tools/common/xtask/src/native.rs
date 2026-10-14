@@ -192,6 +192,7 @@ pub(crate) fn build_one(
             program.binary
         ))
     })?;
+    refuse_armed(program.binary, &bytes)?;
     Ok(Built {
         name: program.binary,
         directory: program.directory,
@@ -236,6 +237,25 @@ pub(crate) fn arm_net_fault(natives: &mut [Built], arch: Arch, release: bool) ->
         .find(|built| built.name == program.binary)
         .ok_or_else(|| Error::new("the native programs carry no net to replace"))?;
     slot.bytes = bytes;
+    Ok(())
+}
+
+/// Refuse a `net` that carries [`arm_net_fault`]'s fault: every image but
+/// `test-net`'s gets this build, and a driver whose network any sender can
+/// take down must not reach one -- through a `FERRIX_NET_FAULT` left in the
+/// environment, say. An unarmed build compiles the marker out entirely.
+///
+/// # Errors
+///
+/// The marker in `net`'s bytes.
+fn refuse_armed(binary: &str, bytes: &[u8]) -> Result<()> {
+    let marker = crate::net::FAULT_MARKER.as_bytes();
+    if binary == "net" && bytes.windows(marker.len()).any(|window| window == marker) {
+        return Err(Error::new(
+            "net was built fault-armed (FERRIX_NET_FAULT is set?): only test-net's images \
+             may carry that driver",
+        ));
+    }
     Ok(())
 }
 
@@ -415,6 +435,20 @@ fn holds(text: &[u8], needle: &[u8], step: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `net` holding the fault marker is refused, and nothing else is.
+    #[test]
+    fn an_armed_net_is_refused_outside_test_net() {
+        let armed = [
+            b"\x7fELF..".as_slice(),
+            crate::net::FAULT_MARKER.as_bytes(),
+            b"..",
+        ]
+        .concat();
+        assert!(refuse_armed("net", &armed).is_err());
+        assert!(refuse_armed("net", b"\x7fELF plain").is_ok());
+        assert!(refuse_armed("gpu", &armed).is_ok());
+    }
 
     /// The tree's programs, built into a target directory of their own so
     /// the build running this test is never waited on.

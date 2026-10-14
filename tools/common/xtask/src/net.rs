@@ -84,7 +84,7 @@ const PACED_BEFORE_FAULT: usize = 256 * 1024;
 /// What a datagram must hold for a fault-armed virtio-net driver to make the
 /// kernel end its ring (`src/user/system/native/drivers/net/virtio-net`,
 /// `fault`): its `FAULT_MARKER`, which the two must agree on.
-const FAULT_MARKER: &str = "ferrix-netring-fault";
+pub(crate) const FAULT_MARKER: &str = "ferrix-netring-fault";
 
 /// What the kernel prints, in this order, when the fault-armed driver lost
 /// its ring and `devmgr` started it again: the driver's own word that the

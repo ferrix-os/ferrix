@@ -670,3 +670,40 @@ fn the_flags_survive_the_trip_through_bits() {
         }
     }
 }
+
+/// Every field one side writes while the other reads it -- both tails, both
+/// heads, both want-bell words -- sits at an offset aligned to its size, for
+/// every ring size the kernel accepts, as each side reads it from the header
+/// it was given. Both sides' accessors make an aligned `u32` one access and
+/// fall back to bytes only for an unaligned one (`RingMemory`), so this is
+/// what keeps the byte fallback, and the torn reads it allows, out of every
+/// honest ring.
+#[test]
+fn every_shared_index_is_aligned_to_its_size() {
+    let mut entries = crate::layout::MIN_ENTRIES;
+    while entries <= crate::layout::MAX_ENTRIES {
+        let size = HEADER_LEN + entries as usize * (SUBMISSION_LEN + COMPLETION_LEN);
+        let mut memory = Memory {
+            bytes: vec![0; size],
+        };
+        let driver = DriverSide::create(&mut memory, size, entries, SLOT).expect("a fresh ring");
+        let kernel = KernelSide::attach(&memory, size, entries as usize * SLOT as usize)
+            .expect("the header the driver wrote");
+        for layout in [driver.layout(), kernel.layout()] {
+            for (name, at) in [
+                ("sub_tail", layout.sub_tail()),
+                ("sub_head", layout.sub_head()),
+                ("comp_tail", layout.comp_tail()),
+                ("comp_head", layout.comp_head()),
+                ("sub_want_bell", layout.sub_want_bell()),
+                ("comp_want_bell", layout.comp_want_bell()),
+            ] {
+                assert!(
+                    at.is_multiple_of(4) && at + 4 <= size,
+                    "{name} at {at} in a ring of {entries} entries"
+                );
+            }
+        }
+        entries *= 2;
+    }
+}
