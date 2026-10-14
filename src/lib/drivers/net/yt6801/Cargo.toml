@@ -1,0 +1,14 @@
+[package]
+name = "ferrix-yt6801"
+description = "The Motorcomm YT6801 PCIe gigabit adapter's own registers around its DesignWare QoS core: chip reset, the PHY's reset, the MAC address in eFuse, interrupt delivery, and the core's options"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrix-dwmac.workspace = true
+
+[lints]
+workspace = true
