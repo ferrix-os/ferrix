@@ -62,6 +62,10 @@ pub(crate) struct Report {
     pub(crate) sync_nanos: u64,
     /// How many threads the process had as that `TSYNC` began.
     pub(crate) sync_threads: usize,
+    /// Its longest hold of the thread-list lock, in nanoseconds.
+    pub(crate) sync_hold: u64,
+    /// How many holds it made: two a round.
+    pub(crate) sync_holds: u64,
     /// Traps delivered as a signal with the call's information, read back, and
     /// a blocked and ignored one that ended its process.
     pub(crate) traps: usize,
@@ -603,6 +607,10 @@ struct Seen {
     sync_nanos: u64,
     /// How many threads its process had as it began.
     sync_threads: usize,
+    /// Its longest hold of the thread-list lock, in nanoseconds.
+    sync_hold: u64,
+    /// How many holds it made.
+    sync_holds: u64,
 }
 
 /// How the task ends its process when it was not killed: it must have been.
@@ -944,6 +952,8 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
     report.synced = seen.threads;
     report.sync_nanos = seen.sync_nanos;
     report.sync_threads = seen.sync_threads;
+    report.sync_hold = seen.sync_hold;
+    report.sync_holds = seen.sync_holds;
     // `TSYNC` while threads change themselves in its second window.
     let (seen, status) = scenario(Ending::Race, false)?;
     if status != SURVIVED {
@@ -1203,6 +1213,8 @@ fn ended_early(
         Some(Ending::Sync) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             (seen.threads, seen.sync_nanos, seen.sync_threads) = synchronised(env)?;
+            seen.sync_hold = HOLD_LONGEST.load(core::sync::atomic::Ordering::Acquire);
+            seen.sync_holds = HOLDS.load(core::sync::atomic::Ordering::Acquire);
             Ok(Some(Then::Report(Ok(seen))))
         }
         Some(Ending::Race) => {
@@ -1579,9 +1591,13 @@ fn synchronised(env: &Env) -> Result<(usize, u64, usize), &'static str> {
     // Timed whole: both holds of the thread-list lock and the test between
     // them (`docs/certification/MEMORY-AND-TIMING.md` §2.2b).
     let threads_then = env.process.threads().len();
+    HOLD_LONGEST.store(0, Ordering::Release);
+    HOLDS.store(0, Ordering::Release);
+    seccomp::arm_sync_pause(&env.thread, time_holds);
     let start = crate::timer::now_nanos();
     let synced = env.seccomp(SET_MODE_FILTER, TSYNC, at);
     let took = crate::timer::now_nanos().saturating_sub(start);
+    seccomp::disarm_sync_pause();
     // Wait for the rest to be made.
     while CLONED.load(Ordering::Acquire) < 1_000 {
         if crate::timer::now_nanos() > patience {
@@ -1609,6 +1625,30 @@ fn synchronised(env: &Env) -> Result<(usize, u64, usize), &'static str> {
         return Err("the threads of the TSYNC check were not all there");
     }
     Ok((count, took, threads_then))
+}
+
+/// When the running-threads case's `TSYNC` took the thread-list lock last.
+static HOLD_START: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// The longest it held it, in nanoseconds.
+static HOLD_LONGEST: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// How many holds it made.
+static HOLDS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Time each hold of the thread-list lock a `TSYNC` makes, from just after it
+/// is taken to just before it is released (`docs/certification/
+/// MEMORY-AND-TIMING.md` §2.2b): the time other threads of the process wait
+/// on it, with preemption off on this processor.
+fn time_holds(window: seccomp::Window) {
+    use core::sync::atomic::Ordering;
+    match window {
+        seccomp::Window::Holding => HOLD_START.store(crate::timer::now_nanos(), Ordering::Release),
+        seccomp::Window::Held => {
+            let held = crate::timer::now_nanos().saturating_sub(HOLD_START.load(Ordering::Acquire));
+            let _ = HOLD_LONGEST.fetch_max(held, Ordering::AcqRel);
+            let _ = HOLDS.fetch_add(1, Ordering::AcqRel);
+        }
+        seccomp::Window::Tested | seccomp::Window::Confirmed => {}
+    }
 }
 
 /// What `TSYNC`'s first window hook changes: set before the call, taken by the

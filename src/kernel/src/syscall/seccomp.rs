@@ -1068,9 +1068,12 @@ pub(crate) fn attach_sync(
         let mut seen: Vec<Seen> = Vec::new();
         looked.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
         seen.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
-        let mine = match process
-            .with_live_threads(&mut looked, |threads| look(caller, threads, &mut seen))
-        {
+        let mine = match process.with_live_threads(&mut looked, |threads| {
+            pause(caller, Window::Holding);
+            let mine = look(caller, threads, &mut seen);
+            pause(caller, Window::Held);
+            mine
+        }) {
             Ok(Some(mine)) => mine,
             Ok(None) => {
                 room = room.saturating_mul(2);
@@ -1114,7 +1117,10 @@ pub(crate) fn attach_sync(
             ancestors: &tested,
         };
         let answer = process.with_live_threads(&mut held, |threads| {
-            synchronise(process, caller, threads, &test, &mut filter, &mut gave)
+            pause(caller, Window::Holding);
+            let round = synchronise(process, caller, threads, &test, &mut filter, &mut gave);
+            pause(caller, Window::Held);
+            round
         });
         // The locks are released: the chains the threads gave up, the
         // references step 1 took and the references to the threads go now,
@@ -1276,15 +1282,20 @@ fn same(one: Option<&Arc<Filter>>, other: Option<&Arc<Filter>>) -> bool {
     }
 }
 
-/// The two points of a `TSYNC` round a boot check can stop at: after the
-/// test, with no lock held, and after the confirmation, under the thread-list
-/// lock, before anything is changed.
+/// The points of a `TSYNC` round a boot check can stop at: after the test,
+/// with no lock held; after the confirmation, under the thread-list lock,
+/// before anything is changed; and as each hold of that lock begins and ends,
+/// for the check that times the holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Window {
     /// After step 2, under no lock.
     Tested,
     /// In step 3, under the thread-list lock, once every thread is confirmed.
     Confirmed,
+    /// Step 1 or step 3 has just taken the thread-list lock.
+    Holding,
+    /// Step 1 or step 3 is about to release it.
+    Held,
 }
 
 /// The thread whose `TSYNC` stops at [`pause`], as an address; zero when none.
