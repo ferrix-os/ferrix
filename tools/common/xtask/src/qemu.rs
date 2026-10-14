@@ -908,12 +908,15 @@ pub(crate) fn test_vfs(
 ///
 /// The programs come from the caller rather than from a constant, because
 /// their arguments hold the ports the host's servers were given a moment ago.
+/// `also` judges the guest's lines after boot as a whole, for what no one
+/// program's output shows -- the kernel's word that a driver was restarted.
 pub(crate) fn test_net(
     arch: Arch,
     image: &Path,
     kernel: &Path,
     programs: &[crate::vfs::Command],
     args: &Args,
+    also: fn(&[String]) -> std::result::Result<(), String>,
 ) -> Result<()> {
     println!(
         "  {arch}: running {} networking programs under QEMU (timeout {}s)",
@@ -936,7 +939,8 @@ pub(crate) fn test_net(
             args.timeout
         )),
     };
-    let judged = crate::vfs::judge(programs, 0, after_boot);
+    let judged = crate::vfs::judge(programs, 0, after_boot)
+        .and_then(|passed| also(after_boot).map(|()| passed).map_err(|why| vec![why]));
     match (judged, ending) {
         (Ok(passed), None) => {
             for line in passed {

@@ -47,6 +47,7 @@ use ferrix_netring::{Message, RingMemory, Wait};
 use ferrix_netserve::{Nic, Serve};
 use ferrix_rt::native::channel::{Channel, ReadError};
 use ferrix_rt::native::device::{Device, Interrupt, IoMapping};
+use ferrix_rt::native::error::Error;
 use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::pending::Protection;
 use ferrix_rt::native::pin::{Pin, PinAccess, device_address};
@@ -113,6 +114,46 @@ const KEY_CONTROL: u64 = 4;
 /// The name the interface takes in the net core.
 const INTERFACE_NAME: &[u8] = b"eth0";
 
+/// A fault for `cargo xtask test-net` to ask for, compiled in only when the
+/// build sets `FERRIX_NET_FAULT` (`native::arm_net_fault` in xtask), and
+/// nothing at all otherwise: a frame anyone can send must not be able to take
+/// a real machine's network down.
+///
+/// Armed, a frame the driver sends holding [`fault::MARKER`] makes it write an
+/// impossible completion tail into the ring and publish nothing after it. The
+/// kernel reads that as a corrupt ring, ends the ring and closes its end of
+/// the control channel, which is exactly what a torn index looked like to it
+/// on the night of 2026-10-15; the gate then requires this driver to leave
+/// with [`Step::Ended`] and `devmgr` to start it again mid-transfer.
+mod fault {
+    use ferrix_netring::RingMemory;
+
+    /// Whether this build carries the fault.
+    pub(super) const ARMED: bool = match option_env!("FERRIX_NET_FAULT") {
+        Some(value) => !value.is_empty(),
+        None => false,
+    };
+
+    /// What a sent frame holds to ask for it (xtask's `net::FAULT_MARKER`).
+    const MARKER: &[u8] = b"ferrix-netring-fault";
+
+    /// Where the completion tail is in the ring's header (`docs/NET-RING.md`
+    /// §3).
+    const COMP_TAIL: usize = 32;
+
+    /// Whether `frame` asks for the fault, in an armed build.
+    pub(super) fn asked(frame: &[u8]) -> bool {
+        ARMED && frame.windows(MARKER.len()).any(|window| window == MARKER)
+    }
+
+    /// Put a completion tail more than a ring ahead of anything published.
+    pub(super) fn corrupt<M: RingMemory>(ring: &mut M, entries: u32) {
+        let tail = ring.read_u32(COMP_TAIL);
+        ring.write_u32(COMP_TAIL, tail.wrapping_add(entries.saturating_mul(2)));
+        ring.barrier();
+    }
+}
+
 /// Where a run stopped, as the exit status.
 #[derive(Clone, Copy, Debug)]
 #[repr(i32)]
@@ -133,6 +174,12 @@ enum Step {
     Serve = 7,
     /// The device would not reset.
     Reset = 8,
+    /// The kernel ended the ring without asking the driver to stop: it closed
+    /// its end of the control channel, as it does when it finds the ring
+    /// corrupt. The interface is parked by then, and only a driver started
+    /// again takes it up, so this is a failure for whoever started this one
+    /// to answer -- never a loop that waits on a channel nobody will write.
+    Ended = 9,
 }
 
 /// The program.
@@ -203,6 +250,66 @@ impl Mapped {
         assert!(address.is_multiple_of(2), "a u16 on its own alignment");
         // SAFETY: as for `write_u8`, and the two bytes are one aligned `u16`.
         unsafe { ptr::write_volatile(address as *mut u16, value.to_le()) }
+    }
+
+    /// The little-endian `u32` at `offset`, in one access where it is aligned
+    /// (`ferrix-netring`'s `RingMemory` says why), composed from bytes where
+    /// it is not, which only a hostile layout reaches.
+    fn read_u32(&self, offset: usize) -> u32 {
+        if offset.checked_add(4).is_none_or(|end| end > self.len) {
+            return 0;
+        }
+        let address = self.base + offset;
+        if !address.is_multiple_of(4) {
+            return u32::from_le_bytes([
+                self.read_u8(offset),
+                self.read_u8(offset + 1),
+                self.read_u8(offset + 2),
+                self.read_u8(offset + 3),
+            ]);
+        }
+        // SAFETY: as for `read_u8`, and the four bytes are one aligned `u32`.
+        u32::from_le(unsafe { ptr::read_volatile(address as *const u32) })
+    }
+
+    /// Write the little-endian `u32` at `offset`, in one access where it is
+    /// aligned, as [`Mapped::read_u32`] reads it.
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        if offset.checked_add(4).is_none_or(|end| end > self.len) {
+            return;
+        }
+        let address = self.base + offset;
+        if !address.is_multiple_of(4) {
+            for (at, byte) in value.to_le_bytes().into_iter().enumerate() {
+                self.write_u8(offset + at, byte);
+            }
+            return;
+        }
+        // SAFETY: as for `write_u8`, and the four bytes are one aligned `u32`.
+        unsafe { ptr::write_volatile(address as *mut u32, value.to_le()) }
+    }
+
+    /// The little-endian `u16` at `offset` for the net ring: one access where
+    /// it is aligned, bytes where it is not. [`Mapped::read_u16`] is the
+    /// virtqueue's, which only ever asks for aligned ones.
+    fn ring_read_u16(&self, offset: usize) -> u16 {
+        if (self.base + offset).is_multiple_of(2) {
+            self.read_u16(offset)
+        } else {
+            u16::from_le_bytes([self.read_u8(offset), self.read_u8(offset + 1)])
+        }
+    }
+
+    /// Write the little-endian `u16` at `offset` for the net ring, as
+    /// [`Mapped::ring_read_u16`] reads it.
+    fn ring_write_u16(&mut self, offset: usize, value: u16) {
+        if (self.base + offset).is_multiple_of(2) {
+            self.write_u16(offset, value);
+        } else {
+            let [low, high] = value.to_le_bytes();
+            self.write_u8(offset, low);
+            self.write_u8(offset + 1, high);
+        }
     }
 }
 
@@ -320,6 +427,28 @@ impl RingMemory for Ring {
     fn barrier(&self) {
         fence(Ordering::SeqCst);
     }
+
+    // The indices the kernel moves while this side reads them are `u32`s, and
+    // each is one access here: composed from bytes, a tail stepping from
+    // 0x00ff to 0x0100 reads 0x01ff on the other side, which is "the peer's
+    // tail ran more than a ring ahead" and ends the ring (`ferrix-netring`'s
+    // `RingMemory`).
+
+    fn read_u16(&self, offset: usize) -> u16 {
+        self.mapped.ring_read_u16(offset)
+    }
+
+    fn read_u32(&self, offset: usize) -> u32 {
+        self.mapped.read_u32(offset)
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        self.mapped.ring_write_u16(offset, value);
+    }
+
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        self.mapped.write_u32(offset, value);
+    }
 }
 
 /// The ring's data VMO, which the kernel also maps.
@@ -339,6 +468,28 @@ impl RingMemory for Data {
 
     fn barrier(&self) {
         fence(Ordering::SeqCst);
+    }
+
+    // The indices the kernel moves while this side reads them are `u32`s, and
+    // each is one access here: composed from bytes, a tail stepping from
+    // 0x00ff to 0x0100 reads 0x01ff on the other side, which is "the peer's
+    // tail ran more than a ring ahead" and ends the ring (`ferrix-netring`'s
+    // `RingMemory`).
+
+    fn read_u16(&self, offset: usize) -> u16 {
+        self.mapped.ring_read_u16(offset)
+    }
+
+    fn read_u32(&self, offset: usize) -> u32 {
+        self.mapped.read_u32(offset)
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        self.mapped.ring_write_u16(offset, value);
+    }
+
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        self.mapped.write_u32(offset, value);
     }
 }
 
@@ -560,6 +711,8 @@ struct Adapter {
     transmit: Window,
     /// Where frames that arrived are read.
     receive: Window,
+    /// Whether a frame sent asked for [`fault`], in an armed build.
+    fault_asked: bool,
 }
 
 impl Nic for Adapter {
@@ -578,6 +731,9 @@ impl Nic for Adapter {
     }
 
     fn write_transmit(&mut self, offset: u64, frame: &[u8]) {
+        if fault::asked(frame) {
+            self.fault_asked = true;
+        }
         self.transmit.write(offset, frame);
     }
 
@@ -684,6 +840,7 @@ fn bring_up(
         card,
         transmit,
         receive,
+        fault_asked: false,
     })
 }
 
@@ -826,17 +983,26 @@ fn serve(
             KEY_CONTROL,
         )
         .map_err(|_| Step::Ring)?;
+    // Set once an armed build has corrupted its ring: nothing is published
+    // after it, so the kernel cannot miss it.
+    let mut corrupted = false;
     loop {
         let turn = serve
             .turn(&mut ring.ring, &mut ring.data, &mut ring.side, adapter)
             .map_err(|_| Step::Serve)?;
-        if let Some(bell) = ring.side.publish(&mut ring.ring) {
+        if fault::ARMED && adapter.fault_asked && !corrupted {
+            fault::corrupt(&mut ring.ring, ENTRIES);
+            corrupted = true;
+        }
+        if !corrupted && let Some(bell) = ring.side.publish(&mut ring.ring) {
             let _ = ring
                 .completion
                 .queue(bell.key(), [u64::from(bell.tail()), 0]);
         }
-        if stopped(control)? {
-            return Ok(());
+        match control_state(control) {
+            Control::Running => {}
+            Control::Stop => return Ok(()),
+            Control::Ended => return Err(Step::Ended),
         }
         if turn.busy {
             continue;
@@ -867,18 +1033,37 @@ fn serve(
     }
 }
 
-/// Whether the kernel has asked the driver to stop.
-fn stopped(control: &Channel<Kernel>) -> Result<bool, Step> {
+/// What the control channel says about the ring.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Control {
+    /// Nothing that ends it.
+    Running,
+    /// STOP: finish, reset the device and say STOPPED.
+    Stop,
+    /// The kernel's end is gone, so the ring is over without a STOP.
+    Ended,
+}
+
+/// Whether the kernel has asked the driver to stop, or ended the ring.
+///
+/// A closed channel is not "nothing to read". The loop waits on the channel's
+/// `PEER_CLOSED` as well as `READABLE`, so once the kernel has closed its end
+/// every wait returns at once; taking that for "keep going" turned a ring the
+/// kernel ended into a driver spinning on one processor for ever, with its
+/// interface parked and nothing restarting it (the night of 2026-10-15).
+fn control_state(control: &Channel<Kernel>) -> Control {
     let mut bytes = [0_u8; MAX_MESSAGE];
     let mut handles = [Handle::INVALID; 1];
     match control.read(&mut bytes, &mut handles) {
         Ok(received) => match Message::decode(bytes.get(..received.bytes).unwrap_or_default()) {
-            Ok(Message::Stop) => Ok(true),
-            Ok(_) => Ok(false),
-            Err(_) => Ok(false),
+            Ok(Message::Stop) => Control::Stop,
+            Ok(_) | Err(_) => Control::Running,
         },
-        Err(ReadError::Failed(_)) => Ok(false),
-        Err(_) => Ok(true),
+        Err(ReadError::Failed(Error::ShouldWait)) => Control::Running,
+        // The peer closed, or the channel cannot be read at all: either way
+        // no STOP can come through it any more.
+        Err(ReadError::Failed(_)) => Control::Ended,
+        Err(_) => Control::Stop,
     }
 }
 

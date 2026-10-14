@@ -5,8 +5,8 @@ use std::net::{Ipv4Addr, UdpSocket};
 use std::time::Duration;
 
 use super::{
-    BIG_BYTES, HELLO_BODY, NAME, NAME_ANSWER, Servers, answer_query, big_body, cksum, commands,
-    path_of, read_name,
+    BIG_BYTES, FAULT_MARKER, HELLO_BODY, NAME, NAME_ANSWER, PACED_BYTES, PACED_PATH, Servers,
+    answer_query, big_body, cksum, commands, path_of, read_name, restarted, text_body,
 };
 
 /// The values the host's own `cksum` prints for these inputs. A digest this
@@ -158,4 +158,65 @@ fn the_command_list_is_well_formed() {
     assert!(joined.contains("git clone -q http://10.0.2.2:"));
     assert!(joined.contains("/repo.git /tmp/fetched"));
     assert!(!joined.contains("10.0.2.15/24"));
+}
+
+/// The paced body is the text body, whole, and slow enough that a fault asked
+/// for after its first quarter megabyte lands before its end.
+#[test]
+fn the_paced_body_arrives_whole_and_slowly() {
+    use std::io::{Read, Write};
+    let servers = Servers::start().unwrap();
+    let started = std::time::Instant::now();
+    let mut answer = Vec::new();
+    let mut stream = std::net::TcpStream::connect(servers.http).unwrap();
+    stream
+        .write_all(format!("GET {PACED_PATH} HTTP/1.0\r\n\r\n").as_bytes())
+        .unwrap();
+    let _ = stream.read_to_end(&mut answer).unwrap();
+    assert!(answer.ends_with(&text_body(PACED_BYTES)));
+    assert!(
+        started.elapsed() >= Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+/// The restart program asks for the fault with the marker the driver knows,
+/// and is last, so a dead network fails it alone.
+#[test]
+fn the_restart_program_is_last_and_asks_for_the_fault() {
+    let servers = Servers::start().unwrap();
+    let list = commands(&servers, false, false);
+    let last = list.last().unwrap().argv.join(" ");
+    assert!(
+        last.contains(&format!("echo {FAULT_MARKER} | nc -u")),
+        "{last}"
+    );
+    assert!(last.contains(PACED_PATH), "{last}");
+    let driver = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../src/user/system/native/drivers/net/virtio-net/src/main.rs"
+    ));
+    assert!(
+        driver.contains(&format!("b\"{FAULT_MARKER}\"")),
+        "the driver's marker is not test-net's"
+    );
+}
+
+/// The kernel's lines must show the driver ending because its ring was ended,
+/// then its restart; either alone, or in the other order, is not enough.
+#[test]
+fn a_restart_is_the_end_then_the_start() {
+    let lines = |text: &[&str]| {
+        text.iter()
+            .map(|line| (*line).to_owned())
+            .collect::<Vec<_>>()
+    };
+    let ended = "  devmgr   the driver of 0x00000060 ended with status 9; the device is quiesced";
+    let started = "  devmgr   the driver of 0x00000060 was started again and published (restart 1)";
+    let other = "  devmgr   the driver of 0x00000060 ended with status 7; the device is quiesced";
+    assert!(restarted(&lines(&[ended, started])).is_ok());
+    assert!(restarted(&lines(&[started, ended])).is_err());
+    assert!(restarted(&lines(&[ended])).is_err());
+    assert!(restarted(&lines(&[other, started])).is_err());
 }

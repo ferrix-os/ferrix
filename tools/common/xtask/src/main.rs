@@ -989,10 +989,14 @@ fn test_net(args: &Args) -> Result<()> {
         let list = paths::build_dir(arch).join("net-commands");
         vfs::write_if_changed(&list, &commands)?;
         let kernel = cargo::build_kernel_with_commands(arch, args.release, &list)?;
-        let natives = native::build(arch, args.release)?;
+        let mut natives = native::build(arch, args.release)?;
+        // The last program makes the driver lose its ring mid-transfer, which
+        // only a fault-armed build of it does (`net::restart_command`).
+        native::arm_net_fault(&mut natives, arch, args.release)?;
         let initramfs = initramfs::build(Some(&program), &natives, None, &ports)?;
         let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
-        if let Err(error) = qemu::test_net(arch, &image, &kernel, &programs, &args) {
+        if let Err(error) = qemu::test_net(arch, &image, &kernel, &programs, &args, net::restarted)
+        {
             eprintln!("\n  {error}");
             failed.push(arch.name());
         }

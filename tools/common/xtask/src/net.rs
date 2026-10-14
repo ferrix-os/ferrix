@@ -64,6 +64,41 @@ const SPEED_PATH: &str = "/speed";
 /// How long the body at [`SPEED_PATH`] is.
 const SPEED_BYTES: usize = 32 * 1024 * 1024;
 
+/// The body [`restart_command`] fetches while the driver is made to lose its
+/// ring: served slowly, so the loss lands mid-transfer on every guest.
+const PACED_PATH: &str = "/paced";
+
+/// How long the body at [`PACED_PATH`] is.
+const PACED_BYTES: usize = 4 * 1024 * 1024;
+
+/// How much of it the stub writes at a time, and how long it rests after
+/// each: about 1.6 MB/s, so the body takes some 2.6 s however fast the
+/// guest is, and the fault [`restart_command`] asks for falls inside it.
+const PACED_CHUNK: usize = 32 * 1024;
+const PACED_REST: Duration = Duration::from_millis(20);
+
+/// What [`restart_command`] waits to have received before it asks for the
+/// fault: a transfer well under way.
+const PACED_BEFORE_FAULT: usize = 256 * 1024;
+
+/// What a datagram must hold for a fault-armed virtio-net driver to make the
+/// kernel end its ring (`src/user/system/native/drivers/net/virtio-net`,
+/// `fault`): its `FAULT_MARKER`, which the two must agree on.
+const FAULT_MARKER: &str = "ferrix-netring-fault";
+
+/// What the kernel prints, in this order, when the fault-armed driver lost
+/// its ring and `devmgr` started it again: the driver's own word that the
+/// kernel ended the ring (its exit status 9, `Step::Ended`), and the restart.
+/// [`restart_command`] proves the traffic came back; these prove it came back
+/// through a restart, and not because the fault never happened.
+pub(crate) const RESTART_LINES: [&str; 2] = [
+    "devmgr   the driver of 0x",
+    "was started again and published",
+];
+
+/// What the line for the driver's end must also hold.
+pub(crate) const RESTART_STATUS: &str = "ended with status 9;";
+
 /// Where the repository [`make_repository`] writes is served from.
 pub(crate) const GIT_REPO_PATH: &str = "/repo.git";
 
@@ -115,15 +150,20 @@ const UDP_PREFIX: &str = "ferrix-udp: ";
 /// generated rather than stored, because a fixture file that has to be the
 /// same in two places is a fixture file that stops being the same.
 fn big_body() -> Vec<u8> {
-    let mut body = Vec::with_capacity(BIG_BYTES + 64);
+    text_body(BIG_BYTES)
+}
+
+/// [`big_body`]'s text, `length` bytes of it.
+fn text_body(length: usize) -> Vec<u8> {
+    let mut body = Vec::with_capacity(length + 64);
     let mut line = 0_u32;
-    while body.len() < BIG_BYTES {
+    while body.len() < length {
         body.extend_from_slice(format!("ferrix net line {line:08} ").as_bytes());
         body.extend(std::iter::repeat_n(b'.', 40));
         body.push(b'\n');
         line = line.wrapping_add(1);
     }
-    body.truncate(BIG_BYTES);
+    body.truncate(length);
     body
 }
 
@@ -335,6 +375,10 @@ fn answer_http(mut stream: TcpStream, repository: &Path) {
         Some(path) if path == HELLO_PATH => Some(format!("{HELLO_BODY}\n").into_bytes()),
         Some(path) if path == BIG_PATH => Some(big_body()),
         Some(path) if path == SPEED_PATH => Some(vec![b'x'; SPEED_BYTES]),
+        Some(path) if path == PACED_PATH => {
+            write_paced(&mut stream, &text_body(PACED_BYTES));
+            return;
+        }
         // Anything else may be a file of the repository below `/repo.git`,
         // which git asks for one at a time over its dumb HTTP protocol.
         Some(path) => repository_file(repository, &path),
@@ -350,6 +394,26 @@ fn answer_http(mut stream: TcpStream, repository: &Path) {
     );
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(&body);
+    let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+}
+
+/// Answer with `body` at [`PACED_CHUNK`] every [`PACED_REST`], so that the
+/// transfer lasts long enough for something to happen in its middle.
+fn write_paced(stream: &mut TcpStream, body: &[u8]) {
+    let head = format!(
+        "HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    if stream.write_all(head.as_bytes()).is_err() {
+        return;
+    }
+    for chunk in body.chunks(PACED_CHUNK) {
+        if stream.write_all(chunk).is_err() {
+            return;
+        }
+        std::thread::sleep(PACED_REST);
+    }
     let _ = stream.flush();
     let _ = stream.shutdown(std::net::Shutdown::Write);
 }
@@ -726,7 +790,78 @@ pub(crate) fn commands(servers: &Servers, curl: bool, git: bool) -> Vec<Command>
     if git {
         commands.push(git_command(http));
     }
+    // Last, because on a broken driver it leaves the network dead, and every
+    // program after it would fail for its reason rather than their own.
+    commands.push(restart_command(http, udp));
     commands
+}
+
+/// A driver that loses its ring mid-transfer is started again, and the
+/// transfer finishes byte for byte.
+///
+/// The image's virtio-net driver is built fault-armed for this
+/// (`native::arm_net_fault`): a frame it sends holding [`FAULT_MARKER`] makes
+/// it write an impossible completion tail and publish nothing more, which is
+/// what a torn index looked like to the kernel the night of 2026-10-15. The
+/// kernel ends the ring and parks `eth0`; the driver must see its control
+/// channel close and leave (status 9), and `devmgr` must start it again. A
+/// driver that took the closed channel for "nothing to read" spun on it for
+/// ever with the network dead, which is what this catches: the fetch is cut
+/// off at 60 s, its status is printed, and the sum is of what arrived.
+///
+/// The fetch runs in the background while the program waits for
+/// [`PACED_BEFORE_FAULT`] of it, then sends the marker with `nc`, so the
+/// fault falls after the transfer has started and before it ends.
+fn restart_command(http: u16, udp: u16) -> Command {
+    let digest = cksum(&text_body(PACED_BYTES));
+    Command {
+        argv: leak_argv(vec![
+            "sh".to_owned(),
+            "-c".to_owned(),
+            format!(
+                "rm -f /tmp/paced; \
+                 (timeout 60 wget -q -O /tmp/paced http://10.0.2.2:{http}{PACED_PATH}; \
+                 echo \"paced-fetch $?\" > /tmp/paced.status) & \
+                 n=0; while [ $n -lt 300 ] && \
+                 [ \"$(wc -c < /tmp/paced 2>/dev/null || echo 0)\" -lt {PACED_BEFORE_FAULT} ]; \
+                 do sleep 0.1; n=$((n + 1)); done; \
+                 echo {FAULT_MARKER} | nc -u -w 1 10.0.2.2 {udp} > /dev/null 2>&1; \
+                 wait; cat /tmp/paced.status; cksum < /tmp/paced"
+            ),
+        ]),
+        status: 0,
+        expect: Expect::Lines(leak_argv(vec![
+            "paced-fetch 0".to_owned(),
+            format!("{digest} {PACED_BYTES}"),
+        ])),
+    }
+}
+
+/// Whether `lines`, the guest's after boot, show the driver ending on a lost
+/// ring and being started again, in that order: [`RESTART_LINES`].
+///
+/// # Errors
+///
+/// What is missing.
+pub(crate) fn restarted(lines: &[String]) -> std::result::Result<(), String> {
+    let [ended, started] = RESTART_LINES;
+    let died = lines
+        .iter()
+        .position(|line| line.contains(ended) && line.contains(RESTART_STATUS))
+        .ok_or_else(|| {
+            format!(
+                "no driver ended because the kernel ended its ring \
+                 (no \"{ended}..{RESTART_STATUS}\" line): the fault never happened, \
+                 or the driver did not notice it"
+            )
+        })?;
+    lines
+        .get(died..)
+        .unwrap_or_default()
+        .iter()
+        .find(|line| line.contains(ended) && line.contains(started))
+        .map(|_| ())
+        .ok_or_else(|| "the driver whose ring was ended was not started again".to_owned())
 }
 
 /// How fast: the guest's own clock around a download it throws away.

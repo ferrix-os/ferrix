@@ -349,6 +349,31 @@ pub(crate) fn build_native(
     artifact(path)
 }
 
+/// [`build_native`], with `variables` set in the build's environment: a
+/// variant of a program some `option_env!` of its own turns on, into a target
+/// directory of its own so the plain build is not rebuilt on the way back.
+pub(crate) fn build_native_with(
+    arch: Arch,
+    release: bool,
+    package: &str,
+    binary: &str,
+    target_dir: &Path,
+    variables: &[(&str, &str)],
+) -> Result<PathBuf> {
+    let profile = if release { "release" } else { "debug" };
+    let path = target_dir
+        .join(arch.kernel_target())
+        .join(profile)
+        .join(binary);
+    let mut build =
+        build(package, arch.kernel_target(), release)?.env("CARGO_TARGET_DIR", target_dir);
+    for (name, value) in variables {
+        build = build.env(name, value);
+    }
+    build.output(&path).run()?;
+    artifact(path)
+}
+
 /// [`build_native`], with `FERRIX_DRIVER_VERSION` set to `version`: a
 /// driver that says that version once at its start, for
 /// `cargo xtask test-restart --update` to tell from the initramfs's

@@ -565,6 +565,17 @@ impl Pages {
         Some((virt + offset % PAGE_SIZE) as *mut u8)
     }
 
+    /// Where the `T` at `offset` is, if it is aligned for one and wholly
+    /// inside. The frames are page-aligned in the direct map, so an aligned
+    /// offset is an aligned address and never straddles two frames.
+    fn word<T>(&self, offset: usize) -> Option<*mut T> {
+        let size = size_of::<T>();
+        if !offset.is_multiple_of(size) || (offset as u64).checked_add(size as u64)? > self.bytes {
+            return None;
+        }
+        self.address(offset as u64).map(<*mut u8>::cast::<T>)
+    }
+
     /// Copy `out.len()` bytes from `offset` into `out`; `false`, with `out`
     /// partly written, if the range runs past the end.
     fn copy_out(&self, offset: u64, out: &mut [u8]) -> bool {
@@ -612,6 +623,59 @@ impl RingMemory for Pages {
         };
         // SAFETY: as in `Pages::copy_in`.
         unsafe { core::ptr::write_volatile(address, value) };
+    }
+
+    // The wider accessors are one access each, never composed from bytes:
+    // the indices and want-bell flags are `u32`s the driver reads and writes
+    // while the kernel does, and a `comp_tail` read torn across the driver's
+    // store is a ring run ahead or backwards, corruption, a ring ended under
+    // a live driver (`ferrix-netring`'s `RingMemory`, and the block ring's
+    // `Pages`, which has kept this rule since F-45). Every shared field is
+    // naturally aligned in a page-aligned VMO; an offset that is not falls
+    // back to bytes, which only a hostile layout reaches.
+
+    fn read_u16(&self, offset: usize) -> u16 {
+        match self.word::<u16>(offset) {
+            // SAFETY: an aligned `u16` inside a held frame, as in `read_u8`.
+            Some(at) => u16::from_le(unsafe { core::ptr::read_volatile(at) }),
+            None => {
+                u16::from_le_bytes([self.read_u8(offset), self.read_u8(offset.wrapping_add(1))])
+            }
+        }
+    }
+
+    fn read_u32(&self, offset: usize) -> u32 {
+        match self.word::<u32>(offset) {
+            // SAFETY: an aligned `u32` inside a held frame, as in `read_u8`.
+            Some(at) => u32::from_le(unsafe { core::ptr::read_volatile(at) }),
+            None => {
+                u32::from(self.read_u16(offset))
+                    | (u32::from(self.read_u16(offset.wrapping_add(2))) << 16)
+            }
+        }
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        match self.word::<u16>(offset) {
+            // SAFETY: an aligned `u16` inside a held frame, as in `write_u8`.
+            Some(at) => unsafe { core::ptr::write_volatile(at, value.to_le()) },
+            None => {
+                let [low, high] = value.to_le_bytes();
+                self.write_u8(offset, low);
+                self.write_u8(offset.wrapping_add(1), high);
+            }
+        }
+    }
+
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        match self.word::<u32>(offset) {
+            // SAFETY: an aligned `u32` inside a held frame, as in `write_u8`.
+            Some(at) => unsafe { core::ptr::write_volatile(at, value.to_le()) },
+            None => {
+                self.write_u16(offset, value as u16);
+                self.write_u16(offset.wrapping_add(2), (value >> 16) as u16);
+            }
+        }
     }
 
     fn barrier(&self) {

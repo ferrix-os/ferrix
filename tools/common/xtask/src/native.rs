@@ -199,6 +199,46 @@ pub(crate) fn build_one(
     })
 }
 
+/// Replace the virtio-net driver in `natives` with one built fault-armed
+/// (`FERRIX_NET_FAULT`): a frame it sends holding its marker makes it corrupt
+/// its own ring, so that the kernel ends the ring under a live driver, as a
+/// torn index once did. `test-net`'s last program asks for that, mid-transfer,
+/// and requires the driver to be started again and the transfer to finish
+/// (`net::restart_command`). Never in any other image: a frame anyone can
+/// send must not be able to take a real machine's network down.
+///
+/// # Errors
+///
+/// The build failing, or no `net` in `natives` to replace.
+pub(crate) fn arm_net_fault(natives: &mut [Built], arch: Arch, release: bool) -> Result<()> {
+    let program = PROGRAMS
+        .iter()
+        .find(|program| program.binary == "net")
+        .ok_or_else(|| Error::new("no virtio-net driver among the native programs"))?;
+    let target = paths::target_dir().join("net-fault");
+    let path = cargo::build_native_with(
+        arch,
+        release,
+        program.package,
+        program.binary,
+        &target,
+        &[("FERRIX_NET_FAULT", "armed")],
+    )?;
+    let bytes = std::fs::read(&path)
+        .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))?;
+    verify(arch, &bytes).map_err(|why| {
+        Error::new(format!(
+            "the fault-armed net for {arch} is not a program the kernel can start: {why}"
+        ))
+    })?;
+    let slot = natives
+        .iter_mut()
+        .find(|built| built.name == program.binary)
+        .ok_or_else(|| Error::new("the native programs carry no net to replace"))?;
+    slot.bytes = bytes;
+    Ok(())
+}
+
 /// Set by `test-restart --update` alone: the one run whose images may
 /// carry [`UPDATER`].
 static UPDATES_ASKED: AtomicBool = AtomicBool::new(false);

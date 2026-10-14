@@ -79,6 +79,15 @@ in `KernelSide::attach`, and keeps its own copies. Every other field has the one
 writer marked above. Indices are free-running `u32`s; the entry for an index is
 at `index & (entries - 1)`.
 
+Each index and want-bell word is read and written in **one aligned access** on
+both sides, never a byte at a time. Composed from bytes, a tail stepping from
+`0x00ff` to `0x0100` is read as `0x01ff` or written through `0x0000`, and the
+reader reports a ring run ahead or backwards and ends it. `RingMemory` therefore
+does not provide its `u16` and `u32` accessors; every implementation gives them,
+and the driver's and the kernel's are single volatile loads and stores. Until
+2026-10-15 both inherited byte-wise ones, and under a long download the
+virtio-net driver stopped on a "corrupt" ring about every 35 minutes.
+
 ## 4. The two operations
 
 A submission is one of:
@@ -155,6 +164,14 @@ side is in a hurry -- it is the only thing that makes the other side ring.
 5. **STOP** asks the driver to stop taking submissions, finish or abandon what
    it holds, reset its device and answer **STOPPED**. A driver that dies is an
    implicit STOPPED *without* the promise that its device was reset.
+6. A ring the **kernel** ends -- because it found the ring corrupt -- ends with
+   no STOP: the kernel parks the interface and closes its end of the channel.
+   The driver must take `PEER_CLOSED` as the end, reset its device and exit
+   with a failure (the virtio-net driver's status 9), so that whoever started
+   it starts it again and the new HELLO takes the parked interface up. A
+   driver that waits on the closed channel is woken at once, every time: the
+   first virtio-net driver did that, and spun on one processor with its
+   network dead and nothing restarting it.
 
 However a ring ends, every outstanding slot is abandoned at once and the data
 VMO's pinned pages are **held until devmgr confirms the device reset**. On an
