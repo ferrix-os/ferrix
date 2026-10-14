@@ -125,9 +125,14 @@ rule below comes from something seen there.
 3. **Don't re-gate for docs, or for areas the change doesn't reach.** 14 gate
    runs went to 6 landings. `main` moved about ten times in those two hours,
    and one landing was re-gated only because another landing had changed the
-   roadmap. Re-gate when the rebase changed code the landing touches or
-   depends on. Otherwise the gate still applies, and saying so in the report
-   is enough.
+   roadmap. **A gate that finished once stands through a rebase that had no
+   merge conflict** (customer, 2026-10-14): the rows are not run again, even
+   where `main` moved in code the landing touches, and the commit cites the
+   rows with the hash they ran on and says the rebase was clean. A rebase
+   that stopped on a conflict is re-gated with the rows the conflicting
+   files' areas need. The evidence scripts are not rows and still run after
+   the final rebase (`carry-coverage.py`, then
+   `gen-coverage-justification.py --check`, AGENTS.md).
 4. **Keep shared-doc edits to your own lines.** Every agent edits the
    roadmap -- the stage's file under `docs/roadmap/`, and `status.md`'s
    status table when a row changes -- `BACKLOG.md` and the design doc, so

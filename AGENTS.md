@@ -126,6 +126,10 @@ The rules its reviews enforce, kept from the first consultant's handover:
 * When item code moves, the bodies stay byte-identical and the boot lines
   stay identical on all four boots. Run `carry-coverage.py`, then
   `gen-coverage-justification.py --check`, after the final rebase.
+* Rows that passed before a rebase with no merge conflict count for the
+  rebased hash (customer, 2026-10-14; `docs/CONVENTIONS.md`, splitting rule
+  3). A condition asking for rows on the landing hash is met by them; only a
+  rebase that stopped on a conflict owes the rows again.
 * A landing that files a finding recounts the register when it lands.
   Finding numbers are reserved on confirmation, and the author is told the
   number.

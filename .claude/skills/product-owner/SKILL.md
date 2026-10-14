@@ -176,7 +176,8 @@ What it looks for:
   one after another, an `--arch all` that runs the architectures in turn, or
   a full row run once per branch where a batch would carry them all.
 * **Runs nobody needs.** A re-gate after `main` moved only in files the
-  change does not touch (the gate stands, `docs/CONVENTIONS.md`, splitting
+  change does not touch, or after any rebase that had no merge conflict
+  (the gate stands, customer 2026-10-14, `docs/CONVENTIONS.md`, splitting
   rule 3), the same gate run twice on the same tree, or the image row run
   for a change the table gives a narrower row (`cargo xtask gate-rows`).
   The product owner **declines** these, not only advises against them: a
