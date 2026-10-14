@@ -5,7 +5,8 @@
  * tool on one system and another on the other.
  *
  *   rig cpus                       how many processors /proc/stat lists
- *   rig busy SECONDS               each processor's busy share over SECONDS
+ *   rig busy SECONDS               each processor's busy share over SECONDS,
+ *                                  of the time it ran (steal apart)
  *   rig wake [-i US] [-n COUNT] [-d US]
  *                                  M5/M9: sleep to an absolute CLOCK_MONOTONIC
  *                                  time every US microseconds (1000), COUNT

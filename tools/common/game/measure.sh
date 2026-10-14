@@ -1,7 +1,7 @@
 #!/bin/sh
 # R3's check inside a guest, the same on the Linux guest and on Ferrix
-# (docs/GAME-PATH.md §2.4 and §8.1): the clock, a timed sleep's overshoot
-# idle, then the background load, every processor's busy share under it,
+# (docs/GAME-PATH.md §2.4 and §8.1): the clock, the launch timer on a
+# stand-in, a timed sleep's overshoot idle, then the background load, every processor's busy share under it,
 # and the overshoot again under it.
 #
 #   measure.sh [WARM-UP SECONDS]       (30)
@@ -21,6 +21,9 @@ if [ -r "$source" ]; then
 else
 	echo "measure: clocksource not in sysfs (Ferrix prints it at boot: the kernel's clock line)"
 fi
+# The launch timer against a stand-in that reports its first swap 100 ms
+# after its constructor: the line must say about 100 ms more for the swap.
+"$rig" launch "$rig" fake-game 100 || exit 7
 echo "measure: idle"
 "$rig" wake -n 5000 || exit 3
 sh "$load" start || exit 4

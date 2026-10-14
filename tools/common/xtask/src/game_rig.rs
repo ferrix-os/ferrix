@@ -180,6 +180,7 @@ fn judge(arch: Arch, smp: u32, lines: &[String]) -> Result<()> {
             "write: ",
             "load: ",
             "compile: ",
+            "launch: ",
         ];
         if shown.iter().any(|prefix| line.starts_with(prefix)) {
             println!("  {arch}: {line}");
