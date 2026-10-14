@@ -3195,10 +3195,15 @@ looked for at a call once the thread it was installed on has gone.
    the creator's chain to the child.
 6. A filter's errno passes through the dispatcher's restart handling, or the
    chain's release is recursive.
+7. `syscall::seccomp::attach` or `set_strict` changes a thread's state without
+   its process's thread-list lock, or `TSYNC` (`attach_sync`) changes a thread
+   it did not confirm under that lock after its test, or puts a thread its
+   filter killed back in filter mode (the consultant's B1 on S5, docs/SECCOMP.md
+   §3.7).
 
 See: src/kernel/src/syscall/seccomp_filters_check.rs;
 src/kernel/src/syscall/seccomp.rs; src/kernel/src/syscall/thread.rs;
-docs/SECCOMP.md §3.4 to §3.5a.
+docs/SECCOMP.md §3.4 to §3.7.
 
 <a id="fx-1501"></a>
 
