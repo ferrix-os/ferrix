@@ -1252,7 +1252,7 @@ Measured without the card, on nazuna under the gate pool's load:
 | | Ferrix (`test-game-rig`, KVM, 4 processors, 8 GiB) | Linux guest (`linux-guest.sh`, KVM pinned, 8 processors, 16 GiB) |
 |---|---|---|
 | Clock line | `TSC, calibrated against the HPET at 4400.017 MHz` | `tsc` |
-| Without invtsc (control) | `HPET at 100.000 MHz`, the gate fails | `kvm-clock` |
+| Without invtsc (control) | `TSC, vouched for and rated by KVM's paravirtual clock`, the gate fails | `kvm-clock` |
 | Busy under the load, least and mean, of the time the host gave | 97.9%, 99.4% | 99.5%, 99.8% (twice) |
 | Without the compile loops (control) | about 22%, the gate fails | — |
 | Holder | 80% of 8,093 MiB in use | 80% of 15,992 MiB |
