@@ -65,7 +65,10 @@ const TIMEOUT: u64 = 900;
 /// binary the Linux guest runs too.
 fn build_rig() -> Result<Vec<u8>> {
     let source = crate::paths::workspace_root().join("tools/common/game/rig.c");
-    let out = crate::paths::build_dir(Arch::X86_64).join("rig");
+    let dir = crate::paths::build_dir(Arch::X86_64);
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| Error::new(format!("making {}: {error}", dir.display())))?;
+    let out = dir.join("rig");
     let built = Command::new("cc")
         .args(["-O2", "-Wall", "-Wextra", "-Werror", "-static", "-o"])
         .arg(&out)
