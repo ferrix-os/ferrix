@@ -99,6 +99,7 @@ Causes are listed most likely first.
 | [FX-0906](#fx-0906) | the kernel heap a job drove through the Linux calls was not bounded by its job |
 | [FX-0907](#fx-0907) | a process left its speculation domain where it may not wait |
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
+| [FX-0910](#fx-0910) | A time namespace failed its self-check |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2413,6 +2414,59 @@ hook, if one still is.
 See: src/kernel/src/arch/speculation.rs CheckHook;
 src/kernel/src/object/domain_check.rs; src/kernel/src/main.rs;
 docs/OPAQUE-KERNEL.md §9.7; src/kernel/src/sched/work.rs hook_armed_by.
+
+<a id="fx-0910"></a>
+
+## FX-0910 — A time namespace failed its self-check
+
+`fs::timens_check::run` has a root process `unshare(CLONE_NEWTIME)`, write the
+namespace's offsets and fork a child into it. The caller must stay in the first
+namespace (`ns/time`) and name a new one in `ns/time_for_children`;
+`timens_offsets` must read in Linux's layout, refuse garbage, a fourth field, a
+third line, a clock other than monotonic and boottime and nanoseconds past a
+second (EINVAL), an offset that makes a clock negative or passes KTIME_SEC_MAX
+(ERANGE), and every write once a process is made in the namespace or for the
+first namespace (EACCES). The child must read CLOCK_MONOTONIC,
+CLOCK_MONOTONIC_RAW, CLOCK_MONOTONIC_COARSE and CLOCK_BOOTTIME shifted by their
+offsets, CLOCK_REALTIME not at all, and `times`, `sysinfo` and /proc/uptime must
+count the boot-time offset; an absolute clock_nanosleep, timerfd_settime and
+FUTEX_WAIT_BITSET deadline given in the child's clock must be converted to the
+host's counter. Creating a namespace needs CAP_SYS_ADMIN, writing its offsets
+CAP_SYS_TIME over its owner by opener and writer; a namespace made with a user
+namespace is owned by it; fake root there is not privileged to set the clock. A
+child forked into another time namespace must map the vDSO variant whose data
+page says system call, at its parent's address, and leave its parent's mapping
+alone, and a swap with no variant to be had must fail. While a process's two
+namespaces differ, CLONE_VM and CLONE_THREAD must be EINVAL; clone3 must take
+CLONE_NEWTIME apart from the exit signal and make the child's namespace with its
+parent's offsets, writable until entered; a program loaded after unshare must
+run in the new namespace; setns on a /proc/<pid>/ns/time descriptor or a pidfd
+must put the caller in the namespace for itself and its children, with the vDSO
+it needs, and refuse a caller without CAP_SYS_ADMIN; NS_GET_NSTYPE,
+NS_GET_PARENT and NS_GET_USERNS must answer for the file (docs/NAMESPACES.md
+§12.1).
+
+1. `Held::for_fork` does not freeze the namespace, or gives the child the
+   parent's own namespace rather than its `time_for_children`.
+2. `TimeNamespace::shown` or `host` is skipped, or given the wrong sign, at
+   `sys_clock_gettime`, `sys_clock_nanosleep`, `sys_timerfd_settime`, the futex
+   wait, `sys_times`, `sys_sysinfo` or `/proc/uptime`.
+3. `timens::write_offsets` judges only the opener or only the writer, drops the
+   range test or accepts text Linux refuses.
+4. `sys_unshare` moves the caller's own clocks, or makes a namespace without
+   CAP_SYS_ADMIN.
+5. `family::retarget_vdso` does not swap the view, or swaps a space the child
+   shares; `vdso::retarget` answers success with no variant to swap to.
+6. `family::namespaces_asked_with` lets CLONE_VM or CLONE_THREAD across two time
+   namespaces, `clone3_request` refuses CLONE_NEWTIME or leaves it in the exit
+   signal, or `timens::create` does not copy the offsets.
+7. `exec::program_time` does not enter the namespace for children, or
+   `namespace::join_time`, `install_time` or the nsfs time arm is skipped or
+   judges the wrong capability.
+
+See: src/kernel/src/fs/timens_check.rs; src/kernel/src/syscall/timens.rs;
+src/kernel/src/syscall/time.rs; src/kernel/src/syscall/vdso.rs;
+src/kernel/src/syscall/namespace.rs.
 
 <a id="fx-1001"></a>
 

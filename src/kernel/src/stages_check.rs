@@ -425,6 +425,23 @@ fn check_user_namespaces() {
         "  userns   {} calls answered as Linux answers them, {} of them refusals: a namespace named apart, ids 65534 until mapped, a gid_map refused before setgroups is denied, kernel root and a second id unmappable, a map written once, fake root refused what only root may do, a chrooted process refused, a set-id bit ignored, a read-only /proc/sys refusing a write",
         checked.calls, checked.refusals,
     );
+    check_time_namespaces();
+}
+
+/// Time namespaces: offsets written once, the shifted clocks, absolute
+/// deadlines converted, and the vDSO variant (`docs/NAMESPACES.md` §12.1).
+fn check_time_namespaces() {
+    let checked = match fs::timens_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_TIME_NAMESPACES,
+            "time namespace self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  timens   {} calls answered as Linux answers them, {} of them refusals: offsets written once in Linux's layout and frozen by a child, the caller's own clocks unmoved, monotonic, raw, coarse and boot time shifted and real time not, uptime, sysinfo and times counting boot time, absolute sleeps, timerfds and futex waits converted to the host's counter, the vDSO a child is given and a missing one refused, vfork and threads across two namespaces EINVAL, clone3, execve and setns (by nsfs file and pidfd) into one",
+        checked.calls, checked.refusals,
+    );
 }
 
 /// What a process keeps private in `/proc`, refused to other users
@@ -1221,6 +1238,10 @@ pub(super) fn check_kernel_memory() {
         report.veth_pairs,
         report.routes,
         report.filters,
+    );
+    println!(
+        "  kmem     and {} time namespaces, each refused at the same limit and given back",
+        report.time_namespaces,
     );
 }
 

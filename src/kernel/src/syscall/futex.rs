@@ -292,7 +292,15 @@ pub(crate) fn sys_futex(
                         i128::from(absolute) - i128::from(crate::syscall::time::realtime_offset());
                     u64::try_from(counter.max(0)).unwrap_or(u64::MAX)
                 } else {
-                    absolute
+                    // In the caller's time namespace (Linux's
+                    // `timens_ktime_to_host(CLOCK_MONOTONIC, ..)`).
+                    crate::syscall::userns::acting().map_or(absolute, |caller| {
+                        crate::syscall::time::host_from(
+                            &caller,
+                            ferrix_linux_abi::types::CLOCK_MONOTONIC,
+                            absolute,
+                        )
+                    })
                 })
             };
             wait(process, address, shared, value, value3, deadline)

@@ -1963,14 +1963,21 @@ package FerrixMemoryRequirements {
         requirement <'L.user.76'> theVdsoIsReadAndRunOverReadOnlyData : ItemLowLevel {
             attribute :>> statement = "map_shared_code shall map a two-page object as a
                 read-only shared data page below a read-and-run shared code page,
-                neither writable nor able to be made writable.";
+                neither writable nor able to be made writable, and
+                replace_shared_code shall give a space another such object at the
+                place the first was, leaving every other space's view alone.";
             attribute :>> criterion = "Where the architecture has a vDSO, a space it
                 is mapped into shows the code page read, execute, shared and not
                 writable over a data page read, shared and neither, the image reads
                 as ELF, and a write through with_page and a protect to read-write
-                are each refused on both pages, 4 of 4.";
+                are each refused on both pages, 4 of 4; and a space forked into a
+                time namespace that shifts a clock has the shifted object mapped at
+                the first one's place and the first unmapped, the parent's mapping
+                unchanged, 3 of 3 (the `timens` line).";
             attribute :>> parent = "H.MEM.18";
             attribute :>> unit = ("user::space::AddressSpace::map_shared_code",
+                "user::space::AddressSpace::map_shared_code_near",
+                "user::space::AddressSpace::replace_shared_code",
                 "user::space::AddressSpace::add_region",
                 "user::space::AddressSpace::with_page", "user::space::permits",
                 "user::space::AddressSpace::protect");

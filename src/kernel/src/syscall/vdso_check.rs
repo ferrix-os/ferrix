@@ -93,7 +93,7 @@ fn check_the_trampoline(image: &[u8]) -> Result<(), &'static str> {
         return Err("the vDSO's image does not export its signal return trampoline where it is");
     }
     let space = AddressSpace::new().map_err(|_| "could not make an address space")?;
-    let mapped = vdso::map_into(&space).ok_or("the vDSO could not be mapped")?;
+    let mapped = vdso::map_into(&space, false).ok_or("the vDSO could not be mapped")?;
     if vdso::sigreturn(&space) != Some(mapped + slot as u64) {
         return Err("a space the vDSO is mapped into does not find its trampoline there");
     }
@@ -150,7 +150,7 @@ fn check_the_data_page() -> Result<Answered, &'static str> {
 /// Verifies: L.user.76
 fn check_the_mapping() -> Result<(), &'static str> {
     let space = AddressSpace::new().map_err(|_| "could not make an address space")?;
-    let at = vdso::map_into(&space).ok_or("the vDSO could not be mapped")?;
+    let at = vdso::map_into(&space, false).ok_or("the vDSO could not be mapped")?;
     let data = at - PAGE_SIZE;
     let regions = space
         .regions()

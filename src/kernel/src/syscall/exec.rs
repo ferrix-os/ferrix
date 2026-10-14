@@ -358,6 +358,20 @@ pub(crate) fn load_into(
     })
 }
 
+/// The time namespace a program loaded into `process` runs in, and whether
+/// it shifts a clock, so that its vDSO must be the variant that makes every
+/// clock a system call (`docs/NAMESPACES.md` §12.1).
+///
+/// The process first enters the namespace `unshare(CLONE_NEWTIME)` made for
+/// its children, if it made one, as Linux's `exec_task_namespaces` moves it at
+/// `execve`: the clocks that could not jump under the old program go with it.
+/// Called past `execve`'s point of no return, and for a process just made,
+/// whose two namespaces are one.
+pub(crate) fn program_time(process: &Process) -> bool {
+    let _ = process.enter_time_for_children();
+    super::vdso::is_shifted(&process.time_namespace())
+}
+
 /// Load `image` into `space`, which must be empty, with [`load_into`], and
 /// build Linux's startup stack: what a new process and `execve` share.
 ///
@@ -397,8 +411,9 @@ fn populate(
     // calls the vDSO would have answered. Not for a 32-bit program: the vDSO
     // is a 64-bit image its libc could not read, and both musl and glibc
     // make those calls themselves without it (`docs/I386.md` §2).
+    let shifted = program_time(process);
     let vdso = match loaded.abi {
-        Abi::Native => super::vdso::map_into(space),
+        Abi::Native => super::vdso::map_into(space, shifted),
         Abi::Compat => None,
     };
     // ARMv7-A's signal return page, where a handler without `SA_RESTORER`

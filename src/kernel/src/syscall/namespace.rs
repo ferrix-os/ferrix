@@ -1,4 +1,5 @@
-//! `unshare` and `setns`: mount, user, UTS, IPC and cgroup namespaces.
+//! `unshare` and `setns`: mount, user, UTS, IPC, cgroup, network and time
+//! namespaces.
 //!
 //! A user namespace (`docs/NAMESPACES.md` §2.2) is made first when asked for
 //! with a mount namespace, and owns it. The caller ends up in it holding every
@@ -34,6 +35,7 @@ use crate::syscall::fd;
 use crate::syscall::nsproxy::{self, CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS};
 use crate::syscall::pidns::{self, CLONE_NEWPID};
 use crate::syscall::process::Process;
+use crate::syscall::timens::{self, CLONE_NEWTIME};
 use crate::syscall::userns::{self, CAP_SYS_ADMIN};
 
 /// Give the process a mount namespace of its own.
@@ -60,6 +62,9 @@ pub(crate) const CLONE_NEWUSER: u64 = 0x1000_0000;
 /// share theirs -- and otherwise needs privilege (`EPERM`), and then copies
 /// the namespace into the context ([`copy_namespace`]).
 ///
+/// `CLONE_NEWTIME` needs `CAP_SYS_ADMIN` too, and moves only the caller's
+/// children ([`timens`]).
+///
 /// Every other flag names a namespace, or asks to leave a thread group or an
 /// address space, and is `EINVAL`.
 pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno> {
@@ -71,6 +76,7 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
             | CLONE_NEWUSER
             | CLONE_NEWPID
             | CLONE_NEWNET
+            | CLONE_NEWTIME
             | SMALL)
         != 0
     {
@@ -105,6 +111,15 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     // is owned by the user namespace it will be in.
     let net = if flags & CLONE_NEWNET != 0 {
         Some(make_net_namespace(process, fresh.as_ref())?)
+    } else {
+        None
+    };
+    // A time namespace is for the caller's children: its clocks stay as they
+    // are (`docs/NAMESPACES.md` §12.1). Owned by the user namespace made in
+    // the same call, if there is one; made here so a refusal changes nothing.
+    let time = if flags & CLONE_NEWTIME != 0 {
+        let from = process.time_namespace_for_children();
+        Some(process.with_credentials(|held| timens::create(held, fresh.as_ref(), &from))?)
     } else {
         None
     };
@@ -145,6 +160,9 @@ pub(crate) fn sys_unshare(process: &Process, flags: u64) -> Result<usize, Errno>
     }
     if let Some(net) = net {
         process.set_net_ns(net);
+    }
+    if let Some(time) = time {
+        process.set_time_namespace_for_children(time);
     }
     Ok(0)
 }
@@ -279,6 +297,7 @@ pub(crate) fn sys_setns(process: &Process, fd: i32, nstype: u32) -> Result<usize
     match target {
         fs::nsfs::Handle::User(namespace) => join_user(process, namespace),
         fs::nsfs::Handle::Mount(namespace) => join_mount(process, &namespace),
+        fs::nsfs::Handle::Time(namespace) => join_time(process, &namespace),
         small => join_small(process, small),
     }
 }
@@ -327,8 +346,53 @@ fn put_in_proxy(proxy: &mut nsproxy::NsProxy, target: fs::nsfs::Handle) -> Resul
         fs::nsfs::Handle::Uts(namespace) => proxy.uts = namespace,
         fs::nsfs::Handle::Ipc(namespace) => proxy.ipc = namespace,
         fs::nsfs::Handle::Cgroup(namespace) => proxy.cgroup = namespace,
-        fs::nsfs::Handle::Mount(_) | fs::nsfs::Handle::User(_) => return Err(Errno::EINVAL),
+        fs::nsfs::Handle::Mount(_) | fs::nsfs::Handle::User(_) | fs::nsfs::Handle::Time(_) => {
+            return Err(Errno::EINVAL);
+        }
     }
+    Ok(())
+}
+
+/// `setns` into a time namespace: Linux's `timens_install`. `EUSERS` for a
+/// process of more than one thread, whose others would read their clocks
+/// through the view about to change; `EPERM` without `CAP_SYS_ADMIN` over the
+/// namespace's owner and in the caller's own user namespace.
+fn join_time(process: &Process, target: &Arc<timens::TimeNamespace>) -> Result<usize, Errno> {
+    check_time(process, target, false)?;
+    install_time(process, target)?;
+    Ok(0)
+}
+
+/// What refuses `process` the time namespace `target`; see [`join_time`].
+/// `joining_user` as [`may_join_as`] takes it.
+fn check_time(
+    process: &Process,
+    target: &timens::TimeNamespace,
+    joining_user: bool,
+) -> Result<(), Errno> {
+    if process.tasks().len() > 1 {
+        return Err(Errno::EUSERS);
+    }
+    if !may_join_as(process, target.owner(), &[CAP_SYS_ADMIN], joining_user) {
+        return Err(Errno::EPERM);
+    }
+    Ok(())
+}
+
+/// Put `process`, judged by [`check_time`], in `target` for itself and its
+/// children, with the vDSO view that namespace needs (`docs/NAMESPACES.md`
+/// §12.1). The view is changed first: if it cannot be, the process stays in
+/// the namespace it was in, and its old view is still right for that one --
+/// or it has none, and its next fast clock read faults rather than reads
+/// another namespace's time.
+///
+/// # Errors
+///
+/// `ENOMEM`.
+fn install_time(process: &Process, target: &Arc<timens::TimeNamespace>) -> Result<(), Errno> {
+    crate::syscall::vdso::retarget(process.space(), crate::syscall::vdso::is_shifted(target))
+        .map_err(|()| Errno::ENOMEM)?;
+    process.join_time(target);
     Ok(())
 }
 
@@ -387,7 +451,7 @@ fn check_user(process: &Process, target: &Arc<userns::UserNamespace>) -> Result<
 
 /// Every namespace `setns` on a pidfd can join.
 const PIDFD_FLAGS: u64 =
-    CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
+    CLONE_NEWNS | CLONE_NEWUSER | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP | CLONE_NEWTIME;
 
 /// `setns` on a pidfd: the namespaces `flags` names, each the process
 /// `target`'s, joined together or not at all. `EINVAL` for no flag or a flag
@@ -443,7 +507,20 @@ fn setns_pidfd(process: &Process, target: &Process, flags: u64) -> Result<usize,
         }
         _ => None,
     };
-    // Everything is judged; nothing below can be refused.
+    // The time namespace the target is in, as Linux's `validate_nsset` takes
+    // its `time_ns`.
+    let time = match Handle::of(target, Kind::Time) {
+        Handle::Time(namespace) if flags & CLONE_NEWTIME != 0 => {
+            check_time(process, &namespace, joining_user)?;
+            Some(namespace)
+        }
+        _ => None,
+    };
+    // Everything is judged. The time namespace's view of the vDSO is the one
+    // thing below that can fail, and goes first, so a failure joins nothing.
+    if let Some(namespace) = time {
+        install_time(process, &namespace)?;
+    }
     if let Some(namespace) = mount {
         install_mount(process, &namespace);
     }

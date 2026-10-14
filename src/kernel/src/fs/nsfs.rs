@@ -36,6 +36,7 @@ use crate::syscall::nsproxy::{CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS, Cgrou
 use crate::syscall::process::Process;
 use crate::syscall::sem::IpcNamespace;
 use crate::syscall::system::UtsNamespace;
+use crate::syscall::timens::{CLONE_NEWTIME, TimeNamespace};
 use crate::syscall::uaccess;
 use crate::syscall::userns::{self, Kind as IdKind, UserNamespace};
 
@@ -54,7 +55,8 @@ pub(crate) const NS_GET_OWNER_UID: u32 = 0xb704;
 /// The block size `stat` reports: a page.
 const BLOCK_SIZE: u32 = 4096;
 
-/// The five kinds of namespace there are to open.
+/// The kinds of namespace there are to open, and the second link of the time
+/// namespace, which names the one a process makes children in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     /// `mnt`.
@@ -67,6 +69,10 @@ pub(crate) enum Kind {
     Ipc,
     /// `cgroup`.
     Cgroup,
+    /// `time`: the time namespace the process is in.
+    Time,
+    /// `time_for_children`: the one its children are made in.
+    TimeForChildren,
 }
 
 /// A namespace, of any kind, held.
@@ -82,6 +88,8 @@ pub(crate) enum Handle {
     Ipc(Arc<IpcNamespace>),
     /// A cgroup namespace.
     Cgroup(Arc<CgroupNamespace>),
+    /// A time namespace (`docs/NAMESPACES.md` §12.1).
+    Time(Arc<TimeNamespace>),
 }
 
 impl Handle {
@@ -93,6 +101,8 @@ impl Handle {
             Kind::Uts => Handle::Uts(process.nsproxy().uts),
             Kind::Ipc => Handle::Ipc(process.nsproxy().ipc),
             Kind::Cgroup => Handle::Cgroup(process.nsproxy().cgroup),
+            Kind::Time => Handle::Time(process.time_namespace()),
+            Kind::TimeForChildren => Handle::Time(process.time_namespace_for_children()),
         }
     }
 
@@ -104,6 +114,7 @@ impl Handle {
             Handle::Uts(ns) => ns.id(),
             Handle::Ipc(ns) => ns.id(),
             Handle::Cgroup(ns) => ns.id(),
+            Handle::Time(ns) => ns.id(),
         }
     }
 
@@ -115,6 +126,7 @@ impl Handle {
             Handle::Uts(_) => CLONE_NEWUTS,
             Handle::Ipc(_) => CLONE_NEWIPC,
             Handle::Cgroup(_) => CLONE_NEWCGROUP,
+            Handle::Time(_) => CLONE_NEWTIME,
         }
     }
 
@@ -126,6 +138,7 @@ impl Handle {
             Handle::Uts(_) => "uts",
             Handle::Ipc(_) => "ipc",
             Handle::Cgroup(_) => "cgroup",
+            Handle::Time(_) => "time",
         }
     }
 
@@ -138,6 +151,7 @@ impl Handle {
             Handle::Uts(ns) => Some(Arc::clone(ns.owner())),
             Handle::Ipc(ns) => Some(Arc::clone(ns.owner())),
             Handle::Cgroup(ns) => Some(Arc::clone(ns.owner())),
+            Handle::Time(ns) => Some(Arc::clone(ns.owner())),
         }
     }
 }

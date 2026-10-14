@@ -84,7 +84,7 @@ fn maker() -> Result<Arc<Process>, &'static str> {
 }
 
 /// A new process that is uid and gid 1000.
-fn person() -> Result<Arc<Process>, &'static str> {
+pub(super) fn person() -> Result<Arc<Process>, &'static str> {
     let made = maker()?;
     for call in [Syscall::Setgid, Syscall::Setuid] {
         by_number(&made, call, [1000, 0, 0, 0, 0, 0])
@@ -195,7 +195,7 @@ fn write_as(
 }
 
 /// `setns(fd, nstype)`.
-fn setns(process: &Process, fd: usize, nstype: u64) -> Result<usize, Errno> {
+pub(super) fn setns(process: &Process, fd: usize, nstype: u64) -> Result<usize, Errno> {
     call(process, Syscall::Setns, [fd as u64, nstype, 0, 0, 0, 0])
 }
 
@@ -210,13 +210,13 @@ fn inode_of(process: &Process, fd: usize) -> Result<u64, &'static str> {
 }
 
 /// The text `readlink("/proc/self/fd/<fd>")` gives.
-fn fd_link(page: &mut Page<'_>, fd: usize) -> Result<Vec<u8>, &'static str> {
+pub(super) fn fd_link(page: &mut Page<'_>, fd: usize) -> Result<Vec<u8>, &'static str> {
     let pid = page.process.pid();
     read_link(page, format!("/proc/{pid}/fd/{fd}").as_bytes())
 }
 
 /// A descriptor for `/proc/<pid>/ns/<kind>`, opened by the page's process.
-fn ns_fd(
+pub(super) fn ns_fd(
     process: &Arc<Process>,
     page: &mut Page<'_>,
     pid: u32,
@@ -226,7 +226,7 @@ fn ns_fd(
 }
 
 /// Require a descriptor, with the message if it was refused.
-fn got(
+pub(super) fn got(
     tally: &mut Tally<'_>,
     opened: Result<Result<usize, Errno>, &'static str>,
     what: &'static str,
@@ -1078,7 +1078,7 @@ fn joining_mount(tally: &mut Tally<'_>) -> Result<(), &'static str> {
 }
 
 /// A pidfd opened for `pid` by `process`.
-fn pidfd(process: &Process, pid: u32) -> Result<usize, Errno> {
+pub(super) fn pidfd(process: &Process, pid: u32) -> Result<usize, Errno> {
     call(process, Syscall::PidfdOpen, [u64::from(pid), 0, 0, 0, 0, 0])
 }
 

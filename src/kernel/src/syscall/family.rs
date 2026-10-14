@@ -15,7 +15,8 @@
 //! # Namespaces
 //!
 //! Every namespace `clone` can ask for exists: mount, user, UTS, IPC, cgroup,
-//! pid and network (`docs/NAMESPACES.md`, `docs/PIDNS.md`, `docs/NETNS.md`).
+//! pid and network (`docs/NAMESPACES.md`, `docs/PIDNS.md`, `docs/NETNS.md`),
+//! and time through `clone3` (`docs/NAMESPACES.md` §12.1).
 //! `clone` once ignored the flags and handed back an ordinary child in the one
 //! namespace there was, so a program that asked to be sandboxed was told it got
 //! what it asked for; now it gets the namespace, or an `EINVAL` for a
@@ -48,7 +49,8 @@ use crate::syscall::nsproxy::{self, CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWUTS}
 use crate::syscall::pidns::{self, CLONE_NEWPID};
 use crate::syscall::process::{self, Process};
 use crate::syscall::thread::{self, Thread};
-use crate::syscall::{attributes, fd, namespace, registry, thread_area, uaccess, userns};
+use crate::syscall::timens::{self, CLONE_NEWTIME};
+use crate::syscall::{attributes, fd, namespace, registry, thread_area, uaccess, userns, vdso};
 use crate::trap::Abi;
 
 /// The low byte of `clone`'s flags: the signal the parent is told with.
@@ -154,6 +156,9 @@ struct CloneRequest {
     /// `clone3`'s `CLONE_INTO_CGROUP`: the descriptor of the cgroup
     /// directory the child starts in.
     cgroup: Option<i32>,
+    /// `clone3`'s `CLONE_NEWTIME`, which `flags` cannot carry: its bit is in
+    /// the exit signal's byte there.
+    new_time: bool,
 }
 
 /// `clone`, `clone3`, `fork` and `vfork`. Answers the child's pid to the
@@ -195,6 +200,7 @@ pub(crate) fn sys_clone(
                 tls: a[4],
                 thread_area: None,
                 cgroup: None,
+                new_time: false,
             },
             _ => CloneRequest {
                 flags: a[0] & CLONE_LEGACY_FLAGS,
@@ -204,6 +210,7 @@ pub(crate) fn sys_clone(
                 child_tid: a[4],
                 thread_area: None,
                 cgroup: None,
+                new_time: false,
             },
         },
     };
@@ -235,6 +242,17 @@ pub(crate) fn sys_clone(
         return Err(Errno::EINVAL);
     }
     clone_with(parent, &request, regs)
+}
+
+/// What `clone3` reads from `size` bytes of `struct clone_args` at `at`, for
+/// the checks: the exit signal the child would end with and whether
+/// `CLONE_NEWTIME` was asked for, or the refusal.
+///
+/// # Errors
+///
+/// As [`clone3_request`].
+pub(crate) fn clone3_for_check(parent: &Process, at: u64, size: u64) -> Result<(u64, bool), Errno> {
+    clone3_request(parent, at, size).map(|request| (request.flags & CSIGNAL, request.new_time))
 }
 
 /// Read and check `clone3`'s `struct clone_args`, `size` bytes of it at `at`.
@@ -311,8 +329,10 @@ fn clone3_request(parent: &Process, at: u64, size: u64) -> Result<CloneRequest, 
     if exit_signal > NSIG {
         return Err(Errno::EINVAL);
     }
+    // `CLONE_NEWTIME` is the one bit of `CSIGNAL` `clone3` takes, as Linux's
+    // `clone3_args_valid` takes it: the exit signal has a field of its own.
     if flags & !(CLONE_LEGACY_FLAGS | CLONE_CLEAR_SIGHAND | CLONE_INTO_CGROUP) != 0
-        || flags & (CLONE_DETACHED | CSIGNAL) != 0
+        || flags & (CLONE_DETACHED | (CSIGNAL & !CLONE_NEWTIME)) != 0
         || flags & (CLONE_SIGHAND | CLONE_CLEAR_SIGHAND) == CLONE_SIGHAND | CLONE_CLEAR_SIGHAND
         || (flags & (CLONE_THREAD | CLONE_PARENT) != 0 && exit_signal != 0)
     {
@@ -343,14 +363,15 @@ fn clone3_request(parent: &Process, at: u64, size: u64) -> Result<CloneRequest, 
     Ok(CloneRequest {
         // The exit signal has a field of its own here and the low byte of the
         // flags in `clone`; checked above to be a signal and the byte to be
-        // clear.
-        flags: flags | exit_signal,
+        // clear but for `CLONE_NEWTIME`, which goes apart.
+        flags: (flags & !CLONE_NEWTIME) | exit_signal,
         stack: stack_top,
         parent_tid,
         child_tid,
         tls,
         thread_area: None,
         cgroup,
+        new_time: flags & CLONE_NEWTIME != 0,
     })
 }
 
@@ -381,9 +402,9 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
 }
 
 /// Whether the namespaces `flags` asks for can be given: every namespace a
-/// child can be asked for exists (`CLONE_NEWTIME` is not among them: its bit is
-/// inside `CSIGNAL`, so `clone` reads it as an exit signal, as Linux does, and
-/// `clone3` refuses `CSIGNAL` outright); `EINVAL` for `CLONE_NEWNS` with
+/// child can be asked for exists (`CLONE_NEWTIME`'s bit is inside `CSIGNAL`,
+/// so `clone` reads it as an exit signal, as Linux does, and only `clone3`
+/// asks for it, as `new_time`); `EINVAL` for `CLONE_NEWNS` with
 /// `CLONE_FS`, as Linux
 /// refuses a namespace a shared fs context would leave, for `CLONE_NEWIPC`
 /// with `CLONE_SYSVSEM`, for any of the UTS, IPC and cgroup namespaces with
@@ -391,10 +412,31 @@ fn give_thread_pointer(state: &mut arch::UserState, tls: u64, thread_area: Optio
 /// with `CLONE_THREAD` or `CLONE_PARENT`, and for one asked where the children
 /// already go in a namespace of their own; `EPERM` for a namespace asked
 /// without `CAP_SYS_ADMIN` (a child given a user namespace holds it there);
-/// `ENOSPC` for a pid namespace past the depth limit.
+/// `ENOSPC` for a pid namespace past the depth limit. A time namespace is
+/// refused `EINVAL` with `CLONE_THREAD`, which here shares it with its
+/// process, and so is a child sharing its parent's memory or thread group
+/// while its parent's children go into another time namespace than its own,
+/// as Linux's `copy_process` refuses it.
 pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno> {
+    namespaces_asked_with(parent, flags, false)
+}
+
+/// [`namespaces_asked`], with `clone3`'s `CLONE_NEWTIME` as `new_time`.
+pub(crate) fn namespaces_asked_with(
+    parent: &Process,
+    flags: u64,
+    new_time: bool,
+) -> Result<(), Errno> {
     const SMALL: u64 = CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWCGROUP;
     if flags & SMALL != 0 && flags & CLONE_THREAD != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if new_time && flags & CLONE_THREAD != 0 {
+        return Err(Errno::EINVAL);
+    }
+    // One address space has one view of the clocks (its vDSO's), and a
+    // thread is its process's: neither is shared across time namespaces.
+    if flags & (CLONE_VM | CLONE_THREAD) != 0 && parent.time_held().differs() {
         return Err(Errno::EINVAL);
     }
     if flags & CLONE_NEWIPC != 0 && flags & CLONE_SYSVSEM != 0 {
@@ -443,7 +485,7 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
         return Err(Errno::EINVAL);
     }
     // With a user namespace the child holds the capability in it.
-    if flags & (CLONE_NEWNS | CLONE_NEWPID | SMALL) != 0
+    if (flags & (CLONE_NEWNS | CLONE_NEWPID | SMALL) != 0 || new_time)
         && flags & CLONE_NEWUSER == 0
         && !parent.with_credentials(|held| held.holds(userns::CAP_SYS_ADMIN))
     {
@@ -467,10 +509,22 @@ pub(crate) fn namespaces_asked(parent: &Process, flags: u64) -> Result<(), Errno
 /// parent's mount namespace, then the UTS, IPC and cgroup ones. A cgroup
 /// namespace is rooted where the parent is, not where `CLONE_INTO_CGROUP`
 /// puts the child, as Linux's `copy_cgroup_ns` reads the parent's css set.
+/// With `new_time`, a time namespace for the child's children, which a child
+/// not sharing its parent's memory then enters ([`settle_time`]).
 pub(crate) fn give_namespaces(
     parent: &Arc<Process>,
     child: &Arc<Process>,
     flags: u64,
+) -> Result<(), Errno> {
+    give_namespaces_with(parent, child, flags, false)
+}
+
+/// [`give_namespaces`], with `clone3`'s `CLONE_NEWTIME` as `new_time`.
+pub(crate) fn give_namespaces_with(
+    parent: &Arc<Process>,
+    child: &Arc<Process>,
+    flags: u64,
+    new_time: bool,
 ) -> Result<(), Errno> {
     let owner = if flags & CLONE_NEWUSER != 0 {
         let fresh = namespace::make_user_namespace(parent)?;
@@ -488,9 +542,37 @@ pub(crate) fn give_namespaces(
     if flags & CLONE_NEWNET != 0 {
         // Owned by the user namespace the child is in, the new one if it has
         // one, and charged to the job of the parent, who is asking.
-        child.set_net_ns(crate::net::namespace::create(owner)?);
+        child.set_net_ns(crate::net::namespace::create(Arc::clone(&owner))?);
+    }
+    if new_time {
+        // Owned by the user namespace made in the same call, whose creator
+        // holds every capability there; else by the parent's, where `create`
+        // asks for `CAP_SYS_ADMIN` itself. With the offsets of the namespace
+        // the parent's children were to be made in.
+        let fresh = (flags & CLONE_NEWUSER != 0).then_some(&owner);
+        let from = parent.time_namespace_for_children();
+        let time = parent.with_credentials(|held| timens::create(held, fresh, &from))?;
+        child.set_time_namespace_for_children(time);
     }
     Ok(())
+}
+
+/// Put `child`, forked from `parent` and not yet findable, in the time
+/// namespace it is born in, and give it the vDSO view that namespace needs if
+/// that is not its parent's. A child sharing its parent's memory (`vm`) stays
+/// where its parent is, as Linux's `copy_namespaces` leaves it; one that does
+/// not enters its namespace for children (`docs/NAMESPACES.md` §12.1).
+///
+/// # Errors
+///
+/// `ENOMEM`; the child is to be abandoned unstarted.
+pub(crate) fn settle_time(
+    parent: &Arc<Process>,
+    child: &Arc<Process>,
+    vm: bool,
+) -> Result<(), Errno> {
+    child.settle_time(vm);
+    retarget_vdso(parent, child)
 }
 
 /// The pid namespace `flags` has a child made in, before the child is: one
@@ -529,6 +611,23 @@ fn write_ids(
     seen
 }
 
+/// Give `child`, forked from `parent`, the vDSO view its time namespace
+/// needs, if that is not its parent's.
+///
+/// # Errors
+///
+/// `ENOMEM`; the child is to be abandoned unstarted.
+pub(crate) fn retarget_vdso(parent: &Arc<Process>, child: &Arc<Process>) -> Result<(), Errno> {
+    if Arc::ptr_eq(parent.space(), child.space()) {
+        return Ok(());
+    }
+    let shifted = vdso::is_shifted(&child.time_namespace());
+    if shifted == vdso::is_shifted(&parent.time_namespace()) {
+        return Ok(());
+    }
+    vdso::retarget(child.space(), shifted).map_err(|()| Errno::ENOMEM)
+}
+
 /// Make the process `request` asks for. See [`sys_clone`].
 fn clone_with(
     parent: &Arc<Process>,
@@ -543,6 +642,7 @@ fn clone_with(
         tls,
         thread_area,
         cgroup,
+        new_time,
     } = *request;
     // A namespace asked for is a namespace that has to exist. Ignoring the
     // flag would answer a sandbox's request for isolation with a child that
@@ -551,7 +651,7 @@ fn clone_with(
     // here answers for the same flags. A mount namespace exists: a copy of
     // the parent's, for a child that shares no fs context with it (Linux's
     // `EINVAL` for `CLONE_NEWNS | CLONE_FS`), made with privilege.
-    namespaces_asked(parent, flags)?;
+    namespaces_asked_with(parent, flags, new_time)?;
     // Linux's own refusals: a thread shares its process's handlers, and
     // handlers shared without the memory they are in would run nothing.
     if flags & CLONE_THREAD != 0 && flags & CLONE_SIGHAND == 0 {
@@ -595,7 +695,12 @@ fn clone_with(
     }
     // Its own copy of the namespace, before anything can see it: a refusal
     // goes with the child, unstarted.
-    give_namespaces(parent, &child, flags)?;
+    give_namespaces_with(parent, &child, flags, new_time)?;
+    // A child made in another time namespace than its parent is, with a copy
+    // of its parent's space, reads the clock through the parent's vDSO view:
+    // give it the other (`docs/NAMESPACES.md` §12.1). A `vfork` child
+    // (`CLONE_VM`) stays in its parent's until its `execve`.
+    settle_time(parent, &child, flags & CLONE_VM != 0)?;
     child.set_exit_signal((flags & CSIGNAL) as u32);
     // What glibc's `posix_spawn` asks for, so that its child need not reset
     // every handler itself before `execve`. Linux leaves the alternate stack

@@ -97,8 +97,8 @@ fn process_give(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno>
 /// running as `creator` runs, or as root with none ([`native::LoadNative`]).
 ///
 /// "As `creator` runs" is its ids and its fs context: its mount namespace,
-/// its root and its working directory (`docs/NAMESPACES.md` §2.5), and its
-/// network namespace. A child
+/// its root and its working directory (`docs/NAMESPACES.md` §2.5), its
+/// network namespace, and the time namespace its children are made in. A child
 /// started in the first namespace's root instead would be an escape from a
 /// namespace, or a `chroot`, in one call. A process with no creator -- one
 /// the kernel starts, as `devmgr` is -- starts in the first namespace's
@@ -143,6 +143,12 @@ pub(crate) fn load_native(
         // a native process can make Linux calls, so a child that did not keep
         // its creator's filter would be one call out of the sandbox.
         crate::syscall::seccomp::inherit_native(creator, &child);
+        // And the time namespace its creator's children are born in, as a
+        // fork's child is (`docs/NAMESPACES.md` §12.1): its Linux calls read
+        // the clocks shifted as its creator's children would. It maps no vDSO
+        // to swap (`exec::load_native_in` starts it without one), and a Linux
+        // program it `execve`s maps the view of the namespace it is in.
+        child.inherit_time(creator);
     }
     let process: Arc<dyn Host> = child;
     Ok(process)
