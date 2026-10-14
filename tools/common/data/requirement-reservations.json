@@ -73,6 +73,13 @@
       "branch": "s13f/cpuio",
       "date": "2026-10-14",
       "purpose": "Stage 13's cpu.max.burst (unused quota carried up to the burst), cpu.idle (a cgroup at the idle weight) and io.weight (a disk's dispatch shared among sibling cgroups by weight) (docs/CGROUPS.md sections 12 and 13)"
+    },
+    {
+      "ids": ["L.x86_64.175"],
+      "owner": "m0-f73",
+      "branch": "m0-f73",
+      "date": "2026-10-14",
+      "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
     }
   ]
 }
