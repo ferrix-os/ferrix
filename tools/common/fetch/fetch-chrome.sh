@@ -36,6 +36,15 @@ debian=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
 security=${DEBIAN_SECURITY_MIRROR:-https://security.debian.org/debian-security}
 chrome_dist=${CHROME_FOR_TESTING:-https://storage.googleapis.com/chrome-for-testing-public}
 out=${FERRIX_CHROME_VOLUME:-$HOME/.local/share/ferrix/chrome}
+# Where a pinned Debian file comes from once the mirror has dropped it, as
+# trixie-security drops a package's update when the next one comes:
+# snapshot.debian.org's archive as it was on the days the pins were taken,
+# tried in turn. The SHA-256 pins are checked either way.
+snapshot=${DEBIAN_SNAPSHOT:-https://snapshot.debian.org/archive}
+snapshot_times=(20260924T235959Z 20260927T235959Z)
+# The downloads, kept between runs; FERRIX_CHROME_POOL names another
+# directory, an empty one to fetch everything as a new machine does.
+pool=${FERRIX_CHROME_POOL:-$out/pool}
 
 CHROME_VERSION=154.0.8037.57
 CHROME_SHA256=5a6979d0ab7cf952ea575d35164e7bdce4872b2ced8f8a215c8f8e8eda00ee09
@@ -147,12 +156,33 @@ for tool in curl sha256sum dpkg-deb unzip readelf mkfs.btrfs; do
     command -v "$tool" > /dev/null || { echo "fetch-chrome: $tool is not installed" >&2; exit 1; }
 done
 
-# Download $2/$1 into the pool unless it is there, and check it against $3.
+# Download $2/$1 from snapshot.debian.org into $3, $2 being $debian's or
+# $security's tree, at each of the snapshot times until one has it; fail when
+# $2 is not Debian's or no snapshot has the file.
+from_snapshot() {
+    local path=$1 base=$2 part=$3 archive rel time
+    case $base in
+        "$security"*) archive=debian-security rel=${base#"$security"} ;;
+        "$debian"*) archive=debian rel=${base#"$debian"} ;;
+        *) echo "fetch-chrome: $base/$path could not be downloaded" >&2; return 1 ;;
+    esac
+    for time in "${snapshot_times[@]}"; do
+        echo "fetch-chrome: ${path##*/} is not at $base; from $snapshot/$archive/$time" >&2
+        curl -fsSL --retry 3 -o "$part" "$snapshot/$archive/$time$rel/$path" && return 0
+    done
+    echo "fetch-chrome: ${path##*/} is in no snapshot either" >&2
+    rm -f "$part"
+    return 1
+}
+
+# Download $2/$1 into the pool unless it is there, from the snapshot when $2
+# is Debian's and no longer has it, and check it against $3.
 fetch() {
     local path=$1 base=$2 sum=$3
-    local file="$out/pool/${path##*/}"
+    local file="$pool/${path##*/}"
     if [ ! -f "$file" ]; then
-        curl -fsSL -o "$file.part" "$base/$path"
+        curl -fsSL -o "$file.part" "$base/$path" \
+            || from_snapshot "$path" "$base" "$file.part" || exit 1
         mv "$file.part" "$file"
     fi
     echo "$sum  $file" | sha256sum -c --quiet \
@@ -160,7 +190,7 @@ fetch() {
     printf '%s\n' "$file"
 }
 
-mkdir -p "$out/pool"
+mkdir -p "$pool"
 tree="$out/tree"
 rm -rf "$tree"
 mkdir -p "$tree"

@@ -40,6 +40,15 @@ debian=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
 security=${DEBIAN_SECURITY_MIRROR:-https://security.debian.org/debian-security}
 out=${FERRIX_WINE_VOLUME:-$HOME/.local/share/ferrix/wine}
 yserver=${FERRIX_YSERVER_VOLUME:-$HOME/.local/share/ferrix/yserver}
+# Where a pinned Debian file comes from once the mirror has dropped it, as
+# trixie-security drops a package's update when the next one comes:
+# snapshot.debian.org's archive as it was on the days the pins were taken,
+# tried in turn. The SHA-256 pins are checked either way.
+snapshot=${DEBIAN_SNAPSHOT:-https://snapshot.debian.org/archive}
+snapshot_times=(20261010T235959Z 20261012T235959Z)
+# The downloads, kept between runs; FERRIX_WINE_POOL names another
+# directory, an empty one to fetch everything as a new machine does.
+pool=${FERRIX_WINE_POOL:-$out/pool}
 
 # Pool path and SHA-256 of each package, from the main archive.
 debs=(
@@ -93,12 +102,33 @@ for tool in curl sha256sum dpkg-deb readelf mkfs.btrfs; do
     command -v "$tool" > /dev/null || { echo "fetch-wine: $tool is not installed" >&2; exit 1; }
 done
 
-# Download $2/$1 into the pool unless it is there, and check it against $3.
+# Download $2/$1 from snapshot.debian.org into $3, $2 being $debian's or
+# $security's tree, at each of the snapshot times until one has it; fail when
+# $2 is not Debian's or no snapshot has the file.
+from_snapshot() {
+    local path=$1 base=$2 part=$3 archive rel time
+    case $base in
+        "$security"*) archive=debian-security rel=${base#"$security"} ;;
+        "$debian"*) archive=debian rel=${base#"$debian"} ;;
+        *) echo "fetch-wine: $base/$path could not be downloaded" >&2; return 1 ;;
+    esac
+    for time in "${snapshot_times[@]}"; do
+        echo "fetch-wine: ${path##*/} is not at $base; from $snapshot/$archive/$time" >&2
+        curl -fsSL --retry 3 -o "$part" "$snapshot/$archive/$time$rel/$path" && return 0
+    done
+    echo "fetch-wine: ${path##*/} is in no snapshot either" >&2
+    rm -f "$part"
+    return 1
+}
+
+# Download $2/$1 into the pool unless it is there, from the snapshot when $2
+# is Debian's and no longer has it, and check it against $3.
 fetch() {
     local path=$1 base=$2 sum=$3
-    local file="$out/pool/${path##*/}"
+    local file="$pool/${path##*/}"
     if [ ! -f "$file" ]; then
-        curl -fsSL -o "$file.part" "$base/$path"
+        curl -fsSL -o "$file.part" "$base/$path" \
+            || from_snapshot "$path" "$base" "$file.part" || exit 1
         mv "$file.part" "$file"
     fi
     echo "$sum  $file" | sha256sum -c --quiet \
@@ -113,7 +143,7 @@ if [ ! -d "$yserver/tree" ] || [ "$(cat "$yserver/yserver.commit" 2> /dev/null)"
     "$(dirname "$0")/fetch-yserver.sh"
 fi
 
-mkdir -p "$out/pool"
+mkdir -p "$pool"
 root="$out/root"
 rm -rf "$root"
 mkdir -p "$root"
