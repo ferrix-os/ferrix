@@ -119,7 +119,9 @@ static int cmd_busy(int argc, char **argv)
 		unsigned long long total = b[i].total - a[i].total;
 		unsigned long long busy = b[i].busy - a[i].busy;
 		unsigned long long steal = b[i].steal - a[i].steal;
-		double share = total ? 100.0 * busy / total : 0;
+		/* Of the time the processor ran: steal is the host's, not
+		 * the load's, and is printed beside the share. */
+		double share = total > steal ? 100.0 * busy / (total - steal) : 0;
 		printf("busy: cpu%d %.1f%% of %llu ticks, steal %llu\n", i, share, total, steal);
 		if (share < min) {
 			min = share;
