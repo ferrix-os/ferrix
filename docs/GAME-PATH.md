@@ -1271,3 +1271,16 @@ no build in 50 s on Ferrix (`/proc/meminfo` counts no page cache, and the
 holder takes what is free), so `load.sh` builds once alone first; and the
 load runs as root on Ferrix's gate, whose initramfs has no ordinary user,
 and as the image's user `ferrix` on Linux.
+
+2026-10-15: I1 is built. hyprix reads its devices on a thread of its own and
+writes a locked pointer's motion from there (§4.7's second point), each
+report a motion of its own under the lock (the third), and the input core's
+stamp travels as the Wayland and the X event's time, with each program
+saying the input's age as it passes (the first); yserver's half is fork
+commit b1bfb042. Per hop without the card, x86-64 under KVM
+(`test-xlatency`, 35 motions): stamp to hyprix 0.11 ms at the median and
+0.60 ms at the 99th percentile, on to yserver 0.10 / 1.49, on to the probe
+under 0.1, on to the scan-out 19.4 / 25.7. Under a lock with every frame
+held 100 ms (`test-compositor --boot lane`) the motion reached the client at
+a median age of 0.12 ms; with the thread removed 38 of 40 never did, in both
+runs of the control. The figures and gates are on the stage's page.

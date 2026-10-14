@@ -597,7 +597,9 @@ invariant TSC, landed on 2026-10-14 (`test-frames`, `test-xlatency`,
 `test-game-rig`), and the same binaries ran on
 Ferrix and on a Linux guest with no card; they stand on yserver's Present
 clock (pin 2966c377, eb7ad7411, which also fixed a lavapipe
-`PresentPixmap` crash). Nothing of what its exit is judged by is measured on
+`PresentPixmap` crash). Of the first cut, I1 followed on 2026-10-15: hyprix reads
+input on a thread of its own, and an input's time travels from the input
+core to the X client, so the mouse's lag is a number per hop. Nothing of what its exit is judged by is measured on
 the card yet. Its first step is the rig that measures it (R1 to R5, 19 to
 21 points; R1 to R3 are built, R4 and R5 need the card), then a first cut of 47
 points; the game domain (52) is stage 14's ground and waits on the
