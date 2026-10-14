@@ -89,7 +89,12 @@ for after Steam runs.
   socket is readable, which reads without blocking.
 * **The volume** carries the packages listed in the fetch script, each
   pinned by SHA-256 as `fetch-chrome.sh` pins them, plus yserver, stripped. `run-compositor --everything` merges it into its volume, as it
-  already merges steamcmd's.
+  already merges steamcmd's. A pinned package the mirror has since dropped
+  (trixie-security keeps only a package's latest update) is fetched from
+  snapshot.debian.org as the archive was on the day the pins were taken,
+  and checked against the same SHA-256; `FERRIX_YSERVER_POOL` names the
+  directory the downloads are kept in, an empty one to fetch as a new
+  machine does.
 
 ## 4. The backend
 
@@ -387,6 +392,15 @@ reports, its period kept in nanoseconds, and hyprix's frames follow it
 `cargo xtask test-frames` now fails a clock whose longest MSC is more
 than 1% of a refresh longer than its shortest. The fork's next commit,
 f1d6cc18, adds a test of the clock and nothing else.
+
+2026-10-14: **a new machine builds the volume again.** Pins of the
+security archive had left it: `libpng-dev` and `libpng16-16t64`
+`1.6.48-1+deb13u5` (its index lists only `deb13u6`) and `linux-libc-dev`
+`6.12.101-1`, so `fetch-yserver.sh` built only where a pool kept them.
+It now takes such a file from snapshot.debian.org at 2026-09-27, the day
+of the pins, under the same SHA-256. Of the other fetch scripts, only
+`fetch-chromium-arm64.sh` pinned files that have left (Chromium
+`154.0.8037.57-1~deb13u1`), and it does the same at 2026-09-26.
 
 2026-10-14: **a Present clock on the Wayland backend.** `fetch-yserver.sh`
 pins the fork at 2966c377. The backend had no clock for the Present

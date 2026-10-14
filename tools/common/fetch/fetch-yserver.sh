@@ -22,8 +22,11 @@
 # second tree with its own loader so the host's glibc does not matter.
 #
 # Every Debian package is pinned by its SHA-256, taken from trixie's,
-# trixie-updates' and trixie-security's Packages files on 2026-09-27.
-# After unpacking, every library yserver and the libraries beside it need
+# trixie-updates' and trixie-security's Packages files on 2026-09-27. A
+# pinned file the mirror has since dropped -- trixie-security keeps only a
+# package's latest update -- is fetched from snapshot.debian.org as the
+# archive was that day, so a new machine builds the same volume as one
+# whose pool kept it. After unpacking, every library yserver and the libraries beside it need
 # is looked for on the volume, so a dependency this list lacks fails here
 # rather than on Ferrix.
 #
@@ -39,7 +42,16 @@ set -euo pipefail
 
 debian=${DEBIAN_MIRROR:-https://deb.debian.org/debian}
 security=${DEBIAN_SECURITY_MIRROR:-https://security.debian.org/debian-security}
+# Where a pinned file comes from once the mirror has dropped it, as
+# trixie-security does with a package's update when the next one comes:
+# snapshot.debian.org's archive as it was the day the pins were taken. The
+# SHA-256 pins are checked either way.
+snapshot=${DEBIAN_SNAPSHOT:-https://snapshot.debian.org/archive}
+snapshot_time=20260927T235959Z
 out=${FERRIX_YSERVER_VOLUME:-$HOME/.local/share/ferrix/yserver}
+# The downloads, kept between runs; FERRIX_YSERVER_POOL names another
+# directory, an empty one to fetch everything as a new machine does.
+pool=${FERRIX_YSERVER_POOL:-$out/pool}
 
 # The fork, and the commit of it that is built. YSERVER_REPO may name a local
 # clone, for a commit not yet pushed.
@@ -232,12 +244,18 @@ for tool in git curl sha256sum dpkg-deb readelf strip mkfs.btrfs cargo; do
     command -v "$tool" > /dev/null || { echo "fetch-yserver: $tool is not installed" >&2; exit 1; }
 done
 
-# Download $2/$1 into the pool unless it is there, and check it against $3.
+# Download $2/$1 into the pool unless it is there, from the snapshot when $2
+# no longer has it, and check it against $3.
 fetch() {
     local path=$1 base=$2 sum=$3
-    local file="$out/pool/${path##*/}"
+    local file="$pool/${path##*/}"
     if [ ! -f "$file" ]; then
-        curl -fsSL -o "$file.part" "$base/$path"
+        if ! curl -fsSL -o "$file.part" "$base/$path"; then
+            local archive=debian
+            [[ $path == pool/updates/* ]] && archive=debian-security
+            echo "fetch-yserver: ${path##*/} is not at $base; from $snapshot/$archive/$snapshot_time" >&2
+            curl -fsSL -o "$file.part" "$snapshot/$archive/$snapshot_time/$path"
+        fi
         mv "$file.part" "$file"
     fi
     echo "$sum  $file" | sha256sum -c --quiet \
@@ -245,7 +263,7 @@ fetch() {
     printf '%s\n' "$file"
 }
 
-mkdir -p "$out/pool"
+mkdir -p "$pool"
 sysroot="$out/sysroot"
 tools="$out/tools"
 rm -rf "$sysroot" "$tools"
