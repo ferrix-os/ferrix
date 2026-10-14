@@ -56,7 +56,7 @@ pool=${FERRIX_YSERVER_POOL:-$out/pool}
 # The fork, and the commit of it that is built. YSERVER_REPO may name a local
 # clone, for a commit not yet pushed.
 repo=${YSERVER_REPO:-https://github.com/ferrix-os/yserver.git}
-YSERVER_COMMIT=d2bf56e25e180a400e5dd0c8188eaff2ca3be33e
+YSERVER_COMMIT=e13992e3d8ac71bb17fc0d0f15fbbeddf0158a30
 # The toolchain Ferrix pins in rust-toolchain.toml.
 toolchain=${YSERVER_TOOLCHAIN:-1.97.1}
 
