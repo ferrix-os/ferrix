@@ -153,11 +153,39 @@ In the design's order, by gain for effort.
 | P2 | The game lane in hyprix: a fullscreen dmabuf surface flipped as it is, with the fallback | 8 | M1: hyprix's frame out of the path; M7: about 1.2 processors | — |
 | — | yserver hands an X client's pixmap on as a dmabuf | another session's; none here | the read-back's 2 ms and yserver's thread | its own |
 | — | A hardware cursor through NVKMS | stage 21's; none here | the lane survives a visible pointer | its own |
-| I1 | Input: time carried end to end, hyprix's input thread, no coalescing under a pointer lock | 5 | M1's tail; the mouse's lag becomes a number per hop | — |
+| I1 | Input: time carried end to end, hyprix's input thread, no coalescing under a pointer lock | 5 | M1's tail; the mouse's lag becomes a number per hop. **Built 2026-10-15** (below) | — |
 | P6 | Tearing: the hint from Wayland and from Present to an NVKMS tearing flip | 5 | M2 exists | consultant for the protocol flag |
 | P7 | Just in time: the hold, in yserver and in hyprix, with its controller and its rule | 8 | M1: about one refresh, for any game | — |
 | G0 | The session with what exists: affinity applied, weights for the game, the path and the rest | 8 | M4, as far as a heuristic goes | design, consultant, ids reserved first (the scheduler applies affinity: core ring) |
 | P5 | hyprix draws backwards from the deadline | 5 | M1 for composited clients: up to a refresh | — |
+
+**I1, 2026-10-15.** hyprix reads its devices on a thread of its own
+(`hyprix/src/front.rs`); while a client holds a pointer lock, the thread
+writes each relative motion to it through the connection's shared queue, one
+per report, so a frame in progress cannot hold it. The input core's stamp is
+the event's time: hyprix sends it as `relative_motion`'s time and yserver's
+fork (commit e13992e3, pinned, on the Present clock's d2bf56e2 and its test)
+hands the motion to X at that time. `HYPRIX_INPUT_AGES` and
+`YSERVER_INPUT_AGES` say each motion's age as it passes, and `test-xlatency`
+joins them with the probe's line per hop. Without a card, x86-64 under KVM,
+39 of 40 tablet motions paired (no lock, so through hyprix's loop), median /
+99th: stamp to hyprix 0.12 / 0.33 ms, on to yserver 0.10 / 0.84 ms, on to
+the probe 0.02 / 0.11 ms, on to the scan-out 19.0 / 25.4 ms; stamp to
+scan-out 19.3 / 25.6 ms (`i1b-xlat2`; the same change on the older clock,
+`i1-xlat1`, gave 19.6 / 26.4). Nearly all of it is waiting for the frame,
+which is P1, P2, P5 and P7's to cut, not input's. `test-compositor --boot
+lane` is the boot check: every frame held 100 ms, 40 motions under vlock's
+lock, median age at the client 0.12 ms and 99th 1.13 ms in one run, 0.23 and
+23.8 ms in the next, inside the whole `test-compositor` on a busy host; with
+the thread removed (the control) 2 of 40 reached the client, twice, and the
+check fails. On the thread hyprix's own hop under the lock was 0.07 ms at
+the median and 0.14 ms at worst in the quiet run, under the 0.3 ms at the
+99th percentile that would call for I2's tap, and 23.6 ms at worst in the
+busy one; the card run on pinned processors is what decides I2. Gates:
+`i1b-xlat2`, `i1b-xwin2`, `i1b-frames2` (its first run, `i1b-frames`,
+counted one 50 ms stall as 34 refreshes at a host load near 48, with no
+input in that boot), `i1-xlat1`, `i1-lane1`, `i1b-comp`, `i1b-lane-ctl`
+(fired), `i1b-check`, `i1b-build`, `i1b-xwin`.
 
 P1, P2, I1, P6, P7, G0 and P5 are 47. The first card run of P2 decides
 whether NVKMS scans out a client's image; if it copies, the lane is still

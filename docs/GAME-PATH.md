@@ -1337,3 +1337,16 @@ stand-in (+1.7 and +101.8 ms, `rf-rig`): its boot is the console's, with
 no X server and no Mesa on the rustc volume. `measure.sh` times a real
 program where a guest names one in `RIG_GAME`; the Linux guest's M6 is not
 taken yet, and with it whether Ferrix is within §2.3's 10%.
+
+2026-10-15: I1 is built. hyprix reads its devices on a thread of its own and
+writes a locked pointer's motion from there (§4.7's second point), each
+report a motion of its own under the lock (the third), and the input core's
+stamp travels as the Wayland and the X event's time, with each program
+saying the input's age as it passes (the first); yserver's half is fork
+commit e13992e3. Per hop without the card, x86-64 under KVM
+(`test-xlatency`, 39 motions): stamp to hyprix 0.12 ms at the median and
+0.33 ms at the 99th percentile, on to yserver 0.10 / 0.84, on to the probe
+0.02 / 0.11, on to the scan-out 19.0 / 25.4. Under a lock with every frame
+held 100 ms (`test-compositor --boot lane`) the motion reached the client at
+a median age of 0.12 ms; with the thread removed 38 of 40 never did, in both
+runs of the control. The figures and gates are on the stage's page.

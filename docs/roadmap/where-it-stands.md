@@ -636,7 +636,9 @@ Ferrix and on a Linux guest with no card; they stand on yserver's Present
 clock (pin 2966c377, eb7ad7411, which also fixed a lavapipe
 `PresentPixmap` crash); since 2026-10-15 the clock keeps one refresh (pin
 d2bf56e2: every msc 13.334 ms, where an msc had lasted 12.2 to 19.4 ms),
-and `test-frames` fails a clock that steps. Nothing of what its exit is judged by is measured on
+and `test-frames` fails a clock that steps. Of the first cut, I1 followed on 2026-10-15: hyprix reads
+input on a thread of its own, and an input's time travels from the input
+core to the X client, so the mouse's lag is a number per hop. Nothing of what its exit is judged by is measured on
 the card yet. Its first step is the rig that measures it (R1 to R5, 19 to
 21 points; R1 to R3 are built, R4 and R5 need the card), then a first cut of 47
 points; the game domain (52) is stage 14's ground and waits on the
