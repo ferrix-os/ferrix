@@ -569,7 +569,10 @@ process since the same day (its 32-bit `cmd` answers); a real Unity game,
 Unity's Spaceship Demo on Direct3D 11 with its High Definition Render
 Pipeline, starts in it and draws its walkthrough in a window of hyprix's
 through DXVK on lavapipe since 2026-10-13, at about 1.3 frames a second
-with no card (`test-unity`), and a window of an X
+with no card (`test-unity`); Endfield's launcher reaches its server in
+Debian's Wine and, since 2026-10-14, in GE-Proton11-7's, whose install
+dialog it draws whole (`test-endfield-launcher`, `test-endfield-proton`),
+and a window of an X
 program drawn by the card exists on unlanded branches only: on 2026-10-10
 Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a
 second between stalls of about 5 s, whose cause is found and whose fix is

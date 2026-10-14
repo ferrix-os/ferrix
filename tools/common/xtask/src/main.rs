@@ -340,6 +340,11 @@ COMMANDS:
     test-unity    Attach the volume tools/common/fetch/fetch-unity.sh makes, and require Unity's Spaceship Demo to start in
                   Wine on DXVK and lavapipe, load its benchmark's scene and draw it, moving, in its window on hyprix
                   (docs/WINE.md §9)
+    test-endfield-launcher  Attach the volume tools/common/fetch/fetch-endfield-launcher.sh makes, and require
+                  Arknights: Endfield's Windows launcher in Wine on hyprix through yserver, on the network: its window,
+                  its first screen drawn, and Gryphline's server answering it; it never logs in (docs/WINE.md §8)
+    test-endfield-proton  The same in GE-Proton's Wine, on the volume FERRIX_ENDFIELD_WINE=proton
+                  tools/common/fetch/fetch-endfield-launcher.sh makes, after the 32-bit cmd /c ver (docs/WINE.md §10)
     test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
                   to reach it
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
@@ -726,6 +731,12 @@ fn run() -> Result<()> {
         "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, &args),
         "test-dxvk" => dxvk::test_dxvk(&args),
         "test-unity" => compositor::unity::test_unity(&args),
+        "test-endfield-launcher" => {
+            compositor::endfield::test_endfield_launcher(&args, compositor::endfield::Wine::Debian)
+        }
+        "test-endfield-proton" => {
+            compositor::endfield::test_endfield_launcher(&args, compositor::endfield::Wine::Proton)
+        }
         "run-nvidia" => nvidia::run_nvidia(&args),
         "run-steam" => compositor::steam_window::run(&args, false),
         "test-steam-window" => compositor::steam_window::run(&args, true),

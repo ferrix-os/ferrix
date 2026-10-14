@@ -512,7 +512,7 @@ kernel's; both are fixed:
   (`test-endfield-launcher` on the branch `endfield-s4` over this kernel,
   `~/.local/share/ferrix/logs/queue/endfield-mmsg-launcher-try.log`).
 
-**The gate on the branch.** `tools/common/fetch/fetch-endfield-launcher.sh`
+**The gate.** `tools/common/fetch/fetch-endfield-launcher.sh`
 pins the installer and 7-Zip 25.01's Linux build by SHA-256, checks the
 three programs are 64-bit, and makes a volume of its own Wine tree (made by
 `fetch-wine.sh` under its own directory; the shared tree is a root other
@@ -522,6 +522,8 @@ requires hyprix to list the window by its title, the yellow button on the
 screen, and `games.log` saying the server answered with 200. The first two
 held on Ferrix on 2026-10-13, and the third once the second defect above
 was fixed the same day. It has no negative control yet.
+`cargo xtask test-endfield-proton` is the same boot in GE-Proton's Wine
+(§10).
 
 ## 9. A real Unity game, with no card (`test-unity`)
 
@@ -617,3 +619,74 @@ far. Two things on the way were not the kernel's:
 
 **Where it runs.** On demand, as `test-wine` and `test-dxvk` do: it
 attaches a volume and never downloads.
+
+## 10. The launcher in Proton's Wine (`test-endfield-proton`)
+
+Debian's Wine 10.0 draws the launcher's Qt dialogs that are translucent
+windows -- its install dialog, its update prompt -- blank, on Linux as
+on Ferrix (§8): only a line of their text shows. The customer asked for
+the latest Proton's Wine instead (2026-10-13). Valve's Proton 11 ships as
+source only; GE-Proton is built from it and released as a tarball, and
+its 11-7 draws those dialogs whole, on Linux and on Ferrix.
+
+```
+tools/common/fetch/fetch-proton.sh                                  # once
+FERRIX_ENDFIELD_WINE=proton tools/common/fetch/fetch-endfield-launcher.sh
+cargo xtask test-endfield-proton --accel kvm
+```
+
+**The volume** (`fetch-proton.sh`): the Wine volume's tree with
+GE-Proton11-7 at `/proton`, pinned by its SHA-512, and the Debian i386
+libraries its 32-bit half needs. This build is Wine's old 32/64 layout,
+not its new WoW64 mode (§7): a 32-bit Unix side
+(`files/lib/wine/i386-unix`) runs 32-bit Windows programs, and without it
+the 64-bit side does not make a prefix either. That half is a 32-bit
+glibc program, which Ferrix runs (stage 22's I1 to I4), so glibc, Xlib and
+the X extensions, FreeType and fontconfig are there in i386 too, in
+Debian's multiarch places. The list is what `wineboot`, the 32-bit `cmd`
+and a 32-bit window asked for on Linux. Proton's own `proton` script,
+which Steam runs inside its runtime, is not used; the boot sets what it
+sets for Wine (`WINEDLLPATH`, `LD_LIBRARY_PATH` into `files/lib`) and
+links Proton's fonts into the prefix before `wineboot`, as it does.
+
+**What Ferrix answered wrongly (fixed 2026-10-13, f0c812f01).** Proton's
+`wineboot` faulted writing its user shared data, a memfd wineserver maps
+`PROT_WRITE` alone and the client maps `MAP_SHARED|MAP_FIXED` over a
+placeholder and `mprotect`s read-write. `mprotect` replaced a region's
+every flag, so the shared mapping became private and the write after it
+faulted; and a write-only region refused a read, where Linux's
+`protection_map` makes it readable. A static probe of each step
+(`~/.local/share/ferrix/endfield/probe/usd2.c`) failed three of twelve
+variants on Ferrix and none on Linux before the fix, and none after
+(L.user.128, L.user.129). Proton's Wine also warns that it could not
+enable Syscall User Dispatch, which Ferrix does not have (stage 23's
+E5.3); nothing the launcher does needed it.
+
+**The font.** The launcher names Segoe UI (and Microsoft YaHei) for its
+interface, and no prefix has Segoe UI, Microsoft's own: Qt's web view
+fell back to Times New Roman and the dialogs came out serif, where Windows
+draws them in Segoe UI. The volume carries Debian's Open Sans, close to it
+in shape, and the boot points Wine's replacements for the Segoe UI family
+at it (`HKCU\Software\Wine\Fonts\Replacements`). Microsoft's open
+stand-in, Selawik, was tried first: it carries no TrueType instructions,
+so Wine's FreeType auto-hints it, rounds each glyph's advance to a pixel,
+and the spacing came out uneven ("N OTIFICATION"); ClearType settings and
+FreeType's own properties did not change that, and Open Sans, which is
+hinted, spaces as Windows does. Open Sans is a little wider than Segoe UI,
+so a line may wrap a word earlier.
+
+**The gate** requires, besides §8's window, button and server answer, the
+32-bit `cmd` to answer with a Windows version. On Ferrix under KVM on
+2026-10-13: `wineboot` exits 0, the 32-bit `cmd` answers `Microsoft Windows
+10.0.19045`, the launcher's window and button are drawn and Gryphline's
+server answers; a click on Download draws the install dialog whole, in Open
+Sans (the screens are in `~/.local/share/ferrix/endfield-proton/` on
+nazuna).
+
+**Still not as on Windows:** the launcher asks every five seconds for the
+image path of its `QtWebEngineProcess.exe` and gets none, because Wine
+reads another process's memory through `ptrace` and `/proc/<pid>/mem`,
+which Ferrix does not have (stage 23's E5.2; the certification
+consultant's answer, ledger line 877, is OK IF P1 to P8, with a design and
+the customer's word on the Security Target first). The version 1.6.0.1607
+pinned here asks for no update; the current launcher on Windows does.

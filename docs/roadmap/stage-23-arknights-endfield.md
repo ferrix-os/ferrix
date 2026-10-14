@@ -370,8 +370,7 @@ screen, and no failed allocation or mapping in `nvrm`'s log.
 
 **Proved by** the launcher showing its start button with the files verified.
 
-**Where step 4 stands (2026-10-13; `docs/WINE.md` §8; branch `endfield-s4`,
-not landed).** It stopped when step 0 found that ACE refuses a VM. Before
+**Where step 4 stands (2026-10-14; `docs/WINE.md` §8 and §10).** It stopped when step 0 found that ACE refuses a VM. Before
 that, GRYPHLINK's launcher drew its first screen on Ferrix under KVM, in
 Debian's Wine 10.0, in software, on hyprix through yserver, with its news
 and pictures fetched from the network through xtask's gateway. Nothing was
@@ -401,10 +400,19 @@ logged into and nothing of the game was downloaded.
   in the kernel now, and a static glibc probe that failed both names with
   flags 0 resolves them (`docs/WINE.md` §8). With the fix the launcher
   reached its server on Ferrix: Gryphline answered its version query with
-  200 (`test-endfield-launcher`, still on the branch `endfield-s4`).
-* *Still to do, when Ferrix runs on the machine:* E4.1, the installer
-  itself (E4.2), the launcher's gate landed
-  from `endfield-s4`, then E4.4 to E4.6.
+  200 (`test-endfield-launcher`).
+* *Done (2026-10-14):* the launcher's gate, `test-endfield-launcher`, and
+  the same in GE-Proton11-7's Wine, `test-endfield-proton`, which the
+  customer asked for because Debian's Wine 10.0 draws the launcher's
+  translucent dialogs blank. In Proton the install dialog draws whole on
+  Ferrix, in Open Sans for the Segoe UI the launcher names (`docs/WINE.md`
+  §10). Proton needed two kernel fixes (f0c812f01): `mprotect` kept no
+  `MAP_SHARED`, and a write-only region refused a read.
+* *Still to do:* the image path of another process (`ptrace` and
+  `/proc/<pid>/mem`, E5.2, which the launcher asks for every five seconds
+  and Wine cannot give it on Ferrix); the current launcher version; and,
+  when Ferrix runs on the machine, E4.1, the installer itself (E4.2), then
+  E4.4 to E4.6.
 
 ### Step 5: past the anti-cheat  ·  29 points as a guess; unknown
 
