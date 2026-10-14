@@ -8,14 +8,16 @@
 //! carries, so a camera or a screen dump can tell the frames apart. For
 //! every event it prints, once a completion shows it,
 //!
-//! `xlatency: shown <n> arrival <ns> swap <ns> ust <us> msc <m> frames <f> in <ms>`
+//! `xlatency: shown <n> arrival <ns> swap <ns> ust <us> msc <m> frames <f> in <ms> xtime <ms>`
 //!
 //! the event's number from 1, when it arrived and when the frame that
 //! carried it was presented (`CLOCK_MONOTONIC`), that frame's
 //! `CompleteNotify` (`ust`, the start of the scan-out, in microseconds of
 //! the same clock, and its `msc`), the refreshes from the last completion
-//! before the event to that one, and the milliseconds from arrival to the
-//! scan-out. It ends with a summary line after `N` events, after `S`
+//! before the event to that one, the milliseconds from arrival to the
+//! scan-out, and the event's X time, which pairs it with the server's log
+//! of the same input (`docs/GAME-PATH.md` §4.7: yserver gives an input the
+//! time the device stamped it, and logs both). It ends with a summary line after `N` events, after `S`
 //! seconds, or, with `--idle`, once every event is shown and none has come
 //! for that many seconds.
 //!
@@ -165,7 +167,7 @@ impl Probe {
         while Instant::now() < deadline {
             match self.x.next(Some(Duration::from_millis(100)))? {
                 Some(Packet::Mapped) => return Ok(()),
-                Some(Packet::RawMotion) => self.tracker.arrive(monotonic()),
+                Some(Packet::RawMotion { time }) => self.tracker.arrive(monotonic(), time),
                 _ => {}
             }
         }
@@ -193,9 +195,9 @@ fn run(options: Options) -> Result<(), String> {
         }
         let packet = probe.x.next(Some(Duration::from_millis(50)))?;
         match packet {
-            Some(Packet::RawMotion) => {
+            Some(Packet::RawMotion { time }) => {
                 last_event = Some(Instant::now());
-                probe.tracker.arrive(monotonic());
+                probe.tracker.arrive(monotonic(), time);
             }
             Some(Packet::Complete {
                 serial,

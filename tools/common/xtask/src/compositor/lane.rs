@@ -147,11 +147,16 @@ pub(super) fn test_lane(arch: Arch, programs: &Programs, args: &Args) -> Result<
 }
 
 /// The ages, in microseconds, of the lines holding `marker`: the number
-/// after `age`.
+/// after `age`: a motion vlock had before the lock, and one hyprix wrote
+/// on its loop rather than its input thread, left out.
 fn ages(lines: &[String], marker: &str) -> Vec<u64> {
     let mut ages: Vec<u64> = lines
         .iter()
-        .filter(|line| line.contains(marker) && !line.contains(" unlocked"))
+        .filter(|line| {
+            line.contains(marker)
+                && !line.contains(" unlocked")
+                && !line.trim_end().ends_with(" loop")
+        })
         .filter_map(|line| {
             let mut words = line.split_whitespace();
             let _ = words.find(|word| *word == "age")?;
@@ -197,7 +202,7 @@ fn judge(arch: Arch, lines: &[String]) -> Result<()> {
             ages.last().copied().map_or("-".to_owned(), millis),
         );
     };
-    tell("stamp to hyprix's write", &written);
+    tell("stamp to the input thread's write", &written);
     tell("stamp to vlock's arrival", &arrived);
     println!("  {arch}: written by the input thread: {lane}; frames held {HOLD_MS} ms");
     if arrived.len() < FEWEST {
@@ -242,6 +247,7 @@ mod tests {
             "vlock: motion 1 stamp 5 age 900 unlocked",
             "vlock: motion 2 stamp 5 age 300",
             "  12.0 | hyprix: input-age stamp 5 age 70 lane",
+            "  12.0 | hyprix: input-age stamp 4 age 90000 loop",
             "vlock: motion 3 stamp 5 age 100",
         ]);
         assert_eq!(ages(&said, "vlock: motion "), [100, 300]);

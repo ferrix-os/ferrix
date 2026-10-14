@@ -9,6 +9,8 @@ const SKIPPED: u8 = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Event {
     arrival: u64,
+    /// Its X time.
+    xtime: u32,
     /// The msc of the last completion before it arrived.
     msc_before: Option<u64>,
     shown: bool,
@@ -32,6 +34,8 @@ pub(crate) struct Shown {
     pub(crate) ust: u64,
     pub(crate) msc: u64,
     pub(crate) frames: Option<u64>,
+    /// The event's X time, in the server's milliseconds.
+    pub(crate) xtime: Option<u32>,
 }
 
 impl Shown {
@@ -44,8 +48,9 @@ impl Shown {
     /// The line the probe prints for it.
     pub(crate) fn line(&self) -> String {
         let frames = self.frames.map_or("-".to_owned(), |n| n.to_string());
+        let xtime = self.xtime.map_or("-".to_owned(), |n| n.to_string());
         format!(
-            "xlatency: shown {} arrival {} swap {} ust {} msc {} frames {} in {}",
+            "xlatency: shown {} arrival {} swap {} ust {} msc {} frames {} in {} xtime {xtime}",
             self.number,
             self.arrival,
             self.swap,
@@ -80,10 +85,11 @@ pub(crate) struct Tracker {
 }
 
 impl Tracker {
-    /// An event arrived at `now`.
-    pub(crate) fn arrive(&mut self, now: u64) {
+    /// An event with X time `xtime` arrived at `now`.
+    pub(crate) fn arrive(&mut self, now: u64, xtime: u32) {
         self.events.push(Event {
             arrival: now,
+            xtime,
             msc_before: self.last.map(|(_, msc)| msc),
             shown: false,
         });
@@ -153,6 +159,7 @@ impl Tracker {
                 ust,
                 msc,
                 frames: event.msc_before.and_then(|before| msc.checked_sub(before)),
+                xtime: Some(event.xtime),
             });
         }
         self.shown.extend_from_slice(&shown);
@@ -249,6 +256,7 @@ pub(crate) fn shown_lines(report: &str) -> Vec<Shown> {
                 ust: field("ust")?.parse().ok()?,
                 msc: field("msc")?.parse().ok()?,
                 frames: field("frames").and_then(|n| n.parse().ok()),
+                xtime: field("xtime").and_then(|n| n.parse().ok()),
             })
         })
         .collect()
@@ -336,7 +344,7 @@ mod tests {
         let mut tracker = Tracker::default();
         tracker.presented(1, 0, 1_000);
         assert!(tracker.complete(1, 0, 16_000, 100).is_empty());
-        tracker.arrive(20_000_000);
+        tracker.arrive(20_000_000, 20);
         // The frame in flight was drawn before it, and shows nothing new.
         tracker.presented(2, 0, 19_000_000);
         assert!(tracker.complete(2, 0, 32_667, 101).is_empty());
@@ -355,7 +363,7 @@ mod tests {
     #[test]
     fn a_delay_holds_an_event_out_of_the_next_frame_and_a_skip_shows_nothing() {
         let mut tracker = Tracker::default();
-        tracker.arrive(10_000_000);
+        tracker.arrive(10_000_000, 10);
         assert_eq!(tracker.applied(20_000_000, 16_700_000), 0);
         assert_eq!(tracker.applied(26_700_000, 16_700_000), 1);
         tracker.presented(7, 1, 27_000_000);
@@ -368,7 +376,7 @@ mod tests {
         let mut tracker = Tracker::default();
         tracker.presented(1, 0, 0);
         let _ = tracker.complete(1, 0, 1_000, 10);
-        tracker.arrive(3_000_000);
+        tracker.arrive(3_000_000, 3);
         tracker.presented(2, 1, 4_000_000);
         let report: String = tracker
             .complete(2, 0, 21_000, 12)
@@ -377,7 +385,8 @@ mod tests {
             .collect();
         assert_eq!(
             report,
-            "xlatency: shown 1 arrival 3000000 swap 4000000 ust 21000 msc 12 frames 2 in 18.000\n"
+            "xlatency: shown 1 arrival 3000000 swap 4000000 ust 21000 msc 12 frames 2 in 18.000 \
+             xtime 3\n"
         );
         assert_eq!(shown_lines(&report), tracker.shown);
         let log = "vptr: send 1 2500000\nvptr: send 2 900000000\n";
@@ -402,6 +411,7 @@ mod tests {
             ust: 0,
             msc: 0,
             frames: None,
+            xtime: None,
         };
         let shown = [event(350), event(351), event(352)];
         let (paired, by, repeated) = pairs(&[100, 200, 300], &shown);

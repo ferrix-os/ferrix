@@ -15,6 +15,16 @@
 //! It passes when every motion was shown and the median frame count is one
 //! to [`MOST_FRAMES`]. A Present whose `msc` never advances shows no motion
 //! after the first frame, and the gate says so.
+//!
+//! **Per hop** (stage 24's I1, `docs/GAME-PATH.md` §4.7): the input core
+//! stamps each tablet report, hyprix sends the stamp on as the relative
+//! motion's time and says how old the input was when it sent it
+//! (`HYPRIX_INPUT_AGES`), yserver gives the X event the stamp's time and
+//! says how old it was when it handed it to X (`YSERVER_INPUT_AGES`), and
+//! the probe's line for each event carries its X time. [`hops`] joins the
+//! three on the stamp and the X time and gives each hop's age. A yserver
+//! that does not take the stamp gives no lines to join, which is said and
+//! is not a failure.
 
 use std::time::{Duration, Instant};
 
@@ -65,7 +75,8 @@ done
 wait $probe
 /bin/xlatency summarize /tmp/sends.txt /tmp/probe.txt 2>&1
 grep -E 'xlatency: (summary|no completion|failed|X error)' /tmp/probe.txt | sed 's/^xlatency: /xlatency: in-guest /'
-grep -v ' 0x[0-9a-f]* - ' /tmp/yserver.log | tail -n 25 | sed 's/^/xlatency: yserver: /'
+grep -v ' 0x[0-9a-f]* - ' /tmp/yserver.log | grep -v 'input-age' | tail -n 25 | sed 's/^/xlatency: yserver: /'
+grep 'input-age stamp' /tmp/yserver.log | sed 's/^.*input-age/xlatency: yserver-age: input-age/'
 echo "xlatency: end"
 "#;
 
@@ -82,10 +93,20 @@ fn tablet(at: usize, across: usize) -> i32 {
     i32::try_from(at * 0x7FFF / across).unwrap_or(0)
 }
 
+/// The compositor's unit, saying each input's age as it passes.
+const AGES_DROP_IN: &str = "# Carried by `cargo xtask test-xlatency`.\n\
+    [Service]\n\
+    Environment=HYPRIX_INPUT_AGES=1\n";
+
 /// What the image carries besides the programs: yserver's start, the
-/// script, the probe and the injector.
+/// script, the probe and the injector, and the compositor's ages.
 fn ports(arch: Arch) -> Result<Vec<crate::ports::File>> {
     let mut ports = crate::yserver::desktop_files(&[]);
+    ports.push(crate::ports::File {
+        path: "etc/ferrix/units/hyprix.service.d/ages.conf".to_owned(),
+        mode: 0o644,
+        content: crate::ports::Content::Bytes(AGES_DROP_IN.as_bytes().to_vec()),
+    });
     ports.push(crate::ports::File {
         path: SCRIPT_PATH.to_owned(),
         mode: 0o644,
@@ -171,6 +192,7 @@ pub(crate) fn test_xlatency(args: &Args) -> Result<()> {
     };
     let config = format!(
         "# Carried into the initramfs by `cargo xtask test-xlatency`.\n{}\
+         env = YSERVER_INPUT_AGES,1\n\
          {}exec-once = /bin/busybox sh /{SCRIPT_PATH}\n",
         crate::chrome::WINDOW_ENV,
         crate::yserver::desktop_config(),
@@ -248,6 +270,7 @@ fn judge(arch: Arch, lines: &[String], timed: &[Option<Duration>]) -> Result<()>
     }) {
         println!("  {arch}: {}", line.trim());
     }
+    println!("  {arch}: {}", hops(lines));
     let mut host: Vec<Duration> = timed.iter().flatten().copied().collect();
     host.sort_unstable();
     let mut frames: Vec<u64> = frames_shown(lines).into_iter().flatten().collect();
@@ -297,9 +320,122 @@ fn judge(arch: Arch, lines: &[String], timed: &[Option<Duration>]) -> Result<()>
     }
 }
 
+/// The number after `word` in `line`.
+fn after(line: &str, word: &str) -> Option<u64> {
+    let mut words = line.split_whitespace();
+    let _ = words.find(|found| *found == word)?;
+    words.next()?.parse().ok()
+}
+
+/// The median and 99th percentile of `values`, microseconds, in
+/// milliseconds.
+fn spread(mut values: Vec<u64>) -> String {
+    values.sort_unstable();
+    let at = |p: usize| {
+        let index = (values.len() * p).div_ceil(100).max(1) - 1;
+        values.get(index).map_or("-".to_owned(), |micros| {
+            format!("{:.3}", *micros as f64 / 1000.0)
+        })
+    };
+    format!("{} / {}", at(50), at(99))
+}
+
+/// Each input's age hop by hop, for the motions xtask sent (the lines
+/// before the injector's phase): from the input core's stamp to hyprix's
+/// write, on to yserver's hand-over to X, on to the probe's arrival, and on
+/// to the scan-out that showed it; and the whole from the stamp. Joined on
+/// the stamp (hyprix's and yserver's lines) and on the X time (yserver's
+/// and the probe's).
+fn hops(lines: &[String]) -> String {
+    use std::collections::BTreeMap;
+    let hyprix: BTreeMap<u64, u64> = lines
+        .iter()
+        .filter(|line| line.contains("hyprix: input-age stamp"))
+        .filter_map(|line| Some((after(line, "stamp")?, after(line, "age")?)))
+        .collect();
+    let yserver: BTreeMap<u64, (u64, u64)> = lines
+        .iter()
+        .filter(|line| line.contains("xlatency: yserver-age: input-age stamp"))
+        .filter_map(|line| {
+            Some((
+                after(line, "xtime")?,
+                (after(line, "stamp")?, after(line, "age")?),
+            ))
+        })
+        .collect();
+    let mut legs: [Vec<u64>; 5] = Default::default();
+    for line in lines
+        .iter()
+        .take_while(|line| !line.contains("xlatency: injector"))
+        .filter(|line| line.contains("xlatency: shown "))
+    {
+        let (Some(xtime), Some(arrival), Some(ust)) = (
+            after(line, "xtime"),
+            after(line, "arrival"),
+            after(line, "ust"),
+        ) else {
+            continue;
+        };
+        let Some(&(stamp, at_yserver)) = yserver.get(&xtime) else {
+            continue;
+        };
+        let Some(&at_hyprix) = hyprix.get(&stamp) else {
+            continue;
+        };
+        let arrival = arrival / 1000;
+        let [to_hyprix, to_yserver, to_probe, to_scanout, whole] = &mut legs;
+        to_hyprix.push(at_hyprix);
+        to_yserver.push(at_yserver.saturating_sub(at_hyprix));
+        to_probe.push(arrival.saturating_sub(stamp).saturating_sub(at_yserver));
+        to_scanout.push(ust.saturating_sub(arrival));
+        whole.push(ust.saturating_sub(stamp));
+    }
+    if legs[0].is_empty() {
+        return format!(
+            "per hop: no motion paired ({} hyprix and {} yserver age lines; a yserver that \
+             does not take the input's stamp gives none)",
+            hyprix.len(),
+            yserver.len()
+        );
+    }
+    let [to_hyprix, to_yserver, to_probe, to_scanout, whole] = legs;
+    format!(
+        "per hop, median / 99th ms, {} motions: stamp to hyprix {}, to yserver {}, to the \
+         probe {}, to the scan-out {}; stamp to scan-out {}",
+        whole.len(),
+        spread(to_hyprix),
+        spread(to_yserver),
+        spread(to_probe),
+        spread(to_scanout),
+        spread(whole)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hops_join_the_three_logs_on_the_stamp_and_the_x_time() {
+        let lines: Vec<String> = [
+            "  10.0 | hyprix: input-age stamp 1000000 age 300 loop",
+            "xlatency: yserver-age: input-age stamp 1000000 xtime 77 age 1300",
+            "xlatency: shown 1 arrival 1002000000 swap 6 ust 1020000 msc 4 frames 2 in 1.000 \
+             xtime 77",
+            "xlatency: shown 2 arrival 5 swap 6 ust 7 msc 4 frames 2 in 1.000 xtime 99",
+            "xlatency: injector",
+        ]
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect();
+        assert_eq!(
+            hops(&lines),
+            "per hop, median / 99th ms, 1 motions: stamp to hyprix 0.300 / 0.300, to yserver \
+             1.000 / 1.000, to the probe 0.700 / 0.700, to the scan-out 18.000 / 18.000; stamp \
+             to scan-out 20.000 / 20.000"
+        );
+        assert!(hops(&lines[3..]).starts_with("per hop: no motion paired"));
+    }
 
     #[test]
     fn frames_are_read_from_the_probes_lines_before_the_injector() {
