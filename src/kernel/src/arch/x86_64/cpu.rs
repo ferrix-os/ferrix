@@ -1708,3 +1708,45 @@ fn clflush_line() -> u64 {
     CLFLUSH_LINE.store(line, Ordering::Relaxed);
     line
 }
+
+/// `CR4.MCE` — an uncorrectable hardware error is taken as the machine
+/// check, vector 18. With it clear the processor does not take the
+/// exception: it shuts down, which on most machines is a reset with no
+/// report, and an Intel machine-check broadcast takes every processor there
+/// at once.
+pub(crate) const CR4_MCE: u64 = 1 << 6;
+
+/// Whether the processor has the machine-check exception:
+/// `CPUID.(EAX=1):EDX` bit 7, without which `CR4.MCE` is nothing to set.
+pub(crate) fn has_machine_check() -> bool {
+    core::arch::x86_64::__cpuid(1).edx & (1 << 7) != 0
+}
+
+/// Whether `CR4.MCE` reads set on this processor.
+pub(crate) fn machine_check_enabled() -> bool {
+    read_cr4() & CR4_MCE != 0
+}
+
+/// Set `CR4.MCE` on this processor, whatever firmware left there, and say
+/// whether it reads set (F-73).
+///
+/// The kernel's own decision on every processor, never the firmware's: the
+/// loader keeps the `CR4` boot services ran with, and a secondary starts
+/// from a copy of the boot processor's with this bit taken out
+/// (`smp::CpuStarter::new`). Each processor sets it once its own IDT and
+/// its own TSS are loaded, so that the machine check's gate and its
+/// interrupt stack (`gdt::MACHINE_CHECK_IST`) are both there to take it,
+/// and before any program runs there. The paranoid entry then stops the
+/// machine as FX-9005 (`paranoid::ferrix_paranoid_entry`).
+///
+/// False on a processor without the exception, where the bit stays clear.
+pub(crate) fn enable_machine_check() -> bool {
+    if !has_machine_check() {
+        return false;
+    }
+    // SAFETY: (SYSREG) CPUID reported the machine-check exception, so the
+    // bit is defined, and this processor's IDT and TSS are loaded: its gate
+    // and its interrupt stack are there to take one.
+    unsafe { write_cr4(read_cr4() | CR4_MCE) };
+    machine_check_enabled()
+}

@@ -97,6 +97,27 @@ const IMAGE_ROW: &[&str] = &[
     "test-boot --arch armv7a --smp 2",
 ];
 
+/// The machine-check row (F-73): a machine check injected into every
+/// processor must stop the kernel as FX-9005, under both accelerators.
+const TEST_MCE: &[&str] = &[
+    "test-mce --arch x86_64 --accel kvm",
+    "test-mce --arch x86_64 --accel tcg",
+];
+
+/// Whether a change to `path` reaches the machine check: x86-64's `CR4`
+/// setup, its paranoid entry and their check, the trap gates and the
+/// secondaries' start (`docs/BACKLOG.md`, *What a landing runs*).
+fn reaches_machine_check(path: &str) -> bool {
+    [
+        "src/kernel/src/arch/x86_64/cpu.rs",
+        "src/kernel/src/arch/x86_64/paranoid.rs",
+        "src/kernel/src/arch/x86_64/paranoid/check.rs",
+        "src/kernel/src/arch/x86_64/trap.rs",
+        "src/kernel/src/arch/x86_64/smp.rs",
+    ]
+    .contains(&path)
+}
+
 /// Whether `path` is documentation only: under `docs/`, or a Markdown file
 /// at the top of the tree.
 fn is_docs(path: &str) -> bool {
@@ -191,6 +212,10 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     {
         rows.add(IMAGE_ROW);
         reason(rows, "in the image: the image row");
+        if reaches_machine_check(path) {
+            rows.add(TEST_MCE);
+            reason(rows, "the machine check's code: test-mce under KVM and TCG");
+        }
         rows.ask(
             "stage 7 or 8? then test-shell --arch x86_64 (zinc, --init ferrousli, the musl and \
              the glibc busybox) and test-vfs --arch x86_64 (ferrousli and musl busybox)",
@@ -654,6 +679,23 @@ mod tests {
                 "docs/sysml/10-roadmap.sysml",
                 "tools/common/data/certification-item.json",
             ]
+        );
+    }
+
+    #[test]
+    fn the_machine_checks_code_adds_test_mce() {
+        let rows = rows_of(&["src/kernel/src/arch/x86_64/paranoid/check.rs"]);
+        assert!(
+            rows.commands.ends_with(
+                &TEST_MCE
+                    .iter()
+                    .map(|row| (*row).to_owned())
+                    .collect::<Vec<_>>()
+            )
+        );
+        assert_eq!(
+            rows_of(&["src/kernel/src/arch/x86_64/apic.rs"]).commands,
+            IMAGE_ROW
         );
     }
 

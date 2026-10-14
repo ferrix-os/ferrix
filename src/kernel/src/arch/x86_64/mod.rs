@@ -180,6 +180,25 @@ pub(crate) fn check_machine() -> Result<(), &'static str> {
     cpu::check::run()
 }
 
+/// The boot processor's machine check, set whatever firmware left in `CR4`
+/// once its gate and its interrupt stack are both loaded (F-73), and its boot
+/// line. Each secondary sets its own in `smp::secondary_start`, after its own
+/// tables.
+fn take_machine_check() {
+    let firmware_mce = cpu::machine_check_enabled();
+    let mce = if cpu::enable_machine_check() {
+        let _ = MACHINE_CHECK_ENABLED.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+        if firmware_mce {
+            "CR4.MCE set, as firmware had left it"
+        } else {
+            "CR4.MCE set, which firmware had left clear"
+        }
+    } else {
+        "unavailable: CPUID offers no machine-check exception, so stage 4 stops the boot"
+    };
+    crate::console::println!("  cpu      machine check: {mce}");
+}
+
 /// Install the descriptor tables and the trap handlers.
 ///
 /// Until this runs the kernel is executing on firmware's tables: a fault would
@@ -210,6 +229,9 @@ pub(crate) unsafe fn init_traps() {
         "CR0 did not take NE and MP set, EM and TS clear, so self-checks would stop the boot"
     };
     crate::console::println!("  cpu      x87 errors as #MF: {x87}");
+    // The machine check, once its gate and its interrupt stack are both
+    // loaded (F-73).
+    take_machine_check();
     // After the IDT, so that a fault this turns on is *reported* rather than
     // becoming a triple fault, and before user mode so that it covers every
     // program. Secondary processors inherit it: `smp::secondary_start` copies
@@ -2172,3 +2194,18 @@ pub(crate) const USER_KERNEL_TIME_PROGRAM: &[u8] = &[
     0x62, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x0f, 0x0b, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
     0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
 ];
+
+/// Processors on which [`cpu::enable_machine_check`] read `CR4.MCE` set at
+/// their bring-up (F-73).
+pub(crate) static MACHINE_CHECK_ENABLED: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
+
+/// Stage 4's look at the machine check on every processor: see
+/// [`paranoid::check::check_machine_check_enabled`].
+///
+/// # Errors
+///
+/// A processor on which it is not enabled.
+pub(crate) fn check_machine_check_enabled() -> Result<(), &'static str> {
+    paranoid::check::check_machine_check_enabled()
+}
