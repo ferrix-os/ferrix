@@ -503,16 +503,31 @@ pub(crate) fn window_command_on(arch: Arch, page: &str, profile: &str, nvidia: b
 /// the desktop's own window command with `profile`, the one its Chrome was
 /// started with, so a running Chrome is handed the address and opens it as
 /// a tab rather than a second browser starting on the same profile.
+///
+/// Except what is the Claude desktop app's, where the desktop has the app
+/// ([`OPENER_CLAUDE`], `docs/CLAUDE-CODE.md` §7): a `claude:` link, which
+/// claude.ai's "open in the app", an MCP server's sign-in and the app's own
+/// actions send, and its MCP bundles and skills, by their extensions, since
+/// Ferrix has no MIME database to know them by. A second start of the app
+/// hands the link to the first.
 pub(crate) fn opener(arch: Arch, profile: &str, nvidia: bool) -> crate::ports::File {
     let command = window_command_on(arch, r#""$@""#, profile, nvidia);
     crate::ports::File {
         path: "bin/xdg-open".to_owned(),
         mode: 0o755,
         content: crate::ports::Content::Bytes(
-            format!("#!/bin/sh\nexec env {WINDOW_HOME} {command}\n").into_bytes(),
+            format!("#!/bin/sh\n{OPENER_CLAUDE}exec env {WINDOW_HOME} {command}\n").into_bytes(),
         ),
     }
 }
+
+/// What [`opener`] hands the Claude desktop app rather than Chrome, when
+/// `/bin/claude-desktop` is there.
+const OPENER_CLAUDE: &str = r#"app=/bin/claude-desktop
+case "$1" in
+    claude:* | *.mcpb | *.dxt | *.skill) [ -x "$app" ] && exec "$app" "$@" ;;
+esac
+"#;
 
 /// The links the image carries into the volume `arch`'s browser is on.
 pub(crate) const fn links(arch: Arch) -> &'static [(&'static str, &'static str)] {
@@ -839,7 +854,8 @@ mod tests {
             panic!("the opener is a script");
         };
         let script = String::from_utf8(bytes).expect("UTF-8");
-        assert!(script.starts_with("#!/bin/sh\nexec env HOME=/dev/shm "));
+        assert!(script.starts_with("#!/bin/sh\n"));
+        assert!(script.contains("\nexec env HOME=/dev/shm "));
         assert!(script.contains(" --user-data-dir=/data/home/chrome "));
         let script = script.replace("/data/chrome-window/chrome", "printf '%s\\n'");
         let address = "https://claude.com/cai/oauth/authorize?code=true&scope=a+b&state=x y";
@@ -849,6 +865,63 @@ mod tests {
             .expect("sh runs");
         let printed = String::from_utf8_lossy(&output.stdout);
         assert_eq!(printed.lines().last(), Some(address), "{printed}");
+    }
+
+    /// A `claude:` link and the app's files go to the Claude desktop app
+    /// where the desktop has it, whole, and everything goes to Chrome where
+    /// it has not: run here with a script for the app that says what it was
+    /// given, and `printf` for Chrome.
+    #[test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "runs the opener with the host's `sh`, which Windows has not got"
+    )]
+    fn the_opener_hands_claude_links_to_the_app() {
+        let crate::ports::Content::Bytes(bytes) =
+            opener(Arch::X86_64, "/dev/shm/chrome", false).content
+        else {
+            panic!("the opener is a script");
+        };
+        let script = String::from_utf8(bytes)
+            .expect("UTF-8")
+            .replace("/data/chrome-window/chrome", "printf 'chrome %s\\n'");
+        let app = std::env::temp_dir().join(format!("ferrix-opener-app-{}", std::process::id()));
+        std::fs::write(&app, "#!/bin/sh\nprintf 'app %s\\n' \"$@\"\n").expect("the app's stand-in");
+        let run = |script: &str, what: &str| {
+            let output = std::process::Command::new("sh")
+                .args(["-c", script, "xdg-open", what])
+                .output()
+                .expect("sh runs");
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .last()
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let with_app = script.replace("app=/bin/claude-desktop", &format!("app={}", app.display()));
+        let _ = std::process::Command::new("chmod")
+            .arg("755")
+            .arg(&app)
+            .status();
+        let link = "claude://claude.ai/new?surface=chat&source=desktop_action";
+        assert_eq!(run(&with_app, link), format!("app {link}"));
+        assert_eq!(
+            run(&with_app, "/tmp/a bundle.mcpb"),
+            "app /tmp/a bundle.mcpb"
+        );
+        assert_eq!(
+            run(&with_app, "https://claude.ai/"),
+            "chrome https://claude.ai/"
+        );
+        // No app on the desktop: Chrome is given even its links.
+        assert_eq!(
+            run(
+                &script.replace("app=/bin/claude-desktop", "app=/nonexistent"),
+                link
+            ),
+            format!("chrome {link}")
+        );
+        let _ = std::fs::remove_file(&app);
     }
 
     #[test]

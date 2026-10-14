@@ -53,7 +53,7 @@
 //! configuration and the verdict it needs. `run` and `desktop` are the
 //! desktops a person watches; `browser`, `apps`, `bench`, `steam_window` and
 //! `steam_store` are the other commands that boot the compositor, as are
-//! `endfield`, `frames`, `unity`, `wine` and `dxvk`.
+//! `endfield`, `frames`, `unity`, `wine`, `dxvk` and `claude_desktop`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -62,6 +62,7 @@ mod apps;
 mod bench;
 mod boot;
 mod browser;
+pub(crate) mod claude_desktop;
 mod desktop;
 mod drawing;
 mod drawn_here;
@@ -95,6 +96,7 @@ pub(crate) use bench::{bench_chrome, bench_chrome_video};
 pub(crate) use boot::desktop_image;
 pub(crate) use boot::{absolute, button_event, client_image, press};
 pub(crate) use browser::{test_chrome_audio, test_chrome_window};
+pub(crate) use claude_desktop::test_claude_desktop;
 pub(crate) use drawing::test_video;
 pub(crate) use latency::test_xlatency;
 pub(crate) use run::{board_files, run_compositor};
