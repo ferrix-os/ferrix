@@ -1,6 +1,7 @@
 # Where it stands, in full
 
-*Reviewed 2026-10-09, to `main` d884add58.* The short version is on the [overview](README.md).
+*Reviewed 2026-10-09, to `main` d884add58; the stage 23 and 24 paragraphs
+2026-10-14, to `main` dc3a11a7a.* The short version is on the [overview](README.md).
 
 ## Where it stands now (2026-09-30)
 
@@ -557,7 +558,7 @@ rule, steps 4 to 6 wait for Ferrix on the machine rather than in it, the
 way the customer chose; whether ACE accepts Wine on bare-metal Linux is not
 known. Before that, Endfield's own launcher, a 64-bit Qt program with
 QtWebEngine, drew its first screen on Ferrix in Wine, fetching its news
-over the network (branch `endfield-s4`, not landed). On Ferrix, `arch_prctl` answers
+over the network. On Ferrix, `arch_prctl` answers
 `ARCH_SET_GS` since 2026-10-10, which 64-bit Wine could not start without
 (`docs/WINE.md`); its notepad is a window of hyprix's at its tile's size
 that takes typed text and the pointer since 2026-10-12, through yserver
@@ -571,8 +572,14 @@ Pipeline, starts in it and draws its walkthrough in a window of hyprix's
 through DXVK on lavapipe since 2026-10-13, at about 1.3 frames a second
 with no card (`test-unity`); Endfield's launcher reaches its server in
 Debian's Wine and, since 2026-10-14, in GE-Proton11-7's, whose install
-dialog it draws whole (`test-endfield-launcher`, `test-endfield-proton`),
-and a window of an X
+dialog it draws whole (`test-endfield-launcher`, `test-endfield-proton`;
+GE-Proton needed `mprotect` to keep a mapping shared and a write-only
+region to read, f0c812f01). Its download's certificate roots are in
+(GnuTLS and the CA bundle where Wine's `crypt32` reads them), and Wine,
+Proton and the launcher are on the `--everything` desktop as `gryphlink`
+(2026-10-14); the game's download is not done: it stopped on ENOSPC from
+Ferrix's btrfs after about 5.8 GB with about 150 GB unallocated, and is
+being worked. A window of an X
 program drawn by the card exists on unlanded branches only: on 2026-10-10
 Teeworlds drew through NVIDIA's GLX over yserver's DRI3 at 85 to 94 swaps a
 second between stalls of about 5 s, whose cause is found and whose fix is
@@ -580,10 +587,14 @@ not landed ([its page](stage-23-arknights-endfield.md)). Stage 24 is the
 game path: where a fullscreen game can be faster on Ferrix than on a stock
 Linux desktop on the same hardware, which is the time from an input to the
 picture and the evenness of frames under a background load. It is a design,
-`docs/GAME-PATH.md`, that the customer made a stage on 2026-10-10, and it is
-not started: nothing is built, and nothing is measured, on either system,
-of what its exit is judged by. Its first step is the rig that measures it
-(R1 to R5, 19 to 21 points, R1 to R3 with no card), then a first cut of 47
+`docs/GAME-PATH.md`, that the customer made a stage on 2026-10-10, and its rig is
+begun: R1, the frame recorder, and R2, the input-to-scan-out probe, landed on
+2026-10-14 (`test-frames`, `test-xlatency`), and the same binaries ran on
+Ferrix and on a Linux guest with no card; they stand on yserver's Present
+clock (pin 2966c377, eb7ad7411, which also fixed a lavapipe
+`PresentPixmap` crash). Nothing of what its exit is judged by is measured on
+the card yet. Its first step is the rig that measures it (R1 to R5, 19 to
+21 points; R3 is not yet on `main`, R4 and R5 need the card), then a first cut of 47
 points; the game domain (52) is stage 14's ground and waits on the
 customer, as eight more decisions do. Its card work stands on displayctl
 v9, yserver's dmabuf hand-over and a hardware cursor, none landed

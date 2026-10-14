@@ -767,14 +767,19 @@ package FerrixRoadmap {
              * known (docs/STEAM.md section 7). */
     }
 
-    #planned requirement <'S23'> stage23Endfield : Stage {
+    #inProgress requirement <'S23'> stage23Endfield : Stage {
         attribute :>> number = 23;
-        attribute :>> status = StageStatus::Planned;
+        attribute :>> status = StageStatus::InProgress;
         attribute :>> size = "about 205 points as a first guess, step 5 unknown";
         doc /* The Windows game Arknights: Endfield on Ferrix, through Wine
              * with DXVK on NVIDIA's Vulkan, put on the roadmap by the
-             * customer on 2026-10-10 as the road after Steam. Nothing of it
-             * is built; a feasibility study was written the same day. Eight
+             * customer on 2026-10-10 as the road after Steam. A feasibility study
+             * was written the same day; step 0 answered on 2026-10-13 (the
+             * anti-cheat refuses a virtual machine), Wine, DXVK and a Unity
+             * game run on Ferrix with no card, and Endfield's launcher draws
+             * its install dialog in Debian's Wine and in GE-Proton11-7's;
+             * the game's download stopped on ENOSPC from Ferrix's btrfs and
+             * is open. Eight
              * steps in the order they can be proved: the game on plain
              * Linux in the same VM shape, which costs no Ferrix work and
              * answers whether its anti-cheat accepts a virtual machine;
@@ -795,17 +800,18 @@ package FerrixRoadmap {
              * account, not a boot in CI. */
     }
 
-    #planned requirement <'S24'> stage24GamePath : Stage {
+    #inProgress requirement <'S24'> stage24GamePath : Stage {
         attribute :>> number = 24;
-        attribute :>> status = StageStatus::Planned;
+        attribute :>> status = StageStatus::InProgress;
         attribute :>> size = "about 68 points before the game domain, about 190 with it and the later rows";
         doc /* The game path: a fullscreen game faster on Ferrix than on a
              * stock Linux desktop on the same hardware, in the time from an
              * input to the picture that shows it and in how even the frames
              * are under a background load. docs/GAME-PATH.md is the design
              * and the build plan, written on 2026-10-10; the customer made
-             * it a stage the same day. Nothing of it is built and nothing
-             * is measured. In order: the measuring rig (R1 to R5, 19 to 21
+             * it a stage the same day. R1, the frame recorder, and R2, the
+             * latency probe, landed on 2026-10-14; nothing is measured on
+             * the card yet. In order: the measuring rig (R1 to R5, 19 to 21
              * points), the same binaries on both systems; then the first
              * cut that can be compared with Linux, 47 points: the flip's
              * time, the game lane (a fullscreen client's buffer scanned out

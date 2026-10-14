@@ -71,6 +71,24 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   does not publish (2026-10-08, test images only: `docs/DEVMGR.md` §4.1).
 - **Pixel 7:** boots natively on all eight cores, runs the desktop in a VM,
   and streams its log over USB.
+- **Stage 23 (Arknights: Endfield):** the road from Steam to a Windows game
+  through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the
+  customer on 2026-10-10; about 205 points as a first guess. Step 0 answered
+  on 2026-10-13: the game's anti-cheat refuses to run in a virtual machine,
+  so steps 4 to 6 wait for Ferrix on the machine. Wine starts on Ferrix,
+  Direct3D 11 draws through DXVK and a Unity game starts in it, with no card,
+  and Endfield's launcher draws its install dialog in Debian's Wine and in
+  GE-Proton11-7's (2026-10-14); the game's download stopped on ENOSPC from
+  Ferrix's btrfs and is being worked, and the GPU steps stand on stage 21's
+  unlanded branches ([its page](stage-23-arknights-endfield.md)).
+- **Stage 24 (the game path):** where a fullscreen game can be faster on
+  Ferrix than on a stock Linux desktop: input to scan-out, and even frames
+  under a background load. A design (`docs/GAME-PATH.md`) the customer made a
+  stage on 2026-10-10; its rig's R1, the frame recorder, and R2, the latency
+  probe, landed on 2026-10-14, and nothing is measured on the card yet. About
+  68 points before the game domain; the game domain (52) is stage 14's
+  ground and an open decision, as eight more are. It stands on stage 21's
+  unlanded zero-copy work ([its page](stage-24-game-path.md)).
 
 **Next:** cutting test and gate run time, the customer's priority one
 (`docs/TEST-TIME.md`), then Steam's workarounds and the namespaces under
@@ -80,21 +98,6 @@ them; what is red, parked and waiting is in
 **Not started**
 
 - Stage 14 (real-time).
-- **Stage 23 (Arknights: Endfield):** the road from Steam to a Windows game
-  through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the
-  customer on 2026-10-10. Eight steps, about 205 points as a first guess. The
-  first costs no Ferrix work and can end the stage: the game on plain Linux
-  in the same VM shape, to learn whether its anti-cheat accepts a virtual
-  machine. It waits on the customer for an account and about 110 GB of disk,
-  and its GPU steps stand on stage 21's unlanded branches
-  ([its page](stage-23-arknights-endfield.md)).
-- **Stage 24 (the game path):** where a fullscreen game can be faster on
-  Ferrix than on a stock Linux desktop: input to scan-out, and even frames
-  under a background load. A design (`docs/GAME-PATH.md`) the customer made a
-  stage on 2026-10-10; nothing is built or measured. About 68 points before
-  the game domain, the measuring rig first; the game domain (52) is stage
-  14's ground and an open decision, as eight more are. It stands on stage
-  21's unlanded zero-copy work ([its page](stage-24-game-path.md)).
 
 **Under way, but outside the list above:** stage 21, NVIDIA's own driver on the
 RTX 3060 (`docs/NVIDIA.md`): N0, the kernel prerequisites, and N1, the GSP
@@ -162,8 +165,8 @@ single file across.
 | 20 | [Self-hosting](stage-20-self-hosting.md) | ◐ in progress |  |
 | 21 | [Bare metal, and a GPU of Ferrix's own](stage-21-bare-metal-gpu-ferrix.md) | ◐ in progress | unsized, over 100 points |
 | 22 | [Steam](stage-22-steam.md) | ◐ in progress | unsized, over 300 points |
-| 23 | [Arknights: Endfield](stage-23-arknights-endfield.md) | ○ not started | ≈ 205 points as a first guess, step 5 unknown |
-| 24 | [The game path](stage-24-game-path.md) | ○ not started | ≈ 68 points before the game domain, about 190 with it and the later rows |
+| 23 | [Arknights: Endfield](stage-23-arknights-endfield.md) | ◐ in progress | ≈ 205 points as a first guess, step 5 unknown |
+| 24 | [The game path](stage-24-game-path.md) | ◐ in progress | ≈ 68 points before the game domain, about 190 with it and the later rows |
 |  | [Microkernel M0 — the build flags, the baselines, the checks](microkernel-m0.md) |  | ≈ 45–60 points |
 |  | [Written ahead of their stage](written-ahead.md) |  |  |
 |  | [Continuously, from stage 1](continuously.md) |  |  |
