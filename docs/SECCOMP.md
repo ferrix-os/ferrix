@@ -926,7 +926,25 @@ attached to nobody, in rounds:
 
 A round is made again only after another thread of the same process changed
 its own seccomp state or made a thread between steps 1 and 3; the calling
-thread pays for that, preemptibly, and nothing else waits on it. Under the
+thread pays for that, preemptibly, and nothing else waits on it. **Rounds
+end** (the consultant's condition 3, 2026-10-14):
+* a round given up because another thread attached a filter of its own or
+  entered strict mode is followed by one whose step 2 fails on that thread
+  and answers its id, since its chain is no longer an ancestor of the
+  caller's, or it is strict;
+* a thread made between the two looks copied a chain that is the caller's,
+  none, or one step 2 tested, and is let through without a round more;
+* so the one change that gives a round up and lets the next go on is
+  another thread's completed `TSYNC`, which replaces the caller's chain with
+  a longer one. Each adds a filter to a chain capped by
+  `MAX_INSNS_PER_PATH` at 6,554 filters, so at most that many rounds are
+  given up for it before an install is refused `ENOMEM`.
+
+**A killed thread fails the sync.** Step 2 refuses a thread its own filter
+marked `Dead` and answers that thread's id, where Linux's
+`seccomp_can_sync_threads` skips a thread that is exiting. This fails
+closed: the program is told the filter reached no thread. It predates B1's
+fix, and is a BACKLOG row. Under the
 lock a round costs, for each thread, one leaf lock and a comparison or a
 binary search: the order of listing the threads, which `Process::threads`
 does under the same lock.
