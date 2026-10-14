@@ -940,7 +940,7 @@ the row says so and gives no points.
 | # | Landing | Points | Proved by | Needs |
 |---|---|---|---|---|
 | R1 | The frame recorder: per-swap times and Present completions in the preload library, the summariser, both brought into the tree under `tools/common/` with the baseline's scripts | 5 | the same binary's record on both guests; negative control: a 50 ms sleep injected every ten seconds is counted exactly, as three missed refreshes each (at 60 Hz; at hyprix's 75 Hz 50 ms is 3.75 refreshes, three or four by the frame's own work) | nothing; no card. Built 2026-10-14 (§12) |
-| R2 | The latency probe and the injector's log: input to scan-out on both systems | 5 | the probe on both; control: a 16.7 ms delay added in the probe moves the median by one refresh; a gate without the card (`test-xwindow`'s boot, counting *frames* from injection to the frame that shows it) | nothing; no card. **Built 2026-10-14.** The probe is `xlatency`, a static X client in the compositor's workspace speaking X11 itself (raw motion on the root, one frame in flight, `PresentPixmap` for the refresh after the last completion, each frame's colour the count of events it carries); the injector is `vptr` there too, logging each motion's `CLOCK_MONOTONIC` send time; `xlatency summarize` pairs the two. Linux: `tools/common/test/latency-sway.sh`, headless sway 1.10 with Xwayland at 60 Hz on nazuna (measured refresh 16.3 to 16.9 ms), 211 motions paired one to one: send to scan-out median 24.3 ms, arrival to scan-out 23.2 ms, 2 refreshes; with `--delay-us 16700` 40.9 and 40.8 ms, 3 refreshes. Ferrix: `cargo xtask test-xlatency`, `test-xwindow`'s boot, 40 QMP tablet motions each timed on the host to the probe's line for its frame, then `vptr` with the probe in the guest; on R1's yserver clock (2966c377; hyprix's virtual screen at 75 Hz, 13.4 to 14.7 ms measured while drawing): host-timed median 23.9 ms, arrival to scan-out 20.6 ms, 2 refreshes, in-guest send to scan-out 23.2 ms; with the delay 44.1, 37.3 and 38.0 ms, 3 refreshes. The delay moves each median by one refresh on both, in the probe's own count. The 99th percentiles (up to 400 ms) were taken with nazuna's load at 30 to 60 and are the host's, not the systems'. The pinned yserver (1a8752e8) panics on the first `PresentPixmap` (`get_semaphore_fd_khr` on lavapipe), which R1's yserver fixes: the gate passes from that pin on |
+| R2 | The latency probe and the injector's log: input to scan-out on both systems | 5 | the probe on both; control: a 16.7 ms delay added in the probe moves the median by one refresh; a gate without the card (`test-xwindow`'s boot, counting *frames* from injection to the frame that shows it) | nothing; no card. **Built 2026-10-14.** The probe is `xlatency`, a static X client in the compositor's workspace speaking X11 itself (raw motion on the root, one frame in flight, `PresentPixmap` for the refresh after the last completion, each frame's colour the count of events it carries); the injector is `vptr` there too, logging each motion's `CLOCK_MONOTONIC` send time; `xlatency summarize` pairs the two. Linux: `tools/common/test/latency-sway.sh`, headless sway 1.10 with Xwayland at 60 Hz on nazuna (measured refresh 16.3 to 16.9 ms), 211 motions paired one to one: send to scan-out median 24.3 ms, arrival to scan-out 23.2 ms, 2 refreshes; with `--delay-us 16700` 40.9 and 40.8 ms, 3 refreshes. Ferrix: `cargo xtask test-xlatency`, `test-xwindow`'s boot, 40 QMP tablet motions each timed on the host to the probe's line for its frame, then `vptr` with the probe in the guest; on R1's yserver clock (2966c377; hyprix's virtual screen at 75 Hz, 13.4 to 14.7 ms measured while drawing): host-timed median 23.9 ms, arrival to scan-out 20.6 ms, 2 refreshes, in-guest send to scan-out 23.2 ms; with the delay 44.1, 37.3 and 38.0 ms, 3 refreshes. On the clock kept to one refresh (yserver d2bf56e2, which measures 13.334 ms; gates `yc-xlat1` and `yc-xlat2`): host-timed medians 21.8 and 22.5 ms, arrival to scan-out 20.4 and 20.3 ms, 2 refreshes, in-guest send to scan-out 19.5 and 19.2 ms. The delay moves each median by one refresh on both, in the probe's own count. The 99th percentiles (up to 400 ms) were taken with nazuna's load at 30 to 60 and are the host's, not the systems'. The pinned yserver (1a8752e8) panics on the first `PresentPixmap` (`get_semaphore_fd_khr` on lavapipe), which R1's yserver fixes: the gate passes from that pin on |
 | R3 | The load script, the launch timer, the sleep and wake-up program, and both guests defined with pinned processors and an invariant TSC | 3 | the load holds every processor at 100% on both; the clock line says TSC. **Built 2026-10-14**: §12 | nothing |
 | R4 | The baseline: M1 to M9 on both guests as they are, the system-call breakdown of §6.1, and the record written into §12 | 3 | the table, with its logs | the card (the product owner's word); the Linux guest; `nv-present` or its successor on the card |
 | R5 | The software measure checked against light, once | 3, or 5 with a built device | the two agree within the device's error on both systems | question 6 of §10 |
@@ -1220,12 +1220,39 @@ card it shows on virtio-gpu, whose flips complete at once (frames every
 5.5 ms, no refresh to count), so `frames.sh` with `HEADLESS=1` starts a
 second sway on wlroots' headless backend for the run.
 
-Open: yserver's clock (pin 2966c377) runs at hyprix's 75 Hz when nothing
-draws and follows hyprix's frame callbacks, about 16 ms apart, while
-something does, so a paced client's refresh reads 15.3 or 15.7 ms in one
-run and 13.3 to 14.0 ms in the next, and misses by msc can be the clock
-stepping between the two; it is a clock, but not yet one refresh, and the
-count by time is only as good as one refresh period.
+yserver's clock at pin 2966c377 ran at hyprix's 75 Hz when nothing drew
+and followed hyprix's frame callbacks, about 16 ms apart, while something
+did, so a paced client's refresh read 15.7 ms in one run and 13.3 to
+14.0 ms in the next, and misses by msc could be the clock stepping between
+the two. hyprix was not slow: it paces at its screen's 13.33 ms and draws
+when a commit comes, and the callbacks came when yserver's commit came,
+which was after the clock's msc by the readback and hand-over, so taking
+their times as the msc's moved each msc that much later. From d2bf56e2 the
+clock is a timer at the screen's refresh, as Xorg's `present_fake` is,
+and hyprix's frames follow it: three runs of `test-frames` on 2026-10-14
+measured 13.335 ms in all six records, and each of the nine stalls missed
+3 refreshes by msc and by time. Before and after, three runs each, both
+records of each (plain and stalled), the same binaries; an msc is the time
+between the answers to two swaps in a row over the mscs they moved:
+
+| | Before: yserver 2966c377 (gates `r1-frames-clock3`, `r1-frames-main`, `rf-frames`) | After: yserver d2bf56e2 (gates `yc-frames1` to `3`) |
+|---|---|---|
+| An msc one apart, median | 14.14 to 15.73 ms plain, 13.34 to 13.86 ms stalled | 13.335 ms in all six |
+| An msc, 1st to 99th percentile | 12.21 to 19.39 ms | 13.334 to 13.335 ms |
+| Longest msc less the shortest | 3.4 to 18.0 ms | 0.001 ms |
+| The client's frame (swap to swap), median | 13.33 to 15.72 ms | 13.29 to 13.43 ms |
+| The client's frame, 1st to 99th percentile | 10.90 to 20.01 ms | 10.47 to 16.83 ms |
+
+The client's own frame still spreads by llvmpipe's and the loaded host's
+time, which is the client's and no longer the clock's. `test-frames` now
+fails when the longest msc is more than 1% of a refresh longer than the
+shortest ("yserver's Present clock stepped"), and its control, the pin
+set back to 2966c377 on that commit's volume, fires on it (gate
+`yc2-frames-ctl`). The clock's frame-callback path is in yserver's
+`WaylandLink`, which needs a live compositor, so this gate is its test;
+the fork's own `wayland/clock.rs` tests hold the timer (one period to the
+microsecond for an hour, a client woken late and stalled measuring one
+refresh).
 The figures above are under KVM on a loaded host and say nothing of M3
 or M4 yet: that is R4, on the card. The baseline's Teeworlds scripts now
 preload `libframerec.so` and were not run (they need the card). A

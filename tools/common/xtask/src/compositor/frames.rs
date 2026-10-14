@@ -10,22 +10,25 @@
 //! serial line, and `crate::frames` reads it.
 //!
 //! It passes when yserver answered the recorder's `PresentNotifyMSC` for
-//! the swaps, its msc moves as a clock at the screen's refresh, the paced
-//! client's median frame is one refresh, and in the second run each of the
+//! the swaps, its msc moves as a clock at the screen's refresh with every
+//! msc one refresh long (within [`CLOCK_SPREAD`]), the paced client's
+//! median frame is one refresh, and in the second run each of the
 //! [`STALLS`] stalls is counted, by msc at the swap it came before, as the
 //! refreshes a stall of [`STALL_MS`] misses at the refresh measured
 //! ([`allowed`]: three at 60 Hz; three or four at hyprix's 75 Hz, where
 //! 50 ms is 3.75 refreshes), and by time within one of that. The count by
-//! time rests on one refresh period, and yserver's clock has none quite:
-//! it runs at the screen's refresh while nothing draws and follows
-//! hyprix's frame callbacks while something does, so the median step the
-//! summariser takes for the period sits between the two (13.98 ms, where
-//! the screen's is 13.33). On Xvfb and on Xwayland at a fixed refresh the
-//! two counts agree exactly.
+//! time rests on one refresh period, which yserver's clock keeps: an msc
+//! each 13.335 ms at hyprix's 74.992 Hz, drawn or not, so the summariser's
+//! period is the screen's in both runs. On Xvfb and on Xwayland at a fixed
+//! refresh the two counts agree exactly, and here too.
 //!
 //! The rootless backend gained a Present clock for this (yserver's
 //! `wayland/clock.rs`, 2966c377); before it, the msc never moved, and the
-//! gate says so.
+//! gate says so. Until d2bf56e2 the clock also took the time of each of
+//! hyprix's frame callbacks as its msc's, and hyprix draws when yserver's
+//! commit comes, after the msc began: with a client drawing each msc the
+//! clock ran at a refresh plus that latency (15.7 ms) in one run and read
+//! 13.3 to 14.0 ms in the next.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -59,6 +62,12 @@ const STALLS: usize = 3;
 /// The stall injected every ten seconds of the second run, in
 /// milliseconds.
 const STALL_MS: u64 = 50;
+
+/// How far the longest msc may be from the shortest, as a part of the
+/// refresh: a clock at one refresh has them a microsecond apart, and the one
+/// that followed hyprix's frame callbacks until yserver d2bf56e2 had them
+/// 3.4 to 18 ms apart.
+const CLOCK_SPREAD: f64 = 0.01;
 
 /// What the script prints last, whatever happened.
 const END: &str = "frames: end";
@@ -253,6 +262,17 @@ fn judge_clock(run: &str, summary: &Summary) -> Result<()> {
             summary.msc_span, summary.seconds
         )));
     }
+    if let Some((low, high)) = summary.msc_steps
+        && high - low > refresh * CLOCK_SPREAD
+    {
+        return Err(Error::new(format!(
+            "yserver's Present clock stepped: an msc of the {run} run lasted {:.3} to {:.3} ms, \
+             not one refresh of {:.3} ms\n{summary}",
+            low / 1000.0,
+            high / 1000.0,
+            refresh / 1000.0
+        )));
+    }
     if (summary.median * 1000.0 - refresh).abs() > refresh * 0.1 {
         return Err(Error::new(format!(
             "the {run} run's median frame is {:.2} ms, not a refresh: framegl was not paced\n\
@@ -375,6 +395,32 @@ mod tests {
         let frozen = judge(&transcript(3, false)).unwrap_err().to_string();
         assert!(frozen.contains("no Present clock"), "{frozen}");
         assert!(judge(&[]).is_err(), "nothing");
+    }
+
+    /// A clock whose every other msc begins 2 ms late, as one that took
+    /// the compositor's frame callbacks for its mscs did, fails.
+    #[test]
+    fn the_judge_wants_every_msc_one_refresh() {
+        let stepping: Vec<String> = transcript(3, true)
+            .into_iter()
+            .map(|line| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                match fields.as_slice() {
+                    [at, "|", frames, run, "rec:", "c", index, "n", ust, msc] => {
+                        let late = if index.parse::<u64>().unwrap() % 2 == 1 {
+                            2_000
+                        } else {
+                            0
+                        };
+                        let ust = ust.parse::<u64>().unwrap() + late;
+                        format!("  {at} | {frames} {run} rec: c {index} n {ust} {msc}")
+                    }
+                    _ => line,
+                }
+            })
+            .collect();
+        let stepped = judge(&stepping).unwrap_err().to_string();
+        assert!(stepped.contains("Present clock stepped"), "{stepped}");
     }
 
     /// 50 ms is three refreshes at 60 Hz, and three or four at 75 Hz.

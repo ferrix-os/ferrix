@@ -248,6 +248,10 @@ pub(crate) struct Summary {
     pub(crate) refresh: Option<f64>,
     /// How far the msc moved from the first answer to the last.
     pub(crate) msc_span: u64,
+    /// The shortest and the longest msc, in microseconds: between the
+    /// answers to two swaps in a row whose msc moved, the time over the
+    /// mscs moved. A clock at one refresh has them a microsecond apart.
+    pub(crate) msc_steps: Option<(f64, f64)>,
     /// Missed refreshes by msc, when the server answered.
     pub(crate) by_msc: Option<u64>,
     /// Missed refreshes by time, when the refresh is known.
@@ -313,6 +317,24 @@ fn refresh_of(record: &Record) -> Option<f64> {
     (!steps.is_empty()).then(|| rank(&steps, 0.5))
 }
 
+/// The shortest and the longest msc between the answers to two swaps in a
+/// row, in microseconds: their time apart over the mscs they moved.
+fn msc_steps_of(record: &Record) -> Option<(f64, f64)> {
+    record
+        .swaps
+        .windows(2)
+        .filter_map(|pair| {
+            let (a, b) = (pair.first()?, pair.get(1)?);
+            let (a, b) = (record.after.get(&a.index)?, record.after.get(&b.index)?);
+            let moved = b.msc.checked_sub(a.msc).filter(|&moved| moved > 0)?;
+            Some(b.ust.saturating_sub(a.ust) as f64 / moved as f64)
+        })
+        .fold(None, |range, step| match range {
+            None => Some((step, step)),
+            Some((low, high)) => Some((f64::min(low, step), f64::max(high, step))),
+        })
+}
+
 /// Summarise `record`. `refresh`, in microseconds, stands in for the one
 /// the completions give.
 ///
@@ -368,6 +390,7 @@ pub(crate) fn summarise(record: &Record, refresh: Option<f64>) -> Result<Summary
         worst,
         refresh,
         msc_span,
+        msc_steps: msc_steps_of(record),
         by_msc: (!answered.is_empty()).then_some(by_msc),
         by_time: refresh.map(|_| by_time),
         stalls,
@@ -397,10 +420,14 @@ impl std::fmt::Display for Summary {
         )?;
         writeln!(
             f,
-            "  refresh {}; missed refreshes {} by msc ({} a minute), {} by time ({} a minute)",
+            "  refresh {}, an msc {}; missed refreshes {} by msc ({} a minute), {} by time ({} a minute)",
             self.refresh.map_or_else(
                 || "unknown".to_owned(),
                 |us| format!("{:.3} ms", us / 1000.0)
+            ),
+            self.msc_steps.map_or_else(
+                || "unknown".to_owned(),
+                |(low, high)| format!("{:.3} to {:.3} ms", low / 1000.0, high / 1000.0)
             ),
             count(self.by_msc),
             rate(self.by_msc),
@@ -479,6 +506,8 @@ mod tests {
         assert!((summary.median - 16.667).abs() < 0.01);
         assert!((summary.refresh.unwrap() - 16_667.0).abs() < 1.0);
         assert_eq!(summary.msc_span, 599);
+        let (low, high) = summary.msc_steps.unwrap();
+        assert!(high - low <= 1.0, "{low} to {high}");
     }
 
     /// Three stalls of three refreshes each are counted as three misses

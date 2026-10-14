@@ -121,6 +121,19 @@ undercounts on the Linux baseline, and the summariser's count by time,
 anchored at the server's refresh, is the one to compare. The details and
 what is open are in the design's §12.
 
+**yserver's clock kept to one refresh, 2026-10-15.** At pin 2966c377 the
+clock took hyprix's frame callbacks for its mscs, and they came after each
+msc by yserver's readback and hand-over: an msc lasted 12.2 to 19.4 ms
+(1st to 99th percentile), 3.4 to 18 ms between the longest and the
+shortest in a record. From pin d2bf56e2 it is a timer at the screen's
+refresh, as Xorg's `present_fake` is: 13.334 or 13.335 ms, every msc of
+six records (gates `yc-frames1` to `3`), each of nine stalls 3 missed by
+msc and by time; R2's probe 2 refreshes, host-timed medians 21.8 and
+22.5 ms (`yc-xlat1`, `yc-xlat2`). `test-frames` fails a clock whose
+longest msc is more than 1% of a refresh longer than its shortest, and its
+control on the old pin fires (`yc2-frames-ctl`). The table is in the
+design's §12.
+
 ### Step 2: the first cut that can be compared with Linux  ·  47 points
 
 In the design's order, by gain for effort.
