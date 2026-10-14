@@ -415,10 +415,11 @@ logged into and nothing of the game was downloaded.
   Windows store) found no roots, because Wine's `crypt32` reads
   `/etc/ssl/certs/ca-certificates.crt` and the boot had the bundle only on
   `/data`. With GnuTLS on the volume and the bundle linked, the download
-  runs at about 3.4 MB/s through xtask's gateway, against 31 MB/s from the
-  host (E4.4; `docs/WINE.md` §10). Wine, Proton and the launcher are on
-  the `--everything` desktop as `gryphlink`
-  (`test-endfield-proton --everything`).
+  ran at about 3.4 MB/s through xtask's gateway, against 31 MB/s from the
+  host (E4.4; `docs/WINE.md` §10), until, after about 5.8 GB, Ferrix's
+  btrfs answered every write `ENOSPC` with some 150 GB unallocated (open).
+  Wine, Proton and the launcher are on the `--everything` desktop as
+  `gryphlink` (`test-endfield-proton --everything`).
 * *Still to do:* the image path of another process (`ptrace` and
   `/proc/<pid>/mem`, E5.2, which the launcher asks for every five seconds
   and Wine cannot give it on Ferrix); the current launcher version; and,

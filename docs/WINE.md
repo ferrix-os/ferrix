@@ -718,10 +718,22 @@ launcher's log:
   do, and the download runs. Verification stays on.
 
 With the link, the launcher downloads its 54 files (the game 1.5.3 in
-`.zip.NNN` parts). Through xtask's gateway Ferrix takes about 3.4 MB/s,
+`.zip.NNN` parts). Through xtask's gateway Ferrix took about 3.4 MB/s,
 steadily; nazuna itself fetches a part from the same CDN at 31 MB/s, so the
 gateway, not the guest, is the limit (`docs/STEAM.md` §7, stage 23's E4.4).
-At that rate the 60 GB take about five hours, then the unpacking.
+
+**Where it stopped (open).** After 36 minutes and about 5.8 GB, every
+write of the downloader failed with Windows' error 112, the disk is full
+(`FlushBufferToFile ... Can not write file with 112`, then curl's 23), and
+the launcher showed "Download Error". Wine maps `ENOSPC` to 112, so
+Ferrix's btrfs refused the writes, with about 150 GB of the volume still
+unallocated: read from the host, the image's chunk tree has the 612 8 MiB
+data chunks `mkfs.btrfs --rootdir` made, four 1 GiB data chunks Ferrix
+made, and one 1 GiB metadata chunk 3 % used. Which of the write path's
+measures (`btrfs-vfs` `rw.rs`'s reservation against `data_room`, or
+`btrfs-write`'s admission) answered `ENOSPC` is not known yet; the boot
+has no shell to ask it.
+
 
 **On the `--everything` desktop.** `run-compositor --everything` merges the
 Proton launcher volume last (`crate::everything`); where it carries
