@@ -357,6 +357,9 @@ COMMANDS:
     test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
                   one of the compositor's, by title and class and on the screen, the server started as
                   run-compositor --everything starts it (--everything: on that desktop's merged volume)
+    test-xlatency  The same boot with stage 24's latency probe: QEMU's tablet moved under xlatency, each motion timed on
+                  the host to the frame that shows it and counted in refreshes, then vptr and the probe in the guest
+                  (docs/GAME-PATH.md §2.4, R2)
     test-chrome-window  The same volume, and require Chrome in a window on the compositor, its page on the screen
     test-chrome-audio   The same window on a page playing 440 Hz, and require the tone in QEMU's wav file of the virtio-snd card
     bench-chrome  Chrome in a window, left alone, scrolled and pointed at: processor time, frames and memory per phase
@@ -1150,13 +1153,14 @@ fn driver_gate(command: &str, args: &Args) -> Result<()> {
 }
 
 /// The gates of the X server and the Windows programs on it: yserver's and
-/// Wine's (`test-yserver`, `test-xwindow`, `test-wine`), DXVK's
-/// (`test-dxvk`), Unity's Spaceship Demo (`test-unity`), and Endfield's
-/// launcher in Debian's Wine (`test-endfield-launcher`) and in GE-Proton's
-/// (`test-endfield-proton`).
+/// Wine's (`test-yserver`, `test-xwindow`, `test-wine`), stage 24's latency
+/// probe on yserver (`test-xlatency`), DXVK's (`test-dxvk`), Unity's
+/// Spaceship Demo (`test-unity`), and Endfield's launcher in Debian's Wine
+/// (`test-endfield-launcher`) and in GE-Proton's (`test-endfield-proton`).
 const WINE_GATES: &[&str] = &[
     "test-yserver",
     "test-xwindow",
+    "test-xlatency",
     "test-wine",
     "test-dxvk",
     "test-unity",
@@ -1168,7 +1172,9 @@ const WINE_GATES: &[&str] = &[
 fn wine_gate(command: &str, args: &Args) -> Result<()> {
     use compositor::endfield::{Wine, test_endfield_launcher};
     match command {
-        "test-yserver" | "test-xwindow" | "test-wine" => yserver::run(command, args),
+        "test-yserver" | "test-xwindow" | "test-xlatency" | "test-wine" => {
+            yserver::run(command, args)
+        }
         "test-dxvk" => dxvk::test_dxvk(args),
         "test-unity" => compositor::unity::test_unity(args),
         "test-endfield-launcher" => test_endfield_launcher(args, Wine::Debian),

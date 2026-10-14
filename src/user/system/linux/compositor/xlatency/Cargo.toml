@@ -1,0 +1,20 @@
+[package]
+name = "compositor-xlatency"
+description = "The input-to-scan-out probe: an X client that takes XInput2 raw motion and shows each event in the next frame it presents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "xlatency"
+path = "src/main.rs"
+
+[dependencies]
+# `clock_gettime`: arrival and swap times are CLOCK_MONOTONIC, the clock
+# Present's `ust` is in, which `Instant` does not expose.
+libc = "0.2.189"
+
+[lints]
+workspace = true

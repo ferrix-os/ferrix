@@ -195,16 +195,17 @@ pub(crate) fn volume() -> Result<std::path::PathBuf> {
     )))
 }
 
-/// `test-yserver`, `test-xwindow` or `test-wine`, whose volume is yserver's
-/// with Wine over it, by the command's name.
+/// `test-yserver`, `test-xwindow`, `test-xlatency` or `test-wine`, whose
+/// volume is yserver's with Wine over it, by the command's name.
 ///
 /// # Errors
 ///
-/// As [`test_yserver`], `crate::compositor::test_xwindow` and
-/// `crate::wine::test_wine`.
+/// As [`test_yserver`], `crate::compositor::test_xwindow`,
+/// `crate::compositor::test_xlatency` and `crate::wine::test_wine`.
 pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     match command {
         "test-xwindow" => crate::compositor::test_xwindow(args),
+        "test-xlatency" => crate::compositor::test_xlatency(args),
         "test-wine" => crate::wine::test_wine(args),
         _ => test_yserver(args),
     }

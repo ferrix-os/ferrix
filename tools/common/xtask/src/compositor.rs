@@ -71,6 +71,7 @@ pub(crate) mod endfield;
 pub(crate) mod frames;
 mod hyprlock;
 mod idle;
+mod latency;
 mod layout;
 mod machine;
 mod monitors;
@@ -92,6 +93,7 @@ pub(crate) use boot::desktop_image;
 pub(crate) use boot::{absolute, button_event, client_image, press};
 pub(crate) use browser::{test_chrome_audio, test_chrome_window};
 pub(crate) use drawing::test_video;
+pub(crate) use latency::test_xlatency;
 pub(crate) use run::{board_files, run_compositor};
 pub(crate) use steam_store::test_steam_store;
 

@@ -1,0 +1,23 @@
+[package]
+name = "compositor-vptr"
+description = "Move the pointer through zwlr_virtual_pointer_v1 as a mouse would, and log when each motion was sent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "vptr"
+path = "src/main.rs"
+
+[dependencies]
+# `clock_gettime`: the send times are CLOCK_MONOTONIC, the clock X's
+# Present reports its completions in, which `Instant` does not expose.
+libc = "0.2.189"
+compositor-protocol = { path = "../protocol" }
+compositor-socket = { path = "../socket" }
+compositor-wire = { path = "../wire" }
+
+[lints]
+workspace = true

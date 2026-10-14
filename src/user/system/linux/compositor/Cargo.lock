@@ -388,12 +388,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "compositor-vptr"
+version = "0.1.0"
+dependencies = [
+ "compositor-protocol",
+ "compositor-socket",
+ "compositor-wire",
+ "libc",
+]
+
+[[package]]
 name = "compositor-wire"
 version = "0.1.0"
 
 [[package]]
 name = "compositor-xkb"
 version = "0.1.0"
+
+[[package]]
+name = "compositor-xlatency"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "compositor-xmoveresize"

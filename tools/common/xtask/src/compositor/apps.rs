@@ -446,7 +446,7 @@ fn judge_foot(arch: Arch, said: &[String], screen: Option<&Image>, dump: &Path) 
 /// `--everything` the volume `run-compositor --everything` attaches, with
 /// yserver merged into it. Not that desktop's 3D card: QMP's `screendump`
 /// has no surface to read from `egl-headless`.
-fn xwindow_args(args: &Args) -> Result<Args> {
+pub(super) fn xwindow_args(args: &Args) -> Result<Args> {
     let mut args = args.clone();
     args.gl = false;
     args.data_image = Some(if args.everything {
