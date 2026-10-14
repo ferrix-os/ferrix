@@ -430,6 +430,12 @@ impl Seat {
         self.hold = hold;
     }
 
+    /// Where the pointer is held now: [`Self::set_hold`]'s last word.
+    #[must_use]
+    pub const fn hold(&self) -> Hold {
+        self.hold
+    }
+
     /// Whether any pointer button is held down.
     ///
     /// A drag ends when the button that began it comes up, and the drag is

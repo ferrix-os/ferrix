@@ -301,3 +301,41 @@ fn a_listener_makes_its_socket_and_takes_it_away_again() {
     assert!(!path.exists(), "a socket file left behind serves nothing");
     let _ = std::fs::remove_dir_all(&directory);
 }
+
+/// A sender on another thread writes whole messages into the connection's
+/// own queue: nothing of one lands inside the other's, and what each sent
+/// arrives in the order it sent it.
+#[test]
+fn a_sender_on_another_thread_keeps_messages_whole() {
+    let (mut a, mut b) = pair();
+    let sender = a.sender();
+    let other = std::thread::spawn(move || {
+        for _ in 0..500 {
+            sender.send(b"[sender message]").expect("sent");
+        }
+    });
+    for _ in 0..500 {
+        a.send(b"(connection message)", &[]).expect("sent");
+    }
+    other.join().expect("the sender's thread");
+    while a.has_pending_writes() {
+        let _ = b.receive();
+        a.flush().expect("flushed");
+    }
+    let mut got = Vec::new();
+    loop {
+        match b.receive() {
+            Ok(_) => {}
+            Err(RecvError::WouldBlock) => break,
+            Err(error) => panic!("reading: {error:?}"),
+        }
+    }
+    got.extend_from_slice(b.bytes());
+    let text = String::from_utf8(got).expect("text");
+    let rest = text
+        .replace("[sender message]", "")
+        .replace("(connection message)", "");
+    assert_eq!(rest, "", "a message was cut by another");
+    assert_eq!(text.matches("[sender message]").count(), 500);
+    assert_eq!(text.matches("(connection message)").count(), 500);
+}

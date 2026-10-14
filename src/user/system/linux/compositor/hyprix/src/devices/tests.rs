@@ -28,9 +28,20 @@ fn of(axes: &mut Axes, kind: u16, code: u16, value: i32) -> Option<Input> {
 /// What a read of `events` sends, as `Devices::read_ready` does it: each
 /// event, then the move left gathered.
 fn read(axes: &mut Axes, events: &[(u16, u16, i32)]) -> Vec<Input> {
+    stamped(axes, events)
+        .into_iter()
+        .map(|(input, _)| input)
+        .collect()
+}
+
+/// The same with each input's stamp, the events stamped 1, 2, 3 ... ms in
+/// turn.
+fn stamped(axes: &mut Axes, events: &[(u16, u16, i32)]) -> Vec<super::Stamped> {
     let mut out = Vec::new();
-    for &(kind, code, value) in events {
-        translate(axes, event(kind, code, value), &mut out);
+    for (&(kind, code, value), at) in events.iter().zip(1_u64..) {
+        let mut stamped = event(kind, code, value);
+        stamped.usec = at * 1_000;
+        translate(axes, stamped, &mut out);
     }
     axes.flush(&mut out);
     out
@@ -325,4 +336,46 @@ fn a_button_follows_the_move_before_it_and_precedes_the_one_after() {
             },
         ]
     );
+}
+
+/// Under a pointer lock each report is a move of its own, with its own
+/// stamp: a game sums the motions itself and is owed each one's time
+/// (`docs/GAME-PATH.md` §4.7). Without one the read's reports are one move,
+/// stamped with the last of them.
+#[test]
+fn under_a_lock_each_report_is_a_move_with_its_own_stamp() {
+    let reports = [
+        (EV_REL, REL_X, 3),
+        (EV_REL, REL_Y, -1),
+        (EV_SYN, SYN_REPORT, 0),
+        (EV_REL, REL_X, 4),
+        (EV_SYN, SYN_REPORT, 0),
+    ];
+    let mut locked = Axes {
+        per_report: true,
+        ..Axes::default()
+    };
+    assert_eq!(
+        stamped(&mut locked, &reports),
+        [
+            (Input::Motion { dx: 3.0, dy: -1.0 }, 2_000),
+            (Input::Motion { dx: 4.0, dy: 0.0 }, 4_000),
+        ]
+    );
+    let mut free = Axes::default();
+    assert_eq!(
+        stamped(&mut free, &reports),
+        [(Input::Motion { dx: 7.0, dy: -1.0 }, 4_000)]
+    );
+}
+
+/// A key carries its own report's stamp, not the move's before it.
+#[test]
+fn a_key_carries_its_own_stamp() {
+    let mut axes = Axes::default();
+    let sent = stamped(
+        &mut axes,
+        &[(EV_REL, REL_X, 1), (EV_KEY, KEY_A, 1), (EV_SYN, SYN_REPORT, 0)],
+    );
+    assert_eq!(sent.iter().map(|(_, at)| *at).collect::<Vec<_>>(), [1_000, 2_000]);
 }

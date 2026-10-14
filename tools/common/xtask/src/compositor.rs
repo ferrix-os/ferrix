@@ -71,6 +71,7 @@ pub(crate) mod endfield;
 pub(crate) mod frames;
 mod hyprlock;
 mod idle;
+mod lane;
 mod latency;
 mod layout;
 mod machine;
@@ -490,7 +491,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 42] = [
+const BOOTS: [(&str, Boot); 43] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -533,6 +534,7 @@ const BOOTS: [(&str, Boot); 42] = [
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
     ("settings", settings::test_settings),
+    ("lane", lane::test_lane),
 ];
 
 /// The boot that always skips the self-checks, whatever its place: the

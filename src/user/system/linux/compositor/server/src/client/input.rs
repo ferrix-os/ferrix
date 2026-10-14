@@ -487,32 +487,21 @@ impl Client {
     /// movements are the same number here: this compositor does not
     /// accelerate the pointer, so there is nothing for the two to differ by.
     pub fn relative_motion(&mut self, micros: u64, dx: f64, dy: f64) {
-        if self.relative_pointers.is_empty() {
-            return;
-        }
-        let pointers = self.relative_pointers.clone();
-        for id in pointers {
+        for id in self.relative_pointers.clone() {
             let _ = self.out.write(
                 id,
                 zwp_relative_pointer_v1::event::RELATIVE_MOTION,
-                &[
-                    ArgType::Uint,
-                    ArgType::Uint,
-                    ArgType::Fixed,
-                    ArgType::Fixed,
-                    ArgType::Fixed,
-                    ArgType::Fixed,
-                ],
-                &[
-                    Arg::Uint(u32::try_from(micros >> 32).unwrap_or(0)),
-                    Arg::Uint(u32::try_from(micros & 0xffff_ffff).unwrap_or(0)),
-                    Arg::Fixed(Fixed::from_f64(dx)),
-                    Arg::Fixed(Fixed::from_f64(dy)),
-                    Arg::Fixed(Fixed::from_f64(dx)),
-                    Arg::Fixed(Fixed::from_f64(dy)),
-                ],
+                RELATIVE_MOTION,
+                &relative_motion_args(micros, dx, dy),
             );
         }
+    }
+
+    /// This client's `zwp_relative_pointer_v1`s, which
+    /// [`relative_motion_message`] is for: the ones it has not destroyed.
+    #[must_use]
+    pub fn relative_pointers(&self) -> &[ObjectId] {
+        &self.relative_pointers
     }
 
     /// The constraint this client holds on `surface`, if it holds one.
@@ -570,4 +559,45 @@ impl Client {
             .values()
             .any(|held| *held == surface)
     }
+}
+
+/// `zwp_relative_pointer_v1.relative_motion`'s signature.
+const RELATIVE_MOTION: &[ArgType] = &[
+    ArgType::Uint,
+    ArgType::Uint,
+    ArgType::Fixed,
+    ArgType::Fixed,
+    ArgType::Fixed,
+    ArgType::Fixed,
+];
+
+/// Its arguments: the time in microseconds, high half first, and the
+/// distance twice, accelerated and not, which are the same here.
+fn relative_motion_args(micros: u64, dx: f64, dy: f64) -> [Arg<'static>; 6] {
+    [
+        Arg::Uint(u32::try_from(micros >> 32).unwrap_or(0)),
+        Arg::Uint(u32::try_from(micros & 0xffff_ffff).unwrap_or(0)),
+        Arg::Fixed(Fixed::from_f64(dx)),
+        Arg::Fixed(Fixed::from_f64(dy)),
+        Arg::Fixed(Fixed::from_f64(dx)),
+        Arg::Fixed(Fixed::from_f64(dy)),
+    ]
+}
+
+/// `relative_motion` to each of `pointers`, as the bytes
+/// [`Client::relative_motion`] would queue: for a compositor's input
+/// thread, which writes a locked pointer's motion to the client itself
+/// while the loop that owns the client is busy (`docs/GAME-PATH.md` §4.7).
+#[must_use]
+pub fn relative_motion_message(pointers: &[ObjectId], micros: u64, dx: f64, dy: f64) -> Vec<u8> {
+    let mut out = compositor_wire::Writer::new();
+    for id in pointers {
+        let _ = out.write(
+            *id,
+            zwp_relative_pointer_v1::event::RELATIVE_MOTION,
+            RELATIVE_MOTION,
+            &relative_motion_args(micros, dx, dy),
+        );
+    }
+    out.bytes().to_vec()
 }

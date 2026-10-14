@@ -51,7 +51,7 @@ impl Compositor<'_> {
         // its frames to its plane, or back, owes a frame that draws it or
         // takes it away.
         let pointer = (self.lock.is_none()
-            && self.devices.has_pointer()
+            && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
             at: (0, 0),
@@ -174,6 +174,11 @@ impl Compositor<'_> {
         // wait.
         for slot in &mut self.slots {
             let _ = slot.flush();
+        }
+        // `HYPRIX_HOLD_FRAME_MS`: a frame that long, for the boot that
+        // moves the mouse while one is drawn (`crate::front`).
+        if let Some(hold) = self.devices.hold() {
+            std::thread::sleep(hold);
         }
         // A frame a monitor: each screen draws the workspace it shows,
         // with the windows' rectangles moved into its own pixels.
@@ -471,7 +476,7 @@ impl Compositor<'_> {
         let cursor = (!dark
             && !screen.plane.on
             && self.lock.is_none()
-            && self.devices.has_pointer()
+            && self.devices.devices().has_pointer()
             && self.seat.pointer_used())
         .then(|| crate::frame::Cursor {
             at: with.cursor_at,

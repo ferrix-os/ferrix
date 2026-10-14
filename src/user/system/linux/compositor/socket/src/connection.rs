@@ -3,6 +3,7 @@
 use std::io;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex};
 
 use compositor_wire::Fd;
 
@@ -45,7 +46,9 @@ pub enum SendError {
 /// and the descriptors not yet claimed.
 #[derive(Debug)]
 pub struct Connection {
-    stream: UnixStream,
+    /// The socket and what is queued for it, shared with every [`Sender`]
+    /// made from this connection.
+    shared: Arc<Shared>,
     /// Bytes read and not yet consumed by whole messages.
     incoming: Vec<u8>,
     /// Descriptors that arrived and have not been claimed by an `fd`
@@ -53,11 +56,135 @@ pub struct Connection {
     /// connection is dropped rather than leaked for the life of the
     /// compositor.
     descriptors: Vec<OwnedFd>,
+}
+
+/// The socket and its queue, which a [`Sender`] on another thread writes
+/// through too.
+#[derive(Debug)]
+struct Shared {
+    stream: UnixStream,
+    queue: Mutex<Queue>,
+}
+
+/// What is queued to send.
+#[derive(Debug, Default)]
+struct Queue {
     /// Bytes queued to send that the socket would not take.
-    outgoing: Vec<u8>,
+    bytes: Vec<u8>,
     /// Descriptors queued with them, to go with the next write. Copies, so
     /// the caller may close its own as soon as `send` returns.
-    outgoing_fds: Vec<OwnedFd>,
+    fds: Vec<OwnedFd>,
+}
+
+/// A second way to write to a connection, from another thread: whole
+/// messages, without descriptors, into the same queue as the connection's
+/// own, under the same lock (stage 24's input thread, `docs/GAME-PATH.md`
+/// §4.7).
+///
+/// A message is appended whole while the lock is held, and the queue is
+/// written from its front, so a sender's message never lands inside one of
+/// the connection's, nor one of the connection's inside a sender's. Which
+/// objects it may name is the caller's to keep right: the queue only keeps
+/// the bytes in order.
+#[derive(Debug, Clone)]
+pub struct Sender(Arc<Shared>);
+
+impl Sender {
+    /// Queue one or more whole messages, and write what the socket will
+    /// take.
+    ///
+    /// # Errors
+    ///
+    /// As [`Connection::send`].
+    pub fn send(&self, bytes: &[u8]) -> Result<(), SendError> {
+        let mut queue = self.0.lock();
+        queue.bytes.extend_from_slice(bytes);
+        self.0.flush(&mut queue)
+    }
+}
+
+impl Shared {
+    /// The queue. A thread that panicked while holding it left whole
+    /// messages or none, so its queue is still good to write.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Queue> {
+        self.queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Write what the socket will take of `queue`.
+    fn flush(&self, queue: &mut Queue) -> Result<(), SendError> {
+        while !queue.bytes.is_empty() {
+            let count = queue.fds.len().min(MAX_FDS_IN);
+            let fds: Vec<Fd> = queue
+                .fds
+                .iter()
+                .take(count)
+                .map(|fd| Fd(fd.as_raw_fd()))
+                .collect();
+            let Some(wrote) = self.write_once(&queue.bytes, &fds)? else {
+                break;
+            };
+            let _ = queue.bytes.drain(..wrote.min(queue.bytes.len()));
+            if wrote > 0 {
+                // In flight with the write, the kernel holding its own
+                // reference: the queue's copies can go.
+                drop(queue.fds.drain(..count));
+            }
+        }
+        if queue.bytes.len() > MAX_QUEUED {
+            return Err(SendError::Overflow(queue.bytes.len()));
+        }
+        Ok(())
+    }
+
+    /// One `sendmsg` of `bytes`, with `fds` beside it.
+    ///
+    /// `None` when the socket is full; `Some(0)` when the call was
+    /// interrupted and is to be made again.
+    fn write_once(&self, bytes: &[u8], fds: &[Fd]) -> Result<Option<usize>, SendError> {
+        let mut control = [0u8; control_bytes()];
+        let mut iov = libc::iovec {
+            iov_base: bytes.as_ptr().cast_mut().cast(),
+            iov_len: bytes.len(),
+        };
+        // SAFETY: as in `receive`.
+        let mut message: libc::msghdr = unsafe { core::mem::zeroed() };
+        message.msg_iov = &raw mut iov;
+        message.msg_iovlen = 1;
+        let count = fds.len().min(MAX_FDS_IN);
+        if count > 0 {
+            message.msg_control = control.as_mut_ptr().cast();
+            message.msg_controllen = cmsg_space(count) as _;
+            if let Some(header) = first_header(&message) {
+                write_rights(header, fds.get(..count).unwrap_or(&[]));
+            }
+        }
+
+        #[expect(
+            unsafe_code,
+            reason = "AUDIT: sendmsg is not in std with control messages; every pointer in the msghdr is to a local buffer whose length is given beside it"
+        )]
+        // SAFETY: as in `receive`; `MSG_NOSIGNAL` keeps a closed client from
+        // killing the compositor with SIGPIPE.
+        let wrote = unsafe {
+            libc::sendmsg(
+                self.stream.as_raw_fd(),
+                &raw const message,
+                libc::MSG_NOSIGNAL,
+            )
+        };
+        if wrote < 0 {
+            let error = io::Error::last_os_error();
+            return match error.kind() {
+                io::ErrorKind::WouldBlock => Ok(None),
+                io::ErrorKind::Interrupted => Ok(Some(0)),
+                _ => Err(SendError::Io(error)),
+            };
+        }
+        Ok(Some(usize::try_from(wrote).unwrap_or(0)))
+    }
+
 }
 
 impl Connection {
@@ -65,18 +192,26 @@ impl Connection {
     pub fn new(stream: UnixStream) -> io::Result<Self> {
         stream.set_nonblocking(true)?;
         Ok(Self {
-            stream,
+            shared: Arc::new(Shared {
+                stream,
+                queue: Mutex::new(Queue::default()),
+            }),
             incoming: Vec::new(),
             descriptors: Vec::new(),
-            outgoing: Vec::new(),
-            outgoing_fds: Vec::new(),
         })
+    }
+
+    /// A [`Sender`] that writes into this connection's queue from another
+    /// thread. It keeps the socket open while it lives.
+    #[must_use]
+    pub fn sender(&self) -> Sender {
+        Sender(Arc::clone(&self.shared))
     }
 
     /// The descriptor to wait on.
     #[must_use]
     pub fn as_raw_fd(&self) -> i32 {
-        self.stream.as_raw_fd()
+        self.shared.stream.as_raw_fd()
     }
 
     /// The process on the other end, or 0 where the kernel would not say.
@@ -105,7 +240,7 @@ impl Connection {
         // `length` is its own size; `getsockopt` writes no more than that.
         let asked = unsafe {
             libc::getsockopt(
-                self.stream.as_raw_fd(),
+                self.shared.stream.as_raw_fd(),
                 libc::SOL_SOCKET,
                 libc::SO_PEERCRED,
                 (&raw mut peer).cast(),
@@ -134,7 +269,7 @@ impl Connection {
     /// Whether anything is waiting to be written.
     #[must_use]
     pub fn has_pending_writes(&self) -> bool {
-        !self.outgoing.is_empty()
+        !self.shared.lock().bytes.is_empty()
     }
 
     /// Read whatever has arrived into the buffers.
@@ -163,7 +298,7 @@ impl Connection {
         // SAFETY: `message` points at `iov` and `control`, both live for this
         // call, and each length is that buffer's own. The socket is valid for
         // as long as `self`.
-        let read = unsafe { libc::recvmsg(self.stream.as_raw_fd(), &raw mut message, 0) };
+        let read = unsafe { libc::recvmsg(self.shared.stream.as_raw_fd(), &raw mut message, 0) };
         if read < 0 {
             let error = io::Error::last_os_error();
             return match error.kind() {
@@ -219,12 +354,13 @@ impl Connection {
     /// waiting, and [`SendError::Io`] when the socket failed or a descriptor
     /// could not be copied.
     pub fn send(&mut self, bytes: &[u8], fds: &[Fd]) -> Result<(), SendError> {
+        let mut queue = self.shared.lock();
         for fd in fds {
             let copy = borrow(fd.0).try_clone_to_owned().map_err(SendError::Io)?;
-            self.outgoing_fds.push(copy);
+            queue.fds.push(copy);
         }
-        self.outgoing.extend_from_slice(bytes);
-        self.flush()
+        queue.bytes.extend_from_slice(bytes);
+        self.shared.flush(&mut queue)
     }
 
     /// Write what the socket will take of what is queued.
@@ -233,75 +369,8 @@ impl Connection {
     ///
     /// As [`Connection::send`].
     pub fn flush(&mut self) -> Result<(), SendError> {
-        while !self.outgoing.is_empty() {
-            let count = self.outgoing_fds.len().min(MAX_FDS_IN);
-            let fds: Vec<Fd> = self
-                .outgoing_fds
-                .iter()
-                .take(count)
-                .map(|fd| Fd(fd.as_raw_fd()))
-                .collect();
-            let Some(wrote) = self.write_once(&fds)? else {
-                break;
-            };
-            let _ = self.outgoing.drain(..wrote.min(self.outgoing.len()));
-            if wrote > 0 {
-                // In flight with the write, the kernel holding its own
-                // reference: the queue's copies can go.
-                drop(self.outgoing_fds.drain(..count));
-            }
-        }
-        if self.outgoing.len() > MAX_QUEUED {
-            return Err(SendError::Overflow(self.outgoing.len()));
-        }
-        Ok(())
-    }
-
-    /// One `sendmsg` of what is queued, with `fds` beside it.
-    ///
-    /// `None` when the socket is full; `Some(0)` when the call was
-    /// interrupted and is to be made again.
-    fn write_once(&mut self, fds: &[Fd]) -> Result<Option<usize>, SendError> {
-        let mut control = [0u8; control_bytes()];
-        let mut iov = libc::iovec {
-            iov_base: self.outgoing.as_ptr().cast_mut().cast(),
-            iov_len: self.outgoing.len(),
-        };
-        // SAFETY: as in `receive`.
-        let mut message: libc::msghdr = unsafe { core::mem::zeroed() };
-        message.msg_iov = &raw mut iov;
-        message.msg_iovlen = 1;
-        let count = fds.len().min(MAX_FDS_IN);
-        if count > 0 {
-            message.msg_control = control.as_mut_ptr().cast();
-            message.msg_controllen = cmsg_space(count) as _;
-            if let Some(header) = first_header(&message) {
-                write_rights(header, fds.get(..count).unwrap_or(&[]));
-            }
-        }
-
-        #[expect(
-            unsafe_code,
-            reason = "AUDIT: sendmsg is not in std with control messages; every pointer in the msghdr is to a local buffer whose length is given beside it"
-        )]
-        // SAFETY: as in `receive`; `MSG_NOSIGNAL` keeps a closed client from
-        // killing the compositor with SIGPIPE.
-        let wrote = unsafe {
-            libc::sendmsg(
-                self.stream.as_raw_fd(),
-                &raw const message,
-                libc::MSG_NOSIGNAL,
-            )
-        };
-        if wrote < 0 {
-            let error = io::Error::last_os_error();
-            return match error.kind() {
-                io::ErrorKind::WouldBlock => Ok(None),
-                io::ErrorKind::Interrupted => Ok(Some(0)),
-                _ => Err(SendError::Io(error)),
-            };
-        }
-        Ok(Some(usize::try_from(wrote).unwrap_or(0)))
+        let mut queue = self.shared.lock();
+        self.shared.flush(&mut queue)
     }
 
     /// Take every descriptor a `recvmsg` delivered.
