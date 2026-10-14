@@ -357,8 +357,8 @@ enum Decision {
 /// is raised: a call one of them has in flight when the sync reaches it, or
 /// one that read the count before the sync's increment, is ordered before
 /// the sync and runs as the thread was, as a call in flight does under
-/// Linux's `TIF_SECCOMP`; no call of theirs that reads the count after it is
-/// let through unjudged.
+/// Linux's `TIF_SECCOMP`; no call of theirs that reads its flag after it is
+/// raised is let through unjudged.
 /// `SeqCst` is not needed: nothing pairs the count with a second location.
 static FILTERED_THREADS: AtomicUsize = AtomicUsize::new(0);
 
@@ -435,7 +435,10 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
 /// without judging it: no probe armed, and no thread filtered now or the
 /// running one not. What the core's fast path asks first (T2,
 /// `docs/OPAQUE-KERNEL.md` §9.7), since it runs before [`check`]; the same
-/// reads `check` makes, in the same order, so the two agree on any call.
+/// reads `check` makes, in the same order, so the two agree on any call --
+/// unless another thread's `TSYNC` raises this thread's flag between the two,
+/// which orders the call before the sync, as a call in flight is
+/// ([`FILTERED_THREADS`]).
 /// With interrupts masked; takes no lock and no reference.
 pub(crate) fn quiet() -> bool {
     if PROBE_TASK.load(Ordering::Acquire) != 0 {
@@ -638,7 +641,7 @@ fn trap(thread: &Thread, args: &SyscallArgs, errno: u32, log: bool) -> Decision 
 /// way back to user mode, where it never arrives.
 fn kill_process(thread: &Thread, args: &SyscallArgs, action: u32) -> Decision {
     report(thread, args, "kill process", action);
-    thread.with_seccomp(|state| state.mode = Mode::Dead);
+    mark_dead(thread);
     process::kill(thread.process(), 128 + SIGSYS as i32);
     Decision::Verdict(Verdict::Errno(ENOSYS))
 }
@@ -650,13 +653,20 @@ fn kill_thread(thread: &Thread, args: &SyscallArgs, signal: u32, logged: bool) -
     if logged {
         report(thread, args, "kill thread", KILL_THREAD);
     }
-    thread.with_seccomp(|state| state.mode = Mode::Dead);
+    mark_dead(thread);
     let process = thread.process();
     if process.live_thread_count() <= 1 {
         process::kill(process, 128 + signal as i32);
         return Decision::Verdict(Verdict::Errno(ENOSYS));
     }
     Decision::Leave(128 + signal as i32)
+}
+
+/// Mark `thread`, which its own filter is ending, `Dead`: it serves no call of
+/// its own should anything return to it. Under its leaf lock alone, on its own
+/// way out; a `TSYNC` that tested it before this leaves it `Dead`.
+pub(crate) fn mark_dead(thread: &Thread) {
+    thread.with_seccomp(|state| state.mode = Mode::Dead);
 }
 
 /// Strict mode: `read`, `write`, `exit` and the signal return of the entry's
@@ -773,18 +783,35 @@ pub(crate) fn prepare(raw: &[Insn], log: bool) -> Result<Arc<Filter>, Errno> {
 /// and nothing is allocated or freed under it: the filter exists already, and
 /// what the lock hands back is dropped by the caller after it.
 ///
+/// The change is made under the process's thread-list lock as well as the
+/// thread's own (list, then leaf), as Linux's `seccomp_attach_filter` runs
+/// under `siglock`: a `TSYNC` another thread of the process is making confirms
+/// and changes every thread under the list's lock, and a filter attached
+/// between its confirmation and its change would be taken off again (SR5; the
+/// consultant's B1 on S5).
+///
 /// # Errors
 ///
 /// `EINVAL` if the thread is in strict mode (Linux's
 /// `seccomp_may_assign_mode`), `ENOMEM` if the chain would pass
 /// `MAX_INSNS_PER_PATH` (Linux's `seccomp_attach_filter`).
 pub(crate) fn attach(thread: &Thread, mut filter: Arc<Filter>) -> Result<(), Errno> {
-    attach_to(thread, &mut filter)
-    // A refused filter is dropped with the argument, outside the lock.
+    under_thread_list(thread, || attach_to(thread, &mut filter))
+    // A refused filter is dropped with the argument, outside the locks.
 }
 
-/// [`attach`], leaving the caller holding the filter as well, so that it can be
-/// attached to other threads as the same chain (`TSYNC`).
+/// Run `change`, a change of `thread`'s own seccomp state, with its process's
+/// thread-list lock held (`Process::with_thread_list_held`). Every change of a
+/// thread's mode or chain is made under that lock, but one: a filter that ends
+/// its own thread marks it `Dead` under the leaf lock alone ([`mark_dead`]),
+/// which `TSYNC` leaves as it finds it.
+fn under_thread_list<R>(thread: &Thread, change: impl FnOnce() -> R) -> R {
+    thread.process().with_thread_list_held(change)
+}
+
+/// [`attach`] without the thread-list lock, which the caller holds, leaving the
+/// caller holding the filter as well, so that it can be attached to other
+/// threads as the same chain (`TSYNC`).
 fn attach_to(thread: &Thread, filter: &mut Arc<Filter>) -> Result<(), Errno> {
     thread.with_seccomp(|state| {
         if matches!(state.mode, Mode::Strict | Mode::Dead) {
@@ -921,8 +948,16 @@ pub(crate) fn dispatch(
     }
 }
 
-/// `SECCOMP_SET_MODE_STRICT`: refused once filters are in.
+/// `SECCOMP_SET_MODE_STRICT`: refused once filters are in. Under the
+/// process's thread-list lock, as [`attach`] is: a thread that entered strict
+/// mode between a `TSYNC`'s test and its change would be put back to filter
+/// mode, which loosens it.
 fn set_strict(thread: &Thread) -> Result<usize, Errno> {
+    under_thread_list(thread, || enter_strict(thread))
+}
+
+/// [`set_strict`]'s change, under the thread-list lock.
+fn enter_strict(thread: &Thread) -> Result<usize, Errno> {
     thread.with_seccomp(|state| match state.mode {
         Mode::Filter | Mode::Dead => Err(Errno::EINVAL),
         Mode::Disabled | Mode::Strict => {
@@ -981,22 +1016,39 @@ fn set_filter(
 ///
 /// # What it does (`docs/SECCOMP.md` §3.7)
 ///
-/// With the filter made and charged but attached to nobody, it takes the
-/// process's thread-list lock, which is what `add_thread_from` holds to list a
-/// new thread and copy its creator's chain, and which `Process::threads`
-/// holds to list them. Under it:
-/// 1. an `execve` that has claimed the process answers `EAGAIN`;
-/// 2. every other live thread is checked under its leaf lock: one with no
-///    seccomp passes, and so does one whose chain is an ancestor of the
-///    caller's; a thread in strict mode or with a chain of its own fails the
-///    whole call, answering that thread's id (or `ESRCH` with `TSYNC_ESRCH`)
-///    with no thread changed;
-/// 3. the filter is attached to the caller as `attach` does, and then every
-///    other thread's chain becomes the caller's new one.
+/// With the filter made and charged but attached to nobody, in rounds:
+/// 1. **Look**, under the process's thread-list lock: every live thread's mode
+///    and newest filter, one reference each, and the caller's newest filter.
+///    Every change of a thread's mode or chain is made under that lock
+///    ([`attach`], [`set_strict`], `add_thread_from`, and this), but a filter
+///    marking its own thread `Dead` ([`mark_dead`]).
+/// 2. **Test, under no lock.** A thread with no seccomp passes, and so does one
+///    whose chain is an ancestor of the caller's (Linux's `is_ancestor`: up to
+///    6,554 filters walked, preemptible). Strict mode, `Dead` or a chain of its
+///    own fails the whole call, answering that thread's id (or `ESRCH` with
+///    `TSYNC_ESRCH`), and no thread is changed. The walk needs no lock: a
+///    filter's `previous` is set before anyone else can see it and never
+///    after, and the references taken in step 1 keep every filter it compares
+///    alive, so an equal pointer is the same filter.
+/// 3. **Confirm and change**, under the thread-list lock again. An `execve`
+///    that has claimed the process answers `EAGAIN`. The caller's newest filter
+///    must be the one step 1 took, and every other live thread must have no
+///    seccomp, or a newest filter that step 2 found to be an ancestor of the
+///    caller's -- by pointer, one comparison and a search of the sorted
+///    addresses -- and not strict mode. That holds for a thread listed since
+///    step 1 too, which copied its creator's chain. If it does not hold,
+///    another thread of the process changed between the two looks: the round
+///    is given up with nothing changed, and made again from step 1. Otherwise
+///    the filter is attached to the caller as [`attach`] does, and every other
+///    thread's chain becomes the caller's new one; a thread its filter marked
+///    `Dead` since step 1 is left `Dead`.
 ///
-/// The old chains a thread gave up are dropped after the lock is released,
-/// and nothing is allocated under it: the list of threads and the room for
-/// those chains are made first.
+/// Nothing is allocated or freed under the lock: the lists, the sorted
+/// addresses and the room for the chains the threads give up are made before
+/// it, and everything taken under it is dropped after it is released. A round
+/// is made again only after another thread of the same process changed its
+/// own seccomp state, or made a thread with a chain step 2 did not test,
+/// between steps 1 and 3; the calling thread pays for it, preemptibly.
 ///
 /// # Errors
 ///
@@ -1009,75 +1061,269 @@ pub(crate) fn attach_sync(
     mut filter: Arc<Filter>,
     esrch: bool,
 ) -> Result<usize, Errno> {
-    let mut held: Vec<Arc<Thread>> = Vec::new();
-    let mut gave: Vec<Option<Arc<Filter>>> = Vec::new();
     let mut room = 8_usize;
     loop {
+        // Step 1.
+        let mut looked: Vec<Arc<Thread>> = Vec::new();
+        let mut seen: Vec<Seen> = Vec::new();
+        looked.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
+        seen.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
+        let mine = match process
+            .with_live_threads(&mut looked, |threads| look(caller, threads, &mut seen))
+        {
+            Ok(Some(mine)) => mine,
+            Ok(None) => {
+                room = room.saturating_mul(2);
+                continue;
+            }
+            Err(listed) => {
+                room = listed.saturating_add(4);
+                continue;
+            }
+        };
+        // Step 2, under no lock.
+        let mut tested: Vec<usize> = Vec::new();
+        tested
+            .try_reserve_exact(seen.len())
+            .map_err(|_| Errno::ENOMEM)?;
+        for (thread, seen) in looked.iter().zip(&seen) {
+            if core::ptr::eq(Arc::as_ptr(thread), caller) {
+                continue;
+            }
+            if !seen.fits(mine.as_ref()) {
+                return if esrch {
+                    Err(Errno::ESRCH)
+                } else {
+                    Ok(thread.tid() as usize)
+                };
+            }
+            if let Some(newest) = &seen.newest {
+                tested.push(Arc::as_ptr(newest) as usize);
+            }
+        }
+        tested.sort_unstable();
+        tested.dedup();
+        pause(caller, Window::Tested);
+        // Step 3.
+        let mut held: Vec<Arc<Thread>> = Vec::new();
+        let mut gave: Vec<Option<Arc<Filter>>> = Vec::new();
         held.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
         gave.try_reserve_exact(room).map_err(|_| Errno::ENOMEM)?;
+        let test = Tested {
+            mine: mine.as_ref(),
+            ancestors: &tested,
+        };
         let answer = process.with_live_threads(&mut held, |threads| {
-            synchronise(process, caller, threads, &mut filter, &mut gave, esrch)
+            synchronise(process, caller, threads, &test, &mut filter, &mut gave)
         });
+        // The locks are released: the chains the threads gave up, the
+        // references step 1 took and the references to the threads go now,
+        // here.
+        drop(gave);
+        drop(held);
+        drop(seen);
+        drop(mine);
+        drop(looked);
         match answer {
-            Ok(answer) => {
-                // The locks are released: the chains the threads gave up and
-                // the references to the threads go now, here.
-                drop(gave);
-                drop(held);
-                return answer;
-            }
+            Ok(Round::Done(answer)) => return answer,
+            Ok(Round::Moved) => {}
+            Ok(Round::Room) => room = room.saturating_mul(2),
             Err(listed) => room = listed.saturating_add(4),
         }
     }
 }
 
-/// [`attach_sync`]'s part under the thread-list lock.
+/// What step 1 of [`attach_sync`] found of one thread: its mode and its newest
+/// filter, one reference, which keeps that filter's address its own until the
+/// round is over.
+struct Seen {
+    /// Its mode.
+    mode: Mode,
+    /// Its newest filter.
+    newest: Option<Arc<Filter>>,
+}
+
+impl Seen {
+    /// Whether the thread could take the caller's chain, `mine`: it has no
+    /// seccomp, or its chain is an ancestor of the caller's (Linux's
+    /// `seccomp_can_sync_threads`).
+    fn fits(&self, mine: Option<&Arc<Filter>>) -> bool {
+        match self.mode {
+            Mode::Disabled => true,
+            Mode::Filter => is_ancestor(self.newest.as_ref(), mine),
+            Mode::Strict | Mode::Dead => false,
+        }
+    }
+}
+
+/// What step 2 of [`attach_sync`] found, for step 3 to compare against.
+struct Tested<'a> {
+    /// The caller's newest filter, as step 1 took it.
+    mine: Option<&'a Arc<Filter>>,
+    /// The addresses of the newest filters step 2 found to be ancestors of
+    /// `mine`, sorted, each once. Each is held by a reference step 1 took.
+    ancestors: &'a [usize],
+}
+
+impl Tested<'_> {
+    /// Whether a thread in `state` can take the caller's chain without a walk:
+    /// it has no seccomp, or its newest filter is the caller's or one step 2
+    /// tested. A thread its own filter marked `Dead` since step 1 passes on its
+    /// chain, and step 3 leaves it `Dead`.
+    fn admits(&self, state: &State) -> bool {
+        match state.mode {
+            Mode::Disabled => true,
+            Mode::Strict => false,
+            Mode::Filter | Mode::Dead => match state.filter.as_ref() {
+                None => true,
+                Some(newest) => {
+                    self.mine.is_some_and(|mine| Arc::ptr_eq(newest, mine))
+                        || self
+                            .ancestors
+                            .binary_search(&(Arc::as_ptr(newest) as usize))
+                            .is_ok()
+                }
+            },
+        }
+    }
+}
+
+/// How a round of [`attach_sync`]'s step 3 ended.
+enum Round {
+    /// The call's answer.
+    Done(Result<usize, Errno>),
+    /// A thread changed since step 1: make the round again.
+    Moved,
+    /// More threads are listed than the room made for them.
+    Room,
+}
+
+/// [`attach_sync`]'s step 1, under the thread-list lock: every thread's mode
+/// and newest filter into `seen`, and the caller's newest filter. `None` when
+/// `seen` has too little room.
+fn look(
+    caller: &Thread,
+    threads: &[Arc<Thread>],
+    seen: &mut Vec<Seen>,
+) -> Option<Option<Arc<Filter>>> {
+    if threads.len() > seen.capacity() {
+        return None;
+    }
+    for thread in threads {
+        // NOALLOC: into the room the caller reserved; that it is enough was
+        // checked above. Cloning a reference allocates nothing.
+        seen.push(thread.read_seccomp(|state| Seen {
+            mode: state.mode,
+            newest: state.filter.clone(),
+        }));
+    }
+    Some(caller.read_seccomp(|state| state.filter.clone()))
+}
+
+/// [`attach_sync`]'s step 3, under the thread-list lock.
 fn synchronise(
     process: &Process,
     caller: &Thread,
     threads: &[Arc<Thread>],
+    test: &Tested<'_>,
     filter: &mut Arc<Filter>,
     gave: &mut Vec<Option<Arc<Filter>>>,
-    esrch: bool,
-) -> Result<usize, Errno> {
+) -> Round {
     if process.exec_claimed() {
-        return Err(Errno::EAGAIN);
+        return Round::Done(Err(Errno::EAGAIN));
+    }
+    if threads.len() > gave.capacity() {
+        return Round::Room;
     }
     let others = || {
         threads
             .iter()
             .filter(|thread| !core::ptr::eq(Arc::as_ptr(thread), caller))
     };
-    let mine = caller.with_seccomp(|state| state.filter.clone());
+    if !caller.read_seccomp(|state| same(state.filter.as_ref(), test.mine)) {
+        return Round::Moved;
+    }
     for thread in others() {
-        let fits = thread.with_seccomp(|state| match state.mode {
-            Mode::Disabled => true,
-            Mode::Filter => is_ancestor(state.filter.as_ref(), mine.as_ref()),
-            Mode::Strict | Mode::Dead => false,
-        });
-        if !fits {
-            return if esrch {
-                Err(Errno::ESRCH)
-            } else {
-                Ok(thread.tid() as usize)
-            };
+        if !thread.read_seccomp(|state| test.admits(state)) {
+            return Round::Moved;
         }
     }
-    attach_to(caller, filter)?;
+    pause(caller, Window::Confirmed);
+    if let Err(errno) = attach_to(caller, filter) {
+        return Round::Done(Err(errno));
+    }
     for thread in others() {
         thread.with_seccomp(|state| {
-            // Reserved by the caller: this cannot allocate.
+            // Killed by its own filter since step 1: it stays killed.
+            if state.mode == Mode::Dead {
+                return;
+            }
+            // NOALLOC: reserved by the caller, checked above.
             gave.push(state.filter.replace(Arc::clone(filter)));
             state.mode = Mode::Filter;
         });
     }
-    Ok(0)
+    Round::Done(Ok(0))
+}
+
+/// Whether two chains are the same, by their newest filter's address: none and
+/// none are.
+fn same(one: Option<&Arc<Filter>>, other: Option<&Arc<Filter>>) -> bool {
+    match (one, other) {
+        (None, None) => true,
+        (Some(one), Some(other)) => Arc::ptr_eq(one, other),
+        _ => false,
+    }
+}
+
+/// The two points of a `TSYNC` round a boot check can stop at: after the
+/// test, with no lock held, and after the confirmation, under the thread-list
+/// lock, before anything is changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Window {
+    /// After step 2, under no lock.
+    Tested,
+    /// In step 3, under the thread-list lock, once every thread is confirmed.
+    Confirmed,
+}
+
+/// The thread whose `TSYNC` stops at [`pause`], as an address; zero when none.
+static PAUSE_THREAD: AtomicUsize = AtomicUsize::new(0);
+
+/// What it runs there.
+static PAUSE_HOOK: SpinLock<Option<fn(Window)>> = SpinLock::new(None);
+
+/// Have `thread`'s `TSYNC` call `hook` at each [`Window`] of each round, for the
+/// boot check that changes other threads there (the consultant's B1 on S5). A
+/// test seam, as the probe is: one load on every `TSYNC` while it is not armed.
+pub(crate) fn arm_sync_pause(thread: &Thread, hook: fn(Window)) {
+    *PAUSE_HOOK.lock() = Some(hook);
+    PAUSE_THREAD.store(core::ptr::from_ref(thread) as usize, Ordering::Release);
+}
+
+/// Stop calling it.
+pub(crate) fn disarm_sync_pause() {
+    PAUSE_THREAD.store(0, Ordering::Release);
+    *PAUSE_HOOK.lock() = None;
+}
+
+/// Call the armed hook, if `caller` is the thread it was armed for. The hook's
+/// lock is a leaf, released before the hook runs.
+fn pause(caller: &Thread, window: Window) {
+    if PAUSE_THREAD.load(Ordering::Acquire) != core::ptr::from_ref(caller) as usize {
+        return;
+    }
+    let hook = *PAUSE_HOOK.lock();
+    if let Some(hook) = hook {
+        hook(window);
+    }
 }
 
 /// Whether `stranger`, a filter in no chain, is found in `thread`'s: never,
-/// and the whole chain is walked to say so. The walk `TSYNC` makes for one
-/// other thread at its worst, under the thread-list lock, for the boot check
-/// that times it (`docs/certification/MEMORY-AND-TIMING.md` §2.2b).
+/// and the whole chain is walked to say so. The walk `TSYNC`'s step 2 makes for
+/// one other thread at its worst, under no lock since the consultant's B1 and
+/// C2 on S5, for the boot check that times it
+/// (`docs/certification/MEMORY-AND-TIMING.md` §2.2b).
 pub(crate) fn found_in_chain(thread: &Thread, stranger: &Arc<Filter>) -> bool {
     let mine = thread.with_seccomp(|state| state.filter.clone());
     is_ancestor(Some(stranger), mine.as_ref())

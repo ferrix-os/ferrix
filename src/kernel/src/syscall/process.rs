@@ -1561,6 +1561,20 @@ impl Process {
         Ok(answer)
     }
 
+    /// Run `change` with the thread list locked: the way one thread changes its
+    /// own seccomp mode or chain, so that a `TSYNC`, which tests and then
+    /// changes every thread under the same lock, never finds a thread's state
+    /// changed between its test and its change (`docs/SECCOMP.md` §3.7, the
+    /// consultant's B1). The thread's leaf lock is taken inside, the one order
+    /// there is. Nothing is allocated or freed under it: `change` hands back
+    /// what it replaced for the caller to drop.
+    pub(crate) fn with_thread_list_held<R>(&self, change: impl FnOnce() -> R) -> R {
+        let list = self.threads.lock();
+        let answer = change();
+        drop(list);
+        answer
+    }
+
     /// List `thread` as one of its own, if it is not already: before the
     /// thread can run, and for a fork child before the child is published.
     pub(crate) fn add_thread(&self, thread: &Arc<Thread>) {

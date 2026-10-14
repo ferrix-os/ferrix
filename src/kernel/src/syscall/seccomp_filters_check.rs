@@ -64,6 +64,11 @@ pub(crate) struct Report {
     pub(crate) synced: usize,
     /// Cases of `TSYNC`'s all-or-nothing rule checked.
     pub(crate) refusals: usize,
+    /// Threads that changed their own seccomp state in one of a `TSYNC`'s two
+    /// windows and kept what they did: two that it saw and gave up its round
+    /// for, and the racers that had begun their call while it held the second
+    /// open (none on one processor).
+    pub(crate) raced: usize,
 }
 
 /// `PR_SET_NO_NEW_PRIVS` and `PR_GET_NO_NEW_PRIVS`.
@@ -248,6 +253,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     entry_task(&mut report)?;
     speculation(&mut report)?;
     tsync_rules(&mut report)?;
+    tsync_tested_window(&mut report)?;
     let (chain, many, released, ancestor) = longest_chain()?;
     report.chain = chain;
     report.walk_many = many;
@@ -585,6 +591,8 @@ struct Seen {
     /// Threads that held the chain `TSYNC` gave, the ones made while it ran
     /// among them.
     threads: usize,
+    /// Threads that raced a `TSYNC`'s second window while it was open.
+    raced: usize,
 }
 
 /// How the task ends its process when it was not killed: it must have been.
@@ -623,6 +631,8 @@ enum Ending {
     TrapNative,
     /// `TSYNC` among threads that are made while it runs.
     Sync,
+    /// `TSYNC` with threads changing themselves in its second window.
+    Race,
 }
 
 /// Run a scenario task in a process of its own, and answer what it found and
@@ -922,6 +932,12 @@ fn entry_task(report: &mut Report) -> Result<(), &'static str> {
         return Err("the synchronised threads' process did not end as the check ended it");
     }
     report.synced = seen.threads;
+    // `TSYNC` while threads change themselves in its second window.
+    let (seen, status) = scenario(Ending::Race, false)?;
+    if status != SURVIVED {
+        return Err("the threads racing TSYNC's process did not end as the check ended it");
+    }
+    report.raced += seen.raced;
     Ok(())
 }
 
@@ -1175,6 +1191,11 @@ fn ended_early(
         Some(Ending::Sync) => {
             let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
             seen.threads = synchronised(env)?;
+            Ok(Some(Then::Report(Ok(seen))))
+        }
+        Some(Ending::Race) => {
+            let _ = attributes::sys_prctl(process, NO_NEW_PRIVS, [1, 0, 0, 0]);
+            seen.raced = raced(env)?;
             Ok(Some(Then::Report(Ok(seen))))
         }
         Some(Ending::Thread | Ending::Process) | None => Ok(None),
@@ -1571,4 +1592,309 @@ fn synchronised(env: &Env) -> Result<usize, &'static str> {
         return Err("the threads of the TSYNC check were not all there");
     }
     Ok(count)
+}
+
+/// What `TSYNC`'s first window hook changes: set before the call, taken by the
+/// hook, so that it changes them once.
+struct Changers {
+    /// A thread object that installs a filter of its own in the window.
+    filterer: Arc<Thread>,
+    /// The filter it installs.
+    filter: Arc<seccomp::Filter>,
+    /// A thread object that enters strict mode in the window.
+    strict: Arc<Thread>,
+}
+
+/// The threads [`change_in_tested_window`] changes.
+static TESTED_WINDOW: SpinLock<Option<Changers>> = SpinLock::new(None);
+/// Whether it changed both.
+static TESTED_CHANGED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// `TSYNC`'s pause after its test, under no lock: one thread installs a filter
+/// of its own there and another enters strict mode, each as its own call
+/// would, through the functions the calls use.
+fn change_in_tested_window(window: seccomp::Window) {
+    if window != seccomp::Window::Tested {
+        return;
+    }
+    let taken = TESTED_WINDOW.lock().take();
+    let Some(changers) = taken else {
+        return;
+    };
+    let attached = seccomp::attach(&changers.filterer, changers.filter).is_ok();
+    let strict = seccomp::do_seccomp(
+        changers.strict.process(),
+        &changers.strict,
+        SET_MODE_STRICT,
+        0,
+        0,
+        Abi::Native,
+    ) == Ok(0);
+    TESTED_CHANGED.store(attached && strict, core::sync::atomic::Ordering::Release);
+}
+
+/// `TSYNC`'s first window (the consultant's B1 on S5): its step 2 tests every
+/// other thread with no lock held, and between that test and the confirmation
+/// under the thread-list lock one thread installs a filter of its own and
+/// another enters strict mode. The round must see both and be made again, so
+/// that the call answers the first changed thread's id, both keep what they
+/// did (SR5: filters only accumulate, and strict mode is never loosened), and
+/// nothing changes (SR10).
+fn tsync_tested_window(report: &mut Report) -> Result<(), &'static str> {
+    let getppid = number(Syscall::Getppid)?;
+    let getuid = number(Syscall::Getuid)?;
+    let env = Env::new()?;
+    if attributes::sys_prctl(&env.process, NO_NEW_PRIVS, [1, 0, 0, 0]) != Ok(0) {
+        return Err("PR_SET_NO_NEW_PRIVS was refused");
+    }
+    let filterer = member_thread(&env, &env.thread)?;
+    let strict = member_thread(&env, &env.thread)?;
+    let filter = seccomp::prepare(&answering(&[(getuid, ERRNO | RACED_ERRNO)]), false)
+        .map_err(|_| "a filter could not be made")?;
+    TESTED_CHANGED.store(false, core::sync::atomic::Ordering::Release);
+    *TESTED_WINDOW.lock() = Some(Changers {
+        filterer: Arc::clone(&filterer),
+        filter,
+        strict: Arc::clone(&strict),
+    });
+    let at = env.put(&answering(&[(getppid, ERRNO | EPERM)]), None)?;
+    seccomp::arm_sync_pause(&env.thread, change_in_tested_window);
+    let synced = env.seccomp(SET_MODE_FILTER, TSYNC, at);
+    seccomp::disarm_sync_pause();
+    let left = TESTED_WINDOW.lock().take();
+    drop(left);
+    if !TESTED_CHANGED.load(core::sync::atomic::Ordering::Acquire) {
+        return Err("the TSYNC check's threads could not change themselves in its first window");
+    }
+    if judge_thread(&filterer, getuid) != Some(RACED_ERRNO) {
+        return Err("a filter a thread installed while TSYNC tested was taken off it");
+    }
+    if strict.read_seccomp(State::mode) != seccomp::Mode::Strict {
+        return Err(
+            "a thread that entered strict mode while TSYNC tested was put back to filter mode",
+        );
+    }
+    if synced != Ok(filterer.tid() as usize) {
+        return Err(
+            "a TSYNC whose threads changed while it tested did not answer the changed thread's id",
+        );
+    }
+    if env.judges(getppid) != Some(0) {
+        return Err("a TSYNC that failed changed its caller's chain");
+    }
+    report.raced += 2;
+    process::kill(&env.process, 137);
+    Ok(())
+}
+
+/// The errno the filters the racing threads install give `getuid`.
+const RACED_ERRNO: u32 = 21;
+/// How many threads race the second window.
+const RACERS: u32 = 2;
+/// How long the second window's hook waits, under the thread-list lock, for
+/// the racers to begin their calls: they are running on other processors.
+const RACE_ENTER_NANOS: u64 = 50_000_000;
+/// How long it then holds the window open for them to finish, which they can
+/// only if their calls do not take the thread-list lock.
+const RACE_HOLD_NANOS: u64 = 2_000_000;
+
+/// Whether the second window's hook is still to run.
+static RACE_ARMED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// The thread object its hook marks as killed by its own filter.
+static RACE_DEAD: SpinLock<Option<Arc<Thread>>> = SpinLock::new(None);
+/// The filter the racing filterer installs.
+static RACE_FILTER: SpinLock<Option<Arc<seccomp::Filter>>> = SpinLock::new(None);
+/// Set by the hook: the racers make their calls.
+static RACE_GO: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Racers that have begun their call.
+static RACE_ENTERED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// Racers whose call has returned.
+static RACE_DONE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// Racers the hook saw begin their call while it held the window open.
+static RACE_SEEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The racing filterer's thread id, once it runs.
+static RACE_FILTERER: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The racing strict thread's id, once it runs.
+static RACE_STRICT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// Whether the filterer's filter was attached.
+static RACE_ATTACHED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Whether the strict thread was let into strict mode.
+static RACE_STRICT_OK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// `TSYNC`'s pause once every thread is confirmed, under the thread-list lock,
+/// before anything is changed. A filter marks one thread killed (`Dead`), as
+/// it does with no lock but the thread's own, and the two racers, running on
+/// other processors, are let go: one installs a filter of its own, the other
+/// enters strict mode. The window is held open until both have begun and for
+/// a while more, in which each finishes unless its call waits for the
+/// thread-list lock.
+fn race_in_confirmed_window(window: seccomp::Window) {
+    use core::sync::atomic::Ordering;
+    if window != seccomp::Window::Confirmed || !RACE_ARMED.swap(false, Ordering::AcqRel) {
+        return;
+    }
+    // The check's own lock, a leaf here: the thread's leaf lock is taken
+    // inside it, and the reference stays in the static, so nothing is freed.
+    if let Some(dead) = RACE_DEAD.lock().as_ref() {
+        seccomp::mark_dead(dead);
+    }
+    RACE_GO.store(true, Ordering::Release);
+    let start = crate::timer::now_nanos();
+    while RACE_ENTERED.load(Ordering::Acquire) < RACERS
+        && crate::timer::now_nanos().saturating_sub(start) < RACE_ENTER_NANOS
+    {
+        core::hint::spin_loop();
+    }
+    RACE_SEEN.store(RACE_ENTERED.load(Ordering::Acquire), Ordering::Release);
+    let start = crate::timer::now_nanos();
+    while RACE_DONE.load(Ordering::Acquire) < RACERS
+        && crate::timer::now_nanos().saturating_sub(start) < RACE_HOLD_NANOS
+    {
+        core::hint::spin_loop();
+    }
+}
+
+/// Wait for the hook to let the racers go; `false` if the check gave up.
+fn race_wait() -> bool {
+    use core::sync::atomic::Ordering;
+    let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while !RACE_GO.load(Ordering::Acquire) {
+        if LEAVE.load(Ordering::Acquire) || crate::timer::now_nanos() > patience {
+            return false;
+        }
+        sched::yield_now();
+    }
+    true
+}
+
+/// The racing filterer's task: installs a filter of its own in the window.
+fn race_filter(_argument: usize) {
+    use core::sync::atomic::Ordering;
+    if let Some(me) = crate::syscall::thread::current() {
+        let filter = RACE_FILTER.lock().take();
+        RACE_FILTERER.store(me.tid(), Ordering::Release);
+        if race_wait() {
+            let _ = RACE_ENTERED.fetch_add(1, Ordering::AcqRel);
+            let attached = filter.is_some_and(|filter| seccomp::attach(&me, filter).is_ok());
+            RACE_ATTACHED.store(attached, Ordering::Release);
+            let _ = RACE_DONE.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    member(0);
+}
+
+/// The racing strict thread's task: enters strict mode in the window, through
+/// `seccomp(SET_MODE_STRICT)`.
+fn race_strict(_argument: usize) {
+    use core::sync::atomic::Ordering;
+    if let Some(me) = crate::syscall::thread::current() {
+        RACE_STRICT.store(me.tid(), Ordering::Release);
+        if race_wait() {
+            let _ = RACE_ENTERED.fetch_add(1, Ordering::AcqRel);
+            let entered =
+                seccomp::do_seccomp(me.process(), &me, SET_MODE_STRICT, 0, 0, Abi::Native) == Ok(0);
+            RACE_STRICT_OK.store(entered, Ordering::Release);
+            let _ = RACE_DONE.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+    member(0);
+}
+
+/// `TSYNC`'s second window (the consultant's B1 on S5): once every thread is
+/// confirmed and before any is changed, under the thread-list lock, a filter
+/// marks one thread killed and two running threads try to install a filter of
+/// their own and to enter strict mode. Their calls take the same lock, so they
+/// wait for the sync and act on what it made: the filter goes on top of the
+/// synchronised chain, and strict mode is refused, a filter being in. A sync
+/// that changed a thread after it changed itself would take its filter off
+/// (SR5) or loosen strict mode; the killed thread stays killed. Answers how
+/// many racers had begun their call while the window was open, which is
+/// what shows the window was raced (none on one processor).
+fn raced(env: &Env) -> Result<usize, &'static str> {
+    use core::sync::atomic::Ordering;
+    let getppid = number(Syscall::Getppid)?;
+    let getuid = number(Syscall::Getuid)?;
+    for flag in [&RACE_GO, &RACE_ATTACHED, &RACE_STRICT_OK, &LEAVE] {
+        flag.store(false, Ordering::Release);
+    }
+    for count in [
+        &RACE_ENTERED,
+        &RACE_DONE,
+        &RACE_SEEN,
+        &RACE_FILTERER,
+        &RACE_STRICT,
+    ] {
+        count.store(0, Ordering::Release);
+    }
+    let dead = member_thread(env, &env.thread)?;
+    *RACE_FILTER.lock() = Some(
+        seccomp::prepare(&answering(&[(getuid, ERRNO | RACED_ERRNO)]), false)
+            .map_err(|_| "a filter could not be made")?,
+    );
+    let leader = Arc::clone(&env.thread);
+    let tasks = [
+        spawn_member(&env.process, &leader, race_filter)?,
+        spawn_member(&env.process, &leader, race_strict)?,
+    ];
+    let patience = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while RACE_FILTERER.load(Ordering::Acquire) == 0 || RACE_STRICT.load(Ordering::Acquire) == 0 {
+        if crate::timer::now_nanos() > patience {
+            LEAVE.store(true, Ordering::Release);
+            return Err("the threads racing TSYNC never ran");
+        }
+        sched::yield_now();
+    }
+    *RACE_DEAD.lock() = Some(Arc::clone(&dead));
+    RACE_ARMED.store(true, Ordering::Release);
+    let at = env.put(&answering(&[(getppid, ERRNO | EPERM)]), None)?;
+    seccomp::arm_sync_pause(&env.thread, race_in_confirmed_window);
+    let synced = env.seccomp(SET_MODE_FILTER, TSYNC, at);
+    seccomp::disarm_sync_pause();
+    RACE_ARMED.store(false, Ordering::Release);
+    let left = RACE_DEAD.lock().take();
+    drop(left);
+    // A racer that waited for the lock finishes after the sync.
+    while RACE_GO.load(Ordering::Acquire) && RACE_DONE.load(Ordering::Acquire) < RACERS {
+        if crate::timer::now_nanos() > patience {
+            LEAVE.store(true, Ordering::Release);
+            return Err("a thread racing TSYNC never finished its call");
+        }
+        sched::yield_now();
+    }
+    let filterer = env
+        .process
+        .thread_by_tid(RACE_FILTERER.load(Ordering::Acquire));
+    let strict = env
+        .process
+        .thread_by_tid(RACE_STRICT.load(Ordering::Acquire));
+    let kept_filter = filterer
+        .as_ref()
+        .is_some_and(|thread| judge_thread(thread, getuid) == Some(RACED_ERRNO));
+    let strict_kept = strict
+        .as_ref()
+        .is_some_and(|thread| thread.read_seccomp(State::mode) == seccomp::Mode::Strict);
+    let dead_kept = dead.read_seccomp(State::mode) == seccomp::Mode::Dead;
+    let attached = RACE_ATTACHED.load(Ordering::Acquire);
+    let strict_entered = RACE_STRICT_OK.load(Ordering::Acquire);
+    LEAVE.store(true, Ordering::Release);
+    drop((filterer, strict));
+    drop(tasks);
+    if synced != Ok(0) {
+        return Err("TSYNC with threads racing it was refused");
+    }
+    if !attached {
+        return Err("a thread racing TSYNC was refused a filter of its own");
+    }
+    if !kept_filter {
+        return Err("a filter a thread installed during TSYNC's change was taken off it");
+    }
+    if strict_entered && !strict_kept {
+        return Err(
+            "a thread that entered strict mode during TSYNC's change was put back to filter mode",
+        );
+    }
+    if !dead_kept {
+        return Err("TSYNC brought a thread its filter had killed back to filter mode");
+    }
+    Ok(RACE_SEEN.load(Ordering::Acquire) as usize)
 }
