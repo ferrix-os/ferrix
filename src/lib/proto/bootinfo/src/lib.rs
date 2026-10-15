@@ -982,6 +982,59 @@ pub fn allocator_owns(regions: impl IntoIterator<Item = MemRegion>, base: u64, l
     })
 }
 
+/// Mark `len` bytes at `base` as `kind` in the first `count` entries of
+/// `regions`, sorted by address, splitting the one region that holds the
+/// range into up to three; the new count, or `None` when no single region
+/// holds the whole range or the slice has no room for the split.
+///
+/// The loader allocates everything as firmware's loader data, because the
+/// N150's AMI firmware hangs in `exit_boot_services` once memory of an
+/// OS-defined type exists; the kernel learns which loader data is its image,
+/// its tables or its initramfs from this instead.
+pub fn retag(
+    regions: &mut [MemRegion],
+    count: usize,
+    base: u64,
+    len: u64,
+    kind: MemKind,
+) -> Option<usize> {
+    let end = base.checked_add(len)?;
+    let at = regions
+        .get(..count)?
+        .iter()
+        .position(|region| region.base <= base && end <= region.base.saturating_add(region.len))?;
+    let holder = *regions.get(at)?;
+    let holder_end = holder.base + holder.len;
+    let mut pieces = [holder; 3];
+    let mut made = 0;
+    for (from, to, piece_kind) in [
+        (holder.base, base, holder.kind),
+        (base, end, kind),
+        (end, holder_end, holder.kind),
+    ] {
+        if from < to {
+            let slot = pieces.get_mut(made)?;
+            *slot = MemRegion {
+                base: from,
+                len: to - from,
+                kind: piece_kind,
+                reserved: 0,
+            };
+            made += 1;
+        }
+    }
+    let grown = count + made - 1;
+    if grown > regions.len() {
+        return None;
+    }
+    // Move what follows the holder up to make room, then put the pieces in.
+    regions.copy_within(at + 1..count, at + made);
+    regions
+        .get_mut(at..at + made)?
+        .copy_from_slice(pieces.get(..made)?);
+    Some(grown)
+}
+
 // ---------------------------------------------------------------------------
 // The hand-off structure
 // ---------------------------------------------------------------------------
@@ -2519,5 +2572,77 @@ mod tests {
             "exactly the room fits"
         );
         assert!(command_line_from_file(b"abcde", 4).is_err());
+    }
+
+    fn loader_region(base: u64, len: u64, kind: MemKind) -> MemRegion {
+        MemRegion {
+            base,
+            len,
+            kind,
+            reserved: 0,
+        }
+    }
+
+    fn shape(regions: &[MemRegion]) -> Vec<(u64, u64, MemKind)> {
+        regions.iter().map(|r| (r.base, r.len, r.kind)).collect()
+    }
+
+    #[test]
+    fn retag_splits_the_holder_in_three_and_keeps_order() {
+        let mut map = [loader_region(0, 0x1000, MemKind::Usable); 6];
+        map[1] = loader_region(0x1000, 0x9000, MemKind::Loader);
+        map[2] = loader_region(0xA000, 0x1000, MemKind::Reserved);
+        let count = retag(&mut map, 3, 0x3000, 0x2000, MemKind::Kernel).unwrap();
+        assert_eq!(count, 5);
+        assert_eq!(
+            shape(&map[..count]),
+            [
+                (0, 0x1000, MemKind::Usable),
+                (0x1000, 0x2000, MemKind::Loader),
+                (0x3000, 0x2000, MemKind::Kernel),
+                (0x5000, 0x5000, MemKind::Loader),
+                (0xA000, 0x1000, MemKind::Reserved),
+            ]
+        );
+    }
+
+    #[test]
+    fn retag_at_an_edge_or_whole_makes_fewer_pieces() {
+        let mut map = [loader_region(0x1000, 0x4000, MemKind::Loader); 4];
+        let count = retag(&mut map, 1, 0x1000, 0x1000, MemKind::PageTables).unwrap();
+        assert_eq!(
+            shape(&map[..count]),
+            [
+                (0x1000, 0x1000, MemKind::PageTables),
+                (0x2000, 0x3000, MemKind::Loader)
+            ]
+        );
+        let count = retag(&mut map, count, 0x4000, 0x1000, MemKind::BootStack).unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(map[2].kind, MemKind::BootStack);
+        let count = retag(&mut map, count, 0x2000, 0x2000, MemKind::Initrd).unwrap();
+        assert_eq!(count, 3, "a whole region changes kind without a split");
+        assert_eq!(map[1].kind, MemKind::Initrd);
+    }
+
+    #[test]
+    fn retag_refuses_a_range_no_one_region_holds_or_no_room() {
+        let mut map = [loader_region(0x1000, 0x1000, MemKind::Loader); 2];
+        map[1] = loader_region(0x2000, 0x1000, MemKind::Loader);
+        assert_eq!(
+            retag(&mut map, 2, 0x1800, 0x1000, MemKind::Kernel),
+            None,
+            "spans two"
+        );
+        assert_eq!(
+            retag(&mut map, 2, 0x8000, 0x1000, MemKind::Kernel),
+            None,
+            "in none"
+        );
+        assert_eq!(
+            retag(&mut map, 2, 0x1400, 0x400, MemKind::Kernel),
+            None,
+            "no room"
+        );
     }
 }
