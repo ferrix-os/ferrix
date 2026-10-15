@@ -1204,12 +1204,162 @@ pub(crate) fn host_doctest() -> Result<()> {
 /// The documentation, warnings denied, as the lint config denies broken
 /// intra-doc links: `cargo xtask host-doc`.
 pub(crate) fn host_doc() -> Result<()> {
+    documentation_in_memory(&paths::target_dir())?;
     host_cargo(
         &["doc"],
         &["--no-deps"],
         &[("RUSTDOCFLAGS", "-D warnings")],
         "cargo doc",
     )
+}
+
+/// Make `<target>/doc`, where `cargo doc` writes, a link to a directory in
+/// memory: `$XDG_RUNTIME_DIR/ferrix-doc/<the SHA-256 of the target
+/// directory's path>`.
+///
+/// The documentation step wants rustdoc's verdict, not its pages, which
+/// nothing reads. Each of the ~105 rustdocs `cargo doc` runs at once takes
+/// a lock on the output directory and, holding it, rewrites the files the
+/// crates share (the search index, the implementations of each trait); on
+/// nazuna's ext4 a file rewritten so is pushed toward the disk when it is
+/// closed, and with the disk busy each crate held the lock for a second or
+/// more, so the crates were documented one after another: 70-170 s of a
+/// step whose rustdocs spend 21-25 CPU-s, 2,413 s of it in `flock` across
+/// the rustdocs (`docs/TEST-TIME.md`, *Cut D1*). In memory it is 9-23 s.
+///
+/// The pages (about 160 MB) stay there until the runtime directory is
+/// emptied (a log out, a reboot); cargo then finds them missing and
+/// documents every crate again, once. The pages of a target directory that
+/// is gone, or no longer links to them, are removed here. With no runtime
+/// directory, under [`MEMORY_KEPT_FREE`] free in it, or off Unix, the
+/// documentation is written to `<target>/doc` as cargo always did.
+///
+/// # Errors
+///
+/// When the link or the directory cannot be made or removed.
+fn documentation_in_memory(target: &std::path::Path) -> Result<()> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from);
+    match runtime {
+        Some(runtime)
+            if cfg!(unix)
+                && runtime.is_dir()
+                && free_bytes(&runtime).is_some_and(|free| free >= MEMORY_KEPT_FREE) =>
+        {
+            prune_pages(&runtime.join("ferrix-doc"))?;
+            doc_link(target, &runtime)
+        }
+        _ => doc_on_disk(target),
+    }
+}
+
+/// What the runtime directory must have free for the pages to go there: a
+/// full one would fail the step, and the session's other users with it.
+const MEMORY_KEPT_FREE: u64 = 1 << 30;
+
+/// The bytes free in the file system holding `directory`, as `df` says;
+/// `None` when it cannot say.
+fn free_bytes(directory: &std::path::Path) -> Option<u64> {
+    let output = Command::new("df")
+        .args(["--output=avail", "-B1"])
+        .arg(directory)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .nth(1)?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// `<target>/doc` a directory of its own again, if it was a link.
+fn doc_on_disk(target: &std::path::Path) -> Result<()> {
+    let link = target.join("doc");
+    if std::fs::symlink_metadata(&link).is_ok_and(|found| found.file_type().is_symlink()) {
+        std::fs::remove_file(&link)?;
+    }
+    Ok(())
+}
+
+/// [`documentation_in_memory`] with the runtime directory given:
+/// `<target>/doc` made a link to `<runtime>/ferrix-doc/<digest>`, whatever
+/// was there before (a directory of pages, a link elsewhere) removed first,
+/// and `<digest>.target` beside the pages naming the target directory, for
+/// [`prune_pages`]. The pages' directory is made last, so pruning never
+/// removes a directory a link already names.
+fn doc_link(target: &std::path::Path, runtime: &std::path::Path) -> Result<()> {
+    let target = std::path::absolute(target)?;
+    let digest = crate::sha256::hex(target.as_os_str().as_encoded_bytes());
+    let store = runtime.join("ferrix-doc");
+    let pages = store.join(&digest);
+    std::fs::create_dir_all(&store)?;
+    std::fs::write(
+        store.join(format!("{digest}.target")),
+        target.as_os_str().as_encoded_bytes(),
+    )?;
+    std::fs::create_dir_all(&target)?;
+    let link = target.join("doc");
+    let linked = match std::fs::symlink_metadata(&link) {
+        Ok(found) if found.file_type().is_symlink() => {
+            let here = std::fs::read_link(&link)? == pages;
+            if !here {
+                std::fs::remove_file(&link)?;
+            }
+            here
+        }
+        Ok(found) if found.is_dir() => {
+            std::fs::remove_dir_all(&link)?;
+            false
+        }
+        Ok(_) => {
+            std::fs::remove_file(&link)?;
+            false
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    #[cfg(unix)]
+    if !linked {
+        std::os::unix::fs::symlink(&pages, &link)?;
+    }
+    std::fs::create_dir_all(&pages)?;
+    Ok(())
+}
+
+/// Remove from `store` the pages of every target directory whose `doc` no
+/// longer links to them (the directory deleted, or its pages moved), with
+/// the file naming it. Pages with no such file are left alone.
+fn prune_pages(store: &std::path::Path) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(store) else {
+        return Ok(());
+    };
+    for entry in entries {
+        let marker = entry?.path();
+        let Some(digest) = marker
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".target"))
+        else {
+            continue;
+        };
+        let pages = store.join(digest);
+        let Ok(named) = std::fs::read(&marker) else {
+            continue;
+        };
+        let target = std::path::PathBuf::from(String::from_utf8_lossy(&named).into_owned());
+        if std::fs::read_link(target.join("doc")).is_ok_and(|linked| linked == pages) {
+            continue;
+        }
+        if pages.is_dir() {
+            std::fs::remove_dir_all(&pages)?;
+        }
+        std::fs::remove_file(&marker)?;
+    }
+    Ok(())
 }
 
 /// `cargo clippy` over the native runtime and programs for `arch`'s kernel
@@ -1612,6 +1762,91 @@ pub(crate) fn python_interpreter() -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scratch directory of its own under the target directory.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let path = paths::target_dir()
+            .join("xtask-check-test")
+            .join(format!("{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_documentation_is_written_to_the_runtime_directory_whatever_was_there() {
+        let root = scratch("doc-link");
+        let runtime = root.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let target = root.join("target");
+        let link = target.join("doc");
+
+        // Pages cargo wrote before: replaced by the link.
+        std::fs::create_dir_all(link.join("ferrix_elf")).unwrap();
+        std::fs::write(link.join("ferrix_elf/index.html"), "old").unwrap();
+        doc_link(&target, &runtime).unwrap();
+        let pages = std::fs::read_link(&link).unwrap();
+        assert!(
+            pages.starts_with(runtime.join("ferrix-doc")),
+            "{}",
+            pages.display()
+        );
+        assert!(pages.is_dir());
+
+        // Run again: the same link, and what was written through it kept.
+        std::fs::write(link.join("kept.html"), "new").unwrap();
+        doc_link(&target, &runtime).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), pages);
+        assert_eq!(
+            std::fs::read_to_string(pages.join("kept.html")).unwrap(),
+            "new"
+        );
+
+        // A link elsewhere, and the runtime directory emptied: made again.
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(root.join("elsewhere"), &link).unwrap();
+        std::fs::remove_dir_all(runtime.join("ferrix-doc")).unwrap();
+        doc_link(&target, &runtime).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), pages);
+        assert!(pages.is_dir());
+
+        // Another target directory has pages of its own.
+        let other = root.join("other-target");
+        doc_link(&other, &runtime).unwrap();
+        let others = std::fs::read_link(other.join("doc")).unwrap();
+        assert_ne!(others, pages);
+
+        // Pruning keeps both while each links to its pages; the other's
+        // directory deleted, its pages and the file naming it go.
+        let store = runtime.join("ferrix-doc");
+        prune_pages(&store).unwrap();
+        assert!(pages.is_dir() && others.is_dir());
+        std::fs::remove_dir_all(&other).unwrap();
+        prune_pages(&store).unwrap();
+        assert!(pages.is_dir());
+        assert!(!others.exists());
+        let mut left: Vec<_> = std::fs::read_dir(&store)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        left.sort();
+        assert_eq!(left.len(), 2, "{left:?}");
+
+        // Pages on disk again: the link goes, and cargo makes a directory.
+        doc_on_disk(&target).unwrap();
+        assert!(std::fs::symlink_metadata(&link).is_err());
+        doc_on_disk(&target).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn free_space_is_read_from_df() {
+        let free = free_bytes(&paths::target_dir());
+        assert!(free.is_some_and(|bytes| bytes > 0), "{free:?}");
+        assert_eq!(free_bytes(std::path::Path::new("/no/such/directory")), None);
+    }
 
     #[test]
     fn miri_runs_the_crates_ci_interprets_in_the_same_order() {

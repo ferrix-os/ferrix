@@ -1140,6 +1140,146 @@ to 45: main failed 2 of 27 and the branch 1 of 22, all three on those
 stage 13 checks; the boot times overlapped (main 31-60 s, the branch
 31-71 s). No rate of failure the change adds could be told from the load's.
 
+## The cold build: the baseline, 2026-10-15 (bs-c)
+
+What everything costs from an empty target directory: a fresh worktree, a
+gate slot made again, CI. Measured on `main` 89a7cf74c in a worktree of its
+own (`.claude/worktrees/bs-c`), each run in an empty target directory, at
+`nice 10`, loads 9 to 30 on 24 threads. cargo was a wrapper (`CARGO=`) that
+adds `--timings` to every build, clippy, test and doc call and logs each
+call's wall time; logs, timing reports and scripts in `~/ferrix-logs/bs-c/`.
+The warm loop is bs-a's and bs-b's (the sections above).
+
+### `build --arch all`, dev and release
+
+| Cold run | Wall | CPU (user) | Of it |
+|---|---:|---:|---|
+| compiling xtask | 11 s | 55 s | |
+| `build --arch all` | 54 s | 299 s | the three kernels, one cargo call: 27 s (each kernel rustc 21-22 s); loaders, natives, images the rest |
+| `build --arch all --release` | 132 s | 417 s | the three kernels at once: 112 s (one rustc each, fat LTO, one codegen unit) |
+
+A fresh worktree also clones its five components (ferrousli, zinc, pixel7,
+the website, apps): about 2 s here. `build` is not where cold time goes:
+`cargo::build_ahead` already compiles the architectures side by side, the
+targets' `core` comes with the toolchain (no build-std), and what is left of
+a release build is the certified reference configuration's own codegen (one
+LTO'd codegen unit a kernel), which this work does not touch.
+
+### `check`, cold
+
+One whole cold `check`, when the disk had room (14:17, loads 22 to 37):
+**483 s** (14 s of it compiling xtask), 2,341 CPU-s, 22.4 GB written, a
+20 GB target directory (`debug/` 3.9 GB, the apps 6.9 GB, the compositor's
+3.2 GB, `mitigations-off/` 1.2 GB, Ferrocene's 0.8 GB). Its steps:
+
+| Step, cold | Wall |
+|---|---:|
+| **the workspaces of their own, beside (`check-side`)** | **463.7 s** |
+| of them: the apps, in turn (waybar 131, hyprlock 32, fuzzel 31, term 26, settings 25, hypridle 17, badapple 17, ferrofetch 6, statd 3) | 288 s |
+| of them: the compositor (its tests 104) | 115 s |
+| of them: loom, init, auth, pkg, installer, media, adbd, nvos | 60 s |
+| main workspace: **documentation** | **188.4 s** |
+| main workspace: tests | 93.7 s |
+| main workspace: kernel clippy, both settings | 77.2 s |
+| main workspace: clippy (host) | 47.6 s |
+| main workspace: Ferrocene, crate layering, doc tests, the rest | 55 s |
+| beside: the audits, at once (the architecture document) | 80.8 s |
+
+Two earlier attempts were stopped when free space on `/` fell under
+29 GB (the rule: keep `/` above 30 GB), so the parts were also measured on
+their own, each cold in an empty target directory, alternated where two
+settings were compared:
+
+| Part, cold | Wall | CPU (user) | Written | Target dir |
+|---|---:|---:|---:|---:|
+| clippy (host) | 14 s | 75 s | 1.3 GB | |
+| tests (host), build and run | 78-105 s | 351-367 s | 2.9 GB | 2.7 GB |
+| doc tests | 5 s | 20 s | | |
+| documentation, after the tests | **48-170 s** | **21-25 s** | 0.9 GB | |
+| the item with Ferrocene's Rust | 13 s | | | 0.8 GB |
+| side: loom / compositor / init / auth / pkg / installer / media / adbd / nvos | 11 / 91 / 6 / 27 / 51 / 10 / 23 / 3 / 13 s, in turn | | | |
+| side: the nine apps, in turn | 155-201 s | 821-866 s | 8.0 GB | 6.9 GB |
+
+* **The side workspaces are the critical path cold**: 464 s one after
+  another, beside a main workspace of 470 s of which 188 s is the
+  documentation; with that cut (D1, below) the main workspace is about 290 s
+  and the side workspaces are the whole of the critical path.
+* **The documentation waits, it does not compute.** 105 rustdocs spend
+  21-25 CPU-s in all, and the step took 48-188 s after the tests (8 s in
+  an empty directory with nothing before it). Under `strace -f -c` the
+  rustdocs spent 2,413 s in `flock`: each takes a lock on `target/doc` and,
+  holding it, rewrites the files the crates share; on this host each of
+  those files is pushed toward the disk when closed (`close` 2.2 ms on
+  average, 163 s in all), so the crates were documented one at a time. Cut
+  D1 below.
+* **The apps compile the same crates over and over**: each of the nine is a
+  workspace with a target directory of its own, and builds the compositor's
+  crates and the resvg stack for the host's clippy, the host's tests and
+  three targets' clippy. Summed over the timing reports, `tiny-skia` was
+  compiled 32 times, `compositor-xkb` 35, `compositor-toolkit` 30, `libc` 90.
+* **The disk is a cost of its own here.** `/` is a 2 TB DRAM-less SSD 98%
+  full; `/proc/pressure/io` read 20-25% *some* and 11-17% *full* through
+  these runs. Bytes written are time on this host: a cold `check` writes
+  more than 20 GB, about 6 GB of it rustc's incremental state, which a
+  one-time build never reads back.
+
+**Incremental compilation in a cold run** (`CARGO_INCREMENTAL=0` against
+the default, alternated, two rounds each):
+
+| | default | `CARGO_INCREMENTAL=0` |
+|---|---:|---:|
+| tests (host): wall / CPU / written / target dir | 76-78 s / 344-348 s / 2.9 GB / 2.7 GB | 80-108 s / 325-329 s / **1.3 GB / 0.9 GB** |
+| the nine apps | 177-201 s / 860-866 s / 8.0 GB / 6.9 GB | 202-205 s / 806-830 s / **4.7 GB / 3.1 GB** |
+
+Half the bytes and a third to a half of the directory, 4-7% less CPU, no
+wall time gained at these loads. It costs a warm edit its incremental
+reuse, so it is for one-time builds; gate slots already trim the
+incremental caches when the disk is short (`gate.sh`).
+
+**One target directory for the nine apps** (an experiment, not landed:
+`~/ferrix-logs/bs-c/apps-shared-experiment.patch`), alternated:
+
+| `check-apps`, cold | own directories | one shared |
+|---|---:|---:|
+| wall | 155 s | 146, 152 s |
+| CPU (user) | 821 s | **438, 447 s** |
+| written / directory | 8.0 / 6.9 GB | **4.9 / 4.3 GB** |
+
+Half the processor time and a third less disk; the wall time stays, since
+the apps still run one after another. It changes the step cache's unit
+target (Cut B2), so it waits for a design with bs-b and the certification
+consultant.
+
+### Cut D1: the documentation written in memory (bs-c-doc)
+
+The documentation step makes `<target>/doc` a link to
+`$XDG_RUNTIME_DIR/ferrix-doc/<SHA-256 of the target directory's path>` (a
+tmpfs) before `cargo doc` runs; nothing reads the pages, the step wants
+rustdoc's verdict. The pages, about 160 MB, stay there, so a warm run
+documents only what changed, as before; when the runtime directory is
+emptied (log out, reboot), cargo finds them gone and documents everything
+once. Pages whose target directory is gone, or no longer links to them,
+are removed by the next documentation step; with less than 1 GiB free in
+the runtime directory, with none, or off Unix, the pages go to
+`<target>/doc` as before (`tools/common/xtask/src/check.rs`,
+`documentation_in_memory`). The same rustdoc runs with the same flags; the
+verdict is the same.
+
+| `host-doc` after a cold `host-test`, alternated | Before (on disk) | After (in memory) |
+|---|---:|---:|
+| Wall | 170, 71, 48 s | **8.8, 23.0, 8.6, 8.3 s** |
+| CPU (user) | 24.4, 24.6, 25.1 s | 25.0, 35.6, 25.3, 25.0 s |
+| Written | 0.9 GB | 0.1 GB |
+| Again, nothing changed | 0.20 s | 0.19 s |
+
+Two unit tests hold it (the link replaces a directory of pages or a link
+elsewhere and keeps what was written through it; pruning keeps what is
+linked and removes what is not; back on disk the link goes; `df`'s free
+space read); each of four sabotages (pruning blind to links, an old pages
+directory kept, any link taken as ours, `df`'s header read as the figure)
+fails them. This is also the 317.7 s of documentation bs-b measured in a
+gate slot on a tree new to it by several commits (branch `bs-b-mainpar`).
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
