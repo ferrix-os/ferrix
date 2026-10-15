@@ -1,4 +1,9 @@
 #!/bin/bash
+# MACHINE-SPECIFIC: written for the N150 bring-up from the customer's Windows
+# PC (2026-10-15, docs/N150.md §13.1). It hardcodes the box's keyboard's USB id
+# (1a2c:2124); run on Linux on the box. Adjust those before running it
+# anywhere else.
+#
 # Stop polling the 1a2c:2124 keyboard: unbind usbhid from its interfaces,
 # then watch the kernel log for a disconnect while keys are pressed.
 for i in /sys/bus/usb/drivers/usbhid/*:1.*; do

@@ -584,6 +584,12 @@ taken from either. It is three crates and a kernel change:
   consultant's OK IF of 2026-10-15). Stage 10 checks that path on QEMU's
   `e1000e`, so every x86-64 boot exercises it.
 
+**On the box (2026-10-15, `docs/N150.md` §13):** the link came up at 1 Gbit
+and the launcher reached the internet. The firmware had left the function's
+memory decoding off (enumeration now turns it on), and the MSI vector never
+delivers, so the driver runs on its polling fallback; why MSI never arrives
+on the box is not known.
+
 **Proven** on the host models and, for the kernel's path, on QEMU's `e1000e`.
 **Not proven:** anything about the chip itself. QEMU models no dwmac4 core at
 all (9.2 and 10.2 have only the NPCM GMAC and the XGMAC), so the driver has

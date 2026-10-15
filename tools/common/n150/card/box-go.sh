@@ -1,7 +1,13 @@
 #!/bin/bash
-# Ferrix onto the N150's NVMe, from an Ubuntu live session:
+# MACHINE-SPECIFIC: written for the N150 bring-up from the customer's Windows
+# PC (2026-10-15, docs/N150.md §13.1). It hardcodes the card PC's address on the
+# customer's LAN (192.168.178.39:8150), the image's sha256 and the box's drive
+# size (512110190592 bytes). Adjust those before running it anywhere else.
+#
+# Ferrix onto the N150's internal drive (SATA on the box; NVMe is accepted too),
+# from an Ubuntu live session:
 #   wget -qO- 192.168.178.39:8150/go | sudo bash
-# Finds the one internal NVMe drive, checks its size, asks for ERASE,
+# Finds the one internal NVMe or SATA drive, checks its size, asks for ERASE,
 # streams the image onto it and checks the result. The only typing is ERASE.
 set -u
 SERVER=http://192.168.178.39:8150

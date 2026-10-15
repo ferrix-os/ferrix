@@ -581,7 +581,12 @@ guess. Step 0, the game on plain Linux in the same VM shape, answered on
 (ACE) refused to run in a virtual machine (13-65544-2). By the stage's own
 rule, steps 4 to 6 wait for Ferrix on the machine rather than in it, the
 way the customer chose; whether ACE accepts Wine on bare-metal Linux is not
-known. Before that, Endfield's own launcher, a 64-bit Qt program with
+known. The machine is the customer's N150 box, and on 2026-10-15 Ferrix
+booted on it: hyprix's desktop on the firmware framebuffer, the USB
+keyboard, `/` on its SATA drive through a new AHCI driver, the YT6801's
+network, and `gryphlink` showing the launcher with its online notices; not
+logged in, nothing downloaded, and slow (an uncached framebuffer, and USB
+and NIC polling because MSI never arrives; `docs/N150.md` §13). Before that, Endfield's own launcher, a 64-bit Qt program with
 QtWebEngine, drew its first screen on Ferrix in Wine, fetching its news
 over the network. On Ferrix, `arch_prctl` answers
 `ARCH_SET_GS` since 2026-10-10, which 64-bit Wine could not start without

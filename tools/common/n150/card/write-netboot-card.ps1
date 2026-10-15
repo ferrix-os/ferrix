@@ -1,3 +1,8 @@
+# MACHINE-SPECIFIC: written for the N150 bring-up from the customer's Windows
+# PC (2026-10-15, docs/N150.md §13.1). It hardcodes the Windows PC's image path
+# (G:\GameLab\iso\ferrix), the card reader's USB serial (000000002964) and the
+# card's size (31914983424 bytes). Adjust those before running it anywhere
+# else.
 # Writes the Ferrix netboot stick image onto the 32 GB microSD card in the
 # USB reader, then reads it back. Run from an elevated PowerShell with
 # -Erase ERASE as the confirmation.

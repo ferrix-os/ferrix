@@ -1,4 +1,9 @@
 #!/bin/bash
+# MACHINE-SPECIFIC: written for the N150 bring-up from the customer's Windows
+# PC (2026-10-15, docs/N150.md §13.1). It hardcodes the card PC's address on the
+# customer's LAN (192.168.178.39:8150, override with SERVER=). Adjust those
+# before running it anywhere else.
+#
 # Replace Ferrix's kernel, initramfs and command line on the N150 box's ESP.
 # Run from Ubuntu live on the box:
 #   wget -qO- 192.168.178.39:8150/esp | sudo bash

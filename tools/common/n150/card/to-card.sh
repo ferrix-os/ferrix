@@ -1,4 +1,10 @@
 #!/bin/bash
+# MACHINE-SPECIFIC: written for the N150 bring-up from the customer's Windows
+# PC (2026-10-15, docs/N150.md §13.1). It hardcodes the Windows PC's paths as
+# Git Bash sees them (/f/Dokumente/projekte/os, the worktree
+# .claude/worktrees/ahci, /g/GameLab/iso/ferrix/...) and the card as drive H:.
+# Adjust those before running it anywhere else.
+#
 # Build the N150 ESP files from a commit of branch ahci and put them on the
 # boot card (FAT32 FERRIXBOOT, mounted on Windows). Run from Git Bash:
 #   bash /g/GameLab/iso/ferrix/card/to-card.sh [COMMIT] [DRIVE]

@@ -1,4 +1,9 @@
 #!/bin/bash
+# MACHINE-SPECIFIC: written for the N150 bring-up from the customer's Windows
+# PC (2026-10-15, docs/N150.md §13.1). It hardcodes the Windows PC's paths as
+# WSL sees them (/mnt/g/GameLab/iso/ferrix/...). Adjust those before running
+# it anywhere else.
+#
 # Build the Ferrix boot card image: MBR, one 4 GiB FAT32 partition (0x0C)
 # holding the N150 ESP's tree with the newest FERRIX files. Run as root in WSL.
 set -euo pipefail

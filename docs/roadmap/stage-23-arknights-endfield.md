@@ -181,6 +181,15 @@ since been deleted from the guest on the customer's word.
 * *The machine (2026-10-15):* the customer's N150 box, bare metal, with
   software rendering; the plan, the disk image and its QEMU gate are
   [`docs/N150.md`](../N150.md) (`n150-install`, `test-n150`).
+* *On the machine (2026-10-15 and 16, from the customer's Windows PC):*
+  Ferrix boots interactively on the N150 box: hyprix's desktop on the
+  firmware framebuffer, the terminal on the USB keyboard, `/` on btrfs on
+  the box's SATA drive (a new AHCI driver, [`docs/AHCI.md`](../AHCI.md)),
+  the YT6801's link up at 1 Gbit, and `gryphlink` under Wine showing the
+  launcher with its online notices. Not logged in, nothing downloaded.
+  Performance is really bad: the framebuffer is uncached (`n150-wc`, not
+  yet tried on the box) and, with no MSI arriving, USB and the NIC poll
+  ([`docs/N150.md`](../N150.md) §13).
 * *Not known, and worth stating:* whether ACE accepts Wine or Proton on
   Linux on bare metal. The reports above are of that, not of a VM, and
   none was checked here; ACE has broken under Wine more than once in 2026.
