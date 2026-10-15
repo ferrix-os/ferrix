@@ -31,8 +31,8 @@ const CR0_WP: u64 = 1 << 16;
 /// Both of these must happen **before** `CR3` is loaded. Bit 63 of a page table
 /// entry is a *reserved* bit until `EFER.NXE` is set, and a reserved bit that is
 /// set does not mean "no execute" — it means every access through that entry
-/// takes a page fault.
-pub(crate) fn prepare_cpu() -> Result<(), &'static str> {
+/// takes a page fault. And both after `exit_boot_services` ([`prepare_cpu`]).
+fn enable_paging_features() {
     // SAFETY: reading IA32_EFER is architecturally defined on every 64-bit x86
     // and has no side effects.
     let efer = unsafe { read_msr(IA32_EFER) };
@@ -50,7 +50,21 @@ pub(crate) fn prepare_cpu() -> Result<(), &'static str> {
     unsafe {
         asm!("mov cr4, {}", in(reg) cr4 | CR4_PGE, options(nostack, preserves_flags));
     }
+}
 
+/// Nothing to check on x86-64 while firmware still runs, and nothing to
+/// change: [`enable_paging_features`] waits until it has gone.
+///
+/// Setting `EFER.NXE` and `CR4.PGE` here, under firmware's page tables, hung
+/// a real machine (an Intel N150's AMI firmware) inside `exit_boot_services`:
+/// firmware's exit handlers run with whatever the loader left in the control
+/// registers, and with `CR4.PGE` set a reload of `CR3` no longer flushes the
+/// global entries firmware may have. OVMF never noticed.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the other architectures' check can fail"
+)]
+pub(crate) const fn prepare_cpu() -> Result<(), &'static str> {
     Ok(())
 }
 
@@ -142,8 +156,7 @@ pub(crate) const fn switch_code() -> Option<&'static [u8]> {
 ///
 /// # Safety
 ///
-/// Boot services must already have been exited, [`prepare_cpu`] must have been
-/// called, and `handoff` must describe tables in which the loader's own code is
+/// Boot services must already have been exited, and `handoff` must describe tables in which the loader's own code is
 /// still identity mapped — the instruction after `mov cr3` is fetched through
 /// the new tables.
 pub(crate) unsafe fn enter_kernel(handoff: Handoff) -> ! {
@@ -153,6 +166,7 @@ pub(crate) unsafe fn enter_kernel(handoff: Handoff) -> ! {
         handoff.identity_table, handoff.root_table,
         "x86-64 has a single root table for both halves"
     );
+    enable_paging_features();
 
     // Every operand is bound to a named register, for AArch64's reason:
     // `options(noreturn)` forbids outputs, so the only way to have a scratch
