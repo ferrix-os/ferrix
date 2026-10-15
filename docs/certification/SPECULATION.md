@@ -691,8 +691,8 @@ debug kernel's text: 33,432 on `main` 89a7cf74c, the one-crate kernel with
 no LTO, and 72,178 once the kernel is four crates (`docs/KERNEL-CRATES.md`,
 S3), since every call from one of its crates into another is a call to a
 symbol rustc cannot prove local. The table's debug rows predate both. The
-release kernel, linked with fat LTO, is one module either way (§8's release
-count below is the reference's).
+release kernel, linked with fat LTO, is one module either way: 5,093
+such calls against 5,129, its text 6.88 MB against 6.85 (`llvm-size`).
 
 Measured again on the release kernel of `main` 523fc3d50 (2026-10-07,
 po10-quick, `docs/OPAQUE-KERNEL.md` §9.11, Q8): 4,475 calls go through a
