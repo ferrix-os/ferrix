@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "dea0d9903cebc4d5c6dda245271851a7a9a0a8e9347ed97c394077cb1cc5f762",
+  "digest": "bed369dfee3d3e7dda3c26568255060b68bb267c5f63ab70d9dd4bfb81d67e59",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -13169,7 +13169,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 7,
-          "doc": "src/kernel/src/syscall/futex.rs: wait, wake and requeue, plain and with a bitset, with the word read and the waiter listed under one table lock so no wake is lost, and the read under it never faulting. One table. A private futex is keyed by address space and user address; one without FUTEX_PRIVATE_FLAG on a word in a shared region, by the VMO behind it and the word's offset there, so a word two processes map shared is one futex, as on Linux. A thread that ends clears its clear_child_tid word and wakes whoever waits on it. The robust list's head is recorded and never walked, and the priority-inheritance operations and FUTEX_WAKE_OP are ENOSYS.",
+          "doc": "src/kernel/src/syscall/futex.rs: wait, wake and requeue, plain and with a bitset, with the word read and the waiter listed under one table lock so no wake is lost, and the read under it never faulting. One table. A private futex is keyed by address space and user address; one without FUTEX_PRIVATE_FLAG on a word in a shared region, by the VMO behind it and the word's offset there, so a word two processes map shared is one futex, as on Linux. A thread that ends clears its clear_child_tid word and wakes whoever waits on it. The robust list's head is recorded and never walked, and the priority-inheritance operations and FUTEX_WAKE_OP are ENOSYS. futex_waitv (449; x86-64, i386, AArch64) sleeps on up to 128 words, one table entry per word, and answers the index of the word woken; a wake does not count a stale entry of a vector waiter already woken through another word, a difference from Linux on purpose. Proton's fsync waits through it (docs/WINE.md 11).",
           "source": {
             "file": "docs/sysml/05-scheduling.sysml",
             "line": 560

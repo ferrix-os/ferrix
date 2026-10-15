@@ -570,6 +570,11 @@ package FerrixScheduling {
              * that ends clears its clear_child_tid word and wakes whoever
              * waits on it. The robust list's head is recorded and never walked, and
              * the priority-inheritance operations and FUTEX_WAKE_OP are
-             * ENOSYS. */
+             * ENOSYS. futex_waitv (449; x86-64, i386, AArch64) sleeps on up
+             * to 128 words, one table entry per word, and answers the index
+             * of the word woken; a wake does not count a stale entry of a
+             * vector waiter already woken through another word, a
+             * difference from Linux on purpose. Proton's fsync waits
+             * through it (docs/WINE.md 11). */
     }
 }

@@ -1336,7 +1336,9 @@ against its socket's capacity; and a btrfs root held changed tree nodes
 uncounted until the commit interval.
 
 *Argued rather than charged,* each with what bounds it: one per task and so
-bounded by the task limit -- a kernel stack, a futex waiter, signal state, a
+bounded by the task limit -- a kernel stack, a futex waiter (at most about
+19 KiB since `futex_waitv`'s 128 words, 2026-10-15; MEMORY-AND-TIMING.md),
+signal state, a
 process's recorded program and arguments (at most 256 KiB); fixed by the
 machine and shared by every job -- 256 pseudoterminal pairs, the neighbour
 and IP reassembly caches, the routing tables (now root's alone), a btrfs

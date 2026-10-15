@@ -350,7 +350,15 @@ even for an instant, and a refused charge takes nothing.
   call, before anything changed. The kinds, and what is argued rather than
   charged, are in FINDINGS.md F-37: a kernel stack, a futex waiter and a
   process's recorded arguments are one per task, which the task limit
-  bounds; 256 pseudoterminals, the neighbour and IP reassembly caches, the
+  bounds. A futex waiter is at most about 19 KiB on a 64-bit kernel since
+  `futex_waitv` (2026-10-15): up to 128 table entries of 48 bytes each,
+  with up to as much again of their buckets' growth slack (12 KiB), its
+  words' list (128 of 40 bytes, 5 KiB), one bucket record per word (1 KiB)
+  and its sleeper (56 bytes); the 3 KiB copy of the caller's vector is freed
+  before it sleeps. Argued through the task limit, not charged, as before.
+  A wake's walk under a bucket's spin lock is linear in that bucket's
+  entries, now up to 128 per waiting task; setting up and leaving take one
+  bucket's lock at a time, never two, and only a requeue holds two; 256 pseudoterminals, the neighbour and IP reassembly caches, the
   routing tables, a btrfs transaction's changed nodes and the dentry cache's
   queue (made whole at boot and never grown) are the machine's, each with a
   fixed bound; a VMO's page list is a few dozen bytes per

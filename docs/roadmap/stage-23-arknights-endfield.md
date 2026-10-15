@@ -249,10 +249,16 @@ desktop to type into.
   `SS` after `SYSRET` on AMD (`docs/WINE.md` §7). `modify_ldt` was not
   needed; `wineboot` starts the 32-bit `rundll32.exe`. Reviewed by the
   consultant (ledger line 762, OK IF W1 to W7, met in the landing).
-* *Still to do:* E1.4's esync, which Debian's Wine 10.0 does not have (nor
-  fsync or ntsync; `docs/WINE.md` §5): it waits on a Wine that does, the
-  route's patched Proton, and E1.4's 3 points move with it. A 32-bit program that draws a window.
-  Whether btrfs's write path leaves more of a
+  A 32-bit program draws a window (2026-10-15): `window32.c`, built with
+  mingw-w64's i686 compiler, says it runs as an i386 process under WoW64
+  and paints its window, which hyprix lists, in `test-wine`'s desktop boot.
+  E1.4 (2026-10-15): Debian's Wine 10.0 has no esync, fsync or ntsync, and
+  GE-Proton11-7 no esync either -- Proton dropped it -- so the fast path is
+  Proton's fsync, for which the kernel gained `futex_waitv` (449; consultant
+  OK IF (1) to (10), ledger line 1172). Proton's Wine takes fsync on Ferrix
+  from its 64-bit and 32-bit sides, and a turn handed between two threads
+  takes 4.9 µs instead of 90.6 (`test-wine-sync`, `docs/WINE.md` §11).
+* *Still to do:* whether btrfs's write path leaves more of a
   full volume unallocated than Linux would (135 MB of 2 GB on the full Wine
   volume), filed in `docs/BACKLOG.md`.
 
@@ -316,7 +322,8 @@ step 0's guest.
 * **E3.4** Full screen and a change of mode: yserver offers one synthetic
   RandR output, and a game's switch of resolution through Wine is untried. 5.
 * **E3.5** Faster synchronisation, if wineserver's and esync's are too slow
-  by measurement: `futex_waitv` (Wine's fsync), or ntsync, which is the
+  by measurement: `futex_waitv` (Wine's fsync; done 2026-10-15 with E1.4,
+  `docs/WINE.md` §11), or ntsync, which is the
   larger. 8.
 * **E3.6** What the game finds missing in the kernel. Candidates the tree
   shows: `FUTEX_WAKE_OP` and the priority-inheritance futexes are `ENOSYS`,

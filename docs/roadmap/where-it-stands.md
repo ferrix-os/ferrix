@@ -589,7 +589,10 @@ with no workaround (`test-wine`; `run-compositor --wine` to watch it);
 Direct3D 11 draws through DXVK on lavapipe in it with no
 card since 2026-10-12, offscreen and presented in a window on hyprix
 (`test-dxvk`), Wine runs 32-bit Windows programs inside its 64-bit
-process since the same day (its 32-bit `cmd` answers); a real Unity game,
+process since the same day (its 32-bit `cmd` answers, and since 2026-10-15
+a 32-bit program draws a window); GE-Proton's Wine waits through fsync on
+the kernel's new `futex_waitv` since 2026-10-15, about eighteen times
+faster a turn than through wineserver (`test-wine-sync`); a real Unity game,
 Unity's Spaceship Demo on Direct3D 11 with its High Definition Render
 Pipeline, starts in it and draws its walkthrough in a window of hyprix's
 through DXVK on lavapipe since 2026-10-13, at about 1.3 frames a second

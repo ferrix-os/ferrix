@@ -226,9 +226,11 @@ no line naming any of the three, and neither `wineserver64` nor
 which is what `test-wine` already runs. What esync asks of the kernel
 (`eventfd` with `EFD_SEMAPHORE`, non-blocking reads, `poll` and `ppoll`
 over many descriptors, a high `RLIMIT_NOFILE`, shared memory for its
-objects) stays untried by Wine until a Wine that has it is on a volume:
-the route's patched Proton builds (DW-Proton, then GE-Proton) carry esync
-and fsync, and GE-Proton's newer releases ntsync.
+objects) stays untried by Wine until a Wine that has it is on a volume.
+GE-Proton11-7, the Proton of §10, has none either (2026-10-15): its
+`wineserver` and `ntdll.so` carry fsync and ntsync and no line of esync,
+which Proton has dropped. Its fast path is fsync, on Ferrix since
+2026-10-15 (§11).
 
 **Leads, none of them in the kernel as far as is known.**
 
@@ -418,8 +420,13 @@ record):
 
 **Where it stands (2026-10-12).** `test-wine` runs the 32-bit `cmd` to
 completion: `Microsoft Windows 10.0.19043`. `wineboot` runs the 32-bit
-`rundll32` and `iexplore` without an exception. Not tried yet: a 32-bit
-program that draws a window, and a 32-bit installer. An i386 handler in a
+`rundll32` and `iexplore` without an exception. Since 2026-10-15 a 32-bit
+program draws a window: `tools/common/test/window32.c`, built by xtask with
+mingw-w64's i686 compiler and run in `test-wine`'s desktop boot, prints
+`window32: pointer=4 wow64=1 process=014c native=8664` and paints its
+window, titled `Ferrix WoW64`, in the colour the script names; the gate
+requires the line, the window in hyprix's list and the colour over half
+the screen (90% on the 1024 by 768 screen under KVM, 2026-10-15). Not tried yet: a 32-bit installer. An i386 handler in a
 64-bit program, delivered on a `SYSCALL`'s way back, runs in 64-bit mode,
 unlike Linux; Wine installs none, and the row is in `docs/BACKLOG.md`.
 
@@ -769,3 +776,79 @@ certificate bundle, and fuzzel lists it as GRYPHLINK.
 `cargo xtask test-endfield-proton --everything --accel kvm` boots on the
 merged volume, starts the launcher with `gryphlink`, and requires the
 same window, button and server answer.
+
+## 11. fsync: Proton's Wine without wineserver in every wait (`test-wine-sync`)
+
+Stage 23's E1.4 and E3.5. With wineserver's synchronisation alone, every
+wait and every `SetEvent` of a Windows program is a request to the server
+over its socket. esync and fsync are Proton's ways around that; GE-Proton11-7
+has fsync (and ntsync) and no esync (§5). Read in its binaries and in
+Valve's `proton_11.0` source (`server/fsync.c`,
+`dlls/ntdll/unix/fsync.c`):
+
+* wineserver turns fsync on when `WINEFSYNC=1` and `futex_waitv` (449),
+  called with no arguments, fails with something other than `ENOSYS` or
+  `EPERM`; it then says `fsync: up and running.` on its standard error;
+* every event, mutex and semaphore is then a word in a POSIX
+  shared-memory file, `/dev/shm/wine-<prefix inode>-fsync`, which the server
+  grows with `ftruncate` and each Wine process maps `MAP_SHARED`;
+* a wait is `futex_waitv` over those words -- up to 64 objects and the
+  thread's APC word, each `FUTEX_32` without `FUTEX2_PRIVATE`, so keyed
+  shared -- with an absolute timeout on `CLOCK_MONOTONIC` or
+  `CLOCK_REALTIME`; a signal is the word changed and a plain `FUTEX_WAKE`;
+* a client whose own probe gets `ENOSYS` while the server runs fsync exits
+  ("can't use __NR_futex_waitv"). Both Unix sides call it: Proton's 64-bit
+  `ntdll.so` through `syscall`, its 32-bit one through `int $0x80`.
+
+**What Ferrix lacked.** `futex_waitv` itself; shared futex keys on a
+`MAP_SHARED` file mapping, `/dev/shm` and `FUTEX_WAKE` were there. It is
+in the kernel since 2026-10-15 (`syscall/futex.rs`, 449 on x86-64, i386
+and AArch64; ARMv7-A's local header ends before it), with Linux's answers
+and one deliberate difference: a wake does not count a stale entry of a
+vector waiter already woken through another of its words. The stage 7 self-check's
+`futex` line holds it. Reviewed by the certification consultant before it
+was built: OK IF (1) to (10), ledger line 1172 (all of it in the load; no
+requirement id).
+
+**The gate.** `cargo xtask test-wine-sync --accel kvm` attaches Proton's
+volume (`fetch-proton.sh`) with no display and carries
+`tools/common/test/syncbench.c`, built by xtask with mingw-w64 for x86-64
+and i386: two threads hand a turn back and forth 20,000 times (the waiting
+side in `WaitForMultipleObjects` on three handles, the one it waits for
+the second), then two processes through named events. It runs each width
+under a wineserver of its own without `WINEFSYNC`, then with
+`WINEFSYNC=1`, and passes when with fsync the server said it took it and a
+run traced with `WINEDEBUG=+fsync` shows Proton's own `Woken up by handle`
+from each width, without it neither, and every run handed every turn over.
+Its negative control runs it on a kernel that answers 449 with `ENOSYS`:
+the server never takes fsync and the gate says so.
+
+On nazuna under KVM, 2026-10-15, two runs (a first by hand, then the
+gate pool's `es-sync`; wineserver's time is its user and system time from
+`/proc` over the run, process starts included):
+
+| | 64-bit threads | 64-bit processes | 32-bit threads | 32-bit processes | wineserver, 64 / 32-bit runs |
+|---|---|---|---|---|---|
+| wineserver alone | 90.6, 86.2 µs a turn | 83.8, 91.8 µs | 127.6, 86.3 µs | 196.3, 105.2 µs | 4170 / 5440, 4140 / 3810 ms |
+| fsync | 4.9, 3.3 µs | 8.0, 5.5 µs | 5.4, 3.8 µs | 8.7, 6.0 µs | 880 / 320, 1240 / 200 ms |
+
+**The launcher.** `test-endfield-proton` sets `WINEFSYNC=1`, as Proton's
+own script does (`FERRIX_WINEFSYNC=0` leaves it to wineserver, to compare),
+and prints the processor time wineserver and the Windows programs took
+over the last two minutes of its wait, the launcher idle on its first
+screen.
+
+On nazuna under KVM, 2026-10-15, one run each with the host loaded by other
+sessions (load about 30): wineserver took 30.6 s of processor time in those
+120 s without fsync and 19.8 s with it, a third less; the Windows programs
+(the launcher, its web engine's processes) took 395 s and 408 s, about
+three and a half processors either way -- the launcher's own drawing and
+its web view, not its waits, are what it spends. Both runs drew the window
+and its button and reached Gryphline's server; with fsync the server said
+`fsync: up and running.`
+
+**Not done.** ntsync (`/dev/ntsync`, Linux 6.14's driver), which Proton
+prefers when the device is there and which is E3.5's larger half;
+`gryphlink` on the volume (`fetch-endfield-launcher.sh`) does not set
+`WINEFSYNC` yet, so the `--everything` desktop's launcher waits through
+wineserver unless the gate's script, which does, starts it.
