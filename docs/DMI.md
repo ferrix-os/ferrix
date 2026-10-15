@@ -124,6 +124,11 @@ tries the 2.x entry point after a refused 3.x one, and passes zeros. When it
 copies, it prints `smbios 3.0 entry point (64-bit), table of N bytes
 copied`: the version and the length, nothing from the table.
 
+What the loader does here is an assumption of the kernel's requirement
+(`L.discovery.5`), not a requirement of its own: no requirement names a
+loader unit, so `L.discovery.6`, reserved for it, was released unwritten.
+The kernel does not rely on it: it checks the copy again.
+
 `BootInfo` version 8 is refused by a version 7 kernel and the other way
 round, as every version change is (`BootInfoError::VersionMismatch`), so a
 loader and a kernel go together; an A/B update carries both.
