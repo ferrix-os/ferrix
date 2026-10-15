@@ -726,7 +726,8 @@ fn start_tsc() -> Result<&'static str, &'static str> {
     crate::console::println!(
         "  clock    WARNING: PIT channel 2 never reached terminal count (gated 8254?); asking CPUID leaf 0x15/0x16 for the TSC's rate"
     );
-    let hz = cpuid_tsc_hz().ok_or("no HPET, the PIT did not answer, and CPUID reports no TSC rate")?;
+    let hz =
+        cpuid_tsc_hz().ok_or("no HPET, the PIT did not answer, and CPUID reports no TSC rate")?;
     COUNTER_HZ.store(hz, Ordering::Relaxed);
     Ok(BY_CPUID)
 }

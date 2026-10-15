@@ -288,8 +288,7 @@ pub(crate) fn flush_tlb_page(address: u64) {
 /// Interrupt the processor whose hardware identifier is `hardware_id`, and no
 /// other: its local APIC ID.
 pub(crate) fn send_ipi_to(hardware_id: u64) -> Result<(), &'static str> {
-    let apic_id = u32::try_from(hardware_id)
-        .map_err(|_| "an APIC ID wider than 32 bits")?;
+    let apic_id = u32::try_from(hardware_id).map_err(|_| "an APIC ID wider than 32 bits")?;
     apic::send_ipi_to(apic_id)
 }
 
