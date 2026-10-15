@@ -1537,7 +1537,10 @@ package FerrixObjectRequirements {
         }
         // The write's reclaim and retry (at most eight reclaims, then
         // ENOSPC) are fs/pages.rs's write_reclaiming, load, whose evidence
-        // is the stage 12 check and its control K3 (ledger 2026-10-15). This
+        // is the stage 12 check write_reclaims_at_max and its control K3
+        // (ledger 2026-10-15); a fill's (allocate_reclaiming, the same bound,
+        // then ENOMEM) is load too, its evidence the stage 12 check
+        // fill_reclaims_until_room and its control (ledger line 1637). This
         // states what the core does for it. That the commit and the copy are
         // made under one hold of the pages lock is verified by inspection
         // (the consultant's code review, reviews.md line 1154), not by a
