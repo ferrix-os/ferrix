@@ -117,3 +117,44 @@ fn the_second_boot_must_find_what_the_first_wrote() {
     let error = check_second(&fresh).unwrap_err().to_string();
     assert!(error.contains("the root the first left"), "{error}");
 }
+
+const DESKTOP: [&str; 11] = [
+    "  nvme     0000:00:04.0 NVMe 1.4 controller up",
+    "  root     / is btrfs on vdd2; the system was installed on it",
+    "  display  firmware framebuffer 1024x768 lent to a driver",
+    "efifb: 1024x768 firmware framebuffer",
+    "hyprix: card0 Virtual-1 1024x768 1024x768 /tmp/wayland-1",
+    "hyprix: seat 2 devices [event0 QEMU QEMU USB Keyboard, event1 QEMU QEMU USB Mouse], 5 binds",
+    "n150-desktop: the launcher's video host gl-utils-public.hg-cdn.com resolves nowhere",
+    "n150-desktop: gryphlink is on /data",
+    "n150-desktop: a lease for eth0",
+    "n150-desktop: yserver is up on :0 after 2s",
+    "n150-desktop: ready",
+];
+
+#[test]
+fn the_desktop_boot_passes_with_every_line_and_fails_naming_the_missing_one() {
+    check_desktop(&lines(&DESKTOP)).unwrap();
+    for (missing, said) in [
+        (2, "did not lend the firmware framebuffer"),
+        (5, "no USB keyboard"),
+        (6, "video host is not blocked"),
+        (8, "got no lease"),
+        (9, "yserver did not start"),
+    ] {
+        let mut without = DESKTOP.to_vec();
+        let _ = without.remove(missing);
+        let error = check_desktop(&lines(&without)).unwrap_err().to_string();
+        assert!(error.contains(said), "{error}");
+    }
+    let mut unblocked = DESKTOP.to_vec();
+    unblocked[6] = "n150-desktop: /etc/hosts does not block gl-utils-public.hg-cdn.com";
+    assert!(check_desktop(&lines(&unblocked)).is_err());
+}
+
+#[test]
+fn a_cleared_screen_has_one_colour_and_a_desktop_many() {
+    assert_eq!(distinct_colours(&[0; 3 * 64]), 1);
+    let ramp: Vec<u8> = (0..=255_u8).flat_map(|v| [v, v, 0]).collect();
+    assert_eq!(distinct_colours(&ramp), 256);
+}

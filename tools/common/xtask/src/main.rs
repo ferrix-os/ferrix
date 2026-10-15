@@ -239,10 +239,12 @@ COMMANDS:
     test-netboot  Boot the netboot stick under QEMU from a server this runs, to the boot marker; then the
                   negative control, the server serving under another path, must fail with iPXE's error
     n150-install  Write build/x86_64/n150-disk.img for the N150 box's NVMe drive: a GUID partition table, the
-                  image's EFI system partition, and a btrfs root at the rest of the disk with a program tree
-                  at /data (docs/N150.md); a file only, never a device
+                  box's desktop (or --image) in its EFI system partition, and a btrfs root at the rest of the
+                  disk with a program tree at /data (docs/N150.md); a file only, never a device
     test-n150     Write that disk with a fixture tree and boot it under OVMF as the machine's one NVMe boot
                   disk, GOP display only; /data read, written, kept across a power cycle, btrfs check after
+    test-n150-desktop  Write the box's disk with its desktop and the launcher's tree and boot it so: hyprix on
+                  the firmware framebuffer, yserver, the video host blocked, a lease, a picture on the screen
     run           Boot the image under QEMU, attached to the terminal
     run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show
     run-badapple  Boot the badapple app's player as init: all of Bad Apple!! in a window, heard on this host's sound server (tools/common/fetch/fetch-badapple.sh first)
@@ -785,7 +787,7 @@ fn run() -> Result<()> {
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
         "netboot" | "netboot-stick" | "test-netboot" => netboot::run(command, &args),
-        "n150-install" | "test-n150" => n150::run(command, &args),
+        "n150-install" | "test-n150" | "test-n150-desktop" => n150::run(command, &args),
         "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container"
         | "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),

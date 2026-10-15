@@ -77,6 +77,7 @@ mod layout;
 mod locked;
 mod machine;
 mod monitors;
+pub(crate) mod n150_box;
 mod picture;
 mod pointer;
 mod protocols;

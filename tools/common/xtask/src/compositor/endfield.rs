@@ -248,7 +248,7 @@ fn script(wine: Wine, gryphlink: bool) -> String {
 /// The launcher's background video's host, which the launcher's main
 /// background image comes from too (Gryphline's `batch_proxy`,
 /// `get_main_bg_image`, 2026-10-15).
-const VIDEO_HOST: &str = "gl-utils-public.hg-cdn.com";
+pub(crate) const VIDEO_HOST: &str = "gl-utils-public.hg-cdn.com";
 
 /// What `FERRIX_ENDFIELD_NO_VIDEO=1` adds before the launcher starts: the
 /// video's host resolves nowhere, in the guest's hosts file and in the

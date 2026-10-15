@@ -857,8 +857,11 @@ disk for the N150 box's NVMe drive: an EFI system partition with the image,
 and a btrfs root at the rest of the disk with a program tree (by default
 the Proton launcher volume's) at `/data`. It writes a file only; carrying
 it to the drive erases the drive and is the owner's step.
+Its EFI system partition holds the box's desktop: hyprix on the firmware's
+framebuffer (`ferrix.efifb`), yserver, and GRYPHLINK's start.
 `cargo xtask test-n150` boots such a disk under OVMF as the machine's one
-NVMe boot disk, with the firmware's framebuffer as the only display.
+NVMe boot disk, with the firmware's framebuffer as the only display, and
+`cargo xtask test-n150-desktop` boots the desktop itself the same way.
 [`docs/N150.md`](N150.md) is the plan for Endfield's anti-cheat on the box,
 the transfer, and the limits.
 

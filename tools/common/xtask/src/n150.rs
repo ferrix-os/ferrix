@@ -138,29 +138,36 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     }
     match command {
         "test-n150" => test(args),
+        "test-n150-desktop" => test_desktop(args),
         _ => install(args),
     }
 }
 
-/// `n150-install`: see the module documentation.
-fn install(args: &Args) -> Result<()> {
-    let arch = Arch::X86_64;
-    let image = match &args.n150.image {
-        Some(image) => image.clone(),
-        None => crate::build_image(arch, args)?.0,
-    };
+/// The tree put at `/data`: `--tree`, or the Proton launcher volume's.
+fn launcher_tree(args: &Args) -> Result<PathBuf> {
     let tree = match &args.n150.tree {
         Some(tree) => tree.clone(),
         None => paths::volume_directory("endfield-launcher-proton")?.join("tree"),
     };
     if !tree.is_dir() {
         return Err(Error::new(format!(
-            "n150-install: no tree at {}: `tools/common/fetch/fetch-proton.sh`, then \
+            "n150: no tree at {}: `tools/common/fetch/fetch-proton.sh`, then \
              `FERRIX_ENDFIELD_WINE=proton tools/common/fetch/fetch-endfield-launcher.sh` make it \
              (docs/WINE.md §10), or name one with --tree",
             tree.display()
         )));
     }
+    Ok(tree)
+}
+
+/// `n150-install`: see the module documentation.
+fn install(args: &Args) -> Result<()> {
+    let arch = Arch::X86_64;
+    let tree = launcher_tree(args)?;
+    let image = match &args.n150.image {
+        Some(image) => image.clone(),
+        None => crate::compositor::n150_box::image(args)?.0,
+    };
     let disk = args
         .n150
         .disk
@@ -547,6 +554,159 @@ fn test(args: &Args) -> Result<()> {
     checked?;
     remove_own(&fixture)?;
     println!("  {arch}: test-n150 passed");
+    Ok(())
+}
+
+/// `test-n150-desktop`'s disk: room for the launcher's tree (about 5 GB)
+/// and the system, sparse.
+const DESKTOP_TEST_DISK_BYTES: u64 = 16 << 30;
+/// Megabytes of guest RAM for the desktop boot, unless `--memory` says.
+const DESKTOP_MEMORY: u32 = 4096;
+/// Distinct colours the screen must show: a desktop, not a cleared screen.
+const DESKTOP_COLOURS: usize = 8;
+
+/// `test-n150-desktop`: the disk `n150-install` writes by default -- the
+/// box's desktop in its EFI system partition, the launcher's tree (or
+/// `--tree`) at `/data` -- at a smaller size, booted under OVMF from the
+/// NVMe drive alone, with a VGA as the only display (the GOP framebuffer
+/// the box will have), a network, and a USB keyboard and mouse on an xHCI
+/// controller. Required: `/` on the root partition
+/// with the system installed, the firmware framebuffer lent to efifb,
+/// hyprix on it with a keyboard in its seat, [`crate::compositor::n150_box`]'s script reporting the
+/// video host blocked, the launcher on `/data`, a lease and yserver up; and
+/// a screendump of the VGA that is a desktop, kept at
+/// `build/x86_64/n150-desktop.ppm`.
+fn test_desktop(args: &Args) -> Result<()> {
+    use crate::compositor::n150_box::READY;
+    use crate::display::{Qmp, free_port, parse_ppm};
+
+    let arch = Arch::X86_64;
+    let build = paths::build_dir(arch);
+    let tree = launcher_tree(args)?;
+    let (image, kernel) = crate::compositor::n150_box::image(args)?;
+    let disk = build.join("n150-desktop-test.img");
+    let layout = make_disk(&disk, &image, Some(&tree), DESKTOP_TEST_DISK_BYTES)?;
+    println!(
+        "  {arch}: the box's desktop disk written: ESP sectors {:?}, root sectors {:?}",
+        layout.esp, layout.root
+    );
+    let port = free_port()?;
+    let mut booted = args.clone();
+    booted.boot_nvme = true;
+    booted.firmware_screen = true;
+    booted.net = true;
+    booted.qmp_port = Some(port);
+    // The box's keyboard and mouse are USB, on its xHCI: test-usb's bus,
+    // with the image's own ESP volume as the stick nothing reads.
+    booted.usb = Some(image);
+    if !booted.memory_given {
+        booted.memory = DESKTOP_MEMORY;
+    }
+    if !booted.timeout_given {
+        booted.timeout = BOOT_SECONDS;
+    }
+    let dump = build.join("n150-desktop.ppm");
+    let mut colours = 0;
+    let lines = qemu::watch_then(arch, &disk, &kernel, &booted, READY, |watching| {
+        let mut qmp = Qmp::connect(
+            port,
+            std::time::Instant::now() + std::time::Duration::from_secs(10),
+        )?;
+        // A moment for hyprix to draw what the script's last lines changed.
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        qmp.screendump(Some(qemu::FIRMWARE_SCREEN_ID), &dump)?;
+        let bytes = std::fs::read(&dump)
+            .map_err(|error| Error::new(format!("reading {}: {error}", dump.display())))?;
+        colours = distinct_colours(&parse_ppm(&bytes)?.pixels);
+        watching.stop_when_done();
+        Ok(())
+    });
+    // A boot that never reached the script's last line is judged on what it
+    // did print, so that the failure names what was missing.
+    let lines = match lines {
+        Ok(lines) => lines,
+        Err(error) => {
+            if let Ok(text) = std::fs::read_to_string(build.join("serial.log")) {
+                let said: Vec<String> = text.lines().map(str::to_owned).collect();
+                check_desktop(&said)?;
+            }
+            return Err(error);
+        }
+    };
+    check_desktop(&lines)?;
+    if colours < DESKTOP_COLOURS {
+        return Err(Error::new(format!(
+            "{arch}: the screen showed {colours} colours, not a desktop: {}",
+            dump.display()
+        )));
+    }
+    remove_own(&disk)?;
+    println!(
+        "  {arch}: the box's desktop on the firmware framebuffer, {colours} colours on the screen \
+         ({}); test-n150-desktop passed",
+        dump.display()
+    );
+    Ok(())
+}
+
+/// How many distinct colours an RGB picture holds, counted up to 4096.
+pub(crate) fn distinct_colours(pixels: &[u8]) -> usize {
+    let mut seen = std::collections::BTreeSet::new();
+    let (rgb, _) = pixels.as_chunks::<3>();
+    for pixel in rgb {
+        let _ = seen.insert(*pixel);
+        if seen.len() >= 4096 {
+            break;
+        }
+    }
+    seen.len()
+}
+
+/// What the desktop boot must print.
+pub(crate) fn check_desktop(lines: &[String]) -> Result<()> {
+    require(
+        lines,
+        &[("NVMe 1.", "the NVMe driver did not bring the drive up")],
+    )?;
+    on_root_partition(lines)?;
+    require(
+        lines,
+        &[
+            (
+                "the system was installed on it",
+                "the first boot did not install the system on the root",
+            ),
+            (
+                "lent to a driver",
+                "the kernel did not lend the firmware framebuffer (ferrix.efifb)",
+            ),
+            ("efifb: ", "efifb did not start on the firmware framebuffer"),
+            ("hyprix: card0", "hyprix found no card to draw on"),
+            (
+                "n150-desktop: the launcher's video host",
+                "the launcher's video host is not blocked in /etc/hosts",
+            ),
+            (
+                "n150-desktop: gryphlink is on /data",
+                "the launcher's start is not on /data",
+            ),
+            (
+                "n150-desktop: a lease for eth0",
+                "the wired interface got no lease",
+            ),
+            ("n150-desktop: yserver is up on :0", "yserver did not start"),
+        ],
+    )?;
+    // The keyboard in hyprix's own seat, not only the kernel's input line.
+    if !lines
+        .iter()
+        .any(|line| line.contains("hyprix: seat") && line.contains("USB Keyboard"))
+    {
+        return Err(Error::new(
+            "x86_64: hyprix's seat has no USB keyboard (no `hyprix: seat` line naming one); \
+             its lines are in the serial log",
+        ));
+    }
     Ok(())
 }
 
