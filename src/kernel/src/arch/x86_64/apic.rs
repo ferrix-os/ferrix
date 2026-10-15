@@ -193,7 +193,7 @@ fn choose_mode(option: Option<&str>) -> Result<Option<Why>, &'static str> {
         None
     } else if base & APIC_BASE_X2APIC != 0 && base & APIC_BASE_ENABLE != 0 {
         Some(Why::LeftOn)
-    } else if option == Some("x2apic") && offered {
+    } else if option != Some("none") && offered {
         Some(Why::Asked)
     } else {
         None
