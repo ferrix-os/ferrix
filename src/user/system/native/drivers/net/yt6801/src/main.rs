@@ -188,7 +188,14 @@ impl Mapped {
             return 0;
         }
         let address = self.base + offset;
-        assert!(address.is_multiple_of(4), "a u32 on its own alignment");
+        if !address.is_multiple_of(4) {
+            return u32::from_le_bytes([
+                self.read_u8(offset),
+                self.read_u8(offset + 1),
+                self.read_u8(offset + 2),
+                self.read_u8(offset + 3),
+            ]);
+        }
         // SAFETY: as for `read_u8`, and the four bytes are one aligned `u32`.
         u32::from_le(unsafe { ptr::read_volatile(address as *const u32) })
     }
@@ -200,9 +207,45 @@ impl Mapped {
             return;
         }
         let address = self.base + offset;
-        assert!(address.is_multiple_of(4), "a u32 on its own alignment");
+        if !address.is_multiple_of(4) {
+            for (at, byte) in value.to_le_bytes().into_iter().enumerate() {
+                self.write_u8(offset + at, byte);
+            }
+            return;
+        }
         // SAFETY: as for `write_u8`, and the four bytes are one aligned `u32`.
         unsafe { ptr::write_volatile(address as *mut u32, value.to_le()) }
+    }
+
+    /// The little-endian `u16` at `offset`: one access where it is aligned,
+    /// bytes where it is not.
+    fn read_u16(&self, offset: usize) -> u16 {
+        if offset.checked_add(2).is_none_or(|end| end > self.len) {
+            return 0;
+        }
+        let address = self.base + offset;
+        if !address.is_multiple_of(2) {
+            return u16::from_le_bytes([self.read_u8(offset), self.read_u8(offset + 1)]);
+        }
+        // SAFETY: as for `read_u8`, and the two bytes are one aligned `u16`.
+        u16::from_le(unsafe { ptr::read_volatile(address as *const u16) })
+    }
+
+    /// Write the little-endian `u16` at `offset`, as [`Mapped::read_u16`]
+    /// reads it.
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        if offset.checked_add(2).is_none_or(|end| end > self.len) {
+            return;
+        }
+        let address = self.base + offset;
+        if !address.is_multiple_of(2) {
+            let [low, high] = value.to_le_bytes();
+            self.write_u8(offset, low);
+            self.write_u8(offset + 1, high);
+            return;
+        }
+        // SAFETY: as for `write_u8`, and the two bytes are one aligned `u16`.
+        unsafe { ptr::write_volatile(address as *mut u16, value.to_le()) }
     }
 }
 
@@ -296,6 +339,25 @@ impl RingMemory for Ring {
     fn barrier(&self) {
         fence(Ordering::SeqCst);
     }
+    // The indices the kernel moves while this side reads them are one
+    // access each where aligned (`ferrix-netring`'s `RingMemory`): composed
+    // from bytes, a tail stepping from 0x00ff to 0x0100 could read 0x01ff.
+
+    fn read_u16(&self, offset: usize) -> u16 {
+        self.mapped.read_u16(offset)
+    }
+
+    fn read_u32(&self, offset: usize) -> u32 {
+        self.mapped.read_u32(offset)
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        self.mapped.write_u16(offset, value);
+    }
+
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        self.mapped.write_u32(offset, value);
+    }
 }
 
 /// The ring's data VMO, which the kernel also maps.
@@ -315,6 +377,25 @@ impl RingMemory for Data {
 
     fn barrier(&self) {
         fence(Ordering::SeqCst);
+    }
+    // The indices the kernel moves while this side reads them are one
+    // access each where aligned (`ferrix-netring`'s `RingMemory`): composed
+    // from bytes, a tail stepping from 0x00ff to 0x0100 could read 0x01ff.
+
+    fn read_u16(&self, offset: usize) -> u16 {
+        self.mapped.read_u16(offset)
+    }
+
+    fn read_u32(&self, offset: usize) -> u32 {
+        self.mapped.read_u32(offset)
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        self.mapped.write_u16(offset, value);
+    }
+
+    fn write_u32(&mut self, offset: usize, value: u32) {
+        self.mapped.write_u32(offset, value);
     }
 }
 
