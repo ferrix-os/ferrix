@@ -35,7 +35,7 @@
 pub use ferrix_kernel_core::discovery::board;
 pub(crate) use ferrix_kernel_core::discovery::description;
 pub mod devmgr;
-pub(crate) mod firmware;
+pub mod firmware;
 pub use ferrix_kernel_core::discovery::fdt;
 pub use ferrix_kernel_core::discovery::finder;
 pub mod pci;
