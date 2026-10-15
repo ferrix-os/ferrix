@@ -795,9 +795,7 @@ fn run() -> Result<()> {
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
         "netboot" | "netboot-stick" | "test-netboot" => netboot::run(command, &args),
-        "n150-install" | "test-n150" | "test-n150-sata" | "test-n150-desktop" => {
-            n150::run(command, &args)
-        }
+        c if c == "n150-install" || c.starts_with("test-n150") => n150::run(command, &args),
         "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container"
         | "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),
