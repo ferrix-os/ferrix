@@ -189,6 +189,12 @@ pub trait PageSource: Send + Sync + fmt::Debug {
     /// file's end are zeros. Called with no spin lock held; may block on I/O.
     /// A checksum failure is `Err(EIO)`, never a zeroed page.
     ///
+    /// A page past the first that cannot be read ends the run short, with
+    /// the pages before it: `Err` is for the first page alone. The kernel's
+    /// store reads ahead of what a read asked for, and falls back to the
+    /// read's own pages when a run fails, so a source that fails a whole
+    /// run costs only the read-ahead.
+    ///
     /// # Errors
     ///
     /// `EIO` for pages that cannot be read or do not verify.

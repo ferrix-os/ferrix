@@ -298,8 +298,9 @@ fn check_tmpfs_stores_pages() -> Result<u64, &'static str> {
 fn check_page_stores() -> Result<(u64, u64), &'static str> {
     let pages = check_tmpfs_stores_pages()?;
     let filled = check_a_store_fills_from_its_source()?;
+    let streamed = check_a_stream_reads_ahead()?;
     let faulted = check_a_mapping_faults_in_its_source()?;
-    Ok((pages, filled + faulted))
+    Ok((pages, filled + streamed + faulted))
 }
 
 /// The byte at `address` in `space`, faulted in for reading as a program's
@@ -333,6 +334,7 @@ fn check_a_mapping_faults_in_its_source() -> Result<u64, &'static str> {
         most: AtomicUsize::new(0),
         fail_at: AtomicU64::new(u64::MAX),
         lie: AtomicBool::new(false),
+        fail_within: AtomicU64::new(u64::MAX),
     });
     let store = VmoStorage
         .allocate_with(Arc::clone(&source) as Arc<dyn PageSource>)
@@ -441,12 +443,19 @@ struct CheckSource {
     fail_at: AtomicU64,
     /// Whether it claims one page more than it was asked for.
     lie: AtomicBool,
+    /// A call whose pages take in this one fails whole with `EIO`, as a
+    /// source that does not end a run short at a bad page would.
+    fail_within: AtomicU64,
 }
 
 impl PageSource for CheckSource {
     fn fill_range(&self, first: u64, pages: &mut [&mut [u8]]) -> ferrix_vfs::Result<usize> {
         let _ = self.calls.fetch_add(1, Ordering::Relaxed);
         if first == self.fail_at.load(Ordering::Relaxed) {
+            return Err(Errno::EIO);
+        }
+        let bad = self.fail_within.load(Ordering::Relaxed);
+        if (first..first.saturating_add(pages.len() as u64)).contains(&bad) {
             return Err(Errno::EIO);
         }
         let most = self.most.load(Ordering::Relaxed);
@@ -487,6 +496,7 @@ fn check_a_store_fills_from_its_source() -> Result<u64, &'static str> {
         most: AtomicUsize::new(0),
         fail_at: AtomicU64::new(u64::MAX),
         lie: AtomicBool::new(false),
+        fail_within: AtomicU64::new(u64::MAX),
     });
     let store = VmoStorage
         .allocate_with(Arc::clone(&source) as Arc<dyn PageSource>)
@@ -548,6 +558,95 @@ fn check_a_store_fills_from_its_source() -> Result<u64, &'static str> {
     let filled = store.committed_bytes() / PAGE_SIZE;
     check_a_store_distrusts_and_cuts_its_source(store.as_ref(), &source)?;
     Ok(filled)
+}
+
+/// A store read as `read` hands a large read to a file -- a page at a time --
+/// reads ahead once the reads run on from where the last one ended: 64 pages
+/// read a page at a time from the start take three fills, the first page's
+/// and two runs of 32, where filling only the page asked for took 64, one
+/// disk request for each page of an archive 7-Zip read (docs/WINE.md §12).
+/// A read elsewhere then fills its own page and no more, none reads past
+/// the end of the file, a second read within the page the last one began in
+/// is no stream, and a run ahead that meets a page that does not read falls
+/// back to the read's own pages. Returns the pages filled.
+fn check_a_stream_reads_ahead() -> Result<u64, &'static str> {
+    let page = usize::try_from(PAGE_SIZE).map_err(|_| "the page size does not fit")?;
+    let source = Arc::new(CheckSource {
+        calls: AtomicUsize::new(0),
+        most: AtomicUsize::new(0),
+        fail_at: AtomicU64::new(u64::MAX),
+        lie: AtomicBool::new(false),
+        fail_within: AtomicU64::new(u64::MAX),
+    });
+    let store = VmoStorage
+        .allocate_with(Arc::clone(&source) as Arc<dyn PageSource>)
+        .map_err(|_| "a store over a page source was refused")?;
+    let calls = || source.calls.load(Ordering::Relaxed);
+    // A file of 300 pages and 100 bytes.
+    store.resize(300 * PAGE_SIZE + 100);
+    let mut one = vec![0_u8; page];
+    for index in 0..64 {
+        store
+            .read(index * PAGE_SIZE, &mut one)
+            .map_err(|_| "a page-sized read of a store over a page source failed")?;
+        if !holds_source_bytes(&one, index * PAGE_SIZE) {
+            return Err("a stream read back something other than the source's bytes");
+        }
+    }
+    if calls() != 3 || store.committed_bytes() != 65 * PAGE_SIZE {
+        crate::console::println!(
+            "  tmpfs    64 pages read a page at a time took {} fills and hold {} pages",
+            calls(),
+            store.committed_bytes() / PAGE_SIZE
+        );
+        return Err("a stream of page-sized reads did not read ahead in runs of 32");
+    }
+    // Elsewhere: its own page only.
+    store
+        .read(200 * PAGE_SIZE, &mut one)
+        .map_err(|_| "a read away from the stream failed")?;
+    if calls() != 4 || store.committed_bytes() != 66 * PAGE_SIZE {
+        return Err("a read away from the stream read ahead");
+    }
+    // A stream near the end reads ahead to the end and no further: the last
+    // page, partly the file's, and nothing past it.
+    for index in 280..=300 {
+        store
+            .read(index * PAGE_SIZE, &mut one)
+            .map_err(|_| "a read near the end of the file failed")?;
+    }
+    if store.committed_bytes() != 87 * PAGE_SIZE {
+        return Err("a stream near the end of a file read ahead past its end");
+    }
+    // Two reads within one page, the second running into the next: no
+    // stream yet, so the second fills its own page and no more.
+    let mut head = vec![0_u8; 64];
+    store
+        .read(240 * PAGE_SIZE, &mut head)
+        .map_err(|_| "a read of a page's head failed")?;
+    store
+        .read(240 * PAGE_SIZE + 64, &mut one)
+        .map_err(|_| "a read on from a page's head failed")?;
+    if store.committed_bytes() != 89 * PAGE_SIZE {
+        return Err("a second read within the page the last one began in read ahead");
+    }
+    // A stream whose run ahead takes in a page that does not read: every
+    // page before that one still reads, and that one answers EIO.
+    source.fail_within.store(230, Ordering::Relaxed);
+    for index in 220..230 {
+        store
+            .read(index * PAGE_SIZE, &mut one)
+            .map_err(|_| "a stream whose read-ahead met a bad page failed the pages before it")?;
+        if !holds_source_bytes(&one, index * PAGE_SIZE) {
+            return Err("a stream whose read-ahead failed read back the wrong bytes");
+        }
+    }
+    let bad = store.read(230 * PAGE_SIZE, &mut one);
+    source.fail_within.store(u64::MAX, Ordering::Relaxed);
+    if bad != Err(Errno::EIO) || store.committed_bytes() != 99 * PAGE_SIZE {
+        return Err("a stream's bad page did not answer EIO, or its failed run kept pages");
+    }
+    Ok(store.committed_bytes() / PAGE_SIZE)
 }
 
 /// A fill that fails or claims more than it was asked for keeps nothing, and a

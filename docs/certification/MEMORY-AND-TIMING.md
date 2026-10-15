@@ -221,7 +221,12 @@ frames always took: clean cache reclaimed first, then the fault fails
   pages back (since 2026-10-15: one reclaim let another processor take what
   it gave back, and a read answered `ENOMEM` with clean cache to spare), and
   its failure is the read's error. The fill runs from a read and from a
-  fault through a mapping (`Filler::fill`) under that same bound; a fault's
+  fault through a mapping (`Filler::fill`) under that same bound: one
+  fill takes at most 32 frames (128 KiB), charged to the reader's job,
+  and the 8-reclaim bound applies per frame; since 2026-10-15 a read on a
+  sequential stream also waits for a whole run of 32 pages from the
+  source, as a fault did, with no lock held while it waits (ledger line
+  1700); a fault's
   own retry after it is `oom::out_of_memory`'s, so 8 is not the fault's
   whole bound; a file's write (`fs/pages.rs`,
   `write_reclaiming` over `Vmo::commit_and_write`, since 2026-10-15)

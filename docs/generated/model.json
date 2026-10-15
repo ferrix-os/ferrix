@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "4848090e0ce69e320755733bb512c9dd769f287d93bb85ab2c46a121efcd5c62",
+  "digest": "02fa0e728329f6ea2daa79b0263de664886a33abab7985d795bd1cdc57b4c1e4",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -16163,7 +16163,7 @@
           "definition": true,
           "maturity": "implemented",
           "stage": 8,
-          "doc": "Unified with VMOs: not a separate cache but the set of file VMOs, subject to reclaim's LRU. src/kernel/src/fs/pages.rs: each file's VMO, filled from a disk filesystem's PageSource in runs of at most 32 missing pages with no lock held, and by a fault through a mapping as by a read. Reclaim is stage 13's and not built, and no page is marked dirty, so a page written through MAP_SHARED reaches a btrfs disk only if write writes it too.",
+          "doc": "Unified with VMOs: not a separate cache but the set of file VMOs, subject to reclaim's LRU. src/kernel/src/fs/pages.rs: each file's VMO, filled from a disk filesystem's PageSource in runs of at most 32 missing pages with no lock held, and by a fault through a mapping as by a read. A read fills to its own last page; on a sequential stream (it begins where the last read ended, in a later page) at least MAX_FILL_RUN pages from its first, never past the end of the file, and to its own last page again if that run fails; a fault fills a run, as before. Reclaim is stage 13's and not built, and no page is marked dirty, so a page written through MAP_SHARED reaches a btrfs disk only if write writes it too.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
             "line": 104
@@ -16180,7 +16180,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 113
+                "line": 117
               }
             }
           ]
@@ -16197,7 +16197,7 @@
           "doc": "src/lib/fs/vfs's FileSystem trait.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 120
+            "line": 124
           },
           "children": [
             {
@@ -16206,7 +16206,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 122
+                "line": 126
               }
             },
             {
@@ -16215,7 +16215,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 123
+                "line": 127
               }
             },
             {
@@ -16224,7 +16224,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 124
+                "line": 128
               }
             },
             {
@@ -16233,7 +16233,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 125
+                "line": 129
               }
             }
           ]
@@ -16249,7 +16249,7 @@
           "doc": "src/lib/fs/vfs/src/tmpfs.rs, whose file contents are a page store the kernel supplies as a VMO, so a shared mmap of a tmpfs file maps the file's own pages. The root and /tmp are tmpfs, and mount -t tmpfs makes a fresh one.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 128
+            "line": 132
           }
         },
         {
@@ -16263,7 +16263,7 @@
           "doc": "src/kernel/src/fs/devfs.rs: null, zero, full, random, urandom, tty and console, numbered as Linux numbers them, ptmx and the dri, input and pts directories since stages 17 and 18, and the disks a driver's kernel side registers. It calls itself devtmpfs, the name init scripts look for.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 135
+            "line": 139
           }
         },
         {
@@ -16277,7 +16277,7 @@
           "doc": "self/maps, self/exe, self/fd backed by the real VM and fd table; cpuinfo, meminfo. src/kernel/src/fs/procfs.rs over src/lib/fs/procfs's text, rendered at open: each /proc/<pid> with its fd, status, comm, cmdline, stat, maps, exe, cwd, root, task and mounts, and /proc's mounts, stat, partitions, filesystems, uptime, version, sys, sysrq-trigger and net beside them.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 143
+            "line": 147
           }
         },
         {
@@ -16290,7 +16290,7 @@
           "doc": "src/kernel/src/fs/sysfs.rs over src/lib/fs/sysfs's text, a view that stores nothing, fed by the services that own each fact (docs/SYSFS.md): enumeration's device nodes under devices/pci and platform, the disks, interfaces, cards, render nodes and input devices the ring-3 drivers published, each inside the node its driver serves, and devmgr's word on which driver drives which device. A write to a driver's bind or unbind is sent to devmgr to decide. Mounted on /sys at boot; cgroup2 mounts on its fs/cgroup.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 153
+            "line": 157
           }
         },
         {
@@ -16304,7 +16304,7 @@
           "doc": "src/lib/fs/cgroupfs, mounted as cgroup2 since 2026-09-23: a view of the job tree that stores nothing, with cgroup.events, delegation by chown, and the pids, memory and cpu files over each job's quota slot (docs/CGROUPS.md).",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 164
+            "line": 168
           }
         },
         {
@@ -16317,7 +16317,7 @@
           "doc": "src/lib/fs/cpio: the \"newc\" reader. Borrows, copies nothing, allocates nothing, rejects unsafe paths. Unpacked into tmpfs by src/lib/fs/vfs's initramfs module through the same calls a program makes, hard links and device nodes included.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 172
+            "line": 176
           }
         },
         {
@@ -16330,7 +16330,7 @@
           "doc": "src/lib/fs/btrfs: superblock, sys chunk array and chunk map (logical to physical), B-tree nodes and leaves, item payloads (inode, inode ref, dir, extent data), crc32c. Pure functions over bytes, forbid(unsafe_code); no cache, no transactions. Fuzzed from images mkfs.btrfs produced.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 180
+            "line": 184
           }
         },
         {
@@ -16344,7 +16344,7 @@
           "doc": "The real filesystem, read and write, single device, no RAID 5/6. The largest single piece of work in the project. src/kernel/src/fs/btrfs.rs mounts it from a block node, read-only over src/lib/fs/btrfs-vfs or writable over src/lib/fs/btrfs-write, one inode object per inode so two names share one page cache. `/` is a btrfs volume under cargo xtask run, and test-rustc's sysroot is one at /data.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 189
+            "line": 193
           },
           "children": [
             {
@@ -16354,7 +16354,7 @@
               "type": "BtrfsParsing",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 198
+                "line": 202
               }
             },
             {
@@ -16364,7 +16364,7 @@
               "type": "BtrfsRead",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 199
+                "line": 203
               }
             },
             {
@@ -16374,7 +16374,7 @@
               "type": "BtrfsWrite",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 200
+                "line": 204
               }
             },
             {
@@ -16385,7 +16385,7 @@
               "maturity": "planned",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 201
+                "line": 205
               }
             }
           ]
@@ -16400,7 +16400,7 @@
           "doc": "Stage A: superblock, chunk tree, root tree, fs trees, extent data inline and regular, directory and inode items, crc32c verification, zstd/zlib/lzo. Enough to mount what mkfs.btrfs produced and read a sysroot out of it.\n\nsrc/lib/fs/btrfs and src/lib/fs/btrfs-vfs, host-tested against real images, with every data sector checked against the checksum tree before its bytes are used and a bounded cache of metadata reads. Exit met on all three architectures: a mkfs.btrfs fixture on a second virtio-blk disk, served by the ring-3 driver, mounted at /mnt and read back against its manifest. A file on the read-only mount cannot be mapped yet (ENODEV); one on the writable mount can.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 204
+            "line": 208
           }
         },
         {
@@ -16413,7 +16413,7 @@
           "doc": "Stage B: copy-on-write allocation through the extent tree, delayed refs, transaction commit against both superblock copies with the right flush/FUA ordering, the free-space tree, the log tree and its replay.\n\nAll three are in src/lib/fs/btrfs-write, mounted writable by the kernel through src/lib/fs/btrfs-vfs, and clean under host btrfs check: over what every boot writes (cargo xtask test-btrfs), and before and after the log is replayed when QEMU is killed inside a transaction (cargo xtask test-powerfail). Owed beside the stage: writeback of pages written through MAP_SHARED.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 221
+            "line": 225
           },
           "children": [
             {
@@ -16422,7 +16422,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 234
+                "line": 238
               }
             },
             {
@@ -16431,7 +16431,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 235
+                "line": 239
               }
             },
             {
@@ -16440,7 +16440,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 236
+                "line": 240
               }
             }
           ]
@@ -16454,7 +16454,7 @@
           "doc": "Stage C: subvolumes and snapshots, then the rest. The reader mounts the default subvolume; entering others, subvol= and subvolid= are owed, and the writer refuses subvolumes and snapshots.",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 239
+            "line": 243
           }
         },
         {
@@ -16465,7 +16465,7 @@
           "maturity": "implemented",
           "source": {
             "file": "docs/sysml/09-storage.sysml",
-            "line": 246
+            "line": 250
           },
           "children": [
             {
@@ -16475,7 +16475,7 @@
               "type": "Tmpfs",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 247
+                "line": 251
               }
             },
             {
@@ -16485,7 +16485,7 @@
               "type": "Devfs",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 248
+                "line": 252
               }
             },
             {
@@ -16495,7 +16495,7 @@
               "type": "Procfs",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 249
+                "line": 253
               }
             },
             {
@@ -16505,7 +16505,7 @@
               "type": "Sysfs",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 250
+                "line": 254
               }
             },
             {
@@ -16515,7 +16515,7 @@
               "type": "Cgroupfs",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 251
+                "line": 255
               }
             },
             {
@@ -16525,7 +16525,7 @@
               "type": "Btrfs",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 252
+                "line": 256
               }
             },
             {
@@ -16535,7 +16535,7 @@
               "type": "InitramfsUnpack",
               "source": {
                 "file": "docs/sysml/09-storage.sysml",
-                "line": 253
+                "line": 257
               }
             }
           ]

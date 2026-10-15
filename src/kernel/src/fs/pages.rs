@@ -48,6 +48,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_frame::Frame;
@@ -147,6 +148,10 @@ struct Fill {
     /// so a fill that raced the truncation is either cut back here or taken
     /// away there.
     sourced_below: SpinLock<u64>,
+    /// Where the last read began and ended, in bytes: a read that begins
+    /// where it ended, in a later page than it began, continues a
+    /// sequential stream and reads ahead (see `VmoPages::read`).
+    last_read: (AtomicU64, AtomicU64),
 }
 
 /// The page-sized piece of `[offset, offset + len)` that begins `done` bytes
@@ -269,6 +274,7 @@ impl VmoPages {
             Arc::new(Fill {
                 source,
                 sourced_below: SpinLock::new(u64::MAX),
+                last_read: (AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)),
             })
         });
         let filler = fill.clone().map(|fill| fill as Arc<dyn Filler>);
@@ -457,8 +463,10 @@ impl Fill {
 
 impl VmoPages {
     /// `out.len()` bytes of page `index` from `within`, filling the page
-    /// first if it is the source's to fill. `offset` and `len` are the whole
-    /// read's, which a fill reads ahead to the end of.
+    /// first if it is the source's to fill. A fill runs to page `ahead`, or,
+    /// if that run fails, to page `own`, the read's own last page: a run
+    /// read ahead into a page that does not read must not fail the pages
+    /// before it, which the read asked for and which read well.
     ///
     /// Under the object's lock a page a truncation took away since the fill
     /// reads as the zeros the file now has there. A page that reclaim took
@@ -470,13 +478,15 @@ impl VmoPages {
         index: u64,
         within: usize,
         out: &mut [u8],
-        offset: u64,
-        len: usize,
+        (ahead, own): (u64, u64),
     ) -> Result<()> {
         for _ in 0..REFILLS {
             if self.wants_fill(index) {
-                let (last, _, _) = piece(offset, len - 1, len)?;
-                self.fill_from(index, last)?;
+                match self.fill_from(index, ahead) {
+                    Ok(()) => {}
+                    Err(_) if own < ahead => self.fill_from(index, own)?,
+                    Err(error) => return Err(error),
+                }
             } else {
                 super::seam::served(1);
             }
@@ -504,14 +514,55 @@ impl VmoPages {
     }
 }
 
+impl VmoPages {
+    /// The last page a read of `len` bytes at `offset` fills to: its own
+    /// last page, or on a sequential stream (see the doc of `read` below) at
+    /// least [`MAX_FILL_RUN`] pages from its first, never past the file's
+    /// end. Notes the read as the stream's last.
+    fn read_ahead_to(&self, offset: u64, len: usize) -> Result<u64> {
+        let (first, _, _) = piece(offset, 0, len)?;
+        let (last, _, _) = piece(offset, len - 1, len)?;
+        let Some(fill) = self.fill.as_deref() else {
+            return Ok(last);
+        };
+        let (began, ended) = &fill.last_read;
+        let was_begun = began.swap(offset, Ordering::Relaxed);
+        let was_ended = ended.swap(offset.saturating_add(len as u64), Ordering::Relaxed);
+        if offset != was_ended || first <= was_begun / PAGE_SIZE {
+            return Ok(last);
+        }
+        let mut ahead = last.max(first.saturating_add(MAX_FILL_RUN as u64 - 1));
+        // Never past the end of the file, whose pages nobody would read.
+        while ahead > last && self.vmo.past_file_end(ahead) {
+            ahead -= 1;
+        }
+        Ok(ahead)
+    }
+}
+
 impl Pages for VmoPages {
+    /// A fill reads to the end of the read, and on a sequential stream at
+    /// least [`MAX_FILL_RUN`] pages ahead, as a fault does: the kernel hands
+    /// a filesystem a large `read` a page at a time, and filling only the
+    /// page asked for made each page of a file read one disk request (a
+    /// 4 KiB round trip to the disk's driver for each page 7-Zip read of its
+    /// archive, docs/WINE.md §12). A read is sequential when it begins where
+    /// the last one ended, in a later page than the last one began: a
+    /// program's loader reading its headers out of the first page reads no
+    /// further than it asks.
     fn read(&self, offset: u64, buf: &mut [u8]) -> Result<()> {
         let len = buf.len();
+        let (ahead, own) = if len == 0 {
+            (0, 0)
+        } else {
+            let (own, _, _) = piece(offset, len - 1, len)?;
+            (self.read_ahead_to(offset, len)?, own)
+        };
         let mut done = 0;
         while done < len {
             let (index, within, take) = piece(offset, done, len)?;
             let out = buf.get_mut(done..done + take).ok_or(Errno::EIO)?;
-            self.read_piece(index, within, out, offset, len)?;
+            self.read_piece(index, within, out, (ahead, own))?;
             done += take;
         }
         // The pages are in the object and copied out, so a job over its

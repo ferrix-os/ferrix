@@ -107,7 +107,11 @@ package FerrixStorage {
              * VMOs, subject to reclaim's LRU. src/kernel/src/fs/pages.rs: each
              * file's VMO, filled from a disk filesystem's PageSource in runs
              * of at most 32 missing pages with no lock held, and by a fault
-             * through a mapping as by a read. Reclaim is stage 13's and not
+             * through a mapping as by a read. A read fills to its own last
+             * page; on a sequential stream (it begins where the last read
+             * ended, in a later page) at least MAX_FILL_RUN pages from its
+             * first, never past the end of the file, and to its own last
+             * page again if that run fails; a fault fills a run, as before. Reclaim is stage 13's and not
              * built, and no page is marked dirty, so a page written through
              * MAP_SHARED reaches a btrfs disk only if write writes it too. */
         ref part vmos : Vmo[0..*];

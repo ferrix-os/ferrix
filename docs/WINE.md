@@ -875,3 +875,56 @@ prefers when the device is there and which is E3.5's larger half;
 `gryphlink` on the volume (`fetch-endfield-launcher.sh`) does not set
 `WINEFSYNC` yet, so the `--everything` desktop's launcher waits through
 wineserver unless the gate's script, which does, starts it.
+
+## 12. Disk speed under the launcher's 7-Zip (`ep-` bench, 2026-10-15)
+
+The launcher's 7-Zip took about 1 h 45 min for the 68 GB of Endfield 1.6
+(about 10 MB/s) where a machine on Linux takes minutes. The same kind of job
+is reproduced on its own: a 4 GiB set of game-like files (208 files, 30 %
+compressible, the rest random, 1 KiB to 320 MiB) zipped by 7-Zip 25 into four
+1 GiB volumes (`set.zip.001`-`004`, 3.2 GiB), on a 16 GiB btrfs volume with
+the Linux `7zz` and its glibc beside them. The volume is attached at `/data`
+under QEMU's `snapshot=on` with its overlay on the host's `/dev/shm`, so the
+host's disk (saturated by other work that day: a 4 GiB `sync` took 5 min) is
+out of the figures; 4 processors, 4 GiB, KVM, so the extraction runs into the
+memory floor as Endfield's did. Linux is the Debian 13 guest of
+`~/.local/share/ferrix/linux-baseline` (no card) with the same volume, the same
+command and the same QEMU. Ferrix's own split comes from counters around the
+`read`/`write` calls, the btrfs mount's writeback and commit, its page-cache
+fills, and the disk's reads, writes and flushes (scratch branch `ep-rig`,
+never landed). Scripts and logs: `~/.local/share/ferrix/ep-bench/`.
+
+| 4 GiB out of a 3.2 GiB zip set | Linux 6.12 | Ferrix, debug kernel | + read-ahead | + read-ahead, release kernel |
+|---|---|---|---|---|
+| `7zz x` (s) | 20 | 200 | 88 | 42 |
+| MB/s | 205 | 21 | 47 | 99 |
+| 7-Zip's reads, waiting on the disk (s) | -- | 169 | 34 | 12 |
+| 7-Zip's writes, of which commits (s) | -- | 42 (36) | 42 (36) | 14 (12) |
+| disk reads: count, average size | -- | 811,047 x 4 KiB | 27,397 x 113 KiB | 23,941 x 113 KiB |
+| `dd` of 1 GiB to `/data`, then `sync` (s) | 0.5 | 10-13 | 10-13 | 10 |
+
+**Each page of the archive was one disk request.** The kernel hands a
+filesystem a large `read` a page at a time (`syscall/file.rs`, `CHUNK`), and the
+page cache filled only as far as the read it was given asked: one 4 KiB page,
+one round trip to the disk's driver, about 160 us each (520 us on a loaded
+host), 4.1 of every 5 seconds of the extraction. A fault already read ahead
+32 pages (`fs::pages::MAX_FILL_RUN`); now a `read` does too, once the reads
+run on from where the last one ended in a later page than it began (the
+loader's reads of a program's headers, within its first page, still read only
+what they ask, and the stage 8 program-file check still counts three pages).
+Fills fell from 811,047 to 24,606 and the extraction from 200 to 88 s. The
+stage 8 tmpfs check reads 64 pages a page at a time and requires three fills;
+without the read-ahead it counts 64 and stops the boot.
+
+**Without the reclaim hand nothing finished.** On main before
+`mm-floor-livelock` (17a4952ed, not landed when this was measured) the same
+extraction reached the floor at 2.2 GiB written and then read the volume at
+120 MB/s for minutes while writing nothing: 85 GB read for 3.5 GB written in
+15 minutes. Each fill reclaimed from the first object on, 7-Zip's own
+program and libraries on the same volume, which it faulted straight back.
+Every figure in the table runs with the hand; the live Endfield boot has it
+too (`ef-night2`).
+
+**The debug kernel costs half.** Every `test-endfield-proton` boot so far ran
+the debug kernel (`opt-level = 1`); with `--release` the same disk requests
+take 328 us rather than 925 us and the extraction 42 s rather than 88.
