@@ -65,6 +65,9 @@ const K7_UPTIME: &str = "k7: uptime before the power-off";
 /// the uptime of its first commit.
 const FIRST_COMMIT: &str = "/data is committed every 30 s, first at ";
 
+/// What the kernel says when a data disk's mount could start no committer.
+const NO_COMMITTER: &str = "no commit task: only sync and fsync reach /data";
+
 /// What the first K7 boot writes and the second must read back.
 const K7_TEXT: &str = "committed by reboot(2)";
 
@@ -446,9 +449,13 @@ fn judge_k7_write(lines: &[String]) -> std::result::Result<(), String> {
 /// committer's first commit when it mounted `/data`.
 fn k7_premise(lines: &[String]) -> std::result::Result<(), String> {
     let seconds = |line: &String, after: &str| -> Option<f64> {
-        let rest = &line[line.find(after)? + after.len()..];
+        let (_, rest) = line.split_once(after)?;
         rest.split_whitespace().next()?.parse().ok()
     };
+    if lines.iter().any(|line| line.contains(NO_COMMITTER)) {
+        // No committer at all: nothing but the call can commit.
+        return Ok(());
+    }
     let Some(first) = lines.iter().find_map(|line| seconds(line, FIRST_COMMIT)) else {
         return Err(format!(
             "the kernel never said when it first commits /data (`{FIRST_COMMIT}`)"
@@ -589,6 +596,8 @@ mod tests {
         assert!(why.contains("K7's premise broke"), "{why}");
         let _ = lines.remove(0);
         assert!(k7_premise(&lines).unwrap_err().contains("first commits"));
+        lines.push(format!("  data     {NO_COMMITTER}"));
+        assert_eq!(k7_premise(&lines), Ok(()));
         assert!(write_script().contains("/proc/uptime"));
     }
 
@@ -636,7 +645,7 @@ mod tests {
         assert!(judge_k8_write(&lines).unwrap_err().contains(K8_SLEPT));
         lines.push(K8_SLEPT.to_owned());
         assert_eq!(judge_k8_write(&lines), Ok(()));
-        assert!(K8_SLEEP_SECONDS > 30);
+        const { assert!(K8_SLEEP_SECONDS > 30) };
     }
 
     #[test]
