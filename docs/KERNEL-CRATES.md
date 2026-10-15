@@ -273,7 +273,9 @@ review and the regenerated evidence), S4 1.
 * **Shape**: the certification consultant's design review, OK IF (1) to (12),
   ledger line 1477; this document's answers to (1) to (4) and the step order,
   OK IF (D1) to (D9), ledger line 1531. Each step's landing message cites both.
-* **S1** (branch `bs-a-s1`): the conflicts out, inside one crate. The checks
+* **S1** (branch `bs-a-s1`; the consultant's code review OK IF (1) to (4),
+  ledger line 1549, which also opened F-75 for the carry tool): the
+  conflicts out, inside one crate. The checks
   flag is the core's (`boot_checks.rs`; `checks.rs` parses the option and
   sets it); the stage 3 and stage 9 wrappers moved into the check files they
   run, reached by one name through `arch/stage_check.rs`; `iommu/check.rs` is
