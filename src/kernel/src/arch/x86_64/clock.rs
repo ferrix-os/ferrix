@@ -724,7 +724,7 @@ fn start_tsc() -> Result<&'static str, &'static str> {
         return Ok(BY_PIT);
     }
     crate::console::println!(
-        "  clock    WARNING: PIT channel 2 never reached terminal count (gated 8254?);          asking CPUID leaf 0x15/0x16 for the TSC's rate"
+        "  clock    WARNING: PIT channel 2 never reached terminal count (gated 8254?); asking CPUID leaf 0x15/0x16 for the TSC's rate"
     );
     let hz = cpuid_tsc_hz().ok_or("no HPET, the PIT did not answer, and CPUID reports no TSC rate")?;
     COUNTER_HZ.store(hz, Ordering::Relaxed);
@@ -815,7 +815,7 @@ fn calibrate_tsc() -> Option<u64> {
     // hundredth of its length and every timeout come at once.
     if hz < 200_000_000 {
         crate::console::println!(
-            "  clock    WARNING: PIT channel 2 says the TSC runs at {hz} Hz, which no x86-64              processor does; the PIT is not counting"
+            "  clock    WARNING: PIT channel 2 says the TSC runs at {hz} Hz, which no x86-64 processor does; the PIT is not counting"
         );
         return None;
     }
