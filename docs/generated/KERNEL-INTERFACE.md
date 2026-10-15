@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-1983 declarations in the core's files, 142 in the item's; 52 checks-only.
+1983 declarations in the core's files, 142 in the item's; 53 checks-only.
 
 ## ferrix-kernel-core
 
@@ -1719,6 +1719,7 @@ checks above is `pub` for raised checks (F3).
 | `release` | fn | load (checks) | checks-only |
 | `room` | fn | item |  |
 | `set_budget` | fn | item |  |
+| `set_wait` | fn | load (checks) | checks-only |
 | `Counts` | struct | load (checks) |  |
 | `Pin` | struct | item, load |  |
 | `Released` | struct | - | checks-only |
@@ -1726,7 +1727,6 @@ checks above is `pub` for raised checks (F3).
 | `Counts::kept` | field | item, load, bin |  |
 | `Counts::live` | field | item, load |  |
 | `Counts::quarantined` | field | load (checks) |  |
-| `Pin::wait` | field | load |  |
 | `Pin::addresses` | method | item, load, bin |  |
 | `Pin::new` | method | item, load, bin |  |
 | `Pin::with_budget` | method | load (checks) | checks-only |

@@ -428,9 +428,18 @@ pub struct Pin {
     /// How its unpin's invalidation is waited for: [`Wait::Status`], but
     /// [`Wait::Unwritten`] for check R7's, set by `check.rs` alone, whose
     /// invalidation then fails (`docs/NVIDIA.md` §12.3).
-    pub wait: Wait,
+    wait: Wait,
     /// The pages it counts in its device's `live`, until it is closed.
     pages: usize,
+}
+
+// CHECKS-ONLY: object/pin/check.rs
+/// Make `pin`'s unpin wait for its invalidation with `wait`: check R7 alone,
+/// which makes it [`Wait::Unwritten`] so that the invalidation fails (ledger
+/// line 1630, F1: the field stays private to everything else).
+#[doc(hidden)]
+pub fn set_wait(pin: &mut Pin, wait: Wait) {
+    pin.wait = wait;
 }
 
 impl fmt::Debug for Pin {

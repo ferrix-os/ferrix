@@ -388,14 +388,14 @@ does not apply to exported functions.
 
 **The interface** (§3 (4); ledger line 1531, D5): `tools/common/gen/kernel-interface.py`
 lists every `pub` of a core or item file in
-`docs/generated/KERNEL-INTERFACE.md` -- 2,125 declarations, 52 checks-only
+`docs/generated/KERNEL-INTERFACE.md` -- 2,125 declarations, 53 checks-only
 -- with the crates above that name each, and `--check`, in `cargo xtask
 check`, fails on a list that differs from the tree, on a `pub` no crate
 above names and no named item's signature carries (a dead interface), and
 on a `pub` item that is not checks-only naming a checks-only type or a
 kernel trait implemented for one (ledger line 1630, F2.2).
 
-**Checks-only** (§3 (4)(b)): 38 items -- free functions, statics,
+**Checks-only** (§3 (4)(b)): 39 items -- free functions, statics,
 constants and types made `pub` from private or `pub(super)` for a raised
 check alone -- carry `// CHECKS-ONLY:` and `#[doc(hidden)]`; the gate
 refuses a path to one from product code outside the item's own module.
@@ -403,8 +403,9 @@ refuses a path to one from product code outside the item's own module.
 the generator writes them into `.clippy.toml`'s `disallowed-methods`; the
 raised checks that call them allow the lint for the file, the defining
 modules per function with a reason. Fields (ledger line 1630): a
-`DeviceNode`'s six fields the configuration check reads stay private behind
-six checks-only accessors (`device::node_bars` and the rest; F1); the
+`DeviceNode`'s six fields the configuration check reads, and the `wait` of
+a `Pin` the pin check sets, stay private behind seven checks-only accessors
+(`device::node_bars` and the rest, `object::pin::set_wait`; F1); the 11
 fields of the nine checks-only types are `pub` (F2). Modules made `pub`
 only for raised checks are not marked (F3); the layering rule keeps load
 product code out of an architecture's own module. A product file naming a
@@ -416,18 +417,24 @@ F3.2), the composition root excepted.
 `unclassified_deps`, F-76's debt register, which the gate holds to the
 manifest and to what the crate's files name.
 
-**Shown unchanged against `main` 89a7cf74c** (line 1477 (7)): no function
-moved between files, and of 8,277 function bodies 35 differ, every one in
-a raised architecture check (the path edits above) or in
-`device/config_check.rs` (the accessors); 6 functions are new, the
-accessors. The boundary gate's three ring lists differ by the three roots;
-its counts move by lines added and removed, not by code moved: item product
-94,954 to 95,018, core 70,706 to 70,850, load 72,987 to 73,175, upward
-references 0, composition-root edges 28, hooks 2. The unsafe audit's
+**Shown unchanged against `main`** (line 1477 (7); `main` 3b1e72a71 after
+the rebase, S2's baseline 89a7cf74c for the boots): no function moved
+between files, and of 8,279 function bodies 36 differ, every one in a
+raised architecture check (the path edits above), in
+`device/config_check.rs` or `object/pin/check.rs` (the accessors); the new
+functions are the accessors. The boundary gate's three ring lists differ by
+the three roots; its counts move by lines added and removed, not by code
+moved: item product 94,954 to 95,109, core 70,706 to 70,950, load 73,006
+to 73,193, upward references 0, composition-root edges 28, hooks 2. The unsafe audit's
 output is byte-identical; the panic audit's 8 exemptions and the catalog
-are the same; TRACEABILITY.md differs only in the accessor count (916 to
-922, the six accessors); the four boots' lines are the same but for the
+are the same; TRACEABILITY.md's statuses are main's, but for the accessor count (916 to
+923, the seven accessors) and x86-64's re-measure below; the four boots' lines are the same but for the
 two that vary from boot to boot (the thread hand-off's wording, the seam
 trip's figures). The coverage evidence was carried with the line matching
 blind to visibility (`~/ferrix-logs/bs-a/s3b/carry_vis.py`), and every
 carried line checked to stay in its function (`span_check.py`, F-75).
+
+**Coverage** (line 1477 (9)): x86-64's evidence is measured again on the
+split, debug and release (`docs/certification/VERIFICATION.md` §3.1 and
+§3.2): 143 x86-64 requirement statuses moved to *reached*, none away. The
+Arm pair's is carried until an Arm QEMU loads the plugin (`docs/BACKLOG.md`).

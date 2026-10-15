@@ -104,7 +104,7 @@ fn check_failed_invalidation(
     }
     let before = counts(domain);
     let (mut pin, frames) = watched_pin(domain, &owners.live)?;
-    pin.wait = Wait::Unwritten;
+    super::set_wait(&mut pin, Wait::Unwritten);
     let failed = crate::iommu::invalidations().failed;
     drop(pin);
     let now = counts(domain);

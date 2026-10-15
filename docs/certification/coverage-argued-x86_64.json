@@ -915,14 +915,14 @@
     },
     {
       "file": "object/pin.rs",
-      "lines": "564",
+      "lines": "573",
       "category": "defensive",
       "match": "};",
       "why": "`Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice."
     },
     {
       "file": "object/pin.rs",
-      "lines": "637-638, 643",
+      "lines": "646-647, 652",
       "category": "defensive",
       "match": "for &frame in spare.frames.iter().take(taken) {",
       "why": "A dead driver's pin whose frames could not all be shared into the quarantine: `mm::share_frame` fails only for a frame the allocator does not count as one order-0 allocation, and drivers pin only VMOs, whose frames are allocator order-0 frames. Were one not, the pin is kept for good, mapped and held, never freed -- which is what the branch does."
