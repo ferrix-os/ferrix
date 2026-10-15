@@ -43,6 +43,21 @@ const MARGIN: usize = 16;
 /// The share of the height kept clear at the top: a phone's camera cut-out
 /// and a monitor's bezel both take the top edge.
 const TOP_INSET_DIVISOR: usize = 20;
+/// Milestone stripes across the top of the screen, one row each
+/// ([`milestone`]), above the text.
+const STRIPES: usize = 12;
+/// The height of one stripe, in pixels.
+const STRIPE_HEIGHT: usize = 20;
+/// A stripe's colour, by milestone: neighbours differ, so a photo shows which
+/// rows are lit even when the text is unreadable.
+const STRIPE_COLOURS: [Rgb; 6] = [
+    Rgb::new(0xE0, 0x30, 0x30),
+    Rgb::new(0x30, 0xC0, 0x40),
+    Rgb::new(0x30, 0x60, 0xE0),
+    Rgb::new(0xE0, 0xC0, 0x20),
+    Rgb::new(0xC0, 0x40, 0xC0),
+    Rgb::new(0x30, 0xC0, 0xC0),
+];
 /// The fewest columns a larger glyph is worth. The largest scale that still
 /// leaves this many is used: a phone's 1080 pixels get double-size glyphs and
 /// 65 columns rather than 131 columns nobody can read.
@@ -87,7 +102,9 @@ impl Board {
     /// [`MIN_COLUMNS`], or `None` if not even two rows fit.
     fn new(surface: Surface<'static>) -> Option<Board> {
         let width = surface.width().saturating_sub(MARGIN.saturating_mul(2));
-        let top = MARGIN.max(surface.height() / TOP_INSET_DIVISOR);
+        let top = MARGIN
+            .max(surface.height() / TOP_INSET_DIVISOR)
+            .saturating_add(STRIPES.saturating_mul(STRIPE_HEIGHT));
         let height = surface.height().saturating_sub(top.saturating_add(MARGIN));
         let scale = (1..=MAX_SCALE)
             .rev()
@@ -149,6 +166,36 @@ impl Board {
         self.clear_row((self.row + 1) % self.rows);
     }
 
+    /// Paint milestone stripe `row` and its number.
+    fn stripe(&mut self, row: usize) {
+        let colour = STRIPE_COLOURS
+            .get(row % STRIPE_COLOURS.len())
+            .copied()
+            .unwrap_or(TEXT);
+        let digit = |value: usize| {
+            u32::try_from(value % 10)
+                .ok()
+                .and_then(|value| char::from_digit(value, 10))
+                .unwrap_or('?')
+        };
+        let y = MARGIN.saturating_add(row.saturating_mul(STRIPE_HEIGHT));
+        let width = self.surface.width();
+        self.surface
+            .fill_rect(0, y, width, STRIPE_HEIGHT.saturating_sub(2), colour);
+        let tens = digit(row / 10);
+        let ones = digit(row);
+        self.surface
+            .draw_char(MARGIN, y, tens, 1, Rgb::new(0, 0, 0), Some(colour));
+        self.surface.draw_char(
+            MARGIN.saturating_add(GLYPH_WIDTH),
+            y,
+            ones,
+            1,
+            Rgb::new(0, 0, 0),
+            Some(colour),
+        );
+    }
+
     /// Paint `row` the background colour.
     fn clear_row(&mut self, row: usize) {
         let y = self.row_top(row);
@@ -168,8 +215,8 @@ impl Board {
 /// framebuffer to draw on: clear the screen, and draw what the console has
 /// kept of the lines printed before this.
 ///
-/// Once, on the boot processor, as soon as stage 1 has mapped the framebuffer
-/// (`check_early_mapper`), before `mm::init`: a machine with no serial port
+/// Once, on the boot processor, as soon as `kmain` has mapped the framebuffer
+/// (`map_boot_framebuffer`), before its first line and before `mm::init`: a machine with no serial port
 /// shows nothing at all of a hang before the console is on the screen. The
 /// lines printed before this -- the very first one on -- are drawn from what
 /// the console kept. A second call does nothing.
@@ -203,6 +250,24 @@ pub(crate) fn start(view: &BootView<'_>) {
     }
     *BOARD.lock() = Some(board);
     ENABLED.store(true, Ordering::Release);
+}
+
+/// Light the stripe for boot milestone `row`, counted from 0 at the top, if
+/// the console is on the screen.
+///
+/// What a photo of a machine with no serial port reads the last milestone
+/// from when no text is legible or none was drawn: each stripe is a bar the
+/// width of the screen in its own colour, with its number at the left. The
+/// rows are fixed by the caller (`kmain`); a row past [`STRIPES`] is dropped.
+pub(crate) fn milestone(row: usize) {
+    if !ENABLED.load(Ordering::Acquire) || row >= STRIPES {
+        return;
+    }
+    if let Some(mut board) = BOARD.try_lock()
+        && let Some(board) = board.as_mut()
+    {
+        board.stripe(row);
+    }
 }
 
 /// Draw `byte`, if the console is on the screen.
