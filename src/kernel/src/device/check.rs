@@ -671,12 +671,23 @@ pub(super) fn check_node(
 /// does stop the device reaching memory. The register and the flag are left
 /// as they were found, whatever firmware set.
 ///
-/// On the first published function with a configuration space; a machine
-/// with none has nothing to switch.
+/// On the first published function with a configuration space that is not a
+/// bridge; a machine with none has nothing to switch.
 ///
 /// Verifies: L.device.9
 pub(super) fn check_dma_switch(nodes: &[Arc<DeviceNode>]) -> Result<(), Failure> {
-    let Some(node) = nodes.iter().find(|node| node.config_phys().is_some()) else {
+    // Not a bridge (base class 06): an Intel host bridge's bus master enable
+    // is hardwired on, so on the N150 box 00:00.0 failed this check; QEMU's
+    // takes the write. A bridge is no device whose DMA a quiesce stops.
+    let is_bridge = |node: &&Arc<DeviceNode>| {
+        node.pci
+            .as_ref()
+            .is_some_and(|function| function.class >> 16 == 0x06)
+    };
+    let Some(node) = nodes
+        .iter()
+        .find(|node| node.config_phys().is_some() && !is_bridge(node))
+    else {
         return Ok(());
     };
     let fail = |what| Failure {
