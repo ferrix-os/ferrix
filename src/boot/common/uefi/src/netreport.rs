@@ -24,12 +24,14 @@
 //! more than they could decide (`docs/NETBOOT.md` §6).
 //!
 //! **Nothing here can stop a boot.** Every failure is one line on the
-//! console; a request is aborted after [`WAIT_MS`], the whole send after
-//! [`TOTAL_MS`] (at most 64 parts of a 32 KiB log), and the first request
-//! that fails ends the sending. So a netbooted boot waits at most 30 s more
-//! than it did, against a server that accepts connections and never
-//! answers; 5 s when the server is gone; nothing to speak of when it
-//! refuses (an HTTP error ends the request at once).
+//! console; a request is aborted after about [`WAIT_MS`], the whole send
+//! after about [`TOTAL_MS`] (at most 64 parts of a 32 KiB log), and the
+//! first request that fails ends the sending. Both count the 1 ms stalls
+//! between polls, not the time spent inside iPXE's `poll`, so they are
+//! approximate. Against a server that accepts connections and never
+//! answers, a netbooted boot waits roughly 30 s more than it did; about
+//! 5 s when the server is gone; nothing to speak of when it refuses (an
+//! HTTP error ends the request at once).
 
 use core::cell::Cell;
 use core::ffi::c_void;
@@ -205,6 +207,12 @@ struct Pending {
 }
 
 /// iPXE's data callback: the server's answer is a short `ok`, not kept.
+///
+/// # Safety
+///
+/// Called by iPXE only, from inside the download protocol's `poll`, with
+/// the arguments `efi_download.c` passes; it reads none of them, so any
+/// values are sound.
 unsafe extern "efiapi" fn on_data(
     _context: *mut c_void,
     _buffer: *mut c_void,
@@ -215,10 +223,19 @@ unsafe extern "efiapi" fn on_data(
 }
 
 /// iPXE's finish callback: note that the request ended, and how.
+///
+/// # Safety
+///
+/// `context` must be the `Pending` [`fetch`] passed to `start`, still live.
+/// iPXE calls this exactly once per request, from `efi_download_close`:
+/// inside `poll` when the request ends, or inside `abort`
+/// (`efi_download_abort` -> `efi_download_close`) before `abort` returns.
+/// Both happen while `fetch` is still waiting, so the `Pending` on its stack
+/// outlives every call.
 unsafe extern "efiapi" fn on_finish(context: *mut c_void, status: Status) {
-    // SAFETY: `context` is the `Pending` `fetch` passed to `start`, which
-    // lives until the request has finished or been aborted, both of which
-    // call this before `fetch` returns.
+    // SAFETY: `context` is the live `Pending` this function's contract
+    // names: `fetch` does not return before the request finished or was
+    // aborted, and both call this before that.
     let pending = unsafe { &*context.cast::<Pending>() };
     pending.status.set(status);
     pending.done.set(true);
