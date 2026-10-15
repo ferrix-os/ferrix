@@ -146,8 +146,98 @@ const IA32_XAPIC_DISABLE_STATUS: u32 = 0xBD;
 /// locks the local APIC in x2APIC mode.
 const LEGACY_XAPIC_DISABLED: u64 = 1 << 0;
 
-/// Processors that looked at their local APIC's mode before using its MMIO
-/// window ([`leave_x2apic`]).
+/// The first of the x2APIC MSRs: register `offset` of the xAPIC window is
+/// MSR `X2APIC_MSR_BASE + (offset >> 4)` in x2APIC mode.
+const X2APIC_MSR_BASE: u32 = 0x800;
+/// x2APIC: the interrupt command register, one 64-bit MSR with the
+/// destination in bits 63:32.
+const X2APIC_ICR: u32 = 0x830;
+
+/// Whether this kernel drives every local APIC in x2APIC mode, through its
+/// MSRs, rather than in xAPIC mode through the MMIO window. Decided once, by
+/// the boot processor in [`init`], before any processor uses its local APIC;
+/// every application processor follows it ([`enter_mode`]).
+static X2APIC: AtomicBool = AtomicBool::new(false);
+
+/// Whether the local APICs run in x2APIC mode.
+pub(crate) fn x2apic() -> bool {
+    X2APIC.load(Ordering::Relaxed)
+}
+
+/// The command-line option that chooses the mode: `x2apic` to run in x2APIC
+/// mode wherever the processor has it, `xapic` to stay in xAPIC mode unless
+/// the platform locks x2APIC. Without it, x2APIC mode is taken only where
+/// firmware locked it or left it on.
+pub(crate) const OPTION: &str = "ferrix.apic";
+
+/// Why the boot processor chose x2APIC mode, for its line.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Why {
+    /// `IA32_XAPIC_DISABLE_STATUS` says legacy xAPIC is disabled.
+    Locked,
+    /// Firmware handed over the boot processor in x2APIC mode.
+    LeftOn,
+    /// `ferrix.apic=x2apic`.
+    Asked,
+}
+
+/// Choose the mode, on the boot processor, before its local APIC is used.
+fn choose_mode(option: Option<&str>) -> Result<Option<Why>, &'static str> {
+    let offered = core::arch::x86_64::__cpuid(1).ecx & 1 << 21 != 0;
+    // SAFETY: (SYSREG) `IA32_APIC_BASE` exists on every processor with a
+    // local APIC, which every x86-64 processor has.
+    let base = unsafe { super::cpu::read_msr(IA32_APIC_BASE) };
+    let why = if xapic_locked() {
+        Some(Why::Locked)
+    } else if option == Some("xapic") {
+        None
+    } else if base & APIC_BASE_X2APIC != 0 && base & APIC_BASE_ENABLE != 0 {
+        Some(Why::LeftOn)
+    } else if option == Some("x2apic") && offered {
+        Some(Why::Asked)
+    } else {
+        None
+    };
+    if why.is_some() && !offered {
+        return Err("the local APIC is in x2APIC mode but CPUID does not offer x2APIC");
+    }
+    Ok(why)
+}
+
+/// Put this processor's local APIC in the mode [`X2APIC`] says, before it
+/// is used: on the boot processor from [`init`], on every application
+/// processor from `secondary_start`.
+///
+/// # Errors
+///
+/// As [`leave_x2apic`], in xAPIC mode.
+pub(crate) fn enter_mode() -> Result<(), &'static str> {
+    if !x2apic() {
+        return leave_x2apic();
+    }
+    let _ = MODE_CHECKED.fetch_add(1, Ordering::Relaxed);
+    // SAFETY: (SYSREG) `IA32_APIC_BASE` exists on every processor with a
+    // local APIC, which every x86-64 processor has.
+    let base = unsafe { super::cpu::read_msr(IA32_APIC_BASE) };
+    let both = APIC_BASE_ENABLE | APIC_BASE_X2APIC;
+    if base & both == both {
+        return Ok(());
+    }
+    if base & APIC_BASE_ENABLE == 0 {
+        // SAFETY: (SYSREG) disabled to xAPIC, a transition the SDM allows,
+        // on this processor's own register with its base unchanged; nothing
+        // uses the local APIC before the next write.
+        unsafe { super::cpu::write_msr(IA32_APIC_BASE, base | APIC_BASE_ENABLE) };
+    }
+    // SAFETY: (SYSREG) xAPIC to x2APIC, a transition the SDM allows, on this
+    // processor's own register; the boot processor saw CPUID offer x2APIC,
+    // and every processor of a platform is of one kind.
+    unsafe { super::cpu::write_msr(IA32_APIC_BASE, base | both) };
+    Ok(())
+}
+
+/// Processors that looked at their local APIC's mode before using it
+/// ([`enter_mode`]).
 static MODE_CHECKED: AtomicU64 = AtomicU64::new(0);
 /// Of those, the ones found in x2APIC mode and switched to xAPIC.
 static SWITCHED_TO_XAPIC: AtomicU64 = AtomicU64::new(0);
@@ -227,13 +317,42 @@ static LAPIC: AtomicU64 = AtomicU64::new(0);
 /// How fast the local APIC timer counts, after the divider.
 static TIMER_HZ: AtomicU64 = AtomicU64::new(0);
 
-/// The local APIC's register window.
+/// The local APIC's register window, in xAPIC mode. Only [`read_reg`],
+/// [`write_reg`], [`id`] and [`issue`] use it.
 fn lapic() -> Mmio {
     let base = LAPIC.load(Ordering::Relaxed);
     if base == 0 {
         return Mmio::unmapped();
     }
     Mmio::at(base)
+}
+
+/// The x2APIC MSR that holds xAPIC register `offset`.
+fn x2apic_msr(offset: u64) -> u32 {
+    X2APIC_MSR_BASE + (offset >> 4) as u32
+}
+
+/// Read local APIC register `offset` (its xAPIC window offset), in whichever
+/// mode the local APICs run: every read of a local APIC register goes
+/// through here, [`id`] or [`issue`].
+fn read_reg(offset: u64) -> u32 {
+    if x2apic() {
+        // SAFETY: (SYSREG) the local APIC is in x2APIC mode, where every
+        // register the kernel names has its MSR.
+        return unsafe { super::cpu::read_msr(x2apic_msr(offset)) } as u32;
+    }
+    lapic().read32(offset)
+}
+
+/// Write local APIC register `offset`, as [`read_reg`] reads it.
+fn write_reg(offset: u64, value: u32) {
+    if x2apic() {
+        // SAFETY: (SYSREG) as in `read_reg`; the values written are the
+        // xAPIC ones, which x2APIC mode takes unchanged for these registers.
+        unsafe { super::cpu::write_msr(x2apic_msr(offset), u64::from(value)) };
+        return;
+    }
+    lapic().write32(offset, value);
 }
 
 /// Bring up the local APIC, calibrate its timer, and quiesce every I/O APIC.
@@ -244,36 +363,48 @@ fn lapic() -> Mmio {
 /// is loaded and while interrupts are still masked: this leaves the local APIC
 /// enabled, and an interrupt arriving before there is a gate for it is a fault
 /// with no handler.
-pub(crate) unsafe fn init(acpi: &Acpi<'_, DirectMap>) -> Result<(), &'static str> {
+pub(crate) unsafe fn init(
+    acpi: &Acpi<'_, DirectMap>,
+    option: Option<&str>,
+) -> Result<(), &'static str> {
     let madt = acpi.madt().map_err(|_| "the machine has no MADT")?;
     // Before the window is mapped, let alone used: it does not exist in
     // x2APIC mode.
-    leave_x2apic().map_err(|_| {
-        "processor 0: the platform locks the local APIC in x2APIC mode, which this kernel does \
-         not drive yet"
-    })?;
+    let why = choose_mode(option)?;
+    X2APIC.store(why.is_some(), Ordering::Relaxed);
+    enter_mode()?;
+    crate::console::println!(
+        "  apic     {}",
+        match why {
+            Some(Why::Locked) => "x2APIC mode (firmware locked it)",
+            Some(Why::LeftOn) => "x2APIC mode (firmware left it on)",
+            Some(Why::Asked) => "x2APIC mode (ferrix.apic=x2apic asked for it)",
+            None => "xAPIC mode",
+        }
+    );
 
-    let phys = match madt.local_apic_address() {
-        0 => LAPIC_DEFAULT_BASE,
-        address => address,
-    };
-    let base =
-        crate::vmap::map_device(phys, LAPIC_WINDOW).map_err(|_| "could not map the local APIC")?;
-    LAPIC.store(base, Ordering::Relaxed);
+    if why.is_none() {
+        let phys = match madt.local_apic_address() {
+            0 => LAPIC_DEFAULT_BASE,
+            address => address,
+        };
+        let base = crate::vmap::map_device(phys, LAPIC_WINDOW)
+            .map_err(|_| "could not map the local APIC")?;
+        LAPIC.store(base, Ordering::Relaxed);
+    }
 
-    let regs = Mmio::at(base);
     // Accept every priority. Firmware may have left this high enough to
     // silently discard the timer.
-    regs.write32(LAPIC_TPR, 0);
-    regs.write32(LAPIC_SVR, SVR_ENABLE | SPURIOUS_VECTOR as u32);
+    write_reg(LAPIC_TPR, 0);
+    write_reg(LAPIC_SVR, SVR_ENABLE | SPURIOUS_VECTOR as u32);
 
-    calibrate(regs)?;
+    calibrate()?;
     quiesce_io_apics(&madt)?;
     Ok(())
 }
 
 /// Measure the timer against the counter, and leave it stopped.
-fn calibrate(regs: Mmio) -> Result<(), &'static str> {
+fn calibrate() -> Result<(), &'static str> {
     /// Microseconds to measure over. Long enough that the counter's own
     /// resolution is noise, short enough not to stretch the boot.
     const WINDOW_MICROS: u64 = 10_000;
@@ -284,20 +415,20 @@ fn calibrate(regs: Mmio) -> Result<(), &'static str> {
     }
     let window_ticks = reference_hz * WINDOW_MICROS / 1_000_000;
 
-    regs.write32(LAPIC_TIMER_DCR, DCR_DIVIDE_BY_16);
+    write_reg(LAPIC_TIMER_DCR, DCR_DIVIDE_BY_16);
     // Masked: this is a measurement, and a timer interrupt arriving in the
     // middle of it would be delivered before there is a handler.
-    regs.write32(LAPIC_LVT_TIMER, TIMER_VECTOR as u32 | LVT_MASKED);
-    regs.write32(LAPIC_TIMER_ICR, u32::MAX);
+    write_reg(LAPIC_LVT_TIMER, TIMER_VECTOR as u32 | LVT_MASKED);
+    write_reg(LAPIC_TIMER_ICR, u32::MAX);
 
     let started = clock::counter_now();
     // Subtracted in the counter's width, which `clock` decides: a 32-bit
     // counter subtracted in 64 bits across its wrap reads as an interval of
     // centuries, and the measurement would end at once with a tiny count.
     while clock::ticks_between(started, clock::counter_now()) < window_ticks {}
-    let remaining = regs.read32(LAPIC_TIMER_CCR);
+    let remaining = read_reg(LAPIC_TIMER_CCR);
 
-    regs.write32(LAPIC_TIMER_ICR, 0);
+    write_reg(LAPIC_TIMER_ICR, 0);
 
     let counted = u64::from(u32::MAX - remaining);
     if counted == 0 {
@@ -388,10 +519,22 @@ impl IoApicInput {
     /// never live with a stale destination.
     pub(crate) fn route(self, vector: u64, masked: bool) {
         let low_register = IOAPIC_REDIRECTION_BASE + self.input * 2;
+        let destination = id();
+        if destination > 0xFF {
+            // Without interrupt remapping a redirection entry names eight
+            // bits of destination: the input stays masked.
+            crate::console::println!(
+                "  apic     I/O APIC input {} not routed: APIC ID {destination} is above 255, \
+                 which needs interrupt remapping",
+                self.input
+            );
+            io_apic_write(self.regs, low_register, IOAPIC_ENTRY_MASKED);
+            return;
+        }
         io_apic_write(
             self.regs,
             low_register + 1,
-            id() << IOAPIC_DESTINATION_SHIFT,
+            destination << IOAPIC_DESTINATION_SHIFT,
         );
         let mask = if masked { IOAPIC_ENTRY_MASKED } else { 0 };
         io_apic_write(
@@ -483,11 +626,10 @@ fn mask_all_inputs(regs: Mmio) {
 /// measured holds for every processor sharing the crystal, which on every
 /// machine this runs on is all of them.
 pub(crate) fn init_this_cpu() {
-    let regs = lapic();
-    regs.write32(LAPIC_TPR, 0);
-    regs.write32(LAPIC_SVR, SVR_ENABLE | SPURIOUS_VECTOR as u32);
-    regs.write32(LAPIC_TIMER_DCR, DCR_DIVIDE_BY_16);
-    regs.write32(LAPIC_LVT_TIMER, TIMER_VECTOR as u32 | LVT_MASKED);
+    write_reg(LAPIC_TPR, 0);
+    write_reg(LAPIC_SVR, SVR_ENABLE | SPURIOUS_VECTOR as u32);
+    write_reg(LAPIC_TIMER_DCR, DCR_DIVIDE_BY_16);
+    write_reg(LAPIC_LVT_TIMER, TIMER_VECTOR as u32 | LVT_MASKED);
     if let Some(flag) = lvt_unmasked() {
         flag.store(false, Ordering::Relaxed);
     }
@@ -510,9 +652,9 @@ pub(crate) fn send_startup(apic_id: u32, page: u8) -> Result<(), &'static str> {
 /// for its start-up IPI ignores a fixed interrupt, and one with interrupts
 /// masked takes it when it unmasks.
 ///
-/// No fence before it: the register is uncached memory, and x86 does not let
-/// an uncached store pass the ordinary stores before it. (An x2APIC's
-/// register is an MSR, which would need one. This is not an x2APIC.)
+/// No fence before it in xAPIC mode: the register is uncached memory, and x86
+/// does not let an uncached store pass the ordinary stores before it. In
+/// x2APIC mode the register is an MSR, and [`issue`] fences.
 pub(crate) fn send_ipi_to_others() -> Result<(), &'static str> {
     issue(None, ICR_ALL_BUT_SELF | ICR_ASSERT | IPI_VECTOR as u32)
 }
@@ -547,8 +689,11 @@ pub(crate) fn send_nmi_to(apic_id: u32) -> Result<(), &'static str> {
 
 /// Send `command` to the local APIC `apic_id` and wait for it to be accepted.
 fn send(apic_id: u32, command: u32) -> Result<(), &'static str> {
+    if x2apic() {
+        return issue(Some(apic_id), command);
+    }
     if apic_id > 0xFF {
-        return Err("an APIC ID above 255 needs x2APIC mode, which is not written yet");
+        return Err("an APIC ID above 255 needs x2APIC mode, which this boot does not run in");
     }
     issue(Some(apic_id << 24), command)
 }
@@ -557,18 +702,31 @@ fn send(apic_id: u32, command: u32) -> Result<(), &'static str> {
 /// for the local APIC to accept it.
 fn issue(destination: Option<u32>, command: u32) -> Result<(), &'static str> {
     crate::sched::trip::count(crate::sched::trip::Count::Ipi);
-    let regs = lapic();
-
+    if x2apic() {
+        // One 64-bit write sends, with the whole x2APIC ID as destination,
+        // and there is no delivery status to wait on. `WRMSR` to an x2APIC
+        // register is not serializing, so the stores before it -- a
+        // shootdown's request, say -- are fenced to be seen first (SDM
+        // 11.12.3: `MFENCE; LFENCE`).
+        core::sync::atomic::fence(Ordering::SeqCst);
+        // SAFETY: (SYSREG) `lfence` orders instruction issue and nothing else.
+        unsafe { core::arch::asm!("lfence", options(nostack, preserves_flags)) };
+        let value = u64::from(destination.unwrap_or(0)) << 32 | u64::from(command);
+        // SAFETY: (SYSREG) x2APIC mode: the interrupt command register's
+        // MSR, written with a command this module built.
+        unsafe { super::cpu::write_msr(X2APIC_ICR, value) };
+        return Ok(());
+    }
     // Masked, because a command can be two writes: an interrupt handler that
     // sent one of its own between them would send it to this destination.
     let saved = <super::Irq as IrqControl>::disable();
     if let Some(high) = destination {
-        regs.write32(LAPIC_ICR_HIGH, high);
+        write_reg(LAPIC_ICR_HIGH, high);
     }
-    regs.write32(LAPIC_ICR_LOW, command);
+    write_reg(LAPIC_ICR_LOW, command);
     let mut accepted = false;
     for _ in 0..1_000_000 {
-        if regs.read32(LAPIC_ICR_LOW) & ICR_PENDING == 0 {
+        if read_reg(LAPIC_ICR_LOW) & ICR_PENDING == 0 {
             accepted = true;
             break;
         }
@@ -592,12 +750,17 @@ fn issue(destination: Option<u32>, command: u32) -> Result<(), &'static str> {
 /// Zero before [`init`] has mapped the local APIC, which is also a valid
 /// identifier — so callers must not ask until it has.
 pub(crate) fn id() -> u32 {
-    lapic().read32(LAPIC_ID) >> 24
+    if x2apic() {
+        // x2APIC mode: the ID register holds the whole 32-bit x2APIC ID.
+        return read_reg(LAPIC_ID);
+    }
+    read_reg(LAPIC_ID) >> 24
 }
 
 /// Retire the interrupt currently being serviced.
 pub(crate) fn end_of_interrupt() {
-    lapic().write32(LAPIC_EOI, 0);
+    // Zero in either mode: x2APIC mode faults on anything else.
+    write_reg(LAPIC_EOI, 0);
 }
 
 /// Fire the timer interrupt once, `nanos` from now.
@@ -611,22 +774,20 @@ pub(crate) fn arm(nanos: u64) {
     // firing immediately, which would be an interrupt that never arrives.
     let count = u32::try_from(ticks.max(1)).unwrap_or(u32::MAX);
 
-    let regs = lapic();
     // The vector is unmasked once and left so: rewriting it at every arm was
     // a second exit under a hypervisor for a register that had not changed.
     // Unknown (no per-CPU record yet) is written, as before.
     let unmasked = lvt_unmasked();
     if !unmasked.is_some_and(|flag| flag.swap(true, Ordering::Relaxed)) {
-        regs.write32(LAPIC_LVT_TIMER, TIMER_VECTOR as u32);
+        write_reg(LAPIC_LVT_TIMER, TIMER_VECTOR as u32);
     }
-    regs.write32(LAPIC_TIMER_ICR, count);
+    write_reg(LAPIC_TIMER_ICR, count);
 }
 
 /// Stop the timer.
 pub(crate) fn disarm() {
-    let regs = lapic();
-    regs.write32(LAPIC_TIMER_ICR, 0);
-    regs.write32(LAPIC_LVT_TIMER, TIMER_VECTOR as u32 | LVT_MASKED);
+    write_reg(LAPIC_TIMER_ICR, 0);
+    write_reg(LAPIC_LVT_TIMER, TIMER_VECTOR as u32 | LVT_MASKED);
     if let Some(flag) = lvt_unmasked() {
         flag.store(false, Ordering::Relaxed);
     }
