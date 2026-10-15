@@ -579,3 +579,25 @@ fn the_item_list_fails_closed_when_a_crate_has_no_path() {
     assert!(item_paths(&root).is_err());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn gate_sh_s_settings_are_not_part_of_the_environment() {
+    // Each gate run has a tag of its own; a record must hold across runs.
+    for ignored in [
+        "FERRIX_GATE_TAG",
+        "GATE_SLOT",
+        "GATE_STEP_CACHE",
+        "GATE_PRIORITY",
+    ] {
+        assert!(environment_ignored(ignored), "{ignored}");
+    }
+    for kept in [
+        "RUSTFLAGS",
+        "XDG_CONFIG_HOME",
+        "XDG_RUNTIME_DIR",
+        "FERRIX_INIT",
+        "PATH",
+    ] {
+        assert!(!environment_ignored(kept), "{kept}");
+    }
+}

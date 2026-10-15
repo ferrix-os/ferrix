@@ -151,6 +151,9 @@ const EXCLUDED: &[(&str, &str)] = &[
 const ENVIRONMENT_IGNORED: &[&str] = &[
     "CARGO_TARGET_DIR",
     "CLAUDECODE",
+    // gate.sh's name for the run, which the record keeps as its origin: a
+    // different tag every run, and nothing in the tree reads it.
+    "FERRIX_GATE_TAG",
     "COLORTERM",
     "DBUS_SESSION_BUS_ADDRESS",
     "GPG_AGENT_INFO",
@@ -177,6 +180,9 @@ const ENVIRONMENT_IGNORED: &[&str] = &[
 /// Prefixes of environment variables left out, for the same reason.
 const ENVIRONMENT_IGNORED_PREFIXES: &[&str] = &[
     "ANTHROPIC_",
+    // gate.sh's own settings (GATE_SLOT, GATE_STEP_CACHE, GATE_PRIORITY),
+    // which choose where and when a run goes; nothing in the tree reads them.
+    "GATE_",
     "CLAUDE_",
     "OTEL_",
     "SSH_",
