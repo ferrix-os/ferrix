@@ -155,18 +155,25 @@ fn ferrix_fast_write_read(a: &[u64; 6]) -> trap::Fast {
 }
 
 fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
+    // Before the first line, so the boot console draws every one of them.
+    // The milestone stripes (`console::screen::milestone`) are what a photo
+    // of a screen with no legible text still tells: rows 0 to 10, in order.
+    let framebuffer = map_boot_framebuffer(view, memory);
+    console::screen::milestone(0);
     println!();
     println!("Ferrix {} on {}", env!("CARGO_PKG_VERSION"), arch::NAME);
 
     report(view);
+    console::screen::milestone(1);
 
-    if let Err(problem) = self_check(view, memory) {
+    if let Err(problem) = framebuffer.and_then(|()| self_check(view, memory)) {
         fatal!(
             catalog::STAGE1_HANDOFF,
             "stage 1 self-check failed: {problem}"
         );
     }
     println!("  stage 1  loader hand-off verified");
+    console::screen::milestone(2);
     // Whether the rest of the stages check what they bring up. Read here,
     // after the one check that always runs and before the first that may not.
     checks::init(view);
@@ -185,8 +192,10 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     syscall::deliver::install();
     register_system_calls();
     println!("  traps    vectors installed");
+    console::screen::milestone(3);
 
     let stats = bring_up_memory(view);
+    console::screen::milestone(4);
     // The log kept across a reset, as soon as the direct map's RAM is known
     // and while this is the only processor and interrupts are off.
     attach_pstore(view);
@@ -197,6 +206,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
             "could not bring up the kernel address arena: {problem}"
         );
     }
+    console::screen::milestone(5);
 
     // From here on each self-check runs only when `checks::run` says so; each
     // step that brings something up runs whatever it says. The checks that
@@ -220,6 +230,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
             "could not bring up interrupts: {problem}"
         ),
     };
+    console::screen::milestone(6);
     report_clocks_and_power(view, &clocks);
 
     if let Err(problem) = timer::init() {
@@ -233,17 +244,20 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     arch::enable_interrupts();
 
     check_timer_and_start_clocks(view);
+    console::screen::milestone(7);
 
     // Stage 4. It has to be here: after interrupt bring-up, which maps the
     // local APIC x86-64 reads its own identifier from, and before
     // `finish_memory`, which reclaims the tables the processor list comes
     // from and sweeps a set of mappings that bringing processors up adds to.
     let cpus = bring_up_processors(view);
+    console::screen::milestone(8);
 
     // Stage 5, after stage 4 because it needs every processor it is going to
     // schedule on, and before `finish_memory` because the task stacks it
     // takes and gives back are mappings the sweep below has to see settled.
     start_scheduler(cpus);
+    console::screen::milestone(9);
 
     // The console's transmit side, as a program's output goes out: from a
     // task, which the scheduler just made this, into the ring the port's
@@ -696,6 +710,7 @@ fn check_devmgr() -> bool {
             "stage 10 devmgr self-check failed: {problem}"
         ),
     };
+    console::screen::milestone(10);
     let Some(report) = report else {
         println!("  devmgr   not started: the image carries no /sbin/devmgr");
         return false;
@@ -1723,27 +1738,44 @@ fn check_early_mapper(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(
     // A device window the kernel has a real use for, when firmware left one:
     // the visible part of the framebuffer, which is where a panic is drawn.
     // The PL011 console took the same path a moment ago.
+    // Mapped at the top of `kmain` (`map_boot_framebuffer`), so that the
+    // boot console is on the screen before anything else runs; checked here
+    // with the rest of the early mapper.
     let framebuffer = info.framebuffer;
-    display::note_boot_framebuffer(framebuffer.is_present(), framebuffer.is_reclaimable());
-    // A framebuffer in memory the allocator will hand out again is not drawn
-    // on: the panic screen would write into frames that belong to someone
-    // else. The panic still goes to serial. `docs/DISPLAY.md` §2.4.
-    if framebuffer.is_present() && !framebuffer.is_reclaimable() {
-        let at = vmap::FRAMEBUFFER_WINDOW;
-        let len = framebuffer_bytes(&framebuffer).min(vmap::FRAMEBUFFER_WINDOW_SIZE);
-        if memory.map_framebuffer(at, framebuffer.phys, len).is_err() {
-            return Err("could not map the framebuffer");
-        }
-        if memory.translate(at) != Some(framebuffer.phys) {
-            return Err("the framebuffer mapping does not resolve to the framebuffer");
-        }
-        panic::screen::install(&framebuffer, at, len);
-        // The boot console, under `ferrix.fbcon`, from here rather than after
-        // `mm::init`: the first point the framebuffer is mapped, so a hang in
-        // the rest of early boot is on the screen of a machine with no serial
-        // port. The lines before this are drawn from what the console kept.
-        console::screen::start(view);
+    if framebuffer.is_present()
+        && !framebuffer.is_reclaimable()
+        && memory.translate(vmap::FRAMEBUFFER_WINDOW) != Some(framebuffer.phys)
+    {
+        return Err("the framebuffer mapping does not resolve to the framebuffer");
     }
 
+    Ok(())
+}
+
+/// Map the framebuffer firmware left, record it for the panic screen, and
+/// start the boot console on it under `ferrix.fbcon`: the first thing `kmain`
+/// does, so a machine with no serial port shows how far boot got from its
+/// very first line on.
+///
+/// A framebuffer in memory the allocator will hand out again is not drawn
+/// on: the panic screen would write into frames that belong to someone else.
+/// The panic still goes to serial. `docs/DISPLAY.md` §2.4. A failure is
+/// returned for stage 1's self-check to report, after the console is up.
+fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'static str> {
+    let framebuffer = view.raw().framebuffer;
+    display::note_boot_framebuffer(framebuffer.is_present(), framebuffer.is_reclaimable());
+    if !framebuffer.is_present() || framebuffer.is_reclaimable() {
+        return Ok(());
+    }
+    let at = vmap::FRAMEBUFFER_WINDOW;
+    let len = framebuffer_bytes(&framebuffer).min(vmap::FRAMEBUFFER_WINDOW_SIZE);
+    if memory.map_framebuffer(at, framebuffer.phys, len).is_err() {
+        return Err("could not map the framebuffer");
+    }
+    if memory.translate(at) != Some(framebuffer.phys) {
+        return Err("the framebuffer mapping does not resolve to the framebuffer");
+    }
+    panic::screen::install(&framebuffer, at, len);
+    console::screen::start(view);
     Ok(())
 }
