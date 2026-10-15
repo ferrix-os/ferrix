@@ -897,6 +897,48 @@ to 45: main failed 2 of 27 and the branch 1 of 22, all three on those
 stage 13 checks; the boot times overlapped (main 31-60 s, the branch
 31-71 s). No rate of failure the change adds could be told from the load's.
 
+### Cut B2: `check`'s units by their inputs (bs-b-stepcache)
+
+`FERRIX_STEP_CACHE=on` makes each of `check`'s workspaces of their own --
+the compositor's, init's, auth's, pkg's, the installer's, media's, adbd's,
+nvos's and every app's -- a unit that is skipped when a run that passed read
+exactly the inputs it would read now (`tools/common/xtask/src/step_cache.rs`
+says how, `docs/certification/TOOLS.md` says what it shall and shall not
+do). On a miss the unit runs under `strace -ff` as `cargo xtask check-unit`;
+when it passes, the record keeps every file it read, directory it listed,
+path it looked up and program it ran, with xtask's digest, the environment,
+the toolchains, the kernel release and the processor. The log says `ran,
+recorded` or `cached pass from <time> on <commit>, <target directory>` for
+each unit, and counts both. loom (the kernel's orderings) and every step of
+the main workspace stay uncached: they read the certified item (the
+certification consultant, ledger lines 1447 and 1461).
+
+**It is off unless asked for**, and release runs and the baseline keep it
+off: a gate turns it on only once its end-to-end control has fired through
+`gate.sh`'s host-side control mode (proposed with the pool's T1/T2).
+
+`cargo xtask check-side` in one worktree and target directory, at a load of
+about 20:
+
+| Run | Wall |
+|---|---:|
+| Warm, unchanged tree, no cache | 65.8 s |
+| First run with the cache, recording all 25 units | 93.8 s (strace cost nothing measurable: the compositor's unit 42.9 s traced, 47.5 s plain) |
+| Warm, unchanged tree, every unit a cached pass | **3.7 s** |
+| After a kernel edit (no unit reads `src/kernel/`) | every unit a cached pass |
+
+In the pool, these units are `check`'s critical path: 110 s (median, a
+warm slot on the same tree), 273 s and 537 s (new trees). With them cached,
+`check` takes as long as its main workspace's steps.
+
+**Controls.** A broken assertion in hyprix's `plane.rs` after a cached pass:
+the compositor's unit missed, ran, and failed the run with the test's
+failure; with the file restored, every unit was a cached pass again. Each
+of the cache's checks sabotaged in turn (a file's digest, a listing's, a
+looked-up path's kind and size, the prelude, the toolchains, an unreadable
+input, the item refusal) fails the unit tests that hold it, eleven
+invalidations in all.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

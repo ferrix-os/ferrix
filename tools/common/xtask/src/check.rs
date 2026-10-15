@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::cargo::{self, cargo as cargo_binary};
 use crate::paths::{self, Arch};
+use crate::step_cache;
 use crate::workspace;
 use crate::{Error, Result};
 
@@ -25,6 +26,7 @@ pub(crate) const COMMANDS: &[&str] = &[
     "host-doc",
     "check-apps",
     "check-side",
+    "check-unit",
     "check-docs",
     "check-ferrocene",
     "gate-rows",
@@ -42,8 +44,9 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "host-test" => host_test(),
         "host-doctest" => host_doctest(),
         "host-doc" => host_doc(),
-        "check-apps" => apps(),
+        "check-apps" => apps(&mut Counts::default()),
         "check-side" => side_workspaces(&paths::workspace_root()),
+        "check-unit" => check_unit(&paths::workspace_root()),
         "check-docs" => docs(),
         "check-ferrocene" => ferrocene_rust(),
         "gate-rows" => crate::gate_rows::run(args),
@@ -337,12 +340,79 @@ fn main_workspace(root: &std::path::Path, args: &Args) -> Result<bool> {
 /// after another: `cargo xtask check-side`, which `check` starts beside its
 /// main workspace's steps ([`Beside`]).
 fn side_workspaces(root: &std::path::Path) -> Result<()> {
+    // loom's models are of the kernel's orderings: the item's, never cached
+    // (the certification consultant, ledger line 1447).
     loom(root)?;
-    compositor(root)?;
-    userland(root)?;
-    adbd(root)?;
-    nvos(root)?;
-    apps()
+    let mut counts = Counts::default();
+    counts.add(step_cache::unit("compositor", || compositor(root))?);
+    for (name, relative) in LINUX_WORKSPACES {
+        counts.add(step_cache::unit(name, || {
+            linux_workspace(root, name, relative)
+        })?);
+    }
+    step("auth: no sabotage in the environment", no_sabotage)?;
+    counts.add(step_cache::unit("media", || media(root))?);
+    counts.add(step_cache::unit("adbd", || adbd(root))?);
+    counts.add(step_cache::unit("nvos", || nvos(root))?);
+    apps(&mut counts)?;
+    if step_cache::store().is_some() {
+        println!(
+            "\n-- the step cache: {} units ran, {} cached passes",
+            counts.ran, counts.cached
+        );
+    }
+    Ok(())
+}
+
+/// How many units ran and how many were cached passes.
+#[derive(Debug, Default)]
+struct Counts {
+    /// Units that ran.
+    ran: usize,
+    /// Units a record stood for.
+    cached: usize,
+}
+
+impl Counts {
+    fn add(&mut self, outcome: step_cache::Outcome) {
+        match outcome {
+            step_cache::Outcome::Ran => self.ran += 1,
+            step_cache::Outcome::Cached => self.cached += 1,
+        }
+    }
+}
+
+/// The Linux-ABI workspaces `check` reaches as units, by name and place.
+const LINUX_WORKSPACES: &[(&str, &str)] = &[
+    ("init", "src/user/system/linux/init"),
+    ("auth", "src/user/system/linux/auth"),
+    ("pkg", "src/user/system/linux/pkg"),
+    ("installer", "src/user/system/linux/installer"),
+];
+
+/// `cargo xtask check-unit`: the one unit `FERRIX_CHECK_UNIT` names, as
+/// [`step_cache`] runs it under `strace`.
+fn check_unit(root: &std::path::Path) -> Result<()> {
+    let name = std::env::var(step_cache::UNIT_VARIABLE)
+        .map_err(|_| Error::new("check-unit: FERRIX_CHECK_UNIT names no unit"))?;
+    if let Some(app) = name.strip_prefix("app:") {
+        let apps = crate::apps::discover()?;
+        let app = apps
+            .iter()
+            .find(|found| found.recipe.package.name == app)
+            .ok_or_else(|| Error::new(format!("check-unit: no app {app}")))?;
+        return app_steps(app);
+    }
+    match name.as_str() {
+        "compositor" => compositor(root),
+        "media" => media(root),
+        "adbd" => adbd(root),
+        "nvos" => nvos(root),
+        _ => match LINUX_WORKSPACES.iter().find(|(unit, _)| *unit == name) {
+            Some((unit, relative)) => linux_workspace(root, unit, relative),
+            None => Err(Error::new(format!("check-unit: no unit {name}"))),
+        },
+    }
 }
 
 /// `cargo xtask check-side`, started by `check` as a process of its own,
@@ -815,21 +885,10 @@ fn compositor(root: &std::path::Path) -> Result<()> {
     })
 }
 
-/// The Linux-ABI workspaces under `src/user/system/linux/` that the host steps do not
-/// reach: init's, authentication's, the package manager's and media's.
-fn userland(root: &std::path::Path) -> Result<()> {
-    linux_workspace(root, "init", "src/user/system/linux/init")?;
-    linux_workspace(root, "auth", "src/user/system/linux/auth")?;
-    linux_workspace(root, "pkg", "src/user/system/linux/pkg")?;
-    linux_workspace(root, "installer", "src/user/system/linux/installer")?;
-    step("auth: no sabotage in the environment", no_sabotage)?;
-    media(root)
-}
-
 /// The gates of every app under `src/user/apps/`, found by their manifests
 /// (`docs/APPS.md` §5): nothing here names one. Each is a workspace of its
 /// own, so the host steps above never reach it.
-fn apps() -> Result<()> {
+fn apps(counts: &mut Counts) -> Result<()> {
     let mut apps = Vec::new();
     step("apps: manifests", || {
         apps = crate::apps::discover()?;
@@ -838,21 +897,28 @@ fn apps() -> Result<()> {
     })?;
     for app in &apps {
         let name = &app.recipe.package.name;
+        // A search of the whole tree, so never a unit: it reads the item.
         step(
             &format!("app {name}: nothing outside its folder names it"),
             || crate::apps::stays_in_its_folder(app),
         )?;
-        step(&format!("app {name}: formatting"), || {
-            crate::apps::formatting(app)
-        })?;
-        step(&format!("app {name}: clippy and tests (host)"), || {
-            crate::apps::host(app)
-        })?;
-        step(&format!("app {name}: clippy (targets)"), || {
-            crate::apps::targets(app)
-        })?;
+        counts.add(step_cache::unit(&format!("app:{name}"), || app_steps(app))?);
     }
     Ok(())
+}
+
+/// One app's formatting, clippy and tests.
+fn app_steps(app: &crate::apps::App) -> Result<()> {
+    let name = &app.recipe.package.name;
+    step(&format!("app {name}: formatting"), || {
+        crate::apps::formatting(app)
+    })?;
+    step(&format!("app {name}: clippy and tests (host)"), || {
+        crate::apps::host(app)
+    })?;
+    step(&format!("app {name}: clippy (targets)"), || {
+        crate::apps::targets(app)
+    })
 }
 
 /// Every image build inherits this environment, and a set

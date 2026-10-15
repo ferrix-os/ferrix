@@ -160,6 +160,7 @@ mod ssh;
 mod start_page;
 mod steam;
 mod steamcmd;
+mod step_cache;
 mod symbolize;
 mod sysfs;
 mod test_disk;
@@ -427,6 +428,7 @@ COMMANDS:
     apps          List the apps in src/user/apps, each checked against its app.toml (docs/APPS.md)
     check-apps    check's steps for the apps alone: each app's formatting, clippy, tests and folder
     check-side    check's steps for the workspaces of their own (loom, compositor, Linux programs, adbd, nvos, apps), which check runs beside its main workspace
+    check-unit    one of check-side's units, the one FERRIX_CHECK_UNIT names, as the step cache runs it under strace (FERRIX_STEP_CACHE=on caches passed units by their inputs, docs/TEST-TIME.md)
     build-apps    Build every app's package, or --app's, for --arch: scripts too, which run and
                   run-compositor never start, and take the last of
     new-app       Write a new app's folder: --app NAME, --abi native (the default) or linux
@@ -701,7 +703,12 @@ fn command_of(args: &Args) -> Result<&str> {
         println!("{USAGE}");
         return Err(Error::new("no command given"));
     };
-    components::ensure()?;
+    // A unit `check` runs under the step cache is a child of a run that
+    // has just done this, and its trace must hold the unit's own reads and
+    // writes, not git refreshing the components' indexes.
+    if command != "check-unit" {
+        components::ensure()?;
+    }
     Ok(command)
 }
 
