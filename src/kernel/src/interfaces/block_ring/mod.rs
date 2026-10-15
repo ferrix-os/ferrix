@@ -133,6 +133,9 @@ const MAX_PARTS: u32 = 16;
 /// The most submissions a ring holds outstanding, whatever its data VMO.
 const MAX_OUTSTANDING: u64 = 4096;
 
+/// The most pieces of one write queued before the first is waited for.
+const WRITES_AT_ONCE: usize = 4;
+
 /// Why a ring could not be made.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CreateError {
@@ -1612,15 +1615,6 @@ impl RingDisk {
         self.collect(id, out)
     }
 
-    /// Write `payload` — `count` whole sectors — at `sector`, as one request.
-    fn write_request(&self, sector: u64, count: u32, payload: Vec<u8>) -> Result<(), Errno> {
-        self.request(
-            Request::write(0, sector, count).sync(),
-            Some(payload),
-            &mut [],
-        )
-    }
-
     /// Make everything written durable: one flush, which the queue treats as
     /// a barrier no request crosses.
     fn flush_request(&self) -> Result<(), Errno> {
@@ -1704,12 +1698,54 @@ impl BlockDevice for RingDisk {
         }
         let most = usize::try_from(self.device.max_sectors())
             .unwrap_or(usize::MAX)
-            .saturating_mul(size);
+            .saturating_mul(size)
+            .max(size);
+        // Up to WRITES_AT_ONCE pieces are queued before any is waited for,
+        // so the driver has the next while it does one; each piece's bytes
+        // are a copy until the ring's task moves them into the data region,
+        // so that many copies is the most a write holds at once.
         let mut at = sector;
-        for chunk in buf.chunks(most.max(size)) {
-            let count = u32::try_from(chunk.len() / size).map_err(|_| Errno::EIO)?;
-            self.write_request(at, count, chunk.to_vec())?;
-            at = at.checked_add(u64::from(count)).ok_or(Errno::EIO)?;
+        let mut outcome = Ok(());
+        for group in buf.chunks(most.saturating_mul(WRITES_AT_ONCE)) {
+            let slot = self.slot();
+            let mut ids: Vec<u64> = Vec::new();
+            ids.try_reserve_exact(WRITES_AT_ONCE)
+                .map_err(|_| Errno::ENOMEM)?;
+            for chunk in group.chunks(most) {
+                let Ok(count) = u32::try_from(chunk.len() / size) else {
+                    outcome = Err(Errno::EIO);
+                    break;
+                };
+                let mut payload = Vec::new();
+                if payload.try_reserve_exact(chunk.len()).is_err() {
+                    outcome = Err(Errno::ENOMEM);
+                    break;
+                }
+                payload.extend_from_slice(chunk);
+                match self.submit(Request::write(0, at, count).sync(), Some(payload), slot) {
+                    // NOALLOC: at most WRITES_AT_ONCE ids, reserved above.
+                    Ok(id) => ids.push(id),
+                    Err(errno) => {
+                        outcome = Err(errno);
+                        break;
+                    }
+                }
+                let Some(next) = at.checked_add(u64::from(count)) else {
+                    outcome = Err(Errno::EIO);
+                    break;
+                };
+                at = next;
+            }
+            // What was queued is waited for and collected even after a piece
+            // failed to queue, so that no answer is left behind.
+            self.wait(&ids, slot);
+            for &id in &ids {
+                let collected = self.collect(id, &mut []);
+                if outcome.is_ok() {
+                    outcome = collected;
+                }
+            }
+            outcome?;
         }
         Ok(())
     }
