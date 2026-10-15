@@ -1,6 +1,6 @@
 //! The HTTP server `netboot` and `test-netboot` run: GET and HEAD of a
-//! fixed set of files held in memory, under one path prefix, and nothing
-//! else.
+//! fixed set of files held in memory, under one path prefix, and the
+//! reports a netbooted machine sends (`report.rs`).
 //!
 //! As small as iPXE needs. HTTP/1.1 with persistent connections, because
 //! iPXE keeps one open across fetches; `Content-Length` on every answer and
@@ -8,15 +8,18 @@
 //! one or two at a time for one machine booting. Every request is logged
 //! as it is answered, with what it cost.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use super::REPORT;
+use super::report::{self, Report, Reports};
 use crate::{Error, Result};
 
 /// The longest request head read before the connection is dropped.
@@ -43,6 +46,9 @@ struct State {
     files: BTreeMap<String, Vec<u8>>,
     prefix: Mutex<String>,
     requests: Mutex<Vec<Request>>,
+    reports: Mutex<Reports>,
+    /// Answer every report 404, as a server that does not take them would.
+    refuse_reports: AtomicBool,
     stop: AtomicBool,
     started: Instant,
 }
@@ -70,6 +76,8 @@ impl Server {
             files,
             prefix: Mutex::new(prefix.to_owned()),
             requests: Mutex::new(Vec::new()),
+            reports: Mutex::new(Reports::new(None)),
+            refuse_reports: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             started: Instant::now(),
         });
@@ -99,6 +107,31 @@ impl Server {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner),
         );
+    }
+
+    /// Keep each report that arrives whole in a directory per machine under
+    /// `directory` from now on.
+    pub(super) fn keep_reports_in(&self, directory: PathBuf) {
+        *self
+            .state
+            .reports
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Reports::new(Some(directory));
+    }
+
+    /// Answer reports 404 from now on (`refuse`), or take them.
+    pub(super) fn refuse_reports(&self, refuse: bool) {
+        self.state.refuse_reports.store(refuse, Ordering::Relaxed);
+    }
+
+    /// Every report that arrived whole so far.
+    pub(super) fn reports(&self) -> Vec<Report> {
+        self.state
+            .reports
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .done
+            .clone()
     }
 
     /// Every request answered so far.
@@ -209,11 +242,16 @@ fn read_head(stream: &mut TcpStream, pending: &mut Vec<u8>) -> std::io::Result<O
     }
 }
 
-/// A request's method, path and whether the client keeps the connection.
+/// A request's method, path, query and host, and whether the client keeps
+/// the connection.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Head {
     pub(super) method: String,
     pub(super) path: String,
+    /// What followed the `?`, or nothing.
+    pub(super) query: String,
+    /// The `Host` header's value, or nothing.
+    pub(super) host: String,
     pub(super) keep: bool,
 }
 
@@ -226,16 +264,25 @@ pub(super) fn parse(head: &[u8]) -> Head {
     let method = first.next().unwrap_or_default().to_owned();
     let target = first.next().unwrap_or_default();
     let version = first.next().unwrap_or_default();
-    let path = target.split('?').next().unwrap_or_default().to_owned();
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let mut keep = version == "HTTP/1.1";
+    let mut host = String::new();
     for line in lines {
-        if let Some((name, value)) = line.split_once(':')
-            && name.trim().eq_ignore_ascii_case("connection")
-        {
-            keep = !value.trim().eq_ignore_ascii_case("close");
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("connection") {
+                keep = !value.trim().eq_ignore_ascii_case("close");
+            } else if name.trim().eq_ignore_ascii_case("host") {
+                value.trim().clone_into(&mut host);
+            }
         }
     }
-    Head { method, path, keep }
+    Head {
+        method,
+        path: path.to_owned(),
+        query: query.to_owned(),
+        host,
+        keep,
+    }
 }
 
 /// Answer one request and log it. Says whether to keep the connection.
@@ -252,15 +299,15 @@ fn answer(
         .clone();
     let name = request.path.strip_prefix(prefix.as_str());
     let report = name.and_then(|name| name.strip_prefix(REPORT));
-    let (status, body): (u16, &[u8]) = match (request.method.as_str(), name, report) {
-        ("GET" | "HEAD", _, Some(_)) => (200, REPORT_BODY),
+    let (status, body): (u16, Cow<'_, [u8]>) = match (request.method.as_str(), name, report) {
+        ("GET" | "HEAD", _, Some(report)) => take_report(state, &prefix, request, report),
         ("GET" | "HEAD", Some(name), None) => match state.files.get(name) {
-            Some(file) => (200, file.as_slice()),
-            None => (404, b"not found\n"),
+            Some(file) => (200, Cow::Borrowed(file.as_slice())),
+            None => (404, Cow::Borrowed(b"not found\n")),
         },
-        ("GET" | "HEAD", None, None) => (404, b"not found\n"),
-        ("", _, _) => (400, b"bad request\n"),
-        _ => (405, b"only GET and HEAD\n"),
+        ("GET" | "HEAD", None, None) => (404, Cow::Borrowed(b"not found\n")),
+        ("", _, _) => (400, Cow::Borrowed(b"bad request\n")),
+        _ => (405, Cow::Borrowed(b"only GET and HEAD\n")),
     };
     let reason = match status {
         200 => "OK",
@@ -283,7 +330,7 @@ fn answer(
     );
     stream.write_all(header.as_bytes())?;
     if request.method != "HEAD" {
-        stream.write_all(body)?;
+        stream.write_all(&body)?;
     }
     stream.flush()?;
     log(
@@ -304,6 +351,47 @@ fn answer(
             status,
         });
     Ok(keep)
+}
+
+/// Answer a request under `report/`: `hello/<mac>` with the URL the
+/// machine's loader sends its reports to, built from the `Host` it reached
+/// this server at; `box/...` by taking a part of a report (`report.rs`);
+/// anything else (`boot.ipxe`'s PCI report) with `ok`, logged.
+fn take_report<'a>(
+    state: &State,
+    prefix: &str,
+    request: &Head,
+    report: &str,
+) -> (u16, Cow<'a, [u8]>) {
+    let refused = |why: &str| (400, Cow::Owned(format!("refused: {why}\n").into_bytes()));
+    if let Some(machine) = report.strip_prefix("hello/") {
+        let host_fits = |byte: u8| byte.is_ascii_alphanumeric() || b".-:[]".contains(&byte);
+        let Some(machine) = report::machine(machine) else {
+            return refused("the machine is not a MAC address");
+        };
+        if request.host.is_empty() || !request.host.bytes().all(host_fits) {
+            return refused("no Host to build the URL from");
+        }
+        let url = format!("http://{}{prefix}{REPORT}box/{machine}/\n", request.host);
+        return (200, Cow::Owned(url.into_bytes()));
+    }
+    if let Some(rest) = report.strip_prefix("box/") {
+        if state.refuse_reports.load(Ordering::Relaxed) {
+            return (404, Cow::Borrowed(b"not found\n"));
+        }
+        let taken = report::part(rest, &request.query).and_then(|part| {
+            state
+                .reports
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(part)
+        });
+        return match taken {
+            Ok(_) => (200, Cow::Borrowed(REPORT_BODY)),
+            Err(why) => refused(why),
+        };
+    }
+    (200, Cow::Borrowed(REPORT_BODY))
 }
 
 /// One line for one request: when, who, what, the answer and its cost; a

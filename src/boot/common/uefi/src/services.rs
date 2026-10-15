@@ -13,8 +13,8 @@ use ferrix_bootinfo::PAGE_SIZE;
 
 use crate::uefi::protocols::{
     BLOCK_IO_GUID, BlockIo, DEVICE_PATH_GUID, FILE_MODE_READ, FILE_POSITION_END, FileProtocol,
-    GRAPHICS_OUTPUT_GUID, GraphicsOutput, LOADED_IMAGE_GUID, LoadedImage, RNG_GUID, Rng,
-    SIMPLE_FILE_SYSTEM_GUID, SimpleFileSystem,
+    GRAPHICS_OUTPUT_GUID, GraphicsOutput, IPXE_DOWNLOAD_GUID, IpxeDownload, LOADED_IMAGE_GUID,
+    LoadedImage, RNG_GUID, Rng, SIMPLE_FILE_SYSTEM_GUID, SimpleFileSystem,
 };
 use crate::uefi::tables::{
     AllocateType, BootServices, MemoryDescriptor, MemoryType, SystemTable, Time,
@@ -744,6 +744,26 @@ impl Services {
             }
         }
         None
+    }
+
+    // -- the network, when iPXE started the loader --------------------------
+
+    /// iPXE's download protocol, when iPXE started the loader: it is on the
+    /// device handle of every program iPXE starts, and on nothing else.
+    pub(crate) fn ipxe_download(&self) -> Option<*mut IpxeDownload> {
+        let image: *mut LoadedImage = self
+            .protocol(self.image, &LOADED_IMAGE_GUID, "loaded image")
+            .ok()?;
+        // SAFETY: firmware returned a live `LoadedImage` for our own handle.
+        let device = unsafe { &*image }.device_handle;
+        self.protocol(device, &IPXE_DOWNLOAD_GUID, "iPXE download protocol")
+            .ok()
+    }
+
+    /// Wait `microseconds`, with firmware's own timer.
+    pub(crate) fn stall(&self, microseconds: usize) {
+        // SAFETY: `stall` takes only a count; boot services are live.
+        let _ = unsafe { (self.boot().stall)(microseconds) };
     }
 
     // -- the last call -----------------------------------------------------

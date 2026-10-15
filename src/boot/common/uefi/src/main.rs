@@ -18,9 +18,12 @@
 #![no_main]
 
 mod arch;
+mod bootlog;
 mod console;
 mod kaslr;
 mod load;
+mod netreport;
+mod report_url;
 mod services;
 mod slots;
 mod uefi;
@@ -104,6 +107,17 @@ extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -> St
         Ok(never) => match never {},
         Err(error) => {
             println!("FERRIX-PANIC loader: {error}");
+            // Netbooted, the boot log says why on the server too -- unless
+            // the loader was already leaving firmware, when nothing of it
+            // may be called again.
+            if !netreport::has_left_firmware() {
+                // SAFETY: these are the arguments firmware passed, and boot
+                // services have not been exited: the flag is set before the
+                // loader starts to leave them.
+                if let Ok(services) = unsafe { Services::new(image, system_table) } {
+                    netreport::send_boot_log(&services);
+                }
+            }
             Status::LOAD_ERROR
         }
     }
@@ -240,7 +254,14 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
         },
     );
 
+    // The last line the boot log holds; a netbooted loader sends it now,
+    // while firmware (and iPXE) can still be called. What iPXE allocates for
+    // that is in the final map, which is fetched below.
+    println!("  handing over to the kernel");
+    netreport::send_boot_log(&services);
+
     // Past this line firmware is gone: no allocation, no console, no protocols.
+    netreport::firmware_left();
     console::shutdown();
     let map = leave_firmware(&services, map_buffer)?;
     let regions = record_memory_map(&map, info_area);

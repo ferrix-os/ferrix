@@ -173,4 +173,11 @@ bound keep garbage out.
   `handing over to the kernel` then `bootlog::save` before
   `console::shutdown()`, `save` on `efi_main`'s error path (a fresh
   `Services`), build, test-ab-boot with BOOTLOG checks, P1's doc edits.
-* **PM3 not started.**
+* **2026-10-15, branch `netboot-pm`:** the console tee landed there, as
+  `bootlog.rs` (the 32 KiB buffer, the `handing over to the kernel` line),
+  for a netbooted loader to send its log to `cargo xtask netboot`
+  (`docs/NETBOOT.md` §6; consultant ledger 2026-10-15, netboot-pm). The ESP
+  write (`save`, `replace_file`, the FileProtocol write bindings) is still
+  PM2's, on branch `postmortem`, and still owes P1's doc restatements.
+* **PM3 not started.** When it is, `LASTKERNEL.TXT` goes to the netboot
+  server through the same sender (`netreport.rs`), under PM3's own review.

@@ -21,7 +21,7 @@
 //!   boot marker. Then the negative control: the same stick against the
 //!   server serving under another path must fail with iPXE's own error.
 //!
-//! # Why the loader needs nothing new
+//! # How the loader reads its files
 //!
 //! The loader reads `\FERRIX\KERNEL.ELF`, `INITRD.IMG` and `CMDLINE.TXT`
 //! through the `SimpleFileSystem` of the device it was loaded from. When
@@ -29,11 +29,21 @@
 //! listing every image it has fetched by its name, and a name may hold a
 //! backslash (`efi_file.c` compares the whole of what follows the leading
 //! one). So `boot.ipxe` fetches each file under the name of its path on the
-//! image's volume, and the loader finds them where it always looks. Writing
-//! there fails, which the loader's boot log already treats as a volume it
-//! cannot write (`docs/POSTMORTEM.md` §2).
+//! image's volume, and the loader finds them where it always looks.
+//!
+//! # The boot log comes back
+//!
+//! Nothing can be written there, nor to the machine's disk, so the loader
+//! sends its boot log to this server instead (`docs/NETBOOT.md` §5):
+//! `boot.ipxe` fetches `FERRIX\REPORT.TXT`, the URL to send to, from
+//! `report/hello/<MAC>`, and the loader sends the log through iPXE as GETs
+//! to `report/box/<MAC>/BOOTLOG.TXT`, which `report.rs` checks, puts
+//! together, keeps in a directory per machine and prints. `test-netboot`
+//! checks that it arrives and matches the guest's console, and that a
+//! server refusing it does not stop the boot.
 
 mod http;
+mod report;
 mod volume;
 
 #[cfg(test)]
@@ -75,6 +85,14 @@ const FAILED: &str = "FERRIX-NETBOOT-FAILED";
 /// What the stick prints before `ifstat`'s list of the cards it drives:
 /// an empty list is a firmware whose network stack is off (`docs/NETBOOT.md`).
 const NO_CARD: &str = "Network cards iPXE drives (none: the firmware's UEFI network stack is off):";
+/// Where `boot.ipxe` fetches the URL the loader sends its boot log to, on
+/// iPXE's file system (`netreport.rs` in the loader reads it there).
+const REPORT_FILE: &str = "FERRIX\\REPORT.TXT";
+/// What the loader prints once its boot log reached the server.
+const REPORT_SENT: &str = "report   boot log sent to the netboot server";
+/// What the loader prints when it did not.
+const REPORT_NOT_SENT: &str = "report   boot log not sent";
+
 /// What `boot.ipxe` prints first, so a log says the served script ran.
 const SERVED: &str = "Ferrix netboot: commit";
 
@@ -158,7 +176,8 @@ fn build_served(args: &Args) -> Result<Served> {
 }
 
 /// `boot.ipxe`: report the PCI bus, fetch every file of the image under the
-/// name of its path, the loader last, and start the loader.
+/// name of its path, then the URL the loader sends its boot log to as
+/// `FERRIX\REPORT.TXT` (`docs/NETBOOT.md` §5), and start the loader.
 ///
 /// Relative URLs, which iPXE resolves against the script's own: the server
 /// need not know the address it is reached at.
@@ -174,6 +193,11 @@ fn boot_script(files: &BTreeMap<String, Vec<u8>>, commit: &str) -> Result<String
             path.replace('/', "\\")
         ));
     }
+    // Not fatal: without it the loader boots and keeps its log to itself.
+    script.push_str(&format!(
+        "imgfetch --name {REPORT_FILE} {REPORT}hello/${{netX/mac:hexhyp}} || \
+         echo Ferrix netboot: no report URL, the boot log stays on the screen\n"
+    ));
     script.push_str(&format!(
         "chain --name {} {loader} || goto failed\n\
          :failed\n\
@@ -305,6 +329,8 @@ fn serve(args: &Args) -> Result<()> {
     let served = build_served(args)?;
     let total: usize = served.files.values().map(Vec::len).sum();
     let server = http::Server::start(listen, PREFIX, served.files)?;
+    let reports = paths::volume_directory("netboot")?.join("reports");
+    server.keep_reports_in(reports.clone());
     let address = server.address();
     println!(
         "netboot: serving commit {} ({} KiB)",
@@ -316,6 +342,10 @@ fn serve(args: &Args) -> Result<()> {
         "  a stick for it: cargo xtask netboot-stick --server {address} (docs/NETBOOT.md); \
          the kernel's symbols are in {}",
         served.kernel.display()
+    );
+    println!(
+        "  each machine's loader sends its boot log here; kept in {}/<MAC>/",
+        reports.display()
     );
     server.wait();
     Ok(())
@@ -502,6 +532,9 @@ fn test(args: &Args) -> Result<()> {
         served.commit,
         server.address()
     );
+    let reports = paths::target_dir().join("netboot").join("test-reports");
+    let _ = std::fs::remove_dir_all(&reports);
+    server.keep_reports_in(reports);
     let lines = qemu::test_boot_lines(arch, &stick, &served.kernel, &booted)?;
     let requests = server.requests();
     check_booted(&lines, &requests, &names)?;
@@ -510,6 +543,15 @@ fn test(args: &Args) -> Result<()> {
          ran boot.ipxe and fetched all {} files of the image",
         names.len()
     );
+    let report = check_reported(&lines, &server.reports())?;
+    println!("  {arch}: {report}");
+
+    // A server that takes no report: the boot goes on, and says why.
+    server.refuse_reports(true);
+    let lines = qemu::test_boot_lines(arch, &stick, &served.kernel, &booted)?;
+    let refused = check_report_refused(&lines, &server.reports())?;
+    println!("  {arch}: reports answered 404: the kernel booted, and the loader said: {refused}");
+    server.refuse_reports(false);
 
     // The negative control: the same stick, the same server, every file
     // now under another path.
@@ -555,6 +597,100 @@ fn check_booted(lines: &[String], requests: &[http::Request], names: &[String]) 
     }
     println!("  x86_64: boot.ipxe reported {reported} PCI functions to the server");
     Ok(())
+}
+
+/// What the first boot's report must be: one boot log, kept on the host,
+/// that starts with the loader's first line and whose every line the guest
+/// printed on its console, in the same order. Answers what was found.
+fn check_reported(lines: &[String], reports: &[report::Report]) -> Result<String> {
+    let [report] = reports else {
+        return Err(Error::new(format!(
+            "the loader's boot log never reached the server: {} reports arrived whole, \
+             wanted 1; the loader said: {}",
+            reports.len(),
+            said(lines, "report   ")
+        )));
+    };
+    let text = String::from_utf8_lossy(&report.bytes);
+    let sent: Vec<&str> = text
+        .split("\r\n")
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if !sent
+        .first()
+        .is_some_and(|line| line.starts_with("Ferrix loader"))
+    {
+        return Err(Error::new(format!(
+            "the boot log that reached the server does not start with `Ferrix loader`: {:?}",
+            sent.first()
+        )));
+    }
+    let mut console = lines.iter();
+    for line in &sent {
+        if !console.any(|printed| printed.contains(line)) {
+            return Err(Error::new(format!(
+                "the boot log that reached the server does not match the guest's console: \
+                 `{line}` was not printed there, or not in this order"
+            )));
+        }
+    }
+    let kept = report
+        .path
+        .as_ref()
+        .ok_or_else(|| Error::new("the boot log arrived but was not kept on the host"))?;
+    if std::fs::read(kept)? != report.bytes {
+        return Err(Error::new(format!(
+            "{} is not the boot log that arrived",
+            kept.display()
+        )));
+    }
+    if !lines.iter().any(|line| line.contains(REPORT_SENT)) {
+        return Err(Error::new(format!("the loader never said `{REPORT_SENT}`")));
+    }
+    Ok(format!(
+        "the loader's boot log reached the server from {}: {} bytes, {} lines, each printed \
+         on the guest's console in order; kept in {}",
+        report.machine,
+        report.bytes.len(),
+        sent.len(),
+        kept.display()
+    ))
+}
+
+/// What a boot against a server that refuses reports must show: the
+/// kernel booted (the caller waited for it), no report arrived, and the
+/// loader said it could not send. Answers the loader's line.
+fn check_report_refused(lines: &[String], reports: &[report::Report]) -> Result<String> {
+    if reports.len() != 1 {
+        return Err(Error::new(format!(
+            "a report arrived from a boot whose server refused reports ({} in all)",
+            reports.len()
+        )));
+    }
+    lines
+        .iter()
+        .find(|line| line.contains(REPORT_NOT_SENT))
+        .map(|line| line.trim().to_owned())
+        .ok_or_else(|| {
+            Error::new(format!(
+                "the server refused the report, but the loader never said `{REPORT_NOT_SENT}`"
+            ))
+        })
+}
+
+/// The guest's lines holding `what`, joined, or `nothing`.
+fn said(lines: &[String], what: &str) -> String {
+    let found: Vec<&str> = lines
+        .iter()
+        .filter(|line| line.contains(what))
+        .map(|line| line.trim())
+        .collect();
+    if found.is_empty() {
+        "nothing".to_owned()
+    } else {
+        found.join(" / ")
+    }
 }
 
 /// What the negative control must show: iPXE's own error for the script it

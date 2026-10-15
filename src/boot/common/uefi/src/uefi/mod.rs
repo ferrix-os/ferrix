@@ -42,6 +42,8 @@ impl Status {
     /// Expected, not exceptional: how opening a file that is not on the volume
     /// fails, which is how an image with no initramfs says so.
     pub(crate) const NOT_FOUND: Status = Status(Status::ERROR_BIT | 14);
+    /// What a download the loader gave up waiting for is aborted with.
+    pub(crate) const TIMEOUT: Status = Status(Status::ERROR_BIT | 18);
 
     /// True if the call succeeded.
     pub(crate) const fn is_success(self) -> bool {

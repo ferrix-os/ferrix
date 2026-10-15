@@ -62,6 +62,10 @@ fn boot_script_fetches_each_file_by_its_volume_path_and_starts_the_loader_last()
         !script.contains("imgfetch --name EFI"),
         "the loader is chained, not fetched"
     );
+    let report = script
+        .find("imgfetch --name FERRIX\\REPORT.TXT report/hello/${netX/mac:hexhyp} || echo ")
+        .expect("the report URL is fetched, and its failure is not fatal");
+    assert!(report < chain, "the report URL before the loader");
 }
 
 #[test]
@@ -129,6 +133,8 @@ fn a_request_head_is_read_for_method_path_and_keep_alive() {
         http::Head {
             method: "GET".to_owned(),
             path: "/ferrix/boot.ipxe".to_owned(),
+            query: "x=1".to_owned(),
+            host: "h".to_owned(),
             keep: true
         }
     );
@@ -218,4 +224,203 @@ fn the_negative_control_wants_an_ipxe_error_code() {
         "http://10.0.2.2:8086/ferrix/boot.ipxe... Not found (https://ipxe.org/2d0c618e)"
     );
     assert!(check_refused(&error, &[]).is_err(), "no 404, no control");
+}
+
+/// The loader's own check of `REPORT.TXT`, compiled here from its source.
+#[path = "../../../../../src/boot/common/uefi/src/report_url.rs"]
+mod loader_report_url;
+
+#[test]
+fn the_loader_takes_only_a_short_printable_http_url() {
+    use loader_report_url::report_url;
+    let good = b"http://10.0.2.2:8086/ferrix/report/box/52-54-00-12-34-56/";
+    assert_eq!(report_url(good), Ok(&good[..]));
+    let mut ended = good.to_vec();
+    ended.extend_from_slice(b"\r\n");
+    assert_eq!(report_url(&ended), Ok(&good[..]), "one CRLF ending");
+    ended.truncate(good.len());
+    ended.push(b'\n');
+    assert_eq!(report_url(&ended), Ok(&good[..]), "one LF ending");
+    for (bad, why) in [
+        (b"https://10.0.2.2/x/".to_vec(), "https"),
+        (b"http://10.0.2.2/a b/".to_vec(), "a space"),
+        (b"http://10.0.2.2/a\x01b/".to_vec(), "a control byte"),
+        (b"http://10.0.2.2/\xc3\xa4/".to_vec(), "non-ASCII"),
+        (Vec::new(), "empty"),
+        (b"\n".to_vec(), "only an ending"),
+        (b"http://x/\n\n".to_vec(), "two endings"),
+        ([b"http://".as_slice(), &[b'a'; 250]].concat(), "257 bytes"),
+    ] {
+        assert!(report_url(&bad).is_err(), "{why} is refused");
+    }
+    let longest = [b"http://".as_slice(), &[b'a'; 249]].concat();
+    assert!(report_url(&longest).is_ok(), "256 bytes is taken");
+}
+
+#[test]
+fn a_report_part_is_checked_before_anything_is_kept() {
+    let ok = report::part("52-54-00-AB-cd-56/BOOTLOG.TXT", "part=0&of=2&data=4869").unwrap();
+    assert_eq!(ok.machine, "52-54-00-ab-cd-56");
+    assert_eq!((ok.file, ok.index, ok.of), ("BOOTLOG.TXT", 0, 2));
+    assert_eq!(ok.data, b"Hi");
+    for (rest, query, why) in [
+        ("../etc/BOOTLOG.TXT", "part=0&of=1&data=", "a ../ machine"),
+        (
+            "52-54-00-12-34/BOOTLOG.TXT",
+            "part=0&of=1&data=",
+            "five pairs",
+        ),
+        (
+            "52-54-00-12-34-5g/BOOTLOG.TXT",
+            "part=0&of=1&data=",
+            "not hex",
+        ),
+        ("52-54-00-12-34-56/../x", "part=0&of=1&data=", "a ../ file"),
+        (
+            "52-54-00-12-34-56/OTHER.TXT",
+            "part=0&of=1&data=",
+            "a file not allowed",
+        ),
+        ("52-54-00-12-34-56", "part=0&of=1&data=", "no file"),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=1&of=1&data=",
+            "part past of",
+        ),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=0&of=0&data=",
+            "of zero",
+        ),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=0&of=65&data=",
+            "of over 64",
+        ),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=-1&of=2&data=",
+            "a sign",
+        ),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=0&of=1&data=486",
+            "odd hex",
+        ),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=0&of=1&data=zz",
+            "bad hex",
+        ),
+        ("52-54-00-12-34-56/BOOTLOG.TXT", "part=0&of=1", "no data"),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=0&of=1&data=&data=",
+            "data twice",
+        ),
+        (
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            "part=0&of=1&data=&x=1",
+            "an unknown word",
+        ),
+    ] {
+        assert!(report::part(rest, query).is_err(), "{why} is refused");
+    }
+    let huge = "41".repeat(64 * 1024 + 1);
+    assert!(
+        report::part(
+            "52-54-00-12-34-56/BOOTLOG.TXT",
+            &format!("part=0&of=1&data={huge}")
+        )
+        .is_err(),
+        "over 64 KiB in one part"
+    );
+}
+
+/// One report request on a fresh connection, with a `Host`.
+fn get_from(server: &http::Server, path: &str, host: &str) -> (u16, Vec<u8>) {
+    let mut stream = TcpStream::connect(server.address()).unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut answer = Vec::new();
+    let _ = stream.read_to_end(&mut answer).unwrap();
+    let end = answer.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&answer[..end]).into_owned();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, answer[end + 4..].to_vec())
+}
+
+#[test]
+fn the_server_names_the_report_url_and_keeps_a_whole_report() {
+    let server = http::Server::start("127.0.0.1:0".parse().unwrap(), PREFIX, files()).unwrap();
+    let directory = std::env::temp_dir().join(format!("nb-reports-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    server.keep_reports_in(directory.clone());
+    let host = "10.0.2.2:8086";
+    assert_eq!(
+        get_from(&server, "/ferrix/report/hello/52-54-00-12-34-56", host),
+        (
+            200,
+            b"http://10.0.2.2:8086/ferrix/report/box/52-54-00-12-34-56/\n".to_vec()
+        )
+    );
+    assert_eq!(get_from(&server, "/ferrix/report/hello/..", host).0, 400);
+    assert_eq!(
+        get_from(&server, "/ferrix/report/hello/52-54-00-12-34-56", "a/b").0,
+        400,
+        "a Host that is no host"
+    );
+    let base = "/ferrix/report/box/52-54-00-12-34-56/BOOTLOG.TXT";
+    assert_eq!(
+        get_from(&server, &format!("{base}?part=1&of=2&data=21"), host).0,
+        400,
+        "no part 0"
+    );
+    assert_eq!(
+        get_from(&server, &format!("{base}?part=0&of=2&data=4869"), host).0,
+        200
+    );
+    assert!(server.reports().is_empty(), "half a report is not a report");
+    assert_eq!(
+        get_from(&server, &format!("{base}?part=1&of=2&data=21"), host).0,
+        200
+    );
+    let reports = server.reports();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0].bytes, b"Hi!");
+    let kept = reports[0].path.clone().unwrap();
+    assert!(
+        kept.starts_with(directory.join("52-54-00-12-34-56")),
+        "{}",
+        kept.display()
+    );
+    assert_eq!(std::fs::read(&kept).unwrap(), b"Hi!");
+    assert_eq!(
+        std::fs::read(directory.join("52-54-00-12-34-56/BOOTLOG.TXT")).unwrap(),
+        b"Hi!"
+    );
+    // Out of order: the report is dropped, nothing more kept.
+    assert_eq!(
+        get_from(&server, &format!("{base}?part=0&of=3&data=41"), host).0,
+        200
+    );
+    assert_eq!(
+        get_from(&server, &format!("{base}?part=2&of=3&data=41"), host).0,
+        400
+    );
+    assert_eq!(
+        get_from(&server, &format!("{base}?part=1&of=3&data=41"), host).0,
+        400
+    );
+    server.refuse_reports(true);
+    assert_eq!(
+        get_from(&server, &format!("{base}?part=0&of=1&data=41"), host).0,
+        404
+    );
+    assert_eq!(server.reports().len(), 1);
+    drop(server);
+    std::fs::remove_dir_all(&directory).unwrap();
 }

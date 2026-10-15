@@ -1,6 +1,7 @@
 # Network boot for a bare-metal test machine
 
-Version 1, written 2026-10-15. The ask: boot the latest build on a small
+Version 2, 2026-10-15 (version 1 the same day; version 2 adds the boot
+log sent back, §5 and §6). The ask: boot the latest build on a small
 PC (the first is a SOYO M4 Pro with an Intel N150) without reflashing its
 disk or carrying a stick back and forth after every change. The machine
 has no serial port, so it also has to say on its screen, and to the host,
@@ -80,7 +81,16 @@ location, vendor:device and class goes on the screen and, as a request
 for `report/pci/...`, into the server's log, marked `<- network`,
 `<- storage` or `<- display` for those classes. That is how a machine with
 no serial port says which chips it has before Ferrix has a driver for
-them. Then it fetches the image's files and starts the loader.
+them. Then it fetches the image's files, and the URL the loader sends its
+boot log to (§5), and starts the loader.
+
+The loader sends its boot log -- every line it printed, up to `handing
+over to the kernel` or the error it stopped at -- back to the server, which
+prints it and keeps it as
+`~/.local/share/ferrix/netboot/reports/<MAC>/<seconds>-BOOTLOG.TXT`, the
+latest also as `BOOTLOG.TXT` beside it, a directory per machine by its
+network card's MAC address. So a loader that stops before the kernel says
+why on the host as well as on the screen.
 
 The kernel is served stripped, as `flash` strips it: every byte comes
 through the network at every boot. `netboot` prints where the kernel with
@@ -101,6 +111,14 @@ the guest the host's loopback), and boots it under OVMF with `--net`:
   `1af4:1041` class 02, must be among the functions reported), and fetch
   every file of the image; and the kernel must reach `FERRIX-BOOT-OK`.
   The stick holds no kernel, so a kernel that boots read it through iPXE.
+* The loader's boot log must reach the server: one whole `BOOTLOG.TXT`
+  from the machine, beginning with `Ferrix loader`, every line of it
+  printed on the guest's console in the same order, kept on the host as it
+  arrived; and the loader must say it sent it. The log of some 500 bytes
+  goes in two parts, so the reassembly is part of what passes.
+* A second boot against the same server answering every report `404`:
+  the kernel must still reach `FERRIX-BOOT-OK`, and the loader must say
+  `report   boot log not sent` -- sending never stops a boot.
 * The negative control: the same stick, the same server, every file now
   under `/wrong/`. It must fail with iPXE's own error for
   `/ferrix/boot.ipxe` (a `... (https://ipxe.org/<code>)` line naming it),
@@ -112,7 +130,7 @@ the address different.
 
 ## 5. How it works
 
-### The loader needs nothing new
+### The loader reads its files as it does from a disk
 
 The loader reads `\FERRIX\KERNEL.ELF`, `INITRD.IMG` (and `CMDLINE.TXT`
 when the image has one) through the `SimpleFileSystem` of the device it was loaded from. When iPXE
@@ -125,6 +143,53 @@ loader with `chain`; the loader finds them where it always looks. Proven by
 `test-netboot` 2026-10-15: the loader says `boot esp` and the kernel
 reaches its boot marker. No `sanboot` of the whole image is needed, so the
 server needs no HTTP range requests.
+
+### The boot log comes back
+
+The loader keeps every line it prints in a 32 KiB buffer (`bootlog.rs`,
+`docs/POSTMORTEM.md` PM2's console tee). It sends it to the server
+(`netreport.rs`) only when both hold:
+
+* its volume has `FERRIX/REPORT.TXT`. `boot.ipxe` fetches it as
+  `report/hello/${netX/mac:hexhyp}`, and the server answers with
+  `http://<the Host the request named>/ferrix/report/box/<MAC>/`; no disk
+  image carries the file. The loader takes it only as one line of at most
+  256 bytes, `http://` and printable ASCII without a space, and otherwise
+  says it ignored it;
+* its device handle carries iPXE's download protocol
+  (`3eaeaebd-decf-493b-9bd1-cdb2decae719`), which iPXE installs on every
+  program it starts.
+
+A loader started from a disk finds neither and sends nothing; its console
+differs only by the `handing over to the kernel` line.
+
+It sends just before it leaves firmware -- or, when it stops with an error,
+from the error path, unless it had already begun to leave firmware. What
+iPXE allocates for the requests is in the final memory map, which is taken
+after.
+
+**GETs, not a POST.** `snp.efi` opens the card's Simple Network Protocol
+exclusively, which disconnects firmware's own IP, TCP and HTTP drivers from
+it, so a program iPXE starts has no network but iPXE's; and iPXE's download
+protocol only fetches a URL (a POST needs iPXE `params`, which a program it
+started cannot make). So the log goes as the query of GETs, 512 bytes a
+part, in hex:
+
+```
+GET /ferrix/report/box/<MAC>/BOOTLOG.TXT?part=<i>&of=<n>&data=<hex>
+```
+
+parts in order from 0, each answered `ok`; the last completes the file. The
+server checks everything before it keeps anything: the MAC is six hex pairs,
+the file one it allows (`BOOTLOG.TXT`), `part` below `of`, `of` at most 64,
+the hex whole bytes, the report at most 64 KiB, and parts in order; anything
+else is answered `400` and the report under way is dropped. A path on the
+host is built only from the checked MAC and the allowed name.
+
+**Bounded.** Each request is aborted after 5 s and the whole send after
+30 s, and the first request that fails ends it: the boot goes on with one
+line saying which part failed and why. A server that is gone costs 5 s; one
+that refuses (`404`) costs nothing to speak of.
 
 ### Why the test's network card is in the boot order
 
@@ -148,16 +213,23 @@ real machine fails. Keeping `snp.efi` keeps the test about the stick.
 
 ## 6. Limitations
 
-* **No post-mortem from a netbooted run.** iPXE's file system is
-  read-only, so the loader's boot log (`docs/POSTMORTEM.md` PM2,
-  `BOOTLOG.TXT`) and its copy of the previous kernel's log (PM3,
-  `LASTKERNEL.TXT`) cannot be written to the device the loader came from,
-  and `ferrix-postmortem.sh` (PM1) has no disk to read: the machine's own
-  disk is never written. A logging failure never stops a boot (PM2's
-  rule), so the boot goes on; what is lost is the record. Until the loader
-  can send it to the server (an HTTP `POST` of `LASTKERNEL` to `netboot`,
-  or printing it on the screen at the next boot), the screen and the
-  server's log are all a netbooted run leaves.
+* **The post-mortem of a netbooted run is the loader's boot log, sent to
+  the server** (§5). iPXE's file system is read-only and the machine's own
+  disk is never written, so nothing is left on the machine, and
+  `ferrix-postmortem.sh` (PM1) has nothing to read. The kernel's own log
+  of the previous run (`docs/POSTMORTEM.md` PM3, `LASTKERNEL.TXT`) does not
+  exist yet; when it does, the loader sends it the same way. A kernel that
+  panics after the handover says so on the screen only.
+* **The report is plain HTTP, with no authentication, for a LAN.**
+  Anyone on the network path reads it, and it holds what the loader
+  prints: this boot's KASLR layout (the kernel's and the direct map's
+  addresses, the page-table roots), the firmware's clock and the
+  machine's MAC. KASLR gives a netbooted machine no protection against its
+  network -- but whoever can read the path can equally serve the machine a
+  kernel of their own (§3), so the report tells them nothing they could not
+  decide. Anyone who reaches the server can also send it reports for a MAC
+  of their choosing; it keeps at most 64 KiB a report and builds no path
+  from the request. A disk-booted machine sends nothing.
 * **No network once Ferrix runs on the N150.** Ferrix drives virtio-net
   only; the box's Motorcomm YT6801 and Realtek 8852BE have no driver yet.
   The image arrives through the firmware's driver, and nothing after
@@ -170,5 +242,7 @@ real machine fails. Keeping `snp.efi` keeps the test about the stick.
 ## 7. Where it stands
 
 2026-10-15: `netboot-stick`, `netboot` and `test-netboot` built;
-`test-netboot` passes under KVM with its negative control. The stick has
+`test-netboot` passes under KVM with its negative control. The same day
+(branch `netboot-pm`): the loader's boot log comes back to the server, and
+`test-netboot` checks it arrives and matches the guest's console. The stick has
 not yet booted the N150 (§2 is the customer's to do).

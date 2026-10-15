@@ -271,3 +271,55 @@ pub(crate) struct BlockIo {
     ) -> Status,
     pub(crate) flush_blocks: unsafe extern "efiapi" fn(this: *mut BlockIo) -> Status,
 }
+
+// ---------------------------------------------------------------------------
+// iPXE's download protocol -- the netbooted loader's way to the server
+// ---------------------------------------------------------------------------
+
+/// Identifies [`IpxeDownload`] (iPXE's `include/ipxe/efi/efi_download.h`).
+pub(crate) const IPXE_DOWNLOAD_GUID: Guid = Guid::new(
+    0x3eae_aebd,
+    0xdecf,
+    0x493b,
+    [0x9b, 0xd1, 0xcd, 0xb2, 0xde, 0xca, 0xe7, 0x19],
+);
+
+/// Called with each piece of a download's answer.
+pub(crate) type IpxeDataCallback = unsafe extern "efiapi" fn(
+    context: *mut c_void,
+    buffer: *mut c_void,
+    buffer_length: usize,
+    file_offset: usize,
+) -> Status;
+
+/// Called once when a download ends, with how.
+pub(crate) type IpxeFinishCallback =
+    unsafe extern "efiapi" fn(context: *mut c_void, status: Status);
+
+/// iPXE fetching a URL for a program it started, through its own network
+/// stack. iPXE installs it on the device handle of every EFI program it
+/// starts, beside its read-only file system of fetched images.
+///
+/// The callback contract (`efi_download.c`): `start` opens the URL and
+/// returns at once, calling neither callback; the data and finish callbacks
+/// are called only from inside `poll` (or, for finish, `abort`), on the
+/// caller's own stack, with the context given to `start`; finish is called
+/// exactly once, after which the file token is dead and `abort` must not be
+/// called with it.
+#[repr(C)]
+pub(crate) struct IpxeDownload {
+    pub(crate) start: unsafe extern "efiapi" fn(
+        this: *mut IpxeDownload,
+        url: *const u8,
+        data: IpxeDataCallback,
+        finish: IpxeFinishCallback,
+        context: *mut c_void,
+        file: *mut *mut c_void,
+    ) -> Status,
+    pub(crate) abort: unsafe extern "efiapi" fn(
+        this: *mut IpxeDownload,
+        file: *mut c_void,
+        status: Status,
+    ) -> Status,
+    pub(crate) poll: unsafe extern "efiapi" fn(this: *mut IpxeDownload) -> Status,
+}
