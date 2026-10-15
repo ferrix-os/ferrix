@@ -584,9 +584,11 @@ taken from either. It is three crates and a kernel change:
   consultant's OK IF of 2026-10-15). Stage 10 checks that path on QEMU's
   `e1000e`, so every x86-64 boot exercises it.
 
-**On the box (2026-10-15, `docs/N150.md` §13):** the link came up at 1 Gbit
-and the launcher reached the internet. The firmware had left the function's
-memory decoding off (enumeration now turns it on), and the MSI vector never
+**On the box (2026-10-15, built from branch `ahci` 4a0db8a97, `docs/N150.md`
+§13):** the link came up at 1 Gbit and the launcher reached the internet.
+The firmware had left the function's memory decoding off; enumeration
+turning it on is parked on `ahci-n150-kernel` (a013115f6), so from `main`
+the NIC does not come up on the box until that lands. The MSI vector never
 delivers, so the driver runs on its polling fallback; why MSI never arrives
 on the box is not known.
 
