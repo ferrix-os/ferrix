@@ -20,7 +20,11 @@ static PUT_IN_X2APIC: AtomicU64 = AtomicU64::new(0);
 /// to skip its checks or the processor offers no x2APIC: turn x2APIC mode
 /// on, as firmware might have left it, before `leave_x2apic` looks.
 pub(crate) fn put_first_in_x2apic() {
-    if !crate::boot_checks::run() || core::arch::x86_64::__cpuid(1).ecx & 1 << 21 == 0 {
+    // In x2APIC mode every processor is put there anyway (`enter_mode`).
+    if !crate::boot_checks::run()
+        || super::x2apic()
+        || core::arch::x86_64::__cpuid(1).ecx & 1 << 21 == 0
+    {
         return;
     }
     if TAKEN.swap(true, Ordering::AcqRel) {
@@ -59,6 +63,11 @@ pub(crate) fn require_every_processor(
     }
     if switched < put {
         return Err("a processor left in x2APIC mode was not switched to xAPIC");
+    }
+    if super::x2apic() {
+        return Ok(Some(alloc::format!(
+            "{checked} processors looked at their local APIC's mode before using it; all run in              x2APIC mode"
+        )));
     }
     Ok(Some(alloc::format!(
         "{checked} processors looked at their local APIC's mode before using its window; {put} \

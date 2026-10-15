@@ -923,8 +923,8 @@ pub(crate) static SECONDARY_START: Explanation = Explanation {
          device tree on ARMv7-A), the core is already on, or the entry address was \
          rejected; the message says which.",
         "On x86-64 there is no free frame below 1 MiB for the trampoline or its root table, \
-         or a processor's APIC ID is above 255, which needs x2APIC mode the kernel does not \
-         have.",
+         or a processor's APIC ID is above 255 while the boot runs in xAPIC mode \
+         (`ferrix.apic=x2apic` runs it in x2APIC mode).",
         "On x86-64 the local APIC never accepted the INIT or start-up IPI.",
         "On ARMv7-A the entry sequence, a stack, a per-CPU record or the start block lies \
          above 4 GiB and cannot be passed in a 32-bit register.",
@@ -2177,18 +2177,21 @@ pub(crate) static STAGE10_REMAP: Explanation = Explanation {
 pub(crate) static X2APIC_LOCKED: Explanation = Explanation {
     code: "FX-0408",
     title: "a processor's local APIC is locked in x2APIC mode",
-    meaning: "This kernel drives the local APIC through its MMIO window, which does not exist in \
-              x2APIC mode. Every processor looks at its own `IA32_APIC_BASE` before it uses the \
-              window, and one firmware left in x2APIC mode is switched back to xAPIC \
-              (`docs/NVIDIA.md` section 12.3, condition G6). A platform that has disabled legacy \
-              xAPIC (`IA32_XAPIC_DISABLE_STATUS`) cannot be switched, and the boot stops here by \
-              name rather than drive a window that is not there: the customer's decision.",
+    meaning: "The boot processor chooses the local APIC's mode once: x2APIC, through its MSRs, \
+              where firmware locked it (`IA32_XAPIC_DISABLE_STATUS`), left it on, or \
+              `ferrix.apic=x2apic` asked; xAPIC, through its MMIO window, otherwise. Every \
+              application processor follows it, and in xAPIC mode one firmware left in x2APIC \
+              mode is switched back (`docs/NVIDIA.md` section 12.3, condition G6). A processor \
+              locked in x2APIC mode while the boot processor runs in xAPIC mode cannot be \
+              switched, and the boot stops here by name rather than drive a window that is not \
+              there.",
     causes: &[
-        "The platform's firmware locks the local APIC in x2APIC mode, as some recent Intel \
-         platforms do. The kernel needs x2APIC support (and `IRTA.EIME` = 1 in interrupt \
-         remapping) to boot there.",
+        "The platform locks some processors' local APICs in x2APIC mode and not the boot \
+         processor's, or reports the lock only on some processors.",
+        "`ferrix.apic=xapic` on a platform whose application processors are locked in x2APIC \
+         mode.",
     ],
-    see: "src/kernel/src/arch/x86_64/apic.rs leave_x2apic; src/kernel/src/arch/x86_64/smp.rs \
+    see: "src/kernel/src/arch/x86_64/apic.rs enter_mode; src/kernel/src/arch/x86_64/smp.rs \
           secondary_start; docs/NVIDIA.md section 12.3",
 };
 
