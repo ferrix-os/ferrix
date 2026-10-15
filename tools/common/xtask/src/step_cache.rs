@@ -154,6 +154,20 @@ const ENVIRONMENT_IGNORED: &[&str] = &[
     // gate.sh's name for the run, which the record keeps as its origin: a
     // different tag every run, and nothing in the tree reads it.
     "FERRIX_GATE_TAG",
+    // gate.sh's own settings, which choose where and when a run goes and
+    // which nothing in the tree reads, each named: a new GATE_ variable is
+    // an input until it is added here (the consultant's lesser point,
+    // ledger 1564).
+    "GATE_LOCK_DIR",
+    "GATE_MAX_LOAD",
+    "GATE_MIN_FREE_GB",
+    "GATE_OPEN_GB",
+    "GATE_PRIORITY",
+    "GATE_SHED_GB",
+    "GATE_SLOT",
+    "GATE_SLOTS",
+    "GATE_STEP_CACHE",
+    "GATE_TEST_FREE_GB",
     "COLORTERM",
     "DBUS_SESSION_BUS_ADDRESS",
     "GPG_AGENT_INFO",
@@ -180,9 +194,6 @@ const ENVIRONMENT_IGNORED: &[&str] = &[
 /// Prefixes of environment variables left out, for the same reason.
 const ENVIRONMENT_IGNORED_PREFIXES: &[&str] = &[
     "ANTHROPIC_",
-    // gate.sh's own settings (GATE_SLOT, GATE_STEP_CACHE, GATE_PRIORITY),
-    // which choose where and when a run goes; nothing in the tree reads them.
-    "GATE_",
     "CLAUDE_",
     "OTEL_",
     "SSH_",

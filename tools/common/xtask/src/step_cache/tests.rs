@@ -597,6 +597,7 @@ fn gate_sh_s_settings_are_not_part_of_the_environment() {
         "XDG_RUNTIME_DIR",
         "FERRIX_INIT",
         "PATH",
+        "GATE_SOMETHING_NEW",
     ] {
         assert!(!environment_ignored(kept), "{kept}");
     }
