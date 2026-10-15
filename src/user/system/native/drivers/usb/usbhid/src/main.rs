@@ -793,6 +793,34 @@ fn ready(control: &Channel<Kernel>) -> Option<u32> {
     }
 }
 
+/// An xHCI PORTSC decoded: connect, enabled, reset, link state, power,
+/// speed, and the change bits.
+struct Portsc(u32);
+
+impl fmt::Display for Portsc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let v = self.0;
+        let bit = |n: u32| u8::from(v & (1 << n) != 0);
+        write!(
+            f,
+            "CCS {} PED {} PR {} PLS {} PP {} speed {} CSC {} PEC {} WRC {} OCC {} PRC {} PLC {} CEC {}",
+            bit(0),
+            bit(1),
+            bit(4),
+            (v >> 5) & 0xF,
+            bit(9),
+            (v >> 10) & 0xF,
+            bit(17),
+            bit(18),
+            bit(19),
+            bit(20),
+            bit(21),
+            bit(22),
+            bit(23),
+        )
+    }
+}
+
 /// Say a note on the console.
 fn tell(note: Note) {
     match note {
@@ -812,6 +840,23 @@ fn tell(note: Note) {
             )),
         },
         Note::Gone { address } => say(format_args!("usbhid: device {address} gone")),
+        Note::PortEvent { port, status } => say(format_args!(
+            "usbhid: port status change event, root port {port}: PORTSC {status:08x} {}",
+            Portsc(status)
+        )),
+        Note::RootGone {
+            port,
+            status,
+            changed,
+        } => say(format_args!(
+            "usbhid: root port {port}'s device let go ({}): PORTSC {status:08x} {}",
+            if changed {
+                "connect status change"
+            } else {
+                "nothing connected"
+            },
+            Portsc(status)
+        )),
         // A short packet is how most reports end: not worth a line.
         Note::Transfer(trouble) if trouble.code == 13 && trouble.known => {}
         Note::Transfer(trouble) => say(format_args!(

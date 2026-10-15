@@ -242,6 +242,18 @@ pub trait Host {
         None
     }
 
+    /// The oldest Port Status Change event not yet taken: the root port,
+    /// counting from zero, and its status register as the event found it.
+    fn take_port_event(&mut self) -> Option<(u32, u32)> {
+        None
+    }
+
+    /// A root port's raw status register, for the console; 0 where the
+    /// controller has none to give.
+    fn root_port_raw(&self, _port: u32) -> u32 {
+        0
+    }
+
     /// Make the device in the default state at `place` one that control
     /// transfers reach: its target, with the packet size every device of its
     /// speed takes.

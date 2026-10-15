@@ -148,6 +148,25 @@ pub enum Note {
     /// short packet, an error the pipe is recovered from, or an event for a
     /// request it did not queue.
     Transfer(host::Trouble),
+    /// A Port Status Change event: the root port, from zero, and its
+    /// status register as the event found it.
+    PortEvent {
+        /// The port.
+        port: u32,
+        /// `PORTSC`.
+        status: u32,
+    },
+    /// A root port's device is let go: its status register, and whether a
+    /// connect status change (rather than a port with nothing connected)
+    /// was the reason.
+    RootGone {
+        /// The port.
+        port: u32,
+        /// `PORTSC` when it was decided.
+        status: u32,
+        /// Whether the change bit was set.
+        changed: bool,
+    },
     /// A function's pipe halted too often in a row and was left stopped: its
     /// device sends nothing more until it is plugged in again.
     Stopped {
@@ -412,6 +431,9 @@ impl<H: Host> Bus<H> {
         while let Some(trouble) = self.hc.take_trouble() {
             self.notes.push_over(Note::Transfer(trouble));
         }
+        while let Some((port, status)) = self.hc.take_port_event() {
+            self.notes.push_over(Note::PortEvent { port, status });
+        }
         // A controller that says a port changed is polled at once.
         if self.hc.ports_changed() {
             self.next_poll = self.hc.clock().now_nanos();
@@ -602,8 +624,14 @@ impl<H: Host> Bus<H> {
         let bit = 1_u32 << port;
         let state = self.hc.root_port(port);
         if state.changed {
+            let status = self.hc.root_port_raw(port);
             self.hc.clear_root_changes(port);
             if let Some(child) = self.child(Parent::Root(port)) {
+                self.notes.push_over(Note::RootGone {
+                    port,
+                    status,
+                    changed: true,
+                });
                 self.detach(child);
             }
             self.root_failed &= !bit;
@@ -611,7 +639,14 @@ impl<H: Host> Bus<H> {
         let child = self.child(Parent::Root(port));
         match (state.connected, child) {
             (true, None) if self.root_failed & bit == 0 => self.attach_root(port),
-            (false, Some(child)) => self.detach(child),
+            (false, Some(child)) => {
+                self.notes.push_over(Note::RootGone {
+                    port,
+                    status: self.hc.root_port_raw(port),
+                    changed: false,
+                });
+                self.detach(child);
+            }
             _ => {}
         }
     }
