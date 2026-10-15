@@ -118,6 +118,12 @@ pub const TFD_BSY: u32 = 1 << 7;
 pub const SSTS_DET_MASK: u32 = 0xF;
 /// `PxSSTS.DET` = 1: a device is there but the link is not up yet.
 pub const SSTS_DET_PRESENT: u32 = 1;
+/// `PxSCTL.DET` = 1: perform interface initialisation (COMRESET).
+pub const SCTL_DET_INIT: u32 = 1;
+/// `PxSCTL.DET` and `PxSCTL.IPM`, bits 3:0 and 11:8.
+pub const SCTL_DET_IPM_MASK: u32 = 0xF0F;
+/// `PxSCTL.IPM` = 3: no transitions to Partial or Slumber.
+pub const SCTL_IPM_NONE: u32 = 0x300;
 /// `PxSSTS.DET` = 3: a device is there and the link is up.
 pub const SSTS_DET_ESTABLISHED: u32 = 3;
 

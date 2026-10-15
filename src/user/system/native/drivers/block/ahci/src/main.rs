@@ -191,6 +191,7 @@ impl Driver for Sata {
             registers.len(),
             if device.msix() { "MSI-X" } else { "MSI" },
         ));
+        said_registers(&info, &registers);
         let pinned = |pages: usize| {
             device.dma(pages).inspect_err(|_| {
                 say(format_args!(
@@ -410,6 +411,42 @@ impl block::Device for Sata {
         control.0.free(&stopped);
         data.free(&stopped);
         Ok(stopped)
+    }
+}
+
+/// What firmware left in the HBA, said before it is touched: its
+/// capabilities, the ports it implements, and each implemented port's link,
+/// task file, signature and command register -- what decides whether a drive
+/// is found, on a machine whose screen is its only output.
+fn said_registers(info: &DeviceInfo, registers: &mmio::Block) {
+    let read = |offset: u32| -> u32 {
+        if (offset as usize) + 4 <= registers.len() {
+            registers.read::<u32>(offset)
+        } else {
+            u32::MAX
+        }
+    };
+    let implemented = read(0x0C);
+    say(format_args!(
+        "ahci     {} CAP {:08x} GHC {:08x} PI {implemented:08x} VS {:08x} CAP2 {:08x} BOHC {:08x}",
+        Place(info.location),
+        read(0x00),
+        read(0x04),
+        read(0x10),
+        read(0x24),
+        read(0x28),
+    ));
+    for index in (0..32_u32).filter(|index| implemented & (1 << index) != 0) {
+        let at = 0x100 + 0x80 * index;
+        say(format_args!(
+            "ahci     port {index}: SSTS {:08x} SCTL {:08x} TFD {:08x} SIG {:08x} CMD {:08x} SERR {:08x}",
+            read(at + 0x28),
+            read(at + 0x2C),
+            read(at + 0x20),
+            read(at + 0x24),
+            read(at + 0x18),
+            read(at + 0x30),
+        ));
     }
 }
 

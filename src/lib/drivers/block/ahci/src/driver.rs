@@ -25,6 +25,10 @@ pub const BUSY_TIMEOUT: u64 = 1_000_000_000;
 pub const HANDOFF_TIMEOUT: u64 = 2_000_000_000;
 /// How long links get to come up after a spin-up.
 pub const LINK_TIMEOUT: u64 = 100_000_000;
+/// How long `PxSCTL.DET` is held at 1 for a COMRESET: AHCI asks for 1 ms.
+pub const COMRESET_HOLD: u64 = 2_000_000;
+/// How long a link is given to come up after a COMRESET.
+pub const COMRESET_LINK_TIMEOUT: u64 = 1_000_000_000;
 
 /// One piece of a transfer's buffer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -159,7 +163,12 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
                 continue;
             }
             let ssts = hba.regs.read(port(index, regs::PX_SSTS));
-            if ssts & regs::SSTS_DET_MASK != regs::SSTS_DET_ESTABLISHED {
+            let det = ssts & regs::SSTS_DET_MASK;
+            // A link firmware left down or offline (DET 1 or 4) is
+            // reset, as Linux does; an empty port (DET 0) is not waited for.
+            if det != regs::SSTS_DET_ESTABLISHED
+                && (det == 0 || hba.stop(index).is_err() || !hba.comreset(index))
+            {
                 continue;
             }
             match hba.try_port(index) {
@@ -309,9 +318,23 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         let cmd = self.regs.read(port(index, regs::PX_CMD));
         self.regs
             .write(port(index, regs::PX_CMD), cmd | regs::CMD_FRE);
-        let idle = self.wait(BUSY_TIMEOUT, "device busy", |hba| {
-            hba.regs.read(port(index, regs::PX_TFD)) & (regs::TFD_BSY | regs::TFD_DRQ) == 0
-        });
+        let idle = |hba: &mut Self| {
+            hba.wait(BUSY_TIMEOUT, "device busy", |hba| {
+                hba.regs.read(port(index, regs::PX_TFD)) & (regs::TFD_BSY | regs::TFD_DRQ) == 0
+            })
+        };
+        let mut idle = idle(self);
+        // A device firmware left busy, or that sent no signature since its
+        // last reset, gets a COMRESET and one more wait: what a BIOS leaves
+        // behind is not what QEMU starts with.
+        if idle.is_err() || self.regs.read(port(index, regs::PX_SIG)) == regs::GONE {
+            if self.comreset(index) {
+                idle = self.wait(BUSY_TIMEOUT, "device busy after COMRESET", |hba| {
+                    hba.regs.read(port(index, regs::PX_TFD)) & (regs::TFD_BSY | regs::TFD_DRQ)
+                        == 0
+                });
+            }
+        }
         if let Err(error) = idle {
             let _stopped = self.stop(index);
             return Err(PortError::Failed(error));
@@ -333,6 +356,30 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
             serial: parsed.serial,
             port: index,
         })
+    }
+
+    /// COMRESET port `index`, whose command list is stopped: `PxSCTL.DET`
+    /// to 1 for at least a millisecond, then back to 0, with Partial and
+    /// Slumber off, and wait for the link (AHCI 1.3.1 section 10.4.2).
+    /// Whether the link came up.
+    fn comreset(&mut self, index: u8) -> bool {
+        let at = port(index, regs::PX_SCTL);
+        let sctl = self.regs.read(at) & !regs::SCTL_DET_IPM_MASK;
+        self.regs
+            .write(at, sctl | regs::SCTL_IPM_NONE | regs::SCTL_DET_INIT);
+        let start = self.clock.now_nanos();
+        while self.clock.now_nanos().saturating_sub(start) < COMRESET_HOLD {
+            self.clock.pause(COMRESET_HOLD);
+        }
+        self.regs.write(at, sctl | regs::SCTL_IPM_NONE);
+        let up = self
+            .wait(COMRESET_LINK_TIMEOUT, "link after COMRESET", |hba| {
+                hba.regs.read(port(index, regs::PX_SSTS)) & regs::SSTS_DET_MASK
+                    == regs::SSTS_DET_ESTABLISHED
+            })
+            .is_ok();
+        self.regs.write(port(index, regs::PX_SERR), u32::MAX);
+        up
     }
 
     /// Stop port `index`'s command list and FIS receive engines.
