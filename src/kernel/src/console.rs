@@ -43,6 +43,7 @@ pub(crate) mod input;
 pub(crate) mod log;
 pub(crate) mod log_check;
 pub(crate) mod output;
+pub(crate) mod pstore;
 pub(crate) mod screen;
 
 use core::fmt::{self, Write};

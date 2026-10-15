@@ -418,6 +418,17 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.14";
             attribute :>> unit = "mm::reclaim_boot_memory";
         }
+        requirement <'L.mm.75'> thePstoreRegionIsNeverFree : ItemLowLevel {
+            attribute :>> statement = "No frame of a Pstore region shall be free at
+                boot, reclaimed, or on a free list.";
+            attribute :>> criterion = "After reclaim_boot_memory, every frame of the
+                attached region (257 for the 1 MiB ring and its header) reads
+                Reserved from the frame allocator, or lies outside its array: none
+                Free, FreeTail, Allocated or AllocatedTail, on every boot that
+                attached one.";
+            attribute :>> parent = "H.MEM.14";
+            attribute :>> unit = "mm::reclaim_boot_memory";
+        }
         requirement <'L.mm.71'> theWatermarkIsSizedOnce : ItemLowLevel {
             attribute :>> statement = "init shall set the watermark once, to the
                 frames the allocator manages divided by 128, and no fewer than 256

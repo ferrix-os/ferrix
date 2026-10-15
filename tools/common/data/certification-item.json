@@ -68,6 +68,20 @@
       "images that boot /sbin/init use it, and no claim is made of it",
       "(ITEM.md 5, SAFETY-MANUAL AoU-8 and AoU-13)."
     ],
+    "pstore": "on",
+    "pstore_settings": [
+      "on",
+      "off"
+    ],
+    "pstore_why": [
+      "A second boot option changes what the item does: `ferrix.pstore=on|off`",
+      "(docs/POSTMORTEM.md 3). `on`, the default and the reference, has the",
+      "loader give the kernel one region of RAM, which the kernel checks and",
+      "mirrors its log into, and writes back at the end of a panic report; the",
+      "next boot's loader reports what survived. `off`, or any other value, said,",
+      "takes no region. Claims: L.console.42-44 and L.mm.75; the record is a",
+      "diagnostic only (SAFETY-MANUAL AoU-30, VULNERABILITY-ANALYSIS V-14)."
+    ],
     "driver_updates": "absent",
     "driver_updates_settings": [
       "absent",

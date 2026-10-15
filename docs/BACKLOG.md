@@ -814,6 +814,20 @@ log path and commit; a new sighting is added to its row the day it is seen.
   volume on it. The certification consultant's C5 (ledger line 480) asks
   this row.
 
+* **PM3 on hardware: the kernel log across a warm reset (pm3, 2026-10-15;
+  `docs/POSTMORTEM.md` §3, the consultant's Q13 and P9).** The panic path's
+  write-back (`L.console.44`) is not observable under QEMU, whose caches are
+  the host's: on the WD SN720 PC, once it boots Ferrix at all and with the
+  customer's OK for the boot, a deliberate panic (`ferrix.onexit=panic`)
+  then a warm reset (the reset button or `0xCF9 = 0x06`) must show the
+  next loader's `pstore   at ...: boot N's kernel log` and its panic line;
+  and a full reset or power cycle what the firmware does to the region
+  (expected: `nothing there`). Then the same on the DK1 board, whose
+  U-Boot loads the loader into RAM the rule may choose. Also owed, each its
+  own review (P10, ledger line 1202 C3): the full text to the ESP as
+  `FERRIX/LASTKERNEL.TXT` once PM2 lands, and to the netboot server once
+  netboot-pm lands.
+
 * **NVMe, what the driver leaves (nvme-driver, 2026-10-10; `docs/NVME.md`).**
   (1) *The first run on a real drive*, by §9's checklist, on the WD PC
   SN720 once the PC boots Ferrix at all (H0): nothing in the driver has met

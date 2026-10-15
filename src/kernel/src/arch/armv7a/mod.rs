@@ -28,6 +28,10 @@ pub(crate) use cpu::clean_to_poc as clean_for_device;
 /// The same for an IOMMU's table walk that does not snoop the caches (see
 /// [`crate::arch::clean_for_walker`]): to the point of coherency, and waited for.
 pub(crate) use cpu::clean_to_poc as clean_for_walker;
+/// The same for the region the kernel log is kept in across a reset, before a
+/// reset may discard the caches (see [`crate::arch::write_back_for_reset`]):
+/// the region's lines only.
+pub(crate) use cpu::clean_to_poc as write_back_for_reset;
 pub(crate) use cpu::sync_instructions;
 mod trap;
 

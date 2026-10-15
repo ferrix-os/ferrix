@@ -270,7 +270,8 @@ Three slices, each reviewed before it lands:
    the audit id, which bring-up draws from the random generator and hands
    in, since the generator is the item's and the core may not name it --
    and bring-up's records: the start-up record and the boot's configuration
-   (`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR) right after
+   (`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, and whether the
+   log is kept across a reset, `ferrix.pstore`) right after
    the generator's check, and one when the boot is brought up. Its boot
    check, `audit::check`, is §6's first half on stores of its own and on a
    job tree of its own, and the kernel's store read back (FX-0309). The

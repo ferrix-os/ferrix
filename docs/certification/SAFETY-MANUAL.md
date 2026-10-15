@@ -568,6 +568,20 @@ options apply to a slot's command line as they do to the ESP's
 `CMDLINE.TXT` (§1, AoU-8), and a slot is only as authentic as whoever wrote
 it (AoU-15's argument: root, through the raw device).
 
+### AoU-30 — the previous boot's log is reported only when RAM survived
+With `ferrix.pstore=on`, the reference, the kernel mirrors its log into a
+region of RAM the loader gives and writes it back from the caches at the
+end of a panic report and before a reset `ferrix.onexit=reset` asks for;
+the next boot's loader, outside the element, reports what it finds
+(`docs/POSTMORTEM.md` §3). The claim is only **when the region survived the
+reset, its text is reported**: never that it survives. A cold boot, a power
+cycle, a full reset that drops refresh, memory training, or firmware that
+uses the region's RAM on its way up loses or damages it; the loader then
+says there was nothing, or quotes text it calls unchecked. A hang, or a
+watchdog's reset, writes nothing back, and loses what was still in a cache.
+The integrator shall not rely on the record for any safety function: it is
+a diagnostic, and the safe state (§3) does not depend on it.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

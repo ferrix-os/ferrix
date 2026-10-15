@@ -80,6 +80,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | gap-memfd-exec-seal, memfd_create's exec seal and vm.memfd_noexec (BACKLOG P1 row, done 2026-10-12; load ring) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | syscall/memfd.rs sanitize_flags, noexec_scope, set_noexec and the exec branches of sys_memfd_create; syscall/pidns.rs memfd_noexec, memfd_noexec_floor, set_memfd_noexec; fs/procfs/render.rs memfd_noexec and set_memfd_noexec; fs/memfd_check.rs check_the_exec_seal and its helpers: measure them on each architecture's coverage run (stage 8's memfd line reaches every one). ferrix-vfs's tmpfs add_seals and set_attributes exec-seal branches are outside the kernel's coverage files. |
 | endfield-wow64, Wine's 32-bit Windows programs in its 64-bit process (stage 23 E1.6; endfield-wow64's consultant, ledger line 762, W1-W7) | x86_64 | new and changed code; no coverage run has measured it yet. | arch/x86_64/signal.rs restored_code_selector and restore_signal_frame's 4 GiB refusal, setup_signal_frame's choice by the installer's ABI and its recorded cs; signal_frame.rs and syscall/signal.rs's Abi carried with a disposition; syscall.rs arch_prctl's null FS load; cpu.rs settle_kernel_ss and switch.rs restore_user_state's call of it; gdt.rs KERNEL_DATA_DESCRIPTOR; trap/check.rs check_wow64 and check_forged_64_bit_frames' new case; switch/check.rs run_sysret_ss and run_inherit: measure them on the x86-64 coverage run (stage 3's wow64 and signal lines and stage 9's sysret and inherit lines reach every one). settle_kernel_ss's load is reached only on AMD, where SYSRET leaves SS's attributes; on Intel its branch is argued, not measured. |
 | gap-kill-reaped, a reaped process found by no pid (BACKLOG P1 row, done 2026-10-12; L.object.181; consultant gkr-cert, ledger 2026-10-12 line 754) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | object/process.rs Entry::findable, unlist, listed and gather's listed branch, and find's unlisted answer: measure them on each architecture's coverage run (stage 7's pids line reaches every one through syscall/check.rs check_a_reaped_pid_finds_nothing, whose SIGCHLD-ignoring parent reaches unlist through disown). |
+| pm3, the kernel log kept across a reset (docs/POSTMORTEM.md section 3; L.console.42-44, L.mm.75; consultant pm3-cert, design ledger 2026-10-15 line 1238, Q15) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | console/pstore.rs record, write_back, attached, attach, check, placement and adopt; console/log.rs record_byte and slot (the shared ring code, moved out of Ring); panic.rs conclude's write-back branch; power.rs finish's write-back before a reset; arch x86_64 write_back_for_reset: measure them on each architecture's coverage run. Every boot through the UEFI loader attaches (attach, check, placement, adopt, record, and the placement and never-free checks in console/log_check.rs and mm/check.rs); the write-back runs only in a first panic report or ferrix.onexit=reset, which a coverage boot reaches only under test-postmortem or test-boot --reset; attach's refusal lines only with a loader that gives a bad region (argued: the placement check drives placement's refusals, not attach's line). |
 
 ---
 
@@ -113,7 +114,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 54-67, 70, 72, 77-81 |
 | `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 759, 762, 765, 772 |
 | `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 346, 908, 917 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1557-1558 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1561-1562 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 339 |
 
 ---
@@ -150,7 +151,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 324, 714, 1307 |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 327, 717, 1314 |
 
 ---
 
@@ -199,7 +200,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1389 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1393 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---

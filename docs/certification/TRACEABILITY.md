@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 131 | 80 | 51 |
-| Low (`L.*`) | 894 | 630 | 264 |
+| Low (`L.*`) | 898 | 634 | 264 |
 
-1884 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1894 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1886 |
-| Accessors, covered by the requirement they serve | 914 |
+| Named by a low-level requirement | 1896 |
+| Accessors, covered by the requirement they serve | 915 |
 | Check code in a product file | 81 |
-| Named by none | 897 |
+| Named by none | 896 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -782,6 +782,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.mm.32` | Once bring-up has dropped the loader's identity map, no leaf under the kernel's root, nor under the identity map's own root where the architecture has one, shall be both writable and executable. | The sweep of every leaf under those roots, after the identity map is dropped, counts N leaves, E > 0 of them executable, and 0 both writable and executable (the w^x line). | H.MEM.4 | `mm::map_kernel`, `mm::protect_kernel`, `mm::clear_root_slots`, `early::EarlyMemory::map_window` | `src/kernel/src/mm/check.rs::sweep_w_xor_x` | reached | reached | reached |
 | `L.mm.33` | No leaf under the kernel's root that maps a frame of the image's text or read-only data shall be writable, and the direct map shall alias every byte of them read-only. | The sweep of every leaf under the kernel's root finds the image's text and read-only data non-empty, 0 of the leaves mapping them writable, and the direct map's leaves over them covering every byte (the sealed line). | H.MEM.5 | `mm::direct_map`, `mm::overlaps_image`, `vmap::map_device`, `early::EarlyMemory::map_window` | `src/kernel/src/mm/check.rs::check_sealed_image` | reached | reached | reached |
 | `L.mm.34` | reclaim_boot_memory shall give the frame allocator the loader's and the ACPI-reclaimable frames the per-frame array covers, above frame 0, and none of the page tables, boot stack or boot information the kernel still uses. | The frames reclaimed equal the loader and ACPI-reclaim frames of the memory map inside the array, above frame 0, and greater than 0; afterwards no frame of a PageTables, BootStack or BootInfo region is free. | H.MEM.14 | `mm::reclaim_boot_memory` | *baselined* | — | — | — |
+| `L.mm.75` | No frame of a Pstore region shall be free at boot, reclaimed, or on a free list. | After reclaim_boot_memory, every frame of the attached region (257 for the 1 MiB ring and its header) reads Reserved from the frame allocator, or lies outside its array: none Free, FreeTail, Allocated or AllocatedTail, on every boot that attached one. | H.MEM.14 | `mm::reclaim_boot_memory` | `src/kernel/src/mm/check.rs::check_pstore_never_free` | not reached | not reached | not reached |
 | `L.mm.71` | init shall set the watermark once, to the frames the allocator manages divided by 128, and no fewer than 256 frames nor more than 8192. | The watermark equals watermark_for of the frames managed at init, and watermark_for gives 256 for 0 frames, 300 for 38400 and 8192 for the largest count (the `watermark` line). | H.QUOTA.13 | `mm::init`, `mm::watermark_for`, `mm::watermark` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
 | `L.mm.72` | allocate_user_frame and allocate_user_run shall refuse frames that would leave fewer than the watermark free, deciding in the same hold of the frame allocator's lock as the frames are taken, and a refusal shall take back any charge made for them. | At stage 2, with no job charged, single frames taken until refused leave exactly the watermark free; a run of two is given at two above it and refused at one above it while a block of two is free; a single frame is given at one above it. | H.QUOTA.13 | `mm::allocate_program_frames`, `mm::allocate_user_frame`, `mm::allocate_user_run` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
 | `L.mm.73` | A page table for a user mapping shall be taken as a program's frame, refused at the watermark whether or not its job has a quota slot, and zeroed before it is used. | At stage 2, with exactly the watermark free, a program's page table with no job to charge is refused; with one frame more it is given, and the free count is the watermark again. | H.QUOTA.13 | `mm::ChargedTables::allocate_table`, `mm::map_in` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
@@ -1501,6 +1502,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.console.38` | Board::put shall ignore a CR, start a new row at a newline, advance a tab to the next stop of eight, draw a printable byte and draw anything else as the replacement character, wrapping at the last column and from the bottom row to the top, and keep the row after the newest line blank. | Drawn on a board of 3 rows, a line with a tab, a CR and a byte 0x01 puts its glyphs at the columns the rule gives, the replacement glyph for 0x01, and after a fourth newline the text is on row 1 with row 2 blank. | H.FAIL.1 | `console::screen::Board::put`, `console::screen::Board::glyph`, `console::screen::Board::newline`, `console::screen::Board::clear_row` | *baselined* | — | — | — |
 | `L.console.39` | screen::stop shall stop the screen console for good and wait a bounded time for a draw in flight to finish, and a byte that finds the board taken shall not be drawn. | After stop, 0 bytes are drawn; stop called by a processor part way through a draw returns after at most 1,000,000 attempts at the board. | H.FAIL.1 | `console::screen::stop`, `console::screen::put` | *baselined* | — | — | — |
 
+### Pstore
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.console.42` | The pstore mirror shall hold in the region's ring what the kernel log records, from the boot's first logged byte, in order, with nothing the log does not record: the lines sent unlogged are in neither. | In test-postmortem's boot 1, the region saved over QMP after the report validates as boot 1's, and its text, line for line, is boot 1's serial log from the kernel's first line with only the unlogged lines missing, and holds none of them (x86-64 and AArch64). | H.TRAP.15 | `console::pstore::record`, `console::pstore::adopt`, `console::log::record_into`, `console::log::slot_of`, `console::log::record` | `tools/common/xtask/src/postmortem.rs::region_problem` | xtask gate | xtask gate | xtask gate |
+| `L.console.43` | attach shall mirror the log into the loader's region only when it is whole pages, a header page and a ring of a power of two from 4 KiB to 16 MiB, wholly inside one Pstore entry of the memory map, RAM the direct map covers at both ends, and its header is valid with nothing recorded; else it shall say why in one line and write nothing there. | At boot, placement refuses a region made up inside the kernel image's entry and, around the loader's region, one not on a page, one no longer than its header, one whose ring is not a power of two and one running past its entry, and takes the loader's region: 5 of 5 refused when a region was attached, 1 of 1 when none. The header clause is ferrix-bootinfo's validate, whose host tests refuse a wrong magic, version, header length, capacity, region length, CRC and count: every_field_is_checked and capacities_outside_the_bounds_are_refused. By inspection of check: a valid header with a count other than 0 is refused, and nothing is written to the region before every clause passes (adopt is its only writer). | H.BOOT.1 | `console::pstore::attach`, `console::pstore::check`, `console::pstore::placement` | `src/kernel/src/console/log_check.rs::check_pstore_placement`, `src/lib/proto/bootinfo/src/pstore/tests.rs::every_field_is_checked`, `src/lib/proto/bootinfo/src/pstore/tests.rs::capacities_outside_the_bounds_are_refused` | not reached | not reached | not reached |
+| `L.console.44` | conclude shall write the pstore region back from the caches after the report's last line is drained and before the screen is drawn, taking no lock and allocating nothing; an abridged report shall write nothing back. finish shall write it back before the reset ferrix.onexit=reset asks for, after its last line. | In test-postmortem's boot 1, the unlogged `written back for the next boot` line comes straight after the report's explanation, and the region saved after it holds that explanation (x86-64 and AArch64); in test-boot --reset, the loader that comes back quotes the kernel's resetting line as the log's last (x86-64 and AArch64). Neither write-back is observable under QEMU, whose caches are the host's: the hardware run is a BACKLOG row. | H.FAIL.1 | `console::pstore::write_back`, `panic::conclude`, `power::finish` | `tools/common/xtask/src/postmortem.rs::write_back_problem`, `tools/common/xtask/src/qemu.rs::reset_problem` | xtask gate | xtask gate | xtask gate |
+
 ### Superblocks
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
@@ -1760,6 +1769,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/audit/check.rs::pinned` | kernel | H.AUD.2 |
 | `src/kernel/src/audit/check.rs::routing` | kernel | H.AUD.3 |
 | `src/kernel/src/audit/check.rs::start_and_wrap` | kernel | H.AUD.1 |
+| `src/kernel/src/console/log_check.rs::check_pstore_placement` | kernel | L.console.43 |
 | `src/kernel/src/console/log_check.rs::console_records` | kernel | L.console.31, L.console.32, L.console.34 |
 | `src/kernel/src/console/log_check.rs::run` | kernel | H.TRAP.13 |
 | `src/kernel/src/console/log_check.rs::two_writers` | kernel | L.console.25, L.console.29 |
@@ -1840,6 +1850,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/mm/check.rs::check_no_device_window_over_the_image` | kernel | L.mm.50 |
 | `src/kernel/src/mm/check.rs::check_no_device_window_wraps` | kernel | L.mm.51 |
 | `src/kernel/src/mm/check.rs::check_only_ram_has_a_checked_alias` | kernel | L.mm.62 |
+| `src/kernel/src/mm/check.rs::check_pstore_never_free` | kernel | L.mm.75 |
 | `src/kernel/src/mm/check.rs::check_sealed_image` | kernel | H.MEM.5, L.mm.33 |
 | `src/kernel/src/mm/check.rs::check_stacks` | kernel | H.FAIL.2, L.mm.55 |
 | `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | H.QUOTA.13 |
@@ -2243,6 +2254,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/platform/pci/src/window.rs::the_ats_capability_is_refused_and_a_vsec_body_is_writable` | host | L.device.26 |
 | `src/lib/platform/pci/src/window.rs::virtio_s_pci_cfg_data_is_refused_and_its_fields_are_not` | host | L.device.26 |
 | `src/lib/proto/audit/src/tests.rs::a_record_is_its_sixty_four_bytes_in_order_little_endian` | host | H.AUD.13 |
+| `src/lib/proto/bootinfo/src/pstore/tests.rs::capacities_outside_the_bounds_are_refused` | host | L.console.43 |
+| `src/lib/proto/bootinfo/src/pstore/tests.rs::every_field_is_checked` | host | L.console.43 |
 | `src/lib/proto/devmgr-proto/src/isolation_tests.rs::a_device_without_firmware_is_neither_marked_nor_stopped` | host | L.device.27 |
 | `src/lib/proto/devmgr-proto/src/isolation_tests.rs::a_firmware_device_starts_only_once_marked` | host | L.device.27 |
 | `src/lib/proto/devmgr-proto/src/isolation_tests.rs::the_refusal_names_the_device_and_the_mark` | host | L.device.27 |
@@ -2262,6 +2275,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/jobs.rs::test_jobs` | gate | L.x86_64.115 |
 | `tools/common/xtask/src/main.rs::test_shell` | gate | L.init.1 |
 | `tools/common/xtask/src/main.rs::test_vfs` | gate | L.init.1 |
+| `tools/common/xtask/src/postmortem.rs::region_problem` | gate | L.console.42 |
+| `tools/common/xtask/src/postmortem.rs::write_back_problem` | gate | L.console.44 |
 | `tools/common/xtask/src/qemu.rs::cleaning_problem` | gate | L.iommu.56 |
 | `tools/common/xtask/src/qemu.rs::config_problem` | gate | L.device.24, L.device.25 |
 | `tools/common/xtask/src/qemu.rs::entropy_problem` | gate | L.x86_64.113 |
@@ -2270,5 +2285,5 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/qemu.rs::msi_problem` | gate | L.device.22 |
 | `tools/common/xtask/src/qemu.rs::queue_problem` | gate | L.iommu.47, L.iommu.48 |
 | `tools/common/xtask/src/qemu.rs::remap_problem` | gate | L.iommu.50, L.iommu.54, L.x86_64.129, L.x86_64.130, L.x86_64.131 |
-| `tools/common/xtask/src/qemu.rs::reset_problem` | gate | L.x86_64.99, H.BOOT.7 |
+| `tools/common/xtask/src/qemu.rs::reset_problem` | gate | L.x86_64.99, H.BOOT.7, L.console.44 |
 | `tools/common/xtask/src/qemu.rs::test_boot_lines` | gate | L.x86_64.97 |

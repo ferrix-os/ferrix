@@ -191,7 +191,7 @@ pub(crate) fn test_boot_lines(
                 )));
             }
             if args.reset {
-                if let Some(problem) = reset_problem(&watched) {
+                if let Some(problem) = reset_problem(arch, &watched) {
                     return Err(Error::new(format!(
                         "{arch}: {problem}.\n  Serial output is in {}",
                         watched.log.display()
@@ -218,8 +218,8 @@ pub(crate) fn test_boot_lines(
 /// said it was resetting, and the loader then has to have started again. A
 /// power-off cannot do that: under `-action shutdown=pause` it only pauses
 /// QEMU, the debug-exit write on x86-64 included.
-/// Verifies: `L.x86_64.99`, H.BOOT.7
-fn reset_problem(watched: &Watched) -> Option<String> {
+/// Verifies: `L.x86_64.99`, H.BOOT.7, `L.console.44`
+fn reset_problem(arch: Arch, watched: &Watched) -> Option<String> {
     let first = |text: &str| watched.lines.iter().position(|line| line.contains(text));
     if first(RESET_ARMED).is_none() {
         return Some(format!(
@@ -229,18 +229,54 @@ fn reset_problem(watched: &Watched) -> Option<String> {
     let Some(at) = first(RESETTING) else {
         return Some(format!("--reset: the kernel never said `{RESETTING}`"));
     };
-    if watched
+    let Some(again) = watched
         .lines
         .iter()
         .skip(at)
-        .any(|line| line.contains(LOADER_BANNER))
-    {
-        None
-    } else {
-        Some(format!(
+        .position(|line| line.contains(LOADER_BANNER))
+    else {
+        return Some(format!(
             "--reset: the loader did not start again after `{RESETTING}`, so the machine did not reset"
-        ))
+        ));
+    };
+    // The guest's own reset keeps RAM, so the loader that comes back finds
+    // the log the kernel kept there, and quotes its last line: the one saying
+    // it was resetting (`docs/POSTMORTEM.md` §3, the consultant's Q8). Not
+    // on ARMv7-A, whose board firmware's RAM across a reset is not claimed.
+    if arch == Arch::Armv7a {
+        return None;
     }
+    let second = watched
+        .lines
+        .get(at.saturating_add(again)..)
+        .unwrap_or_default();
+    let has = |text: &str| second.iter().any(|line| line.contains(text));
+    if !has(PSTORE_FOUND) {
+        return Some(format!(
+            "--reset: the loader that came back did not find the kernel's log (`{PSTORE_FOUND}`)"
+        ));
+    }
+    if !second
+        .iter()
+        .any(|line| line.contains(PSTORE_LAST_LINE) && line.contains(RESETTING))
+    {
+        return Some(format!(
+            "--reset: the loader that came back did not quote `{RESETTING}` as the log's last line"
+        ));
+    }
+    None
+}
+
+/// The loader's line for a previous kernel's log it found.
+const PSTORE_FOUND: &str = "pstore   at ";
+/// The loader's quotation of a log that ended in no panic.
+const PSTORE_LAST_LINE: &str = "'s last report: did not panic; its last line: ";
+
+/// Whether `line` is the loader's last line about the pstore region: it was
+/// handed on, or there is none this boot.
+fn pstore_settled(line: &str) -> bool {
+    line.contains("pstore   ")
+        && (line.contains("'s kernel log goes to ") || line.contains("no region this boot"))
 }
 
 /// What stage 10's PCI check prints after the number of bytes a virtio-rng
@@ -1563,6 +1599,7 @@ fn watch_hooked(
     // Under `--reset` the marker is not the end: the kernel still has to say it
     // is resetting, and the loader to start again because it did.
     let mut resetting = false;
+    let mut again = false;
     let mut restarted = false;
     let mut closed = false;
     let mut unchecked = false;
@@ -1592,6 +1629,10 @@ fn watch_hooked(
                     if line.contains(RESETTING) {
                         resetting = true;
                     } else if resetting && line.contains(LOADER_BANNER) {
+                        again = true;
+                    } else if again && pstore_settled(&line) {
+                        // The loader that came back has said what it found
+                        // of the kernel's log (`reset_problem`).
                         restarted = true;
                     }
                 }
@@ -2312,7 +2353,7 @@ fn qemu_command(
     // `--reset`, whose point is that the machine starts again: there a reset
     // restarts firmware and the loader, and a power-off only pauses QEMU, so
     // the loader can appear a second time only if the kernel reset it.
-    if args.reset {
+    if args.reset || args.keep_ram {
         let _ = command.args(["-action", "shutdown=pause"]);
     } else {
         let _ = command.arg("-no-reboot");

@@ -45,6 +45,7 @@
 use core::fmt;
 
 mod kaslr;
+pub mod pstore;
 pub use kaslr::{
     KASLR_DECLINED, KASLR_FIXED_IMAGE, KASLR_MOVED, KASLR_NO_ENTROPY, KASLR_NOT_OFFERED,
     KERNEL_TOP_GUARD, Kaslr, SOURCE_COUNTER, SOURCE_CPU_RNG, SOURCE_FIRMWARE_RNG, SOURCE_NONE,
@@ -73,8 +74,11 @@ pub const BOOTINFO_MAGIC: u64 = 0x4645_5252_4958_4249;
 /// given, not what the field can hold. Version 7 added [`BootInfo::kaslr`],
 /// and let the direct map begin anywhere in its region rather than at its
 /// base: the loader moves the kernel image, the direct map and the top of the
-/// vmap arena at random each boot, and says how, and how well.
-pub const BOOTINFO_VERSION: u32 = 7;
+/// vmap arena at random each boot, and says how, and how well. Version 8
+/// added [`BootInfo::pstore_phys`] and [`BootInfo::pstore_len`], the region
+/// the kernel keeps its log in across a reset ([`pstore`]), and
+/// [`MemKind::Pstore`].
+pub const BOOTINFO_VERSION: u32 = 8;
 
 /// [`BootInfo::firmware_flags`]: [`BootInfo::firmware_time`] holds the time
 /// firmware's `GetTime` gave.
@@ -820,6 +824,9 @@ pub enum MemKind {
     Mmio = 10,
     /// Memory the firmware reported as bad.
     Defective = 11,
+    /// The region the kernel keeps its log in across a reset ([`pstore`]):
+    /// RAM, direct-mapped, never free and never reclaimed.
+    Pstore = 14,
 }
 
 impl MemKind {
@@ -977,7 +984,7 @@ pub fn allocator_owns(regions: impl IntoIterator<Item = MemRegion>, base: u64, l
 /// tables the loader installed before jumping to the kernel, which is to say
 /// inside the direct map at [`PHYSMAP_BASE`]. Fields named `_phys` are
 /// physical. None of them is a pointer type, so the structure is the same
-/// 328 bytes on every word width.
+/// 344 bytes on every word width.
 ///
 /// Read it through [`BootInfo::validate`] rather than field by field.
 #[repr(C)]
@@ -1082,13 +1089,20 @@ pub struct BootInfo {
 
     /// What the loader did about layout randomisation, and with what.
     pub kaslr: Kaslr,
+
+    /// Physical address of the region the kernel keeps its log in across a
+    /// reset ([`pstore`]), inside a [`MemKind::Pstore`] entry of the map; 0
+    /// when there is none.
+    pub pstore_phys: u64,
+    /// Its length in bytes, header page included; 0 when there is none.
+    pub pstore_len: u64,
 }
 
 // The claim the module documentation makes, asserted where it can fail: a
 // field whose size follows the pointer width would break it, and the loader
 // and the host tests would then disagree about a layout neither of them sees.
 const _: () = assert!(
-    size_of::<BootInfo>() == 328,
+    size_of::<BootInfo>() == 344,
     "BootInfo must be laid out identically on every word width"
 );
 const _: () = assert!(
@@ -1393,6 +1407,19 @@ impl<'a> BootView<'a> {
         option_in(self.cmdline, key)
     }
 
+    /// The region the kernel keeps its log in across a reset, as
+    /// `(physical address, length)`, or `None` when the length is 0: an
+    /// address with no length is no region, and is ignored. What the region
+    /// is, the kernel checks for itself before it writes there.
+    #[must_use]
+    pub const fn pstore(&self) -> Option<(u64, u64)> {
+        if self.info.pstore_len == 0 {
+            None
+        } else {
+            Some((self.info.pstore_phys, self.info.pstore_len))
+        }
+    }
+
     /// True if the command line carries `flag` as a bare word.
     #[must_use]
     pub fn flag(&self, name: &str) -> bool {
@@ -1513,6 +1540,8 @@ mod tests {
             firmware_flags: 0,
             firmware_seed_len: 0,
             kaslr: Kaslr::fixed(&LAYOUT, KASLR_DECLINED),
+            pstore_phys: 0,
+            pstore_len: 0,
         }
     }
 
@@ -1599,6 +1628,79 @@ mod tests {
             unsafe { info.validate() }.unwrap_err(),
             BootInfoError::VersionMismatch(BOOTINFO_VERSION + 1),
             "a loader from another build must not be trusted"
+        );
+    }
+
+    #[test]
+    fn rejects_the_version_before_the_pstore_fields() {
+        let map = regions();
+        let mut info = boot_info(&map, "");
+        info.version = 7;
+        assert_eq!(
+            // SAFETY: as in `rejects_a_mismatched_version`.
+            unsafe { info.validate() }.unwrap_err(),
+            BootInfoError::VersionMismatch(7),
+            "a version 7 loader writes no pstore fields, and must not be read as one that did"
+        );
+        assert_eq!(BOOTINFO_VERSION, 8, "version 8 carries the pstore fields");
+    }
+
+    #[test]
+    fn a_pstore_address_with_no_length_is_ignored() {
+        let map = regions();
+        let mut info = boot_info(&map, "");
+        info.pstore_phys = 0x100_0000;
+        // SAFETY: as in `rejects_a_mismatched_version`.
+        let view = unsafe { info.validate() }.unwrap();
+        assert_eq!(view.pstore(), None, "no length, no region");
+        info.pstore_len = 0x10_1000;
+        // SAFETY: as above.
+        let view = unsafe { info.validate() }.unwrap();
+        assert_eq!(view.pstore(), Some((0x100_0000, 0x10_1000)), "both given");
+    }
+
+    #[test]
+    fn only_usable_is_free_and_only_loader_and_acpi_reclaim_are_reclaimed() {
+        let every = [
+            MemKind::Usable,
+            MemKind::Reserved,
+            MemKind::AcpiReclaim,
+            MemKind::AcpiNvs,
+            MemKind::Loader,
+            MemKind::Kernel,
+            MemKind::Initrd,
+            MemKind::PageTables,
+            MemKind::BootStack,
+            MemKind::BootInfo,
+            MemKind::DeviceTree,
+            MemKind::Framebuffer,
+            MemKind::Mmio,
+            MemKind::Defective,
+            MemKind::Pstore,
+        ];
+        for kind in every {
+            assert_eq!(
+                kind.is_free_at_boot(),
+                kind == MemKind::Usable,
+                "{kind:?} free at boot"
+            );
+            assert_eq!(
+                kind.is_reclaimable(),
+                matches!(kind, MemKind::Loader | MemKind::AcpiReclaim),
+                "{kind:?} reclaimable"
+            );
+        }
+    }
+
+    #[test]
+    fn pstore_is_ram_never_free_never_reclaimed() {
+        assert!(MemKind::Pstore.is_ram(), "direct-mapped");
+        assert!(!MemKind::Pstore.is_free_at_boot(), "not free at boot");
+        assert!(!MemKind::Pstore.is_reclaimable(), "not reclaimed");
+        assert_eq!(
+            MemKind::Pstore as u32,
+            14,
+            "appended, existing values unchanged"
         );
     }
 

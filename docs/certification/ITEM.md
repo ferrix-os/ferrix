@@ -426,7 +426,7 @@ A certificate attaches to a configuration, not to a repository.
 | Cargo features | 7 in the workspace, **0** in `src/kernel/` or `src/boot/common/uefi/` |
 | Where the loader boots from | the ESP's `FERRIX/` files, or on a disk with A/B system slots the slot its boot control record selects, verified, with the ESP's files as the rescue path (`docs/AB-BOOT.md`; SECURITY-TARGET A.FIRMWARE, SAFETY-MANUAL AoU-29). The loader has **no Cargo feature and no `cfg`** of its own; the A/B gate's negative controls are source sabotages run by `fleet/gate.sh control`. A netboot (the loader and its files from iPXE's read-only file system, `docs/NETBOOT.md`), where the loader sends its boot log to the server, is a development path, not the reference configuration |
 | Build settings | **one**, `cargo xtask --mitigations on\|off`; the reference is `on`, the default |
-| Boot options that change the item's work | **one**, `ferrix.devmgr=kernel\|init`; the reference is `kernel`, the default |
+| Boot options that change the item's work | **two**: `ferrix.devmgr=kernel\|init`, the reference `kernel`, the default; and `ferrix.pstore=on\|off`, the reference `on`, the default (the kernel log kept across a reset, `docs/POSTMORTEM.md` §3; any other value is said and taken as `off`) |
 | Driver updates at run time | **absent**: no reference image carries `drvupdated` (`docs/DEVMGR.md` §4.1); only `cargo xtask test-restart --update`'s images do, xtask refuses it in any other, and no claim is made of them (SAFETY-MANUAL AoU-26) |
 | Test platform | QEMU; on x86-64 the patched 10.2.1 `(ferrix-cfi)`, whose VT-d blocks compatibility-format interrupts, with `intel-iommu,intremap=on,eim=off` and, under KVM, the split interrupt controller ([TOOLS.md](TOOLS.md)) |
 | Kernel link (`on`) | a static PIE on x86-64 (PIC code model, every x86-64 crate) and AArch64 (static code model, `-pie -z notext`); on ARMv7-A a fixed-address link that keeps its relocations (`--emit-relocs`). The loader moves it each boot (KASLR). `off`: the static fixed-address image |
@@ -448,7 +448,18 @@ here are made of `on` alone (SAFETY-MANUAL AoU-8). `cargo xtask check` builds
 the kernel in both settings on all three architectures so that `off` cannot
 stop compiling unnoticed, and the running kernel says which it is.
 
-The boot option is who starts `devmgr` (`docs/INIT.md` §7.3, landing L12).
+The second boot option is whether the kernel keeps its log across a reset
+(`docs/POSTMORTEM.md` §3). Under `on`, the reference, the loader gives the
+kernel one region of RAM, and the kernel mirrors every byte its log records
+into it, checks the region first and refuses it with a line otherwise, and
+writes it back from the caches at the end of a panic report. Under `off`
+the loader takes no region and the kernel has none; it does not erase a
+region an earlier `on` boot left, whose text stays in RAM until the memory
+is reused or power is lost. It changes no other
+work of the item, and its text is the log's, which privileged programs
+already read (VULNERABILITY-ANALYSIS V-14).
+
+The first boot option is who starts `devmgr` (`docs/INIT.md` §7.3, landing L12).
 Under `kernel`, the reference, the kernel starts it at bring-up, runs the
 disk checks of stages 10 to 12 through its drivers, and switches `/` to the
 root disk before pid 1 exists. Under `init`, which the images that boot

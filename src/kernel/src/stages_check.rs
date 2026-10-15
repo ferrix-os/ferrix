@@ -1984,6 +1984,13 @@ pub(super) fn check_loader_allocations(view: &BootView<'_>) -> Result<(), &'stat
             MemKind::Initrd,
             "the memory map does not describe the initramfs as the initramfs",
         ),
+        // The region a reset keeps: described as anything the allocator owns,
+        // it would be handed out under the mirror (`console::pstore`).
+        (
+            view.pstore(),
+            MemKind::Pstore,
+            "the memory map does not describe the pstore region as Pstore",
+        ),
     ];
     for (range, kind, problem) in optional {
         if range.is_some_and(|(at, len)| !described_as(view, at, len, kind)) {

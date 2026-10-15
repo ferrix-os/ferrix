@@ -221,6 +221,15 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
     // Every line written is not every line sent: let the port finish, so the
     // report is whole on the wire before anything else can go wrong.
     console::drain();
+    // The log as the next boot's loader will find it, written back from the
+    // caches a reset may discard: after the last line, before the step most
+    // likely to fault.
+    if console::pstore::write_back() {
+        // Unlogged: after the write-back, the region is not to change. The
+        // point from which a reset keeps the whole report (`test-postmortem`).
+        println_unlogged!("  pstore    written back for the next boot");
+        console::drain();
+    }
     // Last, and after every line has gone to the serial port: the screen is
     // drawn from what the console printed, and drawing is the step most
     // likely to fault on a machine in this state.

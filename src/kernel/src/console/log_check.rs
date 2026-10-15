@@ -270,3 +270,54 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .windows(needle.len())
         .any(|window| window == needle)
 }
+
+/// Where the region kept across a reset may be (`console::pstore::placement`),
+/// held to regions made up from the memory map: one inside the kernel image's
+/// entry, and around the loader's region, one not on a page, one shorter than
+/// its header, one whose ring is not a power of two and one running past its
+/// entry. Each is refused, and the loader's own region, when there is one, is
+/// taken. Answers how many were refused.
+///
+/// Verifies: `L.console.43`
+pub(crate) fn check_pstore_placement(
+    view: &ferrix_bootinfo::BootView<'_>,
+) -> Result<usize, &'static str> {
+    use ferrix_bootinfo::PAGE_SIZE;
+    use ferrix_bootinfo::pstore::{HEADER, MIN_CAPACITY};
+
+    use super::pstore::placement;
+
+    let small = HEADER + MIN_CAPACITY;
+    let raw = view.raw();
+    if placement(view, raw.kernel_phys, small).is_ok() {
+        return Err("pstore placement took a region inside the kernel image's entry");
+    }
+    let mut refused = 1;
+    let Some((phys, len)) = super::pstore::attached() else {
+        return Ok(refused);
+    };
+    if placement(view, phys, len).is_err() {
+        return Err("pstore placement refused the loader's region, which the boot attached");
+    }
+    let made_up = [
+        (phys + 1, len, "a region not on a page"),
+        (phys, HEADER, "a region no longer than its header"),
+        (
+            phys,
+            HEADER + 3 * PAGE_SIZE,
+            "a ring that is not a power of two",
+        ),
+        (
+            phys + len - PAGE_SIZE,
+            small,
+            "a region running past its entry",
+        ),
+    ];
+    for (at, length, what) in made_up {
+        if placement(view, at, length).is_ok() {
+            return Err(what);
+        }
+        refused += 1;
+    }
+    Ok(refused)
+}

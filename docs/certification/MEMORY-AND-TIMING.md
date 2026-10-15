@@ -1153,6 +1153,33 @@ Bounds of the locks the writable mount's reclaim adds (`L.object.188-190`):
   (no memory for it at mount), which then needs the waiting task to be
   preempted in task context for the writeback or reclaim it waits for to run.
 
+### 2.2o The pstore region's write-back and its boot check (`console::pstore`, PM3)
+
+`docs/POSTMORTEM.md` §3. The panic path's write-back (`L.console.44`) runs
+once, in the first report, after `console::drain` and before the screen,
+with the other processors already asked to stop; it takes no lock and
+allocates nothing. Its time is bounded by the hardware:
+
+* **x86-64**: `clflush` by address over the region alone and one `mfence`
+  (`clean_for_walker`, the IOMMU's own): 16 448 at the 64-byte line
+  `CPUID` reports. Not `wbinvd`, which §3.6 of the design had: it takes no
+  address, its time is every cache's size, and it is the one instruction
+  here a hypervisor must emulate whole; `clflush` writes the line back from
+  every cache in the coherence domain, which is the claim needed.
+* **AArch64**: `dc cvac` by address over the region alone, `(4 KiB + 1
+  MiB) / line` instructions and one `dsb sy`: 16 448 at 64-byte lines, the
+  line size `CTR_EL0` reports on the reference machines.
+* **ARMv7-A**: `DCCMVAC` over the region alone: 32 896 at the Cortex-A7's
+  32-byte lines (the DK1), 16 448 at 64.
+
+The same write-back runs before a reset `ferrix.onexit=reset` asks for.
+The mirror itself (`L.console.42`) is the log's own lock-free record, once
+more per byte: a store and a compare-and-exchange on the region's count.
+
+The boot check that no frame of the region is free (`L.mm.75`) takes the
+frame allocator's lock once a frame, 257 times for the region, once a boot
+after the reclaim, on the boot processor.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

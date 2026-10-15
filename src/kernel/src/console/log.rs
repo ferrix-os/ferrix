@@ -100,30 +100,14 @@ impl<const N: usize> Ring<N> {
         }
     }
 
-    /// Record one byte: store it into the next place's slot, then claim the
-    /// place, and store again at the next if another writer claimed it first.
+    /// Record one byte: [`record_into`] over this ring's slots and count.
     fn record_byte(&self, byte: u8) {
-        let mut at = self.written.load(Ordering::Relaxed);
-        loop {
-            if let Some(slot) = self.slot(at) {
-                slot.store(byte, Ordering::Relaxed);
-            }
-            match self.written.compare_exchange_weak(
-                at,
-                at.wrapping_add(1),
-                Ordering::Release,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return,
-                Err(now) => at = now,
-            }
-        }
+        record_into(&self.slots, &self.written, byte);
     }
 
     /// The slot place `at` is kept in.
     fn slot(&self, at: u64) -> Option<&AtomicU8> {
-        let index = usize::try_from(at & Self::LENGTH.wrapping_sub(1)).ok()?;
-        self.slots.get(index)
+        slot_of(&self.slots, at)
     }
 
     /// How many bytes have ever been recorded: the place the next one takes.
@@ -192,6 +176,39 @@ impl<const N: usize> Ring<N> {
     }
 }
 
+/// Record one byte into a ring of `slots`, whose length is a power of two,
+/// counted by `written`: store it into the next place's slot, then claim the
+/// place, and store again at the next if another writer claimed it first.
+///
+/// The one algorithm every log ring records with: the kernel log's static
+/// [`Ring`], and the region the log is kept in across a reset
+/// (`console::pstore`), whose slots are memory the loader gave. So the two
+/// cannot record differently.
+pub(crate) fn record_into(slots: &[AtomicU8], written: &AtomicU64, byte: u8) {
+    let mut at = written.load(Ordering::Relaxed);
+    loop {
+        if let Some(slot) = slot_of(slots, at) {
+            slot.store(byte, Ordering::Relaxed);
+        }
+        match written.compare_exchange_weak(
+            at,
+            at.wrapping_add(1),
+            Ordering::Release,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return,
+            Err(now) => at = now,
+        }
+    }
+}
+
+/// The slot of `slots`, a power of two long, that place `at` is kept in.
+fn slot_of(slots: &[AtomicU8], at: u64) -> Option<&AtomicU8> {
+    let mask = (slots.len() as u64).wrapping_sub(1);
+    let index = usize::try_from(at & mask).ok()?;
+    slots.get(index)
+}
+
 /// The kernel log.
 static LOG: Ring<CAPACITY> = Ring::new();
 
@@ -199,6 +216,7 @@ static LOG: Ring<CAPACITY> = Ring::new();
 /// sends, and all it asks of the log.
 pub(crate) fn record(bytes: &[u8]) {
     LOG.record(bytes);
+    super::pstore::record(bytes);
 }
 
 /// Read the kernel log from `cursor`: see [`Ring::read`].

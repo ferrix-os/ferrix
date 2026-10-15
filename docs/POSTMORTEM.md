@@ -107,8 +107,9 @@ Version 1 kept the address in a non-volatile UEFI variable. Version 2 drops
 the variable and **derives the address from the memory map the same way
 every boot**:
 
-> the lowest 2 MiB-aligned address at least 16 MiB above the lowest
-> `EfiConventionalMemory` address of the map, below the direct map's end,
+> the lowest 2 MiB-aligned address at least 64 MiB above the lowest
+> `EfiConventionalMemory` address of the map rounded down to 2 MiB, below
+> the direct map's end,
 > whose whole region lies inside one `EfiConventionalMemory` descriptor at
 > the moment the loader looks.
 
@@ -119,9 +120,13 @@ the command line is read (§3.3), and takes the region with
 (`FERRIX_PSTORE`, beside the five Ferrix types already in use).
 
 Why chosen: EDK2 allocates top-down, so its boot-time allocations sit at the
-top of low RAM and the bottom of RAM above the first 16 MiB stays
+top of low RAM and the bottom of RAM above its own early work area stays
 conventional from boot to boot of the same machine and firmware; the rule
-then lands on the same address every time without anything stored. A
+then lands on the same address every time without anything stored. The
+first draft said 16 MiB; OVMF rewrites 8 to 27 MiB on every reset (its
+MEMFD and the firmware volumes it decompresses: measured 2026-10-15 by
+writing a marker into every MiB of a 512 MiB guest over gdb, resetting,
+and reading them back; 27 to 480 MiB survived), so the floor is 64 MiB. A
 variable, by contrast, writes a PC's NV store (flash) on the first boot and
 every time the address is lost, and U-Boot's UEFI (the DK1) keeps variables
 only in a file. If the choice ever moves (a firmware update, a different RAM
@@ -137,9 +142,12 @@ reclaimable; every match on kinds names it (P4).
 
 **Off switch** (P7): `ferrix.pstore=off` on the command line (the ESP's
 `CMDLINE.TXT` or the slot's) makes the loader skip §3.3 entirely: it neither
-reads nor writes the region and hands over `pstore_len = 0`. Any other value
-is said and taken as on. The reference configuration has it **on** (the
-customer's ask; ITEM.md row and certification-item.json say so).
+reads nor writes the region and hands over `pstore_len = 0`. No option, or
+exactly `ferrix.pstore=on`, is on; any other value is said and taken as
+**off** (the consultant's Q4: a misspelt switch keeps no log nobody asked
+for). The reference configuration has it **on** (the customer's ask;
+ITEM.md row and certification-item.json say so). Every loader line that
+leaves the boot without a region ends `no region this boot`.
 
 ### 3.3 The loader
 
@@ -189,16 +197,22 @@ Always, on the console (so into the boot log that PM2 writes and
 netboot-pm sends, with no extra plumbing):
 
 ```
-  pstore   at 0x1000000, 1 MiB: boot 7's kernel log, 48211 bytes, 48210 kept
-  pstore   boot 7's last report: panicked: init exited, as ferrix.onexit=panic asks
+  pstore   at 0x1000000, 1 MiB: boot 7's kernel log, 48211 bytes, 48211 kept (unchecked)
+  pstore   boot 7's last report: panicked: init exited, and ferrix.onexit=panic asks for a panic
 ```
 
 The second line is the last `FERRIX-PANIC ` line of the text with that
 marker left off (so no gate's log reader takes a loader line for a panic of
 this boot), or `did not panic; its last line: ...` when there is none.
-Each is cut at 160 columns.
+Each is cut at 160 columns, every byte that is not printable shown as `?`,
+and every other `FERRIX-` in it made `FERRIX_` (Q6). The quoted line is
+**untrusted text** (L1): whatever the previous boot's programs printed to
+the console, or RAM firmware scribbled on.
 
-Then the whole text, by where the loader was started from:
+Then the whole text, by where the loader was started from -- **not yet**:
+PM3 lands without either (the consultant's ruling on deviation (c), ledger
+line 1238), and each comes to the consultant as its own review before its
+landing (P10, line 1202 C3):
 
 * **A disk boot** (ESP or slot): `FERRIX/LASTKERNEL.TXT` on the ESP, the
   previous one moved to `LASTKERNEL.PRV`, headed by the two lines above,
@@ -235,12 +249,16 @@ PM1's host script prints `LASTKERNEL.TXT` already.
   `pstore_len = 0`: `pstore   none (the loader gave no region)`.
 * **The panic write-back** (P5): in `conclude`, after `smp::stop_others`, the
   backtrace and the explanation, after `console::drain` and before
-  `screen::draw` (the step most likely to fault): `wbinvd` on x86-64, clean
-  by VA to the point of coherency over the region only on AArch64 and
-  ARMv7-A (the existing `clean_to_poc`). No lock, no allocation. Bounded:
-  `wbinvd` is one instruction whose time is the cache's size; the Arm clean
-  is `capacity / line` (16 384 at 64-byte lines) instructions. Stated in
-  MEMORY-AND-TIMING beside the panic path. An abridged report (a second
+  `screen::draw` (the step most likely to fault): clean by address over the
+  region alone on every architecture -- `clflush` on x86-64 (the IOMMU's
+  `clean_for_walker`; version 2's first draft had `wbinvd`, which takes no
+  address and costs every cache's size), `clean_to_poc` on AArch64 and
+  ARMv7-A. No lock, no allocation. Bounded: `len / line` instructions,
+  16 448 at 64-byte lines, 32 896 at the Cortex-A7's 32. Stated in
+  MEMORY-AND-TIMING §2.2o. Then one unlogged line, `pstore    written back
+  for the next boot`, and a drain: the point from which a reset keeps the
+  whole report (Q7). The same write-back runs before `ferrix.onexit=reset`'s
+  reset. An abridged report (a second
   processor) writes nothing back: the first report does, last.
   If `ferrix.panic=reset` (bm-nvme, AB-BOOT §6.4) lands, its wait and reset
   come after this write-back (R12); whichever lands second places it.
@@ -259,7 +277,7 @@ P4).
 * **Host tests**: `ferrix-bootinfo::pstore` -- header encode/validate and
   every refusal (each field, CRC, bound, version), extraction across a wrap
   and with `written` below and above capacity, the printable filter, the
-  address choice over sample maps (none, an occupied 16 MiB, a map whose
+  address choice over sample maps (none, an occupied 64 MiB, an OVMF-shaped map, a map whose
   lowest RAM is at 1 GiB as on Arm); the shared ring code (a wrap,
   concurrent writers); BootInfo v8 refusing v7 and v9 (P8).
 * **Boot checks**: `log_check` gains a region case (a ring written through
@@ -274,20 +292,33 @@ P4).
   report: panicked: <boot 1's panic message, exactly>`, and boot 2's kernel
   attaching boot 2. A third check: boot 1's kernel attached (`pstore
   mirroring`), and its loader said `nothing there` (cold).
-* **Controls** (gate.sh control, each must FIRE):
-  1. the mirror removed (`log::record` stops calling the region) ->
-     `test-postmortem` fails on `boot 1's last report` lacking the panic
-     line ("did not panic" or empty) -- the gate's own line;
-  2. the attach check removed with a boot info naming a non-Pstore region
-     -> the boot check's line (P3);
-  3. Pstore made free at boot -> the P4 assertion's line;
-  4. the loader's CRC check removed -> the host test of a corrupted header;
-  5. the panic write-back is stated not observable under QEMU (its caches
-     are the host's, coherent); the hardware run is a BACKLOG row (first
-     boot of the SN720 PC, warm reset, the customer's OK for the boot).
-* Rows owed: `cargo xtask gate-rows --since main` decides; expected test-boot's
-  four arches (every boot now attaches), test-ab-boot (loader), check, and
-  the two test-postmortem rows.
+* **Controls** (Q15; gate.sh control, each must FIRE; the tags and
+  verdicts are in `~/.local/share/ferrix/handover/pm3.md`):
+  1. the mirror removed (`console::pstore::record` records nothing) ->
+     test-postmortem: `missing from the region's end`;
+  2. placement's Pstore clause removed -> the boot's placement check:
+     `took a region inside the kernel image's entry`;
+  3. `MemKind::Pstore` free at boot -> the never-free check's line;
+  4. the header's CRC check removed -> host test `every_field_is_checked`
+     (host tests print no guest line, so gate.sh cannot judge them: run
+     with a private target, the output kept in the handover);
+  5. unlogged lines mirrored -> test-postmortem: `holds an unlogged line`;
+  6. `ferrix.pstore=off` ignored by the loader -> test-postmortem's switch,
+     caught by off_problem's first check, the loader's line: `the loader did
+     not say \`pstore   off (ferrix.pstore=off)` (pm3-ctl-off2; pm3-ctl-off
+     shows the sabotage took effect, its --expect-line named the later arm;
+     ledger line 1335);
+  7. `0x8000_0006` translated as Usable -> stage 1: `does not describe the
+     pstore region as Pstore`;
+  8. the quotation's `FERRIX-` defusing removed -> host test
+     `quoted_markers_are_defused` (as 4);
+  9. the copy of the log so far at attach removed -> test-postmortem: `does
+     not start with the kernel's first lines`;
+  10. the write-back is stated not observable under QEMU (its caches are
+     the host's); the hardware run is a BACKLOG row.
+* Rows owed (Q14): check; build --arch all --release; test-boot x86_64 kvm
+  and tcg, aarch64, armv7a, armv7a --smp 2; test-boot --reset x86_64 and
+  aarch64; test-ab-boot; test-postmortem x86_64 kvm and aarch64.
 
 ### 3.8 What changed from version 1
 
@@ -342,4 +373,12 @@ P4).
   (`docs/NETBOOT.md` §6; consultant ledger 2026-10-15, netboot-pm). The ESP
   write (`save`, `replace_file`, the FileProtocol write bindings) is still
   PM2's, on branch `postmortem`, and still owes P1's doc restatements.
-* **PM3 design version 2** (§3, 2026-10-15, branch `pm3`): for review.
+* **PM3** (§3, version 2, 2026-10-15, branch `pm3`): design verdict
+  **OK IF (Q1)-(Q16)**, ledger line 1238. Ids `L.console.42-44` and
+  `L.mm.75` reserved on branch `pm3-reserve` (docs only, to land first).
+  Code on `pm3`: the format and its host tests (`ferrix-bootinfo::pstore`),
+  BootInfo v8 and `MemKind::Pstore`, the loader's region and report, the
+  kernel's mirror, attach, placement check, never-free check, panic and
+  reset write-back, the audit record `Config::Pstore`, `cargo xtask
+  test-postmortem`, and `test-boot --reset`'s record check (Q8). Rows and
+  controls: `~/.local/share/ferrix/handover/pm3.md`.

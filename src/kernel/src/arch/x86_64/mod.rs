@@ -5,6 +5,10 @@ mod clock;
 pub(crate) mod console;
 mod cpu;
 pub(crate) use cpu::clean_for_walker;
+/// The region the kernel log is kept in across a reset, written back before
+/// a reset may discard the caches (see [`crate::arch::write_back_for_reset`]):
+/// `clflush` over the region's lines alone, as for an IOMMU's walk.
+pub(crate) use cpu::clean_for_walker as write_back_for_reset;
 pub(crate) use cpu::dma_barrier;
 pub(crate) use cpu::{gs_xadd, read_gs_at};
 mod gdt;

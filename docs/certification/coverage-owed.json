@@ -382,6 +382,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet.",
       "what": "object/process.rs Entry::findable, unlist, listed and gather's listed branch, and find's unlisted answer: measure them on each architecture's coverage run (stage 7's pids line reaches every one through syscall/check.rs check_a_reaped_pid_finds_nothing, whose SIGCHLD-ignoring parent reaches unlist through disown)."
+    },
+    {
+      "landing": "pm3, the kernel log kept across a reset (docs/POSTMORTEM.md section 3; L.console.42-44, L.mm.75; consultant pm3-cert, design ledger 2026-10-15 line 1238, Q15)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet.",
+      "what": "console/pstore.rs record, write_back, attached, attach, check, placement and adopt; console/log.rs record_byte and slot (the shared ring code, moved out of Ring); panic.rs conclude's write-back branch; power.rs finish's write-back before a reset; arch x86_64 write_back_for_reset: measure them on each architecture's coverage run. Every boot through the UEFI loader attaches (attach, check, placement, adopt, record, and the placement and never-free checks in console/log_check.rs and mm/check.rs); the write-back runs only in a first panic report or ferrix.onexit=reset, which a coverage boot reaches only under test-postmortem or test-boot --reset; attach's refusal lines only with a loader that gives a bad region (argued: the placement check drives placement's refusals, not attach's line)."
     }
   ]
 }

@@ -276,6 +276,10 @@ pub enum Config {
     /// KASLR: the loader's state word, and in the third detail word 1 when
     /// the layout was randomised from a source an attacker cannot predict.
     Kaslr = 4,
+    /// The log kept across a reset (`docs/POSTMORTEM.md` §3): 1 when the
+    /// kernel attached the loader's region and mirrors its log there, 0 when
+    /// it did not (`ferrix.pstore=off`, no region, or a region it refused).
+    Pstore = 5,
 }
 
 /// Whether the decision recorded went for the subject or against it.

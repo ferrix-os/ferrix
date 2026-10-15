@@ -137,6 +137,7 @@ mod persistent;
 mod pipe_bench;
 mod pkg;
 mod ports;
+mod postmortem;
 mod powerfail;
 mod procfs;
 mod pty;
@@ -295,6 +296,7 @@ COMMANDS:
                   read known blocks, write and read back, flush, kill the drivers under load (--boot io, the default);
                   a read QEMU fails must fail upward and nothing else (--boot fault); time 4 KiB reads beside
                   virtio-blk's (--boot bench) (x86_64; docs/NVME.md)
+    test-postmortem  the kernel's log across a warm reset: a panic, a QMP reset, the next loader quotes it; and ferrix.pstore=off (x86_64, aarch64)
     test-ab-boot  A/B system slots under OVMF: a trial that panics comes back on the good slot at the next reset, a good trial is kept (x86_64)
     test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64);
                   --slots: the A/B layout, bootctl's status, try, good and rollback, and their refusals
@@ -728,6 +730,7 @@ fn run() -> Result<()> {
         "run" => run_machine(args),
         "test-btrfs" => btrfs_check::test_btrfs(&args, |arch| build_image(arch, &args)),
         "test-powerfail" => powerfail::test_powerfail(&args, |arch| build_parts(arch, &args)),
+        "test-postmortem" => postmortem::test_postmortem(&args, build_image),
         "test-boot" => test_boot(&args),
         "test-kaslr" => test_kaslr(&args),
         "test-shell" => test_shell(&args),

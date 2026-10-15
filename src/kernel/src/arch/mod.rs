@@ -377,6 +377,17 @@ pub(crate) use armv7a::clean_for_device;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::clean_for_device;
 
+// Cache maintenance before a reset may discard the caches: the region the
+// kernel log is kept in across a reset (`console::pstore`), written back to
+// memory by the panic path. Every architecture cleans by address over the
+// region alone: `dc cvac`, `DCCMVAC`, `clflush`.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::write_back_for_reset;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::write_back_for_reset;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::write_back_for_reset;
+
 // Cache maintenance for an IOMMU whose table walk does not snoop the caches
 // (VT-d's ECAP.C clear): the entries a processor wrote through its cached
 // direct map are written back to memory, and waited for, before the unit is

@@ -401,6 +401,11 @@ pub(crate) struct Args {
     /// Where QEMU serves QMP. No flag sets it: `test-display` picks a port to
     /// ask QEMU for its screendump over.
     pub(crate) qmp_port: Option<u16>,
+    /// Keep RAM across a reset: no `-no-reboot`, and a power-off only pauses
+    /// QEMU, as under `--reset` but without its command-line option. No flag
+    /// sets it: `test-postmortem` resets over QMP and reads what the next
+    /// boot found.
+    pub(crate) keep_ram: bool,
     /// Where QEMU serves the card over VNC for a judged boot, on the
     /// loopback. No flag sets it: the cursor boot asks QEMU for the
     /// pointer's shape there, which is the one place a cursor plane shows.

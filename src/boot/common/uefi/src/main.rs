@@ -23,6 +23,7 @@ mod console;
 mod kaslr;
 mod load;
 mod netreport;
+mod pstore;
 mod report_url;
 mod services;
 mod slots;
@@ -167,9 +168,8 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     let direct = measure_direct_map(&services)?;
     services.allocate_below(direct.end());
 
-    // Before the kernel is placed, because the command line can say
-    // `nokaslr`, and that decides where the kernel goes.
-    let area = boot_info_area(&services)?;
+    // Before the kernel is placed: the command line can say `nokaslr`.
+    let (area, pstore) = boot_info_and_pstore(&services, direct)?;
     let loader = services.image_range()?;
     let (kernel, choice) = stage_kernel(&services, (direct, loader), &area)?;
     let (info_area, cmdline_len, source) = area;
@@ -245,7 +245,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
         (&kernel.image, choice),
         &space,
         stack,
-        (info_area, cmdline_len),
+        (info_area, cmdline_len, pstore),
         direct,
         Carried {
             device_tree,
@@ -433,6 +433,39 @@ fn boot_info_area(services: &Services) -> Result<(Allocation, u64, slots::Choice
     Ok((info_area, load_cmdline(services, info_area), choice))
 }
 
+/// The boot info area with its command line, then the pstore region: before
+/// the kernel's allocations, since the region goes where the previous boot's
+/// was, and after the command line, which can turn it off. `pstore::take`
+/// itself refuses a region the direct map does not cover.
+fn boot_info_and_pstore(
+    services: &Services,
+    direct: DirectMap,
+) -> Result<((Allocation, u64, slots::Choice), Option<Allocation>)> {
+    let area = boot_info_area(services)?;
+    let pstore = pstore::take(services, cmdline_of(&area), direct);
+    Ok((area, pstore))
+}
+
+/// The command line [`boot_info_area`] put in the boot info area, or nothing
+/// if it is not UTF-8 (which the kernel then refuses on its own).
+fn cmdline_of((info_area, cmdline_len, _): &(Allocation, u64, slots::Choice)) -> &'static str {
+    cmdline_in(*info_area, *cmdline_len)
+}
+
+/// The `cmdline_len` bytes of command line in `info_area`.
+fn cmdline_in(info_area: Allocation, cmdline_len: u64) -> &'static str {
+    // SAFETY: `load_cmdline` or the slot wrote `cmdline_len` bytes there,
+    // inside the loader's own allocation, which lives until the kernel is
+    // entered, and nothing writes them again.
+    let cmdline = unsafe {
+        core::slice::from_raw_parts(
+            (info_area.address + CMDLINE_OFFSET) as *const u8,
+            cmdline_len as usize,
+        )
+    };
+    core::str::from_utf8(cmdline).unwrap_or("")
+}
+
 /// Read the kernel, decide where it and the other moving regions go, and copy
 /// it there.
 ///
@@ -462,15 +495,7 @@ fn stage_kernel(
         image: KernelImage::EMPTY,
     };
     let elf = staged.elf()?;
-    // SAFETY: `load_cmdline` wrote `cmdline_len` bytes of UTF-8 there, inside
-    // the loader's own allocation, and nothing writes them again.
-    let cmdline = unsafe {
-        core::slice::from_raw_parts(
-            (info_area.address + CMDLINE_OFFSET) as *const u8,
-            cmdline_len as usize,
-        )
-    };
-    let declined = core::str::from_utf8(cmdline).is_ok_and(kaslr::declined);
+    let declined = kaslr::declined(cmdline_in(info_area, cmdline_len));
     let choice = kaslr::choose(
         services,
         &elf,
@@ -514,7 +539,7 @@ fn write_boot_info(
     (kernel, choice): (&KernelImage, kaslr::Choice),
     space: &AddressSpace,
     stack: Allocation,
-    (info_area, cmdline_len): (Allocation, u64),
+    (info_area, cmdline_len, pstore): (Allocation, u64, Option<Allocation>),
     direct: DirectMap,
     carried: Carried,
 ) {
@@ -573,6 +598,8 @@ fn write_boot_info(
         firmware_flags: time.map_or(0, |_| FIRMWARE_TIME) | seed.map_or(0, |_| FIRMWARE_SEED),
         firmware_seed_len: seed.map_or(0, |bytes| bytes.len() as u64),
         kaslr: choice.kaslr,
+        pstore_phys: pstore.map_or(0, |region| region.address),
+        pstore_len: pstore.map_or(0, |region| region.len),
     };
 
     // SAFETY: `info_area` is our own allocation of BOOT_INFO_BYTES, identity

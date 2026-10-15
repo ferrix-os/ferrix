@@ -11,7 +11,8 @@ use super::{Guid, Handle, Status, TableHeader};
 
 /// How firmware should choose the address in `allocate_pages`.
 ///
-/// The loader never asks for a particular address — the kernel is
+/// The loader asks for a particular address once, for the pstore region,
+/// which has to be where the previous boot's was. Otherwise the kernel is
 /// position-independent as to *physical* placement, and the page tables built
 /// below map wherever firmware chose. It does sometimes need an upper bound,
 /// on a 32-bit machine with more RAM than the direct map holds.
@@ -24,6 +25,8 @@ impl AllocateType {
     pub(crate) const ANY_PAGES: AllocateType = AllocateType(0);
     /// Anywhere whose last byte is at or below the address passed in.
     pub(crate) const MAX_ADDRESS: AllocateType = AllocateType(1);
+    /// Exactly at the address passed in.
+    pub(crate) const ADDRESS: AllocateType = AllocateType(2);
 }
 
 /// UEFI memory types.
@@ -57,6 +60,9 @@ impl MemoryType {
     pub(crate) const FERRIX_INITRD: MemoryType = MemoryType(0x8000_0004);
     /// The loader's copy of the device tree, which the kernel keeps for good.
     pub(crate) const FERRIX_DEVICE_TREE: MemoryType = MemoryType(0x8000_0005);
+    /// The region the kernel keeps its log in across a reset, at the address
+    /// `pstore::choose` gives (`docs/POSTMORTEM.md` §3.2).
+    pub(crate) const FERRIX_PSTORE: MemoryType = MemoryType(0x8000_0006);
 }
 
 /// One entry of the UEFI memory map.

@@ -186,6 +186,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     println!("  traps    vectors installed");
 
     let stats = bring_up_memory(view);
+    // The log kept across a reset, as soon as the direct map's RAM is known
+    // and while this is the only processor and interrupts are off.
+    attach_pstore(view);
 
     if let Err(problem) = vmap::init(view.raw().kaslr.vmap_end) {
         fatal!(
@@ -1199,7 +1202,9 @@ fn finish_memory(view: &BootView<'_>) -> Result<(), &'static str> {
     if reclaimed.total() == 0 {
         return Err("nothing was reclaimed, so the memory map describes no early boot");
     }
-    Ok(())
+    // Whatever `checks` says: the region a reset keeps must never be handed
+    // out, and after the reclaim is when it could have been.
+    mm::check::check_pstore_never_free()
 }
 
 /// Report the clocks interrupt bring-up measured, then read what the end of
@@ -1271,6 +1276,7 @@ fn start_audit(view: &BootView<'_>) {
         devmgr: u32::from(devmgr::by_init()),
         mitigations: u32::from(arch::HARDENED),
         kaslr: kaslr.state,
+        pstore: u32::from(console::pstore::attached().is_some()),
     };
     audit::config(audit::Config::Checks, expected.checks, 0);
     audit::config(audit::Config::Devmgr, expected.devmgr, 0);
@@ -1280,8 +1286,9 @@ fn start_audit(view: &BootView<'_>) {
         expected.kaslr,
         u32::from(kaslr.is_random()),
     );
+    audit::config(audit::Config::Pstore, expected.pstore, 0);
     println!(
-        "  audit    started: {} high-value and {} refusal records, 4 configuration items recorded",
+        "  audit    started: {} high-value and {} refusal records, 5 configuration items recorded",
         audit::HIGH_RECORDS,
         audit::REFUSAL_RECORDS
     );
@@ -1477,6 +1484,23 @@ fn bring_up_memory(view: &BootView<'_>) -> mm::Stats {
     report_memory(&stats);
     console::screen::start(view);
     stats
+}
+
+/// Mirror the log into the region the loader gave, if it passes its checks
+/// (`console::pstore`), and when the checks run, hold the placement rule to
+/// regions made up from the map.
+fn attach_pstore(view: &BootView<'_>) {
+    console::pstore::attach(view);
+    if !checks::run() {
+        return;
+    }
+    match console::log_check::check_pstore_placement(view) {
+        Ok(refused) => println!("  pstore   placement refused {refused} made-up regions"),
+        Err(problem) => fatal!(
+            catalog::CONSOLE_LOG,
+            "console log self-check failed: {problem}"
+        ),
+    }
 }
 
 /// Unlogged: the page array's address is in the direct map, which KASLR moves

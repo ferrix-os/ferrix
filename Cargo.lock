@@ -914,6 +914,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-adb",
  "ferrix-argon2",
+ "ferrix-bootinfo",
  "ferrix-cpio",
  "ferrix-displayctl",
  "ferrix-elf",

@@ -628,6 +628,7 @@ pub(crate) fn describe(descriptor: &MemoryDescriptor) -> MemRegion {
         0x8000_0003 => MemKind::BootInfo,
         0x8000_0004 => MemKind::Initrd,
         0x8000_0005 => MemKind::DeviceTree,
+        0x8000_0006 => MemKind::Pstore,
         _ => MemKind::Reserved,
     };
 

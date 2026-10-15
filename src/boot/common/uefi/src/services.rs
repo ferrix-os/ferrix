@@ -290,6 +290,32 @@ impl Services {
         Ok(allocation)
     }
 
+    /// Allocate `len` bytes at exactly `address`, rounded up to whole pages,
+    /// and leave what is there as it is: `None` when firmware will not, said
+    /// by the caller. For the pstore region, whose bytes are what the
+    /// previous kernel left.
+    pub(crate) fn allocate_at(
+        &self,
+        address: u64,
+        len: u64,
+        kind: MemoryType,
+    ) -> Option<Allocation> {
+        let pages = len.div_ceil(PAGE_SIZE);
+        let end = address.checked_add(pages.checked_mul(PAGE_SIZE)?)?;
+        if pages == 0 || !address.is_multiple_of(PAGE_SIZE) || end > self.ceiling.get() {
+            return None;
+        }
+        let mut at = address;
+        // SAFETY: `at` is a live local, and `pages` is non-zero.
+        let status = unsafe {
+            (self.boot().allocate_pages)(AllocateType::ADDRESS, kind, pages as usize, &raw mut at)
+        };
+        (status.is_success() && at == address).then_some(Allocation {
+            address,
+            len: pages * PAGE_SIZE,
+        })
+    }
+
     /// Give an allocation back to firmware.
     pub(crate) fn free(&self, context: &'static str, allocation: Allocation) -> Result<()> {
         // SAFETY: the range came from `allocate`, which rounded it to whole

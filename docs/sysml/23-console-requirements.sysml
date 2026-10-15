@@ -541,4 +541,68 @@ package FerrixConsoleRequirements {
                 "arch::armv7a::console::Port::of", "arch::armv7a::console::Port::named");
         }
     }
+
+    package Pstore {
+        doc /* src/kernel/src/console/pstore.rs: the kernel log kept across a reset
+             * in a region of RAM the loader gives, which the next boot's loader
+             * reports (docs/POSTMORTEM.md section 3; the consultant's OK IF Q1-Q16,
+             * ledger line 1238). The region's format is ferrix-bootinfo's
+             * pstore module, unclassified, host-tested; the decisions below are
+             * the kernel's. */
+
+        requirement <'L.console.42'> theRegionHoldsWhatTheLogRecords : ItemLowLevel {
+            attribute :>> statement = "The pstore mirror shall hold in the region's
+                ring what the kernel log records, from the boot's first logged byte,
+                in order, with nothing the log does not record: the lines sent
+                unlogged are in neither.";
+            attribute :>> criterion = "In test-postmortem's boot 1, the region saved
+                over QMP after the report validates as boot 1's, and its text, line
+                for line, is boot 1's serial log from the kernel's first line with
+                only the unlogged lines missing, and holds none of them (x86-64 and
+                AArch64).";
+            attribute :>> parent = "H.TRAP.15";
+            attribute :>> unit = ("console::pstore::record", "console::pstore::adopt",
+                "console::log::record_into", "console::log::slot_of", "console::log::record");
+        }
+        requirement <'L.console.43'> attachingFailsClosed : ItemLowLevel {
+            attribute :>> statement = "attach shall mirror the log into the loader's
+                region only when it is whole pages, a header page and a ring of a
+                power of two from 4 KiB to 16 MiB, wholly inside one Pstore entry of
+                the memory map, RAM the direct map covers at both ends, and its header
+                is valid with nothing recorded; else it shall say why in one line and
+                write nothing there.";
+            attribute :>> criterion = "At boot, placement refuses a region made up
+                inside the kernel image's entry and, around the loader's region, one
+                not on a page, one no longer than its header, one whose ring is not a
+                power of two and one running past its entry, and takes the loader's
+                region: 5 of 5 refused when a region was attached, 1 of 1 when none.
+                The header clause is ferrix-bootinfo's validate, whose host tests
+                refuse a wrong magic, version, header length, capacity, region
+                length, CRC and count: every_field_is_checked and
+                capacities_outside_the_bounds_are_refused. By inspection of check:
+                a valid header with a count other than 0 is refused, and nothing is
+                written to the region before every clause passes (adopt is its only
+                writer).";
+            attribute :>> parent = "H.BOOT.1";
+            attribute :>> unit = ("console::pstore::attach", "console::pstore::check",
+                "console::pstore::placement");
+        }
+        requirement <'L.console.44'> theFirstReportWritesTheRegionBack : ItemLowLevel {
+            attribute :>> statement = "conclude shall write the pstore region back from
+                the caches after the report's last line is drained and before the
+                screen is drawn, taking no lock and allocating nothing; an abridged
+                report shall write nothing back. finish shall write it back before
+                the reset ferrix.onexit=reset asks for, after its last line.";
+            attribute :>> criterion = "In test-postmortem's boot 1, the unlogged
+                `written back for the next boot` line comes straight after the
+                report's explanation, and the region saved after it holds that
+                explanation (x86-64 and AArch64); in test-boot --reset, the loader
+                that comes back quotes the kernel's resetting line as the log's last
+                (x86-64 and AArch64). Neither write-back is observable under QEMU,
+                whose caches are the host's: the hardware run is a BACKLOG row.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("console::pstore::write_back", "panic::conclude",
+                "power::finish");
+        }
+    }
 }

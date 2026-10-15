@@ -1625,6 +1625,9 @@ pub(crate) unsafe fn reclaim_boot_memory(view: &BootView<'_>) -> Reclaimed {
             frames.insert_free(first, count);
             match region.kind {
                 MemKind::Loader => reclaimed.loader_frames += count,
+                // Only `Loader` and `AcpiReclaim` pass `is_reclaimable` above,
+                // which matches its kinds by name; every other kind -- `Pstore`
+                // among them -- never reaches this count.
                 _ => reclaimed.acpi_frames += count,
             }
         }

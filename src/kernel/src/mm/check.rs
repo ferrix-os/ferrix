@@ -1083,3 +1083,29 @@ fn check_only_ram_has_a_checked_alias() -> Result<(), &'static str> {
     }
     Ok(())
 }
+
+/// The region kept across a reset stays the kernel's: after the loader's and
+/// the firmware's memory is reclaimed, every frame of it is Reserved to the
+/// allocator (or outside its array), so none is free or handed out.
+/// Whatever `checks` says, since the reclaim runs either way. Takes the
+/// frame allocator's lock once a frame, 257 times for the 1 MiB region.
+///
+/// Verifies: `L.mm.75`
+pub(crate) fn check_pstore_never_free() -> Result<(), &'static str> {
+    let Some((phys, len)) = crate::console::pstore::attached() else {
+        return Ok(());
+    };
+    let first = phys / PAGE_SIZE;
+    for frame in first..first + len / PAGE_SIZE {
+        // Reserved, or outside the allocator's array: anything else is a
+        // frame the allocator owns, free or already handed out.
+        if !matches!(
+            mm::frame_state(frame),
+            None | Some(ferrix_frame::State::Reserved)
+        ) {
+            return Err("a frame of the pstore region is the allocator's, free or handed out");
+        }
+    }
+    println!("  pstore   none of its {} frames is free", len / PAGE_SIZE);
+    Ok(())
+}

@@ -91,6 +91,8 @@ pub(crate) struct Expected {
     pub(crate) mitigations: u32,
     /// The loader's KASLR state word.
     pub(crate) kaslr: u32,
+    /// 1 when the log is mirrored to the region kept across a reset.
+    pub(crate) pstore: u32,
 }
 
 /// What the check established, for the boot log.
@@ -567,6 +569,7 @@ fn kernel_store(expected: &Expected) -> Result<usize, &'static str> {
         (Config::Devmgr, expected.devmgr),
         (Config::Mitigations, expected.mitigations),
         (Config::Kaslr, expected.kaslr),
+        (Config::Pstore, expected.pstore),
     ];
     for (key, value) in wants {
         match config(key) {

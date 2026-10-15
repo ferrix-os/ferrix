@@ -89,13 +89,6 @@
       "purpose": "H6: the firmware (GOP) framebuffer lent to a node of its own under ferrix.efifb -- the one exemption from the reserved ranges, a node that takes no pin and holds the kernel's memory type, the PCI function holding it left undriven, the boot console stopped before the node exists, and the mode device_info reports (docs/DISPLAY.md section 8; consultant ledger lines 772, 1207, 1260)"
     },
     {
-      "ids": ["L.console.42-44", "L.mm.75"],
-      "owner": "pm3",
-      "branch": "pm3",
-      "date": "2026-10-15",
-      "purpose": "PM3, the kernel log kept across a reset (docs/POSTMORTEM.md section 3; the consultant's OK IF Q1-Q16, ledger line 1238): the mirror, attaching fails closed, the panic write-back, Pstore never free"
-    },
-    {
       "ids": ["L.device.35-37"],
       "owner": "net-yt6801",
       "branch": "net-yt6801",
