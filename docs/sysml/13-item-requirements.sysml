@@ -1042,13 +1042,15 @@ package FerrixItemRequirements {
             attribute :>> parent = "O.ISOLATE";
         }
         requirement <'H.BOOT.4'> firmwareTablesBounded : ItemHighLevel {
-            attribute :>> statement = "The kernel shall refuse an ACPI table or a
-                device tree whose declared length is shorter than its header or
-                reaches beyond the memory mapped for it, rather than read past it.";
-            attribute :>> criterion = "The ACPI and device-tree parsers' host tests
-                feed truncated, oversized and misaligned tables and each is refused
-                with its error, 0 read out of bounds; the kernel refuses a table
-                outside the direct map.";
+            attribute :>> statement = "The kernel shall refuse an ACPI table, a
+                device tree, or an SMBIOS entry point or structure table whose
+                declared length is shorter than its header or reaches beyond the
+                memory mapped for it, rather than read past it.";
+            attribute :>> criterion = "The ACPI, device-tree and SMBIOS parsers' host
+                tests feed truncated, oversized and misaligned tables and each is
+                refused with its error, 0 read out of bounds; the kernel refuses a
+                table outside the direct map, and an SMBIOS copy outside its region
+                of the memory map.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
         // Added by W-8 step 4 (smp): the processors a boot claims, which no
@@ -1113,6 +1115,19 @@ package FerrixItemRequirements {
                 and taken as absent (L.init.1 to L.init.3); and none is unpacked
                 into a root, which SAFETY-MANUAL AoU-24 assumes of the unpacker.";
             attribute :>> parent = "O.FAILSAFE";
+        }
+        // Added by D1 (docs/DMI.md; consultant ledger line 1339).
+        requirement <'H.BOOT.16'> firmwareIdentityOnlyFromAValidatedTable : ItemHighLevel {
+            attribute :>> statement = "The kernel shall show the firmware's identity
+                only from an SMBIOS table it validated, with the values the table
+                holds, and nothing when there is none or it does not validate; the
+                boot shall go on either way.";
+            attribute :>> criterion = "A test boot under QEMU with -smbios accepts the
+                table and names exactly the vendor and the product QEMU was given,
+                and no serial or UUID of it appears in the log; forged copies are
+                each refused by name at boot, and refused tables leave nothing
+                shown.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
     }
 

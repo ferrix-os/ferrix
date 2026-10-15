@@ -469,6 +469,72 @@ package FerrixDeviceRequirements {
             attribute :>> parent = ("H.DMA.1", "H.DMA.5");
             attribute :>> unit = "discovery::description::of";
         }
+        // L.discovery.2-5: the firmware's SMBIOS tables (docs/DMI.md; consultant
+        // ledger line 1339). The loader's handover (L.discovery.6, reserved and
+        // released unwritten) is .5's assumption: no requirement names a loader
+        // unit.
+        requirement <'L.discovery.2'> smbiosEntryPointChecked : ItemLowLevel {
+            attribute :>> statement = "EntryPoint::parse shall accept only a 3.x
+                entry point (_SM3_, length 24 to 32) or a 2.x one (_SM_, length 30
+                to 32, with a _DMI_ header at byte 16) whose bytes sum to zero, the
+                2.x one's _DMI_ header too, whose table is 1 to 1 MiB long; it shall
+                refuse a 2.x entry point whose own checksum fails even when its
+                _DMI_ header checks; and it shall answer any bytes without a panic.";
+            attribute :>> criterion = "Host tests: good 3.x and 2.x entry points
+                parse with Linux's version fixups; a bad checksum, a bad _DMI_
+                header, a bad _SM_ checksum beside a good _DMI_, lengths just
+                outside both ranges, every truncation, no anchor, an empty table
+                and one of 1 MiB and a byte are each refused with their error.";
+            attribute :>> parent = "H.BOOT.4";
+            attribute :>> unit = ("ferrix_smbios::EntryPoint::parse",
+                "ferrix_smbios::EntryPoint::v3", "ferrix_smbios::EntryPoint::v2");
+        }
+        requirement <'L.discovery.3'> smbiosWalkBounded : ItemLowLevel {
+            attribute :>> statement = "walk shall read no byte outside the table it is
+                given, shall hand on only a structure whose strings end inside it,
+                and shall stop at the count when there is one, at type 127 when there
+                is none, at a structure shorter than its header, and where a header
+                would not fit.";
+            attribute :>> criterion = "Host tests: a length past the end, a structure
+                shorter than its header, unterminated strings and a count larger
+                than the table stop the walk inside the table; every truncation and
+                every single-byte change of a good table walks within bounds; a 3.x
+                table stops at type 127 and a 2.x one with a count does not.";
+            attribute :>> parent = "H.BOOT.4";
+            attribute :>> unit = ("ferrix_smbios::walk", "ferrix_smbios::Smbios::new");
+        }
+        requirement <'L.discovery.4'> smbiosIdentityAsLinux : ItemLowLevel {
+            attribute :>> statement = "Smbios shall decode the identity fields of
+                types 0 to 3 from the offsets Linux's dmi_decode reads, the first
+                structure of a type winning, and render each as Linux's dmi-id
+                shows it, the strings' bytes unaltered.";
+            attribute :>> criterion = "Host tests: a table laid out as QEMU lays out
+                types 0, 1, 3 and 127 reads as Linux shows it, including the
+                release, the UUID in both byte orders, the chassis type, empty
+                strings, absent fields, bytes passed through, the modalias and the
+                cut to a page.";
+            attribute :>> parent = "H.BOOT.16";
+            attribute :>> unit = ("ferrix_smbios::Smbios::field_text",
+                "ferrix_smbios::Smbios::modalias", "ferrix_smbios::decode",
+                "ferrix_smbios::string");
+        }
+        requirement <'L.discovery.5'> smbiosCopyAcceptedOnlyInBounds : ItemLowLevel {
+            attribute :>> statement = "discovery::smbios shall read the loader's
+                SMBIOS copy only when it is wholly inside one region the memory map
+                reports as the SMBIOS copy and wholly inside the direct map, holds
+                more than the 32 bytes of the entry point and at most 1 MiB of
+                table, and re-parses with a table exactly as long as the entry point
+                says; and shall otherwise keep nothing, say why, and let the boot go
+                on.";
+            attribute :>> criterion = "At boot, forged copies -- none, outside the
+                region, straddling its end, below the direct map, overflowing,
+                holding no table, a byte longer than its table, a bad checksum --
+                are each refused by their name and a good one accepted; stage 1
+                requires the map to describe the real copy as the SMBIOS copy.";
+            attribute :>> parent = ("H.BOOT.4", "H.BOOT.16");
+            attribute :>> unit = ("discovery::smbios::range", "discovery::smbios::decode",
+                "discovery::smbios::open");
+        }
     }
 
     package Quiesce {
