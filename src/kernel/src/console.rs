@@ -166,8 +166,12 @@ impl<'port> Writer<'port> {
             self.put(byte);
             if self.remembered {
                 remember(byte);
-                screen::put(byte);
             }
+            // Under `ferrix.fbcon` a program's output is drawn too: on a
+            // machine whose screen is its only output (the N150 box) a
+            // driver's own lines and devmgr's word on a driver that failed
+            // are the ones that say why.
+            screen::put(byte);
         }
     }
 
@@ -255,7 +259,8 @@ enum Kind {
 }
 
 impl Kind {
-    /// Whether the bytes are kept in [`RECENT`] and drawn on the screen.
+    /// Whether the bytes are kept in [`RECENT`]. Every kind is drawn on the
+    /// screen under `ferrix.fbcon`.
     const fn remembered(self) -> bool {
         matches!(self, Kind::Line | Kind::Unlogged)
     }
