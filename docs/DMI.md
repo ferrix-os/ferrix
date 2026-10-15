@@ -264,6 +264,11 @@ absent branch is what runs there.
   architecture, unless on x86-64 its line names exactly that vendor and
   product, and if any marker appears anywhere in the serial log.
 * Negative controls through `gate.sh control`, each to read FIRED (§6).
+* Statement coverage of `discovery/smbios.rs` is measured on x86-64 only.
+  On AArch64 and ARMv7-A it is unmeasured until BACKLOG's row for Arm coverage
+  on the gate host closes (its drcov plugin is built for QEMU 10.2.1, the Arm
+  emulators there are 9.2.4); the first Arm coverage run after that owes the
+  file at 100% or each unreached line justified (consultant, ledger line 1809).
 
 ## 5. What it is not
 
