@@ -79,6 +79,10 @@ const KEY_FIRST_CONTROL: u64 = 16;
 /// devmgr reads only that something came.
 const SETTLED: &[u8] = b"settled";
 
+/// How often the controller's events are taken while its interrupt has not
+/// been seen: a low-speed keyboard's 8 ms interval, so no report waits.
+const SERVICE_POLL: u64 = 8 * MILLISECOND;
+
 /// How long the core has to answer a HELLO.
 const READY_PATIENCE: u64 = 2_000_000_000;
 
@@ -590,15 +594,43 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         self.bus.poll();
         self.forward();
         let _ = boot.write(SETTLED);
+        // Until the controller's interrupt has been seen to arrive, its
+        // events are also taken every SERVICE_POLL: on the N150 box no MSI
+        // came, the eight queued interrupt requests filled, and the keyboard
+        // reset itself after ten reports it could not deliver.
+        let mut interrupted = false;
+        let mut said = false;
         loop {
             self.forward();
-            let deadline = Deadline::At(self.bus.next_poll());
-            match self.port.wait(deadline) {
+            let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+            let next_poll = self.bus.next_poll();
+            let deadline = if interrupted {
+                next_poll
+            } else {
+                next_poll.min(now.saturating_add(SERVICE_POLL))
+            };
+            match self.port.wait(Deadline::At(deadline)) {
                 Ok(packet) if packet.kind == PACKET_INTERRUPT && packet.key == KEY_INTERRUPT => {
+                    interrupted = true;
                     let serviced = self.bus.on_interrupt();
                     let _ = self.interrupt.ack();
                     if serviced.is_err() {
                         return Err(Step::Faulted);
+                    }
+                }
+                Err(Error::TimedOut) if !interrupted => {
+                    if !said {
+                        said = true;
+                        say(format_args!(
+                            "usbhid: no interrupt from the controller yet: its events are taken every {} ms until one comes",
+                            SERVICE_POLL / 1_000_000
+                        ));
+                    }
+                    if self.bus.on_interrupt().is_err() {
+                        return Err(Step::Faulted);
+                    }
+                    if ferrix_rt::linux::monotonic_nanos().unwrap_or(0) >= next_poll {
+                        self.bus.poll();
                     }
                 }
                 Ok(packet) if packet.kind == PACKET_SIGNAL && packet.key >= KEY_FIRST_CONTROL => {
