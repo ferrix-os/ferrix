@@ -31,8 +31,6 @@
 //! asks for the default explicitly, which is how a card's `CMDLINE.TXT` turns
 //! the checks back on over an image that carries `skip` among its defaults.
 
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use ferrix_bootinfo::{BootView, option_in};
 
 use crate::console::println;
@@ -41,10 +39,6 @@ use crate::console::println;
 const OPTION: &str = "ferrix.checks";
 const SKIP: &str = "skip";
 const RUN: &str = "run";
-
-/// Whether the checks are skipped. Only [`init`] writes it, once, before the
-/// first check that could be.
-static SKIPPED: AtomicBool = AtomicBool::new(false);
 
 /// Read `ferrix.checks`, and say what it asked for.
 ///
@@ -60,7 +54,7 @@ pub(crate) fn init(view: &BootView<'_>) {
     match value {
         None => {}
         Some(SKIP) => {
-            SKIPPED.store(true, Ordering::Relaxed);
+            crate::boot_checks::skip();
             println!(
                 "  checks   {OPTION}={SKIP}: stages 2 to 12 are brought up and not checked; \
                  this boot is not a boot test"
@@ -84,7 +78,7 @@ pub(crate) fn init(view: &BootView<'_>) {
 }
 
 /// Whether the self-checks run on this boot: true unless [`init`] read
-/// `ferrix.checks=skip`.
+/// `ferrix.checks=skip`. The flag is the core's (`crate::boot_checks`).
 pub(crate) fn run() -> bool {
-    !SKIPPED.load(Ordering::Relaxed)
+    crate::boot_checks::run()
 }

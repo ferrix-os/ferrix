@@ -1373,3 +1373,22 @@ fn check_forged_64_bit_frames() -> Result<(), &'static str> {
     );
     Ok(())
 }
+
+/// Show that the exceptions nothing masks are survived where they land: an NMI
+/// in the kernel, and hardware breakpoints in the `SYSCALL` trampoline's ring-0
+/// stretches on the program's stack and `GS`. See `paranoid`. Then the
+/// exceptions a program raises itself, each of which has to end it with the
+/// signal Linux gives it, and `arch_prctl`'s refusals, the one call this
+/// entry answers itself. See `trap::check`; and `syscall::check` for the
+/// registers a fork child is handed.
+///
+/// # Errors
+///
+/// What did not come back, or did not end as it had to.
+pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
+    super::super::paranoid::check::run()?;
+    super::super::syscall::check::run()?;
+    super::super::syscall::check::run_decode()?;
+    super::super::gdt::check::run()?;
+    run()
+}

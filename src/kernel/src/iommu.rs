@@ -73,6 +73,9 @@ use crate::sync::SpinLock;
 use crate::{arch, mm, println};
 
 mod check;
+// Stage 10's check, raised above the core with the kernel split
+// (`docs/KERNEL-CRATES.md`): `check_iommu`, which main.rs runs.
+pub(crate) mod domain_check;
 mod gate;
 pub(crate) mod remapping;
 mod smmuv3;
@@ -83,7 +86,7 @@ pub(crate) use remapping::{
     open_check_window, route, stray_deliveries,
 };
 
-pub(crate) use check::{check_dma_faults, check_iommu, run as check_gate};
+pub(crate) use check::{check_dma_faults, run as check_gate};
 pub(crate) use vtd::{Invalidations, invalidations};
 
 use gate::Gate;
@@ -428,7 +431,8 @@ fn discover(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) -> (Report, Vec<Unit
 ///
 /// Nothing here can fail the boot: firmware that describes no IOMMU, or one
 /// this cannot follow, is reported and the boot goes on. `xtask test-boot`
-/// requires the placements on the machines it configures.
+/// requires the placements on the machines it configures. Last, the pin
+/// budgets' ceiling is counted.
 pub(crate) fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
     let (report, units, placements) = discover(view, nodes);
     remapping::note_bypassing(report.bypassing);
@@ -446,6 +450,12 @@ pub(crate) fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
         }
     }
     name_functions_without_vectors(nodes);
+    // The ceiling on raised pin budgets, a quarter of RAM, counted here at
+    // stage 10, checks or not: before devmgr can set a budget, and before
+    // the budget's checks in `domain_check::check_iommu` set one
+    // (`object::pin`). Counted in `check_iommu` until 2026-10-15, which ran
+    // straight after this (`docs/KERNEL-CRATES.md` §3 (3)).
+    crate::object::pin::count_ceiling();
 }
 
 /// While a unit remaps interrupts, name every PCI function that gets no

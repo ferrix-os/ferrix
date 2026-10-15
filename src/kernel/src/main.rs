@@ -15,6 +15,7 @@ extern crate alloc;
 mod arch;
 mod audit;
 mod backtrace;
+mod boot_checks;
 mod checks;
 mod claim;
 mod console;
@@ -288,7 +289,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // Straight after enumeration, which builds the PCI half.
     check_devices(view);
     iommu::report(view, device::devices());
-    iommu::check_iommu();
+    iommu::domain_check::check_iommu();
 
     // Stage 9's device objects, on the nodes just published: an I/O mapping of
     // a device's own aperture and nothing past it, reached from a forked

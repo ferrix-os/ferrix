@@ -18,6 +18,8 @@ mod x86_64;
 // `docs/certification/SPECULATION.md`.
 mod speculation;
 mod speculation_check;
+// The stage checks every architecture answers, by one name (`stage_check.rs`).
+pub(crate) mod stage_check;
 #[cfg(target_arch = "aarch64")]
 use aarch64::speculation as machine_speculation;
 #[cfg(target_arch = "arm")]
@@ -126,14 +128,6 @@ pub(crate) const fn write_combining_processors() -> Option<usize> {
     None
 }
 
-// What the switch gives a program back, checked in user mode: x86-64's
-// vector-state contract and its FS base kept in the task (docs/OPAQUE-KERNEL.md
-// §9.8, 3a and 3b), and ARMv7-A's thread ID registers (§9.14).
-#[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::check_switch_state;
-// ARMv7-A's: its thread ID registers (§9.14, 3b and F-66).
-#[cfg(target_arch = "arm")]
-pub(crate) use armv7a::check_switch_state;
 // The switches that left DS and ES unloaded, 0 over 0, for the fast path's
 // counts (OPAQUE-KERNEL.md §9.8, 3b, the DS/ES skip); none on Arm.
 #[cfg(target_arch = "aarch64")]
@@ -142,12 +136,6 @@ pub(crate) use aarch64::selector_skips_total;
 pub(crate) use armv7a::selector_skips_total;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::selector_skips_total;
-
-/// AArch64: no vector-state contract and no record of its own here yet.
-#[cfg(target_arch = "aarch64")]
-pub(crate) const fn check_switch_state() -> Result<(), &'static str> {
-    Ok(())
-}
 
 // A signal return page, for an architecture without a vDSO its programs
 // could read: ARMv7-A's (`syscall::sigpage`, F-48).
@@ -317,14 +305,6 @@ pub(crate) use aarch64::init_speculation;
 pub(crate) use armv7a::init_speculation;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::init_speculation;
-
-// The boot check for exceptions that arrive wherever the processor is.
-#[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::check_exception_entry;
-#[cfg(target_arch = "arm")]
-pub(crate) use armv7a::check_exception_entry;
-#[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::check_exception_entry;
 
 // The vDSO's code, whether it can read the counter itself, and the program
 // the boot check holds it to: none of the three on an architecture whose

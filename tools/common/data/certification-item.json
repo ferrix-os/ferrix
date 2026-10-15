@@ -144,6 +144,7 @@
         "audit.rs",
         "audit/**",
         "backtrace.rs",
+        "boot_checks.rs",
         "claim.rs",
         "console.rs",
         "console/**",

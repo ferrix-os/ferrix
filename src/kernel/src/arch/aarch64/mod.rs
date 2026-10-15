@@ -11,7 +11,7 @@ mod smp;
 pub(super) mod speculation;
 mod switch;
 mod timer;
-mod trap;
+pub(super) mod trap;
 mod trng;
 
 /// Clean and drop a buffer's lines, for memory about to be shared with such a
@@ -923,26 +923,6 @@ pub(crate) const USER_XSTATE_PROGRAM: &[u8] = &[];
 
 /// What [`USER_STEP_PROGRAM`] would exit with; unused while it is empty.
 pub(crate) const USER_STEP_STATUS: i32 = 0;
-
-/// Nothing to check: no exception finds the kernel on a program's stack.
-///
-/// x86-64 checks that an NMI or a hardware breakpoint in its `SYSCALL`
-/// trampoline, which runs in ring 0 on the program's stack and `GS`, is
-/// survived. An exception taken at EL1 here runs on `SP_EL1`, which a program
-/// never sets, and the per-CPU register `TPIDR_EL1` is not one EL0 can write.
-///
-/// Then the exceptions a program raises itself, each of which has to end it
-/// with the signal Linux gives it: see `trap::check`.
-///
-/// # Errors
-///
-/// A program that did not end as it had to.
-pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
-    crate::console::println!(
-        "  entry    every exception on {NAME} enters on a stack a program cannot set"
-    );
-    trap::check::run()
-}
 
 /// A program that `execve`s `/exec-target` and, if that returns, exits with
 /// the error number: the target's own status when it exists, 2 (`ENOENT`) when

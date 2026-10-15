@@ -855,7 +855,7 @@ pub(super) fn check_speculation() {
 ///
 /// Halts rather than returning, as every other stage's check does.
 pub(super) fn check_exception_entry() {
-    if let Err(problem) = arch::check_exception_entry() {
+    if let Err(problem) = arch::stage_check::check_exception_entry() {
         fatal!(
             catalog::STAGE3_TRAPS,
             "stage 3 self-check failed: {problem}"
@@ -1105,7 +1105,7 @@ pub(super) fn check_native_objects() {
 ///
 /// Halts rather than returning, as every other stage's check does.
 pub(super) fn check_switch_state() {
-    if let Err(problem) = arch::check_switch_state() {
+    if let Err(problem) = arch::stage_check::check_switch_state() {
         fatal!(
             catalog::STAGE9_OBJECTS,
             "stage 9 switch-state self-check failed: {problem}"

@@ -267,3 +267,19 @@ Each step is a branch of its own with before and after figures, gated through
 
 Estimate: S1 3 points, S2 4, S3 10 to 15 (most of it the visibility edits'
 review and the regenerated evidence), S4 1.
+
+## Where it stands
+
+* **Shape**: the certification consultant's design review, OK IF (1) to (12),
+  ledger line 1477; this document's answers to (1) to (4) and the step order,
+  OK IF (D1) to (D9), ledger line 1531. Each step's landing message cites both.
+* **S1** (branch `bs-a-s1`): the conflicts out, inside one crate. The checks
+  flag is the core's (`boot_checks.rs`; `checks.rs` parses the option and
+  sets it); the stage 3 and stage 9 wrappers moved into the check files they
+  run, reached by one name through `arch/stage_check.rs`; `iommu/check.rs` is
+  split, stage 10's domain and remapping check now `iommu/domain_check.rs`,
+  and the pin budgets' ceiling is counted at the end of `iommu::report`, which
+  `check_iommu` ran straight after. Product lines per ring: core 70,874 to
+  70,706, item 9,417 to 9,418, load unchanged; check lines core 32,743 to
+  32,984, item 4,281 to 4,275.
+* S2 to S4: not started.

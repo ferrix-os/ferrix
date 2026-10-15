@@ -20,7 +20,7 @@ static PUT_IN_X2APIC: AtomicU64 = AtomicU64::new(0);
 /// to skip its checks or the processor offers no x2APIC: turn x2APIC mode
 /// on, as firmware might have left it, before `leave_x2apic` looks.
 pub(crate) fn put_first_in_x2apic() {
-    if !crate::checks::run() || core::arch::x86_64::__cpuid(1).ecx & 1 << 21 == 0 {
+    if !crate::boot_checks::run() || core::arch::x86_64::__cpuid(1).ecx & 1 << 21 == 0 {
         return;
     }
     if TAKEN.swap(true, Ordering::AcqRel) {
@@ -49,7 +49,7 @@ pub(crate) fn put_first_in_x2apic() {
 pub(crate) fn require_every_processor(
     processors: u64,
 ) -> Result<Option<alloc::string::String>, &'static str> {
-    if !crate::checks::run() {
+    if !crate::boot_checks::run() {
         return Ok(None);
     }
     let (checked, switched) = super::modes_checked();

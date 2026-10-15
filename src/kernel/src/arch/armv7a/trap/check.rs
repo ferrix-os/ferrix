@@ -344,3 +344,24 @@ pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64;
         ],
     )
 }
+
+/// Nothing to check: no exception finds the kernel on a program's stack.
+///
+/// x86-64 checks that an NMI or a hardware breakpoint in its `SYSCALL`
+/// trampoline, which runs in ring 0 on the program's stack and `GS`, is
+/// survived. Every exception here is taken into a mode with its own banked
+/// stack pointer and stored on the SVC stack, which USR mode cannot set.
+///
+/// Then the exceptions a program raises itself, each of which has to end it
+/// with the signal Linux gives it: see `trap::check`.
+///
+/// # Errors
+///
+/// A program that did not end as it had to.
+pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
+    crate::console::println!(
+        "  entry    every exception on {} enters on a stack a program cannot set",
+        super::super::NAME
+    );
+    run()
+}

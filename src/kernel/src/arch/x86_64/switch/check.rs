@@ -2800,3 +2800,79 @@ pub(crate) fn run_inherit() -> Result<(), &'static str> {
     println!("  inherit  the inheritance program ended with {status}");
     Err(problem)
 }
+
+/// Stage 9: what the switch gives a program back, read by programs in ring 3
+/// -- the vector-state contract of the native calls that block, the `FS`
+/// base kept in the task, and `DS` and `ES` left unloaded only 0 over 0
+/// (`docs/OPAQUE-KERNEL.md` §9.8, 3a and 3b). See `switch::check`.
+///
+/// # Errors
+///
+/// The first case that read what it must not.
+pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+    let report = run()?;
+    if report.xsave {
+        crate::console::println!(
+            "  vectors  {} wakes from a blocking native call reset the vector registers with \
+             their own MXCSR and control word; {} Linux sleeps, preemptions and calls after one \
+             kept them",
+            report.reset,
+            report.kept
+        );
+        let how = if report.fast { "VZEROALL" } else { "XRSTOR" };
+        match report.xinuse {
+            Some((busy, quiet)) => crate::console::println!(
+                "  vectors  reset by {how}: {} x87 reset, {} left initial by XINUSE; XINUSE \
+                 after a busy and a quiet program: {busy:#x} and {quiet:#x}",
+                report.x87.0,
+                report.x87.1,
+            ),
+            None => crate::console::println!(
+                "  vectors  reset by {how}: {} x87 reset, {} left initial by XINUSE; XINUSE \
+                 not offered",
+                report.x87.0,
+                report.x87.1,
+            ),
+        }
+    } else {
+        crate::console::println!(
+            "  vectors  saved with FXSAVE: every switch keeps the vector registers whole, and \
+             the reset's cases are not run"
+        );
+    }
+    crate::console::println!(
+        "  fsbase   {} switches between two FS bases, each its own; a base cleared by a null \
+         selector came back as recorded, and leaked to no program; {} switches between two GS \
+         bases set with ARCH_SET_GS, each its own",
+        report.traded,
+        report.traded_gs
+    );
+    crate::console::println!(
+        "  gsbase   CR4.FSGSBASE read clear at the bring-up of {} of {} processors; {}; a \
+         program's WRGSBASE with a kernel address ended it with SIGILL on {} of them",
+        report.base_processors,
+        crate::smp::count(),
+        if report.base_clear_seen {
+            "set for the check, it was cleared again"
+        } else {
+            "this processor has no FSGSBASE, so the clear had nothing to clear and was not seen to"
+        },
+        report.base_refused_on
+    );
+    let selectors = run_selectors()?;
+    let compat = if selectors.compat_decided {
+        "a null DS faulted in compatibility mode"
+    } else {
+        "a null DS in compatibility mode not decided: TCG checks no data segment"
+    };
+    crate::console::println!(
+        "  selector {} switches left DS or ES unloaded, 0 over 0; programs read their own DS \
+         and ES across {} yields beside 3, USER_DS, an i386 program's, and a based descriptor \
+         then 0; {compat}",
+        selectors.skipped,
+        selectors.rounds
+    );
+    // The `FS`/`GS` skip's cases print their own `fsgs` line (3c).
+    run_fs_gs()?;
+    run_sysret_ss().and_then(|()| run_inherit())
+}

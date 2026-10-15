@@ -2474,3 +2474,53 @@ fn lazy_bc(
     patch(&mut code, 20, &rounds.to_le_bytes())?;
     load(name, &code)
 }
+
+/// Stage 9: what the switch gives a program back, read by programs in USR
+/// mode -- the VFP registers of a task resumed from a blocking native call
+/// and the two thread ID registers (`docs/OPAQUE-KERNEL.md` §9.14, 3a's port,
+/// 3b and F-66). See `switch::check`.
+///
+/// # Errors
+///
+/// The first case that read what it must not.
+pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+    // First, so that a sabotage of the lazy switch fires with the lazy
+    // check's own text rather than a later case's (`docs/OPAQUE-KERNEL.md`
+    // §9.15).
+    let lazy = run_lazy()?;
+    if lazy.ran {
+        crate::console::println!(
+            "  lazy     {} round trips between two programs without VFP moved no VFP register \
+             and wrote no FPEXC; first uses in ARM, Thumb and an IT block, SIGILL at its own \
+             address, zero behind a clear FPEXC.EN at bring-up, handover and execve, the record \
+             through signals, fork and execve; {}",
+            lazy.trips,
+            if lazy.migrated {
+                "a program with VFP state resumed on another processor kept it"
+            } else {
+                "the migration case did not run on one processor"
+            }
+        );
+    } else {
+        crate::console::println!("  lazy     no D32 VFP: the lazy cases are not run");
+    }
+    let vectors = run_vectors()?;
+    if vectors.ran {
+        crate::console::println!(
+            "  vectors  {} wakes from a blocking native call zeroed the caller-saved VFP \
+             registers and kept FPSCR and d8-d15; {} Linux sleeps, preemptions and calls after \
+             one kept them all",
+            vectors.reset,
+            vectors.kept
+        );
+    } else {
+        crate::console::println!("  vectors  no D32 VFP: the reset's cases are not run");
+    }
+    let traded = run_tls()?;
+    crate::console::println!(
+        "  tls      {traded} switches between two programs' TPIDRURO and TPIDRURW, each its \
+         own; a nanosleep, a value equal to the one last written, a fork child and an execve'd \
+         image each read theirs"
+    );
+    Ok(())
+}

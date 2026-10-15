@@ -16,7 +16,7 @@ pub(crate) mod mmio;
 mod signal;
 mod smp;
 pub(super) mod speculation;
-mod switch;
+pub(super) mod switch;
 mod timer;
 
 /// Clean and drop a buffer's lines, for memory about to be shared with such a
@@ -33,7 +33,7 @@ pub(crate) use cpu::clean_to_poc as clean_for_walker;
 /// the region's lines only.
 pub(crate) use cpu::clean_to_poc as write_back_for_reset;
 pub(crate) use cpu::sync_instructions;
-mod trap;
+pub(super) mod trap;
 
 pub(crate) use signal::{SIGNAL_RED_ZONE, UserContext, restore_signal_frame, setup_signal_frame};
 
@@ -110,56 +110,6 @@ pub(crate) const FAST_WRITE_READ: bool = false;
 /// `docs/OPAQUE-KERNEL.md` §9.8, 3b): none here, which has no segments.
 pub(crate) const fn selector_skips_total() -> Option<[u64; 3]> {
     None
-}
-
-/// Stage 9: what the switch gives a program back, read by programs in USR
-/// mode -- the VFP registers of a task resumed from a blocking native call
-/// and the two thread ID registers (`docs/OPAQUE-KERNEL.md` §9.14, 3a's port,
-/// 3b and F-66). See `switch::check`.
-///
-/// # Errors
-///
-/// The first case that read what it must not.
-pub(crate) fn check_switch_state() -> Result<(), &'static str> {
-    // First, so that a sabotage of the lazy switch fires with the lazy
-    // check's own text rather than a later case's (`docs/OPAQUE-KERNEL.md`
-    // §9.15).
-    let lazy = switch::check::run_lazy()?;
-    if lazy.ran {
-        crate::console::println!(
-            "  lazy     {} round trips between two programs without VFP moved no VFP register \
-             and wrote no FPEXC; first uses in ARM, Thumb and an IT block, SIGILL at its own \
-             address, zero behind a clear FPEXC.EN at bring-up, handover and execve, the record \
-             through signals, fork and execve; {}",
-            lazy.trips,
-            if lazy.migrated {
-                "a program with VFP state resumed on another processor kept it"
-            } else {
-                "the migration case did not run on one processor"
-            }
-        );
-    } else {
-        crate::console::println!("  lazy     no D32 VFP: the lazy cases are not run");
-    }
-    let vectors = switch::check::run_vectors()?;
-    if vectors.ran {
-        crate::console::println!(
-            "  vectors  {} wakes from a blocking native call zeroed the caller-saved VFP \
-             registers and kept FPSCR and d8-d15; {} Linux sleeps, preemptions and calls after \
-             one kept them all",
-            vectors.reset,
-            vectors.kept
-        );
-    } else {
-        crate::console::println!("  vectors  no D32 VFP: the reset's cases are not run");
-    }
-    let traded = switch::check::run_tls()?;
-    crate::console::println!(
-        "  tls      {traded} switches between two programs' TPIDRURO and TPIDRURW, each its \
-         own; a nanosleep, a value equal to the one last written, a fork child and an execve'd \
-         image each read theirs"
-    );
-    Ok(())
 }
 
 pub(crate) const STAT_LAYOUT: super::StatLayout = super::StatLayout::Stat64;
@@ -998,26 +948,6 @@ pub(crate) const USER_XSTATE_PROGRAM: &[u8] = &[];
 
 /// What [`USER_STEP_PROGRAM`] would exit with; unused while it is empty.
 pub(crate) const USER_STEP_STATUS: i32 = 0;
-
-/// Nothing to check: no exception finds the kernel on a program's stack.
-///
-/// x86-64 checks that an NMI or a hardware breakpoint in its `SYSCALL`
-/// trampoline, which runs in ring 0 on the program's stack and `GS`, is
-/// survived. Every exception here is taken into a mode with its own banked
-/// stack pointer and stored on the SVC stack, which USR mode cannot set.
-///
-/// Then the exceptions a program raises itself, each of which has to end it
-/// with the signal Linux gives it: see `trap::check`.
-///
-/// # Errors
-///
-/// A program that did not end as it had to.
-pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
-    crate::console::println!(
-        "  entry    every exception on {NAME} enters on a stack a program cannot set"
-    );
-    trap::check::run()
-}
 
 /// A program that spins, then writes a tagged line and exits with a status it
 /// reads out of its own image.
