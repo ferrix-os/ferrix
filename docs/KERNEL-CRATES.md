@@ -304,7 +304,8 @@ review and the regenerated evidence), S4 1.
   "the kernel" to all of the kernel's packages and orders the three library
   crates (inert until they exist); `decision-coverage.py` knows the guard
   symbols under any of the crates' names and refuses an image with neither.
-* **S3a** (branch `bs-a-s3`): ledger 1565's (2), before the first
+* **S3a** (branch `bs-a-s3`; the consultant's code review OK IF (1), ledger
+  line 1575): ledger 1565's (2), before the first
   CHECKS-ONLY marker: a marker the gate cannot place (no item after it, or
   inside braces: an inline module, an `impl`) fails the gate; the
   upward-reference rule is shown refusing a core file and an item file that
@@ -312,5 +313,15 @@ review and the regenerated evidence), S4 1.
   crates' root, `::ferrix_kernel_load::fs`, which it used to skip); and
   `check-crate-layering.sh` fails when a crate `kernel_crates` lists is not
   in the workspace instead of passing over its rules.
+* **Where the raised architecture checks get their `cfg`** (ledger line
+  1579): shape A, no exception to the layering rule. `kernel_load.rs`
+  declares the positions without a conditional and without per-architecture
+  re-exports (`pub mod arch { pub use ferrix_kernel_core::arch::*; pub mod
+  x86_64 { pub mod trap { pub mod check; } ... } ... }`); each raised
+  architecture check starts with `#![cfg(target_arch = "...")]` and reaches
+  the core through `ferrix_kernel_core::arch::<isa>::...`, a mechanical edit
+  S3 lists. An exception in `check-crate-layering.sh` for crate roots (shape
+  B, conditions B1 to B5) only if shape A does not compile, with the error in
+  the S3 commit.
 * S3 and S4: not started. D5 (`KERNEL-INTERFACE.md`) and the
   `disallowed-methods` list come with S3, which makes the first `pub`.
