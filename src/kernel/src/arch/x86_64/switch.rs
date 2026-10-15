@@ -348,6 +348,10 @@ impl UserState {
 
     /// A program's state before it has run: no thread pointer, and the x87 and
     /// SSE control words a processor has at reset ([`FpuArea::initial`]).
+    #[allow(
+        clippy::new_without_default,
+        reason = "`new` is the one way to make it, at a place the kernel chooses; a `Default` would be a second"
+    )]
     pub const fn new() -> UserState {
         UserState {
             thread_pointer: 0,

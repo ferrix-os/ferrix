@@ -104,7 +104,7 @@ pub mod platform {
             pub mod usb;
         }
     }
-    /// STMicroelectronics' systems on chip.
+    /// ST's systems on chip, by their vendor prefix `st`.
     pub mod st {
         pub mod stm32mp1;
     }

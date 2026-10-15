@@ -221,6 +221,10 @@ const _: () = assert!(
 impl UserState {
     /// A program's state before it has run: no thread pointer, the default
     /// floating-point mode, every register zero.
+    #[allow(
+        clippy::new_without_default,
+        reason = "`new` is the one way to make it, at a place the kernel chooses; a `Default` would be a second"
+    )]
     pub const fn new() -> UserState {
         UserState {
             thread_pointer: 0,

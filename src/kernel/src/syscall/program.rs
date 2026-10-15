@@ -104,6 +104,10 @@ impl ProgramFile {
     }
 
     /// The file's length when it was opened.
+    #[allow(
+        clippy::len_without_is_empty,
+        reason = "callers ask how many, never whether none"
+    )]
     pub fn len(&self) -> u64 {
         self.len
     }

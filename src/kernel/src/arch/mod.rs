@@ -150,10 +150,6 @@ pub use armv7a::check_distributor;
 ///
 /// None.
 #[cfg(target_arch = "x86_64")]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "the Arm architectures' checks return what failed, and callers are shared"
-)]
 pub const fn check_distributor() -> Result<DistributorCheck, &'static str> {
     Ok(DistributorCheck {
         lines: None,

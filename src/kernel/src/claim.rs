@@ -62,6 +62,10 @@ pub struct Claims {
 
 impl Claims {
     /// DOC-OWED
+    #[allow(
+        clippy::new_without_default,
+        reason = "`new` is the one way to make it, at a place the kernel chooses; a `Default` would be a second"
+    )]
     pub const fn new() -> Self {
         Self {
             held: SpinLock::new(Vec::new()),

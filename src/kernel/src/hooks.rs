@@ -39,6 +39,10 @@ pub struct Full;
 
 impl<T: 'static, const N: usize> Hooks<T, N> {
     /// An empty list.
+    #[allow(
+        clippy::new_without_default,
+        reason = "`new` is the one way to make it, at a place the kernel chooses; a `Default` would be a second"
+    )]
     pub const fn new() -> Self {
         Hooks {
             slots: [const { Once::new() }; N],
@@ -72,6 +76,10 @@ impl<T: 'static, const N: usize> Hooks<T, N> {
     }
 
     /// How many registrations have been made.
+    #[allow(
+        clippy::len_without_is_empty,
+        reason = "callers ask how many, never whether none"
+    )]
     pub fn len(&self) -> usize {
         self.iter().count()
     }

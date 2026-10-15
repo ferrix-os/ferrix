@@ -185,6 +185,10 @@ fn count_wakes(queues: &[&WaitQueue], drained: &[bool]) {
 
 impl WaitQueue {
     /// A queue with nobody on it.
+    #[allow(
+        clippy::new_without_default,
+        reason = "`new` is the one way to make it, at a place the kernel chooses; a `Default` would be a second"
+    )]
     pub const fn new() -> WaitQueue {
         WaitQueue {
             waiters: IrqSpinLock::new(Vec::new()),
