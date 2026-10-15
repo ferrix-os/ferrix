@@ -669,8 +669,10 @@ fn quarantine(mut spare: Box<Quarantined>, pinned: Pinned, held: Held, quiet: bo
     }
 }
 
+// CHECKS-ONLY: object/pin/check.rs
 /// What a release gave back.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct Released {
     /// Pages given back to the allocator.
     pub pages: usize,
@@ -705,9 +707,11 @@ pub(crate) fn quarantine_release(node: &DeviceNode) {
     }
 }
 
+// CHECKS-ONLY: object/pin/check.rs
 /// [`quarantine_release`]'s work, for `domain`. A boot check names in
 /// `refusing` how many of the pins to treat as refused by the domain, as a
 /// unit that never answers would refuse them; every other caller passes 0.
+#[doc(hidden)]
 pub fn release(domain: &Arc<Domain>, refusing: usize) -> Released {
     let mut freed: Option<Box<Quarantined>> = None;
     {

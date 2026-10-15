@@ -86,8 +86,10 @@ pub(super) fn check_vectors(
     check_msi(published, report)
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
 /// its interrupt on request (QEMU's `docs/specs/edu.rst`).
+#[doc(hidden)]
 pub const EDU: (u16, u16) = (0x1234, 0x11E8);
 /// `edu`'s register that raises its interrupt with the bits written.
 const EDU_RAISE: u64 = 0x60;

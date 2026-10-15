@@ -369,6 +369,7 @@ fn cstar_stub_address() -> u64 {
     ferrix_syscall32_stub as *const () as usize as u64
 }
 
+// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs
 /// Where the `LSTAR` entry point is: what `IA32_LSTAR` holds, and what the
 /// system call window check puts a breakpoint on.
 ///
@@ -377,6 +378,7 @@ fn cstar_stub_address() -> u64 {
 /// profile's link-time optimisation into one of them and a renamed
 /// `ferrix_syscall_stub.1` nothing defines, which is how the release build
 /// stopped linking once the window check declared it as a `static`.
+#[doc(hidden)]
 pub fn stub_address() -> u64 {
     ferrix_syscall_stub as *const () as usize as u64
 }
@@ -628,11 +630,13 @@ fn write_outcome(frame: &mut SyscallFrame, outcome: Outcome) {
     }
 }
 
+// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs
 /// Whether `number` is one of the three native calls declared to destroy the
 /// caller's vector registers, as across a function call: `channel_write_read`,
 /// `object_wait_one` and `port_wait`, the native calls that block (3a). By
 /// number, on this entry alone: no Linux number, and nothing through
 /// `int $0x80`.
+#[doc(hidden)]
 pub const fn vectors_die_in(number: usize) -> bool {
     use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, OBJECT_WAIT_ONE, PORT_WAIT};
     matches!(number, CHANNEL_WRITE_READ | OBJECT_WAIT_ONE | PORT_WAIT)

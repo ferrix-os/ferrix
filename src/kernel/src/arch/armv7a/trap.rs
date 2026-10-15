@@ -545,10 +545,12 @@ fn dispatch_marked(args: &crate::trap::SyscallArgs, regs: &UserRegs) -> crate::t
     outcome
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs, arch/armv7a/trap/check.rs
 /// Whether `number` is one of the three native calls declared to lose the
 /// caller-saved VFP registers, as across a function call: `channel_write_read`,
 /// `object_wait_one` and `port_wait`, the native calls that block (§9.14). By
 /// number, at the one `svc` entry every program uses.
+#[doc(hidden)]
 pub const fn vectors_die_in(number: usize) -> bool {
     use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, OBJECT_WAIT_ONE, PORT_WAIT};
     matches!(number, CHANNEL_WRITE_READ | OBJECT_WAIT_ONE | PORT_WAIT)

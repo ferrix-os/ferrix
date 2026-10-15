@@ -69,8 +69,10 @@ pub fn run() -> Result<(), &'static str> {
     Ok(())
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// VT-d units on which [`check_firmware_left_on`] left the queue on as
 /// firmware would and saw `open`'s path turn it off.
+#[doc(hidden)]
 pub static FIRMWARE_QUEUES_STOPPED: core::sync::atomic::AtomicU64 =
     core::sync::atomic::AtomicU64::new(0);
 
@@ -202,6 +204,8 @@ pub(crate) fn require_masked_byte_served() {
     MASKED_BYTE_SERVED.store(true, core::sync::atomic::Ordering::Relaxed);
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// Whether [`require_masked_byte_served`] found its byte read.
+#[doc(hidden)]
 pub static MASKED_BYTE_SERVED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);

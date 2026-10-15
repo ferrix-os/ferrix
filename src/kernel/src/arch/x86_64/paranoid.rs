@@ -104,7 +104,9 @@ const DR6_BREAKPOINTS: u64 = 0xF;
 /// instruction breakpoint.
 const RFLAGS_RF: u64 = 1 << 16;
 
+// CHECKS-ONLY: arch/x86_64/paranoid/check.rs
 /// NMIs taken.
+#[doc(hidden)]
 pub static NMIS: AtomicU64 = AtomicU64::new(0);
 
 /// NMIs taken since boot: for interrupt remapping's check R2, that a forged
@@ -112,15 +114,23 @@ pub static NMIS: AtomicU64 = AtomicU64::new(0);
 pub(crate) fn nmis() -> u64 {
     NMIS.load(Ordering::Relaxed)
 }
+// CHECKS-ONLY: arch/x86_64/paranoid/check.rs
 /// Kernel `#DB`s taken for each hardware breakpoint, by the slot DR6 named.
+#[doc(hidden)]
 pub static BREAKPOINTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+// CHECKS-ONLY: arch/x86_64/paranoid/check.rs
 /// Paranoid handlers that found `GS` naming no processor's record.
+#[doc(hidden)]
 pub static FOREIGN_GS: AtomicU64 = AtomicU64::new(0);
+// CHECKS-ONLY: arch/x86_64/paranoid/check.rs
 /// NMIs taken from ring 3, of [`NMIS`]: the ones whose entry found a
 /// program's `GS` base in the register and swapped.
+#[doc(hidden)]
 pub static USER_NMIS: AtomicU64 = AtomicU64::new(0);
 
+// CHECKS-ONLY: arch/x86_64/paranoid/check.rs
 /// Runs of [`debug_hook`].
+#[doc(hidden)]
 pub static HOOK_RUNS: AtomicU64 = AtomicU64::new(0);
 
 /// Where `ferrix_paranoid_common` hands over, on the vector's own stack, with
@@ -203,9 +213,11 @@ fn note_gs() {
     }
 }
 
+// CHECKS-ONLY: arch/x86_64/paranoid/check.rs
 /// Called by every kernel `#DB` handler run, so that the nesting check can put
 /// a breakpoint on code the handler executes.
 #[inline(never)]
+#[doc(hidden)]
 pub fn debug_hook() {
     let _ = HOOK_RUNS.fetch_add(1, Ordering::Relaxed);
 }

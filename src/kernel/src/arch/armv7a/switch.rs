@@ -453,7 +453,9 @@ pub(super) unsafe fn load_user_fp(fpscr: u32, doubles: [u64; 32]) {
     });
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Run `body` with interrupts masked on this processor, as they were after.
+#[doc(hidden)]
 pub fn masked<R>(body: impl FnOnce() -> R) -> R {
     let open = super::interrupts_enabled();
     super::disable_interrupts();
@@ -464,7 +466,9 @@ pub fn masked<R>(body: impl FnOnce() -> R) -> R {
     result
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// `FPEXC.EN`.
+#[doc(hidden)]
 pub const FPEXC_EN: u32 = 1 << 30;
 
 /// What each processor's `FPEXC.EN` was last written to (§9.15, D2), by
@@ -478,8 +482,10 @@ fn vfp_record() -> Option<&'static AtomicBool> {
     VFP_ON.get(crate::smp::this_cpu()?.logical)
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Whether this processor's `FPEXC.EN` is set: its record, or the register
 /// itself before the record can be named.
+#[doc(hidden)]
 pub fn vfp_on() -> bool {
     match vfp_record() {
         Some(record) => record.load(Ordering::Relaxed),
@@ -487,15 +493,19 @@ pub fn vfp_on() -> bool {
     }
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Write this processor's record.
+#[doc(hidden)]
 pub fn set_vfp_record(on: bool) {
     if let Some(record) = vfp_record() {
         record.store(on, Ordering::Relaxed);
     }
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// `FPEXC`, read from the register: for the checks, which compare it with
 /// the record, and before the record exists. Zero on a core with no VFP.
+#[doc(hidden)]
 pub fn fpexc() -> u32 {
     if super::cpu::user_fpu_doubles() == 0 {
         return 0;
@@ -508,17 +518,20 @@ pub fn fpexc() -> u32 {
 /// What a scrub loads: no `FPSCR` and every double zero, in read-only data.
 static ZERO_STATE: UserState = UserState::new();
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Turn this processor's VFP on: `FPEXC.EN`, an `isb`, the record.
 ///
 /// # Safety
 ///
 /// (SYSREG) This processor has a VFP and interrupts are masked.
+#[doc(hidden)]
 pub unsafe fn turn_on() {
     // SAFETY: (SYSREG) the caller's guarantee.
     unsafe { ferrix_fpu_enable() };
     set_vfp_record(true);
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Zero every VFP register this processor has and `FPSCR`, then clear
 /// `FPEXC.EN` and the record (§9.15, I2): what stays behind a clear `EN` is
 /// nobody's.
@@ -527,6 +540,7 @@ pub unsafe fn turn_on() {
 ///
 /// (SYSREG) This processor has `count` double registers, `EN` is set, and
 /// interrupts are masked.
+#[doc(hidden)]
 pub unsafe fn scrub_off(count: u8) {
     // SAFETY: (SYSREG) `EN` is set; the source is the read-only zero state.
     unsafe { ferrix_user_fpu_restore(&raw const ZERO_STATE, u32::from(count == 32)) };

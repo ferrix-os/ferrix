@@ -452,6 +452,7 @@ impl Reserved {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// A PCI function's MSI capability, for one that has no MSI-X table, and
 /// the one vector minted from it.
 ///
@@ -471,6 +472,7 @@ impl Reserved {
 /// Every write goes through the node's configuration lock
 /// ([`DeviceNode::config_writes`]), which bus mastering's writes and a
 /// driver's take too.
+#[doc(hidden)]
 pub struct MsiFunction {
     /// The function's requester ID, which its message writes carry.
     requester: u32,
@@ -582,12 +584,14 @@ impl MsiFunction {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// What the kernel has made a function's configuration space hold, and the
 /// refusals it has printed: everything under the node's configuration lock.
 ///
 /// [`DeviceNode::verify_config`] reads the registers back against the first
 /// five, so each is updated in the same hold as the write that makes it so.
 #[derive(Debug)]
+#[doc(hidden)]
 pub struct ConfigState {
     /// One bit per dword of the 4 KiB at which a driver's write has been
     /// refused and the refusal printed, so each is printed once. 1,024 bits,
@@ -633,11 +637,13 @@ impl ConfigState {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// One function's configuration space, mapped, for reading only: what a
 /// driver's `device_config_read` and the checks read through. A read outside
 /// the function's space, or not aligned to its width, answers all ones, as
 /// hardware answers for a register that is not there.
 #[derive(Debug, Clone, Copy)]
+#[doc(hidden)]
 pub struct MappedConfig {
     /// The mapping.
     registers: Mmio,
@@ -678,6 +684,7 @@ impl MappedConfig {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// A published node's configuration space with its configuration lock held:
 /// the one type that writes it after stage 10.
 ///
@@ -692,6 +699,7 @@ impl MappedConfig {
     missing_debug_implementations,
     reason = "a held lock over a mapping; nothing in it is worth printing"
 )]
+#[doc(hidden)]
 pub struct ConfigWrites<'a> {
     /// The function's space.
     space: MappedConfig,
@@ -755,7 +763,9 @@ impl ferrix_pci::ConfigSpace for ConfigWrites<'_> {
 /// An MSI-X message: its address and data.
 type Message = (u64, u32);
 
+// CHECKS-ONLY: device/config_check.rs
 /// A PCI function's MSI-X table, and the vectors minted from it.
+#[doc(hidden)]
 pub struct MsixTable {
     /// The function's requester ID, which its message writes carry and a
     /// GICv3's ITS translates them by.
@@ -1115,13 +1125,13 @@ pub struct DeviceNode {
     pci: Option<PciFunction>,
     /// Whether the function's bus mastering has been turned on for a driver,
     /// which the first pin into its domain does and a quiesce undoes.
-    pub dma_on: AtomicBool,
+    dma_on: AtomicBool,
     /// Its index in [`devices`], once published.
     index: usize,
     /// Set when [`DeviceNode::verify_config`] found a kernel-owned register
     /// rewritten: from then on, until reboot, every call that needs `MANAGE`
     /// on the node answers `BAD_STATE`.
-    pub refused: AtomicBool,
+    refused: AtomicBool,
     /// The isolated-interrupts mark (`DEVICE_LIMIT_ISOLATED_INTERRUPTS`):
     /// set once by `devmgr` and never cleared. While it is set and the
     /// machine's interrupts are not isolated, the node's vectors and pins
@@ -1134,9 +1144,9 @@ pub struct DeviceNode {
     vectors: Vec<Vector>,
     /// A PCI function's MSI-X table, when it has one vectors can be minted
     /// from.
-    pub msix: Option<MsixTable>,
+    msix: Option<MsixTable>,
     /// A PCI function's MSI capability, when it has no MSI-X table to offer.
-    pub msi: Option<MsiFunction>,
+    msi: Option<MsiFunction>,
     /// The node's one configuration lock: every write of a published PCI
     /// function's configuration space, the kernel's and a driver's, is made
     /// holding it, through the [`ConfigWrites`] it guards -- bus mastering's
@@ -1155,10 +1165,10 @@ pub struct DeviceNode {
     config_bytes: u16,
     /// The bytes a driver may write (`ferrix_pci::window`), computed at
     /// stage 10.
-    pub writable: Writable,
+    writable: Writable,
     /// Each memory BAR enumeration found assigned, by slot: what the BAR
     /// registers must read back.
-    pub bars: [Option<MintedBar>; 6],
+    bars: [Option<MintedBar>; 6],
     /// The IOMMU domain its DMA goes through, made the first time it is asked
     /// for.
     domain: SpinLock<Option<Arc<iommu::Domain>>>,
@@ -1179,6 +1189,59 @@ pub struct DeviceNode {
     binding: u16,
     /// How it reaches memory.
     dma: DmaShape,
+}
+
+// The fields of a `DeviceNode` stage 10's configuration-space check reads and
+// sets (`device/config_check.rs`, raised to the load crate by the kernel split):
+// private to everything else, reached by these accessors alone (ledger line
+// 1630, F1).
+
+// CHECKS-ONLY: device/config_check.rs
+/// The node's minted BARs, by slot.
+#[doc(hidden)]
+#[must_use]
+pub fn node_bars(node: &DeviceNode) -> &[Option<MintedBar>; 6] {
+    &node.bars
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// The node's MSI capability, if it has one.
+#[doc(hidden)]
+#[must_use]
+pub fn node_msi(node: &DeviceNode) -> Option<&MsiFunction> {
+    node.msi.as_ref()
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// The node's MSI-X table, if it has one.
+#[doc(hidden)]
+#[must_use]
+pub fn node_msix(node: &DeviceNode) -> Option<&MsixTable> {
+    node.msix.as_ref()
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// Which bytes of the node's configuration space its driver may write.
+#[doc(hidden)]
+#[must_use]
+pub fn node_writable(node: &DeviceNode) -> &Writable {
+    &node.writable
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// Whether the node's function may master the bus, as the kernel last set it.
+#[doc(hidden)]
+#[must_use]
+pub fn node_dma_on(node: &DeviceNode) -> &AtomicBool {
+    &node.dma_on
+}
+
+// CHECKS-ONLY: device/config_check.rs
+/// Whether the node has refused its driver for breaking its rule.
+#[doc(hidden)]
+#[must_use]
+pub fn node_refused(node: &DeviceNode) -> &AtomicBool {
+    &node.refused
 }
 
 impl DeviceNode {
@@ -1953,9 +2016,11 @@ impl MsixTable {
     }
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// A memory BAR as enumeration found it assigned: what its register must
 /// read back.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[doc(hidden)]
 pub struct MintedBar {
     /// The address, both halves for a 64-bit BAR.
     pub address: u64,

@@ -79,6 +79,7 @@ pub fn run() -> Result<(), &'static str> {
     Ok(())
 }
 
+// CHECKS-ONLY: object/write_read_check.rs, object/fast_path_check.rs, syscall/seccomp_check.rs, syscall/seccomp_filters_check.rs, through arch/stage_check.rs
 /// Take the entry a system call of `abi` arrives through, with a frame built
 /// from these registers as the processor leaves them, and answer what the
 /// entry left in `RAX`.
@@ -90,6 +91,7 @@ pub fn run() -> Result<(), &'static str> {
 /// Interrupts are as the caller had them: a real entry starts with them masked
 /// and leaves them so, this wrapper does both for a task that runs with them
 /// open.
+#[doc(hidden)]
 pub fn drive_system_call(
     abi: crate::trap::Abi,
     number: usize,
@@ -157,6 +159,7 @@ pub fn drive_system_call(
     result
 }
 
+// CHECKS-ONLY: object/write_read_check.rs, object/fast_path_check.rs, syscall/seccomp_check.rs, syscall/seccomp_filters_check.rs, through arch/stage_check.rs
 /// Take `SYSCALL`'s entry with a native call of `number` and these argument
 /// registers, and answer what the entry left in `RAX` and in the second,
 /// third and fourth argument registers (`RSI`, `RDX`, `R10`): where
@@ -165,6 +168,7 @@ pub fn drive_system_call(
 ///
 /// For the `channel_write_read` check (`object::write_read_check`), run on a
 /// thread of a check's process, as [`drive_system_call`] is run.
+#[doc(hidden)]
 pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     use ferrix_sync::IrqControl;
 

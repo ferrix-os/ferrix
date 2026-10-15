@@ -1046,8 +1046,10 @@ impl Drop for Domain {
 // Units the kernel programs
 // ---------------------------------------------------------------------------
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// Every unit translation was turned on for, and the functions behind each.
 #[derive(Debug, Default)]
+#[doc(hidden)]
 pub struct Programmed {
     /// VT-d units translating.
     pub vtd: Vec<vtd::Unit>,
@@ -1110,7 +1112,9 @@ struct StreamMap {
     unit: usize,
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// What [`bring_up`] turned on.
+#[doc(hidden)]
 pub static PROGRAMMED: Once<Programmed> = Once::new();
 
 /// What bringing the units up did.

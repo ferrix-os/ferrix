@@ -200,12 +200,14 @@ pub struct UserState {
     fpu: FpuArea,
 }
 
+// CHECKS-ONLY: arch/x86_64/switch/check.rs
 /// An `XSAVE` area in the standard form, for the components
 /// `cpu::enable_extended_state` enables: the 512-byte legacy area `FXSAVE`
 /// also writes, the header, and the upper halves of the sixteen `YMM`
 /// registers. `FXSAVE` uses the first part alone.
 #[repr(C, align(64))]
 #[derive(Debug, Clone)]
+#[doc(hidden)]
 pub struct FpuArea {
     /// x87 and SSE, as `FXSAVE` lays them out.
     pub legacy: [u8; 512],

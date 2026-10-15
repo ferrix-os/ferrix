@@ -20,7 +20,6 @@ mod smp;
 pub(super) mod speculation;
 pub mod switch;
 pub mod syscall;
-pub use syscall::check::{drive_native_words, drive_system_call};
 pub(super) mod trap;
 
 pub use cpu::hardware_random;

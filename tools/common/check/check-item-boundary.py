@@ -1193,9 +1193,18 @@ def checks_only_items(files: list[str], read, problems: list[str] | None = None)
                                     f"module, an impl or a function): the gate cannot place its item")
                 continue
             found = None
+            # Open brackets of an attribute that runs over several lines
+            # (`#[allow(\n    lint,\n    reason = ..\n)]`), skipped whole.
+            attribute = 0
             for after in lines[number + 1 :]:
                 stripped = after.strip()
-                if not stripped or stripped.startswith(("#[", "///", "//")):
+                if attribute > 0:
+                    attribute += stripped.count("[") - stripped.count("]")
+                    continue
+                if stripped.startswith("#["):
+                    attribute = stripped.count("[") - stripped.count("]")
+                    continue
+                if not stripped or stripped.startswith(("///", "//")):
                     continue
                 found = CHECKS_ONLY_ITEM.match(after)
                 break
@@ -1277,6 +1286,7 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
     problems += kernel_paths_unresolved(refs, modules, {p.replace("-", "_") for p in entries})
     if marked:
         resolver = Resolver(modules, {p.replace("-", "_") for p in entries})
+        crate_of = {rel: crates[0] for rel, crates in reached.items() if len(crates) == 1}
         for ref in refs:
             if is_test_file(ref.file, manifest):
                 continue
@@ -1285,9 +1295,40 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
                 continue
             for name in ref.segments:
                 where = marked.get((landed[0], name))
+                # The item's own module and those below it, in its own crate
+                # -- what a private item reached before it was made `pub` for
+                # a raised check -- still use it as product code did; anything
+                # else is product code reaching a checks-only item (ledger
+                # lines 1531 (4)(b), 1630).
+                scope = landed[0]
+                if where is not None and crate_of.get(ref.file) == crate_of.get(where) \
+                        and ref.module[: len(scope)] == scope:
+                    continue
                 if where is not None:
                     problems.append(f"{ref.file}:{ref.line}: names {key_of(landed[0])}::{name}, "
                                     f"checks-only ({where}), from product code")
+    # Product code calling check code across the split (ledger line 1585,
+    # Q2.2; 1630, F3.2): a product file may not name a raised check file, nor
+    # a check file another crate builds -- the checks' helpers are not the
+    # kernel's interface. The composition root, which runs the boot's checks
+    # in order, is the one exception, as it is for the load.
+    resolver = Resolver(modules, {p.replace("-", "_") for p in entries})
+    crate_of = {rel: crates[0] for rel, crates in reached.items() if len(crates) == 1}
+    roots = {e.get("root") for e in entries.values()}
+    composition = manifest.get("composition_root", {}).get("file")
+    for ref in refs:
+        if ref.file == composition or ref.file in roots or is_test_file(ref.file, manifest):
+            continue
+        landed = resolver.resolve(ref.module, ref.segments, ref.is_use)
+        if landed is None:
+            continue
+        target = resolver.file_of(landed[0])
+        if target is None or target == ref.file or not is_test_file(target, manifest):
+            continue
+        if target in raised or crate_of.get(target) != crate_of.get(ref.file):
+            problems.append(f"{ref.file}:{ref.line}: names {'::'.join(ref.segments)}, check code in "
+                            f"{target} ({'raised' if target in raised else crate_of.get(target)}), "
+                            f"from product code")
     for rel in files:
         masked_lines = read(rel).split("\n")
         for number, line in enumerate(masked_lines, 1):
@@ -1586,12 +1627,28 @@ def _hook_self_test() -> list[str]:
 # shaped as docs/KERNEL-CRATES.md lays them out; each break must be refused.
 _KERNEL_TREE = {
     "main.rs": "mod stages_check;\nfn main() {}\n",
-    "kernel_core.rs": "pub mod mm;\npub mod object;\n",
+    "kernel_core.rs": "pub mod arch;\npub mod mm;\npub mod object;\n",
     "kernel_item.rs": "pub use ferrix_kernel_core::{mm, object};\npub mod syscall;\n",
+    # The raised architecture check by ledger line 1579's shape A: declared
+    # by position with no `cfg`, the file itself `#![cfg(..)]`; and the one
+    # arch-neutral re-export of the drivers (ledger line 1585, Q2).
     "kernel_load.rs": "pub use ferrix_kernel_item::*;\npub mod fs;\n"
+                      "pub mod arch { pub use ferrix_kernel_core::arch::*;\n"
+                      "    pub use stage_check::drive_system_call;\n    pub mod stage_check;\n"
+                      "    pub mod x86_64 { pub mod trap { pub mod check; } } }\n"
                       "pub mod object { pub use ferrix_kernel_core::object::*; pub mod check; }\n"
                       "pub mod syscall { pub use ferrix_kernel_item::syscall::*; pub mod eventfd; }\n",
-    "mm.rs": "// CHECKS-ONLY: object/check.rs\n#[doc(hidden)]\npub fn secret() {}\npub fn frame() {}\n",
+    "arch/mod.rs": "pub mod x86_64;\npub fn facade() {}\n",
+    "arch/x86_64/mod.rs": "pub mod trap;\n",
+    "arch/x86_64/trap.rs": "pub fn entry() {}\n",
+    "arch/x86_64/trap/check.rs": "#![cfg(target_arch = \"x86_64\")]\n"
+                                 "pub fn drive_system_call() { ferrix_kernel_core::arch::x86_64::trap::entry(); }\n",
+    "arch/stage_check.rs": "#[cfg(target_arch = \"x86_64\")]\npub use super::x86_64::trap::check::drive_system_call;\n",
+    # A marker above an attribute of several lines; and the item named from
+    # its own module, which reached it before it was made `pub`.
+    "mm.rs": "pub mod check;\n// CHECKS-ONLY: object/check.rs\n#[allow(\n    dead_code,\n    reason = \"x\"\n)]\n"
+             "#[doc(hidden)]\npub fn secret() {}\npub fn frame() { crate::mm::secret(); }\n",
+    "mm/check.rs": "pub fn probe() { super::frame(); }\n",
     "object/mod.rs": "pub fn make() { crate::mm::frame(); }\n",
     "object/check.rs": "#![allow(clippy::disallowed_methods, reason = \"a raised check\")]\n"
                        "fn c() { crate::mm::secret(); crate::fs::open(); }\n",
@@ -1602,7 +1659,7 @@ _KERNEL_TREE = {
 }
 _KERNEL_MANIFEST = {
     "rings": {
-        "core": {"members": ["kernel_core.rs", "mm.rs", "object/**"]},
+        "core": {"members": ["kernel_core.rs", "arch/**", "mm.rs", "mm/**", "object/**"]},
         "item": {"members": ["kernel_item.rs", "main.rs", "syscall/mod.rs", "stages_check.rs"]},
         "load": {"members": ["kernel_load.rs", "fs.rs", "syscall/eventfd.rs", "x.rs"]},
     },
@@ -1614,6 +1671,8 @@ _KERNEL_MANIFEST = {
         "ferrix-kernel-load": {"path": "k/load", "root": "kernel_load.rs", "rings": ["load"]},
     },
     "raised_checks": {"entries": [
+        {"file": "arch/stage_check.rs", "crate": "ferrix-kernel-load"},
+        {"file": "arch/x86_64/trap/check.rs", "crate": "ferrix-kernel-load"},
         {"file": "object/check.rs", "crate": "ferrix-kernel-load"},
         {"file": "stages_check.rs", "crate": "ferrix-kernel"},
     ]},
@@ -1660,6 +1719,8 @@ _KERNEL_BREAKS = [
      "is product code"),
     ("a checks-only item named from product code",
      {"tree": {"fs.rs": "pub fn open() { crate::mm::secret(); }\n"}}, "checks-only"),
+    ("a checks-only item named from another module of its own crate",
+     {"tree": {"object/mod.rs": "pub fn make() { crate::mm::secret(); }\n"}}, "checks-only"),
     ("a checks-only item named through a re-export chain",
      {"tree": {"fs.rs": "pub fn open() { crate::syscall::secret(); }\n"}}, "checks-only"),
     ("a path through a kernel crate that names nothing",
@@ -1683,6 +1744,13 @@ _KERNEL_BREAKS = [
      {"tree": {"mm.rs": _KERNEL_TREE["mm.rs"] + "pub struct S;\nimpl S {\n    // CHECKS-ONLY: object/check.rs\n"
                                                 "    pub fn hidden(&self) {}\n}\n"}},
      "inside braces"),
+    ("a load product file naming a core check file (ledger line 1630, F3.2)",
+     {"tree": {"fs.rs": "pub fn open() { crate::mm::check::probe(); }\n"}}, "check code in mm/check.rs"),
+    ("a load product file naming a driver through the root's re-export (ledger line 1585, Q2.2)",
+     {"tree": {"fs.rs": "pub fn open() { crate::arch::drive_system_call(); }\n"}}, "check code in"),
+    ("a load product file naming a raised architecture check directly",
+     {"tree": {"fs.rs": "pub fn open() { crate::arch::x86_64::trap::check::drive_system_call(); }\n"}},
+     "check code in arch/x86_64/trap/check.rs (raised)"),
     ("a package under src/kernel not in kernel_crates",
      {"members": dict(_KERNEL_MEMBERS, **{"ferrix-kernel-extra": "k/extra"})}, "not in kernel_crates"),
 ]
@@ -1743,6 +1811,24 @@ def _kernel_upward_self_test() -> list[str]:
         if not any(e.file == rel and e.from_ring == want and e.to_ring == "load" for e in edges):
             failures.append(f"kernel crates: {what} naming ferrix_kernel_load::fs passed the upward rule "
                             f"({[(e.file, e.references) for e in edges]})")
+    # A `#[macro_export]` macro sits at the crate's root (ledger line 1477, C2):
+    # `crate::say!` from a core file names the core file that defines it, not
+    # the root module, whose file here is the item's main.rs.
+    files = dict(_KERNEL_TREE, **{
+        "mm.rs": _KERNEL_TREE["mm.rs"] + "#[macro_export]\nmacro_rules! say { () => {} }\n",
+        "object/mod.rs": "pub fn make() { crate::say!(); }\n",
+    })
+    ring_of, _, _ = classify(manifest, sorted(files))
+    added = {e["root"] for e in manifest["kernel_crates"].values()} - ROOT_FILES
+    ROOT_FILES.update(added)
+    try:
+        modules, refs, _ = build(sorted(files), files.__getitem__)
+        edges = find_edges(manifest, ring_of, modules, refs)
+    finally:
+        ROOT_FILES.difference_update(added)
+    if any(e.file == "object/mod.rs" for e in edges):
+        failures.append(f"kernel crates: a core file naming a core #[macro_export] macro made an edge "
+                        f"({[(e.file, e.references, e.to_ring) for e in edges]})")
     return failures
 
 

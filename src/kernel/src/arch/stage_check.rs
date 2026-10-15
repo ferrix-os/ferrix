@@ -26,7 +26,7 @@ pub use super::aarch64::trap::check::{drive_native_words, drive_system_call};
 #[cfg(target_arch = "arm")]
 pub use super::armv7a::trap::check::{drive_native_words, drive_system_call};
 #[cfg(target_arch = "x86_64")]
-pub use ferrix_kernel_core::arch::x86_64::{drive_native_words, drive_system_call};
+pub use ferrix_kernel_core::arch::x86_64::syscall::check::{drive_native_words, drive_system_call};
 
 // What the switch gives a program back, checked in user mode: x86-64's
 // vector-state contract and its FS base kept in the task (docs/OPAQUE-KERNEL.md

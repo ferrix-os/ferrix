@@ -1249,6 +1249,7 @@ fn clear_stale_errors(registers: Mmio) -> Result<(), &'static str> {
     Ok(())
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// Plant an invalidation completion error (`ICE`) on `unit`, as if the
 /// unit had raised one, and require an invalidation to fail on it, the
 /// error to be cleared and counted, and the next invalidation to succeed
@@ -1258,6 +1259,7 @@ fn clear_stale_errors(registers: Mmio) -> Result<(), &'static str> {
 /// # Errors
 ///
 /// What did not hold.
+#[doc(hidden)]
 pub fn check_planted_completion_error(unit: &Unit) -> Result<(), &'static str> {
     let cleared = COMPLETION_ERRORS.load(Ordering::Relaxed);
     let _ = unit.planted.fetch_or(FSTS_ICE, Ordering::Relaxed);
