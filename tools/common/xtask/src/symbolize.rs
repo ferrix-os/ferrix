@@ -80,7 +80,7 @@ fn trace_address(line: &str) -> Option<u64> {
 /// This toolchain mangles with the v0 scheme, whose grammar carries generics,
 /// lifetimes, and back-references to earlier substrings of the same symbol. A
 /// backtrace wants the function's name, so the path is decoded and the rest
-/// skipped: `ferrix_kernel::backtrace::walk`, not the closure type it was
+/// skipped: `ferrix_kernel_core::backtrace::walk`, not the closure type it was
 /// instantiated with. Anything the grammar does not cover gives `None`, and
 /// the raw symbol is printed instead, which is still searchable.
 fn v0(name: &str) -> Option<String> {
