@@ -101,6 +101,9 @@ const STATUS: i32 = 17;
 /// through the page cache.
 const MEMORY: u32 = 6144;
 
+/// Seconds the boot is given unless `--timeout` says otherwise.
+const TIMEOUT_SECONDS: u64 = 900;
+
 /// The volume `tools/common/fetch/fetch-proton.sh` makes.
 ///
 /// # Errors
@@ -263,6 +266,11 @@ pub(crate) fn test_wine_sync(args: &Args) -> Result<()> {
     args.data_image = Some(volume()?);
     if !args.memory_given {
         args.memory = MEMORY;
+    }
+    // A prefix and eight bench runs: 3 minutes under KVM on an idle host,
+    // past the default 120 s on a loaded one.
+    if !args.timeout_given {
+        args.timeout = TIMEOUT_SECONDS;
     }
     let shell =
         zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
