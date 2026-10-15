@@ -231,6 +231,37 @@ fn parity() -> Option<(PathBuf, PathBuf)> {
 /// `gryphlink`, its own start of the launcher replaced by
 /// [`GRYPHLINK_START`].
 fn script(wine: Wine, gryphlink: bool) -> String {
+    script_with(wine, gryphlink, no_video())
+}
+
+/// The launcher's background video's host, which the launcher's main
+/// background image comes from too (Gryphline's `batch_proxy`,
+/// `get_main_bg_image`, 2026-10-15).
+const VIDEO_HOST: &str = "gl-utils-public.hg-cdn.com";
+
+/// What `FERRIX_ENDFIELD_NO_VIDEO=1` adds before the launcher starts: the
+/// video's host resolves nowhere, in the guest's hosts file and in the
+/// prefix's, which Chromium reads on Windows. The web view's `<video>`
+/// then fails, and the launcher's page drops it and shows its own still
+/// background. Playing, it took about 3.2 of 4 processors of the launcher's
+/// in software, before any download (docs/WINE.md §12).
+const NO_VIDEO: &str = "echo \"0.0.0.0 @HOST@\" >> /etc/hosts\n\
+     mkdir -p \"$WINEPREFIX/drive_c/windows/system32/drivers/etc\"\n\
+     echo \"0.0.0.0 @HOST@\" >> \"$WINEPREFIX/drive_c/windows/system32/drivers/etc/hosts\"\n\
+     echo \"endfield: the launcher's video host @HOST@ resolves nowhere\"\n";
+
+/// Where [`NO_VIDEO`] goes: before the launcher starts, whether the script
+/// or `gryphlink` starts it, after the prefix is made.
+const LAUNCH_PLACES: [&str; 2] = ["ln -s /data/GRYPHLINK ", "/data/usr/bin/gryphlink 2>&1"];
+
+/// Whether `FERRIX_ENDFIELD_NO_VIDEO=1` asks for the launcher without its
+/// background video, as a long download or extraction wants.
+fn no_video() -> bool {
+    std::env::var("FERRIX_ENDFIELD_NO_VIDEO").as_deref() == Ok("1")
+}
+
+/// [`script`], with the background video blocked or not.
+fn script_with(wine: Wine, gryphlink: bool, no_video: bool) -> String {
     let replaced = SCRIPT
         .split_once(OWN_START)
         .and_then(|(before, rest)| {
@@ -238,7 +269,13 @@ fn script(wine: Wine, gryphlink: bool) -> String {
                 .map(|(_, after)| format!("{before}{GRYPHLINK_START}{after}"))
         })
         .filter(|_| gryphlink);
-    let body = replaced.unwrap_or_else(|| SCRIPT.to_owned());
+    let mut body = replaced.unwrap_or_else(|| SCRIPT.to_owned());
+    if no_video {
+        let block = NO_VIDEO.replace("@HOST@", VIDEO_HOST);
+        if let Some(at) = LAUNCH_PLACES.iter().find_map(|place| body.find(place)) {
+            body.insert_str(at, &block);
+        }
+    }
     // SCRATCH: with FERRIX_ENDFIELD_KEEP the whole of /tmp/wine -- HOME, the
     // prefix with the launcher's AppData and registry -- lives on the kept
     // volume, so a later boot's launcher still knows its download task and
@@ -764,6 +801,33 @@ mod tests {
             "echo \"endfield: end\"",
         ] {
             assert!(everything.contains(kept), "{kept}");
+        }
+    }
+
+    /// `FERRIX_ENDFIELD_NO_VIDEO=1` blocks the video's host before the
+    /// launcher starts, in both starts, and nothing is blocked without it.
+    #[test]
+    fn no_video_blocks_the_video_host_before_the_launcher_starts() {
+        for gryphlink in [false, true] {
+            let blocked = script_with(Wine::Proton, gryphlink, true);
+            let line = format!("echo \"0.0.0.0 {VIDEO_HOST}\" >> /etc/hosts");
+            let at = blocked.find(&line).expect("the hosts line");
+            let prefix = blocked
+                .find("system32/drivers/etc/hosts")
+                .expect("the prefix's hosts file");
+            let start = if gryphlink {
+                blocked.find("/data/usr/bin/gryphlink 2>&1")
+            } else {
+                blocked.find("'C:\\GRYPHLINK\\Launcher.exe'")
+            }
+            .expect("the launcher's start");
+            assert!(at < start && prefix < start, "gryphlink {gryphlink}");
+            if !gryphlink {
+                let wineboot = blocked.find("wineboot -i").expect("wineboot");
+                assert!(wineboot < at, "after the prefix is made");
+            }
+            let open = script_with(Wine::Proton, gryphlink, false);
+            assert!(!open.contains(VIDEO_HOST));
         }
     }
 

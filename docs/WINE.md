@@ -765,6 +765,23 @@ back; the same boot then read 60,000 times without an error, and stage
 `memory.max` to succeed.
 
 
+**The background video (2026-10-15).** Behind its page the launcher plays a
+looping video, `main_bg_image.video_url` of Gryphline's `batch_proxy`
+answer, an `.mp4` on `gl-utils-public.hg-cdn.com`; Qt's web engine decodes
+and draws it in software, and with it the launcher's Windows programs took
+389 processor-seconds of the gate's two minutes -- 3.2 of 4 processors,
+KVM, 8 GiB -- before any download. The page's
+switch to a still picture (a pill under the top of the window) keeps its
+choice in memory only, and clicks on it from the gate did not take. But
+the page drops the `<video>` element when it fails to load, and the still
+picture comes from the launcher itself: with the video's host resolving
+to nowhere, in the guest's `/etc/hosts` and in the prefix's, the same two
+minutes took 6.5 processor-seconds (wineserver 9.8), the window, the
+yellow button and the server's answer as before.
+`FERRIX_ENDFIELD_NO_VIDEO=1 cargo xtask test-endfield-proton` does that,
+for a boot that downloads or unpacks the game; the gate leaves the video
+on.
+
 **On the `--everything` desktop.** `run-compositor --everything` merges the
 Proton launcher volume last (`crate::everything`); where it carries
 another build of a file an earlier volume has -- yserver, and libpng and
