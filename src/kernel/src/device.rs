@@ -2417,6 +2417,51 @@ pub(crate) fn claim_line(id: u32, taken: &mut BTreeSet<u32>) -> bool {
     id >= FIRST_SHARED_INTERRUPT && !irq::is_registered(id) && taken.insert(id)
 }
 
+/// Widen each PCI BAR aperture shorter than a page, starting on a page
+/// boundary, to that whole page when nothing else lies in the page: no other
+/// aperture of any node (`claimed` holds them all) and nothing reserved.
+///
+/// A driver maps whole pages only ([`Aperture::whole_pages`]), and real
+/// hardware has BARs shorter than one: an Intel PCH's AHCI ABAR is 2 KiB,
+/// where QEMU's is 4 KiB. A page that holds such a BAR and nothing else maps
+/// no neighbour's registers; one that is shared stays refused.
+fn widen_lone_partial_bars(nodes: &mut [DeviceNode], claimed: &[(u64, u64)], reserved: &Reserved) {
+    for node in nodes.iter_mut() {
+        let location = node.location;
+        for aperture in &mut node.apertures {
+            if aperture.whole_pages()
+                || !matches!(aperture.source, Source::Bar { offset: 0, .. })
+                || !aperture.phys.is_multiple_of(PAGE_SIZE)
+                || aperture.len > PAGE_SIZE
+            {
+                continue;
+            }
+            let (start, end) = (aperture.phys, aperture.phys + PAGE_SIZE);
+            let shared = claimed.iter().any(|&(from, to)| {
+                (from, to) != (aperture.phys, aperture.end()) && from < end && start < to
+            });
+            let widened = Aperture {
+                len: PAGE_SIZE,
+                ..*aperture
+            };
+            if shared || reserved.covers(widened) {
+                crate::println!(
+                    "  device   {location} BAR of {} bytes at {:#x} shares its page: not mappable",
+                    aperture.len,
+                    aperture.phys
+                );
+                continue;
+            }
+            crate::println!(
+                "  device   {location} BAR of {} bytes at {:#x} has its page alone: mapped as the page",
+                aperture.len,
+                aperture.phys
+            );
+            *aperture = widened;
+        }
+    }
+}
+
 /// Every device node, once boot has published them.
 static DEVICES: Once<Vec<Arc<DeviceNode>>> = Once::new();
 
@@ -2582,6 +2627,7 @@ pub(crate) fn publish<'f>(
         });
         node.withheld += before - node.apertures.len();
     }
+    widen_lone_partial_bars(&mut nodes, &claimed, reserved);
 
     yield_framebuffer_holder(&mut nodes);
 
