@@ -172,6 +172,9 @@ impl GraphicsPixelFormat {
     pub(crate) const RED_GREEN_BLUE_RESERVED: GraphicsPixelFormat = GraphicsPixelFormat(0);
     /// Blue, green, red, reserved — one byte each. What QEMU reports.
     pub(crate) const BLUE_GREEN_RED_RESERVED: GraphicsPixelFormat = GraphicsPixelFormat(1);
+    /// Four bytes a pixel, laid out by the mode's red, green, blue and
+    /// reserved masks. Some firmware reports plain `BGRx` this way.
+    pub(crate) const BIT_MASK: GraphicsPixelFormat = GraphicsPixelFormat(2);
 }
 
 /// Description of one graphics mode.
