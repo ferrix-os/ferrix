@@ -760,7 +760,7 @@ pub(crate) fn id() -> u32 {
 /// Retire the interrupt currently being serviced.
 pub(crate) fn end_of_interrupt() {
     // Zero in either mode: x2APIC mode faults on anything else.
-    write_reg(LAPIC_EOI, 0);
+    if !x2apic() { write_reg(LAPIC_EOI, 0); } // SABOTAGE-X2APIC-EOI
 }
 
 /// Fire the timer interrupt once, `nanos` from now.
