@@ -42,13 +42,23 @@ fn traces(root: &Path, traces: &[(u32, &str)]) -> PathBuf {
     let directory = root.join("traces");
     let _ = std::fs::remove_dir_all(&directory);
     std::fs::create_dir_all(&directory).unwrap();
+    // An hour on: whatever the test changes before it records, however
+    // slowly a loaded host runs it, is older than the run; the tests of the
+    // change-time guard stamp their own lines.
+    let started = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
     for (pid, text) in traces {
         let stamped: String = text
             .lines()
             .enumerate()
             .map(|(index, line)| {
                 if stamp(line).0 == 0 {
-                    format!("1.{:06} {line}\n", 500_000 + index)
+                    // Now, as a run that starts as the traces are made:
+                    // what the test wrote before is older than the run.
+                    format!("{started}.{:06} {line}\n", 500_000 + index)
                 } else {
                     format!("{line}\n")
                 }
@@ -784,5 +794,272 @@ fn an_item_keyed_record_misses_when_the_item_changes() {
     let text = record("audit:a", &directory, &keyed("1111")).unwrap();
     assert!(holds("audit:a", &text, &keyed("1111")).is_some());
     assert!(holds("audit:a", &text, &keyed("2222")).is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn loom_is_never_looked_up_or_recorded() {
+    // Its models are the item's orderings (ledger lines 1447 and 1684):
+    // whether `check-side` runs it in turn or beside the others, and even
+    // if a caller called it cacheable.
+    assert!(NEVER.contains(&"loom"));
+    assert!(!may_look_up("loom", true));
+    assert!(!may_look_up("loom", false));
+    assert!(may_look_up("compositor", true));
+    assert!(!may_look_up("compositor", false));
+}
+
+#[test]
+fn an_input_changed_while_the_unit_ran_is_not_recorded() {
+    // The consultant's R1 and condition 3 (ledger line 1684): another
+    // process rewrote an input after the traced run began, so its digest
+    // now is not what the unit read.
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let stamped = |root: &Path, began: u64| -> String {
+        sample_trace(root)
+            .lines()
+            .enumerate()
+            .map(|(index, line)| format!("{began}.{index:06} {line}\n"))
+            .collect()
+    };
+    for (what, changed) in [
+        ("a file read", "f"),
+        ("a directory listed", "d"),
+        ("a file looked up", "sized"),
+    ] {
+        let root = sample_root("changed-during");
+        // The run began a minute ago; the input changes now, after it.
+        let directory = traces(&root, &[(100, &stamped(&root, now - 60))]);
+        if changed == "d" {
+            std::fs::write(root.join("d/y"), b"").unwrap();
+        } else {
+            std::fs::write(root.join(changed), b"other").unwrap();
+        }
+        let why = record("unit", &directory, &context(&root)).unwrap_err();
+        assert!(why.contains("changed during the run"), "{what}: {why}");
+        // The same tree, the run beginning after the change: recorded.
+        let directory = traces(&root, &[(100, &stamped(&root, now + 60))]);
+        assert!(
+            record("unit", &directory, &context(&root)).is_ok(),
+            "{what}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn loom_beside_the_others_is_run_and_never_looked_up() {
+    // Through `unit_logged`'s own path, with a store: loom's child runs
+    // (here the test binary itself, which `check-unit` filters to no test)
+    // and nothing of loom's is looked up or made in the store.
+    let root = scratch("loom-beside");
+    let store = root.join("store");
+    std::fs::create_dir_all(&store).unwrap();
+    let log_path = root.join("loom.log");
+    let log = std::fs::File::create(&log_path).unwrap();
+    let outcome = unit_logged_with(
+        Some(store.clone()),
+        "loom",
+        &root.join("target"),
+        None,
+        &log,
+        true,
+    )
+    .unwrap();
+    assert_eq!(outcome, Outcome::Ran);
+    let said = std::fs::read_to_string(&log_path).unwrap();
+    assert!(said.contains("loom: ran (never cached)"), "{said}");
+    assert!(
+        std::fs::read_dir(&store).unwrap().next().is_none(),
+        "the store holds something of loom's"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_looked_up_path_that_came_or_went_during_the_run_is_not_recorded() {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    for (what, change) in [
+        ("a file found there, gone", "rm sized"),
+        ("a path found absent, there", "make gone"),
+    ] {
+        let root = sample_root("came-or-went");
+        // Begun a minute from now, so no change time counts: only what the
+        // lookups saw.
+        let stamped: String = sample_trace(&root)
+            .lines()
+            .enumerate()
+            .map(|(index, line)| format!("{}.{index:06} {line}\n", now + 60))
+            .collect();
+        let directory = traces(&root, &[(100, &stamped)]);
+        assert!(
+            record("unit", &directory, &context(&root)).is_ok(),
+            "{what}"
+        );
+        if change == "rm sized" {
+            std::fs::remove_file(root.join("sized")).unwrap();
+        } else {
+            std::fs::write(root.join("gone"), b"").unwrap();
+        }
+        let directory = traces(&root, &[(100, &stamped)]);
+        let why = record("unit", &directory, &context(&root)).unwrap_err();
+        assert!(why.contains("during the run"), "{what}: {why}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn a_looked_up_path_found_absent_and_then_there_is_not_recorded() {
+    // The consultant's A4.1, ledger line 1715: another unit made it between
+    // two of this unit's lookups (a registry directory extracted, say).
+    let root = sample_root("came");
+    std::fs::create_dir_all(root.join("came")).unwrap();
+    let r = root.display();
+    let later = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 60;
+    let lookups = [
+        format!(
+            "newfstatat(AT_FDCWD<{r}>, \"came\", 0x1, 0) = -1 ENOENT (No such file or directory)"
+        ),
+        format!("statx(AT_FDCWD<{r}>, \"came\", AT_STATX_SYNC_AS_STAT, STATX_ALL, {{}}) = 0"),
+    ];
+    let both: String = lookups
+        .iter()
+        .enumerate()
+        .map(|(index, line)| format!("{later}.{index:06} {line}\n"))
+        .collect();
+    let directory = traces(&root, &[(100, &both)]);
+    let why = record("unit", &directory, &context(&root)).unwrap_err();
+    assert!(why.contains("came during the run"), "{why}");
+    // Found there by every lookup: recorded.
+    let there = format!("{later}.000001 {}\n", lookups[1]);
+    let directory = traces(&root, &[(100, &there)]);
+    assert!(record("unit", &directory, &context(&root)).is_ok());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// `lines`, each stamped a minute from now: a run begun after every change
+/// the test makes, so only what the lookups saw counts.
+fn stamped_later(lines: &[String]) -> String {
+    let later = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 60;
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| format!("{later}.{index:06} {line}\n"))
+        .collect()
+}
+
+#[test]
+fn a_path_found_absent_and_then_made_by_another_is_not_recorded() {
+    // The code review of 1fddc2b88: a stat finds it absent, another unit
+    // makes it, and this unit's mkdir fails with EEXIST.
+    let root = sample_root("mkdir-eexist");
+    std::fs::create_dir_all(root.join("made")).unwrap();
+    let r = root.display();
+    let trace = stamped_later(&[
+        format!(
+            "newfstatat(AT_FDCWD<{r}>, \"made\", 0x1, 0) = -1 ENOENT (No such file or directory)"
+        ),
+        format!("mkdir(\"{r}/made\", 0777) = -1 EEXIST (File exists)"),
+    ]);
+    let directory = traces(&root, &[(100, &trace)]);
+    let why = record("unit", &directory, &context(&root)).unwrap_err();
+    assert!(why.contains("came during the run"), "{why}");
+    // Gone again by the time of the record: only the EEXIST says it was
+    // there, and it is still refused.
+    std::fs::remove_dir(root.join("made")).unwrap();
+    let directory = traces(&root, &[(100, &trace)]);
+    let why = record("unit", &directory, &context(&root)).unwrap_err();
+    assert!(why.contains("came during the run"), "{why}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_path_found_there_and_gone_is_not_recorded_whatever_else_failed_on_it() {
+    // Found there, then an open refused (EACCES, which says nothing of
+    // whether it is there), then deleted by another process.
+    let root = sample_root("there-gone");
+    let r = root.display();
+    let trace = stamped_later(&[
+        format!("statx(AT_FDCWD<{r}>, \"sized\", AT_STATX_SYNC_AS_STAT, STATX_ALL, {{}}) = 0"),
+        format!("openat(AT_FDCWD<{r}>, \"sized\", O_RDONLY) = -1 EACCES (Permission denied)"),
+    ]);
+    std::fs::remove_file(root.join("sized")).unwrap();
+    let directory = traces(&root, &[(100, &trace)]);
+    let why = record("unit", &directory, &context(&root)).unwrap_err();
+    assert!(why.contains("went away during the run"), "{why}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dangling_link_is_there_unfollowed_and_absent_followed() {
+    // Looked at both ways, each kept apart: recorded.
+    let root = sample_root("dangling");
+    std::os::unix::fs::symlink(root.join("nowhere"), root.join("dangling")).unwrap();
+    let r = root.display();
+    let trace = stamped_later(&[
+        format!("lstat(\"{r}/dangling\", {{}}) = 0"),
+        format!(
+            "newfstatat(AT_FDCWD<{r}>, \"dangling\", 0x1, 0) = -1 ENOENT (No such file or directory)"
+        ),
+    ]);
+    let directory = traces(&root, &[(100, &trace)]);
+    let made = record("unit", &directory, &context(&root));
+    assert!(made.is_ok(), "{made:?}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_listing_of_a_directory_holding_excluded_entries_is_judged_by_its_digest() {
+    // `~/.cargo` changes its change time with cargo's bookkeeping, which
+    // the record leaves out; another directory listed, changed during the
+    // run, is refused.
+    let root = sample_root("listing-cargo-home");
+    let cargo = root.join("home/.cargo");
+    std::fs::create_dir_all(cargo.join("registry/index")).unwrap();
+    std::fs::write(cargo.join("config.toml"), "").unwrap();
+    // Its journal, which comes and goes with every cargo run.
+    std::fs::write(cargo.join(".global-cache"), "").unwrap();
+    let r = root.display();
+    let c = cargo.display();
+    let earlier = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 60;
+    let listing = |path: &str| {
+        format!(
+            "{earlier}.000001 openat(AT_FDCWD<{r}>, \"{path}\", O_RDONLY|O_DIRECTORY) = 3<{path}>\n"
+        )
+    };
+    let directory = traces(&root, &[(100, &listing(&c.to_string()))]);
+    let made = record("unit", &directory, &context(&root));
+    assert!(made.is_ok(), "{made:?}");
+    let directory = traces(&root, &[(100, &listing(&format!("{r}/d")))]);
+    let why = record("unit", &directory, &context(&root)).unwrap_err();
+    assert!(why.contains("changed during the run"), "{why}");
+    // A directory of the worktree holding an excluded entry (the unit's
+    // own target directory, made inside it) keeps the check (A5.1).
+    std::fs::create_dir_all(root.join("d/out")).unwrap();
+    let mut here = context(&root);
+    here.unit_targets = vec![root.join("d/out")];
+    assert!(here.is_excluded(&root.join("d/out")));
+    let directory = traces(&root, &[(100, &listing(&format!("{r}/d")))]);
+    let why = record("unit", &directory, &here).unwrap_err();
+    assert!(why.contains("changed during the run"), "{why}");
     std::fs::remove_dir_all(root).unwrap();
 }

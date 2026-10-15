@@ -1299,9 +1299,8 @@ incremental caches when the disk is short (`gate.sh`).
 | written / directory | 8.0 / 6.9 GB | **4.9 / 4.3 GB** |
 
 Half the processor time and a third less disk; the wall time stays, since
-the apps still run one after another. It changes the step cache's unit
-target (Cut B2), so it waits for a design with bs-b and the certification
-consultant.
+the apps still run one after another. Landed as Cut D3, below, with two
+shared directories.
 
 ### Cut D1: the documentation written in memory (bs-c-doc)
 
@@ -1332,6 +1331,120 @@ space read); each of four sabotages (pruning blind to links, an old pages
 directory kept, any link taken as ours, `df`'s header read as the figure)
 fails them. This is also the 317.7 s of documentation bs-b measured in a
 gate slot on a tree new to it by several commits (branch `bs-b-mainpar`).
+
+### Cut D2: the side workspaces at once (bs-c-side)
+
+`check-side` ran its units -- loom, the compositor, init, auth, pkg, the
+installer, media, adbd, nvos and every app -- one after another, 464 s on a
+cold tree, the whole critical path of a cold `check` once D1 had cut the
+documentation. Now the steps that are not units run first as before (auth's
+no-sabotage check, the apps' manifests and the directories they share, each
+app's search of the tree), and then the units run in lanes,
+`FERRIX_SIDE_JOBS` lanes at once (4 by default; 1 runs them in turn in one
+process as before). A lane is one unit, or the apps of one shared target
+directory (Cut D3) in turn; lanes start heaviest first, by the packages in
+their `Cargo.lock`, which a cold tree has no timings to replace. Each unit
+runs as a child, `cargo xtask check-unit`, given its name and, for an app,
+the directory it builds in (`FERRIX_CHECK_APP_DIR`), under `strace` when
+the step cache is on (`step_cache::unit_logged`: the same lookup, made in
+the worker, and the same record), with its output in
+`<target>/check-side/<unit>.log`. Every unit runs to its end; each log is
+printed whole, in the order the units always ran in, with its verdict and
+time; the summary names every unit that failed, could not start, died of a
+signal, has no recorded end or whose log could not be read back, and the
+first of them in that order is the error. `check-side` and every unit child
+watch their parent, and once it is gone kill everything they started and
+exit; a traced unit's strace dies with the worker that started it
+(`setpriv --pdeathsig KILL`) and takes what it traces with it. Left: a
+process whose parent in the chain died first, which the walk cannot find;
+up to a second before the watch notices; and with no `setpriv`, a traced
+unit's strace reached only by `check-side`'s watch. loom is in the step
+cache's `NEVER`: never looked up or recorded, at once or in turn.
+
+The step cache gained a guard the certification consultant found owed (R1,
+A4): a record keeps the inputs' digests as they are when the run ended, so
+an input another process changed while the unit ran would be recorded in
+its later state. A unit is no longer recorded when an input kept by its
+content (a file or link read, a directory listed, a looked-up path that is
+a file) changed (its `ctime`) from 20 ms before its traced run began, or
+when a looked-up path is not now as its lookups found it (there, absent, or
+found both ways: it came during the run), checked after every state was
+taken. Directories looked up are kept by their kind alone, and `$HOME`,
+`~/.cargo` and the loader's search path change their entries all the time,
+so their change time is not judged; nor is that of a listed directory at
+or under `$CARGO_HOME` or `$RUSTUP_HOME` holding an entry under an
+excluded root (`~/.cargo`, whose bookkeeping comes and goes with every
+cargo run), which its digest alone judges, as before (the first warm row
+through the pool, `bsc-d2-cache-warm`, found `~/.cargo` refusing six units;
+the consultant's A5, ledger line 1722). The gap was there since the side
+workspaces first ran beside the main workspace; running units at once made
+it likelier.
+
+`cargo xtask check-side`, cold, each run in an empty target directory,
+alternated, loads 33 to 43 (the host saturated; with D3 in both):
+
+| | In turn (`FERRIX_SIDE_JOBS=1`) | At once (default) |
+|---|---:|---:|
+| Wall | 787, 416 s | **267, 220 s** |
+| CPU (user) | 1,163, 1,189 s | 1,212, 1,222 s |
+| Written / target dir | 11.4 GB / 10.1 GB | the same |
+
+At once, the critical path is the two apps lanes (about 220-260 s at this
+load, fuzzel and ferrofetch first in each, compiling the shared crates),
+beside the compositor (180 s, its tests 148 s); in turn, the sum. The
+processor time is 3% more: units contending. Running units at once can add
+false fails (tests contending for the processor, the GPU or ports), never a
+false pass: the compositor's and waybar's flake rows say to run the units in
+turn to diagnose (`docs/BACKLOG.md`).
+
+**Release runs and the baseline** run the units at once too: on one hash,
+`bsc-d2-check` (at once) and `bsc-d2-check-seq` (`FERRIX_SIDE_JOBS=1`) both
+passed with the same 142 test results, 1,516 tests passed in each, and the
+certification consultant lifted the in-turn requirement (R3, ledger line
+1722, as for the test runner at line 1622). `FERRIX_SIDE_JOBS=1` stays the
+switch for diagnosing a flake; the step cache stays off in both.
+
+Twenty sabotages of the new checks (units not reported in the order they always ran in, the change-time guard, a path found
+absent and there, a path found there and gone, EEXIST not counted as found
+there, lookups kept without whether they followed links, no listing
+exempted, every listing exempted, a listing exempted outside cargo's and
+rustup's homes, loom looked up by the predicate and
+at the call site, a unit with no end not failed, lanes not
+put back in order, `CARGO_TARGET_TMPDIR` unseen, placing blind to output
+names, an image's build in a check directory, loom not resolvable by
+`check-unit`, test targets counted as outputs, a target kind not known
+accepted, the lightest lane first) each fail the unit tests.
+
+### Cut D3: the apps' checks in shared target directories (bs-c-side)
+
+Each app's `check` steps built in `<target>/apps/<name>`, so the nine apps
+built by cargo compiled the compositor's toolkit and the resvg stack nine
+times for each of five purposes (821-866 CPU-s cold). They now share
+directories (`crate::apps::check_dirs`, worked out once by `check-side`): at
+least two, `apps-check` and `apps-check-2`, the heaviest app first to the
+lightest directory, so the apps' two lanes run at once (one directory was a
+250 s lane). What cargo's fingerprints do not cover is kept apart (the
+consultant's conditions 6 and 7 as amended, ledger lines 1684 and 1715): an
+app whose source names `CARGO_TARGET_TMPDIR`, which every app's tests in a
+directory would share, is refused; two apps that make an output -- a
+binary, an example, a C library -- of one name, which cargo would copy to
+one place, are never placed in one directory (fuzzel and hyprlock each have
+an example named `probe`); a failing `cargo metadata` or a target kind not
+known fails `check` rather than placing an app by guess. An app built by its
+script keeps a directory of its own. Each app's unit passes its shared
+directory to the step cache as its own target directory. The packages an
+image carries are still built in a directory each (`build`,
+`cargo_linux`), and a unit test holds that.
+
+| `check-apps`, cold, in turn | A directory each | One shared (experiment) | Two shared (landed) |
+|---|---:|---:|---:|
+| CPU (user) | 821-866 s | 438-447 s | 646 s |
+| Written / target dir | 8.0 / 6.9 GB | 4.9 / 4.3 GB | 6.0 / 5.3 GB |
+| Wall | 155-201 s (loads 16-30) | 146-152 s | 183 s (load 32-35) |
+
+The certification consultant's design review of D2 and D3: OK IF (1)-(9),
+ledger line 1684; the amendments after the code reviews, lines 1715 and
+1722.
 
 ## Next
 

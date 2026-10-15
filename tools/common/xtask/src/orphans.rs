@@ -37,6 +37,47 @@ pub(crate) fn install() {
     }));
 }
 
+/// Watch this program's parent, and when it is gone -- this process
+/// reparented, as when `check` or `check-side` is killed -- kill every
+/// process descended from this one and exit (the certification
+/// consultant's condition 1, ledger line 1684): `check-side` and each unit
+/// it runs as a child call this, so a killed `check` leaves no unit, cargo
+/// or test running. Looked at once a second; off Unix, nothing.
+pub(crate) fn exit_with_parent() {
+    #[cfg(unix)]
+    {
+        let parent = std::os::unix::process::parent_id();
+        // Started by a parent already gone: reparented to init before the
+        // watch began, so no change would ever be seen.
+        let gone_already = parent == 1;
+        let _ = std::thread::spawn(move || {
+            if gone_already {
+                kill_descendants();
+                #[expect(
+                    clippy::exit,
+                    reason = "nobody waits for this process; it was orphaned before it began"
+                )]
+                std::process::exit(1);
+            }
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if std::os::unix::process::parent_id() != parent {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "xtask: the process that started this one is gone"
+                    );
+                    kill_descendants();
+                    #[expect(
+                        clippy::exit,
+                        reason = "nobody waits for this process any more; its work is killed"
+                    )]
+                    std::process::exit(1);
+                }
+            }
+        });
+    }
+}
+
 /// Every process below this one, killed at once. On Linux, from `/proc`;
 /// nothing elsewhere, where `/proc` is not there to read.
 fn kill_descendants() {

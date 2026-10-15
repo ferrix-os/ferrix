@@ -863,19 +863,225 @@ pub(crate) fn linker_variable(target: &str) -> String {
     )
 }
 
-/// `cargo` in `app`'s folder, into the app's own target directory under
-/// the tree's, where its builds go and CI's cache finds it: on Windows, a
-/// Linux app's through WSL, which keeps its own.
-fn cargo_in(app: &App, arguments: &[&str]) -> Command {
+/// `cargo` in `app`'s folder, into `dir`, its check directory under the
+/// tree's ([`check_dirs`]), where CI's cache finds it: on Windows, a Linux
+/// app's through WSL, which keeps its own.
+fn cargo_in(app: &App, dir: &Path, arguments: &[&str]) -> Command {
     if cfg!(windows) && app.recipe.package.abi == Abi::Linux {
         return crate::wsl::cargo(&app.dir, arguments);
     }
     let mut command = Command::new(cargo::cargo());
-    let _ = command.current_dir(&app.dir).args(arguments).env(
-        "CARGO_TARGET_DIR",
-        paths::target_dir().join("apps").join(app.name()),
-    );
+    let _ = command
+        .current_dir(&app.dir)
+        .args(arguments)
+        .env("CARGO_TARGET_DIR", dir);
     command
+}
+
+/// The target directory each of `apps` builds its `check` steps in, in
+/// their order: the apps compile the same crates (the compositor's toolkit,
+/// the resvg stack) for the same targets, and in a directory each they
+/// compiled them nine times over, 821 CPU-s cold where one directory is 440
+/// (`docs/TEST-TIME.md`, *Cut D3*). A crate one app's step built is fresh
+/// for the next by cargo's own fingerprints, as one of its own is.
+///
+/// What cargo's fingerprints do not cover is kept apart (the certification
+/// consultant's conditions 6 and 7, ledger line 1684): an app whose source
+/// names `CARGO_TARGET_TMPDIR`, which every app's tests would share, is
+/// refused; and an app that makes an output (a binary, an example, a C
+/// library) of a name an app already in a directory makes, which cargo
+/// would copy to the same place, goes to the lightest directory where no
+/// app makes it (`apps-check`, `apps-check-2`, ..., at least [`CHECK_DIRS`],
+/// more when outputs clash). An app built by its script keeps a directory
+/// of its own, `apps/<name>`. The packages an image carries are built in a
+/// directory each still (`build`, `cargo_linux`).
+///
+/// # Errors
+///
+/// An app naming `CARGO_TARGET_TMPDIR`, or `cargo metadata` failing.
+pub(crate) fn check_dirs(apps: &[App]) -> Result<Vec<PathBuf>> {
+    let mut built = Vec::new();
+    for app in apps {
+        if app.recipe.build != Build::Cargo {
+            built.push(None);
+            continue;
+        }
+        if let Some(file) = names_target_tmpdir(&app.dir)? {
+            return Err(Error::new(format!(
+                "app {}: {} names CARGO_TARGET_TMPDIR, which the apps' shared check \
+                 directory would share between their tests",
+                app.name(),
+                file.display(),
+            )));
+        }
+        let weight = fs::read_to_string(app.dir.join("Cargo.lock"))
+            .map(|text| text.matches("[[package]]").count())
+            .unwrap_or(0);
+        built.push(Some((weight, cargo_outputs(&app.dir)?)));
+    }
+    Ok(assign(&built)
+        .into_iter()
+        .zip(apps)
+        .map(|(index, app)| {
+            index.map_or_else(
+                // An app built by its script builds nothing with cargo:
+                // a directory of its own, as before, shared with nobody.
+                || paths::target_dir().join("apps").join(app.name()),
+                check_dir,
+            )
+        })
+        .collect())
+}
+
+/// [`check_dirs`]' placing: for each app built by cargo, its weight and the
+/// names of its outputs, the index of the shared directory it goes to,
+/// heaviest first to the lightest directory where no app makes an output
+/// of a name it makes, a new one when there is none; `None` for the rest.
+fn assign(built: &[Option<(usize, Vec<String>)>]) -> Vec<Option<usize>> {
+    let mut order: Vec<(usize, usize)> = built
+        .iter()
+        .enumerate()
+        .filter_map(|(index, app)| app.as_ref().map(|(weight, _)| (index, *weight)))
+        .collect();
+    order.sort_by_key(|&(index, weight)| (std::cmp::Reverse(weight), index));
+    let mut directories: Vec<(usize, Vec<&String>)> =
+        (0..CHECK_DIRS).map(|_| (0, Vec::new())).collect();
+    let mut placed = vec![None; built.len()];
+    for (index, weight) in order {
+        let Some(Some((_, made))) = built.get(index) else {
+            continue;
+        };
+        let chosen = directories
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, outputs))| !outputs.iter().any(|name| made.contains(name)))
+            .min_by_key(|(number, (load, _))| (*load, *number))
+            .map_or(directories.len(), |(number, _)| number);
+        if chosen == directories.len() {
+            directories.push((0, Vec::new()));
+        }
+        if let Some((load, outputs)) = directories.get_mut(chosen) {
+            *load += weight;
+            outputs.extend(made);
+        }
+        if let Some(slot) = placed.get_mut(index) {
+            *slot = Some(chosen);
+        }
+    }
+    placed
+}
+
+/// How many directories the apps' checks share at least: the apps of one
+/// directory run one after another (`check-side`), so one directory was
+/// the whole side's critical path at 250 s cold, where two at once halve
+/// it for some of the compiling saved (`docs/TEST-TIME.md`, *Cut D3*).
+const CHECK_DIRS: usize = 2;
+
+/// The `index`th of the apps' shared check directories.
+fn check_dir(index: usize) -> PathBuf {
+    let name = match index {
+        0 => "apps-check".to_owned(),
+        n => format!("apps-check-{}", n + 1),
+    };
+    paths::target_dir().join(name)
+}
+
+/// The first Rust or TOML file under `dir` (not in its `target` directory)
+/// that names `CARGO_TARGET_TMPDIR`.
+fn names_target_tmpdir(dir: &Path) -> Result<Option<PathBuf>> {
+    within(dir, &dir.join("target"))
+}
+
+/// [`names_target_tmpdir`] below `dir`, skipping `skipped` (the app's own
+/// target directory) and never following a link.
+fn within(dir: &Path, skipped: &Path) -> Result<Option<PathBuf>> {
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        let kind = fs::symlink_metadata(&path)?.file_type();
+        if kind.is_dir() {
+            if path == skipped {
+                continue;
+            }
+            if let Some(found) = within(&path, skipped)? {
+                return Ok(Some(found));
+            }
+        } else if !kind.is_symlink()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "rs" || extension == "toml")
+            && fs::read(&path)?
+                .windows(b"CARGO_TARGET_TMPDIR".len())
+                .any(|window| window == b"CARGO_TARGET_TMPDIR")
+        {
+            return Ok(Some(path));
+        }
+    }
+    Ok(None)
+}
+
+/// The names of the binaries, examples and C libraries (dynamic or static)
+/// the workspace in
+/// `dir` builds, as `cargo metadata` lists its members' targets.
+fn cargo_outputs(dir: &Path) -> Result<Vec<String>> {
+    let output = Command::new(cargo::cargo())
+        .current_dir(dir)
+        .args([
+            "metadata",
+            "--no-deps",
+            "--format-version",
+            "1",
+            "--offline",
+        ])
+        .output()
+        .map_err(|error| Error::new(format!("cargo metadata in {}: {error}", dir.display())))?;
+    if !output.status.success() {
+        return Err(Error::new(format!(
+            "cargo metadata in {} failed: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+    outputs_in_metadata(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// [`cargo_outputs`] from the metadata's text.
+fn outputs_in_metadata(text: &str) -> Result<Vec<String>> {
+    use crate::hotpath::json::Value;
+    let metadata =
+        Value::parse(text).map_err(|why| Error::new(format!("cargo metadata: {why}")))?;
+    let mut made = Vec::new();
+    let Some(Value::List(packages)) = metadata.get("packages") else {
+        return Err(Error::new("cargo metadata: no packages"));
+    };
+    for package in packages {
+        let Some(Value::List(targets)) = package.get("targets") else {
+            return Err(Error::new("cargo metadata: a package without targets"));
+        };
+        for target in targets {
+            let Some(Value::List(kinds)) = target.get("kind") else {
+                return Err(Error::new("cargo metadata: a target without a kind"));
+            };
+            let mut output = false;
+            for kind in kinds {
+                match kind.as_str() {
+                    Some("bin" | "example" | "cdylib" | "dylib" | "staticlib") => output = true,
+                    // Nothing runs these from where cargo copies them.
+                    Some("lib" | "rlib" | "test" | "bench" | "custom-build" | "proc-macro") => {}
+                    // A kind not known here is not placed by guess (the
+                    // consultant's A2.1, ledger line 1715).
+                    _ => {
+                        return Err(Error::new(format!(
+                            "cargo metadata: a target kind not known here: {kind:?}"
+                        )));
+                    }
+                }
+            }
+            if let (true, Some(name)) = (output, target.get("name").and_then(Value::as_str)) {
+                made.push(name.to_owned());
+            }
+        }
+    }
+    Ok(made)
 }
 
 /// Rule 1: nothing outside `app`'s folder names it -- in this tree, and in
@@ -952,21 +1158,21 @@ fn names_only_itself(repository: &Path, needles: &[&str], folder: &str) -> Resul
 /// `cargo fmt --check` in `app`'s folder; for an app built by a script,
 /// `bash -n` over the script, which is what can be said of it without
 /// running it.
-pub(crate) fn formatting(app: &App) -> Result<()> {
+pub(crate) fn formatting(app: &App, dir: &Path) -> Result<()> {
     if app.recipe.build == Build::Script {
         let mut command = Command::new("bash");
         let _ = command.current_dir(&app.dir).args(["-n", "build.sh"]);
         return cargo::run(command, &format!("{}: bash -n build.sh", app.name()));
     }
     cargo::run(
-        cargo_in(app, &["fmt", "--check"]),
+        cargo_in(app, dir, &["fmt", "--check"]),
         &format!("{}: cargo fmt", app.name()),
     )
 }
 
 /// The host's clippy and tests over `app`'s lib target, when its manifest
-/// asks for them.
-pub(crate) fn host(app: &App) -> Result<()> {
+/// asks for them, built in `dir` ([`check_dirs`]).
+pub(crate) fn host(app: &App, dir: &Path) -> Result<()> {
     if !app.recipe.host_tests {
         println!("  {} has no host tests", app.name());
         return Ok(());
@@ -974,19 +1180,19 @@ pub(crate) fn host(app: &App) -> Result<()> {
     let mut clippy = vec!["clippy", "--lib", "--tests", "--"];
     clippy.extend(LINTS);
     cargo::run(
-        cargo_in(app, &clippy),
+        cargo_in(app, dir, &clippy),
         &format!("{}: cargo clippy", app.name()),
     )?;
     // The lib's tests and the integration tests beside it in `tests/`.
     cargo::run(
-        cargo_in(app, &["test", "--lib", "--tests"]),
+        cargo_in(app, dir, &["test", "--lib", "--tests"]),
         &format!("{}: cargo test", app.name()),
     )
 }
 
 /// Clippy over `app`'s programs for each target it is built for: none for
 /// an app built by a script, which has no cargo workspace.
-pub(crate) fn targets(app: &App) -> Result<()> {
+pub(crate) fn targets(app: &App, dir: &Path) -> Result<()> {
     if app.recipe.build == Build::Script {
         println!(
             "  {} is built by its build.sh: nothing for clippy",
@@ -1007,7 +1213,7 @@ pub(crate) fn targets(app: &App) -> Result<()> {
         };
         let mut clippy = vec!["clippy", "--bins", "--target", target, "--"];
         clippy.extend(LINTS);
-        let mut command = cargo_in(app, &clippy);
+        let mut command = cargo_in(app, dir, &clippy);
         if app.recipe.package.abi == Abi::Linux {
             let _ = command.env("RUSTFLAGS", linux_rustflags(arch));
         }
@@ -1162,6 +1368,115 @@ mod tests {
     use crate::ports;
     use ferrix_pkg::manifest;
     use ferrix_pkg::record::{self, Installed, Record};
+
+    use super::{assign, names_target_tmpdir, outputs_in_metadata};
+
+    #[test]
+    fn the_apps_share_a_check_directory_only_without_shared_temporaries_or_outputs() {
+        let metadata = r#"{"packages":[{"name":"a","targets":[
+            {"kind":["lib"],"name":"a"},{"kind":["bin"],"name":"waybar"},
+            {"kind":["example"],"name":"demo"},{"kind":["cdylib"],"name":"plug"},
+            {"kind":["test"],"name":"it"}]}]}"#;
+        assert_eq!(
+            outputs_in_metadata(metadata).unwrap(),
+            ["waybar", "demo", "plug"]
+        );
+
+        // Placing, with planted apps: heaviest first to the lightest
+        // directory; two making an output of one name never in one
+        // directory, a third directory when the two first both clash; a
+        // script-built app nowhere.
+        let app = |weight: usize, made: &[&str]| {
+            Some((weight, made.iter().map(|name| (*name).to_owned()).collect()))
+        };
+        let built = vec![
+            app(10, &["a"]),
+            None,
+            app(50, &["big", "probe"]),
+            app(40, &["probe"]),
+            app(5, &["probe"]),
+            app(20, &["c"]),
+        ];
+        let placed = assign(&built);
+        assert_eq!(
+            placed,
+            vec![Some(0), None, Some(0), Some(1), Some(2), Some(1)]
+        );
+        // No output name is made by two apps in one directory, here or in
+        // any placing of a bigger planted set (the consultant's A2.2).
+        let shares_a_name = |built: &[Option<(usize, Vec<String>)>], placed: &[Option<usize>]| {
+            built.iter().zip(placed).enumerate().any(|(one, (a, at))| {
+                built.iter().zip(placed).skip(one + 1).any(|(b, bt)| {
+                    at.is_some()
+                        && at == bt
+                        && a.as_ref()
+                            .zip(b.as_ref())
+                            .is_some_and(|((_, a), (_, b))| a.iter().any(|name| b.contains(name)))
+                })
+            })
+        };
+        assert!(!shares_a_name(&built, &placed));
+        let many: Vec<Option<(usize, Vec<String>)>> = (0..40)
+            .map(|index| {
+                let names = [format!("own{index}"), format!("common{}", index % 3)];
+                Some((index * 7 % 11, names.to_vec()))
+            })
+            .collect();
+        assert!(!shares_a_name(&many, &assign(&many)));
+        assert!(
+            outputs_in_metadata(r#"{"packages":[{"targets":[{"kind":["new-kind"],"name":"x"}]}]}"#)
+                .is_err()
+        );
+
+        // A source naming the shared temporary directory is found; one in a
+        // target directory is not the app's source.
+        let root = crate::paths::target_dir()
+            .join("xtask-apps-test")
+            .join(format!("{}-tmpdir", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("target/debug")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn f() {}").unwrap();
+        std::fs::write(root.join("target/debug/x.rs"), "CARGO_TARGET_TMPDIR").unwrap();
+        assert_eq!(names_target_tmpdir(&root).unwrap(), None);
+        std::fs::write(root.join("src/t.rs"), "env!(\"CARGO_TARGET_TMPDIR\")").unwrap();
+        assert_eq!(
+            names_target_tmpdir(&root).unwrap(),
+            Some(root.join("src/t.rs"))
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+
+        // The apps in this tree: fuzzel and hyprlock both have an example
+        // named probe, so they never share a directory; the heaviest,
+        // waybar, goes first, to the first directory.
+        let apps = super::discover().unwrap();
+        let dirs = super::check_dirs(&apps).unwrap();
+        let dir_of = |name: &str| {
+            let index = apps.iter().position(|app| app.name() == name).unwrap();
+            dirs.get(index).unwrap().clone()
+        };
+        assert_ne!(dir_of("fuzzel"), dir_of("hyprlock"));
+        assert_eq!(dir_of("waybar"), dir_of("fuzzel"));
+        assert_eq!(
+            dir_of("waybar"),
+            crate::paths::target_dir().join("apps-check")
+        );
+    }
+
+    #[test]
+    fn packages_for_images_are_never_built_in_the_check_directory() {
+        // The consultant's condition 8 (ledger line 1684): `build` and
+        // `cargo_linux` keep a directory an app.
+        let source = include_str!("apps.rs");
+        for function in ["\nfn build(", "\nfn cargo_linux("] {
+            let start = source.find(function).unwrap();
+            let body = source.get(start..).unwrap();
+            let end = body.find("\n}\n").unwrap();
+            let body = body.get(..end).unwrap();
+            assert!(!body.contains("check_dir"), "{function}");
+            assert!(body.contains(r#".join("apps")"#), "{function}");
+        }
+    }
 
     fn app(name: &str, smoke: &str) -> App {
         let text = format!(

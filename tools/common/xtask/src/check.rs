@@ -49,8 +49,14 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "host-doctest" => host_doctest(),
         "host-doc" => host_doc(),
         "check-apps" => apps(&mut Counts::default()),
-        "check-side" => side_workspaces(&paths::workspace_root()),
-        "check-unit" => check_unit(&paths::workspace_root()),
+        "check-side" => {
+            crate::orphans::exit_with_parent();
+            side_workspaces(&paths::workspace_root())
+        }
+        "check-unit" => {
+            crate::orphans::exit_with_parent();
+            check_unit(&paths::workspace_root())
+        }
         "check-audit" => check_audit(),
         "check-docs" => docs(),
         "check-ferrocene" => ferrocene_rust(),
@@ -360,10 +366,51 @@ fn after_the_tests(root: &std::path::Path, args: &Args) -> Result<bool> {
 }
 
 /// The workspaces of their own that `check` reaches -- loom's, the
-/// compositor's, the Linux programs', adbd's, nvos's and every app's -- one
-/// after another: `cargo xtask check-side`, which `check` starts beside its
-/// main workspace's steps ([`Beside`]).
+/// compositor's, the Linux programs', adbd's, nvos's and every app's:
+/// `cargo xtask check-side`, which `check` starts beside its main
+/// workspace's steps ([`Beside`]). [`SIDE_JOBS`] of them at once
+/// ([`side_workspaces_at_once`]), or one after another when it is 1.
 fn side_workspaces(root: &std::path::Path) -> Result<()> {
+    match side_jobs()? {
+        1 => {
+            println!(
+                "\n   the workspaces of their own, in turn ({SIDE_JOBS}={})",
+                std::env::var(SIDE_JOBS).unwrap_or_default()
+            );
+            side_workspaces_in_turn(root)
+        }
+        jobs => side_workspaces_at_once(root, jobs),
+    }
+}
+
+/// Set to how many of `check-side`'s units may run at once; 1 runs them one
+/// after another in the order they always ran, as release runs and the
+/// baseline do.
+const SIDE_JOBS: &str = "FERRIX_SIDE_JOBS";
+
+/// [`SIDE_JOBS`], or 4: the side workspaces were 464 s one after another on
+/// a cold tree, the critical path of `check` (`docs/TEST-TIME.md`, *Cut
+/// D2*), and four at once leave the main workspace's steps, which run
+/// beside them, most of a 24-thread host.
+fn side_jobs() -> Result<usize> {
+    parse_side_jobs(std::env::var(SIDE_JOBS).ok().as_deref())
+}
+
+/// [`side_jobs`] from the variable's value.
+fn parse_side_jobs(value: Option<&str>) -> Result<usize> {
+    let Some(text) = value else {
+        return Ok(4);
+    };
+    match text.trim().parse::<usize>() {
+        Ok(jobs) if jobs >= 1 => Ok(jobs),
+        _ => Err(Error::new(format!(
+            "{SIDE_JOBS}={text}: give a number of units, 1 or more"
+        ))),
+    }
+}
+
+/// [`side_workspaces`] one after another, each in this process.
+fn side_workspaces_in_turn(root: &std::path::Path) -> Result<()> {
     // loom's models are of the kernel's orderings: the item's, never cached
     // (the certification consultant, ledger line 1447).
     loom(root)?;
@@ -371,23 +418,33 @@ fn side_workspaces(root: &std::path::Path) -> Result<()> {
     counts.add(step_cache::unit(
         "compositor",
         &own_target_dir("compositor"),
+        None,
         || compositor(root),
     )?);
     for (name, relative) in LINUX_WORKSPACES {
-        counts.add(step_cache::unit(name, &own_target_dir(name), || {
+        counts.add(step_cache::unit(name, &own_target_dir(name), None, || {
             linux_workspace(root, name, relative)
         })?);
     }
     step("auth: no sabotage in the environment", no_sabotage)?;
-    counts.add(step_cache::unit("media", &own_target_dir("media"), || {
-        media(root)
-    })?);
-    counts.add(step_cache::unit("adbd", &own_target_dir("adbd"), || {
-        adbd(root)
-    })?);
-    counts.add(step_cache::unit("nvos", &own_target_dir("nvos"), || {
-        nvos(root)
-    })?);
+    counts.add(step_cache::unit(
+        "media",
+        &own_target_dir("media"),
+        None,
+        || media(root),
+    )?);
+    counts.add(step_cache::unit(
+        "adbd",
+        &own_target_dir("adbd"),
+        None,
+        || adbd(root),
+    )?);
+    counts.add(step_cache::unit(
+        "nvos",
+        &own_target_dir("nvos"),
+        None,
+        || nvos(root),
+    )?);
     apps(&mut counts)?;
     if step_cache::store().is_some() {
         println!(
@@ -396,6 +453,315 @@ fn side_workspaces(root: &std::path::Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// One of `check-side`'s units, as [`side_workspaces_at_once`] runs it.
+#[derive(Debug)]
+struct SideUnit {
+    /// Its name, as `check-unit` and the step cache know it.
+    name: String,
+    /// Its own target directory.
+    target: std::path::PathBuf,
+    /// Whether the step cache may answer for it: not loom's, whose models
+    /// are the item's orderings (the consultant, ledger line 1447).
+    cacheable: bool,
+    /// Its workspace's `Cargo.lock`, whose packages weigh it.
+    lock: std::path::PathBuf,
+    /// An app's: the directory its checks build in, told to its child.
+    app_dir: Option<std::path::PathBuf>,
+    /// Where it comes in the order the units always ran in.
+    order: usize,
+}
+
+/// The units of `check-side` in the order they always ran, in lanes: a lane
+/// runs its units one after another, lanes run at once. The apps share
+/// target directories (`crate::apps::check_dirs`), and the apps of one
+/// directory are one lane, by design: in turn, each finds what the one
+/// before compiled. Every other unit is a lane of its own.
+fn side_lanes(
+    root: &std::path::Path,
+    apps: &[crate::apps::App],
+    dirs: &[std::path::PathBuf],
+) -> Vec<Vec<SideUnit>> {
+    let unit = |name: &str, target: std::path::PathBuf, dir: std::path::PathBuf| SideUnit {
+        name: name.to_owned(),
+        target,
+        cacheable: name != "loom",
+        lock: dir.join("Cargo.lock"),
+        app_dir: None,
+        order: 0,
+    };
+    let mut lanes = vec![
+        vec![unit(
+            "loom",
+            own_target_dir("loom"),
+            root.join("src/tests/loom"),
+        )],
+        vec![unit(
+            "compositor",
+            own_target_dir("compositor"),
+            root.join("src/user/system/linux/compositor"),
+        )],
+    ];
+    for (name, relative) in LINUX_WORKSPACES {
+        lanes.push(vec![unit(name, own_target_dir(name), root.join(relative))]);
+    }
+    for (name, relative) in [
+        ("media", "src/user/system/linux/media"),
+        ("adbd", "src/user/system/linux/adbd"),
+        ("nvos", "src/user/system/linux/drivers/nvrm/os/nvos"),
+    ] {
+        lanes.push(vec![unit(name, own_target_dir(name), root.join(relative))]);
+    }
+    // The apps of one shared directory are one lane, the directories'
+    // lanes in the order their first app comes.
+    let mut app_lanes: Vec<(&std::path::PathBuf, Vec<SideUnit>)> = Vec::new();
+    // The order the units always ran in: each other unit is a lane of its
+    // own, made in that order; the apps come after them, as found.
+    for (order, lane) in lanes.iter_mut().enumerate() {
+        for unit in lane {
+            unit.order = order;
+        }
+    }
+    let first_app = lanes.len();
+    for (position, (app, dir)) in apps.iter().zip(dirs).enumerate() {
+        let unit = SideUnit {
+            app_dir: Some(dir.clone()),
+            order: first_app + position,
+            ..unit(
+                &format!("app:{}", app.recipe.package.name),
+                dir.clone(),
+                app.dir.clone(),
+            )
+        };
+        match app_lanes.iter_mut().find(|(lane, _)| *lane == dir) {
+            Some((_, units)) => units.push(unit),
+            None => app_lanes.push((dir, vec![unit])),
+        }
+    }
+    lanes.extend(app_lanes.into_iter().map(|(_, units)| units));
+    lanes
+}
+
+/// The packages in `lock`, a `Cargo.lock`: how much a unit compiles, which
+/// a cold tree has no timings for; 0 when there is none.
+fn packages_in(lock: &std::path::Path) -> usize {
+    std::fs::read_to_string(lock)
+        .map(|text| text.matches("[[package]]").count())
+        .unwrap_or(0)
+}
+
+/// The order lanes start in: heaviest first, so the longest is not left to
+/// start last; ties keep the order they always ran in.
+fn lane_order(weights: &[usize]) -> Vec<usize> {
+    let mut order: Vec<(usize, usize)> = weights.iter().copied().enumerate().collect();
+    order.sort_by_key(|&(_, weight)| std::cmp::Reverse(weight));
+    order.into_iter().map(|(lane, _)| lane).collect()
+}
+
+/// What one unit came to: how it ended, how long it took, its log.
+#[derive(Debug)]
+struct SideRun {
+    outcome: Result<step_cache::Outcome>,
+    took: Duration,
+    log: std::path::PathBuf,
+    /// What the log holds, read back when the unit ended.
+    said: String,
+}
+
+/// [`side_workspaces`] `jobs` lanes at once (`docs/TEST-TIME.md`, *Cut
+/// D2*). The steps that are not units run first, here, as they always ran.
+/// Each unit then runs as a child, `cargo xtask check-unit` (under `strace`
+/// when the step cache is on: `step_cache::unit_logged`), with its output
+/// in `<target>/check-side/<unit>.log`. Every unit runs to its end whichever
+/// fail; then each log is printed whole in the order the units always ran
+/// in, and the first failure in that order is the error.
+fn side_workspaces_at_once(root: &std::path::Path, jobs: usize) -> Result<()> {
+    step("auth: no sabotage in the environment", no_sabotage)?;
+    let (apps, dirs) = app_manifests()?;
+    for app in &apps {
+        let name = &app.recipe.package.name;
+        // A search of the whole tree, so never a unit: it reads the item.
+        step(
+            &format!("app {name}: nothing outside its folder names it"),
+            || crate::apps::stays_in_its_folder(app),
+        )?;
+    }
+    let lanes = side_lanes(root, &apps, &dirs);
+    let logs = paths::target_dir().join("check-side");
+    std::fs::create_dir_all(&logs)?;
+    let weights: Vec<usize> = lanes
+        .iter()
+        .map(|lane| lane.iter().map(|unit| packages_in(&unit.lock)).sum())
+        .collect();
+    let order = lane_order(&weights);
+    let units: usize = lanes.iter().map(Vec::len).sum();
+    println!(
+        "\n== the workspaces of their own: {units} units in {} lanes, {jobs} at once \
+         ({SIDE_JOBS}={}; 1 runs them in turn); each one's output follows when all have ended",
+        lanes.len(),
+        std::env::var(SIDE_JOBS).unwrap_or_else(|_| "unset".to_owned())
+    );
+    for &lane in &order {
+        let (Some(units), Some(weight)) = (lanes.get(lane), weights.get(lane)) else {
+            continue;
+        };
+        let names: Vec<&str> = units.iter().map(|unit| unit.name.as_str()).collect();
+        println!("   lane ({weight} packages): {}", names.join(", "));
+    }
+    let next = std::sync::Mutex::new(order.into_iter());
+    let done: std::sync::Mutex<Vec<(usize, Vec<SideRun>)>> = std::sync::Mutex::new(Vec::new());
+    let died = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..jobs.min(lanes.len()))
+            .map(|_| scope.spawn(|| side_worker(&next, &lanes, &logs, &done)))
+            .collect();
+        // A worker that panicked ends here, not in the scope: its lane's
+        // units are then the ones with no end recorded, and every log is
+        // still printed.
+        workers
+            .into_iter()
+            .map(std::thread::ScopedJoinHandle::join)
+            .filter(std::result::Result::is_err)
+            .count()
+    });
+    if died > 0 {
+        println!("\n-- check-side: {died} worker(s) died");
+    }
+    let done = done
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (counts, failures) = side_verdicts(&lanes, done);
+    if step_cache::store().is_some() {
+        println!(
+            "\n-- the step cache: {} units ran, {} cached passes",
+            counts.ran, counts.cached
+        );
+    }
+    if !failures.is_empty() {
+        let names: Vec<&str> = failures.iter().map(|(name, _)| name.as_str()).collect();
+        println!(
+            "\n-- check-side: {} of {units} units failed: {}",
+            failures.len(),
+            names.join(", ")
+        );
+    }
+    failures
+        .into_iter()
+        .next()
+        .map_or(Ok(()), |(_, error)| Err(error))
+}
+
+/// Each unit's log printed and its outcome counted, in the order the units
+/// always ran in, whatever order the lanes ended in (`done`); the failures in
+/// that order, each with its unit's name. A unit with no run recorded fails.
+fn side_verdicts(
+    lanes: &[Vec<SideUnit>],
+    mut done: Vec<(usize, Vec<SideRun>)>,
+) -> (Counts, Vec<(String, Error)>) {
+    done.sort_by_key(|(index, _)| *index);
+    let mut runs = done.into_iter().peekable();
+    // Each unit with its run, or none: then in the order the units always
+    // ran in, whatever lane they were in.
+    let mut units: Vec<(&SideUnit, Option<SideRun>)> = Vec::new();
+    for (index, lane) in lanes.iter().enumerate() {
+        let mut ran = match runs.next_if(|(lane, _)| *lane == index) {
+            Some((_, ran)) => ran.into_iter(),
+            None => Vec::new().into_iter(),
+        };
+        for unit in lane {
+            units.push((unit, ran.next()));
+        }
+    }
+    units.sort_by_key(|(unit, _)| unit.order);
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    for (unit, run) in units {
+        let Some(run) = run else {
+            failures.push((
+                unit.name.clone(),
+                Error::new(format!("{}: no end recorded (its worker died)", unit.name)),
+            ));
+            continue;
+        };
+        print_side_run(unit, &run);
+        match run.outcome {
+            Ok(outcome) => counts.add(outcome),
+            Err(error) => failures.push((unit.name.clone(), error)),
+        }
+    }
+    (counts, failures)
+}
+
+/// Print one unit's log whole, under a line with its time, and its verdict.
+fn print_side_run(unit: &SideUnit, run: &SideRun) {
+    println!(
+        "\n== {} ({:.1} s, {})",
+        unit.name,
+        run.took.as_secs_f64(),
+        run.log.display()
+    );
+    print!("{}", run.said);
+    let verdict = match &run.outcome {
+        Ok(_) => "passed".to_owned(),
+        Err(error) => format!("FAILED: {error}"),
+    };
+    println!(
+        "-- {}: {verdict}, {:.1} s",
+        unit.name,
+        run.took.as_secs_f64()
+    );
+}
+
+/// One of [`side_workspaces_at_once`]'s workers: take the next lane, run
+/// its units in turn, keep what each came to, until no lane is left.
+fn side_worker(
+    next: &std::sync::Mutex<std::vec::IntoIter<usize>>,
+    lanes: &[Vec<SideUnit>],
+    logs: &std::path::Path,
+    done: &std::sync::Mutex<Vec<(usize, Vec<SideRun>)>>,
+) {
+    loop {
+        let Some(index) = lock(next).next() else {
+            return;
+        };
+        let runs = lanes.get(index).map_or_else(Vec::new, |lane| {
+            lane.iter().map(|unit| run_side_unit(unit, logs)).collect()
+        });
+        lock(done).push((index, runs));
+    }
+}
+
+/// Run `unit` as a child with its output in `<logs>/<unit>.log`.
+fn run_side_unit(unit: &SideUnit, logs: &std::path::Path) -> SideRun {
+    let log = logs.join(format!("{}.log", unit.name.replace(':', "-")));
+    let began = Instant::now();
+    let mut outcome = std::fs::File::create(&log)
+        .map_err(|error| Error::new(format!("creating {}: {error}", log.display())))
+        .and_then(|file| {
+            step_cache::unit_logged(
+                &unit.name,
+                &unit.target,
+                unit.app_dir.as_deref(),
+                &file,
+                unit.cacheable,
+            )
+        });
+    let took = began.elapsed();
+    let said = match std::fs::read(&log) {
+        Ok(said) => String::from_utf8_lossy(&said).into_owned(),
+        Err(error) => {
+            // A unit whose log cannot be read back fails, whatever it said.
+            let error = Error::new(format!("{}: reading {}: {error}", unit.name, log.display()));
+            outcome = outcome.and(Err(error));
+            String::new()
+        }
+    };
+    SideRun {
+        outcome,
+        took,
+        log,
+        said,
+    }
 }
 
 /// How many units ran and how many were cached passes.
@@ -432,23 +798,63 @@ const LINUX_WORKSPACES: &[(&str, &str)] = &[
 fn check_unit(root: &std::path::Path) -> Result<()> {
     let name = std::env::var(step_cache::UNIT_VARIABLE)
         .map_err(|_| Error::new("check-unit: FERRIX_CHECK_UNIT names no unit"))?;
+    let apps = if name.starts_with("app:") {
+        crate::apps::discover()?
+    } else {
+        Vec::new()
+    };
+    match resolve_unit(&name, &apps) {
+        Some(Unit::Loom) => loom(root),
+        Some(Unit::Compositor) => compositor(root),
+        Some(Unit::Linux(unit, relative)) => linux_workspace(root, unit, relative),
+        Some(Unit::Media) => media(root),
+        Some(Unit::Adbd) => adbd(root),
+        Some(Unit::Nvos) => nvos(root),
+        Some(Unit::App(app)) => {
+            // `check-side` works out which shared directory the app builds
+            // in and says so: no `cargo metadata` and no scan of the apps here.
+            let dir = std::env::var_os(step_cache::APP_DIR_VARIABLE).ok_or_else(|| {
+                Error::new(format!(
+                    "check-unit {name}: {} names no directory to build in",
+                    step_cache::APP_DIR_VARIABLE
+                ))
+            })?;
+            app_steps(app, std::path::Path::new(&dir))
+        }
+        None => Err(Error::new(format!("check-unit: no unit {name}"))),
+    }
+}
+
+/// What a `check-side` unit's name stands for.
+#[derive(Debug)]
+enum Unit<'a> {
+    Loom,
+    Compositor,
+    Linux(&'static str, &'static str),
+    Media,
+    Adbd,
+    Nvos,
+    App(&'a crate::apps::App),
+}
+
+/// The unit `name` names, from the lists [`side_lanes`] is made from.
+fn resolve_unit<'a>(name: &str, apps: &'a [crate::apps::App]) -> Option<Unit<'a>> {
     if let Some(app) = name.strip_prefix("app:") {
-        let apps = crate::apps::discover()?;
-        let app = apps
+        return apps
             .iter()
             .find(|found| found.recipe.package.name == app)
-            .ok_or_else(|| Error::new(format!("check-unit: no app {app}")))?;
-        return app_steps(app);
+            .map(Unit::App);
     }
-    match name.as_str() {
-        "compositor" => compositor(root),
-        "media" => media(root),
-        "adbd" => adbd(root),
-        "nvos" => nvos(root),
-        _ => match LINUX_WORKSPACES.iter().find(|(unit, _)| *unit == name) {
-            Some((unit, relative)) => linux_workspace(root, unit, relative),
-            None => Err(Error::new(format!("check-unit: no unit {name}"))),
-        },
+    match name {
+        "loom" => Some(Unit::Loom),
+        "compositor" => Some(Unit::Compositor),
+        "media" => Some(Unit::Media),
+        "adbd" => Some(Unit::Adbd),
+        "nvos" => Some(Unit::Nvos),
+        _ => LINUX_WORKSPACES
+            .iter()
+            .find(|(unit, _)| *unit == name)
+            .map(|(unit, relative)| Unit::Linux(unit, relative)),
     }
 }
 
@@ -927,17 +1333,33 @@ fn compositor(root: &std::path::Path) -> Result<()> {
     })
 }
 
+/// `check-side`'s step "apps: manifests": every app, and the target
+/// directory its `check` steps build in (`crate::apps::check_dirs`).
+fn app_manifests() -> Result<(Vec<crate::apps::App>, Vec<std::path::PathBuf>)> {
+    let mut found = (Vec::new(), Vec::new());
+    step("apps: manifests", || {
+        let apps = crate::apps::discover()?;
+        let dirs = crate::apps::check_dirs(&apps)?;
+        let mut distinct = dirs.clone();
+        distinct.sort();
+        distinct.dedup();
+        println!(
+            "  {} apps, their checks in {} shared target directories",
+            apps.len(),
+            distinct.len()
+        );
+        found = (apps, dirs);
+        Ok(())
+    })?;
+    Ok(found)
+}
+
 /// The gates of every app under `src/user/apps/`, found by their manifests
 /// (`docs/APPS.md` §5): nothing here names one. Each is a workspace of its
 /// own, so the host steps above never reach it.
 fn apps(counts: &mut Counts) -> Result<()> {
-    let mut apps = Vec::new();
-    step("apps: manifests", || {
-        apps = crate::apps::discover()?;
-        println!("  {} apps", apps.len());
-        Ok(())
-    })?;
-    for app in &apps {
+    let (apps, dirs) = app_manifests()?;
+    for (app, dir) in apps.iter().zip(&dirs) {
         let name = &app.recipe.package.name;
         // A search of the whole tree, so never a unit: it reads the item.
         step(
@@ -946,24 +1368,25 @@ fn apps(counts: &mut Counts) -> Result<()> {
         )?;
         counts.add(step_cache::unit(
             &format!("app:{name}"),
-            &paths::target_dir().join("apps").join(name),
-            || app_steps(app),
+            dir,
+            Some(dir),
+            || app_steps(app, dir),
         )?);
     }
     Ok(())
 }
 
 /// One app's formatting, clippy and tests.
-fn app_steps(app: &crate::apps::App) -> Result<()> {
+fn app_steps(app: &crate::apps::App, dir: &std::path::Path) -> Result<()> {
     let name = &app.recipe.package.name;
     step(&format!("app {name}: formatting"), || {
-        crate::apps::formatting(app)
+        crate::apps::formatting(app, dir)
     })?;
     step(&format!("app {name}: clippy and tests (host)"), || {
-        crate::apps::host(app)
+        crate::apps::host(app, dir)
     })?;
     step(&format!("app {name}: clippy (targets)"), || {
-        crate::apps::targets(app)
+        crate::apps::targets(app, dir)
     })
 }
 
@@ -1956,6 +2379,151 @@ mod tests {
         for (name, _) in AUDITS_UNCACHED {
             assert!(AUDITS.iter().any(|(step, _)| step == name), "{name}");
         }
+    }
+
+    #[test]
+    fn side_units_run_heaviest_lane_first_and_the_apps_share_one_lane() {
+        assert_eq!(parse_side_jobs(None).unwrap(), 4);
+        assert_eq!(parse_side_jobs(Some("1")).unwrap(), 1);
+        assert_eq!(parse_side_jobs(Some(" 6 ")).unwrap(), 6);
+        assert!(parse_side_jobs(Some("0")).is_err());
+        assert!(parse_side_jobs(Some("all")).is_err());
+
+        // Heaviest first; equal weights keep their order.
+        assert_eq!(lane_order(&[31, 126, 14, 126, 0]), vec![1, 3, 0, 2, 4]);
+
+        let root = paths::workspace_root();
+        let apps = crate::apps::discover().unwrap();
+        assert!(apps.len() >= 3);
+        // The second app in a directory of its own, the others in one.
+        let shared = std::path::PathBuf::from("/shared");
+        let apart = std::path::PathBuf::from("/apart");
+        let dirs: Vec<std::path::PathBuf> = (0..apps.len())
+            .map(|index| {
+                if index == 1 {
+                    apart.clone()
+                } else {
+                    shared.clone()
+                }
+            })
+            .collect();
+        let lanes = side_lanes(&root, &apps, &dirs);
+        let names: Vec<Vec<&str>> = lanes
+            .iter()
+            .map(|lane| lane.iter().map(|unit| unit.name.as_str()).collect())
+            .collect();
+        // The order they always ran in: loom, the compositor, the Linux
+        // workspaces, media, adbd, nvos, then the apps, a lane for each
+        // directory in the order its first app comes.
+        let mut expected: Vec<Vec<String>> = vec![vec!["loom".into()], vec!["compositor".into()]];
+        for (name, _) in LINUX_WORKSPACES {
+            expected.push(vec![(*name).to_owned()]);
+        }
+        for name in ["media", "adbd", "nvos"] {
+            expected.push(vec![name.to_owned()]);
+        }
+        let app_name = |app: &crate::apps::App| format!("app:{}", app.recipe.package.name);
+        expected.push(
+            apps.iter()
+                .enumerate()
+                .filter(|(index, _)| *index != 1)
+                .map(|(_, app)| app_name(app))
+                .collect(),
+        );
+        expected.push(apps.get(1).map(app_name).into_iter().collect());
+        assert_eq!(names, expected);
+        for unit in lanes.iter().flatten() {
+            // Loom's models are the item's: never cached (ledger 1447).
+            assert_eq!(unit.cacheable, unit.name != "loom", "{}", unit.name);
+            if unit.name.starts_with("app:") {
+                let second = apps.get(1).map(app_name).unwrap_or_default();
+                let dir = if unit.name == second { &apart } else { &shared };
+                assert_eq!(&unit.target, dir, "{}", unit.name);
+            } else {
+                assert_eq!(unit.target, own_target_dir(&unit.name));
+            }
+        }
+        // Their order is the order they always ran in, apps as found.
+        let mut by_order: Vec<(usize, &str)> = lanes
+            .iter()
+            .flatten()
+            .map(|unit| (unit.order, unit.name.as_str()))
+            .collect();
+        by_order.sort_unstable();
+        let flat: Vec<String> = expected
+            .iter()
+            .take(expected.len() - 2)
+            .flatten()
+            .cloned()
+            .chain(apps.iter().map(app_name))
+            .collect();
+        assert_eq!(
+            by_order.iter().map(|(_, name)| *name).collect::<Vec<_>>(),
+            flat.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        // Each workspace's lock file is found, so weights mean something.
+        assert!(packages_in(&root.join("src/user/system/linux/compositor/Cargo.lock")) > 50);
+        assert_eq!(packages_in(&root.join("no/such/Cargo.lock")), 0);
+    }
+
+    #[test]
+    fn every_side_unit_resolves_in_check_unit() {
+        let root = paths::workspace_root();
+        let apps = crate::apps::discover().unwrap();
+        let dirs = crate::apps::check_dirs(&apps).unwrap();
+        for unit in side_lanes(&root, &apps, &dirs).iter().flatten() {
+            assert!(
+                resolve_unit(&unit.name, &apps).is_some(),
+                "check-unit cannot run {}",
+                unit.name
+            );
+        }
+        assert!(resolve_unit("app:no-such-app", &apps).is_none());
+        assert!(resolve_unit("nothing", &apps).is_none());
+    }
+
+    #[test]
+    fn side_failures_are_every_one_in_the_order_the_units_always_ran() {
+        let unit = |name: &str, order: usize| SideUnit {
+            name: name.to_owned(),
+            target: std::path::PathBuf::new(),
+            cacheable: true,
+            lock: std::path::PathBuf::new(),
+            app_dir: None,
+            order,
+        };
+        let run = |fails: bool| SideRun {
+            outcome: if fails {
+                Err(Error::new("failed"))
+            } else {
+                Ok(step_cache::Outcome::Ran)
+            },
+            took: Duration::ZERO,
+            log: std::path::PathBuf::new(),
+            said: String::new(),
+        };
+        // The apps a, b, c, d always ran in that order; b and d share a
+        // directory, so a lane, after a and c's.
+        let lanes = vec![
+            vec![unit("loom", 0)],
+            vec![unit("compositor", 1)],
+            vec![unit("init", 2)],
+            vec![unit("app:a", 3), unit("app:c", 5)],
+            vec![unit("app:b", 4), unit("app:d", 6)],
+        ];
+        // Ended in another order than they always ran in, the apps' lanes
+        // first; the compositor, app c and app b failed, and lane 2 never
+        // ended.
+        let done = vec![
+            (4, vec![run(true), run(false)]),
+            (3, vec![run(false), run(true)]),
+            (1, vec![run(true)]),
+            (0, vec![run(false)]),
+        ];
+        let (counts, failures) = side_verdicts(&lanes, done);
+        let names: Vec<&str> = failures.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["compositor", "init", "app:b", "app:c"]);
+        assert_eq!(counts.ran, 3);
     }
 
     #[test]

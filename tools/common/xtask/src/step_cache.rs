@@ -76,8 +76,9 @@ pub(crate) const FLAKY_BUT_CACHED: &[(&str, &str)] = &[
     ),
 ];
 
-/// Units never cached.
-const NEVER: &[&str] = &[];
+/// Units never cached: loom's models are the kernel's orderings, the
+/// item's (the certification consultant, ledger lines 1447 and 1684).
+pub(crate) const NEVER: &[&str] = &["loom"];
 
 /// Roots whose files are not inputs, each with why. A path under one is
 /// neither recorded nor checked.
@@ -239,13 +240,14 @@ pub(crate) enum Outcome {
 pub(crate) fn unit(
     name: &str,
     target: &Path,
+    app_dir: Option<&Path>,
     inline: impl FnOnce() -> Result<()>,
 ) -> Result<Outcome> {
     let Some(store) = store() else {
         inline()?;
         return Ok(Outcome::Ran);
     };
-    if NEVER.contains(&name) {
+    if !may_look_up(name, true) {
         println!("   {name}: ran (never cached)");
         inline()?;
         return Ok(Outcome::Ran);
@@ -267,8 +269,107 @@ pub(crate) fn unit(
         println!("   {name}: cached pass {origin} ({inputs} inputs unchanged){flake}");
         return Ok(Outcome::Cached);
     }
-    run_traced(name, &directory, context)?;
+    run_traced(name, &directory, context, None, app_dir)?;
     Ok(Outcome::Ran)
+}
+
+/// [`unit()`] for a unit run beside others (`check-side`'s workers,
+/// `docs/TEST-TIME.md`, *Cut D2*): the same lookup and the same traced run,
+/// but the unit always runs as a child, `cargo xtask check-unit`, and what
+/// it and this say goes to `log` rather than to this process's output, so
+/// units run at once never interleave. `target` is the unit's own target
+/// directory, as for [`unit()`]; a unit not `cacheable` (loom's) is run and
+/// never looked up or recorded. An app's unit is given the shared directory
+/// it builds in (`app_dir`, as [`APP_DIR_VARIABLE`]).
+///
+/// # Errors
+///
+/// The unit failing, or its log not being written.
+pub(crate) fn unit_logged(
+    name: &str,
+    target: &Path,
+    app_dir: Option<&Path>,
+    log: &std::fs::File,
+    cacheable: bool,
+) -> Result<Outcome> {
+    unit_logged_with(store(), name, target, app_dir, log, cacheable)
+}
+
+/// The variable that gives an app's `check-unit` child the target
+/// directory its checks build in (`crate::apps::check_dirs`), worked out
+/// once by `check-side` (or `check-apps`), so that the child runs no
+/// `cargo metadata` and scans no app's sources of its own.
+pub(crate) const APP_DIR_VARIABLE: &str = "FERRIX_CHECK_APP_DIR";
+
+/// [`unit_logged`] with the store given.
+fn unit_logged_with(
+    store: Option<PathBuf>,
+    name: &str,
+    target: &Path,
+    app_dir: Option<&Path>,
+    log: &std::fs::File,
+    cacheable: bool,
+) -> Result<Outcome> {
+    use std::io::Write as _;
+    let mut said = log.try_clone()?;
+    let plain = |said: &mut std::fs::File, why: &str| -> Result<Outcome> {
+        if !why.is_empty() {
+            writeln!(said, "   {name}: ran ({why})")?;
+        }
+        let mut child = Command::new(std::env::current_exe()?);
+        let _ = child
+            .arg("check-unit")
+            .current_dir(paths::workspace_root())
+            .env(UNIT_VARIABLE, name);
+        if let Some(dir) = app_dir {
+            let _ = child.env(APP_DIR_VARIABLE, dir);
+        }
+        let status = child
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log.try_clone()?)
+            .status()
+            .map_err(|error| Error::new(format!("could not start check-unit {name}: {error}")))?;
+        if status.success() {
+            Ok(Outcome::Ran)
+        } else {
+            Err(Error::new(format!(
+                "{name} failed ({status}; it ran as `cargo xtask check-unit`)"
+            )))
+        }
+    };
+    let Some(store) = store else {
+        return plain(&mut said, "");
+    };
+    if !may_look_up(name, cacheable) {
+        return plain(&mut said, "never cached");
+    }
+    if !cfg!(target_os = "linux") || !strace_works() {
+        return plain(&mut said, "no strace, so nothing is recorded");
+    }
+    let mut context = Context::once()?.clone();
+    context.unit_targets = vec![absolute(target)?];
+    let context = &context;
+    let directory = store.join(file_name(name));
+    if let Some((origin, inputs)) = lookup(name, &directory, context) {
+        let flake = FLAKY_BUT_CACHED
+            .iter()
+            .find(|(unit, _)| *unit == name)
+            .map_or(String::new(), |(_, row)| format!(" [flake row: {row}]"));
+        writeln!(
+            said,
+            "   {name}: cached pass {origin} ({inputs} inputs unchanged){flake}"
+        )?;
+        return Ok(Outcome::Cached);
+    }
+    run_traced(name, &directory, context, Some(log), app_dir)?;
+    Ok(Outcome::Ran)
+}
+
+/// Whether unit `name` may be looked up and recorded at all: not when its
+/// caller says it may not be cached, nor when [`NEVER`] names it.
+pub(crate) fn may_look_up(name: &str, cacheable: bool) -> bool {
+    cacheable && !NEVER.contains(&name)
 }
 
 /// A unit's name as a directory's.
@@ -290,6 +391,46 @@ pub(crate) fn strace_works() -> bool {
         .arg("-V")
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+/// `command` started through `setpriv --pdeathsig KILL`, so that the
+/// kernel kills it when the thread that started it ends -- a `check-side`
+/// worker, or `check-side` killed -- rather than leave it running on,
+/// reparented: for a traced unit's strace, which `--kill-on-exit` makes
+/// take what it traces with it. With no `setpriv`, `command` as it is. The program,
+/// arguments, environment changes and directory are carried over.
+fn dies_with_parent(command: &Command) -> Command {
+    static SETPRIV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let setpriv = *SETPRIV.get_or_init(|| {
+        Command::new("setpriv")
+            .args(["--pdeathsig", "KILL", "--", "true"])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    });
+    let mut wrapped = if setpriv {
+        let mut wrapped = Command::new("setpriv");
+        let _ = wrapped
+            .args(["--pdeathsig", "KILL", "--"])
+            .arg(command.get_program());
+        wrapped
+    } else {
+        Command::new(command.get_program())
+    };
+    let _ = wrapped.args(command.get_args());
+    for (key, value) in command.get_envs() {
+        match value {
+            Some(value) => {
+                let _ = wrapped.env(key, value);
+            }
+            None => {
+                let _ = wrapped.env_remove(key);
+            }
+        }
+    }
+    if let Some(directory) = command.get_current_dir() {
+        let _ = wrapped.current_dir(directory);
+    }
+    wrapped
 }
 
 /// `strace` as every unit runs under it, writing one trace per process
@@ -461,14 +602,38 @@ pub(crate) fn record_pass(
 
 /// Run the unit as a traced child, and record it when it passes and the
 /// trace allows.
-fn run_traced(name: &str, directory: &Path, context: &Context) -> Result<()> {
+/// With `log`, the child's output and the line saying what was recorded
+/// go there.
+fn run_traced(
+    name: &str,
+    directory: &Path,
+    context: &Context,
+    log: Option<&std::fs::File>,
+    app_dir: Option<&Path>,
+) -> Result<()> {
     std::fs::create_dir_all(directory)?;
     let traces = directory.join(format!("trace-{}", std::process::id()));
-    let status = strace(&traces, false)?
+    // Run beside other units (with `log`), strace dies with the thread that
+    // started it and kills what it traces when it dies; `check-side` kills
+    // its descendants when its own parent goes
+    // (`crate::orphans::exit_with_parent`).
+    let mut command = strace(&traces, log.is_some())?;
+    let _ = command
         .arg(std::env::current_exe()?)
         .arg("check-unit")
         .current_dir(&context.root)
-        .env(UNIT_VARIABLE, name)
+        .env(UNIT_VARIABLE, name);
+    if let Some(dir) = app_dir {
+        let _ = command.env(APP_DIR_VARIABLE, dir);
+    }
+    if let Some(log) = log {
+        command = dies_with_parent(&command);
+        let _ = command
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log.try_clone()?);
+    }
+    let status = command
         .status()
         .map_err(|error| Error::new(format!("could not start strace for {name}: {error}")))?;
     if !status.success() {
@@ -478,7 +643,13 @@ fn run_traced(name: &str, directory: &Path, context: &Context) -> Result<()> {
         )));
     }
     let said = record_pass(name, &traces, &context.root, directory, context)?;
-    println!("   {name}: {said}");
+    match log {
+        Some(mut log) => {
+            use std::io::Write as _;
+            writeln!(log, "   {name}: {said}")?;
+        }
+        None => println!("   {name}: {said}"),
+    }
     Ok(())
 }
 
@@ -1008,6 +1179,13 @@ pub(crate) struct Traced {
     pub(crate) inputs: BTreeSet<Input>,
     /// The first reason not to record it, when there is one.
     pub(crate) refused: Option<String>,
+    /// Paths a lookup found there (succeeding, or failing in a way only a
+    /// path that is there can: EEXIST, EISDIR, ELOOP and the like), each
+    /// with whether the lookup followed links, as its `Input::Probe` has:
+    /// what the unit saw, checked against the path as the record finds it.
+    pub(crate) seen_there: BTreeSet<(PathBuf, bool)>,
+    /// Paths a lookup found absent (ENOENT, ENOTDIR).
+    pub(crate) seen_absent: BTreeSet<(PathBuf, bool)>,
 }
 
 impl Traced {
@@ -1822,6 +2000,7 @@ impl Walk<'_> {
         if call.returned < 0 {
             self.absent(path, call);
         } else {
+            let _ = self.traced.seen_there.insert((path.to_path_buf(), follow));
             self.read(path, Input::Probe(path.to_path_buf(), follow));
         }
     }
@@ -1857,10 +2036,29 @@ impl Walk<'_> {
                 | "ENODATA" | "EOPNOTSUPP" | "ENOEXEC" | "ELOOP" | "EISDIR" | "EINVAL" | "EEXIST"
                 | "ENOTEMPTY" | "EXDEV" | "EBUSY",
             ) => {
-                let _ = self.traced.inputs.insert(Input::Probe(
-                    path.to_path_buf(),
-                    !call.arguments.contains("AT_SYMLINK_NOFOLLOW"),
-                ));
+                let follow =
+                    !call.arguments.contains("AT_SYMLINK_NOFOLLOW") && call.name != "lstat";
+                let key = (path.to_path_buf(), follow);
+                match call.error.as_deref() {
+                    Some("ENOENT" | "ENOTDIR") => {
+                        let _ = self.traced.seen_absent.insert(key);
+                    }
+                    // Failures only a path that is there gives: it exists
+                    // (a mkdir of it, a directory opened as a file, a link
+                    // not followed, a readlink of what is no link).
+                    Some(
+                        "EEXIST" | "EISDIR" | "ENOTEMPTY" | "ELOOP" | "ENOEXEC" | "EBUSY"
+                        | "ENODATA" | "EINVAL",
+                    ) => {
+                        let _ = self.traced.seen_there.insert(key);
+                    }
+                    // The rest say nothing of whether it is there.
+                    _ => {}
+                }
+                let _ = self
+                    .traced
+                    .inputs
+                    .insert(Input::Probe(path.to_path_buf(), follow));
             }
             other => self.traced.refuse(format!(
                 "{} on {} failed with {}",
@@ -2034,7 +2232,141 @@ fn record_from(
         }
         text.push_str(&format!("{state} {written}\n"));
     }
+    // An input another process changed while the unit ran is recorded above
+    // as it is now, not as the unit read it (the certification consultant's
+    // R1, ledger line 1684): no record. Checked after every state was
+    // taken, so a change while they were taken counts too; from a little
+    // before the first call, for the coarse clock a change time is set
+    // from. What the run made itself is no input, so its own writes never
+    // count.
+    let started = first_stamp(traces)?.saturating_sub(CHANGE_TIME_MARGIN_MICROS);
+    for input in &traced.inputs {
+        if let Some(why) = changed_since(input, started, &traced, context) {
+            return Err(why);
+        }
+    }
     Ok(text)
+}
+
+/// How far before a run's first call a change still counts as during it:
+/// the clock a change time is set from is the kernel's coarse one, which
+/// advances once a timer tick, every 10 ms at HZ=100 (4 ms at 250), so a
+/// change in the tick the run began in can carry a time up to a tick
+/// before it. Twice the longest tick; a wider margin can only refuse more.
+const CHANGE_TIME_MARGIN_MICROS: u64 = 20_000;
+
+/// Why `input` cannot be recorded as the unit saw it, when it changed at or
+/// after `started` (microseconds since the epoch) or is not what the unit's
+/// lookups found it to be; `None` when it stands.
+///
+/// The change time is judged only where the record keeps what it tracks: a
+/// file read, a link read, a directory listed, a path looked up that is a
+/// file (kept by its bytes). A path looked up that is a directory is kept
+/// by its kind alone, and directories such as `$HOME`, `~/.cargo` and the
+/// dynamic loader's search path change their entries all the time without
+/// that kind changing; for those, and for absent paths, what counts is
+/// whether the path is there now as the unit's lookups found it, and
+/// whether they found it both absent and there.
+fn changed_since(
+    input: &Input,
+    started: u64,
+    traced: &Traced,
+    context: &Context,
+) -> Option<String> {
+    let path = input_path(input);
+    match input {
+        Input::Probe(_, follow) => {
+            let metadata = if *follow {
+                std::fs::metadata(path)
+            } else {
+                std::fs::symlink_metadata(path)
+            };
+            let key = (path.to_path_buf(), *follow);
+            let seen_there = traced.seen_there.contains(&key);
+            let seen_absent = traced.seen_absent.contains(&key);
+            // Found absent by one lookup and there by another, or absent
+            // and there now: it came while the unit ran, and what the
+            // record keeps is not what the unit saw (the consultant's A4.1,
+            // ledger line 1715). A path the run made itself is no input: it
+            // is in the target or a temporary directory, which are never
+            // inputs, or the run wrote outside them and is refused already.
+            if seen_absent && (seen_there || metadata.is_ok()) {
+                return Some(format!("{} came during the run", path.display()));
+            }
+            if seen_there && metadata.is_err() {
+                return Some(format!("{} went away during the run", path.display()));
+            }
+            if !metadata.is_ok_and(|metadata| metadata.is_file()) {
+                return None;
+            }
+        }
+        // A directory of cargo's or rustup's holding entries under an
+        // excluded root (`~/.cargo` and its bookkeeping) changes its own
+        // change time with them, and the record leaves them out: its
+        // listing is judged by the digest alone, as before (A5). Never one
+        // in the worktree or anywhere else (A5.1, ledger line 1722): a
+        // worktree holding its own excluded target directory keeps the
+        // check.
+        Input::Directory(_)
+            if (path.starts_with(&context.cargo_home)
+                || path.starts_with(&context.rustup_home))
+                && holds_excluded(path, context) =>
+        {
+            return None;
+        }
+        Input::File(_) | Input::Directory(_) | Input::Link(_) => {}
+    }
+    changed_at(input)
+        .is_some_and(|changed| changed >= started)
+        .then(|| format!("{} changed during the run", path.display()))
+}
+
+/// Whether directory `path` holds an entry under one of the excluded roots.
+fn holds_excluded(path: &Path, context: &Context) -> bool {
+    std::fs::read_dir(path).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| context.is_excluded(&entry.path()))
+    })
+}
+
+/// The earliest time stamp in the traces in `traces`, in microseconds since
+/// the epoch: when the traced run began.
+fn first_stamp(traces: &Path) -> std::result::Result<u64, String> {
+    let mut first = None::<u64>;
+    for entry in std::fs::read_dir(traces)
+        .map_err(|error| error.to_string())?
+        .flatten()
+    {
+        let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+        if let Some((time, _)) = text.lines().map(stamp).find(|(time, _)| *time != 0) {
+            first = Some(first.map_or(time, |earlier| earlier.min(time)));
+        }
+    }
+    first.ok_or_else(|| "no time stamp in the traces".to_owned())
+}
+
+/// When `input`'s inode last changed (its `ctime`), in microseconds since
+/// the epoch, rounded down; `None` for a path that is not there or off Unix.
+fn changed_at(input: &Input) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let path = input_path(input);
+        let metadata = match input {
+            Input::Probe(_, true) | Input::File(_) | Input::Directory(_) => std::fs::metadata(path),
+            Input::Probe(_, false) | Input::Link(_) => std::fs::symlink_metadata(path),
+        }
+        .ok()?;
+        let seconds = u64::try_from(metadata.ctime()).ok()?;
+        let nanos = u64::try_from(metadata.ctime_nsec()).ok()?;
+        Some(seconds * 1_000_000 + nanos / 1_000)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = input;
+        None
+    }
 }
 
 /// The path an input names.
