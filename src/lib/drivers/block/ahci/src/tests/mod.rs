@@ -36,6 +36,36 @@ fn pattern(len: usize, seed: u8) -> Vec<u8> {
 }
 
 #[test]
+fn an_offline_link_is_comreset_and_the_disk_found() {
+    let mut model = Model::new(1000, 512);
+    // What a BIOS that put the port offline leaves: DET 4, nothing busy.
+    model.ports[0].ssts = 0x4;
+    model.ports[0].after_reset = Some((0x113, 0x50, regs::SIG_ATA));
+    let (model, _, ahci) = start(model);
+    assert_eq!(ahci.unwrap().identity().sectors, 1000);
+    assert_eq!(model.borrow().ports[0].comresets, 1);
+}
+
+#[test]
+fn a_device_left_busy_is_comreset_and_then_identified() {
+    let mut model = Model::new(1000, 512);
+    model.ports[0].tfd = 0x80;
+    model.ports[0].after_reset = Some((0x113, 0x50, regs::SIG_ATA));
+    let (model, _, ahci) = start(model);
+    assert_eq!(ahci.unwrap().identity().sectors, 1000);
+    assert_eq!(model.borrow().ports[0].comresets, 1);
+}
+
+#[test]
+fn an_empty_port_is_not_reset() {
+    let mut model = Model::new(1000, 512);
+    model.ports[0].ssts = 0;
+    let (model, _, ahci) = start(model);
+    assert!(matches!(ahci, Err(Error::NoDrive)));
+    assert_eq!(model.borrow().ports[0].comresets, 0);
+}
+
+#[test]
 fn init_identifies_the_disk() {
     let (model, _, ahci) = start(Model::new(1000, 512));
     let ahci = ahci.unwrap();

@@ -29,6 +29,10 @@ pub(crate) struct Port {
     pub(crate) ssts: u32,
     pub(crate) serr: u32,
     pub(crate) ci: u32,
+    pub(crate) sctl: u32,
+    /// COMRESETs seen, and what the link and device are after one.
+    pub(crate) comresets: u32,
+    pub(crate) after_reset: Option<(u32, u32, u32)>,
 }
 
 /// A command the model saw.
@@ -179,6 +183,7 @@ impl Model {
             regs::PX_TFD => port.tfd,
             regs::PX_SIG => port.sig,
             regs::PX_SSTS => port.ssts,
+            regs::PX_SCTL => port.sctl,
             regs::PX_SERR => port.serr,
             regs::PX_CI => port.ci,
             _ => 0,
@@ -204,6 +209,19 @@ impl Model {
             regs::PX_IS => port.is &= !value,
             regs::PX_IE => port.ie = value,
             regs::PX_SERR => port.serr &= !value,
+            regs::PX_SCTL => {
+                assert_eq!(port.cmd & regs::CMD_ST, 0, "a COMRESET with PxCMD.ST set");
+                let was = port.sctl & 0xF;
+                port.sctl = value;
+                if was == 1 && value & 0xF == 0 {
+                    port.comresets += 1;
+                    if let Some((ssts, tfd, sig)) = port.after_reset {
+                        (port.ssts, port.tfd, port.sig) = (ssts, tfd, sig);
+                    }
+                } else if value & 0xF == 1 {
+                    port.ssts &= !0xF;
+                }
+            }
             regs::PX_CMD => {
                 let kept = regs::CMD_ST | regs::CMD_SUD | regs::CMD_POD | regs::CMD_FRE;
                 port.cmd = value & kept;
