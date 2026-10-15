@@ -119,7 +119,11 @@ point and the table where they are. It:
 4. passes the copy's physical address and length in two new `BootInfo`
    fields, `smbios` and `smbios_len` (version 8), or zeros.
 
-A refusal never stops the boot: the loader prints one line naming it,
+A refused table never halts the boot, while firmware ignoring the
+loader's `MAX_ADDRESS` ceiling for the copy, or a memory map that
+misdescribes the loader's own copy (stage 1), halts it as it does for every
+loader allocation; no byte of the table decides either. On a refusal the
+loader prints one line naming it,
 tries the 2.x entry point after a refused 3.x one, and passes zeros. When it
 copies, it prints `smbios 3.0 entry point (64-bit), table of N bytes
 copied`: the version and the length, nothing from the table.
@@ -237,7 +241,11 @@ none (the DK1's U-Boot, the Pixel 7's bootloader, which is not UEFI) has no
   files have Linux's mode and uid 0, read what the parse decoded, refuse a
   write with `EACCES`; a user (1000) and the global user a namespaced root
   runs as (100000) get `EACCES` on the 0400 files and read the 0444 ones;
-  fields the table lacks are absent. With none, `/sys/class/dmi`,
+  fields the table lacks are absent. That shows the uid half for a
+  namespace root; the capability half, that its CAP_DAC_OVERRIDE does not
+  reach a file of an id it does not map (global uid 0 here), is
+  `fs/userns_check.rs`'s case "root inside a namespace read a 0600 file of
+  an id it does not map (CAP_DAC_OVERRIDE)". With none, `/sys/class/dmi`,
   `/sys/firmware` and `/sys/devices/virtual/dmi` do not exist.
 * Every QEMU boot xtask makes gives the machine `-smbios` with a vendor, a
   product, and marker serials and UUID (`tools/common/xtask/src/smbios.rs`).

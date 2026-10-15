@@ -688,8 +688,6 @@ pub(super) fn check_cgroupfs() {
     );
 }
 
-/// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the
-/// VFS, and what it says held against what enumeration and the cores know.
 /// The SMBIOS copy's acceptance, against forged copies (`docs/DMI.md` §4).
 pub(super) fn check_smbios() {
     let checked = match discovery::smbios_check::run() {
@@ -702,6 +700,8 @@ pub(super) fn check_smbios() {
     );
 }
 
+/// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the
+/// VFS, and what it says held against what enumeration and the cores know.
 pub(super) fn check_sysfs() {
     let checked = match fs::sysfs::check::run() {
         Ok(checked) => checked,
