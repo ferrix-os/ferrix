@@ -24,7 +24,11 @@ pub const FIS_DWORDS: u32 = 5;
 
 /// The command header's `W` bit: data goes to the device.
 pub const HEADER_WRITE: u32 = 1 << 6;
-/// The command header's `C` bit: clear `BSY` once the FIS is sent.
+/// The command header's `C` bit: clear `BSY` -- and the command's `PxCI`
+/// bit -- as soon as the FIS is sent. Only for a FIS with no data and no
+/// answer (a soft reset); on a data command the command looks done before
+/// its data came, which real HBAs do and QEMU's, finishing at once, hides.
+/// Never set by this crate.
 pub const HEADER_CLEAR_BUSY: u32 = 1 << 10;
 
 /// The most bytes one PRDT entry describes.
@@ -58,7 +62,7 @@ pub const IDENTIFY_PAGE: usize = crate::regs::PAGE;
 /// Slot 0's command header.
 #[must_use]
 pub fn header(write: bool, prds: u16, table: u64) -> [u8; 32] {
-    let mut flags = FIS_DWORDS | HEADER_CLEAR_BUSY | (u32::from(prds) << 16);
+    let mut flags = FIS_DWORDS | (u32::from(prds) << 16);
     if write {
         flags |= HEADER_WRITE;
     }

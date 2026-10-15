@@ -94,8 +94,9 @@ pub enum Error {
     Unaligned,
     /// Fewer than [`CONTROL_PAGES`] pages, or a page the HBA cannot reach.
     ControlMemory,
-    /// IDENTIFY DEVICE's data cannot be used.
-    Identify(Refused),
+    /// IDENTIFY DEVICE's data cannot be used, and words 0 to 3, 49, 60,
+    /// 61, 83, 86, 100, 101 and 106 of what came back.
+    Identify(Refused, [u16; 12]),
     /// The HBA's registers read as all ones: it left the bus.
     Gone,
 }
@@ -347,7 +348,16 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         self.issue(IDENTIFY, 0, 0, false, &[(data, 512)])
             .map_err(PortError::Failed)?;
         let parsed = identify::parse(|word| self.control.read_u16(IDENTIFY_PAGE + 2 * word))
-            .map_err(|refused| PortError::Failed(Error::Identify(refused)))?;
+            .map_err(|refused| {
+                let mut words = [0_u16; 12];
+                for (slot, word) in words
+                    .iter_mut()
+                    .zip([0, 1, 2, 3, 49, 60, 61, 83, 86, 100, 101, 106])
+                {
+                    *slot = self.control.read_u16(IDENTIFY_PAGE + 2 * word);
+                }
+                PortError::Failed(Error::Identify(refused, words))
+            })?;
         Ok(Identity {
             sectors: parsed.sectors,
             sector_size: parsed.sector_size,
@@ -460,6 +470,16 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
             self.recover();
             return Err(error);
         }
+        // The device's last FIS ends the command, not PxCI alone: wait for the
+        // task file to say it is no longer busy.
+        let settled = self.wait(BUSY_TIMEOUT, "BSY after the command", |hba| {
+            hba.regs.read(port(hba.port, regs::PX_TFD)) & (regs::TFD_BSY | regs::TFD_DRQ) == 0
+        });
+        if let Err(error) = settled {
+            self.recover();
+            return Err(error);
+        }
+        self.control.barrier();
         let is = self.regs.read(port(self.port, regs::PX_IS));
         let tfd = self.regs.read(port(self.port, regs::PX_TFD));
         if is == regs::GONE {
