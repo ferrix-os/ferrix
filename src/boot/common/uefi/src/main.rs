@@ -649,6 +649,7 @@ fn leave_and_record(
 ) {
     stripes::reached(stripes::Step::Printed);
     console::shutdown();
+    stripes::tick(stripes::Tick::ConsoleGone);
     let Ok(map) = leave_firmware(services, map_buffer) else {
         stripes::failed(stripes::Step::LeftFirmware);
     };
@@ -669,11 +670,15 @@ fn leave_and_record(
 /// between fetching it and the call, and says to fetch it again and retry once.
 fn leave_firmware(services: &Services, buffer: Allocation) -> Result<MemoryMap> {
     let map = services.memory_map(buffer)?;
+    stripes::tick(stripes::Tick::FirstMap);
     if services.exit_boot_services(map.key).is_ok() {
+        stripes::tick(stripes::Tick::FirstExitOk);
         return Ok(map);
     }
+    stripes::tick(stripes::Tick::FirstExitFailed);
 
     let map = services.memory_map(buffer)?;
+    stripes::tick(stripes::Tick::SecondMap);
     services.exit_boot_services(map.key)?;
     Ok(map)
 }

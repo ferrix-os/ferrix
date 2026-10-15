@@ -89,8 +89,47 @@ pub(crate) fn failed(step: Step) -> ! {
     }
 }
 
+/// The calls between [`Step::Printed`] and [`Step::LeftFirmware`], each
+/// marked by a short block in the latter's row once it returned: the last
+/// block on the screen names the call that did not.
+#[derive(Clone, Copy)]
+pub(crate) enum Tick {
+    /// Firmware's console is forgotten.
+    ConsoleGone = 0,
+    /// The first `get_memory_map` returned.
+    FirstMap = 1,
+    /// The first `exit_boot_services` returned success.
+    FirstExitOk = 2,
+    /// The first `exit_boot_services` returned failure.
+    FirstExitFailed = 3,
+    /// The second `get_memory_map` returned.
+    SecondMap = 4,
+}
+
+/// The width of a tick's block, and from one block's left edge to the next.
+const TICK: u32 = 40;
+/// From one tick's left edge to the next one's.
+const TICK_PITCH: u32 = 56;
+/// Each tick's colour: white, blue, green, yellow, blue.
+const TICK_COLOURS: [u32; 5] = [0xFF_FF_FF, 0x40_80_FF, 0x00_FF_00, 0xFF_FF_00, 0x40_80_FF];
+
+/// Paint `tick`'s block in [`Step::LeftFirmware`]'s row.
+pub(crate) fn tick(tick: Tick) {
+    let n = tick as u32;
+    let colour = TICK_COLOURS.get(n as usize).copied().unwrap_or(RED);
+    let from = WIDTH.load(Ordering::Relaxed) / 2 + n * TICK_PITCH;
+    paint_span(Step::LeftFirmware as u32, colour, from, from + TICK);
+}
+
 /// Paint row `row` from the bottom, on the right half, in `rgb`.
 fn paint(row: u32, rgb: u32) {
+    let width = WIDTH.load(Ordering::Relaxed);
+    paint_span(row, rgb, width / 2, width);
+}
+
+/// Paint row `row` from the bottom, from column `from` to before `to`, in
+/// `rgb`.
+fn paint_span(row: u32, rgb: u32, from: u32, to: u32) {
     let phys = PHYS.load(Ordering::Acquire);
     if phys == 0 {
         return;
@@ -111,7 +150,7 @@ fn paint(row: u32, rgb: u32) {
     };
     for y in top..top + BAR {
         let line = phys + u64::from(y) * stride * 4;
-        for x in width / 2..width {
+        for x in from..to.min(width) {
             // (x, y) is inside the visible area firmware reported, so
             // the address is inside its framebuffer, which firmware's tables
             // identity map until the kernel's are installed; nothing else
