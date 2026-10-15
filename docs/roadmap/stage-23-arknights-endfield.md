@@ -178,6 +178,9 @@ it, and the customer chose that way the same day. The game's data has
 since been deleted from the guest on the customer's word.
 
 * *Done:* E0.1, E0.2, and of E0.3 the answer the step exists for.
+* *The machine (2026-10-15):* the customer's N150 box, bare metal, with
+  software rendering; the plan, the disk image and its QEMU gate are
+  [`docs/N150.md`](../N150.md) (`n150-install`, `test-n150`).
 * *Not known, and worth stating:* whether ACE accepts Wine or Proton on
   Linux on bare metal. The reports above are of that, not of a VM, and
   none was checked here; ACE has broken under Wine more than once in 2026.

@@ -119,6 +119,7 @@ mod ipc;
 mod jobs;
 mod kaslr;
 mod keyboard;
+mod n150;
 mod native;
 mod net;
 mod netboot;
@@ -231,6 +232,11 @@ COMMANDS:
                   http://<--server>/ferrix/boot.ipxe (tools/common/fetch/fetch-ipxe.sh first)
     test-netboot  Boot the netboot stick under QEMU from a server this runs, to the boot marker; then the
                   negative control, the server serving under another path, must fail with iPXE's error
+    n150-install  Write build/x86_64/n150-disk.img for the N150 box's NVMe drive: a GUID partition table, the
+                  image's EFI system partition, and a btrfs root at the rest of the disk with a program tree
+                  at /data (docs/N150.md); a file only, never a device
+    test-n150     Write that disk with a fixture tree and boot it under OVMF as the machine's one NVMe boot
+                  disk, GOP display only; /data read, written, kept across a power cycle, btrfs check after
     run           Boot the image under QEMU, attached to the terminal
     run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show
     run-badapple  Boot the badapple app's player as init: all of Bad Apple!! in a window, heard on this host's sound server (tools/common/fetch/fetch-badapple.sh first)
@@ -571,6 +577,11 @@ OPTIONS:
     --listen <ADDRESS:PORT|PORT>         netboot: where to serve [default: this host's address on its
                                          default route, port 8086]
     --server <HOST[:PORT]>               netboot-stick: where the machine finds `netboot` [port 8086]
+    --image <FAT>                        n150-install: the image volume for the ESP [default: build's]
+    --tree <DIR>                         n150-install: the tree at /data [default: the Proton
+                                         launcher volume's, ~/.local/share/ferrix/endfield-launcher-proton/tree]
+    --disk <IMG>                         n150-install: where to write [default: build/x86_64/n150-disk.img]
+    --disk-bytes <N>                     n150-install: the box's disk size [default: 512110190592]
     --scale <N>                         run-compositor, flash --compositor: the monitor's scale, 1 by default
     --size <W>x<H>                       run-compositor: the guest's screen; wallpapers: the screen
                                          to cut pictures for (1920x1080 for both)
@@ -754,6 +765,7 @@ fn run() -> Result<()> {
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
         "netboot" | "netboot-stick" | "test-netboot" => netboot::run(command, &args),
+        "n150-install" | "test-n150" => n150::run(command, &args),
         "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container"
         | "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),

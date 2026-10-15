@@ -2365,7 +2365,7 @@ fn qemu_command(
             //
             // which is harmless and the kind of noise that trains people to
             // skim the boot log.
-            if !args.boot_virtio {
+            if !args.boot_virtio && !args.boot_nvme {
                 let _ = command.args([
                     "-drive",
                     &format!("format=raw,file={},if=none,id=disk", display(image)),
@@ -3003,6 +3003,9 @@ fn attach_install_disks(command: &mut Command, arch: Arch, image: &Path, args: &
         let boot = if boot { ",bootindex=0" } else { "" };
         format!("virtio-blk-pci,drive={id},disable-legacy=on,iommu_platform=on{boot}")
     };
+    if args.boot_nvme && arch == Arch::X86_64 {
+        attach_boot_nvme(command, arch, image);
+    }
     if args.boot_virtio && arch == Arch::X86_64 {
         println!("  {arch}: {} as a virtio disk, booted from", display(image));
         let _ = command.args([
@@ -3118,6 +3121,32 @@ fn attach_root_disk(command: &mut Command, arch: Arch, args: &Args) -> Result<()
         attach_home(command, arch, &home, said);
     }
     Ok(())
+}
+
+/// The serial number of the N150 box's drive under `test-n150`.
+pub(crate) const NVME_BOOT_SERIAL: &str = "ferrix-n150";
+
+/// Attach `image` as the machine's one boot disk: an NVMe drive on a root
+/// port of its own, first in the firmware's boot order, as the N150 box's
+/// M.2 drive is (`crate::n150`). OVMF boots it through its own NVMe driver
+/// and finds the loader at the EFI system partition's fallback path.
+/// Chassis and slot numbers continue after [`attach_nvme_scratch`]'s.
+fn attach_boot_nvme(command: &mut Command, arch: Arch, image: &Path) {
+    println!(
+        "  {arch}: {} as an NVMe drive ({NVME_BOOT_SERIAL}) on a root port, booted from",
+        display(image)
+    );
+    let _ = command.args([
+        "-drive",
+        &format!(
+            "file={},if=none,format=raw,id=n150,cache=writeback",
+            display(image)
+        ),
+        "-device",
+        "pcie-root-port,id=ferrix.n150.port,chassis=6,slot=6",
+        "-device",
+        &format!("nvme,drive=n150,serial={NVME_BOOT_SERIAL},bus=ferrix.n150.port,bootindex=0"),
+    ]);
 }
 
 /// The serial number of the NVMe drive the root is on under `--nvme`.

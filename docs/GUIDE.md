@@ -850,6 +850,18 @@ reports the PC's PCI bus to the server's log and fetches the image.
 `cargo xtask test-netboot` proves the path under QEMU.
 [`docs/NETBOOT.md`](NETBOOT.md) has the firmware settings and the limits.
 
+### On the N150 box, from its own drive
+
+`cargo xtask n150-install` writes `build/x86_64/n150-disk.img`, a whole
+disk for the N150 box's NVMe drive: an EFI system partition with the image,
+and a btrfs root at the rest of the disk with a program tree (by default
+the Proton launcher volume's) at `/data`. It writes a file only; carrying
+it to the drive erases the drive and is the owner's step.
+`cargo xtask test-n150` boots such a disk under OVMF as the machine's one
+NVMe boot disk, with the firmware's framebuffer as the only display.
+[`docs/N150.md`](N150.md) is the plan for Endfield's anti-cheat on the box,
+the transfer, and the limits.
+
 ### On an STM32MP157-DK1 board
 
 The same ARMv7-A image boots the STM32MP157D-DK1 from its SD card, under

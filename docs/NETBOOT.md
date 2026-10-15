@@ -234,6 +234,12 @@ real machine fails. Keeping `snp.efi` keeps the test about the stick.
   only; the box's Motorcomm YT6801 and Realtek 8852BE have no driver yet.
   The image arrives through the firmware's driver, and nothing after
   `ExitBootServices` can use it.
+* **A machine whose disk holds `ferrix-root` is written.** The kernel
+  finds its root by that label on any partition, so once the N150 box's
+  drive carries the disk `n150-install` writes (`docs/N150.md` §3), a
+  netbooted run puts `/` there and installs its initramfs on it, keeping
+  everything else. `--kernel-option ferrix.root=tmpfs` keeps a run off the
+  disk.
 * **Plain HTTP, no authentication** (§3).
 * **Firmware the stick depends on**: a firmware with no UEFI network
   driver for its card, or with the stack switched off, gives `snp.efi`

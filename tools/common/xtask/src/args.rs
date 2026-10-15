@@ -447,6 +447,16 @@ pub(crate) struct Args {
     /// `--server <HOST[:PORT]>`: where the stick `netboot-stick` writes
     /// finds `netboot`. Never defaulted: the machine's network decides it.
     pub(crate) server: Option<String>,
+    /// `n150-install`'s inputs and output (`crate::n150`, `docs/N150.md`):
+    /// `--image <FAT>`, the image volume for the EFI system partition in
+    /// place of the one `build` makes; `--tree <DIR>`, the program tree put
+    /// at `/data` on the root volume; `--disk <IMG>`, where the disk image
+    /// is written; `--disk-bytes <N>`, the target disk's size.
+    pub(crate) n150: N150Args,
+    /// Boot the image as an NVMe drive on a root port, first in the
+    /// firmware's boot order, with no AHCI disk: the N150 box's one disk
+    /// (`crate::n150`). Never a flag of its own.
+    pub(crate) boot_nvme: bool,
     /// `--plan <DIR>`: a plan of builds `FERRIX_BUILDS=record:` wrote, which
     /// `test-selfhost` has Ferrix carry out and `builds-execute` carries out
     /// (see `crate::builds`).
@@ -549,6 +559,16 @@ const NAMED_FLAGS: [&str; 13] = [
     "--stage",
     "--record",
     "--board",
+];
+
+/// The flags [`Args::bare_metal`] takes.
+const BARE_METAL_FLAGS: [&str; 6] = [
+    "--listen",
+    "--server",
+    "--image",
+    "--tree",
+    "--disk",
+    "--disk-bytes",
 ];
 
 /// The flags [`Args::root`] takes.
@@ -862,8 +882,7 @@ impl Args {
                 "--wallpaper" => args.wallpaper = Some(value(&mut items, "--wallpaper")?),
                 "--edid" => args.edid = Some(value(&mut items, "--edid")?),
                 "--from" => args.from = Some(value(&mut items, "--from")?),
-                "--listen" => args.listen = Some(value(&mut items, "--listen")?),
-                "--server" => args.server = Some(value(&mut items, "--server")?),
+                flag if BARE_METAL_FLAGS.contains(&flag) => args.bare_metal(flag, &mut items)?,
                 "--plan" | "--volume" => args.selfhost(&item, &mut items)?,
                 "--size" => args.size = Some(dimensions(&value(&mut items, "--size")?, "--size")?),
                 flag if SCALE_FLAGS.contains(&flag) => args.scales(flag, &mut items)?,
@@ -971,7 +990,35 @@ fn number<T: std::str::FromStr>(items: &mut impl Iterator<Item = String>, key: &
         .map_err(|_| Error::new(format!("{key} wants a number, got `{raw}`")))
 }
 
+/// `n150-install`'s own flags (`crate::n150`).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct N150Args {
+    /// `--image <FAT>`: the image volume for the EFI system partition.
+    pub(crate) image: Option<std::path::PathBuf>,
+    /// `--tree <DIR>`: the tree put at `/data` on the root volume.
+    pub(crate) tree: Option<std::path::PathBuf>,
+    /// `--disk <IMG>`: where the disk image is written.
+    pub(crate) disk: Option<std::path::PathBuf>,
+    /// `--disk-bytes <N>`: the target disk's size in bytes.
+    pub(crate) disk_bytes: Option<u64>,
+}
+
 impl Args {
+    /// The bare-metal machine's flags: `netboot`'s `--listen` and
+    /// `--server`, and `n150-install`'s `--image`, `--tree`, `--disk` and
+    /// `--disk-bytes`.
+    fn bare_metal(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
+        match key {
+            "--listen" => self.listen = Some(value(items, key)?),
+            "--server" => self.server = Some(value(items, key)?),
+            "--disk-bytes" => self.n150.disk_bytes = Some(number(items, key)?),
+            "--image" => self.n150.image = Some(value(items, key)?.into()),
+            "--tree" => self.n150.tree = Some(value(items, key)?.into()),
+            _ => self.n150.disk = Some(value(items, key)?.into()),
+        }
+        Ok(())
+    }
+
     /// `bench-ipc`'s own flags: `--alternate`, `--rounds`, `--against-sel4`,
     /// `--against-redox`, `--record`, `--board`, `--board-log` and `--pin`.
     fn bench(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
