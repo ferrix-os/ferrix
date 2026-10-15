@@ -278,16 +278,9 @@ pub(crate) fn wait_for(directory: &Path, index: usize) -> Ended {
     let failure = if status == "0" {
         // The files it ran, unchanged since it started (a later build could
         // have rewritten them under it).
-        match (
-            std::fs::read_to_string(record("digests")),
-            digests(&command, &environment_binaries()),
-        ) {
-            (Ok(before), Ok(now)) if before == now => None,
-            (Ok(_), Ok(_)) => {
-                Some("its binary or a CARGO_BIN_EXE_ file changed while it ran".to_owned())
-            }
-            (Err(error), _) => Some(format!("no record of its files: {error}")),
-            (_, Err(error)) => Some(format!("its files cannot be read again: {error}")),
+        match std::fs::read_to_string(record("digests")) {
+            Ok(recorded) => changed(&recorded),
+            Err(error) => Some(format!("no record of its files: {error}")),
         }
     } else {
         Some(format!("it ended with {status}"))
@@ -299,6 +292,26 @@ pub(crate) fn wait_for(directory: &Path, index: usize) -> Ended {
         seconds,
         failure,
     }
+}
+
+/// Why the files a `.digests` record lists are not what it says now --
+/// each path it names, hashed again (the paths `test-wait` saw, the
+/// binary's `CARGO_BIN_EXE_*` among them) -- or `None` when every one is.
+pub(crate) fn changed(recorded: &str) -> Option<String> {
+    if recorded.trim().is_empty() {
+        return Some("its record of its files is empty".to_owned());
+    }
+    for line in recorded.lines() {
+        let Some((digest, path)) = line.split_once(' ') else {
+            return Some(format!("a record line that does not parse: {line}"));
+        };
+        match std::fs::read(path) {
+            Ok(bytes) if sha256::hex(&bytes) == digest => {}
+            Ok(_) => return Some(format!("{path} changed while it ran")),
+            Err(error) => return Some(format!("{path} cannot be read again: {error}")),
+        }
+    }
+    None
 }
 
 /// Whether binary `index`'s waiter is gone: its `.waiting` record removed
@@ -381,23 +394,42 @@ pub(crate) fn runner(arguments: &[String]) -> Result<()> {
             Err(error) => return Err(error.into()),
         }
     }
-    // Marked before the waiter starts, so `finish` never sees a gap.
-    std::fs::write(directory.join(format!("{index}.waiting")), b"")?;
-    let output = std::fs::File::create(directory.join(format!("{index}.out")))?;
-    let child = Command::new(std::env::current_exe()?)
-        .arg("test-wait")
-        .arg(index.to_string())
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(output.try_clone()?)
-        .stderr(output)
-        .spawn()
-        .map_err(|error| Error::new(format!("test-runner: could not start test-wait: {error}")))?;
-    std::fs::write(
-        directory.join(format!("{index}.waiting")),
-        child.id().to_string(),
-    )?;
-    Ok(())
+    start_waiter(&directory, index, arguments, &std::env::current_exe()?)
+}
+
+/// Start `exe test-wait` for binary `index`. Once `<index>.cmd` exists, any
+/// failure leaves a status that says so, so the collector fails rather than
+/// waits.
+fn start_waiter(directory: &Path, index: usize, arguments: &[String], exe: &Path) -> Result<()> {
+    let started = (|| -> Result<()> {
+        // Marked before the waiter starts, so `finish` never sees a gap.
+        std::fs::write(directory.join(format!("{index}.waiting")), b"")?;
+        let output = std::fs::File::create(directory.join(format!("{index}.out")))?;
+        let child = Command::new(exe)
+            .arg("test-wait")
+            .arg(index.to_string())
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(output.try_clone()?)
+            .stderr(output)
+            .spawn()
+            .map_err(|error| {
+                Error::new(format!("test-runner: could not start test-wait: {error}"))
+            })?;
+        std::fs::write(
+            directory.join(format!("{index}.waiting")),
+            child.id().to_string(),
+        )?;
+        Ok(())
+    })();
+    if let Err(error) = &started {
+        let _ = std::fs::write(
+            directory.join(format!("{index}.status")),
+            format!("could not start test-wait: {error}"),
+        );
+        let _ = std::fs::remove_file(directory.join(format!("{index}.waiting")));
+    }
+    started
 }
 
 /// `xtask test-wait <index> <binary> <arguments>`: take a slot, run the

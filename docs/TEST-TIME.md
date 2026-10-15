@@ -892,10 +892,16 @@ signal, could not start or never reported, one whose binary or
 `CARGO_BIN_EXE_*` files changed while it ran (their SHA-256 at its start and
 end), a "Running" line of cargo's without its record or the other way
 round, and no binary at all, each fail `check`; a binary whose `check` is
-gone is killed. `FERRIX_TESTS_IN_TURN=1` runs them as cargo does, and release
-runs and the reference configuration's baseline use it until a row shows
-both ways give the same results (the certification consultant's design
-review, ledger line 1594).
+gone is killed. `FERRIX_TESTS_IN_TURN=1` runs them as cargo does, for
+diagnosing a test; release runs and the reference configuration's baseline
+run them side by side too, since the gate's rows on one hash gave the same
+results both ways (`bsb-mp-check` and `bsb-mp-check-turn` on 3ff35caae: 183
+binaries, 5,242 tests passed, each binary's result the same), the
+certification consultant's design and code reviews, ledger lines 1594 and
+1619. The controls through `gate.sh`'s host-side mode fired: a broken test in
+an item crate (`bsb-mp-ctl-item`, `ferrix-sync`), five failing binaries all
+reported (`bsb-mp-ctl-two`), and binaries that never report
+(`bsb-mp-ctl-silent`).
 
 One worktree at a load of about 11-14, warm:
 

@@ -176,3 +176,38 @@ fn a_binary_whose_check_is_gone_is_killed() {
     let status = run(&words(&["sleep", "30"]), "999999999");
     assert!(status.starts_with("killed"), "{status}");
 }
+
+#[test]
+fn the_files_compared_are_the_ones_the_waiter_recorded() {
+    // A CARGO_BIN_EXE_ file only test-wait's environment named.
+    let directory = scratch("recorded-paths");
+    let exe = directory.join("bin-exe");
+    std::fs::write(&exe, b"one").unwrap();
+    let record = format!("{} {}\n", sha256::hex(b"one"), exe.display());
+    assert_eq!(changed(&record), None);
+    std::fs::write(&exe, b"two").unwrap();
+    assert!(changed(&record).unwrap_or_default().contains("changed"));
+    assert!(changed("").is_some());
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn a_waiter_that_cannot_start_leaves_a_failure() {
+    let directory = scratch("no-waiter");
+    std::fs::write(directory.join("0.cmd"), "/bin/true").unwrap();
+    let started = start_waiter(
+        &directory,
+        0,
+        &words(&["/bin/true"]),
+        Path::new("/nonexistent/xtask"),
+    );
+    assert!(started.is_err());
+    // Read, not waited for forever.
+    let one = wait_for(&directory, 0);
+    assert!(
+        one.failure
+            .unwrap_or_default()
+            .contains("could not start test-wait")
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
