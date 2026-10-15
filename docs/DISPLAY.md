@@ -1260,7 +1260,8 @@ processor in bursts instead of one uncached store a pixel.
 * *Negative controls* (tags `wc-ctl-*`, each through `gate.sh control`):
   `remap`, the kernel's change of type skipped; `hold`, the hold left
   `Device` with the change done; `prefetch`, the aperture minted not
-  prefetchable; `plain`, efifb mapping with `io_mapping_map`; `skip`,
+  prefetchable; `plain`, efifb mapping with `io_mapping_map`, expecting
+  efifb's line `the kernel refused the window's mapping`; `skip`,
   stage 9's `check_write_combining` no longer skipping the lent node. The
   stage 9 check skips the node by its binding, and only under the option,
   since the kernel's hold would refuse its uncached step for that, not

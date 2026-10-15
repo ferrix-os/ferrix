@@ -188,7 +188,15 @@ impl Screen {
                 len: len as u64,
             })
             .map_err(|_| Step::Window)?;
-        let base = mapping.map_combining(None).map_err(|_| Step::Window)?;
+        // The kernel maps the lent window only write-combining
+        // (L.device.39): a refusal here says so on the console, the line
+        // wc-ctl-plain expects (docs/DISPLAY.md section 8).
+        let base = mapping.map_combining(None).map_err(|_| {
+            say(format_args!(
+                "efifb: the kernel refused the window's mapping"
+            ));
+            Step::Window
+        })?;
         Ok(Screen {
             _mapping: mapping,
             base,
