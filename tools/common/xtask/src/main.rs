@@ -243,6 +243,8 @@ COMMANDS:
                   at /data (docs/N150.md); a file only, never a device
     test-n150     Write that disk with a fixture tree and boot it under OVMF as the machine's one NVMe boot
                   disk, GOP display only; /data read, written, kept across a power cycle, btrfs check after
+    test-n150-sata  test-n150 with that disk as a SATA drive on q35's AHCI controller, served by the
+                  ahci driver, in place of the NVMe drive
     run           Boot the image under QEMU, attached to the terminal
     run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show
     run-badapple  Boot the badapple app's player as init: all of Bad Apple!! in a window, heard on this host's sound server (tools/common/fetch/fetch-badapple.sh first)
@@ -785,7 +787,7 @@ fn run() -> Result<()> {
         "test-sysfs" => sysfs::test_sysfs(&args),
         "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
         "netboot" | "netboot-stick" | "test-netboot" => netboot::run(command, &args),
-        "n150-install" | "test-n150" => n150::run(command, &args),
+        "n150-install" | "test-n150" | "test-n150-sata" => n150::run(command, &args),
         "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container"
         | "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
         "test-apps" => apps::test_apps(&args),

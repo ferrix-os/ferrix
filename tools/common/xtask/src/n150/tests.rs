@@ -89,18 +89,32 @@ const FIRST: &[&str] = &[
 
 #[test]
 fn the_first_boot_passes_with_every_line_and_fails_naming_the_missing_one() {
-    check_first(&lines(FIRST)).unwrap();
+    check_first(&lines(FIRST), false).unwrap();
     let mut on_tmpfs = lines(FIRST);
     on_tmpfs.retain(|line| !line.contains("/ is btrfs"));
-    let error = check_first(&on_tmpfs).unwrap_err().to_string();
+    let error = check_first(&on_tmpfs, false).unwrap_err().to_string();
     assert!(error.contains("/ is not on its root partition"), "{error}");
     let mut no_marker = lines(FIRST);
     no_marker.retain(|line| !line.contains("marker"));
-    let error = check_first(&no_marker).unwrap_err().to_string();
+    let error = check_first(&no_marker, false).unwrap_err().to_string();
     assert!(error.contains("marker was not read from /data"), "{error}");
     let mut wrong = lines(FIRST);
     wrong[1] = wrong[1].replace("vde2", "vdd");
-    assert!(check_first(&wrong).is_err());
+    assert!(check_first(&wrong, false).is_err());
+}
+
+#[test]
+fn the_sata_boot_asks_for_the_ahci_drive_not_the_nvme_one() {
+    // The NVMe boot's lines do not pass the SATA check: no AHCI drive line.
+    let error = check_first(&lines(FIRST), true).unwrap_err().to_string();
+    assert!(error.contains("AHCI driver did not bring the drive up"), "{error}");
+    let mut sata = lines(FIRST);
+    sata[0] = "  0.900 |   ahci     8086:2922 port 0: QEMU HARDDISK serial ferrix-n150: \
+               2097152 sectors of 512 (1024 MiB)"
+        .to_owned();
+    check_first(&sata, true).unwrap();
+    // And the SATA lines do not pass the NVMe check.
+    assert!(check_first(&sata, false).is_err());
 }
 
 #[test]
