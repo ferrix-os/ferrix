@@ -261,7 +261,10 @@ where X has it, one core motion and one XI2 raw motion each, at the input's
 stamped time; `wl_pointer` motion is not followed. It lets go when the
 cursor is shown, the window loses hyprix's pointer or keyboard, the grab it
 was taken under ends, or, for a lock taken by a warp alone, X's pointer
-leaves the window. A hidden cursor is now hidden on hyprix too.
+leaves the window. A hidden cursor is now hidden on hyprix too. A warp,
+the game's or a confining grab's pull, sends no XI2 raw motion, as in Xorg
+(`miPointerMove` with `POINTER_NORAW`; fork ac2485ea), so a game counting
+raw events sees one a motion.
 `YSERVER_POINTER_LOCK=0` turns it off. With the lock, hyprix's input thread
 (I1) carries an X game's motion as it does a Wayland client's.
 
@@ -407,10 +410,11 @@ I1's e13992e3, asks hyprix for a locked pointer when a client hides the
 cursor and grabs or warps the pointer in its window, and moves X's pointer
 by each relative motion while it holds. `test-xlatency` ends with a game's
 grab and warps and fails a yserver that does not lock
-(`YSERVER_POINTER_LOCK=0`, the control). On the way: the server still sends
-an XI2 raw motion of no distance for each warp (243 raw for 121 motions and
-122 warps), which Xorg does not; a game summing raw motion is not moved by
-it, one counting events would be.
+(`YSERVER_POINTER_LOCK=0`, the control). The XI2 raw motion of no distance
+it sent for each warp (243 raw for 121 motions and 122 warps), which Xorg
+does not, is gone with ac2485ea (pinned): 121 raw for 121 motions, and the
+gate fails a warp's raw motion. The same commit carries a motion's stamped
+time into X's core and XI2 events on the KMS backend.
 
 2026-10-15: **the Present clock keeps one refresh.**
 `fetch-yserver.sh` pins the fork at d2bf56e2. The clock no longer takes a

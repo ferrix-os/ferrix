@@ -203,6 +203,19 @@ moving the mouse 9 pixels a motion: 114 of 121 motions read as the 9 pixels
 `YSERVER_POINTER_LOCK=0` (the control, `pl-xlat-ctl`, fired) 0 of 114, each
 read as wherever hyprix's pointer was. `pl-xwin` passed on the same volume.
 
+**No raw motion for a warp, and a motion's own time, 2026-10-15.** The
+243 raw motions were one per motion and one of no distance per warp, which
+Xorg does not send: a `WarpPointer`, a confining grab's pull and a move onto
+another CRTC go through `miPointerMove` with `POINTER_NORAW`, and raw events
+come only from the device. The fork's ac2485ea (on a1d0dcb3, pinned here)
+drains a warp without the XI2 raw event, and its KMS backend keeps a
+pointer motion's time, so the time I1 stamps reaches X's core and XI2
+motion and their crossings rather than the server's read time. The grab
+phase of `test-xlatency` now wants as many raw motions as motions, more
+failing as "a warp sent raw motion" and fewer as lost: 121 motions, 121 raw,
+119 read as the mouse's 9 pixels (`rm-xlat`); at the old pin, the control
+(`rm-xlat-ctl`, fired), 243 raw for 121 motions. `rm-xwin` passed.
+
 P1, P2, I1, P6, P7, G0 and P5 are 47. The first card run of P2 decides
 whether NVKMS scans out a client's image; if it copies, the lane is still
 far better than today and no longer level with Linux (the design's first

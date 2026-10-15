@@ -1357,4 +1357,6 @@ hides the cursor and grabs or warps the pointer in its window, and feeds
 each relative motion to X as the motion and the XI2 raw motion the game
 expects; so an X game's motion takes I1's lane. `test-xlatency`'s grabbing
 game read 114 of 121 motions as the mouse's step under the lock, 0 of 114
-without it (the control).
+without it (the control). From fork ac2485ea a warp sends no XI2 raw motion,
+as in Xorg, so the game reads one raw motion a motion (121 for 121; 243 at
+the old pin), and a motion keeps its stamped time into X's events.
