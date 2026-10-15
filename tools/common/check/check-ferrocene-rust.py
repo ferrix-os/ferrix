@@ -123,8 +123,17 @@ def load_boundary():
 
 
 def packages(manifest: dict) -> list[tuple[str, str]]:
-    """`(package, directory)` for the kernel and the item's library crates."""
-    found = [("ferrix-kernel", "src/kernel")]
+    """`(package, directory)` for the kernel's crates and the item's library
+    crates. The kernel's are `kernel_crates`, which the item-boundary gate
+    holds equal to the packages under src/kernel (docs/KERNEL-CRATES.md)."""
+    kernel = {
+        name: entry for name, entry in manifest.get("kernel_crates", {}).items()
+        if not name.startswith("//")
+    }
+    if "ferrix-kernel" not in kernel:
+        say("certification-item.json's kernel_crates names no ferrix-kernel; nothing to check")
+        sys.exit(1)
+    found = [(name, entry["path"]) for name, entry in sorted(kernel.items())]
     crates = manifest["crates"]
     for name, crate in crates["members"].items():
         if name.startswith("//"):

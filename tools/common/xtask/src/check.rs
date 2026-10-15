@@ -1459,8 +1459,22 @@ fn python_captured(script: &str, arguments: &[&str], said: &mut Vec<u8>) -> Resu
 /// other. It is linted in the target directory `cargo::kernel` builds that
 /// setting into, so neither setting's cache is thrown away for the other's,
 /// and cargo's lock on one directory never waits for the other.
+///
+/// Every one of the kernel's packages is linted: the binary and whatever
+/// library crates sit beneath `src/kernel` (`docs/KERNEL-CRATES.md`), as
+/// `workspace::members` finds them, so a crate split out of the kernel
+/// cannot leave the lint pass by being missed from a list.
 fn kernel_clippy_both_settings() -> Result<()> {
-    let mut with_defences = vec!["-p", "ferrix-kernel"];
+    let packages = workspace::members(&paths::workspace_root())?.kernel;
+    if !packages.iter().any(|name| name == "ferrix-kernel") {
+        return Err(Error::new(
+            "the workspace has no ferrix-kernel package under src/kernel to lint",
+        ));
+    }
+    let mut with_defences: Vec<&str> = Vec::new();
+    for package in &packages {
+        with_defences.extend(["-p", package.as_str()]);
+    }
     for arch in Arch::ALL {
         with_defences.extend(["--target", arch.kernel_target()]);
     }

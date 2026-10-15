@@ -90,27 +90,48 @@ forbid() {
 # ---------------------------------------------------------------------------
 # 1. Loader and kernel are two programs.
 # ---------------------------------------------------------------------------
-forbid ferrix-boot   "UEFI loader" "ferrix-kernel"
+# The kernel's packages: the binary at src/kernel and the library crates
+# beneath it (docs/KERNEL-CRATES.md). Every rule that keeps something away
+# from "the kernel" names all of them: an anchored `ferrix-kernel` does not
+# match `ferrix-kernel-core`.
+kernel_crates=$(find src/kernel -maxdepth 2 -name Cargo.toml -not -path '*/target/*' 2>/dev/null | sort \
+    | xargs -r sed -n '/^\[package\]/,/^\[/s/^name = "\(.*\)"$/\1/p' \
+    | paste -sd '|' - || true)
+if [[ "|$kernel_crates|" != *"|ferrix-kernel|"* ]]; then
+    echo "ERROR: no ferrix-kernel package found under src/kernel; the kernel's rules were NOT checked." >&2
+    exit 1
+fi
+K="$kernel_crates"
+
+forbid ferrix-boot   "UEFI loader" "$K"
 forbid ferrix-kernel "kernel"      "ferrix-boot"
+
+# The kernel's own crates, in ring order (docs/KERNEL-CRATES.md, the
+# certification consultant's ledger line 1477 (5)): the core links none of
+# the others, the item neither the load nor the binary. A crate that does not
+# exist yet is passed over by `forbid`.
+forbid ferrix-kernel-core "the kernel's core ring" "ferrix-kernel|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
+forbid ferrix-kernel-item "the kernel's item ring" "ferrix-kernel|ferrix-kernel-load|ferrix-boot"
+forbid ferrix-kernel-load "the kernel's load ring" "$K|ferrix-boot"
 
 # ---------------------------------------------------------------------------
 # 2. The host-testable libraries sit below both.
 # ---------------------------------------------------------------------------
-forbid ferrix-bootinfo "handoff ABI"  "ferrix-kernel|ferrix-boot|ferrix-elf|ferrix-frame"
-forbid ferrix-elf      "ELF64 reader" "ferrix-kernel|ferrix-boot"
-forbid ferrix-frame    "frame allocator" "ferrix-kernel|ferrix-boot"
-forbid ferrix-paging   "page tables"  "ferrix-kernel|ferrix-boot"
-forbid ferrix-sched    "scheduler logic" "ferrix-kernel|ferrix-boot"
-forbid ferrix-pci      "PCI configuration space" "ferrix-kernel|ferrix-boot"
-forbid ferrix-block    "block core" "ferrix-kernel|ferrix-boot"
-forbid ferrix-btrfs    "btrfs read path" "ferrix-kernel|ferrix-boot"
-forbid ferrix-btrfs-write "btrfs write path" "ferrix-kernel|ferrix-boot"
-forbid ferrix-netwire  "network wire formats" "ferrix-kernel|ferrix-boot"
-forbid ferrix-nettcp   "TCP state machine" "ferrix-kernel|ferrix-boot"
-forbid ferrix-net      "net core" "ferrix-kernel|ferrix-boot"
-forbid ferrix-netring  "net ring protocol" "ferrix-kernel|ferrix-boot"
-forbid ferrix-netserve "net driver serve loop" "ferrix-kernel|ferrix-boot"
-forbid ferrix-netlink  "netlink messages" "ferrix-kernel|ferrix-boot"
+forbid ferrix-bootinfo "handoff ABI"  "$K|ferrix-boot|ferrix-elf|ferrix-frame"
+forbid ferrix-elf      "ELF64 reader" "$K|ferrix-boot"
+forbid ferrix-frame    "frame allocator" "$K|ferrix-boot"
+forbid ferrix-paging   "page tables"  "$K|ferrix-boot"
+forbid ferrix-sched    "scheduler logic" "$K|ferrix-boot"
+forbid ferrix-pci      "PCI configuration space" "$K|ferrix-boot"
+forbid ferrix-block    "block core" "$K|ferrix-boot"
+forbid ferrix-btrfs    "btrfs read path" "$K|ferrix-boot"
+forbid ferrix-btrfs-write "btrfs write path" "$K|ferrix-boot"
+forbid ferrix-netwire  "network wire formats" "$K|ferrix-boot"
+forbid ferrix-nettcp   "TCP state machine" "$K|ferrix-boot"
+forbid ferrix-net      "net core" "$K|ferrix-boot"
+forbid ferrix-netring  "net ring protocol" "$K|ferrix-boot"
+forbid ferrix-netserve "net driver serve loop" "$K|ferrix-boot"
+forbid ferrix-netlink  "netlink messages" "$K|ferrix-boot"
 
 # ---------------------------------------------------------------------------
 # 2a. Ring-3 programs sit beside the kernel, never in it.
@@ -127,16 +148,18 @@ user_crates=$(find src/user/system/native -name Cargo.toml -not -path '*/target/
     | paste -sd '|' - || true)
 if [[ -n "$user_crates" ]]; then
     for crate in ${user_crates//|/ }; do
-        forbid "$crate" "ring-3 program" "ferrix-kernel|ferrix-boot"
+        forbid "$crate" "ring-3 program" "$K|ferrix-boot"
     done
-    forbid ferrix-kernel "kernel"      "$user_crates"
+    for kernel_crate in ${K//|/ }; do
+        forbid "$kernel_crate" "kernel" "$user_crates"
+    done
     forbid ferrix-boot   "UEFI loader" "$user_crates"
 fi
-forbid ferrix-btrfs-vfs "btrfs mount" "ferrix-kernel|ferrix-boot"
-forbid ferrix-blkring  "block ring protocol" "ferrix-kernel|ferrix-boot"
-forbid ferrix-virtio-blk "virtio-blk driver logic" "ferrix-kernel|ferrix-boot"
-forbid ferrix-virtio-net "virtio-net driver logic" "ferrix-kernel|ferrix-boot"
-forbid ferrix-blkserve "block driver serve loop" "ferrix-kernel|ferrix-boot"
+forbid ferrix-btrfs-vfs "btrfs mount" "$K|ferrix-boot"
+forbid ferrix-blkring  "block ring protocol" "$K|ferrix-boot"
+forbid ferrix-virtio-blk "virtio-blk driver logic" "$K|ferrix-boot"
+forbid ferrix-virtio-net "virtio-net driver logic" "$K|ferrix-boot"
+forbid ferrix-blkserve "block driver serve loop" "$K|ferrix-boot"
 
 # ---------------------------------------------------------------------------
 # 3. Generic kernel code reaches architecture code through the facade.

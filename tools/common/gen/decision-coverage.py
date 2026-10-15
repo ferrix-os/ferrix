@@ -255,9 +255,13 @@ PANICKING = re.compile(
     r"|alloc::alloc::handle_alloc_error"
     r"|alloc::raw_vec::(handle_error|capacity_overflow)"
     r"|rust_begin_unwind"
-    r"|ferrix_kernel::panic::explain"
-    r"|ferrix_kernel::trap::fatal)"
+    r"|ferrix_kernel(?:_core|_item|_load)?::panic::explain"
+    r"|ferrix_kernel(?:_core|_item|_load)?::trap::fatal)"
 )
+# The kernel's own two, by whichever of its crates defines them
+# (`docs/KERNEL-CRATES.md`): an image in which neither is named is refused,
+# since every guard that ends in them would read as an ordinary decision.
+KERNEL_GUARDS = re.compile(r"^ferrix_kernel(?:_core|_item|_load)?::(?:panic::explain|trap::fatal)")
 # `callq *0x54dd86(%rip) # 0xffffffff8054ddd8 <...>`: x86-64's kernel code
 # calls most functions through a slot the loader relocates.
 SLOT = re.compile(r"^\*0x[0-9a-f]+\(%rip\)\s+# 0x([0-9a-f]+)")
@@ -428,6 +432,12 @@ def mark_guards(
     is. Stopping at the first call errs toward counting a guard as an
     ordinary decision, which lowers the figure for the rest."""
     names = function_names(elf)
+    if not any(KERNEL_GUARDS.match(name) for name in names.values()):
+        raise SystemExit(
+            f"{elf}: neither the kernel's panic::explain nor its trap::fatal is among its "
+            f"symbols, under any of its crates' names: the guards that end in them would be "
+            f"counted as decisions. Teach KERNEL_GUARDS the crate that defines them now."
+        )
     slots = slot_targets(elf) if arch == "x86_64" else {}
     index = {address: i for i, (address, _, _, _) in enumerate(stream)}
     call, stop, jump = CALL[arch], STOP[arch], JUMP[arch]

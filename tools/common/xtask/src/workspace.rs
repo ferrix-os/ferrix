@@ -9,7 +9,8 @@
 //! test job went red while `cargo xtask check` stayed green.
 //!
 //! Now there is no list. A freestanding member is one at `boot`, at
-//! `src/boot/vendor/google/pixel7`, at `kernel` or under `src/user/system/native/`, read from the workspace manifest; `cargo xtask check` and
+//! `src/boot/vendor/google/pixel7`, at or under `src/kernel` (the kernel's
+//! crates, `docs/KERNEL-CRATES.md`) or under `src/user/system/native/`, read from the workspace manifest; `cargo xtask check` and
 //! CI both ask this module, through the same commands. And a member anywhere
 //! else whose `src/main.rs` says `#![no_main]` is refused, so a new program
 //! put in the wrong place fails the gate on the machine that added it.
@@ -20,11 +21,11 @@ use std::path::Path;
 use crate::{Error, Result};
 
 /// Where freestanding members live, relative to the workspace root.
-const FREESTANDING_PLACES: &[&str] = &[
-    "src/boot/common/uefi",
-    "src/boot/vendor/google/pixel7",
-    "src/kernel",
-];
+const FREESTANDING_PLACES: &[&str] = &["src/boot/common/uefi", "src/boot/vendor/google/pixel7"];
+
+/// Where the kernel's packages live: the binary at `src/kernel`, and its
+/// library crates beneath it (`docs/KERNEL-CRATES.md`).
+const KERNEL_PLACE: &str = "src/kernel";
 
 /// The directory freestanding native programs live under.
 const NATIVE_PLACE: &str = "src/user/system/native/";
@@ -36,6 +37,9 @@ pub(crate) struct Members {
     pub(crate) host: Vec<String>,
     /// The loader and the kernel, by package name.
     pub(crate) kernel_and_loader: Vec<String>,
+    /// The kernel's packages alone, by package name: the binary and its
+    /// library crates, every one linted for every kernel target.
+    pub(crate) kernel: Vec<String>,
     /// The native runtime and programs under `src/user/system/native/`, by package name.
     pub(crate) native: Vec<String>,
 }
@@ -69,6 +73,7 @@ pub(crate) fn members(root: &Path) -> Result<Members> {
     let mut sorted = Members {
         host: Vec::new(),
         kernel_and_loader: Vec::new(),
+        kernel: Vec::new(),
         native: Vec::new(),
     };
     for member in member_paths(&manifest)? {
@@ -76,7 +81,10 @@ pub(crate) fn members(root: &Path) -> Result<Members> {
         let name = package_name(&read(&directory.join("Cargo.toml"))?).ok_or_else(|| {
             Error::new(format!("workspace member `{member}` has no package name"))
         })?;
-        if FREESTANDING_PLACES.contains(&member.as_str()) {
+        if is_kernel_place(&member) {
+            sorted.kernel.push(name.clone());
+            sorted.kernel_and_loader.push(name);
+        } else if FREESTANDING_PLACES.contains(&member.as_str()) {
             sorted.kernel_and_loader.push(name);
         } else if member.starts_with(NATIVE_PLACE) {
             sorted.native.push(name);
@@ -91,6 +99,14 @@ pub(crate) fn members(root: &Path) -> Result<Members> {
         }
     }
     Ok(sorted)
+}
+
+/// Whether a member at `member` is one of the kernel's packages: the
+/// binary at `src/kernel` or a crate beneath it.
+fn is_kernel_place(member: &str) -> bool {
+    member
+        .strip_prefix(KERNEL_PLACE)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// The strings in the manifest's `members = [ ... ]`, comments skipped.
@@ -142,7 +158,7 @@ fn read(path: &Path) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{member_paths, members, package_name};
+    use super::{is_kernel_place, member_paths, members, package_name};
     use crate::paths;
 
     #[test]
@@ -163,6 +179,22 @@ mod tests {
         }
         assert!(sorted.host.iter().any(|name| name == "xtask"));
         assert!(sorted.host.iter().any(|name| name == "ferrix-net"));
+    }
+
+    #[test]
+    fn the_kernels_crates_are_kernel_wherever_beneath_it() {
+        assert!(is_kernel_place("src/kernel"));
+        assert!(is_kernel_place("src/kernel/core"));
+        assert!(is_kernel_place("src/kernel/load"));
+        assert!(!is_kernel_place("src/kernelish"));
+        assert!(!is_kernel_place("src/lib/kernel/sched"));
+        let sorted = members(&paths::workspace_root()).expect("the workspace sorts");
+        assert!(sorted.kernel.iter().any(|name| name == "ferrix-kernel"));
+        for package in &sorted.kernel {
+            assert!(sorted.kernel_and_loader.contains(package), "{package}");
+            assert!(!sorted.host.contains(package), "{package}");
+        }
+        assert!(!sorted.kernel.iter().any(|name| name == "ferrix-boot"));
     }
 
     #[test]

@@ -284,4 +284,24 @@ review and the regenerated evidence), S4 1.
   `check_iommu` ran straight after. Product lines per ring: core 70,874 to
   70,706, item 9,417 to 9,418, load unchanged; check lines core 32,743 to
   32,984, item 4,281 to 4,275.
-* S2 to S4: not started.
+* **S2** (branch `bs-a-s2`): the tools know the kernel's crates, from one
+  list, `kernel_crates` in `certification-item.json` (today the binary,
+  holding all three rings), with `raised_checks` beside it (empty). The
+  item-boundary gate walks every crate root's module tree and refuses a file
+  reached by no crate or by two, a file in a crate that does not hold its ring
+  but for the crate's root and a raised check, a stale or product raised
+  entry, a checks-only item named from product code (directly or through a
+  re-export), a path through a kernel crate's name that names nothing, an
+  allow of clippy's `disallowed_methods` outside a raised check (and, per
+  item, outside a checks-only item's module or without a reason), a package
+  under `src/kernel` missing from the list, and a core or item kernel crate
+  depending above its ring or without the workspace lints (D1, D2, D6's gate
+  half, D7); each rule has fixture cases in its self-test, which fail when
+  the rule is taken out. The Ferrocene check reads the list; the kernel's
+  clippy step lints every package under `src/kernel`, which `workspace.rs`
+  sorts as kernel, not host; `check-crate-layering.sh` keeps every rule's
+  "the kernel" to all of the kernel's packages and orders the three library
+  crates (inert until they exist); `decision-coverage.py` knows the guard
+  symbols under any of the crates' names and refuses an image with neither.
+* S3 and S4: not started. D5 (`KERNEL-INTERFACE.md`) and the
+  `disallowed-methods` list come with S3, which makes the first `pub`.

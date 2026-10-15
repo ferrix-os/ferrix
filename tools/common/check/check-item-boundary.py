@@ -145,6 +145,33 @@ DEFINES = {"fn", "struct", "enum", "union", "trait", "type", "const", "static"}
 UNREADABLE = re.compile(r"#\s*\[\s*path\s*=|(?<![\w:])include\s*!")
 
 
+def _kernel_crates_in_manifest() -> dict[str, dict]:
+    """The manifest's `kernel_crates`, by package name: the kernel binary and
+    the library crates it is split into (docs/KERNEL-CRATES.md). Read once,
+    here, because where a crate's root file sits decides module paths for
+    every tool that loads this file."""
+    try:
+        data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {
+        name: entry
+        for name, entry in data.get("kernel_crates", {}).items()
+        if not name.startswith("//")
+    }
+
+
+KERNEL_CRATES = _kernel_crates_in_manifest()
+# Files that are a crate's root, whose `mod x;` is `x.rs` beside them and
+# whose module path is the crate's: `main.rs` and `lib.rs`, and each kernel
+# crate's root beside `main.rs`.
+ROOT_FILES = {"main.rs", "lib.rs"} | {e["root"] for e in KERNEL_CRATES.values() if "root" in e}
+# A path through one of the kernel's own crates, `ferrix_kernel_core::mm`,
+# names the module `crate::mm` names: the four crates share one tree of
+# modules by position, each re-exporting the ones below it.
+KERNEL_CRATE_NAMES = {name.replace("-", "_") for name in KERNEL_CRATES}
+
+
 def load_manifest() -> dict:
     with MANIFEST.open(encoding="utf-8") as handle:
         return json.load(handle)
@@ -251,7 +278,7 @@ class Reference:
 def module_of_file(rel: str) -> ModPath:
     """`main.rs`/`lib.rs` -> (), `a/mod.rs` and `a.rs` -> (a,), `a/b.rs` -> (a, b)."""
     parts = rel[:-3].split("/")
-    if parts[-1] == "mod" or (len(parts) == 1 and parts[0] in ("main", "lib")):
+    if parts[-1] == "mod" or (len(parts) == 1 and rel in ROOT_FILES):
         parts = parts[:-1]
     return tuple(parts)
 
@@ -406,15 +433,18 @@ class Resolver:
     from outside a module follows only its `pub use` re-exports.
     """
 
-    def __init__(self, modules: dict[ModPath, Module]):
+    def __init__(self, modules: dict[ModPath, Module], crate_names: set[str] | None = None):
         self.modules = modules
+        self.crate_names = KERNEL_CRATE_NAMES if crate_names is None else crate_names
 
     def resolve(self, module: ModPath, segs: list[str], is_use: bool = False,
                 guard: frozenset = frozenset()):
         """(landing module, whether every segment named a module), or None
         when the path does not start in this crate."""
+        if segs[0] == "::" and len(segs) > 1 and segs[1] in self.crate_names:
+            segs = segs[1:]
         first, rest = segs[0], list(segs[1:])
-        if first == "crate":
+        if first == "crate" or first in self.crate_names:
             start: ModPath = ()
         elif first == "self":
             start = module
@@ -1047,6 +1077,256 @@ def hook_problems(ring_of: dict[str, str], read, hooks: list[dict], root: str | 
     return problems
 
 
+# --- the kernel's crates (docs/KERNEL-CRATES.md) ------------------------------
+
+# A checks-only item: `pub` so a raised check in a higher crate can reach it,
+# and not interface for product code there (ledger line 1531, D6).
+CHECKS_ONLY = re.compile(r"//\s*CHECKS-ONLY:")
+CHECKS_ONLY_ITEM = re.compile(
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:(?:const|unsafe|async|extern\s+\"[^\"]*\")\s+)*"
+    r"(?:fn|struct|enum|union|trait|type|const|static|mod)\s+(?:mut\s+)?(?:r#)?([^\W\d]\w*)"
+)
+DISALLOWED_ALLOW = re.compile(r"#\s*(!?)\s*\[\s*(?:allow|expect)\s*\([^\]]*clippy::disallowed_methods")
+
+
+def kernel_crate_files(entries: dict[str, dict], read, exists, listing: list[str]):
+    """`{file: [packages whose module tree reaches it]}` for every kernel file,
+    each crate walked from its root by `mod` declarations, inline ones
+    included; and the declarations that name no file."""
+    reached: dict[str, list[str]] = {rel: [] for rel in listing}
+    problems: list[str] = []
+    roots = ROOT_FILES | {e["root"] for e in entries.values() if e.get("root")}
+    for package, entry in sorted(entries.items()):
+        root = entry.get("root")
+        if not root or not exists(root):
+            problems.append(f"kernel_crates.{package}: its root {root!r} is not a kernel file")
+            continue
+        seen: set[str] = set()
+        queue = [root]
+        while queue:
+            rel = queue.pop()
+            if rel in seen:
+                continue
+            seen.add(rel)
+            reached.setdefault(rel, []).append(package)
+            masked = rustlex.mask(read(rel))
+            stem = rel[:-3]
+            parts = stem.split("/")
+            base = "/".join(parts[:-1]) if parts[-1] == "mod" or rel in roots else stem
+            toks = [t for t, _ in rustlex.tokens(masked)]
+            stack: list[tuple[str, int]] = []
+            depth = 0
+            for i, tok in enumerate(toks):
+                if tok == "{":
+                    depth += 1
+                elif tok == "}":
+                    depth -= 1
+                    if stack and depth == stack[-1][1]:
+                        stack.pop()
+                elif tok == "mod" and (i == 0 or toks[i - 1] not in ("::", ".")) and i + 2 < len(toks) \
+                        and IDENT.match(toks[i + 1]) and toks[i + 2] in (";", "{"):
+                    name = _name(toks[i + 1])
+                    if toks[i + 2] == "{":
+                        stack.append((name, depth))
+                        continue
+                    directory = "/".join([p for p in [base] + [s for s, _ in stack] if p])
+                    prefix = f"{directory}/{name}" if directory else name
+                    found = [c for c in (f"{prefix}.rs", f"{prefix}/mod.rs") if exists(c)]
+                    if not found:
+                        problems.append(f"{rel}: `mod {name};` ({package}) has no file this gate can find")
+                        continue
+                    queue.append(found[0])
+    return reached, problems
+
+
+def checks_only_items(files: list[str], read) -> dict[tuple[ModPath, str], str]:
+    """`{(module, item): file}` for every item marked `// CHECKS-ONLY:`: the
+    marker on a line of its own, then the item within its attributes and
+    doc comments."""
+    out = {}
+    for rel in files:
+        lines = read(rel).split("\n")
+        for number, line in enumerate(lines):
+            if not CHECKS_ONLY.search(line):
+                continue
+            for after in lines[number + 1 : number + 12]:
+                stripped = after.strip()
+                if not stripped or stripped.startswith(("#[", "///", "//")):
+                    continue
+                found = CHECKS_ONLY_ITEM.match(after)
+                if found:
+                    out[(module_of_file(rel), found.group(1))] = rel
+                break
+    return out
+
+
+def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, str], read, exists,
+                          members: dict[str, str]) -> list[str]:
+    """The kernel's crates against their rings (ledger lines 1477 and 1531):
+
+    * every package under src/kernel is in `kernel_crates`, and every entry is
+      a package there (`members`: package -> directory);
+    * each file is reached by exactly one crate's module tree;
+    * a file's crate holds its ring: an entry's `rings`, or the crate's own
+      root (the composition root), or `raised_checks`, which may name only
+      check files, and none that no longer needs it;
+    * a checks-only item is named by no product file, and only a raised check
+      allows clippy's `disallowed_methods` for a whole file."""
+    entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
+    problems: list[str] = []
+    if "ferrix-kernel" not in entries:
+        problems.append("kernel_crates: no entry for ferrix-kernel, the kernel binary")
+    for package, directory in sorted(members.items()):
+        entry = entries.get(package)
+        if entry is None:
+            problems.append(f"{directory}: package {package} is under src/kernel and not in kernel_crates")
+        elif entry.get("path") != directory:
+            problems.append(f"kernel_crates.{package}: path {entry.get('path')!r}, the workspace has {directory!r}")
+    for package in sorted(entries):
+        if package not in members:
+            problems.append(f"kernel_crates.{package}: no such package under src/kernel")
+
+    reached, found = kernel_crate_files(entries, read, exists, files)
+    problems += found
+    raised = {
+        e["file"]: e for e in manifest.get("raised_checks", {}).get("entries", [])
+    }
+    for rel in sorted(reached):
+        crates = reached[rel]
+        if not crates:
+            problems.append(f"{rel}: reached by no crate's module tree, so built by none")
+            continue
+        if len(crates) > 1:
+            problems.append(f"{rel}: reached by {len(crates)} crates ({', '.join(crates)}): "
+                            f"each would build its own copy, statics and locks included")
+            continue
+        crate = crates[0]
+        ring = ring_of.get(rel)
+        holds = set(entries.get(crate, {}).get("rings", []))
+        own_root = entries.get(crate, {}).get("root") == rel
+        entry = raised.get(rel)
+        if entry is not None:
+            if not is_test_file(rel, manifest):
+                problems.append(f"raised_checks: {rel} is product code; only a check may be raised")
+                continue
+            if entry.get("crate") != crate and not (ring in holds or own_root):
+                problems.append(f"raised_checks: {rel} names {entry.get('crate')}, it is reached by {crate}")
+                continue
+        if ring not in holds and not own_root:
+            if entry is None:
+                problems.append(f"{rel}: {ring} ring, reached by {crate}, which holds "
+                                f"{sorted(holds) or 'only its root'}")
+            continue
+        if entry is not None:
+            problems.append(f"raised_checks: {rel} is in its ring's crate ({crate}); the entry is stale")
+    for rel in sorted(raised):
+        if rel not in reached:
+            problems.append(f"raised_checks: {rel} is no kernel file; the entry is stale")
+
+    # Checks-only items, and the allows that let a check call their methods.
+    marked = checks_only_items(files, read)
+    modules, refs, _ = build(files, read)
+    problems += kernel_paths_unresolved(refs, modules, {p.replace("-", "_") for p in entries})
+    if marked:
+        resolver = Resolver(modules, {p.replace("-", "_") for p in entries})
+        for ref in refs:
+            if is_test_file(ref.file, manifest):
+                continue
+            landed = resolver.resolve(ref.module, ref.segments, ref.is_use)
+            if landed is None:
+                continue
+            for name in ref.segments:
+                where = marked.get((landed[0], name))
+                if where is not None:
+                    problems.append(f"{ref.file}:{ref.line}: names {key_of(landed[0])}::{name}, "
+                                    f"checks-only ({where}), from product code")
+    for rel in files:
+        masked_lines = read(rel).split("\n")
+        for number, line in enumerate(masked_lines, 1):
+            allow = DISALLOWED_ALLOW.search(line)
+            if not allow:
+                continue
+            whole_file = allow.group(1) == "!"
+            if whole_file and rel not in raised:
+                problems.append(f"{rel}:{number}: allows clippy::disallowed_methods for the whole file; "
+                                f"only a raised check may")
+            elif not whole_file and rel not in raised and rel not in set(marked.values()):
+                problems.append(f"{rel}:{number}: allows clippy::disallowed_methods outside a raised check "
+                                f"and outside the module of a checks-only item")
+            elif not whole_file and "reason" not in line:
+                problems.append(f"{rel}:{number}: allows clippy::disallowed_methods without a reason")
+    return problems
+
+
+def kernel_paths_unresolved(refs, modules, crate_names: set[str]) -> list[str]:
+    """Paths written through one of the kernel's crate names that resolve to
+    nothing: never skipped (ledger line 1531, D1)."""
+    resolver = Resolver(modules, crate_names)
+    out = []
+    for ref in refs:
+        first = ref.segments[1] if ref.segments[0] == "::" and len(ref.segments) > 1 else ref.segments[0]
+        if first not in crate_names:
+            continue
+        rest = ref.segments[ref.segments.index(first) + 1:]
+        if not rest:
+            # `use ferrix_kernel_item::*;`, the crate's root itself.
+            continue
+        if resolver.member((), rest[0], (), len(rest) == 1 and not ref.is_use, frozenset()) is None:
+            out.append(f"{ref.file}:{ref.line}: {'::'.join(ref.segments)} names nothing in the kernel's crates")
+    return out
+
+
+def kernel_dependency_problems(manifest: dict, cargo_of, workspace: dict) -> list[str]:
+    """A kernel crate that holds only the core or only the item may depend on
+    kernel crates and classified crates of its ring or below, and on the
+    allowlist; nothing of a higher ring, nothing in no ring (ledger 1531, D2)."""
+    entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
+    classified = crate_entries(manifest)
+    allow = crate_allowlist(manifest)
+    problems = []
+    for package, entry in sorted(entries.items()):
+        rings = entry.get("rings", [])
+        if len(rings) != 1 or rings[0] not in ("core", "item"):
+            continue
+        ring = rings[0]
+        cargo = cargo_of(package)
+        if cargo is None:
+            problems.append(f"{package}: cannot read its manifest")
+            continue
+        if cargo.get("lints", {}).get("workspace") is not True:
+            problems.append(f"{package}: its manifest does not inherit the workspace lints")
+        if "build" in cargo.get("package", {}) or entry.get("build_script"):
+            problems.append(f"{package}: a kernel library crate has no build script")
+        for dep in _dependency_names(cargo, workspace):
+            other = entries.get(dep)
+            if other is not None:
+                theirs = other.get("rings", [])
+                if len(theirs) != 1 or RING_ORDER.get(theirs[0], 9) > RING_ORDER[ring]:
+                    problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on one holding {theirs}")
+            elif dep in classified:
+                if RING_ORDER.get(classified[dep]["ring"], 9) > RING_ORDER[ring]:
+                    problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on "
+                                    f"{_a(classified[dep]['ring'])} crate")
+            elif dep not in allow:
+                problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on a crate in no ring "
+                                f"and not in crates.infrastructure_allowlist")
+    return problems
+
+
+def kernel_members() -> dict[str, str]:
+    """`{package: directory}` for the workspace's members at or under src/kernel."""
+    import tomllib
+
+    with (ROOT / "Cargo.toml").open("rb") as handle:
+        members = tomllib.load(handle).get("workspace", {}).get("members", [])
+    out = {}
+    for member in members:
+        if member == "src/kernel" or member.startswith("src/kernel/"):
+            with (ROOT / member / "Cargo.toml").open("rb") as handle:
+                out[tomllib.load(handle)["package"]["name"]] = member
+    return out
+
+
 # --- self-test ---------------------------------------------------------------
 
 _CRATE = {
@@ -1103,6 +1383,7 @@ def self_test() -> list[str]:
         failures.append("resolver: inline module sys::inline not placed in sys/mod.rs")
     failures += _crate_self_test()
     failures += _hook_self_test()
+    failures += _kernel_self_test()
     rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
     stale = stale_members(rings, ["fs/pipe.rs", "interfaces/render/mod.rs", "net.rs"])
     if stale != [("load", "render/**")]:
@@ -1216,6 +1497,136 @@ def _hook_self_test() -> list[str]:
     return failures
 
 
+# The kernel split's rules (ledger line 1531, D7) on a tree of four crates
+# shaped as docs/KERNEL-CRATES.md lays them out; each break must be refused.
+_KERNEL_TREE = {
+    "main.rs": "mod stages_check;\nfn main() {}\n",
+    "kernel_core.rs": "pub mod mm;\npub mod object;\n",
+    "kernel_item.rs": "pub use ferrix_kernel_core::{mm, object};\npub mod syscall;\n",
+    "kernel_load.rs": "pub use ferrix_kernel_item::*;\npub mod fs;\n"
+                      "pub mod object { pub use ferrix_kernel_core::object::*; pub mod check; }\n"
+                      "pub mod syscall { pub use ferrix_kernel_item::syscall::*; pub mod eventfd; }\n",
+    "mm.rs": "// CHECKS-ONLY: object/check.rs\n#[doc(hidden)]\npub fn secret() {}\npub fn frame() {}\n",
+    "object/mod.rs": "pub fn make() { crate::mm::frame(); }\n",
+    "object/check.rs": "#![allow(clippy::disallowed_methods, reason = \"a raised check\")]\n"
+                       "fn c() { crate::mm::secret(); crate::fs::open(); }\n",
+    "syscall/mod.rs": "pub use crate::mm::*;\npub fn dispatch() {}\n",
+    "syscall/eventfd.rs": "fn e() { super::dispatch(); }\n",
+    "fs.rs": "pub fn open() { ferrix_kernel_core::mm::frame(); }\n",
+    "stages_check.rs": "fn s() { crate::fs::open(); ferrix_kernel_load::object::make(); }\n",
+}
+_KERNEL_MANIFEST = {
+    "rings": {
+        "core": {"members": ["kernel_core.rs", "mm.rs", "object/**"]},
+        "item": {"members": ["kernel_item.rs", "main.rs", "syscall/mod.rs", "stages_check.rs"]},
+        "load": {"members": ["kernel_load.rs", "fs.rs", "syscall/eventfd.rs", "x.rs"]},
+    },
+    "test_file_patterns": ["check.rs", "*_check.rs"],
+    "kernel_crates": {
+        "ferrix-kernel": {"path": "k", "root": "main.rs", "rings": []},
+        "ferrix-kernel-core": {"path": "k/core", "root": "kernel_core.rs", "rings": ["core"]},
+        "ferrix-kernel-item": {"path": "k/item", "root": "kernel_item.rs", "rings": ["item"]},
+        "ferrix-kernel-load": {"path": "k/load", "root": "kernel_load.rs", "rings": ["load"]},
+    },
+    "raised_checks": {"entries": [
+        {"file": "object/check.rs", "crate": "ferrix-kernel-load"},
+        {"file": "stages_check.rs", "crate": "ferrix-kernel"},
+    ]},
+}
+_KERNEL_MEMBERS = {"ferrix-kernel": "k", "ferrix-kernel-core": "k/core",
+                   "ferrix-kernel-item": "k/item", "ferrix-kernel-load": "k/load"}
+
+
+def _kernel_break(tree: dict | None = None, raised: list | None = None, members: dict | None = None):
+    files = dict(_KERNEL_TREE, **(tree or {}))
+    files = {k: v for k, v in files.items() if v is not None}
+    manifest = dict(_KERNEL_MANIFEST)
+    if raised is not None:
+        manifest["raised_checks"] = {"entries": raised}
+    ring_of, _, _ = classify(manifest, sorted(files))
+    roots = {e["root"] for e in manifest["kernel_crates"].values()}
+    added = roots - ROOT_FILES
+    ROOT_FILES.update(added)
+    try:
+        return kernel_crate_problems(manifest, sorted(files), ring_of, files.__getitem__,
+                                     files.__contains__, members or _KERNEL_MEMBERS)
+    finally:
+        ROOT_FILES.difference_update(added)
+
+
+_KERNEL_BREAKS = [
+    ("four roots: a file reached by two crates",
+     {"tree": {"kernel_core.rs": "pub mod mm;\npub mod object;\npub mod fs;\n"}}, "reached by 2 crates"),
+    ("four roots: a file reached by none",
+     {"tree": {"kernel_load.rs": _KERNEL_TREE["kernel_load.rs"].replace("pub mod fs;\n", "")}},
+     "reached by no crate"),
+    ("crate equals ring: a load file in the core's crate",
+     {"tree": {"kernel_core.rs": "pub mod mm;\npub mod object;\npub mod x;\n", "x.rs": ""}},
+     "load ring, reached by ferrix-kernel-core"),
+    ("a raised check back in its ring's crate is stale",
+     {"tree": {"object/mod.rs": "pub mod check;\npub fn make() {}\n",
+               "kernel_load.rs": _KERNEL_TREE["kernel_load.rs"].replace(" pub mod check;", "")}},
+     "the entry is stale"),
+    ("a raised entry naming no file is stale",
+     {"raised": _KERNEL_MANIFEST["raised_checks"]["entries"] + [{"file": "gone_check.rs", "crate": "ferrix-kernel"}]},
+     "is no kernel file"),
+    ("product code is never raised",
+     {"raised": _KERNEL_MANIFEST["raised_checks"]["entries"] + [{"file": "fs.rs", "crate": "ferrix-kernel-load"}]},
+     "is product code"),
+    ("a checks-only item named from product code",
+     {"tree": {"fs.rs": "pub fn open() { crate::mm::secret(); }\n"}}, "checks-only"),
+    ("a checks-only item named through a re-export chain",
+     {"tree": {"fs.rs": "pub fn open() { crate::syscall::secret(); }\n"}}, "checks-only"),
+    ("a path through a kernel crate that names nothing",
+     {"tree": {"fs.rs": "pub fn open() { ferrix_kernel_core::nothing::here(); }\n"}}, "names nothing"),
+    ("a whole-file allow of disallowed_methods outside a raised check",
+     {"tree": {"fs.rs": "#![allow(clippy::disallowed_methods)]\npub fn open() {}\n"}}, "for the whole file"),
+    ("an item allow of disallowed_methods in a product module",
+     {"tree": {"fs.rs": "#[allow(clippy::disallowed_methods, reason = \"x\")]\npub fn open() {}\n"}},
+     "outside a raised check"),
+    ("an allow of disallowed_methods without a reason",
+     {"tree": {"mm.rs": _KERNEL_TREE["mm.rs"] + "#[allow(clippy::disallowed_methods)]\nfn f() {}\n"}},
+     "without a reason"),
+    ("a package under src/kernel not in kernel_crates",
+     {"members": dict(_KERNEL_MEMBERS, **{"ferrix-kernel-extra": "k/extra"})}, "not in kernel_crates"),
+]
+
+# The dependency rule for the core's and the item's kernel crates (D2).
+_KDEP_MANIFEST = dict(_KERNEL_MANIFEST, crates={
+    "members": {"ferrix-low": {"ring": "core", "path": "-"}, "ferrix-high": {"ring": "load", "path": "-"}},
+    "infrastructure_allowlist": {"ferrix-sync": "why"},
+})
+_KDEP_CASES = [
+    ("a core library", "ferrix-kernel-core", {"ferrix-low": "1", "ferrix-sync": "1"}, None),
+    ("the core, from the item", "ferrix-kernel-item", {"ferrix-kernel-core": "1"}, None),
+    ("the item, from the core", "ferrix-kernel-core", {"ferrix-kernel-item": "1"}, "depends on one holding"),
+    ("a load library, from the core", "ferrix-kernel-core", {"ferrix-high": "1"}, "depends on a load crate"),
+    ("a crate in no ring", "ferrix-kernel-item", {"ferrix-other": "1"}, "in no ring"),
+]
+
+
+def _kernel_self_test() -> list[str]:
+    failures = []
+    kept = _kernel_break()
+    if kept:
+        failures.append(f"kernel crates: a tree that keeps the rules was refused: {kept}")
+    for what, change, expect in _KERNEL_BREAKS:
+        found = _kernel_break(**change)
+        if not any(expect in problem for problem in found):
+            failures.append(f"kernel crates: {what} passed ({found})")
+    for what, package, deps, expect in _KDEP_CASES:
+        manifests = {p: {"lints": {"workspace": True}, "package": {"name": p}} for p in _KERNEL_MEMBERS}
+        manifests[package] = dict(manifests[package], dependencies=deps)
+        found = [p for p in kernel_dependency_problems(_KDEP_MANIFEST, manifests.get, {})
+                 if p.startswith(package)]
+        if (expect is None) != (not found) or (expect and not any(expect in p for p in found)):
+            failures.append(f"kernel crates: dependency {what}: {found or 'passed'}")
+    bare = {p: {"package": {"name": p}} for p in _KERNEL_MEMBERS}
+    if not any("workspace lints" in p for p in kernel_dependency_problems(_KDEP_MANIFEST, bare.get, {})):
+        failures.append("kernel crates: a manifest without the workspace lints passed")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1289,6 +1700,36 @@ def main() -> int:
             file=sys.stderr,
         )
         for problem in crate_problems:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+
+    kernel_read = lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")  # noqa: E731
+    kernel_problems = kernel_crate_problems(
+        manifest, files, ring_of, kernel_read, lambda rel: (KERNEL_SRC / rel).is_file(), kernel_members()
+    )
+    import tomllib
+
+    with (ROOT / "Cargo.toml").open("rb") as handle:
+        workspace_deps = tomllib.load(handle).get("workspace", {}).get("dependencies", {})
+    kernel_entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
+
+    def kernel_cargo(package: str):
+        path = kernel_entries.get(package, {}).get("path")
+        if path is None or not (ROOT / path / "Cargo.toml").is_file():
+            return None
+        with (ROOT / path / "Cargo.toml").open("rb") as handle:
+            return tomllib.load(handle)
+
+    kernel_problems += kernel_dependency_problems(manifest, kernel_cargo, workspace_deps)
+    if kernel_problems:
+        print(
+            f"item-boundary: {len(kernel_problems)} problem(s) with the kernel's crates\n"
+            f"  (docs/KERNEL-CRATES.md; the certification consultant's ledger lines\n"
+            f"  1477 and 1531): each file in exactly one crate, the crate its ring's\n"
+            f"  or a listed raised check, checks-only items out of product code:",
+            file=sys.stderr,
+        )
+        for problem in kernel_problems:
             print(f"    {problem}", file=sys.stderr)
         status = 1
 
