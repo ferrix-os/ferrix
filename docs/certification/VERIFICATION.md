@@ -256,6 +256,20 @@ against 49,567, none of them in a residual (`docs/TEST-TIME.md`, Cut C1).
 `carry-coverage.py` carries by source line and cannot see such a change, so
 it is stated here.
 
+**The debug build the gates boot is not the one measured.** From the
+landing of `bs-a-coverage-profile` (2026-10-15, ledger line 1472, route B)
+the dev profile builds without LTO, for a fast edit, and the debug coverage
+figures stay those of the `coverage` profile: the dev profile with rustc's
+crate-local ThinLTO, which every debug figure here measured, whose `.text`
+is byte for byte the dev profile's as it was (`docs/TEST-TIME.md`, Cut C2).
+xtask builds it for every boot a TCG plugin traces, and the coverage
+scripts name the profile from the kernel's path and refuse one that names
+none. So the debug-profile test gates boot lto-off code that no coverage
+figure measures: about ten thousand more statement rows (x86-64 61,046
+against 51,145), small functions out of line that the measured build
+inlines. The suite's own run on the `coverage` build is what checks that
+build; no other gate boots it.
+
 **The three architectures agree**, within four points, on one boot and on the
 suite. The table published on 2026-09-25 had ARMv7-A at 70.8% against 46.6%
 and 46.1% for the 64-bit pair, and explained the gap by x86-64's larger

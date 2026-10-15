@@ -374,7 +374,25 @@ opt-level = 1
 # The profile is the whole workspace's: the host tests, xtask and the native
 # programs are built with line tables too.
 debug = "line-tables-only"
+# No LTO. rustc's default for an optimised, incremental build is ThinLTO
+# across the crate's own codegen units, which after a one-line kernel edit
+# re-optimised the crate: about 17 of an edit's 20 processor seconds; without
+# it the edit takes about 3 (docs/TEST-TIME.md, "The compile", Cut C2). Calls
+# between codegen units are no longer inlined unless marked `#[inline]`, so
+# the debug kernel is not the code the debug coverage figures measured: a
+# traced boot builds the `coverage` profile below instead.
+lto = "off"
 overflow-checks = true
+
+# The debug kernel `cargo xtask coverage` measures: the dev profile with
+# rustc's crate-local ThinLTO kept (`lto = false` is that default, not "no
+# LTO"), the code every debug coverage figure in docs/certification was
+# measured on. xtask builds it for any boot a TCG plugin traces
+# (`FERRIX_QEMU_PLUGIN`), and the coverage scripts name it from the ELF's
+# path (the certification consultant's ruling, ledger line 1472, route B).
+[profile.coverage]
+inherits = "dev"
+lto = false
 
 [profile.release]
 panic = "abort"

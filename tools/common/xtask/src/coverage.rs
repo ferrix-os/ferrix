@@ -123,8 +123,7 @@ fn sidecar(trace: &Path) -> PathBuf {
 fn keep_kernel(trace: &Path, kernel: &Path) -> Result<String> {
     let bytes = std::fs::read(kernel)
         .map_err(|error| Error::new(format!("reading {}: {error}", kernel.display())))?;
-    let digest = crate::sha256::hex(&bytes);
-    let name = format!("ferrix-kernel-{}.elf", digest.get(..16).unwrap_or(&digest));
+    let name = kept_name(kernel, &crate::sha256::hex(&bytes))?;
     let directory = trace.parent().unwrap_or_else(|| Path::new("."));
     let kept = directory.join(&name);
     if !kept.is_file() {
@@ -132,6 +131,36 @@ fn keep_kernel(trace: &Path, kernel: &Path) -> Result<String> {
         std::fs::write(&kept, &bytes)?;
     }
     Ok(name)
+}
+
+/// The cargo profiles a kernel the suite measures can be built in, by the
+/// directory cargo puts it in: what `tools/common/gen/coverage-report.py`'s
+/// `PROFILES` reads back from a kept kernel's name.
+const PROFILES: [&str; 4] = ["debug", "coverage", "release", "iterate"];
+
+/// What a kept copy of `kernel`, whose content hashes to `digest`, is called:
+/// `ferrix-kernel-<profile>-<16 hex>.elf`, the profile the directory cargo
+/// built it into (`target/<triple>/<profile>/ferrix-kernel`), so that the
+/// report can say which build it measured. A kernel from anywhere else is
+/// refused, never guessed (the certification consultant, ledger line 1472).
+fn kept_name(kernel: &Path, digest: &str) -> Result<String> {
+    let profile = kernel
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .filter(|name| PROFILES.contains(name))
+        .ok_or_else(|| {
+            Error::new(format!(
+                "coverage: {} is not in a cargo profile's directory ({}), so the \
+                 report could not say which build it measured",
+                kernel.display(),
+                PROFILES.join(", ")
+            ))
+        })?;
+    Ok(format!(
+        "ferrix-kernel-{profile}-{}.elf",
+        digest.get(..16).unwrap_or(digest)
+    ))
 }
 
 /// One gate of the suite.
@@ -583,6 +612,22 @@ mod tests {
             numbered_path(Path::new("/c/trace"), 2),
             PathBuf::from("/c/trace.2")
         );
+    }
+
+    #[test]
+    fn a_kept_kernel_is_named_by_its_profile() {
+        let digest = "0123456789abcdef0123";
+        for profile in PROFILES {
+            let kernel = Path::new("/t/x86_64-unknown-none")
+                .join(profile)
+                .join("ferrix-kernel");
+            assert_eq!(
+                kept_name(&kernel, digest).unwrap(),
+                format!("ferrix-kernel-{profile}-0123456789abcdef.elf")
+            );
+        }
+        assert!(kept_name(Path::new("/t/elsewhere/ferrix-kernel"), digest).is_err());
+        assert!(kept_name(Path::new("ferrix-kernel"), digest).is_err());
     }
 
     #[test]

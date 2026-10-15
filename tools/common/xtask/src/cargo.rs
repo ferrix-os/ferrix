@@ -98,12 +98,32 @@ fn full_debug_config(profile: &str, full: bool) -> Option<&'static str> {
 }
 
 /// The cargo profile a kernel is built in, and so the directory cargo puts
-/// it in: `iterate` only for a release kernel with `--iterate`.
+/// it in: `iterate` only for a release kernel with `--iterate`, and
+/// `coverage` for a debug kernel whose boots a TCG plugin traces.
 fn kernel_profile(release: bool) -> &'static str {
-    match (release, ITERATE.load(Ordering::Relaxed)) {
-        (false, _) => "debug",
-        (true, false) => "release",
-        (true, true) => "iterate",
+    profile_for(
+        release,
+        ITERATE.load(Ordering::Relaxed),
+        std::env::var_os("FERRIX_QEMU_PLUGIN").is_some(),
+    )
+}
+
+/// [`kernel_profile`], from what it reads.
+///
+/// `traced`: `FERRIX_QEMU_PLUGIN` is set, which `cargo xtask coverage` sets
+/// for every gate it runs. The dev profile builds without LTO, for a fast
+/// edit; the `coverage` profile is the dev profile with rustc's crate-local
+/// thin LTO kept, the code every debug coverage figure was measured on
+/// (`Cargo.toml`; the certification consultant's ruling, ledger line 1472,
+/// route B). Taking it from the plugin rather than from an option means no
+/// traced boot can measure the other build. A release kernel is traced as
+/// it is.
+fn profile_for(release: bool, iterate: bool, traced: bool) -> &'static str {
+    match (release, iterate, traced) {
+        (false, _, false) => "debug",
+        (false, _, true) => "coverage",
+        (true, false, _) => "release",
+        (true, true, _) => "iterate",
     }
 }
 
@@ -134,11 +154,18 @@ pub(crate) fn mitigations_off_target_dir() -> PathBuf {
 fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
     let target = arch.kernel_target();
     let profile = kernel_profile(release);
-    let mut build = if profile == "iterate" {
-        println!("  with --iterate: thin LTO, not the release kernel a gate builds");
-        build("ferrix-kernel", target, false)?.args(["--profile", "iterate"])
-    } else {
-        build("ferrix-kernel", target, release)?
+    let mut build = match profile {
+        "iterate" => {
+            println!("  with --iterate: thin LTO, not the release kernel a gate builds");
+            build("ferrix-kernel", target, false)?.args(["--profile", "iterate"])
+        }
+        "coverage" => {
+            println!(
+                "  traced: the coverage profile, with the crate-local ThinLTO of the measured build"
+            );
+            build("ferrix-kernel", target, false)?.args(["--profile", "coverage"])
+        }
+        _ => build("ferrix-kernel", target, release)?,
     };
     if let Some(config) = full_debug_config(profile, FULL_DEBUG.load(Ordering::Relaxed)) {
         println!("  with --gdb: the full DWARF");
@@ -295,6 +322,9 @@ pub(crate) fn build_ahead(arches: &[Arch], release: bool) -> Result<()> {
     match kernel_profile(release) {
         "iterate" => {
             let _ = kernel.args(["--profile", "iterate"]);
+        }
+        "coverage" => {
+            let _ = kernel.args(["--profile", "coverage"]);
         }
         "release" => {
             let _ = kernel.arg("--release");
@@ -568,6 +598,15 @@ pub(crate) fn cargo() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_traced_debug_kernel_is_the_coverage_build() {
+        assert_eq!(profile_for(false, false, false), "debug");
+        assert_eq!(profile_for(false, false, true), "coverage");
+        assert_eq!(profile_for(true, false, false), "release");
+        assert_eq!(profile_for(true, false, true), "release", "traced as built");
+        assert_eq!(profile_for(true, true, true), "iterate");
+    }
 
     #[test]
     fn only_a_debug_kernel_under_gdb_gets_the_full_dwarf() {

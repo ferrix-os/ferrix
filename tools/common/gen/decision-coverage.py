@@ -689,6 +689,7 @@ def main() -> int:
     by_elf: dict[Path, list[Path]] = defaultdict(list)
     for trace in args.drcov:
         by_elf[cov.kernel_of(trace, args.elf).resolve()].append(trace)
+    profile = cov.one_profile([args.elf, *by_elf])
     reference_path = args.elf.resolve()
 
     reference, entries = disassemble(reference_path, args.arch)
@@ -775,7 +776,6 @@ def main() -> int:
         for name in ("decisions", "both")
     }
 
-    profile = "release" if "/release/" in str(args.elf) else "debug"
     print(
         f"decisions: {args.arch}, {profile} profile, {len(args.drcov)} traces, "
         f"{blocks} blocks"

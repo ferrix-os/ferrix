@@ -788,7 +788,7 @@ warm `check` after a kernel edit spends about 300 CPU-s in all.
 | Cost (one kernel edit) | What removes it | State |
 |---|---|---|
 | DWARF: 148 MB ELF, 476 MB written an edit | line tables only in the dev profile | **Cut C1**, below |
-| crate-local ThinLTO, 17 CPU-s an edit | `lto = "off"` in the dev profile: 2.4 CPU-s an edit, 301 MB written | allowed by the consultant (ledger 1472) by one of two routes: a coverage re-measure on three arches, or a `coverage` profile keeping today's settings |
+| crate-local ThinLTO, 17 CPU-s an edit | `lto = "off"` in the dev profile, a `coverage` profile keeping the measured build | **Cut C2**, below |
 | one 237k-line crate: dep graph and lint pass grow with it | the crate split along the rings: core (104k lines) <- item (14k) <- load (122k) <- the binary; an edit in load then recompiles about half of today's crate, an edit in core all of it | design OK IF (1)-(12), ledger 1477; four conditions to answer in the design before code |
 | six kernel clippy passes, each linting the whole crate | the split (lints only the crates the edit reaches) | with the split |
 
@@ -830,6 +830,42 @@ only in the generated code, so the coverage figures name the build they
 measured: full DWARF until this landing, line tables from the next
 re-measure (`docs/certification/VERIFICATION.md` §3.2). The certification
 consultant's review: ledger line 1463.
+
+### Cut C2: no LTO in the dev profile, the measured build kept (bs-a-coverage-profile)
+
+`[profile.dev] lto = "off"`: rustc's default for an optimised incremental
+build is ThinLTO across the crate's own 256 codegen units, which after a
+one-line edit re-optimises the whole kernel. The debug kernel the coverage
+figures measured is kept as `[profile.coverage]`, the dev profile with
+`lto = false` (rustc's default, crate-local ThinLTO), and xtask builds it
+for every boot a TCG plugin traces (`FERRIX_QEMU_PLUGIN`, which `cargo xtask
+coverage` sets for each gate it runs), so no traced boot can measure the
+other build. This is route B of the certification consultant's ruling
+(ledger line 1472); the coverage scripts now name the profile from the
+ELF's path, `target/<triple>/<profile>/` or the suite's kept copy
+`ferrix-kernel-<profile>-<digest>.elf`, and refuse a path that names none,
+where any path without `/release/` used to be reported as debug.
+
+| Kernel rustc after the edit, x86-64, 4 rounds alternated | dev profile, no LTO | `coverage` profile (crate-local ThinLTO) |
+|---|---:|---:|
+| Processor time | **2.6, 3.1, 3.5, 3.7 CPU-s** | 19.8, 20.0, 21.8, 21.9 CPU-s |
+| Written | **301 MB** | 332 MB |
+| Wall (load 28-66, the host saturated) | 14.7-91.8 s | 20.0-92.0 s |
+
+The edit's processor time falls by six sevenths; what is left of its wall
+time is writing the crate's incremental state, which the crate split
+addresses. Code size: the debug kernel's `.text` is 5.75 MB against 6.60 MB
+on x86-64 (4.99 against 5.60 on aarch64, 5.84 against 6.66 on armv7a), the
+copies of small functions inlined into every caller no longer made.
+
+**The measured build is unchanged.** At one source, the `coverage`
+profile's kernel and the dev profile as it was (`--config
+profile.dev.lto=false`) have byte-identical `.text` on all three
+architectures. The dev kernel the gates boot now has about ten thousand
+more statement rows (functions that were inlined everywhere and dropped
+now exist on their own): x86-64 61,046 against 51,145, aarch64 58,737
+against 48,964, armv7a 59,147 against 49,578. No coverage figure measures
+that build; `docs/certification/VERIFICATION.md` §3.2 says so.
 
 ## Next
 

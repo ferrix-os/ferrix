@@ -306,6 +306,45 @@ def read_floor(path: Path, arch: str | None) -> float:
 
 
 
+# The cargo profiles a measured kernel can come from, by the directory cargo
+# builds it into (target/<triple>/<profile>/ferrix-kernel). `cargo xtask
+# coverage` keeps each boot's kernel as ferrix-kernel-<profile>-<digest>.elf.
+PROFILES = ("debug", "coverage", "release", "iterate")
+KEPT_KERNEL = re.compile(r"ferrix-kernel-(" + "|".join(PROFILES) + r")-[0-9a-f]{16}\.elf")
+
+
+def profile_of(elf: Path) -> str:
+    """The cargo profile that built `elf`, from its path, or exit naming it.
+
+    Until 2026-10-15 any path without `/release/` was reported as the debug
+    profile, so a kept copy of a release kernel, whose name says nothing,
+    was published as debug. A path that names no profile is refused now, not
+    guessed (the certification consultant's ruling, ledger line 1472, B2).
+    """
+    if elf.parent.name in PROFILES:
+        return elf.parent.name
+    kept = KEPT_KERNEL.fullmatch(elf.name)
+    if kept:
+        return kept.group(1)
+    raise SystemExit(
+        f"{elf}: cannot tell which cargo profile built it: give the ELF where "
+        f"cargo wrote it (target/<triple>/<profile>/ferrix-kernel, profile one "
+        f"of {', '.join(PROFILES)}) or as `cargo xtask coverage` keeps it "
+        f"(ferrix-kernel-<profile>-<16 hex>.elf)"
+    )
+
+
+def one_profile(elves) -> str:
+    """The one profile every ELF in `elves` was built in, or exit: a union of
+    traces of different profiles' kernels is no one build's coverage."""
+    profiles = {profile_of(elf) for elf in elves}
+    if len(profiles) != 1:
+        raise SystemExit(
+            "the traces ran kernels of different profiles: " + ", ".join(sorted(profiles))
+        )
+    return profiles.pop()
+
+
 def format_lines(numbers) -> str:
     """`1-3, 7`: the form carry-coverage.py reads and writes."""
     numbers = sorted(set(numbers))
@@ -371,6 +410,7 @@ def main() -> int:
     by_elf: dict[Path, list[Path]] = defaultdict(list)
     for trace in args.drcov:
         by_elf[kernel_of(trace, args.elf)].append(trace)
+    profile = one_profile([args.elf, *by_elf])
 
     # The union across traces: a statement reached by any test in the suite is
     # a covered statement, which is how every coverage tool aggregates a run.
@@ -444,7 +484,6 @@ def main() -> int:
         if missed:
             residual[rel] = {"ring": ring, "lines": sorted(missed)}
 
-    profile = "release" if "/release/" in str(args.elf) else "debug"
     print(f"coverage: {blocks_executed} basic blocks executed, "
           f"{blocks_in_image} inside the kernel images ({profile} profile)")
     print("coverage: statements reached, by certification ring")

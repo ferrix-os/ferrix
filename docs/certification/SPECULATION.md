@@ -678,8 +678,10 @@ stage 7's cost lines in ms:
 In the reference profile KASLR costs nothing these can see. The release
 profile links with fat LTO, so every crate is one module and a call from one
 to another is internal: 3,142 calls went through the GOT against 3,152 in the
-static build when this was measured. The debug profile has no LTO, and there
-the PIC model costs 3 to 10%. rustc's `x86_64-unknown-none` emits a call to a
+static build when this was measured. The debug profile had no LTO across
+crates, only rustc's ThinLTO within each crate (its default; no LTO at all
+since 2026-10-15, `Cargo.toml`, ledger line 1472), and there the PIC model
+cost 3 to 10%; these debug figures date from that build. rustc's `x86_64-unknown-none` emits a call to a
 symbol it cannot prove local as `call *sym@GOTPCREL(%rip)` with
 `R_X86_64_GOTPCREL`, not the `GOTPCRELX` lld could relax into a direct call.
 So 24,227 calls stayed indirect against 3,102 in the debug build.

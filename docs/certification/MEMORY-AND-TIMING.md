@@ -618,8 +618,9 @@ refuses a filter that would pass it with `ENOMEM`.
 
 **What a step costs, measured.** The boot reads it (the second `seccomp` line):
 the longest program the verifier admits, 4,095 loads of `seccomp_data` and a
-return, run 500 times against a call's data, in the dev profile in QEMU on the
-development host.
+return, run 500 times against a call's data, in the dev profile (then with
+rustc's crate-local ThinLTO, which the dev profile has not had since
+2026-10-15) in QEMU on the development host.
 
 | Architecture (accelerator) | one hook, no filter | one interpreted instruction | 32,768 steps |
 |---|---:|---:|---:|
@@ -633,8 +634,8 @@ milliseconds on the slowest machine measured. Chromium's filters run a few dozen
 steps for a call.
 
 **What S3's chains cost, measured.** The boot reads, in the guest and in the
-dev profile, the two worst chains the limits allow: 6,554 filters of one
-instruction (most runs of the interpreter, each with its loop and `Arc`
+dev profile (with crate-local ThinLTO, as above), the two worst chains the
+limits allow: 6,554 filters of one instruction (most runs of the interpreter, each with its loop and `Arc`
 deref) walked in 401 us a call, and seven filters of 4,096 instructions
 (most steps) in 732 us a call, both on x86-64 where a step is 25 ns; and the
 release of the 6,554-filter chain, which is a walk of `Drop`s and runs under
