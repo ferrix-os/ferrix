@@ -107,6 +107,42 @@ stopped all of them within twenty minutes, mid-gate. Brief each agent:
 * Agents don't push. The product owner pushes after each landing.
 * Ferrix is "Ferrix, a Rust operating system", never "a hobby OS", including
   in the context line of an agent's prompt (customer, 2026-09-28).
+* It reports only when something is red (a failed row, a control that did
+  not fire) or when its branch is ready to land, never once per verdict.
+  Each report wakes the product owner and re-reads a large context; on
+  2026-10-15 two agents sent the same report six times each.
+
+### The customer's goal gets the agents
+
+A slot count is a ceiling, not a target. On the night of 2026-10-15 ten
+agents ran across some twenty workstreams while the customer's one goal
+(Endfield installed) had at most two. Twenty-two branches landed, the goal
+was not reached, and about 30% of the weekly usage was spent, most of it on
+agents waking up to wait for queued gates. So:
+
+* **Staff the critical path first.** Name the customer's goal for the
+  session and the chain of fixes between here and it. Every agent works on
+  that chain until it cannot use another; only then does other roadmap work
+  get a slot.
+* **Leave a slot empty rather than fill it with side work** while the gate
+  pool is saturated (`gate.sh status` shows a queue that is longer than its
+  slots, or the load is above the slot count). Each extra agent adds runs to
+  the queue that the critical path's own gates then wait behind.
+* **Test the real workload before landing a fix for it.** A fix found by a
+  long real-world run (a download, a game, an install) lands with a gate that
+  reproduces that workload in a small QEMU guest: for memory, the guest at
+  its memory floor with several writers and busy CPUs. On 2026-10-15 the
+  page-cache fix landed without one, and the livelock it exposed was found
+  four hours into the next download instead of in the first gate.
+* **Never restart a long real-world run on code with a known blocking bug.**
+  Wait for the fix, or run it on the fix's branch as a scratch boot.
+* **Plan requirement-id reservations up front.** Each reservation lands
+  alone with `check` on its landing hash, and every reservation edits the
+  same file, so several in one round conflict and re-run `check` each time.
+  Ask every branch that will need ids for them at the start of the round.
+* **Report to the customer by the goal, not by the count.** "Twenty-two
+  landed" is not progress when the goal has not moved; say where the goal
+  stands first.
 
 ## Landing a batch
 
