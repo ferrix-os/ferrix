@@ -565,16 +565,10 @@ impl Serving {
 }
 
 /// Make every store to the write-combining window visible before what
-/// follows -- FLIPPED, above all: `sfence` on x86-64, the one architecture
-/// the window is lent on, a full device barrier elsewhere.
+/// follows -- FLIPPED, above all: the runtime's device barrier, `mfence` on
+/// x86-64 (a full fence, which drains the write-combining buffers as
+/// `sfence` does, with no assembly of this program's own).
 fn shown() {
-    #[cfg(target_arch = "x86_64")]
-    // SAFETY: a fence: it changes no register or memory. Not `nomem`, so the
-    // compiler keeps the copy's stores before it.
-    unsafe {
-        core::arch::asm!("sfence", options(nostack, preserves_flags));
-    }
-    #[cfg(not(target_arch = "x86_64"))]
     ferrix_rt::device_barrier();
 }
 
@@ -608,8 +602,8 @@ fn time_frames(screen: &Screen, card_base: usize, card_len: usize) {
                 let pixel = unsafe { ptr::read_volatile(source.wrapping_add(column)) };
                 // SAFETY: as above, a pixel of the mapped window.
                 unsafe {
-                    ptr::write_volatile(target.wrapping_add(column), turned(pixel, screen.rgbx))
-                };
+                    ptr::write_volatile(target.wrapping_add(column), turned(pixel, screen.rgbx));
+                }
             }
         }
         shown();
