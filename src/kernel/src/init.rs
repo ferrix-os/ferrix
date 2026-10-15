@@ -202,7 +202,7 @@ pub fn bootstrap_channel() -> Option<(Arc<Endpoint>, Arc<Endpoint>)> {
 /// A bootstrap for the next program: its end of a new channel, the kernel's
 /// end kept in [`CHANNEL`] in place of the last program's. `None`, said on a
 /// line, when there is no memory for one; the program starts without.
-pub fn next_bootstrap() -> Option<Transfer> {
+fn next_bootstrap() -> Option<Transfer> {
     let Some((kernel_end, program_end)) = bootstrap_channel() else {
         println!("  init     no memory for a bootstrap channel; starting the program without one");
         return None;
@@ -248,7 +248,7 @@ pub fn next_bootstrap() -> Option<Transfer> {
 /// alone, after the hello (`docs/certification/AUDIT.md` §4): never
 /// duplicated or sent, so it stays in pid 1's table and goes with it. Given
 /// once; a later program of a command list gets none.
-pub fn give_audit(kernel_end: &Arc<Endpoint>) {
+fn give_audit(kernel_end: &Arc<Endpoint>) {
     if AUDIT_GIVEN.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -583,7 +583,7 @@ impl fmt::Display for Refusal {
 }
 
 /// A refusal for want of memory.
-pub fn no_memory(_: fallible::AllocError) -> Refusal {
+fn no_memory(_: fallible::AllocError) -> Refusal {
     Refusal::Open(Errno::ENOMEM)
 }
 
@@ -592,7 +592,7 @@ pub fn no_memory(_: fallible::AllocError) -> Refusal {
 /// A `#!` script runs under its interpreter with its own path as the last
 /// argument, one level deep, as `execve` runs one; any other file runs with
 /// its path as its only argument, as Linux starts `init=`.
-pub fn run_file(launcher: &Launcher, path: &[u8]) -> Result<i32, Refusal> {
+fn run_file(launcher: &Launcher, path: &[u8]) -> Result<i32, Refusal> {
     let mut opened = (launcher.open)(path).map_err(Refusal::Open)?;
     let mut argv: Vec<Vec<u8>> = Vec::new();
     if opened.program.head().starts_with(b"#!") {
@@ -673,7 +673,7 @@ fn run_built_in(launcher: &Launcher, inputs: Inputs) {
 
 /// Run each command in `list`, each with the program its `argv[0]` names in
 /// [`PROGRAM_DIR`].
-pub fn run_commands(launcher: &Launcher, list: &[u8]) {
+fn run_commands(launcher: &Launcher, list: &[u8]) {
     let Ok(commands) = parse(list) else {
         println!("  init     no memory to read the commands");
         return;
@@ -779,7 +779,7 @@ fn start(
 /// # Errors
 ///
 /// [`fallible::AllocError`] when there is no memory for the list.
-pub fn parse(list: &[u8]) -> Result<Vec<Vec<&[u8]>>, fallible::AllocError> {
+fn parse(list: &[u8]) -> Result<Vec<Vec<&[u8]>>, fallible::AllocError> {
     let mut commands = Vec::new();
     let mut current = Vec::new();
     for word in list.split(|byte| *byte == 0) {

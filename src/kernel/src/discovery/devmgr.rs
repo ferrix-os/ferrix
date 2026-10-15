@@ -315,7 +315,7 @@ static UNRECORDED: AtomicU64 = AtomicU64::new(0);
 
 /// Take in what a message from `devmgr` says about drivers. Answers whether
 /// it was such a message.
-pub fn record(message: Message) -> bool {
+fn record(message: Message) -> bool {
     match message {
         Message::Driver { driver, bus } => {
             let bus = match bus {
@@ -435,7 +435,7 @@ pub struct Files {
 /// Read `devmgr`, the manifest and every driver it names through the
 /// registered reader, and note the names for sysfs. `Ok(None)` without
 /// `/sbin/devmgr`.
-pub fn read_files() -> Result<Option<Files>, &'static str> {
+fn read_files() -> Result<Option<Files>, &'static str> {
     let read = READ_FILE.get().copied().unwrap_or(no_files);
     let Ok(image) = read(PROGRAM) else {
         return Ok(None);
@@ -471,7 +471,7 @@ pub fn read_files() -> Result<Option<Files>, &'static str> {
 /// Write the DEVICES messages on `kernel_end`: `job` for the drivers, every
 /// device node twice, and `images` by the names [`read_files`] noted.
 /// Answers how many device nodes went.
-pub fn write_devices(
+fn write_devices(
     kernel_end: &Endpoint,
     images: Vec<Arc<Vmo>>,
     job: Arc<Job>,
@@ -681,7 +681,7 @@ pub fn wait_reported(deadline: u64) -> bool {
 /// has started. `ALREADY_BOUND` while a `devmgr` it started lives;
 /// `BAD_STATE` after, until every process in that `devmgr`'s job has ended,
 /// and then every device is quiesced before the next one is handed them.
-pub fn devmgr_start(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
+pub(crate) fn devmgr_start(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
     let [starter, job, ..] = *registers;
     let core = caller.core();
     let job = starter_and_job(core, starter, job)?;
@@ -886,7 +886,7 @@ static DRIVER_ENDINGS: SpinLock<Vec<(Location, Arc<Exit>)>> = SpinLock::new(Vec:
 /// Note that `driver` mapped `node`'s registers or took its interrupt: it is
 /// that device's driver now. Cheap when it is already noted, which every call
 /// after its first is.
-pub fn note_driver(node: &device::DeviceNode, driver: &Process) {
+pub(crate) fn note_driver(node: &device::DeviceNode, driver: &Process) {
     let Some(location) = location_of(node) else {
         return;
     };
@@ -974,7 +974,7 @@ fn drivers_job() -> Result<Arc<Job>, &'static str> {
 
 /// The manifest's names, each NUL-padded to a driver name; an image without
 /// one lists no drivers.
-pub fn manifest(read: ReadFile) -> Result<Vec<[u8; NAME_BYTES]>, &'static str> {
+fn manifest(read: ReadFile) -> Result<Vec<[u8; NAME_BYTES]>, &'static str> {
     let Ok(text) = read(MANIFEST) else {
         return Ok(Vec::new());
     };

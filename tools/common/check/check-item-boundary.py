@@ -262,6 +262,9 @@ class Module:
         self.globs: list[tuple[list[str], bool]] = []
         # Items defined at this module's own scope: a `fn`, a type, a constant.
         self.defined: set[str] = set()
+        # At a crate's root: each `#[macro_export]` macro, by name, and the
+        # module whose file defines it.
+        self.macros: dict[str, ModPath] = {}
 
 
 class Reference:
@@ -392,6 +395,11 @@ def parse_file(rel: str, source: str, modules: dict[ModPath, Module], refs: list
             module(here).defined.add(_name(toks[i + 1]))
         elif tok == "macro_rules" and i + 2 < n and toks[i + 1] == "!":
             module(here).defined.add(_name(toks[i + 2]))
+            # `#[macro_export]` puts the macro at the crate's root, whichever
+            # module defines it (ledger line 1477, C2): `crate::println` names
+            # the macro `console.rs` defines, so the root binds the name there.
+            if i >= 4 and toks[i - 4 : i] == ["#", "[", "macro_export", "]"]:
+                module(()).macros[_name(toks[i + 2])] = here
         elif tok == "use" and prev not in ("::", ".", "$"):
             public = prev == "pub" or (prev == ")" and _opens_pub(toks, i - 1))
             leaves: list = []
@@ -503,6 +511,8 @@ class Resolver:
             return None
         if value and name in mod.defined:
             return at, False
+        if name in mod.macros:
+            return mod.macros[name], False
         if name in mod.children:
             return at + (name,), True
         # Private imports are visible in the module and below it.
@@ -1314,17 +1324,28 @@ def kernel_paths_unresolved(refs, modules, crate_names: set[str]) -> list[str]:
     return out
 
 
-def kernel_dependency_problems(manifest: dict, cargo_of, workspace: dict) -> list[str]:
+def kernel_dependency_problems(manifest: dict, cargo_of, workspace: dict,
+                               named: dict[str, set[str]] | None = None) -> list[str]:
     """A kernel crate that holds only the core or only the item may depend on
     kernel crates and classified crates of its ring or below, and on the
-    allowlist; nothing of a higher ring, nothing in no ring (ledger 1531, D2)."""
+    allowlist; nothing of a higher ring, nothing in no ring (ledger 1531, D2)
+    -- but for the crates its `unclassified_deps` lists, F-76's debt register
+    (ledger line 1585, Q1): an unclassified crate the files name today. An
+    entry is stale, and fails, when the crate is classified or allowlisted
+    since, when the manifest no longer depends on it, or when no file of the
+    crate names it (`named`: package -> the library names its files name).
+    No other kernel crate keeps such a list."""
     entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
     classified = crate_entries(manifest)
     allow = crate_allowlist(manifest)
     problems = []
     for package, entry in sorted(entries.items()):
         rings = entry.get("rings", [])
+        listed = {k: v for k, v in entry.get("unclassified_deps", {}).items() if not k.startswith("//")}
         if len(rings) != 1 or rings[0] not in ("core", "item"):
+            if listed:
+                problems.append(f"kernel_crates.{package}: unclassified_deps on a crate that holds no "
+                                f"core or item alone; only those keep the register")
             continue
         ring = rings[0]
         cargo = cargo_of(package)
@@ -1345,10 +1366,36 @@ def kernel_dependency_problems(manifest: dict, cargo_of, workspace: dict) -> lis
                 if RING_ORDER.get(classified[dep]["ring"], 9) > RING_ORDER[ring]:
                     problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on "
                                     f"{_a(classified[dep]['ring'])} crate")
-            elif dep not in allow:
-                problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on a crate in no ring "
-                                f"and not in crates.infrastructure_allowlist")
+            elif dep not in allow and dep not in listed:
+                problems.append(f"{package} -> {dep}: {_a(ring)} kernel crate depends on a crate in no ring, "
+                                f"not in crates.infrastructure_allowlist and not in its unclassified_deps "
+                                f"(F-76; the list grows only with a ledger line)")
+        depends = set(_dependency_names(cargo, workspace))
+        for dep in sorted(listed):
+            if dep in classified or dep in allow or dep in entries:
+                problems.append(f"kernel_crates.{package}.unclassified_deps: {dep} is classified or "
+                                f"allowlisted now; the entry is stale")
+            elif dep not in depends:
+                problems.append(f"kernel_crates.{package}.unclassified_deps: {dep} is no dependency of "
+                                f"the crate's manifest; the entry is stale")
+            elif named is not None and lib_name(dep) not in named.get(package, set()):
+                problems.append(f"kernel_crates.{package}.unclassified_deps: no file of the crate names "
+                                f"{lib_name(dep)}; the entry is stale")
     return problems
+
+
+def kernel_crate_libraries(manifest: dict, files: list[str], read, exists) -> dict[str, set[str]]:
+    """`{package: the library names (ferrix_vfs, ...) its files name}`, each
+    file counted for the crate whose module tree reaches it."""
+    entries = {k: v for k, v in manifest.get("kernel_crates", {}).items() if not k.startswith("//")}
+    reached, _ = kernel_crate_files(entries, read, exists, files)
+    out: dict[str, set[str]] = {}
+    for rel, crates in reached.items():
+        if len(crates) != 1:
+            continue
+        names = {t for t, _ in rustlex.tokens(rustlex.mask(read(rel))) if t.startswith("ferrix_")}
+        out.setdefault(crates[0], set()).update(names)
+    return out
 
 
 def kernel_members() -> dict[str, str]:
@@ -1645,13 +1692,29 @@ _KDEP_MANIFEST = dict(_KERNEL_MANIFEST, crates={
     "members": {"ferrix-low": {"ring": "core", "path": "-"}, "ferrix-high": {"ring": "load", "path": "-"}},
     "infrastructure_allowlist": {"ferrix-sync": "why"},
 })
+# F-76's register (ledger line 1585, Q1): the core's fixture entry lists
+# ferrix-listed, which the core's files name, and ferrix-unnamed, which none
+# does.
+_KDEP_LISTED = dict(_KDEP_MANIFEST, kernel_crates=dict(_KERNEL_MANIFEST["kernel_crates"], **{
+    "ferrix-kernel-core": dict(_KERNEL_MANIFEST["kernel_crates"]["ferrix-kernel-core"],
+                               unclassified_deps={"ferrix-listed": "F-76", "ferrix-unnamed": "F-76"}),
+}))
 _KDEP_CASES = [
     ("a core library", "ferrix-kernel-core", {"ferrix-low": "1", "ferrix-sync": "1"}, None),
     ("the core, from the item", "ferrix-kernel-item", {"ferrix-kernel-core": "1"}, None),
     ("the item, from the core", "ferrix-kernel-core", {"ferrix-kernel-item": "1"}, "depends on one holding"),
     ("a load library, from the core", "ferrix-kernel-core", {"ferrix-high": "1"}, "depends on a load crate"),
     ("a crate in no ring", "ferrix-kernel-item", {"ferrix-other": "1"}, "in no ring"),
+    # F-76's register (_KDEP_LISTED).
+    ("a listed unclassified crate", "ferrix-kernel-core", {"ferrix-listed": "1", "ferrix-unnamed": "1"},
+     "no file of the crate names ferrix_unnamed"),
+    ("a listed crate the manifest dropped", "ferrix-kernel-core", {"ferrix-unnamed": "1"},
+     "ferrix-listed is no dependency of the crate's manifest"),
+    ("an unlisted crate beside the register", "ferrix-kernel-core",
+     {"ferrix-listed": "1", "ferrix-unnamed": "1", "ferrix-other": "1"}, "not in its unclassified_deps"),
+    ("the register on the load crate", "ferrix-kernel-load", {}, "holds no core or item alone"),
 ]
+_KDEP_NAMED = {"ferrix-kernel-core": {"ferrix_listed", "ferrix_low", "ferrix_sync"}}
 
 
 def _kernel_upward_self_test() -> list[str]:
@@ -1695,8 +1758,19 @@ def _kernel_self_test() -> list[str]:
     for what, package, deps, expect in _KDEP_CASES:
         manifests = {p: {"lints": {"workspace": True}, "package": {"name": p}} for p in _KERNEL_MEMBERS}
         manifests[package] = dict(manifests[package], dependencies=deps)
-        found = [p for p in kernel_dependency_problems(_KDEP_MANIFEST, manifests.get, {})
-                 if p.startswith(package)]
+        manifest = _KDEP_MANIFEST
+        if "crate" in what and ("listed" in what or "register" in what):
+            manifest = _KDEP_LISTED
+        if what == "the register on the load crate":
+            manifest = dict(_KDEP_LISTED, kernel_crates=dict(_KDEP_LISTED["kernel_crates"], **{
+                "ferrix-kernel-load": dict(_KERNEL_MANIFEST["kernel_crates"]["ferrix-kernel-load"],
+                                           unclassified_deps={"ferrix-listed": "F-76"})}))
+        found = [p for p in kernel_dependency_problems(manifest, manifests.get, {}, _KDEP_NAMED)
+                 if p.startswith(package) or p.startswith(f"kernel_crates.{package}")]
+        if what == "a listed unclassified crate":
+            # Only the unnamed entry may be refused: ferrix-listed passes.
+            if any("ferrix-listed" in p or "ferrix_listed" in p for p in found):
+                failures.append(f"kernel crates: a listed unclassified crate was refused: {found}")
         if (expect is None) != (not found) or (expect and not any(expect in p for p in found)):
             failures.append(f"kernel crates: dependency {what}: {found or 'passed'}")
     bare = {p: {"package": {"name": p}} for p in _KERNEL_MEMBERS}
@@ -1798,7 +1872,10 @@ def main() -> int:
         with (ROOT / path / "Cargo.toml").open("rb") as handle:
             return tomllib.load(handle)
 
-    kernel_problems += kernel_dependency_problems(manifest, kernel_cargo, workspace_deps)
+    kernel_problems += kernel_dependency_problems(
+        manifest, kernel_cargo, workspace_deps,
+        kernel_crate_libraries(manifest, files, kernel_read, lambda rel: (KERNEL_SRC / rel).is_file()),
+    )
     if kernel_problems:
         print(
             f"item-boundary: {len(kernel_problems)} problem(s) with the kernel's crates\n"

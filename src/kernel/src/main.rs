@@ -323,7 +323,7 @@ fn require_hooks_disarmed() {
 /// The last line of boot before init: the success marker when every check
 /// ran, and the unchecked one, which no boot test accepts, when they were
 /// skipped.
-pub fn say_booted() {
+fn say_booted() {
     require_hooks_disarmed();
     panic::mark_booted();
     audit::record(

@@ -363,7 +363,7 @@ pub fn dispatch(args: &SyscallArgs, caller: Option<&dyn Host>) -> Result<usize, 
 /// refused -- here, where each call's answer passes, rather than at each of
 /// the refusals -- and each handle given that carries authority, a job for
 /// a cgroup or a device's control channel. Made with no lock held.
-pub fn record_call(
+fn record_call(
     call: NativeCall,
     number: usize,
     process: &Process,
@@ -565,7 +565,7 @@ fn port_create(process: &Process) -> Result<usize, Errno> {
 }
 
 /// `channel_create`.
-pub fn channel_create(process: &Process, out: u64) -> Result<usize, Errno> {
+fn channel_create(process: &Process, out: u64) -> Result<usize, Errno> {
     let (first, second) = Endpoint::pair().map_err(|_| status::NO_MEMORY)?;
     let mut ends = fallible::try_with_capacity(2).map_err(|_| status::NO_MEMORY)?;
     for end in [first, second] {
@@ -605,7 +605,7 @@ fn insert_all(process: &Process, objects: Vec<(Object, Rights)>) -> Result<Vec<H
 }
 
 /// `channel_write`.
-pub fn channel_write(
+fn channel_write(
     process: &Process,
     channel: Handle,
     bytes: Buffer,
@@ -714,7 +714,7 @@ fn refuse_the_writing_end(
 ///
 /// A value that names nothing is skipped here; taking the handles refuses it
 /// afterwards, with the status that says why.
-pub fn carried_endpoints(table: &HandleTable, values: &[Handle]) -> Result<Vec<Arc<Endpoint>>, Errno> {
+fn carried_endpoints(table: &HandleTable, values: &[Handle]) -> Result<Vec<Arc<Endpoint>>, Errno> {
     fallible::try_collect(values.iter().filter_map(|&value| match table.get(value) {
         Ok((Object::Channel(endpoint), _)) => Some(Arc::clone(endpoint)),
         _ => None,
@@ -1396,7 +1396,7 @@ fn capacity(count: u64, max: usize) -> usize {
 }
 
 /// `count` bytes from the caller's memory.
-pub fn copy_in(process: &Process, at: u64, count: usize) -> Result<Vec<u8>, Errno> {
+fn copy_in(process: &Process, at: u64, count: usize) -> Result<Vec<u8>, Errno> {
     let mut data = fallible::try_filled(0_u8, count).map_err(|_| status::NO_MEMORY)?;
     if count > 0 {
         uaccess::copy_from_user(process.space(), at, &mut data).map_err(fault)?;
@@ -1405,7 +1405,7 @@ pub fn copy_in(process: &Process, at: u64, count: usize) -> Result<Vec<u8>, Errn
 }
 
 /// `count` handle values from the caller's memory.
-pub fn copy_in_handles(process: &Process, at: u64, count: usize) -> Result<Vec<Handle>, Errno> {
+fn copy_in_handles(process: &Process, at: u64, count: usize) -> Result<Vec<Handle>, Errno> {
     let bytes = copy_in(process, at, count * HANDLE_BYTES)?;
     let mut handles = fallible::try_with_capacity(count).map_err(|_| status::NO_MEMORY)?;
     for word in bytes.chunks_exact(HANDLE_BYTES) {
@@ -1417,7 +1417,7 @@ pub fn copy_in_handles(process: &Process, at: u64, count: usize) -> Result<Vec<H
 }
 
 /// Handle values as a user buffer holds them.
-pub fn handle_bytes(handles: &[Handle]) -> Result<Vec<u8>, Errno> {
+fn handle_bytes(handles: &[Handle]) -> Result<Vec<u8>, Errno> {
     fallible::try_collect(handles.iter().flat_map(|handle| handle.0.to_ne_bytes()))
         .map_err(|_| status::NO_MEMORY)
 }
@@ -1463,7 +1463,7 @@ fn vmo_write(process: &Process, vmo: Handle, buffer: Buffer, offset: u64) -> Res
 /// Through a kernel page of scratch rather than frame to user page directly,
 /// so the VMO's lock is never held across a user copy — which can fault a
 /// page in, and take the address space's lock to do it.
-pub fn vmo_copy(
+fn vmo_copy(
     process: &Process,
     vmo: Handle,
     buffer: Buffer,
@@ -1682,7 +1682,7 @@ fn device_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usiz
 }
 
 /// `job_create`.
-pub fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, Errno> {
+fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, Errno> {
     if options & !JOB_SPECULATION_DOMAIN != 0 {
         return Err(status::INVALID_ARGS);
     }
@@ -1722,7 +1722,7 @@ pub fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usi
 /// Answers even when the caller is inside the job it kills: the kill ends the
 /// caller's own process too, and its task stops on the way back to user mode
 /// rather than here, with nothing held.
-pub fn job_kill(process: &Process, job: Handle) -> Result<usize, Errno> {
+fn job_kill(process: &Process, job: Handle) -> Result<usize, Errno> {
     let job = job_in(process, job, Rights::MANAGE)?;
     let ended = job
         .kill(job::KILLED_STATUS)
@@ -1762,7 +1762,7 @@ fn limited(resource: u64) -> Result<Limited, Errno> {
 /// `job_set_limit`: on a handle with [`Rights::SET_LIMIT`], not only
 /// [`Rights::MANAGE`], so a delegated cgroup's own limits stay its
 /// delegator's (`docs/CGROUPS.md` §5).
-pub fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Result<usize, Errno> {
+fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Result<usize, Errno> {
     let job = job_in(process, job, Rights::SET_LIMIT)?;
     let limit = read_u64(process, at)?;
     let limited = limited(resource)?;
@@ -1888,7 +1888,7 @@ fn audit_ring(process: &Process, handle: Handle, which: u64) -> Result<audit::Wh
 
 /// Read up to `count` records of `which` from `from` into a buffer of the
 /// kernel's, under the ring's lock, and copy them to `buffer` after it.
-pub fn copy_records(
+fn copy_records(
     process: &Process,
     which: audit::Which,
     from: u64,
@@ -1922,7 +1922,7 @@ const MAX_IMAGE_BYTES: u64 = 16 << 20;
 /// mapped executable. The process is in `job` before the caller hears of it,
 /// so a kill of the job reaches a process that was never started. It runs as
 /// its creator, the `caller`, runs ([`LoadNative`]).
-pub fn process_create(
+fn process_create(
     caller: &dyn Host,
     job: Handle,
     image: Handle,
@@ -1975,7 +1975,7 @@ pub fn process_create(
 }
 
 /// Every byte of a VMO, for `process_create` to load.
-pub fn image_bytes(vmo: &Vmo) -> Result<Vec<u8>, Errno> {
+fn image_bytes(vmo: &Vmo) -> Result<Vec<u8>, Errno> {
     let len = vmo.len_bytes();
     if len > MAX_IMAGE_BYTES {
         return Err(status::TOO_BIG);
@@ -2448,7 +2448,7 @@ pub(crate) fn quiesce(node: &Arc<DeviceNode>) -> Result<(), Errno> {
 }
 
 /// The body of [`device_quiesce`], given when to give up waiting.
-pub fn quiesce_while(node: &Arc<DeviceNode>, cancelled: &dyn Fn() -> bool) -> Result<(), Errno> {
+fn quiesce_while(node: &Arc<DeviceNode>, cancelled: &dyn Fn() -> bool) -> Result<(), Errno> {
     // A dead driver's ring, card or renderer may not have noticed the death
     // yet: wait for each, as long as the driver's end of its channel is
     // closed. A driver started again is refused its channel until they let
@@ -2824,7 +2824,7 @@ fn domain_status(why: crate::iommu::DomainError) -> Errno {
 
 /// `vmo_pin_addresses`. Writes up to `capacity` device addresses, and answers
 /// how many pages the pin holds.
-pub fn vmo_pin_addresses(
+fn vmo_pin_addresses(
     process: &Process,
     pin: Handle,
     at: u64,

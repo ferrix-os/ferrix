@@ -399,7 +399,7 @@ fn set_limit_through(
 /// `side`'s process on `node` of that event and status, naming the pin
 /// budget and the old and new values (condition 1 of the consultant's
 /// review of N0f).
-pub fn audited(
+fn audited(
     side: &Side,
     node: &DeviceNode,
     wanted: &[(audit::Event, u16, [u64; 2])],

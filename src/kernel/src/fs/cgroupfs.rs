@@ -1052,7 +1052,7 @@ fn writer() -> audit::Subject {
 }
 
 /// Record the writer setting `job`'s limit on `resource` to `limit`.
-pub fn limit_set(job: &Job, resource: Resource, limit: u64) {
+fn limit_set(job: &Job, resource: Resource, limit: u64) {
     audit::limit_set(
         audit::CGROUP_LIMIT,
         writer(),
@@ -1130,7 +1130,7 @@ fn set_io_max(job: &Job, data: &[u8]) -> Result<()> {
 }
 
 /// A write to `cpu.max`.
-pub fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
+fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
     let (_, period) = job.bandwidth();
     let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
     let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
@@ -1150,7 +1150,7 @@ pub fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
 }
 
 /// Set `job`'s `cpu.weight`, from either file that does, and record it.
-pub fn set_weight(job: &Job, weight: u32) {
+fn set_weight(job: &Job, weight: u32) {
     if job.set_cpu_weight(weight) {
         audit::limit_set(
             audit::CGROUP_LIMIT,
@@ -1163,7 +1163,7 @@ pub fn set_weight(job: &Job, weight: u32) {
 }
 
 /// A write of `data` to a file of `job`, opened by `opener`.
-pub fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<usize> {
+fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<usize> {
     match kind {
         Kind::Procs => move_process(job, data, opener)?,
         Kind::Kill => {

@@ -176,7 +176,8 @@
         "trap.rs",
         "trap/**",
         "user/**",
-        "vmap.rs"
+        "vmap.rs",
+        "kernel_core.rs"
       ]
     },
     "item": {
@@ -226,7 +227,8 @@
         "syscall/native_check.rs",
         "syscall/program.rs",
         "syscall/program_check.rs",
-        "syscall/unmap_check.rs"
+        "syscall/unmap_check.rs",
+        "kernel_item.rs"
       ]
     },
     "load": {
@@ -304,7 +306,8 @@
         "syscall/tty.rs",
         "syscall/userns.rs",
         "syscall/vdso.rs",
-        "syscall/vdso_check.rs"
+        "syscall/vdso_check.rs",
+        "kernel_load.rs"
       ]
     }
   },
@@ -496,14 +499,82 @@
       "that does not hold its ring (but for the crate's own root and the entries of",
       "raised_checks), a package under src/kernel missing here, and, for a crate",
       "holding the core or the item alone, a dependency on anything above its ring.",
-      "Until the split (step S3) the binary holds all three rings."
+      "Since the split (step S3) the binary holds only its root, main.rs, the",
+      "composition root, and the raised stages_check.rs.",
+      "",
+      "`unclassified_deps` (ledger line 1585, Q1): the libraries a core or item crate",
+      "depends on that `crates` does not classify and the allowlist does not hold --",
+      "exactly the ones its files name. It is F-76's debt register, not an",
+      "endorsement: those crates are linked into the item and no item-scoped gate",
+      "reads them. The gate fails an unclassified dependency not listed here, and an",
+      "entry the manifest no longer has or no file of the crate names. The list may",
+      "shrink freely and grows only with a ledger line; a classified crate of a",
+      "higher ring fails whatever this list says."
     ],
     "ferrix-kernel": {
       "path": "src/kernel",
       "root": "main.rs",
+      "rings": []
+    },
+    "ferrix-kernel-core": {
+      "path": "src/kernel/core",
+      "root": "kernel_core.rs",
       "rings": [
-        "core",
-        "item",
+        "core"
+      ],
+      "unclassified_deps": {
+        "ferrix-acpi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-audit": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-bootinfo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-cgroupfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-description": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-elf": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-fbtext": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-fdt": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-frame": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-heap": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-kmem": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-linux-abi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-native-abi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-objects": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-qr": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-vdso": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"
+      }
+    },
+    "ferrix-kernel-item": {
+      "path": "src/kernel/item",
+      "root": "kernel_item.rs",
+      "rings": [
+        "item"
+      ],
+      "unclassified_deps": {
+        "ferrix-audit": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-blkring": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-bootinfo": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-crng": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-devmgr-proto": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-elf": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-fdt": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-linux-abi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-native-abi": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-objects": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-paging": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-pci": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-sched": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-vfs": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-virtio": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement",
+        "ferrix-vma": "F-76 (ledger line 1585): a first-party library this crate's files name and the manifest does not classify; open debt, not an endorsement"
+      }
+    },
+    "ferrix-kernel-load": {
+      "path": "src/kernel/load",
+      "root": "kernel_load.rs",
+      "rings": [
         "load"
       ]
     }
@@ -515,8 +586,139 @@
       "test_file_patterns and the crate that reaches it. A ratchet like",
       "known_violations: it may shrink freely; an entry whose file is back in its",
       "ring's crate, or is no kernel file, fails as stale; a product file is never",
-      "listed. Empty until the split."
+      "listed. Filled by the split (step S3): 26 files, each needing the load to run what it checks (stages_check.rs: the binary)."
     ],
-    "entries": []
+    "entries": [
+      {
+        "file": "arch/aarch64/trap/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "arch/armv7a/switch/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "arch/armv7a/trap/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "arch/stage_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "arch/x86_64/paranoid/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "arch/x86_64/switch/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "arch/x86_64/trap/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "device/config_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "iommu/domain_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/alloc_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/device_copy_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/domain_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/edge_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/fast_path_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/format_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/pin/check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/quota_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "object/write_read_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "service_check.rs",
+        "ring": "item",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "stages_check.rs",
+        "ring": "item",
+        "crate": "ferrix-kernel"
+      },
+      {
+        "file": "syscall/native_check.rs",
+        "ring": "item",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "syscall/program_check.rs",
+        "ring": "item",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "syscall/unmap_check.rs",
+        "ring": "item",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "user/madvise_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
+        "file": "user/rmap_check.rs",
+        "ring": "core",
+        "crate": "ferrix-kernel-load"
+      }
+    ]
   }
 }

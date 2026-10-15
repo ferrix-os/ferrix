@@ -154,7 +154,7 @@ fn read_at(file: &OpenFile, offset: u64, buf: &mut [u8]) -> Result<usize, Errno>
 }
 
 /// A zeroed buffer of `len` bytes, or `ENOMEM`.
-pub fn zeroed(len: u64) -> Result<Vec<u8>, Errno> {
+fn zeroed(len: u64) -> Result<Vec<u8>, Errno> {
     let len = usize::try_from(len).map_err(|_| Errno::ENOMEM)?;
     crate::fallible::try_filled(0, len).map_err(|_| Errno::ENOMEM)
 }
