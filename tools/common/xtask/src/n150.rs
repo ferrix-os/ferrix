@@ -137,7 +137,8 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
         )));
     }
     match command {
-        "test-n150" => test(args),
+        "test-n150" => test(args, false),
+        "test-n150-sata" => test(args, true),
         "test-n150-desktop" => test_desktop(args),
         _ => install(args),
     }
@@ -496,8 +497,9 @@ fn guid(what: &[u8]) -> Guid {
     Guid::random(bytes)
 }
 
-/// `test-n150`: see the module documentation.
-fn test(args: &Args) -> Result<()> {
+/// `test-n150`, and with `sata` `test-n150-sata`, whose disk is a SATA
+/// drive on q35's AHCI controller: see the module documentation.
+fn test(args: &Args, sata: bool) -> Result<()> {
     let arch = Arch::X86_64;
     let build = paths::build_dir(arch);
     let natives = native::build(arch, args.release)?;
@@ -523,14 +525,16 @@ fn test(args: &Args) -> Result<()> {
     );
 
     let mut booted = args.clone();
-    booted.boot_nvme = true;
+    booted.boot_nvme = !sata;
+    booted.boot_sata = sata;
     if !booted.timeout_given {
         booted.timeout = BOOT_SECONDS;
     }
     let boot = || qemu::watch_lines(arch, &disk, &kernel, &booted, crate::shell::EXITED);
-    check_first(&boot()?)?;
+    check_first(&boot()?, sata)?;
     println!(
-        "  {arch}: booted from the NVMe drive alone; / on its root partition, /data read and written"
+        "  {arch}: booted from the {} drive alone; / on its root partition, /data read and written",
+        if sata { "SATA" } else { "NVMe" }
     );
     if REWRITE_BEFORE_SECOND_BOOT {
         let _ = make_disk(&disk, &image, Some(&fixture), TEST_DISK_BYTES)?;
@@ -553,7 +557,10 @@ fn test(args: &Args) -> Result<()> {
     remove_own(&copy)?;
     checked?;
     remove_own(&fixture)?;
-    println!("  {arch}: test-n150 passed");
+    println!(
+        "  {arch}: test-n150{} passed",
+        if sata { "-sata" } else { "" }
+    );
     Ok(())
 }
 
@@ -749,11 +756,16 @@ fn on_root_partition(lines: &[String]) -> Result<()> {
 }
 
 /// What the first boot must print.
-pub(crate) fn check_first(lines: &[String]) -> Result<()> {
-    require(
-        lines,
-        &[("NVMe 1.", "the NVMe driver did not bring the drive up")],
-    )?;
+pub(crate) fn check_first(lines: &[String], sata: bool) -> Result<()> {
+    let up = if sata {
+        (
+            "serial ferrix-n150:",
+            "the AHCI driver did not bring the drive up",
+        )
+    } else {
+        ("NVMe 1.", "the NVMe driver did not bring the drive up")
+    };
+    require(lines, &[up])?;
     on_root_partition(lines)?;
     require(
         lines,

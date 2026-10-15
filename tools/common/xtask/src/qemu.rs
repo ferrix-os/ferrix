@@ -2425,7 +2425,7 @@ fn qemu_command(
             //
             // which is harmless and the kind of noise that trains people to
             // skim the boot log.
-            if !args.boot_virtio && !args.boot_nvme {
+            if !args.boot_virtio && !args.boot_nvme && !args.boot_sata {
                 let _ = command.args([
                     "-drive",
                     &format!("format=raw,file={},if=none,id=disk", display(image)),
@@ -3119,6 +3119,9 @@ fn attach_install_disks(command: &mut Command, arch: Arch, image: &Path, args: &
     if args.boot_nvme && arch == Arch::X86_64 {
         attach_boot_nvme(command, arch, image);
     }
+    if args.boot_sata && arch == Arch::X86_64 {
+        attach_boot_sata(command, arch, image);
+    }
     if args.boot_virtio && arch == Arch::X86_64 {
         println!("  {arch}: {} as a virtio disk, booted from", display(image));
         let _ = command.args([
@@ -3259,6 +3262,26 @@ fn attach_boot_nvme(command: &mut Command, arch: Arch, image: &Path) {
         "pcie-root-port,id=ferrix.n150.port,chassis=6,slot=6",
         "-device",
         &format!("nvme,drive=n150,serial={NVME_BOOT_SERIAL},bus=ferrix.n150.port,bootindex=0"),
+    ]);
+}
+
+/// Attach `image` as the machine's one boot disk: a SATA drive on the first
+/// port of q35's AHCI controller (ICH9, 00:1f.2), first in the firmware's
+/// boot order, as an N150 box with a SATA drive has it (`crate::n150`). The
+/// serial is [`NVME_BOOT_SERIAL`], the box's drive's under either bus.
+fn attach_boot_sata(command: &mut Command, arch: Arch, image: &Path) {
+    println!(
+        "  {arch}: {} as a SATA drive ({NVME_BOOT_SERIAL}) on the AHCI controller, booted from",
+        display(image)
+    );
+    let _ = command.args([
+        "-drive",
+        &format!(
+            "file={},if=none,format=raw,id=n150,cache=writeback",
+            display(image)
+        ),
+        "-device",
+        &format!("ide-hd,drive=n150,bus=ide.0,bootindex=0,serial={NVME_BOOT_SERIAL}"),
     ]);
 }
 

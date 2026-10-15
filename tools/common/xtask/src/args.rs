@@ -470,6 +470,10 @@ pub(crate) struct Args {
     /// firmware's boot order, with no AHCI disk: the N150 box's one disk
     /// (`crate::n150`). Never a flag of its own.
     pub(crate) boot_nvme: bool,
+    /// Boot the image as a SATA drive on the first port of q35's AHCI
+    /// controller, first in the firmware's boot order: an N150 box whose
+    /// one disk is SATA (`test-n150-sata`). Never a flag of its own.
+    pub(crate) boot_sata: bool,
     /// `--plan <DIR>`: a plan of builds `FERRIX_BUILDS=record:` wrote, which
     /// `test-selfhost` has Ferrix carry out and `builds-execute` carries out
     /// (see `crate::builds`).
