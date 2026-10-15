@@ -184,6 +184,19 @@ pub struct Packet {
     pub len: usize,
 }
 
+/// A transfer event on an interrupt pipe that was not a plain success.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Trouble {
+    /// The device's slot.
+    pub slot: u8,
+    /// The endpoint's context index.
+    pub endpoint: u8,
+    /// The completion code.
+    pub code: u8,
+    /// Whether the event's TRB pointer was one of the pipe's requests.
+    pub known: bool,
+}
+
 /// A host controller, running.
 pub trait Host {
     /// The clock it waits on.
@@ -220,6 +233,13 @@ pub trait Host {
     /// controller that says so itself spares the wait for the next poll.
     fn ports_changed(&mut self) -> bool {
         false
+    }
+
+    /// The oldest transfer event on an interrupt pipe that was not a plain
+    /// success, not yet taken: for the console, since real controllers say
+    /// things a model does not.
+    fn take_trouble(&mut self) -> Option<Trouble> {
+        None
     }
 
     /// Make the device in the default state at `place` one that control

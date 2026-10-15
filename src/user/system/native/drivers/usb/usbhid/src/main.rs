@@ -244,6 +244,8 @@ struct Area {
     base: usize,
     bytes: usize,
     addresses: [u64; MAX_AREA_PAGES],
+    /// Whether an access outside the area was said.
+    strayed: core::cell::Cell<bool>,
 }
 
 impl Area {
@@ -276,15 +278,28 @@ impl Area {
             base,
             bytes,
             addresses,
+            strayed: core::cell::Cell::new(false),
         })
     }
 
-    fn at(&self, offset: usize, size: usize) -> usize {
-        assert!(
-            offset + size <= self.bytes && offset.is_multiple_of(size),
-            "inside the area, aligned"
-        );
-        self.base + offset
+    /// Where `size` bytes at `offset` are mapped; `None` outside the area
+    /// or unaligned, which is said once and then read as zero and not
+    /// written, rather than ending the driver.
+    fn at(&self, offset: usize, size: usize) -> Option<usize> {
+        let inside = offset
+            .checked_add(size)
+            .is_some_and(|end| end <= self.bytes)
+            && offset.is_multiple_of(size);
+        if inside {
+            Some(self.base + offset)
+        } else {
+            if !self.strayed.replace(true) {
+                say(format_args!(
+                    "usbhid: an access of {size} bytes at {offset:#x} is outside the controller's memory; ignored"
+                ));
+            }
+            None
+        }
     }
 }
 
@@ -294,25 +309,35 @@ impl Dma for Area {
     }
 
     fn read32(&self, offset: usize) -> u32 {
+        let Some(at) = self.at(offset, 4) else {
+            return 0;
+        };
         // SAFETY: a mapping of this process's own pinned VMO that lives as
         // long as `self`; the offset was checked; volatile, since the other
         // side is a device.
-        unsafe { ptr::read_volatile(self.at(offset, 4) as *const u32) }
+        unsafe { ptr::read_volatile(at as *const u32) }
     }
 
     fn write32(&mut self, offset: usize, value: u32) {
-        // SAFETY: as for `read32`, and the mapping is writable.
-        unsafe { ptr::write_volatile(self.at(offset, 4) as *mut u32, value) }
+        if let Some(at) = self.at(offset, 4) {
+            // SAFETY: as for `read32`, and the mapping is writable.
+            unsafe { ptr::write_volatile(at as *mut u32, value) }
+        }
     }
 
     fn read8(&self, offset: usize) -> u8 {
+        let Some(at) = self.at(offset, 1) else {
+            return 0;
+        };
         // SAFETY: as for `read32`.
-        unsafe { ptr::read_volatile(self.at(offset, 1) as *const u8) }
+        unsafe { ptr::read_volatile(at as *const u8) }
     }
 
     fn write8(&mut self, offset: usize, value: u8) {
-        // SAFETY: as for `write32`.
-        unsafe { ptr::write_volatile(self.at(offset, 1) as *mut u8, value) }
+        if let Some(at) = self.at(offset, 1) {
+            // SAFETY: as for `write32`.
+            unsafe { ptr::write_volatile(at as *mut u8, value) }
+        }
     }
 
     fn device_address(&self, offset: usize) -> Option<u32> {
@@ -787,6 +812,19 @@ fn tell(note: Note) {
             )),
         },
         Note::Gone { address } => say(format_args!("usbhid: device {address} gone")),
+        // A short packet is how most reports end: not worth a line.
+        Note::Transfer(trouble) if trouble.code == 13 && trouble.known => {}
+        Note::Transfer(trouble) => say(format_args!(
+            "usbhid: slot {} endpoint {} transfer event code {}{}",
+            trouble.slot,
+            trouble.endpoint,
+            trouble.code,
+            if trouble.known {
+                ""
+            } else {
+                ", for a TRB it did not queue"
+            }
+        )),
         Note::Stopped { function } => say(format_args!(
             "usbhid: function {function}'s pipe kept failing and is stopped until it is plugged in again"
         )),

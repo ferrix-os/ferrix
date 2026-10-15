@@ -396,6 +396,75 @@ fn a_pipe_that_keeps_stalling_is_recovered_then_stopped_and_said_so() {
 }
 
 #[test]
+fn a_stall_on_an_interrupt_pipe_is_said_with_its_code() {
+    let model = Xhci::new();
+    let keyboard = {
+        let mut m = model.borrow_mut();
+        let keyboard = m.add(sem_keyboard());
+        m.plug_root(0, keyboard);
+        keyboard
+    };
+    let mut bus = started(&model);
+    bus.poll();
+    let _ = outputs(&mut bus);
+    let _ = notes(&mut bus);
+    model.borrow_mut().world.devices[keyboard].stall_interrupts = true;
+    pass(&model, &mut bus, 2);
+    let said = notes(&mut bus);
+    assert!(
+        said.iter().any(|note| matches!(
+            note,
+            Note::Transfer(host::Trouble {
+                code: 6,
+                known: true,
+                ..
+            })
+        )),
+        "{said:?}"
+    );
+}
+
+#[test]
+fn an_event_for_a_trb_it_did_not_queue_is_said_and_the_pipe_kept_armed() {
+    let model = Xhci::new();
+    let keyboard = {
+        let mut m = model.borrow_mut();
+        let keyboard = m.add(sem_keyboard());
+        m.plug_root(0, keyboard);
+        keyboard
+    };
+    let mut bus = started(&model);
+    bus.poll();
+    let _ = outputs(&mut bus);
+    let _ = notes(&mut bus);
+    // More strays than requests queued: a pipe that was not re-armed for
+    // each would run dry, and the reports after them would never come.
+    model.borrow_mut().stray_pointers = 12;
+    for _ in 0..12 {
+        model
+            .borrow_mut()
+            .report(keyboard, 1, &[0, 0, 4, 0, 0, 0, 0, 0]);
+        pass(&model, &mut bus, 2);
+    }
+    let said = notes(&mut bus);
+    assert!(
+        said.iter()
+            .any(|note| matches!(note, Note::Transfer(host::Trouble { known: false, .. }))),
+        "{said:?}"
+    );
+    let _ = outputs(&mut bus);
+    model
+        .borrow_mut()
+        .report(keyboard, 1, &[0, 0, 5, 0, 0, 0, 0, 0]);
+    pass(&model, &mut bus, 2);
+    assert!(
+        outputs(&mut bus).contains(&Got::Events(0, vec![key(48, true), syn()])),
+        "the pipe still carries reports"
+    );
+    no_violations(&model);
+}
+
+#[test]
 fn a_pipe_recovers_when_the_stall_was_once() {
     let model = Xhci::new();
     let keyboard = {

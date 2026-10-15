@@ -421,7 +421,8 @@ impl Interpreter {
         for (slot, position) in now.iter_mut().zip(0..count as u32) {
             let usage = report::value(field, body, position)
                 .filter(|value| (field.minimum..=field.maximum).contains(value))
-                .and_then(|value| u32::try_from(value - field.minimum).ok())
+                .and_then(|value| value.checked_sub(field.minimum))
+                .and_then(|offset| u32::try_from(offset).ok())
                 .and_then(|offset| self.descriptor.usage(field, offset));
             *slot = usage.unwrap_or(0);
         }
