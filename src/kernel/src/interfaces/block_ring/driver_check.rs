@@ -106,17 +106,17 @@ const RUN_SECTORS: usize = 16;
 
 /// What the check found.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// The disks' names in `/dev`, space-separated: one per virtio-blk
     /// function, in PCI order.
-    pub(crate) names: &'static str,
+    pub names: &'static str,
     /// The first disk's size in sectors, as its driver announced it.
-    pub(crate) sectors: u64,
+    pub sectors: u64,
     /// Sectors of the first disk read back as written: none on a boot that
     /// skips its self-checks.
-    pub(crate) read: u32,
+    pub read: u32,
     /// Why nothing was checked, on a machine without the device.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
 }
 
 /// Start a driver per virtio-blk function and read the test disk through the
@@ -125,7 +125,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// What did not happen, as a sentence.
-pub(crate) fn run(started_by_devmgr: bool) -> Result<Report, &'static str> {
+pub fn run(started_by_devmgr: bool) -> Result<Report, &'static str> {
     let nodes: Vec<Arc<device::DeviceNode>> = device::devices()
         .iter()
         .filter(|node| {

@@ -21,11 +21,11 @@
 //! (`tools/common/data/certification-item.json`): a defect in one is bounded
 //! by the item's own enforcement, as a driver's fault is.
 
-pub(crate) mod audio;
-pub(crate) mod block_ring;
-pub(crate) mod chardev;
-pub(crate) mod display;
-pub(crate) mod input;
-pub(crate) mod logctl;
-pub(crate) mod net_ring;
-pub(crate) mod render;
+pub mod audio;
+pub mod block_ring;
+pub mod chardev;
+pub mod display;
+pub mod input;
+pub mod logctl;
+pub mod net_ring;
+pub mod render;

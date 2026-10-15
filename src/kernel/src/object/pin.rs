@@ -100,8 +100,6 @@ use crate::println;
 use crate::sync::SpinLock;
 use crate::user::vmo::Held;
 
-pub(crate) mod check;
-
 /// Whether a kept pin has been announced.
 static KEPT: AtomicBool = AtomicBool::new(false);
 
@@ -145,10 +143,10 @@ static CEILING: AtomicUsize = AtomicUsize::new(0);
 /// are under 1024 pages more. Seen in the gates: 1580 pages for a `gpu` at
 /// 1024x768, 20 for `snd`. So twice the default is the fixed cap the
 /// quarantine had before budgets, and no existing driver sees a change.
-pub(crate) const DEFAULT_PIN_BUDGET_PAGES: usize = LARGEST_DRIVER_PIN_PAGES + 1024;
+pub const DEFAULT_PIN_BUDGET_PAGES: usize = LARGEST_DRIVER_PIN_PAGES + 1024;
 
 /// The most pages one driver pins: the display card, 256 MiB.
-pub(crate) const LARGEST_DRIVER_PIN_PAGES: usize = 256 * 1024 * 1024 / PAGE_SIZE as usize;
+pub const LARGEST_DRIVER_PIN_PAGES: usize = 256 * 1024 * 1024 / PAGE_SIZE as usize;
 
 /// One pin closed by its process's death, until its device's next driver has
 /// reset the device.
@@ -226,15 +224,15 @@ impl PinBudget {
 
 /// A device's budget and its counts at one moment, in pages.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Counts {
+pub struct Counts {
     /// `B`.
-    pub(crate) budget: usize,
+    pub budget: usize,
     /// Pages of live pins.
-    pub(crate) live: usize,
+    pub live: usize,
     /// Pages in the quarantine.
-    pub(crate) quarantined: usize,
+    pub quarantined: usize,
     /// Pages kept for good.
-    pub(crate) kept: usize,
+    pub kept: usize,
 }
 
 impl fmt::Display for Counts {
@@ -248,14 +246,14 @@ impl fmt::Display for Counts {
 }
 
 /// `domain`'s budget and counts now.
-pub(crate) fn counts(domain: &Domain) -> Counts {
+pub fn counts(domain: &Domain) -> Counts {
     let held = QUARANTINE.lock();
     domain.pin_budget().read(&held)
 }
 
 /// `node`'s pin budget: its domain's, or the default for a node whose
 /// domain was never made.
-pub(crate) fn budget_of(node: &DeviceNode) -> usize {
+pub fn budget_of(node: &DeviceNode) -> usize {
     node.domain_made()
         .map_or(DEFAULT_PIN_BUDGET_PAGES, |domain| counts(&domain).budget)
 }
@@ -268,7 +266,7 @@ pub(crate) fn count_ceiling() {
 }
 
 /// The kernel's ceiling on twice every raised budget, in pages.
-pub(crate) fn ceiling() -> usize {
+pub fn ceiling() -> usize {
     CEILING.load(Ordering::Relaxed)
 }
 
@@ -284,7 +282,7 @@ fn raise_of(budget: usize) -> usize {
 
 /// What of the ceiling budgets raised on devices other than `domain`'s
 /// leave: the most twice `domain`'s budget may be.
-pub(crate) fn room(domain: &Domain) -> usize {
+pub fn room(domain: &Domain) -> usize {
     let held = QUARANTINE.lock();
     let own = raise_of(domain.pin_budget().read(&held).budget);
     ceiling().saturating_sub(held.raised.saturating_sub(own))
@@ -292,14 +290,14 @@ pub(crate) fn room(domain: &Domain) -> usize {
 
 /// What of the ceiling raised budgets leave, for a device whose budget was
 /// never set and so holds none of it.
-pub(crate) fn ceiling_room() -> usize {
+pub fn ceiling_room() -> usize {
     let held = QUARANTINE.lock();
     ceiling().saturating_sub(held.raised)
 }
 
 /// Why a budget was not set.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum BudgetError {
+pub enum BudgetError {
     /// The device has live pins.
     LivePins,
     /// Raised budgets would hold more than the ceiling.
@@ -316,7 +314,7 @@ pub(crate) enum BudgetError {
 /// budget and held against another; [`BudgetError::PastCeiling`] when twice
 /// every raised budget, this one's new value counted and its old one not,
 /// would pass [`ceiling`]. Nothing changes on either.
-pub(crate) fn set_budget(domain: &Domain, pages: usize) -> Result<usize, BudgetError> {
+pub fn set_budget(domain: &Domain, pages: usize) -> Result<usize, BudgetError> {
     let mut held = QUARANTINE.lock();
     let pins = domain.pin_budget();
     let mut now = pins.read(&held);
@@ -410,7 +408,7 @@ fn account_release(domain: &Domain, pages: usize, how: Release) {
 }
 
 /// Pages of a VMO pinned into a device's domain.
-pub(crate) struct Pin {
+pub struct Pin {
     /// The domain they are pinned into.
     domain: Arc<Domain>,
     /// The domain's record of them. Taken on drop.
@@ -430,7 +428,7 @@ pub(crate) struct Pin {
     /// How its unpin's invalidation is waited for: [`Wait::Status`], but
     /// [`Wait::Unwritten`] for check R7's, set by `check.rs` alone, whose
     /// invalidation then fails (`docs/NVIDIA.md` §12.3).
-    wait: Wait,
+    pub wait: Wait,
     /// The pages it counts in its device's `live`, until it is closed.
     pages: usize,
 }
@@ -445,6 +443,10 @@ impl fmt::Debug for Pin {
 }
 
 impl Pin {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the defining module's own call of a method made pub only for a raised check"
+    )]
     /// Pin `held`'s pages into `node`'s domain `domain`, writable when
     /// `flags` says so, for the process whose end is `owner`, against the
     /// device's budget.
@@ -456,7 +458,7 @@ impl Pin {
     /// counts; what the domain refused; [`PinError::NoMemory`] for the
     /// quarantine's record. The hold is then released and nothing is counted:
     /// nothing was mapped.
-    pub(crate) fn new(
+    pub fn new(
         node: &DeviceNode,
         domain: &Arc<Domain>,
         held: Held,
@@ -474,7 +476,8 @@ impl Pin {
     /// [`Pin::new`]'s work, against `budget` in place of the device's when a
     /// boot check gives one; `quiet` for a boot check's, which neither
     /// announces nor counts in [`REFUSED`].
-    fn with_budget(
+    #[doc(hidden)]
+    pub fn with_budget(
         domain: Arc<Domain>,
         held: Held,
         flags: MapFlags,
@@ -527,7 +530,7 @@ impl Pin {
     }
 
     /// Each page's device address, in page order.
-    pub(crate) fn addresses(&self) -> &[u64] {
+    pub fn addresses(&self) -> &[u64] {
         self.pinned.as_ref().map_or(&[], Pinned::addresses)
     }
 }
@@ -592,7 +595,7 @@ impl Drop for Pin {
 
 /// Why a pin was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum PinError {
+pub enum PinError {
     /// What the domain refused.
     Domain(DomainError),
     /// No memory for the quarantine's record.
@@ -670,15 +673,17 @@ fn quarantine(mut spare: Box<Quarantined>, pinned: Pinned, held: Held, quiet: bo
     }
 }
 
+// CHECKS-ONLY: object/pin/check.rs
 /// What a release gave back.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Released {
+#[doc(hidden)]
+pub struct Released {
     /// Pages given back to the allocator.
-    pages: usize,
+    pub pages: usize,
     /// Of those, the ones written after their driver died.
     written: usize,
     /// Pages the domain would not unpin, kept for good.
-    kept: usize,
+    pub kept: usize,
 }
 
 /// Give back the frames of every pin into `node`'s domain that its process's
@@ -706,10 +711,12 @@ pub(crate) fn quarantine_release(node: &DeviceNode) {
     }
 }
 
+// CHECKS-ONLY: object/pin/check.rs
 /// [`quarantine_release`]'s work, for `domain`. A boot check names in
 /// `refusing` how many of the pins to treat as refused by the domain, as a
 /// unit that never answers would refuse them; every other caller passes 0.
-fn release(domain: &Arc<Domain>, refusing: usize) -> Released {
+#[doc(hidden)]
+pub fn release(domain: &Arc<Domain>, refusing: usize) -> Released {
     let mut freed: Option<Box<Quarantined>> = None;
     {
         let mut held = QUARANTINE.lock();

@@ -48,7 +48,7 @@ const MAX_CATCH_UP: u64 = 16;
 ///
 /// Whatever [`irq::register`] reports, which at this point can only mean two
 /// subsystems claimed the same line.
-pub(crate) fn init() -> Result<(), IrqError> {
+pub fn init() -> Result<(), IrqError> {
     irq::register(arch::timer_irq(), on_tick)
 }
 
@@ -164,7 +164,7 @@ fn count_write() {
 }
 
 /// This processor's count in [`WRITES`], for the skipped-arm check.
-pub(crate) fn writes_here() -> u64 {
+pub fn writes_here() -> u64 {
     crate::smp::this_cpu()
         .and_then(|cpu| WRITES.get(cpu.logical))
         .map_or(0, |writes| writes.load(Ordering::Relaxed))
@@ -180,7 +180,7 @@ fn armed_slot() -> Option<&'static AtomicU64> {
 ///
 /// Called with interrupts masked on the processor whose timer it arms, as the
 /// scheduler calls it.
-pub(crate) fn after(nanos: u64) {
+pub fn after(nanos: u64) {
     after_from(nanos, now_nanos());
 }
 
@@ -190,7 +190,7 @@ pub(crate) fn after(nanos: u64) {
 /// it allows is no later than [`after`]'s would be (see [`ARMED`] for how
 /// late that is); the bound kept after an arm is still read after the
 /// write.
-pub(crate) fn after_from(nanos: u64, now: u64) {
+pub fn after_from(nanos: u64, now: u64) {
     // A load first, and the swap only for a periodic timer: a one-shot asked
     // for at every switch makes no read-modify-write here.
     let periodic =
@@ -220,7 +220,7 @@ pub(crate) fn after_from(nanos: u64, now: u64) {
 /// Every `nanos` from *now*, and thereafter on that schedule: the periods are
 /// measured from the deadlines they were due at rather than from the instants
 /// the interrupts arrived, so a late tick does not make its successors late.
-pub(crate) fn every(nanos: u64) {
+pub fn every(nanos: u64) {
     if let Some(slot) = armed_slot() {
         slot.store(0, Ordering::Relaxed);
     }
@@ -265,7 +265,7 @@ fn arm_at(deadline: u64) {
 /// [`ARMED`] gives: what it costs is one decision that finds nothing to do,
 /// where stopping it is an exit under a hypervisor every time a processor
 /// goes quiet. A periodic timer, which would fire for ever, is stopped.
-pub(crate) fn stop() {
+pub fn stop() {
     // A load first, and the swap only for a periodic timer: a one-shot asked
     // for at every switch makes no read-modify-write here.
     let periodic =
@@ -285,7 +285,7 @@ pub(crate) fn stop() {
 }
 
 /// Timer interrupts taken since boot.
-pub(crate) fn ticks() -> u64 {
+pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
@@ -295,7 +295,7 @@ pub(crate) fn ticks() -> u64 {
 /// in 128 bits because the obvious 64-bit form overflows after about eighteen
 /// seconds at a 1 `GHz` counter, which is exactly long enough to pass every
 /// test and fail on a real machine.
-pub(crate) fn now_nanos() -> u64 {
+pub fn now_nanos() -> u64 {
     let hz = arch::counter_hz();
     if hz == 0 {
         return 0;
@@ -310,6 +310,6 @@ fn ticks_to_nanos(ticks: u64, hz: u64) -> u64 {
 }
 
 /// How fast the free-running counter counts.
-pub(crate) fn counter_hz() -> u64 {
+pub fn counter_hz() -> u64 {
     arch::counter_hz()
 }

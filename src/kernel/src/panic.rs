@@ -40,8 +40,8 @@
 //! inside this one or on another processor while it is being written, prints
 //! its opening lines and nothing else.
 
-pub(crate) mod catalog;
-pub(crate) mod screen;
+pub mod catalog;
+pub mod screen;
 
 use core::panic::PanicInfo;
 use core::ptr;
@@ -73,16 +73,17 @@ const TEXT_COLUMNS: usize = 66;
 /// records the entry and panics with the message. The report prints the site's
 /// own sentence first, where the boot test reads it, and the catalog's
 /// explanation below the trace.
+#[macro_export]
 macro_rules! fatal {
     ($entry:expr, $($message:tt)+) => {{
         $crate::panic::explain(&$entry);
         panic!($($message)+)
     }};
 }
-pub(crate) use fatal;
+pub use crate::fatal;
 
 /// Record `entry` as the explanation for the panic that is about to happen.
-pub(crate) fn explain(entry: &'static Explanation) {
+pub fn explain(entry: &'static Explanation) {
     let _ = EXPLANATION.compare_exchange(
         ptr::null_mut(),
         ptr::from_ref(entry).cast_mut(),
@@ -149,7 +150,7 @@ static BOOTED: AtomicBool = AtomicBool::new(false);
 
 /// Say that the kernel has come up. An allocation failure that stops it from
 /// here on is not one of the boot's (see [`allocation_failure`]).
-pub(crate) fn mark_booted() {
+pub fn mark_booted() {
     BOOTED.store(true, Ordering::Release);
 }
 

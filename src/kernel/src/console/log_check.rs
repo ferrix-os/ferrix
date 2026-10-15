@@ -55,17 +55,17 @@ static GO: AtomicBool = AtomicBool::new(false);
 
 /// What the check established, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Bytes the small ring kept after being written past its length.
-    pub(crate) kept: usize,
+    pub kept: usize,
     /// Bytes a reader that fell behind was told it lost.
-    pub(crate) lost: u64,
+    pub lost: u64,
     /// Bytes the two writers recorded between them.
-    pub(crate) raced: u64,
+    pub raced: u64,
     /// Bytes this task read while they did.
-    pub(crate) read_racing: u64,
+    pub read_racing: u64,
     /// Processors the writers ran on.
-    pub(crate) processors: usize,
+    pub processors: usize,
 }
 
 /// Run the check.
@@ -75,7 +75,7 @@ pub(crate) struct Report {
 /// The first property that did not hold, as a sentence.
 ///
 /// Verifies: H.TRAP.13
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let (kept, lost) = wrap_overrun_and_partial()?;
     let (read_racing, processors) = two_writers()?;
     console_records()?;
@@ -279,9 +279,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// taken. Answers how many were refused.
 ///
 /// Verifies: `L.console.43`
-pub(crate) fn check_pstore_placement(
-    view: &ferrix_bootinfo::BootView<'_>,
-) -> Result<usize, &'static str> {
+pub fn check_pstore_placement(view: &ferrix_bootinfo::BootView<'_>) -> Result<usize, &'static str> {
     use ferrix_bootinfo::PAGE_SIZE;
     use ferrix_bootinfo::pstore::{HEADER, MIN_CAPACITY};
 

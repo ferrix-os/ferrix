@@ -17,10 +17,14 @@
 //! of `fault_signal` no boot had run, and nothing had touched a file mapping
 //! past its file's end, which the dispatcher turns into `SIGBUS` itself.
 
+#![cfg(target_arch = "x86_64")]
+
+use ferrix_kernel_core::arch::x86_64 as core_x86_64;
+
 use ferrix_linux_abi::types::{SIGBUS, SIGFPE, SIGILL, SIGSEGV};
 
-use super::super::cpu;
 use crate::console::println;
+use core_x86_64::cpu;
 
 /// `divl %ecx` with `%ecx` zero: `#DE`, vector 0.
 ///
@@ -1033,7 +1037,7 @@ fn check_thread_areas() -> Result<u32, &'static str> {
 fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        core_x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -1385,10 +1389,10 @@ fn check_forged_64_bit_frames() -> Result<(), &'static str> {
 /// # Errors
 ///
 /// What did not come back, or did not end as it had to.
-pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
-    super::super::paranoid::check::run()?;
-    super::super::syscall::check::run()?;
-    super::super::syscall::check::run_decode()?;
-    super::super::gdt::check::run()?;
+pub fn check_exception_entry() -> Result<(), &'static str> {
+    crate::arch::x86_64::paranoid::check::run()?;
+    core_x86_64::syscall::check::run()?;
+    core_x86_64::syscall::check::run_decode()?;
+    core_x86_64::gdt::check::run()?;
     run()
 }

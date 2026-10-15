@@ -17,8 +17,6 @@
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-pub(in crate::arch) mod check;
-
 /// Bytes the switch pushes: nine registers and one word of padding.
 const FRAME_BYTES: u32 = 40;
 
@@ -147,7 +145,7 @@ pub(crate) unsafe fn prepare_stack(
 /// switches to it. Only that reset clears `unsaved`.
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub(crate) struct UserState {
+pub struct UserState {
     /// `TPIDRURO`, which `set_tls` asks the kernel to write: the record the
     /// switch loads, never reads back.
     thread_pointer: u32,
@@ -222,7 +220,11 @@ const _: () = assert!(
 impl UserState {
     /// A program's state before it has run: no thread pointer, the default
     /// floating-point mode, every register zero.
-    pub(crate) const fn new() -> UserState {
+    #[allow(
+        clippy::new_without_default,
+        reason = "`new` is the one way to make it, at a place the kernel chooses; a `Default` would be a second"
+    )]
+    pub const fn new() -> UserState {
         UserState {
             thread_pointer: 0,
             fpscr: 0,
@@ -238,12 +240,14 @@ impl UserState {
     }
 
     /// Whether the task has used VFP (§9.15, D1).
-    pub(super) const fn uses_vfp(&self) -> bool {
+    #[doc(hidden)]
+    pub const fn uses_vfp(&self) -> bool {
         self.vfp
     }
 
     /// How many times VFP state was moved or `FPEXC` written for the task.
-    pub(super) const fn vfp_moves(&self) -> u32 {
+    #[doc(hidden)]
+    pub const fn vfp_moves(&self) -> u32 {
         self.vfp_moves
     }
 
@@ -266,13 +270,15 @@ impl UserState {
 
     /// Mark the record as holding only `FPSCR` and `d8`-`d15`: what the
     /// partial save does once it has stored them.
-    pub(super) const fn mark_unsaved(&mut self) {
+    #[doc(hidden)]
+    pub const fn mark_unsaved(&mut self) {
         self.unsaved = true;
     }
 
     /// Whether the record holds only `FPSCR` and `d8`-`d15`, and the next
     /// switch to the task resets the rest.
-    pub(super) const fn is_unsaved(&self) -> bool {
+    #[doc(hidden)]
+    pub const fn is_unsaved(&self) -> bool {
         self.unsaved
     }
 
@@ -297,7 +303,7 @@ impl UserState {
     /// carries the bit: a fork child or a thread of a task that has used VFP
     /// starts with it; one of a task that has not takes its first use on the
     /// state copied here.
-    pub(crate) unsafe fn capture() -> UserState {
+    pub unsafe fn capture() -> UserState {
         let mut state = UserState::new();
         state.user_rw = super::cpu::read_tpidrurw();
         // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in
@@ -313,7 +319,7 @@ impl UserState {
 
     /// Give the program `pointer` as its thread pointer, as `CLONE_SETTLS`
     /// and `set_tls` ask.
-    pub(crate) const fn set_thread_pointer(&mut self, pointer: u64) {
+    pub const fn set_thread_pointer(&mut self, pointer: u64) {
         self.thread_pointer = pointer as u32;
     }
 
@@ -326,7 +332,7 @@ impl UserState {
 
     /// A 32-bit x86 program's thread-local segment: there are none on this
     /// architecture, and no table here maps a call that asks for one.
-    pub(crate) const fn set_thread_area(&mut self, _index: usize, _descriptor: u64) -> bool {
+    pub const fn set_thread_area(&mut self, _index: usize, _descriptor: u64) -> bool {
         false
     }
 
@@ -345,7 +351,7 @@ impl UserState {
     /// which is whole; a frame built from a saved state later, a core dump or
     /// a register report reads it through here (§9.14, R6). The boot's check
     /// (`check::check_unsaved_reads_as_reset`) holds it.
-    pub(super) fn fp(&self) -> (u32, [u64; 32]) {
+    pub fn fp(&self) -> (u32, [u64; 32]) {
         if !self.unsaved {
             return (self.fpscr, self.doubles);
         }
@@ -361,7 +367,8 @@ impl UserState {
 
     /// Replace the floating-point registers, as `sigreturn` does: the state
     /// is whole after, so no reset follows at the next switch in.
-    pub(super) const fn set_fp(&mut self, fpscr: u32, doubles: [u64; 32]) {
+    #[doc(hidden)]
+    pub const fn set_fp(&mut self, fpscr: u32, doubles: [u64; 32]) {
         self.fpscr = fpscr;
         self.doubles = doubles;
         self.unsaved = false;
@@ -389,6 +396,10 @@ pub(super) fn set_user_banked(sp: u32, lr: u32) {
     unsafe { ferrix_user_banked_restore(words.as_ptr()) };
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the defining module's own call of a method made pub only for a raised check"
+)]
 /// The VFP half of [`UserState::capture`], with interrupts masked: the
 /// registers when the running task has the bit (and so `EN`, I1), else its
 /// record, read without a VFP instruction.
@@ -412,6 +423,10 @@ fn capture_vfp(state: &mut UserState, count: u8) {
     }
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the defining module's own call of a method made pub only for a raised check"
+)]
 /// Give the running task `fpscr` and `doubles` as its VFP state, if this core
 /// has a VFP: what `sigreturn` puts back.
 ///
@@ -450,8 +465,10 @@ pub(super) unsafe fn load_user_fp(fpscr: u32, doubles: [u64; 32]) {
     });
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Run `body` with interrupts masked on this processor, as they were after.
-fn masked<R>(body: impl FnOnce() -> R) -> R {
+#[doc(hidden)]
+pub fn masked<R>(body: impl FnOnce() -> R) -> R {
     let open = super::interrupts_enabled();
     super::disable_interrupts();
     let result = body();
@@ -461,8 +478,10 @@ fn masked<R>(body: impl FnOnce() -> R) -> R {
     result
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// `FPEXC.EN`.
-pub(super) const FPEXC_EN: u32 = 1 << 30;
+#[doc(hidden)]
+pub const FPEXC_EN: u32 = 1 << 30;
 
 /// What each processor's `FPEXC.EN` was last written to (§9.15, D2), by
 /// logical number. Exact, because only the kernel writes `FPEXC`: no program
@@ -475,25 +494,31 @@ fn vfp_record() -> Option<&'static AtomicBool> {
     VFP_ON.get(crate::smp::this_cpu()?.logical)
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Whether this processor's `FPEXC.EN` is set: its record, or the register
 /// itself before the record can be named.
-pub(super) fn vfp_on() -> bool {
+#[doc(hidden)]
+pub fn vfp_on() -> bool {
     match vfp_record() {
         Some(record) => record.load(Ordering::Relaxed),
         None => fpexc() & FPEXC_EN != 0,
     }
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Write this processor's record.
-fn set_vfp_record(on: bool) {
+#[doc(hidden)]
+pub fn set_vfp_record(on: bool) {
     if let Some(record) = vfp_record() {
         record.store(on, Ordering::Relaxed);
     }
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// `FPEXC`, read from the register: for the checks, which compare it with
 /// the record, and before the record exists. Zero on a core with no VFP.
-pub(super) fn fpexc() -> u32 {
+#[doc(hidden)]
+pub fn fpexc() -> u32 {
     if super::cpu::user_fpu_doubles() == 0 {
         return 0;
     }
@@ -505,17 +530,20 @@ pub(super) fn fpexc() -> u32 {
 /// What a scrub loads: no `FPSCR` and every double zero, in read-only data.
 static ZERO_STATE: UserState = UserState::new();
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Turn this processor's VFP on: `FPEXC.EN`, an `isb`, the record.
 ///
 /// # Safety
 ///
 /// (SYSREG) This processor has a VFP and interrupts are masked.
-pub(super) unsafe fn turn_on() {
+#[doc(hidden)]
+pub unsafe fn turn_on() {
     // SAFETY: (SYSREG) the caller's guarantee.
     unsafe { ferrix_fpu_enable() };
     set_vfp_record(true);
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs
 /// Zero every VFP register this processor has and `FPSCR`, then clear
 /// `FPEXC.EN` and the record (§9.15, I2): what stays behind a clear `EN` is
 /// nobody's.
@@ -524,7 +552,8 @@ pub(super) unsafe fn turn_on() {
 ///
 /// (SYSREG) This processor has `count` double registers, `EN` is set, and
 /// interrupts are masked.
-pub(super) unsafe fn scrub_off(count: u8) {
+#[doc(hidden)]
+pub unsafe fn scrub_off(count: u8) {
     // SAFETY: (SYSREG) `EN` is set; the source is the read-only zero state.
     unsafe { ferrix_user_fpu_restore(&raw const ZERO_STATE, u32::from(count == 32)) };
     // SAFETY: (SYSREG) the caller's guarantee.
@@ -544,7 +573,7 @@ pub(super) unsafe fn scrub_off(count: u8) {
 ///
 /// (SYSREG) `CPACR` grants cp10 and cp11 on this core, and interrupts are
 /// masked.
-pub(super) unsafe fn bring_up_vfp() -> (u32, u32) {
+pub unsafe fn bring_up_vfp() -> (u32, u32) {
     // SAFETY: (SYSREG) the caller's guarantee.
     unsafe { ferrix_fpu_enable() };
     // SAFETY: (SYSREG) as above; reads of identification registers.
@@ -768,9 +797,11 @@ unsafe extern "C" {
     /// Read `MVFR1`.
     fn ferrix_fpu_features1() -> u32;
     /// Store this processor's floating-point registers into `state`.
-    fn ferrix_user_fpu_save(state: *mut UserState, all_32: u32);
+    #[doc(hidden)]
+    pub fn ferrix_user_fpu_save(state: *mut UserState, all_32: u32);
     /// Load `state`'s floating-point registers onto this processor.
-    fn ferrix_user_fpu_restore(state: *const UserState, all_32: u32);
+    #[doc(hidden)]
+    pub fn ferrix_user_fpu_restore(state: *const UserState, all_32: u32);
     /// Store `FPSCR` and `d8`-`d15` alone into `state`.
     fn ferrix_user_fpu_keep(state: *mut UserState);
     /// Load `state`'s `FPSCR` and `d8`-`d15`, and `zeros` into every other
@@ -778,6 +809,10 @@ unsafe extern "C" {
     fn ferrix_user_fpu_reset(state: *const UserState, all_32: u32, zeros: *const u64);
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the defining module's own call of a method made pub only for a raised check"
+)]
 /// Store the program state this processor holds into `state`.
 ///
 /// `TPIDRURO` is not read (3b): it is the record's, which `set_tls` and
@@ -881,7 +916,7 @@ pub(crate) fn set_user_stack(stack: u32) {
 /// # Safety
 ///
 /// (CONTEXT) Must be called by the user task whose registers these are.
-pub(crate) unsafe fn reset_user_state() {
+pub unsafe fn reset_user_state() {
     // Both thread ID registers and the record together, in one masked
     // window (the consultant's R3): `execve` runs with interrupts open, and a
     // switch between the register and the record would give the new image the

@@ -95,13 +95,13 @@ fn arena<T>(result: Result<T, VmapError>, what: &'static str) -> Result<T, Refus
 
 /// What the sweeps came to, for the boot line.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Scenarios swept.
-    pub(crate) scenarios: u32,
+    pub scenarios: u32,
     /// Runs in which an allocation was failed: one per allocation site met.
-    pub(crate) failed: u32,
+    pub failed: u32,
     /// Of those, runs that succeeded all the same, the failure absorbed.
-    pub(crate) absorbed: u32,
+    pub absorbed: u32,
 }
 
 /// A scenario: a name for the console, and the thing itself.
@@ -113,7 +113,7 @@ type Scenario = (&'static str, fn(u64) -> Result<(), Refusal>);
 /// window over one.
 ///
 /// Verifies: H.MEM.11, L.mm.48, L.user.20, L.user.100, L.user.106
-pub(crate) fn run(frame: u64) -> Result<Report, &'static str> {
+pub fn run(frame: u64) -> Result<Report, &'static str> {
     let scenarios: [Scenario; 9] = [
         ("fork", fork_every_kind_of_region),
         ("move", remap_a_private_region),

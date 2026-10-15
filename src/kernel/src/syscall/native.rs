@@ -101,7 +101,7 @@ const HANDLE_BYTES: usize = size_of::<u32>();
 
 /// A pointer and a count, as two registers give them.
 #[derive(Debug, Clone, Copy)]
-struct Buffer {
+pub struct Buffer {
     /// Where it starts in the caller's memory.
     at: u64,
     /// How many elements: bytes, or handles.
@@ -190,7 +190,7 @@ static SERVED: [Served; 20] = [
 /// [`Full`] when `call` is not one this table leaves to the load ring, or
 /// already has a handler: either way the load registers more than the item
 /// expects, and the boot says so.
-pub(crate) fn serve(call: NativeCall, handler: Handler) -> Result<(), Full> {
+pub fn serve(call: NativeCall, handler: Handler) -> Result<(), Full> {
     let served = SERVED
         .iter()
         .find(|served| served.call == call)
@@ -206,7 +206,7 @@ pub(crate) fn serve(call: NativeCall, handler: Handler) -> Result<(), Full> {
 /// The first call left to the load ring that nothing answers: what the boot
 /// checks is `None` before it goes on, so that a call the `match` in
 /// [`dispatch`] no longer answers itself cannot go unanswered unseen.
-pub(crate) fn unserved() -> Option<NativeCall> {
+pub fn unserved() -> Option<NativeCall> {
     SERVED
         .iter()
         .find(|served| served.handler.get().is_none())
@@ -214,7 +214,7 @@ pub(crate) fn unserved() -> Option<NativeCall> {
 }
 
 /// How many calls the load ring answers, for the boot's report.
-pub(crate) fn served_count() -> usize {
+pub fn served_count() -> usize {
     SERVED
         .iter()
         .filter(|served| served.handler.get().is_some())
@@ -240,18 +240,19 @@ fn served(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Er
 /// that loader and that process are above the item. So the item states what
 /// it needs and the personality registers it, as it lends `init` its
 /// `Launcher`.
-pub(crate) struct Processes {
+#[derive(Debug)]
+pub struct Processes {
     /// A new process with the ELF `image` loaded, named `name`, made and not
     /// started. Refused with the native status the caller hears.
-    pub(crate) load: LoadNative,
+    pub load: LoadNative,
     /// Claim the process's start and make its first task; then ask the
     /// argument for the value its first argument register starts with, and
     /// run it. A refused argument gives the start back with nothing run.
-    pub(crate) start: StartNative,
+    pub start: StartNative,
     /// Whether the calling thread of `caller` is to leave a wait rather than
     /// sleep on: its process is ending, or another of its threads is
     /// replacing the program.
-    pub(crate) must_leave: fn(caller: &dyn Host) -> bool,
+    pub must_leave: fn(caller: &dyn Host) -> bool,
 }
 
 /// [`Processes::load`]: the process asking, an image and a name, and the
@@ -265,7 +266,7 @@ pub(crate) type LoadNative =
     fn(creator: Option<&dyn Host>, image: &[u8], name: &[u8]) -> Result<Arc<dyn Host>, Errno>;
 
 /// What gives a starting process its first argument, or refuses to.
-pub(crate) type Argument<'a> = &'a mut dyn FnMut() -> Result<u64, Errno>;
+pub type Argument<'a> = &'a mut dyn FnMut() -> Result<u64, Errno>;
 
 /// [`Processes::start`].
 pub(crate) type StartNative =
@@ -273,7 +274,7 @@ pub(crate) type StartNative =
 
 /// Why [`Processes::start`] did not start a process.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum StartRefused {
+pub enum StartRefused {
     /// It has no program loaded, has already ended, or was already started.
     Claimed,
     /// No task could be made for it.
@@ -287,12 +288,12 @@ static PROCESSES: Once<&'static Processes> = Once::new();
 
 /// Make and start native processes with `processes`. The first registration
 /// stands.
-pub(crate) fn register_processes(processes: &'static Processes) {
+pub fn register_processes(processes: &'static Processes) {
     let _ = PROCESSES.call_once(|| processes);
 }
 
 /// The registered [`Processes`], if one is: what `devmgr` starts with.
-pub(crate) fn processes() -> Option<&'static Processes> {
+pub fn processes() -> Option<&'static Processes> {
     PROCESSES.get().copied()
 }
 
@@ -307,14 +308,15 @@ fn must_leave(caller: &dyn Host) -> bool {
 
 /// A subsystem that serves devices through a control channel, as a quiesce
 /// sees it.
-pub(crate) struct Server {
+#[derive(Debug)]
+pub struct Server {
     /// Wait, bounded, until nothing of it serves `node` any more, or until
     /// `cancelled`; refused while a live driver still does.
-    pub(crate) wait_until_unserved: WaitUnserved,
+    pub wait_until_unserved: WaitUnserved,
     /// Let go of a claim it keeps on `node` past its driver's end, once the
     /// device reaches nothing: the block ring's, which a driver started again
     /// would otherwise be refused by.
-    pub(crate) release: Option<fn(node: &Arc<DeviceNode>)>,
+    pub release: Option<fn(node: &Arc<DeviceNode>)>,
 }
 
 /// [`Server::wait_until_unserved`].
@@ -332,12 +334,12 @@ static SERVERS: Hooks<Server, 8> = Hooks::new();
 ///
 /// [`Full`] past eight, which is more subsystems serving devices than the
 /// item expects.
-pub(crate) fn register_server(server: &'static Server) -> Result<(), Full> {
+pub fn register_server(server: &'static Server) -> Result<(), Full> {
     SERVERS.register(server)
 }
 
 /// How many subsystems a quiesce waits out, for the boot's report.
-pub(crate) fn server_count() -> usize {
+pub fn server_count() -> usize {
     SERVERS.len()
 }
 
@@ -348,7 +350,7 @@ pub(crate) fn server_count() -> usize {
 /// `ENOSYS` for a gap in the range, a call not built yet, or one left to the
 /// load ring that nothing answers; `ESRCH` with no process, as the Linux half
 /// answers; otherwise the call's own status.
-pub(crate) fn dispatch(args: &SyscallArgs, caller: Option<&dyn Host>) -> Result<usize, Errno> {
+pub fn dispatch(args: &SyscallArgs, caller: Option<&dyn Host>) -> Result<usize, Errno> {
     let call = decode(args.number).ok_or(Errno::ENOSYS)?;
     let caller = caller.ok_or(Errno::ESRCH)?;
     let answered = answer(call, caller, args.args);
@@ -868,7 +870,7 @@ fn channel_write_read(caller: &dyn Host, a: &[u64; 6]) -> Result<(usize, [u64; 3
 /// argument registers, as they would lie in memory. The general write takes
 /// the first `count`; the fast path's commit sends them as words, the bytes
 /// past `count` zeroed ([`reply_words`]).
-pub(crate) fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
+pub fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
     let mut bytes = [0_u8; nr::CHANNEL_WRITE_READ_BYTES];
     for (chunk, word) in bytes.chunks_exact_mut(size_of::<usize>()).zip(&a[2..5]) {
         // The word as the program held it: a `usize` in its registers,
@@ -881,7 +883,7 @@ pub(crate) fn sent_bytes(a: &[u64; 6]) -> [u8; nr::CHANNEL_WRITE_READ_BYTES] {
 /// The words a reader of `count` bytes of `bytes` is answered with, the
 /// bytes after `count` zero: what [`receive_words`] makes of a message held
 /// in the slot, whose bytes past its length `Small::of` left zero.
-pub(crate) fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
+pub fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
     let mut held = [0_u8; nr::CHANNEL_WRITE_READ_BYTES];
     if let (Some(to), Some(from)) = (held.get_mut(..count), bytes.get(..count)) {
         to.copy_from_slice(from);
@@ -902,7 +904,7 @@ pub(crate) fn words_of(bytes: &[u8], count: usize) -> [u64; 3] {
 /// `count` on zero (`Small::of`'s rule, O7). Held to that composition for
 /// every count and byte position by stage 9's reply-words case
 /// (`object::fast_path_check`).
-pub(crate) fn reply_words(count: usize, a: &[u64; 6]) -> [u64; 3] {
+pub fn reply_words(count: usize, a: &[u64; 6]) -> [u64; 3] {
     const WORD: usize = size_of::<usize>();
     let mut words = [0_u64; 3];
     for (index, (word, &register)) in words.iter_mut().zip(&a[2..5]).enumerate() {
@@ -982,7 +984,8 @@ fn receive_words(endpoint: &Endpoint) -> Result<(usize, [u64; 3]), Errno> {
 }
 
 /// What the receive half made of a wait.
-pub(crate) enum Parked {
+#[derive(Debug)]
+pub enum Parked {
     /// It could not park: the general wait runs.
     Declined,
     /// A commit handed it this reply.
@@ -998,7 +1001,7 @@ pub(crate) enum Parked {
 /// interrupts on as the general wait blocks. Woken by a commit, it takes its
 /// reply; by anything else, it leaves its record and goes on as after the
 /// general wait.
-pub(crate) fn park_for_reply(endpoint: &Endpoint) -> Parked {
+pub fn park_for_reply(endpoint: &Endpoint) -> Parked {
     let Some(task) = crate::sched::current() else {
         return Parked::Declined;
     };
@@ -1033,7 +1036,7 @@ pub(crate) fn park_for_reply(endpoint: &Endpoint) -> Parked {
 ///
 /// [`Fast::Tail`]: crate::trap::Fast::Tail
 /// [`Fast::Done`]: crate::trap::Fast::Done
-pub(crate) fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
+pub fn fast_write_read(a: &[u64; 6]) -> crate::trap::Fast {
     // Its first act, as `trap::system_call`'s is: the frame tail or the
     // continuation lowers it. A decline lowers it here, since a declined
     // call need not reach `system_call` -- the filter may answer it, and
@@ -1198,7 +1201,7 @@ static FAULTED_ROUNDS: core::sync::atomic::AtomicU64 = core::sync::atomic::Atomi
 
 /// How many times a `channel_read` has gone round again to fault a buffer in
 /// with the topology lock let go: see [`FAULTED_ROUNDS`].
-pub(crate) fn faulted_rounds() -> u64 {
+pub fn faulted_rounds() -> u64 {
     FAULTED_ROUNDS.load(core::sync::atomic::Ordering::Relaxed)
 }
 
@@ -1539,11 +1542,7 @@ fn vmo_get_size(process: &Process, vmo: Handle, out: u64) -> Result<usize, Errno
 }
 
 /// Open a handle to a new object, or free the object if there is no room.
-pub(crate) fn insert_new(
-    process: &Process,
-    object: Object,
-    rights: Rights,
-) -> Result<usize, Errno> {
+pub fn insert_new(process: &Process, object: Object, rights: Rights) -> Result<usize, Errno> {
     // FALLIBLE: the handle table's reserve refuses with `TableError::NoMemory`.
     let placed = process.with_handles(|table| match table.reserve(1) {
         Ok(()) => table
@@ -2089,7 +2088,7 @@ fn move_handle(from: &Process, to: &Process, handle: Handle) -> Result<Handle, E
 ///
 /// `BAD_HANDLE`, `ACCESS_DENIED` without `TRANSFER`, `ALREADY_BOUND` for a
 /// slot given before, `BAD_STATE` for a sealed one.
-pub(crate) fn give_bootstrap(from: &Process, to: &Process, handle: Handle) -> Result<usize, Errno> {
+pub fn give_bootstrap(from: &Process, to: &Process, handle: Handle) -> Result<usize, Errno> {
     from.with_handles(|source| {
         let (_, rights) = source.get(handle).map_err(table_error)?;
         if !rights.contains(Rights::TRANSFER) {
@@ -2290,7 +2289,7 @@ fn io_mapping_create(process: &Process, device: Handle, spec: u64) -> Result<usi
 /// # Errors
 ///
 /// As the handle lookup, or `create`'s status, or `NO_HANDLES`.
-pub(crate) fn control_channel(
+pub fn control_channel(
     caller: &dyn Host,
     device: u64,
     rights: Rights,
@@ -2947,7 +2946,7 @@ fn space_status(why: SpaceError) -> Errno {
 
 /// The port a handle names, if it carries `needed`: for the port calls, and
 /// for `port_fd`, which the load ring answers.
-pub(crate) fn port_in(process: &Process, port: Handle, needed: Rights) -> Result<Arc<Port>, Errno> {
+pub fn port_in(process: &Process, port: Handle, needed: Rights) -> Result<Arc<Port>, Errno> {
     process.with_handles(|table| {
         let (object, rights) = table.get(port).map_err(table_error)?;
         let Object::Port(port) = object else {

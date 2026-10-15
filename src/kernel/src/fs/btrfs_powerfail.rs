@@ -67,7 +67,7 @@ const SEED_OPTION: &str = "ferrix.btrfs.seed";
 
 /// What the boot does with the writable disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mode {
+pub enum Mode {
     /// Stage 12's ordinary check: build a tree, remount, read it back.
     Check,
     /// Write until the host pulls the plug.
@@ -82,7 +82,7 @@ static SEED: AtomicU64 = AtomicU64::new(1);
 
 /// Read `ferrix.btrfs` and `ferrix.btrfs.seed` from the command line, once,
 /// early, so a typo is reported at the top of the log.
-pub(crate) fn init(view: &BootView<'_>) {
+pub fn init(view: &BootView<'_>) {
     match view.option(MODE_OPTION) {
         None => {}
         Some("churn") => MODE.store(1, Ordering::Relaxed),
@@ -97,7 +97,7 @@ pub(crate) fn init(view: &BootView<'_>) {
 }
 
 /// The mode [`init`] read.
-pub(crate) fn mode() -> Mode {
+pub fn mode() -> Mode {
     match MODE.load(Ordering::Relaxed) {
         1 => Mode::Churn,
         2 => Mode::Replay,
@@ -106,24 +106,24 @@ pub(crate) fn mode() -> Mode {
 }
 
 /// The seed [`init`] read.
-pub(crate) fn seed() -> u64 {
+pub fn seed() -> u64 {
     SEED.load(Ordering::Relaxed)
 }
 
 /// What a replay found.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Files the volume held after the replay.
-    pub(crate) files: u32,
+    pub files: u32,
     /// Of those, the ones ending in a well-formed trailer, whose body was
     /// therefore promised and was checked against it.
-    pub(crate) checked: u32,
+    pub checked: u32,
     /// Whether the crash left a log for the mount to replay: the primary
     /// superblock's `log_root`, read before the mount replays and clears it.
     /// A cut between a log commit and the next commit leaves one.
-    pub(crate) logged: bool,
+    pub logged: bool,
     /// Why nothing was done: no third disk on this machine.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
 }
 
 /// What ends a file whose body was made durable: its length and its
@@ -275,7 +275,7 @@ fn pass(which: u64, seq: u64, len: u64) -> Result<(), &'static str> {
 ///
 /// Anything that fails before the kill, which is a failure of the write path
 /// and not of the test.
-pub(crate) fn churn(seed: u64) -> Result<Report, &'static str> {
+pub fn churn(seed: u64) -> Result<Report, &'static str> {
     if !served() {
         return Ok(Report {
             files: 0,
@@ -316,7 +316,7 @@ pub(crate) fn churn(seed: u64) -> Result<Report, &'static str> {
 /// # Errors
 ///
 /// A body that does not match the trailer over it: a promise rolled back.
-pub(crate) fn replay() -> Result<Report, &'static str> {
+pub fn replay() -> Result<Report, &'static str> {
     let mut report = Report {
         files: 0,
         checked: 0,

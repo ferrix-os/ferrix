@@ -60,7 +60,7 @@ use super::WaitQueue;
 
 /// A point on the trip, in the order a trip passes them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Stamp {
+pub enum Stamp {
     /// The check calls the read.
     Issued,
     /// The read is queued, before the ring's task is nudged.
@@ -90,10 +90,10 @@ pub(crate) enum Stamp {
 }
 
 /// How many stamps a trip has.
-pub(crate) const STAMPS: usize = 13;
+pub const STAMPS: usize = 13;
 
 /// Each stamp's name, for the check's line.
-pub(crate) const NAMES: [&str; STAMPS] = [
+pub const NAMES: [&str; STAMPS] = [
     "issue",
     "queued",
     "ring",
@@ -111,7 +111,7 @@ pub(crate) const NAMES: [&str; STAMPS] = [
 
 /// What the trace counts beside the stamps, while it is up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Count {
+pub enum Count {
     /// A user root written: a program's address space installed.
     RootInstall,
     /// A user root taken off: back to the kernel's alone.
@@ -129,7 +129,7 @@ const COUNTS: usize = 4;
 /// The traced wait queues: the reader's, the ring's port's and the driver's
 /// port's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Traced {
+pub enum Traced {
     /// The disk's reader queue.
     Reader,
     /// The ring's completion port.
@@ -163,29 +163,29 @@ static SLEPT: [[AtomicU64; 2]; QUEUES] = [const { [const { AtomicU64::new(0) }; 
 /// One traced trip: each stamp's counter value and processor, and the slots
 /// it passed over.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Trip {
+pub struct Trip {
     /// Counter values, in the architecture's counter's ticks.
-    pub(crate) at: [u64; STAMPS],
+    pub at: [u64; STAMPS],
     /// Processors, by logical number.
-    pub(crate) cpu: [u32; STAMPS],
+    pub cpu: [u32; STAMPS],
     /// Bit `n` set: slot `n` was passed over, and holds the stamp before it.
-    pub(crate) skipped: u32,
+    pub skipped: u32,
 }
 
 /// What the trace counted since it was armed.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct Counted {
+pub struct Counted {
     /// By [`Count`], in its order.
-    pub(crate) counts: [u64; COUNTS],
+    pub counts: [u64; COUNTS],
     /// By [`Traced`], in its order: sleeps a wake ended, and sleeps the
     /// recheck ended.
-    pub(crate) slept: [[u64; 2]; QUEUES],
+    pub slept: [[u64; 2]; QUEUES],
 }
 
 /// Raise the trace, and zero its counts. The queues named by earlier trips
 /// stay named, so a check can run one trip to name them and then count from
 /// a clean start.
-pub(crate) fn arm() {
+pub fn arm() {
     for count in &COUNTED {
         count.store(0, Ordering::Relaxed);
     }
@@ -199,7 +199,7 @@ pub(crate) fn arm() {
 }
 
 /// Lower the trace and forget the queues it named.
-pub(crate) fn disarm() {
+pub fn disarm() {
     TRACING.store(false, Ordering::Release);
     for queue in &QUEUE_AT {
         queue.store(0, Ordering::Relaxed);
@@ -207,7 +207,7 @@ pub(crate) fn disarm() {
 }
 
 /// What the trace has counted since [`arm`].
-pub(crate) fn counted() -> Counted {
+pub fn counted() -> Counted {
     let mut counted = Counted::default();
     for (to, from) in counted.counts.iter_mut().zip(&COUNTED) {
         *to = from.load(Ordering::Relaxed);
@@ -248,7 +248,7 @@ pub(crate) fn slept(queue: &WaitQueue, woken: bool) {
 }
 
 /// The check calls a read: a new trip starts.
-pub(crate) fn issued() {
+pub fn issued() {
     if !TRACING.load(Ordering::Relaxed) {
         return;
     }
@@ -260,7 +260,7 @@ pub(crate) fn issued() {
 
 /// The read is queued on the disk whose readers wait on `reader`: that is
 /// the traced disk.
-pub(crate) fn queued(reader: &WaitQueue) {
+pub fn queued(reader: &WaitQueue) {
     if !TRACING.load(Ordering::Relaxed) {
         return;
     }
@@ -272,7 +272,7 @@ pub(crate) fn queued(reader: &WaitQueue) {
 
 /// The ring task serving the disk of `reader` is running after a sleep: the
 /// first wake of a trip, or the one after the driver's completion.
-pub(crate) fn ring_running(reader: &WaitQueue) {
+pub fn ring_running(reader: &WaitQueue) {
     if !TRACING.load(Ordering::Relaxed) || !is(Traced::Reader, reader) {
         return;
     }
@@ -283,7 +283,7 @@ pub(crate) fn ring_running(reader: &WaitQueue) {
 /// The ring serving the disk of `reader` put a command on the ring; its
 /// completion port's queue is `ring_port`, which becomes the traced ring
 /// port.
-pub(crate) fn on_ring(reader: &WaitQueue, ring_port: &WaitQueue) {
+pub fn on_ring(reader: &WaitQueue, ring_port: &WaitQueue) {
     if !TRACING.load(Ordering::Relaxed) || !is(Traced::Reader, reader) {
         return;
     }
@@ -296,7 +296,7 @@ pub(crate) fn on_ring(reader: &WaitQueue, ring_port: &WaitQueue) {
 /// queue is `driver_port`, which becomes the traced driver port. A driver
 /// already awake is not rung, and its port stays unnamed until one is: the
 /// check's first, untimed read finds it asleep.
-pub(crate) fn bell(reader: &WaitQueue, driver_port: &WaitQueue) {
+pub fn bell(reader: &WaitQueue, driver_port: &WaitQueue) {
     if !TRACING.load(Ordering::Relaxed) || !is(Traced::Reader, reader) {
         return;
     }
@@ -308,7 +308,7 @@ pub(crate) fn bell(reader: &WaitQueue, driver_port: &WaitQueue) {
 /// A `port_wait` took a packet from the port whose queue is `port`: on the
 /// traced driver's port, the bell or, for an `interrupt` packet, the
 /// device's completion.
-pub(crate) fn port_taken(port: &WaitQueue, interrupt: bool) {
+pub fn port_taken(port: &WaitQueue, interrupt: bool) {
     if !TRACING.load(Ordering::Relaxed) || !is(Traced::DriverPort, port) {
         return;
     }
@@ -330,7 +330,7 @@ pub(crate) fn interrupt_queued(port: &WaitQueue) {
 
 /// A program queued a packet on the port whose queue is `port`: on the
 /// traced ring's port, the driver posting its completion.
-pub(crate) fn port_rung(port: &WaitQueue) {
+pub fn port_rung(port: &WaitQueue) {
     if !TRACING.load(Ordering::Relaxed) || !is(Traced::RingPort, port) {
         return;
     }
@@ -338,7 +338,7 @@ pub(crate) fn port_rung(port: &WaitQueue) {
 }
 
 /// The ring serving the disk of `reader` copied an answer out.
-pub(crate) fn answered(reader: &WaitQueue) {
+pub fn answered(reader: &WaitQueue) {
     if !TRACING.load(Ordering::Relaxed) || !is(Traced::Reader, reader) {
         return;
     }
@@ -346,7 +346,7 @@ pub(crate) fn answered(reader: &WaitQueue) {
 }
 
 /// A reader of the disk of `reader` is running with its answer.
-pub(crate) fn reader_running(reader: &WaitQueue) {
+pub fn reader_running(reader: &WaitQueue) {
     if !TRACING.load(Ordering::Relaxed) || !is(Traced::Reader, reader) {
         return;
     }
@@ -355,7 +355,7 @@ pub(crate) fn reader_running(reader: &WaitQueue) {
 
 /// The read returned to the check: the trip, if it reached every slot, or
 /// else the slot it was still waiting for ([`STAMPS`] when not tracing).
-pub(crate) fn done() -> Result<Trip, usize> {
+pub fn done() -> Result<Trip, usize> {
     if !TRACING.load(Ordering::Relaxed) {
         return Err(STAMPS);
     }

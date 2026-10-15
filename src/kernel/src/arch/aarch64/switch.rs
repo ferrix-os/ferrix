@@ -127,7 +127,7 @@ pub(crate) unsafe fn prepare_stack(
 /// switches between tasks that run user code.
 #[repr(C)]
 #[derive(Debug, Clone)]
-pub(crate) struct UserState {
+pub struct UserState {
     /// `TPIDR_EL0`, which EL0 writes for itself.
     thread_pointer: u64,
     /// `FPCR`.
@@ -152,7 +152,7 @@ impl UserState {
     /// # Safety
     ///
     /// (CONTEXT) The registers must be the calling task's own.
-    pub(crate) unsafe fn capture() -> UserState {
+    pub unsafe fn capture() -> UserState {
         let mut state = UserState::new();
         // SAFETY: (CONTEXT) the caller's guarantee.
         unsafe { save_user_state(&mut state, false) };
@@ -161,13 +161,13 @@ impl UserState {
 
     /// Give the program `pointer` as its thread pointer, as `CLONE_SETTLS`
     /// asks.
-    pub(crate) const fn set_thread_pointer(&mut self, pointer: u64) {
+    pub const fn set_thread_pointer(&mut self, pointer: u64) {
         self.thread_pointer = pointer;
     }
 
     /// A 32-bit x86 program's thread-local segment: there are none on this
     /// architecture, and no table here maps a call that asks for one.
-    pub(crate) const fn set_thread_area(&mut self, _index: usize, _descriptor: u64) -> bool {
+    pub const fn set_thread_area(&mut self, _index: usize, _descriptor: u64) -> bool {
         false
     }
 
@@ -306,7 +306,7 @@ pub(crate) unsafe fn restore_user_state(state: &UserState, entry_stack: u64) {
 /// # Safety
 ///
 /// (CONTEXT) Must be called by the user task whose registers these are.
-pub(crate) unsafe fn reset_user_state() {
+pub unsafe fn reset_user_state() {
     let fresh = UserState::new();
     // SAFETY: (CONTEXT) loading zeroed user registers cannot affect the kernel.
     unsafe { ferrix_user_restore(core::ptr::from_ref(&fresh)) };

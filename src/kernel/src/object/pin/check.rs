@@ -5,6 +5,10 @@
 //! P1 to P5 of `docs/NVIDIA.md` §12.2, each at a budget of two pages, which a
 //! boot can afford, on the first translated PCI domain. With no translated
 //! domain there is no quarantine, and nothing is checked (ARMv7-A).
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
 
 use alloc::sync::Arc;
 use alloc::vec;

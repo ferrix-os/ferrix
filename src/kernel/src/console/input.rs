@@ -131,11 +131,12 @@ const CHECK_ARMED: u16 = 0x100;
 const CHECK_TAKEN: u16 = 0x200;
 
 /// What [`check`] established.
-pub(crate) struct Checked {
+#[derive(Debug)]
+pub struct Checked {
     /// Bytes the ring held and gave back in order.
-    pub(crate) held: usize,
+    pub held: usize,
     /// Bytes offered past its capacity and counted rather than kept.
-    pub(crate) dropped: u64,
+    pub dropped: u64,
 }
 
 /// Install the console port's receive interrupt, if the machine has one this
@@ -150,7 +151,7 @@ pub(crate) struct Checked {
 /// # Errors
 ///
 /// When something else already holds the port's interrupt number.
-pub(crate) fn init(view: &BootView<'_>) -> Result<Option<u32>, &'static str> {
+pub fn init(view: &BootView<'_>) -> Result<Option<u32>, &'static str> {
     let Some(irq) = arch::console_receive_irq(view) else {
         return Ok(None);
     };
@@ -237,25 +238,25 @@ fn receive(mut take: impl FnMut() -> Option<u8>) {
 /// [`disarm_check_byte`], the first `byte` [`receive`] reads is taken
 /// rather than put in the ring, so that it never reaches a reader of the
 /// console. Call before looping `byte` back.
-pub(crate) fn arm_check_byte(byte: u8) {
+pub fn arm_check_byte(byte: u8) {
     CHECK_BYTE.store(CHECK_ARMED | u16::from(byte), Ordering::Release);
 }
 
 /// Whether the receive path has read `byte` since [`arm_check_byte`].
-pub(crate) fn check_byte_taken(byte: u8) -> bool {
+pub fn check_byte_taken(byte: u8) -> bool {
     CHECK_BYTE.load(Ordering::Acquire) == CHECK_TAKEN | u16::from(byte)
 }
 
 /// Stop waiting for `byte`, and say whether the receive path read it since
 /// [`arm_check_byte`]. A `byte` read after this goes into the ring.
-pub(crate) fn disarm_check_byte(byte: u8) -> bool {
+pub fn disarm_check_byte(byte: u8) -> bool {
     CHECK_BYTE.swap(0, Ordering::AcqRel) == CHECK_TAKEN | u16::from(byte)
 }
 
 /// Take `byte` from the front of the ring, if it is there: for x86-64's
 /// check R5, whose looped-back byte, delivered only after the check
 /// stopped waiting for it, must not reach a reader of the console.
-pub(crate) fn take_check_byte(byte: u8) -> bool {
+pub fn take_check_byte(byte: u8) -> bool {
     let mut ring = RING.lock();
     if ring.len() == 0 || ring.bytes.get(ring.head).copied() != Some(byte) {
         return false;
@@ -287,7 +288,7 @@ pub(crate) fn has_input() -> bool {
 }
 
 /// The queue the receive interrupt wakes when it adds to the ring.
-pub(crate) fn waiters() -> &'static WaitQueue {
+pub fn waiters() -> &'static WaitQueue {
     &WAITERS
 }
 
@@ -297,7 +298,7 @@ pub(crate) fn overruns() -> u64 {
 }
 
 /// Whether input arrives by interrupt. When it does not, a reader has to poll.
-pub(crate) fn interrupt_driven() -> bool {
+pub fn interrupt_driven() -> bool {
     INTERRUPT_DRIVEN.load(Ordering::Relaxed)
 }
 
@@ -309,7 +310,7 @@ pub(crate) fn interrupt_driven() -> bool {
 ///
 /// A description of the first property that did not hold. Also when called
 /// after [`init`] installed the interrupt, which would race the port.
-pub(crate) fn check() -> Result<Checked, &'static str> {
+pub fn check() -> Result<Checked, &'static str> {
     const EXTRA: usize = 3;
 
     if interrupt_driven() {

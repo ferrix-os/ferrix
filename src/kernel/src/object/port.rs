@@ -55,14 +55,14 @@ use crate::object::quota::{Charge, Resource};
 use crate::sched::WaitQueue;
 
 /// The most user packets a port holds unread.
-pub(crate) const PORT_CAPACITY: usize = 1024;
+pub const PORT_CAPACITY: usize = 1024;
 
 /// The most registrations one object holds at once.
 pub(crate) const MAX_OBSERVERS: usize = 64;
 
 /// Why a port or an object refused a packet or a registration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PortError {
+pub enum PortError {
     /// The port is full of user packets, or the object of registrations.
     Full,
     /// The room a registration promises could not be reserved.
@@ -77,7 +77,7 @@ impl From<AllocError> for PortError {
 
 /// An event queue.
 #[derive(Debug)]
-pub(crate) struct Port {
+pub struct Port {
     /// Packets, oldest first, and what they are owed: see the module
     /// documentation.
     queue: IrqSpinLock<Queue, arch::Irq>,
@@ -134,7 +134,7 @@ impl Port {
     /// # Errors
     ///
     /// [`AllocError`] when the port or its queue could not be allocated.
-    pub(crate) fn new() -> Result<Arc<Port>, AllocError> {
+    pub fn new() -> Result<Arc<Port>, AllocError> {
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
         let packets = fallible::try_deque_with_capacity(PORT_CAPACITY)?;
         let waiters = fallible::try_arc(WaitQueue::new())?;
@@ -155,7 +155,7 @@ impl Port {
     /// # Errors
     ///
     /// [`PortError::Full`] at [`PORT_CAPACITY`].
-    pub(crate) fn queue_user(&self, key: u64, data: [u64; 2]) -> Result<(), PortError> {
+    pub fn queue_user(&self, key: u64, data: [u64; 2]) -> Result<(), PortError> {
         {
             let mut queue = self.queue.lock();
             if queue.users >= PORT_CAPACITY {
@@ -240,7 +240,7 @@ impl Port {
     }
 
     /// Take the oldest packet.
-    pub(crate) fn take(&self) -> Option<PortPacket> {
+    pub fn take(&self) -> Option<PortPacket> {
         let mut queue = self.queue.lock();
         let packet = queue.packets.pop_front()?;
         match packet.kind {
@@ -258,7 +258,7 @@ impl Port {
     /// the queue if it has to. If that fails the packet is lost -- and the
     /// call putting it back was failing anyway, with the fault that stopped
     /// it being delivered.
-    pub(crate) fn put_back(&self, packet: PortPacket) {
+    pub fn put_back(&self, packet: PortPacket) {
         {
             let mut queue = self.queue.lock();
             let kind = packet.kind;
@@ -280,24 +280,24 @@ impl Port {
     }
 
     /// Whether nothing is queued.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.queue.lock().packets.is_empty()
     }
 
     /// Packets that found no room since the port was made: zero unless the
     /// promise accounting is wrong, which a boot check asks.
-    pub(crate) fn lost(&self) -> u64 {
+    pub fn lost(&self) -> u64 {
         self.queue.lock().lost
     }
 
     /// The queue woken when a packet arrives.
-    pub(crate) fn waiters(&self) -> &WaitQueue {
+    pub fn waiters(&self) -> &WaitQueue {
         &self.waiters
     }
 
     /// [`Port::waiters`], as a reference a wait can keep: what a `port_fd`
     /// descriptor offers `poll` and `epoll_wait` to sleep on.
-    pub(crate) fn shared_waiters(&self) -> &Arc<WaitQueue> {
+    pub fn shared_waiters(&self) -> &Arc<WaitQueue> {
         &self.waiters
     }
 }
@@ -349,7 +349,7 @@ impl Drop for Promise {
 /// It holds its port's promise of room for the packet, so firing it never
 /// allocates; dropped unfired, it gives the promise back.
 #[derive(Debug)]
-pub(crate) struct Observer {
+pub struct Observer {
     /// Where the packet goes, and the room promised there.
     promise: Promise,
     /// The key the packet carries.
@@ -365,11 +365,7 @@ impl Observer {
     /// # Errors
     ///
     /// [`AllocError`] when `port` could not reserve room for the packet.
-    pub(crate) fn new(
-        port: &Arc<Port>,
-        key: u64,
-        signals: Signals,
-    ) -> Result<Observer, AllocError> {
+    pub fn new(port: &Arc<Port>, key: u64, signals: Signals) -> Result<Observer, AllocError> {
         Ok(Observer {
             promise: Promise::new(port)?,
             key,
@@ -393,7 +389,7 @@ impl Observer {
     /// The packet is queued on the room the registration promised, and the
     /// promise goes with it: it is released when the packet is taken, not
     /// when this is dropped.
-    pub(crate) fn fire(self, asserted: Signals) {
+    pub fn fire(self, asserted: Signals) {
         let Observer {
             mut promise,
             key,

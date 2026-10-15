@@ -20,24 +20,15 @@
 //! to [`dispose`], which drops them one level at a time in a loop. However
 //! deep the chain, the stack holds one drop at a time.
 
-pub(crate) mod alloc_check;
-pub(crate) mod channel;
-pub(crate) mod check;
-pub(crate) mod device_copy_check;
-pub(crate) mod domain_check;
-pub(crate) mod edge_check;
-pub(crate) mod fast_path_check;
-pub(crate) mod format_check;
-pub(crate) mod interrupt;
-pub(crate) mod io_mapping;
-pub(crate) mod job;
-pub(crate) mod oom;
-pub(crate) mod pin;
-pub(crate) mod port;
-pub(crate) mod process;
-pub(crate) mod quota;
-pub(crate) mod quota_check;
-pub(crate) mod write_read_check;
+pub mod channel;
+pub mod interrupt;
+pub mod io_mapping;
+pub mod job;
+pub mod oom;
+pub mod pin;
+pub mod port;
+pub mod process;
+pub mod quota;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -58,11 +49,11 @@ use crate::user::vmo::Vmo;
 /// `ferrix_objects::table::MAX_SLOTS`. Four thousand is far more than a driver
 /// needs, and small enough that a program leaking handles in a loop hits it
 /// long before the heap notices.
-pub(crate) const HANDLE_LIMIT: usize = 4096;
+pub const HANDLE_LIMIT: usize = 4096;
 
 /// Something a handle can name.
 #[derive(Debug, Clone)]
-pub(crate) enum Object {
+pub enum Object {
     /// One end of a channel.
     Channel(Arc<channel::Endpoint>),
     /// A memory object.
@@ -106,7 +97,7 @@ static QUIET: WaitQueue = WaitQueue::new();
 
 impl Object {
     /// What a waiter on this object would see now.
-    pub(crate) fn signals(&self) -> Signals {
+    pub fn signals(&self) -> Signals {
         match self {
             Object::Channel(endpoint) => endpoint.signals(),
             Object::Vmo(_) => Signals::NONE,
@@ -130,7 +121,7 @@ impl Object {
     /// "May have": a waiter is woken for any change and looks at the level
     /// again, so a queue woken too often costs a recheck and one woken too
     /// rarely is a wait that sleeps out its deadline.
-    pub(crate) fn waiters(&self) -> &WaitQueue {
+    pub fn waiters(&self) -> &WaitQueue {
         match self {
             Object::Channel(endpoint) => endpoint.waiters(),
             Object::Job(job) => job.waiters(),
@@ -149,13 +140,13 @@ impl Object {
 }
 
 /// A process's handle table.
-pub(crate) type HandleTable = ferrix_objects::table::HandleTable<Object>;
+pub type HandleTable = ferrix_objects::table::HandleTable<Object>;
 
 /// An object travelling in a message, with the rights its handle carried.
 ///
 /// The rights travel with it: a read-only VMO sent to another process arrives
 /// read-only, which is what lets `devmgr` hand a driver less than it holds.
-pub(crate) type Transfer = (Object, Rights);
+pub type Transfer = (Object, Rights);
 
 /// Held by every send that carries a channel endpoint, from its cycle check
 /// to its push.
@@ -169,7 +160,7 @@ pub(crate) type Transfer = (Object, Rights);
 ///
 /// Taken before a process's handle table or any queue, never while holding
 /// either.
-pub(crate) static TOPOLOGY: SpinLock<()> = SpinLock::new(());
+pub static TOPOLOGY: SpinLock<()> = SpinLock::new(());
 
 /// Objects waiting to be dropped.
 static ORPHANS: SpinLock<Vec<Object>> = SpinLock::new(Vec::new());
@@ -182,7 +173,7 @@ static DISPOSING: AtomicBool = AtomicBool::new(false);
 static DROPPING_IN_PLACE: AtomicUsize = AtomicUsize::new(0);
 
 /// How deep drops in place may nest before an object is given up instead.
-pub(crate) const IN_PLACE_DEPTH: usize = 4;
+pub const IN_PLACE_DEPTH: usize = 4;
 
 /// Objects given up, because [`ORPHANS`] could not grow and drops in place
 /// were already [`IN_PLACE_DEPTH`] deep: see [`defer`].
@@ -211,7 +202,7 @@ static ABANDONED: AtomicU64 = AtomicU64::new(0);
 ///
 /// Call it with no lock held that an object's drop might need: a channel's
 /// queue, a process's handle table.
-pub(crate) fn dispose(objects: impl IntoIterator<Item = Object>) {
+pub fn dispose(objects: impl IntoIterator<Item = Object>) {
     for object in objects {
         match object {
             // Another reference -- a message in flight, a call its holder is
@@ -290,7 +281,7 @@ fn defer(object: Object) {
 }
 
 /// Objects [`defer`] has given up since boot.
-pub(crate) fn abandoned() -> u64 {
+pub fn abandoned() -> u64 {
     ABANDONED.load(Ordering::Relaxed)
 }
 
@@ -324,7 +315,7 @@ impl Object {
 ///
 /// Waits for a real drain to finish first, so that the mark is this call's to
 /// set and to clear, and drains afterwards whatever `f` left queued.
-pub(crate) fn as_if_draining_elsewhere<R>(f: impl FnOnce() -> R) -> R {
+pub fn as_if_draining_elsewhere<R>(f: impl FnOnce() -> R) -> R {
     while DISPOSING
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()

@@ -53,23 +53,23 @@ const CPU_WORDS: usize = 8;
 
 /// What [`init`] found, for the boot line.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Seeding {
+pub struct Seeding {
     /// How many random bytes firmware gave, 0 for none.
-    pub(crate) firmware_bytes: u64,
+    pub firmware_bytes: u64,
     /// How many words the CPU gave.
-    pub(crate) cpu_words: usize,
+    pub cpu_words: usize,
     /// How many full-entropy bytes firmware's TRNG gave.
-    pub(crate) trng_bytes: usize,
+    pub trng_bytes: usize,
     /// Bits credited in all.
-    pub(crate) credited: u32,
+    pub credited: u32,
     /// Whether that is enough to call the generator seeded.
-    pub(crate) seeded: bool,
+    pub seeded: bool,
 }
 
 /// Seed the generator from what the loader handed over, the bytes firmware's
 /// TRNG gave (`trng`, full entropy, credited a bit for each bit), the CPU and
 /// jitter.
-pub(crate) fn init(info: &BootInfo, trng: &[u8]) -> Seeding {
+pub fn init(info: &BootInfo, trng: &[u8]) -> Seeding {
     let mut rng = RNG.lock();
 
     let firmware_bytes = if info.firmware_flags & FIRMWARE_SEED == 0 {
@@ -122,7 +122,7 @@ pub(crate) fn init(info: &BootInfo, trng: &[u8]) -> Seeding {
 }
 
 /// Fill `bytes` from the generator.
-pub(crate) fn fill(bytes: &mut [u8]) {
+pub fn fill(bytes: &mut [u8]) {
     for piece in bytes.chunks_mut(CHUNK) {
         let mut rng = RNG.lock();
         rng.mix(&arch::counter_now().to_le_bytes());
@@ -132,7 +132,7 @@ pub(crate) fn fill(bytes: &mut [u8]) {
 
 /// The boot check: two reads differ from each other and from zero, and the
 /// generator's state has moved between them.
-pub(crate) fn check() -> Result<(), &'static str> {
+pub fn check() -> Result<(), &'static str> {
     let mut first = [0_u8; 64];
     let mut second = [0_u8; 64];
     fill(&mut first);

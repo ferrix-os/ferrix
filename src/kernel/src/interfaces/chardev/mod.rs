@@ -80,7 +80,7 @@ use crate::syscall::uaccess;
 use crate::timer;
 use crate::user::vmo::Vmo;
 
-pub(crate) mod check;
+pub mod check;
 pub(crate) mod dmabuf;
 pub(crate) mod file;
 pub(crate) mod sync;
@@ -253,7 +253,7 @@ impl Control {
 /// # Errors
 ///
 /// [`Full`] when the item has no room for a registration.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     native::serve(NativeCall::ChardevControlCreate, control_create)?;
     native::serve(NativeCall::ChardevReply, reply)?;
     native::serve(NativeCall::ChardevCopyIn, copy_in)?;

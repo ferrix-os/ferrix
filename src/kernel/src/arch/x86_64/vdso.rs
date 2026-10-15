@@ -207,7 +207,7 @@ const FUNCTIONS: [Function<'static>; 3] = [
 ];
 
 /// The vDSO's machine code and what it exports: always, on x86-64.
-pub(crate) fn vdso_spec() -> Option<ferrix_vdso::Spec<'static>> {
+pub fn vdso_spec() -> Option<ferrix_vdso::Spec<'static>> {
     // SAFETY: (BOOT-DATA) a quadword the assembly above defines in read-only data, never
     // written, and valid for the kernel's life.
     let len = usize::try_from(unsafe { ferrix_vdso_len }).ok()?;
@@ -225,7 +225,7 @@ pub(crate) fn vdso_spec() -> Option<ferrix_vdso::Spec<'static>> {
 
 /// Whether the vDSO's code can read the kernel's counter itself: when the
 /// counter is the TSC, which ring 3 reads with `rdtsc`, and not the HPET.
-pub(crate) fn vdso_can_read_counter() -> bool {
+pub fn vdso_can_read_counter() -> bool {
     super::clock::counter_is_tsc()
 }
 
@@ -261,7 +261,7 @@ pub(crate) fn vdso_can_read_counter() -> bool {
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_VDSO_PROGRAM: &[u8] = &[
+pub const USER_VDSO_PROGRAM: &[u8] = &[
     0x48, 0x8b, 0x0c, 0x24, 0x48, 0x8d, 0x74, 0xcc, 0x10, 0x48, 0x8b, 0x06, 0x48, 0x83, 0xc6, 0x08,
     0x48, 0x85, 0xc0, 0x75, 0xf4, 0x48, 0x8b, 0x06, 0x48, 0x85, 0xc0, 0x0f, 0x84, 0xff, 0x01, 0x00,
     0x00, 0x48, 0x83, 0xf8, 0x21, 0x74, 0x06, 0x48, 0x83, 0xc6, 0x10, 0xeb, 0xe8, 0x4c, 0x8b, 0x66,

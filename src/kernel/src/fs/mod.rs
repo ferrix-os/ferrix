@@ -25,55 +25,55 @@
 //! decide what to do about a filesystem that does not exist.
 
 pub(crate) mod anon;
-pub(crate) mod bind_check;
+pub mod bind_check;
 pub(crate) mod blkio;
 pub(crate) mod block;
 pub(crate) mod btrfs;
-pub(crate) mod btrfs_check;
-pub(crate) mod btrfs_powerfail;
-pub(crate) mod btrfs_write_check;
-pub(crate) mod cgroupfs;
-pub(crate) mod check;
+pub mod btrfs_check;
+pub mod btrfs_powerfail;
+pub mod btrfs_write_check;
+pub mod cgroupfs;
+pub mod check;
 pub(crate) mod console;
-pub(crate) mod data_disk;
+pub mod data_disk;
 pub(crate) mod devfs;
 pub(crate) mod disk_file;
 pub(crate) mod epoll;
-pub(crate) mod epoll_check;
+pub mod epoll_check;
 pub(crate) mod eventfd;
-pub(crate) mod eventfd_check;
-pub(crate) mod exec_check;
-pub(crate) mod home_disk;
+pub mod eventfd_check;
+pub mod exec_check;
+pub mod home_disk;
 pub(crate) mod inotify;
-pub(crate) mod kmem_check;
-pub(crate) mod memfd_check;
-pub(crate) mod mmap_check;
-pub(crate) mod mount_check;
-pub(crate) mod namespace_check;
-pub(crate) mod netns_check;
+pub mod kmem_check;
+pub mod memfd_check;
+pub mod mmap_check;
+pub mod mount_check;
+pub mod namespace_check;
+pub mod netns_check;
 pub(crate) mod nsfs;
 mod pages;
 pub(crate) mod partitions;
 pub(crate) mod pidfd;
-pub(crate) mod pidns_check;
+pub mod pidns_check;
 pub(crate) mod pipe;
-pub(crate) mod pipe_check;
+pub mod pipe_check;
 pub(crate) mod portfd;
-pub(crate) mod procaccess_check;
-pub(crate) mod procfs;
+pub mod procaccess_check;
+pub mod procfs;
 pub(crate) mod pty;
-pub(crate) mod root_disk;
+pub mod root_disk;
 pub(crate) mod seam;
 pub(crate) mod signalfd;
-pub(crate) mod signalfd_check;
-pub(crate) mod smallns_check;
+pub mod signalfd_check;
+pub mod smallns_check;
 pub(crate) mod socket;
 pub(crate) mod sockname;
-pub(crate) mod sysfs;
+pub mod sysfs;
 pub(crate) mod terminal;
 pub(crate) mod timerfd;
-pub(crate) mod timerfd_check;
-pub(crate) mod userns_check;
+pub mod timerfd_check;
+pub mod userns_check;
 pub(crate) mod wake;
 
 use alloc::sync::Arc;
@@ -135,7 +135,7 @@ static HOME_FLUSH: Flush = Flush {
 ///
 /// [`Full`] when power's list of flushes is, or the native call already has
 /// a handler.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     crate::power::register_flush(&ROOT_FLUSH)?;
     crate::power::register_flush(&DATA_FLUSH)?;
     crate::power::register_flush(&HOME_FLUSH)?;
@@ -485,16 +485,16 @@ impl Clock for RealtimeClock {
 
 /// What building the root found.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// The archive's size, if the loader handed one over.
-    pub(crate) initramfs_bytes: Option<u64>,
+    pub initramfs_bytes: Option<u64>,
     /// What unpacking it made.
-    pub(crate) unpacked: Option<Unpacked>,
+    pub unpacked: Option<Unpacked>,
 }
 
 /// Why the root could not be built.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum InitError {
+pub enum InitError {
     /// The loader described an archive the direct map does not cover.
     OutsideDirectMap,
     /// The archive did not unpack.
@@ -534,7 +534,7 @@ impl fmt::Display for InitError {
 /// # Errors
 ///
 /// [`InitError`].
-pub(crate) fn init(view: &BootView<'_>) -> Result<Report, InitError> {
+pub fn init(view: &BootView<'_>) -> Result<Report, InitError> {
     let ns = namespace();
     let ctx = ns.context();
 

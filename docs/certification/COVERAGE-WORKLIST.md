@@ -17,10 +17,10 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`init`](#init) | 3 | 14 | 14 | 1 |
 | [`console`](#console) | 3 | 6 | 7 | 4 |
 | [`main`](#main) | 3 | 6 | 4 | 1 |
-| [`early`](#early) | - | - | 4 | 1 |
 | [`mm`](#mm) | 1 | 1 | 4 | 1 |
 | [`smp`](#smp) | - | 4 | 4 | 1 |
 | [`vmap`](#vmap) | 2 | 2 | 4 | 1 |
+| [`early`](#early) | - | - | 3 | 1 |
 | [`sched`](#sched) | 2 | 3 | 3 | 2 |
 | [`arch/armv7a`](#archarmv7a) | - | - | 2 | 2 |
 | [`irq`](#irq) | 2 | - | 1 | 1 |
@@ -31,7 +31,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
 | [`user`](#user) | - | - | 1 | 1 |
-| **Total** | **129** | **177** | **234** | 38 |
+| **Total** | **129** | **177** | **233** | 38 |
 
 ---
 
@@ -100,7 +100,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `object/pin.rs` | `core` | 0 | 1 | 23 | 0 | - |
 | `object/oom.rs` | `core` | 0 | 6 | 5 | 0 | - |
 | `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 614-616, 621 |
-| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 186, 225 |
+| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 186, 221 |
 | `object/mod.rs` | `core` | 2 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
 | `object/quota.rs` | `core` | 0 | 1 | 1 | 0 | - |
@@ -111,10 +111,10 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 54-67, 70, 72, 77-81 |
-| `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 759, 762, 765, 772 |
-| `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 346, 908, 917 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1466-1467 |
+| `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 52-65, 68, 70, 75-79 |
+| `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 414, 763, 766, 769, 776 |
+| `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 348, 918, 927 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1463-1464 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 339 |
 
 ---
@@ -123,7 +123,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2444 |
+| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2443 |
 | `syscall/program.rs` | `item` | 3 | 4 | 2 | 1 | 89 |
 
 ---
@@ -151,15 +151,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 328, 718, 1315 |
-
----
-
-## `early`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `early.rs` | `core` | 0 | 0 | 4 | 0 | - |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 277, 667, 1264 |
 
 ---
 
@@ -187,11 +179,19 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 ---
 
+## `early`
+
+| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
+|---|---|---:|---:|---:|---:|---|
+| `early.rs` | `core` | 0 | 0 | 3 | 0 | - |
+
+---
+
 ## `sched`
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1277, 2267 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1280, 2271 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
@@ -200,7 +200,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1323 |
+| `arch/armv7a/mod.rs` | `core` | - | - | 1 | 1 | 1320 |
 | `arch/armv7a/speculation.rs` | `core` | - | - | 1 | 1 | 99 |
 
 ---

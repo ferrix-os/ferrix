@@ -101,18 +101,18 @@ const ENTRIES: u32 = 2;
 
 /// What the check measured, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls and HELLOs refused with exactly the answer they had to get.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Disks published from an accepted HELLO and unpublished again.
-    pub(crate) published: u32,
+    pub published: u32,
     /// Frames the second round did not give back.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
     /// Fields of a posted completion a cheating driver rewrote after the
     /// kernel read them, none of which it acted on ([`super::reread_check`]).
-    pub(crate) rewrites: u32,
+    pub rewrites: u32,
     /// Why nothing was checked, on a machine with no PCI function.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
 }
 
 /// Counts what happened, so the report is a measurement and not a claim.
@@ -131,7 +131,7 @@ pub(super) struct Counter {
 /// What was not true.
 ///
 /// Verifies: L.quiesce.3
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     // No device needed: that ring is a page of the kernel's own.
     let rewrites = super::reread_check::run()?.rewrites;
     // Nor here: its two tree nodes are its own, and it leaves `vda` free.

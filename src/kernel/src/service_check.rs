@@ -33,14 +33,14 @@ use crate::syscall::uaccess::UserError;
 
 /// What the checks did, for the boot log.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Registrations a list took, and the one it refused.
-    pub(crate) registered: usize,
+    pub registered: usize,
     /// Refusals asserted: a full list, a claim held twice, a quiesce under a
     /// live driver and one cancelled, a boot mode where none is kept.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
     /// Failure sentences read back word for word.
-    pub(crate) sentences: usize,
+    pub sentences: usize,
 }
 
 /// Run every check.
@@ -50,7 +50,7 @@ pub(crate) struct Report {
 /// The first property that did not hold, as a sentence.
 ///
 /// Verifies: H.DEV.1
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     a_list_keeps_its_order_and_its_bound(&mut report)?;
     a_claim_is_refused_while_its_driver_lives(&mut report)?;

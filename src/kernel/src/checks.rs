@@ -45,7 +45,7 @@ const RUN: &str = "run";
 /// Any value but the two is reported and ignored: running every check is the
 /// safe default, and a misspelt option should cost a slow boot rather than
 /// an unchecked one.
-pub(crate) fn init(view: &BootView<'_>) {
+pub fn init(view: &BootView<'_>) {
     let value = view.option(OPTION).or_else(|| {
         crate::discovery::fdt::open(view)
             .ok()
@@ -79,6 +79,6 @@ pub(crate) fn init(view: &BootView<'_>) {
 
 /// Whether the self-checks run on this boot: true unless [`init`] read
 /// `ferrix.checks=skip`. The flag is the core's (`crate::boot_checks`).
-pub(crate) fn run() -> bool {
+pub fn run() -> bool {
     crate::boot_checks::run()
 }

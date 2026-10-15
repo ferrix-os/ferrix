@@ -5,12 +5,10 @@
 //! builds address spaces it does not itself run in, and hands a processor to
 //! code it does not trust.
 
-pub(crate) mod alloc_check;
-pub(crate) mod cache;
-pub(crate) mod check;
+pub mod alloc_check;
+pub mod cache;
+pub mod check;
 pub(crate) mod edge_check;
-pub(crate) mod madvise_check;
-pub(crate) mod memory_type;
-pub(crate) mod rmap_check;
-pub(crate) mod space;
-pub(crate) mod vmo;
+pub mod memory_type;
+pub mod space;
+pub mod vmo;

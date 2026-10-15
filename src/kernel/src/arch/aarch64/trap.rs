@@ -24,8 +24,6 @@
 
 use super::cpu;
 
-pub(in crate::arch) mod check;
-
 /// Bytes in a saved frame. Must match [`TrapFrame`] exactly, and must be a
 /// multiple of sixteen because `AArch64` faults on a misaligned stack pointer.
 const FRAME_SIZE: usize = 304;
@@ -33,25 +31,25 @@ const FRAME_SIZE: usize = 304;
 /// The register state at the point an exception was taken.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TrapFrame {
+pub struct TrapFrame {
     /// `x0` through `x30`. `x30` is the link register; there is no `x31`,
     /// because that encoding means the zero register or the stack pointer
     /// depending on the instruction.
-    pub(crate) x: [u64; 31],
+    pub x: [u64; 31],
     /// `SP_EL0`: the user stack pointer when the exception came from EL0.
-    pub(crate) sp: u64,
+    pub sp: u64,
     /// Exception link register — where to return to.
-    pub(crate) elr: u64,
+    pub elr: u64,
     /// Saved program status.
-    pub(crate) spsr: u64,
+    pub spsr: u64,
     /// Exception syndrome: what happened, and why.
-    pub(crate) esr: u64,
+    pub esr: u64,
     /// Fault address, for an abort.
-    pub(crate) far: u64,
+    pub far: u64,
     /// Which of the sixteen vector entries was taken.
-    pub(crate) kind: u64,
+    pub kind: u64,
     /// Padding, so the frame is a multiple of sixteen bytes.
-    pub(crate) reserved: u64,
+    pub reserved: u64,
 }
 
 impl TrapFrame {
@@ -293,7 +291,7 @@ ferrix_enter_user:
 /// program's root. A program is a task of its own now, carrying its space, so
 /// a tick in EL0 is an ordinary preemption and the scheduler puts the right
 /// root back when it returns.
-pub(super) const USER_SPSR: u64 = (1 << 9) | (1 << 8) | (1 << 6);
+pub const USER_SPSR: u64 = (1 << 9) | (1 << 8) | (1 << 6);
 
 unsafe extern "C" {
     /// Enter EL0 at `entry` on `stack`.
@@ -310,24 +308,24 @@ unsafe extern "C" {
 /// pointer, and `AArch64` faults on a misaligned one.
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(16))]
-pub(crate) struct UserRegs(pub(super) TrapFrame);
+pub struct UserRegs(pub(super) TrapFrame);
 
 impl UserRegs {
     /// The same registers, as a child sees them: the call returned zero.
-    pub(crate) const fn for_child(&self) -> UserRegs {
+    pub const fn for_child(&self) -> UserRegs {
         let mut frame = self.0;
         frame.x[0] = 0;
         UserRegs(frame)
     }
 
     /// Start on `stack` instead, as `clone` with a stack argument asks.
-    pub(crate) const fn set_stack(&mut self, state: &mut super::UserState, stack: u64) {
+    pub const fn set_stack(&mut self, state: &mut super::UserState, stack: u64) {
         let _ = state;
         self.0.sp = stack;
     }
 
     /// The stack pointer the program made the call with.
-    pub(crate) const fn stack_pointer(&self) -> u64 {
+    pub const fn stack_pointer(&self) -> u64 {
         self.0.sp
     }
 }
@@ -383,7 +381,7 @@ pub(crate) fn fault_signal(frame: &TrapFrame, trap: &crate::trap::Trap) -> (u32,
 /// space saved. `regs` must live on the running task's kernel stack: its
 /// address becomes `SP_EL1`, and the stack an exception from EL0 lands on is
 /// just above it.
-pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
+pub unsafe fn resume_user(regs: &UserRegs) -> ! {
     // SAFETY: (CONTEXT) the caller's guarantee is the assembly's contract.
     unsafe { ferrix_resume_user(core::ptr::from_ref(&regs.0)) }
 }
@@ -395,7 +393,7 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 ///
 /// (CONTEXT) Must be called by a user task, on its own kernel stack, with its address
 /// space installed; `entry` and `stack` must be addresses inside that space.
-pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crate::trap::Abi) -> ! {
+pub unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crate::trap::Abi) -> ! {
     // One mode of user code on this architecture: every program is entered
     // as [`crate::trap::Abi::Native`], whatever it was asked to be.
     let _ = abi;
@@ -418,7 +416,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 ///
 /// A system call from EL1, which is a kernel bug, or an `execve` this path does
 /// not yet know how to honour.
-pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
+pub fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
     use crate::trap::{Outcome, SyscallArgs, system_call as dispatch};
 
     if !frame.came_from_user() {
@@ -661,7 +659,7 @@ pub(crate) unsafe fn init() {
 }
 
 /// Raise a breakpoint, so the boot self-check can prove the trap path runs.
-pub(crate) fn breakpoint() {
+pub fn breakpoint() {
     // SAFETY: (PROBE) `brk` raises a synchronous exception the vector table handles.
     // Unlike x86-64's `int3`, the link register points *at* this instruction
     // rather than past it, which is why returning needs `advance_past_breakpoint`.

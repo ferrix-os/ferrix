@@ -56,7 +56,7 @@ const EVERY_CAPABILITY: &[u8] = b"CapEff:\t000001ffffffffff";
 const UID: u32 = 1000;
 
 /// What the check saw, for the boot line.
-pub(crate) fn run() -> Result<Counts, &'static str> {
+pub fn run() -> Result<Counts, &'static str> {
     let mut counts = Counts::default();
     let mut tally = Tally {
         report: &mut counts,

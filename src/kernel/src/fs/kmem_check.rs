@@ -28,7 +28,7 @@ use crate::sched;
 use crate::user::space::{AddressSpace, SpaceError};
 
 /// The memory limit each kind is filled to.
-pub(crate) const LIMIT: u64 = 32 * 1024;
+pub const LIMIT: u64 = 32 * 1024;
 
 /// More of any kind than the limit could pay for: a fill that reaches it
 /// was not refused by the limit.
@@ -41,59 +41,59 @@ const DIRECTORY: &[u8] = b"/tmp/.kmem-check";
 /// What the check saw, for the boot line: how many of each kind a job with
 /// [`LIMIT`] bytes made before one was refused.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Files made in a tmpfs directory, each an inode, a name and a dentry.
-    pub(crate) files: usize,
+    pub files: usize,
     /// Pipes, each two open files and a buffer.
-    pub(crate) pipes: usize,
+    pub pipes: usize,
     /// `AF_UNIX` socket pairs.
-    pub(crate) sockets: usize,
+    pub sockets: usize,
     /// Messages carrying a descriptor, in flight in a socket's queue.
-    pub(crate) in_flight: usize,
+    pub in_flight: usize,
     /// Registrations in an epoll set.
-    pub(crate) registrations: usize,
+    pub registrations: usize,
     /// Eventfds.
-    pub(crate) eventfds: usize,
+    pub eventfds: usize,
     /// Regions one mapping was split into by `mprotect`.
-    pub(crate) regions: usize,
+    pub regions: usize,
     /// Record locks one open file description holds, on every other byte.
-    pub(crate) locks: usize,
+    pub locks: usize,
     /// System V semaphore sets of one semaphore each.
-    pub(crate) sets: usize,
+    pub sets: usize,
     /// System V shared memory segments of one page each.
-    pub(crate) segments: usize,
+    pub segments: usize,
     /// Mount namespaces, each a copy of one holding [`TREE`] mounts, as
     /// `unshare(CLONE_NEWNS)` copies them (`docs/NAMESPACES.md` §5).
-    pub(crate) namespaces: usize,
+    pub namespaces: usize,
     /// User namespaces, each a level-1 child of the first.
-    pub(crate) user_namespaces: usize,
+    pub user_namespaces: usize,
     /// UTS namespaces, copies of the first's.
-    pub(crate) uts_namespaces: usize,
+    pub uts_namespaces: usize,
     /// IPC namespaces, empty.
-    pub(crate) ipc_namespaces: usize,
+    pub ipc_namespaces: usize,
     /// Cgroup namespaces, rooted at the tree's root.
-    pub(crate) cgroup_namespaces: usize,
+    pub cgroup_namespaces: usize,
     /// Namespace files, each opened from a link of `/proc/<pid>/ns`.
-    pub(crate) namespace_files: usize,
+    pub namespace_files: usize,
     /// Pid namespaces, each a child of the first (`docs/PIDNS.md` §7).
-    pub(crate) pid_namespaces: usize,
+    pub pid_namespaces: usize,
     /// Tasks numbered in a pid namespace, each with its record and its entry
     /// in the namespace's map.
-    pub(crate) pid_numbers: usize,
+    pub pid_numbers: usize,
     /// Network namespaces, each made as `unshare(CLONE_NEWNET)` makes one.
-    pub(crate) network_namespaces: usize,
+    pub network_namespaces: usize,
     /// Veth pairs, each between two namespaces made with it.
-    pub(crate) veth_pairs: usize,
+    pub veth_pairs: usize,
     /// Routes added to a network namespace by netlink.
-    pub(crate) routes: usize,
+    pub routes: usize,
     /// seccomp filters of two instructions, each charged to the job that
     /// installed it (`docs/SECCOMP.md` §6, SR12).
-    pub(crate) filters: usize,
+    pub filters: usize,
 }
 
 /// How many mounts the namespace the mount namespaces are copied from
 /// holds, its root included.
-pub(crate) const TREE: usize = 64;
+pub const TREE: usize = 64;
 
 /// Run every kind.
 ///
@@ -102,7 +102,7 @@ pub(crate) const TREE: usize = 64;
 /// Which property failed, for which kind.
 ///
 /// Verifies: L.object.56, H.QUOTA.7
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let slots = quota::live_slots();
     let ns = fs::namespace();
     let ctx = ns.context();
