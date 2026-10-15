@@ -241,11 +241,13 @@ impl UserState {
     }
 
     /// Whether the task has used VFP (§9.15, D1).
+    #[doc(hidden)]
     pub const fn uses_vfp(&self) -> bool {
         self.vfp
     }
 
     /// How many times VFP state was moved or `FPEXC` written for the task.
+    #[doc(hidden)]
     pub const fn vfp_moves(&self) -> u32 {
         self.vfp_moves
     }
@@ -269,12 +271,14 @@ impl UserState {
 
     /// Mark the record as holding only `FPSCR` and `d8`-`d15`: what the
     /// partial save does once it has stored them.
+    #[doc(hidden)]
     pub const fn mark_unsaved(&mut self) {
         self.unsaved = true;
     }
 
     /// Whether the record holds only `FPSCR` and `d8`-`d15`, and the next
     /// switch to the task resets the rest.
+    #[doc(hidden)]
     pub const fn is_unsaved(&self) -> bool {
         self.unsaved
     }
@@ -364,6 +368,7 @@ impl UserState {
 
     /// Replace the floating-point registers, as `sigreturn` does: the state
     /// is whole after, so no reset follows at the next switch in.
+    #[doc(hidden)]
     pub const fn set_fp(&mut self, fpscr: u32, doubles: [u64; 32]) {
         self.fpscr = fpscr;
         self.doubles = doubles;
@@ -787,8 +792,10 @@ unsafe extern "C" {
     /// Read `MVFR1`.
     fn ferrix_fpu_features1() -> u32;
     /// Store this processor's floating-point registers into `state`.
+    #[doc(hidden)]
     pub fn ferrix_user_fpu_save(state: *mut UserState, all_32: u32);
     /// Load `state`'s floating-point registers onto this processor.
+    #[doc(hidden)]
     pub fn ferrix_user_fpu_restore(state: *const UserState, all_32: u32);
     /// Store `FPSCR` and `d8`-`d15` alone into `state`.
     fn ferrix_user_fpu_keep(state: *mut UserState);

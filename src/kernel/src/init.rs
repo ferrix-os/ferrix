@@ -566,7 +566,7 @@ pub fn run() {
 
 /// Why a file could not be started as pid 1.
 #[derive(Debug)]
-pub enum Refusal {
+enum Refusal {
     /// Opening it, or its `#!` interpreter, was refused.
     Open(Errno),
     /// It opened, and would not load or run.

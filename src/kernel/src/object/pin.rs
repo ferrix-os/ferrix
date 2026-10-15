@@ -474,6 +474,7 @@ impl Pin {
     /// [`Pin::new`]'s work, against `budget` in place of the device's when a
     /// boot check gives one; `quiet` for a boot check's, which neither
     /// announces nor counts in [`REFUSED`].
+    #[doc(hidden)]
     pub fn with_budget(
         domain: Arc<Domain>,
         held: Held,

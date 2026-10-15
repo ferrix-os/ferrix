@@ -1648,6 +1648,7 @@ impl DeviceNode {
 
     /// Physical address of the function's configuration space, for a PCI
     /// function whose host window placed it.
+    #[doc(hidden)]
     pub fn config_phys(&self) -> Option<u64> {
         self.pci.as_ref().and_then(|function| function.config_phys)
     }
@@ -1673,6 +1674,7 @@ impl DeviceNode {
 
     /// The function's configuration space for reading, if it is mapped
     /// already. Maps nothing.
+    #[doc(hidden)]
     pub fn mapped_config(&self) -> Option<MappedConfig> {
         match self.config_map.get() {
             Some(&Ok(registers)) => Some(MappedConfig {
@@ -1685,6 +1687,7 @@ impl DeviceNode {
 
     /// The function's configuration space with the configuration lock held,
     /// mapping it first if nothing has: the only way to write it.
+    #[doc(hidden)]
     pub fn config_writes(&self) -> Result<ConfigWrites<'_>, &'static str> {
         let space = self.config_mapping()?;
         Ok(ConfigWrites {
@@ -1848,6 +1851,7 @@ impl DeviceNode {
     /// The first kernel-owned register that reads back other than the kernel
     /// made it, if any: [`DeviceNode::verify_config`]'s comparison.
     #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
+    #[doc(hidden)]
     pub fn breach(&self) -> Option<Breach> {
         let _placed = self.config_phys()?;
         let breach = {

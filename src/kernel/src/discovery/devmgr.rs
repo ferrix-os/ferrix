@@ -423,7 +423,7 @@ pub fn start() -> Result<Option<Report>, &'static str> {
 /// What `devmgr` is started with: its own program, and every driver the
 /// manifest names, by name and in a VMO of its own.
 #[derive(Debug)]
-pub struct Files {
+struct Files {
     /// `/sbin/devmgr`.
     image: Vec<u8>,
     /// The manifest's names, in its order.

@@ -100,7 +100,6 @@ pub mod platform {
     pub mod google {
         /// The Pixel 7's Tensor G2: the load's part of it.
         pub mod gs201 {
-            pub use ferrix_kernel_core::platform::google::gs201::*;
             pub mod usb;
         }
     }

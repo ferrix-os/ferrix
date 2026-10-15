@@ -276,6 +276,7 @@ impl UserState {
     /// `XSTATE_BV` says (Intel SDM Vol. 1 §13.8.1). The legacy region's other
     /// bytes are this task's own, from its last full save; no reader sees
     /// them ([`UserState::vectors`]).
+    #[doc(hidden)]
     pub fn keep_vector_controls(&mut self, mxcsr: u32, control: u16) {
         let [c0, c1] = control.to_le_bytes();
         let [m0, m1, m2, m3] = mxcsr.to_le_bytes();
@@ -294,6 +295,7 @@ impl UserState {
 
     /// Whether the area holds only `MXCSR` and the control word, and the
     /// next switch to the task resets its vector registers.
+    #[doc(hidden)]
     pub const fn is_unsaved(&self) -> bool {
         self.unsaved
     }

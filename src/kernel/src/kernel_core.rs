@@ -44,7 +44,7 @@ pub mod discovery {
     dead_code,
     reason = "ARMv7-A describes itself with a device tree, not ACPI"
     )]
-    pub mod acpi;
+    pub(crate) mod acpi;
     pub mod board;
     pub mod description;
     pub mod fdt;
@@ -63,7 +63,7 @@ pub mod platform {
         /// The Pixel 7's Tensor G2: the core's part of it.
         pub mod gs201 {
             #[allow(dead_code, reason = "only AArch64 has a gs201, the Pixel 7's")]
-            pub mod watchdog;
+            pub(crate) mod watchdog;
         }
     }
 }

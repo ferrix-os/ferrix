@@ -1441,7 +1441,7 @@ fn vmo_create(process: &Process, bytes: u64) -> Result<usize, Errno> {
 
 /// Which way a VMO copy goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Direction {
+enum Direction {
     /// Out of the VMO, into the caller's buffer.
     Read,
     /// Out of the caller's buffer, into the VMO.
