@@ -72,10 +72,17 @@ const SEEDED: &[(&str, &str)] = &[];
 /// `docs/BACKLOG.md` names one of their tests, each with that row, whose
 /// flake is a false failure under load (the consultant's ruling, ledger
 /// line 1461). The log prints the row beside the cached pass.
-pub(crate) const FLAKY_BUT_CACHED: &[(&str, &str)] = &[(
-    "xtask",
-    "BACKLOG P1 flakes: xtask's gateway::tests::probes_a_shut_window_and_resumes_when_it_opens, 3 us short of its 400 ms under load, a false fail",
-)];
+/// Empty: xtask's gateway flake row is a false fail, but xtask's tests
+/// read the item and are never recorded, so it is not listed. A new flake
+/// row on a cacheable package's host test adds the package here or to
+/// [`NEVER`] in the same commit.
+pub(crate) const FLAKY_BUT_CACHED: &[(&str, &str)] = &[];
+
+/// Packages never cached because an open flake row names one of their
+/// host tests and the flake is not shown to be a false failure, each with
+/// the row (ruling 1461 (5a)). Empty: on 2026-10-15 no open flake row
+/// names a host test of a cacheable package but xtask's.
+const NEVER: &[(&str, &str)] = &[];
 
 /// One workspace member, as its manifest says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +98,9 @@ pub(crate) struct Member {
     pub(crate) named: BTreeSet<String>,
     /// What of its manifest this could not read, when something.
     pub(crate) unread: Option<String>,
+    /// The requirement ids its files say they verify (`Verifies:`), or
+    /// why its files could not all be read; `None` when there are none.
+    pub(crate) verifies: Option<String>,
 }
 
 /// The workspace's members at `root`.
@@ -100,6 +110,7 @@ pub(crate) struct Member {
 /// A manifest that cannot be read, or a member without a package name.
 pub(crate) fn members(root: &Path) -> Result<Vec<Member>> {
     let manifest = read(&root.join("Cargo.toml"))?;
+    let renamed = workspace_renames(&manifest);
     let mut found = Vec::new();
     for directory in crate::workspace::member_paths(&manifest)? {
         let text = read(&root.join(&directory).join("Cargo.toml"))?;
@@ -108,8 +119,16 @@ pub(crate) fn members(root: &Path) -> Result<Vec<Member>> {
                 "workspace member `{directory}` has no package name"
             ))
         })?;
-        let (linked, named, unread) = dependencies(&text);
+        let (linked, named, mut unread) = dependencies(&text);
+        // A key the workspace renames names another package than its own
+        // (the consultant's condition 2, ledger 1650): not read, so closed.
+        if let Some(key) = named.iter().find(|key| renamed.contains(*key)) {
+            let _ = unread.get_or_insert_with(|| {
+                format!("it names {key}, which the workspace's dependencies rename")
+            });
+        }
         found.push(Member {
+            verifies: verifies(&root.join(&directory)),
             name,
             directory: directory.trim_end_matches('/').to_owned(),
             linked,
@@ -118,6 +137,186 @@ pub(crate) fn members(root: &Path) -> Result<Vec<Member>> {
         });
     }
     Ok(found)
+}
+
+/// The keys of the root manifest's `[workspace.dependencies]` that name
+/// another package (`package = "..."`).
+pub(crate) fn workspace_renames(manifest: &str) -> BTreeSet<String> {
+    let Some(start) = manifest.find("[workspace.dependencies]") else {
+        return BTreeSet::new();
+    };
+    let section = manifest
+        .get(start + "[workspace.dependencies]".len()..)
+        .unwrap_or_default();
+    let section = section.split("\n[").next().unwrap_or_default();
+    section
+        .lines()
+        .filter_map(|line| {
+            let line = line.split('#').next().unwrap_or_default();
+            let (key, value) = line.split_once('=')?;
+            let renames = value
+                .trim()
+                .trim_matches(|c| c == '{' || c == '}')
+                .split(',')
+                .any(|pair| {
+                    pair.split_once('=')
+                        .is_some_and(|(key, _)| key.trim() == "package")
+                });
+            renames.then(|| {
+                key.trim()
+                    .split('.')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned()
+            })
+        })
+        .collect()
+}
+
+/// The requirement ids the files under `directory` say they verify, or
+/// why they could not all be read: a package carrying item evidence is
+/// never cached, whatever ring its code is in (the consultant's D1 and
+/// condition 1, ledger 1650: ferrix-native's host test verifies
+/// L.device.24).
+pub(crate) fn verifies(directory: &Path) -> Option<String> {
+    let mut ids = BTreeSet::new();
+    let mut pending = vec![directory.to_path_buf()];
+    while let Some(here) = pending.pop() {
+        let entries = match std::fs::read_dir(&here) {
+            Ok(entries) => entries,
+            Err(error) => return Some(format!("{} could not be listed: {error}", here.display())),
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                return Some(format!("{} could not be listed", here.display()));
+            };
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                return Some(format!("{} could not be looked at", path.display()));
+            };
+            if kind.is_dir() {
+                let name = entry.file_name();
+                if name != "target" && name != ".git" {
+                    pending.push(path);
+                }
+                continue;
+            }
+            // A device or a pipe is no source file; a link is read where it
+            // leads.
+            if std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+                let Ok(bytes) = std::fs::read(&path) else {
+                    return Some(format!("{} could not be read", path.display()));
+                };
+                tagged(&String::from_utf8_lossy(&bytes), &mut ids);
+            }
+        }
+    }
+    if ids.is_empty() {
+        return None;
+    }
+    let mut said: Vec<&str> = ids.iter().map(String::as_str).take(4).collect();
+    if ids.len() > 4 {
+        said.push("...");
+    }
+    Some(format!("it verifies {}", said.join(", ")))
+}
+
+/// The ids after each `Verifies:` in `text`, added to `ids`.
+fn tagged(text: &str, ids: &mut BTreeSet<String>) {
+    for rest in text.split("Verifies:").skip(1) {
+        let line = rest.lines().next().unwrap_or_default();
+        let before = ids.len();
+        ids.extend(
+            line.split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|id| {
+                    !id.is_empty()
+                        && id
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                })
+                .map(str::to_owned),
+        );
+        // A tag without a readable id still counts: closed, not open.
+        if ids.len() == before {
+            let _ = ids.insert("(an id not read)".to_owned());
+        }
+    }
+}
+
+/// Why the plan may cache nothing at all, when it may not: an item crate
+/// the workspace does not hold, a path the item links that is no member,
+/// or a randomizing crate in the lock (the consultant's conditions 3 and
+/// 4, ledger 1650), each of which could cut what the closure sees.
+pub(crate) fn refusal(root: &Path, members: &[Member], item: &[String]) -> Option<String> {
+    let places: BTreeSet<String> = members
+        .iter()
+        .map(|member| format!("{}/", member.directory))
+        .collect();
+    for path in item {
+        if let Some(manifest) = manifest_outside(&root.join(path), root, &places) {
+            return Some(format!(
+                "{manifest} is under the item's {path} and no workspace member"
+            ));
+        }
+    }
+    if let Some(why) = links_outside(members, item) {
+        return Some(why);
+    }
+    let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap_or_default();
+    if lock.is_empty() {
+        return Some("Cargo.lock could not be read".to_owned());
+    }
+    locked_randomizers(&lock).map(|name| {
+        format!("Cargo.lock holds {name}, which draws new inputs each run; a review names the packages that reach it")
+    })
+}
+
+/// The first `Cargo.toml` under `directory` whose directory is no member's.
+fn manifest_outside(directory: &Path, root: &Path, places: &BTreeSet<String>) -> Option<String> {
+    let mut pending = vec![directory.to_path_buf()];
+    while let Some(here) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&here) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                if entry.file_name() != "target" {
+                    pending.push(path);
+                }
+            } else if entry.file_name() == "Cargo.toml" {
+                let place = here
+                    .strip_prefix(root)
+                    .map(|relative| format!("{}/", relative.to_string_lossy()))
+                    .unwrap_or_default();
+                if !places.contains(&place) {
+                    return Some(path.display().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Why the item's closure is not whole: a package one of its members
+/// links that is no workspace member.
+pub(crate) fn links_outside(members: &[Member], item: &[String]) -> Option<String> {
+    // The closure holds every package its members link, so a name in it
+    // that is no member is a link out of the workspace.
+    let names: BTreeSet<&str> = members.iter().map(|member| member.name.as_str()).collect();
+    item_closure(members, item)
+        .into_iter()
+        .find(|(name, _)| !names.contains(name.as_str()))
+        .map(|(name, why)| format!("{name} ({why}) is no workspace member"))
+}
+
+/// The first [`RANDOMIZED`] crate a lock file holds.
+pub(crate) fn locked_randomizers(lock: &str) -> Option<&'static str> {
+    lock.lines()
+        .filter_map(|line| line.trim().strip_prefix("name = \""))
+        .filter_map(|rest| rest.strip_suffix('"'))
+        .find_map(|name| RANDOMIZED.iter().copied().find(|random| *random == name))
 }
 
 /// A file's contents, or an error naming it.
@@ -202,6 +401,39 @@ pub(crate) fn dependencies(manifest: &str) -> (BTreeSet<String>, BTreeSet<String
 /// cached, otherwise why not. `item` holds the item's paths as
 /// `step_cache::item_paths` gives them, each ending in `/`.
 pub(crate) fn verdicts(members: &[Member], item: &[String]) -> BTreeMap<String, Option<String>> {
+    let why = item_closure(members, item);
+    members
+        .iter()
+        .map(|member| {
+            let verdict = if let Some(reason) = why.get(&member.name) {
+                Some(reason.clone())
+            } else if let Some(unread) = &member.unread {
+                Some(format!("its manifest was not read whole: {unread}"))
+            } else if let Some(verifies) = &member.verifies {
+                Some(verifies.clone())
+            } else if let Some((_, row)) = NEVER.iter().find(|(name, _)| *name == member.name) {
+                Some(format!("an open flake row: {row}"))
+            } else if let Some(crate_name) = member
+                .named
+                .iter()
+                .find(|named| RANDOMIZED.contains(&named.as_str()))
+            {
+                Some(format!(
+                    "it depends on {crate_name}, which draws new inputs each run"
+                ))
+            } else {
+                SEEDED
+                    .iter()
+                    .find(|(name, _)| *name == member.name)
+                    .map(|(_, reason)| format!("its tests seed from {reason}"))
+            };
+            (member.name.clone(), verdict)
+        })
+        .collect()
+}
+
+/// The item's packages and everything they link, each with why.
+fn item_closure(members: &[Member], item: &[String]) -> BTreeMap<String, String> {
     let by_name: BTreeMap<&str, &Member> = members
         .iter()
         .map(|member| (member.name.as_str(), member))
@@ -230,30 +462,7 @@ pub(crate) fn verdicts(members: &[Member], item: &[String]) -> BTreeMap<String, 
         }
         let _ = why.insert(name, reason);
     }
-    members
-        .iter()
-        .map(|member| {
-            let verdict = if let Some(reason) = why.get(&member.name) {
-                Some(reason.clone())
-            } else if let Some(unread) = &member.unread {
-                Some(format!("its manifest was not read whole: {unread}"))
-            } else if let Some(crate_name) = member
-                .named
-                .iter()
-                .find(|named| RANDOMIZED.contains(&named.as_str()))
-            {
-                Some(format!(
-                    "it depends on {crate_name}, which draws new inputs each run"
-                ))
-            } else {
-                SEEDED
-                    .iter()
-                    .find(|(name, _)| *name == member.name)
-                    .map(|(_, reason)| format!("its tests seed from {reason}"))
-            };
-            (member.name.clone(), verdict)
-        })
-        .collect()
+    why
 }
 
 /// The text of [`FILE`] for a `check` at `root`, or `None` when the step
@@ -272,9 +481,15 @@ pub(crate) fn plan(root: &Path) -> Result<Option<String>> {
     }
     let members = members(root)?;
     let item = step_cache::item_paths(root)?;
+    let refused = refusal(root, &members, &item);
+    let mut verdicts = verdicts(&members, &item);
     let mut text = format!("{MAGIC}\n{}store {}\n", Context::shared()?, store.display());
     for member in &members {
-        match verdicts(&members, &item).remove(&member.name).flatten() {
+        let verdict = match &refused {
+            Some(why) => Some(format!("nothing is cached: {why}")),
+            None => verdicts.remove(&member.name).flatten(),
+        };
+        match verdict {
             None => text.push_str(&format!("cache {} {}\n", member.name, member.directory)),
             Some(why) => text.push_str(&format!("never {} {why}\n", member.name)),
         }

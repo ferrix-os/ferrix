@@ -928,26 +928,43 @@ passes. **Never cached**, each saying why in its line (`ran (never cached:
 and core crates of `certification-item.json` and its allow-list) and every
 package one of them links, through dependencies or build dependencies on any
 target -- which takes in the libraries the kernel links that the
-classification does not name yet (F-76); a package whose manifest the reader
-does not take whole; one depending on a crate that draws new inputs each run
-(`proptest`, `quickcheck`, `rand` and the like, none in the workspace) or
-seeding its tests from entropy or the clock (none outside the item); a binary
-whose package cargo does not name, or names at another place than the plan.
-The certification consultant's design review, ledger line 1594 (P2.1-P2.5).
+classification does not name yet (F-76); a package any of whose files says
+`Verifies:` a requirement (host tests outside the item that are item evidence:
+ferrix-native's verifies L.device.24, xtask's carry 28 tags); a package whose
+manifest the reader does not take whole, or that names a dependency the
+workspace's `[workspace.dependencies]` renames; one depending on a crate that
+draws new inputs each run (`proptest`, `quickcheck`, `rand` and the like) or
+seeding its tests from entropy or the clock (none outside the item); one an
+open flake row names, unless the row is a false fail and the package is listed
+with it (both lists empty today; **a new flake row on a cacheable package's
+host test adds the package to one of the two lists in the same commit**); a
+binary whose package cargo does not name, or names at another place than the
+plan. And nothing at all is cached when a `Cargo.toml` under the item's paths
+is no workspace member, a package the item links is none, or `Cargo.lock`
+holds a randomizing crate (it holds none), since each could cut what the
+closure sees. The certification consultant's design review, ledger line 1594
+(P2.1-P2.5), and code review, line 1650.
 
-Of the workspace's 75 host packages, 26 are cacheable today: xtask and the
-ring-3 drivers' and protocols' libraries (adb, argon2, the virtio drivers, usb,
-nvme, svc, pkg, restart, ...). xtask's own tests read the item, so its runs are
-never recorded; a passed traced run that could not be recorded keeps the unit
-untraced for a day (`unrecordable`), since tracing made xtask's tests 3-8 s
-untraced into 15-34 s traced, on the tests' critical path.
+**The residual accepted for these binaries:** a cached pass repeats one sample
+of thread scheduling and of std's per-process hash seed, the sample of the run
+that passed; it is never item evidence, which is why every package carrying a
+`Verifies:` tag or linked by the item runs every time.
+
+Of the workspace's 75 host packages, 24 are cacheable today (25 of the 80 test
+binaries): the ring-3 drivers' and protocols' libraries (adb, argon2, the
+virtio drivers, usb, nvme, svc, pkg, restart, ...). A passed traced run that
+could not be recorded keeps its unit untraced for a day (`unrecordable`), since
+tracing made xtask's tests (before their tags kept them out) 3-8 s untraced
+into 15-34 s traced, on the tests' critical path; an untraced run is a run as
+with the cache off, and never gives a cached pass.
 
 One worktree, warm, unchanged tree, alternating (load 19-34):
 
 | Run | `check` | test binaries after cargo returned | binaries run |
 |---|---:|---:|---:|
 | cache off (P1 only) | 104.1 s, 115.7 s | 22.4 s, 14.7 s | 80 |
-| cache on, every record standing | **45.2 s, 47.4 s** | 18.1 s, 16.9 s | 54 (26 cached passes) |
+| cache on, every record standing | **45.2 s, 47.4 s** | 18.1 s, 16.9 s | 54 (26 cached passes, xtask and ferrix-native among them before the review's fixes) |
+| the same after them (`p2-hit4`) | | 16.1 s | 55 (25 cached passes) |
 | cache on, recording (first run after an xtask change) | 408.7 s | 22.1 s | 80 |
 
 (The whole `check` falls mostly by the side workspaces' cache, Cut B2.) **What
@@ -960,8 +977,10 @@ critical path; what remains on it is the item's tests and the audits beside
 **Controls.** Unit tests hold the key (binary, programs, arguments, directory:
 each changed is a miss), the closure over what the item links, the plan's
 package and place, the manifest reader failing closed, a keyed unit reading
-its keyed files only, and the not-traced memo; each of 11 sabotages of those
-checks fails a test (`~/ferrix-logs/bs-b2/sabotage/p2.log`).
+its keyed files only, the not-traced memo, the `Verifies:` tags, the
+workspace's renames, an item not held whole, a randomizing crate in the lock,
+and no unit reading the item before P3; each of 17 sabotages of those checks
+fails a test (`~/ferrix-logs/bs-b2/sabotage/`).
 
 ## The compile: the baseline, 2026-10-15 (bs-a)
 

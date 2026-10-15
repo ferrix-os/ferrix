@@ -12,6 +12,7 @@ fn member(name: &str, directory: &str, linked: &[&str], dev: &[&str]) -> Member 
         linked,
         named,
         unread: None,
+        verifies: None,
     }
 }
 
@@ -168,7 +169,20 @@ fn the_real_workspace_keeps_the_item_s_test_binaries_running() {
             "{package} would be cached"
         );
     }
-    assert_eq!(verdicts.get("xtask").cloned().flatten(), None);
+    // Host tests outside the item that verify the item's requirements
+    // (ferrix-native's L.device.24, xtask's tags).
+    for package in ["ferrix-native", "xtask"] {
+        assert!(
+            verdicts
+                .get(package)
+                .cloned()
+                .flatten()
+                .is_some_and(|why| why.starts_with("it verifies")),
+            "{package}: {:?}",
+            verdicts.get(package)
+        );
+    }
+    assert_eq!(refusal(&root, &members, &item), None);
     for member in &members {
         assert!(verdicts.contains_key(&member.name), "{}", member.name);
     }
@@ -228,7 +242,7 @@ fn a_binary_the_plan_does_not_know_or_places_elsewhere_is_never_cached() {
         Ok(Way::Unit(unit)) => {
             assert_eq!(unit.name, format!("test:{package}:deps/xtask"));
             assert!(unit.directory.starts_with("/nonexistent/store"));
-            assert!(unit.flake.is_some());
+            assert!(unit.flake.is_none());
         }
         other => panic!("{other:?}"),
     }
@@ -306,4 +320,142 @@ fn a_unit_whose_traced_run_was_not_recorded_is_not_traced_again_for_a_day() {
     unit("1111").remember("ran, recorded");
     assert_eq!(unit("1111").unrecordable(), None);
     std::fs::remove_dir_all(&directory).unwrap();
+}
+
+/// A scratch directory of its own.
+fn scratch(name: &str) -> PathBuf {
+    let path = crate::paths::target_dir()
+        .join("xtask-test-cache-test")
+        .join(format!("{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).unwrap();
+    path
+}
+
+#[test]
+fn a_package_whose_files_say_they_verify_a_requirement_is_never_cached() {
+    let root = scratch("verifies");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/lib.rs"), "pub fn a() {}\n").unwrap();
+    assert_eq!(verifies(&root), None);
+    std::fs::create_dir_all(root.join("tests")).unwrap();
+    std::fs::write(
+        root.join("tests/a.rs"),
+        "/// Verifies: L.device.24, L.x.1\n#[test]\nfn a() {}\n",
+    )
+    .unwrap();
+    let said = verifies(&root).unwrap();
+    assert!(
+        said.contains("L.device.24") && said.contains("L.x.1"),
+        "{said}"
+    );
+    // Code that only names the tag still counts, its id not read.
+    let mut ids = BTreeSet::new();
+    tagged("let x = \"Verifies:\").skip(1);", &mut ids);
+    assert_eq!(ids.into_iter().collect::<Vec<_>>(), ["(an id not read)"]);
+    let mut tagged = member("ferrix-tagged", "src/lib/tagged", &[], &[]);
+    tagged.verifies = Some(said);
+    let verdicts = verdicts(&[tagged], &[]);
+    assert!(
+        verdicts["ferrix-tagged"]
+            .as_deref()
+            .unwrap()
+            .starts_with("it verifies")
+    );
+    // A directory that cannot be listed counts as verifying.
+    assert!(verifies(&root.join("nonexistent")).is_some());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_dependency_the_workspace_renames_leaves_its_users_unread() {
+    let manifest = "[workspace]\nmembers = [\"a\", \"b\"]\n\n[workspace.dependencies]\nferrix-x = { path = \"x\" }\nalias = { package = \"ferrix-y\", path = \"y\" }\n\n[profile.dev]\nopt-level = 1\n";
+    let renamed = workspace_renames(manifest);
+    assert_eq!(renamed.into_iter().collect::<Vec<_>>(), ["alias"]);
+    let root = scratch("renames");
+    std::fs::write(root.join("Cargo.toml"), manifest).unwrap();
+    for (name, dependency) in [("a", "alias"), ("b", "ferrix-x")] {
+        std::fs::create_dir_all(root.join(name)).unwrap();
+        std::fs::write(
+            root.join(name).join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{name}\"\n\n[dependencies]\n{dependency}.workspace = true\n"
+            ),
+        )
+        .unwrap();
+    }
+    let members = members(&root).unwrap();
+    assert!(members[0].unread.as_deref().unwrap().contains("alias"));
+    assert_eq!(members[1].unread, None);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_item_the_workspace_does_not_hold_whole_caches_nothing() {
+    let members = [
+        member("ferrix-kernel", "src/kernel", &["ferrix-heap"], &[]),
+        member("ferrix-heap", "src/lib/heap", &["ferrix-elsewhere"], &[]),
+    ];
+    let item = ["src/kernel/".to_owned()];
+    assert!(
+        links_outside(&members, &item)
+            .unwrap()
+            .contains("ferrix-elsewhere")
+    );
+    assert_eq!(links_outside(&members[..1], &[]), None);
+    let root = scratch("outside");
+    std::fs::create_dir_all(root.join("src/kernel/core")).unwrap();
+    std::fs::write(root.join("src/kernel/Cargo.toml"), "").unwrap();
+    std::fs::write(
+        root.join("Cargo.lock"),
+        "[[package]]\nname = \"ferrix-kernel\"\n",
+    )
+    .unwrap();
+    let whole = [member("ferrix-kernel", "src/kernel", &[], &[])];
+    assert_eq!(refusal(&root, &whole, &item), None);
+    // A crate under the item that is no member.
+    std::fs::write(root.join("src/kernel/core/Cargo.toml"), "").unwrap();
+    assert!(
+        refusal(&root, &whole, &item)
+            .unwrap()
+            .contains("core/Cargo.toml")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_randomizing_crate_in_the_lock_caches_nothing() {
+    let lock = "version = 4\n\n[[package]]\nname = \"ferrix-a\"\nversion = \"0.1.0\"\n";
+    assert_eq!(locked_randomizers(lock), None);
+    let with = format!("{lock}\n[[package]]\nname = \"proptest\"\nversion = \"1.0.0\"\n");
+    assert_eq!(locked_randomizers(&with), Some("proptest"));
+    // The real lock holds none.
+    let real = std::fs::read_to_string(crate::paths::workspace_root().join("Cargo.lock")).unwrap();
+    assert_eq!(locked_randomizers(&real), None);
+}
+
+/// The consultant's condition 6, ledger 1650: only P3's units, keyed on
+/// the whole item, may read it; until P3's code review no product code of
+/// xtask sets `reads_item` true.
+#[test]
+fn no_unit_reads_the_item_yet() {
+    let source = crate::paths::workspace_root().join("tools/common/xtask/src");
+    let mut pending = vec![source];
+    let mut found = Vec::new();
+    while let Some(here) = pending.pop() {
+        for entry in std::fs::read_dir(&here).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs")
+                && path.file_name().is_some_and(|name| name != "tests.rs")
+            {
+                let text = std::fs::read_to_string(&path).unwrap();
+                if text.contains(&format!("reads_item: {}", "true")) {
+                    found.push(path);
+                }
+            }
+        }
+    }
+    assert!(found.is_empty(), "{found:?}");
 }
