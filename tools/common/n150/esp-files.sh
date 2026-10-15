@@ -34,9 +34,12 @@ wt=.claude/worktrees/win-n150-esp-$stamp
 git worktree add --detach "\$wt" "$ref" >/dev/null
 cd "\$wt"
 if ! git merge-base --is-ancestor $desktop HEAD; then
-    git -c user.name=esp -c user.email=esp@localhost merge -q --no-edit $desktop
+    # The desktop's xtask: its patch, but main.rs and n150.rs (which the
+    # SATA harness also changed) taken whole from it; nothing outside xtask.
+    git diff $desktop^ $desktop -- tools/common/xtask         ':!tools/common/xtask/src/main.rs' ':!tools/common/xtask/src/n150.rs'         ':!tools/common/xtask/src/n150/tests.rs' | git apply -3
+    git checkout $desktop -- tools/common/xtask/src/main.rs tools/common/xtask/src/n150.rs         tools/common/xtask/src/n150/tests.rs
 fi
-git log --oneline -1
+git log --oneline -1; git status --short
 mkdir -p /tmp/n150-esp-$stamp/tree
 echo n150 > /tmp/n150-esp-$stamp/tree/README
 export CARGO_TARGET_DIR=\$HOME/target-n150-esp
