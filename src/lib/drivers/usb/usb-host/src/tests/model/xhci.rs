@@ -113,6 +113,10 @@ pub(in crate::tests) struct Xhci {
     pub(in crate::tests) pages: Vec<u64>,
     /// Contexts are 64 bytes.
     pub(in crate::tests) wide_contexts: bool,
+    /// How many of the next interrupt transfer events name a TRB pointer
+    /// that is not the request's: what a controller with its own idea of
+    /// the ring might say.
+    pub(in crate::tests) stray_pointers: u32,
     /// Pointers are 64 bits.
     pub(in crate::tests) wide_pointers: bool,
     /// Firmware owns the controller, and whether it lets go when asked.
@@ -179,6 +183,7 @@ impl Xhci {
             memory: vec![0xA5; AREA_PAGES * 4096],
             pages,
             wide_contexts: false,
+            stray_pointers: 0,
             wide_pointers: true,
             firmware_owned: true,
             firmware_lets_go: true,
@@ -1203,7 +1208,13 @@ impl Xhci {
             self.write8(buffer + i as u64, byte);
         }
         let code = if moved < asked { SHORT } else { SUCCESS };
-        self.transfer_event(slot, dci, at, code, (asked - moved) as u32);
+        let pointer = if self.stray_pointers > 0 {
+            self.stray_pointers -= 1;
+            at ^ 0x8000_0000
+        } else {
+            at
+        };
+        self.transfer_event(slot, dci, pointer, code, (asked - moved) as u32);
         true
     }
 

@@ -161,6 +161,27 @@ fn values_are_read_little_endian_and_sign_extended_when_the_minimum_is_negative(
 }
 
 #[test]
+fn a_32_bit_field_and_an_array_from_i32_min_are_read_without_a_panic() {
+    // A vendor report: one 32-bit variable, then an array whose Logical
+    // Minimum is i32::MIN, as real keyboards' second interfaces carry.
+    let mut reader = Interpreter::new(
+        Descriptor::parse(&[
+            0x06, 0x00, 0xFF, 0x09, 0x01, 0xA1, 0x01, 0x15, 0x00, 0x25, 0x01, 0x75, 0x20, 0x95,
+            0x01, 0x09, 0x01, 0x81, 0x02, 0x05, 0x07, 0x17, 0x00, 0x00, 0x00, 0x80, 0x27, 0xFF,
+            0xFF, 0xFF, 0x7F, 0x19, 0x00, 0x29, 0xFF, 0x75, 0x08, 0x95, 0x01, 0x81, 0x00, 0xC0,
+        ])
+        .expect("parses"),
+    );
+    let fields = reader.descriptor().fields();
+    assert_eq!(fields[0].size, 32);
+    assert_eq!(fields[1].minimum, i32::MIN);
+    assert_eq!(report::value(&fields[0], &[0xFF; 5], 0), Some(-1));
+    // 0x7F - i32::MIN does not fit: the value is not a usage, not a panic.
+    let _ = run(&mut reader, &[0xFF, 0xFF, 0xFF, 0xFF, 0x7F]);
+    let _ = run(&mut reader, &[0x00; 5]);
+}
+
+#[test]
 fn a_one_byte_maximum_of_0xff_is_read_unsigned() {
     // Logical Maximum 0xFF in one byte would be -1 read signed.
     let descriptor = Descriptor::parse(&[
