@@ -108,11 +108,25 @@ forbid ferrix-kernel "kernel"      "ferrix-boot"
 
 # The kernel's own crates, in ring order (docs/KERNEL-CRATES.md, the
 # certification consultant's ledger line 1477 (5)): the core links none of
-# the others, the item neither the load nor the binary. A crate that does not
-# exist yet is passed over by `forbid`.
-forbid ferrix-kernel-core "the kernel's core ring" "ferrix-kernel|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
-forbid ferrix-kernel-item "the kernel's item ring" "ferrix-kernel|ferrix-kernel-load|ferrix-boot"
-forbid ferrix-kernel-load "the kernel's load ring" "$K|ferrix-boot"
+# the others, the item neither the load nor the binary, the load not the
+# binary. Which of them exist is certification-item.json's kernel_crates: a
+# crate listed there and not in the workspace fails here rather than being
+# passed over (ledger 1565 (2)(c)); one not listed yet (before the split)
+# has no rule to keep.
+listed=$(python3 -c 'import json,sys; print(" ".join(k for k in json.load(open(sys.argv[1]))["kernel_crates"] if not k.startswith("//")))' tools/common/data/certification-item.json)
+for crate in $listed; do
+    if ! have "$crate"; then
+        echo "LAYERING VIOLATION: $crate is in kernel_crates and not in the workspace; its rules were NOT checked" >&2
+        status=1
+    fi
+done
+kernel_rule() {
+    [[ " $listed " == *" $1 "* ]] && forbid "$@"
+    return 0
+}
+kernel_rule ferrix-kernel-core "the kernel's core ring" "ferrix-kernel|ferrix-kernel-item|ferrix-kernel-load|ferrix-boot"
+kernel_rule ferrix-kernel-item "the kernel's item ring" "ferrix-kernel|ferrix-kernel-load|ferrix-boot"
+kernel_rule ferrix-kernel-load "the kernel's load ring" "ferrix-kernel|ferrix-boot"
 
 # ---------------------------------------------------------------------------
 # 2. The host-testable libraries sit below both.

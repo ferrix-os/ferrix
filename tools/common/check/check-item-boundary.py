@@ -325,6 +325,15 @@ def _use_tree(toks: list[str], i: int, prefix: list[str], leaves: list) -> int:
         raise ParseError(f"unexpected {tok!r} in a use tree")
 
 
+def _leading_colons(toks: list[str], at: int) -> bool:
+    """Whether the `::` at `toks[at]` begins a path rather than joins two
+    segments: nothing a path segment could end with stands before it."""
+    if at == 0:
+        return True
+    before = toks[at - 1]
+    return not (IDENT.match(before) or before in (">", ")", "]", "*", "self", "super", "Self", "crate"))
+
+
 def parse_file(rel: str, source: str, modules: dict[ModPath, Module], refs: list[Reference]) -> None:
     """Add this file's modules, declarations, bindings and references."""
     masked = rustlex.mask(source)
@@ -406,12 +415,14 @@ def parse_file(rel: str, source: str, modules: dict[ModPath, Module], refs: list
             continue
         elif (
             IDENT.match(tok)
-            and prev not in ("::", ".")
+            and (prev not in ("::", ".") or (prev == "::" and _leading_colons(toks, i - 1)))
             and i + 1 < n
             and toks[i + 1] == "::"
             and (prev != "$" or tok == "crate")
         ):
-            segs = [_name(tok)]
+            # `::ferrix_kernel_load::fs`: a path from the crates' root, which
+            # the resolver reads as through the crate named next.
+            segs = ["::", _name(tok)] if prev == "::" else [_name(tok)]
             j = i + 1
             while j + 1 < n and toks[j] == "::" and IDENT.match(toks[j + 1]):
                 segs.append(_name(toks[j + 1]))
@@ -583,7 +594,12 @@ def find_edges(manifest: dict, ring_of: dict[str, str], modules, refs) -> list[E
         rule["from"]: set(rule["may_not_reference"])
         for rule in manifest["dependency_rules"]
     }
-    resolver = Resolver(modules)
+    # A path through one of the kernel's own crates (`ferrix_kernel_load::fs`)
+    # is a path into the kernel's one tree of modules, and lands in the ring
+    # of the file it names, as `crate::fs` would.
+    resolver = Resolver(modules, KERNEL_CRATE_NAMES | {
+        name.replace("-", "_") for name in manifest.get("kernel_crates", {}) if not name.startswith("//")
+    })
     # A path that starts at a classified library crate lands in its ring.
     crates = {lib_name(name): entry["ring"] for name, entry in crate_entries(manifest).items()}
     edges: dict[tuple[str, str], Edge] = {}
@@ -1139,24 +1155,46 @@ def kernel_crate_files(entries: dict[str, dict], read, exists, listing: list[str
     return reached, problems
 
 
-def checks_only_items(files: list[str], read) -> dict[tuple[ModPath, str], str]:
+def checks_only_items(files: list[str], read, problems: list[str] | None = None) -> dict[tuple[ModPath, str], str]:
     """`{(module, item): file}` for every item marked `// CHECKS-ONLY:`: the
-    marker on a line of its own, then the item within its attributes and
-    doc comments."""
+    marker on a line of its own at the file's own module scope, then the item
+    after its attributes and doc comments. A marker the gate cannot place --
+    no item follows it, or it stands inside braces (an inline module, an
+    `impl`, a function), where the item is not the file module's -- is put in
+    `problems` (ledger line 1565, (2)(a)): a mark that marks nothing would
+    let the item it meant be named from product code unseen."""
     out = {}
     for rel in files:
-        lines = read(rel).split("\n")
+        source = read(rel)
+        masked = rustlex.mask(source)
+        lines = source.split("\n")
+        offset = 0
+        starts = []
+        for line in lines:
+            starts.append(offset)
+            offset += len(line) + 1
         for number, line in enumerate(lines):
             if not CHECKS_ONLY.search(line):
                 continue
-            for after in lines[number + 1 : number + 12]:
+            before = masked[: starts[number]]
+            if before.count("{") != before.count("}"):
+                if problems is not None:
+                    problems.append(f"{rel}:{number + 1}: a CHECKS-ONLY marker inside braces (an inline "
+                                    f"module, an impl or a function): the gate cannot place its item")
+                continue
+            found = None
+            for after in lines[number + 1 :]:
                 stripped = after.strip()
                 if not stripped or stripped.startswith(("#[", "///", "//")):
                     continue
                 found = CHECKS_ONLY_ITEM.match(after)
-                if found:
-                    out[(module_of_file(rel), found.group(1))] = rel
                 break
+            if found is None:
+                if problems is not None:
+                    problems.append(f"{rel}:{number + 1}: a CHECKS-ONLY marker followed by no item the "
+                                    f"gate can place (fn, struct, enum, union, trait, type, const, static, mod)")
+                continue
+            out[(module_of_file(rel), found.group(1))] = rel
     return out
 
 
@@ -1224,7 +1262,7 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
             problems.append(f"raised_checks: {rel} is no kernel file; the entry is stale")
 
     # Checks-only items, and the allows that let a check call their methods.
-    marked = checks_only_items(files, read)
+    marked = checks_only_items(files, read, problems)
     modules, refs, _ = build(files, read)
     problems += kernel_paths_unresolved(refs, modules, {p.replace("-", "_") for p in entries})
     if marked:
@@ -1587,6 +1625,17 @@ _KERNEL_BREAKS = [
     ("an allow of disallowed_methods without a reason",
      {"tree": {"mm.rs": _KERNEL_TREE["mm.rs"] + "#[allow(clippy::disallowed_methods)]\nfn f() {}\n"}},
      "without a reason"),
+    ("a CHECKS-ONLY marker followed by no item",
+     {"tree": {"mm.rs": _KERNEL_TREE["mm.rs"] + "// CHECKS-ONLY: object/check.rs\nmacro_rules! m { () => {} }\n"}},
+     "followed by no item"),
+    ("a CHECKS-ONLY marker on an item inside an inline module",
+     {"tree": {"mm.rs": _KERNEL_TREE["mm.rs"] + "pub mod inner {\n    // CHECKS-ONLY: object/check.rs\n"
+                                                "    pub fn hidden() {}\n}\n"}},
+     "inside braces"),
+    ("a CHECKS-ONLY marker on an item inside an impl",
+     {"tree": {"mm.rs": _KERNEL_TREE["mm.rs"] + "pub struct S;\nimpl S {\n    // CHECKS-ONLY: object/check.rs\n"
+                                                "    pub fn hidden(&self) {}\n}\n"}},
+     "inside braces"),
     ("a package under src/kernel not in kernel_crates",
      {"members": dict(_KERNEL_MEMBERS, **{"ferrix-kernel-extra": "k/extra"})}, "not in kernel_crates"),
 ]
@@ -1605,8 +1654,37 @@ _KDEP_CASES = [
 ]
 
 
-def _kernel_self_test() -> list[str]:
+def _kernel_upward_self_test() -> list[str]:
+    """The upward-reference rule sees a path through a kernel crate's name
+    (ledger line 1565, (2)(b)): a core file and an item file each naming
+    `ferrix_kernel_load::fs`, the load's, are refused."""
     failures = []
+    manifest = dict(_KERNEL_MANIFEST, dependency_rules=[
+        {"from": "core", "may_not_reference": ["item", "load"]},
+        {"from": "item", "may_not_reference": ["load"]},
+    ], crates={"members": {}})
+    for what, rel, text, want in [
+        ("a core file", "mm.rs", _KERNEL_TREE["mm.rs"] + "fn up() { ferrix_kernel_load::fs::open(); }\n", "core"),
+        ("an item file", "syscall/mod.rs",
+         _KERNEL_TREE["syscall/mod.rs"] + "fn up() { ::ferrix_kernel_load::fs::open(); }\n", "item"),
+    ]:
+        files = dict(_KERNEL_TREE, **{rel: text})
+        ring_of, _, _ = classify(manifest, sorted(files))
+        added = {e["root"] for e in manifest["kernel_crates"].values()} - ROOT_FILES
+        ROOT_FILES.update(added)
+        try:
+            modules, refs, _ = build(sorted(files), files.__getitem__)
+            edges = find_edges(manifest, ring_of, modules, refs)
+        finally:
+            ROOT_FILES.difference_update(added)
+        if not any(e.file == rel and e.from_ring == want and e.to_ring == "load" for e in edges):
+            failures.append(f"kernel crates: {what} naming ferrix_kernel_load::fs passed the upward rule "
+                            f"({[(e.file, e.references) for e in edges]})")
+    return failures
+
+
+def _kernel_self_test() -> list[str]:
+    failures = _kernel_upward_self_test()
     kept = _kernel_break()
     if kept:
         failures.append(f"kernel crates: a tree that keeps the rules was refused: {kept}")
