@@ -1372,19 +1372,11 @@ impl<D: WriteHandle> Inode for Node<D> {
     /// than a commit. Otherwise the shape must be committed, because a log
     /// carries no names; Linux falls back the same way.
     fn fsync(&self, data_only: bool) -> Result<()> {
-        let _ = data_only;
-        // Slices first, as a commit's writeback goes; what fails is met again
-        // below.
-        let _ = self.write_back_in_slices();
-        let mut volume = self.shared.lock();
-        self.write_back(&mut volume)?;
-        if *self.shared.structural.lock() {
-            *self.shared.pending.lock() = 0;
-            *self.shared.structural.lock() = false;
-            return volume.commit().map_err(errno);
-        }
-        volume.log_inode(self.ino).map_err(errno)?;
-        volume.commit_log().map_err(errno)
+        let ep_t = self.shared.ep_now();
+        let out = self.ep_fsync(data_only);
+        crate::ep::add(crate::ep::FSYNC_NS, self.shared.ep_now().saturating_sub(ep_t));
+        crate::ep::add(crate::ep::FSYNC_N, 1);
+        out
     }
 
     /// Held from here, since a mapping may write without a word to the mount;
@@ -1619,5 +1611,23 @@ impl<D: WriteHandle> Node<D> {
         // position to: the kernel copies a large write in pieces, and a start
         // offset here wrote every piece over the first.
         Ok((data.len(), end))
+    }
+}
+
+impl<D: WriteHandle> Node<D> {
+    fn ep_fsync(&self, data_only: bool) -> Result<()> {
+        let _ = data_only;
+        // Slices first, as a commit's writeback goes; what fails is met again
+        // below.
+        let _ = self.write_back_in_slices();
+        let mut volume = self.shared.lock();
+        self.write_back(&mut volume)?;
+        if *self.shared.structural.lock() {
+            *self.shared.pending.lock() = 0;
+            *self.shared.structural.lock() = false;
+            return volume.commit().map_err(errno);
+        }
+        volume.log_inode(self.ino).map_err(errno)?;
+        volume.commit_log().map_err(errno)
     }
 }
