@@ -63,6 +63,7 @@ members = [
     "src/lib/drivers/block/virtio-blk",
     "src/lib/drivers/block/stm32-sdmmc",
     "src/lib/drivers/block/nvme",
+    "src/lib/drivers/block/ahci",
     "src/lib/drivers/console/virtio-console",
     "src/lib/drivers/display/virtio-gpu",
     "src/lib/drivers/input/virtio-input",
