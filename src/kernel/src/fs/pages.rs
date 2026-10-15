@@ -178,15 +178,33 @@ fn refused(error: VmoError) -> Errno {
 
 /// A frame for a page of the cache, reclaiming when there is none: first
 /// inside the job whose `memory.max` refused it, then anywhere if the machine
-/// itself is out (`user::cache`). Called with no lock held, as a fill is.
+/// itself is out (`user::cache`), tried again while a reclaim gives some
+/// back, at most [`RECLAIMS`] times, as a write is ([`write_reclaiming`]).
+/// One reclaim was not enough: at the machine's floor, with clean cache to
+/// spare, the frames it gave back went to another processor's allocation
+/// before the retry, and the read that wanted the page answered `ENOMEM` --
+/// which Wine turns into `ERROR_GEN_FAILURE`, and which stopped Endfield's
+/// launcher's 7-Zip half-way through 68 GB (2026-10-15). Called with no lock
+/// held, as a fill is.
 fn allocate_reclaiming() -> Option<Frame> {
-    let group = crate::sched::running_group();
-    mm::allocate_user_frame().or_else(|| {
+    let mut tries = 0;
+    loop {
+        if let Some(frame) = mm::allocate_user_frame() {
+            return Some(frame);
+        }
+        if tries == RECLAIMS {
+            return None;
+        }
+        tries += 1;
+        let group = crate::sched::running_group();
         let scope =
             quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE).unwrap_or(quota::NONE);
-        let _ = crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64);
-        mm::allocate_user_frame()
-    })
+        if crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen == 0 {
+            // Nothing to give back; another task may still have let a frame
+            // go since the first try.
+            return mm::allocate_user_frame();
+        }
+    }
 }
 
 /// Write `bytes` into page `index` of `vmo` at `within`, committing the page
@@ -194,7 +212,7 @@ fn allocate_reclaiming() -> Option<Frame> {
 /// there is no frame for it as a fill does ([`allocate_reclaiming`]): clean
 /// cache inside the job whose `memory.max` refused it, or anywhere when the
 /// machine is out, tried again while a reclaim gives some back, at most
-/// [`WRITE_RECLAIMS`] times. Without it a write found the machine full of
+/// [`RECLAIMS`] times. Without it a write found the machine full of
 /// clean cache and answered `ENOSPC` (docs/WINE.md §10). Called with no lock
 /// held, as a write into a store is.
 ///
@@ -206,7 +224,7 @@ fn write_reclaiming(vmo: &Vmo, index: u64, within: usize, bytes: &[u8]) -> Resul
     loop {
         match vmo.commit_and_write(index, within, bytes) {
             Ok(()) => return Ok(()),
-            Err(VmoError::OutOfMemory) if tries < WRITE_RECLAIMS => {
+            Err(VmoError::OutOfMemory) if tries < RECLAIMS => {
                 tries += 1;
                 let group = crate::sched::running_group();
                 let scope = quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE)
@@ -220,10 +238,11 @@ fn write_reclaiming(vmo: &Vmo, index: u64, within: usize, bytes: &[u8]) -> Resul
     }
 }
 
-/// How many reclaims one page of a write tries before it answers `ENOSPC`:
-/// each gives back up to a fill's run, and another task may take the room
-/// between a reclaim and the retry.
-const WRITE_RECLAIMS: u32 = 8;
+/// How many reclaims one page of a write, or one frame of a fill, tries
+/// before it answers `ENOSPC` (a write) or `ENOMEM` (a fill): each gives back
+/// up to a fill's run, and another task may take the room between a reclaim
+/// and the retry.
+const RECLAIMS: u32 = 8;
 
 /// Give back frames no page kept.
 fn release_all(frames: impl IntoIterator<Item = Frame>) {

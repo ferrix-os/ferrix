@@ -216,7 +216,10 @@ frames always took: clean cache reclaimed first, then the fault fails
   now refuses earlier than an empty allocator would, and why each is
   handled: a page-cache fill (`fs/pages.rs`, `allocate_reclaiming`), made
   by whichever task reads the file, kernel tasks at boot included,
-  reclaims clean cache machine-wide and tries again before it fails, and
+  reclaims clean cache, in the job whose `memory.max` refused it or
+  machine-wide, and tries again, at most 8 times while a reclaim gives
+  pages back (since 2026-10-15: one reclaim let another processor take what
+  it gave back, and a read answered `ENOMEM` with clean cache to spare), and
   its failure is the read's error; a file's write (`fs/pages.rs`,
   `write_reclaiming` over `Vmo::commit_and_write`, since 2026-10-15)
   reclaims the same way, in the job whose `memory.max` refused it or

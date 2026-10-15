@@ -12,7 +12,10 @@
 //!   ([`reclaim_beside_a_mapping`], through `user::vmo`'s reclaim hook);
 //! * a write in a job at its `memory.max`, which holds clean cache of the
 //!   mount, takes that cache back and succeeds, where it answered `ENOSPC`
-//!   ([`write_reclaims_at_max`]).
+//!   ([`write_reclaims_at_max`]);
+//! * a read in a job further past its `memory.max` than one reclaim gives
+//!   back, which holds clean cache of the mount, reclaims until there is room
+//!   and succeeds, where it answered `ENOMEM` ([`fill_reclaims_until_room`]).
 
 use alloc::sync::Arc;
 use core::any::Any;
@@ -24,7 +27,7 @@ use ferrix_vma::VmaFlags;
 
 use super::{MOUNT_POINT, crc32c, make, pattern, read_pattern, write_at, write_file};
 use crate::fs;
-use crate::fs::pages::VmoStorage;
+use crate::fs::pages::{MAX_FILL_RUN, VmoStorage};
 use crate::object::quota::{Counter, Quota, Resource};
 use crate::sync::SpinLock;
 use crate::user::cache::{self, Totals};
@@ -43,6 +46,8 @@ pub(super) struct Found {
     pub(super) dirty: u64,
     /// Pages a write at its job's `memory.max` took back.
     pub(super) stolen_at_max: u64,
+    /// Pages a read past its job's `memory.max` took back.
+    pub(super) stolen_by_fill: u64,
 }
 
 /// Run every reclaim check, in order.
@@ -54,10 +59,12 @@ pub(super) fn run() -> Result<Found, &'static str> {
     let (given, dirty) = reclaim_written()?;
     reclaim_beside_a_mapping()?;
     let stolen_at_max = write_reclaims_at_max()?;
+    let stolen_by_fill = fill_reclaims_until_room()?;
     Ok(Found {
         given,
         dirty,
         stolen_at_max,
+        stolen_by_fill,
     })
 }
 
@@ -392,6 +399,97 @@ fn check_write_at_max(
         if read_pattern(path)? != (bytes.len(), crc32c(bytes)) {
             return Err("a file read back otherwise after a write reclaimed at memory.max");
         }
+    }
+    Ok(())
+}
+
+/// A read in a job past its `memory.max` by more than one reclaim gives back,
+/// which holds clean cache of the writable mount, reclaims inside the job
+/// until its fill has room, and succeeds (`fs::pages`'s
+/// `allocate_reclaiming`, at most eight reclaims of a fill's run). With one
+/// reclaim and one retry the read answered `ENOMEM`: what one reclaim gives
+/// back is not always there for the retry -- at the machine's floor another
+/// processor took it, which stopped Endfield's launcher's 7-Zip half-way
+/// through its 68 GB (`docs/WINE.md` §10), and here the job is still past its
+/// limit after it. Answers the pages the job's reclaim gave back.
+fn fill_reclaims_until_room() -> Result<u64, &'static str> {
+    const CLEAN: &[u8] = b"/mnt-rw/reclaim-held";
+    const READ: &[u8] = b"/mnt-rw/reclaim-read";
+    const CLEAN_PAGES: usize = 128;
+    const READ_PAGES: usize = 4;
+    /// How far past `memory.max` the job is put: two fills' runs, so that
+    /// a read finds room only after its third reclaim.
+    const OVER: u64 = 2 * MAX_FILL_RUN as u64 * PAGE_SIZE;
+    let clean_pattern = pattern(47, 0, CLEAN_PAGES * PAGE);
+    let read_pattern_bytes = pattern(53, 0, READ_PAGES * PAGE);
+    write_file(CLEAN, &clean_pattern)?;
+    write_file(READ, &read_pattern_bytes)?;
+    sync()?;
+    // Every page of both out of the cache, so the job's reads fill them,
+    // charged to the job.
+    let _ = cache::reclaim(crate::object::quota::NONE, cache::totals().disk);
+    // The file read past the limit is looked up first, outside the job: its
+    // object and the heap behind it are not what is checked.
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let target = ns
+        .resolve(&ctx, None, READ, true)
+        .map_err(|_| "the file read past memory.max is gone")?
+        .inode()
+        .map_err(|_| "the file read past memory.max has no inode")?;
+    let job = Quota::new(None).map_err(|_| "no quota slot for the fill-past-max check")?;
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(job.index());
+    let held = read_pattern(CLEAN);
+    let used = job.usage(Resource::Memory).used;
+    job.set_limit(Resource::Memory, used.saturating_sub(OVER));
+    let stolen = job.counted(Counter::Stolen);
+    let mut out = alloc::vec![0_u8; READ_PAGES * PAGE];
+    let read = match held {
+        Ok(_) => target.read_at(0, &mut out).map_err(|_| ()),
+        Err(_) => Ok(0),
+    };
+    crate::sched::set_current_group(own);
+    let stolen = job.counted(Counter::Stolen).saturating_sub(stolen);
+    let outcome = held
+        .map_err(|_| "a job could not read a file of the writable mount")
+        .and_then(|_| check_fill_past_max(read, used, stolen, &out, &read_pattern_bytes));
+    let _ = cache::reclaim(job.index(), u64::MAX);
+    drop(job);
+    outcome?;
+    Ok(stolen)
+}
+
+/// [`fill_reclaims_until_room`]'s verdict on what it saw.
+fn check_fill_past_max(
+    read: Result<usize, ()>,
+    used: u64,
+    stolen: u64,
+    out: &[u8],
+    want: &[u8],
+) -> Result<(), &'static str> {
+    if used < 2 * MAX_FILL_RUN as u64 * PAGE_SIZE + 16 * PAGE_SIZE {
+        return Err(
+            "a job reading a file on the writable mount was charged too little of its cache",
+        );
+    }
+    match read {
+        Err(()) => {
+            return Err(
+                "a read past its job's memory.max answered ENOMEM with the job's clean cache of \
+                 the mount to give back",
+            );
+        }
+        Ok(len) if len != out.len() => {
+            return Err("a read past its job's memory.max came up short");
+        }
+        Ok(_) => {}
+    }
+    if stolen <= 2 * MAX_FILL_RUN as u64 {
+        return Err("a read past its job's memory.max found room without reclaiming past it");
+    }
+    if crc32c(out) != crc32c(want) {
+        return Err("a file read past its job's memory.max read back otherwise");
     }
     Ok(())
 }
