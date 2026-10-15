@@ -1070,8 +1070,20 @@ fn check_function(
             }
         }
     }
-    let decoding = decoding || turn_decoding_on(space, address, identity.kind, &regions);
+    let decoding = decoding_after(space, address, identity.kind, &regions, decoding);
     Ok((regions, msix, decoding, found_transport, host_visible))
+}
+
+/// Whether `address` decodes memory once [`turn_decoding_on`] had its say:
+/// `decoding` as firmware left it, or on now.
+fn decoding_after(
+    space: &mut Space,
+    address: Address,
+    kind: HeaderKind,
+    regions: &[Region],
+    decoding: bool,
+) -> bool {
+    decoding || turn_decoding_on(space, address, kind, regions)
 }
 
 /// Turn memory decoding on for an endpoint firmware left it off for, when
