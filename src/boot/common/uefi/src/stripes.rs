@@ -127,6 +127,17 @@ fn paint(row: u32, rgb: u32) {
     paint_span(row, rgb, width / 2, width);
 }
 
+/// Stop painting: firmware is about to leave.
+///
+/// On the N150 a write to the framebuffer right after `exit_boot_services`
+/// returned is the suspect for the hang there: firmware's exit handlers may
+/// unmap it from the tables still installed, and the fault lands in a
+/// handler that spins. Until that is settled, nothing is painted once the
+/// call is made.
+pub(crate) fn stop() {
+    PHYS.store(0, Ordering::Release);
+}
+
 /// Paint row `row` from the bottom, from column `from` to before `to`, in
 /// `rgb`.
 fn paint_span(row: u32, rgb: u32, from: u32, to: u32) {

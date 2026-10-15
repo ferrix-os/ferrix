@@ -667,6 +667,7 @@ fn leave_and_record(
 fn leave_firmware(services: &Services, buffer: Allocation) -> Result<MemoryMap> {
     let map = services.memory_map(buffer)?;
     stripes::tick(stripes::Tick::FirstMap);
+    stripes::stop();
     if services.exit_boot_services(map.key).is_ok() {
         stripes::tick(stripes::Tick::FirstExitOk);
         return Ok(map);
