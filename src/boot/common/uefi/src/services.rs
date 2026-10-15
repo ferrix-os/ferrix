@@ -55,13 +55,35 @@ fn describe_output(graphics: *mut GraphicsOutput) -> Option<ferrix_bootinfo::Fra
     let info = unsafe { *mode.info };
 
     use crate::uefi::protocols::GraphicsPixelFormat;
+    // Red, green and blue masks a bit-mask mode gives for the two byte orders
+    // the kernel draws: such a mode is one of those under another name.
+    const BGRX_MASKS: [u32; 3] = [0x00ff_0000, 0x0000_ff00, 0x0000_00ff];
+    const RGBX_MASKS: [u32; 3] = [0x0000_00ff, 0x0000_ff00, 0x00ff_0000];
+    let [red, green, blue, reserved] = info.pixel_information;
     let format = match info.pixel_format {
         GraphicsPixelFormat::BLUE_GREEN_RED_RESERVED => ferrix_bootinfo::PixelFormat::Bgrx8888,
         GraphicsPixelFormat::RED_GREEN_BLUE_RESERVED => ferrix_bootinfo::PixelFormat::Rgbx8888,
-        // A bit-mask or blt-only mode is a framebuffer the kernel cannot
-        // treat as an array of pixels, so report it as no framebuffer.
+        GraphicsPixelFormat::BIT_MASK if [red, green, blue] == BGRX_MASKS => {
+            ferrix_bootinfo::PixelFormat::Bgrx8888
+        }
+        GraphicsPixelFormat::BIT_MASK if [red, green, blue] == RGBX_MASKS => {
+            ferrix_bootinfo::PixelFormat::Rgbx8888
+        }
+        // Any other bit-mask or a blt-only mode is a framebuffer the kernel
+        // cannot treat as an array of pixels, so report it as no framebuffer.
         _ => ferrix_bootinfo::PixelFormat::Unknown,
     };
+    crate::console::println!(
+        "  graphics mode {} of {}: pixel format {} (masks r {red:#x} g {green:#x} b {blue:#x} x {reserved:#x}), {} pixels a line: {}",
+        mode.mode,
+        mode.max_mode,
+        info.pixel_format.0,
+        info.pixels_per_scan_line,
+        match format {
+            ferrix_bootinfo::PixelFormat::Unknown => "not drawable",
+            _ => "drawable",
+        }
+    );
 
     Some(ferrix_bootinfo::Framebuffer {
         phys: mode.framebuffer_base,
