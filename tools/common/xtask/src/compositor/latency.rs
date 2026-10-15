@@ -33,7 +33,11 @@
 //! lock the pointer gives the game each motion as that step from the
 //! centre; one that does not gives it wherever hyprix's pointer has got to,
 //! and [`judge_grab`] fails it. The control is yserver with
-//! `YSERVER_POINTER_LOCK=0`.
+//! `YSERVER_POINTER_LOCK=0`. The game counts `XInput2` raw motions too, and
+//! must have exactly one for each motion it read: raw events come only from
+//! the device, so the game's own warps make none (Xorg's `miPointerMove`
+//! passes `POINTER_NORAW`). A yserver that sends a raw motion for each warp
+//! (as before fork commit ac2485ea) is failed on [`WARP_RAW`].
 
 use std::time::{Duration, Instant};
 
@@ -350,9 +354,13 @@ fn judge(arch: Arch, lines: &[String], timed: &[Option<Duration>]) -> Result<()>
     }
 }
 
+/// What the judge says when the game's warps came with raw motion.
+const WARP_RAW: &str = "a warp sent raw motion";
+
 /// Pass when the grabbing game read at least half of `vptr`'s motions, nine
-/// in ten of them as the mouse's [`GRAB_STEP`] across and none down, and as
-/// many raw motions: what a yserver gives that has hyprix lock the pointer.
+/// in ten of them as the mouse's [`GRAB_STEP`] across and none down, and
+/// exactly as many raw motions: what a yserver gives that has hyprix lock
+/// the pointer and makes raw events only from the device, as Xorg does.
 fn judge_grab(arch: Arch, lines: &[String]) -> Result<()> {
     let Some(line) = lines
         .iter()
@@ -380,9 +388,15 @@ fn judge_grab(arch: Arch, lines: &[String]) -> Result<()> {
              {GRAB_STEP} pixels: yserver did not lock the pointer"
         )));
     }
-    if raw < as_mouse {
+    if raw > motions {
         return Err(Error::new(format!(
-            "{arch}: the grabbing game had {raw} raw motions for {as_mouse} read as the mouse's"
+            "{arch}: {WARP_RAW}: the grabbing game had {raw} raw motions for {motions} motions, \
+             which a warp makes none of"
+        )));
+    }
+    if raw < motions {
+        return Err(Error::new(format!(
+            "{arch}: the grabbing game had {raw} raw motions for {motions} motions"
         )));
     }
     println!(
@@ -513,8 +527,13 @@ mod tests {
     fn a_grab_passes_only_when_the_game_reads_the_mouses_step() {
         let grab = |line: &str| judge_grab(Arch::X86_64, &[line.to_owned()]);
         assert!(
-            grab("xlatency: grab motions 118 raw 121 as-the-mouse 116 step 9 echoes 1").is_ok()
+            grab("xlatency: grab motions 118 raw 118 as-the-mouse 116 step 9 echoes 119").is_ok()
         );
+        // A raw motion for each warp as well as each motion.
+        let warps = grab("xlatency: grab motions 121 raw 243 as-the-mouse 114 step 9 echoes 122");
+        assert!(warps.is_err_and(|error| error.to_string().contains(WARP_RAW)));
+        assert!(grab("xlatency: grab motions 118 raw 119 as-the-mouse 116 step 9").is_err());
+        assert!(grab("xlatency: grab motions 118 raw 117 as-the-mouse 116 step 9").is_err());
         // No lock: the game reads wherever hyprix's pointer is.
         let unlocked =
             grab("xlatency: grab motions 120 raw 120 as-the-mouse 1 step 9 echoes 0 first 52,-3");
@@ -555,7 +574,7 @@ mod tests {
         }
         assert!(judge(Arch::X86_64, &lines, &timed).is_err(), "no grab line");
         lines.push(
-            "xlatency: grab motions 118 raw 120 as-the-mouse 115 step 9 echoes 118 first 9,0"
+            "xlatency: grab motions 118 raw 118 as-the-mouse 115 step 9 echoes 118 first 9,0"
                 .to_owned(),
         );
         assert!(judge(Arch::X86_64, &lines, &timed).is_ok());
