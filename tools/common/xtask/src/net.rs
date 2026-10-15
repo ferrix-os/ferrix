@@ -760,7 +760,7 @@ pub(crate) fn commands(servers: &Servers, curl: bool, git: bool) -> Vec<Command>
             argv: &[
                 "sh",
                 "-c",
-                "U=http://beyond.hg-cdn.com/YDUTE5gscDZ229CW/1.6/update/6/6/Windows/1.6.3_mMxq1NkIOTpFSacZ/packs/Beyond_Release_v1d6-Rel-os-10781849-2_prod_obt_official.zip.019; t() { cut -d' ' -f1 /proc/uptime; }; for d in null tmp null tmp; do a=$(t); if [ $d = null ]; then wget -q -O - $U | head -c 134217728 > /dev/null; else wget -q -O - $U | head -c 134217728 > /tmp/dl.bin; rm -f /tmp/dl.bin; fi; b=$(t); echo \"farspeed $d 128MiB $a $b\"; done",
+                "U=http://18.245.31.46/YDUTE5gscDZ229CW/1.6/update/6/6/Windows/1.6.3_mMxq1NkIOTpFSacZ/packs/Beyond_Release_v1d6-Rel-os-10781849-2_prod_obt_official.zip.019; t() { cut -d' ' -f1 /proc/uptime; }; for d in null tmp null tmp; do a=$(t); if [ $d = null ]; then wget -q --header 'Host: beyond.hg-cdn.com' -O - $U | head -c 134217728 | wc -c > /tmp/n; else wget -q --header 'Host: beyond.hg-cdn.com' -O - $U | head -c 134217728 > /tmp/dl.bin; ls -la /tmp/dl.bin | awk '{print $5}' > /tmp/n; rm -f /tmp/dl.bin; fi; b=$(t); echo \"farspeed $d $(cat /tmp/n) $a $b\"; done",
             ],
             status: 0,
             expect: Expect::Shaped(&["farspeed *"]),
