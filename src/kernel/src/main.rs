@@ -185,6 +185,8 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     syscall::deliver::install();
     register_system_calls();
     println!("  traps    vectors installed");
+    println!("  SABOTAGE fbcon negative control: panicking before mm::init");
+    panic!("fbcon sabotage before mm::init");
 
     let stats = bring_up_memory(view);
     // The log kept across a reset, as soon as the direct map's RAM is known
