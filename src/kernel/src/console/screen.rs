@@ -32,6 +32,10 @@ use ferrix_sync::SpinLock;
 
 /// The command-line flag that asks for it.
 const FLAG: &str = "ferrix.fbcon";
+/// Asks for single-size glyphs whatever the screen's width: as many lines
+/// as fit, for reading a whole boot off one photo of a machine with no other
+/// output (the N150 box).
+const SMALL_FLAG: &str = "ferrix.fbcon.small";
 
 /// The screen behind the text: the panic screen's, so a panic drawn over the
 /// console changes the banner and the text, not the whole screen.
@@ -100,13 +104,14 @@ struct Board {
 impl Board {
     /// A board over `surface` with the largest scale that leaves
     /// [`MIN_COLUMNS`], or `None` if not even two rows fit.
-    fn new(surface: Surface<'static>) -> Option<Board> {
+    fn new(surface: Surface<'static>, small: bool) -> Option<Board> {
         let width = surface.width().saturating_sub(MARGIN.saturating_mul(2));
         let top = MARGIN
             .max(surface.height() / TOP_INSET_DIVISOR)
             .saturating_add(STRIPES.saturating_mul(STRIPE_HEIGHT));
         let height = surface.height().saturating_sub(top.saturating_add(MARGIN));
-        let scale = (1..=MAX_SCALE)
+        let largest = if small { 1 } else { MAX_SCALE };
+        let scale = (1..=largest)
             .rev()
             .find(|&scale| width / GLYPH_WIDTH.saturating_mul(scale) >= MIN_COLUMNS)
             .unwrap_or(1);
@@ -234,7 +239,7 @@ pub(crate) fn start(view: &BootView<'_>) {
         return;
     };
     surface.fill(BACKGROUND);
-    let Some(mut board) = Board::new(surface) else {
+    let Some(mut board) = Board::new(surface, view.flag(SMALL_FLAG)) else {
         return;
     };
     let mut earlier = [0_u8; 2048];
