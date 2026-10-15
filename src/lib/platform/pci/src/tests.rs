@@ -651,6 +651,37 @@ fn sizing_finds_each_kind_of_aperture() {
     assert_eq!(partial.bar.address(), 0x80_E000_0000, "address");
 }
 
+/// An AHCI controller's registers are in BAR 5 (ABAR), not BAR 0: QEMU q35's
+/// ICH9 at 00:1f.2, class 01:06:01, legacy I/O BARs 0-4 and an 8 KiB 32-bit
+/// memory BAR 5. Sizing finds slot 5 as the one memory region, which the
+/// kernel mints whole as an aperture whose `bar` is 5 (`map_bar(5)`).
+#[test]
+fn an_ahci_controllers_abar_is_slot_five_and_mappable_whole() {
+    let mut bus = Bus::new();
+    let mut d = Device::endpoint(0x8086, 0x2922);
+    d.put16(COMMAND, COMMAND_MEMORY_SPACE | 1);
+    for (index, port) in [0xC001, 0xC021, 0xC041, 0xC061, 0xC081].into_iter().enumerate() {
+        d.bar(index, port, 0x0000_FFE0);
+    }
+    d.bar(5, 0xFEBD_4000, 0xFFFF_E000);
+    bus.put(at(0, 0x1F, 2), d);
+    let f = at(0, 0x1F, 2);
+    let memory: Vec<Region> = (0..6)
+        .filter_map(|index| bar::size(&mut bus, f, HeaderKind::Endpoint, index).unwrap())
+        .filter(|region| matches!(region.bar, Bar::Memory { .. }))
+        .collect();
+    assert_eq!(memory.len(), 1, "only the ABAR is memory");
+    let abar = &memory[0];
+    assert_eq!(abar.index, 5, "the ABAR is slot 5");
+    assert_eq!(abar.size, 0x2000, "8 KiB");
+    assert_eq!(abar.bar.address(), 0xFEBD_4000, "address");
+    assert_eq!(
+        msix::mappable(abar, None, 0x1000).as_slice(),
+        &[(0, 0x2000)],
+        "no MSI-X table: the whole BAR is the driver's"
+    );
+}
+
 #[test]
 fn sizing_restores_every_register_and_never_probes_a_decoding_function() {
     let (mut bus, f) = sized_device();
