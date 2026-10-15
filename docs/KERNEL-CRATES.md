@@ -284,7 +284,8 @@ review and the regenerated evidence), S4 1.
   `check_iommu` ran straight after. Product lines per ring: core 70,874 to
   70,706, item 9,417 to 9,418, load unchanged; check lines core 32,743 to
   32,984, item 4,281 to 4,275.
-* **S2** (branch `bs-a-s2`): the tools know the kernel's crates, from one
+* **S2** (branch `bs-a-s2`; the consultant's code review OK IF (1) to (3),
+  ledger line 1565, (2) owed before S3 lands): the tools know the kernel's crates, from one
   list, `kernel_crates` in `certification-item.json` (today the binary,
   holding all three rings), with `raised_checks` beside it (empty). The
   item-boundary gate walks every crate root's module tree and refuses a file
