@@ -297,6 +297,52 @@ fn unplugging_and_plugging_again_gives_every_slot_and_page_back() {
 }
 
 #[test]
+fn key_cycles_with_an_led_report_each_cross_both_rings_many_times() {
+    use ferrix_linux_abi::input::{EV_LED, LED_CAPSL};
+    let model = Xhci::new();
+    let keyboard = {
+        let mut m = model.borrow_mut();
+        let keyboard = m.add(sem_keyboard());
+        m.plug_root(0, keyboard);
+        keyboard
+    };
+    let mut bus = started(&model);
+    bus.poll();
+    let _ = outputs(&mut bus);
+    let _ = notes(&mut bus);
+    // Each cycle: a press, a release, and the LED report a console sends
+    // back -- three TRBs on the control ring, two on the interrupt ring.
+    // 300 cycles lap the control ring three times and the interrupt ring
+    // twice, past every count of ten reports on the way.
+    for cycle in 0..300_u32 {
+        model
+            .borrow_mut()
+            .report(keyboard, 1, &[0, 0, 4, 0, 0, 0, 0, 0]);
+        pass(&model, &mut bus, 1);
+        model.borrow_mut().report(keyboard, 1, &[0; 8]);
+        pass(&model, &mut bus, 1);
+        let got = outputs(&mut bus);
+        assert_eq!(
+            got,
+            vec![
+                Got::Events(0, vec![key(KEY_A, true), syn()]),
+                Got::Events(0, vec![key(KEY_A, false), syn()])
+            ],
+            "cycle {cycle}"
+        );
+        let caps = [RawEvent::new(EV_LED, LED_CAPSL, i32::from(cycle % 2 == 0))];
+        assert_eq!(bus.set_leds(0, &caps), Ok(true), "cycle {cycle}");
+        bus.poll();
+        let said = notes(&mut bus);
+        assert!(
+            !said.iter().any(|note| matches!(note, Note::Gone { .. })),
+            "cycle {cycle}: {said:?}"
+        );
+    }
+    no_violations(&model);
+}
+
+#[test]
 fn a_root_device_let_go_is_said_with_its_portsc_and_the_port_event() {
     let model = Xhci::new();
     let keyboard = {
