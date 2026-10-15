@@ -58,6 +58,13 @@ const K7_READ: &str = "/etc/k7-read";
 const K7_VOLUME: &str = "k7-data.img";
 const K7_HOME: &str = "k7-home.img";
 
+/// What the first K7 boot says just before its power-off, with its uptime.
+const K7_UPTIME: &str = "k7: uptime before the power-off";
+
+/// What the kernel says of the committer a data disk's mount started, before
+/// the uptime of its first commit.
+const FIRST_COMMIT: &str = "/data is committed every 30 s, first at ";
+
 /// What the first K7 boot writes and the second must read back.
 const K7_TEXT: &str = "committed by reboot(2)";
 
@@ -340,6 +347,9 @@ fn write_script() -> String {
             "echo \"k7: writing {file}\"\necho \"{K7_TEXT}\" > {file}\n"
         ));
     }
+    script.push_str(&format!(
+        "read up rest < /proc/uptime\necho \"{K7_UPTIME} $up\"\n"
+    ));
     script.push_str("poweroff -f -n\necho \"k7: poweroff returned\"\nexit 1\n");
     script
 }
@@ -427,7 +437,35 @@ fn judge_k7_write(lines: &[String]) -> std::result::Result<(), String> {
             "the kernel never said `{POWER_DOWN}`: poweroff -f -n did not reach reboot(2)"
         ));
     }
-    Ok(())
+    k7_premise(lines)
+}
+
+/// Whether K7's power-off came before the periodic committer's first commit,
+/// so that only `reboot(2)` can have committed the files: the uptime the
+/// script read just before it, below the one the kernel named for the
+/// committer's first commit when it mounted `/data`.
+fn k7_premise(lines: &[String]) -> std::result::Result<(), String> {
+    let seconds = |line: &String, after: &str| -> Option<f64> {
+        let rest = &line[line.find(after)? + after.len()..];
+        rest.split_whitespace().next()?.parse().ok()
+    };
+    let Some(first) = lines.iter().find_map(|line| seconds(line, FIRST_COMMIT)) else {
+        return Err(format!(
+            "the kernel never said when it first commits /data (`{FIRST_COMMIT}`)"
+        ));
+    };
+    let Some(off) = lines.iter().find_map(|line| seconds(line, K7_UPTIME)) else {
+        return Err(format!("{K7_WRITE} never said `{K7_UPTIME}`"));
+    };
+    if off < first {
+        Ok(())
+    } else {
+        Err(format!(
+            "K7's premise broke: the power-off came at {off} s of uptime, not before the \
+             periodic committer's first commit at {first} s, so reboot(2) need not have \
+             committed the files"
+        ))
+    }
 }
 
 /// Whether the second K7 boot read back what the first wrote, and init's
@@ -513,10 +551,12 @@ mod tests {
     fn the_write_boot_must_power_off_through_reboot() {
         let good = transcript(&[
             "  data     vde mounted writable at /data",
+            "  data     /data is committed every 30 s, first at 49.20 s of uptime",
             "  home     vdf mounted writable at /home",
             SUCCESS_MARKER,
             "k7: writing /data/k7",
             "k7: writing /home/k7",
+            "k7: uptime before the power-off 21.07",
             "reboot: Power down",
         ]);
         assert_eq!(judge_k7_write(&good), Ok(()));
@@ -535,6 +575,21 @@ mod tests {
             .cloned()
             .collect();
         assert!(judge_k7_write(&homeless).unwrap_err().contains("/home"));
+    }
+
+    #[test]
+    fn k7_fails_when_its_power_off_comes_after_the_first_periodic_commit() {
+        let mut lines = transcript(&[
+            "  data     /data is committed every 30 s, first at 49.20 s of uptime",
+            "k7: uptime before the power-off 21.07",
+        ]);
+        assert_eq!(k7_premise(&lines), Ok(()));
+        lines[1] = "k7: uptime before the power-off 49.20".to_owned();
+        let why = k7_premise(&lines).unwrap_err();
+        assert!(why.contains("K7's premise broke"), "{why}");
+        let _ = lines.remove(0);
+        assert!(k7_premise(&lines).unwrap_err().contains("first commits"));
+        assert!(write_script().contains("/proc/uptime"));
     }
 
     #[test]

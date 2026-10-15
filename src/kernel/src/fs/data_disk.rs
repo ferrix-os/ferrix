@@ -58,10 +58,7 @@ pub(crate) fn mount() {
             let _ = VOLUME.call_once(|| volume);
             println!("  data     vd{name} mounted writable at /data");
             if root_disk::start_committer() {
-                println!(
-                    "  data     /data is committed every {} s",
-                    root_disk::COMMIT_SECONDS
-                );
+                println!("  data     /data is committed {}", root_disk::schedule());
             } else {
                 println!("  data     no commit task: only sync and fsync reach /data");
             }

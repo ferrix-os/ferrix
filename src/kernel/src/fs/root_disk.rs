@@ -62,7 +62,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ferrix_bootinfo::BootView;
 use ferrix_btrfs::crc32c::crc32c;
@@ -254,6 +254,12 @@ pub(crate) fn start_committer() -> bool {
     if COMMITTER.swap(true, Ordering::SeqCst) {
         return true;
     }
+    // Its first commit is a whole interval from now: on the clock
+    // `/proc/uptime` reads, which K7 compares its power-off with.
+    FIRST_COMMIT.store(
+        crate::syscall::time::now_nanos().saturating_add(COMMIT_INTERVAL),
+        Ordering::SeqCst,
+    );
     let spawned = sched::spawn(
         "disk commit",
         commit_forever,
@@ -269,7 +275,22 @@ pub(crate) fn start_committer() -> bool {
 
 /// The interval [`commit_forever`] commits at, in whole seconds, for the
 /// mount lines.
-pub(crate) const COMMIT_SECONDS: u64 = COMMIT_INTERVAL / 1_000_000_000;
+const COMMIT_SECONDS: u64 = COMMIT_INTERVAL / 1_000_000_000;
+
+/// When the committer's first commit is due, in nanoseconds on
+/// `/proc/uptime`'s clock; zero before it is started.
+static FIRST_COMMIT: AtomicU64 = AtomicU64::new(0);
+
+/// The committer's line for a mount: how often, and when first, as
+/// `every 30 s, first at 49.31 s of uptime`.
+pub(crate) fn schedule() -> alloc::string::String {
+    let first = FIRST_COMMIT.load(Ordering::SeqCst);
+    alloc::format!(
+        "every {COMMIT_SECONDS} s, first at {}.{:02} s of uptime",
+        first / 1_000_000_000,
+        (first % 1_000_000_000) / 10_000_000
+    )
+}
 
 /// Unpack the initramfs into the volume, unless it already has this one.
 fn install(inside: &Context) -> Result<Installed, &'static str> {

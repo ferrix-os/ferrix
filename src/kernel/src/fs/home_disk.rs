@@ -62,10 +62,7 @@ pub(crate) fn mount() {
             let _ = VOLUME.call_once(|| volume);
             println!("  home     vd{name} mounted writable at /home");
             if root_disk::start_committer() {
-                println!(
-                    "  home     /home is committed every {} s",
-                    root_disk::COMMIT_SECONDS
-                );
+                println!("  home     /home is committed {}", root_disk::schedule());
             } else {
                 println!("  home     no commit task: only sync and fsync reach /home");
             }

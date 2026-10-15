@@ -1370,8 +1370,11 @@ writes `/data/k7` on a fresh volume and runs `poweroff -f -n`, which skips
 busybox's own `sync`. A second boot of that volume, under
 `ferrix.onexit=panic`, must read the file back and then panic with
 `FX-1501`. A test boot has no root disk, and the committer its data disk
-starts first commits 30 s after the mount, after the power-off, so only the
-call can have committed the file. K8 then checks that committer: a boot
+starts first commits 30 s after the mount, so only the call can have
+committed the file -- which the test checks rather than assumes: the
+kernel names the uptime of that first commit when it mounts `/data`, the
+script prints `/proc/uptime` just before `poweroff -f -n`, and the first
+boot fails with "K7's premise broke" unless the power-off came first. K8 then checks that committer: a boot
 writes `/data/k8` and `/home/k8`, sleeps 45 s and is stopped by the test
 with nothing synced, and a second boot must read both back (before
 2026-10-15 nothing committed a data disk under a root in memory; the
