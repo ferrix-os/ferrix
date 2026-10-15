@@ -808,10 +808,18 @@ fn calibrate_tsc() -> Option<u64> {
     // SAFETY: (DEVICE) put port 0x61 back exactly as it was found.
     unsafe { cpu::outb(PIT_GATE, saved) };
 
-    if elapsed == 0 {
+    let hz = elapsed * 1000 / CALIBRATION_MILLIS;
+    // No x86-64 processor's TSC counts below 200 MHz. A rate under that is a
+    // PIT whose output was already high -- QEMU's `pit=off` reads so, and a
+    // gated 8254 may too -- and adopting it would make every delay a
+    // hundredth of its length and every timeout come at once.
+    if hz < 200_000_000 {
+        crate::console::println!(
+            "  clock    WARNING: PIT channel 2 says the TSC runs at {hz} Hz, which no x86-64              processor does; the PIT is not counting"
+        );
         return None;
     }
-    Some(elapsed * 1000 / CALIBRATION_MILLIS)
+    Some(hz)
 }
 
 /// Read one of the HPET's 64-bit registers.
