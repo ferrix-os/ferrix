@@ -297,6 +297,38 @@ fn unplugging_and_plugging_again_gives_every_slot_and_page_back() {
 }
 
 #[test]
+fn a_root_device_let_go_is_said_with_its_portsc_and_the_port_event() {
+    let model = Xhci::new();
+    let keyboard = {
+        let mut m = model.borrow_mut();
+        let keyboard = m.add(sem_keyboard());
+        m.plug_root(0, keyboard);
+        keyboard
+    };
+    let _ = keyboard;
+    let mut bus = started(&model);
+    bus.poll();
+    let _ = outputs(&mut bus);
+    let _ = notes(&mut bus);
+    model.borrow_mut().unplug_root(0);
+    pass(&model, &mut bus, 1);
+    bus.poll();
+    let said = notes(&mut bus);
+    assert!(
+        said.iter()
+            .any(|note| matches!(note, Note::PortEvent { port: 0, .. })),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().any(|note| matches!(
+            note,
+            Note::RootGone { port: 0, status, changed: true } if status & 1 == 0
+        )),
+        "{said:?}"
+    );
+}
+
+#[test]
 fn a_device_behind_the_hub_comes_and_goes_while_the_other_reports() {
     let (model, mut bus, hub, mouse, keyboard) = hub_board(false);
     let _ = outputs(&mut bus);

@@ -461,6 +461,8 @@ pub struct Controller<R, D, C> {
     ports_changed: bool,
     /// Interrupt-pipe events that were not a plain success, for the console.
     troubles: [Option<Trouble>; TROUBLES],
+    /// Port Status Change events, for the console: the port and its status.
+    port_events: [Option<(u32, u32)>; TROUBLES],
     /// The controller reported an error of its own, or stopped answering.
     dead: bool,
 }
@@ -516,6 +518,7 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
             waiting: None,
             ports_changed: false,
             troubles: [None; TROUBLES],
+            port_events: [None; TROUBLES],
             dead: false,
         };
         let slots = (structure & 0xFF).min(MAX_SLOTS as u32);
@@ -830,7 +833,13 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
                     slot,
                 });
             }
-            TRB_PORT_STATUS_CHANGE => self.ports_changed = true,
+            TRB_PORT_STATUS_CHANGE => {
+                self.ports_changed = true;
+                // Bits 31:24 of the parameter: the port, from one.
+                if let Some(port) = (((parameter >> 24) & 0xFF) as u32).checked_sub(1) {
+                    self.note_port_event(port);
+                }
+            }
             TRB_TRANSFER_EVENT => {
                 let dci = ((control >> TRB_ENDPOINT_SHIFT) & 0x1F) as u8;
                 self.take_transfer(slot, dci, parameter, code, status & 0x00FF_FFFF);
@@ -906,6 +915,21 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
         }
         if let Some(entry) = self.pipes.get_mut(index) {
             *entry = Some(pipe);
+        }
+    }
+
+    /// Keep root port `port`'s status for the console, as a Port Status
+    /// Change event found it; the oldest goes when there is no room.
+    fn note_port_event(&mut self, port: u32) {
+        let status = self.port(port);
+        if self.port_events.iter().all(Option::is_some) {
+            self.port_events.rotate_left(1);
+            if let Some(last) = self.port_events.last_mut() {
+                *last = None;
+            }
+        }
+        if let Some(slot) = self.port_events.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some((port, status));
         }
     }
 
@@ -1655,6 +1679,16 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
                 *entry = None;
             }
         }
+    }
+
+    fn take_port_event(&mut self) -> Option<(u32, u32)> {
+        let first = self.port_events.first_mut()?.take()?;
+        self.port_events.rotate_left(1);
+        Some(first)
+    }
+
+    fn root_port_raw(&self, port: u32) -> u32 {
+        self.port(port)
     }
 
     fn take_trouble(&mut self) -> Option<Trouble> {
