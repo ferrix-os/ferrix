@@ -78,7 +78,7 @@ pub(crate) unsafe fn this_cpu_read(offset: usize) -> u64 {
 ///
 /// (SHARED) As on x86-64.
 #[cfg(not(target_arch = "x86_64"))]
-pub(crate) unsafe fn this_cpu_add(offset: usize, delta: u64) -> u64 {
+pub unsafe fn this_cpu_add(offset: usize, delta: u64) -> u64 {
     let saved = <super::Irq as IrqControl>::disable();
     // The mask is an `asm!` the compiler may move memory accesses across; the
     // fences keep the access inside it.

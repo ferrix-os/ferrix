@@ -980,7 +980,7 @@ impl Task {
     ///
     /// (SHARED) As [`Task::stack_pointer_slot`]: the caller must hold the lock of the
     /// run queue that owns this task, which is what orders every access.
-    pub(crate) unsafe fn user_state(&self) -> Option<*mut arch::UserState> {
+    pub unsafe fn user_state(&self) -> Option<*mut arch::UserState> {
         self.user.as_ref().map(|cell| cell.get())
     }
 

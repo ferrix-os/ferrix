@@ -41,24 +41,24 @@ const FRAME_SIZE: usize = 80;
 /// save path leaves it on the stack: lowest address first.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TrapFrame {
+pub struct TrapFrame {
     /// Which of the eight vector entries was taken.
-    pub(crate) kind: u32,
+    pub kind: u32,
     /// The fault status register, for an abort: `DFSR` or `IFSR`.
-    pub(crate) fsr: u32,
+    pub fsr: u32,
     /// The fault address register, for an abort: `DFAR` or `IFAR`.
-    pub(crate) far: u32,
+    pub far: u32,
     /// Padding, so the frame keeps the stack eight-byte aligned.
-    pub(crate) reserved: u32,
+    pub reserved: u32,
     /// `r0` through `r12`.
-    pub(crate) r: [u32; 13],
+    pub r: [u32; 13],
     /// The interrupted code's link register — its SVC-mode one.
-    pub(crate) lr: u32,
+    pub lr: u32,
     /// Where to return to: the interrupted instruction, or for a system call
     /// the one after it.
-    pub(crate) pc: u32,
+    pub pc: u32,
     /// The interrupted code's program status.
-    pub(crate) cpsr: u32,
+    pub cpsr: u32,
 }
 
 impl TrapFrame {
@@ -294,7 +294,7 @@ ferrix_enter_user:
 /// AArch64's reason: a tick in USR mode could switch to a task with an address
 /// space and back, and the switch back uninstalled the program's root. A
 /// program is a task of its own now, so a tick is an ordinary preemption.
-pub(super) const USER_CPSR: u32 = MODE_USR | (1 << 8) | (1 << 6);
+pub const USER_CPSR: u32 = MODE_USR | (1 << 8) | (1 << 6);
 
 /// `CPSR.T`: execute Thumb instructions.
 ///
@@ -319,11 +319,11 @@ unsafe extern "C" {
 /// user state instead, which is why [`UserRegs::set_stack`] writes there.
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-pub(crate) struct UserRegs(pub(super) TrapFrame);
+pub struct UserRegs(pub(super) TrapFrame);
 
 impl UserRegs {
     /// The same registers, as a child sees them: the call returned zero.
-    pub(crate) const fn for_child(&self) -> UserRegs {
+    pub const fn for_child(&self) -> UserRegs {
         let mut frame = self.0;
         frame.r[0] = 0;
         UserRegs(frame)
@@ -331,13 +331,13 @@ impl UserRegs {
 
     /// Start on `stack` instead, as `clone` with a stack argument asks. The
     /// user stack pointer is banked, so it goes in `state`.
-    pub(crate) fn set_stack(&mut self, state: &mut super::UserState, stack: u64) {
+    pub fn set_stack(&mut self, state: &mut super::UserState, stack: u64) {
         state.set_user_stack(stack as u32);
     }
 
     /// The stack pointer the program made the call with: banked, so read
     /// from the processor, which inside the call still holds it.
-    pub(crate) fn stack_pointer(&self) -> u64 {
+    pub fn stack_pointer(&self) -> u64 {
         u64::from(super::switch::user_banked().0)
     }
 }
@@ -386,7 +386,7 @@ pub(crate) fn fault_signal(frame: &TrapFrame, trap: &crate::trap::Trap) -> (u32,
 /// state -- banked stack pointer included -- loaded, and `regs` must be a frame
 /// a system call from that address space saved, living on the task's kernel
 /// stack.
-pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
+pub unsafe fn resume_user(regs: &UserRegs) -> ! {
     // SAFETY: (CONTEXT) the caller's guarantee is the assembly's contract.
     unsafe { ferrix_resume_user(core::ptr::from_ref(&regs.0)) }
 }
@@ -398,7 +398,7 @@ pub(crate) unsafe fn resume_user(regs: &UserRegs) -> ! {
 ///
 /// (CONTEXT) Must be called by a user task, on its own kernel stack, with its address
 /// space installed; `entry` and `stack` must be addresses inside that space.
-pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crate::trap::Abi) -> ! {
+pub unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crate::trap::Abi) -> ! {
     // One mode of user code on this architecture: every program is entered
     // as [`crate::trap::Abi::Native`], whatever it was asked to be.
     let _ = abi;
@@ -425,7 +425,7 @@ pub(crate) unsafe fn enter_user(entry: u64, stack: u64, argument: u64, abi: crat
 ///
 /// A system call from SVC mode, which is a kernel bug, or an `execve` this path
 /// does not yet honour.
-pub(crate) fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
+pub fn system_call(frame: &mut TrapFrame) -> Result<(), &'static str> {
     use crate::trap::{Outcome, SyscallArgs};
     use ferrix_linux_abi::nr::Syscall;
 
@@ -549,7 +549,7 @@ fn dispatch_marked(args: &crate::trap::SyscallArgs, regs: &UserRegs) -> crate::t
 /// caller-saved VFP registers, as across a function call: `channel_write_read`,
 /// `object_wait_one` and `port_wait`, the native calls that block (§9.14). By
 /// number, at the one `svc` entry every program uses.
-pub(super) const fn vectors_die_in(number: usize) -> bool {
+pub const fn vectors_die_in(number: usize) -> bool {
     use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, OBJECT_WAIT_ONE, PORT_WAIT};
     matches!(number, CHANNEL_WRITE_READ | OBJECT_WAIT_ONE | PORT_WAIT)
 }
@@ -760,7 +760,7 @@ pub(crate) unsafe fn init() {
 }
 
 /// Raise a breakpoint, so the boot self-check can prove the trap path runs.
-pub(crate) fn breakpoint() {
+pub fn breakpoint() {
     // SAFETY: (PROBE) `bkpt` raises a prefetch abort the vector table handles. Like
     // AArch64's `brk`, the return address it leaves is the instruction
     // itself, which is why returning needs `advance_past_breakpoint`.

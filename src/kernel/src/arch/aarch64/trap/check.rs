@@ -158,7 +158,7 @@ fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
 /// Interrupts are as the caller had them: a real entry starts with them masked
 /// and leaves them so, this wrapper does both for a task that runs with them
 /// open. `None` for a mode of entry this architecture does not have.
-pub(crate) fn drive_system_call(
+pub fn drive_system_call(
     abi: crate::trap::Abi,
     number: usize,
     args: [u64; 6],
@@ -197,7 +197,7 @@ pub(crate) fn drive_system_call(
 /// For the `channel_write_read` check (`object::write_read_check`), run on a
 /// thread of a check's process, as [`drive_system_call`] is run. An entry
 /// that refuses the frame answers `ENOSYS` with the registers as sent.
-pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
+pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     use ferrix_sync::IrqControl;
 
     let mut frame = ferrix_kernel_core::arch::aarch64::trap::TrapFrame {
@@ -237,7 +237,7 @@ pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64;
 /// # Errors
 ///
 /// A program that did not end as it had to.
-pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
+pub fn check_exception_entry() -> Result<(), &'static str> {
     crate::console::println!(
         "  entry    every exception on {} enters on a stack a program cannot set",
         ferrix_kernel_core::arch::aarch64::NAME

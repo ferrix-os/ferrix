@@ -2485,7 +2485,7 @@ fn lazy_bc(
 /// # Errors
 ///
 /// The first case that read what it must not.
-pub(crate) fn check_switch_state() -> Result<(), &'static str> {
+pub fn check_switch_state() -> Result<(), &'static str> {
     // First, so that a sabotage of the lazy switch fires with the lazy
     // check's own text rather than a later case's (`docs/OPAQUE-KERNEL.md`
     // §9.15).

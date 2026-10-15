@@ -54,7 +54,7 @@ pub(crate) fn dsb_ishst() {
 /// `dma_wmb` and `dma_rmb` are this barrier's two halves (`dmb oshst`,
 /// `dmb oshld`), and its `__iowmb` puts one before a register write for the
 /// same reason as the doorbell after a publish. F-44.
-pub(crate) fn dma_barrier() {
+pub fn dma_barrier() {
     // SAFETY: (SYSREG) a barrier has no effect beyond ordering.
     unsafe {
         asm!("dmb osh", options(nostack, preserves_flags));
@@ -406,7 +406,7 @@ fn data_line() -> u64 {
 ///
 /// For memory a core with its caches off is about to read: it reads RAM, and
 /// a line still dirty in this core's cache is a line it does not see.
-pub(crate) fn clean_to_poc(start: u64, len: u64) {
+pub fn clean_to_poc(start: u64, len: u64) {
     let line = data_line();
     let mut at = start - start % line;
     let end = start.saturating_add(len);
@@ -445,7 +445,7 @@ pub(crate) fn clean_to_poc(start: u64, len: u64) {
 /// because on a machine of three core types the one mapping the page is not
 /// the one that runs it, and a page's worth of maintenance is cheap beside a
 /// fault.
-pub(crate) fn sync_instructions(start: u64, len: u64) {
+pub fn sync_instructions(start: u64, len: u64) {
     clean_to_poc(start, len);
     // SAFETY: (SYSREG) barriers and cache maintenance change no data. The second `dsb`
     // completes the invalidate on every core before the page can be mapped.
@@ -465,7 +465,7 @@ pub(crate) fn sync_instructions(start: u64, len: u64) {
 /// For memory about to be shared with a device that does not snoop, through
 /// a mapping that bypasses the caches: a dirty line left behind could be
 /// evicted later, over whatever the device wrote since.
-pub(crate) fn clean_invalidate_to_poc(start: u64, len: u64) {
+pub fn clean_invalidate_to_poc(start: u64, len: u64) {
     let line = data_line();
     let mut at = start - start % line;
     let end = start.saturating_add(len);
@@ -922,7 +922,7 @@ pub(crate) fn write_icc_sgi1r(value: u64) {
 /// A 64-bit random number from the CPU's `RNDR` register, tried ten times;
 /// `None` on a core without it, which `ID_AA64ISAR0_EL1` says, or one that
 /// kept reporting failure.
-pub(crate) fn hardware_random() -> Option<u64> {
+pub fn hardware_random() -> Option<u64> {
     let isar0: u64;
     // SAFETY: (SYSREG) reading an identification register at EL1 changes nothing.
     unsafe {

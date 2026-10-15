@@ -280,7 +280,7 @@ pub(crate) fn enable_user_fpu() {
 static USER_FPU_DOUBLES: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 /// How many double registers a program's floating-point state has.
-pub(crate) fn user_fpu_doubles() -> u8 {
+pub fn user_fpu_doubles() -> u8 {
     USER_FPU_DOUBLES.load(core::sync::atomic::Ordering::Relaxed)
 }
 
@@ -673,7 +673,7 @@ fn data_line() -> u64 {
 ///
 /// For memory a core with its caches off is about to read: it reads RAM, and
 /// a line still dirty in this core's cache is a line it does not see.
-pub(crate) fn clean_to_poc(start: u64, len: u64) {
+pub fn clean_to_poc(start: u64, len: u64) {
     let line = data_line();
     let mut at = start - start % line;
     let end = start.saturating_add(len);
@@ -702,7 +702,7 @@ pub(crate) fn clean_to_poc(start: u64, len: u64) {
 /// empties every instruction cache in the inner shareable domain and
 /// `BPIALLIS` every branch predictor, whose targets can point into what was
 /// there before.
-pub(crate) fn sync_instructions(start: u64, len: u64) {
+pub fn sync_instructions(start: u64, len: u64) {
     clean_to_poc(start, len);
     // SAFETY: (SYSREG) barriers and cache and predictor maintenance change no data;
     // the register the two invalidates take is ignored.
@@ -725,7 +725,7 @@ pub(crate) fn sync_instructions(start: u64, len: u64) {
 /// a mapping that bypasses the caches: a dirty line left behind could be
 /// evicted later, over whatever the device wrote since, and a clean one
 /// would be read in place of it by the next cached access.
-pub(crate) fn clean_invalidate_to_poc(start: u64, len: u64) {
+pub fn clean_invalidate_to_poc(start: u64, len: u64) {
     let line = data_line();
     let mut at = start - start % line;
     let end = start.saturating_add(len);
@@ -769,7 +769,7 @@ pub(crate) fn dsb_ishst() {
 /// `dma_wmb` and `dma_rmb` are this barrier's two halves (`dmb oshst`,
 /// `dmb oshld`), and its `__iowmb` puts one before a register write for the
 /// same reason as the doorbell after a publish. F-44.
-pub(crate) fn dma_barrier() {
+pub fn dma_barrier() {
     // SAFETY: (SYSREG) a barrier has no effect beyond ordering.
     unsafe {
         asm!("dmb osh", options(nostack, preserves_flags));
