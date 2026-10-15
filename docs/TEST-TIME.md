@@ -616,6 +616,106 @@ coordinator decides, and installs it with `mv` once no run is waiting,
 keeps every verdict, log and line format the same; a run taken out of turn,
 and one with priority, says so in its log's `queued` line.
 
+## Caching and assembly: the baseline, 2026-10-15 (bs-b)
+
+The customer's target (2026-10-15): with warm caches, a rebuild after a
+small edit, through to a bootable test image, and `cargo xtask check`, in a
+minute or less, and the gold case in seconds. This is the half of that work
+that is caching and assembly (branches `bs-b-*`); the compile itself (the
+kernel crate, profiles, the linker) is `bs-a-*`'s. Measured in a worktree of
+`main` 4605abd72 with a target directory of its own, at a load of 27 to 41 on
+24 threads (the pool was full and an Endfield guest was writing to the
+disk), so the figures are a loaded host's; the logs and the scripts are in
+`~/ferrix-logs/bs-b/`.
+
+### A warm `build --arch x86_64`, and what happens after cargo
+
+| Run | Total | Natives (18 cargo calls) | Kernel compile | Image written |
+|---|---:|---:|---:|---:|
+| Cold, new target dir (components cloned) | 107 s | | | |
+| No-op | 33.0 s | 3.4 s | 0.3 s | **28.8 s** |
+| One string in `src/kernel/src/main.rs` changed | 125.1 s | 6.3 s | 53.4 s | **65.1 s** |
+| `test-boot --arch x86_64`, no-op, to `FERRIX-BOOT-OK` | 75.1 s | 3.9 s | | **22.6 s**, then 1.5 s copying the writable btrfs disk, then a 46 s boot |
+
+**The image write is the largest cost a warm build has.** `fat.rs` builds
+the 512 MiB FAT image in memory and writes it with one `write` of 536,870,912
+bytes into a truncated file (`strace`: the one call took 32 s of a 33 s
+no-op). 173 MiB of it are data (the 145 MB debug kernel ELF, the 29 MB
+initramfs, the loader); the rest are zeros, written out as zeros. On a host
+whose disk is busy the kernel throttles the writer to the disk's pace, so a
+build that changed nothing waits half a minute for 512 MiB of writeback, and
+every image a gate writes pays the same.
+
+**What an edit changes in the image.** Compared in 4 KiB blocks, the image
+after the one-string kernel edit above differs from the one before in **4
+blocks (16 KiB)** of 131,072; in 64 KiB blocks, 3. Of the 512 MiB, 173 MiB
+are not zero. So writing only the blocks that differ from the file already
+there turns 512 MiB of writes into kilobytes, and a no-op into none, with
+the file afterwards byte for byte the image a fresh build writes.
+
+The natives: each of the 18 programs is one `cargo build` call, about 0.2 s
+each when nothing changed (3.4-6.3 s at this load). The test disks
+(`test-disk.img`, `btrfs-test.img`, the blank btrfs images) are already
+rewritten only when missing or of another version.
+
+### A new worktree or gate slot, cold
+
+A cold `build --arch x86_64` took 107 s here and left 2.6 GB of target
+directory. A cold `check` takes 621 s in the pool against 271 s warm on the
+same tree (*The pool at saturation* above). A gate slot's target directory
+(slot 2, 52 GB) is mostly `debug/` (20 GB: the host workspace, 14 GB of it
+rustc's incremental caches), `apps/` (9.6 GB), the three kernel targets (14
+GB), `mitigations-off/` (3.6 GB), `check-compositor/` (3.8 GB) and
+`xtask-native-test/` (1.6 GB). Nothing is shared between slots or worktrees:
+the same commit built in two slots compiles twice, and a slot shed and made
+again (eight times on 2026-10-14/15) compiles everything again.
+
+### `check`: what runs in turn, and what an unchanged input runs anyway
+
+From the 119 passed `check` runs in the pool's logs of the last three days,
+grouped by how many crates each compiled (a warm slot on the same tree
+compiles fewer than 60):
+
+| Step (median s) | < 60 crates (31 runs) | 60-400 (56) | 400 or more (32) |
+|---|---:|---:|---:|
+| `check` in all | 152 | 304 | 529 |
+| the workspaces of their own, beside (`check-side`) | **110** | **273** | **537** |
+| of them: compositor tests | 39 | 46 | 94 |
+| main workspace: tests | 46 | 71 | 150 |
+| main workspace: documentation | 4 | 43 | 134 |
+| kernel clippy, both settings | 10 | 29 | 58 |
+| the audits, at once (critical: the architecture document) | 31 | 34 | 53 |
+
+* **The side workspaces are the critical path**, and they run one after
+  another: loom, compositor, init, auth, pkg, installer, media, adbd, nvos
+  and every app, each in its own target directory. Run side by side, their
+  time is their longest (the compositor's tests), not their sum.
+* **Every step runs whatever changed.** A change to the kernel alone still
+  runs the compositor's tests, every app's clippy and tests, the
+  architecture document and the Ferrocene type check of crates it did not
+  touch. A step whose inputs are unchanged since a passed run gives the
+  same verdict; skipping it needs those inputs written down exactly (the
+  sources, path dependencies, `Cargo.lock`, toolchain, flags, environment,
+  and the files its tests read while they run), which is what a cache keyed
+  on them has to prove.
+* **xtask's own tests: 148 of the 208 s of `tests`** in `es-check-land2`
+  (05:02Z): `native::tests::every_program_builds_and_passes_the_check_on_every_architecture`
+  builds all 18 native programs for three architectures, 54 cargo calls in
+  turn, into `xtask-native-test/` (the only "has been running for over 60
+  seconds" in the pool's recent logs, five times).
+
+### What a loop in seconds needs, and what stands in its way
+
+| Cost today (warm, one-file edit) | What removes it | Who |
+|---|---|---|
+| Image: 22-65 s writing 512 MiB | write only the blocks that differ (kilobytes for a kernel edit), proven equal to a fresh write | bs-b, first |
+| Natives: 18 cargo no-op calls, 3-6 s | one call, or skip them when their inputs' digest is unchanged | bs-b |
+| Kernel: one rustc, 53 s at load 34 (debug) | the crate split, the linker | bs-a |
+| The kernel ELF is 145 MB (debug info) and is written, read and copied whole | a stripped copy in the image with the full ELF beside it (`--strip-kernel` exists, opt-in) | bs-a / bs-b |
+| `check`: every step on every run | steps keyed by the digest of their inputs; side workspaces at once | bs-b |
+| New worktree or slot: everything compiled again | a compiler cache shared across target directories, same tree one slot (T1), no shed thrash (T2) | bs-b, gate.sh by the coordinator |
+| The boot: 23-46 s for `test-boot`'s stages 1-12 at this load | not caching: a boot is the test | |
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
