@@ -111,6 +111,8 @@ static SCRATCH: ScratchCell = ScratchCell(UnsafeCell::new(Scratch {
 
 /// Record the framebuffer boot mapped, for a panic to draw on.
 ///
+/// Only for a mapping the caller has just made and checked resolves to
+/// `framebuffer.phys`: before `mm::init`, [`surface`] trusts it unchecked.
 /// `mapped` bytes of `framebuffer` are mapped at `virt`. A format this kernel
 /// cannot draw in records nothing, and so does a mapping too small for a
 /// single line.
@@ -182,11 +184,18 @@ pub(crate) unsafe fn surface() -> Option<Surface<'static>> {
     let virt = VIRT.load(Ordering::Relaxed);
     // Still mapped where boot left it, and to the same memory. Nothing since
     // has had a reason to change that, and a panic is not the moment to
-    // assume it. Before `mm::init` the root table is not known, and a walk
-    // from zero would fault with nowhere to go; that early, there is no
-    // screen.
+    // assume it.
+    //
+    // Before `mm::init` the root table is not known to `mm`, and neither is
+    // the direct map a walk reads tables through, so a walk would fault with
+    // nowhere to go. That early the mapping is trusted as `install` recorded
+    // it: its one caller (`check_early_mapper`) records only a mapping it has
+    // just made and translated back to the framebuffer through the live
+    // tables, on the only processor running, and nothing between that and
+    // `mm::init` unmaps or remaps the framebuffer window. This is what lets a
+    // machine with no serial port show a hang or panic in early boot.
     let root = mm::root_table();
-    if root == 0 || mm::translate_in(root, virt) != Some(PHYS.load(Ordering::Relaxed)) {
+    if root != 0 && mm::translate_in(root, virt) != Some(PHYS.load(Ordering::Relaxed)) {
         return None;
     }
     let (Ok(address), Ok(len), Ok(width), Ok(height), Ok(stride)) = (
