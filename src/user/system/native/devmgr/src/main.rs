@@ -491,6 +491,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         };
         let index = u32::try_from(index).unwrap_or(u32::MAX);
         let Ok(info) = device.info() else {
+            say(format_args!("devmgr   device {index}: no info; not started"));
             failed += 1;
             continue;
         };
@@ -500,11 +501,20 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
             // A device nobody drives: both handles close here.
             continue;
         };
+        let name = driver_name(&given.names, driver);
         let Some(plan) = plan_for(kind, &info, &mut disks) else {
+            say(format_args!(
+                "devmgr   {name} {:#010x}: no plan for the device; not started",
+                info.location
+            ));
             failed += 1;
             continue;
         };
         let Some(slot) = started.get_mut(count as usize) else {
+            say(format_args!(
+                "devmgr   {name} {:#010x}: no slot left; not started",
+                info.location
+            ));
             failed += 1;
             continue;
         };
@@ -541,6 +551,24 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                 } else {
                     await_boot(channel, &port, info.location, u64::from(count), &mut inbox)
                 };
+                say(format_args!(
+                    "devmgr   {name} {:#010x} {:04x}:{:04x}: {}",
+                    info.location,
+                    info.vendor_id,
+                    info.device_id,
+                    if published {
+                        "started"
+                    } else {
+                        "ended before it published"
+                    }
+                ));
+                if !published {
+                    say(format_args!(
+                        "devmgr   {name} {:#010x}: exit status {}",
+                        info.location,
+                        died_status(exit_of(&process))
+                    ));
+                }
                 if published {
                     let _ = channel.write(
                         &Message::Bound {
@@ -571,6 +599,10 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                 count += 1;
             }
             Err(()) => {
+                say(format_args!(
+                    "devmgr   {name} {:#010x}: could not be started",
+                    info.location
+                ));
                 if let Plan::Gpu(program) = plan {
                     say(format_args!(
                         "devmgr   gpu {} not started: {program} could not be started",
@@ -1596,6 +1628,18 @@ fn image_index(
         })
     })?;
     u16::try_from(at).ok()
+}
+
+/// The name of image `driver`, for a line on the console.
+fn driver_name(names: &[[u8; NAME_BYTES]; MAX_DRIVERS], driver: u16) -> &str {
+    let name = names.get(usize::from(driver)).map_or(&[][..], |name| {
+        let end = name
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(name.len());
+        name.get(..end).unwrap_or(&[])
+    });
+    core::str::from_utf8(name).unwrap_or("?")
 }
 
 /// Start `image` on `device`: a ring of the kind the table names, a job, a

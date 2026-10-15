@@ -132,12 +132,44 @@ macro_rules! entry {
 /// A panic ends the process with [`PANIC_STATUS`].
 ///
 /// The one panic handler, and the only one there can be: a `no_std` program
-/// must define exactly one. It prints nothing because a native program has no
-/// console of its own — it is given channels, not descriptors — and the status
-/// is what a parent waiting on the process can see. The workspace lints deny
-/// every way of reaching it in production code, so a panic here is a bug the
-/// lints could not see, such as an arithmetic overflow.
+/// must define exactly one. It says where it panicked and why on standard
+/// error, which a driver has open on the console, as one line -- on a machine
+/// whose screen is its only output that line is the whole diagnosis -- and the
+/// status is what a parent waiting on the process can see. The workspace
+/// lints deny every way of reaching it in production code, so a panic here is
+/// a bug the lints could not see, such as an arithmetic overflow.
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
+fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
+    use core::fmt::Write as _;
+    let mut line = PanicLine {
+        bytes: [0; 200],
+        len: 0,
+    };
+    let _ = line.write_str("panic");
+    if let Some(location) = info.location() {
+        let _ = write!(line, " at {}:{}", location.file(), location.line());
+    }
+    let _ = write!(line, ": {}", info.message());
+    let _ = line.write_str("
+");
+    let _ = linux::write(2, line.bytes.get(..line.len).unwrap_or(&[]));
     exit(PANIC_STATUS)
+}
+
+/// The panic's line, cut at its buffer's end.
+struct PanicLine {
+    bytes: [u8; 200],
+    len: usize,
+}
+
+impl core::fmt::Write for PanicLine {
+    fn write_str(&mut self, text: &str) -> core::fmt::Result {
+        for &byte in text.as_bytes() {
+            if let Some(slot) = self.bytes.get_mut(self.len) {
+                *slot = byte;
+                self.len += 1;
+            }
+        }
+        Ok(())
+    }
 }

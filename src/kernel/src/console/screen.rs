@@ -6,7 +6,10 @@
 //! thing a person holding it can see. So the kernel's own console lines -- the
 //! same bytes [`super::recent`] keeps, and so the same ones the log and a
 //! later panic screen show -- are drawn here as they are printed. A program's
-//! output is not: this is the boot console, not a terminal.
+//! output to the console is drawn too: on a machine whose screen is its only
+//! output, a driver's lines and devmgr's word on a driver that stopped are the
+//! ones that say why a boot went wrong. It is still the boot console, not a
+//! terminal: nothing is read from it.
 //!
 //! It is asked for with `ferrix.fbcon` on the command line and is off
 //! otherwise. On a machine with a cable a second copy of the log only costs
