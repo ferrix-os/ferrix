@@ -264,6 +264,13 @@ fn script(wine: Wine, gryphlink: bool) -> String {
         }
         None => script,
     }
+    .replace(
+        "sleep 120\nfirst=$(sample)",
+        &format!(
+            "sleep {}\nsleep 120\nfirst=$(sample)",
+            std::env::var("FERRIX_EP_HOLD").unwrap_or_else(|_| "0".to_owned())
+        ),
+    )
 }
 
 /// Where [`SCRIPT`] says whether fsync is on.
