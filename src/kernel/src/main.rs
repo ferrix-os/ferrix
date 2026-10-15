@@ -1497,7 +1497,6 @@ fn bring_up_memory(view: &BootView<'_>) -> mm::Stats {
     }
     fallible::install_library_sections();
     report_memory(&stats);
-    console::screen::start(view);
     stats
 }
 
@@ -1739,6 +1738,11 @@ fn check_early_mapper(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(
             return Err("the framebuffer mapping does not resolve to the framebuffer");
         }
         panic::screen::install(&framebuffer, at, len);
+        // The boot console, under `ferrix.fbcon`, from here rather than after
+        // `mm::init`: the first point the framebuffer is mapped, so a hang in
+        // the rest of early boot is on the screen of a machine with no serial
+        // port. The lines before this are drawn from what the console kept.
+        console::screen::start(view);
     }
 
     Ok(())
