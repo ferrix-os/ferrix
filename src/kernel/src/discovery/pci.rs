@@ -683,6 +683,7 @@ fn check_host(
     for function in found {
         let (regions, msix, decoding, transport, host_visible) =
             check_function(&mut space, function, reserved, report)?;
+        let decoding = decoding_after(&mut space, &function, &regions, decoding);
         // Where the function's configuration space is, which minting one of
         // its MSI-X vectors writes to turn MSI-X on.
         let config_phys = host
@@ -980,7 +981,8 @@ fn check_function(
     if identity.class.base == CLASS_BRIDGE && identity.class.sub == SUBCLASS_HOST_BRIDGE {
         report.host_bridges += 1;
     }
-    let decoding = space.read16(address, COMMAND) & COMMAND_MEMORY_SPACE != 0; // before sizing
+    // Read before sizing, which switches decoding off and back to this.
+    let decoding = space.read16(address, COMMAND) & COMMAND_MEMORY_SPACE != 0;
 
     for capability in Capabilities::new(&*space, address) {
         let _ = capability?;
@@ -1069,21 +1071,18 @@ fn check_function(
             }
         }
     }
-    let on = decoding_after(space, address, identity.kind, &regions, decoding);
-    Ok((regions, msix, on, found_transport, host_visible))
+    Ok((regions, msix, decoding, found_transport, host_visible))
 }
 
-/// Whether `address` decodes memory once [`turn_decoding_on`] had its say:
-/// `decoding` as firmware left it -- read before sizing, which switches
-/// decoding off and back to that -- or on now.
+/// Whether `function` decodes memory once [`turn_decoding_on`] had its say:
+/// `decoding` as firmware left it, or on now.
 fn decoding_after(
     space: &mut Space,
-    address: Address,
-    kind: HeaderKind,
+    function: &Function,
     regions: &[Region],
     decoding: bool,
 ) -> bool {
-    decoding || turn_decoding_on(space, address, kind, regions)
+    decoding || turn_decoding_on(space, function.address, function.identity.kind, regions)
 }
 
 /// Turn memory decoding on for an endpoint firmware left it off for, when
