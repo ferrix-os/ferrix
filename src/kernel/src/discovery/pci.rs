@@ -980,8 +980,7 @@ fn check_function(
     if identity.class.base == CLASS_BRIDGE && identity.class.sub == SUBCLASS_HOST_BRIDGE {
         report.host_bridges += 1;
     }
-    // Read before sizing, which switches decoding off and back to this.
-    let decoding = space.read16(address, COMMAND) & COMMAND_MEMORY_SPACE != 0;
+    let decoding = space.read16(address, COMMAND) & COMMAND_MEMORY_SPACE != 0; // before sizing
 
     for capability in Capabilities::new(&*space, address) {
         let _ = capability?;
@@ -1070,12 +1069,13 @@ fn check_function(
             }
         }
     }
-    let decoding = decoding_after(space, address, identity.kind, &regions, decoding);
-    Ok((regions, msix, decoding, found_transport, host_visible))
+    let on = decoding_after(space, address, identity.kind, &regions, decoding);
+    Ok((regions, msix, on, found_transport, host_visible))
 }
 
 /// Whether `address` decodes memory once [`turn_decoding_on`] had its say:
-/// `decoding` as firmware left it, or on now.
+/// `decoding` as firmware left it -- read before sizing, which switches
+/// decoding off and back to that -- or on now.
 fn decoding_after(
     space: &mut Space,
     address: Address,
