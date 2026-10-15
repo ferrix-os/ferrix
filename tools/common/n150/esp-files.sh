@@ -30,8 +30,15 @@ scp -q "$here/esp-files.py" "$host:esp-files-$stamp.py"
 cat > "${TMPDIR:-/tmp}/n150-esp-$stamp.sh" <<EOF
 set -euo pipefail
 cd ~/$repo
-wt=.claude/worktrees/win-n150-esp-$stamp
-git worktree add --detach "\$wt" "$ref" >/dev/null
+# One worktree, reused: cargo's fingerprints name the source path, so a new
+# path each run rebuilt every workspace crate.
+wt=.claude/worktrees/win-n150-esp
+if [ -d "\$wt" ]; then
+    git -C "\$wt" reset -q --hard
+    git -C "\$wt" checkout -q --detach "$ref"
+else
+    git worktree add --detach "\$wt" "$ref" >/dev/null
+fi
 cd "\$wt"
 if ! git merge-base --is-ancestor $desktop HEAD; then
     # The desktop's xtask: its patch, but main.rs and n150.rs (which the
@@ -48,6 +55,8 @@ cargo xtask n150-install --tree /tmp/n150-esp-$stamp/tree --disk /tmp/n150-esp-$
 esp=\$(sed -n 's/.*the ESP from \(.*\), .ferrix-root.*/\1/p' /tmp/n150-esp-$stamp/install.log | tail -n 1)
 [ -f "\$esp" ] || { echo "esp-files: no ESP path in the install log"; exit 1; }
 python3 ~/esp-files-$stamp.py "\$esp" /tmp/n150-esp-$stamp/out
+# Compressed for the trip back: the kernel is mostly debug information.
+(cd /tmp/n150-esp-$stamp/out/FERRIX && zstd -q -T0 -f --rm KERNEL.ELF INITRD.IMG)
 rm -f /tmp/n150-esp-$stamp/disk.img /tmp/n150-esp-$stamp/disk.img.*
 EOF
 sed -i 's/\r$//' "${TMPDIR:-/tmp}/n150-esp-$stamp.sh"
@@ -57,6 +66,8 @@ ssh "$host" "bash n150-esp-$stamp.sh" </dev/null
 rm -rf "$out/esp-files.new"
 mkdir -p "$out/esp-files.new"
 scp -q -r "$host:/tmp/n150-esp-$stamp/out/." "$out/esp-files.new/"
+ssh "$host" "rm -rf /tmp/n150-esp-$stamp ~/n150-esp-$stamp.sh ~/esp-files-$stamp.py" </dev/null
+(cd "$out/esp-files.new/FERRIX" && zstd -q -d -f --rm KERNEL.ELF.zst INITRD.IMG.zst)
 (cd "$out/esp-files.new" && sha256sum -c --strict SHA256SUMS)
 rm -rf "$out/esp-files"
 mv "$out/esp-files.new" "$out/esp-files"
