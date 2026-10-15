@@ -686,6 +686,13 @@ symbol it cannot prove local as `call *sym@GOTPCREL(%rip)` with
 `R_X86_64_GOTPCREL`, not the `GOTPCRELX` lld could relax into a direct call.
 So 24,227 calls stayed indirect against 3,102 in the debug build.
 `-Z relax-elf-relocations` and `-Z plt` would fix that and are nightly-only.
+Counted again on 2026-10-15, as `call *(%rip)` instructions in the x86-64
+debug kernel's text: 33,432 on `main` 89a7cf74c, the one-crate kernel with
+no LTO, and 72,178 once the kernel is four crates (`docs/KERNEL-CRATES.md`,
+S3), since every call from one of its crates into another is a call to a
+symbol rustc cannot prove local. The table's debug rows predate both. The
+release kernel, linked with fat LTO, is one module either way: 5,093
+such calls against 5,129, its text 6.88 MB against 6.85 (`llvm-size`).
 
 Measured again on the release kernel of `main` 523fc3d50 (2026-10-07,
 po10-quick, `docs/OPAQUE-KERNEL.md` §9.11, Q8): 4,475 calls go through a

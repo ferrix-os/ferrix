@@ -1193,6 +1193,48 @@ to 45: main failed 2 of 27 and the branch 1 of 22, all three on those
 stage 13 checks; the boot times overlapped (main 31-60 s, the branch
 31-71 s). No rate of failure the change adds could be told from the load's.
 
+### The split: four crates (bs-a-s3b, S3 and S4)
+
+The kernel as four crates along the rings (`docs/KERNEL-CRATES.md`): an
+edit recompiles its crate and those above it. Measured on `bs-a-s3b`
+against `main` 89a7cf74c, each in a worktree and target directory of its
+own at `nice 10`, turn about per edit: a one-line `black_box` in a load file
+(`syscall/eventfd.rs`), an item file (`random.rs`, `fill`) and a core file
+(`smp.rs`, `count`), each followed by an unmeasured build after the edit is
+undone, so every measured build starts from the same state. Four rounds,
+host load 15 to 35 (`~/ferrix-logs/bs-a/s3b/editloop{,-clippy}.sh`,
+`editloop3.txt`, `editloop-clippy2.txt`). Medians; the wall times' range in
+brackets, since at these loads they are the host's more than the build's:
+
+| After an edit in | Kernel build (x86-64 debug), main | the split | `cargo clippy` of the kernel (x86-64, one pass), main | the split |
+|---|---|---|---|---|
+| a load file | 3.3 CPU-s, 315 MB written, 9.3 s (7-25) | 2.6 CPU-s, 337 MB, 14.6 s (6-24) | 8.9 CPU-s, 224 MB, 13.8 s (11-19) | **6.4 CPU-s, 177 MB, 8.6 s (8-13)** |
+| an item file | 3.3 CPU-s, 315 MB, 12.4 s (11-36) | 2.6 CPU-s, 361 MB, 13.6 s (7-19) | 8.7 CPU-s, 224 MB, 16.2 s (15-18) | 6.3 CPU-s, 191 MB, 14.3 s (7-19) |
+| a core file | 3.2 CPU-s, 315 MB, 16.3 s (6-22) | 3.8 CPU-s, 468 MB, 14.8 s (14-16) | 8.3 CPU-s, 224 MB, 14.8 s (9-21) | 8.3 CPU-s, 256 MB, 15.6 s (10-19) |
+
+* **The build gains little.** Since cuts C1 and C2 an edit's build was 3
+  CPU-s; the split takes a fifth off an edit in the load or the item and
+  adds a fifth to one in the core, which rebuilds all four. It does not
+  write less: the load crate holds the load ring, its 26 raised checks and
+  most of the tests (the largest incremental state of the four), and its `.rlib`,
+  64 MB with its objects, is written again for every edit in it; a core
+  edit writes all four crates' state. The wall time is that writing on a
+  host at loads of 15 to 35, and no difference shows above its noise.
+* **Clippy gains what the design said it would** (ledger 1531 C2): an edit
+  in the load lints the load crate and the binary only, about 28% less
+  processor time and a fifth less written per pass; `check` runs six such
+  passes (three targets, both mitigation settings), so a load edit's
+  `check` saves about 15 CPU-s there. A core edit costs the same as before.
+* **What is left of a kernel edit** is writing the edited crate's
+  incremental state and `.rlib`. Seconds would need the load crate itself
+  smaller -- its raised checks and its tests are most of it -- or a target
+  directory on faster storage than nazuna's, which is 95% full.
+* The debug kernel makes more calls through the GOT, every call between
+  two of its crates now (`docs/certification/SPECULATION.md` §8: 72,178
+  against 33,432 on x86-64), and its text segment is 7.52 MB against 7.16
+  (`llvm-size`). The release
+  kernel, linked with fat LTO, is one module either way.
+
 ## The cold build: the baseline, 2026-10-15 (bs-c)
 
 What everything costs from an empty target directory: a fresh worktree, a

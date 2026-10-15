@@ -48,7 +48,12 @@ Only `src/boot/*` and `src/kernel/` are freestanding;
 
 ## `src/kernel/`
 
-The kernel crate. Its source paths are load-bearing: the certification
+The kernel, as four crates along the certified item's rings
+(`docs/KERNEL-CRATES.md`): `ferrix-kernel-core`, `ferrix-kernel-item` and
+`ferrix-kernel-load`, whose manifests are in `core/`, `item/` and `load/` and
+whose roots are `src/kernel_core.rs`, `src/kernel_item.rs` and
+`src/kernel_load.rs`, beside the binary's `src/main.rs`; every file is in
+`src/` whichever crate builds it. Its source paths are load-bearing: the certification
 evidence (`docs/certification/coverage-*.json`) and the baselines in
 `tools/common/data/` anchor to `src/kernel/src/**` by file and line, so a file moved
 inside `src/kernel/src` means regenerating that evidence, and every file has a
@@ -58,7 +63,7 @@ ring in `tools/common/data/certification-item.json`.
 |---|---|
 | `src/kernel/src/arch/<isa>/` | What one instruction set architecture defines: entry and traps, context switch, signal frames, bringing up the other processors, speculation defences, the architected timer, and the interrupt controller a core reaches through system registers (`aarch64/gic/`, x86's APIC) |
 | `src/kernel/src/arch/arm_common/` | Drivers for Arm peripherals both Arm architectures can have: the GICv2, the PL011 and the STM32MP1's USART |
-| `src/kernel/src/platform/<vendor>/<soc>/` | The kernel's part in one system on chip's devices, found in the device tree at boot: `google/gs201` (the Pixel 7) and `st/stm32mp1` (the DK1), the vendor being the prefix of the chip's device-tree `compatible`. Declared inline in `main.rs`, and each file has its own ring |
+| `src/kernel/src/platform/<vendor>/<soc>/` | The kernel's part in one system on chip's devices, found in the device tree at boot: `google/gs201` (the Pixel 7) and `st/stm32mp1` (the DK1), the vendor being the prefix of the chip's device-tree `compatible`. Declared inline in the root of the crate that holds each file (`kernel_core.rs`, `kernel_load.rs`), and each file has its own ring |
 | `src/kernel/src/discovery/` | Finding what the machine has and handing it to ring 3: `acpi` and `fdt` reach the firmware's description of the machine, `pci` walks the buses it describes, and `devmgr` starts `devmgr` with what was found. The parsers are the host-testable crates in `src/lib/platform/`; what the kernel does for a running driver (device nodes, IOMMU domains, interrupts) stays outside |
 | `src/kernel/src/interfaces/` | The kernel's end of each ring-3 driver's protocol, not a driver: `block_ring`, `net_ring`, `display`, `render`, `input`, `audio`, `logctl`. Each checks its channel against the protocol crate in `src/lib/proto/` and publishes what the driver serves (a disk, a card, an event node). The drivers themselves are processes under `src/user/system/native/drivers/` |
 | `src/kernel/src/` otherwise | Everything the architecture does not change: memory, scheduling, objects, system calls, filesystems |

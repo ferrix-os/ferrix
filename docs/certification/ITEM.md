@@ -90,6 +90,29 @@ table above, after the checks F-10's passes wrote, F-38's quarantine, F-40's
 limit right and the other work since F-37, and the kernel relayout, which put
 the SoC code in `platform/` and the Arm peripherals in `arch/arm_common/`.)
 
+**Four crates since 2026-10-15** (`docs/KERNEL-CRATES.md`, step S3; the
+certification consultant's ledger lines 1477, 1531, 1585 and 1630). The
+kernel is built as four Cargo packages along the rings: `ferrix-kernel-core`
+holds every `core` file, `ferrix-kernel-item` every `item` file but
+`main.rs`, `ferrix-kernel-load` every `load` file, and the binary,
+`ferrix-kernel`, holds `main.rs` alone, with `stages_check.rs`. Every file
+stays where it is and keeps its ring; `kernel_crates` in the manifest says
+which crate holds which ring, and `check-item-boundary.py` fails a file
+reached by no crate or by two, or built by a crate that does not hold its
+ring. What the boundary gate asserted by reading paths, the compiler now
+enforces as well: the core's crate depends on no other kernel crate and
+the item's on the core's alone, so a core file cannot name the item or the
+load, nor an item file the load, without the build failing
+(`check-crate-layering.sh` holds the manifests to that order). The
+exceptions are listed: 26 check files are built by a crate above their
+ring, because what they check needs it (`raised_checks`), and none of them
+is product code. The core's and the item's `pub` items are the interface
+they offer the crates above -- nothing in the kernel was `pub` before --
+listed in `docs/generated/KERNEL-INTERFACE.md`, which `cargo xtask check`
+regenerates and compares; the few made `pub` only for a raised check are
+marked checks-only, and product code naming or calling one fails the gate
+or clippy.
+
 ### `core` — the minimal trusted base
 
 Memory protection, scheduling, capability objects, the trap and syscall entry
@@ -174,6 +197,10 @@ SAFETY-MANUAL AoU-24, not a requirement of the item.
 **`main.rs` is in the item, and it is the composition root.** The manifest
 puts it in the `item` ring as bring-up, and nothing about that is changed
 here. But it is also where the load is put together with the item. Since
+the kernel split it no longer declares the kernel's modules -- each crate's
+root does, beside it -- and reaches all of them through
+`ferrix_kernel_load`, which re-exports the crates below it; its calls into
+the load are the same calls, and the gate reads them the same way. Since
 2026-09-26 the gate reads its calls into the load -- 28 modules on
 2026-10-05 -- and records them under `composition_root` in the manifest
 rather than in the debt register: ratcheted the same way, filed against no
@@ -317,7 +344,20 @@ them; `docs/BACKLOG.md` has the row that classifies them.
 Two open points are for the assessor rather than settled here. The two
 allowlisted crates are linked by the core today without being classified at
 all, which this change makes visible rather than causes; classifying them
-`core` is the natural next step (F-56; `docs/BACKLOG.md`). And the coverage evidence, which is measured on
+`core` is the natural next step (F-56; `docs/BACKLOG.md`). And they are not
+the only ones: since the kernel split gave the core and the item manifests
+of their own, they are seen to link 25 more first-party libraries that no
+ring classifies -- `ferrix-acpi`, `ferrix-audit`, `ferrix-blkring`,
+`ferrix-bootinfo`, `ferrix-cgroupfs`, `ferrix-crng`, `ferrix-description`,
+`ferrix-devmgr-proto`, `ferrix-elf`, `ferrix-fbtext`, `ferrix-fdt`,
+`ferrix-frame`, `ferrix-heap`, `ferrix-kmem`, `ferrix-linux-abi`,
+`ferrix-native-abi`, `ferrix-objects`, `ferrix-paging`, `ferrix-pci`,
+`ferrix-qr`, `ferrix-sched`, `ferrix-vdso`, `ferrix-vfs`, `ferrix-virtio`
+and `ferrix-vma` -- which no item-scoped gate reads, two of them filesystem
+crates the core names (F-76). The kernel crates list them under
+`unclassified_deps`, F-76's debt register and not an endorsement: the gate
+fails one more without a ledger line, and an entry no longer needed.
+Classifying them is the customer's decision. And the coverage evidence, which is measured on
 the kernel image, does not yet reach the crates, whose tests run on the host;
 the traceability matrix reaches them since the same landing (`L.btrfs.*` and
 `H.STORE.*`, traced to the crates' host tests), with the requirements no test
