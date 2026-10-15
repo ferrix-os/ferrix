@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1648,
+  "max_total_lines": 1649,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -47,7 +47,12 @@
     "write that turns VFP on (1 line), ferrix_fpu_disable, the FPEXC write that",
     "turns it off for a program that has never used VFP (5 with its comment), and",
     "ferrix_fpu_exc, the PL1 read of FPEXC the checks compare the record with (4).",
-    "Two native programs trading a core then run no VFP instruction at all."
+    "Two native programs trading a core then run no VFP instruction at all.",
+    "1649 since 2026-10-15 (h6-wc, docs/DISPLAY.md section 8, the consultant's",
+    "ledger 1303, condition 7) for the lent firmware framebuffer's write-combining",
+    "window: one sfence in the kernel's arch::x86_64::framebuffer::",
+    "drain_write_combining, after the panic draw (1). The kernel target has SSE",
+    "off, so _mm_sfence cannot be called; efifb uses the runtime's mfence."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [
@@ -64,6 +69,11 @@
     "as the direction of travel that check-asm-budget.py prints every run."
   ],
   "files": [
+    {
+      "file": "src/kernel/src/arch/x86_64/framebuffer.rs",
+      "max_lines": 1,
+      "reason": "sfence after the panic screen's last store on a framebuffer mapped write-combining (ferrix.efifb, docs/DISPLAY.md section 8), so the picture leaves the fill buffers before the processor halts. The kernel target has SSE off, so core::arch's _mm_sfence cannot be called; a store fence has no other Rust spelling (atomic fences are mfence or nothing)."
+    },
     {
       "file": "src/boot/common/uefi/src/arch/aarch64.rs",
       "max_lines": 60,

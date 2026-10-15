@@ -77,7 +77,7 @@ pub(crate) fn mtrr_type(phys: u64, len: u64) -> Option<u8> {
 /// its drawing with on a framebuffer mapped write-combining, whose stores
 /// may otherwise wait in a fill buffer.
 pub(crate) fn drain_write_combining() {
-    // SAFETY: a fence: it changes no register or memory. Not `nomem`, so the
+    // SAFETY: (SYSREG) a fence: it changes no register or memory. Not `nomem`, so the
     // compiler keeps the drawing's stores before it.
     unsafe { asm!("sfence", options(nostack, preserves_flags)) };
 }

@@ -1230,14 +1230,16 @@ processor in bursts instead of one uncached store a pixel.
   cacheable type, which is what SDM 11.12.4 forbids beside WC.
 * *Flush ordering.* WC stores are weakly ordered and may sit in a
   processor's fill buffers. `efifb` ends every copy (SCANOUT, FLUSH) with
-  `sfence` and only then answers `FLIPPED`: a frame counts as shown after
-  the `sfence`, not after the last store. The panic screen ends its
+  a full fence (the runtime's `device_barrier`, `mfence` on x86-64, which
+  drains the write-combining buffers as `sfence` does) and only then
+  answers `FLIPPED`: a frame counts as shown after the fence, not after
+  the last store. The panic screen ends its
   drawing with `sfence` too (`arch::drain_write_combining`), before the
   processor halts.
 * *The figure.* A copy time in QEMU says nothing about WC: TCG and KVM
   both back the VGA BAR with host memory. The figure is the N150's:
   after READY, `efifb` copies 8 full frames from the card to the screen,
-  each ended by `sfence`, and says `efifb: full-frame copy WxH: median N
+  each ended by the fence, and says `efifb: full-frame copy WxH: median N
   us over 8 (write-combining)`. On the N150 at 1920x1080 (8.3 MB a frame)
   it must be under one 60 Hz frame, 16.7 ms; at one uncached store a
   pixel it would be several times that. QEMU prints the line too, and
