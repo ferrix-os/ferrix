@@ -755,6 +755,16 @@ pub(crate) fn commands(servers: &Servers, curl: bool, git: bool) -> Vec<Command>
             expect: Expect::Lines(leak_argv(vec![format!("{digest} {BIG_BYTES}")])),
         },
         speed_command(http),
+        // ep-rig scratch: a far download, the game's CDN over HTTP.
+        Command {
+            argv: &[
+                "sh",
+                "-c",
+                "U=http://beyond.hg-cdn.com/YDUTE5gscDZ229CW/1.6/update/6/6/Windows/1.6.3_mMxq1NkIOTpFSacZ/packs/Beyond_Release_v1d6-Rel-os-10781849-2_prod_obt_official.zip.019; t() { cut -d' ' -f1 /proc/uptime; }; for d in null tmp null tmp; do a=$(t); if [ $d = null ]; then wget -q -O - $U | head -c 134217728 > /dev/null; else wget -q -O - $U | head -c 134217728 > /tmp/dl.bin; rm -f /tmp/dl.bin; fi; b=$(t); echo \"farspeed $d 128MiB $a $b\"; done",
+            ],
+            status: 0,
+            expect: Expect::Shaped(&["farspeed *"]),
+        },
         // A datagram out and its answer back, which TCP's success does not
         // imply: the two take different paths through the stack.
         Command {
