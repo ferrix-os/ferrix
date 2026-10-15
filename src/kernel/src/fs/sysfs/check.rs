@@ -545,6 +545,28 @@ fn check_refusals(harness: &mut Harness) -> Checked<()> {
 /// global ids, so it is not root here (Steam's pressure-vessel is one).
 const NOT_ROOT: [(u32, u32); 2] = [(1000, 1000), (100_000, 100_000)];
 
+/// The files Linux lets only root read (`dmi-id.c`, `dmi_scan.c`), written
+/// out here rather than asked of the code that sets the modes, so that a
+/// mode changed there is caught here.
+const ROOT_ONLY: [&[u8]; 6] = [
+    b"product_serial",
+    b"product_uuid",
+    b"board_serial",
+    b"chassis_serial",
+    b"smbios_entry_point",
+    b"DMI",
+];
+
+/// The mode Linux gives the file at `tail`.
+fn linux_mode(tail: &[u8]) -> u32 {
+    let name = tail.rsplit(|&byte| byte == b'/').next().unwrap_or(tail);
+    if ROOT_ONLY.contains(&name) {
+        0o400
+    } else {
+        0o444
+    }
+}
+
 /// The firmware's identity and tables (`docs/DMI.md` §4): absent without a
 /// table the kernel accepted; with one, every file Linux would have, with
 /// Linux's mode and owner, reading what the parse decoded, refusing a write,
@@ -568,11 +590,9 @@ fn check_dmi(harness: &mut Harness) -> Checked<()> {
             .field_text(field, &mut |piece| text.extend_from_slice(piece))
             .is_some()
         {
-            files.push((
-                [&b"/class/dmi/id/"[..], field.name()].concat(),
-                text,
-                field.mode(),
-            ));
+            let tail = [&b"/class/dmi/id/"[..], field.name()].concat();
+            let mode = linux_mode(&tail);
+            files.push((tail, text, mode));
         } else if harness
             .read(&[&b"/class/dmi/id/"[..], field.name()].concat())
             .err()
@@ -584,16 +604,17 @@ fn check_dmi(harness: &mut Harness) -> Checked<()> {
     let mut alias = Vec::new();
     tables.modalias(&mut |piece| alias.extend_from_slice(piece));
     files.push((b"/class/dmi/id/modalias".to_vec(), alias, 0o444));
-    files.push((
-        b"/firmware/dmi/tables/smbios_entry_point".to_vec(),
-        Smbios::entry_point(&tables).to_vec(),
-        0o400,
-    ));
-    files.push((
-        b"/firmware/dmi/tables/DMI".to_vec(),
-        Smbios::table(&tables).to_vec(),
-        0o400,
-    ));
+    let mut uevent = b"MODALIAS=".to_vec();
+    tables.modalias(&mut |piece| uevent.extend_from_slice(piece));
+    files.push((b"/class/dmi/id/uevent".to_vec(), uevent, 0o444));
+    for (name, bytes) in [
+        (&b"smbios_entry_point"[..], Smbios::entry_point(&tables)),
+        (b"DMI", Smbios::table(&tables)),
+    ] {
+        let tail = [&b"/firmware/dmi/tables/"[..], name].concat();
+        let mode = linux_mode(&tail);
+        files.push((tail, bytes.to_vec(), mode));
+    }
     for (tail, expected, mode) in &files {
         check_dmi_file(harness, tail, expected, *mode)?;
     }
@@ -613,6 +634,15 @@ fn check_dmi_file(harness: &mut Harness, tail: &[u8], expected: &[u8], mode: u32
         .metadata;
     if meta.permissions != mode || meta.uid != 0 || meta.gid != 0 {
         return Err("a dmi file's mode or owner is not Linux's");
+    }
+    // A table file is a binary attribute: `stat` says its real length.
+    let size = if tail.starts_with(b"/firmware/") {
+        expected.len() as u64
+    } else {
+        4096
+    };
+    if meta.size != size {
+        return Err("a dmi file's size is not what Linux's stat would say");
     }
     if !harness.reads(tail, expected) {
         return Err("a dmi file does not read what the SMBIOS parse decoded");
