@@ -17,6 +17,8 @@
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+// CHECKS-ONLY-METHODS: home: super
+
 /// Bytes the switch pushes: nine registers and one word of padding.
 const FRAME_BYTES: u32 = 40;
 
@@ -351,6 +353,7 @@ impl UserState {
     /// which is whole; a frame built from a saved state later, a core dump or
     /// a register report reads it through here (§9.14, R6). The boot's check
     /// (`check::check_unsaved_reads_as_reset`) holds it.
+    #[doc(hidden)]
     pub fn fp(&self) -> (u32, [u64; 32]) {
         if !self.unsaved {
             return (self.fpscr, self.doubles);
@@ -478,7 +481,7 @@ pub fn masked<R>(body: impl FnOnce() -> R) -> R {
     result
 }
 
-// CHECKS-ONLY: arch/armv7a/switch/check.rs
+// CHECKS-ONLY: arch/armv7a/switch/check.rs; home: super
 /// `FPEXC.EN`.
 #[doc(hidden)]
 pub const FPEXC_EN: u32 = 1 << 30;
@@ -494,7 +497,7 @@ fn vfp_record() -> Option<&'static AtomicBool> {
     VFP_ON.get(crate::smp::this_cpu()?.logical)
 }
 
-// CHECKS-ONLY: arch/armv7a/switch/check.rs
+// CHECKS-ONLY: arch/armv7a/switch/check.rs; home: super
 /// Whether this processor's `FPEXC.EN` is set: its record, or the register
 /// itself before the record can be named.
 #[doc(hidden)]
@@ -514,7 +517,7 @@ pub fn set_vfp_record(on: bool) {
     }
 }
 
-// CHECKS-ONLY: arch/armv7a/switch/check.rs
+// CHECKS-ONLY: arch/armv7a/switch/check.rs; home: super
 /// `FPEXC`, read from the register: for the checks, which compare it with
 /// the record, and before the record exists. Zero on a core with no VFP.
 #[doc(hidden)]
@@ -530,7 +533,7 @@ pub fn fpexc() -> u32 {
 /// What a scrub loads: no `FPSCR` and every double zero, in read-only data.
 static ZERO_STATE: UserState = UserState::new();
 
-// CHECKS-ONLY: arch/armv7a/switch/check.rs
+// CHECKS-ONLY: arch/armv7a/switch/check.rs; home: super
 /// Turn this processor's VFP on: `FPEXC.EN`, an `isb`, the record.
 ///
 /// # Safety
@@ -543,7 +546,7 @@ pub unsafe fn turn_on() {
     set_vfp_record(true);
 }
 
-// CHECKS-ONLY: arch/armv7a/switch/check.rs
+// CHECKS-ONLY: arch/armv7a/switch/check.rs; home: super
 /// Zero every VFP register this processor has and `FPSCR`, then clear
 /// `FPEXC.EN` and the record (§9.15, I2): what stays behind a clear `EN` is
 /// nobody's.
@@ -561,6 +564,7 @@ pub unsafe fn scrub_off(count: u8) {
     set_vfp_record(false);
 }
 
+// CHECKS-ONLY: arch/armv7a/switch/check.rs; home: super
 /// The VFP part of bring-up on this processor (§9.15, D8): `EN` on, the
 /// feature registers read, the register file scrubbed of whatever firmware
 /// left there, `EN` off. Answers `MVFR0` and `MVFR1`.
@@ -573,6 +577,7 @@ pub unsafe fn scrub_off(count: u8) {
 ///
 /// (SYSREG) `CPACR` grants cp10 and cp11 on this core, and interrupts are
 /// masked.
+#[doc(hidden)]
 pub unsafe fn bring_up_vfp() -> (u32, u32) {
     // SAFETY: (SYSREG) the caller's guarantee.
     unsafe { ferrix_fpu_enable() };

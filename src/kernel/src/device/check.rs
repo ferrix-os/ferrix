@@ -86,7 +86,7 @@ pub(super) fn check_vectors(
     check_msi(published, report)
 }
 
-// CHECKS-ONLY: device/config_check.rs
+// CHECKS-ONLY: device/config_check.rs; home: super
 /// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
 /// its interrupt on request (QEMU's `docs/specs/edu.rst`).
 #[doc(hidden)]

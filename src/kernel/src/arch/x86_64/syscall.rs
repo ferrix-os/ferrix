@@ -369,7 +369,7 @@ fn cstar_stub_address() -> u64 {
     ferrix_syscall32_stub as *const () as usize as u64
 }
 
-// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs
+// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs; home: super
 /// Where the `LSTAR` entry point is: what `IA32_LSTAR` holds, and what the
 /// system call window check puts a breakpoint on.
 ///
@@ -630,7 +630,7 @@ fn write_outcome(frame: &mut SyscallFrame, outcome: Outcome) {
     }
 }
 
-// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs
+// CHECKS-ONLY: arch/x86_64/switch/check.rs, arch/x86_64/paranoid/check.rs; home: super
 /// Whether `number` is one of the three native calls declared to destroy the
 /// caller's vector registers, as across a function call: `channel_write_read`,
 /// `object_wait_one` and `port_wait`, the native calls that block (3a). By

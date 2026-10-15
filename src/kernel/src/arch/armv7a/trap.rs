@@ -285,6 +285,7 @@ ferrix_enter_user:
 "#
 );
 
+// CHECKS-ONLY: arch/armv7a/trap/check.rs; home: super
 /// `CPSR` for a program: USR mode, little-endian, with asynchronous aborts and
 /// FIQs masked and IRQs open. ARM state, unless the entry point says Thumb --
 /// see [`CPSR_THUMB`].
@@ -293,6 +294,7 @@ ferrix_enter_user:
 /// AArch64's reason: a tick in USR mode could switch to a task with an address
 /// space and back, and the switch back uninstalled the program's root. A
 /// program is a task of its own now, so a tick is an ordinary preemption.
+#[doc(hidden)]
 pub const USER_CPSR: u32 = MODE_USR | (1 << 8) | (1 << 6);
 
 /// `CPSR.T`: execute Thumb instructions.
@@ -544,7 +546,7 @@ fn dispatch_marked(args: &crate::trap::SyscallArgs, regs: &UserRegs) -> crate::t
     outcome
 }
 
-// CHECKS-ONLY: arch/armv7a/switch/check.rs, arch/armv7a/trap/check.rs
+// CHECKS-ONLY: arch/armv7a/switch/check.rs, arch/armv7a/trap/check.rs; home: super
 /// Whether `number` is one of the three native calls declared to lose the
 /// caller-saved VFP registers, as across a function call: `channel_write_read`,
 /// `object_wait_one` and `port_wait`, the native calls that block (§9.14). By

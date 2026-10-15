@@ -341,6 +341,10 @@ fn sigcontext_of(
     Ok(sc)
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the home of a method made pub only for a raised check: pub(super) before the split"
+)]
 /// Write the program's x87 and SSE state at `fpstate` as `_fpstate_32`: the
 /// `FXSAVE` image at its 112th byte, `magic` saying so, and the control and
 /// status words in the `fsave` environment's first two.

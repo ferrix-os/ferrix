@@ -1113,6 +1113,43 @@ CHECKS_ONLY_ITEM = re.compile(
     r"(?:fn|struct|enum|union|trait|type|const|static|mod)\s+(?:mut\s+)?(?:r#)?([^\W\d]\w*)"
 )
 DISALLOWED_ALLOW = re.compile(r"#\s*(!?)\s*\[\s*(?:allow|expect)\s*\([^\]]*clippy::disallowed_methods")
+# `; home: super` (or `self`, or `in crate::a::b`) after a marker's files: the
+# scope that reached the item before it was made `pub` for a raised check,
+# its old visibility (ledger line 1795, S3.2a). `self` when not said.
+CHECKS_ONLY_HOME = re.compile(r";\s*home:\s*(self|super|in\s+crate((?:::\w+)*))\s*$")
+# A file's own `#[doc(hidden)]` checks-only methods, which no marker can
+# stand on (they are inside an `impl`), take their home from this line.
+CHECKS_ONLY_METHOD_HOME = re.compile(r"^//\s*CHECKS-ONLY-METHODS:\s*home:\s*(self|super)\s*$")
+
+
+def home_scope(module: ModPath, home: str) -> ModPath:
+    """The modules a checks-only item's home covers: its own module and
+    below for `self`, its parent's for `super`, the named one's for `in`."""
+    if home == "super":
+        return module[:-1]
+    if home.startswith("in"):
+        path = home.split("crate", 1)[1]
+        return tuple(seg for seg in path.split("::") if seg)
+    return module
+
+
+def checks_only_homes(files: list[str], read) -> dict[tuple[ModPath, str], str]:
+    """`{(module, item): home}` for every placeable CHECKS-ONLY marker."""
+    homes: dict[tuple[ModPath, str], str] = {}
+    checks_only_items(files, read, None, homes)
+    return homes
+
+
+def method_home_scopes(files: list[str], read) -> list[tuple[str, ModPath]]:
+    """`(file, scope)` for each file that says where its checks-only methods'
+    home is."""
+    out = []
+    for rel in files:
+        for line in read(rel).split("\n"):
+            found = CHECKS_ONLY_METHOD_HOME.match(line.strip())
+            if found:
+                out.append((rel, home_scope(module_of_file(rel), found.group(1))))
+    return out
 
 
 def kernel_crate_files(entries: dict[str, dict], read, exists, listing: list[str]):
@@ -1165,7 +1202,8 @@ def kernel_crate_files(entries: dict[str, dict], read, exists, listing: list[str
     return reached, problems
 
 
-def checks_only_items(files: list[str], read, problems: list[str] | None = None) -> dict[tuple[ModPath, str], str]:
+def checks_only_items(files: list[str], read, problems: list[str] | None = None,
+                      homes: dict | None = None) -> dict[tuple[ModPath, str], str]:
     """`{(module, item): file}` for every item marked `// CHECKS-ONLY:`: the
     marker on a line of its own at the file's own module scope, then the item
     after its attributes and doc comments. A marker the gate cannot place --
@@ -1214,6 +1252,9 @@ def checks_only_items(files: list[str], read, problems: list[str] | None = None)
                                     f"gate can place (fn, struct, enum, union, trait, type, const, static, mod)")
                 continue
             out[(module_of_file(rel), found.group(1))] = rel
+            if homes is not None:
+                home = CHECKS_ONLY_HOME.search(line)
+                homes[(module_of_file(rel), found.group(1))] = home.group(1) if home else "self"
     return out
 
 
@@ -1281,7 +1322,8 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
             problems.append(f"raised_checks: {rel} is no kernel file; the entry is stale")
 
     # Checks-only items, and the allows that let a check call their methods.
-    marked = checks_only_items(files, read, problems)
+    homes: dict[tuple[ModPath, str], str] = {}
+    marked = checks_only_items(files, read, problems, homes)
     modules, refs, _ = build(files, read)
     problems += kernel_paths_unresolved(refs, modules, {p.replace("-", "_") for p in entries})
     if marked:
@@ -1295,12 +1337,13 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
                 continue
             for name in ref.segments:
                 where = marked.get((landed[0], name))
-                # The item's own module and those below it, in its own crate
-                # -- what a private item reached before it was made `pub` for
-                # a raised check -- still use it as product code did; anything
-                # else is product code reaching a checks-only item (ledger
-                # lines 1531 (4)(b), 1630).
-                scope = landed[0]
+                # The item's home, in its own crate -- its module and below
+                # for a private item, its parent's for a `pub(super)` one:
+                # what reached it before it was made `pub` for a raised check
+                # -- still uses it as product code did; anything else is
+                # product code reaching a checks-only item (ledger lines 1531
+                # (4)(b), 1630, 1795).
+                scope = home_scope(landed[0], homes.get((landed[0], name), "self"))
                 if where is not None and crate_of.get(ref.file) == crate_of.get(where) \
                         and ref.module[: len(scope)] == scope:
                     continue
@@ -1329,6 +1372,11 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
             problems.append(f"{ref.file}:{ref.line}: names {'::'.join(ref.segments)}, check code in "
                             f"{target} ({'raised' if target in raised else crate_of.get(target)}), "
                             f"from product code")
+    # Where a per-item allow of a checks-only method may stand: the home of
+    # a marked item (its file's scope) and of a file's checks-only methods.
+    allow_scopes = [(where, home_scope(module, homes.get((module, item), "self")))
+                    for (module, item), where in marked.items()]
+    allow_scopes += method_home_scopes(files, read)
     for rel in files:
         masked_lines = read(rel).split("\n")
         for number, line in enumerate(masked_lines, 1):
@@ -1339,9 +1387,12 @@ def kernel_crate_problems(manifest: dict, files: list[str], ring_of: dict[str, s
             if whole_file and rel not in raised:
                 problems.append(f"{rel}:{number}: allows clippy::disallowed_methods for the whole file; "
                                 f"only a raised check may")
-            elif not whole_file and rel not in raised and rel not in set(marked.values()):
+            elif not whole_file and rel not in raised and rel not in set(marked.values()) \
+                    and not any(crate_of.get(rel) == crate_of.get(home_file)
+                                and module_of_file(rel)[: len(scope)] == scope
+                                for home_file, scope in allow_scopes):
                 problems.append(f"{rel}:{number}: allows clippy::disallowed_methods outside a raised check "
-                                f"and outside the module of a checks-only item")
+                                f"and outside the home of a checks-only item")
             elif not whole_file and "reason" not in line:
                 problems.append(f"{rel}:{number}: allows clippy::disallowed_methods without a reason")
     return problems
@@ -1627,7 +1678,13 @@ def _hook_self_test() -> list[str]:
 # shaped as docs/KERNEL-CRATES.md lays them out; each break must be refused.
 _KERNEL_TREE = {
     "main.rs": "mod stages_check;\nfn main() {}\n",
-    "kernel_core.rs": "pub mod arch;\npub mod mm;\npub mod object;\n",
+    "kernel_core.rs": "pub mod arch;\npub mod mm;\npub mod object;\npub mod sched;\n",
+    # A file's checks-only methods with home `super`: its parent's own calls
+    # stand behind a per-function allow.
+    "sched.rs": "pub mod meth;\n#[allow(clippy::disallowed_methods, reason = \"its own module's\")]\n"
+                "fn parent() { meth::T.m(); }\n",
+    "sched/meth.rs": "// CHECKS-ONLY-METHODS: home: super\npub struct T;\nimpl T {\n    #[doc(hidden)]\n"
+                     "    pub fn m(&self) {}\n}\n",
     "kernel_item.rs": "pub use ferrix_kernel_core::{mm, object};\npub mod syscall;\n",
     # The raised architecture check by ledger line 1579's shape A: declared
     # by position with no `cfg`, the file itself `#![cfg(..)]`; and the one
@@ -1649,7 +1706,10 @@ _KERNEL_TREE = {
     "mm.rs": "pub mod check;\n// CHECKS-ONLY: object/check.rs\n#[allow(\n    dead_code,\n    reason = \"x\"\n)]\n"
              "#[doc(hidden)]\npub fn secret() {}\npub fn frame() { crate::mm::secret(); }\n",
     "mm/check.rs": "pub fn probe() { super::frame(); }\n",
-    "object/mod.rs": "pub fn make() { crate::mm::frame(); }\n",
+    # A checks-only item that was pub(super), named by its parent module:
+    # its home (ledger line 1795, S3.2a).
+    "object/mod.rs": "pub mod inner;\npub fn make() { crate::mm::frame(); inner::sibling(); }\n",
+    "object/inner.rs": "// CHECKS-ONLY: object/check.rs; home: super\n#[doc(hidden)]\npub fn sibling() {}\n",
     "object/check.rs": "#![allow(clippy::disallowed_methods, reason = \"a raised check\")]\n"
                        "fn c() { crate::mm::secret(); crate::fs::open(); }\n",
     "syscall/mod.rs": "pub use crate::mm::*;\npub fn dispatch() {}\n",
@@ -1659,7 +1719,7 @@ _KERNEL_TREE = {
 }
 _KERNEL_MANIFEST = {
     "rings": {
-        "core": {"members": ["kernel_core.rs", "arch/**", "mm.rs", "mm/**", "object/**"]},
+        "core": {"members": ["kernel_core.rs", "arch/**", "mm.rs", "mm/**", "object/**", "sched.rs", "sched/**"]},
         "item": {"members": ["kernel_item.rs", "main.rs", "syscall/mod.rs", "stages_check.rs"]},
         "load": {"members": ["kernel_load.rs", "fs.rs", "syscall/eventfd.rs", "x.rs"]},
     },
@@ -1721,6 +1781,11 @@ _KERNEL_BREAKS = [
      {"tree": {"fs.rs": "pub fn open() { crate::mm::secret(); }\n"}}, "checks-only"),
     ("a checks-only item named from another module of its own crate",
      {"tree": {"object/mod.rs": "pub fn make() { crate::mm::secret(); }\n"}}, "checks-only"),
+    ("a formerly pub(super) checks-only item named from load product code",
+     {"tree": {"fs.rs": "pub fn open() { crate::object::inner::sibling(); }\n"}}, "checks-only"),
+    ("a checks-only item's home narrower than its old visibility",
+     {"tree": {"object/inner.rs": "// CHECKS-ONLY: object/check.rs\n#[doc(hidden)]\npub fn sibling() {}\n"}},
+     "names object::inner::sibling, checks-only"),
     ("a checks-only item named through a re-export chain",
      {"tree": {"fs.rs": "pub fn open() { crate::syscall::secret(); }\n"}}, "checks-only"),
     ("a path through a kernel crate that names nothing",

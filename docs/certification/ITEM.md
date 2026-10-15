@@ -109,9 +109,13 @@ ring, because what they check needs it (`raised_checks`), and none of them
 is product code. The core's and the item's `pub` items are the interface
 they offer the crates above -- nothing in the kernel was `pub` before --
 listed in `docs/generated/KERNEL-INTERFACE.md`, which `cargo xtask check`
-regenerates and compares; the few made `pub` only for a raised check are
-marked checks-only, and product code naming or calling one fails the gate
-or clippy.
+regenerates and compares; those that were private or `pub(super)` and are
+`pub` only for a raised check are marked checks-only with their old scope,
+and product code outside it naming or calling one fails the gate or clippy.
+The 483 that were `pub(crate)` and are named above only by checks are listed
+in `tools/common/data/kernel-formerly-crate-wide.json`: core and item
+internals the load's checks reach, which load product code could reach
+before the split exactly as now -- none is newly exposed.
 
 ### `core` — the minimal trusted base
 
