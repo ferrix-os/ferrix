@@ -13,10 +13,13 @@ use std::time::Duration;
 const CREATE_WINDOW: u8 = 1;
 const MAP_WINDOW: u8 = 8;
 const CHANGE_PROPERTY: u8 = 18;
+const GRAB_POINTER: u8 = 26;
+const WARP_POINTER: u8 = 41;
 const CREATE_PIXMAP: u8 = 53;
 const CREATE_GC: u8 = 55;
 const CHANGE_GC: u8 = 56;
 const POLY_FILL_RECTANGLE: u8 = 70;
+const CREATE_CURSOR: u8 = 93;
 const QUERY_EXTENSION: u8 = 98;
 
 /// `XInput2`'s minor opcodes, its raw motion event and its mask for every
@@ -36,6 +39,11 @@ const PRESENT_COMPLETE_MASK: u32 = 2;
 /// Core events by their code.
 const GENERIC_EVENT: u8 = 35;
 const MAP_NOTIFY: u8 = 19;
+const MOTION_NOTIFY: u8 = 6;
+const CONFIGURE_NOTIFY: u8 = 22;
+
+/// `GrabPointer`'s `PointerMotion` event mask bit.
+const POINTER_MOTION_MASK: u16 = 1 << 6;
 
 /// Four bytes at `at`, little-endian.
 pub(crate) fn word(bytes: &[u8], at: usize) -> Option<u32> {
@@ -143,6 +151,11 @@ pub(crate) enum Packet {
     },
     /// The window was mapped.
     Mapped,
+    /// Core pointer motion, at this position on the window it is reported
+    /// to.
+    Motion { x: i16, y: i16 },
+    /// The window has this size now.
+    Configured { width: u16, height: u16 },
     /// Anything else.
     Other,
 }
@@ -182,8 +195,21 @@ pub(crate) fn packet(bytes: &[u8], opcodes: Opcodes) -> Packet {
             Packet::Other
         }
         Some(code) if code & 0x7f == MAP_NOTIFY => Packet::Mapped,
+        Some(code) if code & 0x7f == MOTION_NOTIFY => Packet::Motion {
+            x: signed(half(bytes, 24).unwrap_or(0)),
+            y: signed(half(bytes, 26).unwrap_or(0)),
+        },
+        Some(code) if code & 0x7f == CONFIGURE_NOTIFY => Packet::Configured {
+            width: half(bytes, 20).unwrap_or(0),
+            height: half(bytes, 22).unwrap_or(0),
+        },
         _ => Packet::Other,
     }
+}
+
+/// An `INT16` from its two bytes as read.
+const fn signed(value: u16) -> i16 {
+    i16::from_le_bytes(value.to_le_bytes())
 }
 
 /// How long the packet at the start of `bytes` is, once 32 bytes are there:
@@ -395,6 +421,54 @@ impl Display {
         Ok(gc)
     }
 
+    /// A cursor that shows nothing, as a game hides the pointer with: a
+    /// 1x1 bitmap, cleared, for both its picture and its mask.
+    pub(crate) fn blank_cursor(&mut self, window: u32) -> Result<u32, String> {
+        let bitmap = self.id();
+        let mut body = words(&[bitmap, window]);
+        body.extend_from_slice(&1_u16.to_le_bytes());
+        body.extend_from_slice(&1_u16.to_le_bytes());
+        self.send(&request(CREATE_PIXMAP, 1, &body))?;
+        let gc = self.id();
+        // foreground (bit 2) 0.
+        self.send(&request(CREATE_GC, 0, &words(&[gc, bitmap, 1 << 2, 0])))?;
+        let mut body = words(&[bitmap, gc, 0]);
+        body.extend_from_slice(&1_u16.to_le_bytes());
+        body.extend_from_slice(&1_u16.to_le_bytes());
+        self.send(&request(POLY_FILL_RECTANGLE, 0, &body))?;
+        let cursor = self.id();
+        // Black on black, its hot spot at 0, 0.
+        let mut body = words(&[cursor, bitmap, bitmap]);
+        body.extend_from_slice(&[0; 12]);
+        body.extend_from_slice(&[0; 4]);
+        self.send(&request(CREATE_CURSOR, 0, &body))?;
+        Ok(cursor)
+    }
+
+    /// `GrabPointer` on `window`, its motion reported to it, the pointer
+    /// confined to it and shown as `cursor`, asynchronous: the reply's
+    /// status, 0 for `Success`.
+    pub(crate) fn grab_pointer(&mut self, window: u32, cursor: u32) -> Result<u8, String> {
+        let mut body = words(&[window]);
+        body.extend_from_slice(&POINTER_MOTION_MASK.to_le_bytes());
+        // Both modes asynchronous (1).
+        body.extend_from_slice(&[1, 1]);
+        body.extend_from_slice(&words(&[window, cursor, 0]));
+        // owner-events false.
+        let reply = self.round_trip(&request(GRAB_POINTER, 0, &body))?;
+        Ok(reply.get(1).copied().unwrap_or(u8::MAX))
+    }
+
+    /// `WarpPointer` to (`x`, `y`) on `window`, from wherever it is.
+    pub(crate) fn warp_pointer(&mut self, window: u32, x: i16, y: i16) -> Result<(), String> {
+        let mut body = words(&[0, window, 0, 0]);
+        body.truncate(12);
+        body.extend_from_slice(&[0; 4]);
+        body.extend_from_slice(&x.to_le_bytes());
+        body.extend_from_slice(&y.to_le_bytes());
+        self.send(&request(WARP_POINTER, 0, &body))
+    }
+
     /// Fill all of `pixmap` with `pixel`.
     pub(crate) fn fill(&mut self, pixmap: u32, gc: u32, pixel: u32) -> Result<(), String> {
         self.send(&request(CHANGE_GC, 0, &words(&[gc, 1 << 2, pixel])))?;
@@ -479,6 +553,50 @@ mod tests {
         let mut other = vec![GENERIC_EVENT, 99, 0, 0, 4, 0, 0, 0, 17, 0];
         other.resize(48, 0);
         assert_eq!(packet(&other, opcodes), Packet::Other);
+    }
+
+    #[test]
+    fn motion_and_configure_are_read_from_their_events() {
+        let opcodes = Opcodes::default();
+        let mut motion = vec![MOTION_NOTIFY, 0];
+        motion.resize(24, 0);
+        motion.extend_from_slice(&(-3_i16).to_le_bytes());
+        motion.extend_from_slice(&400_i16.to_le_bytes());
+        motion.resize(32, 0);
+        assert_eq!(packet(&motion, opcodes), Packet::Motion { x: -3, y: 400 });
+        let mut configure = vec![CONFIGURE_NOTIFY | 0x80, 0];
+        configure.resize(20, 0);
+        configure.extend_from_slice(&1000_u16.to_le_bytes());
+        configure.extend_from_slice(&700_u16.to_le_bytes());
+        configure.resize(32, 0);
+        assert_eq!(
+            packet(&configure, opcodes),
+            Packet::Configured {
+                width: 1000,
+                height: 700
+            }
+        );
+    }
+
+    #[test]
+    fn grab_warp_and_cursor_requests_have_their_lengths() {
+        let mut body = words(&[0x20_0001]);
+        body.extend_from_slice(&POINTER_MOTION_MASK.to_le_bytes());
+        body.extend_from_slice(&[1, 1]);
+        body.extend_from_slice(&words(&[0x20_0001, 0x20_0009, 0]));
+        assert_eq!(request(GRAB_POINTER, 0, &body).len(), 24);
+        let mut warp = words(&[0, 7, 0, 0]);
+        warp.truncate(12);
+        warp.extend_from_slice(&[0; 4]);
+        warp.extend_from_slice(&5_i16.to_le_bytes());
+        warp.extend_from_slice(&6_i16.to_le_bytes());
+        let warp = request(WARP_POINTER, 0, &warp);
+        assert_eq!(warp.len(), 24);
+        assert_eq!(half(&warp, 20), Some(5));
+        assert_eq!(half(&warp, 22), Some(6));
+        let mut cursor = words(&[1, 2, 3]);
+        cursor.extend_from_slice(&[0; 16]);
+        assert_eq!(request(CREATE_CURSOR, 0, &cursor).len(), 32);
     }
 
     #[test]

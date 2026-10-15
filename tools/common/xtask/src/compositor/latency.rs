@@ -25,6 +25,15 @@
 //! three on the stamp and the X time and gives each hop's age. A yserver
 //! that does not take the stamp gives no lines to join, which is said and
 //! is not a failure.
+//!
+//! **A game's pointer lock** (`docs/GAME-PATH.md` §4.7): last, `xlatency
+//! grab` is an X game's mouse -- a grab confined to its window, a cursor
+//! with nothing in it, a warp to the centre after each motion -- and `vptr`
+//! moves the mouse [`GRAB_STEP`] pixels a motion. A yserver that has hyprix
+//! lock the pointer gives the game each motion as that step from the
+//! centre; one that does not gives it wherever hyprix's pointer has got to,
+//! and [`judge_grab`] fails it. The control is yserver with
+//! `YSERVER_POINTER_LOCK=0`.
 
 use std::time::{Duration, Instant};
 
@@ -77,6 +86,18 @@ wait $probe
 grep -E 'xlatency: (summary|no completion|failed|X error)' /tmp/probe.txt | sed 's/^xlatency: /xlatency: in-guest /'
 grep -v ' 0x[0-9a-f]* - ' /tmp/yserver.log | grep -v 'input-age' | tail -n 25 | sed 's/^/xlatency: yserver: /'
 grep 'input-age stamp' /tmp/yserver.log | sed 's/^.*input-age/xlatency: yserver-age: input-age/'
+echo "xlatency: grab phase"
+/bin/xlatency grab --seconds 45 --idle 3 --step 9 > /tmp/grab.txt 2>&1 &
+grab=$!
+waited=0
+until grep -q 'xlatency: grab ready' /tmp/grab.txt || [ $waited -ge 20 ]; do
+    sleep 1
+    waited=$((waited + 1))
+done
+/bin/vptr 20 6 9 2>&1 | sed 's/^/xlatency: grab /'
+wait $grab
+cat /tmp/grab.txt
+grep -E 'holds the pointer|the pointer on window|pointer lock on window|pointer_constraints|POINTER_LOCK' /tmp/yserver.log | head -n 12 | sed 's/^/xlatency: yserver-lock: /'
 echo "xlatency: end"
 "#;
 
@@ -85,6 +106,13 @@ const END: &str = "xlatency: end";
 
 /// The line the probe says once its first frame completed.
 const READY: &str = "xlatency: ready";
+
+/// The pixels `vptr` moves the mouse a motion in the grab phase, which the
+/// grabbing game must read as such.
+const GRAB_STEP: u64 = 9;
+
+/// The motions `vptr` sends in the grab phase: 20 a second for 6 seconds.
+const GRAB_SENT: u64 = 120;
 
 /// The tablet's coordinate for pixel `at` of `across`.
 fn tablet(at: usize, across: usize) -> i32 {
@@ -267,6 +295,8 @@ fn judge(arch: Arch, lines: &[String], timed: &[Option<Duration>]) -> Result<()>
             || line.contains("xlatency: ready")
             || line.contains("xlatency: failed")
             || line.contains("xlatency: yserver:")
+            || line.contains("xlatency: grab")
+            || line.contains("xlatency: yserver-lock:")
     }) {
         println!("  {arch}: {}", line.trim());
     }
@@ -313,11 +343,53 @@ fn judge(arch: Arch, lines: &[String], timed: &[Option<Duration>]) -> Result<()>
         frames.last().map_or("-".to_owned(), ToString::to_string)
     );
     match median {
-        Some(median) if (1..=MOST_FRAMES).contains(&median) => Ok(()),
+        Some(median) if (1..=MOST_FRAMES).contains(&median) => judge_grab(arch, lines),
         _ => Err(Error::new(format!(
             "{arch}: the median refresh count is not 1 to {MOST_FRAMES}: the msc does not count refreshes"
         ))),
     }
+}
+
+/// Pass when the grabbing game read at least half of `vptr`'s motions, nine
+/// in ten of them as the mouse's [`GRAB_STEP`] across and none down, and as
+/// many raw motions: what a yserver gives that has hyprix lock the pointer.
+fn judge_grab(arch: Arch, lines: &[String]) -> Result<()> {
+    let Some(line) = lines
+        .iter()
+        .find(|line| line.contains("xlatency: grab motions "))
+    else {
+        return Err(Error::new(format!(
+            "{arch}: the grabbing game said nothing of what it read (xlatency grab)"
+        )));
+    };
+    let (Some(motions), Some(raw), Some(as_mouse)) = (
+        after(line, "motions"),
+        after(line, "raw"),
+        after(line, "as-the-mouse"),
+    ) else {
+        return Err(Error::new(format!("{arch}: cannot read {line:?}")));
+    };
+    if motions * 2 < GRAB_SENT {
+        return Err(Error::new(format!(
+            "{arch}: the grabbing game read {motions} of {GRAB_SENT} motions"
+        )));
+    }
+    if as_mouse * 10 < motions * 9 {
+        return Err(Error::new(format!(
+            "{arch}: the grabbing game read {as_mouse} of {motions} motions as the mouse's \
+             {GRAB_STEP} pixels: yserver did not lock the pointer"
+        )));
+    }
+    if raw < as_mouse {
+        return Err(Error::new(format!(
+            "{arch}: the grabbing game had {raw} raw motions for {as_mouse} read as the mouse's"
+        )));
+    }
+    println!(
+        "  {arch}: a game's grab and warps: {as_mouse} of {motions} motions read as the \
+         mouse's {GRAB_STEP} pixels, {raw} raw, of {GRAB_SENT} sent"
+    );
+    Ok(())
 }
 
 /// The number after `word` in `line`.
@@ -438,6 +510,25 @@ mod tests {
     }
 
     #[test]
+    fn a_grab_passes_only_when_the_game_reads_the_mouses_step() {
+        let grab = |line: &str| judge_grab(Arch::X86_64, &[line.to_owned()]);
+        assert!(
+            grab("xlatency: grab motions 118 raw 121 as-the-mouse 116 step 9 echoes 1").is_ok()
+        );
+        // No lock: the game reads wherever hyprix's pointer is.
+        let unlocked =
+            grab("xlatency: grab motions 120 raw 120 as-the-mouse 1 step 9 echoes 0 first 52,-3");
+        assert!(unlocked.is_err_and(|error| {
+            error
+                .to_string()
+                .contains("yserver did not lock the pointer")
+        }));
+        assert!(grab("xlatency: grab motions 20 raw 20 as-the-mouse 20 step 9").is_err());
+        assert!(grab("xlatency: grab motions 120 raw 3 as-the-mouse 120 step 9").is_err());
+        assert!(judge_grab(Arch::X86_64, &[]).is_err());
+    }
+
+    #[test]
     fn frames_are_read_from_the_probes_lines_before_the_injector() {
         let lines: Vec<String> = [
             "xlatency: ready msc 2 ust 9 mode 0",
@@ -462,6 +553,11 @@ mod tests {
                 "xlatency: shown {number} arrival 5 swap 6 ust 7 msc 4 frames 2 in 1.000"
             ));
         }
+        assert!(judge(Arch::X86_64, &lines, &timed).is_err(), "no grab line");
+        lines.push(
+            "xlatency: grab motions 118 raw 120 as-the-mouse 115 step 9 echoes 118 first 9,0"
+                .to_owned(),
+        );
         assert!(judge(Arch::X86_64, &lines, &timed).is_ok());
         let stuck: Vec<String> = lines
             .iter()

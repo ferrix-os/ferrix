@@ -27,7 +27,11 @@
 //!
 //! `xlatency summarize SENDS REPORT` pairs the report with the injector's
 //! log (`vptr --log`) and gives the latency from each motion's send.
+//!
+//! `xlatency grab` is a game's mouse instead: a grab, a hidden cursor and a
+//! warp to the centre after each motion ([`grab`]).
 
+mod grab;
 mod record;
 mod x11;
 
@@ -39,7 +43,8 @@ use record::Tracker;
 use x11::{Display, Packet};
 
 const USAGE: &str = "usage: xlatency [--events N] [--seconds S] [--idle S] [--delay-us D]\n\
-    \x20      xlatency summarize SENDS REPORT";
+    \x20      xlatency summarize SENDS REPORT\n\
+    \x20      xlatency grab [--seconds S] [--idle S] [--step P]";
 
 /// Frames in turn: one shown, one in flight, one drawn into.
 const PIXMAPS: usize = 3;
@@ -92,7 +97,7 @@ fn monotonic() -> u64 {
 }
 
 /// Say a line, at once.
-fn say(line: &str) {
+pub(crate) fn say(line: &str) {
     let mut out = std::io::stdout();
     let _ = writeln!(out, "{line}");
     let _ = out.flush();
@@ -247,6 +252,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.as_slice() {
         [command, sends, report] if command == "summarize" => summarize(sends, report),
+        [command, rest @ ..] if command == "grab" => grab::options(rest).and_then(grab::run),
         _ => options(&args).and_then(run),
     };
     match result {
