@@ -117,7 +117,7 @@ def main():
         with open(target, "wb") as f:
             f.write(data)
         digest = hashlib.sha256(data).hexdigest()
-        sums.append(f"{digest}  FERRIX/{name}\n")
+        sums.append(f"{digest}  {name}\n")
         print(f"esp-files: {name} {len(data)} bytes {digest}")
         if name == "FERRIX/CMDLINE.TXT":
             print(f"esp-files: CMDLINE.TXT = {data.decode('utf-8', 'replace').strip()!r}")
