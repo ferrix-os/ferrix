@@ -781,6 +781,24 @@ talks to it is not recorded (the consultant, ledger 1508). `check` now sets
 `DBUS_SYSTEM_BUS_ADDRESS` to an address with nothing at it for the
 compositor's steps, cached or not; its 1,040 tests pass so.
 
+**In the gate, and the control that lets gates use it (2026-10-15).** Through
+the installed `gate.sh` (which carries T1/T2 and the host-side control mode),
+in slot 2 with `GATE_STEP_CACHE=on`, on e6365c59e: `check-side` recording all
+25 units 126 s (`bsb-e2e2-warm`), then every unit a cached pass in 10 s
+(`bsb-e2e2-hit`). The end-to-end controls, `gate.sh control --expect-host`:
+a same-size edit of `src/lib/init/restart/src/lib.rs` (`Exit` to `Exot`), a
+file init's unit only looks up on a warm build, **FIRED** (`bsb-e2e2-ctl-same`:
+the compositor a cached pass, init missed, ran and failed with E0425); a
+broken assertion in hyprix's `plane.rs` **FIRED** (`bsb-e2e2-ctl-test`: the
+compositor missed, ran, and its test failed). With the edits undone, every
+unit was a cached pass again (`bsb-e2e2-after`, 8 s). The first attempt found
+that `gate.sh`'s `FERRIX_GATE_TAG`, a new name every run, was in the
+environment's digest, so no record held from one gate run to the next; it
+and gate.sh's `GATE_*` settings are left out now (nothing in the tree reads
+them; the tag stays in the record as its origin). Gates may turn the cache
+on from here (the certification consultant's conditions, ledger lines 1447,
+1461, 1494, 1508, 1516); release runs and the baseline keep it off.
+
 **Controls.** A broken assertion in hyprix's `plane.rs` after a cached pass:
 the compositor's unit missed, ran, and failed the run. A same-size edit of
 `src/lib/init/restart/src/lib.rs` (a type renamed to a name of its length),
