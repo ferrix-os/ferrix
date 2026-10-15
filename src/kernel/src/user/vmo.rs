@@ -920,7 +920,7 @@ impl Vmo {
     /// pages lock: the fault holds its space's lock from this check through
     /// its mapping, and a truncation stores the new end before it takes the
     /// pages away and then takes the lock of every space that maps them.
-    pub(crate) fn past_file_end(&self, index: u64) -> bool {
+    pub fn past_file_end(&self, index: u64) -> bool {
         index >= self.bound.load(Ordering::SeqCst)
     }
 

@@ -388,7 +388,7 @@ does not apply to exported functions.
 
 **The interface** (§3 (4); ledger line 1531, D5): `tools/common/gen/kernel-interface.py`
 lists every `pub` of a core or item file in
-`docs/generated/KERNEL-INTERFACE.md` -- 2,125 declarations, 53 checks-only
+`docs/generated/KERNEL-INTERFACE.md` -- 2,126 declarations, 53 checks-only
 -- with the crates above that name each, and `--check`, in `cargo xtask
 check`, fails on a list that differs from the tree, on a `pub` no crate
 above names and no named item's signature carries (a dead interface), and
@@ -417,15 +417,15 @@ F3.2), the composition root excepted.
 `unclassified_deps`, F-76's debt register, which the gate holds to the
 manifest and to what the crate's files name.
 
-**Shown unchanged against `main`** (line 1477 (7); `main` 3b1e72a71 after
+**Shown unchanged against `main`** (line 1477 (7); `main` 814a95809 after
 the rebase, S2's baseline 89a7cf74c for the boots): no function moved
-between files, and of 8,279 function bodies 36 differ, every one in a
+between files, and of 8,281 function bodies 36 differ, every one in a
 raised architecture check (the path edits above), in
 `device/config_check.rs` or `object/pin/check.rs` (the accessors); the new
 functions are the accessors. The boundary gate's three ring lists differ by
 the three roots; its counts move by lines added and removed, not by code
-moved: item product 94,954 to 95,109, core 70,706 to 70,950, load 73,006
-to 73,193, upward references 0, composition-root edges 28, hooks 2. The unsafe audit's
+moved: item product 94,954 to 95,109, core 70,706 to 70,950, load 73,057
+to 73,244, upward references 0, composition-root edges 28, hooks 2. The unsafe audit's
 output is byte-identical; the panic audit's 8 exemptions and the catalog
 are the same; TRACEABILITY.md's statuses are main's, but for the accessor count (916 to
 923, the seven accessors) and x86-64's re-measure below; the four boots' lines are the same but for the

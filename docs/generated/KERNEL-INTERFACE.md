@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-1983 declarations in the core's files, 142 in the item's; 53 checks-only.
+1984 declarations in the core's files, 142 in the item's; 53 checks-only.
 
 ## ferrix-kernel-core
 
@@ -2513,6 +2513,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::new_anonymous` | method | item, load |  |
 | `Vmo::new_filled` | method | load |  |
 | `Vmo::page` | method | item, load |  |
+| `Vmo::past_file_end` | method | load |  |
 | `Vmo::read_page` | method | item, load |  |
 | `Vmo::read_present` | method | load |  |
 | `Vmo::replace` | method | item, load |  |
