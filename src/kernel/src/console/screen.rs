@@ -55,6 +55,9 @@ const STOP_SPINS: u32 = 1_000_000;
 
 /// Whether bytes are drawn. Set once by [`start`], cleared by [`stop`].
 static ENABLED: AtomicBool = AtomicBool::new(false);
+/// Whether [`start`] has run: it starts the board once, never again after a
+/// [`stop`].
+static STARTED: AtomicBool = AtomicBool::new(false);
 
 /// The screen and where the next glyph goes, while there is one.
 static BOARD: SpinLock<Option<Board>> = SpinLock::new(None);
@@ -165,10 +168,13 @@ impl Board {
 /// framebuffer to draw on: clear the screen, and draw what the console has
 /// kept of the lines printed before this.
 ///
-/// Once, on the boot processor, after `mm::init`: the framebuffer's mapping is
-/// checked through the kernel's root table, which is not known before it.
+/// Once, on the boot processor, as soon as stage 1 has mapped the framebuffer
+/// (`check_early_mapper`), before `mm::init`: a machine with no serial port
+/// shows nothing at all of a hang before the console is on the screen. The
+/// lines printed before this -- the very first one on -- are drawn from what
+/// the console kept. A second call does nothing.
 pub(crate) fn start(view: &BootView<'_>) {
-    if !view.flag(FLAG) {
+    if !view.flag(FLAG) || STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
     // SAFETY: (SHARED) nothing else writes the framebuffer while the board holds it:
