@@ -27,7 +27,7 @@
 
 /// A fatal condition, explained for someone who has not read the source.
 #[derive(Debug)]
-pub(crate) struct Explanation {
+pub struct Explanation {
     /// Stable code, `FX-SSNN`: `SS` the roadmap stage whose check or bring-up
     /// failed (`00` for anything before stage 1 or outside any stage, `90` for
     /// traps), `NN` a number within it. Never reused once published.
@@ -166,7 +166,7 @@ pub(crate) static PRIVATE_OBJECT_SHARED: Explanation = Explanation {
 
 /// For `register_load` in `main.rs`, when the load ring did not register
 /// what the certified item reaches it through.
-pub(crate) static LOAD_REGISTRATION: Explanation = Explanation {
+pub static LOAD_REGISTRATION: Explanation = Explanation {
     code: "FX-0006",
     title: "the load ring did not register what the item needs from it",
     meaning: "The certified item may not name what is above it (`docs/certification/ITEM.md`), so \
@@ -188,7 +188,7 @@ pub(crate) static LOAD_REGISTRATION: Explanation = Explanation {
 
 /// For an allocation the kernel makes while it comes up, before the first
 /// program runs, when memory has already run out.
-pub(crate) static BOOT_OUT_OF_MEMORY: Explanation = Explanation {
+pub static BOOT_OUT_OF_MEMORY: Explanation = Explanation {
     code: "FX-0007",
     title: "memory ran out while the kernel was coming up",
     meaning: "After the kernel has booted, an allocation that fails is reported to whoever \
@@ -237,7 +237,7 @@ pub(crate) static ALLOCATION_ABORTED: Explanation = Explanation {
 };
 
 /// For `check_allocation_failure` in `stages_check.rs`.
-pub(crate) static STAGE9_ALLOCATION: Explanation = Explanation {
+pub static STAGE9_ALLOCATION: Explanation = Explanation {
     code: "FX-0902",
     title: "an allocation failure was not survived",
     meaning: "`object::alloc_check::run` makes allocations fail on purpose and requires the \
@@ -266,7 +266,7 @@ pub(crate) static STAGE9_ALLOCATION: Explanation = Explanation {
 };
 
 /// For `check_native_refusals` in `stages_check.rs`.
-pub(crate) static STAGE9_REFUSALS: Explanation = Explanation {
+pub static STAGE9_REFUSALS: Explanation = Explanation {
     code: "FX-0903",
     title: "a native call accepted what the ABI says it refuses",
     meaning: "`syscall::native_check::run` drives the native calls from a process of its \
@@ -291,7 +291,7 @@ pub(crate) static STAGE9_REFUSALS: Explanation = Explanation {
 };
 
 /// For `check_services` in `stages_check.rs`.
-pub(crate) static SERVICES: Explanation = Explanation {
+pub static SERVICES: Explanation = Explanation {
     code: "FX-0904",
     title: "a service the item leans on failed its self-check",
     meaning: "`service_check::run` drives the small services the rest of the item leans on \
@@ -313,7 +313,7 @@ pub(crate) static SERVICES: Explanation = Explanation {
 };
 
 /// For `check_quotas` in `stages_check.rs`.
-pub(crate) static STAGE9_QUOTAS: Explanation = Explanation {
+pub static STAGE9_QUOTAS: Explanation = Explanation {
     code: "FX-0905",
     title: "a job quota did not bound what it claims to",
     meaning: "`object::quota_check::run` drives the quotas the Security Target claims as \
@@ -340,7 +340,7 @@ pub(crate) static STAGE9_QUOTAS: Explanation = Explanation {
 };
 
 /// For `check_kernel_memory` in `stages_check.rs`, when `fs::kmem_check::run` fails.
-pub(crate) static STAGE9_KMEM: Explanation = Explanation {
+pub static STAGE9_KMEM: Explanation = Explanation {
     code: "FX-0906",
     title: "the kernel heap a job drove through the Linux calls was not bounded by its job",
     meaning: "`fs::kmem_check::run` fills a job with a small memory limit with each kind of \
@@ -397,7 +397,7 @@ pub(crate) static SPECULATION_DOMAIN_LEAVE_MAY_NOT_WAIT: Explanation = Explanati
 
 /// For `kmain` in `main.rs`, when a hook a stage 9 check armed inside the
 /// item is still armed after stage 9.
-pub(crate) static CHECK_HOOK_LEFT_ARMED: Explanation = Explanation {
+pub static CHECK_HOOK_LEFT_ARMED: Explanation = Explanation {
     code: "FX-0908",
     title: "a check's hook inside the item was still armed after stage 9",
     meaning: "Some of stage 9's checks need the item to do something at a point no program \
@@ -426,7 +426,7 @@ pub(crate) static CHECK_HOOK_LEFT_ARMED: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `self_check` fails.
-pub(crate) static STAGE1_HANDOFF: Explanation = Explanation {
+pub static STAGE1_HANDOFF: Explanation = Explanation {
     code: "FX-0101",
     title: "the loader's hand-off is not what the kernel needs",
     meaning: "Stage 1 checks what the UEFI loader handed over before anything depends on it. \
@@ -456,7 +456,7 @@ pub(crate) static STAGE1_HANDOFF: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `mm::init` fails.
-pub(crate) static MEMORY_BRING_UP: Explanation = Explanation {
+pub static MEMORY_BRING_UP: Explanation = Explanation {
     code: "FX-0201",
     title: "the frame allocator could not be built",
     meaning: "`mm::init` builds the buddy allocator that every physical frame is handed out \
@@ -478,7 +478,7 @@ pub(crate) static MEMORY_BRING_UP: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `vmap::init` fails.
-pub(crate) static VMAP_ARENA_BRING_UP: Explanation = Explanation {
+pub static VMAP_ARENA_BRING_UP: Explanation = Explanation {
     code: "FX-0202",
     title: "the kernel address arena could not be created",
     meaning: "`vmap::init` creates the arena that hands out kernel virtual ranges, from which \
@@ -494,7 +494,7 @@ pub(crate) static VMAP_ARENA_BRING_UP: Explanation = Explanation {
 };
 
 /// For `check_allocators_and_traps` in `stages_check.rs`, when `mm::check::memory_check` fails.
-pub(crate) static STAGE2_ALLOCATORS: Explanation = Explanation {
+pub static STAGE2_ALLOCATORS: Explanation = Explanation {
     code: "FX-0203",
     title: "the memory allocators failed their self-check",
     meaning: "`memory_check` exercises what every later subsystem assumes about memory without \
@@ -525,7 +525,7 @@ pub(crate) static STAGE2_ALLOCATORS: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `finish_memory` fails.
-pub(crate) static STAGE2_FINISH_MEMORY: Explanation = Explanation {
+pub static STAGE2_FINISH_MEMORY: Explanation = Explanation {
     code: "FX-0204",
     title: "the identity map, the W^X sweep or the reclaim failed",
     meaning: "`finish_memory` runs last in boot. It first requires the W^X sweep to see the \
@@ -560,7 +560,7 @@ pub(crate) static STAGE2_FINISH_MEMORY: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `trap_check` fails.
-pub(crate) static STAGE3_TRAPS: Explanation = Explanation {
+pub static STAGE3_TRAPS: Explanation = Explanation {
     code: "FX-0301",
     title: "a deliberate trap did not come back correctly",
     meaning: "`trap_check` raises two breakpoints and requires both to reach the handler and \
@@ -596,7 +596,7 @@ pub(crate) static STAGE3_TRAPS: Explanation = Explanation {
 
 /// For `kmain` in `main.rs`, when `timer_check` fails, and for
 /// `bring_up_processors`, when `check_a_skipped_arm` does.
-pub(crate) static STAGE3_TIMER: Explanation = Explanation {
+pub static STAGE3_TIMER: Explanation = Explanation {
     code: "FX-0302",
     title: "the timer interrupt did not arrive as programmed",
     meaning: "`timer_check` proves time works before anything is built on it. A one-shot \
@@ -628,7 +628,7 @@ pub(crate) static STAGE3_TIMER: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `arch::init_interrupts` fails.
-pub(crate) static INTERRUPT_BRING_UP: Explanation = Explanation {
+pub static INTERRUPT_BRING_UP: Explanation = Explanation {
     code: "FX-0303",
     title: "the interrupt controller or the clocks could not be brought up",
     meaning: "`arch::init_interrupts` brings up, on the boot processor, the interrupt \
@@ -661,7 +661,7 @@ pub(crate) static INTERRUPT_BRING_UP: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `timer::init` fails.
-pub(crate) static TIMER_REGISTRATION: Explanation = Explanation {
+pub static TIMER_REGISTRATION: Explanation = Explanation {
     code: "FX-0304",
     title: "the timer's interrupt could not be registered",
     meaning: "`timer::init` attaches the tick handler to the interrupt number \
@@ -677,7 +677,7 @@ pub(crate) static TIMER_REGISTRATION: Explanation = Explanation {
 
 /// For `kmain` in `main.rs`, when `console::input::check` or
 /// `console::input::init` fails.
-pub(crate) static CONSOLE_INPUT: Explanation = Explanation {
+pub static CONSOLE_INPUT: Explanation = Explanation {
     code: "FX-0305",
     title: "console input could not be set up",
     meaning: "Before interrupts are first enabled, `console::input::check` fills the ring the \
@@ -698,7 +698,7 @@ pub(crate) static CONSOLE_INPUT: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `console::output::check` fails.
-pub(crate) static CONSOLE_OUTPUT: Explanation = Explanation {
+pub static CONSOLE_OUTPUT: Explanation = Explanation {
     code: "FX-0504",
     title: "console output did not go out by interrupt",
     meaning: "Once the scheduler runs, `console::output::check` writes one line to the console \
@@ -722,7 +722,7 @@ pub(crate) static CONSOLE_OUTPUT: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `logctl::check::run` fails.
-pub(crate) static LOG_CONTROL: Explanation = Explanation {
+pub static LOG_CONTROL: Explanation = Explanation {
     code: "FX-1008",
     title: "the log core did not serve the kernel log to a driver",
     meaning: "A driver whose device may carry the kernel log off the machine -- the Pixel 7's \
@@ -746,7 +746,7 @@ pub(crate) static LOG_CONTROL: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `console::log_check::run` fails.
-pub(crate) static CONSOLE_LOG: Explanation = Explanation {
+pub static CONSOLE_LOG: Explanation = Explanation {
     code: "FX-0505",
     title: "the kernel log lost track of what it keeps",
     meaning: "The kernel log is a ring of every byte the console sends, which `syslog(2)` and a \
@@ -771,7 +771,7 @@ pub(crate) static CONSOLE_LOG: Explanation = Explanation {
 };
 
 /// For `kmain` in `main.rs`, when `random::check` fails.
-pub(crate) static RANDOM_GENERATOR: Explanation = Explanation {
+pub static RANDOM_GENERATOR: Explanation = Explanation {
     code: "FX-0306",
     title: "the random number generator repeated itself",
     meaning: "`random::check` reads the generator twice, after `random::init` seeded it from \
@@ -789,7 +789,7 @@ pub(crate) static RANDOM_GENERATOR: Explanation = Explanation {
 };
 
 /// For `check_speculation` in `stages_check.rs`, when `arch::check_speculation` fails.
-pub(crate) static SPECULATION_DEFENCES: Explanation = Explanation {
+pub static SPECULATION_DEFENCES: Explanation = Explanation {
     code: "FX-0307",
     title: "the side-channel defences did not hold",
     meaning: "`arch::check_speculation` runs after stage 7's programs and requires the clamp \
@@ -818,7 +818,7 @@ pub(crate) static SPECULATION_DEFENCES: Explanation = Explanation {
 
 /// For `check_timer_and_start_clocks` in `main.rs`, when `arch::check_machine`
 /// fails.
-pub(crate) static STAGE3_MACHINE: Explanation = Explanation {
+pub static STAGE3_MACHINE: Explanation = Explanation {
     code: "FX-0308",
     title: "the architecture decoded or masked something wrongly",
     meaning: "`arch::check_machine` drives what the architecture decides on its own from \
@@ -845,7 +845,7 @@ pub(crate) static STAGE3_MACHINE: Explanation = Explanation {
 };
 
 /// For `start_audit` in `main.rs`, when `audit::check::run` fails.
-pub(crate) static AUDIT_STORE: Explanation = Explanation {
+pub static AUDIT_STORE: Explanation = Explanation {
     code: "FX-0309",
     title: "the audit record lost or misplaced what it keeps",
     meaning: "The audit store keeps a record of each security decision the kernel makes, in \
@@ -877,7 +877,7 @@ pub(crate) static AUDIT_STORE: Explanation = Explanation {
 };
 
 /// For `bring_up_processors` in `main.rs`, when `smp::discover` fails.
-pub(crate) static PROCESSOR_DISCOVERY: Explanation = Explanation {
+pub static PROCESSOR_DISCOVERY: Explanation = Explanation {
     code: "FX-0401",
     title: "the processor list could not be read",
     meaning: "`smp::discover` finds which processors firmware says can be started, and which \
@@ -904,7 +904,7 @@ pub(crate) static PROCESSOR_DISCOVERY: Explanation = Explanation {
 };
 
 /// For `bring_up_processors` in `main.rs`, when `smp::start_secondaries` fails.
-pub(crate) static SECONDARY_START: Explanation = Explanation {
+pub static SECONDARY_START: Explanation = Explanation {
     code: "FX-0402",
     title: "a secondary processor could not be started",
     meaning: "`smp::start_secondaries` starts every processor but the boot one, one at a \
@@ -1020,7 +1020,7 @@ pub(crate) static SECONDARY_RECORD_MISMATCH: Explanation = Explanation {
 };
 
 /// For `bring_up_processors` in `main.rs`, when fewer processors are online than described.
-pub(crate) static PROCESSORS_MISSING: Explanation = Explanation {
+pub static PROCESSORS_MISSING: Explanation = Explanation {
     code: "FX-0406",
     title: "not every processor firmware described came online",
     meaning: "Once `smp::start_secondaries` returns, every processor in the list must have \
@@ -1036,7 +1036,7 @@ pub(crate) static PROCESSORS_MISSING: Explanation = Explanation {
 };
 
 /// For `bring_up_processors` in `main.rs`, when `smp::check::run` fails.
-pub(crate) static STAGE4_SMP: Explanation = Explanation {
+pub static STAGE4_SMP: Explanation = Explanation {
     code: "FX-0407",
     title: "the processors failed to work together",
     meaning: "`smp::check::run` is stage 4's exit criterion, run on every processor at once. \
@@ -1071,7 +1071,7 @@ pub(crate) static STAGE4_SMP: Explanation = Explanation {
 };
 
 /// For `start_scheduler` in `main.rs`, when `sched::init` fails.
-pub(crate) static SCHEDULER_BRING_UP: Explanation = Explanation {
+pub static SCHEDULER_BRING_UP: Explanation = Explanation {
     code: "FX-0501",
     title: "the scheduler could not be started",
     meaning: "`sched::init` builds one Throughput scheduling domain over every processor, gives \
@@ -1179,7 +1179,7 @@ pub(crate) static FAST_PATH_IDLE_TASK: Explanation = Explanation {
 
 /// For the fast path's general continuation, when it is reached where a
 /// task may not block.
-pub(crate) static FAST_PATH_CONTINUATION_MASKED: Explanation = Explanation {
+pub static FAST_PATH_CONTINUATION_MASKED: Explanation = Explanation {
     code: "FX-0533",
     title: "the fast path went the general way with interrupts masked or a lock held",
     meaning: "A task resumed from its park in `channel_write_read`'s fast path without a \
@@ -1303,7 +1303,7 @@ pub(crate) static PREEMPT_COUNT_WITHOUT_RECORD: Explanation = Explanation {
 };
 
 /// For `start_scheduler` in `main.rs`, when `sched::run_checks` fails.
-pub(crate) static STAGE5_SCHEDULER: Explanation = Explanation {
+pub static STAGE5_SCHEDULER: Explanation = Explanation {
     code: "FX-0502",
     title: "the scheduler failed its self-check",
     meaning: "`sched::run_checks` is stage 5's exit criterion and the checks added after it. A \
@@ -1333,7 +1333,7 @@ pub(crate) static STAGE5_SCHEDULER: Explanation = Explanation {
 };
 
 /// For `check_user_memory` in `stages_check.rs`, when `user::check::run` fails.
-pub(crate) static STAGE6_USER_MEMORY: Explanation = Explanation {
+pub static STAGE6_USER_MEMORY: Explanation = Explanation {
     code: "FX-0601",
     title: "the memory a process is built from failed its self-check",
     meaning: "`user::check::run` tests the objects stage 6 builds processes from. A VMO must cost \
@@ -1360,7 +1360,7 @@ pub(crate) static STAGE6_USER_MEMORY: Explanation = Explanation {
 };
 
 /// For `check_reverse_map` in `stages_check.rs`, when `user::rmap_check::run` fails.
-pub(crate) static STAGE6_REVERSE_MAP: Explanation = Explanation {
+pub static STAGE6_REVERSE_MAP: Explanation = Explanation {
     code: "FX-0602",
     title: "a page taken from a mapped object stayed reachable, or was not taken as it should be",
     meaning: "`user::rmap_check::run` maps one shared anonymous object in two processes pinned to \
@@ -1390,7 +1390,7 @@ pub(crate) static STAGE6_REVERSE_MAP: Explanation = Explanation {
 
 /// For `check_devices` in `main.rs`, when the PCI finder, `pci::Enumeration`,
 /// fails.
-pub(crate) static STAGE10_PCI: Explanation = Explanation {
+pub static STAGE10_PCI: Explanation = Explanation {
     code: "FX-1001",
     title: "PCI enumeration failed its self-check",
     meaning: "`pci::Enumeration` reads where firmware put PCI Express configuration space — the MCFG \
@@ -1423,7 +1423,7 @@ pub(crate) static STAGE10_PCI: Explanation = Explanation {
 };
 
 /// For `check_btrfs_disk` in `stages_check.rs`, when `fs::btrfs_check::run` fails.
-pub(crate) static STAGE11_MOUNT: Explanation = Explanation {
+pub static STAGE11_MOUNT: Explanation = Explanation {
     code: "FX-1101",
     title: "the btrfs disk did not mount and read back as the host wrote it",
     meaning: "Stage 11's exit: xtask attaches the `none` fixture, an image made by real \
@@ -1447,7 +1447,7 @@ pub(crate) static STAGE11_MOUNT: Explanation = Explanation {
 };
 
 /// For `check_cgroupfs` in `stages_check.rs`, when `fs::cgroupfs::check` fails.
-pub(crate) static STAGE13_CGROUPFS: Explanation = Explanation {
+pub static STAGE13_CGROUPFS: Explanation = Explanation {
     code: "FX-1301",
     title: "cgroupfs did not show the job tree as cgroup v2",
     meaning: "Stage 13's landing G2 (docs/CGROUPS.md): `fs::cgroupfs::check` mounts cgroup2 at \
@@ -1531,7 +1531,7 @@ pub(crate) static STAGE13_CGROUPFS: Explanation = Explanation {
 
 /// For `check_seccomp` in `stages_check.rs`, when `syscall::seccomp_check::run`
 /// fails.
-pub(crate) static STAGE13_SECCOMP: Explanation = Explanation {
+pub static STAGE13_SECCOMP: Explanation = Explanation {
     code: "FX-1302",
     title: "seccomp's filter was not asked first at every entry, or not as the entry's own",
     meaning: "Stage 13's seccomp landing S2 (docs/SECCOMP.md §3.3): the core's system call \
@@ -1564,7 +1564,7 @@ pub(crate) static STAGE13_SECCOMP: Explanation = Explanation {
 
 /// For `check_seccomp_filters` in `stages_check.rs`, when
 /// `syscall::seccomp_filters_check::run` fails.
-pub(crate) static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
+pub static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
     code: "FX-1303",
     title: "a seccomp filter was not installed, judged, inherited, ordered or released as specified",
     meaning: "Stage 13's seccomp landing S3 (docs/SECCOMP.md §3.4, §3.5, §3.5a, §8.1): \
@@ -1605,7 +1605,7 @@ pub(crate) static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
 };
 
 /// For `check_sysfs` in `stages_check.rs`, when `fs::sysfs::check::run` fails.
-pub(crate) static SYSFS: Explanation = Explanation {
+pub static SYSFS: Explanation = Explanation {
     code: "FX-0890",
     title: "sysfs did not show the machine's devices as Linux shows them",
     meaning: "`fs::sysfs::check::run` (docs/SYSFS.md §7), the last boot check, after devmgr has \
@@ -1637,7 +1637,7 @@ pub(crate) static SYSFS: Explanation = Explanation {
 
 /// For `check_btrfs_write` in `main.rs`, when `fs::btrfs_write_check::run`
 /// fails, or `fs::btrfs_powerfail`'s churn or replay under `ferrix.btrfs=`.
-pub(crate) static STAGE12_WRITE: Explanation = Explanation {
+pub static STAGE12_WRITE: Explanation = Explanation {
     code: "FX-1201",
     title: "a btrfs volume Ferrix wrote did not read back as it was written",
     meaning: "Stage 12's exit, the guest's half: xtask attaches a fresh copy of the `blank` \
@@ -1676,7 +1676,7 @@ pub(crate) static STAGE12_WRITE: Explanation = Explanation {
 };
 
 /// For `check_net` in `main.rs`, when the net core's self-check fails.
-pub(crate) static NET_CORE: Explanation = Explanation {
+pub static NET_CORE: Explanation = Explanation {
     code: "FX-1150",
     title: "the net core did not carry a packet round its own loopback",
     meaning: "The net core is `src/lib/network/net` behind one lock, driven by a kernel task. Its check \
@@ -1710,7 +1710,7 @@ pub(crate) static NET_CORE: Explanation = Explanation {
 };
 
 /// For `check_net_ring` in `stages_check.rs`, when the net ring's self-check fails.
-pub(crate) static NET_RING: Explanation = Explanation {
+pub static NET_RING: Explanation = Explanation {
     code: "FX-1151",
     title: "the net ring did not carry a frame between the kernel and a driver",
     meaning: "`docs/NET-RING.md` is the memory the kernel shares with a ring-3 network driver. \
@@ -1740,7 +1740,7 @@ pub(crate) static NET_RING: Explanation = Explanation {
 };
 
 /// For `check_netlink` in `stages_check.rs`, when the netlink self-check fails.
-pub(crate) static NETLINK: Explanation = Explanation {
+pub static NETLINK: Explanation = Explanation {
     code: "FX-1152",
     title: "AF_NETLINK did not answer the requests `ip` makes",
     meaning: "`AF_NETLINK` is how a program configures an interface: `ip` uses nothing else, and \
@@ -1774,7 +1774,7 @@ pub(crate) static NETLINK: Explanation = Explanation {
 
 /// For `devmgr::devmgr_start`, when a start pid 1 asked for does not leave
 /// the DEVICES channel with `devmgr` alone.
-pub(crate) static DEVMGR_BY_INIT: Explanation = Explanation {
+pub static DEVMGR_BY_INIT: Explanation = Explanation {
     code: "FX-1009",
     title: "a devmgr pid 1 started did not keep device authority to itself",
     meaning: "Under ferrix.devmgr=init (docs/INIT.md §7.3, L12) pid 1 asks the kernel to start \
@@ -1798,7 +1798,7 @@ pub(crate) static DEVMGR_BY_INIT: Explanation = Explanation {
 
 /// For `fs::root_disk`'s switch under `ferrix.devmgr=init`, when pid 1 did
 /// not move onto the volume with it.
-pub(crate) static ROOT_PID1: Explanation = Explanation {
+pub static ROOT_PID1: Explanation = Explanation {
     code: "FX-1202",
     title: "pid 1 did not move onto the root volume with the switch",
     meaning: "Under ferrix.devmgr=init pid 1 starts on the tmpfs, since the root disk's driver \
@@ -1817,7 +1817,7 @@ pub(crate) static ROOT_PID1: Explanation = Explanation {
 };
 
 /// For `check_devmgr` in `main.rs`, when `devmgr::start` fails.
-pub(crate) static STAGE10_DEVMGR: Explanation = Explanation {
+pub static STAGE10_DEVMGR: Explanation = Explanation {
     code: "FX-1006",
     title: "devmgr could not be started, or did not report",
     meaning: "The kernel starts `/sbin/devmgr` from the initramfs with a bootstrap channel \
@@ -1840,7 +1840,7 @@ pub(crate) static STAGE10_DEVMGR: Explanation = Explanation {
 
 /// For `check_driver` in `main.rs`, when `block_ring::driver_check::run`
 /// fails.
-pub(crate) static STAGE10_DRIVER: Explanation = Explanation {
+pub static STAGE10_DRIVER: Explanation = Explanation {
     code: "FX-1005",
     title: "the ring-3 virtio-blk driver did not serve the test disk",
     meaning: "The boot check starts `/sbin/blk` from the initramfs the way `devmgr` will: a \
@@ -1867,7 +1867,7 @@ pub(crate) static STAGE10_DRIVER: Explanation = Explanation {
 };
 
 /// For `check_block_ring` in `main.rs`, when `block_ring::check::run` fails.
-pub(crate) static STAGE10_RING: Explanation = Explanation {
+pub static STAGE10_RING: Explanation = Explanation {
     code: "FX-1004",
     title: "the block ring's control plane answered a driver wrongly",
     meaning: "A ring-3 block driver is given its device and asks the kernel for a ring with \
@@ -1902,7 +1902,7 @@ pub(crate) static STAGE10_RING: Explanation = Explanation {
 
 /// For `check_chardev` in `stages_check.rs`, when `chardev::check::run`
 /// fails.
-pub(crate) static STAGE10_CHARDEV: Explanation = Explanation {
+pub static STAGE10_CHARDEV: Explanation = Explanation {
     code: "FX-1013",
     title: "the chardev core answered a driver or a program wrongly",
     meaning: "The chardev core forwards open, ioctl and release on major 195's nodes to a \
@@ -1953,7 +1953,7 @@ pub(crate) static STAGE10_DISPLAY_COPIES: Explanation = Explanation {
 
 /// For `check_iommu` in `iommu/check.rs`, when its domain check or the
 /// quarantine's fails.
-pub(crate) static STAGE10_IOMMU: Explanation = Explanation {
+pub static STAGE10_IOMMU: Explanation = Explanation {
     code: "FX-1003",
     title: "an IOMMU domain gave a device the wrong addresses",
     meaning: "A driver in ring 3 pins the pages it gives a device into that device's IOMMU domain \
@@ -2057,7 +2057,7 @@ pub(crate) static STAGE10_DMA_FAULT: Explanation = Explanation {
 
 /// For `check_devices` in `main.rs`, when `device::publish` finds a node that
 /// breaks the rule, or a finder other than the PCI walk fails.
-pub(crate) static STAGE10_DEVICES: Explanation = Explanation {
+pub static STAGE10_DEVICES: Explanation = Explanation {
     code: "FX-1002",
     title: "a device node handed out memory or an interrupt it does not have",
     meaning: "A driver in ring 3 is given an `IoMapping` for each of its device's apertures and \
@@ -2088,7 +2088,7 @@ pub(crate) static STAGE10_DEVICES: Explanation = Explanation {
 };
 
 /// For `check_devices` in `main.rs`, when the GICv2 distributor check fails.
-pub(crate) static STAGE10_DISTRIBUTOR: Explanation = Explanation {
+pub static STAGE10_DISTRIBUTOR: Explanation = Explanation {
     code: "FX-1010",
     title: "two cores enabling neighbouring interrupt lines lost one's setting",
     meaning: "A GICv2 keeps four lines' priorities or targets in one register and sixteen \
@@ -2115,7 +2115,7 @@ pub(crate) static STAGE10_DISTRIBUTOR: Explanation = Explanation {
 
 /// For `check_devices` in `main.rs`, when the configuration window's or
 /// `device_aperture`'s check fails (`device::config_check`).
-pub(crate) static STAGE10_CONFIG: Explanation = Explanation {
+pub static STAGE10_CONFIG: Explanation = Explanation {
     code: "FX-1011",
     title: "a driver's configuration window or device_aperture did not answer as specified",
     meaning: "A driver reads its PCI function's configuration space through \
@@ -2193,7 +2193,7 @@ pub(crate) static X2APIC_LOCKED: Explanation = Explanation {
 };
 
 /// For `check_path_calls` in `stages_check.rs`, when `syscall::check::run_paths` fails.
-pub(crate) static STAGE8_PATH_CALLS: Explanation = Explanation {
+pub static STAGE8_PATH_CALLS: Explanation = Explanation {
     code: "FX-0820",
     title: "the system calls that take a path failed their self-check",
     meaning: "`syscall::check::run_paths` makes the calls a shell makes on files -- mkdirat, \
@@ -2230,7 +2230,7 @@ pub(crate) static STAGE8_PATH_CALLS: Explanation = Explanation {
 };
 
 /// For `check_native_objects` in `stages_check.rs`, when `object::check::run` fails.
-pub(crate) static STAGE9_OBJECTS: Explanation = Explanation {
+pub static STAGE9_OBJECTS: Explanation = Explanation {
     code: "FX-0901",
     title: "the native ABI's objects failed their self-check",
     meaning: "`object::check::run` builds two processes and drives the native system call \
@@ -2281,7 +2281,7 @@ pub(crate) static STAGE9_OBJECTS: Explanation = Explanation {
 };
 
 /// For `check_syscalls` in `stages_check.rs`, when `syscall::check::run` fails.
-pub(crate) static STAGE7_SYSCALLS: Explanation = Explanation {
+pub static STAGE7_SYSCALLS: Explanation = Explanation {
     code: "FX-0701",
     title: "the system call dispatch path failed its self-check",
     meaning: "`syscall::check::run` proves the kernel decodes system calls with its own \
@@ -2322,7 +2322,7 @@ pub(crate) static STAGE7_SYSCALLS: Explanation = Explanation {
 };
 
 /// For `check_filesystems` in `main.rs`, when `fs::init` fails.
-pub(crate) static STAGE8_ROOT: Explanation = Explanation {
+pub static STAGE8_ROOT: Explanation = Explanation {
     code: "FX-0801",
     title: "the root filesystem could not be built",
     meaning: "`fs::init` unpacks the initramfs the loader handed over into a tmpfs root and \
@@ -2344,7 +2344,7 @@ pub(crate) static STAGE8_ROOT: Explanation = Explanation {
 };
 
 /// For `check_filesystems` in `main.rs`, when `fs::check::run` fails.
-pub(crate) static STAGE8_FILESYSTEM: Explanation = Explanation {
+pub static STAGE8_FILESYSTEM: Explanation = Explanation {
     code: "FX-0802",
     title: "the root filesystem failed its self-check",
     meaning: "`fs::check::run` requires the unpacked archive to hold what the build wrote, its \
@@ -2367,7 +2367,7 @@ pub(crate) static STAGE8_FILESYSTEM: Explanation = Explanation {
 
 /// For `standard_streams` in `syscall/fd.rs`, when a new process cannot be
 /// given the console.
-pub(crate) static CONSOLE_DESCRIPTORS: Explanation = Explanation {
+pub static CONSOLE_DESCRIPTORS: Explanation = Explanation {
     code: "FX-0810",
     title: "a new process could not be given the console as descriptors 0, 1 and 2",
     meaning: "Every process starts with one open description of the console installed at \
@@ -2389,7 +2389,7 @@ pub(crate) static CONSOLE_DESCRIPTORS: Explanation = Explanation {
 };
 
 /// For `check_filesystems` in `main.rs`, when `/dev` or `/proc` fails its check.
-pub(crate) static STAGE8_PSEUDO_FILESYSTEMS: Explanation = Explanation {
+pub static STAGE8_PSEUDO_FILESYSTEMS: Explanation = Explanation {
     code: "FX-0830",
     title: "/dev or /proc failed its self-check",
     meaning: "`fs::procfs::check::run` opens the memory devices through the namespace and \
@@ -2441,7 +2441,7 @@ pub(crate) static STAGE8_PSEUDO_FILESYSTEMS: Explanation = Explanation {
 
 /// For `sysrq_trigger` in `fs/procfs.rs`, when a program writes `c` to
 /// /proc/sysrq-trigger.
-pub(crate) static SYSRQ_CRASH: Explanation = Explanation {
+pub static SYSRQ_CRASH: Explanation = Explanation {
     code: "FX-0850",
     title: "a panic was requested through /proc/sysrq-trigger",
     meaning: "Nothing is wrong. Writing `c` to /proc/sysrq-trigger stops the kernel on purpose, \
@@ -2458,7 +2458,7 @@ pub(crate) static SYSRQ_CRASH: Explanation = Explanation {
 
 /// For `check_filesystems` in `main.rs`, when the pipe and filesystem call
 /// checks fail.
-pub(crate) static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
+pub static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
     code: "FX-0860",
     title: "pipes, a FIFO or the filesystem calls failed their self-check",
     meaning: "`fs::check::run_calls` builds a process and drives the handlers with paths and \
@@ -2507,7 +2507,7 @@ pub(crate) static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
 };
 
 /// For `check_filesystems` in `main.rs`, when the memfd check fails.
-pub(crate) static STAGE8_MEMFD: Explanation = Explanation {
+pub static STAGE8_MEMFD: Explanation = Explanation {
     code: "FX-0880",
     title: "memfd_create or its seals failed their self-check",
     meaning: "`fs::memfd_check::run` builds a process and makes memfds. An unknown flag and a \
@@ -2546,7 +2546,7 @@ pub(crate) static STAGE8_MEMFD: Explanation = Explanation {
 };
 
 /// For `check_epoll` in `stages_check.rs`, when the epoll check fails.
-pub(crate) static STAGE8_EPOLL: Explanation = Explanation {
+pub static STAGE8_EPOLL: Explanation = Explanation {
     code: "FX-0881",
     title: "epoll failed its self-check",
     meaning: "`fs::epoll_check::run` builds a process, makes epoll sets by number and watches \
@@ -2577,7 +2577,7 @@ pub(crate) static STAGE8_EPOLL: Explanation = Explanation {
 
 /// For `check_mount_flags` in `stages_check.rs`, when `fs::mount_check::run`
 /// fails.
-pub(crate) static STAGE8_MOUNT_FLAGS: Explanation = Explanation {
+pub static STAGE8_MOUNT_FLAGS: Explanation = Explanation {
     code: "FX-0885",
     title: "A mount's flags failed their self-check",
     meaning: "`fs::mount_check::run` mounts a tmpfs under /tmp by number, fills it and \
@@ -2609,7 +2609,7 @@ pub(crate) static STAGE8_MOUNT_FLAGS: Explanation = Explanation {
 };
 
 /// For `check_binds` in `stages_check.rs`, when `fs::bind_check::run` fails.
-pub(crate) static STAGE8_BINDS: Explanation = Explanation {
+pub static STAGE8_BINDS: Explanation = Explanation {
     code: "FX-0886",
     title: "A bind mount failed its self-check",
     meaning: "`fs::bind_check::run` mounts a tmpfs under /tmp by number, with a file, a \
@@ -2643,7 +2643,7 @@ pub(crate) static STAGE8_BINDS: Explanation = Explanation {
 
 /// For `check_namespaces` in `stages_check.rs`, when
 /// `fs::namespace_check::run` fails.
-pub(crate) static STAGE13_MOUNT_NAMESPACES: Explanation = Explanation {
+pub static STAGE13_MOUNT_NAMESPACES: Explanation = Explanation {
     code: "FX-0887",
     title: "A mount namespace failed its self-check",
     meaning: "`fs::namespace_check::run` first opens with openat2 from a descriptor of its \
@@ -2684,7 +2684,7 @@ pub(crate) static STAGE13_MOUNT_NAMESPACES: Explanation = Explanation {
 
 /// For `check_user_namespaces` in `stages_check.rs`, when
 /// `fs::userns_check::run` fails.
-pub(crate) static STAGE13_USER_NAMESPACES: Explanation = Explanation {
+pub static STAGE13_USER_NAMESPACES: Explanation = Explanation {
     code: "FX-0888",
     title: "A user namespace failed its self-check",
     meaning: "`fs::userns_check::run` makes a process that is uid 1000 make a user namespace. It must be named apart by /proc/<pid>/ns/user and read its ids as 65534 until mapped; be refused a gid_map before setgroups is denied, a uid_map naming kernel root or two ids, and a second write; be accepted its own id mapped to 0 and then read 0 from getuid and in status, while the first namespace reads 1000; and be refused sethostname, mount, setuid to an unmapped id (EINVAL) and setgroups, while holding every capability in its own namespace. A chrooted process must be refused a user namespace. On Credentials: a map opened by root and written by an unprivileged holder must be refused, a set-user-id bit must be ignored by execve in a child namespace, and the sets must go to the namespace's root alone. A read-only bind of /proc/sys must refuse a write with EROFS (docs/NAMESPACES.md §4, U1 to U9).",
@@ -2700,7 +2700,7 @@ pub(crate) static STAGE13_USER_NAMESPACES: Explanation = Explanation {
 
 /// For `check_small_namespaces` in `stages_check.rs`, when
 /// `fs::smallns_check::run` fails.
-pub(crate) static STAGE13_SMALL_NAMESPACES: Explanation = Explanation {
+pub static STAGE13_SMALL_NAMESPACES: Explanation = Explanation {
     code: "FX-0892",
     title: "A UTS, IPC or cgroup namespace, or setns, failed its self-check",
     meaning: "`fs::smallns_check::run` drives the small namespaces through the system-call layer. A UTS namespace made by clone or unshare starts with its creator's host name and then keeps its own, as uname and /proc/sys/kernel/hostname tell it; uid 1000 is refused one and refused sethostname; a maker of a user namespace may name the UTS namespace it made and never the first's. An IPC namespace shares no semaphore keys with the first, counts only its own sets in SEM_INFO and ends with its last holder. In a cgroup namespace /proc/<pid>/cgroup reads / at the root and `..` for what lies outside it, a cgroupfs mounted there has the root as its own, a writer moves processes only between cgroups inside it, and a clone is rooted at its creator's cgroup. A /proc/<pid>/ns link opens as a namespace file: two opens are one inode, readlink names it, NS_GET_USERNS, NS_GET_PARENT, NS_GET_NSTYPE and NS_GET_OWNER_UID answer, and another person's link is refused. setns refuses a closed descriptor, a file that is not a namespace, a type that is not the file's, an ancestor user namespace, the caller's own, a stranger, and a child user namespace's join of the first's UTS or mount namespace, and joins where it may. Pid and network namespaces, CLONE_NEWIPC with CLONE_SYSVSEM and a thread with a new namespace are EINVAL (docs/NAMESPACES.md §12).",
@@ -2717,7 +2717,7 @@ pub(crate) static STAGE13_SMALL_NAMESPACES: Explanation = Explanation {
 
 /// For `check_pid_namespaces` in `stages_check.rs`, when
 /// `fs::pidns_check::run` fails.
-pub(crate) static STAGE13_PID_NAMESPACES: Explanation = Explanation {
+pub static STAGE13_PID_NAMESPACES: Explanation = Explanation {
     code: "FX-0891",
     title: "A pid namespace failed its self-check",
     meaning: "`fs::pidns_check::run` makes a namespace with unshare(CLONE_NEWPID) and forks into it. The first process must be pid 1 there and have another number outside, the next 2, and the caller that unshared must not have moved; kill, wait4, getppid, getpgid, getsid and setsid must speak the caller's numbers, refusing a process the namespace cannot see and reading 0 for a parent or group it cannot; an orphan must go to its namespace's init, and the init's end must end the namespace and shut it to new members; an init must ignore SIGTERM, SIGKILL and SIGSTOP from inside, catch a signal it has a handler for, and take SIGSTOP and SIGKILL from an ancestor namespace; si_pid, ssi_pid and SO_PEERCRED must be told in the reader's numbers and 0 for a sender it cannot see; a procfs mounted in a namespace must list only its processes by its numbers, with self, NSpid and ns/pid to match; cgroup.procs must list and take the reader's numbers; and CLONE_NEWPID must need CAP_SYS_ADMIN unless a user namespace comes with it, be refused with CLONE_THREAD or CLONE_PARENT, and stop at 32 levels, each made from a process in the one above; a native child must be numbered in its creator's namespace; and a namespace whose first fork failed must take no later fork (docs/PIDNS.md, P1 to P14).",
@@ -2736,7 +2736,7 @@ pub(crate) static STAGE13_PID_NAMESPACES: Explanation = Explanation {
 
 /// For `check_network_namespaces` in `stages_check.rs`, when
 /// `fs::netns_check::run` fails.
-pub(crate) static STAGE13_NETWORK_NAMESPACES: Explanation = Explanation {
+pub static STAGE13_NETWORK_NAMESPACES: Explanation = Explanation {
     code: "FX-0893",
     title: "A network namespace failed its self-check",
     meaning: "`fs::netns_check::run` makes network namespaces as root and as uid 1000. An unprivileged process must be refused CLONE_NEWNET until it makes a user namespace with it, which then owns it; a new namespace must hold a loopback that is down with no address and no route, and bring 127.0.0.1 and ::1 up by RTM_NEWLINK and by SIOCSIFFLAGS; two namespaces must share no port, no socket and no view of /proc/net or netlink, and a socket must stay in the namespace it was made in when its maker moves. Changes need CAP_NET_ADMIN and raw sockets CAP_NET_RAW over the user namespace that owns the network namespace: an unprivileged process and fake root are refused the first namespace, the owner is allowed its own. A veth pair made by netlink must carry a datagram and a stream between two namespaces and nothing to a third, come up only when both ends do, be moved only by a caller with authority over both owners, follow an end that moves by descriptor, and go with either end. A physical device must move with its ring and come home when the namespace it went to ends; abstract unix names must be per namespace; /proc/<pid>/ns/net and /proc/net must show the reader's; and the ceilings on interfaces, addresses and routes must hold (docs/NETNS.md section 8, NN1 to NN17).",
@@ -2752,7 +2752,7 @@ pub(crate) static STAGE13_NETWORK_NAMESPACES: Explanation = Explanation {
 
 /// For `check_proc_access` in `stages_check.rs`, when
 /// `fs::procaccess_check::run` fails.
-pub(crate) static STAGE13_PROC_ACCESS: Explanation = Explanation {
+pub static STAGE13_PROC_ACCESS: Explanation = Explanation {
     code: "FX-0894",
     title: "/proc let a process look into another's tree",
     meaning: "`fs::procaccess_check::run` makes a dumpable process of uid 1000, one that cleared PR_SET_DUMPABLE, one of uid 2000 and one of root, and reads their /proc/<pid>/root, cwd, exe, fd, fdinfo, maps and ns/*, and asks get_robust_list of their threads, as uid 1000, as root and as root inside a user namespace. Linux's ptrace_may_access decides: the same user reads a dumpable process of its own, never a non-dumpable one or another user's; root reads all; root inside a namespace reads nothing of another uid. A refusal is EACCES. get_robust_list of a thread of another uid's process must be refused.",
@@ -2767,7 +2767,7 @@ pub(crate) static STAGE13_PROC_ACCESS: Explanation = Explanation {
 
 /// For `check_semaphores` in `stages_check.rs`, when `syscall::sem_check::run`
 /// fails.
-pub(crate) static STAGE7_SEMAPHORES: Explanation = Explanation {
+pub static STAGE7_SEMAPHORES: Explanation = Explanation {
     code: "FX-0702",
     title: "System V semaphores failed their self-check",
     meaning: "`syscall::sem_check::run` makes semaphore sets through the functions `semget`, \
@@ -2802,7 +2802,7 @@ pub(crate) static STAGE7_SEMAPHORES: Explanation = Explanation {
 
 /// For `check_shared_memory` in `stages_check.rs`, when
 /// `syscall::shm_check::run` fails.
-pub(crate) static STAGE7_SHARED_MEMORY: Explanation = Explanation {
+pub static STAGE7_SHARED_MEMORY: Explanation = Explanation {
     code: "FX-0703",
     title: "System V shared memory failed its self-check",
     meaning: "`syscall::shm_check::run` makes shared memory segments through the functions \
@@ -2831,7 +2831,7 @@ pub(crate) static STAGE7_SHARED_MEMORY: Explanation = Explanation {
 };
 
 /// For `check_eventfd` in `stages_check.rs`, when the eventfd check fails.
-pub(crate) static STAGE8_EVENTFD: Explanation = Explanation {
+pub static STAGE8_EVENTFD: Explanation = Explanation {
     code: "FX-0882",
     title: "eventfd failed its self-check",
     meaning: "`fs::eventfd_check::run` builds a process and makes eventfds by number. One made \
@@ -2871,7 +2871,7 @@ pub(crate) static STAGE8_EVENTFD: Explanation = Explanation {
 };
 
 /// For `check_timerfd` in `stages_check.rs`, when the timerfd check fails.
-pub(crate) static STAGE8_TIMERFD: Explanation = Explanation {
+pub static STAGE8_TIMERFD: Explanation = Explanation {
     code: "FX-0883",
     title: "timerfd failed its self-check",
     meaning: "`fs::timerfd_check::run` builds a process and makes timerfds by number. \
@@ -2911,7 +2911,7 @@ pub(crate) static STAGE8_TIMERFD: Explanation = Explanation {
 };
 
 /// For `check_signalfd` in `stages_check.rs`, when the signalfd check fails.
-pub(crate) static STAGE8_SIGNALFD: Explanation = Explanation {
+pub static STAGE8_SIGNALFD: Explanation = Explanation {
     code: "FX-0884",
     title: "signalfd failed its self-check",
     meaning: "`fs::signalfd_check::run` builds a process, gives SIGUSR1, SIGUSR2 and SIGALRM \
@@ -2947,7 +2947,7 @@ pub(crate) static STAGE8_SIGNALFD: Explanation = Explanation {
 };
 
 /// For `check_madvise` in `stages_check.rs`, when the madvise check fails.
-pub(crate) static STAGE8_MADVISE: Explanation = Explanation {
+pub static STAGE8_MADVISE: Explanation = Explanation {
     code: "FX-0872",
     title: "madvise failed its self-check",
     meaning: "`user::madvise_check::run` builds a process and calls madvise by number. Eight \
@@ -2980,7 +2980,7 @@ pub(crate) static STAGE8_MADVISE: Explanation = Explanation {
 
 /// For `check_filesystems` in `main.rs`, when the shared file mapping check
 /// fails.
-pub(crate) static STAGE8_FILE_MAPPINGS: Explanation = Explanation {
+pub static STAGE8_FILE_MAPPINGS: Explanation = Explanation {
     code: "FX-0870",
     title: "a shared file mapping failed its self-check",
     meaning: "`fs::mmap_check::run` builds a process, creates a file under /tmp and maps it \
@@ -3012,7 +3012,7 @@ pub(crate) static STAGE8_FILE_MAPPINGS: Explanation = Explanation {
 
 /// For `check_program_files` in `stages_check.rs`, when the check of programs mapped
 /// from their files fails.
-pub(crate) static STAGE8_PROGRAM_FILES: Explanation = Explanation {
+pub static STAGE8_PROGRAM_FILES: Explanation = Explanation {
     code: "FX-0871",
     title: "a program mapped from its file failed its self-check",
     meaning: "`fs::exec_check::run` loads a 72 MiB program -- past the 64 MiB `fs::read_file` \
@@ -3043,7 +3043,7 @@ pub(crate) static STAGE8_PROGRAM_FILES: Explanation = Explanation {
 };
 
 /// For `finish` in `power.rs`, when init exits under `ferrix.onexit=panic`.
-pub(crate) static INIT_EXITED: Explanation = Explanation {
+pub static INIT_EXITED: Explanation = Explanation {
     code: "FX-1501",
     title: "init exited, and ferrix.onexit=panic asked for a panic",
     meaning: "The program the kernel started as pid 1 -- the one `ferrix.init=` named, or the \
@@ -3063,7 +3063,7 @@ pub(crate) static INIT_EXITED: Explanation = Explanation {
 };
 
 /// For `check_init_inputs` in `stages_check.rs`, when `init::check` fails.
-pub(crate) static INIT_INPUTS: Explanation = Explanation {
+pub static INIT_INPUTS: Explanation = Explanation {
     code: "FX-1503",
     title: "init took or refused an input other than set_inputs says",
     meaning: "`init::check` judges sets of entries under `.ferrix/init/` made up as an \
@@ -3086,7 +3086,7 @@ pub(crate) static INIT_INPUTS: Explanation = Explanation {
 
 /// For `check_init_calls` in `stages_check.rs`, when `syscall::init_calls_check::run`
 /// fails.
-pub(crate) static INIT_CALLS: Explanation = Explanation {
+pub static INIT_CALLS: Explanation = Explanation {
     code: "FX-1502",
     title: "a kernel call init needs did not do what docs/INIT.md §11 says",
     meaning: "`syscall::init_calls_check::run` checks the kernel items of init's landing L8 \

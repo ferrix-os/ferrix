@@ -325,7 +325,7 @@ pub(crate) fn filtered_threads() -> usize {
 /// loads (the count of filtered threads and the boot check's probe word); a
 /// thread with none, while another holds one, costs the running task, its
 /// thread and one more load; the rest is for a thread that has one. The chain is walked with interrupts open and under no lock.
-pub(crate) fn check(args: &SyscallArgs) -> Verdict {
+pub fn check(args: &SyscallArgs) -> Verdict {
     if PROBE_TASK.load(Ordering::Relaxed) != 0 {
         let verdict = probed(args);
         if verdict != Verdict::Continue {
@@ -367,7 +367,7 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
 /// `docs/OPAQUE-KERNEL.md` §9.7), since it runs before [`check`]; the same
 /// reads `check` makes, in the same order, so the two agree on any call.
 /// With interrupts masked; takes no lock and no reference.
-pub(crate) fn quiet() -> bool {
+pub fn quiet() -> bool {
     if PROBE_TASK.load(Ordering::Acquire) != 0 {
         return false;
     }

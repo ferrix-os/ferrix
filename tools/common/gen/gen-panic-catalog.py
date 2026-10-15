@@ -11,7 +11,7 @@ machine that has just stopped.
 Validated before anything is written, and failing either way:
 
   * every code is `FX-` and four digits, and no two entries share one;
-  * every `pub(crate) static` of type `Explanation` is listed in `ALL`, once,
+  * every `pub` or `pub(crate)` static of type `Explanation` is listed in `ALL`, once,
     and `ALL` names nothing else and is in code order;
   * every title and meaning says something, and every entry has a cause;
   * every path `see` mentions exists in the repository. A pointer to a file
@@ -40,11 +40,11 @@ COMMAND = "python3 tools/common/gen/gen-panic-catalog.py"
 
 CODE = re.compile(r"FX-\d{4}")
 STATIC = re.compile(
-    r"pub\(crate\)\s+static\s+(\w+)\s*:\s*Explanation\s*=\s*Explanation\s*\{(.*?)\n\};",
+    r"pub(?:\(crate\))?\s+static\s+(\w+)\s*:\s*Explanation\s*=\s*Explanation\s*\{(.*?)\n\};",
     re.DOTALL,
 )
 ALL_LIST = re.compile(
-    r"pub\(crate\)\s+static\s+ALL\s*:\s*&\[&Explanation\]\s*=\s*&\[(.*?)\];",
+    r"pub(?:\(crate\))?\s+static\s+ALL\s*:\s*&\[&Explanation\]\s*=\s*&\[(.*?)\];",
     re.DOTALL,
 )
 STRING = r'"((?:[^"\\]|\\.)*)"'

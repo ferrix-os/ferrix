@@ -73,13 +73,13 @@ const UNKNOWN_OP: u32 = 99;
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Events waits delivered.
-    pub(crate) events: u32,
+    pub events: u32,
     /// Calls refused as Linux refuses them.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Frames the second run cost.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// What one run counts.
@@ -90,7 +90,7 @@ struct Counts {
 }
 
 /// Run it twice, measured on the second.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the epoll check")?;
     let _warm = check_once(&process)?;

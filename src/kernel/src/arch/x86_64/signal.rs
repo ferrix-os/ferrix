@@ -45,7 +45,7 @@ use crate::user::space::AddressSpace;
 
 /// Bytes below the stack pointer the System V ABI lets a leaf function use
 /// without moving it, which a frame must not overwrite.
-pub(crate) const SIGNAL_RED_ZONE: u64 = 128;
+pub const SIGNAL_RED_ZONE: u64 = 128;
 
 /// Where `struct ucontext` starts in the frame.
 const UC: usize = 8;
@@ -140,11 +140,11 @@ const FLAGS_CLEARED_FOR_HANDLER: u64 = (1 << 8) | (1 << 10) | (1 << 16);
 /// trap frame, whichever way the program came in.
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-pub(crate) struct UserContext(TrapFrame);
+pub struct UserContext(TrapFrame);
 
 impl UserContext {
     /// The registers a trap from ring 3 saved.
-    pub(crate) const fn from_trap(frame: &TrapFrame) -> UserContext {
+    pub const fn from_trap(frame: &TrapFrame) -> UserContext {
         UserContext(*frame)
     }
 
@@ -154,20 +154,20 @@ impl UserContext {
     }
 
     /// The program's stack pointer.
-    pub(crate) const fn stack_pointer(&self) -> u64 {
+    pub const fn stack_pointer(&self) -> u64 {
         self.0.rsp
     }
 
     /// The value in the return register, read as a signed result: what a
     /// system call left there, which the restart logic inspects for a
     /// kernel-internal restart code.
-    pub(crate) const fn syscall_result(&self) -> isize {
+    pub const fn syscall_result(&self) -> isize {
         self.0.rax as isize
     }
 
     /// Overwrite the return register with `value`: how the restart logic turns
     /// a restart code into `EINTR` for a call that will not be restarted.
-    pub(crate) const fn set_syscall_result(&mut self, value: isize) {
+    pub const fn set_syscall_result(&mut self, value: isize) {
         self.0.rax = value as u64;
     }
 
@@ -183,12 +183,7 @@ impl UserContext {
     /// bytes too -- and restarts through i386's `restart_syscall`, which is
     /// the table that call was made in (`docs/I386.md` §3.2). `orig_nr` is
     /// already that table's number, being the one the program passed.
-    pub(crate) const fn rewind_syscall(
-        &mut self,
-        orig_nr: u64,
-        orig_arg0: u64,
-        restart_block: bool,
-    ) {
+    pub const fn rewind_syscall(&mut self, orig_nr: u64, orig_arg0: u64, restart_block: bool) {
         let _ = orig_arg0;
         self.0.rax = match (
             restart_block,
@@ -487,7 +482,7 @@ fn put_cause(
 /// Write `request`'s frame below its stack and point `context` at the handler:
 /// `RDI` the signal, `RSI` the `siginfo`, `RDX` the `ucontext`, and the stack
 /// pointer at `pretcode`, as if the handler had just been called from it.
-pub(crate) fn setup_signal_frame(
+pub fn setup_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
     request: &FrameRequest,
@@ -552,7 +547,7 @@ pub(crate) fn setup_signal_frame(
 /// code and the stack selector user data whatever the
 /// frame says, and `MXCSR` is masked to the bits the processor has before
 /// `FXRSTOR64` sees it.
-pub(crate) fn restore_signal_frame(
+pub fn restore_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
     rt: bool,

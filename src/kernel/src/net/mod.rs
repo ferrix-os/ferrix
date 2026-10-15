@@ -36,11 +36,11 @@
 //! them overflows a `u32` in four seconds. The kernel counts in nanoseconds.
 //! The conversion is [`now`], and it is the only place the two meet.
 
-pub(crate) mod check;
+pub mod check;
 pub(crate) mod device;
 pub(crate) mod ifreq;
 pub(crate) mod namespace;
-pub(crate) mod netlink;
+pub mod netlink;
 pub(crate) mod netns_file;
 pub(crate) mod packet;
 pub(crate) mod socket;
@@ -394,7 +394,7 @@ const MAX_PENDING: usize = 512;
 /// # Errors
 ///
 /// If the scheduler cannot take another task.
-pub(crate) fn start() -> Result<(), &'static str> {
+pub fn start() -> Result<(), &'static str> {
     let _ = core();
     let _ = crate::sched::spawn("net core", run, 0, ferrix_sched::NICE_0_WEIGHT)?;
     Ok(())

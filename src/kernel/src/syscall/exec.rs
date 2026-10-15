@@ -83,7 +83,7 @@ const LOST_STATUS: i32 = 128 + 11;
 
 /// Why a program could not be started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExecError {
+pub enum ExecError {
     /// The image could not be loaded.
     Load(LoadError),
     /// The address space refused the stack.
@@ -467,7 +467,7 @@ fn populate(
 /// # Errors
 ///
 /// [`ExecError`].
-pub(crate) fn run(
+pub fn run(
     image: &[u8],
     args: &[&[u8]],
     env: &[&[u8]],

@@ -230,24 +230,24 @@ const FAILED_WHY: &str = "its invalidation queue stopped at a bad descriptor, so
 
 /// What the units' invalidation queues did, for stage 10's check R6.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Invalidations {
+pub struct Invalidations {
     /// Context-cache invalidations queued, each waited for.
-    pub(crate) context: u64,
+    pub context: u64,
     /// IOTLB invalidations queued, each waited for.
-    pub(crate) iotlb: u64,
+    pub iotlb: u64,
     /// Interrupt entry cache invalidations queued, each waited for.
-    pub(crate) interrupt_entry: u64,
+    pub interrupt_entry: u64,
     /// Invalidations that failed.
-    pub(crate) failed: u64,
+    pub failed: u64,
     /// Units marked failed.
-    pub(crate) units_failed: u64,
+    pub units_failed: u64,
     /// Completion errors (`ICE`) taken and cleared, each a failed
     /// invalidation.
-    pub(crate) completion_errors: u64,
+    pub completion_errors: u64,
 }
 
 /// What every unit's invalidation queue has done since boot.
-pub(crate) fn invalidations() -> Invalidations {
+pub fn invalidations() -> Invalidations {
     Invalidations {
         context: QUEUED_CONTEXT.load(Ordering::Relaxed),
         iotlb: QUEUED_IOTLB.load(Ordering::Relaxed),
@@ -260,21 +260,21 @@ pub(crate) fn invalidations() -> Invalidations {
 
 /// What the units' cleaning did, for stage 10's check.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Cleaning {
+pub struct Cleaning {
     /// Units whose walk does not snoop.
-    pub(crate) units: u64,
+    pub units: u64,
     /// Entry writes cleaned to memory.
-    pub(crate) entries: u64,
+    pub entries: u64,
     /// Fresh tables cleaned whole.
-    pub(crate) tables: u64,
+    pub tables: u64,
     /// Changes checked at their own publish point.
-    pub(crate) checked: u64,
+    pub checked: u64,
     /// Changes whose check found a write not cleaned.
-    pub(crate) uncleaned: u64,
+    pub uncleaned: u64,
 }
 
 /// What every unit's cleaning has done since boot.
-pub(crate) fn cleaning() -> Cleaning {
+pub fn cleaning() -> Cleaning {
     Cleaning {
         units: UNITS_CLEANING.load(Ordering::Relaxed),
         entries: ENTRIES_CLEANED.load(Ordering::Relaxed),
@@ -286,7 +286,7 @@ pub(crate) fn cleaning() -> Cleaning {
 
 /// One remapping unit.
 #[derive(Debug)]
-pub(crate) struct Unit {
+pub struct Unit {
     /// Physical address of its registers, which names it on the console.
     phys: u64,
     /// Its registers.
@@ -507,7 +507,7 @@ impl Unit {
 
     /// Whether the unit remaps every interrupt request and blocks
     /// compatibility format: `IRE` read back set and `CFIS` clear.
-    pub(crate) fn remapping(&self) -> bool {
+    pub fn remapping(&self) -> bool {
         self.remapping.load(Ordering::Acquire)
     }
 
@@ -554,7 +554,7 @@ impl Unit {
     ///
     /// No table, an index past it, an entry already present, a write not
     /// cleaned, or a failed invalidation.
-    pub(crate) fn remap(&self, index: u16, entry: Remap) -> Result<(), &'static str> {
+    pub fn remap(&self, index: u16, entry: Remap) -> Result<(), &'static str> {
         if self.irt == 0 {
             return Err("the unit has no interrupt remapping table");
         }
@@ -1249,6 +1249,7 @@ fn clear_stale_errors(registers: Mmio) -> Result<(), &'static str> {
     Ok(())
 }
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// Plant an invalidation completion error (`ICE`) on `unit`, as if the
 /// unit had raised one, and require an invalidation to fail on it, the
 /// error to be cleared and counted, and the next invalidation to succeed
@@ -1258,7 +1259,8 @@ fn clear_stale_errors(registers: Mmio) -> Result<(), &'static str> {
 /// # Errors
 ///
 /// What did not hold.
-pub(super) fn check_planted_completion_error(unit: &Unit) -> Result<(), &'static str> {
+#[doc(hidden)]
+pub fn check_planted_completion_error(unit: &Unit) -> Result<(), &'static str> {
     let cleared = COMPLETION_ERRORS.load(Ordering::Relaxed);
     let _ = unit.planted.fetch_or(FSTS_ICE, Ordering::Relaxed);
     if unit

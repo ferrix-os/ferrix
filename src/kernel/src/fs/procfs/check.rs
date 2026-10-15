@@ -42,25 +42,25 @@ use crate::syscall::{fd, path, registry, uaccess};
 
 /// What the checks measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Device nodes whose numbers were checked against Linux's.
-    pub(crate) devices: u32,
+    pub devices: u32,
     /// What the block registry's check measured.
-    pub(crate) blocks: fs::devfs::check::Report,
+    pub blocks: fs::devfs::check::Report,
     /// Names under `/proc` listed and walked back to, recursively.
-    pub(crate) listed: u32,
+    pub listed: u32,
     /// Lines of `/proc/self/maps` parsed.
-    pub(crate) maps_lines: u32,
+    pub maps_lines: u32,
     /// Of those, the ones naming `[heap]` or `[stack]`.
-    pub(crate) named: u32,
+    pub named: u32,
     /// `cpuN` lines in `/proc/stat`, one per online processor.
-    pub(crate) stat_cpus: u32,
+    pub stat_cpus: u32,
     /// Clock ticks `/proc/stat`'s `cpu` line advanced between its two reads.
-    pub(crate) stat_ticks: u64,
+    pub stat_ticks: u64,
     /// How far apart those reads were, in milliseconds.
-    pub(crate) stat_apart_ms: u64,
+    pub stat_apart_ms: u64,
     /// Values under `/proc/sys` walked to and read.
-    pub(crate) sysctl_values: u32,
+    pub sysctl_values: u32,
 }
 
 /// How far apart the two reads of `/proc/stat` are: five ticks at
@@ -117,7 +117,7 @@ static OUTCOME: SpinLock<Option<Found>> = SpinLock::new(None);
 static LAYOUT: SpinLock<Option<Layout>> = SpinLock::new(None);
 
 /// Run them. `Err` names the first thing that was not true.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let devices = check_devices()?;
     let blocks = fs::devfs::check::run()?;
     // In the boot task: `/proc/stat` describes the machine, not the reader.

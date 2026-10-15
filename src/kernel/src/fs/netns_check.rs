@@ -62,7 +62,7 @@ const REQUEST: usize = 1024;
 const REPLY: usize = 4096;
 
 /// What the check saw, for the boot line.
-pub(crate) fn run() -> Result<Counts, &'static str> {
+pub fn run() -> Result<Counts, &'static str> {
     let mut counts = Counts::default();
     let mut tally = Tally {
         report: &mut counts,

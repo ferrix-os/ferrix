@@ -39,19 +39,19 @@ use crate::net;
 
 /// What the check saw.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Why it did not run, if it did not.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
     /// How many interfaces are up.
-    pub(crate) interfaces: usize,
+    pub interfaces: usize,
     /// Bytes carried over the loopback, both directions and both families.
-    pub(crate) bytes: usize,
+    pub bytes: usize,
     /// How many calls were refused exactly as specified.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
     /// How many connections were made and accepted.
-    pub(crate) connections: usize,
+    pub connections: usize,
     /// How many packets raw sockets read.
-    pub(crate) raw_packets: usize,
+    pub raw_packets: usize,
 }
 
 /// The body every check sends, chosen so a truncation shows.
@@ -62,7 +62,7 @@ const BODY: &[u8] = b"Ferrix carries this over its own loopback, both ways.";
 /// # Errors
 ///
 /// A string naming what did not hold, which the caller turns into a panic.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let core = net::core();
     report.interfaces = core.with(|stack, _| {

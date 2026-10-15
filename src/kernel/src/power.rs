@@ -42,11 +42,11 @@ use crate::panic::{catalog, fatal};
 /// A filesystem's writes not yet on its disk, committed before the machine
 /// stops.
 #[derive(Debug)]
-pub(crate) struct Flush {
+pub struct Flush {
     /// Where it is mounted, as the log names it: `/`, `/data`, `/home`.
-    pub(crate) mount: &'static str,
+    pub mount: &'static str,
     /// Commit it. Nothing mounted there is nothing to commit, and `Ok`.
-    pub(crate) commit: fn() -> Result<(), Errno>,
+    pub commit: fn() -> Result<(), Errno>,
 }
 
 /// Every registered [`Flush`]. Four is one more than the kernel registers.
@@ -58,13 +58,13 @@ static FLUSHES: Hooks<Flush, 4> = Hooks::new();
 /// # Errors
 ///
 /// [`Full`] when the list is.
-pub(crate) fn register_flush(flush: &'static Flush) -> Result<(), Full> {
+pub fn register_flush(flush: &'static Flush) -> Result<(), Full> {
     FLUSHES.register(flush)
 }
 
 /// How many flushes are registered: the boot's check that a filesystem will
 /// be committed before the machine stops.
-pub(crate) fn flushes() -> usize {
+pub fn flushes() -> usize {
     FLUSHES.len()
 }
 
@@ -76,12 +76,12 @@ pub(crate) type BootMode = fn(&str) -> Result<&'static str, &'static str>;
 static BOOT_MODE: Once<BootMode> = Once::new();
 
 /// Send `reboot(2)`'s words to `set`. The first registration stands.
-pub(crate) fn register_boot_mode(set: BootMode) {
+pub fn register_boot_mode(set: BootMode) {
     let _ = BOOT_MODE.call_once(|| set);
 }
 
 /// Whether a board registered a [`BootMode`].
-pub(crate) fn has_boot_mode() -> bool {
+pub fn has_boot_mode() -> bool {
     BOOT_MODE.get().is_some()
 }
 
@@ -92,7 +92,7 @@ pub(crate) fn has_boot_mode() -> bool {
 /// Why the next reset will be as it would have been without the word: a
 /// machine with no board support that keeps a boot mode, or whatever the
 /// board's own says.
-pub(crate) fn request_boot_mode(word: &str) -> Result<&'static str, &'static str> {
+pub fn request_boot_mode(word: &str) -> Result<&'static str, &'static str> {
     let set = BOOT_MODE.get().ok_or("this machine keeps no boot mode")?;
     set(word)
 }
@@ -115,7 +115,7 @@ const PANIC_ON_EXIT: u8 = 2;
 /// Any other value is reported and ignored: powering off is the safe
 /// default, and a misspelt option should not turn into something nobody asked
 /// for.
-pub(crate) fn init(view: &BootView<'_>) {
+pub fn init(view: &BootView<'_>) {
     let tree = crate::discovery::fdt::open(view).ok();
     if let Some(tree) = &tree {
         arch::init_watchdogs(tree);
@@ -150,7 +150,7 @@ pub(crate) fn init(view: &BootView<'_>) {
 /// exited, and `reboot(2)` when a program asks, so that a program calling it
 /// without a `sync` of its own loses no transaction either. A failure is said
 /// and does not stop the machine stopping.
-pub(crate) fn sync_disks() {
+pub fn sync_disks() {
     for flush in FLUSHES.iter() {
         if (flush.commit)().is_err() {
             println!(
@@ -162,7 +162,7 @@ pub(crate) fn sync_disks() {
 }
 
 /// End boot the way [`init`] was told to.
-pub(crate) fn finish() -> ! {
+pub fn finish() -> ! {
     sync_disks();
     let action = match ON_EXIT.load(Ordering::Relaxed) {
         RESET_ON_EXIT => ferrix_audit::power::RESTART,

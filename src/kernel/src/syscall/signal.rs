@@ -401,7 +401,7 @@ impl Queue {
     /// # Errors
     ///
     /// [`AllocError`] when there is no memory for the origins.
-    fn new() -> Result<Queue, AllocError> {
+    pub(crate) fn new() -> Result<Queue, AllocError> {
         Ok(Queue {
             pending: 0,
             origins: fallible::try_boxed_filled(Origin::Kernel, NSIG as usize)?,

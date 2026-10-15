@@ -26,7 +26,7 @@ use core::sync::atomic::Ordering;
 use super::cpu;
 use crate::smp::PerCpu;
 
-pub(super) mod check;
+pub mod check;
 
 /// Kernel code. `SYSCALL` loads this from `STAR[47:32]`. Entry 2, as on
 /// Linux; entry 1 is Linux's 32-bit kernel code, which nothing here uses and
@@ -40,7 +40,7 @@ pub(crate) const KERNEL_DATA: u16 = 0x18;
 /// (`super::syscall` says why).
 pub(crate) const USER_CODE32: u16 = 0x20;
 /// User data, for both modes. `SYSRET` computes this as `STAR[63:48] + 8`.
-pub(crate) const USER_DATA: u16 = 0x28;
+pub const USER_DATA: u16 = 0x28;
 /// User 64-bit code. `SYSRET` computes this as `STAR[63:48] + 16`.
 pub(crate) const USER_CODE: u16 = 0x30;
 /// The task state segment. Sixteen bytes, so it occupies two slots, 8 and 9.

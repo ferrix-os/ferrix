@@ -233,7 +233,9 @@ package FerrixStructure {
         doc /* src/kernel/: monolithic core, capability seams, userspace device
              * drivers. Entered from the loader with the MMU on, three
              * mappings in place and nothing else: no vectors, no allocator,
-             * no other CPU running. */
+             * no other CPU running. Built as four crates along the rings
+             * (kernelCore, kernelItem, kernelLoad and the kernelCrate
+             * binary; docs/KERNEL-CRATES.md), its parts below by file. */
 
         port handoff : BootHandoffPort;
         port console : SerialConsolePort;
@@ -1477,11 +1479,43 @@ package FerrixStructure {
             attribute :>> hostTestable = false;
             attribute :>> forbidsUnsafe = false;
         }
+        // The kernel, as four crates along the rings since 2026-10-15
+        // (docs/KERNEL-CRATES.md): every file where it was, each crate's root
+        // beside main.rs, the core depending on no other kernel crate.
         #implemented part kernelCrate : Crate {
             attribute :>> path = "src/kernel";
             attribute :>> kind = CrateKind::Kernel;
             attribute :>> hostTestable = false;
             attribute :>> forbidsUnsafe = false;
+            doc /* The binary, ferrix-kernel: main.rs, the composition root,
+                 * and the raised stages_check.rs; it reaches the other three
+                 * through ferrix_kernel_load's re-exports. */
+        }
+        #implemented part kernelCore : Crate {
+            attribute :>> path = "src/kernel/core";
+            attribute :>> kind = CrateKind::Kernel;
+            attribute :>> hostTestable = false;
+            attribute :>> forbidsUnsafe = false;
+            doc /* ferrix-kernel-core, root src/kernel/src/kernel_core.rs: every
+                 * core-ring file. Its pub items are the core's interface to
+                 * the crates above (docs/generated/KERNEL-INTERFACE.md). */
+        }
+        #implemented part kernelItem : Crate {
+            attribute :>> path = "src/kernel/item";
+            attribute :>> kind = CrateKind::Kernel;
+            attribute :>> hostTestable = false;
+            attribute :>> forbidsUnsafe = false;
+            doc /* ferrix-kernel-item, root src/kernel/src/kernel_item.rs: every
+                 * item-ring file but main.rs; re-exports the core. */
+        }
+        #implemented part kernelLoad : Crate {
+            attribute :>> path = "src/kernel/load";
+            attribute :>> kind = CrateKind::Kernel;
+            attribute :>> hostTestable = false;
+            attribute :>> forbidsUnsafe = false;
+            doc /* ferrix-kernel-load, root src/kernel/src/kernel_load.rs: every
+                 * load-ring file, and the check files raised above their ring
+                 * (raised_checks); re-exports the item and the core. */
         }
         #implemented part xtask : Crate {
             attribute :>> path = "tools/common/xtask";
@@ -1507,10 +1541,15 @@ package FerrixStructure {
 
         // Dependency edges, as Cargo.toml has them ([dependencies] only, and
         // only to crates this package names).
-        dependency from kernelCrate to acpi, blkRing, blockQueue, bootinfo, btrfs, btrfsVfs,
-            btrfsWrite, crng, devmgrProto, displayctl, elf, fbtext, fdt, frameCrate, heap,
-            inputctl, linuxAbi, nativeAbi, netCore, netlink, netRing, nettcp, netwire, objects,
-            paging, pci, procfs, qr, renderctl, sched, sync, sysfs, ustack, vfs, virtio, vma;
+        dependency from kernelCrate to kernelLoad, bootinfo, crng, elf, paging, sched, sync, ustack;
+        dependency from kernelCore to acpi, audit, bootinfo, elf, fbtext, fdt, frameCrate, heap,
+            linuxAbi, nativeAbi, objects, paging, pci, qr, sched, sync, vfs, vma;
+        dependency from kernelItem to kernelCore, audit, blkRing, bootinfo, crng, devmgrProto, elf,
+            fdt, linuxAbi, nativeAbi, objects, paging, pci, sched, sync, vfs, virtio, vma;
+        dependency from kernelLoad to kernelCore, kernelItem, audit, blkRing, blockQueue, bootinfo,
+            btrfs, btrfsVfs, btrfsWrite, displayctl, elf, fdt, frameCrate, inputctl, linuxAbi,
+            logctl, nativeAbi, netCore, netRing, netlink, nettcp, netwire, paging, pci, procfs,
+            renderctl, sched, seccompBpf, sndctl, sync, sysfs, ustack, vfs, vma;
         dependency from bootCrate to bootinfo, elf, paging;
         dependency from xtask to elf, netwire;
         dependency from fuzz to acpi, blkRing, blockQueue, btrfs, cpio, displayctl, elf, fdt,

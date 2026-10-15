@@ -471,7 +471,7 @@ impl From<ferrix_virtio::QueueError> for Failure {
 ///
 /// A failure halts the boot, as it did before there were finders: the walk
 /// is where a broken configuration space or DMA path shows first.
-pub(crate) struct Enumeration {
+pub struct Enumeration {
     /// The hosts still to walk.
     hosts: Vec<Host>,
     /// Their ECAM windows, which no aperture may overlap.
@@ -486,7 +486,7 @@ pub(crate) struct Enumeration {
 
 impl Enumeration {
     /// The hosts `view`'s machine describes, ready to walk.
-    pub(crate) fn new(view: &BootView<'_>) -> Self {
+    pub fn new(view: &BootView<'_>) -> Self {
         let (hosts, refused, source) = hosts(description::of(view));
         let ecam: Vec<(u64, u64)> = hosts
             .iter()

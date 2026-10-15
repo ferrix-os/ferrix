@@ -179,7 +179,7 @@ fn mountinfo_line(
 }
 
 /// Run the check.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the bind check")?;
     let mut page = page_for(&process)?;

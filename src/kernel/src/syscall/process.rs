@@ -79,7 +79,7 @@ use ferrix_linux_abi::types::SIGCHLD;
 
 /// A program, as far as the system call layer is concerned.
 #[derive(Debug)]
-pub(crate) struct Process {
+pub struct Process {
     /// What the core enforces and reports: its address space, its pid, when
     /// it was made, its handles, its job and how it ended. First, so that it
     /// is dropped first -- its job's count and its pid are given back before

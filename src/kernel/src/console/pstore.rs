@@ -63,7 +63,7 @@ pub(crate) fn record(bytes: &[u8]) {
 /// Write the region back from the caches to memory, for a reset that may
 /// discard them, and say whether there was one. The panic path's, last
 /// before the screen, and the reset's. Takes no lock and allocates nothing.
-pub(crate) fn write_back() -> bool {
+pub fn write_back() -> bool {
     REGION.get().is_some_and(|region| {
         arch::write_back_for_reset(region.virt, region.len);
         true
@@ -72,7 +72,7 @@ pub(crate) fn write_back() -> bool {
 
 /// The attached region's physical address and length: for the boot check
 /// that no frame of it is free.
-pub(crate) fn attached() -> Option<(u64, u64)> {
+pub fn attached() -> Option<(u64, u64)> {
     REGION.get().map(|region| (region.phys, region.len))
 }
 
@@ -82,7 +82,7 @@ pub(crate) fn attached() -> Option<(u64, u64)> {
 /// Once, on the boot processor, after the direct map's RAM is recorded and
 /// before interrupts are on, so that nothing else records while the log so
 /// far is copied in.
-pub(crate) fn attach(view: &BootView<'_>) {
+pub fn attach(view: &BootView<'_>) {
     let Some((phys, len)) = view.pstore() else {
         println!("  pstore   none (the loader gave no region)");
         return;

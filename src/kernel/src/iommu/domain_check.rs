@@ -28,7 +28,7 @@ use super::{Domain, DomainError};
 /// unless the boot was told to skip its checks.
 ///
 /// Halts rather than returning, as every other stage's check does.
-pub(crate) fn check_iommu() {
+pub fn check_iommu() {
     if !crate::boot_checks::run() {
         return;
     }

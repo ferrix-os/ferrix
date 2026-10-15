@@ -90,9 +90,11 @@ pub(super) fn check_vectors(
     HELD_OFF.get().copied().unwrap_or(Ok(()))
 }
 
+// CHECKS-ONLY: device/config_check.rs
 /// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
 /// its interrupt on request (QEMU's `docs/specs/edu.rst`).
-pub(super) const EDU: (u16, u16) = (0x1234, 0x11E8);
+#[doc(hidden)]
+pub const EDU: (u16, u16) = (0x1234, 0x11E8);
 /// `edu`'s register that raises its interrupt with the bits written.
 const EDU_RAISE: u64 = 0x60;
 /// `edu`'s register that clears the bits written from its interrupt status.
@@ -198,6 +200,10 @@ const R3_PATIENCE_NANOS: u64 = 100_000_000;
 /// looked for.
 const GRACE_NANOS: u64 = 2_000_000;
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 /// Checks R1 to R4 of `docs/NVIDIA.md` §12.3, on QEMU's `edu`, once its
 /// own vector has been delivered remapped: `None` where its message is not
 /// in remappable format, so no unit remaps it.
@@ -324,6 +330,10 @@ fn check_forged(
     clippy::too_many_arguments,
     reason = "one forged message, every part of it named"
 )]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 fn forge(
     node: &DeviceNode,
     edu: Mmio,
@@ -362,6 +372,10 @@ fn forge(
     Ok(faulted && !arrived())
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 /// Program `edu`'s minted message back, masked.
 fn restore(
     node: &DeviceNode,
@@ -664,6 +678,10 @@ pub(super) fn check_node(
     Ok(())
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 /// A PCI function's bus mastering is what `enable_dma` and `disable_dma`
 /// say, read back from its command register rather than taken from the
 /// node's own flag: set after the one, with memory decoding on; clear after
@@ -737,7 +755,7 @@ pub(super) fn check_dma_switch(nodes: &[Arc<DeviceNode>]) -> Result<(), Failure>
 /// The memory map's ranges are counted and left out of the digest: the
 /// loader places them around the kernel image, so they move whenever the
 /// image changes size, whatever gathered them.
-pub(crate) fn reserved(reserved: &Reserved) -> (usize, usize, u64) {
+pub fn reserved(reserved: &Reserved) -> (usize, usize, u64) {
     let (first, last) = reserved.map;
     let mut others = 0;
     // FNV-1a over each range's two ends, summed, so that gathering the same
@@ -762,7 +780,7 @@ pub(crate) fn reserved(reserved: &Reserved) -> (usize, usize, u64) {
 /// order they were published: what the `nodes` boot line prints, so that a
 /// change to how nodes are found shows when it reorders them, which a count
 /// cannot.
-pub(crate) fn order(nodes: &[Arc<DeviceNode>]) -> (usize, u64) {
+pub fn order(nodes: &[Arc<DeviceNode>]) -> (usize, u64) {
     let mut hasher = Fnv(0xcbf2_9ce4_8422_2325);
     for node in nodes {
         // Writing to an FNV sum cannot fail.

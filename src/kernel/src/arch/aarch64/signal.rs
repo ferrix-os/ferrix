@@ -30,7 +30,7 @@ use crate::user::space::AddressSpace;
 
 /// No red zone in the AAPCS64: nothing below the stack pointer is the
 /// program's.
-pub(crate) const SIGNAL_RED_ZONE: u64 = 0;
+pub const SIGNAL_RED_ZONE: u64 = 0;
 
 /// Where `struct ucontext` starts.
 const UC: usize = 128;
@@ -66,11 +66,11 @@ const PSTATE_NZCV: u64 = 0xF000_0000;
 /// A program's registers as the way back to EL0 will load them.
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-pub(crate) struct UserContext(TrapFrame);
+pub struct UserContext(TrapFrame);
 
 impl UserContext {
     /// The registers a trap from EL0 saved.
-    pub(crate) const fn from_trap(frame: &TrapFrame) -> UserContext {
+    pub const fn from_trap(frame: &TrapFrame) -> UserContext {
         UserContext(*frame)
     }
 
@@ -80,21 +80,21 @@ impl UserContext {
     }
 
     /// The program's stack pointer, `SP_EL0`.
-    pub(crate) const fn stack_pointer(&self) -> u64 {
+    pub const fn stack_pointer(&self) -> u64 {
         self.0.sp
     }
 
     /// The value in the return register (`x0`), read as a signed result: what
     /// a system call left there, which the restart logic inspects for a
     /// kernel-internal restart code.
-    pub(crate) const fn syscall_result(&self) -> isize {
+    pub const fn syscall_result(&self) -> isize {
         self.0.x[0] as isize
     }
 
     /// Overwrite the return register (`x0`) with `value`: how the restart
     /// logic turns a restart code into `EINTR` for a call that will not be
     /// restarted.
-    pub(crate) const fn set_syscall_result(&mut self, value: isize) {
+    pub const fn set_syscall_result(&mut self, value: isize) {
         self.0.x[0] = value as u64;
     }
 
@@ -104,12 +104,7 @@ impl UserContext {
     /// result, so it is restored to `orig_arg0`. `x8`, the number, was never
     /// clobbered, so only a `restart_block` resume touches it -- to point the
     /// call at `restart_syscall`.
-    pub(crate) const fn rewind_syscall(
-        &mut self,
-        orig_nr: u64,
-        orig_arg0: u64,
-        restart_block: bool,
-    ) {
+    pub const fn rewind_syscall(&mut self, orig_nr: u64, orig_arg0: u64, restart_block: bool) {
         let _ = orig_nr;
         self.0.x[0] = orig_arg0;
         if restart_block {
@@ -136,7 +131,7 @@ fn write_frame_record(
 /// Write `request`'s frame and point `context` at the handler: `x0` the
 /// signal, `x1` the `siginfo`, `x2` the `ucontext`, `x29` the frame record,
 /// `x30` the restorer.
-pub(crate) fn setup_signal_frame(
+pub fn setup_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
     request: &FrameRequest,
@@ -201,7 +196,7 @@ pub(crate) fn setup_signal_frame(
 /// since nothing here writes any other. `pstate` keeps only the condition
 /// flags, so a frame cannot hand a program another exception level or its
 /// interrupts masked.
-pub(crate) fn restore_signal_frame(
+pub fn restore_signal_frame(
     space: &AddressSpace,
     context: &mut UserContext,
     rt: bool,

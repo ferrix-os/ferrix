@@ -29,6 +29,10 @@
 //!
 //! W4 and W5 run before W3 so that a control loosening the allowlist is
 //! caught by the check it is the control of.
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -105,16 +109,16 @@ pub(crate) const REFUSED_REENABLED: &str =
 
 /// What the checks did, for the boot's `config` lines.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// W1: apertures `device_aperture` answered as minted.
-    pub(crate) apertures: usize,
+    pub apertures: usize,
     /// W1: of those, above 4 GiB and longer than 4 GiB.
-    pub(crate) above_4_gib: usize,
+    pub above_4_gib: usize,
     /// W2: header fields read as enumeration read them, and capability and
     /// extended reads answered.
-    pub(crate) reads: usize,
+    pub reads: usize,
     /// W2: functions read.
-    pub(crate) functions: usize,
+    pub functions: usize,
     /// W2: functions holding a lent firmware framebuffer, which answered no
     /// read.
     pub(crate) yielded: usize,
@@ -122,19 +126,19 @@ pub(crate) struct Report {
     /// answered as `ferrix.efifb` requires.
     pub(crate) lent: usize,
     /// W4 and W5: writes refused whole and read back unchanged.
-    pub(crate) refused: usize,
+    pub refused: usize,
     /// W5: malformed accesses refused.
-    pub(crate) malformed: usize,
+    pub malformed: usize,
     /// W3: driver-writable fields written and read back.
-    pub(crate) written: usize,
+    pub written: usize,
     /// Why W3, W5 and W6 did not run, where they did not.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
     /// W6: rounds raced.
-    pub(crate) rounds: usize,
+    pub rounds: usize,
     /// W6: why it did not run, where it did not.
-    pub(crate) race_skipped: Option<&'static str>,
+    pub race_skipped: Option<&'static str>,
     /// W7: the register a provoked breach was found at.
-    pub(crate) breach: Option<Register>,
+    pub breach: Option<Register>,
 }
 
 /// Run W1 to W7.
@@ -142,7 +146,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first check that failed, by the message its control requires.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let side = Side::new()?;
     let mut report = Report::default();
     let result = (|| {
@@ -418,7 +422,7 @@ fn reads(side: &Side, report: &mut Report) -> Result<(), &'static str> {
                 u32::from(function.subsystem_vendor) | u32::from(function.subsystem) << 16;
             same &= field(0x2C, 4)? == subsystem;
         }
-        for (slot, bar) in (0_u16..).zip(node.bars.iter()) {
+        for (slot, bar) in (0_u16..).zip(crate::device::node_bars(node).iter()) {
             let Some(bar) = bar else { continue };
             let mut address = u64::from(field(BAR0 + 4 * slot, 4)? & !0xF);
             if bar.wide {
@@ -432,13 +436,13 @@ fn reads(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         }
         report.reads += 6;
         // The kernel's own capabilities are read in full (ruling 5b).
-        if let Some(msi) = &node.msi {
+        if let Some(msi) = crate::device::node_msi(node) {
             if field(msi.msi.capability, 1)? != u32::from(ID_MSI) {
                 return Err("the MSI capability did not read as itself");
             }
             report.reads += 1;
         }
-        if let Some(table) = &node.msix {
+        if let Some(table) = crate::device::node_msix(node) {
             if field(table.capability, 1)? != u32::from(ID_MSIX) {
                 return Err("the MSI-X capability did not read as itself");
             }
@@ -499,11 +503,11 @@ fn kernel_owned(side: &Side, report: &mut Report) -> Result<(), &'static str> {
             targets[1] = Some((BAR0, 4, 1 << 20));
             done[0] = true;
         }
-        if let Some(msi) = node.msi.as_ref().filter(|_| !done[1]) {
+        if let Some(msi) = crate::device::node_msi(node).filter(|_| !done[1]) {
             targets[2] = Some((msi.msi.capability + 2, 2, 1));
             done[1] = true;
         }
-        if let Some(table) = node.msix.as_ref().filter(|_| !done[2]) {
+        if let Some(table) = crate::device::node_msix(node).filter(|_| !done[2]) {
             targets[3] = Some((table.capability + 2, 2, 1 << 14));
             done[2] = true;
         }
@@ -548,7 +552,7 @@ fn uncovered(side: &Side, node: &DeviceNode, device: Handle) -> Result<Option<u1
     }
     Ok(last
         .filter(|&(start, id)| start + 0x40 <= 0xFF && id != ID_VENDOR)
-        .filter(|_| !node.writable.allows_byte(0xFF))
+        .filter(|_| !crate::device::node_writable(node).allows_byte(0xFF))
         .map(|_| 0xFF))
 }
 
@@ -693,7 +697,7 @@ fn race(
         let found = config.read16(ConfigWrites::FUNCTION, COMMAND);
         (found, (config.state.memory, config.state.bus_master))
     };
-    let was_on = node.dma_on.load(Ordering::Acquire);
+    let was_on = crate::device::node_dma_on(node).load(Ordering::Acquire);
     WRONG.store(0, Ordering::SeqCst);
     WRITES_DONE.store(false, Ordering::SeqCst);
     WRITES_REFUSED.store(0, Ordering::SeqCst);
@@ -715,7 +719,7 @@ fn race(
         config.write16(ConfigWrites::FUNCTION, COMMAND, found);
         (config.state.memory, config.state.bus_master) = state;
     }
-    node.dma_on.store(was_on, Ordering::Release);
+    crate::device::node_dma_on(node).store(was_on, Ordering::Release);
     let _ = write(side, device, cap + PCI_CFG_OFFSET, 4, offset);
     if late {
         return Err("the configuration race's tasks never finished");
@@ -753,7 +757,9 @@ fn switch(_argument: usize) {
             let read = node
                 .mapped_config()
                 .map(|config| config.read16(COMMAND) & COMMAND_BUS_MASTER != 0);
-            if switched.is_err() || read != Some(node.dma_on.load(Ordering::Acquire)) {
+            if switched.is_err()
+                || read != Some(crate::device::node_dma_on(&node).load(Ordering::Acquire))
+            {
                 let _ = WRONG.fetch_add(1, Ordering::SeqCst);
             }
         }
@@ -816,7 +822,7 @@ fn breach(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         let found = config.read16(ConfigWrites::FUNCTION, COMMAND);
         (found, (config.state.memory, config.state.bus_master))
     };
-    let was_on = node.dma_on.load(Ordering::Acquire);
+    let was_on = crate::device::node_dma_on(node).load(Ordering::Acquire);
     node.enable_dma()?;
 
     // As firmware, or a driver through a mirror in a BAR, could: through a
@@ -844,8 +850,8 @@ fn breach(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         config.write16(ConfigWrites::FUNCTION, COMMAND, found);
         (config.state.memory, config.state.bus_master) = state;
     }
-    node.dma_on.store(was_on, Ordering::Release);
-    node.refused.store(false, Ordering::Release);
+    crate::device::node_dma_on(node).store(was_on, Ordering::Release);
+    crate::device::node_refused(node).store(false, Ordering::Release);
 
     let named = found_breach.err().map(|breach| breach.register);
     if named != Some(Register::Command) || !bus_master_off || !refused {

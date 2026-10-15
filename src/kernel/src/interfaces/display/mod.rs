@@ -99,7 +99,7 @@ const REPLY_PATIENCE_NANOS: u64 = 5_000_000_000;
 static RECLAIMABLE_FRAMEBUFFER: AtomicBool = AtomicBool::new(false);
 
 /// Record what the loader said about the firmware framebuffer, once at boot.
-pub(crate) fn note_boot_framebuffer(present: bool, reclaimable: bool) {
+pub fn note_boot_framebuffer(present: bool, reclaimable: bool) {
     RECLAIMABLE_FRAMEBUFFER.store(present && reclaimable, Ordering::Relaxed);
 }
 
@@ -947,7 +947,7 @@ static SERVER: native::Server = native::Server {
 /// # Errors
 ///
 /// [`Full`] when the item has no room for the registration.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     native::serve(NativeCall::DisplayControlCreate, control_create)?;
     native::register_server(&SERVER)
 }

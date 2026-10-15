@@ -25,7 +25,7 @@
 //!   makes.
 
 /// A spin lock whose holder is not switched out while it holds it.
-pub(crate) type SpinLock<T> = ferrix_sync::PreemptSpinLock<T, crate::sched::Preempt>;
+pub type SpinLock<T> = ferrix_sync::PreemptSpinLock<T, crate::sched::Preempt>;
 
 /// What the kernel lends a `ferrix_sync::SleepLock` to wait on: a wait
 /// queue of its own per lock, so that a release wakes that lock's waiters and
@@ -34,7 +34,7 @@ pub(crate) type SpinLock<T> = ferrix_sync::PreemptSpinLock<T, crate::sched::Pree
 /// Before the scheduler runs, a wait on the queue spins, so a lock made at
 /// boot works then too; it just cannot be contended yet.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct SchedParker;
+pub struct SchedParker;
 
 impl ferrix_sync::Parker for SchedParker {
     fn new_parking(&self) -> Option<alloc::boxed::Box<dyn ferrix_sync::Parking>> {

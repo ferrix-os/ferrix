@@ -41,7 +41,7 @@ pub(crate) type Handler = fn(u32);
 
 /// Why an interrupt could not be registered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum IrqError {
+pub enum IrqError {
     /// The number is outside the table.
     OutOfRange(u32),
     /// Something is already registered on that number. Sharing a line is a
@@ -80,13 +80,13 @@ static UNCLAIMED: AtomicU64 = AtomicU64::new(0);
 /// Where a device writes to raise one allocated interrupt, and the number it
 /// then arrives as. What `arch::msi_allocate` hands out.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Msi {
+pub struct Msi {
     /// What [`register`] and [`dispatch`] call it.
-    pub(crate) number: u32,
+    pub number: u32,
     /// The address the device writes.
-    pub(crate) address: u64,
+    pub address: u64,
     /// The value it writes there.
-    pub(crate) data: u32,
+    pub data: u32,
 }
 
 /// Attach `handler` to interrupt `irq`.
@@ -95,7 +95,7 @@ pub(crate) struct Msi {
 ///
 /// [`IrqError::OutOfRange`] past the end of the table, and
 /// [`IrqError::AlreadyTaken`] if something is already there.
-pub(crate) fn register(irq: u32, handler: Handler) -> Result<(), IrqError> {
+pub fn register(irq: u32, handler: Handler) -> Result<(), IrqError> {
     let mut table = HANDLERS.lock();
     let slot = table
         .get_mut(irq as usize)
@@ -200,12 +200,12 @@ pub(crate) fn dispatch(irq: u32) {
 }
 
 /// How many interrupts reached a handler.
-pub(crate) fn delivered() -> u64 {
+pub fn delivered() -> u64 {
     DELIVERED.load(Ordering::Relaxed)
 }
 
 /// How many arrived with nothing registered.
-pub(crate) fn unclaimed() -> u64 {
+pub fn unclaimed() -> u64 {
     UNCLAIMED.load(Ordering::Relaxed)
 }
 
@@ -214,16 +214,16 @@ pub(crate) fn unclaimed() -> u64 {
 /// Named parts rather than a formatted line, so the architecture reports what
 /// it discovered and generic code decides how a boot log looks.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// What the free-running counter is.
-    pub(crate) counter: &'static str,
+    pub counter: &'static str,
     /// How fast it counts.
-    pub(crate) counter_hz: u64,
+    pub counter_hz: u64,
     /// What the interrupt controller is.
-    pub(crate) controller: &'static str,
+    pub controller: &'static str,
     /// What the timer is.
-    pub(crate) timer: &'static str,
+    pub timer: &'static str,
     /// How fast the timer counts, which is not the counter's frequency: on
     /// x86-64 they are two different pieces of hardware.
-    pub(crate) timer_hz: u64,
+    pub timer_hz: u64,
 }

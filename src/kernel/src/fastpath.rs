@@ -69,7 +69,7 @@ pub(crate) fn on() -> bool {
 
 /// Stage 9's line: which path `channel_write_read` takes, and how the option
 /// was read.
-pub(crate) fn report() {
+pub fn report() {
     let state = if on() { ON } else { OFF };
     let how = match READ.load(Ordering::Relaxed) {
         READ_ON | READ_OFF => "as ferrix.fastpath asked",

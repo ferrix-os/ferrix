@@ -364,13 +364,14 @@ pub(crate) fn stalls() -> u64 {
 }
 
 /// What [`check`] established.
-pub(crate) struct Checked {
+#[derive(Debug)]
+pub struct Checked {
     /// The bytes the check's line is on the wire.
-    pub(crate) line: usize,
+    pub line: usize,
     /// How many of them the transmit interrupt sent.
-    pub(crate) by_interrupt: u64,
+    pub by_interrupt: u64,
     /// How many the writer sent itself.
-    pub(crate) by_writer: u64,
+    pub by_writer: u64,
 }
 
 /// The line the check writes: longer than a [`BURST`], so that the port's
@@ -391,7 +392,7 @@ const CHECK_LINE: &[u8] = concat!(
 /// # Errors
 ///
 /// A description of the first property that did not hold.
-pub(crate) fn check() -> Result<Option<Checked>, &'static str> {
+pub fn check() -> Result<Option<Checked>, &'static str> {
     if !interrupt_driven() {
         return Ok(None);
     }

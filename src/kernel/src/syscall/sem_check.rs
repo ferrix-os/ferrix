@@ -26,16 +26,16 @@ use crate::syscall::sem::{
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls answered as Linux answers them.
-    pub(crate) calls: usize,
+    pub calls: usize,
     /// Of them, refusals with Linux's error.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
     /// Blocked callers ended, each by one of the five ways.
-    pub(crate) waits: usize,
+    pub waits: usize,
     /// Sets a job made before the per-job bound (at the check's bound)
     /// refused one, while a sibling made one.
-    pub(crate) per_job: usize,
+    pub per_job: usize,
 }
 
 /// `IPC_RMID` and the other commands, as `semctl` takes them.
@@ -316,7 +316,7 @@ fn expect<T: PartialEq + Copy>(
 /// Which property failed.
 ///
 /// Verifies: H.QUOTA.7
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let before = sem::sets_in_use();
     let mut report = Report::default();
     keys(&mut report)?;

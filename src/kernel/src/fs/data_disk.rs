@@ -40,7 +40,7 @@ static VOLUME: Once<Arc<dyn FileSystem>> = Once::new();
 
 /// Mount the first data disk at `/data`, if this machine has one. Called
 /// after [`root_disk::switch`], so that `/data` lands in the `/` it chose.
-pub(crate) fn mount() {
+pub fn mount() {
     let Some((index, rdev)) = (FIRST..END)
         .map(|index| (index, makedev(VIRTIO_BLK_MAJOR, index * 16)))
         .filter(|&(_, rdev)| fs::devfs::block_device(rdev).is_some())

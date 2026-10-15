@@ -30,7 +30,7 @@ use ferrix_paging::PhysMem;
 /// have swept.
 ///
 /// Verifies: H.MEM.4, L.mm.32
-pub(crate) fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
+pub fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
     let wx = match check_w_xor_x(view) {
         Ok(report) => report,
         Err(found) => {
@@ -84,7 +84,7 @@ pub(crate) fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
 
 /// A mapping that is both writable and executable.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct WriteExecute {
+pub struct WriteExecute {
     /// Where it starts.
     pub(crate) virt: u64,
     /// How much of the address space it covers.
@@ -93,7 +93,7 @@ pub(crate) struct WriteExecute {
 
 /// What the W^X sweep found.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct WxReport {
+pub struct WxReport {
     /// Mappings the hardware can see.
     pub(crate) leaves: u64,
     /// Of those, how many are executable at all.
@@ -118,7 +118,7 @@ pub(crate) struct WxReport {
 /// The first offending mapping, which is enough: the fix for one is the fix
 /// for all of them, and reporting the address of the first is what makes it
 /// findable.
-pub(crate) fn check_w_xor_x(view: &BootView<'_>) -> Result<WxReport, WriteExecute> {
+pub fn check_w_xor_x(view: &BootView<'_>) -> Result<WxReport, WriteExecute> {
     let mut report = WxReport {
         leaves: 0,
         executable: 0,
@@ -286,7 +286,7 @@ fn permissions_of(virt: u64) -> Option<MapFlags> {
 /// gets a `Vec` back with the wrong contents has no idea the heap is at fault.
 ///
 /// Verifies: H.MEM.14, L.mm.13
-pub(crate) fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
+pub fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
     if stats.managed_frames == 0 {
         return Err("the frame allocator was given nothing");
     }
@@ -1026,7 +1026,7 @@ fn ram_runs() -> impl Iterator<Item = (u64, u64)> {
 /// first gibibyte boundary at or past the end of the highest run, where the
 /// window a virtual GPU exposes host memory through sits on a machine with
 /// that much RAM (F-55).
-pub(crate) fn past_ram() -> u64 {
+pub fn past_ram() -> u64 {
     let end = ram_runs().map(|(_, end)| end).max().unwrap_or(0);
     end.next_multiple_of(1 << 30)
 }
@@ -1034,7 +1034,7 @@ pub(crate) fn past_ram() -> u64 {
 /// A physical page between two runs of RAM, inside the span the direct map
 /// covers but not RAM, if the memory map has one: where a device's window
 /// would have a cacheable alias if the direct map translated it.
-pub(crate) fn hole_in_ram() -> Option<u64> {
+pub fn hole_in_ram() -> Option<u64> {
     let mut runs = ram_runs().peekable();
     while let Some((_, end)) = runs.next() {
         if let Some(&(next, _)) = runs.peek()
@@ -1091,7 +1091,7 @@ fn check_only_ram_has_a_checked_alias() -> Result<(), &'static str> {
 /// frame allocator's lock once a frame, 257 times for the 1 MiB region.
 ///
 /// Verifies: `L.mm.75`
-pub(crate) fn check_pstore_never_free() -> Result<(), &'static str> {
+pub fn check_pstore_never_free() -> Result<(), &'static str> {
     let Some((phys, len)) = crate::console::pstore::attached() else {
         return Ok(());
     };

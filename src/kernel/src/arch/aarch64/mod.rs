@@ -1,9 +1,9 @@
 //! The `AArch64` end of the kernel.
 
 mod check;
-pub(crate) mod console;
+pub mod console;
 mod cpu;
-pub(crate) use cpu::dma_barrier;
+pub use cpu::dma_barrier;
 mod gic;
 pub(crate) mod mmio;
 mod signal;
@@ -11,15 +11,15 @@ mod smp;
 pub(super) mod speculation;
 mod switch;
 mod timer;
-pub(super) mod trap;
+pub mod trap;
 mod trng;
 
 /// Clean and drop a buffer's lines, for memory about to be shared with such a
 /// device through a mapping that bypasses the caches.
-pub(crate) use cpu::clean_invalidate_to_poc as flush_for_device;
+pub use cpu::clean_invalidate_to_poc as flush_for_device;
 /// Clean a buffer out of the data cache for a device that reads memory past
 /// it (see [`crate::arch::clean_for_device`]).
-pub(crate) use cpu::clean_to_poc as clean_for_device;
+pub use cpu::clean_to_poc as clean_for_device;
 /// The same for an IOMMU's table walk that does not snoop the caches (see
 /// [`crate::arch::clean_for_walker`]): to the point of coherency, and waited for.
 pub(crate) use cpu::clean_to_poc as clean_for_walker;
@@ -27,12 +27,11 @@ pub(crate) use cpu::clean_to_poc as clean_for_walker;
 /// reset may discard the caches (see [`crate::arch::write_back_for_reset`]):
 /// the region's lines only.
 pub(crate) use cpu::clean_to_poc as write_back_for_reset;
-pub(crate) use cpu::hardware_random;
-pub(crate) use cpu::sync_instructions;
-pub(crate) use signal::{SIGNAL_RED_ZONE, UserContext, restore_signal_frame, setup_signal_frame};
+pub use cpu::hardware_random;
+pub use cpu::sync_instructions;
+pub use signal::{SIGNAL_RED_ZONE, UserContext, restore_signal_frame, setup_signal_frame};
 
 use core::sync::atomic::{AtomicBool, Ordering};
-pub(crate) use trap::check::{drive_native_words, drive_system_call};
 
 use ferrix_bootinfo::{Arch, BootView};
 use ferrix_linux_abi::nr::{self, Syscall};
@@ -43,7 +42,7 @@ use crate::irq::Report;
 use crate::platform::google::gs201::watchdog;
 
 /// Name for log lines.
-pub(crate) const NAME: &str = "aarch64";
+pub const NAME: &str = "aarch64";
 
 /// This machine, as the hand-off structure names it.
 ///
@@ -51,7 +50,7 @@ pub(crate) const NAME: &str = "aarch64";
 /// image built for a different architecture. `src/boot/common/uefi/src/arch/` has carried the
 /// same constant since stage 1; this is the kernel's copy, and the two are
 /// checked against each other by the image simply booting.
-pub(crate) const ARCH: Arch = Arch::AArch64;
+pub const ARCH: Arch = Arch::AArch64;
 
 /// Which `struct stat` the stat calls fill in: the generic one, 128 bytes,
 /// from `include/uapi/asm-generic/stat.h`, as on every architecture added
@@ -59,19 +58,20 @@ pub(crate) const ARCH: Arch = Arch::AArch64;
 /// Whether this architecture's `SYSCALL`-style entry takes step 4's fast
 /// path for `channel_write_read` when one is registered
 /// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
-pub(crate) const FAST_WRITE_READ: bool = false;
+pub const FAST_WRITE_READ: bool = false;
 
 /// The switches that left `DS` and `ES` unloaded (x86-64's `DS`/`ES` skip,
 /// `docs/OPAQUE-KERNEL.md` §9.8, 3b): none here, which has no segments.
-pub(crate) const fn selector_skips_total() -> Option<[u64; 3]> {
+pub const fn selector_skips_total() -> Option<[u64; 3]> {
     None
 }
 
-pub(crate) const STAT_LAYOUT: super::StatLayout = super::StatLayout::Generic;
+/// The `struct stat` this architecture's programs read: the generic layout of `include/uapi/asm-generic/stat.h`.
+pub const STAT_LAYOUT: super::StatLayout = super::StatLayout::Generic;
 
 /// AArch64's `struct epoll_event`, 16 bytes: not packed, so `data` is
 /// aligned at offset 8.
-pub(crate) const EPOLL_EVENT_BYTES: usize = 16;
+pub const EPOLL_EVENT_BYTES: usize = 16;
 
 /// The page table descriptor layout this machine uses.
 pub(crate) type PageEncoding = ferrix_paging::aarch64::AArch64;
@@ -82,10 +82,7 @@ pub(crate) type PageEncoding = ferrix_paging::aarch64::AArch64;
 /// mapped as device memory before a single byte can go out. Its address is
 /// still the `virt` machine's, rather than the SPCR's or the device tree's,
 /// unless the command line names a `ramoops` zone instead.
-pub(crate) fn init_console(
-    view: &BootView<'_>,
-    memory: &mut EarlyMemory,
-) -> Result<(), EarlyError> {
+pub fn init_console(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), EarlyError> {
     console::init(view, memory)
 }
 
@@ -119,10 +116,10 @@ pub(crate) unsafe fn cpu_local() -> u64 {
 pub(crate) fn cpu_local_register() -> u64 {
     cpu::read_tpidr_el1()
 }
-pub(crate) use trap::{
-    TrapFrame, UserRegs, advance_past_breakpoint, breakpoint, classify, enter_user, fault_signal,
-    report_trap, resume_user, system_call,
-};
+pub use trap::UserRegs;
+pub use trap::breakpoint;
+pub use trap::{TrapFrame, enter_user, resume_user};
+pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap, system_call};
 
 /// Install the exception vector table.
 ///
@@ -134,7 +131,7 @@ pub(crate) use trap::{
 ///
 /// (ENTRY) Must be called exactly once, on the boot CPU, before interrupts are
 /// unmasked.
-pub(crate) unsafe fn init_traps() {
+pub unsafe fn init_traps() {
     // SAFETY: (ENTRY) called once from `kmain`, before anything faults deliberately.
     unsafe { trap::init() };
     // After the vectors, so a fault this turns on is reported rather than
@@ -164,7 +161,7 @@ pub(crate) const LENDS_FRAMEBUFFER: bool = false;
 
 /// Fill `out` with full-entropy bytes from firmware's TRNG, through SMCCC,
 /// and say how many: 0 where firmware offers none. See `trng.rs`.
-pub(crate) fn firmware_entropy(view: &BootView<'_>, out: &mut [u8]) -> usize {
+pub fn firmware_entropy(view: &BootView<'_>, out: &mut [u8]) -> usize {
     trng::fill(view, out)
 }
 
@@ -189,7 +186,7 @@ pub(crate) fn flush_tlb() {
 /// every core of the machine is in, and the `dsb ish` after it does not
 /// complete until every one of them has done it. The TLB shootdown x86-64
 /// needs interrupts for, this architecture does in hardware.
-pub(crate) const TLB_FLUSH_IS_BROADCAST: bool = true;
+pub const TLB_FLUSH_IS_BROADCAST: bool = true;
 
 /// Invalidate the translation of the page holding `address` — on every core,
 /// as [`flush_tlb`] does.
@@ -235,7 +232,7 @@ pub(crate) fn send_ipi_to(_hardware_id: u64) -> Result<(), &'static str> {
 /// object's lock, which every read and write of the control page takes.
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_RMAP_PROGRAM: &[u8] = &[
+pub const USER_RMAP_PROGRAM: &[u8] = &[
     0xe9, 0x03, 0x40, 0xb9, 0x29, 0x05, 0x00, 0x51, 0x0a, 0x00, 0xae, 0xd2, 0x4b, 0x05, 0x40, 0x91,
     0x6b, 0x11, 0x09, 0x8b, 0xac, 0xdd, 0xab, 0x52, 0x8c, 0x01, 0x09, 0x0b, 0xed, 0xdd, 0x97, 0x52,
     0xad, 0xd5, 0xbb, 0x72, 0x60, 0x01, 0x40, 0xb9, 0xbf, 0x3b, 0x03, 0xd5, 0x60, 0x01, 0x00, 0x34,
@@ -263,13 +260,13 @@ pub(crate) const USER_RMAP_PROGRAM: &[u8] = &[
 /// jump table of, so it is bounded and clamped first: a processor that
 /// mispredicts the table's own bounds check then jumps through slot zero
 /// rather than through whatever lies past the table (Spectre variant 1).
-pub(crate) fn decode_syscall(number: usize) -> Option<Syscall> {
+pub fn decode_syscall(number: usize) -> Option<Syscall> {
     nr::from_aarch64(super::nospec_index(number, nr::AARCH64_END)?)
 }
 
 /// The `AUDIT_ARCH_*` token a system call carries in `seccomp_data.arch`:
 /// `EM_AARCH64` | `__AUDIT_ARCH_64BIT` | `__AUDIT_ARCH_LE`. One ABI here.
-pub(crate) const fn audit_arch(abi: crate::trap::Abi) -> u32 {
+pub const fn audit_arch(abi: crate::trap::Abi) -> u32 {
     let _ = abi;
     0xC000_00B7
 }
@@ -278,7 +275,7 @@ pub(crate) const fn audit_arch(abi: crate::trap::Abi) -> u32 {
 /// the frame reads as it did when the program made the call: Linux's
 /// `syscall_rollback`. `x8` still holds the number, and `x0` held the first
 /// argument (`docs/SECCOMP.md` §3.6).
-pub(crate) const fn syscall_rollback_value(
+pub const fn syscall_rollback_value(
     abi: crate::trap::Abi,
     number: usize,
     args: &[u64; 6],
@@ -289,18 +286,18 @@ pub(crate) const fn syscall_rollback_value(
 
 /// The ABI a program image runs in, or `None` for one this machine cannot
 /// run: this machine's own images, natively. There is no second ABI here.
-pub(crate) fn image_abi(_class: ferrix_elf::Class, machine: u16) -> Option<crate::trap::Abi> {
+pub fn image_abi(_class: ferrix_elf::Class, machine: u16) -> Option<crate::trap::Abi> {
     (machine == ARCH.elf_machine()).then_some(crate::trap::Abi::Native)
 }
 
 /// One past the highest address a compatibility-mode program's space may
 /// hold: this architecture has none, so it is the native bound, never asked.
-pub(crate) const COMPAT_USER_END: u64 = ferrix_bootinfo::USER_VIRT_END;
+pub const COMPAT_USER_END: u64 = ferrix_bootinfo::USER_VIRT_END;
 
 /// A compatibility-mode call: none on this architecture, which has no
 /// second ABI to run. Every entry here is [`crate::trap::Abi::Native`], so
 /// this is never asked; it answers as `ENOSYS` would if it were.
-pub(crate) const fn decode_compat_syscall(_number: usize) -> Option<Syscall> {
+pub const fn decode_compat_syscall(_number: usize) -> Option<Syscall> {
     None
 }
 
@@ -308,7 +305,7 @@ pub(crate) const fn decode_compat_syscall(_number: usize) -> Option<Syscall> {
 /// numbers them. AArch64 uses the generic *call* table but not the generic
 /// flags: `arch/arm64/include/uapi/asm/fcntl.h` keeps 32-bit Arm's, so that a
 /// compat program's flags mean the same thing to both kernels.
-pub(crate) const OPEN_FLAGS: OpenFlagBits = types::OPEN_FLAGS_ARM;
+pub const OPEN_FLAGS: OpenFlagBits = types::OPEN_FLAGS_ARM;
 
 /// A whole program, in machine code, for the self-check to run at EL0.
 ///
@@ -320,7 +317,7 @@ pub(crate) const OPEN_FLAGS: OpenFlagBits = types::OPEN_FLAGS_ARM;
 /// Assembled by rustc's own LLVM from `global_asm!` and read back out of the
 /// object file, rather than encoded by hand, so the bytes cannot disagree with
 /// the assembler that builds the rest of the kernel.
-pub(crate) const USER_TEST_PROGRAM: &[u8] = &[
+pub const USER_TEST_PROGRAM: &[u8] = &[
     0x08, 0x08, 0x80, 0xd2, // mov  x8, #64      // write
     0x20, 0x00, 0x80, 0xd2, // mov  x0, #1       // fd 1
     0xe1, 0x00, 0x00, 0x10, // adr  x1, msg
@@ -335,7 +332,7 @@ pub(crate) const USER_TEST_PROGRAM: &[u8] = &[
 ];
 
 /// The status [`USER_TEST_PROGRAM`] exits with.
-pub(crate) const USER_TEST_STATUS: i32 = 42;
+pub const USER_TEST_STATUS: i32 = 42;
 
 /// A program that exits with whatever its first argument register held when it
 /// entered user mode: the start argument a native process's bootstrap handle
@@ -347,7 +344,7 @@ pub(crate) const USER_TEST_STATUS: i32 = 42;
 /// ```
 ///
 /// Two instructions, checked against the host's disassembler.
-pub(crate) const USER_ARGUMENT_PROGRAM: &[u8] = &[0xc8, 0x0b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4];
+pub const USER_ARGUMENT_PROGRAM: &[u8] = &[0xc8, 0x0b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4];
 
 /// A program that writes through a null pointer, and exits with 98 if that did
 /// not fault.
@@ -365,7 +362,7 @@ pub(crate) const USER_ARGUMENT_PROGRAM: &[u8] = &[0xc8, 0x0b, 0x80, 0xd2, 0x01, 
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_FAULT_PROGRAM: &[u8] = &[
+pub const USER_FAULT_PROGRAM: &[u8] = &[
     0x00, 0x00, 0x80, 0xd2, // mov  x0, #0
     0x00, 0x00, 0x00, 0xf9, // str  x0, [x0]
     0xc8, 0x0b, 0x80, 0xd2, // mov  x8, #94
@@ -388,7 +385,7 @@ pub(crate) const USER_FAULT_PROGRAM: &[u8] = &[
 ///
 /// Assembled by the host's GNU assembler for AArch64 and read back with its
 /// disassembler.
-pub(crate) const USER_BOOTSTRAP_PROGRAM: &[u8] = &[
+pub const USER_BOOTSTRAP_PROGRAM: &[u8] = &[
     0x68, 0x06, 0x82, 0xd2, // mov x8, #0x1033
     0x01, 0x00, 0x00, 0xd4, // svc #0
     0x08, 0x00, 0x82, 0xd2, // mov x8, #0x1000
@@ -410,7 +407,7 @@ pub(crate) const USER_BOOTSTRAP_PROGRAM: &[u8] = &[
 ///
 /// Assembled by the host's GNU assembler for AArch64 and read back with its
 /// disassembler.
-pub(crate) const USER_GETUID_PROGRAM: &[u8] = &[
+pub const USER_GETUID_PROGRAM: &[u8] = &[
     0xc8, 0x15, 0x80, 0xd2, // mov x8, #174
     0x01, 0x00, 0x00, 0xd4, // svc #0
     0xc8, 0x0b, 0x80, 0xd2, // mov x8, #94
@@ -434,7 +431,7 @@ pub(crate) const USER_GETUID_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_FORK_PROGRAM: &[u8] = &[
+pub const USER_FORK_PROGRAM: &[u8] = &[
     0x88, 0x1b, 0x80, 0xd2, 0x20, 0x02, 0x80, 0xd2, 0x01, 0x00, 0x80, 0xd2, 0x02, 0x00, 0x80, 0xd2,
     0x03, 0x00, 0x80, 0xd2, 0x04, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0x80, 0x00, 0x00, 0xb5,
     0xc8, 0x0b, 0x80, 0xd2, 0xe0, 0x02, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0xf3, 0x03, 0x00, 0xaa,
@@ -468,7 +465,7 @@ pub(crate) const USER_FORK_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_NAMESPACE_PROGRAM: &[u8] = &[
+pub const USER_NAMESPACE_PROGRAM: &[u8] = &[
     0x88, 0x1b, 0x80, 0x52, 0x20, 0x42, 0x80, 0x52, 0x40, 0x00, 0xae, 0x72, 0xe1, 0x03, 0x1f, 0xaa,
     0xe2, 0x03, 0x1f, 0xaa, 0xe3, 0x03, 0x1f, 0xaa, 0xe4, 0x03, 0x1f, 0xaa, 0x01, 0x00, 0x00, 0xd4,
     0x1f, 0x58, 0x00, 0xb1, 0xa1, 0x01, 0x00, 0x54, 0x88, 0x1b, 0x80, 0x52, 0x20, 0x02, 0x80, 0x52,
@@ -504,7 +501,7 @@ pub(crate) const USER_NAMESPACE_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_INTO_CGROUP_PROGRAM: &[u8] = &[
+pub const USER_INTO_CGROUP_PROGRAM: &[u8] = &[
     0x08, 0x07, 0x80, 0xd2, 0x60, 0x0c, 0x80, 0x92, 0xa1, 0x0b, 0x00, 0x10, 0x02, 0x00, 0x80, 0xd2,
     0x03, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0x1f, 0x00, 0x00, 0xf1, 0x4b, 0x0a, 0x00, 0x54,
     0xf3, 0x03, 0x00, 0xaa, 0xff, 0x03, 0x04, 0xd1, 0xff, 0x7f, 0x00, 0xa9, 0xff, 0x7f, 0x01, 0xa9,
@@ -548,7 +545,7 @@ pub(crate) const USER_INTO_CGROUP_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled with binutils' `as` and read back out of the object file.
-pub(crate) const USER_OOM_PROGRAM: &[u8] = &[
+pub const USER_OOM_PROGRAM: &[u8] = &[
     0x00, 0x00, 0x80, 0xd2, 0x01, 0x10, 0xa0, 0xd2, 0x62, 0x00, 0x80, 0xd2, 0x43, 0x04, 0x80, 0xd2,
     0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
     0x1f, 0x04, 0x40, 0xb1, 0x28, 0x01, 0x00, 0x54, 0x01, 0x00, 0x60, 0x91, 0x22, 0x00, 0x80, 0x52,
@@ -576,7 +573,7 @@ pub(crate) const USER_OOM_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_MPROTECT_PROGRAM: &[u8] = &[
+pub const USER_MPROTECT_PROGRAM: &[u8] = &[
     0x00, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x82, 0xd2, 0x62, 0x00, 0x80, 0xd2, 0x43, 0x04, 0x80, 0xd2,
     0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
     0x1f, 0xfc, 0x3f, 0xb1, 0xc2, 0x01, 0x00, 0x54, 0xf3, 0x03, 0x00, 0xaa, 0x29, 0x00, 0x80, 0xd2,
@@ -618,7 +615,7 @@ pub(crate) const USER_MPROTECT_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_COW_PROGRAM: &[u8] = &[
+pub const USER_COW_PROGRAM: &[u8] = &[
     0xff, 0x83, 0x00, 0xd1, 0x00, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x84, 0xd2, 0x62, 0x00, 0x80, 0xd2,
     0x43, 0x04, 0x80, 0xd2, 0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2,
     0x01, 0x00, 0x00, 0xd4, 0x1f, 0xfc, 0x3f, 0xb1, 0x02, 0x0b, 0x00, 0x54, 0xf3, 0x03, 0x00, 0xaa,
@@ -672,7 +669,7 @@ pub(crate) const USER_COW_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_SHARED_PROGRAM: &[u8] = &[
+pub const USER_SHARED_PROGRAM: &[u8] = &[
     0xff, 0x43, 0x00, 0xd1, 0x00, 0x00, 0x80, 0xd2, 0x01, 0x00, 0x84, 0xd2, 0x62, 0x00, 0x80, 0xd2,
     0x23, 0x04, 0x80, 0xd2, 0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2,
     0x01, 0x00, 0x00, 0xd4, 0x1f, 0xfc, 0x3f, 0xb1, 0xa2, 0x07, 0x00, 0x54, 0xf3, 0x03, 0x00, 0xaa,
@@ -723,7 +720,7 @@ pub(crate) const USER_SHARED_PROGRAM: &[u8] = &[
 /// `child_tid` from its register would clear the wrong word and the first wait
 /// would never end. Assembled by rustc's LLVM and read back out of the object
 /// file.
-pub(crate) const USER_THREAD_PROGRAM: &[u8] = &[
+pub const USER_THREAD_PROGRAM: &[u8] = &[
     0x20, 0x22, 0x80, 0xd2, 0x01, 0x00, 0x80, 0xd2, 0x02, 0x00, 0x80, 0xd2, 0x03, 0x00, 0x80, 0xd2,
     0x04, 0x00, 0x80, 0xd2, 0x88, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0x1f, 0x98, 0x00, 0xb1,
     0x41, 0x09, 0x00, 0x54, 0x00, 0x00, 0x80, 0xd2, 0x21, 0x00, 0xa0, 0xd2, 0x62, 0x00, 0x80, 0xd2,
@@ -761,7 +758,7 @@ pub(crate) const USER_THREAD_PROGRAM: &[u8] = &[
 /// it running with no thread. It races only with two processors.
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_EXITS_PROGRAM: &[u8] = &[
+pub const USER_EXITS_PROGRAM: &[u8] = &[
     0x00, 0x00, 0x80, 0xd2, 0x21, 0x00, 0xa0, 0xd2, 0x62, 0x00, 0x80, 0xd2, 0x43, 0x04, 0x80, 0xd2,
     0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
     0xf3, 0x03, 0x00, 0xaa, 0x7f, 0x02, 0x00, 0xb9, 0x7f, 0x06, 0x00, 0xb9, 0x00, 0xe0, 0x81, 0xd2,
@@ -779,7 +776,7 @@ pub(crate) const USER_EXITS_PROGRAM: &[u8] = &[
 /// killed there with no signal is still released. Exits 1 if the read returns.
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_SYSLOG_PROGRAM: &[u8] = &[
+pub const USER_SYSLOG_PROGRAM: &[u8] = &[
     0xff, 0x03, 0x01, 0xd1, 0x88, 0x0e, 0x80, 0xd2, 0x40, 0x00, 0x80, 0xd2, 0xe1, 0x03, 0x00, 0x91,
     0x02, 0x08, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0x20, 0x00, 0x80, 0xd2, 0xc8, 0x0b, 0x80, 0xd2,
     0x01, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x00,
@@ -793,7 +790,7 @@ pub(crate) const USER_SYSLOG_PROGRAM: &[u8] = &[
 /// a refused `clone`, 97 an `execve` that returned.
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_DETHREAD_PROGRAM: &[u8] = &[
+pub const USER_DETHREAD_PROGRAM: &[u8] = &[
     0x00, 0x00, 0x80, 0xd2, 0x21, 0x00, 0xa0, 0xd2, 0x62, 0x00, 0x80, 0xd2, 0x43, 0x04, 0x80, 0xd2,
     0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
     0xf3, 0x03, 0x00, 0xaa, 0x7f, 0x02, 0x00, 0xb9, 0x09, 0x00, 0x80, 0x12, 0x69, 0x06, 0x00, 0xb9,
@@ -815,7 +812,7 @@ pub(crate) const USER_DETHREAD_PROGRAM: &[u8] = &[
 /// `mmap` or `clone`.
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_STOPPED_PROGRAM: &[u8] = &[
+pub const USER_STOPPED_PROGRAM: &[u8] = &[
     0x00, 0x00, 0xac, 0xd2, 0x01, 0x00, 0x82, 0xd2, 0x62, 0x00, 0x80, 0xd2, 0x43, 0x06, 0x80, 0xd2,
     0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
     0x09, 0x00, 0xac, 0xd2, 0x1f, 0x00, 0x09, 0xeb, 0x81, 0x06, 0x00, 0x54, 0xf3, 0x03, 0x00, 0xaa,
@@ -843,7 +840,7 @@ pub(crate) const USER_STOPPED_PROGRAM: &[u8] = &[
 /// a refused `mmap`, `rt_sigaction` or `clone`.
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_HANDOFF_PROGRAM: &[u8] = &[
+pub const USER_HANDOFF_PROGRAM: &[u8] = &[
     0x00, 0x00, 0xac, 0xd2, 0x01, 0x00, 0x82, 0xd2, 0x62, 0x00, 0x80, 0xd2, 0x43, 0x06, 0x80, 0xd2,
     0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
     0x09, 0x00, 0xac, 0xd2, 0x1f, 0x00, 0x09, 0xeb, 0x01, 0x0b, 0x00, 0x54, 0xf3, 0x03, 0x00, 0xaa,
@@ -894,7 +891,7 @@ pub(crate) const USER_HANDOFF_PROGRAM: &[u8] = &[
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_SIGNAL_PROGRAM: &[u8] = &[
+pub const USER_SIGNAL_PROGRAM: &[u8] = &[
     0xff, 0x83, 0x00, 0xd1, 0xa0, 0x04, 0x00, 0x10, 0xe0, 0x03, 0x00, 0xf9, 0x80, 0x00, 0x80, 0xd2,
     0x00, 0x80, 0xa0, 0xf2, 0xe0, 0x07, 0x00, 0xf9, 0x00, 0x07, 0x00, 0x10, 0xe0, 0x0b, 0x00, 0xf9,
     0xff, 0x0f, 0x00, 0xf9, 0x40, 0x01, 0x80, 0xd2, 0xe1, 0x03, 0x00, 0x91, 0x02, 0x00, 0x80, 0xd2,
@@ -920,14 +917,14 @@ pub(crate) const USER_SIGNAL_PROGRAM: &[u8] = &[
 /// flag left set would single-step the kernel's first instruction. The nearest
 /// thing here, `PSTATE.SS`, is armed only through `MDSCR_EL1` and the
 /// `SPSR_EL1` an exception return loads, and EL0 can write neither.
-pub(crate) const USER_STEP_PROGRAM: &[u8] = &[];
+pub const USER_STEP_PROGRAM: &[u8] = &[];
 
 /// x86-64's `XSAVE` signal-frame check has no counterpart here: the
 /// frame carries no `XSAVE` header to poison.
-pub(crate) const USER_XSTATE_PROGRAM: &[u8] = &[];
+pub const USER_XSTATE_PROGRAM: &[u8] = &[];
 
 /// What [`USER_STEP_PROGRAM`] would exit with; unused while it is empty.
-pub(crate) const USER_STEP_STATUS: i32 = 0;
+pub const USER_STEP_STATUS: i32 = 0;
 
 /// A program that `execve`s `/exec-target` and, if that returns, exits with
 /// the error number: the target's own status when it exists, 2 (`ENOENT`) when
@@ -941,7 +938,7 @@ pub(crate) const USER_STEP_STATUS: i32 = 0;
 /// ```
 ///
 /// Assembled by rustc's LLVM and read back out of the object file.
-pub(crate) const USER_EXEC_PROGRAM: &[u8] = &[
+pub const USER_EXEC_PROGRAM: &[u8] = &[
     0x40, 0x01, 0x00, 0x10, 0xe0, 0x7f, 0xbf, 0xa9, 0xe1, 0x03, 0x00, 0x91, 0x02, 0x00, 0x80, 0xd2,
     0xa8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0xe0, 0x03, 0x00, 0xcb, 0xc8, 0x0b, 0x80, 0xd2,
     0x01, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14, 0x2f, 0x65, 0x78, 0x65, 0x63, 0x2d, 0x74, 0x61,
@@ -977,7 +974,7 @@ pub(crate) const USER_EXEC_PROGRAM: &[u8] = &[
 ///
 /// Assembled by rustc's LLVM and read back out of the object file, as
 /// [`USER_TEST_PROGRAM`] was.
-pub(crate) const USER_SPIN_PROGRAM: &[u8] = &[
+pub const USER_SPIN_PROGRAM: &[u8] = &[
     0xea, 0x03, 0x00, 0x91, 0xc9, 0x02, 0x00, 0x18, 0x29, 0x05, 0x00, 0xf1, 0xe1, 0xff, 0xff, 0x54,
     0xeb, 0x03, 0x00, 0x91, 0x5f, 0x01, 0x0b, 0xeb, 0x21, 0x01, 0x00, 0x54, 0x08, 0x08, 0x80, 0xd2,
     0x20, 0x00, 0x80, 0xd2, 0x41, 0x01, 0x00, 0x10, 0x02, 0x02, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
@@ -1028,7 +1025,7 @@ pub(crate) const USER_SPIN_PROGRAM: &[u8] = &[
 ///
 /// Assembled by rustc's LLVM and read back out of the object file, as
 /// [`USER_SPIN_PROGRAM`] was.
-pub(crate) const USER_NATIVE_PROGRAM: &[u8] = &[
+pub const USER_NATIVE_PROGRAM: &[u8] = &[
     0x09, 0x00, 0x00, 0x14, 0x63, 0x61, 0x72, 0x72, 0x69, 0x65, 0x64, 0x20, 0x62, 0x79, 0x20, 0x61,
     0x20, 0x68, 0x61, 0x6e, 0x64, 0x6c, 0x65, 0x70, 0x69, 0x6e, 0x67, 0x00, 0x3f, 0x0a, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0xc9, 0xff, 0xff, 0x10, 0x34, 0x01, 0x40, 0x39, 0x33, 0x05, 0x40, 0xb9,
@@ -1063,12 +1060,12 @@ pub(crate) const USER_NATIVE_PROGRAM: &[u8] = &[
 
 /// One byte from the console, if one has arrived: from the receive ring once
 /// the port's interrupt is installed, straight from the port before then.
-pub(crate) fn read_console_byte() -> Option<u8> {
+pub fn read_console_byte() -> Option<u8> {
     crate::console::input::read_byte(console::read_byte)
 }
 
 /// One byte straight from the console port, for its receive interrupt.
-pub(crate) fn take_console_byte() -> Option<u8> {
+pub fn take_console_byte() -> Option<u8> {
     console::read_byte()
 }
 
@@ -1099,7 +1096,7 @@ pub(crate) fn enable_console_receive(irq: u32) {
 /// core's identification registers say it has, in the bits
 /// `arch/arm64/include/uapi/asm/hwcap.h` numbers, and only the features a
 /// program can use without more from the kernel. See `ferrix_linux_abi::hwcap`.
-pub(crate) fn user_hwcaps() -> (u64, u64) {
+pub fn user_hwcaps() -> (u64, u64) {
     use ferrix_linux_abi::hwcap::aarch64::{IdRegisters, hwcap, hwcap2};
     let ids = IdRegisters {
         pfr0: cpu::read_id_aa64pfr0(),
@@ -1117,7 +1114,7 @@ pub(crate) fn user_hwcaps() -> (u64, u64) {
 /// linker that wants a platform-specific library path has nothing here to
 /// build one from, and glibc's `dl_platform` stays null on this architecture.
 /// There is no second ABI here, so `abi` is always the native one.
-pub(crate) const fn user_platform(abi: crate::trap::Abi) -> Option<&'static [u8]> {
+pub const fn user_platform(abi: crate::trap::Abi) -> Option<&'static [u8]> {
     let _ = abi;
     None
 }
@@ -1202,7 +1199,7 @@ static IDENTITY_DROPPED: AtomicBool = AtomicBool::new(false);
 /// never reaches it. Live if walks through `TTBR0_EL1` are enabled, or if the
 /// register still holds the loader's root, which clearing `EPD0` for a user
 /// process would bring straight back.
-pub(crate) fn identity_map_live(view: &BootView<'_>) -> bool {
+pub fn identity_map_live(view: &BootView<'_>) -> bool {
     let loader_root = view.raw().ttbr0_phys;
     cpu::read_tcr() & cpu::TCR_EPD0 == 0
         || (loader_root != 0 && cpu::read_ttbr0() & cpu::TTBR_ADDRESS == loader_root)
@@ -1212,7 +1209,7 @@ pub(crate) fn identity_map_live(view: &BootView<'_>) -> bool {
 ///
 /// Always, at EL1: the access permissions in a descriptor bind the kernel, and
 /// there is no switch to turn that off.
-pub(crate) const fn kernel_write_protected() -> bool {
+pub const fn kernel_write_protected() -> bool {
     true
 }
 
@@ -1222,7 +1219,7 @@ pub(crate) const fn kernel_write_protected() -> bool {
 ///
 /// (TRANSLATE) Nothing may still be executing or reading through the lower half of the
 /// address space. See [`cpu::disable_ttbr0`].
-pub(crate) unsafe fn drop_identity_map(_view: &BootView<'_>) {
+pub unsafe fn drop_identity_map(_view: &BootView<'_>) {
     // SAFETY: (TRANSLATE) the caller guarantees the lower half is unused, and the kernel
     // has been running entirely in the upper half since its first instruction.
     unsafe { cpu::disable_ttbr0() };
@@ -1236,7 +1233,7 @@ pub(crate) fn frame_pointer() -> u64 {
 }
 
 /// Stop the machine, once the console has sent its last line.
-pub(crate) fn shutdown() -> ! {
+pub fn shutdown() -> ! {
     crate::console::announce_power_off();
     crate::console::drain();
     // On the Pixel 7, a watchdog reset instead: powered off, the phone would
@@ -1251,12 +1248,12 @@ pub(crate) fn shutdown() -> ! {
 
 /// Find the watchdogs the device tree lists that firmware left running --
 /// the Pixel 7's two -- and feed them once. Nothing elsewhere.
-pub(crate) fn init_watchdogs(tree: &ferrix_fdt::Fdt<'_>) {
+pub fn init_watchdogs(tree: &ferrix_fdt::Fdt<'_>) {
     watchdog::init(tree);
 }
 
 /// Start the task that keeps feeding them, once the scheduler can run one.
-pub(crate) fn start_watchdogs() {
+pub fn start_watchdogs() {
     watchdog::start();
 }
 
@@ -1265,7 +1262,7 @@ pub(crate) fn start_watchdogs() {
 /// A firmware without PSCI `SYSTEM_RESET` returns, and the machine is powered
 /// off instead: one that stops when asked to come back is noticed, one that
 /// carries on as though it had reset is not.
-pub(crate) fn reset() -> ! {
+pub fn reset() -> ! {
     crate::console::drain();
     watchdog::reset_now();
     cpu::psci_system_reset();
@@ -1279,7 +1276,7 @@ pub(crate) fn drain_console() {
 }
 
 /// Stop this CPU permanently.
-pub(crate) fn halt() -> ! {
+pub fn halt() -> ! {
     cpu::disable_interrupts();
     loop {
         cpu::wfi();
@@ -1292,7 +1289,7 @@ pub(crate) fn halt() -> ! {
 ///
 /// (DEVICE) Must be called exactly once, on the boot CPU, after [`init_traps`] and
 /// while interrupts are masked.
-pub(crate) unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'static str> {
+pub unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'static str> {
     // ACPI when the loader found an RSDP, which every QEMU boot does; the
     // device tree when it did not, which is the Pixel 7's loader. Decided by
     // the RSDP rather than by trying ACPI first, so a machine with ACPI whose
@@ -1337,19 +1334,19 @@ pub(crate) unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'st
 }
 
 /// Unmask `IRQ` on this CPU.
-pub(crate) fn enable_interrupts() {
+pub fn enable_interrupts() {
     cpu::enable_interrupts();
 }
 
 /// Mask every interrupt on this CPU.
-pub(crate) fn disable_interrupts() {
+pub fn disable_interrupts() {
     cpu::disable_interrupts();
 }
 
 /// With interrupts masked, wait for one and then unmask, so one that arrived
 /// since they were masked wakes the wait instead of being lost before it.
 /// Returns with `IRQ` unmasked.
-pub(crate) fn wait_for_work() {
+pub fn wait_for_work() {
     cpu::wait_then_enable_interrupts();
 }
 
@@ -1379,7 +1376,7 @@ pub(crate) fn send_ipi_to_others() -> Result<(), &'static str> {
 
 /// How `ferrix_sync`'s interrupt-masking lock masks interrupts here.
 #[derive(Debug)]
-pub(crate) struct Irq;
+pub struct Irq;
 
 // SAFETY: (SHARED) `disable` masks every interrupt on this CPU and returns the `DAIF`
 // value it found; `restore` puts exactly that value back, so nesting two
@@ -1400,17 +1397,17 @@ unsafe impl ferrix_sync::IrqControl for Irq {
 }
 
 /// Wait until an interrupt arrives.
-pub(crate) fn wait_for_interrupt() {
+pub fn wait_for_interrupt() {
     cpu::wfi();
 }
 
 /// The free-running counter.
-pub(crate) fn counter_now() -> u64 {
+pub fn counter_now() -> u64 {
     timer::counter_now()
 }
 
 /// How fast it counts.
-pub(crate) fn counter_hz() -> u64 {
+pub fn counter_hz() -> u64 {
     timer::counter_hz()
 }
 
@@ -1418,7 +1415,7 @@ pub(crate) fn counter_hz() -> u64 {
 /// That is `CNTVCT_EL0`, and every processor sets `CNTKCTL_EL1.EL0VCTEN` as
 /// it starts (`cpu::allow_user_counter`), as Linux does for its vDSO. What a
 /// driver's own timings, in its counter's ticks, need to mean something here.
-pub(crate) fn ring3_reads_counter() -> bool {
+pub fn ring3_reads_counter() -> bool {
     true
 }
 
@@ -1450,7 +1447,7 @@ pub(crate) fn timer_irq() -> u32 {
 /// # Errors
 ///
 /// No usable frame or ITS, or every vector it has already taken.
-pub(crate) fn msi_allocate(device: u32) -> Result<crate::irq::Msi, &'static str> {
+pub fn msi_allocate(device: u32) -> Result<crate::irq::Msi, &'static str> {
     gic::msi_allocate(device)
 }
 
@@ -1466,7 +1463,7 @@ pub(crate) fn msi_doorbell() -> Option<u64> {
 /// # Errors
 ///
 /// What did not hold.
-pub(crate) fn check_machine() -> Result<(), &'static str> {
+pub fn check_machine() -> Result<(), &'static str> {
     check::check()
 }
 
@@ -1477,7 +1474,7 @@ pub(crate) fn check_machine() -> Result<(), &'static str> {
 /// # Errors
 ///
 /// What did not hold.
-pub(crate) fn check_distributor() -> Result<super::DistributorCheck, &'static str> {
+pub fn check_distributor() -> Result<super::DistributorCheck, &'static str> {
     if gic::is_v3() {
         return Ok(super::DistributorCheck {
             skipped: Some(
@@ -1529,28 +1526,27 @@ pub(crate) fn service_interrupts(_frame: &mut TrapFrame, handle: fn(u32)) {
     }
 }
 
+pub use switch::{UserState, reset_user_state};
 /// The context switch, and the stack layout a new task starts on.
-pub(crate) use switch::{
-    UserState, prepare_stack, reset_user_state, restore_user_state, save_user_state, switch_to,
-};
+pub(crate) use switch::{prepare_stack, restore_user_state, save_user_state, switch_to};
 
 /// Install a thread-local segment descriptor: i386's `set_thread_area`, which
 /// this architecture has no segments for. Never asked, since no table here
 /// maps the call; answered as a full set of slots would be.
-pub(crate) const fn set_thread_area(_index: Option<usize>, _descriptor: u64) -> Option<usize> {
+pub const fn set_thread_area(_index: Option<usize>, _descriptor: u64) -> Option<usize> {
     None
 }
 
 /// Read a thread-local segment descriptor back: none here, as for
 /// [`set_thread_area`].
-pub(crate) const fn thread_area(_index: usize) -> Option<u64> {
+pub const fn thread_area(_index: usize) -> Option<u64> {
     None
 }
 
 /// The `FS` or `GS` base `arch_prctl`'s `code` asks for: x86-64's, which
 /// this architecture has neither of. Never asked, since no table here maps
 /// the call.
-pub(crate) const fn user_base(_code: u64) -> Option<u64> {
+pub const fn user_base(_code: u64) -> Option<u64> {
     None
 }
 
@@ -1595,7 +1591,7 @@ const VDSO_FUNCTIONS: &[ferrix_vdso::Function<'static>] = &[ferrix_vdso::Functio
 }];
 
 /// The vDSO, which here is the signal return trampoline and nothing else.
-pub(crate) fn vdso_spec() -> Option<ferrix_vdso::Spec<'static>> {
+pub fn vdso_spec() -> Option<ferrix_vdso::Spec<'static>> {
     Some(ferrix_vdso::Spec {
         machine: ferrix_elf::EM_AARCH64,
         code: &VDSO_CODE,
@@ -1605,9 +1601,9 @@ pub(crate) fn vdso_spec() -> Option<ferrix_vdso::Spec<'static>> {
 
 /// The vDSO has no clock functions, so nothing in a program reads the
 /// counter through it.
-pub(crate) fn vdso_can_read_counter() -> bool {
+pub fn vdso_can_read_counter() -> bool {
     false
 }
 
 /// No clock program to check the vDSO with: it has no clock.
-pub(crate) const USER_VDSO_PROGRAM: &[u8] = &[];
+pub const USER_VDSO_PROGRAM: &[u8] = &[];

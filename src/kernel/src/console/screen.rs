@@ -167,7 +167,7 @@ impl Board {
 ///
 /// Once, on the boot processor, after `mm::init`: the framebuffer's mapping is
 /// checked through the kernel's root table, which is not known before it.
-pub(crate) fn start(view: &BootView<'_>) {
+pub fn start(view: &BootView<'_>) {
     if !view.flag(FLAG) {
         return;
     }
@@ -227,7 +227,7 @@ pub(crate) fn drawing() -> bool {
 /// and for a display driver taking the screen. The wait is bounded: a draw
 /// that never finishes is one this processor was part way through when it
 /// panicked, and it will not be resumed.
-pub(crate) fn stop() {
+pub fn stop() {
     if !ENABLED.swap(false, Ordering::AcqRel) {
         return;
     }
