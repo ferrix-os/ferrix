@@ -313,6 +313,10 @@ pub(super) struct Connection {
     resend_first: bool,
     /// When the guest was last heard from.
     heard_at: Instant,
+    /// ep scratch counters: retransmission timeouts, fast retransmits,
+    /// probes, bytes acknowledged, and when they were last reported.
+    ep: [u64; 4],
+    ep_at: Instant,
 }
 
 impl Connection {
@@ -350,6 +354,8 @@ impl Connection {
             duplicate_acks: 0,
             resend_first: false,
             heard_at: now,
+            ep: [0; 4],
+            ep_at: now,
         }
     }
 
@@ -386,6 +392,8 @@ impl Connection {
             duplicate_acks: 0,
             resend_first: false,
             heard_at: now,
+            ep: [0; 4],
+            ep_at: now,
         };
         connection.send_syn(out);
         connection
@@ -601,6 +609,7 @@ impl Connection {
             if outstanding > 0 && !carries_data {
                 self.duplicate_acks += 1;
                 if self.duplicate_acks == DUPLICATE_ACKS {
+                    self.ep[1] += 1;
                     self.resend_first = true;
                     self.sent_at = Instant::now();
                 }
@@ -624,6 +633,7 @@ impl Connection {
         // The FIN's sequence number is not in the buffer either, which is why
         // this is a minimum rather than an assertion.
         let bytes = covered.min(self.pending.len());
+        self.ep[3] += bytes as u64;
         let _ = self.pending.drain(..bytes);
         self.snd_una = acknowledgment;
         self.sent_at = Instant::now();
@@ -662,6 +672,14 @@ impl Connection {
             return;
         }
         self.expire_retransmit();
+        if self.ep_at.elapsed() >= Duration::from_secs(2) && self.ep[3] > 0 {
+            eprintln!(
+                "GWEP iss {} acked {} rto {} fast {} probes {} wnd {} inflight {} pending {}",
+                self.iss, self.ep[3], self.ep[0], self.ep[1], self.ep[2], self.snd_wnd,
+                self.in_flight(), self.pending.len()
+            );
+            self.ep_at = Instant::now();
+        }
         if self.state != State::Open {
             return;
         }
@@ -709,6 +727,7 @@ impl Connection {
             payload: payload.to_vec(),
         });
         self.probes = self.probes.saturating_add(1);
+        self.ep[2] += 1;
         self.sent_at = Instant::now();
     }
 
@@ -830,6 +849,7 @@ impl Connection {
         if self.snd_nxt == self.snd_una || self.sent_at.elapsed() < self.retransmit {
             return;
         }
+        self.ep[0] += 1;
         self.snd_nxt = self.snd_una;
         self.sent_at = Instant::now();
     }
