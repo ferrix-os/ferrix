@@ -87,7 +87,6 @@ use super::cpu;
 use super::trap::TrapFrame;
 use crate::panic::catalog;
 
-
 /// `#DB`.
 const DEBUG: u64 = 1;
 /// The NMI.

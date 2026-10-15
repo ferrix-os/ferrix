@@ -41,8 +41,8 @@ pub mod discovery {
     // ACPI is how the 64-bit pair describe themselves. An ARMv7-A machine has
     // none, and there this module is compiled and never called.
     #[allow(
-    dead_code,
-    reason = "ARMv7-A describes itself with a device tree, not ACPI"
+        dead_code,
+        reason = "ARMv7-A describes itself with a device tree, not ACPI"
     )]
     pub(crate) mod acpi;
     pub mod board;

@@ -29,7 +29,10 @@
 //!
 //! W4 and W5 run before W3 so that a control loosening the allowlist is
 //! caught by the check it is the control of.
-#![allow(clippy::disallowed_methods, reason = "a raised check: it calls methods made pub for it alone")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -630,7 +633,9 @@ fn switch(_argument: usize) {
             let read = node
                 .mapped_config()
                 .map(|config| config.read16(COMMAND) & COMMAND_BUS_MASTER != 0);
-            if switched.is_err() || read != Some(crate::device::node_dma_on(&node).load(Ordering::Acquire)) {
+            if switched.is_err()
+                || read != Some(crate::device::node_dma_on(&node).load(Ordering::Acquire))
+            {
                 let _ = WRONG.fetch_add(1, Ordering::SeqCst);
             }
         }

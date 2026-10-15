@@ -95,11 +95,7 @@ pub fn board_bindings() -> usize {
 
 /// Ask for `node`'s clock at `hz`, setting it when `set` is: `None` when the
 /// node's binding has no clock a driver may ask for.
-pub fn board_clock(
-    node: &DeviceNode,
-    hz: u64,
-    set: bool,
-) -> Option<Result<u64, &'static str>> {
+pub fn board_clock(node: &DeviceNode, hz: u64, set: bool) -> Option<Result<u64, &'static str>> {
     let binding = node.tree_binding()?;
     let clock = BOARD
         .iter()

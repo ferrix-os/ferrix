@@ -4916,10 +4916,10 @@ mod paths {
     use super::{map_rw, number_for};
     use crate::arch;
     use crate::arch::StatLayout;
-    use crate::syscall::stat::StatEncoding as _;
     use crate::fs;
     use crate::mm;
     use crate::syscall::process::{self, Process};
+    use crate::syscall::stat::StatEncoding as _;
     use crate::syscall::{memory, uaccess};
 
     /// What the path checks measured, for the boot log.

@@ -65,16 +65,19 @@ use crate::smp::Topology;
 use queue::CpuQueue;
 use task::{DEAD, RUNNABLE};
 
-pub(crate) use borrow::{RunningSlot};
-pub use borrow::{with_current};
+pub(crate) use borrow::RunningSlot;
+pub use borrow::with_current;
 pub use check::before_start as check_before_start;
 pub use check::run as run_checks;
 pub use preempt::counting as records_kept;
-pub(crate) use preempt::{Preempt, PreemptState, lock_site, locks_held, lower_masked, preempt_count, preempt_site, raise_masked};
+pub(crate) use preempt::{
+    Preempt, PreemptState, lock_site, locks_held, lower_masked, preempt_count, preempt_site,
+    raise_masked,
+};
 pub use preempt::{preempt_disable, preempt_enable};
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
+pub use task::Task;
 pub use task::{TaskId, UserThread};
-pub use task::{Task};
 pub use wait::{LastLook, WaitQueue};
 
 /// One run queue per logical processor.

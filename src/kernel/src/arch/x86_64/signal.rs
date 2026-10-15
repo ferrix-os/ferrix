@@ -183,12 +183,7 @@ impl UserContext {
     /// bytes too -- and restarts through i386's `restart_syscall`, which is
     /// the table that call was made in (`docs/I386.md` §3.2). `orig_nr` is
     /// already that table's number, being the one the program passed.
-    pub const fn rewind_syscall(
-        &mut self,
-        orig_nr: u64,
-        orig_arg0: u64,
-        restart_block: bool,
-    ) {
+    pub const fn rewind_syscall(&mut self, orig_nr: u64, orig_arg0: u64, restart_block: bool) {
         let _ = orig_arg0;
         self.0.rax = match (
             restart_block,

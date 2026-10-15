@@ -158,11 +158,7 @@ fn user_address(at: u64) -> Result<u64, UserError> {
 ///
 /// [`UserError`]. Nothing here panics, and nothing is copied at all if the
 /// range check fails.
-pub fn copy_from_user(
-    space: &AddressSpace,
-    from: u64,
-    out: &mut [u8],
-) -> Result<(), UserError> {
+pub fn copy_from_user(space: &AddressSpace, from: u64, out: &mut [u8]) -> Result<(), UserError> {
     let copied = copy_from_user_through(space, from, out, Through::Faulting)?;
     debug_assert!(copied, "a copy that faults pages in stopped short");
     Ok(())
@@ -264,11 +260,7 @@ pub fn copy_to_user(space: &AddressSpace, to: u64, data: &[u8]) -> Result<(), Us
 ///
 /// [`UserError`], for a range that is not the program's or a page it may not
 /// write.
-pub fn copy_to_user_present(
-    space: &AddressSpace,
-    to: u64,
-    data: &[u8],
-) -> Result<bool, UserError> {
+pub fn copy_to_user_present(space: &AddressSpace, to: u64, data: &[u8]) -> Result<bool, UserError> {
     copy_to_user_through(space, to, data, Through::Present)
 }
 
@@ -339,11 +331,7 @@ fn copy_to_user_through(
 ///
 /// [`UserError`], for a range that is not the program's or a page it may not
 /// write.
-pub fn fault_in_for_write(
-    space: &AddressSpace,
-    at: u64,
-    len: usize,
-) -> Result<(), UserError> {
+pub fn fault_in_for_write(space: &AddressSpace, at: u64, len: usize) -> Result<(), UserError> {
     let len = u64::try_from(len).map_err(|_| UserError::Overflow)?;
     check_range(at, len)?;
     let end = at.checked_add(len).ok_or(UserError::Overflow)?;

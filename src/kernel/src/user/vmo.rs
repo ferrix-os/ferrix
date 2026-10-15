@@ -473,10 +473,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`AllocError`] when memory has run out.
-    pub fn new_filled(
-        pages: u64,
-        filler: Option<Arc<dyn Filler>>,
-    ) -> Result<Arc<Vmo>, AllocError> {
+    pub fn new_filled(pages: u64, filler: Option<Arc<dyn Filler>>) -> Result<Arc<Vmo>, AllocError> {
         let vmo = crate::fallible::try_arc(Vmo::unfilled(
             pages,
             filler,
@@ -1049,12 +1046,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`VmoError::OutOfRange`] past the end of the object or of the page.
-    pub fn read_page(
-        &self,
-        index: u64,
-        offset: usize,
-        out: &mut [u8],
-    ) -> Result<(), VmoError> {
+    pub fn read_page(&self, index: u64, offset: usize, out: &mut [u8]) -> Result<(), VmoError> {
         self.check_span(index, offset, out.len())?;
         let pages = self.pages.lock();
         match pages.frames.get(&index) {
@@ -1087,12 +1079,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`VmoError::OutOfRange`], or [`VmoError::OutOfMemory`].
-    pub fn write_page(
-        &self,
-        index: u64,
-        offset: usize,
-        data: &[u8],
-    ) -> Result<(), VmoError> {
+    pub fn write_page(&self, index: u64, offset: usize, data: &[u8]) -> Result<(), VmoError> {
         self.check_span(index, offset, data.len())?;
         // A page some other holder shares is copied, and its original
         // displaced into a list that must have room before the original
@@ -1156,12 +1143,7 @@ impl Vmo {
     /// [`VmoError::OutOfRange`] past the end of the object or of the page,
     /// and [`VmoError::OutOfMemory`] when there is no frame for an absent
     /// page, or no room to record it.
-    pub fn commit_and_write(
-        &self,
-        index: u64,
-        offset: usize,
-        data: &[u8],
-    ) -> Result<(), VmoError> {
+    pub fn commit_and_write(&self, index: u64, offset: usize, data: &[u8]) -> Result<(), VmoError> {
         self.check_span(index, offset, data.len())?;
         let mut pages = self.pages.lock();
         let frame = match pages.frames.get(&index) {

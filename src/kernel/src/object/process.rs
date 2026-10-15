@@ -216,11 +216,7 @@ impl Bootstrap {
     /// # Errors
     ///
     /// [`GiveRefused`], with the object.
-    pub fn give(
-        &mut self,
-        object: Object,
-        rights: Rights,
-    ) -> Result<(), (GiveRefused, Object)> {
+    pub fn give(&mut self, object: Object, rights: Rights) -> Result<(), (GiveRefused, Object)> {
         if let Some(why) = self.refusal() {
             return Err((why, object));
         }
@@ -267,11 +263,7 @@ impl Process {
     /// # Errors
     ///
     /// [`AllocError`], before it is counted anywhere.
-    pub fn new(
-        space: Arc<AddressSpace>,
-        pid: u32,
-        job: Arc<Job>,
-    ) -> Result<Process, AllocError> {
+    pub fn new(space: Arc<AddressSpace>, pid: u32, job: Arc<Job>) -> Result<Process, AllocError> {
         let exit = fallible::try_arc(Exit::new())?;
         let slot = job.quota_index();
         // Charged before it is counted, and never started if refused: the

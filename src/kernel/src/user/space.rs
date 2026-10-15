@@ -730,12 +730,7 @@ impl AddressSpace {
     /// [`SpaceError::NotUserRange`] outside the user half,
     /// [`SpaceError::BadRange`] if it overlaps or is malformed, and
     /// [`SpaceError::OutOfMemory`] if the object cannot be made.
-    pub fn map_anonymous(
-        &self,
-        at: u64,
-        len: u64,
-        flags: VmaFlags,
-    ) -> Result<u64, SpaceError> {
+    pub fn map_anonymous(&self, at: u64, len: u64, flags: VmaFlags) -> Result<u64, SpaceError> {
         if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
             return Err(SpaceError::NotUserRange(at));
         }
@@ -3048,7 +3043,10 @@ impl AddressSpace {
         })
     }
 
-    /// DOC-OWED
+    /// Map `vmo`, two pages, shared into this space at a free address: the
+    /// first readable, the second readable and runnable. Answers where the
+    /// runnable page starts. How the vDSO, its data page and its code, is put
+    /// into a program's space (`syscall::vdso`).
     pub fn map_shared_code(&self, vmo: Arc<Vmo>) -> Result<u64, SpaceError> {
         let len = 2 * PAGE_SIZE;
         if vmo.len_bytes() != len {
@@ -3802,10 +3800,7 @@ impl AddressSpace {
 
     /// Show `visit` every region, lowest first, under the space's lock: it
     /// must not wait, and nothing can change the map while it looks.
-    pub fn with_regions<R>(
-        &self,
-        visit: impl FnOnce(&mut dyn Iterator<Item = Region>) -> R,
-    ) -> R {
+    pub fn with_regions<R>(&self, visit: impl FnOnce(&mut dyn Iterator<Item = Region>) -> R) -> R {
         let inner = self.inner.lock();
         let mut regions = inner.map.iter().map(|vma| Region {
             start: vma.range.start(),

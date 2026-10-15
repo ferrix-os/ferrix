@@ -23,10 +23,12 @@ use core::sync::atomic::Ordering;
 use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 use ferrix_sync::IrqControl;
 
-use ferrix_kernel_core::arch::x86_64::cpu;
-use ferrix_kernel_core::arch::x86_64::paranoid::{BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, USER_NMIS, debug_hook};
 use crate::console::println;
 use crate::sync::SpinLock;
+use ferrix_kernel_core::arch::x86_64::cpu;
+use ferrix_kernel_core::arch::x86_64::paranoid::{
+    BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, USER_NMIS, debug_hook,
+};
 
 /// The instruction the nesting check breaks on first.
 #[inline(never)]

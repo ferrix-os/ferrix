@@ -104,12 +104,7 @@ impl UserContext {
     /// result, so it is restored to `orig_arg0`. `x8`, the number, was never
     /// clobbered, so only a `restart_block` resume touches it -- to point the
     /// call at `restart_syscall`.
-    pub const fn rewind_syscall(
-        &mut self,
-        orig_nr: u64,
-        orig_arg0: u64,
-        restart_block: bool,
-    ) {
+    pub const fn rewind_syscall(&mut self, orig_nr: u64, orig_arg0: u64, restart_block: bool) {
         let _ = orig_nr;
         self.0.x[0] = orig_arg0;
         if restart_block {

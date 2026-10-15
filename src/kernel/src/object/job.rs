@@ -729,11 +729,7 @@ impl Job {
     /// [`JobError::Missing`] for a controller not offered, [`JobError::Busy`]
     /// for one a child still enables, [`JobError::Internal`] for the rule,
     /// [`JobError::NoMemory`].
-    pub fn change_subtree_control(
-        &self,
-        change: Change,
-        offered: Set,
-    ) -> Result<(), JobError> {
+    pub fn change_subtree_control(&self, change: Change, offered: Set) -> Result<(), JobError> {
         let current = self.subtree_control();
         let enable = change.enable.minus(current);
         let disable = change.disable.intersect(current);

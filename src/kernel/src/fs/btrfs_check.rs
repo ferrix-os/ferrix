@@ -48,11 +48,11 @@ const DISK_INDEX: u32 = 1;
 /// What the check found.
 #[derive(Debug)]
 pub struct Report {
-    /// DOC-OWED
+    /// Regular files read back.
     pub files: u32,
-    /// DOC-OWED
+    /// Directories listed.
     pub directories: u32,
-    /// DOC-OWED
+    /// Symbolic links read.
     pub links: u32,
     /// Bytes of file data read back.
     pub bytes: u64,

@@ -279,9 +279,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// taken. Answers how many were refused.
 ///
 /// Verifies: `L.console.43`
-pub fn check_pstore_placement(
-    view: &ferrix_bootinfo::BootView<'_>,
-) -> Result<usize, &'static str> {
+pub fn check_pstore_placement(view: &ferrix_bootinfo::BootView<'_>) -> Result<usize, &'static str> {
     use ferrix_bootinfo::PAGE_SIZE;
     use ferrix_bootinfo::pstore::{HEADER, MIN_CAPACITY};
 

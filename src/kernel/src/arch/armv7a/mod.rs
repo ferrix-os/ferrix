@@ -49,10 +49,10 @@ use crate::early::{EarlyError, EarlyMemory};
 use crate::irq::Report;
 
 pub(crate) use smp::{CpuStarter, describe_cpus, hardware_id};
-pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap, system_call};
-pub use trap::{breakpoint};
+pub use trap::UserRegs;
+pub use trap::breakpoint;
 pub use trap::{TrapFrame, enter_user, resume_user};
-pub use trap::{UserRegs};
+pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap, system_call};
 
 /// Point this CPU's per-CPU register at `address`.
 ///
@@ -111,7 +111,7 @@ pub const fn selector_skips_total() -> Option<[u64; 3]> {
     None
 }
 
-/// DOC-OWED
+/// The `struct stat` this architecture's programs read: ARMv7-A's `struct stat64`.
 pub const STAT_LAYOUT: super::StatLayout = super::StatLayout::Stat64;
 
 /// ARMv7-A's `struct epoll_event`, 16 bytes: not packed, and the EABI aligns
@@ -126,10 +126,7 @@ pub(crate) type PageEncoding = ferrix_paging::armv7a::Armv7a;
 /// Which port that is, and which of the two drivers it wants, is
 /// [`console::init`]'s decision. This is where the tree it decides from comes
 /// from, and the only reason the two are separate functions.
-pub fn init_console(
-    view: &BootView<'_>,
-    memory: &mut EarlyMemory,
-) -> Result<(), EarlyError> {
+pub fn init_console(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), EarlyError> {
     let tree = crate::discovery::fdt::open(view).map_err(|_| EarlyError::NoConsole)?;
     console::init(&tree, memory)
 }
@@ -1555,9 +1552,9 @@ pub(crate) fn service_interrupts(_frame: &mut TrapFrame, handle: fn(u32)) {
     }
 }
 
+pub use switch::{UserState, reset_user_state};
 /// The context switch, and the stack layout a new task starts on.
 pub(crate) use switch::{prepare_stack, restore_user_state, save_user_state, switch_to};
-pub use switch::{UserState, reset_user_state};
 
 /// Install a thread-local segment descriptor: i386's `set_thread_area`, which
 /// this architecture has no segments for. Never asked, since no table here

@@ -30,7 +30,10 @@
 //! null `DS` and `ES` see the skip taken. The same for `FS` and `GS` (3c).
 
 #![cfg(target_arch = "x86_64")]
-#![allow(clippy::disallowed_methods, reason = "a raised check: it calls methods made pub for it alone")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
 
 use alloc::sync::Arc;
 
@@ -38,8 +41,6 @@ use ferrix_linux_abi::types::SIGUSR1;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Rights;
 
-use ferrix_kernel_core::arch::x86_64::{cpu, gdt};
-use ferrix_kernel_core::arch::x86_64::switch::{FpuArea, UserState};
 use crate::console::println;
 use crate::object::Object;
 use crate::object::channel::Endpoint;
@@ -47,6 +48,8 @@ use crate::object::job::KILLED_STATUS;
 use crate::sched::Task;
 use crate::syscall::process::{self, Process};
 use crate::syscall::signal::Origin;
+use ferrix_kernel_core::arch::x86_64::switch::{FpuArea, UserState};
+use ferrix_kernel_core::arch::x86_64::{cpu, gdt};
 
 /// What the checks counted, for the boot line.
 #[derive(Debug, Default)]
@@ -1279,7 +1282,8 @@ fn check_no_program_writes_a_base() -> Result<(usize, bool, usize), &'static str
     use ferrix_sync::IrqControl;
 
     let count = crate::smp::count();
-    let forbidden = ferrix_kernel_core::arch::x86_64::BASE_WRITES_FORBIDDEN.load(core::sync::atomic::Ordering::Acquire);
+    let forbidden = ferrix_kernel_core::arch::x86_64::BASE_WRITES_FORBIDDEN
+        .load(core::sync::atomic::Ordering::Acquire);
     if forbidden != count {
         return Err("CR4.FSGSBASE did not read clear at the bring-up of every processor");
     }

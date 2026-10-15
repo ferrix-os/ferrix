@@ -31,7 +31,10 @@
 //! across a `nanosleep` after it, because the mark is the call's.
 
 #![cfg(target_arch = "arm")]
-#![allow(clippy::disallowed_methods, reason = "a raised check: it calls methods made pub for it alone")]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a raised check: it calls methods made pub for it alone"
+)]
 
 use alloc::sync::Arc;
 
@@ -39,7 +42,6 @@ use ferrix_linux_abi::types::SIGUSR1;
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Rights;
 
-use ferrix_kernel_core::arch::armv7a::switch::UserState;
 use crate::console::println;
 use crate::object::Object;
 use crate::object::channel::Endpoint;
@@ -47,6 +49,7 @@ use crate::object::job::KILLED_STATUS;
 use crate::sched::Task;
 use crate::syscall::process::{self, Process};
 use crate::syscall::signal::Origin;
+use ferrix_kernel_core::arch::armv7a::switch::UserState;
 
 /// How long a case may take before its program is called stuck: generous
 /// against a loaded host under TCG.
@@ -2043,13 +2046,19 @@ fn check_bring_up_scrubs() -> Result<(), &'static str> {
         // is saved at its switch out), so filling them takes nobody's.
         unsafe { ferrix_kernel_core::arch::armv7a::switch::turn_on() };
         // SAFETY: (SYSREG) as above; `EN` was just set.
-        unsafe { ferrix_kernel_core::arch::armv7a::switch::ferrix_user_fpu_restore(&raw const dirty, 1) };
+        unsafe {
+            ferrix_kernel_core::arch::armv7a::switch::ferrix_user_fpu_restore(&raw const dirty, 1)
+        };
         // SAFETY: (SYSREG) as above; `CPACR` was granted at bring-up.
         let _ = unsafe { ferrix_kernel_core::arch::armv7a::switch::bring_up_vfp() };
         // Bring-up writes no record (a secondary cannot name its own yet);
         // the check's processor had it on from `turn_on` above, so it is put
         // back to what bring-up left the register as, read from the register.
-        ferrix_kernel_core::arch::armv7a::switch::set_vfp_record(ferrix_kernel_core::arch::armv7a::switch::fpexc() & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN != 0);
+        ferrix_kernel_core::arch::armv7a::switch::set_vfp_record(
+            ferrix_kernel_core::arch::armv7a::switch::fpexc()
+                & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN
+                != 0,
+        );
         let after = behind_en_masked();
         match after {
             Behind::Set => Err("bring-up left FPEXC.EN set or its record on"),
@@ -2074,7 +2083,11 @@ enum Behind {
 /// read and the file scrubbed and `EN` cleared again after it, whether every
 /// register and `FPSCR` were zero. Leaves I2 holding.
 fn behind_en_masked() -> Behind {
-    if ferrix_kernel_core::arch::armv7a::switch::fpexc() & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN != 0 || ferrix_kernel_core::arch::armv7a::switch::vfp_on() {
+    if ferrix_kernel_core::arch::armv7a::switch::fpexc()
+        & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN
+        != 0
+        || ferrix_kernel_core::arch::armv7a::switch::vfp_on()
+    {
         return Behind::Set;
     }
     let mut seen = UserState::new();
@@ -2108,7 +2121,12 @@ fn behind_en(cpu: usize) -> Result<Behind, &'static str> {
 
 /// The record of `FPEXC.EN` equals the register on this processor (I1, D2).
 fn record_matches() -> Result<(), &'static str> {
-    let matches = ferrix_kernel_core::arch::armv7a::switch::masked(|| (ferrix_kernel_core::arch::armv7a::switch::fpexc() & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN != 0) == ferrix_kernel_core::arch::armv7a::switch::vfp_on());
+    let matches = ferrix_kernel_core::arch::armv7a::switch::masked(|| {
+        (ferrix_kernel_core::arch::armv7a::switch::fpexc()
+            & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN
+            != 0)
+            == ferrix_kernel_core::arch::armv7a::switch::vfp_on()
+    });
     if matches {
         Ok(())
     } else {

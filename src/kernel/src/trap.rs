@@ -529,7 +529,9 @@ pub enum FaultOutcome {
     NoProcess,
 }
 
-/// DOC-OWED
+/// What the way back to user mode asks of the personality that runs the
+/// program: registered once by the load at boot, and called by the core's trap
+/// exit without naming the load (`set_return_path`).
 #[derive(Debug)]
 pub struct ReturnPath {
     /// Whether the way back has anything to do for the running task. Asked by

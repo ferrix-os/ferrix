@@ -32,7 +32,6 @@
 
 use super::cpu;
 
-
 /// Bytes in a saved frame. Must match [`TrapFrame`] exactly, and a multiple of
 /// eight, which is what the AAPCS requires of the stack at a call.
 const FRAME_SIZE: usize = 80;

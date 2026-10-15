@@ -571,9 +571,10 @@ _FIX = {
     "mm.rs": "pub fn frame() -> Frame { Frame }\npub struct Frame;\n"
              "// CHECKS-ONLY: fs.rs\n#[doc(hidden)]\npub struct Secret {\n    pub inner: u8,\n}\n"
              "// CHECKS-ONLY: fs.rs\n#[doc(hidden)]\npub fn secret() -> Secret { Secret { inner: 0 } }\n"
+             "impl Secret {\n    pub fn again(&self) -> Secret { Secret { inner: self.inner } }\n}\n"
              "pub struct Node;\nimpl Node {\n    #[doc(hidden)]\n    pub fn probe(&self) {}\n}\n",
     "syscall/mod.rs": "pub fn dispatch() { crate::mm::frame(); }\n",
-    "fs.rs": "pub fn open() { crate::syscall::dispatch(); let _ = crate::mm::secret().inner; "
+    "fs.rs": "pub fn open() { crate::syscall::dispatch(); let _ = crate::mm::secret().again().inner; "
              "crate::mm::Node.probe(); }\n",
     "stages_check.rs": "fn s() {}\n",
 }

@@ -66,7 +66,7 @@ pub const fn selector_skips_total() -> Option<[u64; 3]> {
     None
 }
 
-/// DOC-OWED
+/// The `struct stat` this architecture's programs read: the generic layout of `include/uapi/asm-generic/stat.h`.
 pub const STAT_LAYOUT: super::StatLayout = super::StatLayout::Generic;
 
 /// AArch64's `struct epoll_event`, 16 bytes: not packed, so `data` is
@@ -82,10 +82,7 @@ pub(crate) type PageEncoding = ferrix_paging::aarch64::AArch64;
 /// mapped as device memory before a single byte can go out. Its address is
 /// still the `virt` machine's, rather than the SPCR's or the device tree's,
 /// unless the command line names a `ramoops` zone instead.
-pub fn init_console(
-    view: &BootView<'_>,
-    memory: &mut EarlyMemory,
-) -> Result<(), EarlyError> {
+pub fn init_console(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), EarlyError> {
     console::init(view, memory)
 }
 
@@ -119,10 +116,10 @@ pub(crate) unsafe fn cpu_local() -> u64 {
 pub(crate) fn cpu_local_register() -> u64 {
     cpu::read_tpidr_el1()
 }
-pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap, system_call};
-pub use trap::{breakpoint};
-pub use trap::{UserRegs};
+pub use trap::UserRegs;
+pub use trap::breakpoint;
 pub use trap::{TrapFrame, enter_user, resume_user};
+pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap, system_call};
 
 /// Install the exception vector table.
 ///
@@ -1524,9 +1521,9 @@ pub(crate) fn service_interrupts(_frame: &mut TrapFrame, handle: fn(u32)) {
     }
 }
 
+pub use switch::{UserState, reset_user_state};
 /// The context switch, and the stack layout a new task starts on.
 pub(crate) use switch::{prepare_stack, restore_user_state, save_user_state, switch_to};
-pub use switch::{UserState, reset_user_state};
 
 /// Install a thread-local segment descriptor: i386's `set_thread_area`, which
 /// this architecture has no segments for. Never asked, since no table here

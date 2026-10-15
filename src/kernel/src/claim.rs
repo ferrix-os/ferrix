@@ -61,7 +61,7 @@ pub struct Claims {
 }
 
 impl Claims {
-    /// DOC-OWED
+    /// No device claimed yet: a core's static, made once.
     #[allow(
         clippy::new_without_default,
         reason = "`new` is the one way to make it, at a place the kernel chooses; a `Default` would be a second"
@@ -207,7 +207,7 @@ pub struct Numbers {
 }
 
 impl Numbers {
-    /// DOC-OWED
+    /// Numbers from `first` upwards, none taken yet.
     pub const fn new(first: u32) -> Self {
         Self {
             first,

@@ -1542,11 +1542,7 @@ fn vmo_get_size(process: &Process, vmo: Handle, out: u64) -> Result<usize, Errno
 }
 
 /// Open a handle to a new object, or free the object if there is no room.
-pub fn insert_new(
-    process: &Process,
-    object: Object,
-    rights: Rights,
-) -> Result<usize, Errno> {
+pub fn insert_new(process: &Process, object: Object, rights: Rights) -> Result<usize, Errno> {
     // FALLIBLE: the handle table's reserve refuses with `TableError::NoMemory`.
     let placed = process.with_handles(|table| match table.reserve(1) {
         Ok(()) => table

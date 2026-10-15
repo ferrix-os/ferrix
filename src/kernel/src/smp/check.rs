@@ -751,9 +751,7 @@ fn spin_for(nanos: u64) {
 /// processor it left.
 ///
 /// Verifies: L.smp.16
-pub fn migrating_shootdown(
-    topology: &Topology,
-) -> Result<Option<(usize, usize)>, &'static str> {
+pub fn migrating_shootdown(topology: &Topology) -> Result<Option<(usize, usize)>, &'static str> {
     if arch::TLB_FLUSH_IS_BROADCAST || topology.online() < 3 {
         return Ok(None);
     }

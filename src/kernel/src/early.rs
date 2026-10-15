@@ -154,12 +154,7 @@ impl EarlyMemory {
     /// # Errors
     ///
     /// As [`EarlyMemory::map_device`].
-    pub fn map_framebuffer(
-        &mut self,
-        virt: u64,
-        phys: u64,
-        len: u64,
-    ) -> Result<(), EarlyError> {
+    pub fn map_framebuffer(&mut self, virt: u64, phys: u64, len: u64) -> Result<(), EarlyError> {
         self.map_window(virt, phys, len, arch::FRAMEBUFFER_FLAGS)
     }
 

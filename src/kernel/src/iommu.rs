@@ -78,11 +78,13 @@ pub mod remapping;
 mod smmuv3;
 pub mod vtd;
 
-pub(crate) use remapping::{LiveLine, close_check_window, function_isolated, nmis, open_check_window};
 pub use remapping::{CHECK_VECTOR, console_vectors, route, stray_deliveries};
+pub(crate) use remapping::{
+    LiveLine, close_check_window, function_isolated, nmis, open_check_window,
+};
 
-pub use check::{check_dma_faults};
-pub use check::{run as check_gate};
+pub use check::check_dma_faults;
+pub use check::run as check_gate;
 pub use vtd::{Invalidations, invalidations};
 
 use gate::Gate;

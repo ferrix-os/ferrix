@@ -39,10 +39,15 @@ use alloc::sync::{Arc, Weak};
 use core::alloc::Layout;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
-pub(crate) use ferrix_fallible::{try_boxed_str, try_deque_with_capacity, try_format, try_reserve_deque, try_string};
-pub use ferrix_fallible::{try_boxed_filled, try_boxed_slice};
-pub use ferrix_fallible::{AllocError, push_within, try_collect, try_extend, try_extend_from_slice, try_filled, try_push, try_reserve, try_to_vec, try_with_capacity};
+pub use ferrix_fallible::{
+    AllocError, push_within, try_collect, try_extend, try_extend_from_slice, try_filled, try_push,
+    try_reserve, try_to_vec, try_with_capacity,
+};
 use ferrix_fallible::{btree_node_bound, check};
+pub use ferrix_fallible::{try_boxed_filled, try_boxed_slice};
+pub(crate) use ferrix_fallible::{
+    try_boxed_str, try_deque_with_capacity, try_format, try_reserve_deque, try_string,
+};
 use ferrix_heap::LARGEST_CLASS;
 
 pub(crate) use crate::mm::Reserved;

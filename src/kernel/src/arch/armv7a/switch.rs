@@ -17,7 +17,6 @@
 use core::arch::global_asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-
 /// Bytes the switch pushes: nine registers and one word of padding.
 const FRAME_BYTES: u32 = 40;
 
@@ -400,7 +399,10 @@ pub(super) fn set_user_banked(sp: u32, lr: u32) {
 /// The VFP half of [`UserState::capture`], with interrupts masked: the
 /// registers when the running task has the bit (and so `EN`, I1), else its
 /// record, read without a VFP instruction.
-#[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the defining module's own call of a method made pub only for a raised check"
+)]
 fn capture_vfp(state: &mut UserState, count: u8) {
     // SAFETY: (CONTEXT) interrupts are masked by the caller, in the running
     // task's own call.
@@ -433,7 +435,10 @@ fn capture_vfp(state: &mut UserState, count: u8) {
 /// # Safety
 ///
 /// (CONTEXT) Must be called by the running user task, inside its own call.
-#[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the defining module's own call of a method made pub only for a raised check"
+)]
 pub(super) unsafe fn load_user_fp(fpscr: u32, doubles: [u64; 32]) {
     let count = super::cpu::user_fpu_doubles();
     if count == 0 {
@@ -824,7 +829,10 @@ unsafe extern "C" {
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
 /// with user state to run on this processor. `blocked` must say whether that
 /// task is switched out blocked rather than runnable.
-#[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the defining module's own call of a method made pub only for a raised check"
+)]
 pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
     state.user_rw = super::cpu::read_tpidrurw();
     // SAFETY: (CONTEXT) `user_sp` and `user_lr` are two adjacent `u32`s in a `repr(C)`

@@ -113,7 +113,8 @@ pub struct Report {
     /// What one record costs, in nanoseconds on the kernel's counter: a
     /// grant kept, and a refusal past its budget's limit, counted.
     pub grant_nanos: u64,
-    /// DOC-OWED
+    /// What one refusal costs, in nanoseconds on the kernel's counter, once
+    /// its budget is spent and it is only counted.
     pub refusal_nanos: u64,
 }
 

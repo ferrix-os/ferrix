@@ -62,7 +62,7 @@ use crate::sched;
 /// The shape of a system call and of its answer, which the core's trap path
 /// owns: re-exported so the personality's handlers and their checks name them
 /// where they always have.
-pub(crate) use crate::trap::{Abi};
+pub(crate) use crate::trap::Abi;
 pub use crate::trap::{Outcome, SyscallArgs};
 
 /// Answer one system call, with `P` answering the Linux calls.
@@ -79,10 +79,7 @@ pub use crate::trap::{Outcome, SyscallArgs};
 /// registers `dispatch_with::<Linux>` as the core's entry, so the item's code
 /// names no module of the personality, and a Linux call pays the one indirect
 /// call the core's entry costs and no second one.
-pub fn dispatch_with<P: Personality>(
-    args: &SyscallArgs,
-    regs: Option<&arch::UserRegs>,
-) -> Outcome {
+pub fn dispatch_with<P: Personality>(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
     // The native ABI first, by range, before any Linux table is asked: the
     // two ABIs never have to agree about a number, and `arch::decode_syscall`
     // never sees one of Ferrix's own. See `native`. Only from the native

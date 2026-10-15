@@ -214,7 +214,10 @@ const GRACE_NANOS: u64 = 2_000_000;
 /// `edu`'s minted message is programmed back, masked, after each.
 ///
 /// Verifies: `L.x86_64.129`, L.iommu.54, H.DMA.9
-#[allow(clippy::disallowed_methods, reason = "a check of the core, calling the device's methods made pub for a raised check")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 fn check_forged(
     node: &DeviceNode,
     edu: Mmio,
@@ -323,7 +326,10 @@ fn check_forged(
     clippy::too_many_arguments,
     reason = "one forged message, every part of it named"
 )]
-#[allow(clippy::disallowed_methods, reason = "a check of the core, calling the device's methods made pub for a raised check")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 fn forge(
     node: &DeviceNode,
     edu: Mmio,
@@ -363,7 +369,10 @@ fn forge(
 }
 
 /// Program `edu`'s minted message back, masked.
-#[allow(clippy::disallowed_methods, reason = "a check of the core, calling the device's methods made pub for a raised check")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 fn restore(
     node: &DeviceNode,
     msi: &MsiFunction,
@@ -668,7 +677,10 @@ pub(super) fn check_node(
 /// with none has nothing to switch.
 ///
 /// Verifies: L.device.9
-#[allow(clippy::disallowed_methods, reason = "a check of the core, calling the device's methods made pub for a raised check")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 pub(super) fn check_dma_switch(nodes: &[Arc<DeviceNode>]) -> Result<(), Failure> {
     let Some(node) = nodes.iter().find(|node| node.config_phys().is_some()) else {
         return Ok(());

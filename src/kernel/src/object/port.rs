@@ -365,11 +365,7 @@ impl Observer {
     /// # Errors
     ///
     /// [`AllocError`] when `port` could not reserve room for the packet.
-    pub fn new(
-        port: &Arc<Port>,
-        key: u64,
-        signals: Signals,
-    ) -> Result<Observer, AllocError> {
+    pub fn new(port: &Arc<Port>, key: u64, signals: Signals) -> Result<Observer, AllocError> {
         Ok(Observer {
             promise: Promise::new(port)?,
             key,

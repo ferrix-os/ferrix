@@ -22,10 +22,16 @@ mod speculation_check;
 use aarch64::speculation as machine_speculation;
 #[cfg(target_arch = "arm")]
 use armv7a::speculation as machine_speculation;
-pub(crate) use speculation::{answer_leaving, entering_space, leaving_domain, left_space, nospec_below, serve_wanted_barrier};
+pub use speculation::nospec_index;
+pub use speculation::{
+    CheckHook, HARDENED, arm_leave_hook, barrier_decisions_on, disarm_leave_hook, forget_root,
+    last_domain_on, refill_wanted_in_domain, refills_in_domain_on, switch_barriers,
+    switch_barriers_on,
+};
+pub(crate) use speculation::{
+    answer_leaving, entering_space, leaving_domain, left_space, nospec_below, serve_wanted_barrier,
+};
 pub use speculation::{leave_hook_armed_by, report_exposure as report_speculation};
-pub use speculation::{CheckHook, HARDENED, arm_leave_hook, barrier_decisions_on, disarm_leave_hook, forget_root, last_domain_on, refill_wanted_in_domain, refills_in_domain_on, switch_barriers, switch_barriers_on};
-pub use speculation::{nospec_index};
 pub use speculation_check::check as check_speculation;
 #[cfg(target_arch = "x86_64")]
 use x86_64::speculation as machine_speculation;
@@ -55,28 +61,73 @@ pub enum StatLayout {
     Stat64,
 }
 
-
 // Drivers for the Arm peripherals both Arm architectures can have: the GICv2,
 // the PL011, and the STM32MP1's USART, which is ARMv7-A's.
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 mod arm_common;
 
 #[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::{CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, interrupts_enabled, ipi_irq, mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt};
+pub use aarch64::{
+    ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
+    USER_ARGUMENT_PROGRAM, USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM,
+    USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM,
+    USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_TEST_PROGRAM, USER_TEST_STATUS, UserState,
+    audit_arch, counter_hz, enter_user, image_abi, read_console_byte, reset_user_state,
+    resume_user, set_thread_area, syscall_rollback_value, take_console_byte, thread_area,
+    user_base, user_hwcaps, user_platform,
+};
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::{TLB_FLUSH_IS_BROADCAST, USER_STEP_PROGRAM, USER_STEP_STATUS, breakpoint, console, drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps, kernel_write_protected, wait_for_interrupt, wait_for_work};
+pub(crate) use aarch64::{
+    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
+    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
+    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root,
+    interrupts_enabled, ipi_irq, mask_interrupt, msi_doorbell, permit_user_access, prepare_stack,
+    prepare_user_root, report_trap, restore_user_state, save_user_state, send_ipi_to_others,
+    service_interrupts, set_cpu_local, switch_to, system_call, timer_arm, timer_disarm,
+    timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt,
+};
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::{FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall, disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown};
+pub use aarch64::{
+    FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall,
+    disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown,
+};
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::{ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame, USER_ARGUMENT_PROGRAM, USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_TEST_PROGRAM, USER_TEST_STATUS, UserState, audit_arch, counter_hz, enter_user, image_abi, read_console_byte, reset_user_state, resume_user, set_thread_area, syscall_rollback_value, take_console_byte, thread_area, user_base, user_hwcaps, user_platform};
+pub use aarch64::{
+    TLB_FLUSH_IS_BROADCAST, USER_STEP_PROGRAM, USER_STEP_STATUS, breakpoint, console,
+    drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
+    kernel_write_protected, wait_for_interrupt, wait_for_work,
+};
 #[cfg(target_arch = "arm")]
-pub(crate) use armv7a::{CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, interrupts_enabled, ipi_irq, mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt};
+pub use armv7a::{
+    ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
+    USER_ARGUMENT_PROGRAM, USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM,
+    USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM,
+    USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_TEST_PROGRAM, USER_TEST_STATUS, UserState,
+    audit_arch, counter_hz, enter_user, image_abi, read_console_byte, reset_user_state,
+    resume_user, set_thread_area, syscall_rollback_value, take_console_byte, thread_area,
+    user_base, user_hwcaps, user_platform,
+};
 #[cfg(target_arch = "arm")]
-pub use armv7a::{TLB_FLUSH_IS_BROADCAST, USER_STEP_PROGRAM, USER_STEP_STATUS, breakpoint, console, drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps, kernel_write_protected, wait_for_interrupt, wait_for_work};
+pub(crate) use armv7a::{
+    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
+    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
+    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root,
+    interrupts_enabled, ipi_irq, mask_interrupt, msi_doorbell, permit_user_access, prepare_stack,
+    prepare_user_root, report_trap, restore_user_state, save_user_state, send_ipi_to_others,
+    service_interrupts, set_cpu_local, switch_to, system_call, timer_arm, timer_disarm,
+    timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt,
+};
 #[cfg(target_arch = "arm")]
-pub use armv7a::{ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame, USER_ARGUMENT_PROGRAM, USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_TEST_PROGRAM, USER_TEST_STATUS, UserState, audit_arch, counter_hz, enter_user, image_abi, read_console_byte, reset_user_state, resume_user, set_thread_area, syscall_rollback_value, take_console_byte, thread_area, user_base, user_hwcaps, user_platform};
+pub use armv7a::{
+    FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall,
+    disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown,
+};
 #[cfg(target_arch = "arm")]
-pub use armv7a::{FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall, disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown};
+pub use armv7a::{
+    TLB_FLUSH_IS_BROADCAST, USER_STEP_PROGRAM, USER_STEP_STATUS, breakpoint, console,
+    drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
+    kernel_write_protected, wait_for_interrupt, wait_for_work,
+};
 // How many processors programmed the PAT with its write-combining entry:
 // x86-64's, which the Arm architectures do without, their write-combining
 // being a memory attribute every processor has.
@@ -162,17 +213,17 @@ pub const fn check_distributor() -> Result<DistributorCheck, &'static str> {
 // The watchdogs a board's firmware leaves running: found at boot, fed once
 // the scheduler can run a task, fired to reset. Only the Pixel 7's today.
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::{start_watchdogs};
+pub use aarch64::init_watchdogs;
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::{init_watchdogs};
+pub use aarch64::start_watchdogs;
 #[cfg(target_arch = "arm")]
-pub use armv7a::{start_watchdogs};
+pub use armv7a::init_watchdogs;
 #[cfg(target_arch = "arm")]
-pub use armv7a::{init_watchdogs};
+pub use armv7a::start_watchdogs;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{start_watchdogs};
+pub use x86_64::init_watchdogs;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{init_watchdogs};
+pub use x86_64::start_watchdogs;
 // The program that takes its bootstrap handle after an `execve`, for the
 // check of init's native calls (`docs/INIT.md` §6, K3); and the one that
 // answers `getuid`, for the check that a native process runs as its creator.
@@ -192,39 +243,74 @@ pub use x86_64::{USER_INTO_CGROUP_PROGRAM, USER_OOM_PROGRAM};
 // Signal delivery: the register context the way back to user mode loads, the
 // architecture's signal frame, and the signal a user-mode fault becomes.
 #[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::{fault_signal};
+pub(crate) use aarch64::fault_signal;
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::{SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM, USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM, USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame};
+pub use aarch64::{
+    SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
+    USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
+    USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame,
+};
 #[cfg(target_arch = "arm")]
-pub(crate) use armv7a::{fault_signal};
+pub(crate) use armv7a::fault_signal;
 #[cfg(target_arch = "arm")]
-pub use armv7a::{SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM, USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM, USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame};
+pub use armv7a::{
+    SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
+    USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
+    USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame,
+};
 #[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::{CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local, cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb, forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root, interrupts_enabled, ipi_irq, mask_interrupt, msi_doorbell, permit_user_access, prepare_stack, prepare_user_root, report_trap, restore_user_state, save_user_state, send_ipi_to_others, service_interrupts, set_cpu_local, switch_to, system_call, timer_arm, timer_disarm, timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt};
+pub(crate) use x86_64::fault_signal;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{TLB_FLUSH_IS_BROADCAST, USER_STEP_PROGRAM, USER_STEP_STATUS, breakpoint, console, drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps, kernel_write_protected, wait_for_interrupt, wait_for_work};
+pub use x86_64::{
+    ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame,
+    USER_ARGUMENT_PROGRAM, USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM,
+    USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM,
+    USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_TEST_PROGRAM, USER_TEST_STATUS, UserState,
+    audit_arch, counter_hz, enter_user, image_abi, read_console_byte, reset_user_state,
+    resume_user, set_thread_area, syscall_rollback_value, take_console_byte, thread_area,
+    user_base, user_hwcaps, user_platform,
+};
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{ARCH, COMPAT_USER_END, EPOLL_EVENT_BYTES, Irq, NAME, OPEN_FLAGS, STAT_LAYOUT, TrapFrame, USER_ARGUMENT_PROGRAM, USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_TEST_PROGRAM, USER_TEST_STATUS, UserState, audit_arch, counter_hz, enter_user, image_abi, read_console_byte, reset_user_state, resume_user, set_thread_area, syscall_rollback_value, take_console_byte, thread_area, user_base, user_hwcaps, user_platform};
+pub(crate) use x86_64::{
+    CpuStarter, PageEncoding, advance_past_breakpoint, classify, console_receive_irq, cpu_local,
+    cpu_local_register, describe_cpus, drain_console, enable_console_receive, flush_tlb,
+    forbid_user_access, frame_pointer, hardware_id, identity_root, install_user_root,
+    interrupts_enabled, ipi_irq, mask_interrupt, msi_doorbell, permit_user_access, prepare_stack,
+    prepare_user_root, report_trap, restore_user_state, save_user_state, send_ipi_to_others,
+    service_interrupts, set_cpu_local, switch_to, system_call, timer_arm, timer_disarm,
+    timer_disarm_fired, timer_irq, uninstall_user_root, unmask_interrupt,
+};
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall, disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown};
+pub use x86_64::{
+    FAST_WRITE_READ, UserRegs, counter_now, decode_compat_syscall, decode_syscall,
+    disable_interrupts, enable_interrupts, hardware_random, msi_allocate, reset, shutdown,
+};
 #[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::{fault_signal};
+pub use x86_64::{
+    SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
+    USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
+    USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame,
+};
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM, USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM, USER_XSTATE_PROGRAM, UserContext, restore_signal_frame, setup_signal_frame};
+pub use x86_64::{
+    TLB_FLUSH_IS_BROADCAST, USER_STEP_PROGRAM, USER_STEP_STATUS, breakpoint, console,
+    drop_identity_map, halt, identity_map_live, init_console, init_interrupts, init_traps,
+    kernel_write_protected, wait_for_interrupt, wait_for_work,
+};
 // The scoped TLB shootdown: one page invalidated, one processor interrupted,
 // and the program that checks it from user mode.
 #[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::{flush_tlb_page, send_ipi_to};
+pub use aarch64::USER_RMAP_PROGRAM;
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::{USER_RMAP_PROGRAM};
+pub(crate) use aarch64::{flush_tlb_page, send_ipi_to};
+#[cfg(target_arch = "arm")]
+pub use armv7a::USER_RMAP_PROGRAM;
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::{flush_tlb_page, send_ipi_to};
-#[cfg(target_arch = "arm")]
-pub use armv7a::{USER_RMAP_PROGRAM};
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::USER_RMAP_PROGRAM;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{flush_tlb_page, send_ipi_to};
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::{USER_RMAP_PROGRAM};
 
 // Ordering memory a device reaches by DMA, and a register write after it (F-44).
 #[cfg(target_arch = "aarch64")]
@@ -237,8 +323,8 @@ pub use x86_64::dma_barrier;
 // A word of this processor's own record, read and changed atomically against
 // interrupts and migration: the preemption count (`sched::preempt`).
 mod percpu;
-pub(crate) use percpu::{this_cpu_read};
-pub use percpu::{this_cpu_add};
+pub use percpu::this_cpu_add;
+pub(crate) use percpu::this_cpu_read;
 
 // Device register accesses, one instruction each that a hypervisor can
 // emulate; `crate::mmio`'s windows are the only caller.

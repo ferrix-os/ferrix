@@ -51,9 +51,9 @@ const CHUNK: usize = 64 * 1024;
 /// What the check found.
 #[derive(Debug)]
 pub struct Report {
-    /// DOC-OWED
+    /// Regular files written and read back.
     pub files: u32,
-    /// DOC-OWED
+    /// Directories made.
     pub directories: u32,
     /// Bytes of file data written and read back.
     pub bytes: u64,

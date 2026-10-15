@@ -52,7 +52,7 @@ pub const ARCH: Arch = Arch::X86_64;
 /// (`docs/OPAQUE-KERNEL.md` §9.7): x86-64's alone.
 pub const FAST_WRITE_READ: bool = true;
 
-/// DOC-OWED
+/// The `struct stat` this architecture's programs read: x86-64's own `struct stat`.
 pub const STAT_LAYOUT: super::StatLayout = super::StatLayout::Legacy;
 
 /// x86-64's `struct epoll_event`, 12 bytes: `EPOLL_PACKED` in
@@ -69,10 +69,7 @@ pub(crate) type PageEncoding = ferrix_paging::x86_64::X86_64;
 /// I/O space, which has no page tables of its own. The Arm counterparts have
 /// to find a UART and map an `MMIO` window first, which is why this takes two
 /// arguments it ignores.
-pub fn init_console(
-    _view: &BootView<'_>,
-    _memory: &mut EarlyMemory,
-) -> Result<(), EarlyError> {
+pub fn init_console(_view: &BootView<'_>, _memory: &mut EarlyMemory) -> Result<(), EarlyError> {
     console::init();
     Ok(())
 }
@@ -160,9 +157,9 @@ pub(crate) fn cpu_local_register() -> u64 {
     // SAFETY: (SHARED) `IA32_GS_BASE` exists on every 64-bit x86.
     unsafe { cpu::read_msr(IA32_GS_BASE) }
 }
+pub use trap::TrapFrame;
+pub use trap::breakpoint;
 pub(crate) use trap::{advance_past_breakpoint, classify, fault_signal, report_trap};
-pub use trap::{breakpoint};
-pub use trap::{TrapFrame};
 
 /// What this architecture decides on its own from what the machine hands
 /// it, checked right after the timer's rate and before anything is built on
@@ -1849,12 +1846,12 @@ pub(crate) fn service_interrupts(frame: &mut TrapFrame, handle: fn(u32)) {
     apic::end_of_interrupt();
 }
 
+pub use switch::selector_skips_total;
+pub use switch::{UserState, reset_user_state, set_thread_area, thread_area};
 /// The context switch, and the stack layout a new task starts on.
 pub(crate) use switch::{prepare_stack, restore_user_state, save_user_state, switch_to};
-pub use switch::{UserState, reset_user_state, set_thread_area, thread_area};
-pub use switch::{selector_skips_total};
+pub use syscall::UserRegs;
 pub use syscall::{resume_user, user_base};
-pub use syscall::{UserRegs};
 
 /// Nothing to clean: every device a PC's kernel drives snoops the caches, so
 /// what a processor wrote is what the device reads.

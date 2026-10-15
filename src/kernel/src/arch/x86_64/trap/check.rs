@@ -21,8 +21,8 @@
 
 use ferrix_linux_abi::types::{SIGBUS, SIGFPE, SIGILL, SIGSEGV};
 
-use ferrix_kernel_core::arch::x86_64::cpu;
 use crate::console::println;
+use ferrix_kernel_core::arch::x86_64::cpu;
 
 /// `divl %ecx` with `%ecx` zero: `#DE`, vector 0.
 ///

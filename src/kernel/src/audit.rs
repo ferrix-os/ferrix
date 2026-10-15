@@ -77,10 +77,17 @@ pub mod check;
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-pub(crate) use ferrix_audit::{CONFIG, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED};
 pub use ferrix_audit::{BOOTED, Config};
-pub use ferrix_audit::{CGROUP_KILLED, CGROUP_LIMIT, DEVICE_LIMIT, DEVICE_LIMIT_SET, Event, NO_UID, saturated};
-pub use ferrix_audit::{CONTROL, DELEGATED, DEVMGR_STARTED, DOMAIN, JOB_KILLED, LIMIT_SET, Outcome, PROCESS_MADE, QUIESCED, READER_GIVEN, RIGHTS, ROOT_SWITCHED, Record, STARTER_GIVEN, WIDEN, target};
+pub use ferrix_audit::{
+    CGROUP_KILLED, CGROUP_LIMIT, DEVICE_LIMIT, DEVICE_LIMIT_SET, Event, NO_UID, saturated,
+};
+pub(crate) use ferrix_audit::{
+    CONFIG, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED,
+};
+pub use ferrix_audit::{
+    CONTROL, DELEGATED, DEVMGR_STARTED, DOMAIN, JOB_KILLED, LIMIT_SET, Outcome, PROCESS_MADE,
+    QUIESCED, READER_GIVEN, RIGHTS, ROOT_SWITCHED, Record, STARTER_GIVEN, WIDEN, target,
+};
 use ferrix_sync::IrqSpinLock;
 
 use crate::object::process::Process;

@@ -230,6 +230,17 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "panic catalog",
         &[&["tools/common/gen/gen-panic-catalog.py", "--check"]],
     ),
+    // The kernel's crates meet through their `pub` items, and since nothing
+    // in the kernel was `pub` before the split, those items are the
+    // interface the certified item offers what runs above it. The document
+    // listing them, and the checks-only methods clippy refuses to product
+    // code, are regenerated and compared; a `pub` no crate above names, or
+    // one that hands product code a checks-only type, fails.
+    // docs/KERNEL-CRATES.md, docs/generated/KERNEL-INTERFACE.md.
+    (
+        "kernel interface",
+        &[&["tools/common/gen/kernel-interface.py", "--check"]],
+    ),
 ];
 
 /// Run the gate set.
