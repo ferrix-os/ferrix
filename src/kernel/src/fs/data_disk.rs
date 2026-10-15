@@ -8,8 +8,10 @@
 //! test's own volume under QEMU's `snapshot=on`, say, which the guest may
 //! write and nobody keeps.
 //!
-//! It is committed with the root's committer when there is one, at every
-//! `sync`, and at the kernel's own power-off. A disk that is itself
+//! It is committed every 30 s by the one committer, which its mount starts
+//! when no root disk has ([`root_disk::start_committer`]) -- under a root in
+//! memory too, as every test boot has -- at every `sync`, and at the
+//! kernel's own power-off. A disk that is itself
 //! read-only is mounted read-only instead, and there is nothing to commit.
 //!
 //! A mount that fails is said and not fatal, for the reason the root disk
@@ -55,6 +57,14 @@ pub(crate) fn mount() {
         Ok((volume, Access::Writable)) => {
             let _ = VOLUME.call_once(|| volume);
             println!("  data     vd{name} mounted writable at /data");
+            if root_disk::start_committer() {
+                println!(
+                    "  data     /data is committed every {} s",
+                    root_disk::COMMIT_SECONDS
+                );
+            } else {
+                println!("  data     no commit task: only sync and fsync reach /data");
+            }
         }
         Ok((_, Access::ReadOnly)) => {
             println!("  data     vd{name} is a read-only disk, mounted read-only at /data");

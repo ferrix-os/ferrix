@@ -9,8 +9,9 @@
 //! under a btrfs root it is `/sysroot/home` in the kernel's own tree. A data
 //! disk ([`super::data_disk`]) never takes it.
 //!
-//! It is committed with the root's committer, at every `sync`, and at the
-//! kernel's own power-off.
+//! It is committed every 30 s by the one committer, which its mount starts
+//! when no root disk has ([`root_disk::start_committer`]), at every `sync`,
+//! and at the kernel's own power-off.
 //!
 //! A mount that fails is said and not fatal, for the reason the root disk
 //! gives: `/home` is then the directory the system's archive carries.
@@ -60,6 +61,14 @@ pub(crate) fn mount() {
         Ok(volume) => {
             let _ = VOLUME.call_once(|| volume);
             println!("  home     vd{name} mounted writable at /home");
+            if root_disk::start_committer() {
+                println!(
+                    "  home     /home is committed every {} s",
+                    root_disk::COMMIT_SECONDS
+                );
+            } else {
+                println!("  home     no commit task: only sync and fsync reach /home");
+            }
         }
         Err(why) => println!("  home     vd{name} is not mounted: {why}"),
     }
