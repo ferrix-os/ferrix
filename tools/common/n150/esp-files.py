@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy FERRIX/{KERNEL.ELF,INITRD.IMG,CMDLINE.TXT} out of a FAT ESP image
+"""Copy FERRIX/{KERNEL.ELF,INITRD.IMG,CMDLINE.TXT} and EFI/BOOT/BOOTX64.EFI out of a FAT ESP image
 (the one `cargo xtask n150-install` puts on the N150's disk) into
 OUT/FERRIX/, and write OUT/SHA256SUMS, for the box's `esp` script
 (G:/GameLab/iso/ferrix/n150/esp) to fetch over HTTP.
@@ -15,7 +15,7 @@ import os
 import struct
 import sys
 
-NAMES = ["KERNEL.ELF", "INITRD.IMG", "CMDLINE.TXT"]
+NAMES = ["FERRIX/KERNEL.ELF", "FERRIX/INITRD.IMG", "FERRIX/CMDLINE.TXT", "EFI/BOOT/BOOTX64.EFI"]
 
 
 class Fat:
@@ -103,14 +103,14 @@ def main():
         sys.exit(__doc__)
     image, out = argv
     fat = Fat(image)
-    os.makedirs(os.path.join(out, "FERRIX"), exist_ok=True)
     sums = []
     for name in NAMES:
-        src = Fat(other) if (other and name == "CMDLINE.TXT") else fat
-        data = src.lookup("FERRIX/" + name)
-        target = os.path.join(out, "FERRIX", name)
+        src = Fat(other) if (other and name == "FERRIX/CMDLINE.TXT") else fat
+        data = src.lookup(name)
+        target = os.path.join(out, *name.split("/"))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
         if data is None:
-            print(f"esp-files: no FERRIX/{name} in the image: skipped")
+            print(f"esp-files: no {name} in the image: skipped")
             if os.path.exists(target):
                 os.remove(target)
             continue
@@ -118,8 +118,8 @@ def main():
             f.write(data)
         digest = hashlib.sha256(data).hexdigest()
         sums.append(f"{digest}  FERRIX/{name}\n")
-        print(f"esp-files: FERRIX/{name} {len(data)} bytes {digest}")
-        if name == "CMDLINE.TXT":
+        print(f"esp-files: {name} {len(data)} bytes {digest}")
+        if name == "FERRIX/CMDLINE.TXT":
             print(f"esp-files: CMDLINE.TXT = {data.decode('utf-8', 'replace').strip()!r}")
     with open(os.path.join(out, "SHA256SUMS"), "w", newline="\n") as f:
         f.writelines(sums)
