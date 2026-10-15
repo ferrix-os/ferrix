@@ -67,6 +67,10 @@ pub(crate) const FLAKY_BUT_CACHED: &[(&str, &str)] = &[
         "BACKLOG P1 flakes: host tests of the compositor failed `cargo xtask check` under load (hyprix two_clients), each passing on its rerun",
     ),
     (
+        "app:fuzzel",
+        "BACKLOG P1 flakes: fuzzel's game-mode test read the child's environment dump before it was whole (bsb-sc3-check-hit, load 67), a false fail",
+    ),
+    (
         "app:waybar",
         "BACKLOG P1 flakes: host tests of the compositor failed `cargo xtask check` under load (waybar against_hyprix), each passing on its rerun",
     ),
