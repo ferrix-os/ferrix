@@ -867,6 +867,35 @@ now exist on their own): x86-64 61,046 against 51,145, aarch64 58,737
 against 48,964, armv7a 59,147 against 49,578. No coverage figure measures
 that build; `docs/certification/VERIFICATION.md` §3.2 says so.
 
+**What boots the `coverage` build.** No gate does: the suite's own run
+does, under the plugin. On this branch a traced `test-boot --arch x86_64
+--accel tcg` built the `coverage` profile (xtask says `traced: the coverage
+profile`), booted to `FERRIX-BOOT-OK` and was reported by both scripts as
+`coverage profile` (one boot: certified item 8,398 of 9,971 statements,
+84.2%). A whole `cargo xtask coverage --arch all` on nazuna did not get
+that far, for the host, not the build: at loads of 30 to 60 its x86-64 boots
+ran past the default 120 s under drcov, and the Arm boots could not load
+the plugin at all (`libdrcov.so` is built for QEMU 10.2.1's plugin API 5,
+the `qemu-system-aarch64` and `-arm` on PATH are 9.2.4 with API 4). The
+next full measurement needs a 10.2 Arm QEMU and `--timeout`. Until then the
+build it will measure is the one main's gates booted: its `.text` is main's
+dev kernel's, byte for byte.
+
+**The rows, and the load.** On dbe733179 `check`, `build --arch all
+--release`, `test-boot` on x86-64 (KVM and TCG), AArch64, ARMv7-A and
+ARMv7-A with two processors, and `test-threads --arch all` passed (gate
+tags `bsa-lo-*`). `test-container --arch all` failed once, on a new
+sentence of stage 5's moving lock check on ARMv7-A (a `docs/BACKLOG.md`
+row), and passed when run again. A dev kernel without LTO is slower in
+the guest (one boot each: ARMv7-A to `FERRIX-BOOT-OK` 25.7 against 42.2
+guest seconds, x86-64 under KVM 19.2 against 26.4, at different loads), and
+the stage 13 checks that measure a share of the wall clock fail under a
+loaded host (their rows in `docs/BACKLOG.md`). So 49 ARMv7-A boots were
+alternated between main and the branch, four or five at once at loads 20
+to 45: main failed 2 of 27 and the branch 1 of 22, all three on those
+stage 13 checks; the boot times overlapped (main 31-60 s, the branch
+31-71 s). No rate of failure the change adds could be told from the load's.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
