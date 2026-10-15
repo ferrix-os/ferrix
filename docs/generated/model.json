@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "e80f81f44cc83a67bc1ad20e138e6bfd5e67ef9464ff847615122687a89e8c70",
+  "digest": "6550f33ef7d9af3c09aa6cbd4c4fedd10322c7715d759414f53cc907c469da50",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -64701,7 +64701,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::Nodes::dmaIsSwitchedAtTheFunction",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"On the first published function with a configuration space, its command register reads bus mastering and decoding on after enable_dma, and bus mastering off with decoding on after disable_dma.\"",
+                  "value": "\"On the first published function with a configuration space that is not a bridge (class 06), its command register reads bus mastering and decoding on after enable_dma, and bus mastering off with decoding on after disable_dma.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 224
@@ -71068,7 +71068,7 @@
                   "qualifiedName": "FerrixConsoleRequirements::FailureReports::onlyKernelLinesAreKept",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"Writer::bytes shall keep a kernel line, logged or not, in the recent-output ring and on the screen console, and a program's output in neither.\"",
+                  "value": "\"Writer::bytes shall keep a kernel line, logged or not, in the recent-output ring, and a program's output not, and give both to the screen console.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
                     "line": 254
@@ -72130,10 +72130,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Screen::theScreenStartsWhenAsked",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"screen::start shall draw the console only when the command line holds ferrix.fbcon and there is a framebuffer: clear it, and draw what recent keeps of the lines printed before, from the first whole one.\"",
+                  "value": "\"screen::start shall draw the console only when the command line holds ferrix.fbcon and there is a framebuffer, and only the first time it is called: clear it, and draw what recent keeps of the lines printed before, from the first whole one; and milestone shall paint stripe n, for n below 12, only while the console is drawn, and not when it finds the board taken.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 467
+                    "line": 469
                   }
                 },
                 {
@@ -72144,7 +72144,7 @@
                   "value": "\"A boot without ferrix.fbcon leaves the framebuffer as firmware left it; one with it shows the boot's earlier lines from a line's start, and every later kernel line.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 470
+                    "line": 472
                   }
                 },
                 {
@@ -72155,7 +72155,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 471
+                    "line": 473
                   }
                 },
                 {
@@ -72163,10 +72163,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Screen::theScreenStartsWhenAsked",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"console::screen::start\", \"console::screen::put\")",
+                  "value": "(\"console::screen::start\", \"console::screen::put\", \"console::screen::milestone\", \"console::screen::Board::stripe\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 472
+                    "line": 475
                   }
                 }
               ]
@@ -72179,7 +72179,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 474
+                "line": 477
               },
               "children": [
                 {
@@ -72187,10 +72187,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Screen::theBoardFitsTheScreen",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"Board::new shall pick the largest glyph scale up to 4 that leaves at least 60 columns, inside the margins and the top inset, and refuse a surface with room for no column or fewer than 2 rows.\"",
+                  "value": "\"Board::new shall pick the largest glyph scale up to 4, or up to 1 under ferrix.fbcon.small, that leaves at least 60 columns, inside the margins, the top inset and the 12 milestone stripes, and refuse a surface with room for no column or fewer than 2 rows.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 478
+                    "line": 482
                   }
                 },
                 {
@@ -72201,7 +72201,7 @@
                   "value": "\"A 1080-pixel-wide surface gets scale 2 and 65 columns; a 640-pixel one, scale 1; a surface 20 pixels high is refused.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 481
+                    "line": 485
                   }
                 },
                 {
@@ -72212,7 +72212,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 482
+                    "line": 486
                   }
                 },
                 {
@@ -72223,7 +72223,7 @@
                   "value": "\"console::screen::Board::new\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 483
+                    "line": 487
                   }
                 }
               ]
@@ -72236,7 +72236,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 485
+                "line": 489
               },
               "children": [
                 {
@@ -72247,7 +72247,7 @@
                   "value": "\"Board::put shall ignore a CR, start a new row at a newline, advance a tab to the next stop of eight, draw a printable byte and draw anything else as the replacement character, wrapping at the last column and from the bottom row to the top, and keep the row after the newest line blank.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 490
+                    "line": 494
                   }
                 },
                 {
@@ -72258,7 +72258,7 @@
                   "value": "\"Drawn on a board of 3 rows, a line with a tab, a CR and a byte 0x01 puts its glyphs at the columns the rule gives, the replacement glyph for 0x01, and after a fourth newline the text is on row 1 with row 2 blank.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 494
+                    "line": 498
                   }
                 },
                 {
@@ -72269,7 +72269,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 495
+                    "line": 499
                   }
                 },
                 {
@@ -72280,7 +72280,7 @@
                   "value": "(\"console::screen::Board::put\", \"console::screen::Board::glyph\", \"console::screen::Board::newline\", \"console::screen::Board::clear_row\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 498
+                    "line": 502
                   }
                 }
               ]
@@ -72293,7 +72293,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 500
+                "line": 504
               },
               "children": [
                 {
@@ -72304,7 +72304,7 @@
                   "value": "\"screen::stop shall stop the screen console for good and wait a bounded time for a draw in flight to finish, and a byte that finds the board taken shall not be drawn.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 503
+                    "line": 507
                   }
                 },
                 {
@@ -72315,7 +72315,7 @@
                   "value": "\"After stop, 0 bytes are drawn; stop called by a processor part way through a draw returns after at most 1,000,000 attempts at the board.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 506
+                    "line": 510
                   }
                 },
                 {
@@ -72326,7 +72326,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 507
+                    "line": 511
                   }
                 },
                 {
@@ -72337,7 +72337,7 @@
                   "value": "(\"console::screen::stop\", \"console::screen::put\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 508
+                    "line": 512
                   }
                 }
               ]
@@ -72351,7 +72351,7 @@
           "doc": "Which console the kernel writes to, where firmware or the loader says. The ports' drivers are the arch slices'.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 512
+            "line": 516
           },
           "children": [
             {
@@ -72362,7 +72362,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 516
+                "line": 520
               },
               "children": [
                 {
@@ -72373,7 +72373,7 @@
                   "value": "\"ramoops_zone shall read the loader's `console=ramoops,<base>,<size>` as a zone only when both numbers are hexadecimal with a 0x prefix, no third field follows, the base is a page's and the size is more than the record's 12-byte header.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 520
+                    "line": 524
                   }
                 },
                 {
@@ -72384,7 +72384,7 @@
                   "value": "\"`ramoops,0x9ff00000,0x40000` is read as the zone at 0x9ff00000 of 0x40000 bytes; a base not a page's, a 12-byte zone, a missing size, a third field, a number without 0x and `ttyAMA0` are each refused: 0 of 6 taken (the AArch64 `machine` line).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 524
+                    "line": 528
                   }
                 },
                 {
@@ -72395,7 +72395,7 @@
                   "value": "\"H.BOOT.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 525
+                    "line": 529
                   }
                 },
                 {
@@ -72406,7 +72406,7 @@
                   "value": "\"arch::aarch64::console::ramoops_zone\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 526
+                    "line": 530
                   }
                 }
               ]
@@ -72419,7 +72419,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 528
+                "line": 532
               },
               "children": [
                 {
@@ -72430,7 +72430,7 @@
                   "value": "\"chosen shall take the port a `console=` in the device tree's bootargs names, where the tree has that port with registers; else the port stdout-path names; else the first port the kernel drives that the tree has not turned off.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 532
+                    "line": 536
                   }
                 },
                 {
@@ -72441,7 +72441,7 @@
                   "value": "\"Of 4 trees built for the check, `console=pl011` against a stdout-path naming the USART gives the PL011; a `console=ttyS0` falls through to stdout-path's PL011; no stdout-path gives the first port not disabled; a lone STM32 USART gives it: 4 of 4 (the ARMv7-A `machine` line).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 537
+                    "line": 541
                   }
                 },
                 {
@@ -72452,7 +72452,7 @@
                   "value": "\"H.BOOT.8\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 538
+                    "line": 542
                   }
                 },
                 {
@@ -72463,7 +72463,7 @@
                   "value": "(\"arch::armv7a::console::chosen\", \"arch::armv7a::console::forced\", \"arch::armv7a::console::first_enabled\", \"arch::armv7a::console::Port::of\", \"arch::armv7a::console::Port::named\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 541
+                    "line": 545
                   }
                 }
               ]
@@ -72477,7 +72477,7 @@
           "doc": "src/kernel/src/console/pstore.rs: the kernel log kept across a reset in a region of RAM the loader gives, which the next boot's loader reports (docs/POSTMORTEM.md section 3; the consultant's OK IF Q1-Q16, ledger line 1238). The region's format is ferrix-bootinfo's pstore module, unclassified, host-tested; the decisions below are the kernel's.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 545
+            "line": 549
           },
           "children": [
             {
@@ -72488,7 +72488,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 553
+                "line": 557
               },
               "children": [
                 {
@@ -72499,7 +72499,7 @@
                   "value": "\"The pstore mirror shall hold in the region's ring what the kernel log records, from the boot's first logged byte, in order, with nothing the log does not record: the lines sent unlogged are in neither.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 557
+                    "line": 561
                   }
                 },
                 {
@@ -72510,7 +72510,7 @@
                   "value": "\"In test-postmortem's boot 1, the region saved over QMP after the report validates as boot 1's, and its text, line for line, is boot 1's serial log from the kernel's first line with only the unlogged lines missing, and holds none of them (x86-64 and AArch64).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 562
+                    "line": 566
                   }
                 },
                 {
@@ -72521,7 +72521,7 @@
                   "value": "\"H.TRAP.15\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 563
+                    "line": 567
                   }
                 },
                 {
@@ -72532,7 +72532,7 @@
                   "value": "(\"console::pstore::record\", \"console::pstore::adopt\", \"console::log::record_into\", \"console::log::slot_of\", \"console::log::record\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 565
+                    "line": 569
                   }
                 }
               ]
@@ -72545,7 +72545,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 567
+                "line": 571
               },
               "children": [
                 {
@@ -72556,7 +72556,7 @@
                   "value": "\"attach shall mirror the log into the loader's region only when it is whole pages, a header page and a ring of a power of two from 4 KiB to 16 MiB, wholly inside one Pstore entry of the memory map, RAM the direct map covers at both ends, and its header is valid with nothing recorded; else it shall say why in one line and write nothing there.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 573
+                    "line": 577
                   }
                 },
                 {
@@ -72567,7 +72567,7 @@
                   "value": "\"At boot, placement refuses a region made up inside the kernel image's entry and, around the loader's region, one not on a page, one no longer than its header, one whose ring is not a power of two and one running past its entry, and takes the loader's region: 5 of 5 refused when a region was attached, 1 of 1 when none. The header clause is ferrix-bootinfo's validate, whose host tests refuse a wrong magic, version, header length, capacity, region length, CRC and count: every_field_is_checked and capacities_outside_the_bounds_are_refused. By inspection of check: a valid header with a count other than 0 is refused, and nothing is written to the region before every clause passes (adopt is its only writer).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 585
+                    "line": 589
                   }
                 },
                 {
@@ -72578,7 +72578,7 @@
                   "value": "\"H.BOOT.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 586
+                    "line": 590
                   }
                 },
                 {
@@ -72589,7 +72589,7 @@
                   "value": "(\"console::pstore::attach\", \"console::pstore::check\", \"console::pstore::placement\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 588
+                    "line": 592
                   }
                 }
               ]
@@ -72602,7 +72602,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 590
+                "line": 594
               },
               "children": [
                 {
@@ -72613,7 +72613,7 @@
                   "value": "\"conclude shall write the pstore region back from the caches after the report's last line is drained and before the screen is drawn, taking no lock and allocating nothing; an abridged report shall write nothing back. finish shall write it back before the reset ferrix.onexit=reset asks for, after its last line.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 595
+                    "line": 599
                   }
                 },
                 {
@@ -72624,7 +72624,7 @@
                   "value": "\"In test-postmortem's boot 1, the unlogged `written back for the next boot` line comes straight after the report's explanation, and the region saved after it holds that explanation (x86-64 and AArch64); in test-boot --reset, the loader that comes back quotes the kernel's resetting line as the log's last (x86-64 and AArch64). Neither write-back is observable under QEMU, whose caches are the host's: the hardware run is a BACKLOG row.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 602
+                    "line": 606
                   }
                 },
                 {
@@ -72635,7 +72635,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 603
+                    "line": 607
                   }
                 },
                 {
@@ -72646,7 +72646,7 @@
                   "value": "(\"console::pstore::write_back\", \"panic::conclude\", \"power::finish\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 605
+                    "line": 609
                   }
                 }
               ]
