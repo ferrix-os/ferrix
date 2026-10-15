@@ -155,25 +155,7 @@ fn ferrix_fast_write_read(a: &[u64; 6]) -> trap::Fast {
 }
 
 fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
-    // Before the first line, so the boot console draws every one of them.
-    // The milestone stripes (`console::screen::milestone`) are what a photo
-    // of a screen with no legible text still tells: rows 0 to 10, in order.
-    let framebuffer = map_boot_framebuffer(view, memory);
-    console::screen::milestone(0);
-    println!();
-    println!("Ferrix {} on {}", env!("CARGO_PKG_VERSION"), arch::NAME);
-
-    report(view);
-    console::screen::milestone(1);
-
-    if let Err(problem) = framebuffer.and_then(|()| self_check(view, memory)) {
-        fatal!(
-            catalog::STAGE1_HANDOFF,
-            "stage 1 self-check failed: {problem}"
-        );
-    }
-    println!("  stage 1  loader hand-off verified");
-    console::screen::milestone(2);
+    verify_hand_off(view, memory);
     // Whether the rest of the stages check what they bring up. Read here,
     // after the one check that always runs and before the first that may not.
     checks::init(view);
@@ -1750,6 +1732,31 @@ fn check_early_mapper(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(
     }
 
     Ok(())
+}
+
+/// Stage 1: the boot console, the banner, the hand-off report and its
+/// self-check, with the first three milestone stripes. Out of `kmain` so
+/// that function keeps the length the complexity gate holds it to.
+fn verify_hand_off(view: &BootView<'_>, memory: &mut EarlyMemory) {
+    // Before the first line, so the boot console draws every one of them.
+    // The milestone stripes (`console::screen::milestone`) are what a photo
+    // of a screen with no legible text still tells: rows 0 to 10, in order.
+    let framebuffer = map_boot_framebuffer(view, memory);
+    console::screen::milestone(0);
+    println!();
+    println!("Ferrix {} on {}", env!("CARGO_PKG_VERSION"), arch::NAME);
+
+    report(view);
+    console::screen::milestone(1);
+
+    if let Err(problem) = framebuffer.and_then(|()| self_check(view, memory)) {
+        fatal!(
+            catalog::STAGE1_HANDOFF,
+            "stage 1 self-check failed: {problem}"
+        );
+    }
+    println!("  stage 1  loader hand-off verified");
+    console::screen::milestone(2);
 }
 
 /// Map the framebuffer firmware left, record it for the panic screen, and
