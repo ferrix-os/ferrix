@@ -129,7 +129,8 @@ pub(crate) fn layout(disk_bytes: u64, esp_bytes: u64) -> Result<Layout> {
     })
 }
 
-/// `n150-install` and `test-n150`.
+/// `n150-install`, `test-n150`, `test-n150-sata` and `test-n150-desktop`;
+/// any other name is refused, since main.rs hands over every `test-n150*`.
 pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     if args.arches()?.iter().any(|&arch| arch != Arch::X86_64) {
         return Err(Error::new(format!(
@@ -140,7 +141,8 @@ pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
         "test-n150" => test(args, false),
         "test-n150-sata" => test(args, true),
         "test-n150-desktop" => test_desktop(args),
-        _ => install(args),
+        "n150-install" => install(args),
+        _ => Err(Error::new(format!("unknown command {command}"))),
     }
 }
 
