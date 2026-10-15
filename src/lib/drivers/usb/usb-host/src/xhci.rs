@@ -42,7 +42,7 @@
 
 use crate::host::{
     CONTROL_BYTES, Data, Endpoint, Error, Host, PIPE_BYTES, Packet, Place, RootPort, RootReset,
-    Target,
+    Target, Trouble,
 };
 use crate::usb::{Setup, Speed};
 use crate::{Clock, Dma, MILLISECOND, Parts, Registers};
@@ -283,6 +283,8 @@ const QUEUED: usize = 8;
 const PIPE_BUFFERS: usize = 16;
 /// Packets kept between two calls of [`Controller::service`].
 const ARRIVED: usize = 32;
+/// Interrupt-pipe events kept for the console until the bus takes them.
+const TROUBLES: usize = 8;
 
 const _: () = assert!(
     PIPE_BUFFERS * PIPE_BYTES <= PAGE && QUEUED < PIPE_BUFFERS,
@@ -457,6 +459,8 @@ pub struct Controller<R, D, C> {
     completion: Option<Completion>,
     waiting: Option<Waiting>,
     ports_changed: bool,
+    /// Interrupt-pipe events that were not a plain success, for the console.
+    troubles: [Option<Trouble>; TROUBLES],
     /// The controller reported an error of its own, or stopped answering.
     dead: bool,
 }
@@ -511,6 +515,7 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
             completion: None,
             waiting: None,
             ports_changed: false,
+            troubles: [None; TROUBLES],
             dead: false,
         };
         let slots = (structure & 0xFF).min(MAX_SLOTS as u32);
@@ -858,9 +863,27 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
         let Some(Some(mut pipe)) = self.pipes.get(index).copied() else {
             return;
         };
+        let known = self.buffer_of(&pipe, pointer).is_some();
+        if code != CODE_SUCCESS || !known {
+            self.note_trouble(Trouble {
+                slot,
+                endpoint: dci,
+                code,
+                known,
+            });
+        }
         match code {
             CODE_SUCCESS | CODE_SHORT_PACKET => {
                 let Some(buffer) = self.buffer_of(&pipe, pointer) else {
+                    // An event for a TRB this did not queue -- what a
+                    // controller's own idea of the ring says. The request it
+                    // ended is replaced all the same, so the pipe does not run
+                    // dry, and its bytes are not trusted.
+                    self.queue_request(&mut pipe);
+                    self.ring_doorbell(slot, dci);
+                    if let Some(entry) = self.pipes.get_mut(index) {
+                        *entry = Some(pipe);
+                    }
                     return;
                 };
                 let len = pipe.length.saturating_sub(left as usize).min(PIPE_BYTES);
@@ -883,6 +906,19 @@ impl<R: Registers, D: Dma, C: Clock> Controller<R, D, C> {
         }
         if let Some(entry) = self.pipes.get_mut(index) {
             *entry = Some(pipe);
+        }
+    }
+
+    /// Keep `trouble` for the console; the oldest goes when there is no room.
+    fn note_trouble(&mut self, trouble: Trouble) {
+        if self.troubles.iter().all(Option::is_some) {
+            self.troubles.rotate_left(1);
+            if let Some(last) = self.troubles.last_mut() {
+                *last = None;
+            }
+        }
+        if let Some(slot) = self.troubles.iter_mut().find(|slot| slot.is_none()) {
+            *slot = Some(trouble);
         }
     }
 
@@ -1619,6 +1655,12 @@ impl<R: Registers, D: Dma, C: Clock> Host for Controller<R, D, C> {
                 *entry = None;
             }
         }
+    }
+
+    fn take_trouble(&mut self) -> Option<Trouble> {
+        let first = self.troubles.first_mut()?.take()?;
+        self.troubles.rotate_left(1);
+        Some(first)
     }
 
     fn pipe_stopped(&self, pipe: usize) -> bool {

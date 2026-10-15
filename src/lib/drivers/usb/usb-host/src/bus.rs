@@ -144,6 +144,10 @@ pub enum Note {
         /// Why.
         error: Error,
     },
+    /// An interrupt pipe's transfer ended other than in plain success: a
+    /// short packet, an error the pipe is recovered from, or an event for a
+    /// request it did not queue.
+    Transfer(host::Trouble),
     /// A function's pipe halted too often in a row and was left stopped: its
     /// device sends nothing more until it is plugged in again.
     Stopped {
@@ -404,6 +408,9 @@ impl<H: Host> Bus<H> {
                 function.stopped = true;
                 self.notes.push_over(Note::Stopped { function: index });
             }
+        }
+        while let Some(trouble) = self.hc.take_trouble() {
+            self.notes.push_over(Note::Transfer(trouble));
         }
         // A controller that says a port changed is polled at once.
         if self.hc.ports_changed() {

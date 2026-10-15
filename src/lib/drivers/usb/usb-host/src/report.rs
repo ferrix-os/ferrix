@@ -486,7 +486,9 @@ pub fn value(field: &Field, report: &[u8], index: u32) -> Option<i32> {
     }
     let first = u32::from(field.offset).checked_add(index.checked_mul(size)?)?;
     let mut raw = 0_u64;
-    for bit in 0..size {
+    // A value wider than 32 bits (a vendor's blob, which nothing maps) keeps
+    // its low 32: a shift past the accumulator's width would be a panic.
+    for bit in 0..size.min(32) {
         let at = first + bit;
         let byte = *report.get(usize::try_from(at / 8).ok()?)?;
         if byte & (1 << (at % 8)) != 0 {
