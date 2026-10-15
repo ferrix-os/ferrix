@@ -327,13 +327,12 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
         // A device firmware left busy, or that sent no signature since its
         // last reset, gets a COMRESET and one more wait: what a BIOS leaves
         // behind is not what QEMU starts with.
-        if idle.is_err() || self.regs.read(port(index, regs::PX_SIG)) == regs::GONE {
-            if self.comreset(index) {
-                idle = self.wait(BUSY_TIMEOUT, "device busy after COMRESET", |hba| {
-                    hba.regs.read(port(index, regs::PX_TFD)) & (regs::TFD_BSY | regs::TFD_DRQ)
-                        == 0
-                });
-            }
+        if (idle.is_err() || self.regs.read(port(index, regs::PX_SIG)) == regs::GONE)
+            && self.comreset(index)
+        {
+            idle = self.wait(BUSY_TIMEOUT, "device busy after COMRESET", |hba| {
+                hba.regs.read(port(index, regs::PX_TFD)) & (regs::TFD_BSY | regs::TFD_DRQ) == 0
+            });
         }
         if let Err(error) = idle {
             let _stopped = self.stop(index);
