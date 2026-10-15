@@ -28,6 +28,7 @@ mod report_url;
 mod services;
 mod slots;
 mod smbios;
+mod stripes;
 mod uefi;
 
 use core::convert::Infallible;
@@ -191,9 +192,14 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
         loader,
         (kernel.image.virt_base, kernel.image.memory.len),
     )?;
+    // Room for the map as it will be when the loader leaves firmware, not as
+    // it is now: everything allocated from here on -- the kernel's tables,
+    // the graphics query, files read -- can split a region and add entries,
+    // and a real machine's map is far longer than QEMU's. A buffer that
+    // comes up short then fails `exit_boot_services` with nothing on screen.
     let map_buffer = services.allocate(
         "allocating the memory map buffer",
-        services.memory_map_size()?,
+        services.memory_map_size()?.saturating_mul(2).max(64 * 1024),
         MemoryType::LOADER_DATA,
     )?;
 
@@ -240,6 +246,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     // After the address space is built from `first_look`: asking firmware
     // for its graphics outputs allocates, which changes the map.
     let framebuffer = report_framebuffer(services.framebuffer(&first_look));
+    stripes::record(framebuffer.as_ref());
 
     write_boot_info(
         &services,
@@ -264,10 +271,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
 
     // Past this line firmware is gone: no allocation, no console, no protocols.
     netreport::firmware_left();
-    console::shutdown();
-    let map = leave_firmware(&services, map_buffer)?;
-    let regions = record_memory_map(&map, info_area);
-    finish_boot_info(info_area, regions, direct, &map);
+    leave_and_record(&services, map_buffer, info_area, direct);
 
     // The Arm architectures turn the MMU off in the middle of the switch, so
     // anything still dirty in a cache would vanish. No-op on x86-64.
@@ -283,6 +287,8 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     for (copy, _) in [device_tree, smbios, initrd].into_iter().flatten() {
         arch::clean_dcache(copy.address, copy.len);
     }
+    stripes::reached(stripes::Step::Cleaned);
+    stripes::reached(stripes::Step::Entering);
 
     // SAFETY: boot services are gone, `prepare_cpu` ran above, and the tables
     // in `space` identity map the page the switch runs from — the loader's own
@@ -628,6 +634,33 @@ fn report_framebuffer((framebuffer, outputs): (Option<Framebuffer>, usize)) -> O
         );
     }
     framebuffer
+}
+
+/// Leave firmware and put the final memory map in the boot info.
+///
+/// From here the screen's only report is `stripes`: a bar per step, and a
+/// red one where a step failed, after which the loader stops -- firmware's
+/// console is gone, and returning an error to it says nothing anyone sees.
+fn leave_and_record(
+    services: &Services,
+    map_buffer: Allocation,
+    info_area: Allocation,
+    direct: DirectMap,
+) {
+    stripes::reached(stripes::Step::Printed);
+    console::shutdown();
+    let Ok(map) = leave_firmware(services, map_buffer) else {
+        stripes::failed(stripes::Step::LeftFirmware);
+    };
+    stripes::reached(stripes::Step::LeftFirmware);
+    let regions = record_memory_map(&map, info_area);
+    // A map longer than the boot info holds would lose regions the kernel
+    // needs -- its own image among them -- without a word.
+    if regions != map.entries().count() as u64 {
+        stripes::failed(stripes::Step::MapRecorded);
+    }
+    finish_boot_info(info_area, regions, direct, &map);
+    stripes::reached(stripes::Step::MapRecorded);
 }
 
 /// Take the final memory map and leave boot services.
