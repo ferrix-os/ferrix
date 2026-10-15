@@ -107,7 +107,10 @@ fn the_first_boot_passes_with_every_line_and_fails_naming_the_missing_one() {
 fn the_sata_boot_asks_for_the_ahci_drive_not_the_nvme_one() {
     // The NVMe boot's lines do not pass the SATA check: no AHCI drive line.
     let error = check_first(&lines(FIRST), true).unwrap_err().to_string();
-    assert!(error.contains("AHCI driver did not bring the drive up"), "{error}");
+    assert!(
+        error.contains("AHCI driver did not bring the drive up"),
+        "{error}"
+    );
     let mut sata = lines(FIRST);
     sata[0] = "  0.900 |   ahci     8086:2922 port 0: QEMU HARDDISK serial ferrix-n150: \
                2097152 sectors of 512 (1024 MiB)"

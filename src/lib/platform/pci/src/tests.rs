@@ -660,7 +660,10 @@ fn an_ahci_controllers_abar_is_slot_five_and_mappable_whole() {
     let mut bus = Bus::new();
     let mut d = Device::endpoint(0x8086, 0x2922);
     d.put16(COMMAND, COMMAND_MEMORY_SPACE | 1);
-    for (index, port) in [0xC001, 0xC021, 0xC041, 0xC061, 0xC081].into_iter().enumerate() {
+    for (index, port) in [0xC001, 0xC021, 0xC041, 0xC061, 0xC081]
+        .into_iter()
+        .enumerate()
+    {
         d.bar(index, port, 0x0000_FFE0);
     }
     d.bar(5, 0xFEBD_4000, 0xFFFF_E000);
