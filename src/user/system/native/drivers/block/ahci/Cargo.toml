@@ -1,0 +1,26 @@
+[package]
+name = "ferrix-ahci-driver"
+description = "The AHCI driver process: the block ring's driver end over the first SATA disk of an AHCI controller, on ferrix-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "ahci"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-ahci.workspace = true
+ferrix-blkring.workspace = true
+ferrix-blkserve.workspace = true
+ferrix-driver = { workspace = true, features = ["block"] }
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+ferrix-virtio-blk.workspace = true
+
+[lints]
+workspace = true

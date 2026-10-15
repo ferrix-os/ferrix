@@ -111,6 +111,11 @@ const ANY_VENDOR: u16 = 0xFFFF;
 /// bus it sits: on a root port, or below a switch as a chipset's slot is.
 const NVME_INTERFACE: PciMatch = PciMatch::Interface(0x01, 0x08, 0x02);
 
+/// The class code of an AHCI controller: mass storage (`01`), SATA (`06`),
+/// AHCI 1.0 (`01`). Every vendor's, a chipset's or QEMU q35's ICH9, is
+/// driven by `ahci` over a block ring, its first drive served as one disk.
+const AHCI_INTERFACE: PciMatch = PciMatch::Interface(0x01, 0x06, 0x01);
+
 /// Motorcomm's YT6801 PCIe gigabit adapter, driven by `yt6801` over a net
 /// ring as virtio-net is (`docs/roadmap/networking.md`). The kernel holds
 /// its MSI-X off and offers its one MSI vector (`docs/DEVMGR.md` §3).
@@ -134,8 +139,9 @@ enum PciMatch {
 ///
 /// An xHCI USB host controller, class 0C:03:30 whoever made it, is a bus
 /// host driven by `usbhid`, as the STM32MP15's EHCI is (`docs/XHCI.md`).
-const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 5] = [
+const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 6] = [
     (ANY_VENDOR, NVME_INTERFACE, b"nvme", Kind::Block),
+    (ANY_VENDOR, AHCI_INTERFACE, b"ahci", Kind::Block),
     (
         MOTORCOMM_VENDOR,
         PciMatch::Devices(&YT6801_IDS),
@@ -1736,10 +1742,11 @@ impl fmt::Write for Line {
     }
 }
 
-/// A disk's driver -- virtio-blk's, an NVMe controller's, or an STM32MP15's
-/// SD card's -- over a block ring, for the disk to be `name`. START's
-/// register blocks are virtio's or the tree node's; an NVMe controller has
-/// neither, and its driver finds its BAR through `device_aperture`.
+/// A disk's driver -- virtio-blk's, an NVMe or AHCI controller's, or an
+/// STM32MP15's SD card's -- over a block ring, for the disk to be `name`.
+/// START's register blocks are virtio's or the tree node's; an NVMe or AHCI
+/// controller has neither, and its driver finds its BAR through
+/// `device_aperture`.
 fn start_block(
     job: &Job<Kernel>,
     device: Device<Kernel>,
@@ -1784,6 +1791,7 @@ fn start_block(
     let program = match info.virtio {
         DEVICE_TREE_BLOCKS => "sdmmc",
         DEVICE_VIRTIO_PCI => "blk",
+        _ if pci_matches(AHCI_INTERFACE, info) => "ahci",
         _ => "nvme",
     };
     launch(
