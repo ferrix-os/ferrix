@@ -172,8 +172,11 @@ pub(crate) fn start(view: &BootView<'_>) {
         return;
     }
     // SAFETY: (SHARED) nothing else writes the framebuffer while the board holds it:
-    // the panic screen stops the board before it draws, and so does a display
-    // driver taking the screen.
+    // the panic screen stops the board before it draws, and the one ring-3
+    // writer there can be -- `efifb`, under `ferrix.efifb` -- can map the
+    // framebuffer only through the node `discovery::firmware` lends it to,
+    // which stops the board before the node exists (`device::check`'s
+    // `check_framebuffer` requires it stopped).
     let Some(mut surface) = (unsafe { crate::panic::screen::surface() }) else {
         return;
     };
@@ -210,6 +213,12 @@ pub(super) fn put(byte: u8) {
     {
         board.put(byte);
     }
+}
+
+/// Whether the console is drawing on the framebuffer: started, and not yet
+/// stopped.
+pub(crate) fn drawing() -> bool {
+    ENABLED.load(Ordering::Acquire)
 }
 
 /// Stop drawing, for good, and wait for a draw in flight to finish.

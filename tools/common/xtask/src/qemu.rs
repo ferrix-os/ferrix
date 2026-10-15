@@ -2386,16 +2386,7 @@ fn qemu_command(
                     INTEL_IOMMU
                 },
             ]);
-            // The machine's own VGA, which `q35` adds unasked, is QEMU's
-            // first console and the card is the second, so a window opens on
-            // firmware's head and the compositor draws out of sight. A boot
-            // that is watched takes the VGA away and leaves the card as the
-            // only console; a boot that is judged keeps it, because the
-            // loader's framebuffer is then VGA's rather than the card the
-            // driver takes over, which is `docs/DISPLAY.md` §2.4's hazard.
-            if crate::window::sole_screen(args) {
-                let _ = command.args(["-vga", "none"]);
-            }
+            x86_heads(&mut command, args);
             // The image on the first port of q35's AHCI controller, where a
             // bare `-drive` puts it, spelled out only to give it `bootindex`.
             // Without one OVMF tries the virtio test disk first, because its
@@ -2789,6 +2780,36 @@ const WATCHED_CARD_SLOT: u32 = 0x10;
 /// Where a watched boot's firmware head goes: below the cards, and clear of
 /// the slots QEMU assigns from the bottom.
 const FIRMWARE_SLOT: u32 = 0x0a;
+
+/// The x86-64 machine's VGA, as the boot wants it.
+fn x86_heads(command: &mut Command, args: &Args) {
+    // The machine's own VGA, which `q35` adds unasked, is QEMU's
+    // first console and the card is the second, so a window opens on
+    // firmware's head and the compositor draws out of sight. A boot
+    // that is watched takes the VGA away and leaves the card as the
+    // only console; a boot that is judged keeps it, because the
+    // loader's framebuffer is then VGA's rather than the card the
+    // driver takes over, which is `docs/DISPLAY.md` §2.4's hazard.
+    if crate::window::sole_screen(args) {
+        let _ = command.args(["-vga", "none"]);
+    }
+    // The firmware-screen boot's head: a VGA whose EDID prefers
+    // 1024x768, the size every judged picture is of. OVMF takes the
+    // preferred size for its graphics output, so the firmware chose
+    // that mode and nothing in the guest ever sets one.
+    if args.firmware_screen && !crate::window::sole_screen(args) {
+        let _ = command.args([
+            "-vga",
+            "none",
+            "-device",
+            &format!("VGA,id={FIRMWARE_SCREEN_ID},xres=1024,yres=768"),
+        ]);
+    }
+}
+
+/// The QEMU id of the firmware-screen boot's VGA, which its screendumps
+/// name (`compositor::firmware_screen`).
+pub(crate) const FIRMWARE_SCREEN_ID: &str = "firmware";
 
 /// The MAC address the guest's virtio-net device carries.
 ///

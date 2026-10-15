@@ -399,6 +399,15 @@ pub(crate) use armv7a::FRAMEBUFFER_FLAGS;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::FRAMEBUFFER_FLAGS;
 
+// Whether `ferrix.efifb` may lend the framebuffer to a ring-3 driver: only
+// where a user mapping of an aperture can take the kernel's own type for it.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::LENDS_FRAMEBUFFER;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::LENDS_FRAMEBUFFER;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::LENDS_FRAMEBUFFER;
+
 // Full-entropy bytes firmware hands out, where it has a TRNG to ask.
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::firmware_entropy;

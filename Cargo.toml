@@ -104,6 +104,7 @@ members = [
     "src/user/system/native/drivers/block/nvme",
     "src/user/system/native/drivers/net/virtio-net",
     "src/user/system/native/drivers/display/virtio-gpu",
+    "src/user/system/native/drivers/display/efifb",
     "src/user/system/native/drivers/display/stm32-ltdc",
     "src/user/system/native/drivers/input/virtio-input",
     "src/user/system/native/drivers/sound/virtio-snd",

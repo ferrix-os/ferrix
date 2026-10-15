@@ -267,6 +267,27 @@ pub const TREE_GS201_DWC3: u16 = 4;
 /// not one the kernel holds. The node's clock, through `device_clock`, says
 /// the controller's kernel clock rate and refuses `CLOCK_SET`.
 pub const TREE_STM32_SDMMC: u16 = 5;
+/// [`DeviceInfo::device_id`] of the firmware's framebuffer: the screen the
+/// loader handed the kernel, published as a node only when the command line
+/// says `ferrix.efifb` and the framebuffer is outside the allocator's
+/// memory (`docs/DISPLAY.md` §8). It is no device tree node: its one window
+/// in `common` is the framebuffer's visible lines, whole pages, its first
+/// pixel at the block's `offset`; nothing in `device`; no vector; and no
+/// pin, since nothing behind it reaches memory. The mode is in fields a tree
+/// node leaves zero: [`DeviceInfo::subsystem_vendor_id`] is the width,
+/// [`DeviceInfo::subsystem_id`] the height,
+/// [`DeviceInfo::notify_off_multiplier`] the pixels from one line to the
+/// next, and [`DeviceInfo::msix_table_size`] the layout,
+/// [`FRAMEBUFFER_BGRX`] or [`FRAMEBUFFER_RGBX`]. Its driver shows a card by
+/// copying (displayctl's `copies`), and maps the window as device memory, the
+/// type the kernel holds it at.
+pub const TREE_FIRMWARE_FB: u16 = 6;
+/// The firmware framebuffer's pixels are blue, green, red, unused in memory
+/// order: DRM's `XRGB8888`.
+pub const FRAMEBUFFER_BGRX: u16 = 0;
+/// The firmware framebuffer's pixels are red, green, blue, unused in memory
+/// order: DRM's `XBGR8888`.
+pub const FRAMEBUFFER_RGBX: u16 = 1;
 /// How many input control channels one USB host's node may hold at once: an
 /// STM32MP15 board's ([`TREE_STM32_USBH`]), or a PCI function whose class is
 /// [`PCI_CLASS_XHCI`].

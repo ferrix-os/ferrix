@@ -333,8 +333,9 @@ claim.
 audit record of the following auditable events: a) start-up of the audit
 functions -- **the start-up record, and, as the last record before a power
 action, the power action**; b) **the TOE's configuration at start-up:
-`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR and whether the
-kernel log is kept across a reset (`ferrix.pstore`)**; c) **a
+`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, whether the
+kernel log is kept across a reset (`ferrix.pstore`) and
+`ferrix.efifb`**; c) **a
 native call its handle's rights refused, a widening of rights refused, a
 charge a job's limit refused, a native process made, a job handle given for
 a cgroup, a device's control channel given, `devmgr` started through the

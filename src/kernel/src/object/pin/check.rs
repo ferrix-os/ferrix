@@ -649,6 +649,9 @@ fn untranslated_domain(nodes: &[Arc<DeviceNode>]) -> Result<Option<Checked>, &'s
                 Some(domain) => domain,
                 None => continue,
             },
+            // The firmware framebuffer's node reaches no memory and has no
+            // domain to give (`ferrix.efifb`).
+            _ if !node.reaches_memory() => continue,
             _ => node
                 .domain()
                 .map_err(|_| "no memory for a device's domain")?,

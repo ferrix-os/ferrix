@@ -1315,6 +1315,21 @@ pub(super) fn check_ring_control() {
     }
 }
 
+/// Stage 10's display core: which drivers may copy (`docs/DISPLAY.md` §8).
+pub(super) fn check_display_copies() {
+    match display::check::run() {
+        Ok(report) => println!(
+            "  display  {} nodes' drivers refused the copying card, {} allowed it, \
+             each handed it READ and MAP, never WRITE",
+            report.refused, report.allowed
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE10_DISPLAY_COPIES,
+            "stage 10 display self-check failed: {problem}"
+        ),
+    }
+}
+
 /// Stage 10's chardev core, from a fake driver given a PCI function and
 /// programs played by kernel tasks (N12; F-63): all check, and on a machine
 /// with no PCI function nothing at all.

@@ -123,12 +123,16 @@ fn descriptor(side: &Side, at: u64) -> Result<i32, &'static str> {
 /// whose firmware described none. The first such aperture, as the stage's
 /// other device checks take.
 fn map_an_aperture(side: &Side) -> Result<Option<u64>, &'static str> {
-    let Some((node, aperture)) = device::devices().iter().find_map(|node| {
-        node.apertures()
-            .iter()
-            .find(|aperture| aperture.whole_pages())
-            .map(|aperture| (Arc::clone(node), *aperture))
-    }) else {
+    let Some((node, aperture)) = device::devices()
+        .iter()
+        .filter(|node| !node.yielded())
+        .find_map(|node| {
+            node.apertures()
+                .iter()
+                .find(|aperture| aperture.whole_pages())
+                .map(|aperture| (Arc::clone(node), *aperture))
+        })
+    else {
         return Ok(None);
     };
     if mm::direct_map_ram(aperture.phys()).is_some() {

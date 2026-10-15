@@ -82,6 +82,21 @@
       "takes no region. Claims: L.console.42-44 and L.mm.75; the record is a",
       "diagnostic only (SAFETY-MANUAL AoU-30, VULNERABILITY-ANALYSIS V-14)."
     ],
+    "efifb": "off",
+    "efifb_settings": [
+      "off",
+      "on"
+    ],
+    "efifb_why": [
+      "`ferrix.efifb` lends the boot framebuffer to a ring-3 driver, efifb,",
+      "on x86-64 (docs/DISPLAY.md 8; L.device.38-42): stage 10 publishes one",
+      "more node whose aperture is the framebuffer's visible lines, the one",
+      "exemption from the reserved ranges, and leaves the PCI function that",
+      "holds it undriven. `off`, the default and the reference, adds no node.",
+      "`on` is the firmware-screen boot's and a GPU-less PC's, and no claim is",
+      "made of it (ITEM.md 5, SAFETY-MANUAL AoU-31; the certification",
+      "consultant's C7, 2026-10-15)."
+    ],
     "driver_updates": "absent",
     "driver_updates_settings": [
       "absent",
@@ -211,6 +226,7 @@
         "checks.rs",
         "fastpath.rs",
         "discovery/devmgr.rs",
+        "discovery/firmware.rs",
         "discovery/mod.rs",
         "discovery/pci.rs",
         "discovery/pci/**",

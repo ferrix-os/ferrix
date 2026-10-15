@@ -115,6 +115,12 @@ pub(crate) struct Report {
     pub(crate) reads: usize,
     /// W2: functions read.
     pub(crate) functions: usize,
+    /// W2: functions holding a lent firmware framebuffer, which answered no
+    /// read.
+    pub(crate) yielded: usize,
+    /// W8: calls on the firmware framebuffer's node and its holders that
+    /// answered as `ferrix.efifb` requires.
+    pub(crate) lent: usize,
     /// W4 and W5: writes refused whole and read back unchanged.
     pub(crate) refused: usize,
     /// W5: malformed accesses refused.
@@ -154,11 +160,119 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             }
         }
         malformed(&side, &mut report)?;
+        lent(&side, &mut report)?;
         breach(&side, &mut report)
     })();
     side.close_everything();
     result.map(|()| report)
 }
+
+/// Where W8 stages an I/O mapping's spec, in the side's scratch region.
+const SPEC: u64 = SCRATCH + 0x200;
+/// Where W8 has `device_info` write.
+const INFO: u64 = SCRATCH + 0x300;
+
+/// W8, under `ferrix.efifb`: the firmware framebuffer's node, read through
+/// the calls a driver makes. `device_info` names it `TREE_FIRMWARE_FB` with
+/// one aperture, no vector and the mode it was minted with; `vmo_pin`,
+/// plain and contiguous, and `device_set_limit` answer `WRONG_TYPE`; and an
+/// I/O mapping of a function holding it answers `BAD_STATE`. Nothing is
+/// asked of a machine without the node.
+///
+/// Verifies: L.device.39, L.device.40, L.device.42
+fn lent(side: &Side, report: &mut Report) -> Result<(), &'static str> {
+    use ferrix_native_abi::types::{
+        DEVICE_INFO_BYTES, DEVICE_LIMIT_PIN_PAGES, DEVICE_TREE_BLOCKS, PIN_CONTIGUOUS,
+        TREE_FIRMWARE_FB,
+    };
+    let Some(node) = devices()
+        .iter()
+        .find(|node| node.framebuffer_mode().is_some())
+    else {
+        return Ok(());
+    };
+    let mode = node.framebuffer_mode().ok_or(MODE_NOT_AS_MINTED)?;
+    let manager = side
+        .process
+        .with_handles(|table| {
+            table.insert(
+                Object::Device(Arc::clone(node)),
+                Rights(Rights::DEVICE.0 | Rights::SET_LIMIT.0),
+            )
+        })
+        .map_err(|_| "no room for a device handle")?;
+    let _ = side
+        .call(nr::DEVICE_INFO, &[reg(manager), INFO])
+        .map_err(|_| MODE_NOT_AS_MINTED)?;
+    let bytes = side.get(INFO, DEVICE_INFO_BYTES)?;
+    let half = |at: usize| {
+        bytes
+            .get(at..at + 2)
+            .and_then(|word| <[u8; 2]>::try_from(word).ok())
+            .map(u16::from_ne_bytes)
+    };
+    let word = |at: usize| {
+        bytes
+            .get(at..at + 4)
+            .and_then(|word| <[u8; 4]>::try_from(word).ok())
+            .map(u32::from_ne_bytes)
+    };
+    let described = (word(72), word(76), half(86), half(90));
+    let shape = (
+        Some(1),
+        Some(0),
+        Some(TREE_FIRMWARE_FB),
+        Some(DEVICE_TREE_BLOCKS),
+    );
+    let said = (half(92), half(94), word(80), half(88));
+    let minted = (
+        Some(mode.width),
+        Some(mode.height),
+        Some(mode.stride),
+        Some(mode.layout),
+    );
+    if described != shape || said != minted {
+        return Err(MODE_NOT_AS_MINTED);
+    }
+    report.lent += 1;
+    let vmo = side.handle(nr::VMO_CREATE, &[PAGE], "vmo_create for W8 failed")?;
+    for options in [0, PIN_CONTIGUOUS] {
+        if side.call(nr::VMO_PIN, &[reg(manager), reg(vmo), 0, PAGE, options])
+            != Err(status::WRONG_TYPE)
+        {
+            return Err("a pin for the firmware framebuffer's node was not refused WRONG_TYPE");
+        }
+        report.lent += 1;
+    }
+    if side.call(
+        nr::DEVICE_SET_LIMIT,
+        &[reg(manager), DEVICE_LIMIT_PIN_PAGES, 1],
+    ) != Err(status::WRONG_TYPE)
+    {
+        return Err("a pin budget for the firmware framebuffer's node was not refused WRONG_TYPE");
+    }
+    report.lent += 1;
+    for holder in devices().iter().filter(|other| other.yielded()) {
+        let Some(bar) = holder.bars.iter().flatten().next() else {
+            continue;
+        };
+        let device = handle(side, holder)?;
+        side.put(SPEC, &bar.address.to_ne_bytes())?;
+        side.put(SPEC + 8, &PAGE.to_ne_bytes())?;
+        if side.call(nr::IO_MAPPING_CREATE, &[reg(device), SPEC]) != Err(status::BAD_STATE) {
+            return Err("the function holding the lent framebuffer was given an I/O mapping");
+        }
+        report.lent += 1;
+    }
+    Ok(())
+}
+
+/// W8's failure when `device_info` does not describe the node as minted.
+pub(crate) const MODE_NOT_AS_MINTED: &str =
+    "device_info described the firmware framebuffer's node other than it was minted";
+
+/// A page, as the calls take lengths.
+const PAGE: u64 = 4096;
 
 /// A function with virtio's `VIRTIO_PCI_CAP_PCI_CFG`: its node, a handle to
 /// it, and where the capability is.
@@ -273,13 +387,23 @@ fn parse(bytes: &[u8]) -> Option<ApertureInfo> {
 
 /// W2.
 ///
-/// Verifies: L.device.25
+/// Verifies: L.device.25, L.device.40
 fn reads(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     for node in devices() {
         let Some(function) = node.pci_function().filter(|f| f.config_phys.is_some()) else {
             continue;
         };
         let device = handle(side, node)?;
+        // The function holding a firmware framebuffer lent to its own node
+        // (`ferrix.efifb`) is driven by nobody: its configuration answers
+        // no read, which is what `MANAGE` on it gives.
+        if node.yielded() {
+            if read(side, device, 0x00, 4) != Err(status::BAD_STATE) {
+                return Err("the function holding the lent framebuffer answered a read");
+            }
+            report.yielded += 1;
+            continue;
+        }
         let field =
             |offset, width| read(side, device, offset, width).map_err(|_| HEADER_NOT_AS_READ);
         let ids = u32::from(function.vendor) | u32::from(function.device) << 16;
@@ -361,7 +485,8 @@ fn kernel_owned(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     // Command and BAR 0, MSI, MSI-X, Device Control, an uncovered byte, ATS.
     let mut done = [false; 6];
     for node in devices() {
-        if !node.pci_function().is_some_and(|f| f.config_phys.is_some()) {
+        // A function nobody drives (W2 holds that it reads nothing).
+        if !node.pci_function().is_some_and(|f| f.config_phys.is_some()) || node.yielded() {
             continue;
         }
         let device = handle(side, node)?;
@@ -490,10 +615,9 @@ fn spanning(
 ///
 /// Verifies: L.device.25
 fn malformed(side: &Side, report: &mut Report) -> Result<(), &'static str> {
-    let Some(node) = devices()
-        .iter()
-        .find(|node| node.pci_function().is_some_and(|f| f.config_phys.is_some()))
-    else {
+    let Some(node) = devices().iter().find(|node| {
+        node.pci_function().is_some_and(|f| f.config_phys.is_some()) && !node.yielded()
+    }) else {
         return Ok(());
     };
     let device = handle(side, node)?;
@@ -662,8 +786,9 @@ fn breach(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     // edu where there is one, whose MSI mint turned INTx off; else
     // virtio-rng, as on the Arm machines; else the first function with
     // configuration space.
-    let pci =
-        |node: &&Arc<DeviceNode>| node.pci_function().is_some_and(|f| f.config_phys.is_some());
+    let pci = |node: &&Arc<DeviceNode>| {
+        node.pci_function().is_some_and(|f| f.config_phys.is_some()) && !node.yielded()
+    };
     let is = |ids: fn(u16, u16) -> bool| {
         move |node: &&Arc<DeviceNode>| {
             node.pci_function()

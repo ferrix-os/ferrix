@@ -35,7 +35,7 @@ changes nothing about the decision.
 | `DEVICE` | A device quiesced; a DMA fault the IOMMU reported for a device | `native::quiesce`; `iommu` fault handlers |
 | `CHANGED` | TSF data changed by a call that succeeded: a job's limit set (`job_set_limit`), a cgroup's limit file written, a device's pin budget set (`DEVICE_LIMIT_SET`, with the old and new values) | `syscall/native.rs` `job_set_limit` and `device_set_limit`; cgroupfs limit writes |
 | `SYSTEM` | The audit function's own start-up, with the ring sizes; and its shutdown, the last record before a power action | `audit::start` at bring-up; `power` |
-| `SYSTEM` | The boot's configuration: `--mitigations`, the KASLR state (randomised or not, and why), `ferrix.devmgr=kernel\|init`, and **`ferrix.checks=skip`** -- a boot that skipped its self-tests leaves a record of it -- and each self-check stage's verdict | bring-up in `main.rs` |
+| `SYSTEM` | The boot's configuration: `--mitigations`, the KASLR state (randomised or not, and why), `ferrix.devmgr=kernel\|init`, whether `ferrix.efifb` asked for the firmware framebuffer to be lent, and **`ferrix.checks=skip`** -- a boot that skipped its self-tests leaves a record of it -- and each self-check stage's verdict | bring-up in `main.rs` |
 | `SYSTEM` | The root switch and pid 1's re-root; a power action | `fs::root_disk`; `power` |
 
 Not recorded: successful calls in general (a mapping, a message), because
@@ -270,8 +270,8 @@ Three slices, each reviewed before it lands:
    the audit id, which bring-up draws from the random generator and hands
    in, since the generator is the item's and the core may not name it --
    and bring-up's records: the start-up record and the boot's configuration
-   (`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, and whether the
-   log is kept across a reset, `ferrix.pstore`) right after
+   (`ferrix.checks`, `ferrix.devmgr`, the mitigations, KASLR, whether the
+   log is kept across a reset, `ferrix.pstore`, and `ferrix.efifb`) right after
    the generator's check, and one when the boot is brought up. Its boot
    check, `audit::check`, is §6's first half on stores of its own and on a
    job tree of its own, and the kernel's store read back (FX-0309). The

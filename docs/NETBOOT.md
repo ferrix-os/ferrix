@@ -240,6 +240,13 @@ real machine fails. Keeping `snp.efi` keeps the test about the stick.
   netbooted run puts `/` there and installs its initramfs on it, keeping
   everything else. `--kernel-option ferrix.root=tmpfs` keeps a run off the
   disk.
+* **The N150's screen is the firmware's.** Ferrix has no driver for its
+  Intel graphics. With `--kernel-option ferrix.efifb` on the image the
+  server is started with, the kernel lends the GOP framebuffer the loader
+  hands over to `efifb`, and hyprix draws there at the mode the firmware
+  chose (`docs/DISPLAY.md` §8, H6). Proven in QEMU only; the window is
+  uncached, so expect a slow full-screen redraw at 1080p until it is made
+  write-combining.
 * **Plain HTTP, no authentication** (§3).
 * **Firmware the stick depends on**: a firmware with no UEFI network
   driver for its card, or with the stack switched off, gives `snp.efi`

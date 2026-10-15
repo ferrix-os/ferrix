@@ -22,15 +22,26 @@
 //! of the old type when a mapping of the new one is allowed.
 //!
 //! The kernel's own mappings are not here, and need not be, because none of
-//! them is of a page a user mapping can reach. Its direct map covers RAM runs
-//! only (`mm::direct_map_ram`), and no aperture or window is RAM. The boot
-//! framebuffer, which it maps write-combining itself, is in
-//! `device::Reserved` with the interrupt controllers, timers and firmware's
-//! own memory it maps, and an aperture overlapping anything reserved is
-//! withheld rather than minted (`device.rs`). A PCI function's MSI-X table
-//! and pending-bit pages, which the kernel maps to mint vectors, are cut out
-//! of the function's apertures (`msix::withheld`). Configuration space is
-//! not a BAR and is never an aperture.
+//! them is of a page a user mapping can reach -- with one exception, which
+//! holds a type here for good. Its direct map covers RAM runs only
+//! (`mm::direct_map_ram`), and no aperture or window is RAM. The boot
+//! framebuffer, which it maps itself for the boot console and the panic
+//! screen (`arch::FRAMEBUFFER_FLAGS`), is in `device::Reserved` with the
+//! interrupt controllers, timers and firmware's own memory it maps, and an
+//! aperture overlapping anything reserved is withheld rather than minted
+//! (`device.rs`). A PCI function's MSI-X table and pending-bit pages, which
+//! the kernel maps to mint vectors, are cut out of the function's apertures
+//! (`msix::withheld`). Configuration space is not a BAR and is never an
+//! aperture.
+//!
+//! The exception: under `ferrix.efifb`, on x86-64, the boot framebuffer's
+//! visible lines are lent to a node of their own (`discovery::firmware`,
+//! `docs/DISPLAY.md` §8), so a user mapping can reach pages the kernel maps
+//! for its panic screen. Before the node is published the kernel takes a
+//! [`Hold`] of its own mapping's type over them, [`MemoryType::Device`],
+//! and never drops it: every user mapping of the window is then held to
+//! that type, and one of any other type is refused for the life of the
+//! machine (L.device.39, checked by stage 10's `check_framebuffer`).
 //!
 //! # A residual: cache lines across a type change
 //!

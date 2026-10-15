@@ -1107,6 +1107,11 @@ pub(crate) const FRAMEBUFFER_FLAGS: ferrix_paging::MapFlags = ferrix_paging::Map
     ..ferrix_paging::MapFlags::KERNEL_DEVICE
 };
 
+/// Whether `ferrix.efifb` may lend the framebuffer to a ring-3 driver: no.
+/// [`FRAMEBUFFER_FLAGS`] map it normal non-cacheable, which no user mapping
+/// of an aperture can match yet (`discovery::firmware`).
+pub(crate) const LENDS_FRAMEBUFFER: bool = false;
+
 /// Entropy from firmware's TRNG: none yet on this architecture, though
 /// SMCCC defines `TRNG_RND32` for it; the DK1's TF-A has not been asked.
 pub(crate) fn firmware_entropy(_view: &BootView<'_>, _out: &mut [u8]) -> usize {

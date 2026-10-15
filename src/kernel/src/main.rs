@@ -72,7 +72,7 @@ use ferrix_paging::MapError;
 
 use console::{println, println_unlogged};
 use discovery::finder::Finder;
-use discovery::{board, devmgr, fdt, pci, tree};
+use discovery::{board, devmgr, fdt, firmware, pci, tree};
 use early::EarlyMemory;
 use interfaces::{audio, block_ring, chardev, display, input, logctl, net_ring, render};
 use panic::{catalog, fatal};
@@ -551,6 +551,7 @@ fn check_block_ring() {
     if checks::run() {
         stages_check::check_ring_control();
         stages_check::check_chardev();
+        stages_check::check_display_copies();
         // Before devmgr, which may start a driver that claims the log.
         stages_check::check_log_control();
     }
@@ -784,8 +785,11 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
     let mut pci = pci::Enumeration::new(view);
     let mut tree = tree::VirtioMmio::new(view);
     let mut boards = board::Boards::new(view);
+    // Last, so that the framebuffer it lends never takes an aperture from a
+    // device: it adds a node only under `ferrix.efifb`.
+    let mut framebuffer = firmware::FirmwareFramebuffer::new(view);
     let reserved = device::Reserved::of(view, &[pci.reads(), tree.reads(), boards.reads()]);
-    let mut finders: [&mut dyn Finder; 3] = [&mut pci, &mut tree, &mut boards];
+    let mut finders: [&mut dyn Finder; 4] = [&mut pci, &mut tree, &mut boards, &mut framebuffer];
     let report = match device::publish(&mut finders, &reserved) {
         Ok(report) => report,
         // A failed walk halts the boot under its own entry, as it always has.
@@ -891,6 +895,13 @@ fn check_config_window() {
          mastering raced against a driver's writes",
         report.refused, report.malformed, report.written, report.rounds,
     );
+    if report.yielded != 0 || report.lent != 0 {
+        println!(
+            "  config   {} function(s) holding the lent firmware framebuffer answered no read; \
+             {} calls on its node and holders answered as ferrix.efifb requires",
+            report.yielded, report.lent
+        );
+    }
     if let Some(why) = report.skipped {
         println!("  config   the vendor-capability writes not checked: {why}");
     }
@@ -1278,6 +1289,7 @@ fn start_audit(view: &BootView<'_>) {
         mitigations: u32::from(arch::HARDENED),
         kaslr: kaslr.state,
         pstore: u32::from(console::pstore::attached().is_some()),
+        efifb: u32::from(firmware::asked(view)),
     };
     audit::config(audit::Config::Checks, expected.checks, 0);
     audit::config(audit::Config::Devmgr, expected.devmgr, 0);
@@ -1288,8 +1300,9 @@ fn start_audit(view: &BootView<'_>) {
         u32::from(kaslr.is_random()),
     );
     audit::config(audit::Config::Pstore, expected.pstore, 0);
+    audit::config(audit::Config::Efifb, expected.efifb, 0);
     println!(
-        "  audit    started: {} high-value and {} refusal records, 5 configuration items recorded",
+        "  audit    started: {} high-value and {} refusal records, 6 configuration items recorded",
         audit::HIGH_RECORDS,
         audit::REFUSAL_RECORDS
     );

@@ -186,7 +186,9 @@ static OUTCOME: SpinLock<Option<Result<usize, Errno>>> = SpinLock::new(None);
 pub(crate) fn run() -> Result<Report, &'static str> {
     let nodes: Vec<Arc<DeviceNode>> = device::devices()
         .iter()
-        .filter(|node| matches!(node.location(), device::Location::Pci(_)))
+        // Not the function holding a lent firmware framebuffer, which
+        // nobody drives (`ferrix.efifb`).
+        .filter(|node| matches!(node.location(), device::Location::Pci(_)) && !node.yielded())
         .take(2)
         .cloned()
         .collect();

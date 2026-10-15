@@ -426,7 +426,7 @@ A certificate attaches to a configuration, not to a repository.
 | Cargo features | 7 in the workspace, **0** in `src/kernel/` or `src/boot/common/uefi/` |
 | Where the loader boots from | the ESP's `FERRIX/` files, or on a disk with A/B system slots the slot its boot control record selects, verified, with the ESP's files as the rescue path (`docs/AB-BOOT.md`; SECURITY-TARGET A.FIRMWARE, SAFETY-MANUAL AoU-29). The loader has **no Cargo feature and no `cfg`** of its own; the A/B gate's negative controls are source sabotages run by `fleet/gate.sh control`. A netboot (the loader and its files from iPXE's read-only file system, `docs/NETBOOT.md`), where the loader sends its boot log to the server, is a development path, not the reference configuration |
 | Build settings | **one**, `cargo xtask --mitigations on\|off`; the reference is `on`, the default |
-| Boot options that change the item's work | **two**: `ferrix.devmgr=kernel\|init`, the reference `kernel`, the default; and `ferrix.pstore=on\|off`, the reference `on`, the default (the kernel log kept across a reset, `docs/POSTMORTEM.md` §3; any other value is said and taken as `off`) |
+| Boot options that change the item's work | **three**: `ferrix.devmgr=kernel\|init`, the reference `kernel`, the default; `ferrix.pstore=on\|off`, the reference `on`, the default (the kernel log kept across a reset, `docs/POSTMORTEM.md` §3; any other value is said and taken as `off`); and `ferrix.efifb`, which lends the firmware framebuffer to a ring-3 driver on x86-64, the reference **off**, the default (SAFETY-MANUAL AoU-31) |
 | Driver updates at run time | **absent**: no reference image carries `drvupdated` (`docs/DEVMGR.md` §4.1); only `cargo xtask test-restart --update`'s images do, xtask refuses it in any other, and no claim is made of them (SAFETY-MANUAL AoU-26) |
 | Test platform | QEMU; on x86-64 the patched 10.2.1 `(ferrix-cfi)`, whose VT-d blocks compatibility-format interrupts, with `intel-iommu,intremap=on,eim=off` and, under KVM, the split interrupt controller ([TOOLS.md](TOOLS.md)) |
 | Kernel link (`on`) | a static PIE on x86-64 (PIC code model, every x86-64 crate) and AArch64 (static code model, `-pie -z notext`); on ARMv7-A a fixed-address link that keeps its relocations (`--emit-relocs`). The loader moves it each boot (KASLR). `off`: the static fixed-address image |
@@ -477,6 +477,18 @@ and only under this option (`fs::root_disk`). Every start is checked as it
 is made (FX-1009), and so is the re-root (FX-1202). No claim is made of
 `init` (SAFETY-MANUAL AoU-8, AoU-13); the boots that carry the evidence keep
 `kernel`.
+
+The second option, `ferrix.efifb`, is the screen of a PC whose GPU has no
+driver (`docs/DISPLAY.md` §8). On x86-64 it has stage 10 publish one more
+node, whose one aperture is the boot framebuffer's visible lines -- the one
+exemption from the ranges every aperture is withheld from (L.device.38) --
+which reaches no memory (L.device.39); the PCI function holding the
+framebuffer is left undriven (L.device.40), and the boot console stops
+before the node exists (L.device.41); `device_info` reports its mode
+(L.device.42). Off, the reference, the item adds no
+node and says nothing, and stage 10's check of the exemption still runs.
+Every boot records the option in the audit store. No claim is made of a
+boot that gives it (SAFETY-MANUAL AoU-31).
 
 ---
 

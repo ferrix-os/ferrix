@@ -134,9 +134,12 @@ package FerrixDeviceRequirements {
         requirement <'L.device.1'> aperturesClearOfTheKernel : ItemLowLevel {
             attribute :>> statement = "DeviceNode::mint shall withhold, and count,
                 an aperture that overlaps memory the kernel uses, so that no
-                published aperture does.";
+                published aperture does -- every aperture but the firmware
+                framebuffer node's, whose one exemption, inside the boot
+                framebuffer alone, is L.device.38.";
             attribute :>> criterion = "Every aperture of every published node is
-                clear of every reserved range.";
+                clear of every reserved range, the firmware framebuffer node's
+                clear of every one but the framebuffer.";
             attribute :>> parent = ("H.MEM.10", "H.DMA.5");
             attribute :>> unit = ("device::DeviceNode::mint", "device::Reserved::covers",
                 "device::Aperture::overlaps");
@@ -564,6 +567,109 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.DMA.9";
             attribute :>> unit = ("iommu::remapping::route",
                 "arch::x86_64::msi::msi_allocate", "iommu::name_functions_without_vectors");
+        }
+        requirement <'L.device.38'> theFirmwareFramebufferLentExactly : ItemLowLevel {
+            attribute :>> statement = "The boot framebuffer shall stay in the
+                ranges withheld from every aperture but one: on x86-64 under
+                ferrix.efifb, and only there, at most one node, whose one
+                aperture starts at the framebuffer's first byte and is its visible
+                lines in whole pages, not prefetchable, with no vector. None shall
+                be made when the framebuffer is in memory the allocator owns, its
+                size does not hold its lines, its layout is not four bytes a
+                pixel, its first pixel is off a page, or another reserved range
+                lies inside the lines; and an aperture of the node's kind shall be
+                withheld when it reaches past the framebuffer or lies in a
+                reserved range that is not the framebuffer.";
+            attribute :>> criterion = "Every boot lends a made-up 1024x768
+                framebuffer exactly its visible lines as one aperture of its own
+                source; refuses one crossed by another reservation, one the
+                allocator owns, one a page short, one of an unknown layout and
+                one off a page; withholds a lent aperture reaching past the
+                framebuffer and one inside another reserved range; and withholds
+                an ordinary window at the framebuffer. A node without the option
+                or off x86-64 fails the boot. Under ferrix.efifb the published
+                node holds one aperture equal to the framebuffer's lines and no
+                vector (test-compositor --boot firmware-screen). With the
+                exemption granted to any aperture, or either clause of
+                Reserved::lends dropped, or a node made without the option, the
+                boot panics.";
+            attribute :>> parent = "H.DMA.5";
+            attribute :>> unit = ("device::DeviceNode::firmware_framebuffer",
+                "device::Reserved::lends", "device::Reserved::covers",
+                "device::Reserved::synthetic", "device::Reserved::framebuffer",
+                "discovery::firmware::FirmwareFramebuffer::new",
+                "discovery::firmware::FirmwareFramebuffer::lend",
+                "discovery::firmware::FirmwareFramebuffer::find",
+                "discovery::firmware::may_lend");
+        }
+        requirement <'L.device.39'> theFirmwareFramebufferTakesNoPin : ItemLowLevel {
+            attribute :>> statement = "The firmware framebuffer's node shall reach
+                no memory: it shall get no domain; vmo_pin, plain or contiguous,
+                and device_set_limit on it shall answer WRONG_TYPE; and before the
+                node is published the kernel shall take, and never give back, a
+                hold of its own mapping's memory type over the aperture, so that
+                every user mapping of it is held to that type (L.user.109).";
+            attribute :>> criterion = "Under ferrix.efifb the node's domain is
+                refused and none was made, its DMA is off, a hold of the aperture
+                as another type than the kernel's is refused while one of the
+                kernel's type is not, and vmo_pin (plain and PIN_CONTIGUOUS) and
+                device_set_limit(PIN_PAGES) through the calls answer WRONG_TYPE
+                (W8; test-compositor --boot firmware-screen). With the node
+                reaching memory, vmo_pin's refusal removed, or the hold not taken,
+                the boot panics.";
+            attribute :>> parent = ("H.DMA.3", "H.DMA.5");
+            attribute :>> unit = ("device::DeviceNode::reaches_memory",
+                "device::DeviceNode::domain", "discovery::firmware::refuses",
+                "syscall::native::vmo_pin", "syscall::native::set_limit_on");
+        }
+        requirement <'L.device.40'> theHolderOfALentFramebufferIsNotDriven : ItemLowLevel {
+            attribute :>> statement = "While the firmware framebuffer is lent to
+                its own node, every PCI function one of whose BARs holds it shall
+                be driven by nobody: every native call that needs MANAGE on a
+                device reaches it through device_in, and on such a function each
+                shall answer BAD_STATE, configuration reads and I/O mappings
+                included.";
+            attribute :>> criterion = "Under ferrix.efifb every function whose
+                BAR ranges, read again from the published nodes, overlap the
+                framebuffer is marked; the VGA function that holds it answers a
+                configuration read and an io_mapping_create BAD_STATE (W2 and W8,
+                the config line: one function); and no other node's aperture
+                overlaps the framebuffer (test-compositor --boot
+                firmware-screen). With the function left driven, or the mark
+                minting leaves never set, the boot panics.";
+            attribute :>> parent = ("H.DMA.5", "H.DEV.1");
+            attribute :>> unit = ("device::yield_framebuffer_holder",
+                "device::DeviceNode::yielded", "device::DeviceNode::mint_bar",
+                "syscall::native::device_in");
+        }
+        requirement <'L.device.41'> theBootConsoleLetsGoFirst : ItemLowLevel {
+            attribute :>> statement = "The boot console shall stop drawing on the
+                framebuffer, waiting out a draw in flight, before the firmware
+                framebuffer's node exists, so that no kernel draw but a panic's
+                meets a ring-3 driver's on its pages.";
+            attribute :>> criterion = "Under ferrix.efifb ferrix.fbcon the console
+                draws the boot until the node is made, and stage 10's check of the
+                published node finds it stopped; hyprix's picture on the
+                framebuffer then holds no console pixel (test-compositor --boot
+                firmware-screen). With the stop moved after the node is
+                published, the boot panics.";
+            attribute :>> parent = ("H.DMA.5", "H.FAIL.1");
+            attribute :>> unit = ("console::screen::stop",
+                "discovery::firmware::FirmwareFramebuffer::lend");
+        }
+        requirement <'L.device.42'> theFirmwareFramebufferModeDescribed : ItemLowLevel {
+            attribute :>> statement = "DeviceNode::describe shall report the
+                firmware framebuffer's node as TREE_FIRMWARE_FB with one aperture
+                and no vector, and its width, height, stride and pixel layout, as
+                it was minted, in the fields a tree node leaves zero.";
+            attribute :>> criterion = "Under ferrix.efifb the node's device_info,
+                read back through the call, names TREE_FIRMWARE_FB, one aperture,
+                no vector and the minted mode (W8, the config line;
+                test-compositor --boot firmware-screen), and efifb starts at the
+                firmware's mode. With the mode fields not written, the boot
+                panics.";
+            attribute :>> parent = "H.DMA.5";
+            attribute :>> unit = "device::DeviceNode::describe";
         }
     }
 }

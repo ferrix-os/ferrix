@@ -93,6 +93,8 @@ pub(crate) struct Expected {
     pub(crate) kaslr: u32,
     /// 1 when the log is mirrored to the region kept across a reset.
     pub(crate) pstore: u32,
+    /// `ferrix.efifb`: 1 when the firmware framebuffer was asked to be lent.
+    pub(crate) efifb: u32,
 }
 
 /// What the check established, for the boot log.
@@ -570,6 +572,7 @@ fn kernel_store(expected: &Expected) -> Result<usize, &'static str> {
         (Config::Mitigations, expected.mitigations),
         (Config::Kaslr, expected.kaslr),
         (Config::Pstore, expected.pstore),
+        (Config::Efifb, expected.efifb),
     ];
     for (key, value) in wants {
         match config(key) {

@@ -463,6 +463,13 @@ framebuffer the loader already hands over, at the mode the firmware chose,
 with no mode setting, no vsync and no GPU. That is how every Linux live
 image starts before its GPU driver loads, and it is enough for an installer
 and a desktop. Stage 21's NVIDIA driver is not needed for any of this.
+**Built 2026-10-15** (branch `bm-h6-gop`): under `ferrix.efifb` the kernel
+lends the framebuffer to a node of its own, the ring-3 driver `efifb`
+serves it as `card0` by copying, and `test-compositor --boot
+firmware-screen` checks hyprix's two tiled clients on QEMU's VGA, pixel for
+pixel, with no GPU driver (`docs/DISPLAY.md` §8; the certification
+consultant's ledger lines 772, 1207 and 1260). x86-64 only; the window is uncached
+for now, and it has not yet run on the N150.
 
 Network on a PC (Intel and Realtek Ethernet, Wi-Fi) is not needed to
 install, since the medium carries the system, and is not in this design.
@@ -544,7 +551,7 @@ reference machine boots.
 | H3 | xHCI with HID | 21 |
 | H4 | USB mass storage | 5 |
 | H5 | i8042 keyboard and touchpad | 5 |
-| H6 | Firmware framebuffer display for hyprix | 5 |
+| H6 | Firmware framebuffer display for hyprix (built 2026-10-15, `docs/DISPLAY.md` §8; write-combining and the N150 left) | 5 |
 | H7 | The reference PC's exit, and what it finds | 8 |
 | | **Real PCs** | **73** |
 | | **Total** | **251** |

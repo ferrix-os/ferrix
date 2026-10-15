@@ -1893,6 +1893,11 @@ pub(crate) fn write_combining_processors() -> Option<usize> {
 pub(crate) const FRAMEBUFFER_FLAGS: ferrix_paging::MapFlags =
     ferrix_paging::MapFlags::KERNEL_DEVICE;
 
+/// Whether `ferrix.efifb` may lend the framebuffer to a ring-3 driver: yes,
+/// since [`FRAMEBUFFER_FLAGS`] is device memory, the type an aperture's user
+/// mapping takes (`discovery::firmware`).
+pub(crate) const LENDS_FRAMEBUFFER: bool = true;
+
 /// Entropy from firmware's TRNG: none, since a PC has no SMCCC. The CPU's
 /// `RDSEED` is [`hardware_random`].
 pub(crate) fn firmware_entropy(_view: &BootView<'_>, _out: &mut [u8]) -> usize {

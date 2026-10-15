@@ -157,6 +157,11 @@ pub(crate) const FRAMEBUFFER_FLAGS: ferrix_paging::MapFlags = ferrix_paging::Map
     ..ferrix_paging::MapFlags::KERNEL_DEVICE
 };
 
+/// Whether `ferrix.efifb` may lend the framebuffer to a ring-3 driver: no.
+/// [`FRAMEBUFFER_FLAGS`] map it normal non-cacheable, which no user mapping
+/// of an aperture can match yet (`discovery::firmware`).
+pub(crate) const LENDS_FRAMEBUFFER: bool = false;
+
 /// Fill `out` with full-entropy bytes from firmware's TRNG, through SMCCC,
 /// and say how many: 0 where firmware offers none. See `trng.rs`.
 pub(crate) fn firmware_entropy(view: &BootView<'_>, out: &mut [u8]) -> usize {

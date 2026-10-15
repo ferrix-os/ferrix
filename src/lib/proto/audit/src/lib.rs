@@ -280,6 +280,10 @@ pub enum Config {
     /// kernel attached the loader's region and mirrors its log there, 0 when
     /// it did not (`ferrix.pstore=off`, no region, or a region it refused).
     Pstore = 5,
+    /// `ferrix.efifb`: 1 when the command line asked for the firmware's
+    /// framebuffer to be lent to a driver (`docs/DISPLAY.md` §8), 0 when it
+    /// did not.
+    Efifb = 6,
 }
 
 /// Whether the decision recorded went for the subject or against it.

@@ -237,7 +237,7 @@ element. (Finding F-21b.)
 ### AoU-8 — the configuration is the one in §1
 The claims hold for the reference configuration and no other. Changing the
 toolchain, enabling a Cargo feature, building with `--mitigations off`,
-booting with `ferrix.devmgr=init` (AoU-13), or moving a file between rings
+booting with `ferrix.devmgr=init` (AoU-13) or `ferrix.efifb` (AoU-31), or moving a file between rings
 changes what is claimed. The boundary gate makes
 the last of these visible, and the boot log says which build it is — *"speculation
 defences off: built with --mitigations off"* — so the third is visible on the
@@ -285,7 +285,9 @@ x86-64 the processor shall offer UMIP (`UMIP on`), without which `SIDT` reads
 the image's slide. The integrator shall not rely on KASLR for separation: without
 KPTI a program with a timer can locate the kernel, and no ASR rests on it; and
 shall treat a program that can read the framebuffer the boot console drew on
-as able to read the slide the log printed there. (Finding F-31.)
+as able to read the slide the log printed there -- under `ferrix.efifb` that
+is `efifb`, which maps the framebuffer before it draws over the console's
+lines (AoU-31). (Finding F-31.)
 
 ### AoU-12 — no device translates for itself
 An unpin takes a page out of its device's domain and waits for the IOMMU's
@@ -581,6 +583,21 @@ says there was nothing, or quotes text it calls unchecked. A hang, or a
 watchdog's reset, writes nothing back, and loses what was still in a cache.
 The integrator shall not rely on the record for any safety function: it is
 a diagnostic, and the safe state (§3) does not depend on it.
+
+### AoU-31 — no claim is made of a boot that lends the firmware framebuffer
+Under `ferrix.efifb` on x86-64 the element lends the boot framebuffer's
+visible lines to a ring-3 driver, `efifb`, as the one aperture of a node of
+its own (`docs/DISPLAY.md` §8; L.device.38 to L.device.42). The pages are
+the memory of a PCI function -- a PC's integrated GPU, QEMU's VGA -- which
+the element then leaves undriven, and they are the pages its panic screen
+draws on. A panic is drawn over the driver's last frame, with the other
+processors stopped; the driver can read what the boot console drew there
+before it stopped, the log's KASLR slide among it (F-31); and the window is
+mapped uncached, at the cost of a slow screen. The reference configuration
+leaves the option off, and the boots that carry the evidence never give it,
+but for `test-compositor --boot firmware-screen`'s. The integrator shall not
+give `ferrix.efifb` on a configuration a claim is made of; the audit store's
+configuration record (`Config::Efifb`) says whether a boot did.
 
 ## 5. Element failure analysis
 

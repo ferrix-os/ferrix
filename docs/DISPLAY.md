@@ -71,6 +71,8 @@ driver sizes its backing lists for.
   hands it the card VMO with `READ | MAP | TRANSFER`, still never `WRITE`;
   it maps the card read-only. A driver without the flag gets exactly the
   rights above. The boot log says which: `display  card0 copies frames`.
+  The firmware framebuffer's driver, `efifb`, copies too, into a screen of
+  memory with no engine at all (§8).
 * **No copy in the guest.** The compositor writes pages that are the device's
   backing. virtio-gpu 2D does copy on the host side (`TRANSFER_TO_HOST_2D`),
   which is QEMU's business.
@@ -1050,3 +1052,132 @@ not hand it to the core, so `HDMI-A-1` has no `EDID` property and no
 description unless the command line names a file (`docs/BACKLOG.md`).
 The EDID's physical size in `GETCONNECTOR`'s `mm_width` and `mm_height`.
 QEMU's own EDID (`VIRTIO_GPU_F_EDID`, `GET_EDID`) when nothing is named.
+
+## 8. The firmware's framebuffer as a card: `ferrix.efifb` (H6, 2026-10-15)
+
+A PC whose GPU has no driver -- the N150 box's Intel graphics today
+(`docs/INSTALLER.md` §6, H6) -- still has the screen its firmware lit: the
+GOP framebuffer the loader hands over in `BootInfo`, at the mode the
+firmware chose. Under `ferrix.efifb` on the kernel's command line, hyprix
+draws there. It is how a Linux live image starts before its GPU driver
+loads (`simplefb`/`efifb`), and it is all there is: no mode setting, no
+vertical blanking, no GPU.
+
+**The path.**
+
+1. **Kernel, discovery.** `discovery::firmware`, the last finder stage 10
+   runs, makes one node of a kind of its own, `TREE_FIRMWARE_FB`
+   (`ferrix_native_abi::types`), when the option is on, the machine is
+   x86-64, and the framebuffer is usable: outside the allocator's memory
+   (§2.4's `reclaimable` 0), four bytes a pixel, its first pixel on a page,
+   and a size that holds its lines. Its one aperture is the visible lines in
+   whole pages, not prefetchable; it has no vector. `device_info` carries
+   the mode in fields a tree node leaves zero: width, height, the stride in
+   pixels and the layout (`FRAMEBUFFER_BGRX` or `FRAMEBUFFER_RGBX`). The
+   boot line is `display  firmware framebuffer WxH lent to a driver
+   (ferrix.efifb)`, or `... not lent (ferrix.efifb): <why>`.
+2. **Kernel, the one exemption.** The boot framebuffer stays in the ranges
+   stage 10 withholds from every aperture (`device::Reserved`). The node's
+   own aperture, and only it, is minted inside that range, and only while it
+   lies wholly inside it and overlaps nothing else reserved. Every boot,
+   whether or not the option is on, checks the exemption against made-up
+   ranges (`device::check::check_lending`): a clear framebuffer is lent
+   exactly its lines, one crossed by another reservation, one the allocator
+   owns and one a page short are not, and an ordinary window at the same
+   address is still withheld.
+3. **Kernel, no DMA.** The node is memory, not a device that reaches memory:
+   it gets no IOMMU domain, `vmo_pin` and `device_set_limit` on it answer
+   `WRONG_TYPE`. The kernel maps the same pages for its panic screen as
+   uncached device memory on x86-64, and takes a hold of that type over them
+   for the life of the machine (`user::memory_type`), so a driver's mapping
+   of any other type is refused. The boot console, which draws through a
+   slice of its own, stops when the node is made.
+4. **Kernel, the holder is not driven.** The framebuffer is still memory of
+   a PCI function -- QEMU's VGA, a PC's integrated GPU -- whose driver could
+   reset or remap it under the screen. While it is lent, the function whose
+   BAR holds it is *yielded*: every call needing `MANAGE` on it answers
+   `BAD_STATE`, configuration reads and I/O mappings included (stage 10's
+   W2 and W8 check both), and devmgr's start of a driver for it would fail.
+   The holder is found again from the published nodes' BAR ranges, not from
+   the mark minting leaves. The isolated-interrupts mark can still be set on
+   it, which changes nothing while nobody drives it.
+5. **devmgr** starts `efifb` (`src/user/system/native/drivers/display/efifb`)
+   on the node, as the DK1's `ltdc` (§6) is started on its.
+6. **efifb** maps the window, says HELLO with one scanout at the firmware's
+   size, one 60 Hz timing it will never set (the core needs one to list),
+   no cursor plane, and the `copies` flag. The display core accepts `copies`
+   from this node as it does from NVIDIA's (§2.1), so READY brings the card
+   VMO `READ | MAP` and never `WRITE`; efifb maps it read-only. Every boot's
+   `display::check` holds the rule: a made-up tree node and every published
+   node but this one and NVIDIA's are refused the copying card. `ATTACH`
+   records a buffer's range, pinning nothing; `SCANOUT` copies the whole
+   buffer to the screen; `FLUSH` copies the changed rectangle when it is of
+   the buffer on screen, then answers `FLIPPED` at once, since there is no
+   blanking to wait for. An `RGBX` screen gets red and blue exchanged on the
+   way. The connector is `Virtual-1`, which is DRM's word for what firmware
+   lit.
+7. **hyprix** needs nothing new: it opens `card0`, finds one 1024x768 (or
+   whatever the firmware set) mode, and composites with its software
+   renderer into dumb buffers, as on virtio-gpu.
+
+**The test.** `cargo xtask test-compositor --boot firmware-screen`, x86-64
+only. The machine has no virtio-gpu: `-vga none -device
+VGA,id=firmware,xres=1024,yres=768`. QEMU's `VGA` is the bochs display with
+a plain linear framebuffer in its prefetchable BAR 0, outside RAM, which
+OVMF's `QemuVideoDxe` hands out as its GOP at the EDID's preferred size --
+the closest thing QEMU has to a PC's integrated GPU BAR. (`ramfb` was
+rejected: its framebuffer is RAM firmware reserved, which the memory map
+holds and stage 10 never lends; `bochs-display` would do as well as `VGA`
+but q35 already brings `VGA`.) The command line says `ferrix.efifb`; two
+pattern clients are tiled, and the VGA's screendump (QMP `screendump
+device=firmware`) must equal the renderer's blessed `dwindle-two-clients`
+picture in every one of its 786,432 pixels. The guest must also have said
+the kernel's lent line, `efifb: 1024x768 firmware framebuffer`, and `card0
+copies frames`, and `config   1 function(s) holding the lent firmware
+framebuffer answered no read`. The command line also says `ferrix.fbcon`, so
+the boot console draws on the framebuffer until the node is made: a console
+line drawn after that would be in the judged picture. The boot runs the
+kernel's self-checks wherever it falls in a full `test-compositor` run
+(its machine is no other boot's), so the node's checks run on it: `check_framebuffer`
+(one aperture equal to the lines, no vector, no domain, the kernel's type
+held, the holders found from their BARs and yielded, the console stopped,
+and no node at all without the option or off x86-64) and config check W8
+(`device_info` read back with the mode, `vmo_pin` plain and contiguous and
+`device_set_limit` answering `WRONG_TYPE`, the holder refused an I/O
+mapping). The audit store records the option (`Config::Efifb`) on every
+boot.
+
+**Negative controls** (gate tags `h6-ctl-*`, each through `gate.sh
+control`): efifb copying with red and blue exchanged on a `BGRX` screen
+fails the picture; each of these panics the boot with its own check's line:
+the exemption granted to any aperture, either clause of `Reserved::lends`
+dropped, a node made without the option (on `test-boot`), the node reaching
+memory, `vmo_pin`'s `WRONG_TYPE` arm removed, the type hold not taken, the
+holder left driven, the mark minting leaves never set, the console's stop
+moved after the node is published, the copies rule widened to every tree
+node, and the `Efifb` configuration record dropped.
+
+**Requirements.** L.device.38 (lent exactly, the one exemption), L.device.39
+(no pin, the kernel's type held), L.device.40 (the holder not driven) and
+L.device.41 (the console lets go first) and L.device.42 (the mode
+`device_info` reports), with L.device.1 restated for the exemption, in
+`docs/sysml/20-device-requirements.sysml`. The certification consultant's
+design verdict is ledger line 772 (H1-H11), its reviews of this branch lines
+1207 and 1260; SAFETY-MANUAL AoU-31 says no claim is made of a boot that gives the
+option.
+
+**Not done.**
+
+* **Speed.** The window is mapped uncached, because that is the kernel's own
+  panic mapping's type on x86-64 and the two must agree. Each pixel is one
+  uncached store: fine for 1024x768 in QEMU, slow for a full 1080p frame on
+  real hardware. Write-combining (the kernel's panic mapping made
+  write-combining, the aperture marked prefetchable) is the follow-up, and
+  should come with a frame-time figure from the N150.
+* **AArch64 and ARMv7-A.** The Arm kernels map the framebuffer normal
+  non-cacheable, which no user mapping of an aperture can match yet, so the
+  option says `not honoured on this architecture`.
+* **The panic picture.** A panic is still drawn by the kernel on the same
+  pages, over the last frame efifb copied; nothing restores it.
+* **Real hardware.** Not yet run on the N150; netbooting it with
+  `--kernel-option ferrix.efifb` is the first try (`docs/NETBOOT.md` §6).

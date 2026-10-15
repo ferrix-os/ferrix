@@ -59,6 +59,8 @@ use crate::syscall::native;
 use crate::timer;
 use crate::user::vmo::Vmo;
 
+pub(crate) mod check;
+
 pub(crate) mod drm;
 pub(crate) mod edid;
 
@@ -950,6 +952,16 @@ pub(crate) fn install() -> Result<(), Full> {
     native::register_server(&SERVER)
 }
 
+/// Whether a driver of `device` may say it copies, and so be handed the card
+/// VMO it can map. A card the driver can map is the kernel's to give, not the
+/// driver's to claim: only one whose device files the chardev core already
+/// serves for this device, which is NVIDIA's (`docs/DISPLAY.md` §2.1), and
+/// the firmware framebuffer's node, which is a screen of memory a driver can
+/// only copy into (§8). `check::run` holds it.
+pub(crate) fn may_copy(device: &Arc<DeviceNode>) -> bool {
+    device.framebuffer_mode().is_some() || crate::interfaces::chardev::publishes_for(device)
+}
+
 /// `display_control_create`.
 ///
 /// The same shape as the rings': made for a device the caller holds with
@@ -1087,12 +1099,10 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     if RECLAIMABLE_FRAMEBUFFER.load(Ordering::Relaxed) {
         return Err(Refusal::Framebuffer);
     }
-    // A card the driver can map is the kernel's to give, not the driver's to
-    // claim: only one whose device files the chardev core already serves for
-    // this device, which is NVIDIA's (`docs/DISPLAY.md` §2.1).
-    if hello.copies && !crate::interfaces::chardev::publishes_for(&start.device) {
+    if hello.copies && !may_copy(&start.device) {
         return Err(Refusal::Copies);
     }
+    let framebuffer = start.device.framebuffer_mode().is_some();
     // The driver reset the device before it sent HELLO, so what a dead one's
     // pins kept from the allocator can go back (`object::pin`'s quarantine),
     // and the kernel's configuration is read back (`DeviceNode::verify_config`).
@@ -1103,7 +1113,9 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     // nearest it has.
     let core_port = Port::new().map_err(|_| Refusal::Malformed)?;
     let index = NUMBERS.take().ok_or(Refusal::Malformed)?;
-    let hdmi = matches!(start.device.location(), device::Location::Tree(_));
+    // A board's display controller is an HDMI output; the firmware's
+    // framebuffer is whatever firmware lit, which DRM calls virtual.
+    let hdmi = matches!(start.device.location(), device::Location::Tree(_)) && !framebuffer;
     // Read before READY, as Linux reads an override at the connector's first
     // probe: from the initramfs, which takes no time a driver would notice.
     let edids = edid::load(

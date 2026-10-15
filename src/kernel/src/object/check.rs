@@ -2492,12 +2492,18 @@ fn check_a_device_gives_exactly_its_own_memory(counter: &mut Counter) -> Result<
         )?;
     }
 
-    let Some((node, aperture)) = device::devices().iter().find_map(|node| {
-        node.apertures()
-            .iter()
-            .find(|aperture| aperture.whole_pages())
-            .map(|aperture| (Arc::clone(node), *aperture))
-    }) else {
+    // Not the function holding a lent firmware framebuffer, which nobody
+    // drives (`ferrix.efifb`).
+    let Some((node, aperture)) = device::devices()
+        .iter()
+        .filter(|node| !node.yielded())
+        .find_map(|node| {
+            node.apertures()
+                .iter()
+                .find(|aperture| aperture.whole_pages())
+                .map(|aperture| (Arc::clone(node), *aperture))
+        })
+    else {
         side.close_everything();
         return Ok(());
     };
@@ -2588,12 +2594,15 @@ fn check_write_combining(counter: &mut Counter) -> Result<(), &'static str> {
         return Err("a processor's PAT was not programmed with its write-combining entry");
     }
     let find = |prefetchable: bool| {
-        device::devices().iter().find_map(|node| {
-            node.apertures()
-                .iter()
-                .find(|aperture| aperture.whole_pages() && aperture.cacheable() == prefetchable)
-                .map(|aperture| (Arc::clone(node), *aperture))
-        })
+        device::devices()
+            .iter()
+            .filter(|node| !node.yielded())
+            .find_map(|node| {
+                node.apertures()
+                    .iter()
+                    .find(|aperture| aperture.whole_pages() && aperture.cacheable() == prefetchable)
+                    .map(|aperture| (Arc::clone(node), *aperture))
+            })
     };
     let side = Side::new()?;
     if let Some((node, aperture)) = find(false) {
@@ -2755,6 +2764,7 @@ fn check_an_interrupt_is_held_until_acknowledged(
 ) -> Result<(), &'static str> {
     let Some((node, vector)) = device::devices()
         .iter()
+        .filter(|node| !node.yielded())
         .find_map(|node| node.vector(0).map(|vector| (Arc::clone(node), vector)))
     else {
         return Ok(());

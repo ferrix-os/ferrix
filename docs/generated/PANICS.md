@@ -112,6 +112,7 @@ Causes are listed most likely first.
 | [FX-1011](#fx-1011) | a driver's configuration window or device_aperture did not answer as specified |
 | [FX-1012](#fx-1012) | interrupt remapping could not come up as specified |
 | [FX-1013](#fx-1013) | the chardev core answered a driver or a program wrongly |
+| [FX-1014](#fx-1014) | the display core would let the wrong driver copy |
 | [FX-1101](#fx-1101) | the btrfs disk did not mount and read back as the host wrote it |
 | [FX-1150](#fx-1150) | the net core did not carry a packet round its own loopback |
 | [FX-1151](#fx-1151) | the net ring did not carry a frame between the kernel and a driver |
@@ -2848,6 +2849,26 @@ program woken with ENODEV when its driver goes.
 See: src/kernel/src/interfaces/chardev/mod.rs;
 src/kernel/src/interfaces/chardev/check.rs; docs/NVIDIA.md section 4.4;
 docs/certification/FINDINGS.md F-63.
+
+<a id="fx-1014"></a>
+
+## FX-1014 — the display core would let the wrong driver copy
+
+A display driver whose HELLO says it copies is handed the card VMO with `MAP`,
+so it can read every frame. The core allows that only for a device the chardev
+core serves (NVIDIA's) and for the firmware framebuffer's node under
+`ferrix.efifb` (`docs/DISPLAY.md` section 8). `display::check::run` requires a
+made-up device tree node and every other published node refused, the firmware
+framebuffer's node allowed, and the copying card handed with `READ` and `MAP`
+and never `WRITE`.
+
+1. `display::may_copy` was widened: it allows a node by its location or binding
+   rather than by its firmware framebuffer mode or the chardev core's
+   publication.
+2. `Ready::card_rights` gained `WRITE`, or lost `MAP` for a driver that copies.
+
+See: src/kernel/src/interfaces/display/mod.rs may_copy;
+src/kernel/src/interfaces/display/check.rs; docs/DISPLAY.md section 8.
 
 <a id="fx-1101"></a>
 

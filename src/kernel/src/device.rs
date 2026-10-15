@@ -74,7 +74,7 @@ use ferrix_fdt::{GicInterrupt, Trigger as TreeTrigger};
 use ferrix_native_abi::types::{
     APERTURE_BAR_64, APERTURE_NOT_BAR, APERTURE_PREFETCHABLE, APERTURE_WHOLE_PAGES, ApertureInfo,
     DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceBlock, DeviceInfo, PCI_CLASS_XHCI,
-    TREE_GS201_DWC3, TREE_STM32_USBH, USB_INPUT_FUNCTIONS,
+    TREE_FIRMWARE_FB, TREE_GS201_DWC3, TREE_STM32_USBH, USB_INPUT_FUNCTIONS,
 };
 use ferrix_pci::Address;
 use ferrix_pci::ConfigSpace as _;
@@ -142,6 +142,10 @@ enum Source {
         /// Whether the BAR is 64 bits wide.
         wide: bool,
     },
+    /// The firmware's framebuffer, lent to the node `ferrix.efifb`
+    /// publishes for it ([`DeviceNode::firmware_framebuffer`]): the one
+    /// aperture [`Reserved`] lets overlap a range it holds.
+    Framebuffer,
 }
 
 impl Aperture {
@@ -181,7 +185,7 @@ impl Aperture {
     /// whole, the BAR it came from and where in it, and its flags.
     pub(crate) fn info(self) -> ApertureInfo {
         let (bar, offset, wide) = match self.source {
-            Source::Tree => (APERTURE_NOT_BAR, 0, false),
+            Source::Tree | Source::Framebuffer => (APERTURE_NOT_BAR, 0, false),
             Source::Bar { slot, offset, wide } => (slot, offset, wide),
         };
         let mut flags = 0;
@@ -209,6 +213,7 @@ impl Aperture {
     const fn part(self, phys: u64, len: u64) -> Aperture {
         let source = match self.source {
             Source::Tree => Source::Tree,
+            Source::Framebuffer => Source::Framebuffer,
             Source::Bar { slot, offset, wide } => Source::Bar {
                 slot,
                 offset: offset + (phys - self.phys),
@@ -379,6 +384,10 @@ pub(crate) struct Reserved {
     /// they move with the loader's allocations, so [`check::reserved`]
     /// counts them and leaves them out of its digest.
     map: (usize, usize),
+    /// Which of `ranges` is the boot framebuffer, when firmware left one:
+    /// reserved like the rest, except to the one aperture
+    /// [`DeviceNode::firmware_framebuffer`] mints inside it.
+    framebuffer: Option<usize>,
 }
 
 impl Reserved {
@@ -392,7 +401,8 @@ impl Reserved {
     pub(crate) fn of(view: &BootView<'_>, reads: &[&[(u64, u64)]]) -> Self {
         let mut reserved = Reserved::default();
         let framebuffer = view.raw().framebuffer;
-        if framebuffer.is_present() {
+        if framebuffer.is_present() && framebuffer.size > 0 {
+            reserved.framebuffer = Some(reserved.ranges.len());
             reserved.add(framebuffer.phys, framebuffer.size);
         }
         // Firmware's own `MMIO` descriptions are left out: they are where it
@@ -442,10 +452,57 @@ impl Reserved {
     }
 
     /// Whether `aperture` overlaps anything reserved.
+    ///
+    /// The boot framebuffer is reserved for every aperture but one: the
+    /// firmware framebuffer node's ([`Source::Framebuffer`]), and only while
+    /// that one lies wholly inside it. It still overlaps nothing else
+    /// reserved -- the memory map's RAM, the kernel's own device windows --
+    /// or it is withheld like any other.
     fn covers(&self, aperture: Aperture) -> bool {
         self.ranges
             .iter()
-            .any(|&(start, end)| aperture.overlaps(start, end))
+            .enumerate()
+            .any(|(index, &(start, end))| {
+                aperture.overlaps(start, end) && !self.lends(index, aperture)
+            })
+    }
+
+    /// Whether range `index` is the boot framebuffer and `aperture` the
+    /// firmware framebuffer node's, wholly inside it.
+    fn lends(&self, index: usize, aperture: Aperture) -> bool {
+        let Some(&(start, end)) = self.ranges.get(index) else {
+            return false;
+        };
+        self.framebuffer == Some(index)
+            && aperture.source == Source::Framebuffer
+            && start <= aperture.phys
+            && aperture.end() <= end
+    }
+
+    /// A made-up set of reserved ranges, the first of them a framebuffer at
+    /// `framebuffer` when one is given: what stage 10's check of the
+    /// exemption ([`check::check_lending`]) mints against on every boot,
+    /// whether or not the command line lends anything.
+    fn synthetic(
+        framebuffer: Option<(u64, u64)>,
+        others: &[(u64, u64)],
+    ) -> Result<Self, AllocError> {
+        let mut reserved = Reserved::default();
+        if let Some((start, len)) = framebuffer {
+            reserved.framebuffer = Some(0);
+            fallible::try_push(&mut reserved.ranges, (start, start + len))?;
+        }
+        for &(start, len) in others {
+            fallible::try_push(&mut reserved.ranges, (start, start + len))?;
+        }
+        Ok(reserved)
+    }
+
+    /// The boot framebuffer's range, `start..end`, when there is one.
+    fn framebuffer(&self) -> Option<(u64, u64)> {
+        self.framebuffer
+            .and_then(|index| self.ranges.get(index))
+            .copied()
     }
 }
 
@@ -1171,6 +1228,29 @@ pub(crate) struct DeviceNode {
     binding: u16,
     /// How it reaches memory.
     dma: DmaShape,
+    /// For the firmware framebuffer's node, the mode firmware left it in.
+    mode: Option<FramebufferMode>,
+    /// Whether one of its BARs holds the boot framebuffer: the PCI function
+    /// whose memory firmware drew the boot on.
+    holds_framebuffer: bool,
+    /// Whether the firmware framebuffer is lent to its own node, so this
+    /// function, which holds it, is not driven: every call that needs
+    /// `MANAGE` on it answers `BAD_STATE` (`docs/DISPLAY.md` §8).
+    yielded: bool,
+}
+
+/// The mode of the firmware's framebuffer, as `device_info` reports it for
+/// its node (`TREE_FIRMWARE_FB`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct FramebufferMode {
+    /// Visible width in pixels.
+    pub(crate) width: u16,
+    /// Visible height in pixels.
+    pub(crate) height: u16,
+    /// Pixels from one line's start to the next.
+    pub(crate) stride: u32,
+    /// `FRAMEBUFFER_BGRX` or `FRAMEBUFFER_RGBX`.
+    pub(crate) layout: u16,
 }
 
 impl DeviceNode {
@@ -1199,7 +1279,88 @@ impl DeviceNode {
             withheld_vectors: 0,
             binding: 0,
             dma: DmaShape::ORDINARY,
+            mode: None,
+            holds_framebuffer: false,
+            yielded: false,
         }
+    }
+
+    /// The node for the firmware's framebuffer, which `ferrix.efifb`
+    /// asks for (`docs/DISPLAY.md` §8): one aperture, the framebuffer's
+    /// visible lines in whole pages, uncached like the kernel's own x86-64
+    /// mapping of them for the panic screen; no vector; and nothing that
+    /// reaches memory, so no pin ([`DeviceNode::reaches_memory`]).
+    ///
+    /// `Err` says why there is none: a framebuffer the allocator will own
+    /// (`docs/DISPLAY.md` §2.4), a layout other than four bytes a pixel, a
+    /// first pixel off a page boundary, a size that does not hold its lines,
+    /// or an aperture [`Reserved`] withholds.
+    pub(crate) fn firmware_framebuffer(
+        framebuffer: &ferrix_bootinfo::Framebuffer,
+        reserved: &Reserved,
+    ) -> Result<Self, &'static str> {
+        use ferrix_bootinfo::PixelFormat;
+        use ferrix_native_abi::types::{FRAMEBUFFER_BGRX, FRAMEBUFFER_RGBX};
+        if !framebuffer.is_present() {
+            return Err("firmware left no framebuffer");
+        }
+        if framebuffer.is_reclaimable() {
+            return Err("the framebuffer is in memory the allocator owns");
+        }
+        let layout = match framebuffer.format {
+            PixelFormat::Bgrx8888 => FRAMEBUFFER_BGRX,
+            PixelFormat::Rgbx8888 => FRAMEBUFFER_RGBX,
+            PixelFormat::Unknown => return Err("the framebuffer's pixel layout is not one shown"),
+        };
+        let (Ok(width), Ok(height)) = (
+            u16::try_from(framebuffer.width),
+            u16::try_from(framebuffer.height),
+        ) else {
+            return Err("the framebuffer is larger than a mode can say");
+        };
+        if framebuffer.stride < framebuffer.width {
+            return Err("the framebuffer's lines are shorter than its width");
+        }
+        if !framebuffer.phys.is_multiple_of(PAGE_SIZE) {
+            return Err("the framebuffer does not start on a page");
+        }
+        let visible = u64::from(framebuffer.stride)
+            .saturating_mul(u64::from(framebuffer.height))
+            .saturating_mul(4);
+        let len = visible.div_ceil(PAGE_SIZE).saturating_mul(PAGE_SIZE);
+        if len > framebuffer.size {
+            return Err("the framebuffer's size does not hold its lines");
+        }
+        let mut node = DeviceNode::empty(Location::Tree(framebuffer.phys));
+        node.binding = TREE_FIRMWARE_FB;
+        node.mode = Some(FramebufferMode {
+            width,
+            height,
+            stride: framebuffer.stride,
+            layout,
+        });
+        // Not prefetchable, so a driver can map it only as device memory:
+        // the type the kernel's own mapping of it for the panic screen has
+        // on x86-64, the one architecture the node is minted on
+        // (`discovery::firmware`), and the type the hold it takes there
+        // keeps every user mapping to.
+        node.mint_from(framebuffer.phys, len, false, Source::Framebuffer, reserved);
+        if node.apertures.len() != 1 {
+            return Err("the framebuffer overlaps memory the kernel uses");
+        }
+        Ok(node)
+    }
+
+    /// Whether anything behind the node reaches memory, so that pinning
+    /// pages for it means anything: every device but the firmware
+    /// framebuffer's node, which is memory itself, and whose driver copies.
+    pub(crate) const fn reaches_memory(&self) -> bool {
+        !(matches!(self.location, Location::Tree(_)) && self.binding == TREE_FIRMWARE_FB)
+    }
+
+    /// The firmware framebuffer node's mode; `None` for any other node.
+    pub(crate) const fn framebuffer_mode(&self) -> Option<FramebufferMode> {
+        self.mode
     }
 
     /// The node for a PCI function, from its sized BARs.
@@ -1300,9 +1461,16 @@ impl DeviceNode {
         if base == 0 {
             return;
         }
+        if let Some((start, end)) = reserved.framebuffer()
+            && base < end
+            && start < base.saturating_add(region.size)
+        {
+            self.holds_framebuffer = true;
+        }
         if let Some(slot) = self.bars.get_mut(usize::from(region.index)) {
             *slot = Some(MintedBar {
                 address: base,
+                size: region.size,
                 wide,
             });
         }
@@ -1497,6 +1665,13 @@ impl DeviceNode {
             };
             info.common = window(self.apertures.first());
             info.device = window(self.apertures.get(1));
+            // The firmware framebuffer's mode, where `TREE_FIRMWARE_FB` says.
+            if let Some(mode) = self.mode {
+                info.subsystem_vendor_id = mode.width;
+                info.subsystem_id = mode.height;
+                info.notify_off_multiplier = mode.stride;
+                info.msix_table_size = mode.layout;
+            }
         }
         if let Some(function) = &self.pci {
             info.vendor_id = function.vendor;
@@ -1635,6 +1810,12 @@ impl DeviceNode {
     /// Whether [`DeviceNode::verify_config`] has refused the node.
     pub(crate) fn is_refused(&self) -> bool {
         self.refused.load(Ordering::Acquire)
+    }
+
+    /// Whether the node holds the firmware framebuffer lent to its own node,
+    /// and so is not driven while the machine runs.
+    pub(crate) const fn yielded(&self) -> bool {
+        self.yielded
     }
 
     /// `width` bytes of the function's configuration space at `offset`, for
@@ -1826,6 +2007,12 @@ impl DeviceNode {
     ///
     /// [`AllocError`].
     pub(crate) fn domain(&self) -> Result<Arc<iommu::Domain>, AllocError> {
+        // The firmware framebuffer's node reaches no memory, so it never
+        // gets a domain to pin into: every path to one fails here, whatever
+        // its caller checked first.
+        if !self.reaches_memory() {
+            return Err(AllocError);
+        }
         let mut held = self.domain.lock();
         if let Some(domain) = held.as_ref() {
             return Ok(Arc::clone(domain));
@@ -1951,6 +2138,8 @@ impl MsixTable {
 struct MintedBar {
     /// The address, both halves for a 64-bit BAR.
     address: u64,
+    /// Its size in bytes, as sizing read it.
+    size: u64,
     /// Whether it is 64 bits wide, so the next slot is its upper half.
     wide: bool,
 }
@@ -2243,6 +2432,17 @@ impl From<Failure> for Stopped<'_> {
     }
 }
 
+/// The framebuffer lent to its own node is still the memory of the function
+/// that holds it, which a driver of that function could reset or remap under
+/// the screen: while it is lent, that function is not driven.
+fn yield_framebuffer_holder(nodes: &mut [DeviceNode]) {
+    if nodes.iter().any(|node| node.framebuffer_mode().is_some()) {
+        for node in nodes.iter_mut().filter(|node| node.holds_framebuffer) {
+            node.yielded = true;
+        }
+    }
+}
+
 /// Run `finders` in order, printing each one's lines after it, then publish
 /// every node they found after requiring each to hand out exactly what it
 /// has, and no two to hand out the same memory or the same interrupt.
@@ -2312,11 +2512,12 @@ pub(crate) fn publish<'f>(
         node.withheld += before - node.apertures.len();
     }
 
+    yield_framebuffer_holder(&mut nodes);
+
     for node in &nodes {
         check::check_node(node, reserved, &mut report)?;
     }
-    check::check_exclusive(&nodes)?;
-    check::check_input_functions()?;
+    check::check_together(&nodes, reserved)?;
 
     // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
     let published = DEVICES.call_once(|| nodes.into_iter().map(Arc::new).collect());

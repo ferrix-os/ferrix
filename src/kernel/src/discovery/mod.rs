@@ -44,5 +44,6 @@ pub(crate) mod description;
 pub(crate) mod devmgr;
 pub(crate) mod fdt;
 pub(crate) mod finder;
+pub(crate) mod firmware;
 pub(crate) mod pci;
 pub(crate) mod tree;

@@ -82,13 +82,6 @@
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
     },
     {
-      "ids": ["L.device.38-42"],
-      "owner": "bm-h6",
-      "branch": "bm-h6-gop",
-      "date": "2026-10-15",
-      "purpose": "H6: the firmware (GOP) framebuffer lent to a node of its own under ferrix.efifb -- the one exemption from the reserved ranges, a node that takes no pin and holds the kernel's memory type, the PCI function holding it left undriven, the boot console stopped before the node exists, and the mode device_info reports (docs/DISPLAY.md section 8; consultant ledger lines 772, 1207, 1260)"
-    },
-    {
       "ids": ["L.device.35-37"],
       "owner": "net-yt6801",
       "branch": "net-yt6801",

@@ -146,7 +146,11 @@ pub(crate) fn draw() {
     console::screen::stop();
     // SAFETY: (SHARED) nothing else writes the framebuffer during a panic: the other
     // processors have been asked to stop, the boot console has just stopped,
-    // and this is the only report that draws.
+    // and this is the only report that draws. A ring-3 driver the framebuffer
+    // is lent to (`efifb`, under `ferrix.efifb`) writes it only from a
+    // processor, and every other processor has been stopped; a store of its
+    // in flight on one that never stops can only leave pixels of its own
+    // frame on the screen, never touch what the panic draws with.
     let Some(mut surface) = (unsafe { surface() }) else {
         return;
     };
@@ -165,7 +169,10 @@ pub(crate) fn draw() {
 ///
 /// (SHARED) Nothing else may write the framebuffer while the surface lives. There are
 /// two callers: [`draw`], during the one panic that draws, and the boot
-/// console (`console::screen`), which [`draw`] stops first.
+/// console (`console::screen`), which [`draw`] stops first. The framebuffer
+/// lent to a ring-3 driver under `ferrix.efifb` is written by that driver
+/// too: the console is stopped before it can be (`discovery::firmware`), and
+/// [`draw`] runs with the other processors stopped.
 pub(crate) unsafe fn surface() -> Option<Surface<'static>> {
     let order = match FORMAT.load(Ordering::Acquire) {
         format if format == PixelFormat::Bgrx8888 as u32 => PixelOrder::Bgrx,

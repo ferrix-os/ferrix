@@ -189,7 +189,10 @@ pub(super) fn boot_and_dump_carrying(
 
     let port = free_port()?;
     let mut qemu_args = args.clone();
-    qemu_args.display = true;
+    // The firmware-screen boot has no card: its screen is the VGA the loader
+    // hands over, and its keyboard comes without a card to bring it.
+    qemu_args.display = !args.firmware_screen;
+    qemu_args.input = qemu_args.input || args.firmware_screen;
     qemu_args.qmp_port = Some(port);
     qemu_args.screens = wanted.screens();
     let dump = paths::build_dir(arch).join("compositor.ppm");
@@ -223,7 +226,7 @@ pub(super) fn boot_and_dump_carrying(
         for (index, (what, path)) in wanted.states.iter().enumerate() {
             ask_for_state(&mut qmp, arch, index, binds, wanted.pointer)?;
             let want = expected(path)?;
-            let screen = settle(&mut qmp, &dump, &want)?;
+            let screen = settle_on(&mut qmp, screen_of(args), &dump, &want)?;
             let (found, count) = differences(&screen, &want);
             if count != 0 {
                 // What the guest said, which is where the reason usually
@@ -793,6 +796,16 @@ pub(crate) fn button_event(button: &str, down: bool) -> String {
         "{{\"type\":\"btn\",\"data\":{{\"down\":{down},\"button\":{}}}}}",
         crate::display::json_string(button)
     )
+}
+
+/// The device a boot's first screen is screendumped from: the virtio-gpu,
+/// or the firmware-screen boot's VGA.
+fn screen_of(args: &Args) -> &'static str {
+    if args.firmware_screen {
+        crate::qemu::FIRMWARE_SCREEN_ID
+    } else {
+        DEVICE_ID
+    }
 }
 
 #[cfg(test)]

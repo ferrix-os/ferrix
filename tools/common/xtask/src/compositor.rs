@@ -68,6 +68,7 @@ mod drawn_here;
 pub(crate) mod dxvk;
 mod effects;
 pub(crate) mod endfield;
+mod firmware_screen;
 pub(crate) mod frames;
 mod hyprlock;
 mod idle;
@@ -319,8 +320,12 @@ pub(crate) fn test_compositor(args: &Args) -> Result<()> {
         let mut first = true;
         for (name, boot) in BOOTS {
             if wanted(args, name) {
-                boot(arch, &programs, &boot_args)?;
-                judge_checks(arch, name, first)?;
+                // A machine of its own runs them again, wherever it falls.
+                let checked = first || name == ALWAYS_CHECKED;
+                let mut these = boot_args.clone();
+                these.checks_skipped = !checked;
+                boot(arch, &programs, &these)?;
+                judge_checks(arch, name, checked)?;
                 first = false;
                 boot_args.checks_skipped = true;
             }
@@ -494,7 +499,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 44] = [
+const BOOTS: [(&str, Boot); 45] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -539,11 +544,18 @@ const BOOTS: [(&str, Boot); 44] = [
     ("settings", settings::test_settings),
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
+    ("firmware-screen", firmware_screen::test_firmware_screen),
 ];
 
 /// The boot that always skips the self-checks, whatever its place: the
 /// desktop's own image, which carries `DESKTOP_DEFAULTS`.
 const ALWAYS_UNCHECKED: &str = "desktop";
+
+/// The boot that always runs the self-checks, whatever its place: the
+/// firmware-screen boot's machine has no virtio-gpu and lends the firmware
+/// framebuffer (`ferrix.efifb`), so the checks of that node run on no other
+/// boot, and the boot requires their lines (`docs/DISPLAY.md` §8).
+const ALWAYS_CHECKED: &str = "firmware-screen";
 
 /// Whether the boot `name` just made ran the kernel's self-checks as it was
 /// meant to, read from its serial log: an architecture's `first` boot must

@@ -1930,6 +1930,27 @@ pub(crate) static STAGE10_CHARDEV: Explanation = Explanation {
           docs/NVIDIA.md section 4.4; docs/certification/FINDINGS.md F-63",
 };
 
+/// For `check_display_copies` in `stages_check.rs`, when
+/// `display::check::run` fails.
+pub(crate) static STAGE10_DISPLAY_COPIES: Explanation = Explanation {
+    code: "FX-1014",
+    title: "the display core would let the wrong driver copy",
+    meaning: "A display driver whose HELLO says it copies is handed the card VMO with `MAP`, \
+              so it can read every frame. The core allows that only for a device the chardev \
+              core serves (NVIDIA's) and for the firmware framebuffer's node under \
+              `ferrix.efifb` (`docs/DISPLAY.md` section 8). `display::check::run` requires a \
+              made-up device tree node and every other published node refused, the firmware \
+              framebuffer's node allowed, and the copying card handed with `READ` and `MAP` and \
+              never `WRITE`.",
+    causes: &[
+        "`display::may_copy` was widened: it allows a node by its location or binding rather \
+         than by its firmware framebuffer mode or the chardev core's publication.",
+        "`Ready::card_rights` gained `WRITE`, or lost `MAP` for a driver that copies.",
+    ],
+    see: "src/kernel/src/interfaces/display/mod.rs may_copy; \
+          src/kernel/src/interfaces/display/check.rs; docs/DISPLAY.md section 8",
+};
+
 /// For `check_iommu` in `iommu/check.rs`, when its domain check or the
 /// quarantine's fails.
 pub(crate) static STAGE10_IOMMU: Explanation = Explanation {
@@ -3360,6 +3381,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE10_CONFIG,
     &STAGE10_REMAP,
     &STAGE10_CHARDEV,
+    &STAGE10_DISPLAY_COPIES,
     &STAGE11_MOUNT,
     &NET_CORE,
     &NET_RING,

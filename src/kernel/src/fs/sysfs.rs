@@ -625,6 +625,8 @@ fn device_name(index: usize) -> Option<Vec<u8>> {
                 ferrix_native_abi::types::TREE_STM32_HDMI => "display-controller",
                 ferrix_native_abi::types::TREE_STM32_USBH => "usbh-ehci",
                 ferrix_native_abi::types::TREE_GS201_DWC3 => "dwc3",
+                // Linux's name for the same thing: `simple-framebuffer`.
+                ferrix_native_abi::types::TREE_FIRMWARE_FB => "simple-framebuffer",
                 _ => "device",
             };
             name::platform(&mut out, base, kind);

@@ -76,6 +76,21 @@ the kernel too, but are load-ring checks of the glue and name no item
 requirement. §3's coverage is of the kernel's boots and does not measure
 these crates; a floor for them is TODO.md §4.7.
 
+**Checks that run only under a boot option.** The firmware framebuffer's
+node (`ferrix.efifb`, SAFETY-MANUAL AoU-31) is checked on two kinds of boot.
+Every boot runs stage 10's `check_lending` against made-up ranges, which
+verifies L.device.38's exemption and its refusals whether or not the option
+is given, and the display core's `display::check`. Only `cargo xtask
+test-compositor --boot firmware-screen`, which gives `ferrix.efifb
+ferrix.fbcon`, publishes the node, so only it runs `check_framebuffer`
+(L.device.1's exemption clause, L.device.38's node, L.device.39's refused
+domain and type hold, L.device.40's holder found from its BARs, L.device.41's
+stopped console) and config check W8 (L.device.42's mode read back,
+L.device.39's `WRONG_TYPE` refusals, L.device.40's refused I/O mapping), and
+W2's refused configuration read of the holder; its picture check is that no
+console pixel survives on the screen. §3's coverage runs do not give the
+option, so those lines are owed (`coverage-owed.json`).
+
 ---
 
 ## 3. Structural coverage
