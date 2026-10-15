@@ -17,7 +17,6 @@ ferrix-acpi.workspace = true
 ferrix-audit.workspace = true
 ferrix-bootinfo.workspace = true
 ferrix-cgroupfs.workspace = true
-ferrix-chardevctl.workspace = true
 ferrix-description.workspace = true
 ferrix-elf.workspace = true
 ferrix-fallible.workspace = true

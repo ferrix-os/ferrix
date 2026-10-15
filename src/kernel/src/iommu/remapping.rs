@@ -379,10 +379,6 @@ pub(crate) fn interrupts_isolated() -> bool {
 
 /// How a function's messages reach the processors.
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(
-    not(target_arch = "x86_64"),
-    expect(dead_code, reason = "only x86-64 programs a remapped message")
-)]
 pub enum Route {
     /// No unit remaps: a compatibility-format message.
     Compatibility,

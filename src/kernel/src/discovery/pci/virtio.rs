@@ -324,7 +324,7 @@ fn on_entropy(_number: u32) {
 static VECTORS: SpinLock<Vec<(u32, Msi)>> = SpinLock::new(Vec::new());
 
 /// The check's vector for the device at `address`, or why there is none.
-pub fn vector(address: Address) -> Result<Msi, &'static str> {
+pub(crate) fn vector(address: Address) -> Result<Msi, &'static str> {
     let requester = u32::from(address.requester_id());
     let known = VECTORS
         .lock()

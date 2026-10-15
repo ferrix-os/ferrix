@@ -1261,7 +1261,8 @@ fn check_what_vmo_map_refuses(
 }
 
 /// One of the two processes.
-pub(crate) struct Side {
+#[derive(Debug)]
+pub struct Side {
     /// The process, over its own address space.
     pub(crate) process: Arc<Process>,
 }

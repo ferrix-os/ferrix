@@ -96,10 +96,8 @@ pub mod object {
 // are serviced from `arch::aarch64` alone.
 /// What belongs to one system on chip rather than to an architecture: the kernel's part in a board's devices.
 pub mod platform {
-    pub use ferrix_kernel_core::platform::*;
     /// Google's systems on chip.
     pub mod google {
-        pub use ferrix_kernel_core::platform::google::*;
         /// The Pixel 7's Tensor G2: the load's part of it.
         pub mod gs201 {
             pub use ferrix_kernel_core::platform::google::gs201::*;

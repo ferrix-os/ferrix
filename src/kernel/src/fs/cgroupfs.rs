@@ -1025,7 +1025,8 @@ fn offered(job: &Job) -> Set {
 }
 
 /// Who opened a file that takes writes, which a move is judged as.
-struct Writer {
+#[derive(Debug)]
+pub struct Writer {
     /// The opener's identity.
     who: Access,
     /// The instance, for the metadata a permission is judged by.

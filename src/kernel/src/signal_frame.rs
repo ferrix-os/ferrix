@@ -58,18 +58,10 @@ pub struct FrameRequest {
     /// The ABI of the call that installed the handler: on x86-64 an i386
     /// handler is entered on an i386 frame and any other on a 64-bit one,
     /// whatever mode the interrupted code was in (Linux's `SA_IA32_ABI`).
-    #[cfg_attr(
-        not(target_arch = "x86_64"),
-        expect(dead_code, reason = "only x86-64 has a second frame to choose")
-    )]
     pub abi: crate::trap::Abi,
     /// Where the process's signal return page is, on an architecture that
     /// has one (ARMv7-A's, `syscall::sigpage`): what a handler without a
     /// restorer returns through (F-48).
-    #[cfg_attr(
-        not(target_arch = "arm"),
-        expect(dead_code, reason = "only ARMv7-A has a signal return page to read")
-    )]
     pub sigpage: Option<u64>,
 }
 

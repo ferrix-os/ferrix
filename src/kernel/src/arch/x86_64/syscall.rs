@@ -129,7 +129,7 @@ const _: () = assert!(
 /// other half of this type's definition.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub(crate) struct SyscallFrame {
+pub struct SyscallFrame {
     /// Callee-saved, and the ABI's sixth argument register is not among them.
     pub(crate) r15: u64,
     /// Callee-saved.

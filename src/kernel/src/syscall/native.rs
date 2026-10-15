@@ -101,7 +101,7 @@ const HANDLE_BYTES: usize = size_of::<u32>();
 
 /// A pointer and a count, as two registers give them.
 #[derive(Debug, Clone, Copy)]
-struct Buffer {
+pub struct Buffer {
     /// Where it starts in the caller's memory.
     at: u64,
     /// How many elements: bytes, or handles.
@@ -1441,7 +1441,7 @@ fn vmo_create(process: &Process, bytes: u64) -> Result<usize, Errno> {
 
 /// Which way a VMO copy goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Direction {
+pub enum Direction {
     /// Out of the VMO, into the caller's buffer.
     Read,
     /// Out of the caller's buffer, into the VMO.
