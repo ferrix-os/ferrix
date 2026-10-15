@@ -405,6 +405,42 @@ pub(crate) fn build_native(
     artifact(path)
 }
 
+/// [`build_native`] for every architecture in one cargo call, which
+/// compiles the targets side by side, as [`build_ahead`] does: the ELFs,
+/// by architecture. One package and the same features for each target, so
+/// each is what its own call would have built. Not a [`Build`]: for the
+/// tests, which `FERRIX_BUILDS` never records.
+#[cfg(test)]
+pub(crate) fn build_native_every_arch(
+    release: bool,
+    package: &str,
+    binary: &str,
+    target_dir: &Path,
+) -> Result<Vec<(Arch, PathBuf)>> {
+    refuse_inherited_rustflags()?;
+    let targets: Vec<&str> = Arch::ALL.iter().map(|arch| arch.kernel_target()).collect();
+    let mut command = ahead(package, &targets);
+    let _ = command.env("CARGO_TARGET_DIR", target_dir);
+    if release {
+        let _ = command.arg("--release");
+    }
+    run(
+        command,
+        &format!("cargo build -p {package}, every architecture at once"),
+    )?;
+    let profile = if release { "release" } else { "debug" };
+    Arch::ALL
+        .iter()
+        .map(|arch| {
+            let path = target_dir
+                .join(arch.kernel_target())
+                .join(profile)
+                .join(binary);
+            artifact(path).map(|path| (*arch, path))
+        })
+        .collect()
+}
+
 /// [`build_native`], with `variables` set in the build's environment: a
 /// variant of a program some `option_env!` of its own turns on, into a target
 /// directory of its own so the plain build is not rebuilt on the way back.

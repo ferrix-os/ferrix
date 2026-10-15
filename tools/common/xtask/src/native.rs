@@ -450,25 +450,36 @@ mod tests {
         assert!(refuse_armed("gpu", &armed).is_ok());
     }
 
-    /// The tree's programs, built into a target directory of their own so
-    /// the build running this test is never waited on.
-    fn built(arch: Arch) -> Vec<Built> {
-        let directory = paths::target_dir().join("xtask-native-test");
-        build_in(arch, false, &directory).unwrap()
+    /// The target directory of the tests' own, so the build running them is
+    /// never waited on.
+    fn test_target_dir() -> std::path::PathBuf {
+        paths::target_dir().join("xtask-native-test")
     }
 
+    /// The tree's programs for `arch`, built into [`test_target_dir`].
+    fn built(arch: Arch) -> Vec<Built> {
+        build_in(arch, false, &test_target_dir()).unwrap()
+    }
+
+    /// Each program built for the three architectures in one cargo call,
+    /// which compiles them side by side: 18 calls rather than 54 one after
+    /// another, the longest test of `check` (148 s of `tests`' 208 s in a
+    /// gate slot on 2026-10-15, `docs/TEST-TIME.md`), and then each ELF
+    /// checked.
     #[test]
     fn every_program_builds_and_passes_the_check_on_every_architecture() {
-        for arch in Arch::ALL {
-            let programs = built(arch);
-            assert_eq!(programs.len(), PROGRAMS.len(), "{arch}");
-            for program in &programs {
-                assert_eq!(
-                    verify(arch, &program.bytes),
-                    Ok(()),
-                    "{arch} {}",
-                    program.name
-                );
+        for program in PROGRAMS {
+            let built = cargo::build_native_every_arch(
+                false,
+                program.package,
+                program.binary,
+                &test_target_dir(),
+            )
+            .unwrap();
+            assert_eq!(built.len(), Arch::ALL.len(), "{}", program.binary);
+            for (arch, path) in built {
+                let bytes = std::fs::read(&path).unwrap();
+                assert_eq!(verify(arch, &bytes), Ok(()), "{arch} {}", program.binary);
             }
         }
     }

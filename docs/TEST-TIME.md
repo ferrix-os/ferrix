@@ -789,6 +789,22 @@ failed the run with the compile error; with the file restored, every
 recorded unit was a cached pass again. Each of the cache's 15 checks
 sabotaged in turn fails the unit tests that hold it.
 
+### Cut B3: xtask's native-program test, the architectures at once (bs-b-natives)
+
+`native::tests::every_program_builds_and_passes_the_check_on_every_architecture`
+built the 18 native programs for three architectures as 54 cargo calls one
+after another (148 s of `tests`' 208 s in a gate slot on a tree new to it,
+`es-check-land2`). It now makes one call per program naming the three
+kernel targets, which cargo compiles side by side, as `build --arch all`
+does (`cargo::build_ahead`), and checks each ELF as before. With the test's
+target directory emptied, alternating in one worktree:
+
+| Run | Before | After |
+|---|---:|---:|
+| 1 (load 36 / 33) | 34.8 s | 13.2 s |
+| 2 (load 31 / 31) | 43.2 s | 17.0 s |
+| Warm, nothing changed | 6.7 s | 2.8 s |
+
 ## The compile: the baseline, 2026-10-15 (bs-a)
 
 The other half of the customer's target above: what a warm rebuild spends
