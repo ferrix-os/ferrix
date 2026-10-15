@@ -1767,7 +1767,7 @@ pub(super) fn check_console_output() {
         // A writer that could not wait is this kernel's mistake; a transmit
         // interrupt that does not come is the machine's (the N150 box), and
         // its output is polled instead.
-        Err(problem) if crate::sched::may_block() => {
+        Err(problem) if sched::may_block() => {
             console::output::fall_back_to_polling();
             println!(
                 "  output   WARNING: {problem}; the port is polled from now on, as before its \
