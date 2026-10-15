@@ -140,7 +140,18 @@ pub(crate) fn test_game_rig(args: &Args) -> Result<()> {
         Error::new("test-game-rig needs --init PATH, a static busybox: the scripts run its applets")
     })?;
     let mut args = args.clone();
-    args.data_image = Some(rustc::volume()?);
+    // ep-rig (scratch, never land): FERRIX_BENCH_SCRIPT replaces the script,
+    // FERRIX_BENCH_VOLUME is attached kept at /data, and the judge is skipped.
+    let bench_script = std::env::var("FERRIX_BENCH_SCRIPT")
+        .ok()
+        .map(|path| std::fs::read_to_string(path).expect("bench script"));
+    args.data_image = Some(match std::env::var_os("FERRIX_BENCH_VOLUME") {
+        Some(volume) => {
+            args.data_image_kept = std::env::var_os("FERRIX_BENCH_SNAPSHOT").is_none();
+            std::path::PathBuf::from(volume)
+        }
+        None => rustc::volume()?,
+    });
     if !args.memory_given {
         args.memory = MEMORY;
     }
@@ -154,7 +165,8 @@ pub(crate) fn test_game_rig(args: &Args) -> Result<()> {
     let shell =
         zinc::built(arch)?.ok_or_else(|| Error::new("zinc could not be built for x86-64"))?;
     let loader = cargo::build_loader(arch, args.release)?;
-    let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, SCRIPT)?;
+    let script = bench_script.as_deref().unwrap_or(SCRIPT);
+    let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, script)?;
     let natives = native::build(arch, args.release)?;
     let bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
@@ -165,6 +177,12 @@ pub(crate) fn test_game_rig(args: &Args) -> Result<()> {
         args.smp, args.memory, args.timeout
     );
     let lines = qemu::watch_then(arch, &image, &kernel, &args, shell::EXITED, |_| Ok(()))?;
+    if bench_script.is_some() {
+        for line in lines.iter().filter(|line| line.contains("ep:")) {
+            println!("  {line}");
+        }
+        return Ok(());
+    }
     judge(arch, args.smp, &lines)
 }
 

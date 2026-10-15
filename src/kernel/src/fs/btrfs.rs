@@ -96,6 +96,17 @@ impl Device for Disk {
         if buf.is_empty() {
             return Ok(());
         }
+        let ep_t = crate::timer::now_nanos();
+        let out = self.ep_read(physical, buf, failed);
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVR_NS, crate::timer::now_nanos().saturating_sub(ep_t));
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVR_N, 1);
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVR_B, buf.len() as u64);
+        out
+    }
+}
+
+impl Disk {
+    fn ep_read(&mut self, physical: u64, buf: &mut [u8], failed: BtrfsError) -> Result<(), BtrfsError> {
         let len = buf.len() as u64;
         let end = physical.checked_add(len).ok_or(failed)?;
         let first = physical / self.sector;
@@ -128,6 +139,27 @@ impl WriteDevice for Disk {
         if data.is_empty() {
             return Ok(());
         }
+        let ep_t = crate::timer::now_nanos();
+        let out = self.ep_write(physical, data, failed);
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVW_NS, crate::timer::now_nanos().saturating_sub(ep_t));
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVW_N, 1);
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVW_B, data.len() as u64);
+        out
+    }
+
+    /// Everything written is durable when this returns: the driver's flush,
+    /// which the commit puts between its nodes and its superblock.
+    fn flush(&mut self) -> Result<(), WriteError> {
+        let ep_t = crate::timer::now_nanos();
+        let out = self.device.flush().map_err(|_| WriteError::Flush);
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVF_NS, crate::timer::now_nanos().saturating_sub(ep_t));
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::DEVF_N, 1);
+        out
+    }
+}
+
+impl Disk {
+    fn ep_write(&mut self, physical: u64, data: &[u8], failed: WriteError) -> Result<(), WriteError> {
         let len = data.len() as u64;
         let end = physical.checked_add(len).ok_or(failed)?;
         let first = physical / self.sector;
@@ -143,12 +175,6 @@ impl WriteDevice for Disk {
         let patch = bounce.get_mut(skip..skip + data.len()).ok_or(failed)?;
         patch.copy_from_slice(data);
         self.device.write(first, &bounce).map_err(|_| failed)
-    }
-
-    /// Everything written is durable when this returns: the driver's flush,
-    /// which the commit puts between its nodes and its superblock.
-    fn flush(&mut self) -> Result<(), WriteError> {
-        self.device.flush().map_err(|_| WriteError::Flush)
     }
 }
 

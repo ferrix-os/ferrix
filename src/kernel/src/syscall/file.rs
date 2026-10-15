@@ -257,6 +257,21 @@ fn read_into(
     position: Position,
     started: bool,
 ) -> Result<u64, Errno> {
+    let ep_t = crate::timer::now_nanos();
+    let out = ep_read_into(process, file, buf, len, position, started);
+    ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::SYSR_NS, crate::timer::now_nanos().saturating_sub(ep_t));
+    ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::SYSR_N, 1);
+    out
+}
+
+fn ep_read_into(
+    process: &Process,
+    file: &OpenFile,
+    buf: u64,
+    len: u64,
+    position: Position,
+    started: bool,
+) -> Result<u64, Errno> {
     // What reads go to, not the node that was opened: a FIFO or a terminal's
     // node made by mknod on tmpfs is no stream itself, but its pipe or its
     // terminal is.
@@ -337,6 +352,20 @@ fn unread(file: &OpenFile, position: Position, got: usize) {
 
 /// Write the program's `[buf, buf + len)` to `file`, reporting how much went.
 fn write_from(
+    process: &Process,
+    file: &OpenFile,
+    buf: u64,
+    len: u64,
+    position: Position,
+) -> Result<u64, Errno> {
+    let ep_t = crate::timer::now_nanos();
+    let out = ep_write_from(process, file, buf, len, position);
+    ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::SYSW_NS, crate::timer::now_nanos().saturating_sub(ep_t));
+    ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::SYSW_N, 1);
+    out
+}
+
+fn ep_write_from(
     process: &Process,
     file: &OpenFile,
     buf: u64,

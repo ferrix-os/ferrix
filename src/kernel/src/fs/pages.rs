@@ -199,7 +199,11 @@ fn allocate_reclaiming() -> Option<Frame> {
         let group = crate::sched::running_group();
         let scope =
             quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE).unwrap_or(quota::NONE);
-        if crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen == 0 {
+        let ep_t = crate::timer::now_nanos();
+        let ep_stolen = crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen;
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::RECL_NS, crate::timer::now_nanos().saturating_sub(ep_t));
+        ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::RECL_N, 1);
+        if ep_stolen == 0 {
             // Nothing to give back; another task may still have let a frame
             // go since the first try.
             return mm::allocate_user_frame();
@@ -229,7 +233,11 @@ fn write_reclaiming(vmo: &Vmo, index: u64, within: usize, bytes: &[u8]) -> Resul
                 let group = crate::sched::running_group();
                 let scope = quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE)
                     .unwrap_or(quota::NONE);
-                if crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen == 0 {
+                let ep_t = crate::timer::now_nanos();
+                let ep_stolen = crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen;
+                ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::RECL_NS, crate::timer::now_nanos().saturating_sub(ep_t));
+                ferrix_btrfs_vfs::ep::add(ferrix_btrfs_vfs::ep::RECL_N, 1);
+                if ep_stolen == 0 {
                     return Err(Errno::ENOSPC);
                 }
             }

@@ -90,6 +90,7 @@ use ferrix_vfs::{
 };
 
 mod cache;
+pub mod ep;
 pub mod rw;
 
 /// This crate's spin lock: its holder, and a task waiting for its ticket,

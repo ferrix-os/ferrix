@@ -279,12 +279,20 @@ impl<D: WriteHandle> RwBtrfs<D> {
 }
 
 impl<D: WriteHandle> Shared<D> {
+    fn ep_now(&self) -> u64 {
+        let now = self.clock.now();
+        (now.tv_sec as u64).wrapping_mul(1_000_000_000).wrapping_add(now.tv_nsec as u64)
+    }
+
     /// The volume, under its lock. One whose transaction an earlier edit
     /// aborted is reloaded read-only from its last commit first: see "After
     /// an aborted transaction".
     fn lock(&self) -> SleepLockGuard<'_, WriteVolume<D>> {
         let _ = self.arrived.fetch_add(1, Ordering::SeqCst);
+        let ep_t = self.ep_now();
         let mut volume = self.volume.lock();
+        crate::ep::add(crate::ep::LOCKWAIT_NS, self.ep_now().saturating_sub(ep_t));
+        crate::ep::add(crate::ep::LOCK_N, 1);
         let _ = self.admitted.fetch_add(1, Ordering::SeqCst);
         // A writeback between slices may be waiting for this one's turn.
         self.wake();
@@ -443,7 +451,18 @@ impl<D: WriteHandle> Shared<D> {
     /// rest are written back and committed all the same, so what fit is
     /// kept; the answer is then `ENOSPC`.
     fn sync_all(&self) -> Result<()> {
+        let ep_t0 = self.ep_now();
+        let out = self.sync_all_inner(ep_t0);
+        let ep_t1 = self.ep_now();
+        crate::ep::add(crate::ep::SYNC_N, 1);
+        crate::ep::add(crate::ep::SYNC_NS, ep_t1.saturating_sub(ep_t0));
+        crate::ep::report(ep_t1, &mut |line| (self.notice)(line));
+        out
+    }
+
+    fn sync_all_inner(&self, ep_t0: u64) -> Result<()> {
         self.write_back_in_slices();
+        crate::ep::add(crate::ep::SLICES_NS, self.ep_now().saturating_sub(ep_t0));
         let live: Vec<Arc<Node<D>>> = self
             .nodes
             .lock()
@@ -465,6 +484,7 @@ impl<D: WriteHandle> Shared<D> {
         let mut full = false;
         for pass in 0..2 {
             full = false;
+            let ep_w = self.ep_now();
             for node in &live {
                 match node.write_back(&mut volume) {
                     Ok(()) => {}
@@ -472,10 +492,13 @@ impl<D: WriteHandle> Shared<D> {
                     Err(error) => return Err(error),
                 }
             }
+            let ep_c = self.ep_now();
+            crate::ep::add(crate::ep::WB_NS, ep_c.saturating_sub(ep_w));
             let before = volume.data_room();
             *self.pending.lock() = 0;
             *self.structural.lock() = false;
             let committed = volume.commit().map_err(errno);
+            crate::ep::add(crate::ep::COMMIT_NS, self.ep_now().saturating_sub(ep_c));
             self.note_room(&volume);
             committed?;
             *self.freed.lock() = false;
@@ -1010,9 +1033,13 @@ impl<D: WriteHandle> PageSource for Source<D> {
         let page = usize::try_from(PAGE_SIZE).map_err(|_| Errno::EIO)?;
         let mut run = vec![0u8; page.saturating_mul(pages.len())];
         let ino = self.ino;
+        let ep_t = self.shared.ep_now();
         let read = self
             .shared
             .with(|volume| volume.read_file(ino, offset, &mut run));
+        crate::ep::add(crate::ep::FILL_NS, self.shared.ep_now().saturating_sub(ep_t));
+        crate::ep::add(crate::ep::FILL_N, 1);
+        crate::ep::add(crate::ep::FILL_PG, pages.len() as u64);
         match read {
             Ok(_) => {
                 for (target, filled) in pages.iter_mut().zip(run.chunks_exact(page)) {
@@ -1123,95 +1150,22 @@ impl<D: WriteHandle> Inode for Node<D> {
     }
 
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        if self.kind != FileType::Regular {
-            return Err(Errno::EINVAL);
-        }
-        let size = self.meta.lock().size;
-        if offset >= size || buf.is_empty() {
-            return Ok(0);
-        }
-        let len = usize::try_from(size - offset).map_or(buf.len(), |rest| rest.min(buf.len()));
-        let out = buf.get_mut(..len).unwrap_or_default();
-        self.pages()?.read(offset, out)?;
-        Ok(len)
+        let ep_t = self.shared.ep_now();
+        let out = self.ep_read_at(offset, buf);
+        crate::ep::add(crate::ep::RD_NS, self.shared.ep_now().saturating_sub(ep_t));
+        crate::ep::add(crate::ep::RD_N, 1);
+        out
     }
 
-    /// Into the page cache, with the volume's lock not held: filling a page
-    /// the write covers only part of takes it.
     fn write_at(&self, offset: u64, data: &[u8], append: bool) -> Result<(usize, u64)> {
-        if self.kind != FileType::Regular {
-            return Err(Errno::EINVAL);
-        }
-        let pages = self.pages()?;
-        let at = if append {
-            self.meta.lock().size
-        } else {
-            offset
-        };
-        if *self.shared.read_only.lock() {
-            return Err(Errno::EROFS);
-        }
-        let end = at.checked_add(data.len() as u64).ok_or(Errno::EFBIG)?;
-        if end > self.shared.storage.max_file_size() {
-            return Err(Errno::EFBIG);
-        }
-        let (data, took) = self.take_room(at, data)?;
-        let end = at.saturating_add(data.len() as u64);
-        // From the copy to the dirty mark, which reclaim must not come
-        // between: see "Clean pages may be reclaimed".
-        // The room `take_room` took goes back on either failure, as on its
-        // own: no page was marked dirty for it.
-        let still = match self.hold_still(at / PAGE_SIZE, end.saturating_sub(1) / PAGE_SIZE) {
-            Ok(still) => still,
-            Err(error) => {
-                self.shared.release(took);
-                return Err(error);
-            }
-        };
-        if let Err(error) = pages.write(at, data) {
-            drop(still);
-            self.shared.release(took);
-            return Err(error);
-        }
-        {
-            // The clock and the store's length are words the kernel reads
-            // and stores; neither may block or cut a mapping under this lock.
-            let mut meta = self.meta.lock();
-            meta.size = meta.size.max(end);
-            meta.mtime = self.shared.clock.now();
-            meta.ctime = meta.mtime;
-            pages.resize(meta.size);
-        }
-        if !data.is_empty() {
-            let first = at / PAGE_SIZE;
-            let last = end.saturating_sub(1) / PAGE_SIZE;
-            let mut dirty = self.dirty.lock();
-            if dirty.is_empty() {
-                self.hold();
-            }
-            let before = dirty.len();
-            for page in first..=last {
-                let _ = dirty.insert(page);
-            }
-            // The room taken was for the pages that were clean when it was
-            // measured; what changed since -- another write dirtied one, a
-            // writeback cleaned one -- is settled here, under the lock that
-            // makes the pages dirty.
-            let added = (dirty.len() - before) as u64;
-            if added > took {
-                self.shared.reserve_anyway(added - took);
-            } else {
-                self.shared.release(took - added);
-            }
-        }
-        // Before a commit, whose writeback holds what it writes still itself.
-        drop(still);
-        self.maybe_commit(data.len())?;
-        // The offset just past the write, which a `write` moves the file's
-        // position to: the kernel copies a large write in pieces, and a start
-        // offset here wrote every piece over the first.
-        Ok((data.len(), end))
+        let ep_t = self.shared.ep_now();
+        let out = self.ep_write_at(offset, data, append);
+        crate::ep::add(crate::ep::WR_NS, self.shared.ep_now().saturating_sub(ep_t));
+        crate::ep::add(crate::ep::WR_N, 1);
+        out
     }
+
+
 
     fn set_len(&self, len: u64) -> Result<()> {
         if self.kind != FileType::Regular {
@@ -1572,5 +1526,98 @@ fn mount_errno(error: WriteError) -> Errno {
         WriteError::Volume(error) => crate::mount_errno(error),
         WriteError::OutOfMemory => Errno::ENOMEM,
         _ => Errno::EIO,
+    }
+}
+
+impl<D: WriteHandle> Node<D> {
+    fn ep_read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        if self.kind != FileType::Regular {
+            return Err(Errno::EINVAL);
+        }
+        let size = self.meta.lock().size;
+        if offset >= size || buf.is_empty() {
+            return Ok(0);
+        }
+        let len = usize::try_from(size - offset).map_or(buf.len(), |rest| rest.min(buf.len()));
+        let out = buf.get_mut(..len).unwrap_or_default();
+        self.pages()?.read(offset, out)?;
+        Ok(len)
+    }
+
+    /// Into the page cache, with the volume's lock not held: filling a page
+    /// the write covers only part of takes it.
+    fn ep_write_at(&self, offset: u64, data: &[u8], append: bool) -> Result<(usize, u64)> {
+        if self.kind != FileType::Regular {
+            return Err(Errno::EINVAL);
+        }
+        let pages = self.pages()?;
+        let at = if append {
+            self.meta.lock().size
+        } else {
+            offset
+        };
+        if *self.shared.read_only.lock() {
+            return Err(Errno::EROFS);
+        }
+        let end = at.checked_add(data.len() as u64).ok_or(Errno::EFBIG)?;
+        if end > self.shared.storage.max_file_size() {
+            return Err(Errno::EFBIG);
+        }
+        let (data, took) = self.take_room(at, data)?;
+        let end = at.saturating_add(data.len() as u64);
+        // From the copy to the dirty mark, which reclaim must not come
+        // between: see "Clean pages may be reclaimed".
+        // The room `take_room` took goes back on either failure, as on its
+        // own: no page was marked dirty for it.
+        let still = match self.hold_still(at / PAGE_SIZE, end.saturating_sub(1) / PAGE_SIZE) {
+            Ok(still) => still,
+            Err(error) => {
+                self.shared.release(took);
+                return Err(error);
+            }
+        };
+        if let Err(error) = pages.write(at, data) {
+            drop(still);
+            self.shared.release(took);
+            return Err(error);
+        }
+        {
+            // The clock and the store's length are words the kernel reads
+            // and stores; neither may block or cut a mapping under this lock.
+            let mut meta = self.meta.lock();
+            meta.size = meta.size.max(end);
+            meta.mtime = self.shared.clock.now();
+            meta.ctime = meta.mtime;
+            pages.resize(meta.size);
+        }
+        if !data.is_empty() {
+            let first = at / PAGE_SIZE;
+            let last = end.saturating_sub(1) / PAGE_SIZE;
+            let mut dirty = self.dirty.lock();
+            if dirty.is_empty() {
+                self.hold();
+            }
+            let before = dirty.len();
+            for page in first..=last {
+                let _ = dirty.insert(page);
+            }
+            // The room taken was for the pages that were clean when it was
+            // measured; what changed since -- another write dirtied one, a
+            // writeback cleaned one -- is settled here, under the lock that
+            // makes the pages dirty.
+            let added = (dirty.len() - before) as u64;
+            if added > took {
+                self.shared.reserve_anyway(added - took);
+            } else {
+                self.shared.release(took - added);
+            }
+        }
+        // Before a commit, whose writeback holds what it writes still itself.
+        drop(still);
+        self.maybe_commit(data.len())?;
+        // The offset just past the write, which a `write` moves the file's
+        // position to: the kernel copies a large write in pieces, and a start
+        // offset here wrote every piece over the first.
+        Ok((data.len(), end))
     }
 }
