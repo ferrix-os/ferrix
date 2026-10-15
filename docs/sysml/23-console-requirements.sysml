@@ -250,8 +250,8 @@ package FerrixConsoleRequirements {
         }
         requirement <'L.console.18'> onlyKernelLinesAreKept : ItemLowLevel {
             attribute :>> statement = "Writer::bytes shall keep a kernel line, logged
-                or not, in the recent-output ring and on the screen console, and a
-                program's output in neither.";
+                or not, in the recent-output ring, and a program's output not, and
+                give both to the screen console.";
             attribute :>> criterion = "After a program's write of a marker line and a
                 kernel line, the last 4,096 bytes recent gives hold the kernel line
                 and not the marker.";
@@ -462,20 +462,24 @@ package FerrixConsoleRequirements {
 
         requirement <'L.console.36'> theScreenStartsWhenAsked : ItemLowLevel {
             attribute :>> statement = "screen::start shall draw the console only when
-                the command line holds ferrix.fbcon and there is a framebuffer: clear
-                it, and draw what recent keeps of the lines printed before, from the
-                first whole one.";
+                the command line holds ferrix.fbcon and there is a framebuffer, and
+                only the first time it is called: clear it, and draw what recent
+                keeps of the lines printed before, from the first whole one; and
+                milestone shall paint stripe n, for n below 12, only while the
+                console is drawn, and not when it finds the board taken.";
             attribute :>> criterion = "A boot without ferrix.fbcon leaves the
                 framebuffer as firmware left it; one with it shows the boot's earlier
                 lines from a line's start, and every later kernel line.";
             attribute :>> parent = "H.FAIL.1";
-            attribute :>> unit = ("console::screen::start", "console::screen::put");
+            attribute :>> unit = ("console::screen::start", "console::screen::put",
+                "console::screen::milestone", "console::screen::Board::stripe");
         }
         requirement <'L.console.37'> theBoardFitsTheScreen : ItemLowLevel {
             attribute :>> statement = "Board::new shall pick the largest glyph scale up
-                to 4 that leaves at least 60 columns, inside the margins and the top
-                inset, and refuse a surface with room for no column or fewer than 2
-                rows.";
+                to 4, or up to 1 under ferrix.fbcon.small, that leaves at least 60
+                columns, inside the margins, the top inset and the 12 milestone
+                stripes, and refuse a surface with room for no column or fewer than
+                2 rows.";
             attribute :>> criterion = "A 1080-pixel-wide surface gets scale 2 and 65
                 columns; a 640-pixel one, scale 1; a surface 20 pixels high is
                 refused.";
