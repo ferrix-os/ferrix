@@ -586,137 +586,137 @@
       "test_file_patterns and the crate that reaches it. A ratchet like",
       "known_violations: it may shrink freely; an entry whose file is back in its",
       "ring's crate, or is no kernel file, fails as stale; a product file is never",
-      "listed. Filled by the split (step S3): 26 files, each needing the load to run what it checks (stages_check.rs: the binary)."
+      "listed. Filled by the split (step S3): 26 files, each needing the load to run what it checks (stages_check.rs: the binary). `file_ring` is the file's own ring (not `ring`, which names a classified crate's ring to the step cache's reader)."
     ],
     "entries": [
       {
         "file": "arch/aarch64/trap/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "arch/armv7a/switch/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "arch/armv7a/trap/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "arch/stage_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "arch/x86_64/paranoid/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "arch/x86_64/switch/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "arch/x86_64/trap/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "device/config_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "iommu/domain_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/alloc_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/device_copy_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/domain_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/edge_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/fast_path_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/format_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/pin/check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/quota_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "object/write_read_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "service_check.rs",
-        "ring": "item",
+        "file_ring": "item",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "stages_check.rs",
-        "ring": "item",
+        "file_ring": "item",
         "crate": "ferrix-kernel"
       },
       {
         "file": "syscall/native_check.rs",
-        "ring": "item",
+        "file_ring": "item",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "syscall/program_check.rs",
-        "ring": "item",
+        "file_ring": "item",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "syscall/unmap_check.rs",
-        "ring": "item",
+        "file_ring": "item",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "user/madvise_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       },
       {
         "file": "user/rmap_check.rs",
-        "ring": "core",
+        "file_ring": "core",
         "crate": "ferrix-kernel-load"
       }
     ]
