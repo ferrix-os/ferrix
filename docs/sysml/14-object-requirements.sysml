@@ -1445,10 +1445,17 @@ package FerrixObjectRequirements {
                 disk files whose frame is charged to the job it is asked at or
                 beneath it, never a sibling's and never a child's at or under its
                 memory.min, and every page it gave back shall read as its source
-                has it.";
+                has it; it shall start where the last reclaim stopped, the object
+                and the page, and go round the cache from there, so that a page
+                is not taken again before the pages after it have been looked
+                at.";
             attribute :>> criterion = "Reclaim at one cgroup leaves a sibling's
                 cached file untouched, spares a child using no more than its
-                memory.min, and what it took reads back as the source has it.";
+                memory.min, and what it took reads back as the source has it; a
+                cgroup at its memory.max reading a 128-page stream in 16 steps,
+                and an 8-page file again after each, has that file taken back no
+                more than 16 pages, the 128-page cold file beside it giving the
+                rest (the `reclaim` lines of stage 13).";
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::cache::reclaim", "user::cache::take_from",
                 "user::cache::takes", "object::quota::protected",
@@ -1457,7 +1464,8 @@ package FerrixObjectRequirements {
                 "object::job::Job::mark", "object::quota::Quota::set_mark",
                 "object::quota::Mark::at", "user::cache::register", "user::cache::live",
                 "user::vmo::Vmo::reclaimable", "user::vmo::Vmo::pick_pages",
-                "user::vmo::Vmo::for_each_page");
+                "user::vmo::Vmo::for_each_page", "user::cache::hand_in",
+                "user::cache::set_hand");
         }
         requirement <'L.object.110'> aGoneJobStaysGone : ItemLowLevel {
             attribute :>> statement = "job_ended shall be true for a quota slot from

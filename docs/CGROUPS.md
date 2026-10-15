@@ -591,6 +591,15 @@ out of every mapping, a shootdown, then the frame and its charge).
   reclaims down to the mark (`oom::throttle`, after a fault and after a
   read) and, if that gave back less than the excess, pauses a millisecond.
   Linux's pause grows with the excess; this one does not.
+* **Where it starts.** Where the last reclaim stopped, the object and the
+  page (`user::cache`'s hand), going round the cache from there, as a clock
+  does. Until 2026-10-15 every reclaim began at the oldest file's first page:
+  at the machine's floor each fault took back the shell's, the loader's and
+  the libraries' pages that another processor faulted straight back in,
+  never reaching a download's cold cache at the end of the list, and
+  Endfield's install8 boot stopped making progress on all eight processors.
+  The hand does not know which pages are in use: a hot page is still taken
+  once a lap. Linux's active and inactive lists are the next step.
 * **Reclaim makes an absent page a thing to fill.** Two places took an absent
   page of a file for a hole: `Pages::read` read zeros, and a fault committed
   a zero page or copied one into a private mapping. Both now ask the source
