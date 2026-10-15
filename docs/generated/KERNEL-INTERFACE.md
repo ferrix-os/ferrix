@@ -15,7 +15,7 @@ for raised checks, and the type is unobtainable from product API: no pub item
 that is not checks-only names it (ledger line 1630, F2). A module named only by
 checks above is `pub` for raised checks (F3).
 
-1984 declarations in the core's files, 142 in the item's; 53 checks-only.
+2147 declarations in the core's files, 143 in the item's; 65 checks-only.
 
 ## ferrix-kernel-core
 
@@ -61,7 +61,7 @@ checks above is `pub` for raised checks (F3).
 | `StatLayout` | enum | load |  |
 | `check_distributor` | fn | bin |  |
 | `sigpage_code` | fn | load |  |
-| `write_combining_processors` | fn | load (checks) |  |
+| `write_combining_processors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `aarch64` | mod | item, load, bin |  |
 | `armv7a` | mod | item, load, bin |  |
 | `x86_64` | mod | item, load, bin |  |
@@ -71,7 +71,7 @@ checks above is `pub` for raised checks (F3).
 | `COMPAT_USER_END` | re-export | load |  |
 | `COMPAT_USER_END` | re-export | load |  |
 | `COMPAT_USER_END` | re-export | load |  |
-| `CheckHook` | re-export | load (checks) |  |
+| `CheckHook` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `EPOLL_EVENT_BYTES` | re-export | load |  |
 | `EPOLL_EVENT_BYTES` | re-export | load |  |
 | `EPOLL_EVENT_BYTES` | re-export | load |  |
@@ -97,93 +97,93 @@ checks above is `pub` for raised checks (F3).
 | `TLB_FLUSH_IS_BROADCAST` | re-export | bin |  |
 | `TLB_FLUSH_IS_BROADCAST` | re-export | bin |  |
 | `TLB_FLUSH_IS_BROADCAST` | re-export | bin |  |
-| `TrapFrame` | re-export | load (checks) |  |
-| `TrapFrame` | re-export | load (checks) |  |
-| `TrapFrame` | re-export | load (checks) |  |
-| `USER_ARGUMENT_PROGRAM` | re-export | load (checks) |  |
-| `USER_ARGUMENT_PROGRAM` | re-export | load (checks) |  |
-| `USER_ARGUMENT_PROGRAM` | re-export | load (checks) |  |
-| `USER_BOOTSTRAP_PROGRAM` | re-export | load (checks) |  |
-| `USER_BOOTSTRAP_PROGRAM` | re-export | load (checks) |  |
-| `USER_BOOTSTRAP_PROGRAM` | re-export | load (checks) |  |
-| `USER_COW_PROGRAM` | re-export | load (checks) |  |
-| `USER_COW_PROGRAM` | re-export | load (checks) |  |
-| `USER_COW_PROGRAM` | re-export | load (checks) |  |
-| `USER_DETHREAD_PROGRAM` | re-export | load (checks) |  |
-| `USER_DETHREAD_PROGRAM` | re-export | load (checks) |  |
-| `USER_DETHREAD_PROGRAM` | re-export | load (checks) |  |
-| `USER_EXEC_PROGRAM` | re-export | load (checks) |  |
-| `USER_EXEC_PROGRAM` | re-export | load (checks) |  |
-| `USER_EXEC_PROGRAM` | re-export | load (checks) |  |
-| `USER_EXITS_PROGRAM` | re-export | load (checks) |  |
-| `USER_EXITS_PROGRAM` | re-export | load (checks) |  |
-| `USER_EXITS_PROGRAM` | re-export | load (checks) |  |
-| `USER_FAULT_PROGRAM` | re-export | load (checks) |  |
-| `USER_FAULT_PROGRAM` | re-export | load (checks) |  |
-| `USER_FAULT_PROGRAM` | re-export | load (checks) |  |
-| `USER_FORK_PROGRAM` | re-export | load (checks) |  |
-| `USER_FORK_PROGRAM` | re-export | load (checks) |  |
-| `USER_FORK_PROGRAM` | re-export | load (checks) |  |
-| `USER_GETUID_PROGRAM` | re-export | load (checks) |  |
-| `USER_GETUID_PROGRAM` | re-export | load (checks) |  |
-| `USER_GETUID_PROGRAM` | re-export | load (checks) |  |
-| `USER_HANDOFF_PROGRAM` | re-export | load (checks) |  |
-| `USER_HANDOFF_PROGRAM` | re-export | load (checks) |  |
-| `USER_HANDOFF_PROGRAM` | re-export | load (checks) |  |
-| `USER_INTO_CGROUP_PROGRAM` | re-export | load (checks) |  |
-| `USER_INTO_CGROUP_PROGRAM` | re-export | load (checks) |  |
-| `USER_INTO_CGROUP_PROGRAM` | re-export | load (checks) |  |
-| `USER_MPROTECT_PROGRAM` | re-export | load (checks) |  |
-| `USER_MPROTECT_PROGRAM` | re-export | load (checks) |  |
-| `USER_MPROTECT_PROGRAM` | re-export | load (checks) |  |
-| `USER_NAMESPACE_PROGRAM` | re-export | load (checks) |  |
-| `USER_NAMESPACE_PROGRAM` | re-export | load (checks) |  |
-| `USER_NAMESPACE_PROGRAM` | re-export | load (checks) |  |
-| `USER_NATIVE_PROGRAM` | re-export | load (checks) |  |
-| `USER_NATIVE_PROGRAM` | re-export | load (checks) |  |
-| `USER_NATIVE_PROGRAM` | re-export | load (checks) |  |
-| `USER_OOM_PROGRAM` | re-export | load (checks) |  |
-| `USER_OOM_PROGRAM` | re-export | load (checks) |  |
-| `USER_OOM_PROGRAM` | re-export | load (checks) |  |
-| `USER_RMAP_PROGRAM` | re-export | load (checks) |  |
-| `USER_RMAP_PROGRAM` | re-export | load (checks) |  |
-| `USER_RMAP_PROGRAM` | re-export | load (checks) |  |
-| `USER_SHARED_PROGRAM` | re-export | load (checks) |  |
-| `USER_SHARED_PROGRAM` | re-export | load (checks) |  |
-| `USER_SHARED_PROGRAM` | re-export | load (checks) |  |
-| `USER_SIGNAL_PROGRAM` | re-export | load (checks) |  |
-| `USER_SIGNAL_PROGRAM` | re-export | load (checks) |  |
-| `USER_SIGNAL_PROGRAM` | re-export | load (checks) |  |
-| `USER_SPIN_PROGRAM` | re-export | load (checks) |  |
-| `USER_SPIN_PROGRAM` | re-export | load (checks) |  |
-| `USER_SPIN_PROGRAM` | re-export | load (checks) |  |
-| `USER_STEP_PROGRAM` | re-export | bin (checks) |  |
-| `USER_STEP_PROGRAM` | re-export | bin (checks) |  |
-| `USER_STEP_PROGRAM` | re-export | bin (checks) |  |
-| `USER_STEP_STATUS` | re-export | bin (checks) |  |
-| `USER_STEP_STATUS` | re-export | bin (checks) |  |
-| `USER_STEP_STATUS` | re-export | bin (checks) |  |
-| `USER_STOPPED_PROGRAM` | re-export | load (checks) |  |
-| `USER_STOPPED_PROGRAM` | re-export | load (checks) |  |
-| `USER_STOPPED_PROGRAM` | re-export | load (checks) |  |
-| `USER_SYSLOG_PROGRAM` | re-export | load (checks) |  |
-| `USER_SYSLOG_PROGRAM` | re-export | load (checks) |  |
-| `USER_SYSLOG_PROGRAM` | re-export | load (checks) |  |
-| `USER_TEST_PROGRAM` | re-export | load (checks) |  |
-| `USER_TEST_PROGRAM` | re-export | load (checks) |  |
-| `USER_TEST_PROGRAM` | re-export | load (checks) |  |
-| `USER_TEST_STATUS` | re-export | load (checks) |  |
-| `USER_TEST_STATUS` | re-export | load (checks) |  |
-| `USER_TEST_STATUS` | re-export | load (checks) |  |
-| `USER_THREAD_PROGRAM` | re-export | load (checks) |  |
-| `USER_THREAD_PROGRAM` | re-export | load (checks) |  |
-| `USER_THREAD_PROGRAM` | re-export | load (checks) |  |
-| `USER_VDSO_PROGRAM` | re-export | load (checks) |  |
-| `USER_VDSO_PROGRAM` | re-export | load (checks) |  |
-| `USER_VDSO_PROGRAM` | re-export | load (checks) |  |
-| `USER_XSTATE_PROGRAM` | re-export | load (checks) |  |
-| `USER_XSTATE_PROGRAM` | re-export | load (checks) |  |
-| `USER_XSTATE_PROGRAM` | re-export | load (checks) |  |
+| `TrapFrame` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `TrapFrame` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `TrapFrame` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_ARGUMENT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_ARGUMENT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_ARGUMENT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_BOOTSTRAP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_BOOTSTRAP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_BOOTSTRAP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_COW_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_COW_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_COW_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_DETHREAD_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_DETHREAD_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_DETHREAD_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXEC_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXEC_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXEC_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXITS_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXITS_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXITS_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FAULT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FAULT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FAULT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FORK_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FORK_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FORK_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_GETUID_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_GETUID_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_GETUID_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_HANDOFF_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_HANDOFF_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_HANDOFF_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_INTO_CGROUP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_INTO_CGROUP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_INTO_CGROUP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_MPROTECT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_MPROTECT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_MPROTECT_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NAMESPACE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NAMESPACE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NAMESPACE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NATIVE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NATIVE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NATIVE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_OOM_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_OOM_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_OOM_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_RMAP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_RMAP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_RMAP_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SHARED_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SHARED_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SHARED_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SIGNAL_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SIGNAL_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SIGNAL_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SPIN_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SPIN_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SPIN_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_PROGRAM` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_PROGRAM` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_PROGRAM` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_STATUS` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_STATUS` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_STATUS` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STOPPED_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STOPPED_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STOPPED_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SYSLOG_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SYSLOG_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SYSLOG_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_STATUS` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_STATUS` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_STATUS` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_THREAD_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_THREAD_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_THREAD_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_VDSO_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_VDSO_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_VDSO_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_XSTATE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_XSTATE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_XSTATE_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext` | re-export | load |  |
 | `UserContext` | re-export | load |  |
 | `UserContext` | re-export | load |  |
@@ -193,26 +193,26 @@ checks above is `pub` for raised checks (F3).
 | `UserState` | re-export | load |  |
 | `UserState` | re-export | load |  |
 | `UserState` | re-export | load |  |
-| `arm_leave_hook` | re-export | load (checks) |  |
+| `arm_leave_hook` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `audit_arch` | re-export | load |  |
 | `audit_arch` | re-export | load |  |
 | `audit_arch` | re-export | load |  |
-| `barrier_decisions_on` | re-export | load (checks) |  |
-| `breakpoint` | re-export | bin (checks) |  |
-| `breakpoint` | re-export | bin (checks) |  |
-| `breakpoint` | re-export | bin (checks) |  |
+| `barrier_decisions_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check_distributor` | re-export | bin |  |
 | `check_distributor` | re-export | bin |  |
 | `check_machine` | re-export | bin |  |
 | `check_machine` | re-export | bin |  |
 | `check_machine` | re-export | bin |  |
-| `check_speculation` | re-export | bin (checks) |  |
+| `check_speculation` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `clean_for_device` | re-export | load |  |
 | `clean_for_device` | re-export | load |  |
 | `clean_for_device` | re-export | load |  |
-| `console` | re-export | bin (checks) |  |
-| `console` | re-export | bin (checks) |  |
-| `console` | re-export | bin (checks) |  |
+| `console` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `console` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `console` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `counter_hz` | re-export | load |  |
 | `counter_hz` | re-export | load |  |
 | `counter_hz` | re-export | load |  |
@@ -228,7 +228,7 @@ checks above is `pub` for raised checks (F3).
 | `disable_interrupts` | re-export | item, load |  |
 | `disable_interrupts` | re-export | item, load |  |
 | `disable_interrupts` | re-export | item, load |  |
-| `disarm_leave_hook` | re-export | load (checks) |  |
+| `disarm_leave_hook` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dma_barrier` | re-export | item |  |
 | `dma_barrier` | re-export | item |  |
 | `dma_barrier` | re-export | item |  |
@@ -247,7 +247,7 @@ checks above is `pub` for raised checks (F3).
 | `flush_for_device` | re-export | item |  |
 | `flush_for_device` | re-export | item |  |
 | `flush_for_device` | re-export | item |  |
-| `forget_root` | re-export | load (checks) |  |
+| `forget_root` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `halt` | re-export | bin |  |
 | `halt` | re-export | bin |  |
 | `halt` | re-export | bin |  |
@@ -275,7 +275,7 @@ checks above is `pub` for raised checks (F3).
 | `kernel_write_protected` | re-export | bin |  |
 | `kernel_write_protected` | re-export | bin |  |
 | `kernel_write_protected` | re-export | bin |  |
-| `last_domain_on` | re-export | load (checks) |  |
+| `last_domain_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `leave_hook_armed_by` | re-export | bin |  |
 | `msi_allocate` | re-export | item |  |
 | `msi_allocate` | re-export | item |  |
@@ -284,8 +284,8 @@ checks above is `pub` for raised checks (F3).
 | `read_console_byte` | re-export | load |  |
 | `read_console_byte` | re-export | load |  |
 | `read_console_byte` | re-export | load |  |
-| `refill_wanted_in_domain` | re-export | load (checks) |  |
-| `refills_in_domain_on` | re-export | load (checks) |  |
+| `refill_wanted_in_domain` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `refills_in_domain_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `report_speculation` | re-export | bin |  |
 | `reset` | re-export | item, load |  |
 | `reset` | re-export | item, load |  |
@@ -299,9 +299,9 @@ checks above is `pub` for raised checks (F3).
 | `resume_user` | re-export | load |  |
 | `resume_user` | re-export | load |  |
 | `resume_user` | re-export | load |  |
-| `ring3_reads_counter` | re-export | load (checks) |  |
-| `ring3_reads_counter` | re-export | load (checks) |  |
-| `ring3_reads_counter` | re-export | load (checks) |  |
+| `ring3_reads_counter` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `ring3_reads_counter` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `ring3_reads_counter` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `selector_skips_total` | re-export | item |  |
 | `selector_skips_total` | re-export | item |  |
 | `selector_skips_total` | re-export | item |  |
@@ -318,17 +318,17 @@ checks above is `pub` for raised checks (F3).
 | `start_watchdogs` | re-export | bin |  |
 | `start_watchdogs` | re-export | bin |  |
 | `start_watchdogs` | re-export | bin |  |
-| `switch_barriers` | re-export | load (checks) |  |
-| `switch_barriers_on` | re-export | load (checks) |  |
+| `switch_barriers` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `switch_barriers_on` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `sync_instructions` | re-export | load |  |
 | `sync_instructions` | re-export | load |  |
 | `sync_instructions` | re-export | load |  |
-| `syscall_rollback_value` | re-export | load (checks) |  |
-| `syscall_rollback_value` | re-export | load (checks) |  |
-| `syscall_rollback_value` | re-export | load (checks) |  |
-| `take_console_byte` | re-export | load (checks) |  |
-| `take_console_byte` | re-export | load (checks) |  |
-| `take_console_byte` | re-export | load (checks) |  |
+| `syscall_rollback_value` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `syscall_rollback_value` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `syscall_rollback_value` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `take_console_byte` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `take_console_byte` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `take_console_byte` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `this_cpu_add` | re-export | load |  |
 | `thread_area` | re-export | load |  |
 | `thread_area` | re-export | load |  |
@@ -348,13 +348,13 @@ checks above is `pub` for raised checks (F3).
 | `vdso_spec` | re-export | load |  |
 | `vdso_spec` | re-export | load |  |
 | `vdso_spec` | re-export | load |  |
-| `wait_for_interrupt` | re-export | bin (checks) |  |
-| `wait_for_interrupt` | re-export | bin (checks) |  |
-| `wait_for_interrupt` | re-export | bin (checks) |  |
-| `wait_for_work` | re-export | bin (checks) |  |
-| `wait_for_work` | re-export | bin (checks) |  |
-| `wait_for_work` | re-export | bin (checks) |  |
-| `write_combining_processors` | re-export | load (checks) |  |
+| `wait_for_interrupt` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_interrupt` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_interrupt` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_work` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_work` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_work` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `write_combining_processors` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DistributorCheck` | struct | bin |  |
 | `DistributorCheck::lines` | field | item, load, bin |  |
 | `DistributorCheck::lost` | field | item, load, bin |  |
@@ -365,6 +365,42 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `ARCH` | const | load, bin |  |
+| `COMPAT_USER_END` | const | load |  |
+| `EPOLL_EVENT_BYTES` | const | load |  |
+| `FAST_WRITE_READ` | const | item, load |  |
+| `NAME` | const | item, load, bin |  |
+| `OPEN_FLAGS` | const | load |  |
+| `STAT_LAYOUT` | const | load |  |
+| `TLB_FLUSH_IS_BROADCAST` | const | bin |  |
+| `USER_ARGUMENT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_BOOTSTRAP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_COW_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_DETHREAD_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXEC_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXITS_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FAULT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FORK_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_GETUID_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_HANDOFF_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_INTO_CGROUP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_MPROTECT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NAMESPACE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NATIVE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_OOM_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_RMAP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SHARED_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SIGNAL_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SPIN_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_PROGRAM` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_STATUS` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STOPPED_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SYSLOG_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_STATUS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_THREAD_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_VDSO_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_XSTATE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `audit_arch` | fn | load |  |
 | `check_distributor` | fn | bin |  |
 | `check_machine` | fn | bin |  |
@@ -387,29 +423,29 @@ checks above is `pub` for raised checks (F3).
 | `msi_allocate` | fn | item |  |
 | `read_console_byte` | fn | load |  |
 | `reset` | fn | item, load |  |
-| `ring3_reads_counter` | fn | load (checks) |  |
+| `ring3_reads_counter` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `selector_skips_total` | fn | item |  |
 | `set_thread_area` | fn | load |  |
 | `shutdown` | fn | item, load |  |
 | `start_watchdogs` | fn | bin |  |
-| `syscall_rollback_value` | fn | load (checks) |  |
-| `take_console_byte` | fn | load (checks) |  |
+| `syscall_rollback_value` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `take_console_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `thread_area` | fn | load |  |
 | `user_base` | fn | load |  |
 | `user_hwcaps` | fn | load |  |
 | `user_platform` | fn | load |  |
 | `vdso_can_read_counter` | fn | load |  |
 | `vdso_spec` | fn | load |  |
-| `wait_for_interrupt` | fn | bin (checks) |  |
-| `wait_for_work` | fn | bin (checks) |  |
+| `wait_for_interrupt` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_work` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `console` | mod | item, load, bin |  |
 | `trap` | mod | item, load, bin |  |
 | `SIGNAL_RED_ZONE` | re-export | load |  |
-| `TrapFrame` | re-export | load (checks) |  |
+| `TrapFrame` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext` | re-export | load |  |
 | `UserRegs` | re-export | item, load |  |
 | `UserState` | re-export | load |  |
-| `breakpoint` | re-export | bin (checks) |  |
+| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `clean_for_device` | re-export | load |  |
 | `dma_barrier` | re-export | item |  |
 | `enter_user` | re-export | load |  |
@@ -426,7 +462,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `transmit_buffer` | fn | bin (checks) |  |
+| `transmit_buffer` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::aarch64::cpu`
 
@@ -442,10 +478,11 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `SIGNAL_RED_ZONE` | const | load |  |
 | `restore_signal_frame` | fn | load |  |
 | `setup_signal_frame` | fn | load |  |
 | `UserContext` | struct | load |  |
-| `UserContext::from_trap` | method | load (checks) |  |
+| `UserContext::from_trap` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext::rewind_syscall` | method | load |  |
 | `UserContext::set_syscall_result` | method | load |  |
 | `UserContext::stack_pointer` | method | load |  |
@@ -465,19 +502,20 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `breakpoint` | fn | bin (checks) |  |
+| `USER_SPSR` | const | load (checks) | checks-only |
+| `breakpoint` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `enter_user` | fn | load |  |
 | `resume_user` | fn | load |  |
 | `system_call` | fn | item, load |  |
-| `TrapFrame` | struct | load (checks) |  |
+| `TrapFrame` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserRegs` | struct | item, load |  |
-| `TrapFrame::elr` | field | load (checks) |  |
-| `TrapFrame::esr` | field | load (checks) |  |
+| `TrapFrame::elr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `TrapFrame::esr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::far` | field | load |  |
 | `TrapFrame::kind` | field | item, load, bin |  |
 | `TrapFrame::reserved` | field | item, load, bin |  |
 | `TrapFrame::sp` | field | load |  |
-| `TrapFrame::spsr` | field | load (checks) |  |
+| `TrapFrame::spsr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::x` | field | load |  |
 | `UserRegs::for_child` | method | load |  |
 | `UserRegs::set_stack` | method | load |  |
@@ -487,6 +525,42 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `ARCH` | const | load, bin |  |
+| `COMPAT_USER_END` | const | load |  |
+| `EPOLL_EVENT_BYTES` | const | load |  |
+| `FAST_WRITE_READ` | const | item, load |  |
+| `NAME` | const | item, load, bin |  |
+| `OPEN_FLAGS` | const | load |  |
+| `STAT_LAYOUT` | const | load |  |
+| `TLB_FLUSH_IS_BROADCAST` | const | bin |  |
+| `USER_ARGUMENT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_BOOTSTRAP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_COW_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_DETHREAD_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXEC_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXITS_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FAULT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FORK_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_GETUID_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_HANDOFF_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_INTO_CGROUP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_MPROTECT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NAMESPACE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NATIVE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_OOM_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_RMAP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SHARED_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SIGNAL_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SPIN_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_PROGRAM` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_STATUS` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STOPPED_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SYSLOG_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_STATUS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_THREAD_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_VDSO_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_XSTATE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `audit_arch` | fn | load |  |
 | `check_distributor` | fn | bin |  |
 | `check_machine` | fn | bin |  |
@@ -510,32 +584,32 @@ checks above is `pub` for raised checks (F3).
 | `msi_allocate` | fn | item |  |
 | `read_console_byte` | fn | load |  |
 | `reset` | fn | item, load |  |
-| `ring3_reads_counter` | fn | load (checks) |  |
+| `ring3_reads_counter` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `selector_skips_total` | fn | item |  |
 | `set_thread_area` | fn | load |  |
 | `shutdown` | fn | item, load |  |
 | `sigpage_code` | fn | load |  |
 | `start_watchdogs` | fn | bin |  |
-| `syscall_rollback_value` | fn | load (checks) |  |
-| `take_console_byte` | fn | load (checks) |  |
+| `syscall_rollback_value` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `take_console_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `thread_area` | fn | load |  |
 | `user_base` | fn | load |  |
 | `user_hwcaps` | fn | load |  |
 | `user_platform` | fn | load |  |
 | `vdso_can_read_counter` | fn | load |  |
 | `vdso_spec` | fn | load |  |
-| `wait_for_interrupt` | fn | bin (checks) |  |
-| `wait_for_work` | fn | bin (checks) |  |
+| `wait_for_interrupt` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_work` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `console` | mod | item, load, bin |  |
 | `cpu` | mod | item, load |  |
 | `switch` | mod | load, bin |  |
 | `trap` | mod | item, load, bin |  |
 | `SIGNAL_RED_ZONE` | re-export | load |  |
-| `TrapFrame` | re-export | load (checks) |  |
+| `TrapFrame` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext` | re-export | load |  |
 | `UserRegs` | re-export | item, load |  |
 | `UserState` | re-export | load |  |
-| `breakpoint` | re-export | bin (checks) |  |
+| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `clean_for_device` | re-export | load |  |
 | `dma_barrier` | re-export | item |  |
 | `enter_user` | re-export | load |  |
@@ -551,7 +625,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `transmit_buffer` | fn | bin (checks) |  |
+| `transmit_buffer` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::armv7a::cpu`
 
@@ -561,16 +635,17 @@ checks above is `pub` for raised checks (F3).
 | `clean_to_poc` | fn | load |  |
 | `dma_barrier` | fn | item |  |
 | `sync_instructions` | fn | load |  |
-| `user_fpu_doubles` | fn | load (checks) |  |
+| `user_fpu_doubles` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::armv7a::signal`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `SIGNAL_RED_ZONE` | const | load |  |
 | `restore_signal_frame` | fn | load |  |
 | `setup_signal_frame` | fn | load |  |
 | `UserContext` | struct | load |  |
-| `UserContext::from_trap` | method | load (checks) |  |
+| `UserContext::from_trap` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext::rewind_syscall` | method | load |  |
 | `UserContext::set_syscall_result` | method | load |  |
 | `UserContext::stack_pointer` | method | load |  |
@@ -580,7 +655,8 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `bring_up_vfp` | fn | load (checks) |  |
+| `FPEXC_EN` | const | load (checks) | checks-only |
+| `bring_up_vfp` | fn | load (checks) | checks-only |
 | `fpexc` | fn | load (checks) | checks-only |
 | `masked` | fn | load (checks) | checks-only |
 | `reset_user_state` | fn | load |  |
@@ -592,7 +668,7 @@ checks above is `pub` for raised checks (F3).
 | `ferrix_user_fpu_save` | foreign fn | load (checks) | checks-only |
 | `UserState` | struct | load |  |
 | `UserState::capture` | method | load |  |
-| `UserState::fp` | method | load (checks) |  |
+| `UserState::fp` | method | load (checks) | checks-only |
 | `UserState::is_unsaved` | method | load (checks) | checks-only |
 | `UserState::mark_unsaved` | method | load (checks) | checks-only |
 | `UserState::new` | method | item, load, bin |  |
@@ -606,19 +682,20 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `breakpoint` | fn | bin (checks) |  |
+| `USER_CPSR` | const | load (checks) | checks-only |
+| `breakpoint` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `enter_user` | fn | load |  |
 | `resume_user` | fn | load |  |
 | `system_call` | fn | item, load |  |
 | `vectors_die_in` | fn | load (checks) | checks-only |
-| `TrapFrame` | struct | load (checks) |  |
+| `TrapFrame` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserRegs` | struct | item, load |  |
-| `TrapFrame::cpsr` | field | load (checks) |  |
+| `TrapFrame::cpsr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::far` | field | load |  |
-| `TrapFrame::fsr` | field | load (checks) |  |
+| `TrapFrame::fsr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::kind` | field | item, load, bin |  |
-| `TrapFrame::lr` | field | load (checks) |  |
-| `TrapFrame::pc` | field | load (checks) |  |
+| `TrapFrame::lr` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `TrapFrame::pc` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `TrapFrame::r` | field | load |  |
 | `TrapFrame::reserved` | field | item, load, bin |  |
 | `UserRegs::for_child` | method | load |  |
@@ -636,21 +713,22 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `arm_leave_hook` | fn | load (checks) |  |
-| `barrier_decisions_on` | fn | load (checks) |  |
-| `disarm_leave_hook` | fn | load (checks) |  |
-| `forget_root` | fn | load (checks) |  |
-| `last_domain_on` | fn | load (checks) |  |
+| `HARDENED` | const | load, bin |  |
+| `arm_leave_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `barrier_decisions_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `disarm_leave_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `forget_root` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `last_domain_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `leave_hook_armed_by` | fn | bin |  |
 | `nospec_index` | fn | item |  |
-| `refill_wanted_in_domain` | fn | load (checks) |  |
-| `refills_in_domain_on` | fn | load (checks) |  |
+| `refill_wanted_in_domain` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `refills_in_domain_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `report_exposure` | fn | bin |  |
-| `switch_barriers` | fn | load (checks) |  |
-| `switch_barriers_on` | fn | load (checks) |  |
-| `CheckHook` | struct | load (checks) |  |
+| `switch_barriers` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `switch_barriers_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `CheckHook` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Defences` | struct | - |  |
-| `CheckHook::armed_by` | field | load (checks) |  |
+| `CheckHook::armed_by` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CheckHook::run` | field | item, load, bin |  |
 | `Defences::names` | method | item, load, bin |  |
 
@@ -658,18 +736,53 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `check` | fn | bin (checks) |  |
-| `Report` | struct | - |  |
-| `Report::barriers` | field | load, bin (checks) |  |
-| `Report::boot` | field | bin (checks) |  |
-| `Report::differing` | field | bin (checks) |  |
-| `Report::hardened` | field | load, bin (checks) |  |
+| `check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report` | struct | item, load, bin |  |
+| `Report::barriers` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::boot` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::differing` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::hardened` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::processors` | field | load, bin |  |
 
 ### `arch::x86_64`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `ARCH` | const | load, bin |  |
+| `COMPAT_USER_END` | const | load |  |
+| `EPOLL_EVENT_BYTES` | const | load |  |
+| `FAST_WRITE_READ` | const | item, load |  |
+| `NAME` | const | item, load, bin |  |
+| `OPEN_FLAGS` | const | load |  |
+| `STAT_LAYOUT` | const | load |  |
+| `TLB_FLUSH_IS_BROADCAST` | const | bin |  |
+| `USER_ARGUMENT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_BOOTSTRAP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_COW_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_DETHREAD_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXEC_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_EXITS_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FAULT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_FORK_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_GETUID_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_HANDOFF_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_INTO_CGROUP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_MPROTECT_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NAMESPACE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_NATIVE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_OOM_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_RMAP_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SHARED_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SIGNAL_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SPIN_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_PROGRAM` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STEP_STATUS` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_STOPPED_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_SYSLOG_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_TEST_STATUS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_THREAD_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_XSTATE_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `audit_arch` | fn | load |  |
 | `check_machine` | fn | bin |  |
 | `clean_for_device` | fn | load |  |
@@ -693,17 +806,17 @@ checks above is `pub` for raised checks (F3).
 | `kernel_write_protected` | fn | bin |  |
 | `read_console_byte` | fn | load |  |
 | `reset` | fn | item, load |  |
-| `ring3_reads_counter` | fn | load (checks) |  |
+| `ring3_reads_counter` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `shutdown` | fn | item, load |  |
 | `start_watchdogs` | fn | bin |  |
 | `sync_instructions` | fn | load |  |
-| `syscall_rollback_value` | fn | load (checks) |  |
-| `take_console_byte` | fn | load (checks) |  |
+| `syscall_rollback_value` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `take_console_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `user_hwcaps` | fn | load |  |
 | `user_platform` | fn | load |  |
-| `wait_for_interrupt` | fn | bin (checks) |  |
-| `wait_for_work` | fn | bin (checks) |  |
-| `write_combining_processors` | fn | load (checks) |  |
+| `wait_for_interrupt` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `wait_for_work` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `write_combining_processors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `apic` | mod | load (checks) | pub for raised checks |
 | `console` | mod | item, load, bin |  |
 | `cpu` | mod | item, load |  |
@@ -712,12 +825,12 @@ checks above is `pub` for raised checks (F3).
 | `switch` | mod | item, load, bin |  |
 | `syscall` | mod | item, load, bin |  |
 | `SIGNAL_RED_ZONE` | re-export | load |  |
-| `TrapFrame` | re-export | load (checks) |  |
-| `USER_VDSO_PROGRAM` | re-export | load (checks) |  |
+| `TrapFrame` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `USER_VDSO_PROGRAM` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext` | re-export | load |  |
 | `UserRegs` | re-export | item, load |  |
 | `UserState` | re-export | load |  |
-| `breakpoint` | re-export | bin (checks) |  |
+| `breakpoint` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dma_barrier` | re-export | item |  |
 | `hardware_random` | re-export | item |  |
 | `msi_allocate` | re-export | item |  |
@@ -731,43 +844,48 @@ checks above is `pub` for raised checks (F3).
 | `user_base` | re-export | load |  |
 | `vdso_can_read_counter` | re-export | load |  |
 | `vdso_spec` | re-export | load |  |
-| `BASE_WRITES_FORBIDDEN` | static | load (checks) |  |
+| `BASE_WRITES_FORBIDDEN` | static | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Irq` | struct | load, bin |  |
 
 ### `arch::x86_64::apic`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `send_nmi_to` | fn | load (checks) |  |
-| `send_nmi_to_self` | fn | load (checks) |  |
+| `send_nmi_to` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `send_nmi_to_self` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::x86_64::console`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `transmit_buffer` | fn | bin (checks) |  |
+| `transmit_buffer` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::x86_64::cpu`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `CR4_FSGSBASE` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `XSTATE_AVX` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `XSTATE_PKRU` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `XSTATE_X87_SSE` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dma_barrier` | fn | item |  |
-| `extended_state_components` | fn | load (checks) |  |
-| `forbid_user_base_writes` | fn | load (checks) |  |
+| `extended_state_components` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `forbid_user_base_writes` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `hardware_random` | fn | item |  |
-| `has_fsgsbase` | fn | load (checks) |  |
-| `permit_user_base_writes_for_check` | fn | load (checks) |  |
-| `read_cr0` | fn | load (checks) |  |
-| `read_cr4` | fn | load (checks) |  |
-| `reset_components` | fn | load (checks) |  |
-| `write_breakpoint_address` | fn | load (checks) |  |
-| `write_dr7` | fn | load (checks) |  |
-| `xinuse_readable` | fn | load (checks) |  |
+| `has_fsgsbase` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `permit_user_base_writes_for_check` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `read_cr0` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `read_cr4` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `reset_components` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `write_breakpoint_address` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `write_dr7` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `xinuse_readable` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::x86_64::gdt`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `USER_DATA` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check` | mod | item, load, bin |  |
 
 ### `arch::x86_64::gdt::check`
@@ -797,10 +915,11 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `SIGNAL_RED_ZONE` | const | load |  |
 | `restore_signal_frame` | fn | load |  |
 | `setup_signal_frame` | fn | load |  |
 | `UserContext` | struct | load |  |
-| `UserContext::from_trap` | method | load (checks) |  |
+| `UserContext::from_trap` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserContext::rewind_syscall` | method | load |  |
 | `UserContext::set_syscall_result` | method | load |  |
 | `UserContext::stack_pointer` | method | load |  |
@@ -810,37 +929,37 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `fs_gs_skips` | fn | load (checks) |  |
+| `fs_gs_skips` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reset_user_state` | fn | load |  |
-| `selector_skips` | fn | load (checks) |  |
+| `selector_skips` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `selector_skips_total` | fn | item |  |
 | `set_thread_area` | fn | load |  |
-| `ss_reloads` | fn | load (checks) |  |
+| `ss_reloads` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `thread_area` | fn | load |  |
-| `x87_resets` | fn | load (checks) |  |
+| `x87_resets` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FpuArea` | struct | load (checks) | checks-only |
 | `UserState` | struct | load |  |
 | `FpuArea::legacy` | field | load | pub for raised checks; type unobtainable from product API |
 | `FpuArea::initial` | method | load |  |
-| `UserState::avx` | method | load (checks) |  |
-| `UserState::avx_mut` | method | load (checks) |  |
+| `UserState::avx` | method | load (checks) | checks-only |
+| `UserState::avx_mut` | method | load (checks) | checks-only |
 | `UserState::capture` | method | load |  |
-| `UserState::fxsave` | method | load (checks) |  |
-| `UserState::fxsave_mut` | method | load (checks) |  |
+| `UserState::fxsave` | method | load (checks) | checks-only |
+| `UserState::fxsave_mut` | method | load (checks) | checks-only |
 | `UserState::is_unsaved` | method | load (checks) | checks-only |
 | `UserState::keep_vector_controls` | method | load (checks) | checks-only |
 | `UserState::new` | method | item, load, bin |  |
 | `UserState::set_thread_area` | method | load |  |
 | `UserState::set_thread_pointer` | method | load |  |
-| `UserState::set_xstate_bv` | method | load (checks) |  |
-| `UserState::xstate_bv` | method | load (checks) |  |
+| `UserState::set_xstate_bv` | method | load (checks) | checks-only |
+| `UserState::xstate_bv` | method | load (checks) | checks-only |
 
 ### `arch::x86_64::syscall`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `UserRegs` | enum | item, load |  |
-| `program_gs_base` | fn | load (checks) |  |
+| `program_gs_base` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `resume_user` | fn | load |  |
 | `stub_address` | fn | load (checks) | checks-only |
 | `user_base` | fn | load |  |
@@ -858,19 +977,20 @@ checks above is `pub` for raised checks (F3).
 | `drive_native_words` | fn | load | checks-only |
 | `drive_system_call` | fn | load | checks-only |
 | `run` | fn | item, load, bin |  |
-| `run_decode` | fn | load (checks) |  |
+| `run_decode` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::x86_64::trap`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `breakpoint` | fn | bin (checks) |  |
-| `TrapFrame` | struct | load (checks) |  |
+| `breakpoint` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `TrapFrame` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `arch::x86_64::vdso`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `USER_VDSO_PROGRAM` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `vdso_can_read_counter` | fn | load |  |
 | `vdso_spec` | fn | load |  |
 
@@ -878,6 +998,8 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `HIGH_RECORDS` | const | load, bin |  |
+| `REFUSAL_RECORDS` | const | load, bin |  |
 | `Which` | enum | item, load |  |
 | `config` | fn | bin |  |
 | `device_limit` | fn | item |  |
@@ -887,7 +1009,7 @@ checks above is `pub` for raised checks (F3).
 | `power` | fn | item, load |  |
 | `read` | fn | item, load |  |
 | `read_through` | fn | item |  |
-| `read_through_now` | fn | load (checks) |  |
+| `read_through_now` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `record` | fn | item, bin |  |
 | `resource_number` | fn | item, load |  |
 | `start` | fn | bin |  |
@@ -898,14 +1020,14 @@ checks above is `pub` for raised checks (F3).
 | `CONTROL` | re-export | item |  |
 | `Config` | re-export | bin |  |
 | `DELEGATED` | re-export | item |  |
-| `DEVICE_LIMIT` | re-export | load (checks) |  |
-| `DEVICE_LIMIT_SET` | re-export | load (checks) |  |
+| `DEVICE_LIMIT` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `DEVICE_LIMIT_SET` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DEVMGR_STARTED` | re-export | item |  |
 | `DOMAIN` | re-export | item, load |  |
-| `Event` | re-export | load (checks) |  |
+| `Event` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `JOB_KILLED` | re-export | item |  |
 | `LIMIT_SET` | re-export | item |  |
-| `NO_UID` | re-export | load (checks) |  |
+| `NO_UID` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Outcome` | re-export | item, bin |  |
 | `PROCESS_MADE` | re-export | item |  |
 | `QUIESCED` | re-export | item |  |
@@ -915,7 +1037,7 @@ checks above is `pub` for raised checks (F3).
 | `Record` | re-export | item, load |  |
 | `STARTER_GIVEN` | re-export | item |  |
 | `WIDEN` | re-export | item |  |
-| `saturated` | re-export | load (checks) |  |
+| `saturated` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `target` | re-export | item, load |  |
 | `Read` | struct | item |  |
 | `Subject` | struct | item, load, bin |  |
@@ -924,10 +1046,12 @@ checks above is `pub` for raised checks (F3).
 | `Read::id` | field | item, load, bin |  |
 | `Read::lost` | field | item, load, bin |  |
 | `Read::next` | field | item, load |  |
+| `Subject::KERNEL` | associated const | item, load, bin |  |
 | `Subject::job` | field | item, load |  |
 | `Subject::pid` | field | item, load |  |
 | `Subject::uid` | field | load |  |
 | `Subject::of` | method | item, load, bin |  |
+| `Target::NONE` | associated const | item, load, bin |  |
 | `Target::id` | field | item, load, bin |  |
 | `Target::kind` | field | item, load, bin |  |
 
@@ -935,11 +1059,11 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `booted` | fn | bin (checks) |  |
+| `booted` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `run` | fn | bin |  |
-| `Booted` | struct | bin (checks) |  |
+| `Booted` | struct | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Expected` | struct | bin |  |
-| `Report` | struct | - |  |
+| `Report` | struct | item, load, bin |  |
 | `Booted::dma_faults_read` | field | bin |  |
 | `Expected::checks` | field | item, load, bin |  |
 | `Expected::devmgr` | field | item, load, bin |  |
@@ -959,14 +1083,14 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `image_start` | fn | bin (checks) |  |
+| `image_start` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `boot_checks`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `run` | fn | item, load (checks) |  |
-| `skip` | fn | item (checks) |  |
+| `run` | fn | item, load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `skip` | fn | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `claim`
 
@@ -981,7 +1105,7 @@ checks above is `pub` for raised checks (F3).
 | `Claims::release` | method | item, load, bin |  |
 | `Claims::release_one` | method | load |  |
 | `Claims::wait_until_released` | method | load |  |
-| `Claims::wait_within` | method | load (checks) |  |
+| `Claims::wait_within` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Numbers::give_back` | method | item, load |  |
 | `Numbers::new` | method | item, load, bin |  |
 | `Numbers::take` | method | item, load |  |
@@ -991,8 +1115,8 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `mark_ready` | fn | bin |  |
-| `recent` | fn | load (checks) |  |
-| `write` | fn | - |  |
+| `recent` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `write` | fn | load |  |
 | `write_bytes` | fn | load |  |
 | `write_raw` | fn | load |  |
 | `write_unlogged` | fn | - |  |
@@ -1009,15 +1133,15 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `arm_check_byte` | fn | load (checks) |  |
+| `arm_check_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check` | fn | bin |  |
-| `check_byte_taken` | fn | load (checks) |  |
-| `disarm_check_byte` | fn | load (checks) |  |
+| `check_byte_taken` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `disarm_check_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `interrupt_driven` | fn | load |  |
-| `take_check_byte` | fn | load (checks) |  |
+| `take_check_byte` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `waiters` | fn | load |  |
-| `Checked` | struct | - |  |
+| `Checked` | struct | load |  |
 | `Checked::dropped` | field | load, bin |  |
 | `Checked::held` | field | item, load, bin |  |
 
@@ -1025,10 +1149,11 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `CAPACITY` | const | load |  |
 | `read` | fn | load |  |
 | `unread` | fn | load |  |
 | `written` | fn | load |  |
-| `Read` | struct | - |  |
+| `Read` | struct | item, load |  |
 | `Read::copied` | field | item, load, bin |  |
 | `Read::lost` | field | item, load, bin |  |
 
@@ -1037,22 +1162,22 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check_pstore_placement` | fn | bin |  |
-| `run` | fn | bin (checks) |  |
-| `Report` | struct | - |  |
+| `run` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report` | struct | item, load, bin |  |
 | `Report::kept` | field | item, load, bin |  |
 | `Report::lost` | field | item, load, bin |  |
 | `Report::processors` | field | load, bin |  |
-| `Report::raced` | field | bin (checks) |  |
-| `Report::read_racing` | field | bin (checks) |  |
+| `Report::raced` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::read_racing` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `console::output`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `check` | fn | bin (checks) |  |
-| `Checked` | struct | - |  |
+| `check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Checked` | struct | load |  |
 | `Checked::by_interrupt` | field | item, bin |  |
-| `Checked::by_writer` | field | bin (checks) |  |
+| `Checked::by_writer` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Checked::line` | field | item, load, bin |  |
 
 ### `console::pstore`
@@ -1076,7 +1201,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `ConfigRefusal` | enum | item |  |
 | `Location` | enum | item, load |  |
-| `Register` | enum | load (checks) |  |
+| `Register` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Stopped` | enum | bin |  |
 | `claim_line` | fn | item |  |
 | `devices` | fn | item, load, bin |  |
@@ -1088,14 +1213,14 @@ checks above is `pub` for raised checks (F3).
 | `node_writable` | fn | load (checks) | checks-only |
 | `publish` | fn | bin |  |
 | `check` | mod | load, bin |  |
-| `Aperture` | struct | - |  |
+| `Aperture` | struct | load |  |
 | `Breach` | struct | - |  |
 | `ConfigFound` | struct | item |  |
 | `ConfigState` | struct | - | checks-only |
 | `ConfigWrites` | struct | load (checks) | checks-only |
 | `DeviceNode` | struct | item, load |  |
 | `DmaShape` | struct | load |  |
-| `Failure` | struct | load (checks) |  |
+| `Failure` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `MappedConfig` | struct | - | checks-only |
 | `MintedBar` | struct | - | checks-only |
 | `MsiFunction` | struct | - | checks-only |
@@ -1107,23 +1232,24 @@ checks above is `pub` for raised checks (F3).
 | `Seen` | struct | item |  |
 | `Vector` | struct | - |  |
 | `VirtioBlocks` | struct | - |  |
-| `Window` | struct | - |  |
-| `Aperture::cacheable` | method | load (checks) |  |
+| `Window` | struct | load |  |
+| `Aperture::cacheable` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Aperture::info` | method | item, load, bin |  |
 | `Aperture::len` | method | item, load, bin |  |
 | `Aperture::phys` | method | item, load, bin |  |
-| `Aperture::whole_pages` | method | load (checks) |  |
+| `Aperture::whole_pages` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Breach::register` | field | item, load, bin |  |
 | `ConfigFound::bytes` | field | item, load, bin |  |
 | `ConfigFound::command` | field | item, load |  |
 | `ConfigFound::writable` | field | item, load |  |
 | `ConfigState::bus_master` | field | load (checks) | pub for raised checks; type unobtainable from product API |
 | `ConfigState::memory` | field | load, bin | pub for raised checks; type unobtainable from product API |
+| `ConfigWrites::FUNCTION` | associated const | load (checks) |  |
 | `ConfigWrites::state` | field | item, load, bin | pub for raised checks; type unobtainable from product API |
 | `DeviceNode::aperture` | method | item, load, bin |  |
 | `DeviceNode::aperture_info` | method | item, load |  |
 | `DeviceNode::apertures` | method | item, load, bin |  |
-| `DeviceNode::bind_board` | method | load (checks) |  |
+| `DeviceNode::bind_board` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::binding` | method | load |  |
 | `DeviceNode::breach` | method | load, bin | checks-only |
 | `DeviceNode::config_phys` | method | item, load | checks-only |
@@ -1152,7 +1278,7 @@ checks above is `pub` for raised checks (F3).
 | `DeviceNode::pci_function` | method | load |  |
 | `DeviceNode::reads_log` | method | load |  |
 | `DeviceNode::vector` | method | item, load |  |
-| `DeviceNode::vector_count` | method | load (checks) |  |
+| `DeviceNode::vector_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DeviceNode::verify_config` | method | item, load |  |
 | `DmaShape::coherent` | field | item, load |  |
 | `DmaShape::contiguous` | field | load |  |
@@ -1216,6 +1342,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `EDU` | const | load (checks) | checks-only |
 | `order` | fn | bin |  |
 | `reserved` | fn | bin |  |
 
@@ -1296,18 +1423,18 @@ checks above is `pub` for raised checks (F3).
 | `EarlyMemory::map_device` | method | item, load, bin |  |
 | `EarlyMemory::map_framebuffer` | method | bin |  |
 | `EarlyMemory::new` | method | item, load, bin |  |
-| `EarlyMemory::read_physical_byte` | method | bin (checks) |  |
+| `EarlyMemory::read_physical_byte` | method | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `EarlyMemory::translate` | method | bin |  |
 
 ### `fallible`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `inject` | fn | load (checks) |  |
-| `inject_once` | fn | load (checks) |  |
+| `inject` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `inject_once` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `insert` | fn | load |  |
 | `install_library_sections` | fn | bin |  |
-| `stop_injecting` | fn | load (checks) |  |
+| `stop_injecting` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `try_arc` | fn | item, load |  |
 | `try_arc_cyclic` | fn | load |  |
 | `AllocError` | re-export | item, load |  |
@@ -1338,26 +1465,26 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `Cause` | enum | load (checks) |  |
+| `Cause` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DomainError` | enum | item, load |  |
-| `Wait` | enum | load (checks) |  |
+| `Wait` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `bring_up` | fn | bin |  |
 | `domain_for` | fn | item, load |  |
 | `learn_bridge` | fn | item |  |
-| `register_invalidations_pending` | fn | load (checks) |  |
+| `register_invalidations_pending` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `report` | fn | bin |  |
 | `check` | mod | load, bin |  |
 | `gate` | mod | load (checks) | pub for raised checks |
 | `remapping` | mod | load (checks) | pub for raised checks |
 | `vtd` | mod | load (checks) | pub for raised checks |
-| `CHECK_VECTOR` | re-export | load (checks) |  |
-| `Invalidations` | re-export | load (checks) |  |
+| `CHECK_VECTOR` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Invalidations` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check_dma_faults` | re-export | bin |  |
-| `check_gate` | re-export | load (checks) |  |
-| `console_vectors` | re-export | load (checks) |  |
-| `invalidations` | re-export | load (checks) |  |
-| `route` | re-export | load (checks) |  |
-| `stray_deliveries` | re-export | load (checks) |  |
+| `check_gate` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `console_vectors` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `invalidations` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `route` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `stray_deliveries` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `PROGRAMMED` | static | load (checks) | checks-only |
 | `BringUp` | struct | - |  |
 | `Domain` | struct | item, load |  |
@@ -1369,7 +1496,7 @@ checks above is `pub` for raised checks (F3).
 | `BringUp::vtd` | field | load, bin |  |
 | `BringUp::why` | field | item, load, bin |  |
 | `Domain::pin` | method | item, load |  |
-| `Domain::pinned_pages` | method | load (checks) |  |
+| `Domain::pinned_pages` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Domain::provoke` | method | item |  |
 | `Domain::queued` | method | load |  |
 | `Domain::resolve` | method | item, load |  |
@@ -1377,8 +1504,8 @@ checks above is `pub` for raised checks (F3).
 | `Domain::take_fault` | method | item, load |  |
 | `Domain::translated` | method | item, load |  |
 | `Domain::unpin` | method | item, load |  |
-| `Domain::untranslated` | method | load (checks) |  |
-| `Fault::cause` | field | load (checks) |  |
+| `Domain::untranslated` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Fault::cause` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Fault::page` | field | item, load |  |
 | `Fault::stream` | field | item, load |  |
 | `Fault::write` | field | item, load |  |
@@ -1392,7 +1519,7 @@ checks above is `pub` for raised checks (F3).
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check_dma_faults` | fn | bin |  |
-| `run` | fn | load (checks) |  |
+| `run` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FIRMWARE_QUEUES_STOPPED` | static | load (checks) | checks-only |
 | `MASKED_BYTE_SERVED` | static | load (checks) | checks-only |
 
@@ -1400,51 +1527,52 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `waits_with_interrupts_on` | fn | load (checks) |  |
+| `waits_with_interrupts_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `iommu::remapping`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `Route` | enum | - |  |
-| `any_remapping` | fn | load (checks) |  |
-| `console_vectors` | fn | load (checks) |  |
-| `live_line` | fn | load (checks) |  |
-| `route` | fn | load (checks) |  |
-| `stray_deliveries` | fn | load (checks) |  |
+| `CHECK_VECTOR` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Route` | enum | load |  |
+| `any_remapping` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `console_vectors` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `live_line` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `route` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `stray_deliveries` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `FORCED_UNISOLATED` | static | load (checks) | checks-only |
 | `LiveLine` | struct | - |  |
-| `LiveLine::loop_back` | field | load (checks) |  |
+| `LiveLine::loop_back` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `iommu::vtd`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `check_planted_completion_error` | fn | load (checks) | checks-only |
-| `cleaning` | fn | load (checks) |  |
-| `invalidations` | fn | load (checks) |  |
-| `Cleaning` | struct | load (checks) |  |
-| `Invalidations` | struct | load (checks) |  |
-| `Unit` | struct | - |  |
+| `cleaning` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `invalidations` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Cleaning` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Invalidations` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Unit` | struct | item |  |
 | `Cleaning::checked` | field | item, load, bin |  |
 | `Cleaning::entries` | field | item, load |  |
 | `Cleaning::tables` | field | load, bin |  |
-| `Cleaning::uncleaned` | field | load (checks) |  |
-| `Cleaning::units` | field | load (checks) |  |
-| `Invalidations::completion_errors` | field | load (checks) |  |
+| `Cleaning::uncleaned` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Cleaning::units` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Invalidations::completion_errors` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Invalidations::context` | field | load |  |
 | `Invalidations::failed` | field | item, load, bin |  |
-| `Invalidations::interrupt_entry` | field | load (checks) |  |
-| `Invalidations::iotlb` | field | load (checks) |  |
-| `Invalidations::units_failed` | field | load (checks) |  |
+| `Invalidations::interrupt_entry` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Invalidations::iotlb` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Invalidations::units_failed` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Unit::remap` | method | load |  |
-| `Unit::remapping` | method | load (checks) |  |
+| `Unit::remapping` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `irq`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `IrqError` | enum | load (checks) |  |
+| `IrqError` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `delivered` | fn | load, bin |  |
 | `register` | fn | item |  |
 | `unclaimed` | fn | load, bin |  |
@@ -1463,36 +1591,37 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `MemoryError` | enum | load (checks) |  |
+| `DEMAND_WINDOW` | const | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `MemoryError` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `allocate_frame_run` | fn | load |  |
 | `allocate_frames` | fn | item, load |  |
 | `allocate_user_frame` | fn | load |  |
-| `claim_frame` | fn | load (checks) |  |
+| `claim_frame` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `deallocate_frames` | fn | item, load |  |
 | `direct_map` | fn | item, load |  |
-| `direct_map_ram` | fn | load (checks) |  |
-| `flags_in` | fn | load (checks) |  |
-| `frame_references` | fn | load (checks) |  |
+| `direct_map_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `flags_in` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `frame_references` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `free_frames` | fn | load, bin |  |
 | `heap_pages` | fn | load |  |
-| `held_frames` | fn | load (checks) |  |
+| `held_frames` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `managed_frames` | fn | load, bin |  |
-| `print_frame_delta` | fn | load (checks) |  |
+| `print_frame_delta` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reclaim_boot_memory` | fn | bin |  |
 | `release_frame` | fn | load |  |
-| `share_frame` | fn | load (checks) |  |
+| `share_frame` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `split_frames` | fn | load |  |
-| `translate` | fn | bin (checks) |  |
-| `translate_in` | fn | load (checks) |  |
+| `translate` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `translate_in` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `watermark` | fn | bin |  |
 | `zero_frame` | fn | item, load |  |
 | `check` | mod | load, bin |  |
-| `bypass_heap_in_sections` | re-export | load (checks) |  |
+| `bypass_heap_in_sections` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fill_reserve` | re-export | bin |  |
-| `refuse_reserve_fills` | re-export | load (checks) |  |
-| `reserve_counts` | re-export | load (checks) |  |
-| `FrameWindow` | struct | load (checks) |  |
+| `refuse_reserve_fills` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `reserve_counts` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `FrameWindow` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Reclaimed` | struct | - |  |
 | `Stats` | struct | bin |  |
 | `FrameWindow::kept` | method | item, load, bin |  |
@@ -1510,21 +1639,21 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `check_pstore_never_free` | fn | bin |  |
 | `check_w_xor_x` | fn | bin |  |
-| `hole_in_ram` | fn | load (checks) |  |
-| `memory_check` | fn | bin (checks) |  |
-| `past_ram` | fn | load (checks) |  |
+| `hole_in_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `memory_check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `past_ram` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `sweep_w_xor_x` | fn | bin |  |
-| `WriteExecute` | struct | - |  |
+| `WriteExecute` | struct | load |  |
 | `WxReport` | struct | - |  |
 
 ### `mm::reserve`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `bypass_heap_in_sections` | fn | load (checks) |  |
+| `bypass_heap_in_sections` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fill_reserve` | fn | bin |  |
-| `refuse_reserve_fills` | fn | load (checks) |  |
-| `reserve_counts` | fn | load (checks) |  |
+| `refuse_reserve_fills` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `reserve_counts` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `mmio`
 
@@ -1544,9 +1673,11 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `HANDLE_LIMIT` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `IN_PLACE_DEPTH` | const | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Object` | enum | item, load |  |
-| `abandoned` | fn | load (checks) |  |
-| `as_if_draining_elsewhere` | fn | load (checks) |  |
+| `abandoned` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `as_if_draining_elsewhere` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dispose` | fn | item, load |  |
 | `channel` | mod | item, load |  |
 | `interrupt` | mod | item, load, bin |  |
@@ -1582,7 +1713,7 @@ checks above is `pub` for raised checks (F3).
 | `Endpoint::read` | method | item, load, bin |  |
 | `Endpoint::read_small` | method | item, load |  |
 | `Endpoint::readable_or_closed` | method | item |  |
-| `Endpoint::reader_waiting` | method | load (checks) |  |
+| `Endpoint::reader_waiting` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Endpoint::send_direct` | method | item |  |
 | `Endpoint::signals` | method | item, load, bin |  |
 | `Endpoint::unpark` | method | item |  |
@@ -1598,24 +1729,25 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `run` | fn | load (checks) |  |
+| `run` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `object::interrupt`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `STORM_BOUND` | const | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `InterruptError` | enum | item |  |
-| `on_interrupt` | fn | load (checks) |  |
-| `take_delivery` | fn | load (checks) |  |
+| `on_interrupt` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `take_delivery` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Delivery` | struct | - |  |
 | `Interrupt` | struct | item, load |  |
 | `Delivery::fire` | method | load |  |
 | `Interrupt::acknowledge` | method | item, load |  |
 | `Interrupt::bind` | method | item, load |  |
-| `Interrupt::coalesces` | method | load (checks) |  |
+| `Interrupt::coalesces` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Interrupt::new` | method | item, load, bin |  |
-| `Interrupt::reads_masked` | method | load (checks) |  |
-| `Interrupt::storms` | method | load (checks) |  |
+| `Interrupt::reads_masked` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Interrupt::storms` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `object::io_mapping`
 
@@ -1623,7 +1755,7 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `IoMappingError` | enum | item |  |
 | `combining_ready` | fn | item |  |
-| `count_one_unprogrammed_for_check` | fn | load (checks) |  |
+| `count_one_unprogrammed_for_check` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `IoMapping` | struct | item |  |
 | `IoMapping::map_into` | method | item, load |  |
 | `IoMapping::new` | method | item, load, bin |  |
@@ -1633,6 +1765,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `KILLED_STATUS` | const | item, load |  |
 | `Budget` | enum | item, load |  |
 | `JobError` | enum | item, load |  |
 | `root` | fn | item, load |  |
@@ -1656,7 +1789,7 @@ checks above is `pub` for raised checks (F3).
 | `Job::frozen_seen` | method | load |  |
 | `Job::id` | method | item, load, bin |  |
 | `Job::is_dying` | method | load |  |
-| `Job::is_killed` | method | load (checks) |  |
+| `Job::is_killed` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Job::is_populated` | method | load |  |
 | `Job::is_removed` | method | load |  |
 | `Job::is_root` | method | load |  |
@@ -1699,17 +1832,19 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `Answer` | enum | load (checks) |  |
-| `fault` | fn | load (checks) |  |
-| `is_charge_refusal` | fn | load (checks) |  |
-| `kills` | fn | load (checks) |  |
-| `out_of_memory` | fn | load (checks) |  |
+| `Answer` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `fault` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `is_charge_refusal` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `kills` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `out_of_memory` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `throttle` | fn | load |  |
 
 ### `object::pin`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `DEFAULT_PIN_BUDGET_PAGES` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `LARGEST_DRIVER_PIN_PAGES` | const | load |  |
 | `BudgetError` | enum | item |  |
 | `PinError` | enum | item, load |  |
 | `budget_of` | fn | item |  |
@@ -1720,13 +1855,13 @@ checks above is `pub` for raised checks (F3).
 | `room` | fn | item |  |
 | `set_budget` | fn | item |  |
 | `set_wait` | fn | load (checks) | checks-only |
-| `Counts` | struct | load (checks) |  |
+| `Counts` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Pin` | struct | item, load |  |
 | `Released` | struct | - | checks-only |
 | `Counts::budget` | field | item, load |  |
 | `Counts::kept` | field | item, load, bin |  |
 | `Counts::live` | field | item, load |  |
-| `Counts::quarantined` | field | load (checks) |  |
+| `Counts::quarantined` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Pin::addresses` | method | item, load, bin |  |
 | `Pin::new` | method | item, load, bin |  |
 | `Pin::with_budget` | method | load (checks) | checks-only |
@@ -1737,6 +1872,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `PORT_CAPACITY` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `PortError` | enum | item |  |
 | `Observer` | struct | item, load |  |
 | `Port` | struct | item, load |  |
@@ -1755,6 +1891,9 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `INIT_PID` | const | item, load |  |
+| `PID_MAX` | const | load |  |
+| `RESERVED` | const | load |  |
 | `Bootstrap` | enum | item |  |
 | `GiveRefused` | enum | item |  |
 | `allocate` | fn | load |  |
@@ -1763,13 +1902,13 @@ checks above is `pub` for raised checks (F3).
 | `find` | fn | load |  |
 | `is_free` | fn | load |  |
 | `listed` | fn | load |  |
-| `live` | fn | load (checks) |  |
+| `live` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `name` | fn | load |  |
 | `numbers_naming` | fn | load |  |
 | `release` | fn | load |  |
 | `release_naming` | fn | load |  |
 | `unlist` | fn | load |  |
-| `Control` | struct | - |  |
+| `Control` | struct | load |  |
 | `Exit` | struct | item, load |  |
 | `Process` | struct | item, load |  |
 | `ProcessRef` | struct | item, load |  |
@@ -1782,7 +1921,7 @@ checks above is `pub` for raised checks (F3).
 | `Control::process` | method | item, load |  |
 | `Control::started` | method | item, load, bin |  |
 | `Exit::close` | method | load |  |
-| `Exit::for_check` | method | load (checks) |  |
+| `Exit::for_check` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Exit::is_closed` | method | item |  |
 | `Exit::observe` | method | item, load |  |
 | `Exit::signal` | method | item, load |  |
@@ -1802,7 +1941,7 @@ checks above is `pub` for raised checks (F3).
 | `Process::leave_speculation_domain_unstarted` | method | load |  |
 | `Process::list_task` | method | load |  |
 | `Process::move_new_to` | method | item, load |  |
-| `Process::move_to` | method | load (checks) |  |
+| `Process::move_to` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Process::new` | method | item, load, bin |  |
 | `Process::over_quota` | method | load |  |
 | `Process::pid` | method | item, load |  |
@@ -1828,32 +1967,38 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `DEFAULT_WEIGHT` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `MAX_WEIGHT` | const | item, load |  |
+| `MIN_WEIGHT` | const | item, load |  |
+| `NONE` | const | load |  |
+| `UNLIMITED` | const | item, load |  |
 | `Counter` | enum | load |  |
 | `Mark` | enum | load |  |
 | `Resource` | enum | item, load |  |
 | `at_limit` | fn | load |  |
-| `bandwidth_in_use` | fn | load (checks) |  |
-| `charge` | fn | load (checks) |  |
+| `bandwidth_in_use` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `charge` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `charging_nobody` | fn | load |  |
-| `check_pending_charge` | fn | load (checks) |  |
-| `contributed` | fn | load (checks) |  |
+| `check_pending_charge` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `contributed` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `count` | fn | load |  |
-| `effective` | fn | load (checks) |  |
-| `effective_with` | fn | load (checks) |  |
+| `effective` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `effective_with` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `job_ended` | fn | load |  |
-| `live_slots` | fn | load (checks) |  |
-| `load` | fn | load (checks) |  |
+| `live_slots` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `load` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `on_job_release` | fn | load |  |
 | `parent_of` | fn | load |  |
-| `uncharge` | fn | load (checks) |  |
+| `uncharge` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Exceeded` | struct | - |  |
-| `Quota` | struct | load (checks) |  |
+| `Quota` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Usage` | struct | item, load |  |
 | `Quota::counted` | method | load, bin |  |
 | `Quota::index` | method | item, load, bin |  |
 | `Quota::new` | method | item, load, bin |  |
 | `Quota::set_limit` | method | item, load |  |
 | `Quota::usage` | method | item, load, bin |  |
+| `Resource::ALL` | associated const | load |  |
 | `Usage::limit` | field | item, load |  |
 | `Usage::refused` | field | item, load, bin |  |
 | `Usage::used` | field | item, load |  |
@@ -1878,81 +2023,81 @@ checks above is `pub` for raised checks (F3).
 | `CONSOLE_DESCRIPTORS` | static | load |  |
 | `CONSOLE_INPUT` | static | bin |  |
 | `CONSOLE_LOG` | static | bin |  |
-| `CONSOLE_OUTPUT` | static | bin (checks) |  |
+| `CONSOLE_OUTPUT` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `DEVMGR_BY_INIT` | static | item |  |
 | `FAST_PATH_CONTINUATION_MASKED` | static | item |  |
-| `INIT_CALLS` | static | bin (checks) |  |
+| `INIT_CALLS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `INIT_EXITED` | static | item |  |
-| `INIT_INPUTS` | static | bin (checks) |  |
+| `INIT_INPUTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `INTERRUPT_BRING_UP` | static | bin |  |
 | `LOAD_REGISTRATION` | static | bin |  |
-| `LOG_CONTROL` | static | bin (checks) |  |
+| `LOG_CONTROL` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `MEMORY_BRING_UP` | static | bin |  |
-| `NETLINK` | static | bin (checks) |  |
+| `NETLINK` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `NET_CORE` | static | bin |  |
-| `NET_RING` | static | bin (checks) |  |
+| `NET_RING` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `PROCESSORS_MISSING` | static | bin |  |
 | `PROCESSOR_DISCOVERY` | static | bin |  |
 | `RANDOM_GENERATOR` | static | bin |  |
 | `ROOT_PID1` | static | load |  |
 | `SCHEDULER_BRING_UP` | static | bin |  |
 | `SECONDARY_START` | static | bin |  |
-| `SERVICES` | static | bin (checks) |  |
-| `SPECULATION_DEFENCES` | static | bin (checks) |  |
-| `STAGE10_CHARDEV` | static | bin (checks) |  |
+| `SERVICES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `SPECULATION_DEFENCES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE10_CHARDEV` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE10_CONFIG` | static | bin |  |
 | `STAGE10_DEVICES` | static | bin |  |
 | `STAGE10_DEVMGR` | static | bin |  |
 | `STAGE10_DISTRIBUTOR` | static | bin |  |
 | `STAGE10_DRIVER` | static | bin |  |
-| `STAGE10_IOMMU` | static | load (checks) |  |
+| `STAGE10_IOMMU` | static | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE10_PCI` | static | bin |  |
-| `STAGE10_RING` | static | bin (checks) |  |
-| `STAGE11_MOUNT` | static | bin (checks) |  |
+| `STAGE10_RING` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE11_MOUNT` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE12_WRITE` | static | bin |  |
-| `STAGE13_CGROUPFS` | static | bin (checks) |  |
-| `STAGE13_MOUNT_NAMESPACES` | static | bin (checks) |  |
-| `STAGE13_NETWORK_NAMESPACES` | static | bin (checks) |  |
-| `STAGE13_PID_NAMESPACES` | static | bin (checks) |  |
-| `STAGE13_PROC_ACCESS` | static | bin (checks) |  |
-| `STAGE13_SECCOMP` | static | bin (checks) |  |
-| `STAGE13_SECCOMP_FILTERS` | static | bin (checks) |  |
-| `STAGE13_SMALL_NAMESPACES` | static | bin (checks) |  |
-| `STAGE13_USER_NAMESPACES` | static | bin (checks) |  |
+| `STAGE13_CGROUPFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_MOUNT_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_NETWORK_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_PID_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_PROC_ACCESS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_SECCOMP` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_SECCOMP_FILTERS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_SMALL_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE13_USER_NAMESPACES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE1_HANDOFF` | static | bin |  |
-| `STAGE2_ALLOCATORS` | static | bin (checks) |  |
+| `STAGE2_ALLOCATORS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE2_FINISH_MEMORY` | static | bin |  |
 | `STAGE3_MACHINE` | static | bin |  |
 | `STAGE3_TIMER` | static | bin |  |
-| `STAGE3_TRAPS` | static | bin (checks) |  |
+| `STAGE3_TRAPS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE4_SMP` | static | bin |  |
 | `STAGE5_SCHEDULER` | static | bin |  |
-| `STAGE6_REVERSE_MAP` | static | bin (checks) |  |
-| `STAGE6_USER_MEMORY` | static | bin (checks) |  |
-| `STAGE7_SEMAPHORES` | static | bin (checks) |  |
-| `STAGE7_SHARED_MEMORY` | static | bin (checks) |  |
-| `STAGE7_SYSCALLS` | static | bin (checks) |  |
-| `STAGE8_BINDS` | static | bin (checks) |  |
-| `STAGE8_EPOLL` | static | bin (checks) |  |
-| `STAGE8_EVENTFD` | static | bin (checks) |  |
+| `STAGE6_REVERSE_MAP` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE6_USER_MEMORY` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE7_SEMAPHORES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE7_SHARED_MEMORY` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE7_SYSCALLS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_BINDS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_EPOLL` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_EVENTFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_FILESYSTEM` | static | bin |  |
 | `STAGE8_FILE_MAPPINGS` | static | bin |  |
-| `STAGE8_MADVISE` | static | bin (checks) |  |
-| `STAGE8_MEMFD` | static | bin (checks) |  |
-| `STAGE8_MOUNT_FLAGS` | static | bin (checks) |  |
-| `STAGE8_PATH_CALLS` | static | bin (checks) |  |
+| `STAGE8_MADVISE` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_MEMFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_MOUNT_FLAGS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_PATH_CALLS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_PIPES_AND_FILESYSTEM_CALLS` | static | bin |  |
-| `STAGE8_PROGRAM_FILES` | static | bin (checks) |  |
+| `STAGE8_PROGRAM_FILES` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `STAGE8_PSEUDO_FILESYSTEMS` | static | bin |  |
 | `STAGE8_ROOT` | static | bin |  |
-| `STAGE8_SIGNALFD` | static | bin (checks) |  |
-| `STAGE8_TIMERFD` | static | bin (checks) |  |
-| `STAGE9_ALLOCATION` | static | bin (checks) |  |
-| `STAGE9_KMEM` | static | bin (checks) |  |
-| `STAGE9_OBJECTS` | static | bin (checks) |  |
-| `STAGE9_QUOTAS` | static | bin (checks) |  |
-| `STAGE9_REFUSALS` | static | bin (checks) |  |
-| `SYSFS` | static | bin (checks) |  |
+| `STAGE8_SIGNALFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE8_TIMERFD` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_ALLOCATION` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_KMEM` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_OBJECTS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_QUOTAS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAGE9_REFUSALS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `SYSFS` | static | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SYSRQ_CRASH` | static | load |  |
 | `TIMER_REGISTRATION` | static | bin |  |
 | `VMAP_ARENA_BRING_UP` | static | bin |  |
@@ -1980,25 +2125,26 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `ask_for_a_decision_here` | fn | load (checks) |  |
-| `bandwidth_walks` | fn | load (checks) |  |
+| `REAPER_PATIENCE_NANOS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `ask_for_a_decision_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `bandwidth_walks` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `begin_leaving` | fn | load |  |
 | `call_left` | fn | item |  |
 | `charge_running` | fn | load |  |
-| `cpu_report` | fn | load (checks) |  |
+| `cpu_report` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `cpu_times` | fn | load |  |
 | `current` | fn | item, load |  |
 | `current_id` | fn | load |  |
 | `current_runtime` | fn | load |  |
-| `decision_pending_here` | fn | load (checks) |  |
+| `decision_pending_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `exit_leaving` | fn | load |  |
-| `in_call_here` | fn | load (checks) |  |
+| `in_call_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `may_block` | fn | item |  |
-| `pending_group_here` | fn | load (checks) |  |
-| `preemption_held` | fn | load (checks) |  |
+| `pending_group_here` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `preemption_held` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `prepare_user` | fn | load |  |
-| `reap` | fn | load (checks) |  |
+| `reap` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `rearm_timers` | fn | load |  |
 | `regroup_current` | fn | item |  |
 | `running_group` | fn | item, load |  |
@@ -2008,15 +2154,15 @@ checks above is `pub` for raised checks (F3).
 | `sleep_for` | fn | load |  |
 | `sleep_until` | fn | load |  |
 | `spawn` | fn | item, load |  |
-| `spawn_in_group` | fn | load (checks) |  |
-| `spawn_on` | fn | load (checks) |  |
-| `spawn_on_in` | fn | load (checks) |  |
-| `spawn_user` | fn | load (checks) |  |
-| `summary` | fn | load (checks) |  |
+| `spawn_in_group` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `spawn_on` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `spawn_on_in` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `spawn_user` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `summary` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `tasks_made` | fn | load |  |
 | `throttle_current` | fn | item |  |
 | `wait_until_gone` | fn | load |  |
-| `wait_until_reaper_quiet` | fn | load (checks) |  |
+| `wait_until_reaper_quiet` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `wake` | fn | load |  |
 | `yield_now` | fn | load |  |
 | `direct` | mod | item, load |  |
@@ -2024,12 +2170,12 @@ checks above is `pub` for raised checks (F3).
 | `work` | mod | item, load, bin |  |
 | `LastLook` | re-export | item |  |
 | `Task` | re-export | item, load |  |
-| `TaskId` | re-export | load (checks) |  |
+| `TaskId` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `UserThread` | re-export | load |  |
 | `WaitQueue` | re-export | item, load |  |
-| `check_before_start` | re-export | bin (checks) |  |
-| `preempt_disable` | re-export | load (checks) |  |
-| `preempt_enable` | re-export | load (checks) |  |
+| `check_before_start` | re-export | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `preempt_disable` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `preempt_enable` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `records_kept` | re-export | load |  |
 | `run_checks` | re-export | bin |  |
 | `with_current` | re-export | item, load |  |
@@ -2037,7 +2183,7 @@ checks above is `pub` for raised checks (F3).
 | `CpuTime` | struct | load |  |
 | `PreparedTask` | struct | load |  |
 | `Summary` | struct | - |  |
-| `CpuReport::worst_overrun` | field | load (checks) |  |
+| `CpuReport::worst_overrun` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CpuTime::busy_ns` | field | load |  |
 | `CpuTime::idle_ns` | field | load |  |
 | `CpuTime::runnable` | field | load |  |
@@ -2055,9 +2201,9 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `before_start` | fn | bin (checks) |  |
+| `before_start` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `run` | fn | bin |  |
-| `Report` | struct | - |  |
+| `Report` | struct | item, load, bin |  |
 | `Report::balanced` | field | bin |  |
 | `Report::bound` | field | item, load, bin |  |
 | `Report::load_high` | field | bin |  |
@@ -2085,15 +2231,15 @@ checks above is `pub` for raised checks (F3).
 | `block_parked` | fn | item |  |
 | `count` | fn | item |  |
 | `counts` | fn | item, load |  |
-| `uncount` | fn | load (checks) |  |
+| `uncount` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `sched::preempt`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `counting` | fn | load |  |
-| `preempt_disable` | fn | load (checks) |  |
-| `preempt_enable` | fn | load (checks) |  |
+| `preempt_disable` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `preempt_enable` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Preempt` | struct | - |  |
 
 ### `sched::task`
@@ -2102,47 +2248,49 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `Task` | struct | item, load |  |
 | `UserThread` | trait | load |  |
-| `TaskId` | type | load (checks) |  |
+| `TaskId` | type | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::id` | field | item, load, bin |  |
-| `Task::base_weight` | method | load (checks) |  |
+| `Task::base_weight` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::core_process` | method | item, load |  |
 | `Task::cpu` | method | load |  |
-| `Task::cpus_run_on` | method | load (checks) |  |
-| `Task::entity_state` | method | load (checks) |  |
-| `Task::group_word` | method | load (checks) |  |
+| `Task::cpus_run_on` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Task::entity_state` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Task::group_word` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::is_blocked` | method | load |  |
 | `Task::is_dead` | method | load |  |
-| `Task::is_queued` | method | load (checks) |  |
-| `Task::preemptions` | method | load (checks) |  |
+| `Task::is_queued` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Task::preemptions` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Task::runtime` | method | load |  |
 | `Task::state` | method | item, load, bin |  |
 | `Task::switches` | method | load, bin |  |
 | `Task::take_reply` | method | item |  |
 | `Task::thread` | method | item, load |  |
-| `Task::user_state` | method | load (checks) |  |
+| `Task::user_state` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `sched::trip`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `Count` | enum | load (checks) |  |
-| `Stamp` | enum | load (checks) |  |
-| `Traced` | enum | load (checks) |  |
+| `NAMES` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `STAMPS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Count` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Stamp` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Traced` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `answered` | fn | load |  |
-| `arm` | fn | load (checks) |  |
+| `arm` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `bell` | fn | load |  |
-| `counted` | fn | load (checks) |  |
-| `disarm` | fn | load (checks) |  |
-| `done` | fn | load (checks) |  |
-| `issued` | fn | load (checks) |  |
+| `counted` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `disarm` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `done` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `issued` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `on_ring` | fn | load |  |
 | `port_rung` | fn | item |  |
 | `port_taken` | fn | item |  |
 | `queued` | fn | load |  |
 | `reader_running` | fn | load |  |
 | `ring_running` | fn | load |  |
-| `Counted` | struct | load (checks) |  |
-| `Trip` | struct | load (checks) |  |
+| `Counted` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Trip` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Counted::counts` | field | item, load, bin |  |
 | `Counted::slept` | field | load, bin |  |
 | `Trip::at` | field | item, load, bin |  |
@@ -2170,8 +2318,12 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `arm` | fn | load (checks) |  |
-| `disarm` | fn | load (checks) |  |
+| `END` | const | load |  |
+| `HOOK_LAST_LOOK` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `SIGNAL` | const | load |  |
+| `STOP` | const | load |  |
+| `arm` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `disarm` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `has_end` | fn | load |  |
 | `hook_armed_by` | fn | bin |  |
 | `notify` | fn | load |  |
@@ -2179,7 +2331,7 @@ checks above is `pub` for raised checks (F3).
 | `post` | fn | load |  |
 | `post_own` | fn | load |  |
 | `posting` | fn | load |  |
-| `set_auditing` | fn | item (checks) |  |
+| `set_auditing` | fn | item (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check` | mod | load (checks) | pub for raised checks |
 | `Posting` | struct | - |  |
 | `PreparedTask::task` | method | item, load |  |
@@ -2188,14 +2340,15 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `run` | fn | load (checks) |  |
-| `Report` | struct | - |  |
+| `run` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report` | struct | item, load, bin |  |
 | `Report::tries` | field | load |  |
 
 ### `signal_frame`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `SIGINFO_BYTES` | const | load |  |
 | `BadFrame` | struct | load |  |
 | `FrameRequest` | struct | load |  |
 | `Restored` | struct | - |  |
@@ -2220,17 +2373,18 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `SYSCALLS_WORD_OFFSET` | const | load |  |
 | `count` | fn | load |  |
 | `discover` | fn | bin |  |
-| `scoped_shootdowns` | fn | load (checks) |  |
-| `shootdowns` | fn | load (checks) |  |
+| `scoped_shootdowns` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `shootdowns` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `start_secondaries` | fn | bin |  |
 | `this_cpu` | fn | load, bin |  |
 | `topology` | fn | load |  |
 | `check` | mod | bin |  |
 | `OwnCount` | struct | - |  |
 | `PerCpu` | struct | load |  |
-| `ScopedShootdowns` | struct | load (checks) |  |
+| `ScopedShootdowns` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Topology` | struct | load, bin |  |
 | `OwnCount::read` | method | item, load, bin |  |
 | `PerCpu::hardware_id` | field | load |  |
@@ -2254,7 +2408,7 @@ checks above is `pub` for raised checks (F3).
 | `migrating_shootdown` | fn | bin |  |
 | `run` | fn | bin |  |
 | `LateAnswers` | struct | - |  |
-| `Report` | struct | - |  |
+| `Report` | struct | item, load, bin |  |
 | `LateAnswers::grace_us` | field | bin |  |
 | `LateAnswers::held` | field | item, load, bin |  |
 | `LateAnswers::shootdown_us` | field | bin |  |
@@ -2287,6 +2441,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `WORD` | const | load |  |
 | `UserError` | enum | item, load |  |
 | `copy_cstr_from_user` | fn | load |  |
 | `copy_from_user` | fn | item, load |  |
@@ -2304,46 +2459,47 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `after` | fn | bin (checks) |  |
-| `after_from` | fn | bin (checks) |  |
+| `after` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `after_from` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `counter_hz` | fn | load, bin |  |
-| `every` | fn | bin (checks) |  |
+| `every` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `now_nanos` | fn | item, load, bin |  |
-| `stop` | fn | bin (checks) |  |
+| `stop` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `ticks` | fn | bin |  |
-| `writes_here` | fn | bin (checks) |  |
+| `writes_here` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `trap`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `MAX_ERRNO` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Abi` | enum | item, load |  |
 | `Fast` | enum | item, bin |  |
 | `FaultOutcome` | enum | load |  |
 | `Outcome` | enum | item, load |  |
 | `Verdict` | enum | load |  |
-| `ask` | fn | load (checks) |  |
+| `ask` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `attention_due` | fn | load |  |
 | `breakpoint_count` | fn | bin |  |
 | `fast_write_read` | fn | item, load |  |
 | `filter_quiet` | fn | item |  |
-| `filter_system_call` | fn | load (checks) |  |
+| `filter_system_call` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `handled_fault_count` | fn | load, bin |  |
 | `must_attend` | fn | item |  |
-| `register` | fn | load (checks) |  |
+| `register` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `set_fast_write_read` | fn | item |  |
 | `set_quiet_syscall_filter` | fn | bin |  |
 | `set_return_path` | fn | load |  |
 | `set_syscall_entry` | fn | bin |  |
 | `system_call` | fn | item, load |  |
-| `user_interrupt_count` | fn | load (checks) |  |
+| `user_interrupt_count` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `check` | mod | load (checks) | pub for raised checks |
 | `ReturnPath` | struct | load |  |
 | `SyscallArgs` | struct | item, load |  |
 | `FastWriteRead` | type | bin |  |
 | `FilterQuiet` | type | bin |  |
-| `SyscallFilter` | type | load (checks) |  |
+| `SyscallFilter` | type | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `ReturnPath::fault_signal` | field | load |  |
 | `ReturnPath::needs_attention` | field | load |  |
 | `ReturnPath::return_to_user` | field | load |  |
@@ -2357,7 +2513,7 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `outcomes` | fn | load (checks) |  |
+| `outcomes` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `user`
 
@@ -2374,21 +2530,22 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `run` | fn | load (checks) |  |
-| `Report` | struct | - |  |
-| `Report::absorbed` | field | load (checks) |  |
+| `run` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report` | struct | item, load, bin |  |
+| `Report::absorbed` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Report::failed` | field | item, load, bin |  |
-| `Report::scenarios` | field | load (checks) |  |
+| `Report::scenarios` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `user::cache`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `ENTRY_HEAP` | const | load |  |
 | `reclaim` | fn | load |  |
 | `resident` | fn | load |  |
 | `totals` | fn | load |  |
 | `Reclaimed` | struct | - |  |
-| `Totals` | struct | load (checks) |  |
+| `Totals` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Reclaimed::stolen` | field | load |  |
 | `Totals::dirty` | field | load |  |
 | `Totals::disk` | field | load, bin |  |
@@ -2401,28 +2558,29 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `run` | fn | bin (checks) |  |
-| `Report` | struct | - |  |
+| `run` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report` | struct | item, load, bin |  |
 | `Report::committed` | field | load, bin |  |
 | `Report::copied` | field | item, load, bin |  |
 | `Report::faulted` | field | item, load, bin |  |
 | `Report::leaked` | field | load, bin |  |
 | `Report::reserved` | field | item, load, bin |  |
-| `Report::swapped` | field | bin (checks) |  |
-| `Report::walked` | field | load, bin (checks) |  |
+| `Report::swapped` | field | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Report::walked` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `user::memory_type`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
 | `MemoryType` | enum | load |  |
-| `claims` | fn | load (checks) |  |
+| `claims` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `MemoryType::of` | method | item, load, bin |  |
 
 ### `user::space`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `MMAP_MIN_ADDR` | const | load |  |
 | `Advice` | enum | load |  |
 | `Declined` | enum | load |  |
 | `Destination` | enum | load |  |
@@ -2433,6 +2591,8 @@ checks above is `pub` for raised checks (F3).
 | `FileMapping` | struct | load |  |
 | `Region` | struct | load |  |
 | `WindowPages` | struct | load |  |
+| `Access::READ` | associated const | item, load |  |
+| `Access::WRITE` | associated const | item, load |  |
 | `AddressSpace::advise` | method | load |  |
 | `AddressSpace::ceiling` | method | item, load |  |
 | `AddressSpace::domain` | method | item, load |  |
@@ -2454,17 +2614,17 @@ checks above is `pub` for raised checks (F3).
 | `AddressSpace::new` | method | item, load, bin |  |
 | `AddressSpace::object` | method | item, load, bin |  |
 | `AddressSpace::protect` | method | load |  |
-| `AddressSpace::region_count` | method | load (checks) |  |
+| `AddressSpace::region_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::regions` | method | item, load, bin |  |
 | `AddressSpace::remap` | method | load |  |
 | `AddressSpace::resident_pages` | method | load |  |
-| `AddressSpace::root_table` | method | load (checks) |  |
+| `AddressSpace::root_table` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::set_ceiling` | method | load |  |
 | `AddressSpace::shared_code_at` | method | load |  |
 | `AddressSpace::shared_object_at` | method | load |  |
-| `AddressSpace::uninstall` | method | load (checks) |  |
+| `AddressSpace::uninstall` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::unmap` | method | load |  |
-| `AddressSpace::with_page` | method | load (checks) |  |
+| `AddressSpace::with_page` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `AddressSpace::with_present_page` | method | load |  |
 | `AddressSpace::with_regions` | method | load |  |
 | `FileMapping::file` | field | item, load, bin |  |
@@ -2484,15 +2644,15 @@ checks above is `pub` for raised checks (F3).
 |---|---|---|---|
 | `RunError` | enum | item |  |
 | `VmoError` | enum | item, load |  |
-| `arm_reclaim_hook` | fn | load (checks) |  |
-| `disarm_reclaim_hook` | fn | load (checks) |  |
+| `arm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `disarm_reclaim_hook` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `reclaim_hook_armed_by` | fn | bin |  |
 | `Held` | struct | item, load |  |
-| `ReclaimHook` | struct | load (checks) |  |
+| `ReclaimHook` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Vmo` | struct | item, load |  |
 | `Filler` | trait | load |  |
 | `Held::frames` | method | item, load |  |
-| `ReclaimHook::armed_by` | field | load (checks) |  |
+| `ReclaimHook::armed_by` | field | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `ReclaimHook::run` | field | item, load, bin |  |
 | `Vmo::commit_and_write` | method | load |  |
 | `Vmo::commit_run` | method | item |  |
@@ -2509,7 +2669,7 @@ checks above is `pub` for raised checks (F3).
 | `Vmo::len_bytes` | method | item, load |  |
 | `Vmo::len_pages` | method | load |  |
 | `Vmo::make_coherent` | method | item, load |  |
-| `Vmo::mapper_count` | method | load (checks) |  |
+| `Vmo::mapper_count` | method | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Vmo::new_anonymous` | method | item, load |  |
 | `Vmo::new_filled` | method | load |  |
 | `Vmo::page` | method | item, load |  |
@@ -2528,14 +2688,17 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `VmapError` | enum | load (checks) |  |
+| `DEMAND_WINDOW` | const | bin |  |
+| `FRAMEBUFFER_WINDOW` | const | bin |  |
+| `FRAMEBUFFER_WINDOW_SIZE` | const | bin |  |
+| `VmapError` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `init` | fn | bin |  |
 | `map_device` | fn | item, load |  |
 | `unmap_device` | fn | item, load |  |
 | `usage` | fn | load, bin |  |
 | `Buffer` | struct | load |  |
-| `Stack` | struct | load (checks) |  |
-| `Usage` | struct | - |  |
+| `Stack` | struct | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Usage` | struct | load |  |
 | `Buffer::truncate` | method | item, load |  |
 | `Buffer::zeroed` | method | item, load |  |
 | `Stack::base` | field | item, load, bin |  |
@@ -2585,7 +2748,7 @@ checks above is `pub` for raised checks (F3).
 | `Request` | enum | load |  |
 | `bound_to` | fn | load |  |
 | `by_init` | fn | load, bin |  |
-| `driver_ending` | fn | load (checks) |  |
+| `driver_ending` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `driver_of` | fn | load |  |
 | `drivers_on` | fn | load |  |
 | `has_reader` | fn | bin |  |
@@ -2598,7 +2761,7 @@ checks above is `pub` for raised checks (F3).
 | `start` | fn | bin |  |
 | `wait_reported` | fn | load |  |
 | `DriverName` | struct | - |  |
-| `Report` | struct | - |  |
+| `Report` | struct | load, bin |  |
 | `Report::devices` | field | load, bin |  |
 | `Report::drivers` | field | bin |  |
 | `Report::failed` | field | load, bin |  |
@@ -2615,15 +2778,16 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `report` | fn | bin (checks) |  |
+| `report` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 
 ### `init`
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
+| `AUDIT_RIGHTS` | const | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `Failure` | enum | load |  |
 | `Image` | enum | load |  |
-| `bootstrap_channel` | fn | load (checks) |  |
+| `bootstrap_channel` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `has_launcher` | fn | bin |  |
 | `notify_root` | fn | load |  |
 | `read_option` | fn | bin |  |
@@ -2655,9 +2819,9 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `check` | fn | bin (checks) |  |
+| `check` | fn | bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CheckReport` | struct | - |  |
-| `CheckReport::cases` | field | load, bin (checks) |  |
+| `CheckReport::cases` | field | load, bin (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `CheckReport::refusals` | field | load, bin |  |
 
 ### `power`
@@ -2694,13 +2858,13 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `dispatch` | fn | load (checks) |  |
+| `dispatch` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `dispatch_with` | fn | bin |  |
-| `report_unanswered` | fn | load (checks) |  |
+| `report_unanswered` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `unanswered` | fn | load |  |
 | `native` | mod | load, bin |  |
 | `program` | mod | load |  |
-| `Outcome` | re-export | load (checks) |  |
+| `Outcome` | re-export | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `SyscallArgs` | re-export | load |  |
 | `uaccess` | re-export | load |  |
 | `Personality` | trait | load |  |
@@ -2709,27 +2873,27 @@ checks above is `pub` for raised checks (F3).
 
 | Item | Kind | Named by | Note |
 |---|---|---|---|
-| `Parked` | enum | load (checks) |  |
+| `Parked` | enum | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `StartRefused` | enum | load |  |
 | `control_channel` | fn | load |  |
-| `dispatch` | fn | load (checks) |  |
+| `dispatch` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `fast_write_read` | fn | bin |  |
-| `faulted_rounds` | fn | load (checks) |  |
+| `faulted_rounds` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `give_bootstrap` | fn | load |  |
 | `insert_new` | fn | load |  |
-| `park_for_reply` | fn | load (checks) |  |
+| `park_for_reply` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `port_in` | fn | load |  |
 | `processes` | fn | bin |  |
 | `register_processes` | fn | load |  |
 | `register_server` | fn | load |  |
-| `reply_words` | fn | load (checks) |  |
-| `sent_bytes` | fn | load (checks) |  |
+| `reply_words` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `sent_bytes` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
 | `serve` | fn | load |  |
 | `served_count` | fn | bin |  |
 | `server_count` | fn | bin |  |
 | `unserved` | fn | bin |  |
-| `words_of` | fn | load (checks) |  |
-| `Buffer` | struct | - |  |
+| `words_of` | fn | load (checks) | formerly crate-wide, used above only by checks (1531 C1) |
+| `Buffer` | struct | load |  |
 | `Processes` | struct | load |  |
 | `Server` | struct | load |  |
 | `Argument` | type | load |  |

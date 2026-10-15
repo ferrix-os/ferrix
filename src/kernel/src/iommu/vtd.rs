@@ -1249,7 +1249,7 @@ fn clear_stale_errors(registers: Mmio) -> Result<(), &'static str> {
     Ok(())
 }
 
-// CHECKS-ONLY: iommu/domain_check.rs
+// CHECKS-ONLY: iommu/domain_check.rs; home: super
 /// Plant an invalidation completion error (`ICE`) on `unit`, as if the
 /// unit had raised one, and require an invalidation to fail on it, the
 /// error to be cleared and counted, and the next invalidation to succeed

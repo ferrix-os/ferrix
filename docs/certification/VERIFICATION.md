@@ -146,9 +146,37 @@ to *reached* and none away from it; 14 arguments whose statements are now
 reached were dropped and two trimmed to the lines still unreached
 (`~/ferrix-logs/bs-a/s3b/dropped-arguments-x86_64.json` on nazuna). Decision
 coverage over the same traces: the item's branches taken both ways 4,520 of
-15,150 (29.8%), against 4,018 of 12,618 (31.8%). AArch64 and ARMv7-A wait
-for an Arm QEMU the plugin loads in (`docs/BACKLOG.md`); their figures above
-are carried, not re-measured.
+15,150 (29.8%), against 4,018 of 12,618 (31.8%).
+
+*The run, and what the union holds.* Of the suite's boots on 2026-10-15,
+`test-shell` (System V semaphores: "a waiter returned without waiting"),
+`test-vfs` (stage 13: "cgroup.events did not poll POLLPRI when its cgroup
+froze") and `test-jobs` (the console session did not answer Ctrl-Z) failed
+under the load; each was run again alone under the plugin into the same
+directory and passed, and the union holds those reruns' traces (`shell`,
+`shell.2` to `.4`, `vfs`, `jobs`) with every other gate's from the suite run
+-- 35 traces, the empty ones of `test-powerfail`'s cuts left out. So
+condition B3 of ledger line 1517, that a measurement's suite pass on the
+build it measures, is met gate by gate. `boot-legacy` and `boot-single` reach
+`FERRIX-BOOT-OK` and fail xtask's R8 expectation, on every tree since N0g
+(`docs/BACKLOG.md`); their traces are whole and in the union.
+
+*The floor* (`coverage-floor.json`) is 87.0 for x86-64 from this
+measurement, by the file's own rule (the figure less one point, rounded
+down to a half; ledger line 1777, S3.4). The figure moved by the build, not
+by what the suite reaches: of the 29,345 statements of the 2026-09-27
+measurement's boot kernel (e5f3110f) that it reached, mapped line by line to
+this tree, 24 are unreached now, all in paths a boot takes by timing or by
+machine -- the reset's controller wait, a contended spin and a writer's
+wake, a refused interrupt's give-back, the boot's `fatal!` arms and its
+firmware and KASLR details that `boot-options` and `boot-legacy` print --
+and none in code the split changed (`~/ferrix-logs/bs-a/s3b/floor-proof.txt`
+on nazuna, by `floor_proof.py` beside it).
+
+*AArch64 and ARMv7-A* are not re-measured: their `coverage-<arch>.json`,
+residuals and arguments describe the single-crate kernel measured on
+2026-09-27 at 9e196852, carried since, and their floors stay until they are
+measured on the split (`docs/BACKLOG.md`, which owes it to this landing).
 
 The Arm pair's figures are a little below their previous measurement (90.2%
 and 84.8%) although the suite reached more: in between, init's start of

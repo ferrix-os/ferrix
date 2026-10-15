@@ -99,49 +99,49 @@
     },
     {
       "file": "arch/armv7a/switch.rs",
-      "lines": "857",
+      "lines": "862",
       "category": "absent-hardware",
       "match": "}",
       "why": "The row is `save_user_state`'s return with no VFP registers to save (`user_fpu_doubles` zero): a core without VFP. Every ARMv7-A core the kernel boots on -- QEMU's Cortex-A7 and A15, the STM32MP157's A7 -- has VFP with 32 double registers, and the save path runs on every switch."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "372",
+      "lines": "374",
       "category": "credited-elsewhere",
       "match": "Trap::PageFault(fault) => (SIGSEGV, SEGV_MAPERR, fault.address),",
       "why": "Run by `object/check.rs`'s null write, which ends its program with SIGSEGV and `SEGV_MAPERR`, through the copy of `fault_signal` that `handle_page_fault` inlines, under another row. The line's only statement row is in the copy `dispatch` inlines through `user_fault` for traps that are not page faults, where a page fault cannot arrive."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "650",
+      "lines": "652",
       "category": "credited-elsewhere",
       "match": "_ => Trap::Fault {",
       "why": "`classify`'s arm for a vector entry that is neither an interrupt, an undefined instruction, a system call nor an abort: reset, hypervisor trap or FIQ. The stage 3 machine check classifies each from a built frame, in its own copy under other rows; the line's only statement row is in `dispatch`'s copy, which none of those entries reaches on a running kernel -- the stubs for them are the kernel's own failure, which it stops on."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "682",
+      "lines": "684",
       "category": "credited-elsewhere",
       "match": "_ => Trap::Fault {",
       "why": "`abort`'s arm for a fault status that is neither translation, access flag, permission, alignment nor debug: an external abort. The stage 3 machine check decodes data and prefetch external aborts from built frames, in its own copy; the line's only statement row is in `dispatch`'s copy, which runs it only when the memory system reports an external abort, which QEMU's does not."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "691, 705, 711, 721, 723, 727-733, 738, 744",
+      "lines": "693, 707, 713, 723, 725, 729-735, 740, 746",
       "category": "failure-path",
       "match": "match kind {",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`), and `kind_name` as it inlines it there; a passing run never prints it."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "692",
+      "lines": "694",
       "category": "credited-elsewhere",
       "match": "KIND_RESET => \"reset\",",
       "why": "`kind_name` for the reset entry, in `classify`'s arm above (line 550): named by the machine check's frame in its own copy, and in `dispatch`'s only when the kernel's reset stub is taken."
     },
     {
       "file": "arch/armv7a/trap.rs",
-      "lines": "697",
+      "lines": "699",
       "category": "credited-elsewhere",
       "match": "KIND_HYP_TRAP => \"hypervisor trap\",",
       "why": "`kind_name` for the hypervisor-trap entry, as line 592."

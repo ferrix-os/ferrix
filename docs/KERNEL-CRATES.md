@@ -324,7 +324,8 @@ review and the regenerated evidence), S4 1.
   B, conditions B1 to B5) only if shape A does not compile, with the error in
   the S3 commit.
 * **S3** (branch `bs-a-s3b`; the consultant's rulings during it, ledger
-  lines 1585 and 1630; its code review cites them): the split, §5.
+  lines 1585 and 1630; the code review, ledger line 1777, NOT YET on one
+  point, narrowed at line 1795 and met, OK IF (S3.1)-(S3.8)): the split, §5.
 * S4: the edit figures per ring are in `docs/TEST-TIME.md` with S3's; the
   kernel clippy step after an edit in each ring too.
 
@@ -388,18 +389,18 @@ does not apply to exported functions.
 
 **The interface** (§3 (4); ledger line 1531, D5): `tools/common/gen/kernel-interface.py`
 lists every `pub` of a core or item file in
-`docs/generated/KERNEL-INTERFACE.md` -- 2,126 declarations, 53 checks-only
+`docs/generated/KERNEL-INTERFACE.md` -- 2,290 declarations, 65 checks-only
 -- with the crates above that name each, and `--check`, in `cargo xtask
 check`, fails on a list that differs from the tree, on a `pub` no crate
 above names and no named item's signature carries (a dead interface), and
 on a `pub` item that is not checks-only naming a checks-only type or a
 kernel trait implemented for one (ledger line 1630, F2.2).
 
-**Checks-only** (§3 (4)(b)): 39 items -- free functions, statics,
+**Checks-only** (§3 (4)(b)): 44 items -- free functions, statics,
 constants and types made `pub` from private or `pub(super)` for a raised
 check alone -- carry `// CHECKS-ONLY:` and `#[doc(hidden)]`; the gate
 refuses a path to one from product code outside the item's own module.
-14 methods and foreign functions of that kind carry `#[doc(hidden)]`, and
+21 methods and foreign functions of that kind carry `#[doc(hidden)]`, and
 the generator writes them into `.clippy.toml`'s `disallowed-methods`; the
 raised checks that call them allow the lint for the file, the defining
 modules per function with a reason. Fields (ledger line 1630): a
@@ -411,6 +412,22 @@ only for raised checks are not marked (F3); the layering rule keeps load
 product code out of an architecture's own module. A product file naming a
 raised check, or a check file of another crate, fails the gate (Q2.2,
 F3.2), the composition root excepted.
+
+**Narrower items and the register** (ledger lines 1777, 1795): an item that
+was private or `pub(super)` before the split, is `pub` now and is named above
+only by checks is CHECKS-ONLY with its home scope -- `// CHECKS-ONLY: ...;
+home: super` for a `pub(super)` one, and `// CHECKS-ONLY-METHODS: home:
+super` in a file for its methods -- so its old siblings still use it and
+nothing else may (USER_SPSR, USER_CPSR, bring_up_vfp, six x86-64 and one
+ARMv7-A `UserState` methods among them). The 483 declarations that were
+`pub(crate)` before the split and are named above only by checks are listed
+in `tools/common/data/kernel-formerly-crate-wide.json`: core and item
+internals the load's checks reach, which load product code could reach
+before the split exactly as now, so none is newly exposed (1531 C1's debt).
+`kernel-interface.py --check` fails on a declaration named above only by
+checks that is neither marked nor listed, and on a list entry that is no
+longer pub, is now named by product code above, is named by no check, or
+was narrower than `pub(crate)`; the list only shrinks.
 
 **F-76** (ledger line 1585, Q1): the core's and the item's manifests name
 25 libraries no ring classifies; each crate lists exactly those under
@@ -434,7 +451,15 @@ trip's figures). The coverage evidence was carried with the line matching
 blind to visibility (`~/ferrix-logs/bs-a/s3b/carry_vis.py`), and every
 carried line checked to stay in its function (`span_check.py`, F-75).
 
+**Release performance** (line 1477 (10)): the IPC round trip on x86-64
+release, ABAB against 89a7cf74c, read 0.988 with a spread of 0.713 to 1.164
+over 5 rounds on a busy host (load 18 to 37) -- inconclusive, and owed on a
+quiet host (`docs/BACKLOG.md`); the release boot's cost lines are within the
+load's noise.
+
 **Coverage** (line 1477 (9)): x86-64's evidence is measured again on the
 split, debug and release (`docs/certification/VERIFICATION.md` §3.1 and
 §3.2): 143 x86-64 requirement statuses moved to *reached*, none away. The
-Arm pair's is carried until an Arm QEMU loads the plugin (`docs/BACKLOG.md`).
+Arm pair's is carried until an Arm QEMU loads the plugin (`docs/BACKLOG.md`). The x86-64 floor is 87.0 from this
+measurement, with the statement-level comparison in
+`docs/certification/VERIFICATION.md` §3.1.

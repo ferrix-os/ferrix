@@ -204,14 +204,14 @@
     },
     {
       "file": "arch/aarch64/trap.rs",
-      "lines": "610, 616-617, 623-624, 628, 630, 637, 643",
+      "lines": "612, 618-619, 625-626, 630, 632, 639, 645",
       "category": "failure-path",
       "match": "pub(crate) fn report_trap(frame: &TrapFrame) {",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it."
     },
     {
       "file": "arch/aarch64/trap.rs",
-      "lines": "634",
+      "lines": "636",
       "category": "failure-path",
       "match": "println_unlogged!(\"  x30 {:#018x}\", frame.x.get(30).copied()",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it."

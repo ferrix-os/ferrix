@@ -25,6 +25,8 @@ use ferrix_sched::MAX_CPUS;
 use super::cpu;
 use super::gdt;
 
+// CHECKS-ONLY-METHODS: home: super
+
 /// Bytes the switch pushes: six registers and the return address.
 const FRAME_BYTES: u64 = 7 * 8;
 
@@ -369,11 +371,13 @@ impl UserState {
 
     /// The 512-byte `FXSAVE` area: what a signal frame carries as `fpstate`,
     /// through [`UserState::vectors`].
+    #[doc(hidden)]
     pub fn fxsave(&self) -> [u8; 512] {
         self.vectors().legacy
     }
 
     /// The same area, for `rt_sigreturn` to fill from the frame.
+    #[doc(hidden)]
     pub fn fxsave_mut(&mut self) -> &mut [u8; 512] {
         self.materialise();
         &mut self.fpu.legacy
@@ -381,6 +385,7 @@ impl UserState {
 
     /// Which components the area holds, `XSTATE_BV`: a component left out
     /// is in its initial state, all zero for AVX.
+    #[doc(hidden)]
     pub fn xstate_bv(&self) -> u64 {
         self.vectors()
             .header
@@ -390,6 +395,7 @@ impl UserState {
 
     /// Set `XSTATE_BV`. `XRSTOR` refuses with `#GP` a component `XCR0` does
     /// not enable, so only those are kept.
+    #[doc(hidden)]
     pub fn set_xstate_bv(&mut self, components: u64) {
         let kept = components & cpu::extended_state_components();
         self.materialise();
@@ -400,11 +406,13 @@ impl UserState {
 
     /// The upper halves of the sixteen `YMM` registers, through
     /// [`UserState::vectors`].
+    #[doc(hidden)]
     pub fn avx(&self) -> [u8; 256] {
         self.vectors().avx
     }
 
     /// The same, for `rt_sigreturn` to fill from the frame.
+    #[doc(hidden)]
     pub fn avx_mut(&mut self) -> &mut [u8; 256] {
         self.materialise();
         &mut self.fpu.avx

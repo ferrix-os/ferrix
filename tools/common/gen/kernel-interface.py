@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import re
 import sys
 from collections import defaultdict
@@ -59,6 +60,7 @@ gate = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gate)
 
 DOC = ROOT / "docs" / "generated" / "KERNEL-INTERFACE.md"
+REGISTER = ROOT / "tools" / "common" / "data" / "kernel-formerly-crate-wide.json"
 CLIPPY = ROOT / ".clippy.toml"
 BEGIN = "# BEGIN kernel-interface.py"
 END = "# END kernel-interface.py"
@@ -83,6 +85,7 @@ class Entry:
         self.checks_only = False
         self.named_by: set[str] = set()       # crates above naming it
         self.named_by_checks_only = True      # every naming file is a check
+        self.formerly_crate_wide = False
 
     def key(self):
         return (self.module, self.container or "", self.name, self.kind)
@@ -248,8 +251,13 @@ def parse(rel: str, source: str) -> list[Entry]:
             if ctx == "block":
                 i += 1
                 continue
-            while j < n and toks[j] in ("const", "unsafe", "async", "extern", "default") or \
-                    (j < n and toks[j - 1] == "extern" and toks[j] not in ITEM_KINDS):
+            # Qualifiers before the item's keyword. `const` is one only before
+            # `fn` (or `unsafe fn`); `pub const NAME` is a constant.
+            while j < n and (
+                (toks[j] in ("unsafe", "async", "extern", "default"))
+                or (toks[j] == "const" and j + 1 < n and toks[j + 1] in ("fn", "unsafe", "extern"))
+                or (toks[j - 1] == "extern" and toks[j] not in ITEM_KINDS)
+            ):
                 j += 1
             word = toks[j] if j < n else ""
             here = module_path()
@@ -358,7 +366,13 @@ def crates_of(manifest, files, read, exists):
     return crate
 
 
-def analyse(manifest, files, read, exists):
+def register_key(e) -> str:
+    """How `formerly_crate_wide` names a declaration."""
+    what = f"{e.container.split(' ')[0]}::{e.name}" if e.container else e.name
+    return f"{e.file}: {what} ({e.kind})"
+
+
+def analyse(manifest, files, read, exists, register=None):
     """(entries of core and item files, crate of each file, problems)."""
     crate = crates_of(manifest, files, read, exists)
     entries: list[Entry] = []
@@ -387,14 +401,21 @@ def analyse(manifest, files, read, exists):
         for module, name in rec.seen:
             path_named[(module, name)][mine].add(gate.is_test_file(ref.file, manifest))
     token_named: dict[str, dict[str, set[bool]]] = defaultdict(lambda: defaultdict(set))
+    # A name as a path's last segment (`::NAME`), for the paths the gate's
+    # parser does not read as paths: `0..object::port::PORT_CAPACITY`, after
+    # a range's dots.
+    tail_named: dict[str, dict[str, set[bool]]] = defaultdict(lambda: defaultdict(set))
     for rel in files:
         mine = crate.get(rel)
         if mine is None:
             continue
         test = gate.is_test_file(rel, manifest)
-        for tok, _ in rustlex.tokens(rustlex.mask(read(rel))):
+        toks = [t for t, _ in rustlex.tokens(rustlex.mask(read(rel)))]
+        for i, tok in enumerate(toks):
             if gate.IDENT.match(tok):
                 token_named[tok][mine].add(test)
+                if i and toks[i - 1] == "::":
+                    tail_named[tok][mine].add(test)
     for e in entries:
         mine = RANK[crate[e.file]]
         if e.kind in ("method", "field", "macro", "associated const", "associated type", "foreign fn",
@@ -409,6 +430,8 @@ def analyse(manifest, files, read, exists):
                 source[other] = source.get(other, set()) | tests
         else:
             source = path_named.get((e.module, e.name), {})
+            if not any(RANK[o] > RANK[crate[e.file]] for o in source):
+                source = tail_named.get(e.name, {})
         for other, tests in source.items():
             if RANK[other] > mine:
                 e.named_by.add(other)
@@ -470,6 +493,42 @@ def analyse(manifest, files, read, exists):
                         problems.append(f"{rel}: impl {trait[-1]} for checks-only "
                                         f"{[x for x in target if x in types_marked][0]}: a kernel trait "
                                         f"would hand product code one (ledger line 1630, F2.2)")
+    # Used above only by checks (ledger line 1795, S3.2): a declaration that
+    # was narrower than pub(crate) is CHECKS-ONLY with its home; one that was
+    # pub(crate) -- reachable by every load file before the split -- is in
+    # the `formerly_crate_wide` register, 1531 C1's debt, which only shrinks.
+    def only_checks(e):
+        return bool(e.named_by) and e.named_by_checks_only
+
+    listed = {}
+    for item in (register or {}).get("entries", []):
+        listed[item["item"]] = item
+    for e in entries:
+        e.formerly_crate_wide = register_key(e) in listed
+        if e.checks_only or e.kind == "mod" or not only_checks(e):
+            continue
+        if e.container and e.container.split(" ")[0] in types_marked:
+            continue
+        if not e.formerly_crate_wide:
+            problems.append(f"{e.file}:{e.line}: pub {e.kind} {e.name}"
+                            f"{f' of {e.container}' if e.container else ''} is used above only by checks and is "
+                            f"neither CHECKS-ONLY nor in formerly_crate_wide (ledger line 1795, S3.2)")
+    by_key = defaultdict(list)
+    for e in entries:
+        by_key[register_key(e)].append(e)
+    for key, item in sorted(listed.items()):
+        if item.get("before") != "pub(crate)":
+            problems.append(f"formerly_crate_wide: {key} was {item.get('before')} before the split, narrower "
+                            f"than pub(crate): it is marked CHECKS-ONLY with its home, never listed")
+            continue
+        found = by_key.get(key, [])
+        if not found:
+            problems.append(f"formerly_crate_wide: {key} is no pub declaration now; the entry is stale")
+        elif any(e.named_by and not e.named_by_checks_only for e in found):
+            problems.append(f"formerly_crate_wide: {key} is used by a higher crate's product code now -- a "
+                            f"change to the item's interface; the entry is stale")
+        elif not any(e.named_by for e in found):
+            problems.append(f"formerly_crate_wide: {key} is used by no check above; the entry is stale")
     return entries, crate, problems, types_marked
 
 
@@ -542,6 +601,8 @@ def render(entries, crate, types_marked) -> str:
                     note.append("pub for raised checks; type unobtainable from product API")
                 if e.kind == "mod" and e.named_by and e.named_by_checks_only:
                     note.append("pub for raised checks")
+                if e.formerly_crate_wide:
+                    note.append("formerly crate-wide, used above only by checks (1531 C1)")
                 out.append(f"| `{what}` | {e.kind} | {named} | {'; '.join(note)} |")
             out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
@@ -572,16 +633,19 @@ _FIX = {
              "// CHECKS-ONLY: fs.rs\n#[doc(hidden)]\npub struct Secret {\n    pub inner: u8,\n}\n"
              "// CHECKS-ONLY: fs.rs\n#[doc(hidden)]\npub fn secret() -> Secret { Secret { inner: 0 } }\n"
              "impl Secret {\n    pub fn again(&self) -> Secret { Secret { inner: self.inner } }\n}\n"
-             "pub struct Node;\nimpl Node {\n    #[doc(hidden)]\n    pub fn probe(&self) {}\n}\n",
+             "pub struct Node;\nimpl Node {\n    #[doc(hidden)]\n    pub fn probe(&self) {}\n}\n"
+             "pub fn checked() {}\npub const LIMIT: u32 = 1;\n",
+    # A load check naming `checked`, which product code above does not.
+    "fs/check.rs": "fn c() { crate::mm::checked(); }\n",
     "syscall/mod.rs": "pub fn dispatch() { crate::mm::frame(); }\n",
-    "fs.rs": "pub fn open() { crate::syscall::dispatch(); let _ = crate::mm::secret().again().inner; "
-             "crate::mm::Node.probe(); }\n",
+    "fs.rs": "pub mod check;\npub fn open() { crate::syscall::dispatch(); let _ = crate::mm::secret().again().inner; "
+             "crate::mm::Node.probe(); let _ = crate::mm::LIMIT; }\n",
     "stages_check.rs": "fn s() {}\n",
 }
 _MANIFEST = {
     "rings": {"core": {"members": ["kernel_core.rs", "mm.rs"]},
               "item": {"members": ["kernel_item.rs", "main.rs", "syscall/mod.rs", "stages_check.rs"]},
-              "load": {"members": ["kernel_load.rs", "fs.rs"]}},
+              "load": {"members": ["kernel_load.rs", "fs.rs", "fs/check.rs"]}},
     "test_file_patterns": ["check.rs", "*_check.rs"],
     "kernel_crates": {
         "ferrix-kernel": {"path": "k", "root": "main.rs", "rings": []},
@@ -605,11 +669,24 @@ _CASES = [
 ]
 
 
-def _run_fixture(files):
+_REGISTER = {"entries": [{"item": "mm.rs: checked (fn)", "before": "pub(crate)"}]}
+_REGISTER_CASES = [
+    ("an unlisted, unmarked item used above only by checks", {}, None, "neither CHECKS-ONLY nor in"),
+    ("a stale entry: no such pub item",
+     {"entries": _REGISTER["entries"] + [{"item": "mm.rs: gone (fn)", "before": "pub(crate)"}]}, None,
+     "mm.rs: gone (fn) is no pub declaration now"),
+    ("a stale entry: used by product code above now", _REGISTER,
+     {"fs.rs": _FIX["fs.rs"] + "fn p() { crate::mm::checked(); }\n"}, "used by a higher crate's product code"),
+    ("an entry narrower than pub(crate)",
+     {"entries": [{"item": "mm.rs: checked (fn)", "before": "pub(super)"}]}, None, "narrower than pub(crate)"),
+]
+
+
+def _run_fixture(files, register=_REGISTER):
     added = {e["root"] for e in _MANIFEST["kernel_crates"].values()} - gate.ROOT_FILES
     gate.ROOT_FILES.update(added)
     try:
-        return analyse(_MANIFEST, sorted(files), files.__getitem__, files.__contains__)
+        return analyse(_MANIFEST, sorted(files), files.__getitem__, files.__contains__, register)
     finally:
         gate.ROOT_FILES.difference_update(added)
 
@@ -621,13 +698,17 @@ def self_test() -> list[str]:
         failures.append(f"a clean fixture was refused: {problems}")
     names = {(e.name, e.kind, e.checks_only) for e in entries}
     for want in [("secret", "fn", True), ("Secret", "struct", True), ("probe", "method", True),
-                 ("inner", "field", False), ("frame", "fn", False)]:
+                 ("inner", "field", False), ("frame", "fn", False), ("LIMIT", "const", False)]:
         if want not in names:
             failures.append(f"the fixture's {want} was not listed: {sorted(names)}")
     if ("ferrix_kernel_core::mm::Node::probe", "mm.rs") not in clippy_paths(entries, crate):
         failures.append(f"the checks-only method is not in the clippy list: {clippy_paths(entries, crate)}")
     for what, change, expect in _CASES:
         _, _, found, _ = _run_fixture(dict(_FIX, **change))
+        if not any(expect in p for p in found):
+            failures.append(f"{what} passed: {found}")
+    for what, register, change, expect in _REGISTER_CASES:
+        _, _, found, _ = _run_fixture(dict(_FIX, **(change or {})), register)
         if not any(expect in p for p in found):
             failures.append(f"{what} passed: {found}")
     return failures
@@ -649,8 +730,9 @@ def main() -> int:
     manifest = gate.load_manifest()
     files = gate.kernel_files()
     read = lambda rel: (gate.KERNEL_SRC / rel).read_text(encoding="utf-8")  # noqa: E731
+    register = json.loads(REGISTER.read_text(encoding="utf-8")) if REGISTER.is_file() else {}
     entries, crate, problems, types_marked = analyse(manifest, files, read,
-                                                     lambda rel: (gate.KERNEL_SRC / rel).is_file())
+                                                     lambda rel: (gate.KERNEL_SRC / rel).is_file(), register)
     text = render(entries, crate, types_marked)
     block = clippy_block(entries, crate)
     status = 0

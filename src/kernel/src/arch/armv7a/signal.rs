@@ -291,6 +291,10 @@ fn write_registers(
     frame.put_u32(uc + CPSR, context.frame.cpsr)
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "in the home of a method made pub only for a raised check: pub(super) before the split"
+)]
 /// Write the VFP record at `at`, if this core has a VFP; the zero word that
 /// ends the record list is already there either way.
 fn write_vfp(frame: &mut FrameBytes, at: usize) -> Result<(), BadFrame> {
