@@ -491,7 +491,9 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         };
         let index = u32::try_from(index).unwrap_or(u32::MAX);
         let Ok(info) = device.info() else {
-            say(format_args!("devmgr   device {index}: no info; not started"));
+            say(format_args!(
+                "devmgr   device {index}: no info; not started"
+            ));
             failed += 1;
             continue;
         };
