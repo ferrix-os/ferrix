@@ -58,10 +58,14 @@ const ACCEPTED: &str = "  smbios   ";
 /// Why a boot's log does not show what it should of the SMBIOS tables, if
 /// it does not.
 ///
-/// Every architecture boots firmware that installs QEMU's table, and the
-/// kernel must accept it; on x86-64, whose firmware passes QEMU's strings
-/// through, the line must name exactly [`VENDOR`] and [`PRODUCT`]. No line,
-/// the loader's included, may hold a serial or the UUID.
+/// Pinned from the gated boots of 2026-10-15 (d1-boot-kvm-1, d1-boot-a64-1,
+/// d1-boot-a32-1; `docs/DMI.md` §3.4): on every architecture the firmware
+/// xtask boots installs QEMU's table with QEMU's strings -- OVMF its 2.8
+/// 32-bit entry point unless `FERRIX_X86_MACHINE` asks for another, AAVMF and
+/// U-Boot a 3.0 64-bit one -- so the loader must say it copied that kind,
+/// and the kernel's line must name exactly [`VENDOR`] (escaped) and
+/// [`PRODUCT`]. No line, the loader's included, may hold a serial or the
+/// UUID.
 ///
 /// Verifies: H.BOOT.16
 pub(crate) fn problem(arch: Arch, lines: &[String]) -> Option<String> {
@@ -82,17 +86,19 @@ pub(crate) fn problem(arch: Arch, lines: &[String]) -> Option<String> {
             "the kernel did not accept the firmware's SMBIOS table: `{said}`"
         ));
     };
-    if !lines.iter().any(|line| line.contains(LOADER_COPIED)) {
-        return Some(
-            "the loader never said it copied the SMBIOS tables, so its part of the log \
-             was not seen"
-                .to_owned(),
-        );
+    let kind = entry_point_kind(arch, std::env::var("FERRIX_X86_MACHINE").ok().as_deref());
+    if !lines
+        .iter()
+        .any(|line| line.contains(LOADER_COPIED) && line.contains(kind))
+    {
+        return Some(format!(
+            "the loader never said it copied a {kind} SMBIOS entry point's tables, so its \
+             part of the log was not seen as this firmware writes it"
+        ));
     }
-    if arch == Arch::X86_64
-        && !line
-            .trim_end()
-            .ends_with(&format!(": {VENDOR_SHOWN} {PRODUCT}"))
+    if !line
+        .trim_end()
+        .ends_with(&format!(": {VENDOR_SHOWN} {PRODUCT}"))
     {
         return Some(format!(
             "the kernel's SMBIOS line does not name `{VENDOR_SHOWN}` and `{PRODUCT}`: `{}`",
@@ -100,6 +106,22 @@ pub(crate) fn problem(arch: Arch, lines: &[String]) -> Option<String> {
         ));
     }
     None
+}
+
+/// The entry point the firmware xtask boots on `arch` installs, as the
+/// loader's line names it: `(32-bit)` or `(64-bit)`. On x86-64 QEMU's
+/// `smbios-entry-point-type` in `FERRIX_X86_MACHINE` decides; OVMF's
+/// default under `auto` was the 32-bit one.
+fn entry_point_kind(arch: Arch, x86_machine: Option<&str>) -> &'static str {
+    match arch {
+        Arch::X86_64
+            if x86_machine.is_some_and(|extra| extra.contains("smbios-entry-point-type=64")) =>
+        {
+            "(64-bit)"
+        }
+        Arch::X86_64 => "(32-bit)",
+        Arch::AArch64 | Arch::Armv7a => "(64-bit)",
+    }
 }
 
 /// What the loader's line holds when it copied the tables.
@@ -128,18 +150,34 @@ mod tests {
             "  smbios   3.0 entry point (64-bit), table of 400 bytes copied",
             "  smbios   3.0, 9 structures in 380 bytes: Ferrix QEMU \\xc3\\xa9 Ferrix test machine",
         ]);
-        assert_eq!(problem(Arch::X86_64, &boot), None);
         assert_eq!(problem(Arch::AArch64, &boot), None);
+        assert_eq!(problem(Arch::Armv7a, &boot), None);
+        let x86 = lines(&[
+            "  smbios   2.8 entry point (32-bit), table of 508 bytes copied",
+            "  smbios   2.8, 10 structures in 508 bytes: Ferrix QEMU \\xc3\\xa9 Ferrix test machine",
+        ]);
+        assert_eq!(entry_point_kind(Arch::X86_64, None), "(32-bit)");
+        assert_eq!(
+            entry_point_kind(Arch::X86_64, Some("smbios-entry-point-type=64")),
+            "(64-bit)"
+        );
+        if std::env::var_os("FERRIX_X86_MACHINE").is_none() {
+            assert_eq!(problem(Arch::X86_64, &x86), None);
+            assert!(
+                problem(Arch::X86_64, &boot).is_some(),
+                "64-bit on x86 by default"
+            );
+        }
     }
 
     #[test]
-    fn another_name_fails_on_x86_64_only() {
+    fn another_name_fails() {
         let boot = lines(&[
             "  smbios   3.0 entry point (64-bit), table of 400 bytes copied",
             "  smbios   3.0, 9 structures in 380 bytes: QEMU Standard PC",
         ]);
-        assert!(problem(Arch::X86_64, &boot).is_some());
-        assert_eq!(problem(Arch::Armv7a, &boot), None);
+        assert!(problem(Arch::AArch64, &boot).is_some());
+        assert!(problem(Arch::Armv7a, &boot).is_some());
     }
 
     #[test]
@@ -159,7 +197,7 @@ mod tests {
                 "  smbios   3.0, 9 structures in 380 bytes: Ferrix QEMU \\xc3\\xa9 Ferrix test machine",
                 &format!("FERRIX-BOOT-OK {marker}"),
             ]);
-            assert!(problem(Arch::X86_64, &boot).is_some(), "{marker}");
+            assert!(problem(Arch::AArch64, &boot).is_some(), "{marker}");
         }
     }
 
@@ -169,11 +207,11 @@ mod tests {
             "  smbios   3.0 entry point (64-bit), table of 400 bytes copied",
             "  smbios   3.0, 9 structures in 380 bytes: Ferrix QEMU \u{e9} Ferrix test machine",
         ]);
-        assert!(problem(Arch::X86_64, &raw).is_some());
+        assert!(problem(Arch::AArch64, &raw).is_some());
         let no_loader = lines(&[
             "  smbios   3.0, 9 structures in 380 bytes: Ferrix QEMU \\xc3\\xa9 Ferrix test machine",
         ]);
-        assert!(problem(Arch::X86_64, &no_loader).is_some());
+        assert!(problem(Arch::AArch64, &no_loader).is_some());
     }
 
     #[test]

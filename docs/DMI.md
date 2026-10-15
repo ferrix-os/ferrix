@@ -208,14 +208,22 @@ write with `EACCES`, as kernfs does for a file without a `store`.
 
 ### 3.4 AArch64 and ARMv7-A
 
-The loader code is shared, so the same path runs on both: Ferrix shows
-whatever SMBIOS table the firmware it boots on installs. QEMU's `virt`
-machine builds a 3.x table and offers it to firmware over `fw_cfg`
-(virt.c:1694-1717); whether the firmware xtask boots on `virt` installs it
-in the configuration table is what the AArch64 and ARMv7-A boots show, and
-is recorded in §6 rather than assumed. A machine whose firmware installs
-none (the DK1's U-Boot, the Pixel 7's bootloader, which is not UEFI) has no
-`/sys/class/dmi` and no `/sys/firmware/dmi`, as Linux on it has none.
+The loader code is shared, so the same path runs on every architecture:
+Ferrix shows whatever SMBIOS table the firmware it boots on installs. Under
+QEMU all three do, with QEMU's strings, as the gated boots of 2026-10-15 on
+436771d45 showed (`~/.local/share/ferrix/logs/queue/`):
+
+| Architecture | Firmware | Entry point handed over | Row |
+|---|---|---|---|
+| x86_64 | OVMF | 2.8, 32-bit (QEMU's `auto`; `smbios-entry-point-type=64` gives 3.0) | d1-boot-kvm-1 |
+| aarch64 | AAVMF (EDK2 ArmVirtQemu) | 3.0, 64-bit (`virt` builds only that one, virt.c:1715) | d1-boot-a64-1 |
+| armv7a | U-Boot (UEFI) | 3.0, 64-bit | d1-boot-a32-1 |
+
+xtask's `smbios::problem` pins exactly this per architecture. A machine
+whose firmware installs none (the Pixel 7's bootloader, which is not UEFI;
+the DK1's U-Boot as configured, not yet looked at) has no `/sys/class/dmi`
+and no `/sys/firmware/dmi`, as Linux on it has none, and the sysfs check's
+absent branch is what runs there.
 
 ## 4. Checks
 
