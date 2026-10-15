@@ -250,7 +250,20 @@ fn script(wine: Wine, gryphlink: bool) -> String {
         })
         .filter(|_| gryphlink);
     let body = replaced.unwrap_or_else(|| SCRIPT.to_owned());
-    format!("{}{body}", wine.prelude()).replace(FSYNC_PLACE, fsync())
+    let script = format!("{}{body}", wine.prelude()).replace(FSYNC_PLACE, fsync());
+    // ep-wine scratch, never land: FERRIX_EP_PRE names a shell file run
+    // before the launcher starts (in the GRYPHLINK directory, prefix made).
+    match std::env::var_os("FERRIX_EP_PRE") {
+        Some(path) => {
+            let pre = std::fs::read_to_string(path).expect("FERRIX_EP_PRE");
+            script.replacen(
+                "cd /tmp/wine/prefix/drive_c/GRYPHLINK\n",
+                &format!("cd /tmp/wine/prefix/drive_c/GRYPHLINK\n{pre}\n"),
+                1,
+            )
+        }
+        None => script,
+    }
 }
 
 /// Where [`SCRIPT`] says whether fsync is on.
