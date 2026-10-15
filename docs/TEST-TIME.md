@@ -982,6 +982,59 @@ workspace's renames, an item not held whole, a randomizing crate in the lock,
 and no unit reading the item before P3; each of 17 sabotages of those checks
 fails a test (`~/ferrix-logs/bs-b2/sabotage/`).
 
+### Cut B6: the audits as units keyed on the whole item (P3a, bs-b2-p3)
+
+With `FERRIX_STEP_CACHE=on`, each of `check`'s audits beside the main
+workspace is a unit of the step cache, `audit:<name>`: on a miss it runs as
+`cargo xtask check-audit` under `strace` (Python writing no byte-code), and
+when it passes the record keeps what it read **and the digest of every file
+under the item's paths** (the kernel, the loader, the item and core crates,
+the allow-list's), `tools/common/data/`, `docs/sysml/`, `tools/common/check/`
+and `tools/common/gen/` (`step_cache::item_digest`), whatever the trace saw: a
+hit needs the whole item unchanged, so the units save the audits on an edit
+outside it, and never on one inside. They are the only units that may read the
+item (`step_cache::item_keyed`, the one place `reads_item` is set; a test holds
+it). This amends ruling (b) of ledger line 1447 for these analyses alone,
+which are deterministic, so a hit repeats its origin's evidence (the
+certification consultant, ledger line 1594, P3.1-P3.6).
+
+The units, one by one: assembly allow-list, device-access allow-list, unsafe
+audit, panic audit, certification item boundary, complexity budget, fallible
+allocation, safety requirements, traceability (`--check`, its self-test
+inside the unit), coverage residual, architecture document (the model's tests
+and `gen-arch-doc.py --check`), roadmap index and links, wayland protocol
+tables, xkb keymap and tables, init's system call tables, font, panic
+catalog. **Left uncached**, each saying why: line endings (it looks at every
+file of the tree, among them what the test binaries running beside it write
+under `build/`, so it missed on every run, and tracing made its 1.6 s 30 s)
+and the SOUP register (it runs cargo, which reads the target directory's
+outputs: never recorded). The wayland and xkb generators now format through
+rustfmt's standard input instead of a temporary module in the generated
+directory, a write into the tree no unit may make (and one the line-endings
+walk could trip over: it did, once, `p3-rec1`); their `--check` and a
+regeneration give the committed files byte for byte, and a stale file still
+fails.
+
+One worktree, warm, unchanged tree (load 22-45):
+
+| Run | the audits, at once | `check` |
+|---|---:|---:|
+| cache off (`p3-off4`) | 76.4 s (the architecture document; traceability and the item boundary 14 s each) | 89.5 s |
+| cache on, recording (`p3-rec4`) | 36.9 s | 90.1 s |
+| cache on, every record standing (`p3-hit4`, `p3-hit5`) | **2.0 s, 2.3 s** | **39.9 s, 39.9 s** |
+
+With the audits at 2 s, `check`'s critical path on an unchanged tree is the
+test binaries (the item's `ferrix-btrfs-write`, 18-28 s at this load, always
+run) and the side workspaces' hit checks beside (35-37 s here, most of it
+re-hashing their recorded inputs).
+
+**Controls.** Unit tests: the item digest changes with an item file's bytes, a
+new or renamed file in the item, the classification, the model, an audit's or
+a generator's script, and not with a file outside them or Python's byte-code;
+an unreadable root fails it; a record keyed on one digest misses on another;
+only `item_keyed` sets `reads_item`, keying on the digest in the same
+expression. Each of 5 sabotages fails a test (`~/ferrix-logs/bs-b2/sabotage/p3.log`).
+
 ## The compile: the baseline, 2026-10-15 (bs-a)
 
 The other half of the customer's target above: what a warm rebuild spends

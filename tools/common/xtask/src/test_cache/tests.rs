@@ -435,10 +435,11 @@ fn a_randomizing_crate_in_the_lock_caches_nothing() {
 }
 
 /// The consultant's condition 6, ledger 1650: only P3's units, keyed on
-/// the whole item, may read it; until P3's code review no product code of
-/// xtask sets `reads_item` true.
+/// the whole item, may read it. One place in xtask's product code sets
+/// `reads_item`, `step_cache::item_keyed`, which keys on the item's digest
+/// in the same expression.
 #[test]
-fn no_unit_reads_the_item_yet() {
+fn only_the_whole_item_key_reads_the_item() {
     let source = crate::paths::workspace_root().join("tools/common/xtask/src");
     let mut pending = vec![source];
     let mut found = Vec::new();
@@ -451,11 +452,28 @@ fn no_unit_reads_the_item_yet() {
                 && path.file_name().is_some_and(|name| name != "tests.rs")
             {
                 let text = std::fs::read_to_string(&path).unwrap();
-                if text.contains(&format!("reads_item: {}", "true")) {
-                    found.push(path);
+                let setter = format!("reads_item: {}", "true");
+                for (at, _) in text.match_indices(&setter) {
+                    found.push((path.clone(), text.get(..at).unwrap_or_default().to_owned()));
                 }
             }
         }
     }
-    assert!(found.is_empty(), "{found:?}");
+    assert_eq!(
+        found.len(),
+        1,
+        "{:?}",
+        found.iter().map(|(path, _)| path).collect::<Vec<_>>()
+    );
+    let (path, before) = &found[0];
+    assert!(path.ends_with("step_cache.rs"), "{}", path.display());
+    let function = before.rsplit("fn ").next().unwrap_or_default();
+    assert!(
+        function.starts_with("item_keyed()"),
+        "set in {function:.40}"
+    );
+    assert!(
+        function.contains("lines: vec![format!(\"item {digest}\")]"),
+        "{function}"
+    );
 }

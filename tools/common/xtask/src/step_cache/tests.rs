@@ -666,3 +666,123 @@ fn only_a_unit_keyed_on_the_item_may_read_it() {
     assert!(traced.inputs.contains(&Input::File(root.join("item/a.rs"))));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn the_item_digest_changes_with_every_file_of_the_item_and_its_tools() {
+    let root = scratch("item-digest");
+    let item = vec!["src/kernel/".to_owned(), "src/lib/fs/btrfs/".to_owned()];
+    for directory in [
+        "src/kernel/src",
+        "src/lib/fs/btrfs",
+        "src/user",
+        "docs/sysml",
+    ] {
+        std::fs::create_dir_all(root.join(directory)).unwrap();
+    }
+    for directory in ITEM_KEYED_ROOTS {
+        std::fs::create_dir_all(root.join(directory)).unwrap();
+    }
+    std::fs::write(root.join("src/kernel/src/main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(root.join("src/lib/fs/btrfs/lib.rs"), "pub fn a() {}\n").unwrap();
+    std::fs::write(
+        root.join("tools/common/data/certification-item.json"),
+        "{}\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("docs/sysml/a.sysml"), "package a;\n").unwrap();
+    std::fs::write(root.join("tools/common/check/check-a.py"), "print()\n").unwrap();
+    std::fs::write(root.join("tools/common/gen/gen-a.py"), "print()\n").unwrap();
+    std::fs::write(root.join("src/user/app.rs"), "fn app() {}\n").unwrap();
+    let base = item_digest(&root, &item).unwrap();
+    type Change = fn(&Path);
+    let changes: [(&str, Change); 8] = [
+        ("an item file's bytes", |root| {
+            std::fs::write(root.join("src/kernel/src/main.rs"), "fn main() { }\n").unwrap();
+        }),
+        ("an item crate's file", |root| {
+            std::fs::write(root.join("src/lib/fs/btrfs/lib.rs"), "pub fn b() {}\n").unwrap();
+        }),
+        ("a new file in the item", |root| {
+            std::fs::write(root.join("src/kernel/src/new.rs"), "").unwrap();
+        }),
+        ("a file renamed", |root| {
+            std::fs::rename(
+                root.join("src/kernel/src/main.rs"),
+                root.join("src/kernel/src/mian.rs"),
+            )
+            .unwrap();
+        }),
+        ("the classification", |root| {
+            std::fs::write(
+                root.join("tools/common/data/certification-item.json"),
+                "{ }\n",
+            )
+            .unwrap();
+        }),
+        ("the model", |root| {
+            std::fs::write(root.join("docs/sysml/a.sysml"), "package b;\n").unwrap();
+        }),
+        ("an audit's script", |root| {
+            std::fs::write(root.join("tools/common/check/check-a.py"), "print(1)\n").unwrap();
+        }),
+        ("a generator's script", |root| {
+            std::fs::write(root.join("tools/common/gen/gen-a.py"), "print(1)\n").unwrap();
+        }),
+    ];
+    let mut unchanged = Vec::new();
+    for (what, change) in changes {
+        let copy = scratch("item-digest-copy");
+        let status = Command::new("cp")
+            .arg("-a")
+            .arg(format!("{}/.", root.display()))
+            .arg(&copy)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(item_digest(&copy, &item).unwrap(), base, "{what}: the copy");
+        change(&copy);
+        if item_digest(&copy, &item).unwrap() == base {
+            unchanged.push(what);
+        }
+        std::fs::remove_dir_all(copy).unwrap();
+    }
+    assert!(unchanged.is_empty(), "the digest missed: {unchanged:?}");
+    // Outside the item and its tools, and Python's byte-code, change nothing.
+    std::fs::write(root.join("src/user/app.rs"), "fn app() { }\n").unwrap();
+    std::fs::create_dir_all(root.join("tools/common/check/__pycache__")).unwrap();
+    std::fs::write(root.join("tools/common/check/__pycache__/a.pyc"), "x").unwrap();
+    assert_eq!(item_digest(&root, &item).unwrap(), base);
+    // A pipe in the item fails it rather than blocking.
+    let fifo = root.join("src/kernel/src/fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(item_digest(&root, &item).is_err());
+    std::fs::remove_file(&fifo).unwrap();
+    assert_eq!(item_digest(&root, &item).unwrap(), base);
+    // A root that cannot be read fails, so nothing is cached.
+    std::fs::remove_dir_all(root.join("docs/sysml")).unwrap();
+    assert!(item_digest(&root, &item).is_err());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_item_keyed_record_misses_when_the_item_changes() {
+    let root = sample_root("item-keyed-record");
+    let keyed = |digest: &str| {
+        context(&root).keyed(Keyed {
+            lines: vec![format!("item {digest}")],
+            reads_item: true,
+            ..Keyed::default()
+        })
+    };
+    let directory = traces(&root, &[(100, &sample_trace(&root))]);
+    let text = record("audit:a", &directory, &keyed("1111")).unwrap();
+    assert!(holds("audit:a", &text, &keyed("1111")).is_some());
+    assert!(holds("audit:a", &text, &keyed("2222")).is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}

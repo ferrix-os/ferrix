@@ -30,7 +30,6 @@ Usage:
 import pathlib
 import subprocess
 import sys
-import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 PROBES = ROOT / "src" / "user" / "system" / "linux" / "compositor" / "xkb" / "probe"
@@ -333,36 +332,29 @@ use crate::Key;
 def formatted(text, beside=None):
     """`text` through rustfmt, so the file reads like the rest of the tree.
 
-    `beside` is a directory to format in, for a file whose `mod` declarations
-    rustfmt would otherwise fail to resolve: it follows them, so the index
-    module has to be formatted where its children are.
+    `beside` is the directory to format in (its `rustfmt.toml` applies); the
+    crate's source directory when none is given.
     """
-    # The file is written and closed before rustfmt is handed its name, and
-    # closed before it is deleted. Windows refuses to unlink a file that is
-    # still open, so doing either inside the `with` fails there with
-    # `WinError 32` and the generator cannot be run on that host at all --
-    # which is where `cargo xtask check`'s xkb step was failing.
-    handle = tempfile.NamedTemporaryFile(
-        "w", suffix=".rs", dir=beside, delete=False, encoding="utf-8", newline="\n"
+    # Through rustfmt's standard input, in the generated directory: rustfmt
+    # finds `rustfmt.toml` by walking up from its working directory, and this
+    # tree's sets `newline_style = "Unix"`, so the output has the committed
+    # line endings on every host. No file is written: a temporary module in
+    # the generated directory was a write into the tree, which the step cache
+    # refuses to record and which a check listing the tree at the same time
+    # could trip over (`docs/TEST-TIME.md`, Cut B6). From standard input
+    # rustfmt formats the text alone and does not follow `mod` declarations.
+    result = subprocess.run(
+        ["rustfmt", "--edition", "2024", "--emit", "stdout"],
+        input=text,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=beside or OUT,
+        check=False,
     )
-    written = pathlib.Path(handle.name)
-    try:
-        with handle:
-            handle.write(text)
-        result = subprocess.run(
-            ["rustfmt", "--edition", "2024", "--emit", "files", str(written)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise SystemExit(f"rustfmt refused the generated code:\n{result.stderr}")
-        return written.read_text(encoding="utf-8")
-    finally:
-        # `beside` is the generated directory itself, and a temporary file
-        # left there is a module the crate would try to compile.
-        written.unlink(missing_ok=True)
-        written.with_suffix(".rs.bk").unlink(missing_ok=True)
+    if result.returncode != 0:
+        raise SystemExit(f"rustfmt refused the generated code:\n{result.stderr}")
+    return result.stdout
 
 
 def main():

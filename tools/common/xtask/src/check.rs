@@ -27,6 +27,7 @@ pub(crate) const COMMANDS: &[&str] = &[
     "check-apps",
     "check-side",
     "check-unit",
+    "check-audit",
     "check-docs",
     "check-ferrocene",
     "gate-rows",
@@ -50,6 +51,7 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "check-apps" => apps(&mut Counts::default()),
         "check-side" => side_workspaces(&paths::workspace_root()),
         "check-unit" => check_unit(&paths::workspace_root()),
+        "check-audit" => check_audit(),
         "check-docs" => docs(),
         "check-ferrocene" => ferrocene_rust(),
         "gate-rows" => crate::gate_rows::run(args),
@@ -1571,7 +1573,7 @@ fn at_once(steps: &[(&str, &[&[&str]])]) -> (String, Result<()>) {
     let results: Vec<(Duration, Result<Vec<u8>>)> = std::thread::scope(|scope| {
         let running: Vec<_> = steps
             .iter()
-            .map(|(_, scripts)| scope.spawn(move || scripts_in_turn(scripts)))
+            .map(|(name, scripts)| scope.spawn(move || audit(name, scripts)))
             .collect();
         running
             .into_iter()
@@ -1620,6 +1622,107 @@ fn scripts_in_turn(scripts: &[&[&str]]) -> (Duration, Result<Vec<u8>>) {
         }
     }
     (began.elapsed(), Ok(said))
+}
+
+/// Steps of [`AUDITS`] the step cache leaves alone, each with why: they
+/// run as with the cache off.
+const AUDITS_UNCACHED: &[(&str, &str)] = &[
+    (
+        "line endings",
+        "it looks at every file of the tree, among them what the test binaries running beside it write under build/ (a miss on every run), and tracing makes its 1.6 s 30",
+    ),
+    (
+        "SOUP register",
+        "it runs cargo, which reads the target directory's outputs (never recorded)",
+    ),
+];
+
+/// One step of [`AUDITS`]: through the step cache when it is on, as a unit
+/// keyed on the whole item (`step_cache::item_keyed`; `docs/TEST-TIME.md`,
+/// Cut B6), otherwise its scripts in turn. What it said, and whether it
+/// passed.
+fn audit(name: &str, scripts: &[&[&str]]) -> (Duration, Result<Vec<u8>>) {
+    let began = Instant::now();
+    let store =
+        step_cache::store().filter(|_| cfg!(target_os = "linux") && step_cache::strace_works());
+    let Some(store) = store else {
+        return scripts_in_turn(scripts);
+    };
+    let unit = format!("audit:{name}");
+    if let Some((_, why)) = AUDITS_UNCACHED.iter().find(|(step, _)| *step == name) {
+        let (spent, result) = scripts_in_turn(scripts);
+        let note = format!("   {unit}: ran (never cached: {why})\n");
+        return (spent, result.map(|said| [said, note.into_bytes()].concat()));
+    }
+    let context = match step_cache::item_keyed() {
+        Ok(context) => context,
+        Err(error) => {
+            let (spent, result) = scripts_in_turn(scripts);
+            let note = format!("   {unit}: ran, not recorded: {error}\n");
+            return (spent, result.map(|said| [said, note.into_bytes()].concat()));
+        }
+    };
+    let directory = step_cache::unit_directory(&store, &unit);
+    if let Some((origin, inputs)) = step_cache::cached(&unit, &directory, &context) {
+        let said = format!("   {unit}: cached pass {origin} ({inputs} inputs unchanged)\n");
+        return (began.elapsed(), Ok(said.into_bytes()));
+    }
+    let result = audit_traced(&unit, &directory, &context);
+    (began.elapsed(), result)
+}
+
+/// Run audit `unit` as `cargo xtask check-audit` under `strace`, and record
+/// it when it passes and its trace allows: what it said.
+fn audit_traced(
+    unit: &str,
+    directory: &std::path::Path,
+    context: &step_cache::Context,
+) -> Result<Vec<u8>> {
+    std::fs::create_dir_all(directory)?;
+    let traces = directory.join(format!("trace-{}", std::process::id()));
+    let output = step_cache::strace(&traces, true)?
+        .arg(std::env::current_exe()?)
+        .arg("check-audit")
+        .current_dir(context.root())
+        .env(step_cache::UNIT_VARIABLE, unit)
+        // Python writes no byte-code beside the scripts: a write in the
+        // tree is never recorded.
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| Error::new(format!("could not start strace for {unit}: {error}")))?;
+    let mut said = output.stdout;
+    said.extend_from_slice(&output.stderr);
+    if !output.status.success() {
+        let _ = std::fs::remove_dir_all(&traces);
+        return Err(Error::new(format!(
+            "{}{unit} failed ({}; it ran as `cargo xtask check-audit` under strace)",
+            String::from_utf8_lossy(&said),
+            output.status
+        )));
+    }
+    let note = step_cache::record_pass(unit, &traces, context.root(), directory, context)?;
+    said.extend_from_slice(format!("   {unit}: {note}\n").as_bytes());
+    Ok(said)
+}
+
+/// `cargo xtask check-audit`: the step of [`AUDITS`] `FERRIX_CHECK_UNIT`
+/// names (`audit:<name>`), its scripts in turn, as `check` runs it under
+/// `strace`.
+fn check_audit() -> Result<()> {
+    let unit = std::env::var(step_cache::UNIT_VARIABLE)
+        .map_err(|_| Error::new("check-audit: FERRIX_CHECK_UNIT names no audit"))?;
+    let name = unit.strip_prefix("audit:").unwrap_or_default();
+    let (_, scripts) = AUDITS
+        .iter()
+        .find(|(step, _)| *step == name)
+        .ok_or_else(|| Error::new(format!("check-audit: no audit {unit}")))?;
+    for script in *scripts {
+        if let Some((script, arguments)) = script.split_first() {
+            python_with(script, arguments)?;
+        }
+    }
+    Ok(())
 }
 
 /// [`python_with`], with what the script prints added to `said` rather than
@@ -1846,6 +1949,13 @@ mod tests {
         let free = free_bytes(&paths::target_dir());
         assert!(free.is_some_and(|bytes| bytes > 0), "{free:?}");
         assert_eq!(free_bytes(std::path::Path::new("/no/such/directory")), None);
+    }
+
+    #[test]
+    fn every_audit_left_uncached_is_an_audit() {
+        for (name, _) in AUDITS_UNCACHED {
+            assert!(AUDITS.iter().any(|(step, _)| step == name), "{name}");
+        }
     }
 
     #[test]

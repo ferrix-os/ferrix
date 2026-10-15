@@ -332,6 +332,101 @@ pub(crate) fn unit_directory(store: &Path, name: &str) -> PathBuf {
     store.join(file_name(name))
 }
 
+/// What a unit keyed on the whole item holds besides the item's paths:
+/// the classification and the data beside it, the model, and the audits'
+/// and generators' scripts (the consultant's P3.1, ledger 1594).
+pub(crate) const ITEM_KEYED_ROOTS: &[&str] = &[
+    "tools/common/data/",
+    "docs/sysml/",
+    "tools/common/check/",
+    "tools/common/gen/",
+];
+
+/// The digest of every file under the item's paths and [`ITEM_KEYED_ROOTS`]
+/// at `root`, by its path and the SHA-256 of its bytes (a link by its
+/// target): any file added, removed, renamed or changed there changes it.
+/// Python's byte-code caches and target directories are left out.
+///
+/// # Errors
+///
+/// A directory or file that cannot be read.
+pub(crate) fn item_digest(root: &Path, item: &[String]) -> Result<String> {
+    let mut lines = BTreeSet::new();
+    let mut pending: Vec<PathBuf> = item
+        .iter()
+        .map(String::as_str)
+        .chain(ITEM_KEYED_ROOTS.iter().copied())
+        .map(|path| root.join(path))
+        .collect();
+    while let Some(here) = pending.pop() {
+        let entries = std::fs::read_dir(&here)
+            .map_err(|error| Error::new(format!("{}: {error}", here.display())))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| Error::new(format!("{}: {error}", here.display())))?;
+            let path = entry.path();
+            let kind = entry
+                .file_type()
+                .map_err(|error| Error::new(format!("{}: {error}", path.display())))?;
+            let name = entry.file_name();
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned();
+            if kind.is_dir() {
+                if name != "__pycache__" && name != "target" && name != ".git" {
+                    pending.push(path);
+                }
+            } else if kind.is_symlink() {
+                let target = std::fs::read_link(&path)
+                    .map_err(|error| Error::new(format!("{}: {error}", path.display())))?;
+                let _ = lines.insert(format!("{relative}\0link {}", target.display()));
+            } else if entry.metadata().is_ok_and(|metadata| metadata.is_file()) {
+                let bytes = std::fs::read(&path)
+                    .map_err(|error| Error::new(format!("{}: {error}", path.display())))?;
+                let _ = lines.insert(format!("{relative}\0{}", sha256::hex(&bytes)));
+            } else {
+                // A pipe or a device would block or mean nothing: no
+                // digest, so nothing is cached (the consultant's C1, 1671).
+                return Err(Error::new(format!(
+                    "{}: neither a file, a directory nor a link",
+                    path.display()
+                )));
+            }
+        }
+    }
+    let text: String = lines.into_iter().map(|line| line + "\n").collect();
+    Ok(sha256::hex(text.as_bytes()))
+}
+
+/// This process's context for a unit keyed on the whole item: an analysis
+/// of the item (an audit, a generated document's check), which may read
+/// it, since a record of it holds only while every file of the item is
+/// what it was ([`item_digest`]). The only maker of a context with
+/// `reads_item` (P3.1, ledger 1594; condition 6 of line 1650).
+///
+/// # Errors
+///
+/// This process's context, or the item's digest, not made.
+pub(crate) fn item_keyed() -> Result<Context> {
+    static DIGEST: std::sync::OnceLock<std::result::Result<String, String>> =
+        std::sync::OnceLock::new();
+    let context = Context::once()?;
+    let digest = DIGEST
+        .get_or_init(|| {
+            item_digest(&context.root, &context.item).map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| Error::new(error.clone()))?;
+    Ok(context.keyed(Keyed {
+        lines: vec![format!("item {digest}")],
+        files: Vec::new(),
+        targets: Vec::new(),
+        reads_item: true,
+    }))
+}
+
 /// The origin and input count of a record in `directory` that holds now
 /// for unit `name`: a cached pass, or `None`.
 pub(crate) fn cached(name: &str, directory: &Path, context: &Context) -> Option<(String, usize)> {
