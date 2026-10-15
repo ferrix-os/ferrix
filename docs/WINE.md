@@ -741,6 +741,29 @@ answers that as tmpfs does, `ENOSPC`. A boot with more memory goes further
 before it stops (the download was started again with 24 GiB); the fix is
 reclaim for a writable mount's clean pages, in the certified core.
 
+**The extraction stopped on a read** (install9, 2026-10-15). With the
+download whole, the launcher runs its own 7-Zip,
+`7zg.exe x -y -o<decompress>\0.0.0-1.6.3 <...>.zip.001`, over the 59
+volumes of one split zip (62 GB packed, 68 GB in 1782 files). After 1 h 47
+min, at 1505 of 1782 entries, it gave up on `GameAssembly.dll` with
+`0x8007001F`, "General failure", and exited 2; the launcher logged
+`qep run process exit bNormal:false, dwExitCode:2` and the button stayed
+at "Extracting". `ERROR_GEN_FAILURE` is `STATUS_UNSUCCESSFUL`, which Wine
+gives for an errno it has no mapping for -- here `ENOMEM` from `read`. The
+guest's free memory had sat at the floor (about 35 MB free, 15 GB cached)
+for the whole extraction, and a read that missed the cache filled its page
+through `fs/pages.rs`'s `allocate_reclaiming`, which reclaimed once and
+tried once more: the frames that reclaim gave back went to another
+processor's allocation first, and the read answered `ENOMEM`. The archive
+and the 183 MB written of `GameAssembly.dll` were whole (read from a copy
+of the volume). A local boot with 1 GiB and 8 processors -- three `dd`
+writers, a holder at 70 % and readers of the rustc volume's libraries --
+showed 27 `cat: read error: Out of memory` in 240 s. A fill now reclaims
+and retries as a write does, at most 8 times while a reclaim gives pages
+back; the same boot then read 60,000 times without an error, and stage
+12's `reclaim` line requires a read put two fills' runs past its job's
+`memory.max` to succeed.
+
 
 **On the `--everything` desktop.** `run-compositor --everything` merges the
 Proton launcher volume last (`crate::everything`); where it carries

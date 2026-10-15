@@ -357,10 +357,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         "  reclaim  btrfs-rw: {} clean pages of a writable mount given back, {} written and not \
          written back kept and counted in Dirty, every page read back as last written; a shared \
          mapping made during a reclaim kept its page; a write at memory.max took back {} pages \
-         and succeeded",
+         and succeeded; a read past it took back {} pages and succeeded",
         reclaim.given,
         reclaim.dirty,
         reclaim.stolen_at_max,
+        reclaim.stolen_by_fill,
     );
     Ok(report)
 }
