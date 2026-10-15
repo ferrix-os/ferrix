@@ -578,14 +578,18 @@ pub(crate) fn write_image_carrying(
     std::fs::create_dir_all(&directory)?;
     let _ = crate::slot_image::write_if_wanted(arch, &kernel_bytes, initramfs, cmdline, defaults)?;
     let image = directory.join("ferrix.img");
-    std::fs::write(&image, fs.finish())?;
+    // Only the blocks that differ from the image already there: kilobytes
+    // after an edit, where the whole 512 MiB took 22-65 s to write on a busy
+    // disk (`crate::image_file`).
+    let written = crate::image_file::write(&image, &fs.finish())?;
 
     println!(
-        "  image {} ({} KiB loader, {} KiB kernel, {} KiB initramfs)",
+        "  image {} ({} KiB loader, {} KiB kernel, {} KiB initramfs; {} KiB written)",
         image.display(),
         loader_bytes.len() / 1024,
         kernel_bytes.len() / 1024,
-        initramfs.len().div_ceil(1024)
+        initramfs.len().div_ceil(1024),
+        written.bytes.div_ceil(1024)
     );
     Ok(image)
 }

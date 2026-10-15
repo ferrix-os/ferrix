@@ -716,6 +716,29 @@ compiles fewer than 60):
 | New worktree or slot: everything compiled again | a compiler cache shared across target directories, same tree one slot (T1), no shed thrash (T2) | bs-b, gate.sh by the coordinator |
 | The boot: 23-46 s for `test-boot`'s stages 1-12 at this load | not caching: a boot is the test | |
 
+### Cut B1: the image's changed blocks only (bs-b-image)
+
+`fat.rs` hands the image to `image_file::write`, which reads the file already
+there in 64 KiB blocks, compares, and writes only the blocks that differ; a
+new file is made sparse, its zero blocks never written. The image line says
+how much was written (`; 192 KiB written`). Same worktree, target directory
+and load (31-36) as the baseline:
+
+| Run | Before | After | Image written |
+|---|---:|---:|---:|
+| No-op `build --arch x86_64` | 33.0 s | **5.2 s** | 0 KiB |
+| One string in `src/kernel/src/main.rs` | 125.1 s | **30.3 s** (25.5 s of it the kernel) | 192 KiB |
+| No image there yet | | 7.8 s | 177,280 KiB, the 173 MiB of data |
+
+**The same file as a fresh write.** After the kernel edit, the patched image
+was moved aside and the same tree built again with no image there, so it
+was written fresh: both hash to `d016d739f437...`, byte for byte one file.
+The unit tests in `image_file.rs` hold the cases a patch can get wrong (a
+block that changed, data where the new image has zeros, a file longer or
+shorter than the image, and a block a guest wrote into the image since the
+last build); with the comparison made to say every block is the same, four
+of the six fail.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
