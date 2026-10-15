@@ -37,6 +37,7 @@ mod flush;
 pub mod frame;
 pub mod grants;
 pub mod keymap;
+mod knobs;
 pub mod options;
 pub mod overlay;
 pub(crate) mod pace;

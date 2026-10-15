@@ -73,6 +73,7 @@ mod hyprlock;
 mod idle;
 mod latency;
 mod layout;
+mod locked;
 mod machine;
 mod monitors;
 mod picture;
@@ -367,6 +368,9 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     if asked(&["settings"]) {
         settings::build_ahead(arch)?;
     }
+    if asked(&["locked", "locked-held"]) {
+        let _ = build(arch, "compositor-vptr", "vlock")?;
+    }
     Ok(())
 }
 
@@ -490,7 +494,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 42] = [
+const BOOTS: [(&str, Boot); 44] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -533,6 +537,8 @@ const BOOTS: [(&str, Boot); 42] = [
     ("fuzzel-user", test_fuzzel_user),
     ("everything-desktop", test_everything_desktop),
     ("settings", settings::test_settings),
+    ("locked", locked::test_locked),
+    ("locked-held", locked::test_locked_held),
 ];
 
 /// The boot that always skips the self-checks, whatever its place: the

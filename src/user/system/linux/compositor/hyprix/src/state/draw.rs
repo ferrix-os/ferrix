@@ -175,6 +175,11 @@ impl Compositor<'_> {
         for slot in &mut self.slots {
             let _ = slot.flush();
         }
+        // `HYPRIX_HOLD_FRAME_MS`: a frame that long, for the boot that
+        // moves the mouse while one is drawn (`crate::knobs`).
+        if let Some(hold) = crate::knobs::hold_frame() {
+            std::thread::sleep(hold);
+        }
         // A frame a monitor: each screen draws the workspace it shows,
         // with the windows' rectangles moved into its own pixels.
         for which in 0..self.screens.len() {

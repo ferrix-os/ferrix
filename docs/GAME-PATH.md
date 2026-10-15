@@ -529,6 +529,19 @@ to schedule) and §5 (the margin).
   for flushing and for its scope only today (`flush.rs`, `scope.rs`); the
   split between its front and its drawing was proposed on 2026-10-03 for
   another reason (surviving a stalled driver) and serves this one.
+* **The loop reads what is ready now** (fixed 2026-10-15). A pass that
+  changed something runs the next at once without waiting, and that pass
+  read only the descriptors the *last wait* had found ready. A client that
+  draws at every frame, under frames slower than its refresh, kept every
+  pass changed: the loop never waited again, and the mouse, the keyboard
+  and every other client went unread for as long as it drew -- a game's
+  locked pointer lost every motion (0 of 40 with frames held 100 ms;
+  stage 24 I1's negative control saw the same, 2 of 40). The follow-up
+  pass now polls without sleeping first. `test-compositor --boot locked`
+  counts the motions in and out: 40 motions of known distance, each its
+  own event in an ordinary boot, and the whole distance with frames held
+  100 ms (`locked-held`), where two motions read together are one event
+  carrying their sum.
 * **No coalescing for a locked pointer.** A 1,000 Hz mouse sends a
   thousand relative motions a second, and a game that holds a pointer lock
   gets each one with its time. A pointer over the desktop is still drawn

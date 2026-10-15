@@ -393,6 +393,7 @@ version = "0.1.0"
 dependencies = [
  "compositor-protocol",
  "compositor-socket",
+ "compositor-toolkit",
  "compositor-wire",
  "libc",
 ]

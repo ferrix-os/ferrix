@@ -11,12 +11,19 @@ publish.workspace = true
 name = "vptr"
 path = "src/main.rs"
 
+# The other end: a window that locks the pointer and says each relative
+# motion's age, for hyprix's input-thread boot (docs/GAME-PATH.md §4.7, I1).
+[[bin]]
+name = "vlock"
+path = "src/vlock.rs"
+
 [dependencies]
 # `clock_gettime`: the send times are CLOCK_MONOTONIC, the clock X's
 # Present reports its completions in, which `Instant` does not expose.
 libc = "0.2.189"
 compositor-protocol = { path = "../protocol" }
 compositor-socket = { path = "../socket" }
+compositor-toolkit = { path = "../toolkit" }
 compositor-wire = { path = "../wire" }
 
 [lints]

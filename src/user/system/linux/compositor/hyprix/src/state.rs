@@ -737,8 +737,16 @@ impl<'r> Compositor<'r> {
         // A request may have changed the layout after the event snapshot was
         // made above, and a plugin's hello may have carried its first command
         // too. Run that follow-up pass now, before waiting for another
-        // descriptor edge.
+        // descriptor edge -- but on what is ready *now*, asked without
+        // sleeping. The follow-up pass reads only what `self.ready` names,
+        // and kept from the last wait it named the descriptors that were
+        // ready then: a client drawing at every frame keeps every pass
+        // changed while a frame takes longer than its refresh, so the loop
+        // never waited again, the client it was serving stayed in the set,
+        // and the mouse, the keyboard and every other client were never
+        // read. A game's locked pointer lost every motion that way.
         if changed || self.plugins.needs_poll() {
+            self.look(Some(Duration::ZERO))?;
             return Ok(true);
         }
 
@@ -750,7 +758,8 @@ impl<'r> Compositor<'r> {
         if self.slots.iter_mut().any(|slot| !slot.flush()) {
             // Let the normal connection cleanup above remove a client whose
             // queued reply could not be written before it enters the wait
-            // set.
+            // set -- with what is ready now, as above.
+            self.look(Some(Duration::ZERO))?;
             return Ok(true);
         }
 
@@ -1021,6 +1030,17 @@ impl<'r> Compositor<'r> {
             Some(fds) => self.devices.read_ready(fds),
             None => self.devices.read(),
         };
+        if crate::knobs::trace_input() {
+            let ready = self.ready.as_deref().map_or(usize::MAX, |fds| {
+                self.devices.raw_fds().filter(|fd| fds.contains(fd)).count()
+            });
+            if ready > 0 {
+                (self.report)(&format!(
+                    "hyprix: input-trace read devices ready {ready} inputs {}",
+                    inputs.len()
+                ));
+            }
+        }
         let mut changed = false;
         for input in inputs.into_iter().chain(std::mem::take(&mut self.injected)) {
             changed |= self.take_one(input, now, placements);
@@ -1104,6 +1124,18 @@ impl<'r> Compositor<'r> {
                 || self.screens.iter().any(|screen| !screen.plane.on))
         {
             changed = true;
+        }
+        if crate::knobs::trace_input() {
+            for action in &actions {
+                if let crate::seat::Action::Relative { dx, dy } = action {
+                    (self.report)(&format!(
+                        "hyprix: input-trace relative dx {dx} dy {dy} to {}",
+                        self.focus
+                            .pointer_on()
+                            .map_or_else(|| "nobody".to_owned(), |(client, _)| client.to_string())
+                    ));
+                }
+            }
         }
         let done = self.deliver(&actions, now);
         let mut pending = Vec::new();
@@ -1699,7 +1731,13 @@ impl<'r> Compositor<'r> {
     /// timer.
     fn wait(&mut self, animating: bool) -> Result<(), String> {
         let timeout = self.timeout(animating);
+        self.look(timeout)
+    }
 
+    /// Wait up to `timeout` for a descriptor, and keep the ones that are
+    /// ready for the next pass: [`Self::wait`]'s whole wait, or with zero,
+    /// what is ready now for a pass that follows on at once.
+    fn look(&mut self, timeout: Option<Duration>) -> Result<(), String> {
         let mut fds = Vec::with_capacity(
             1 + self.slots.len()
                 + self.devices.len()
