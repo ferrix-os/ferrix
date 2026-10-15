@@ -35,6 +35,10 @@ name = "ferrix-adb"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-ahci"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-argon2"
 version = "0.1.0"
 
