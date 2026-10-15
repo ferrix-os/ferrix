@@ -94,6 +94,13 @@
       "branch": "net-yt6801",
       "date": "2026-10-15",
       "purpose": "YT6801: a listed PCI function (const list, 1F0A:6801 only) whose MSI-X the kernel never enables -- Enable 0 and Function Mask 1 written and read back before publish, its table and PBA pages granted as aperture, its MSI vector offered (35); verify_config refusing a listed node whose MSI-X Enable reads 1 (36); 37 spare (mint's refusal while Enable reads 1, if split out), released if unused (consultant yt2-cert, ledger 2026-10-15 line 1097, D1-D9)"
+    },
+    {
+      "ids": ["L.discovery.2-6", "H.BOOT.16"],
+      "owner": "dmi-d1",
+      "branch": "dmi-d1",
+      "date": "2026-10-15",
+      "purpose": "D1: firmware's SMBIOS tables to programs (docs/DMI.md) -- H.BOOT.16 firmware identity shown only from a validated table; L.discovery.2 entry point parse, .3 the walk's bounds, .4 identity fields as Linux decodes them, .5 the kernel's acceptance of the loader's copy, .6 the loader's handover (consultant dmi-d1-cert, ledger line 1339)"
     }
   ]
 }
