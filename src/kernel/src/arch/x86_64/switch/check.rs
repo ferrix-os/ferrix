@@ -30,6 +30,7 @@
 //! null `DS` and `ES` see the skip taken. The same for `FS` and `GS` (3c).
 
 #![cfg(target_arch = "x86_64")]
+#![allow(clippy::disallowed_methods, reason = "a raised check: it calls methods made pub for it alone")]
 
 use alloc::sync::Arc;
 

@@ -526,6 +526,7 @@ impl MsiFunction {
     }
 
     /// Whether the command register reads back with `INTx` off.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     fn intx_off(node: &DeviceNode) -> Option<bool> {
         let config = node.mapped_config()?;
         Some(config.read16(COMMAND) & COMMAND_INTERRUPT_DISABLE != 0)
@@ -539,6 +540,7 @@ impl MsiFunction {
     /// whose message address a 32-bit capability cannot hold is refused
     /// before a vector is allocated, since an allocated vector is never
     /// given back.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     fn mint(&self, node: &DeviceNode) -> Result<Vector, &'static str> {
         let vector = |number| Vector {
             number,
@@ -834,6 +836,7 @@ impl MsixTable {
     /// mask clear, through `node`'s mapping of its configuration space and
     /// under its configuration lock. Once per table; every entry stays masked
     /// until its holder unmasks it.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     fn open(&self, node: &DeviceNode) -> Result<Mmio, &'static str> {
         let len = u64::from(self.table_size) * MSIX_ENTRY_SIZE;
         let table = vmap::map_device(self.table_phys, len)
@@ -1618,6 +1621,7 @@ impl DeviceNode {
 
     /// Write the function's command register with bus mastering `on` or off,
     /// keeping memory decoding on either way, under the configuration lock.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     fn set_bus_master(&self, on: bool) -> Result<(), &'static str> {
         if self.config_phys().is_none() {
             return Ok(());
@@ -1651,6 +1655,7 @@ impl DeviceNode {
     /// The function's configuration space, mapped at the first call and
     /// kept: never under the configuration lock, since mapping takes the
     /// address space's locks and may wait on other processors.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     fn config_mapping(&self) -> Result<MappedConfig, &'static str> {
         let config_phys = self
             .config_phys()
@@ -1690,6 +1695,7 @@ impl DeviceNode {
 
     /// [`DeviceNode::config_writes`] for a space that is mapped already, as
     /// an interrupt handler needs: maps nothing, and `None` if nothing has.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     fn config_writes_mapped(&self) -> Option<ConfigWrites<'_>> {
         let space = self.mapped_config()?;
         Some(ConfigWrites {
@@ -1719,6 +1725,7 @@ impl DeviceNode {
     /// offset not a multiple of it or not below 4096;
     /// [`ConfigRefusal::NotPci`] for a node with no configuration space;
     /// [`ConfigRefusal::Unmapped`] when it could not be mapped.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     pub fn config_read(&self, offset: u64, width: u64) -> Result<u32, ConfigRefusal> {
         let (offset, width) = config_access(offset, width)?;
         if self.config_phys().is_none() {
@@ -1739,6 +1746,7 @@ impl DeviceNode {
     ///
     /// As [`DeviceNode::config_read`], and [`ConfigRefusal::Denied`] for a
     /// byte the driver may not write.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     pub fn config_write(
         &self,
         offset: u64,
@@ -1785,6 +1793,7 @@ impl DeviceNode {
     /// # Errors
     ///
     /// The register that read back other than the kernel made it.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     pub fn verify_config(&self) -> Result<(), Breach> {
         let Some(breach) = self.breach() else {
             return Ok(());
@@ -1804,6 +1813,7 @@ impl DeviceNode {
     /// Refuse the node and turn its bus mastering off, in one hold of the
     /// configuration lock: [`DeviceNode::set_bus_master`] tests the flag
     /// under the same lock, so no later `enable_dma` turns it on again.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     fn refuse(&self) {
         match self.config_writes() {
             Ok(mut config) => {
@@ -1837,6 +1847,7 @@ impl DeviceNode {
 
     /// The first kernel-owned register that reads back other than the kernel
     /// made it, if any: [`DeviceNode::verify_config`]'s comparison.
+    #[allow(clippy::disallowed_methods, reason = "the defining module's own call of a method made pub only for a raised check")]
     pub fn breach(&self) -> Option<Breach> {
         let _placed = self.config_phys()?;
         let breach = {

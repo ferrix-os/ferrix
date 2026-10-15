@@ -29,6 +29,7 @@
 //!
 //! W4 and W5 run before W3 so that a control loosening the allowlist is
 //! caught by the check it is the control of.
+#![allow(clippy::disallowed_methods, reason = "a raised check: it calls methods made pub for it alone")]
 
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

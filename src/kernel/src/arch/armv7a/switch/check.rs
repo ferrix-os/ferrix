@@ -31,6 +31,7 @@
 //! across a `nanosleep` after it, because the mark is the call's.
 
 #![cfg(target_arch = "arm")]
+#![allow(clippy::disallowed_methods, reason = "a raised check: it calls methods made pub for it alone")]
 
 use alloc::sync::Arc;
 
