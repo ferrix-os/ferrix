@@ -803,6 +803,17 @@ yellow button and the server's answer as before.
 for a boot that downloads or unpacks the game; the gate leaves the video
 on.
 
+**What reached the disk (2026-10-15).** The game unpacked and installed,
+`/data` was never committed again: a boot whose `/` stays in memory had no
+committer, only `sync`, `fsync`, 32 MiB of writes or the power-off. An hour
+later the volume, read from a reflink copy on the host, had the prefix's
+`system.reg` and `user.reg` at 0 bytes (Wine had saved them at 13:58) and the
+last eight DLLs the unpacking copied into the game's directory
+(`ucrtbase.dll` to `zlib.dll`) as holes; a boot that ended then without a
+`sync` would have left a prefix Wine refuses ("not a valid registry file")
+and a game that cannot load its runtime. A writable data or home disk now
+starts the committer itself and is committed every 30 s (test-shell's K8).
+
 **On the `--everything` desktop.** `run-compositor --everything` merges the
 Proton launcher volume last (`crate::everything`); where it carries
 another build of a file an earlier volume has -- yserver, and libpng and

@@ -1369,8 +1369,15 @@ built-in boot it boots the same shell and script from files,
 writes `/data/k7` on a fresh volume and runs `poweroff -f -n`, which skips
 busybox's own `sync`. A second boot of that volume, under
 `ferrix.onexit=panic`, must read the file back and then panic with
-`FX-1501`. A test boot has no root disk and so no committer, so only the
-call can have committed the file. The three negative controls fired by the
+`FX-1501`. A test boot has no root disk, and the committer its data disk
+starts first commits 30 s after the mount, after the power-off, so only the
+call can have committed the file. K8 then checks that committer: a boot
+writes `/data/k8` and `/home/k8`, sleeps 45 s and is stopped by the test
+with nothing synced, and a second boot must read both back (before
+2026-10-15 nothing committed a data disk under a root in memory; the
+control that starts the committer from the root's switch alone fired with
+"/data/k8 was not on the disk after QEMU stopped: nothing committed /data
+in 45 s"). The three negative controls fired by the
 checks' own messages: a wrong path (the fallback line, then "the kernel
 fell back to the built-in shell"), no `sync_disks` in `reboot(2)` ("/data/k7
 did not survive poweroff -f -n"), and no `ferrix.onexit=panic` ("did not
