@@ -193,6 +193,10 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     register_system_calls();
     println!("  traps    vectors installed");
     console::screen::milestone(3);
+    println!("  SABOTAGE fbcon negative control: hanging before mm::init");
+    loop {
+        core::hint::spin_loop();
+    }
 
     let stats = bring_up_memory(view);
     console::screen::milestone(4);
