@@ -2593,10 +2593,17 @@ fn check_write_combining(counter: &mut Counter) -> Result<(), &'static str> {
     {
         return Err("a processor's PAT was not programmed with its write-combining entry");
     }
+    // Not the lent firmware framebuffer's node (`ferrix.efifb`), whose
+    // window the kernel holds write-combining for good: the uncached and
+    // cached mappings below would be refused for that, not for the rule.
+    let lent = |node: &DeviceNode| {
+        crate::discovery::firmware::may_lend()
+            && node.binding() == ferrix_native_abi::types::TREE_FIRMWARE_FB
+    };
     let find = |prefetchable: bool| {
         device::devices()
             .iter()
-            .filter(|node| !node.yielded())
+            .filter(|node| !node.yielded() && !lent(node))
             .find_map(|node| {
                 node.apertures()
                     .iter()

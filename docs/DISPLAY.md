@@ -1071,7 +1071,7 @@ vertical blanking, no GPU.
    x86-64, and the framebuffer is usable: outside the allocator's memory
    (§2.4's `reclaimable` 0), four bytes a pixel, its first pixel on a page,
    and a size that holds its lines. Its one aperture is the visible lines in
-   whole pages, not prefetchable; it has no vector. `device_info` carries
+   whole pages, prefetchable; it has no vector. `device_info` carries
    the mode in fields a tree node leaves zero: width, height, the stride in
    pixels and the layout (`FRAMEBUFFER_BGRX` or `FRAMEBUFFER_RGBX`). The
    boot line is `display  firmware framebuffer WxH lent to a driver
@@ -1087,10 +1087,11 @@ vertical blanking, no GPU.
    address is still withheld.
 3. **Kernel, no DMA.** The node is memory, not a device that reaches memory:
    it gets no IOMMU domain, `vmo_pin` and `device_set_limit` on it answer
-   `WRONG_TYPE`. The kernel maps the same pages for its panic screen as
-   uncached device memory on x86-64, and takes a hold of that type over them
-   for the life of the machine (`user::memory_type`), so a driver's mapping
-   of any other type is refused. The boot console, which draws through a
+   `WRONG_TYPE`. The kernel maps the same pages for its panic screen, and
+   on x86-64 changes that window to write-combining as it lends them, then
+   takes a hold of that type over them for the life of the machine
+   (`user::memory_type`), so a driver's mapping of any other type is
+   refused (the write-combining paragraph below). The boot console, which draws through a
    slice of its own, stops when the node is made.
 4. **Kernel, the holder is not driven.** The framebuffer is still memory of
    a PCI function -- QEMU's VGA, a PC's integrated GPU -- whose driver could
@@ -1103,7 +1104,7 @@ vertical blanking, no GPU.
    it, which changes nothing while nobody drives it.
 5. **devmgr** starts `efifb` (`src/user/system/native/drivers/display/efifb`)
    on the node, as the DK1's `ltdc` (§6) is started on its.
-6. **efifb** maps the window, says HELLO with one scanout at the firmware's
+6. **efifb** maps the window write-combining, says HELLO with one scanout at the firmware's
    size, one 60 Hz timing it will never set (the core needs one to list),
    no cursor plane, and the `copies` flag. The display core accepts `copies`
    from this node as it does from NVIDIA's (§2.1), so READY brings the card
@@ -1160,20 +1161,122 @@ node, and the `Efifb` configuration record dropped.
 **Requirements.** L.device.38 (lent exactly, the one exemption), L.device.39
 (no pin, the kernel's type held), L.device.40 (the holder not driven) and
 L.device.41 (the console lets go first) and L.device.42 (the mode
-`device_info` reports), with L.device.1 restated for the exemption, in
+`device_info` reports), and L.device.43 (the window write-combining), with L.device.1 restated for the exemption, in
 `docs/sysml/20-device-requirements.sysml`. The certification consultant's
 design verdict is ledger line 772 (H1-H11), its reviews of this branch lines
 1207 and 1260; SAFETY-MANUAL AoU-31 says no claim is made of a boot that gives the
 option.
 
+**Write-combining (H6's follow-up, branch h6-wc, 2026-10-15).** Under `ferrix.efifb` on
+x86-64 the lent window is write-combining (WC) everywhere it is mapped --
+in the kernel's panic window and in `efifb` -- so a frame's stores leave the
+processor in bursts instead of one uncached store a pixel.
+
+* *The page attribute table.* Each processor writes `IA32_PAT` (MSR
+  `0x277`; Linux `msr-index.h` `MSR_IA32_CR_PAT`, QEMU `MSR_PAT`) at its
+  bring-up with `ferrix_paging::X86_PAT` = `0x0007_0406_0007_0106`
+  (`cpu::program_pat`), and reads it back; `PAT_PROGRAMMED` counts the
+  ones that did, and stage 9 stops the boot unless every processor did.
+  A byte per entry: entry 0 `0x06` write-back, entry 1 `0x01`
+  write-combining, entry 3 `0x00` uncacheable (Linux uapi `mtrr.h`:
+  `MTRR_TYPE_UNCACHABLE` 0, `WRCOMB` 1, `WRTHROUGH` 4, `WRBACK` 6). The
+  power-on table, `0x0007_0406_0007_0406`, has write-through in entry 1;
+  only entry 1 changes. A 4 KiB leaf selects entry `PAT<<2 | PCD<<1 |
+  PWT` with PWT bit 3, PCD bit 4 and PAT bit 7 (bit 12 in a 2 MiB or
+  1 GiB leaf; Linux `pgtable_types.h`), so `MapFlags::write_combining`
+  is PWT alone: entry 1. No new MSR is written.
+* *MTRRs.* The effective type of a page is the PAT's and the MTRRs'
+  together, and a page whose PAT type is WC is WC under every MTRR type
+  (SDM Vol. 3A, the table of effective page-level memory types, 11.5.2.2
+  / 13.5.2.2 in later editions). So the MTRRs do not decide the type;
+  the kernel reads them anyway, for the boot line (`MTRRcap` `0xFE`,
+  `MTRRdefType` `0x2FF`, `MTRRphysBase/Mask` `0x200 + 2n` / `0x201 + 2n`,
+  as Linux `msr-index.h` and QEMU's `cpu.h` number them, only when
+  `CPUID.1:EDX` bit 12 says they exist), resolves the type with the SDM's
+  precedence in a pure function with host tests
+  (`ferrix_paging::mtrr::range_type`), and says the framebuffer's MTRR
+  type, or `unknown`, beside the lent line, which only `ferrix.efifb`
+  prints. Expected on OVMF:
+  uncacheable (OVMF makes the 32-bit PCI hole, where QEMU's VGA BAR 0
+  lies, uncacheable over a write-back default); the line is the record,
+  on QEMU and on the N150 alike. Nothing is written to an MTRR.
+* *One type per page, the kernel holding it.* `discovery::firmware`'s
+  lend, in this order, before the node is published and before any
+  program runs: (1) refuses to lend unless every processor programmed
+  its PAT (`io_mapping::combining_ready`), publishing nothing and leaving
+  the window uncached; (2) mints the aperture
+  *prefetchable* -- a GOP framebuffer is linear memory, reads of it have
+  no side effect -- so `io_mapping_map_combining` may map it; (3) stops
+  the boot console (as now); (4) changes the kernel's whole panic window
+  from uncacheable (`KERNEL_DEVICE`) to WC (a new
+  `MapFlags::KERNEL_COMBINING`) with `mm::protect_kernel`, given the
+  window `panic::screen` installed, which rewrites
+  the leaves and flushes every processor's TLB, global entries included,
+  before it returns; (5) takes the kernel's hold as
+  `MemoryType::Combining`, never given back (`KERNEL_MAPPING`). An error
+  after the console's stop publishes no node, and the boot line says why.
+  From then
+  on `io_mapping_map` (uncacheable) of the window is refused by the hold
+  (`ALREADY_BOUND`)
+  and only `io_mapping_map_combining` maps it: no alias of two types
+  exists after (4), and no cacheable mapping of the pages exists ever.
+  No cache flush is needed at (4): the pages were only ever mapped
+  uncacheable, which allocates no cache line, so there is nothing to
+  write back (the SDM's flush on a type change is for a cacheable type
+  leaving). During (4) another processor may hold the old uncacheable
+  translation until it answers the shootdown: an uncacheable/WC pair
+  over pages nothing writes then (the console has stopped, no program
+  runs, the panic screen draws only with the others stopped), and no
+  cacheable type, which is what SDM 11.12.4 forbids beside WC.
+* *Flush ordering.* WC stores are weakly ordered and may sit in a
+  processor's fill buffers. `efifb` ends every copy (SCANOUT, FLUSH) with
+  `sfence` and only then answers `FLIPPED`: a frame counts as shown after
+  the `sfence`, not after the last store. The panic screen ends its
+  drawing with `sfence` too (`arch::drain_write_combining`), before the
+  processor halts.
+* *The figure.* A copy time in QEMU says nothing about WC: TCG and KVM
+  both back the VGA BAR with host memory. The figure is the N150's:
+  after READY, `efifb` copies 8 full frames from the card to the screen,
+  each ended by `sfence`, and says `efifb: full-frame copy WxH: median N
+  us over 8 (write-combining)`. On the N150 at 1920x1080 (8.3 MB a frame)
+  it must be under one 60 Hz frame, 16.7 ms; at one uncached store a
+  pixel it would be several times that. QEMU prints the line too, and
+  its number is no claim.
+* *How a QEMU boot still proves WC.* The type is read back, not timed.
+  `check_framebuffer` (stage 10): every page of the kernel's panic window
+  reads back WC, not device, writable and not user's (`mm::flags_in` on
+  the kernel's root), as the type the hold keeps; this processor's
+  `IA32_PAT` reads `X86_PAT` whole and every processor programmed its
+  table; the aperture is prefetchable; and the hold refuses device and
+  cached mappings and allows a WC one (`check_combining`).
+  `X86_PAT`'s entries 0, 1 and 3 are held by a const assertion. W8 (stage 10's config
+  check): an I/O mapping of the node's aperture is refused
+  `io_mapping_map` and given `io_mapping_map_combining`, whose user leaf
+  reads back WC and not device. `check_lending`'s made-up node is
+  prefetchable. The firmware-screen boot requires efifb's line `mapped
+  write-combining` and the figure's line, and the picture as before.
+* *Negative controls* (tags `wc-ctl-*`, each through `gate.sh control`):
+  `remap`, the kernel's change of type skipped; `hold`, the hold left
+  `Device` with the change done; `prefetch`, the aperture minted not
+  prefetchable; `plain`, efifb mapping with `io_mapping_map`; `skip`,
+  stage 9's `check_write_combining` no longer skipping the lent node. The
+  stage 9 check skips the node by its binding, and only under the option,
+  since the kernel's hold would refuse its uncached step for that, not
+  for the rule.
+* *Requirement.* L.device.43 (the window write-combining before the hold
+  and the node; parents H.MEM.15, H.DMA.5), with L.device.38 restated
+  (prefetchable) and L.device.39 (the hold is write-combining, and only
+  `io_mapping_map_combining` maps the window). Certification consultant:
+  ledger line 1303.
+* *Still to show on the N150* (`docs/BACKLOG.md`): the figure, a panic
+  drawn visibly under `ferrix.efifb` (the drain no emulator can show), and
+  the MTRR line.
+* *Arm.* Unchanged: not honoured there.
+
 **Not done.**
 
-* **Speed.** The window is mapped uncached, because that is the kernel's own
-  panic mapping's type on x86-64 and the two must agree. Each pixel is one
-  uncached store: fine for 1024x768 in QEMU, slow for a full 1080p frame on
-  real hardware. Write-combining (the kernel's panic mapping made
-  write-combining, the aperture marked prefetchable) is the follow-up, and
-  should come with a frame-time figure from the N150.
+* **Speed on real hardware.** The window is write-combining (above), but
+  the figure is the N150's to give: QEMU's number says nothing.
 * **AArch64 and ARMv7-A.** The Arm kernels map the framebuffer normal
   non-cacheable, which no user mapping of an aperture can match yet, so the
   option says `not honoured on this architecture`.

@@ -35,7 +35,7 @@ use ferrix_fbtext::{
 };
 use ferrix_qr::{MAX_VERSION, MIN_MODULES_LEN, MIN_TMP_LEN, Symbol};
 
-use crate::{console, mm};
+use crate::{arch, console, mm};
 
 /// Where [`install`] recorded the framebuffer: its mapping, the memory behind
 /// it, and how many bytes of it are mapped.
@@ -161,6 +161,10 @@ pub(crate) fn draw() {
     let count = console::recent(&mut scratch.text);
     let text = scratch.text.get(..count).unwrap_or_default();
     paint(&mut surface, text, &mut scratch.modules, &mut scratch.work);
+    // Lent to `efifb` under `ferrix.efifb`, the window is write-combining on
+    // x86-64 (`discovery::firmware`): the picture's last stores leave the
+    // fill buffers before this processor halts.
+    arch::drain_write_combining();
 }
 
 /// The framebuffer [`install`] recorded, as a surface to draw on: `None` if
@@ -399,4 +403,13 @@ fn report_start(text: &[u8]) -> Option<usize> {
             .rposition(|&byte| byte == b'\n')
             .map_or(0, |newline| newline + 1),
     )
+}
+
+/// The kernel's window on the framebuffer, as [`install`] recorded it: its
+/// address and the bytes mapped, or `None` when there is none. What
+/// `discovery::firmware` changes the type of when it lends the framebuffer.
+pub(crate) fn window() -> Option<(u64, u64)> {
+    let virt = VIRT.load(Ordering::Acquire);
+    let len = LEN.load(Ordering::Acquire);
+    (virt != 0 && len != 0).then_some((virt, len))
 }

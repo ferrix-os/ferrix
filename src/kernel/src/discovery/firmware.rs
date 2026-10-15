@@ -16,11 +16,17 @@
 //!
 //! The kernel maps the framebuffer for the panic screen, and a driver maps
 //! the same pages: the two must be one type (`user::memory_type`). On x86-64
-//! the kernel's mapping is uncached device memory, so the aperture is not
-//! prefetchable, and the kernel takes a hold of that type over it which it
-//! never gives back: a mapping of any other type is refused. The Arm kernels
-//! map it normal non-cacheable, which no user mapping of an aperture can
-//! match yet, so the option is not honoured there and says so.
+//! that type is write-combining. The kernel maps the framebuffer uncached in
+//! early boot, before any processor has programmed the PAT entry
+//! write-combining selects, so lending it changes the kernel's window to
+//! write-combining first (every processor's TLB flushed before that
+//! returns), mints the aperture prefetchable, so that
+//! `io_mapping_map_combining` maps it, and takes a hold of write-combining
+//! over it which it never gives back: a mapping of any other type is
+//! refused. No cache line of the pages can exist to be flushed at the
+//! change: the old type, uncacheable, allocates none. The Arm kernels map it
+//! normal non-cacheable, which no user mapping of an aperture can match yet,
+//! so the option is not honoured there and says so.
 //!
 //! # The boot console
 //!
@@ -52,12 +58,22 @@ static ASKED: AtomicBool = AtomicBool::new(false);
 /// of the machine.
 static KERNEL_TYPE: Once<Arc<Hold>> = Once::new();
 
-/// The type the kernel maps the framebuffer with, where the node is minted.
-pub(crate) const KERNEL_MAPPING: MemoryType = MemoryType::Device;
+/// The type the kernel maps the framebuffer with once it is lent, where the
+/// node is minted: write-combining (`docs/DISPLAY.md` §8).
+pub(crate) const KERNEL_MAPPING: MemoryType = MemoryType::Combining;
 
 /// Whether the command line said [`OPTION`].
 pub(crate) fn asked(view: &BootView<'_>) -> bool {
     view.flag(OPTION)
+}
+
+/// What a lent framebuffer's boot line says.
+#[derive(Clone, Copy, Debug)]
+struct Lent {
+    width: u32,
+    height: u32,
+    /// The type firmware's MTRRs give it, when it is one.
+    mtrr: Option<u8>,
 }
 
 /// The finder: the framebuffer, when [`OPTION`] asked for it.
@@ -65,8 +81,9 @@ pub(crate) fn asked(view: &BootView<'_>) -> bool {
 pub(crate) struct FirmwareFramebuffer {
     /// The loader's framebuffer, when the option is on.
     framebuffer: Option<Framebuffer>,
-    /// What became of it, for the boot line.
-    outcome: Option<Result<(u32, u32), &'static str>>,
+    /// What became of it, for the boot line: the size lent and the type the
+    /// MTRRs give it, or why it was not.
+    outcome: Option<Result<Lent, &'static str>>,
     /// Whether `find` ran out of memory adding the node.
     out_of_memory: bool,
 }
@@ -87,17 +104,34 @@ impl FirmwareFramebuffer {
         if !crate::arch::LENDS_FRAMEBUFFER {
             return Err("not honoured on this architecture");
         }
+        // Write-combining selects PAT entry 1, which is write-through until
+        // a processor programs it: every one must have. Refused here, nothing
+        // is minted and the kernel's window stays uncached.
+        if !crate::object::io_mapping::combining_ready() {
+            return Err("a processor's PAT has no write-combining entry");
+        }
         let node = DeviceNode::firmware_framebuffer(framebuffer, cx.reserved)?;
         let (phys, len) = node
             .aperture_info(0)
             .map(|info| (info.phys, info.len))
             .ok_or("the framebuffer has no aperture")?;
-        let hold = memory_type::hold(phys, len, KERNEL_MAPPING)
-            .map_err(|_| "the framebuffer's memory type could not be held")?;
-        let _ = KERNEL_TYPE.call_once(|| hold);
+        let (window, mapped) =
+            crate::panic::screen::window().ok_or("the kernel has no window on the framebuffer")?;
         // A driver may map the window from now on: the boot console, which
         // draws through a slice it holds alone, stops first.
         crate::console::screen::stop();
+        // The kernel's own window, uncached since early boot, becomes
+        // write-combining before anything else can map the pages: every
+        // processor's TLB has dropped the uncached translation when this
+        // returns. Nothing writes the window meanwhile but a panic, which
+        // stops the other processors first.
+        crate::mm::protect_kernel(window, mapped, ferrix_paging::MapFlags::KERNEL_COMBINING)
+            .map_err(
+                |_| "the kernel's window on the framebuffer could not be made write-combining",
+            )?;
+        let hold = memory_type::hold(phys, len, KERNEL_MAPPING)
+            .map_err(|_| "the framebuffer's memory type could not be held")?;
+        let _ = KERNEL_TYPE.call_once(|| hold);
         Ok(node)
     }
 }
@@ -128,7 +162,12 @@ impl Finder for FirmwareFramebuffer {
                     self.out_of_memory = true;
                     Failed
                 })?;
-                self.outcome = Some(Ok((framebuffer.width, framebuffer.height)));
+                let mtrr = crate::arch::mtrr_type(framebuffer.phys, framebuffer.size);
+                self.outcome = Some(Ok(Lent {
+                    width: framebuffer.width,
+                    height: framebuffer.height,
+                    mtrr,
+                }));
             }
             Err(why) => self.outcome = Some(Err(why)),
         }
@@ -142,13 +181,33 @@ impl Finder for FirmwareFramebuffer {
 
     fn report(&self) {
         match self.outcome {
-            Some(Ok((width, height))) => crate::console::println!(
-                "  display  firmware framebuffer {width}x{height} lent to a driver ({OPTION})"
+            Some(Ok(Lent {
+                width,
+                height,
+                mtrr,
+            })) => crate::console::println!(
+                "  display  firmware framebuffer {width}x{height} lent to a driver ({OPTION}), \
+                 write-combining; its MTRR type {}",
+                mtrr_name(mtrr)
             ),
             Some(Err(why)) => crate::console::println!(
                 "  display  firmware framebuffer not lent ({OPTION}): {why}"
             ),
             None => {}
         }
+    }
+}
+
+/// An MTRR type's name, as the boot line says it: a page mapped
+/// write-combining through the PAT is write-combining under each of them.
+const fn mtrr_name(kind: Option<u8>) -> &'static str {
+    match kind {
+        Some(0x00) => "uncacheable",
+        Some(0x01) => "write-combining",
+        Some(0x04) => "write-through",
+        Some(0x05) => "write-protected",
+        Some(0x06) => "write-back",
+        Some(_) => "reserved",
+        None => "unknown",
     }
 }

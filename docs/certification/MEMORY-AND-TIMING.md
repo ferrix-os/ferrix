@@ -868,6 +868,16 @@ two types are mapped at once, so the effect is stale data over the
 device's own memory, not a machine-wide one (VULNERABILITY-ANALYSIS
 T.DMA path 7). A flush when a cached hold is released would close it.
 
+**The lent framebuffer's type change (`ferrix.efifb` only).** Lending the
+firmware framebuffer (`discovery::firmware`) changes the kernel's own
+panic window from uncacheable to write-combining with `mm::protect_kernel`:
+one walk under the kernel's table lock over the window's leaves, at most
+`FRAMEBUFFER_WINDOW_SIZE` / 4 KiB of them, then one shootdown of every
+processor's TLB, global entries included. It runs once per boot, at stage
+10, before any program, and only under the option; the reference
+configuration never reaches it. Then one hold, kept for good, adds one
+entry here.
+
 ### 2.2g The pin quarantine's lock (`object::pin::QUARANTINE`)
 
 A spin lock over the list of quarantined pins and the pages raised pin

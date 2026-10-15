@@ -10,8 +10,9 @@
 //! stores need not snoop the caches, and the consequence can be a machine
 //! check that is not confined to the device; on Arm, Normal non-cacheable
 //! beside Normal write-back is a mismatched-attribute alias that loses
-//! coherence. Uncacheable beside write-combining is not forbidden, but it
-//! is not needed either, and one rule is easier to hold than two.
+//! coherence. The SDM supports no alias of two types at all; write-combining
+//! beside cacheable is only the case it names as dangerous. So no two types
+//! are allowed over a page, whichever they are.
 //!
 //! So every user mapping of device memory holds a [`Hold`] on its physical
 //! range for as long as any region of any address space maps it, and a
@@ -37,11 +38,17 @@
 //! The exception: under `ferrix.efifb`, on x86-64, the boot framebuffer's
 //! visible lines are lent to a node of their own (`discovery::firmware`,
 //! `docs/DISPLAY.md` §8), so a user mapping can reach pages the kernel maps
-//! for its panic screen. Before the node is published the kernel takes a
-//! [`Hold`] of its own mapping's type over them, [`MemoryType::Device`],
-//! and never drops it: every user mapping of the window is then held to
-//! that type, and one of any other type is refused for the life of the
-//! machine (L.device.39, checked by stage 10's `check_framebuffer`).
+//! for its panic screen. Before the node is published the kernel changes
+//! its own window on them from uncacheable to write-combining (every
+//! processor's TLB flushed before that returns; no cache line to flush,
+//! since uncacheable allocates none), then takes a [`Hold`] of that type,
+//! [`MemoryType::Combining`], and never drops it: every user mapping of the
+//! window is then held to write-combining, and one of any other type is
+//! refused for the life of the machine (L.device.39 and L.device.43,
+//! checked by stage 10's `check_framebuffer` and W8). While the shootdown
+//! is in flight another processor may still hold the uncacheable
+//! translation: an uncacheable/write-combining pair over pages nothing
+//! writes then, and never a cacheable one.
 //!
 //! # A residual: cache lines across a type change
 //!

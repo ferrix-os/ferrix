@@ -37,14 +37,22 @@ exec-once = /bin/pattern gradient two --after one
 const OPTION: &str = "ferrix.efifb ferrix.fbcon";
 
 /// The lines the guest must have said, each with what it shows.
-const SAID: [(&str, &str); 4] = [
+const SAID: [(&str, &str); 6] = [
     (
         "config   1 function(s) holding the lent firmware framebuffer answered no read",
         "the VGA function that holds the framebuffer is driven by nobody",
     ),
     (
-        "display  firmware framebuffer 1024x768 lent to a driver",
-        "the kernel lent the framebuffer",
+        "display  firmware framebuffer 1024x768 lent to a driver (ferrix.efifb), write-combining",
+        "the kernel lent the framebuffer with its own window write-combining",
+    ),
+    (
+        "efifb: window mapped write-combining",
+        "efifb mapped the window write-combining, the one type the kernel allows",
+    ),
+    (
+        "efifb: full-frame copy 1024x768: median",
+        "efifb timed its frame copies, the figure a PC gives",
     ),
     (
         "efifb: 1024x768 firmware framebuffer",
@@ -89,6 +97,14 @@ pub(super) fn test_firmware_screen(arch: Arch, programs: &Programs, args: &Args)
                 "{arch}: the guest never said `{line}`, which is how it shows {what}"
             )));
         }
+    }
+    // On the record, though they decide nothing here: the type firmware's
+    // MTRRs give the framebuffer, and QEMU's frame-copy time.
+    for said in said
+        .iter()
+        .filter(|said| said.contains("its MTRR type") || said.contains("efifb: full-frame copy"))
+    {
+        println!("  {arch}: the guest said: {}", said.trim());
     }
     println!(
         "  {arch}: hyprix on the firmware's framebuffer with no GPU driver, every one of {} \

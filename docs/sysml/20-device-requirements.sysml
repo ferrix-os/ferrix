@@ -622,7 +622,7 @@ package FerrixDeviceRequirements {
                 ranges withheld from every aperture but one: on x86-64 under
                 ferrix.efifb, and only there, at most one node, whose one
                 aperture starts at the framebuffer's first byte and is its visible
-                lines in whole pages, not prefetchable, with no vector. None shall
+                lines in whole pages, prefetchable, with no vector. None shall
                 be made when the framebuffer is in memory the allocator owns, its
                 size does not hold its lines, its layout is not four bytes a
                 pixel, its first pixel is off a page, or another reserved range
@@ -631,17 +631,17 @@ package FerrixDeviceRequirements {
                 reserved range that is not the framebuffer.";
             attribute :>> criterion = "Every boot lends a made-up 1024x768
                 framebuffer exactly its visible lines as one aperture of its own
-                source; refuses one crossed by another reservation, one the
+                source, prefetchable; refuses one crossed by another reservation, one the
                 allocator owns, one a page short, one of an unknown layout and
                 one off a page; withholds a lent aperture reaching past the
                 framebuffer and one inside another reserved range; and withholds
                 an ordinary window at the framebuffer. A node without the option
                 or off x86-64 fails the boot. Under ferrix.efifb the published
-                node holds one aperture equal to the framebuffer's lines and no
-                vector (test-compositor --boot firmware-screen). With the
-                exemption granted to any aperture, or either clause of
-                Reserved::lends dropped, or a node made without the option, the
-                boot panics.";
+                node holds one prefetchable aperture equal to the framebuffer's
+                lines and no vector (test-compositor --boot firmware-screen). With
+                the exemption granted to any aperture, or either clause of
+                Reserved::lends dropped, or a node made without the option, or
+                the aperture minted not prefetchable, the boot panics.";
             attribute :>> parent = "H.DMA.5";
             attribute :>> unit = ("device::DeviceNode::firmware_framebuffer",
                 "device::Reserved::lends", "device::Reserved::covers",
@@ -656,16 +656,20 @@ package FerrixDeviceRequirements {
                 no memory: it shall get no domain; vmo_pin, plain or contiguous,
                 and device_set_limit on it shall answer WRONG_TYPE; and before the
                 node is published the kernel shall take, and never give back, a
-                hold of its own mapping's memory type over the aperture, so that
-                every user mapping of it is held to that type (L.user.109).";
+                hold of write-combining, its own window's memory type
+                (L.device.43), over the aperture, so that every user mapping of
+                it is held to that type (L.user.109) and only
+                io_mapping_map_combining maps it.";
             attribute :>> criterion = "Under ferrix.efifb the node's domain is
                 refused and none was made, its DMA is off, a hold of the aperture
-                as another type than the kernel's is refused while one of the
-                kernel's type is not, and vmo_pin (plain and PIN_CONTIGUOUS) and
-                device_set_limit(PIN_PAGES) through the calls answer WRONG_TYPE
-                (W8; test-compositor --boot firmware-screen). With the node
-                reaching memory, vmo_pin's refusal removed, or the hold not taken,
-                the boot panics.";
+                as device or cached memory is refused while one as
+                write-combining is not, and vmo_pin (plain and PIN_CONTIGUOUS)
+                and device_set_limit(PIN_PAGES) through the calls answer
+                WRONG_TYPE; io_mapping_map of the window is refused and
+                io_mapping_map_combining given, its user leaf write-combining and
+                not device (W8; test-compositor --boot firmware-screen). With the
+                node reaching memory, vmo_pin's refusal removed, the hold not
+                taken or taken as device memory, the boot panics.";
             attribute :>> parent = ("H.DMA.3", "H.DMA.5");
             attribute :>> unit = ("device::DeviceNode::reaches_memory",
                 "device::DeviceNode::domain", "discovery::firmware::refuses",
@@ -719,6 +723,29 @@ package FerrixDeviceRequirements {
                 panics.";
             attribute :>> parent = "H.DMA.5";
             attribute :>> unit = "device::DeviceNode::describe";
+        }
+        requirement <'L.device.43'> theLentFramebufferWriteCombining : ItemLowLevel {
+            attribute :>> statement = "On x86-64 under ferrix.efifb the firmware
+                framebuffer's node shall not be made unless every processor
+                programmed its PAT (L.x86_64.127); and before the kernel's hold
+                is taken and the node published, every page of the kernel's
+                panic window over the framebuffer shall be mapped
+                write-combining and none as device memory, the change reaching
+                every processor's TLB first (L.mm.31, L.smp.14).";
+            attribute :>> criterion = "Under ferrix.efifb stage 10's check of the
+                published node reads every page of the kernel's window back
+                write-combining, not device, writable and not user's, as the
+                type the hold keeps; reads this processor's IA32_PAT back as
+                X86_PAT and every processor counted as programmed; and efifb
+                says it mapped the window write-combining (test-compositor
+                --boot firmware-screen). With the kernel's change of type
+                skipped, the boot panics.";
+            attribute :>> parent = ("H.MEM.15", "H.DMA.5");
+            attribute :>> unit = ("discovery::firmware::FirmwareFramebuffer::lend",
+                "mm::protect_kernel", "panic::screen::window",
+                "arch::x86_64::framebuffer::pat",
+                "arch::x86_64::framebuffer::mtrr_type",
+                "arch::x86_64::framebuffer::drain_write_combining");
         }
     }
 }

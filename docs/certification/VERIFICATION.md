@@ -83,10 +83,14 @@ verifies L.device.38's exemption and its refusals whether or not the option
 is given, and the display core's `display::check`. Only `cargo xtask
 test-compositor --boot firmware-screen`, which gives `ferrix.efifb
 ferrix.fbcon`, publishes the node, so only it runs `check_framebuffer`
-(L.device.1's exemption clause, L.device.38's node, L.device.39's refused
-domain and type hold, L.device.40's holder found from its BARs, L.device.41's
-stopped console) and config check W8 (L.device.42's mode read back,
-L.device.39's `WRONG_TYPE` refusals, L.device.40's refused I/O mapping), and
+(L.device.1's exemption clause, L.device.38's prefetchable node, L.device.39's
+refused domain and write-combining type hold, L.device.40's holder found from
+its BARs, L.device.41's stopped console, and L.device.43's write-combining
+window: every page of the kernel's window read back write-combining, the PAT
+read back whole on this processor and programmed on every one) and config
+check W8 (L.device.42's mode read back, L.device.39's `WRONG_TYPE` refusals
+and its uncached mapping refused and write-combining one given, whose user
+leaf reads back write-combining, L.device.40's refused I/O mapping), and
 W2's refused configuration read of the holder; its picture check is that no
 console pixel survives on the screen. §3's coverage runs do not give the
 option, so those lines are owed (`coverage-owed.json`).

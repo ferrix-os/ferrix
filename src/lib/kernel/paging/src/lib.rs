@@ -44,6 +44,7 @@
 pub mod aarch64;
 pub mod armv7a;
 pub mod coherence;
+pub mod mtrr;
 pub mod stage2;
 pub mod vtd;
 pub mod x86_64;
@@ -220,6 +221,14 @@ pub struct MapFlags {
 /// reached through the PAT bit, are left as at power-on.
 pub const X86_PAT: u64 = 0x0007_0406_0007_0106;
 
+// The entries a descriptor selects: 0 write-back (0x06), 1 write-combining
+// (0x01) and 3 uncacheable (0x00), as Linux's `uapi/asm/mtrr.h` encodes the
+// types. A table that moved one would change the type of every mapping.
+const _: () = assert!(
+    X86_PAT & 0xFF == 0x06 && (X86_PAT >> 8) & 0xFF == 0x01 && (X86_PAT >> 24) & 0xFF == 0x00,
+    "X86_PAT must keep entry 0 write-back, 1 write-combining and 3 uncacheable"
+);
+
 impl MapFlags {
     /// Kernel text: read and execute, never writable.
     pub const KERNEL_CODE: MapFlags = MapFlags {
@@ -296,6 +305,21 @@ impl MapFlags {
         device: true,
         uncached: false,
         write_combining: false,
+    };
+
+    /// A framebuffer the kernel maps write-combining: [`MapFlags::KERNEL_DEVICE`]
+    /// with the device bit clear and `write_combining` set. On x86-64 it
+    /// selects PAT entry 1 ([`X86_PAT`]), so it may be used only once every
+    /// processor has programmed its table.
+    pub const KERNEL_COMBINING: MapFlags = MapFlags {
+        read: true,
+        write: true,
+        execute: false,
+        user: false,
+        global: true,
+        device: false,
+        uncached: false,
+        write_combining: true,
     };
 
     /// User text.

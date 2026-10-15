@@ -1886,9 +1886,12 @@ pub(crate) fn write_combining_processors() -> Option<usize> {
     Some(PAT_PROGRAMMED.load(core::sync::atomic::Ordering::Acquire))
 }
 
-/// How the kernel maps a framebuffer: as a device. Write-combining needs the
-/// PAT, which is not programmed, and these tables ignore `uncached`, which
-/// would leave a framebuffer write-back.
+/// How the kernel maps a framebuffer in early boot: as a device.
+/// Write-combining needs the PAT entry each processor programs only later,
+/// at its bring-up, and these tables ignore `uncached`, which would leave a
+/// framebuffer write-back. A framebuffer lent under `ferrix.efifb` is
+/// changed to write-combining when it is lent, once every processor has
+/// programmed its PAT (`discovery::firmware`).
 pub(crate) const FRAMEBUFFER_FLAGS: ferrix_paging::MapFlags =
     ferrix_paging::MapFlags::KERNEL_DEVICE;
 
@@ -1987,3 +1990,8 @@ pub(crate) const USER_GETUID_PROGRAM: &[u8] = &[
     0xb8, 0xe7, 0x00, 0x00, 0x00, // movl $231, %eax
     0x0f, 0x05, // syscall
 ];
+
+// The lent firmware framebuffer's write-combining (`docs/DISPLAY.md` §8),
+// last for the same reason.
+mod framebuffer;
+pub(crate) use framebuffer::{drain_write_combining, mtrr_type, pat};
