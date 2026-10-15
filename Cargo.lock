@@ -39,6 +39,19 @@ name = "ferrix-ahci"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-ahci-driver"
+version = "0.1.0"
+dependencies = [
+ "ferrix-ahci",
+ "ferrix-blkring",
+ "ferrix-blkserve",
+ "ferrix-driver",
+ "ferrix-native-abi",
+ "ferrix-rt",
+ "ferrix-virtio-blk",
+]
+
+[[package]]
 name = "ferrix-argon2"
 version = "0.1.0"
 

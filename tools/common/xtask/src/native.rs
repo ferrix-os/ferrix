@@ -79,6 +79,11 @@ pub(crate) const PROGRAMS: &[Program] = &[
         directory: DRIVERS,
     },
     Program {
+        package: "ferrix-ahci-driver",
+        binary: "ahci",
+        directory: DRIVERS,
+    },
+    Program {
         package: "ferrix-sdmmc",
         binary: "sdmmc",
         directory: DRIVERS,

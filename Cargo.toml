@@ -106,6 +106,7 @@ members = [
     "src/user/system/native/drivers/block/virtio-blk",
     "src/user/system/native/drivers/block/stm32-sdmmc",
     "src/user/system/native/drivers/block/nvme",
+    "src/user/system/native/drivers/block/ahci",
     "src/user/system/native/drivers/net/virtio-net",
     "src/user/system/native/drivers/net/yt6801",
     "src/user/system/native/drivers/display/virtio-gpu",
@@ -178,6 +179,7 @@ ferrix-native = { path = "src/lib/proto/native" }
 ferrix-stm32-display = { path = "src/lib/drivers/display/stm32-display" }
 ferrix-stm32-sdmmc = { path = "src/lib/drivers/block/stm32-sdmmc" }
 ferrix-nvme = { path = "src/lib/drivers/block/nvme" }
+ferrix-ahci = { path = "src/lib/drivers/block/ahci" }
 ferrix-usb-host = { path = "src/lib/drivers/usb/usb-host" }
 ferrix-usb-device = { path = "src/lib/drivers/usb/usb-device" }
 ferrix-dwc3 = { path = "src/lib/drivers/usb/dwc3" }
