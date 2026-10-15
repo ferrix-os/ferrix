@@ -508,8 +508,10 @@ package FerrixDeviceRequirements {
                 types 0 to 3 from the offsets Linux's dmi_decode reads, the first
                 structure of a type winning, and render each as Linux's dmi-id
                 shows it, the strings' bytes unaltered.";
-            attribute :>> criterion = "Host tests: a table laid out as QEMU lays out
-                types 0, 1, 3 and 127 reads as Linux shows it, including the
+            attribute :>> criterion = "Host tests: QEMU's own 2.x and 3.x tables as
+                OVMF installed them (src/lib/platform/smbios/src/fixtures.rs, captured
+                with xtask's -smbios arguments) read as QEMU built them, and a table
+                laid out as QEMU lays out types 0, 1, 3 and 127 reads as Linux shows it, including the
                 release, the UUID in both byte orders, the chassis type, empty
                 strings, absent fields, bytes passed through, the modalias and the
                 cut to a page.";

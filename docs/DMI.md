@@ -117,7 +117,7 @@ point and the table where they are. It:
    writes, allocated below the direct map's end like everything else it
    hands over;
 4. passes the copy's physical address and length in two new `BootInfo`
-   fields, `smbios` and `smbios_len` (version 8), or zeros.
+   fields, `smbios` and `smbios_len` (version 9, after PM3's version 8), or zeros.
 
 A refused table never halts the boot, while firmware ignoring the
 loader's `MAX_ADDRESS` ceiling for the copy, or a memory map that
@@ -133,7 +133,7 @@ What the loader does here is an assumption of the kernel's requirement
 loader unit, so `L.discovery.6`, reserved for it, was released unwritten.
 The kernel does not rely on it: it checks the copy again.
 
-`BootInfo` version 8 is refused by a version 7 kernel and the other way
+`BootInfo` version 9 is refused by a version 8 kernel and the other way
 round, as every version change is (`BootInfoError::VersionMismatch`), so a
 loader and a kernel go together; an A/B update carries both.
 
@@ -228,8 +228,11 @@ absent branch is what runs there.
 ## 4. Checks
 
 * `ferrix-smbios` host tests (`src/lib/platform/smbios/src/tests.rs`):
-  tables laid out as QEMU's `hw/smbios/smbios.c` lays out types 0, 1, 3
-  and 127; each hostile case of §3.2 refused or walked within bounds (bad
+  QEMU's own 2.x and 3.x tables as OVMF installed them, captured from
+  `/sys/firmware/dmi/tables` on probe boots (`fixtures.rs` names the
+  commit and command), read as the `-smbios` arguments and QEMU's defaults
+  say, never as Ferrix's output said; tables laid out as QEMU's
+  `hw/smbios/smbios.c` lays out types 0, 1, 3 and 127; each hostile case of §3.2 refused or walked within bounds (bad
   checksums, a bad `_DMI_` header, entry point lengths just outside both
   ranges, an entry point cut at every byte, a table at the cap and one byte
   over, a length past the end, a structure shorter than its header,

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "22ae24e7eeb366dbd793b540cb59dcaa2c25812e249896644311238f67bc3b4e",
+  "digest": "e80f81f44cc83a67bc1ad20e138e6bfd5e67ef9464ff847615122687a89e8c70",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -65898,10 +65898,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::Nodes::smbiosIdentityAsLinux",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Host tests: a table laid out as QEMU lays out types 0, 1, 3 and 127 reads as Linux shows it, including the release, the UUID in both byte orders, the chassis type, empty strings, absent fields, bytes passed through, the modalias and the cut to a page.\"",
+                  "value": "\"Host tests: QEMU's own 2.x and 3.x tables as OVMF installed them (src/lib/platform/smbios/src/fixtures.rs, captured with xtask's -smbios arguments) read as QEMU built them, and a table laid out as QEMU lays out types 0, 1, 3 and 127 reads as Linux shows it, including the release, the UUID in both byte orders, the chassis type, empty strings, absent fields, bytes passed through, the modalias and the cut to a page.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 515
+                    "line": 517
                   }
                 },
                 {
@@ -65912,7 +65912,7 @@
                   "value": "\"H.BOOT.16\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 516
+                    "line": 518
                   }
                 },
                 {
@@ -65923,7 +65923,7 @@
                   "value": "(\"ferrix_smbios::Smbios::field_text\", \"ferrix_smbios::Smbios::modalias\", \"ferrix_smbios::decode\", \"ferrix_smbios::string\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 519
+                    "line": 521
                   }
                 }
               ]
@@ -65936,7 +65936,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 521
+                "line": 523
               },
               "children": [
                 {
@@ -65947,7 +65947,7 @@
                   "value": "\"discovery::smbios shall read the loader's SMBIOS copy only when it is wholly inside one region the memory map reports as the SMBIOS copy and wholly inside the direct map, holds more than the 32 bytes of the entry point and at most 1 MiB of table, and re-parses with a table exactly as long as the entry point says; and shall otherwise keep nothing, say why, and let the boot go on.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 528
+                    "line": 530
                   }
                 },
                 {
@@ -65958,7 +65958,7 @@
                   "value": "\"At boot, forged copies -- none, outside the region, straddling its end, below the direct map, overflowing, holding no table, a byte longer than its table, a bad checksum -- are each refused by their name and a good one accepted; stage 1 requires the map to describe the real copy as the SMBIOS copy.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 533
+                    "line": 535
                   }
                 },
                 {
@@ -65969,7 +65969,7 @@
                   "value": "(\"H.BOOT.4\", \"H.BOOT.16\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 534
+                    "line": 536
                   }
                 },
                 {
@@ -65980,7 +65980,7 @@
                   "value": "(\"discovery::smbios::range\", \"discovery::smbios::decode\", \"discovery::smbios::open\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 536
+                    "line": 538
                   }
                 }
               ]
@@ -65994,7 +65994,7 @@
           "doc": "The quiesce in src/kernel/src/syscall/native.rs: every core that serves a device waited out, its DMA turned off, and the claims a core keeps past its driver let go, before the next driver is given it.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 540
+            "line": 542
           },
           "children": [
             {
@@ -66005,7 +66005,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 546
+                "line": 548
               },
               "children": [
                 {
@@ -66016,7 +66016,7 @@
                   "value": "\"device_quiesce shall be refused with ACCESS_DENIED through a device handle without MANAGE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 548
+                    "line": 550
                   }
                 },
                 {
@@ -66027,7 +66027,7 @@
                   "value": "\"A quiesce through a handle to the device without MANAGE answers ACCESS_DENIED.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 550
+                    "line": 552
                   }
                 },
                 {
@@ -66038,7 +66038,7 @@
                   "value": "\"H.OBJ.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 551
+                    "line": 553
                   }
                 },
                 {
@@ -66049,7 +66049,7 @@
                   "value": "\"syscall::native::device_quiesce\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 552
+                    "line": 554
                   }
                 }
               ]
@@ -66062,7 +66062,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 554
+                "line": 556
               },
               "children": [
                 {
@@ -66073,7 +66073,7 @@
                   "value": "\"A quiesce shall answer BAD_STATE, changing nothing, while a driver serves the device.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 556
+                    "line": 558
                   }
                 },
                 {
@@ -66084,7 +66084,7 @@
                   "value": "\"A quiesce of the device a running driver serves answers BAD_STATE, and the driver goes on serving it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 558
+                    "line": 560
                   }
                 },
                 {
@@ -66095,7 +66095,7 @@
                   "value": "\"H.DEV.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 559
+                    "line": 561
                   }
                 },
                 {
@@ -66106,7 +66106,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 560
+                    "line": 562
                   }
                 }
               ]
@@ -66119,7 +66119,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 562
+                "line": 564
               },
               "children": [
                 {
@@ -66130,7 +66130,7 @@
                   "value": "\"A quiesce made as a driver dies shall wait for every core serving the device to let go, turn the device's DMA off, let go the claims a core keeps past its driver, and answer success.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 566
+                    "line": 568
                   }
                 },
                 {
@@ -66141,7 +66141,7 @@
                   "value": "\"A quiesce the instant a block driver's handles close answers success, and the next driver is given a ring on the device.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 569
+                    "line": 571
                   }
                 },
                 {
@@ -66152,7 +66152,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 570
+                    "line": 572
                   }
                 },
                 {
@@ -66163,7 +66163,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 571
+                    "line": 573
                   }
                 }
               ]
@@ -66176,7 +66176,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 573
+                "line": 575
               },
               "children": [
                 {
@@ -66187,7 +66187,7 @@
                   "value": "\"The kernel shall quiesce every device a dead devmgr's drivers served before a devmgr started again is handed them.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 576
+                    "line": 578
                   }
                 },
                 {
@@ -66198,7 +66198,7 @@
                   "value": "\"Restarting devmgr.service starts a second devmgr, which is given the devices and starts their drivers.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 578
+                    "line": 580
                   }
                 },
                 {
@@ -66209,7 +66209,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 579
+                    "line": 581
                   }
                 },
                 {
@@ -66220,7 +66220,7 @@
                   "value": "\"syscall::native::quiesce\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 580
+                    "line": 582
                   }
                 }
               ]
@@ -66233,7 +66233,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 582
+                "line": 584
               },
               "children": [
                 {
@@ -66244,7 +66244,7 @@
                   "value": "\"A quiesce whose device a core has not let go within its patience shall answer TIMED_OUT, and one whose DMA cannot be turned off BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 585
+                    "line": 587
                   }
                 },
                 {
@@ -66255,7 +66255,7 @@
                   "value": "\"A quiesce with a core that never lets go answers TIMED_OUT; one on a function whose configuration space cannot be mapped answers BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 588
+                    "line": 590
                   }
                 },
                 {
@@ -66266,7 +66266,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 589
+                    "line": 591
                   }
                 },
                 {
@@ -66277,7 +66277,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 590
+                    "line": 592
                   }
                 }
               ]
@@ -66291,7 +66291,7 @@
           "doc": "NVIDIA's N0g (docs/NVIDIA.md section 12.3, condition G5): the isolated-interrupts mark, device_isolation, and no vector for a function whose messages arrive under another's source ID.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 594
+            "line": 596
           },
           "children": [
             {
@@ -66302,7 +66302,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 599
+                "line": 601
               },
               "children": [
                 {
@@ -66313,7 +66313,7 @@
                   "value": "\"device_set_limit's DEVICE_LIMIT_ISOLATED_INTERRUPTS shall set a node's isolated-interrupts mark through a handle with SET_LIMIT, and a value that would clear a set mark shall be refused ACCESS_DENIED; nothing else shall clear it. While a node's mark is set and its interrupts are not isolated, interrupt_create and vmo_pin shall be refused ACCESS_DENIED. device_isolation shall answer bit 0 for a translated domain and bit 1 for isolated interrupts. devmgr shall start no driver of a device that runs firmware of its own whose mark the kernel refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 609
+                    "line": 611
                   }
                 },
                 {
@@ -66324,7 +66324,7 @@
                   "value": "\"On x86-64 check R10 sets edu's mark, reads device_isolation 0x3, is given a vector, is refused one ACCESS_DENIED while the machine's interrupts are forced not isolated, and is refused clearing the mark; with the refusal skipped R10 panics. devmgr-proto's host tests: a firmware device starts only once marked, with its line when refused; with the refusal ignored they fail.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 616
+                    "line": 618
                   }
                 },
                 {
@@ -66335,7 +66335,7 @@
                   "value": "(\"H.DMA.9\", \"H.DEV.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 617
+                    "line": 619
                   }
                 },
                 {
@@ -66346,7 +66346,7 @@
                   "value": "(\"syscall::native::set_isolated_mark\", \"syscall::native::set_limit_on\", \"syscall::native::device_set_limit\", \"syscall::native::device_get_limit\", \"syscall::native::device_isolation\", \"syscall::native::device_isolated_in\", \"syscall::native::interrupt_create\", \"syscall::native::vmo_pin\", \"device::DeviceNode::interrupts_isolated\", \"device::DeviceNode::may_take_vectors_and_pins\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 623
+                    "line": 625
                   }
                 }
               ]
@@ -66359,7 +66359,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 625
+                "line": 627
               },
               "children": [
                 {
@@ -66370,7 +66370,7 @@
                   "value": "\"While a unit remaps, a function the remapping units do not place as its own requester -- behind no unit, or under a bridge's alias -- shall be given no message route, and so no vector, and the boot shall name each such function.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 629
+                    "line": 631
                   }
                 },
                 {
@@ -66381,7 +66381,7 @@
                   "value": "\"On x86-64 a requester no unit places is refused a route (the remap line); with the refusal turned into a compatibility route the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 632
+                    "line": 634
                   }
                 },
                 {
@@ -66392,7 +66392,7 @@
                   "value": "\"H.DMA.9\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 633
+                    "line": 635
                   }
                 },
                 {
@@ -66403,7 +66403,7 @@
                   "value": "(\"iommu::remapping::route\", \"arch::x86_64::msi::msi_allocate\", \"iommu::name_functions_without_vectors\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 635
+                    "line": 637
                   }
                 }
               ]
@@ -66416,7 +66416,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 637
+                "line": 639
               },
               "children": [
                 {
@@ -66427,7 +66427,7 @@
                   "value": "\"A PCI function in the build's MSI-preferred list (ferrix_pci::msix::MSI_PREFERRED, exactly 1F0A:6801) with both an MSI-X table and an MSI capability, its configuration space placed, no INTx line and its memory decoded shall have its MSI-X held off at stage 10 before its node is built -- Enable written 0 and Function Mask 1, and read back so -- and only then be granted its table and pending-bit pages as aperture, offered no MSI-X table and its MSI capability's one vector; one that does not read back so keeps its table withheld and its MSI-X offered.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 646
+                    "line": 648
                   }
                 },
                 {
@@ -66438,7 +66438,7 @@
                   "value": "\"On x86-64 test-boot requires the msix-off line, from the check run on a scratch node enumeration builds for QEMU's e1000e with QEMU's subsystem as if it were listed, and never publishes: Enable reads 0 and Function Mask 1, the table's and the pending-bit array's whole ranges and their first and last bytes lie in its apertures, as do the table pages it records, it offers no MSI-X table and one vector, and its MSI mints once, masked, on a number with no handler. Host tests: the list is exactly 1F0A:6801, the check case refuses 8086:10D3 with any subsystem but QEMU's, and hold_off reads back Enable 0 and Function Mask 1. With the hold skipped, the table still withheld, or the MSI vector not offered, the boot fails. The 1F0A:6801 arm is reached only on the hardware.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 658
+                    "line": 660
                   }
                 },
                 {
@@ -66449,7 +66449,7 @@
                   "value": "(\"H.DMA.5\", \"H.IRQ.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 659
+                    "line": 661
                   }
                 },
                 {
@@ -66460,7 +66460,7 @@
                   "value": "(\"discovery::pci::held_off\", \"discovery::pci::hold_msix_off\", \"device::DeviceNode::pci\", \"device::MsiFunction::of\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 661
+                    "line": 663
                   }
                 }
               ]
@@ -66473,7 +66473,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 663
+                "line": 665
               },
               "children": [
                 {
@@ -66484,7 +66484,7 @@
                   "value": "\"DeviceNode::verify_config shall refuse a node whose MSI-X the kernel holds off when its MSI-X Enable reads 1, naming MSI-X control; the Function Mask the kernel wrote is not compared, since the chip's own reset may clear it while Enable stays 0.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 667
+                    "line": 669
                   }
                 },
                 {
@@ -66495,7 +66495,7 @@
                   "value": "\"On x86-64, with Enable written 1 on the scratch node of L.device.35 -- the mirror case -- verify_config reports MSI-X control and the node reads refused (the msix-off line); with the comparison removed the boot fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 671
+                    "line": 673
                   }
                 },
                 {
@@ -66506,7 +66506,7 @@
                   "value": "(\"H.DMA.5\", \"H.IRQ.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 672
+                    "line": 674
                   }
                 },
                 {
@@ -66517,7 +66517,7 @@
                   "value": "(\"device::DeviceNode::verify_config\", \"device::msix_off_breach\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 674
+                    "line": 676
                   }
                 }
               ]
@@ -66530,7 +66530,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 676
+                "line": 678
               },
               "children": [
                 {
@@ -66541,7 +66541,7 @@
                   "value": "\"MsiFunction::mint shall refuse a function whose MSI-X the kernel holds off when its MSI-X Enable, read under the node's configuration lock at the mint, reads 1.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 679
+                    "line": 681
                   }
                 },
                 {
@@ -66552,7 +66552,7 @@
                   "value": "\"On x86-64 the scratch node of L.device.35, with Enable written 1, is refused its MSI vector when asked again (the msix-off line); with the refusal removed the boot fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 682
+                    "line": 684
                   }
                 },
                 {
@@ -66563,7 +66563,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 683
+                    "line": 685
                   }
                 },
                 {
@@ -66574,7 +66574,7 @@
                   "value": "\"device::MsiFunction::mint\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 684
+                    "line": 686
                   }
                 }
               ]
@@ -66587,7 +66587,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 686
+                "line": 688
               },
               "children": [
                 {
@@ -66598,7 +66598,7 @@
                   "value": "\"The boot framebuffer shall stay in the ranges withheld from every aperture but one: on x86-64 under ferrix.efifb, and only there, at most one node, whose one aperture starts at the framebuffer's first byte and is its visible lines in whole pages, prefetchable, with no vector. None shall be made when the framebuffer is in memory the allocator owns, its size does not hold its lines, its layout is not four bytes a pixel, its first pixel is off a page, or another reserved range lies inside the lines; and an aperture of the node's kind shall be withheld when it reaches past the framebuffer or lies in a reserved range that is not the framebuffer.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 697
+                    "line": 699
                   }
                 },
                 {
@@ -66609,7 +66609,7 @@
                   "value": "\"Every boot lends a made-up 1024x768 framebuffer exactly its visible lines as one aperture of its own source, prefetchable; refuses one crossed by another reservation, one the allocator owns, one a page short, one of an unknown layout and one off a page; withholds a lent aperture reaching past the framebuffer and one inside another reserved range; and withholds an ordinary window at the framebuffer. A node without the option or off x86-64 fails the boot. Under ferrix.efifb the published node holds one prefetchable aperture equal to the framebuffer's lines and no vector (test-compositor --boot firmware-screen). With the exemption granted to any aperture, or either clause of Reserved::lends dropped, or a node made without the option, or the aperture minted not prefetchable, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 710
+                    "line": 712
                   }
                 },
                 {
@@ -66620,7 +66620,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 711
+                    "line": 713
                   }
                 },
                 {
@@ -66631,7 +66631,7 @@
                   "value": "(\"device::DeviceNode::firmware_framebuffer\", \"device::Reserved::lends\", \"device::Reserved::covers\", \"device::Reserved::synthetic\", \"device::Reserved::framebuffer\", \"discovery::firmware::FirmwareFramebuffer::new\", \"discovery::firmware::FirmwareFramebuffer::lend\", \"discovery::firmware::FirmwareFramebuffer::find\", \"discovery::firmware::may_lend\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 718
+                    "line": 720
                   }
                 }
               ]
@@ -66644,7 +66644,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 720
+                "line": 722
               },
               "children": [
                 {
@@ -66655,7 +66655,7 @@
                   "value": "\"The firmware framebuffer's node shall reach no memory: it shall get no domain; vmo_pin, plain or contiguous, and device_set_limit on it shall answer WRONG_TYPE; and before the node is published the kernel shall take, and never give back, a hold of write-combining, its own window's memory type (L.device.43), over the aperture, so that every user mapping of it is held to that type (L.user.109) and only io_mapping_map_combining maps it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 728
+                    "line": 730
                   }
                 },
                 {
@@ -66666,7 +66666,7 @@
                   "value": "\"Under ferrix.efifb the node's domain is refused and none was made, its DMA is off, a hold of the aperture as device or cached memory is refused while one as write-combining is not, and vmo_pin (plain and PIN_CONTIGUOUS) and device_set_limit(PIN_PAGES) through the calls answer WRONG_TYPE; io_mapping_map of the window is refused and io_mapping_map_combining given, its user leaf write-combining and not device (W8; test-compositor --boot firmware-screen). With the node reaching memory, vmo_pin's refusal removed, the hold not taken or taken as device memory, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 738
+                    "line": 740
                   }
                 },
                 {
@@ -66677,7 +66677,7 @@
                   "value": "(\"H.DMA.3\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 739
+                    "line": 741
                   }
                 },
                 {
@@ -66688,7 +66688,7 @@
                   "value": "(\"device::DeviceNode::reaches_memory\", \"device::DeviceNode::domain\", \"discovery::firmware::refuses\", \"syscall::native::vmo_pin\", \"syscall::native::set_limit_on\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 742
+                    "line": 744
                   }
                 }
               ]
@@ -66701,7 +66701,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 744
+                "line": 746
               },
               "children": [
                 {
@@ -66712,7 +66712,7 @@
                   "value": "\"While the firmware framebuffer is lent to its own node, every PCI function one of whose BARs holds it shall be driven by nobody: every native call that needs MANAGE on a device reaches it through device_in, and on such a function each shall answer BAD_STATE, configuration reads and I/O mappings included.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 750
+                    "line": 752
                   }
                 },
                 {
@@ -66723,7 +66723,7 @@
                   "value": "\"Under ferrix.efifb every function whose BAR ranges, read again from the published nodes, overlap the framebuffer is marked; the VGA function that holds it answers a configuration read and an io_mapping_create BAD_STATE (W2 and W8, the config line: one function); and no other node's aperture overlaps the framebuffer (test-compositor --boot firmware-screen). With the function left driven, or the mark minting leaves never set, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 758
+                    "line": 760
                   }
                 },
                 {
@@ -66734,7 +66734,7 @@
                   "value": "(\"H.DMA.5\", \"H.DEV.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 759
+                    "line": 761
                   }
                 },
                 {
@@ -66745,7 +66745,7 @@
                   "value": "(\"device::yield_framebuffer_holder\", \"device::DeviceNode::yielded\", \"device::DeviceNode::mint_bar\", \"syscall::native::device_in\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 762
+                    "line": 764
                   }
                 }
               ]
@@ -66758,7 +66758,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 764
+                "line": 766
               },
               "children": [
                 {
@@ -66769,7 +66769,7 @@
                   "value": "\"The boot console shall stop drawing on the framebuffer, waiting out a draw in flight, before the firmware framebuffer's node exists, so that no kernel draw but a panic's meets a ring-3 driver's on its pages.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 768
+                    "line": 770
                   }
                 },
                 {
@@ -66780,7 +66780,7 @@
                   "value": "\"Under ferrix.efifb ferrix.fbcon the console draws the boot until the node is made, and stage 10's check of the published node finds it stopped; hyprix's picture on the framebuffer then holds no console pixel (test-compositor --boot firmware-screen). With the stop moved after the node is published, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 774
+                    "line": 776
                   }
                 },
                 {
@@ -66791,7 +66791,7 @@
                   "value": "(\"H.DMA.5\", \"H.FAIL.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 775
+                    "line": 777
                   }
                 },
                 {
@@ -66802,7 +66802,7 @@
                   "value": "(\"console::screen::stop\", \"discovery::firmware::FirmwareFramebuffer::lend\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 777
+                    "line": 779
                   }
                 }
               ]
@@ -66815,7 +66815,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 779
+                "line": 781
               },
               "children": [
                 {
@@ -66826,7 +66826,7 @@
                   "value": "\"DeviceNode::describe shall report the firmware framebuffer's node as TREE_FIRMWARE_FB with one aperture and no vector, and its width, height, stride and pixel layout, as it was minted, in the fields a tree node leaves zero.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 783
+                    "line": 785
                   }
                 },
                 {
@@ -66837,7 +66837,7 @@
                   "value": "\"Under ferrix.efifb the node's device_info, read back through the call, names TREE_FIRMWARE_FB, one aperture, no vector and the minted mode (W8, the config line; test-compositor --boot firmware-screen), and efifb starts at the firmware's mode. With the mode fields not written, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 789
+                    "line": 791
                   }
                 },
                 {
@@ -66848,7 +66848,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 790
+                    "line": 792
                   }
                 },
                 {
@@ -66859,7 +66859,7 @@
                   "value": "\"device::DeviceNode::describe\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 791
+                    "line": 793
                   }
                 }
               ]
@@ -66872,7 +66872,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 793
+                "line": 795
               },
               "children": [
                 {
@@ -66883,7 +66883,7 @@
                   "value": "\"On x86-64 under ferrix.efifb the firmware framebuffer's node shall not be made unless every processor programmed its PAT (L.x86_64.127); and before the kernel's hold is taken and the node published, every page of the kernel's panic window over the framebuffer shall be mapped write-combining and none as device memory, the change reaching every processor's TLB first (L.mm.31, L.smp.14).\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 800
+                    "line": 802
                   }
                 },
                 {
@@ -66894,7 +66894,7 @@
                   "value": "\"Under ferrix.efifb stage 10's check of the published node reads every page of the kernel's window back write-combining, not device, writable and not user's, as the type the hold keeps; reads this processor's IA32_PAT back as X86_PAT and every processor counted as programmed; and efifb says it mapped the window write-combining (test-compositor --boot firmware-screen). With the kernel's change of type skipped, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 808
+                    "line": 810
                   }
                 },
                 {
@@ -66905,7 +66905,7 @@
                   "value": "(\"H.MEM.15\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 809
+                    "line": 811
                   }
                 },
                 {
@@ -66916,7 +66916,7 @@
                   "value": "(\"discovery::firmware::FirmwareFramebuffer::lend\", \"mm::protect_kernel\", \"panic::screen::window\", \"arch::x86_64::framebuffer::pat\", \"arch::x86_64::framebuffer::mtrr_type\", \"arch::x86_64::framebuffer::drain_write_combining\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 814
+                    "line": 816
                   }
                 }
               ]

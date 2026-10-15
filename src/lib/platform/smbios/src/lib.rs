@@ -19,6 +19,8 @@
 #![deny(clippy::arithmetic_side_effects)]
 
 #[cfg(test)]
+mod fixtures;
+#[cfg(test)]
 mod tests;
 
 /// The most bytes an entry point has: Linux reads 32 and keeps at most 32.

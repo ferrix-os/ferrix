@@ -612,3 +612,59 @@ fn every_truncation_and_every_single_byte_change_is_total() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// QEMU's own tables (`fixtures.rs` says how they were captured)
+// ---------------------------------------------------------------------------
+
+/// What QEMU's tables must read as, from xtask's `-smbios` arguments and QEMU's
+/// defaults (QEMU 0b836b518c): `smbios_set_defaults("QEMU", mc->desc,
+/// mc->name)` in `hw/i386/fw_cfg.c:76` gives type 1's version and type 2's and
+/// 3's manufacturer and version (`hw/smbios/smbios.c:1021-1028`), q35's
+/// `mc->desc` is "Standard PC (Q35 + ICH9, 2009)" (`hw/i386/pc_q35.c:342`) and
+/// its name `pc-q35-10.2`, type 3's chassis type is 0x01, Other
+/// (`smbios.c:650`). Type 0 is OVMF's own, firmware's words, not QEMU's.
+fn reads_as_qemu_built_it(entry: &[u8], table: &[u8], kind: Kind, version: u32) {
+    let smbios = Smbios::new(entry, table).unwrap();
+    assert_eq!(smbios.point().kind, kind);
+    assert_eq!(smbios.point().version, version);
+    assert_eq!(smbios.table(), table, "QEMU's table is walked whole");
+    let read = |field| text(&smbios, field);
+    let expected: [(Field, &[u8]); 15] = [
+        (Field::SysVendor, "Ferrix QEMU \u{e9}\n".as_bytes()),
+        (Field::ProductName, b"Ferrix test machine\n"),
+        (Field::ProductVersion, b"pc-q35-10.2\n"),
+        (Field::ProductSerial, b"FXSER-SYS-71c3e9\n"),
+        (
+            Field::ProductUuid,
+            b"5f0d9a7e-3b21-4c8e-9d4a-0b6e2f8c1d33\n",
+        ),
+        (Field::BoardVendor, b"QEMU\n"),
+        (Field::BoardName, b"Standard PC (Q35 + ICH9, 2009)\n"),
+        (Field::BoardVersion, b"pc-q35-10.2\n"),
+        (Field::BoardSerial, b"FXSER-BRD-2a90d4\n"),
+        (Field::ChassisVendor, b"QEMU\n"),
+        (Field::ChassisType, b"1\n"),
+        (Field::ChassisVersion, b"pc-q35-10.2\n"),
+        (Field::ChassisSerial, b"FXSER-CHS-e5b017\n"),
+        (Field::BiosVendor, b"Ubuntu distribution of EDK II\n"),
+        (Field::BiosDate, b"03/31/2026\n"),
+    ];
+    for (field, shown) in expected {
+        assert_eq!(read(field).as_deref(), Some(shown), "{field:?}");
+    }
+}
+
+/// Verifies: L.discovery.2, L.discovery.3, L.discovery.4
+#[test]
+fn qemus_3x_table_as_ovmf_installed_it_reads_as_qemu_built_it() {
+    use crate::fixtures::{ENTRY_V3, TABLE_V3};
+    reads_as_qemu_built_it(&ENTRY_V3, &TABLE_V3, Kind::V3, 0x03_00_00);
+}
+
+/// Verifies: L.discovery.2, L.discovery.3, L.discovery.4
+#[test]
+fn qemus_2x_table_as_ovmf_installed_it_reads_as_qemu_built_it() {
+    use crate::fixtures::{ENTRY_V2, TABLE_V2};
+    reads_as_qemu_built_it(&ENTRY_V2, &TABLE_V2, Kind::V2, 0x02_08_00);
+}
