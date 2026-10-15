@@ -1350,3 +1350,11 @@ commit e13992e3. Per hop without the card, x86-64 under KVM
 held 100 ms (`test-compositor --boot lane`) the motion reached the client at
 a median age of 0.12 ms; with the thread removed 38 of 40 never did, in both
 runs of the control. The figures and gates are on the stage's page.
+
+2026-10-15: an X game's pointer lock reaches hyprix. yserver (fork commit
+a1d0dcb3) asks for `zwp_locked_pointer_v1` by Xwayland's rule when a client
+hides the cursor and grabs or warps the pointer in its window, and feeds
+each relative motion to X as the motion and the XI2 raw motion the game
+expects; so an X game's motion takes I1's lane. `test-xlatency`'s grabbing
+game read 114 of 121 motions as the mouse's step under the lock, 0 of 114
+without it (the control).

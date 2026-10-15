@@ -187,6 +187,22 @@ counted one 50 ms stall as 34 refreshes at a host load near 48, with no
 input in that boot), `i1-xlat1`, `i1-lane1`, `i1b-comp`, `i1b-lane-ctl`
 (fired), `i1b-check`, `i1b-build`, `i1b-xwin`.
 
+**An X game's pointer lock, 2026-10-15** (I1's other half). yserver took no
+`zwp_locked_pointer_v1`, so an X game's motion went through hyprix's loop
+and, worse, a game that grabs, hides the cursor and warps to its centre
+read wherever hyprix's pointer had got to. The fork's a1d0dcb3 (on
+e13992e3, pinned by this branch) locks the pointer by Xwayland's rule (the
+cursor hidden, hyprix's pointer and keyboard on the window, a grab confining
+the pointer to it or a warp into it) and, while locked, moves X's pointer
+by each relative motion, one core and one XI2 raw motion each; it lets go
+on ungrab, focus loss or a shown cursor (`docs/YSERVER.md` §4.4). Under the
+lock an X game's motion takes hyprix's input thread, as a Wayland client's
+does. `test-xlatency` ends with `xlatency grab`, such a game, and `vptr`
+moving the mouse 9 pixels a motion: 114 of 121 motions read as the 9 pixels
+(the first two came before the lock), 243 raw (`pl-xlat`); with
+`YSERVER_POINTER_LOCK=0` (the control, `pl-xlat-ctl`, fired) 0 of 114, each
+read as wherever hyprix's pointer was. `pl-xwin` passed on the same volume.
+
 P1, P2, I1, P6, P7, G0 and P5 are 47. The first card run of P2 decides
 whether NVKMS scans out a client's image; if it copies, the lane is still
 far better than today and no longer level with Linux (the design's first

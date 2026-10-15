@@ -244,6 +244,27 @@ The wheel takes hyprix's clicks where it counts them, else ten units of
 the test and fixed in the core for every backend, are the fork's `ed44c36`
 and `e81b3a5` (§9).
 
+**A game's pointer lock** (stage 24, `docs/GAME-PATH.md` §4.7; fork
+a1d0dcb3, `crates/yserver/src/wayland/lock.rs`). A game that grabs the
+pointer, hides the cursor and warps the pointer to its window's centre after
+each motion cannot work on the plain path: X's warp moves X's pointer only,
+hyprix's goes on, and the next `wl_pointer.motion` puts X's pointer where
+hyprix's is. yserver binds `zwp_pointer_constraints_v1` and asks for a
+persistent `zwp_locked_pointer_v1` on the window by Xwayland's rule
+(`xwl_seat_maybe_lock_on_hidden_cursor`, `xwl_seat_emulate_pointer_warp`):
+the cursor hidden (the None cursor, XFIXES `HideCursor`, or a cursor with
+no opaque pixel, which is how SDL and most games hide it; Xwayland counts
+only the first), hyprix's pointer and keyboard on the window, and a grab
+confining the pointer to it or a `WarpPointer` landing in it. While hyprix
+says `locked`, each `relative_motion` moves X's pointer by its distance from
+where X has it, one core motion and one XI2 raw motion each, at the input's
+stamped time; `wl_pointer` motion is not followed. It lets go when the
+cursor is shown, the window loses hyprix's pointer or keyboard, the grab it
+was taken under ends, or, for a lock taken by a warp alone, X's pointer
+leaves the window. A hidden cursor is now hidden on hyprix too.
+`YSERVER_POINTER_LOCK=0` turns it off. With the lock, hyprix's input thread
+(I1) carries an X game's motion as it does a Wayland client's.
+
 ### 4.5 The clipboard
 
 X selections are handled only inside yserver's core, which has no internal
@@ -380,6 +401,16 @@ Still open:
    comes back as a decision then.
 
 ## 9. Where it stands
+
+2026-10-15: **an X game's pointer lock** (§4.4). The fork's a1d0dcb3, on
+I1's e13992e3, asks hyprix for a locked pointer when a client hides the
+cursor and grabs or warps the pointer in its window, and moves X's pointer
+by each relative motion while it holds. `test-xlatency` ends with a game's
+grab and warps and fails a yserver that does not lock
+(`YSERVER_POINTER_LOCK=0`, the control). On the way: the server still sends
+an XI2 raw motion of no distance for each warp (243 raw for 121 motions and
+122 warps), which Xorg does not; a game summing raw motion is not moved by
+it, one counting events would be.
 
 2026-10-15: **the Present clock keeps one refresh.**
 `fetch-yserver.sh` pins the fork at d2bf56e2. The clock no longer takes a
