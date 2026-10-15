@@ -295,6 +295,24 @@ fn every_kind_of_change_is_a_miss() {
 }
 
 #[test]
+fn an_excluded_entry_in_a_listed_directory_changes_nothing() {
+    let root = sample_root("listed-excluded");
+    let text = record_of(&root, &sample_trace(&root));
+    let mut here = context(&root);
+    // `d` holds an excluded root's entry, cargo's lock beside its registry.
+    here.cargo_home = root.join("d");
+    let text_here = {
+        let directory = traces(&root, &[(100, &sample_trace(&root))]);
+        record("unit", &directory, &here).unwrap()
+    };
+    std::fs::write(root.join("d/.package-cache"), b"").unwrap();
+    assert!(holds("unit", &text_here, &here).is_some());
+    // And the same entry, not excluded, is a change.
+    assert_eq!(holds("unit", &text, &context(&root)), None);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_toolchains_version_is_part_of_the_record() {
     let root = sample_root("toolchain");
     let toolchain = root.join("home/.rustup/toolchains/test-x86_64");

@@ -1744,7 +1744,7 @@ fn record(name: &str, traces: &Path, context: &Context) -> std::result::Result<S
         text.push_str(&format!("excluded {root}: {why}\n"));
     }
     for input in &traced.inputs {
-        let state = state_of(input)?;
+        let state = state_of(input, context)?;
         let written = context.written(input_path(input));
         if written.contains('\n') {
             return Err("a path with a line break".to_owned());
@@ -1765,7 +1765,7 @@ fn input_path(input: &Input) -> &Path {
 
 /// An input's state now, as a record's line starts: `F <digest>`,
 /// `D <digest>`, `P<f|n> <what>`, `L <digest>`.
-fn state_of(input: &Input) -> std::result::Result<String, String> {
+fn state_of(input: &Input, context: &Context) -> std::result::Result<String, String> {
     match input {
         Input::File(path) => Ok(format!("F {}", file_digest(path)?)),
         Input::Directory(path) => {
@@ -1774,6 +1774,11 @@ fn state_of(input: &Input) -> std::result::Result<String, String> {
                 std::fs::read_dir(path).map_err(|error| format!("{}: {error}", path.display()))?
             {
                 let entry = entry.map_err(|error| error.to_string())?;
+                // An entry under an excluded root (cargo's lock files beside
+                // ~/.cargo's registry) is no input, and comes and goes.
+                if context.is_excluded(&entry.path()) {
+                    continue;
+                }
                 let kind = entry.file_type().map_err(|error| error.to_string())?;
                 names.push(format!(
                     "{} {}",
@@ -2041,7 +2046,7 @@ pub(crate) fn holds(name: &str, text: &str, context: &Context) -> Option<(String
                     "Pf" => Input::Probe(path, true),
                     _ => Input::Probe(path, false),
                 };
-                if state_of(&input).ok()? != format!("{kind} {state}") {
+                if state_of(&input, context).ok()? != format!("{kind} {state}") {
                     return None;
                 }
                 inputs += 1;
