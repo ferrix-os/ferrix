@@ -27,6 +27,15 @@
 //! 2. `ferrix.init=/etc/k7-read ferrix.onexit=panic`: read both back and exit
 //!    0, after which the kernel must panic with `FX-1501` -- §8.3's option,
 //!    checked on the same boot because it costs nothing more.
+//!
+//! # K8: the periodic commit under a root in memory
+//!
+//! Two more boots of fresh copies of the same fixtures. The first writes
+//! `/data/k8` and `/home/k8`, sleeps past the 30 s commit interval, says so,
+//! and goes on sleeping, and the test stops QEMU then: nothing but the
+//! periodic committer can have committed the files. The second reads them
+//! back as K7's does. Until 2026-10-15 a boot with `/` in memory had no
+//! committer at all (`docs/WINE.md` §10).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -63,6 +72,20 @@ const HOME_MOUNTED: &str = "mounted writable at /home";
 
 /// The files the K7 boots write and read back.
 const K7_FILES: [&str; 2] = ["/data/k7", "/home/k7"];
+
+/// The K8 boots' programs, volumes, files and text.
+const K8_WRITE: &str = "/etc/k8-write";
+const K8_READ: &str = "/etc/k8-read";
+const K8_VOLUME: &str = "k8-data.img";
+const K8_HOME: &str = "k8-home.img";
+const K8_FILES: [&str; 2] = ["/data/k8", "/home/k8"];
+const K8_TEXT: &str = "committed by the committer";
+
+/// What the first K8 boot says once it has slept past the commit interval.
+const K8_SLEPT: &str = "k8: slept past the commit interval";
+
+/// How long it sleeps: the kernel's 30 s interval and a margin.
+const K8_SLEEP_SECONDS: u32 = 45;
 
 /// What `reboot(2)` says as it powers the machine off, Linux's line.
 const POWER_DOWN: &str = "reboot: Power down";
@@ -154,6 +177,106 @@ pub(crate) fn test(parts: &Parts<'_>, args: &Args, busybox: bool) -> Result<()> 
         "  {arch}: /data/k7 and /home/k7 survived poweroff -f -n, and init's exit panicked with \
          {INIT_EXITED}"
     );
+
+    let mut k8 = args.clone();
+    k8.data_image = Some(btrfs_disk::blank_copy(arch, K8_VOLUME)?);
+    k8.data_image_kept = true;
+    k8.home_image = Some(btrfs_disk::home_copy(arch, K8_HOME)?);
+    println!(
+        "  {arch}: writing /data/k8 and /home/k8, sleeping {K8_SLEEP_SECONDS} s, and stopping \
+         QEMU with nothing synced"
+    );
+    let image = parts.image_with(
+        &shell,
+        K8_WRITE,
+        &k8_write_script(),
+        &qemu::init_option(K8_WRITE),
+        &["bin/sleep"],
+    )?;
+    let deadline = Instant::now() + Duration::from_secs(args.timeout);
+    let lines = qemu::watch_then(arch, &image, kernel, &k8, SUCCESS_MARKER, |at| {
+        let _ = at.read_more(deadline, |lines| lines.iter().any(|l| l.trim() == K8_SLEPT))?;
+        Ok(())
+    })?;
+    judge_k8_write(&lines).map_err(|why| failed(arch, &why))?;
+    k8.data_image_kept = false;
+    let cmdline = format!("{} ferrix.onexit=panic", qemu::init_option(K8_READ));
+    let image = parts.image(&shell, K8_READ, &k8_read_script(), &cmdline, false)?;
+    let deadline = Instant::now() + Duration::from_secs(args.timeout);
+    let lines = qemu::watch_then(arch, &image, kernel, &k8, SUCCESS_MARKER, |at| {
+        let _ = at.read_more(deadline, |lines| {
+            lines.iter().any(|l| l.contains(INIT_EXITED))
+        })?;
+        Ok(())
+    })?;
+    judge_k8_read(after_marker(&lines)).map_err(|why| failed(arch, &why))?;
+    println!(
+        "  {arch}: /data/k8 and /home/k8 were on the disk after QEMU stopped: the periodic \
+         commit reached them with / in memory"
+    );
+    Ok(())
+}
+
+/// The first K8 boot's script: write, sleep past the commit interval, say
+/// so, and sleep on until QEMU is stopped.
+fn k8_write_script() -> String {
+    let mut script = "#!/bin/sh\n".to_owned();
+    for file in K8_FILES {
+        script.push_str(&format!(
+            "echo \"k8: writing {file}\"\necho \"{K8_TEXT}\" > {file}\n"
+        ));
+    }
+    script.push_str(&format!(
+        "sleep {K8_SLEEP_SECONDS}\necho \"{K8_SLEPT}\"\nsleep 3600\nexit 1\n"
+    ));
+    script
+}
+
+/// The second K8 boot's script, as [`read_script`] for the K8 files.
+fn k8_read_script() -> String {
+    read_script().replace("/k7", "/k8").replace("k7: ", "k8: ")
+}
+
+/// Whether the first K8 boot mounted both volumes, wrote, and slept past
+/// the interval.
+fn judge_k8_write(lines: &[String]) -> std::result::Result<(), String> {
+    for (mounted, at) in [(DATA_MOUNTED, "/data"), (HOME_MOUNTED, "/home")] {
+        if !lines.iter().any(|line| line.contains(mounted)) {
+            return Err(format!(
+                "the volume was not mounted at {at}, so there was nothing to write"
+            ));
+        }
+    }
+    let after = after_marker(lines);
+    for file in K8_FILES {
+        let wrote = format!("k8: writing {file}");
+        if !after.iter().any(|line| line.trim() == wrote) {
+            return Err(format!("{K8_WRITE} never wrote {file}"));
+        }
+    }
+    if !after.iter().any(|line| line.trim() == K8_SLEPT) {
+        return Err(format!("{K8_WRITE} never said `{K8_SLEPT}`"));
+    }
+    Ok(())
+}
+
+/// Whether the second K8 boot read back what the first wrote.
+fn judge_k8_read(after: &[String]) -> std::result::Result<(), String> {
+    for file in K8_FILES {
+        let wanted = format!("k8: read back {file}: {K8_TEXT}");
+        if !after.iter().any(|line| line.trim() == wanted) {
+            let asked = format!("k8: {file} ");
+            let said = after
+                .iter()
+                .find(|line| line.trim_start().starts_with(&asked))
+                .map_or("nothing", |line| line.trim());
+            let volume = file.trim_end_matches("/k8");
+            return Err(format!(
+                "{file} was not on the disk after QEMU stopped: nothing committed {volume} \
+                 in {K8_SLEEP_SECONDS} s (the read said {said})"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -169,11 +292,22 @@ impl Parts<'_> {
         options: &str,
         poweroff: bool,
     ) -> Result<PathBuf> {
+        let applets: &[&str] = if poweroff { &["bin/poweroff"] } else { &[] };
+        self.image_with(shell, path, script, options, applets)
+    }
+
+    /// [`Parts::image`] with `applets`, each another name of `shell`.
+    fn image_with(
+        &self,
+        shell: &[u8],
+        path: &str,
+        script: &str,
+        options: &str,
+        applets: &[&str],
+    ) -> Result<PathBuf> {
         let mut files: Vec<File> = self.carried.to_vec();
         let mut names = vec!["bin/sh"];
-        if poweroff {
-            names.push("bin/poweroff");
-        }
+        names.extend_from_slice(applets);
         for name in names {
             files.push(File {
                 path: name.to_owned(),
@@ -416,6 +550,38 @@ mod tests {
         assert!(why.contains("/home/k7 did not survive"), "{why}");
         assert!(why.contains("committing /home"), "{why}");
         assert!(why.contains("is not there"), "{why}");
+    }
+
+    #[test]
+    fn k8_reads_back_both_files_or_names_the_lost_one() {
+        let kept = transcript(&[
+            "k8: read back /data/k8: committed by the committer",
+            "k8: read back /home/k8: committed by the committer",
+        ]);
+        assert_eq!(judge_k8_read(&kept), Ok(()));
+        let lost = transcript(&[
+            "k8: /data/k8 is not there",
+            "k8: read back /home/k8: committed by the committer",
+        ]);
+        let why = judge_k8_read(&lost).unwrap_err();
+        assert!(why.contains("/data/k8 was not on the disk"), "{why}");
+        assert!(k8_read_script().contains("/home/k8"));
+        assert!(!k8_read_script().contains("k7"));
+    }
+
+    #[test]
+    fn k8_write_must_sleep_past_the_interval() {
+        let mut lines = transcript(&[
+            "  data     vde mounted writable at /data",
+            "  home     vdf mounted writable at /home",
+            SUCCESS_MARKER,
+            "k8: writing /data/k8",
+            "k8: writing /home/k8",
+        ]);
+        assert!(judge_k8_write(&lines).unwrap_err().contains(K8_SLEPT));
+        lines.push(K8_SLEPT.to_owned());
+        assert_eq!(judge_k8_write(&lines), Ok(()));
+        assert!(K8_SLEEP_SECONDS > 30);
     }
 
     #[test]
