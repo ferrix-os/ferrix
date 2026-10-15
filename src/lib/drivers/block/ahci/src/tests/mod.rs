@@ -125,7 +125,11 @@ fn identify_logical_sector_size_and_lba48() {
 
     let mut m = Model::new(300, 512);
     m.identify[83] = 0;
-    assert_eq!(start(m).2.err(), Some(Error::Identify(Refused::NoLba48)));
+    let refused = start(m).2.err();
+    assert!(
+        matches!(refused, Some(Error::Identify(Refused::NoLba48, words)) if words[7] == 0),
+        "{refused:?}"
+    );
 }
 
 #[test]

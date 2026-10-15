@@ -259,6 +259,9 @@ impl Model {
         let table = u64::from(self.read_u32(clb + 8)) | (u64::from(self.read_u32(clb + 12)) << 32);
         assert_eq!(table % 128, 0, "the command table is 128-byte aligned");
         assert_eq!(flags & 0x1F, 5, "a five-dword command FIS");
+        // A real HBA ends a command with C set as soon as its FIS is sent,
+        // before any data: IDENTIFY then reads back what was in memory.
+        assert_eq!(flags & (1 << 10), 0, "the C bit on a command with data");
         let fis = self.read_bytes(table, 16);
         assert_eq!(fis[0], 0x27, "a Register Host to Device FIS");
         assert_eq!(fis[1] & 0x80, 0x80, "the FIS's C bit");
