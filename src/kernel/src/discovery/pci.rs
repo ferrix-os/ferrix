@@ -1070,5 +1070,39 @@ fn check_function(
             }
         }
     }
+    let decoding = decoding || turn_decoding_on(space, address, identity.kind, &regions);
     Ok((regions, msix, decoding, found_transport, host_visible))
+}
+
+/// Turn memory decoding on for an endpoint firmware left it off for, when
+/// every memory BAR it has is assigned: firmware with no driver of its own
+/// for a device -- a NIC on a board with no UEFI network stack -- leaves it
+/// undecoded, and an undecoded function publishes no apertures. Memory
+/// decoding only: bus mastering stays the driver's to ask for. Whether it
+/// was turned on, said on the console.
+fn turn_decoding_on(
+    space: &mut Space,
+    address: Address,
+    kind: HeaderKind,
+    regions: &[Region],
+) -> bool {
+    let memory = || {
+        regions.iter().filter_map(|region| match region.bar {
+            bar::Bar::Memory { address, .. } => Some(address),
+            _ => None,
+        })
+    };
+    let count = memory().count();
+    if kind != HeaderKind::Endpoint || count == 0 || memory().any(|address| address == 0) {
+        return false;
+    }
+    let command = space.read16(address, COMMAND);
+    space.write16(address, COMMAND, command | COMMAND_MEMORY_SPACE);
+    let on = space.read16(address, COMMAND) & COMMAND_MEMORY_SPACE != 0;
+    crate::println!(
+        "  pci      {address}: firmware left memory decoding off; {} it on for {} assigned BARs",
+        if on { "turned" } else { "could not turn" },
+        count
+    );
+    on
 }
