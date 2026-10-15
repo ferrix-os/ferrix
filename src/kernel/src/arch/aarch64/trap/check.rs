@@ -6,7 +6,7 @@
 //! run by the Linux personality's loader, because only an instruction a
 //! program executes at EL0 takes the path under test: the vector stub,
 //! `classify`, the generic dispatcher's user fault and `fault_signal`, and
-//! the kill that ends the program with the signal. `ferrix_kernel_core::arch::aarch64::check`
+//! the kill that ends the program with the signal. `super::super::check`
 //! drives the decoder with every syndrome from built frames; this is the
 //! same decoding reached the way a program reaches it, for the cases a
 //! program can raise on any core.
@@ -17,6 +17,9 @@
 //! been taken from EL0.
 
 #![cfg(target_arch = "aarch64")]
+
+use ferrix_kernel_core::arch::aarch64 as core_aarch64;
+use ferrix_kernel_core::arch::aarch64::trap as core_trap;
 
 use ferrix_linux_abi::types::{SIGBUS, SIGILL, SIGTRAP};
 
@@ -140,7 +143,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
 fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        ferrix_kernel_core::arch::aarch64::ARCH.elf_machine(),
+        core_aarch64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -169,11 +172,11 @@ pub fn drive_system_call(
     if abi != crate::trap::Abi::Native {
         return None;
     }
-    let mut frame = ferrix_kernel_core::arch::aarch64::trap::TrapFrame {
+    let mut frame = core_trap::TrapFrame {
         x: [0; 31],
         sp: 0x7fff_e000,
         elr: ip,
-        spsr: ferrix_kernel_core::arch::aarch64::trap::USER_SPSR,
+        spsr: core_trap::USER_SPSR,
         // An `svc` from AArch64, class 0b010101, from a lower exception level.
         esr: 0b01_0101 << 26,
         far: 0,
@@ -182,9 +185,9 @@ pub fn drive_system_call(
     };
     frame.x[..6].copy_from_slice(&args);
     frame.x[8] = number as u64;
-    let saved = <ferrix_kernel_core::arch::aarch64::Irq as IrqControl>::disable();
-    let done = ferrix_kernel_core::arch::aarch64::trap::system_call(&mut frame);
-    <ferrix_kernel_core::arch::aarch64::Irq as IrqControl>::restore(saved);
+    let saved = <core_aarch64::Irq as IrqControl>::disable();
+    let done = core_trap::system_call(&mut frame);
+    <core_aarch64::Irq as IrqControl>::restore(saved);
     done.ok()?;
     Some(frame.x[0] as i64 as isize)
 }
@@ -200,11 +203,11 @@ pub fn drive_system_call(
 pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     use ferrix_sync::IrqControl;
 
-    let mut frame = ferrix_kernel_core::arch::aarch64::trap::TrapFrame {
+    let mut frame = core_trap::TrapFrame {
         x: [0; 31],
         sp: 0x7fff_e000,
         elr: 0x40_1000,
-        spsr: ferrix_kernel_core::arch::aarch64::trap::USER_SPSR,
+        spsr: core_trap::USER_SPSR,
         // An `svc` from AArch64, class 0b010101, from a lower exception level.
         esr: 0b01_0101 << 26,
         far: 0,
@@ -213,9 +216,9 @@ pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     };
     frame.x[..6].copy_from_slice(&args);
     frame.x[8] = number as u64;
-    let saved = <ferrix_kernel_core::arch::aarch64::Irq as IrqControl>::disable();
-    let done = ferrix_kernel_core::arch::aarch64::trap::system_call(&mut frame);
-    <ferrix_kernel_core::arch::aarch64::Irq as IrqControl>::restore(saved);
+    let saved = <core_aarch64::Irq as IrqControl>::disable();
+    let done = core_trap::system_call(&mut frame);
+    <core_aarch64::Irq as IrqControl>::restore(saved);
     let value = if done.is_ok() {
         frame.x[0] as i64 as isize
     } else {
@@ -240,7 +243,7 @@ pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
 pub fn check_exception_entry() -> Result<(), &'static str> {
     crate::console::println!(
         "  entry    every exception on {} enters on a stack a program cannot set",
-        ferrix_kernel_core::arch::aarch64::NAME
+        core_aarch64::NAME
     );
     run()
 }

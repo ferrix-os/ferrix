@@ -9,7 +9,7 @@
 //! program executes in ring 3 takes the path under test: the stub, `classify`,
 //! the generic dispatcher's user fault and `fault_signal`, and the kill that
 //! ends the program with the signal. The programs are fixtures, and live here
-//! rather than beside the product's in `ferrix_kernel_core::arch::x86_64::trap::super`.
+//! rather than beside the product's in `super::super`.
 //!
 //! Before this, the one program the boot ended by a fault wrote through a null
 //! pointer (`object/check.rs`), so a divide error, an invalid opcode, a
@@ -19,10 +19,12 @@
 
 #![cfg(target_arch = "x86_64")]
 
+use ferrix_kernel_core::arch::x86_64 as core_x86_64;
+
 use ferrix_linux_abi::types::{SIGBUS, SIGFPE, SIGILL, SIGSEGV};
 
 use crate::console::println;
-use ferrix_kernel_core::arch::x86_64::cpu;
+use core_x86_64::cpu;
 
 /// `divl %ecx` with `%ecx` zero: `#DE`, vector 0.
 ///
@@ -1035,7 +1037,7 @@ fn check_thread_areas() -> Result<u32, &'static str> {
 fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        ferrix_kernel_core::arch::x86_64::ARCH.elf_machine(),
+        core_x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -1389,8 +1391,8 @@ fn check_forged_64_bit_frames() -> Result<(), &'static str> {
 /// What did not come back, or did not end as it had to.
 pub fn check_exception_entry() -> Result<(), &'static str> {
     crate::arch::x86_64::paranoid::check::run()?;
-    ferrix_kernel_core::arch::x86_64::syscall::check::run()?;
-    ferrix_kernel_core::arch::x86_64::syscall::check::run_decode()?;
-    ferrix_kernel_core::arch::x86_64::gdt::check::run()?;
+    core_x86_64::syscall::check::run()?;
+    core_x86_64::syscall::check::run_decode()?;
+    core_x86_64::gdt::check::run()?;
     run()
 }

@@ -6,7 +6,7 @@
 //! run by the Linux personality's loader, because only an instruction a
 //! program executes in USR mode takes the path under test: the vector stub,
 //! `classify`, the generic dispatcher's user fault and `fault_signal`, and
-//! the kill that ends the program with the signal. `ferrix_kernel_core::arch::armv7a::check`
+//! the kill that ends the program with the signal. `super::super::check`
 //! drives the decoder with every vector entry and fault status from built
 //! frames; this is the same decoding reached the way a program reaches it,
 //! for the cases a program can raise on any core.
@@ -18,6 +18,9 @@
 //! whose frame nothing else builds.
 
 #![cfg(target_arch = "arm")]
+
+use ferrix_kernel_core::arch::armv7a as core_armv7a;
+use ferrix_kernel_core::arch::armv7a::trap as core_trap;
 
 use ferrix_linux_abi::types::{SIGBUS, SIGILL, SIGTRAP};
 
@@ -56,7 +59,7 @@ const MISALIGNED: &[u8] = &[
 
 /// A handler installed without `SA_RESTORER`, which the frame then returns
 /// into through the copy of the return sequence it carries on the stack
-/// (`ferrix_kernel_core::arch::armv7a::signal`): the handler is entered, and exits with 55.
+/// (`super::super::signal`): the handler is entered, and exits with 55.
 ///
 /// ```text
 ///   sub sp, sp, #24 ; adr r0, handler ; str r0, [sp]       ; sa_handler
@@ -252,7 +255,7 @@ fn sigpage_is_code() -> Result<(), &'static str> {
 fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf32,
-        ferrix_kernel_core::arch::armv7a::ARCH.elf_machine(),
+        core_armv7a::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -282,7 +285,7 @@ pub fn drive_system_call(
     if abi != crate::trap::Abi::Native {
         return None;
     }
-    let mut frame = ferrix_kernel_core::arch::armv7a::trap::TrapFrame {
+    let mut frame = core_trap::TrapFrame {
         kind: 2,
         fsr: 0,
         far: 0,
@@ -290,15 +293,15 @@ pub fn drive_system_call(
         r: [0; 13],
         lr: 0,
         pc: ip as u32,
-        cpsr: ferrix_kernel_core::arch::armv7a::trap::USER_CPSR,
+        cpsr: core_trap::USER_CPSR,
     };
     for (register, value) in frame.r.iter_mut().zip(args) {
         *register = value as u32;
     }
     frame.r[7] = number as u32;
-    let saved = <ferrix_kernel_core::arch::armv7a::Irq as IrqControl>::disable();
-    let done = ferrix_kernel_core::arch::armv7a::trap::system_call(&mut frame);
-    <ferrix_kernel_core::arch::armv7a::Irq as IrqControl>::restore(saved);
+    let saved = <core_armv7a::Irq as IrqControl>::disable();
+    let done = core_trap::system_call(&mut frame);
+    <core_armv7a::Irq as IrqControl>::restore(saved);
     done.ok()?;
     Some(frame.r[0] as i32 as isize)
 }
@@ -315,7 +318,7 @@ pub fn drive_system_call(
 pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
     use ferrix_sync::IrqControl;
 
-    let mut frame = ferrix_kernel_core::arch::armv7a::trap::TrapFrame {
+    let mut frame = core_trap::TrapFrame {
         kind: 2,
         fsr: 0,
         far: 0,
@@ -323,15 +326,15 @@ pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
         r: [0; 13],
         lr: 0,
         pc: 0x40_1000,
-        cpsr: ferrix_kernel_core::arch::armv7a::trap::USER_CPSR,
+        cpsr: core_trap::USER_CPSR,
     };
     for (register, value) in frame.r.iter_mut().zip(args) {
         *register = value as u32;
     }
     frame.r[7] = number as u32;
-    let saved = <ferrix_kernel_core::arch::armv7a::Irq as IrqControl>::disable();
-    let done = ferrix_kernel_core::arch::armv7a::trap::system_call(&mut frame);
-    <ferrix_kernel_core::arch::armv7a::Irq as IrqControl>::restore(saved);
+    let saved = <core_armv7a::Irq as IrqControl>::disable();
+    let done = core_trap::system_call(&mut frame);
+    <core_armv7a::Irq as IrqControl>::restore(saved);
     let value = if done.is_ok() {
         frame.r[0] as i32 as isize
     } else {
@@ -363,7 +366,7 @@ pub fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64; 3]) {
 pub fn check_exception_entry() -> Result<(), &'static str> {
     crate::console::println!(
         "  entry    every exception on {} enters on a stack a program cannot set",
-        ferrix_kernel_core::arch::armv7a::NAME
+        core_armv7a::NAME
     );
     run()
 }

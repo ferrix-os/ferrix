@@ -847,7 +847,7 @@
     },
     "arch/aarch64/trap/check.rs": {
       "ring": "core",
-      "reached": "92-93, 120-122, 135, 139, 141, 145, 147"
+      "reached": "95-96, 123-125, 138, 142, 144, 148, 150"
     },
     "arch/speculation_check.rs": {
       "ring": "core",

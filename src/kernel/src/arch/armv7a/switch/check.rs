@@ -36,6 +36,9 @@
     reason = "a raised check: it calls methods made pub for it alone"
 )]
 
+use ferrix_kernel_core::arch::armv7a as core_armv7a;
+use ferrix_kernel_core::arch::armv7a::switch as core_switch;
+
 use alloc::sync::Arc;
 
 use ferrix_linux_abi::types::SIGUSR1;
@@ -49,7 +52,7 @@ use crate::object::job::KILLED_STATUS;
 use crate::sched::Task;
 use crate::syscall::process::{self, Process};
 use crate::syscall::signal::Origin;
-use ferrix_kernel_core::arch::armv7a::switch::UserState;
+use core_switch::UserState;
 
 /// How long a case may take before its program is called stuck: generous
 /// against a loaded host under TCG.
@@ -524,7 +527,7 @@ fn load(name: &[u8], code: &[u8]) -> Result<Arc<Process>, &'static str> {
     }
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf32,
-        ferrix_kernel_core::arch::armv7a::ARCH.elf_machine(),
+        core_armv7a::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -859,7 +862,7 @@ pub(crate) fn run_vectors() -> Result<VectorReport, &'static str> {
     let mut report = VectorReport::default();
     check_the_three_numbers()?;
     check_unsaved_reads_as_reset()?;
-    if ferrix_kernel_core::arch::armv7a::cpu::user_fpu_doubles() != 32 {
+    if core_armv7a::cpu::user_fpu_doubles() != 32 {
         return Ok(report);
     }
     report.ran = true;
@@ -882,7 +885,7 @@ pub(crate) fn run_vectors() -> Result<VectorReport, &'static str> {
 fn check_the_three_numbers() -> Result<(), &'static str> {
     use ferrix_native_abi::nr::{CHANNEL_WRITE_READ, FIRST, LAST, OBJECT_WAIT_ONE, PORT_WAIT};
 
-    use ferrix_kernel_core::arch::armv7a::trap::vectors_die_in;
+    use core_armv7a::trap::vectors_die_in;
 
     let marked = (FIRST..=LAST)
         .chain(0..1024)
@@ -2010,7 +2013,7 @@ const KILLED_BY_SIGILL: i32 = 128 + 4;
 /// The first case that read what it must not.
 pub(crate) fn run_lazy() -> Result<LazyReport, &'static str> {
     let mut report = LazyReport::default();
-    if ferrix_kernel_core::arch::armv7a::cpu::user_fpu_doubles() != 32 {
+    if core_armv7a::cpu::user_fpu_doubles() != 32 {
         return Ok(report);
     }
     report.ran = true;
@@ -2040,25 +2043,19 @@ pub(crate) fn run_lazy() -> Result<LazyReport, &'static str> {
 fn check_bring_up_scrubs() -> Result<(), &'static str> {
     let mut dirty = UserState::new();
     dirty.set_fp(OTHER_FPSCR, [OTHER_PATTERN; 32]);
-    ferrix_kernel_core::arch::armv7a::switch::masked(|| {
+    core_switch::masked(|| {
         // SAFETY: (SYSREG) a D32 VFP exists, interrupts are masked, and the
         // check is a kernel thread: no task's state is in the registers (each
         // is saved at its switch out), so filling them takes nobody's.
-        unsafe { ferrix_kernel_core::arch::armv7a::switch::turn_on() };
+        unsafe { core_switch::turn_on() };
         // SAFETY: (SYSREG) as above; `EN` was just set.
-        unsafe {
-            ferrix_kernel_core::arch::armv7a::switch::ferrix_user_fpu_restore(&raw const dirty, 1)
-        };
+        unsafe { core_switch::ferrix_user_fpu_restore(&raw const dirty, 1) };
         // SAFETY: (SYSREG) as above; `CPACR` was granted at bring-up.
-        let _ = unsafe { ferrix_kernel_core::arch::armv7a::switch::bring_up_vfp() };
+        let _ = unsafe { core_switch::bring_up_vfp() };
         // Bring-up writes no record (a secondary cannot name its own yet);
         // the check's processor had it on from `turn_on` above, so it is put
         // back to what bring-up left the register as, read from the register.
-        ferrix_kernel_core::arch::armv7a::switch::set_vfp_record(
-            ferrix_kernel_core::arch::armv7a::switch::fpexc()
-                & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN
-                != 0,
-        );
+        core_switch::set_vfp_record(core_switch::fpexc() & core_switch::FPEXC_EN != 0);
         let after = behind_en_masked();
         match after {
             Behind::Set => Err("bring-up left FPEXC.EN set or its record on"),
@@ -2083,22 +2080,18 @@ enum Behind {
 /// read and the file scrubbed and `EN` cleared again after it, whether every
 /// register and `FPSCR` were zero. Leaves I2 holding.
 fn behind_en_masked() -> Behind {
-    if ferrix_kernel_core::arch::armv7a::switch::fpexc()
-        & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN
-        != 0
-        || ferrix_kernel_core::arch::armv7a::switch::vfp_on()
-    {
+    if core_switch::fpexc() & core_switch::FPEXC_EN != 0 || core_switch::vfp_on() {
         return Behind::Set;
     }
     let mut seen = UserState::new();
     // SAFETY: (SYSREG) a D32 VFP exists and interrupts are masked; no task's
     // state is in the registers while `EN` is clear.
-    unsafe { ferrix_kernel_core::arch::armv7a::switch::turn_on() };
+    unsafe { core_switch::turn_on() };
     // SAFETY: (SYSREG) as above; `EN` was just set.
-    unsafe { ferrix_kernel_core::arch::armv7a::switch::ferrix_user_fpu_save(&raw mut seen, 1) };
+    unsafe { core_switch::ferrix_user_fpu_save(&raw mut seen, 1) };
     // SAFETY: (SYSREG) as above; scrubbed again and `EN` cleared, so I2 holds
     // after the read.
-    unsafe { ferrix_kernel_core::arch::armv7a::switch::scrub_off(32) };
+    unsafe { core_switch::scrub_off(32) };
     if seen.fp() == (0, [0; 32]) {
         Behind::Zero
     } else {
@@ -2108,7 +2101,7 @@ fn behind_en_masked() -> Behind {
 
 /// [`behind_en_masked`] on processor `cpu`, which the check runs on.
 fn behind_en(cpu: usize) -> Result<Behind, &'static str> {
-    ferrix_kernel_core::arch::armv7a::switch::masked(|| {
+    core_switch::masked(|| {
         let here = crate::smp::this_cpu()
             .ok_or("the per-CPU register is not installed")?
             .logical;
@@ -2121,11 +2114,8 @@ fn behind_en(cpu: usize) -> Result<Behind, &'static str> {
 
 /// The record of `FPEXC.EN` equals the register on this processor (I1, D2).
 fn record_matches() -> Result<(), &'static str> {
-    let matches = ferrix_kernel_core::arch::armv7a::switch::masked(|| {
-        (ferrix_kernel_core::arch::armv7a::switch::fpexc()
-            & ferrix_kernel_core::arch::armv7a::switch::FPEXC_EN
-            != 0)
-            == ferrix_kernel_core::arch::armv7a::switch::vfp_on()
+    let matches = core_switch::masked(|| {
+        (core_switch::fpexc() & core_switch::FPEXC_EN != 0) == core_switch::vfp_on()
     });
     if matches {
         Ok(())
@@ -2137,11 +2127,11 @@ fn record_matches() -> Result<(), &'static str> {
 /// Clear `EN` on this processor, scrubbing first if it was set, so a case
 /// starts from a core no program's VFP state is on.
 fn start_clear() {
-    ferrix_kernel_core::arch::armv7a::switch::masked(|| {
-        if ferrix_kernel_core::arch::armv7a::switch::vfp_on() {
+    core_switch::masked(|| {
+        if core_switch::vfp_on() {
             // SAFETY: (SYSREG) a D32 VFP exists, `EN` is set, interrupts are
             // masked, and no task's state is only in the registers.
-            unsafe { ferrix_kernel_core::arch::armv7a::switch::scrub_off(32) };
+            unsafe { core_switch::scrub_off(32) };
         }
     });
 }

@@ -827,7 +827,7 @@
     },
     "arch/armv7a/trap/check.rs": {
       "ring": "core",
-      "reached": "163-164, 191-193, 207-208, 249, 253, 259, 261"
+      "reached": "166-167, 194-196, 210-211, 252, 256, 262, 264"
     },
     "arch/speculation_check.rs": {
       "ring": "core",
