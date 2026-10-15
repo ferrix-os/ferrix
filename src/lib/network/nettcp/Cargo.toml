@@ -11,5 +11,8 @@ publish = false
 ferrix-kmem = { workspace = true }
 ferrix-netwire = { workspace = true }
 
+[dev-dependencies]
+ferrix-kmem = { workspace = true, features = ["testing"] }
+
 [lints]
 workspace = true

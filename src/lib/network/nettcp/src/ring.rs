@@ -205,7 +205,17 @@ pub struct Reassembly {
 /// smallest allocation its bytes take. Counted against the capacity, so a
 /// peer sending one-byte runs with gaps between them fills the list at the
 /// same heap as one sending whole segments.
-const RUN_COST: usize = size_of::<Hole>() + 8;
+pub(crate) const RUN_COST: usize = size_of::<Hole>() + 8;
+
+/// The most runs the list holds, whatever its capacity. Each insert rebuilds
+/// the list (`coalesce`), under the network stack's lock and with an
+/// allocation that cannot fail gracefully, so its length is bounded here
+/// rather than by the capacity: a 1 MiB receive buffer would otherwise let a
+/// peer's gapped one-byte segments make some 25,000 runs and an 800 KB
+/// rebuild per segment. 1,024 is below the 1,598 one-byte runs a 64 KiB
+/// buffer allowed (certification consultant, 2026-10-15), and far above
+/// what a path that reorders or loses segments makes.
+pub const MAX_RUNS: usize = 1_024;
 
 impl Reassembly {
     /// An empty list that will hold `capacity` bytes across all its runs.
@@ -258,13 +268,20 @@ impl Reassembly {
         self.capacity = capacity;
     }
 
+    /// How many runs it holds.
+    #[must_use]
+    pub fn runs(&self) -> usize {
+        self.holes.len()
+    }
+
     /// Remember `bytes`, which begin at `start`.
     ///
-    /// Anything already held, and anything past the capacity, is dropped rather
-    /// than kept twice: a duplicate is not information, and a peer that sends
-    /// nothing but holes must not be able to grow this list without end.
+    /// Anything already held, and anything past the capacity or
+    /// [`MAX_RUNS`], is dropped rather than kept twice: a duplicate is not
+    /// information, and a peer that sends nothing but holes must not be able
+    /// to grow this list without end.
     pub fn insert(&mut self, start: SeqNumber, bytes: &[u8]) {
-        if bytes.is_empty() {
+        if bytes.is_empty() || self.holes.len() >= MAX_RUNS {
             return;
         }
         let room = self

@@ -3,5 +3,6 @@
 mod handshake;
 mod harness;
 mod loss;
+mod reassembly;
 mod seq;
 mod stream;

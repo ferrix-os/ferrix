@@ -51,6 +51,18 @@ pub struct Config {
     pub send_capacity: usize,
     /// How many bytes may wait to be read, which is also the window this end
     /// advertises.
+    ///
+    /// 1 MiB by default, up from 64 KiB on 2026-10-15: a program that reads
+    /// in bursts, busy elsewhere between them as a download written to a
+    /// disk is, leaves the sender stopped once this is full, and 64 KiB is
+    /// under a millisecond of the gateway's rate. A burst reader on
+    /// `x86_64` under KVM (1 MiB read, then 15 ms away, 32 MiB) took a
+    /// median 2.0 s at 64 KiB (best 1.10), 1.9 s at 256 KiB (best 1.72, a
+    /// plateau not explained yet) and 1.05 s at 1 MiB (best 0.84), 20 to 24
+    /// runs each on a loaded host. The buffer grows only as
+    /// data waits, so an idle connection costs what it did. The worst case
+    /// per connection is this for the receive queue and this again for the
+    /// reassembly list, both charged to the connection's job (F-37).
     pub receive_capacity: usize,
     /// The largest segment this end will accept, advertised in the handshake.
     pub segment_size: u16,
@@ -67,7 +79,7 @@ impl Default for Config {
     fn default() -> Config {
         Config {
             send_capacity: 64 * 1024,
-            receive_capacity: 64 * 1024,
+            receive_capacity: 1024 * 1024,
             segment_size: MAX_MSS,
             window_scale: 7,
             selective_ack: true,
