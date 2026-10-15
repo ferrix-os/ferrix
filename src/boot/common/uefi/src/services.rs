@@ -4,7 +4,7 @@
 //! being attempted and what firmware said, because "load error" on its own at
 //! this stage of boot is close to useless.
 
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use core::ffi::c_void;
 use core::fmt;
 use core::ptr;
@@ -195,6 +195,37 @@ pub(crate) struct Services {
     /// One past the highest physical address an allocation may reach, or
     /// `u64::MAX` for anywhere; see [`Services::allocate_below`].
     ceiling: Cell<u64>,
+    /// The allocations of a Ferrix memory type, which firmware was asked for
+    /// as loader data ([`Services::firmware_kind`]).
+    tags: RefCell<Tags>,
+}
+
+/// An allocation of one of the loader's own memory types.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Tag {
+    /// First physical address.
+    pub(crate) base: u64,
+    /// Length in bytes, whole pages.
+    pub(crate) len: u64,
+    /// The Ferrix type it is, for the kernel's map.
+    pub(crate) kind: MemoryType,
+}
+
+/// The most allocations of the loader's own types it can mark.
+const MAX_TAGS: usize = 128;
+
+/// The table of [`Tag`]s, in the order they were made.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Tags {
+    entries: [Tag; MAX_TAGS],
+    count: usize,
+}
+
+impl Tags {
+    /// The tags made and not freed.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Tag> {
+        self.entries.iter().take(self.count)
+    }
 }
 
 impl fmt::Debug for Services {
@@ -224,6 +255,14 @@ impl Services {
             system_table,
             boot,
             ceiling: Cell::new(u64::MAX),
+            tags: RefCell::new(Tags {
+                entries: [Tag {
+                    base: 0,
+                    len: 0,
+                    kind: MemoryType::LOADER_DATA,
+                }; MAX_TAGS],
+                count: 0,
+            }),
         })
     }
 
@@ -300,14 +339,26 @@ impl Services {
             end => (AllocateType::MAX_ADDRESS, end - 1),
         };
         // SAFETY: `address` is a live local, and `pages` is non-zero.
-        let status =
-            unsafe { (self.boot().allocate_pages)(how, kind, pages as usize, &raw mut address) };
+        let status = unsafe {
+            (self.boot().allocate_pages)(
+                how,
+                Self::firmware_kind(kind),
+                pages as usize,
+                &raw mut address,
+            )
+        };
         check(context, status)?;
 
         let allocation = Allocation {
             address,
             len: pages * PAGE_SIZE,
         };
+        if !self.tag(allocation, kind) {
+            let _ = self.free(context, allocation);
+            return Err(BootError::plain(
+                "more allocations of the loader's own types than it can mark",
+            ));
+        }
         self.zero(allocation);
         Ok(allocation)
     }
@@ -330,16 +381,80 @@ impl Services {
         let mut at = address;
         // SAFETY: `at` is a live local, and `pages` is non-zero.
         let status = unsafe {
-            (self.boot().allocate_pages)(AllocateType::ADDRESS, kind, pages as usize, &raw mut at)
+            (self.boot().allocate_pages)(
+                AllocateType::ADDRESS,
+                Self::firmware_kind(kind),
+                pages as usize,
+                &raw mut at,
+            )
         };
-        (status.is_success() && at == address).then_some(Allocation {
+        let allocation = (status.is_success() && at == address).then_some(Allocation {
             address,
             len: pages * PAGE_SIZE,
-        })
+        })?;
+        if !self.tag(allocation, kind) {
+            let _ = self.free("freeing an allocation it could not mark", allocation);
+            return None;
+        }
+        Some(allocation)
+    }
+
+    /// What firmware is asked for when the loader wants `kind`: loader data
+    /// for every type of the loader's own.
+    ///
+    /// The N150's AMI firmware never returned from `exit_boot_services` once
+    /// memory of an OS-defined type (`0x8000_0000` and up) existed, which the
+    /// specification allows and OVMF accepts. So firmware only ever sees
+    /// loader data, and the kernel's map gets the loader's types from
+    /// [`Services::tags`] (`ferrix_bootinfo::retag`).
+    const fn firmware_kind(kind: MemoryType) -> MemoryType {
+        if kind.0 >= 0x8000_0000 {
+            MemoryType::LOADER_DATA
+        } else {
+            kind
+        }
+    }
+
+    /// Remember `allocation` as `kind` when that is one of the loader's own
+    /// types; false when the table is full.
+    fn tag(&self, allocation: Allocation, kind: MemoryType) -> bool {
+        if kind.0 < 0x8000_0000 {
+            return true;
+        }
+        let mut tags = self.tags.borrow_mut();
+        let count = tags.count;
+        let Some(slot) = tags.entries.get_mut(count) else {
+            return false;
+        };
+        *slot = Tag {
+            base: allocation.address,
+            len: allocation.len,
+            kind,
+        };
+        tags.count = count + 1;
+        true
+    }
+
+    /// The allocations of the loader's own types still held.
+    pub(crate) fn tags(&self) -> Tags {
+        *self.tags.borrow()
     }
 
     /// Give an allocation back to firmware.
     pub(crate) fn free(&self, context: &'static str, allocation: Allocation) -> Result<()> {
+        {
+            let mut tags = self.tags.borrow_mut();
+            let count = tags.count;
+            if let Some(at) = tags
+                .entries
+                .iter()
+                .take(count)
+                .position(|tag| tag.base == allocation.address)
+            {
+                tags.entries.copy_within(at + 1..count, at);
+                tags.count = count - 1;
+            }
+        }
         // SAFETY: the range came from `allocate`, which rounded it to whole
         // pages, and the caller holds nothing inside it any more.
         let status = unsafe {

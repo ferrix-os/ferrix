@@ -650,12 +650,12 @@ fn leave_and_record(
         stripes::failed(stripes::Step::LeftFirmware);
     };
     stripes::reached(stripes::Step::LeftFirmware);
-    let regions = record_memory_map(&map, info_area);
     // A map longer than the boot info holds would lose regions the kernel
-    // needs -- its own image among them -- without a word.
-    if regions != map.entries().count() as u64 {
+    // needs -- its own image among them -- without a word; so would a tag
+    // that could not be applied.
+    let Some(regions) = record_memory_map(&map, info_area, &services.tags()) else {
         stripes::failed(stripes::Step::MapRecorded);
-    }
+    };
     finish_boot_info(info_area, regions, direct, &map);
     stripes::reached(stripes::Step::MapRecorded);
 }
@@ -750,7 +750,7 @@ fn read_command_file<'a>(services: &Services, path: &str, capacity: usize) -> Op
 ///
 /// Runs after `exit_boot_services`, so it touches nothing but memory the loader
 /// allocated for itself.
-fn record_memory_map(map: &MemoryMap, info_area: Allocation) -> u64 {
+fn record_memory_map(map: &MemoryMap, info_area: Allocation, tags: &services::Tags) -> Option<u64> {
     let array = (info_area.address + REGIONS_OFFSET) as *mut MemRegion;
     let capacity = (info_area.len - REGIONS_OFFSET) / size_of::<MemRegion>() as u64;
 
@@ -770,12 +770,19 @@ fn record_memory_map(map: &MemoryMap, info_area: Allocation) -> u64 {
     // to, and the kernel's frame allocator walks it assuming it is. Sorting a
     // slice needs no allocator, which is just as well: there is none, and
     // firmware is gone.
-    let Some(written) = slots.get_mut(..count) else {
-        return 0;
-    };
+    if count != map.entries().count() {
+        return None;
+    }
+    let written = slots.get_mut(..count)?;
     written.sort_unstable_by_key(|region| region.base);
 
-    count as u64
+    // Firmware was asked for loader data wherever the loader wanted a type
+    // of its own (`Services::firmware_kind`); say which here.
+    for tag in tags.iter() {
+        count = ferrix_bootinfo::retag(slots, count, tag.base, tag.len, load::kind_of(tag.kind.0))?;
+    }
+
+    Some(count as u64)
 }
 
 /// Point the boot info at the memory map now that it exists.

@@ -610,9 +610,19 @@ fn segment_pages(segment: &Segment) -> (u64, u64) {
 
 /// Convert one firmware memory descriptor into a Ferrix memory region.
 pub(crate) fn describe(descriptor: &MemoryDescriptor) -> MemRegion {
+    MemRegion {
+        base: descriptor.physical_start,
+        len: descriptor.number_of_pages * PAGE_SIZE,
+        kind: kind_of(descriptor.memory_type),
+        reserved: 0,
+    }
+}
+
+/// What a UEFI memory type is to the kernel.
+pub(crate) const fn kind_of(memory_type: u32) -> MemKind {
     // The numeric values are UEFI's, including the ones the loader assigned
     // itself out of the range the specification reserves for an OS loader.
-    let kind = match descriptor.memory_type {
+    match memory_type {
         7 => MemKind::Usable,
         // Boot services code and data become free the moment we exit them, and
         // on most firmware that is a large fraction of low memory.
@@ -630,12 +640,5 @@ pub(crate) fn describe(descriptor: &MemoryDescriptor) -> MemRegion {
         0x8000_0005 => MemKind::DeviceTree,
         0x8000_0006 => MemKind::Pstore,
         _ => MemKind::Reserved,
-    };
-
-    MemRegion {
-        base: descriptor.physical_start,
-        len: descriptor.number_of_pages * PAGE_SIZE,
-        kind,
-        reserved: 0,
     }
 }
