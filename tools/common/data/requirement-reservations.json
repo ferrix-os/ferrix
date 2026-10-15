@@ -87,6 +87,13 @@
       "branch": "dmi-d1",
       "date": "2026-10-15",
       "purpose": "D1: firmware's SMBIOS tables to programs (docs/DMI.md) -- H.BOOT.16 firmware identity shown only from a validated table; L.discovery.2 entry point parse, .3 the walk's bounds, .4 identity fields as Linux decodes them, .5 the kernel's acceptance of the loader's copy, .6 the loader's handover (consultant dmi-d1-cert, ledger line 1339)"
+    },
+    {
+      "ids": ["L.device.43"],
+      "owner": "h6-wc",
+      "branch": "h6-wc",
+      "date": "2026-10-15",
+      "purpose": "H6's write-combining window: on x86-64 under ferrix.efifb the node is not made unless every processor programmed its PAT, and every page of the kernel's panic window over the framebuffer is mapped write-combining, none as device, before the hold is taken and the node published (docs/DISPLAY.md section 8; consultant ledger line 1303)"
     }
   ]
 }
