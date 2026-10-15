@@ -469,7 +469,7 @@ const REMAP_LINES: [(&str, &str); 9] = [
         "the check vector or the console's retired vector was delivered, or never counted",
     ),
     (
-        "processors looked at their local APIC's mode before using its window; 1 put in x2APIC mode",
+        R8_LINE,
         "check R8 never put a processor in x2APIC mode and saw it switched back",
     ),
     (
@@ -477,6 +477,14 @@ const REMAP_LINES: [(&str, &str); 9] = [
         "the console's line was never serviced once after its conversion",
     ),
 ];
+
+/// What check R8 prints in xAPIC mode.
+const R8_LINE: &str =
+    "processors looked at their local APIC's mode before using its window; 1 put in x2APIC mode";
+
+/// What it prints instead in x2APIC mode, where every processor is put there.
+const X2APIC_ALL: &str =
+    "processors looked at their local APIC's mode before using it; all run in x2APIC mode";
 
 /// What the kernel prints for each interrupt request a check makes its unit
 /// refuse, before the reason.
@@ -504,7 +512,14 @@ fn remap_problem(arch: Arch, lines: &[String]) -> Option<String> {
             line.trim()
         ));
     }
+    // Check R8 switches a processor back to xAPIC mode, which a boot in
+    // x2APIC mode (`ferrix.apic=x2apic`) has no use for: there every
+    // processor must say it runs in x2APIC mode instead.
+    let x2apic = lines.iter().any(|line| line.contains(X2APIC_ALL));
     for (text, problem) in REMAP_LINES {
+        if x2apic && text == R8_LINE {
+            continue;
+        }
         if !lines.iter().any(|line| line.contains(text)) {
             return Some(problem.to_owned());
         }
@@ -3753,11 +3768,11 @@ fn prepare_vars(arch: Arch, code: &Path, template: Option<&Path>) -> Result<Path
 #[cfg(test)]
 mod tests {
     use super::{
-        Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER,
-        blocks_compatibility_format, cleaning_problem, config_problem, devmgr_problem,
-        entropy_problem, fault_problem, held_off_problem, iommu_problem, msi_problem,
-        namespace_problem, parse_qemu_version, power_off_problem, queue_problem, remap_problem,
-        send_lines, version_translates, xstate_problem,
+        Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, R8_LINE, REMAP_LINES, SUCCESS_MARKER,
+        UNCHECKED_MARKER, X2APIC_ALL, blocks_compatibility_format, cleaning_problem,
+        config_problem, devmgr_problem, entropy_problem, fault_problem, held_off_problem,
+        iommu_problem, msi_problem, namespace_problem, parse_qemu_version, power_off_problem,
+        queue_problem, remap_problem, send_lines, version_translates, xstate_problem,
     };
 
     /// A byte that is not UTF-8 is shown, not the end of the guest's
@@ -4091,6 +4106,15 @@ mod tests {
         }
         assert_eq!(remap_problem(Arch::X86_64, &whole), None);
         assert_eq!(remap_problem(Arch::AArch64, &[]), None, "no VT-d");
+        // In x2APIC mode the x2APIC line stands in for R8's, and only then.
+        let mut x2apic: Vec<String> = whole
+            .iter()
+            .filter(|line| !line.contains(R8_LINE))
+            .cloned()
+            .collect();
+        assert!(remap_problem(Arch::X86_64, &x2apic).is_some());
+        x2apic.push(format!("    1.1 |   apic     4 {X2APIC_ALL}"));
+        assert_eq!(remap_problem(Arch::X86_64, &x2apic), None);
         for missing in 0..whole.len() {
             let mut cut = whole.clone();
             let _ = cut.remove(missing);

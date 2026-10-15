@@ -66,7 +66,8 @@ pub(crate) fn require_every_processor(
     }
     if super::x2apic() {
         return Ok(Some(alloc::format!(
-            "{checked} processors looked at their local APIC's mode before using it; all run in              x2APIC mode"
+            "{checked} processors looked at their local APIC's mode before using it; all run in \
+             x2APIC mode"
         )));
     }
     Ok(Some(alloc::format!(
