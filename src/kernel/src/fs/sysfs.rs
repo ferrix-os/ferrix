@@ -42,9 +42,10 @@
 //!
 //! # What is left out
 //!
-//! `/sys/kernel`, `/sys/firmware`, `/sys/power`, and `/sys/module` but for
-//! `nvidia/initstate` while `nvrm` serves its nodes, which Ferrix has nothing
-//! true to put in; a PCI function's `resource`, `config`
+//! `/sys/kernel`, `/sys/power`, `/sys/firmware` but for `dmi/tables` while
+//! the kernel holds an SMBIOS table it accepted (`docs/DMI.md`), and
+//! `/sys/module` but for `nvidia/initstate` while `nvrm` serves its nodes,
+//! which Ferrix has nothing true to put in; a PCI function's `resource`, `config`
 //! and `irq`, which enumeration does not keep; a processor's `topology`,
 //! which firmware's tables do not say reliably enough to print; and uevents
 //! themselves -- the `uevent` files say what an event would carry, and no
@@ -66,8 +67,11 @@ use ferrix_vfs::{
     Timespec,
 };
 
+use ferrix_smbios::{Field, Smbios};
+
 use crate::device::{self, Location};
 use crate::discovery::devmgr::{self, Bus, Request};
+use crate::discovery::smbios;
 use crate::fs::devfs::{self, DiskInfo};
 use crate::fs::{self, procfs};
 use crate::interfaces::{display, input, net_ring, render};
@@ -152,18 +156,27 @@ enum Class {
     Net,
     /// The terminal devices the kernel has: `tty`, `console`, `ptmx`.
     Tty,
+    /// The firmware's identity, `id`, while the kernel holds an SMBIOS table
+    /// it accepted (`docs/DMI.md`).
+    Dmi,
 }
 
 impl Class {
     /// Every class, in `/sys/class`'s order.
-    const ALL: [Class; 6] = [
+    const ALL: [Class; 7] = [
         Class::Block,
+        Class::Dmi,
         Class::Drm,
         Class::Input,
         Class::Mem,
         Class::Net,
         Class::Tty,
     ];
+
+    /// Whether it is there: `dmi` only while the kernel holds a table.
+    fn shown(self) -> bool {
+        self != Class::Dmi || smbios::tables().is_some()
+    }
 
     /// Its name.
     const fn name(self) -> &'static [u8] {
@@ -174,6 +187,7 @@ impl Class {
             Class::Mem => b"mem",
             Class::Net => b"net",
             Class::Tty => b"tty",
+            Class::Dmi => b"dmi",
         }
     }
 }
@@ -266,6 +280,14 @@ enum Dir {
     /// `/sys/module/nvidia`, while a driver serves NVIDIA's nodes through
     /// the chardev core (`docs/NVIDIA.md` §4.4).
     ModuleNvidia,
+    /// `/sys/devices/virtual/dmi/id`: the firmware's identity fields.
+    DmiId,
+    /// `/sys/firmware`, while there is a table to show in it.
+    Firmware,
+    /// `/sys/firmware/dmi`.
+    FirmwareDmi,
+    /// `/sys/firmware/dmi/tables`: the entry point and the table, root only.
+    DmiTables,
 }
 
 impl Dir {
@@ -397,11 +419,17 @@ enum Attr {
     Bind,
     Unbind,
     Initstate,
+    /// A file of `dmi/id`.
+    Dmi(Field),
+    /// `smbios_entry_point`, the entry point's bytes.
+    EntryPoint,
+    /// `DMI`, the structure table's bytes.
+    DmiTable,
 }
 
 impl Attr {
     /// Its name.
-    const fn name(self) -> &'static [u8] {
+    fn name(self) -> &'static [u8] {
         match self {
             Attr::Vendor => b"vendor",
             Attr::Device => b"device",
@@ -470,6 +498,9 @@ impl Attr {
             Attr::Bind => b"bind",
             Attr::Unbind => b"unbind",
             Attr::Initstate => b"initstate",
+            Attr::Dmi(field) => field.name(),
+            Attr::EntryPoint => b"smbios_entry_point",
+            Attr::DmiTable => b"DMI",
         }
     }
 
@@ -484,9 +515,27 @@ impl Attr {
         !self.writable()
     }
 
-    /// Its permission bits, as Linux gives each.
+    /// Its permission bits, as Linux gives each: the serials, the UUID and
+    /// the raw SMBIOS tables to root alone (`docs/DMI.md` §1).
     const fn permissions(self) -> u32 {
-        if self.writable() { 0o200 } else { 0o444 }
+        match self {
+            Attr::Dmi(field) => field.mode(),
+            Attr::EntryPoint | Attr::DmiTable => 0o400,
+            _ if self.writable() => 0o200,
+            _ => 0o444,
+        }
+    }
+
+    /// Its size as `stat` reports it: a page for a text attribute, as Linux
+    /// says for every one, and the real length for a binary one.
+    fn size(self) -> u64 {
+        let tables = smbios::tables();
+        let len = |bytes: Option<&[u8]>| bytes.map_or(0, |bytes| bytes.len() as u64);
+        match self {
+            Attr::EntryPoint => len(tables.as_ref().map(Smbios::entry_point)),
+            Attr::DmiTable => len(tables.as_ref().map(Smbios::table)),
+            _ => 4096,
+        }
     }
 }
 
@@ -777,7 +826,7 @@ fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
             path(&[b"bus", bus_name(bus), b"drivers", &name])
         }
         Dir::Class => path(&[b"class"]),
-        Dir::ClassOf(class) => path(&[b"class", class.name()]),
+        Dir::ClassOf(class) => class.shown().then(|| path(&[b"class", class.name()]))?,
         Dir::Dev => path(&[b"dev"]),
         Dir::DevChar => path(&[b"dev", b"char"]),
         Dir::DevBlock => path(&[b"dev", b"block"]),
@@ -787,7 +836,9 @@ fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
         Dir::Cpus => path(&[b"devices", b"system", b"cpu"]),
         Dir::Cpu(cpu) => beneath(path_of(Dir::Cpus)?, &numbered("cpu", cpu)),
         Dir::Virtual => path(&[b"devices", b"virtual"]),
-        Dir::VirtualOf(class) => path(&[b"devices", b"virtual", class.name()]),
+        Dir::VirtualOf(class) => class
+            .shown()
+            .then(|| path(&[b"devices", b"virtual", class.name()]))?,
         Dir::PciRoot(segment, bus) => {
             let mut root = Vec::new();
             name::pci_root(&mut root, segment, bus);
@@ -847,6 +898,19 @@ fn path_of(dir: Dir) -> Option<Vec<Vec<u8>>> {
             path(&[b"module", b"nvidia"])
         }
         Dir::FsCgroup => path(&[b"fs", b"cgroup"]),
+        Dir::DmiId | Dir::Firmware | Dir::FirmwareDmi | Dir::DmiTables => dmi_path(dir)?,
+    })
+}
+
+/// Where the firmware's identity and tables are, while the kernel holds a
+/// table to show.
+fn dmi_path(dir: Dir) -> Option<Vec<Vec<u8>>> {
+    let _ = smbios::tables()?;
+    Some(match dir {
+        Dir::DmiId => path(&[b"devices", b"virtual", b"dmi", b"id"]),
+        Dir::Firmware => path(&[b"firmware"]),
+        Dir::FirmwareDmi => path(&[b"firmware", b"dmi"]),
+        _ => path(&[b"firmware", b"dmi", b"tables"]),
     })
 }
 
@@ -882,7 +946,7 @@ fn has_class(node: usize, class: Class) -> bool {
         Class::Input => input::device_indices()
             .into_iter()
             .any(|index| input::device(index).is_some_and(|device| device.node == node)),
-        Class::Mem | Class::Tty => false,
+        Class::Mem | Class::Tty | Class::Dmi => false,
     }
 }
 
@@ -911,7 +975,8 @@ fn entries(dir: Dir) -> Result<Vec<Entry>> {
         | Dir::InputId(_)
         | Dir::InputCaps(_)
         | Dir::Event(_)
-        | Dir::Char(_) => other_class_entries(&mut list, dir)?,
+        | Dir::Char(_)
+        | Dir::DmiId => other_class_entries(&mut list, dir)?,
         _ => index_entries(&mut list, dir)?,
     }
     Ok(list.0)
@@ -927,6 +992,9 @@ fn index_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             list.dir(b"class", Dir::Class);
             list.dir(b"dev", Dir::Dev);
             list.dir(b"devices", Dir::Devices);
+            if smbios::tables().is_some() {
+                list.dir(b"firmware", Dir::Firmware);
+            }
             list.dir(b"fs", Dir::Fs);
             list.dir(b"module", Dir::Module);
         }
@@ -969,7 +1037,7 @@ fn index_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             }
         }
         Dir::Class => {
-            for class in Class::ALL {
+            for class in Class::ALL.into_iter().filter(|class| class.shown()) {
                 list.dir(class.name(), Dir::ClassOf(class));
             }
         }
@@ -999,6 +1067,14 @@ fn index_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             list.file(dir, Attr::Initstate);
         }
         Dir::FsCgroup => {}
+        Dir::Firmware | Dir::FirmwareDmi | Dir::DmiTables => {
+            let _ = path_of(dir).ok_or(Errno::ENOENT)?;
+            match dir {
+                Dir::Firmware => list.dir(b"dmi", Dir::FirmwareDmi),
+                Dir::FirmwareDmi => list.dir(b"tables", Dir::DmiTables),
+                _ => list.files(dir, &[Attr::EntryPoint, Attr::DmiTable]),
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -1055,8 +1131,10 @@ fn device_tree_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             }
         }
         Dir::Virtual => {
-            for class in [Class::Block, Class::Mem, Class::Net, Class::Tty] {
-                list.dir(class.name(), Dir::VirtualOf(class));
+            for class in [Class::Block, Class::Dmi, Class::Mem, Class::Net, Class::Tty] {
+                if class.shown() {
+                    list.dir(class.name(), Dir::VirtualOf(class));
+                }
             }
         }
         Dir::VirtualOf(class) => virtual_entries(list, class),
@@ -1210,6 +1288,17 @@ fn other_class_entries(list: &mut Listing, dir: Dir) -> Result<()> {
             list.files(dir, &[Attr::Dev, Attr::Uevent]);
             list.link_to(b"subsystem", Dir::ClassOf(class));
         }
+        Dir::DmiId => {
+            // The fields the table has, as `dmi_id_init_attr_table` adds them.
+            let tables = smbios::tables().ok_or(Errno::ENOENT)?;
+            for field in Field::ALL {
+                if tables.identity().get(field).is_some() {
+                    list.file(dir, Attr::Dmi(field));
+                }
+            }
+            list.files(dir, &[Attr::Modalias, Attr::Uevent]);
+            list.link_to(b"subsystem", Dir::ClassOf(Class::Dmi));
+        }
         _ => {}
     }
     Ok(())
@@ -1321,7 +1410,7 @@ fn device_class_entries(list: &mut Listing, index: usize, class: Class) {
                 }
             }
         }
-        Class::Mem | Class::Tty => {}
+        Class::Mem | Class::Tty | Class::Dmi => {}
     }
 }
 
@@ -1349,6 +1438,11 @@ fn virtual_entries(list: &mut Listing, class: Class) {
                 if disk.origin.node.is_none() {
                     list.dir(&disk.name, Dir::Disk(disk.registration));
                 }
+            }
+        }
+        Class::Dmi => {
+            if smbios::tables().is_some() {
+                list.dir(b"id", Dir::DmiId);
             }
         }
         Class::Drm | Class::Input => {}
@@ -1400,6 +1494,7 @@ fn class_links(list: &mut Listing, class: Class) {
                 }
             }
         }
+        Class::Dmi => list.link_to(b"id", Dir::DmiId),
     }
 }
 
@@ -1506,6 +1601,7 @@ fn render(dir: Dir, attr: Attr) -> Result<Vec<u8>> {
                 None,
             );
         }
+        Dir::DmiId | Dir::DmiTables => render_dmi(&mut out, attr)?,
         Dir::Char(slot) => {
             let (node, _) = char_node(slot).ok_or(Errno::ENOENT)?;
             match attr {
@@ -1525,6 +1621,25 @@ fn render(dir: Dir, attr: Attr) -> Result<Vec<u8>> {
         _ => return Err(Errno::ENOENT),
     }
     Ok(out)
+}
+
+/// A file of `dmi/id` or `firmware/dmi/tables`, as Linux shows it: the
+/// table's bytes unaltered, formatted where Linux formats them.
+fn render_dmi(out: &mut Vec<u8>, attr: Attr) -> Result<()> {
+    let tables = smbios::tables().ok_or(Errno::ENOENT)?;
+    let mut put = |piece: &[u8]| out.extend_from_slice(piece);
+    match attr {
+        Attr::Dmi(field) => tables.field_text(field, &mut put).ok_or(Errno::ENOENT)?,
+        Attr::Modalias => tables.modalias(&mut put),
+        Attr::Uevent => {
+            put(b"MODALIAS=");
+            tables.modalias(&mut put);
+        }
+        Attr::EntryPoint => put(tables.entry_point()),
+        Attr::DmiTable => put(tables.table()),
+        _ => return Err(Errno::ENOENT),
+    }
+    Ok(())
 }
 
 /// `devices/system/cpu`'s files: the processor lists, and the highest
@@ -1850,7 +1965,7 @@ impl Inode for Node {
         let (permissions, size) = match &self.what {
             What::Dir(_) => (0o755, 0),
             // Linux says a page for every attribute, whatever it holds.
-            What::File(_, attr) => (attr.permissions(), 4096),
+            What::File(_, attr) => (attr.permissions(), attr.size()),
             What::Link(_) => (
                 0o777,
                 self.read_link().map_or(0, |target| target.len() as u64),

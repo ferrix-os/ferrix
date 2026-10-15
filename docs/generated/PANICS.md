@@ -99,6 +99,7 @@ Causes are listed most likely first.
 | [FX-0906](#fx-0906) | the kernel heap a job drove through the Linux calls was not bounded by its job |
 | [FX-0907](#fx-0907) | a process left its speculation domain where it may not wait |
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
+| [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2417,6 +2418,26 @@ See: src/kernel/src/arch/speculation.rs CheckHook;
 src/kernel/src/object/domain_check.rs; src/kernel/src/main.rs;
 docs/OPAQUE-KERNEL.md §9.7; src/kernel/src/sched/work.rs hook_armed_by;
 src/kernel/src/user/vmo.rs ReclaimHook; src/kernel/src/fs/btrfs_write_check.rs.
+
+<a id="fx-0909"></a>
+
+## FX-0909 — the SMBIOS copy's acceptance took a forged copy, or refused a good one
+
+`discovery::smbios_check::run` (docs/DMI.md section 4) feeds
+`discovery::smbios::range` and `decode` a forged machine: a copy that is absent,
+in usable memory, straddling its region's end, below the direct map,
+overflowing, holding no table, one byte longer than its table, and with a bad
+checksum. Each must be refused by its own name, and a well-formed copy accepted.
+A failure means the kernel would read firmware data it has not bounded, or show
+none it should.
+
+1. A bound in `range` in src/kernel/src/discovery/smbios.rs was loosened or
+   dropped.
+2. `ferrix_smbios::Smbios::new` stopped checking the table's length or the
+   checksum; its host tests pin both.
+
+See: src/kernel/src/discovery/smbios.rs;
+src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
 
 <a id="fx-1001"></a>
 

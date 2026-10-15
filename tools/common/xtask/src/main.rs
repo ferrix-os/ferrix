@@ -156,6 +156,7 @@ mod sha256;
 mod shell;
 mod shm;
 mod slot_image;
+mod smbios;
 mod ssh;
 mod start_page;
 mod steam;

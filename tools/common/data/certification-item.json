@@ -230,6 +230,8 @@
         "discovery/mod.rs",
         "discovery/pci.rs",
         "discovery/pci/**",
+        "discovery/smbios.rs",
+        "discovery/smbios_check.rs",
         "init.rs",
         "init_check.rs",
         "main.rs",
@@ -367,6 +369,12 @@
         "path": "src/lib/fs/btrfs-write",
         "below": "the `WriteDevice` trait (ferrix_btrfs_write::WriteDevice, a `Device` that also writes and flushes), implemented by the kernel's `Disk`; and ferrix-btrfs, item",
         "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
+      },
+      "ferrix-smbios": {
+        "ring": "item",
+        "path": "src/lib/platform/smbios",
+        "below": "byte slices its caller lends; no trait, no allocation, no dependency",
+        "above": "the entry point parse, the table walk and the identity decode, called by src/boot/common/uefi and src/kernel/src/discovery/smbios.rs"
       },
       "ferrix-btrfs-vfs": {
         "ring": "load",

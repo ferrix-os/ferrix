@@ -16,6 +16,7 @@ ferrix-bootinfo.workspace = true
 ferrix-elf.workspace = true
 ferrix-paging.workspace = true
 ferrix-slots.workspace = true
+ferrix-smbios.workspace = true
 
 [lints]
 workspace = true

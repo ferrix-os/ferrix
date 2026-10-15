@@ -593,6 +593,7 @@ fn check_block_ring() {
     // `devmgr`, which one of them asks for a driver. And the native calls
     // init needs, which run a program from a file, so after the filesystems.
     if checks::run() {
+        stages_check::check_smbios();
         stages_check::check_sysfs();
         stages_check::check_services();
         stages_check::check_native_refusals();
@@ -1589,6 +1590,31 @@ fn report(view: &BootView<'_>) {
             .and_then(|tree| tree.model())
             .unwrap_or("unreadable");
         println!("  fdt      {model}, {len} bytes at {at:#x}");
+    }
+    report_smbios(view);
+}
+
+/// Accept or refuse the loader's SMBIOS copy, and say which: the version, the
+/// size, and the vendor and product only -- never a serial, a UUID or a byte
+/// of the table (`docs/DMI.md` §4).
+fn report_smbios(view: &BootView<'_>) {
+    use ferrix_smbios::Field;
+    match discovery::smbios::open(view) {
+        Ok(tables) => {
+            let version = tables.point().version;
+            let identity = tables.identity();
+            println!(
+                "  smbios   {}.{}, {} structures in {} bytes: {} {}",
+                version >> 16,
+                (version >> 8) & 0xFF,
+                tables.structures(),
+                tables.table().len(),
+                discovery::smbios::Shown(identity.get(Field::SysVendor)),
+                discovery::smbios::Shown(identity.get(Field::ProductName)),
+            );
+        }
+        Err(discovery::smbios::Refusal::None) => println!("  smbios   none handed over"),
+        Err(refused) => println!("  smbios   refused: {}", refused.text()),
     }
 }
 

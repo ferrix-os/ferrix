@@ -1215,6 +1215,18 @@ The boot check that no frame of the region is free (`L.mm.75`) takes the
 frame allocator's lock once a frame, 257 times for the region, once a boot
 after the reclaim, on the boot processor.
 
+### 2.2p The firmware's SMBIOS tables (2026-10-15)
+
+* **Memory.** The loader's copy is the entry point padded to 32 bytes and
+  the table, at most 1 MiB (`ferrix_smbios::TABLE_MAX`), rounded up to
+  pages, in `MemKind::Smbios`, resident for the life of the system. The
+  kernel copies nothing: it borrows it (`discovery::smbios`).
+* **Time.** The kernel checks and walks the table once at boot, O(length),
+  under no lock; the result is a write-once `Once`.
+* **Reads.** A sysfs read renders one field (at most a page) or returns
+  the entry point or the walked table, bounded by the copy's length; it
+  takes no lock but the `Once`'s completed check.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

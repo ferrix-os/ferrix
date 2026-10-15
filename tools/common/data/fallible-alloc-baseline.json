@@ -28,6 +28,11 @@
       "//": "Held at 0 by cargo xtask check (L.btrfs.22): converted to try_reserve and ferrix-fallible on 2026-10-02, the reader's name matches argued NOALLOC.",
       "count": 0,
       "by_file": {}
+    },
+    "ferrix-smbios": {
+      "//": "Held at 0 from the start (docs/DMI.md, 2026-10-15): the crate is no_std without alloc and allocates nothing.",
+      "count": 0,
+      "by_file": {}
     }
   }
 }

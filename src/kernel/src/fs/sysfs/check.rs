@@ -21,8 +21,9 @@ use alloc::format;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
+use ferrix_smbios::{Field, Smbios};
 use ferrix_sysfs::attr;
-use ferrix_vfs::{Context, DirEntry, Errno, FileType, Namespace, OpenFlags};
+use ferrix_vfs::{Access, Context, DirEntry, Errno, FileType, Namespace, OpenFlags};
 
 use super::Sysfs;
 use crate::device::{self, Location};
@@ -50,6 +51,9 @@ pub(crate) struct Report {
     pub(crate) cpus: u32,
     /// Changes refused as kernfs refuses them.
     pub(crate) refusals: u32,
+    /// Firmware identity and table files whose mode, owner and bytes matched
+    /// the kernel's SMBIOS parse, and which refused what Linux refuses.
+    pub(crate) dmi: u32,
 }
 
 /// Where the check mounts its sysfs.
@@ -196,6 +200,7 @@ pub(crate) fn run() -> Checked<Report> {
     check_interfaces(&mut harness)?;
     check_char_devices(&harness)?;
     check_refusals(&mut harness)?;
+    check_dmi(&mut harness)?;
     check_cgroup_mount_point(&harness)?;
 
     let root = ns
@@ -533,6 +538,120 @@ fn check_refusals(harness: &mut Harness) -> Checked<()> {
         Errno::EACCES,
         "a file created in sysfs was not EACCES",
     )
+}
+
+/// A user that is not root, and the global user the root of a user namespace
+/// that does not map global 0 runs as: permission checks are made against
+/// global ids, so it is not root here (Steam's pressure-vessel is one).
+const NOT_ROOT: [(u32, u32); 2] = [(1000, 1000), (100_000, 100_000)];
+
+/// The firmware's identity and tables (`docs/DMI.md` §4): absent without a
+/// table the kernel accepted; with one, every file Linux would have, with
+/// Linux's mode and owner, reading what the parse decoded, refusing a write,
+/// and the four identifying fields and both tables refusing anyone but root.
+fn check_dmi(harness: &mut Harness) -> Checked<()> {
+    let Some(tables) = crate::discovery::smbios::tables() else {
+        for absent in [&b"/class/dmi"[..], b"/firmware", b"/devices/virtual/dmi"] {
+            let found = harness
+                .ns
+                .resolve(&harness.ctx, None, &Harness::path(absent), false);
+            if found.err() != Some(Errno::ENOENT) {
+                return Err("sysfs shows firmware identity with no SMBIOS table accepted");
+            }
+        }
+        return Ok(());
+    };
+    let mut files: Vec<(Vec<u8>, Vec<u8>, u32)> = Vec::new();
+    for field in Field::ALL {
+        let mut text = Vec::new();
+        if tables
+            .field_text(field, &mut |piece| text.extend_from_slice(piece))
+            .is_some()
+        {
+            files.push((
+                [&b"/class/dmi/id/"[..], field.name()].concat(),
+                text,
+                field.mode(),
+            ));
+        } else if harness
+            .read(&[&b"/class/dmi/id/"[..], field.name()].concat())
+            .err()
+            != Some(Errno::ENOENT)
+        {
+            return Err("a dmi/id field the table lacks is not absent");
+        }
+    }
+    let mut alias = Vec::new();
+    tables.modalias(&mut |piece| alias.extend_from_slice(piece));
+    files.push((b"/class/dmi/id/modalias".to_vec(), alias, 0o444));
+    files.push((
+        b"/firmware/dmi/tables/smbios_entry_point".to_vec(),
+        Smbios::entry_point(&tables).to_vec(),
+        0o400,
+    ));
+    files.push((
+        b"/firmware/dmi/tables/DMI".to_vec(),
+        Smbios::table(&tables).to_vec(),
+        0o400,
+    ));
+    for (tail, expected, mode) in &files {
+        check_dmi_file(harness, tail, expected, *mode)?;
+    }
+    Ok(())
+}
+
+/// One file of [`check_dmi`].
+fn check_dmi_file(harness: &mut Harness, tail: &[u8], expected: &[u8], mode: u32) -> Checked<()> {
+    let at = harness
+        .ns
+        .resolve(&harness.ctx, None, &Harness::path(tail), true)
+        .map_err(|_| "a dmi file did not resolve")?;
+    let meta = harness
+        .ns
+        .stat(&at)
+        .map_err(|_| "a dmi file did not stat")?
+        .metadata;
+    if meta.permissions != mode || meta.uid != 0 || meta.gid != 0 {
+        return Err("a dmi file's mode or owner is not Linux's");
+    }
+    if !harness.reads(tail, expected) {
+        return Err("a dmi file does not read what the SMBIOS parse decoded");
+    }
+    let write = OpenFlags {
+        write: true,
+        ..OpenFlags::default()
+    };
+    let written = harness
+        .ns
+        .open(&harness.ctx, None, &Harness::path(tail), &write, 0)
+        .and_then(|file| file.write(b"x\n"));
+    harness.refused(
+        written.err(),
+        Errno::EACCES,
+        "a write to a dmi file was not EACCES",
+    )?;
+    let read = OpenFlags {
+        read: true,
+        ..OpenFlags::default()
+    };
+    for (uid, gid) in NOT_ROOT {
+        let mut ctx = harness.ctx.clone();
+        ctx.who = Access::user(uid, gid);
+        let opened = harness.ns.open(&ctx, None, &Harness::path(tail), &read, 0);
+        let allowed = opened.is_ok();
+        if allowed != (mode & 0o004 != 0) {
+            return Err(if allowed {
+                "a root-only dmi file opened for a user that is not root"
+            } else {
+                "a dmi file every user may read was refused to one"
+            });
+        }
+        if !allowed && opened.err() != Some(Errno::EACCES) {
+            return Err("a root-only dmi file was refused other than with EACCES");
+        }
+    }
+    harness.report.dmi += 1;
+    Ok(())
 }
 
 /// cgroup2 mounts on `fs/cgroup`, which needs its dentry remembered, and

@@ -27,6 +27,7 @@ mod pstore;
 mod report_url;
 mod services;
 mod slots;
+mod smbios;
 mod uefi;
 
 use core::convert::Infallible;
@@ -182,6 +183,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
         MemoryType::FERRIX_BOOT_STACK,
     )?;
     let device_tree = copy_device_tree(&services)?;
+    let smbios = smbios::copy(&services);
     let initrd = initrd_of(&services, &source)?;
     let switch = load::place_switch(
         &services,
@@ -211,11 +213,10 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     // map. The ceiling set above is meant to guarantee it; this is the check
     // that it did, since firmware is the one choosing the addresses.
     let handed_over = [kernel.image.memory, memory.pool(), stack, info_area];
-    let copied = device_tree.map(|(copy, _)| copy);
+    let copied = [device_tree, smbios, initrd].into_iter().flatten();
     if !handed_over
         .into_iter()
-        .chain(copied)
-        .chain(initrd.map(|(file, _)| file))
+        .chain(copied.map(|(copy, _)| copy))
         .all(|allocation| direct.covers(allocation))
     {
         return Err(BootError::plain(
@@ -251,6 +252,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
             device_tree,
             initrd,
             framebuffer,
+            smbios,
         },
     );
 
@@ -278,11 +280,8 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     arch::clean_dcache(info_area.address, info_area.len);
     arch::clean_dcache(stack.address, stack.len);
     switch.clean();
-    if let Some((copy, _)) = device_tree {
+    for (copy, _) in [device_tree, smbios, initrd].into_iter().flatten() {
         arch::clean_dcache(copy.address, copy.len);
-    }
-    if let Some((file, _)) = initrd {
-        arch::clean_dcache(file.address, file.len);
     }
 
     // SAFETY: boot services are gone, `prepare_cpu` ran above, and the tables
@@ -510,7 +509,7 @@ fn stage_kernel(
 
 /// What the loader copied into memory the kernel keeps, besides the kernel.
 ///
-/// Both optional, and both described to the kernel the same way: where the
+/// All optional, and each described to the kernel the same way: where the
 /// copy is, and how many of its bytes are real.
 #[derive(Clone, Copy, Debug)]
 struct Carried {
@@ -520,6 +519,8 @@ struct Carried {
     initrd: Option<(Allocation, u64)>,
     /// The framebuffer [`Services::framebuffer`] chose, if any.
     framebuffer: Option<Framebuffer>,
+    /// Firmware's SMBIOS entry point and table, copied (`smbios::copy`).
+    smbios: Option<(Allocation, u64)>,
 }
 
 /// Where firmware's ACPI root system description pointer is, or zero.
@@ -547,6 +548,7 @@ fn write_boot_info(
         device_tree,
         initrd,
         framebuffer,
+        smbios,
     } = carried;
     let time = services.firmware_time();
     let seed = services.firmware_seed();
@@ -600,6 +602,8 @@ fn write_boot_info(
         kaslr: choice.kaslr,
         pstore_phys: pstore.map_or(0, |region| region.address),
         pstore_len: pstore.map_or(0, |region| region.len),
+        smbios: smbios.map_or(0, |(copy, _)| copy.address),
+        smbios_len: smbios.map_or(0, |(_, len)| len),
     };
 
     // SAFETY: `info_area` is our own allocation of BOOT_INFO_BYTES, identity

@@ -1604,6 +1604,26 @@ pub(crate) static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
          src/kernel/src/syscall/thread.rs; docs/SECCOMP.md §3.4 to §3.5a",
 };
 
+/// For `check_smbios` in `stages_check.rs`, when `discovery::smbios_check::run`
+/// fails.
+pub(crate) static SMBIOS: Explanation = Explanation {
+    code: "FX-0909",
+    title: "the SMBIOS copy's acceptance took a forged copy, or refused a good one",
+    meaning: "`discovery::smbios_check::run` (docs/DMI.md section 4) feeds \
+              `discovery::smbios::range` and `decode` a forged machine: a copy that is absent, in \
+              usable memory, straddling its region's end, below the direct map, overflowing, \
+              holding no table, one byte longer than its table, and with a bad checksum. Each \
+              must be refused by its own name, and a well-formed copy accepted. A failure means \
+              the kernel would read firmware data it has not bounded, or show none it should.",
+    causes: &[
+        "A bound in `range` in src/kernel/src/discovery/smbios.rs was loosened or dropped.",
+        "`ferrix_smbios::Smbios::new` stopped checking the table's length or the checksum; \
+         its host tests pin both.",
+    ],
+    see: "src/kernel/src/discovery/smbios.rs; src/kernel/src/discovery/smbios_check.rs; \
+         src/lib/platform/smbios; docs/DMI.md",
+};
+
 /// For `check_sysfs` in `stages_check.rs`, when `fs::sysfs::check::run` fails.
 pub(crate) static SYSFS: Explanation = Explanation {
     code: "FX-0890",
@@ -3368,6 +3388,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE9_KMEM,
     &SPECULATION_DOMAIN_LEAVE_MAY_NOT_WAIT,
     &CHECK_HOOK_LEFT_ARMED,
+    &SMBIOS,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

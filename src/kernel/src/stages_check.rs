@@ -690,6 +690,18 @@ pub(super) fn check_cgroupfs() {
 
 /// sysfs (`docs/SYSFS.md`): the device tree mounted and walked through the
 /// VFS, and what it says held against what enumeration and the cores know.
+/// The SMBIOS copy's acceptance, against forged copies (`docs/DMI.md` §4).
+pub(super) fn check_smbios() {
+    let checked = match discovery::smbios_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(catalog::SMBIOS, "SMBIOS self-check failed: {problem}"),
+    };
+    println!(
+        "  smbios   {} forged copies refused by name, a well-formed one accepted",
+        checked.refused
+    );
+}
+
 pub(super) fn check_sysfs() {
     let checked = match fs::sysfs::check::run() {
         Ok(checked) => checked,
@@ -698,7 +710,7 @@ pub(super) fn check_sysfs() {
     println!(
         "  sysfs    {} names walked in {} directories, {} links followed; {} devices, {} bound \
          as devmgr says, {} disks, {} interfaces and {} processors as their owners say; {} \
-         refusals as kernfs refuses",
+         refusals as kernfs refuses; {} firmware identity files as Linux shows them",
         checked.names,
         checked.directories,
         checked.links,
@@ -708,6 +720,7 @@ pub(super) fn check_sysfs() {
         checked.interfaces,
         checked.cpus,
         checked.refusals,
+        checked.dmi,
     );
 }
 
@@ -1993,6 +2006,11 @@ pub(super) fn check_loader_allocations(view: &BootView<'_>) -> Result<(), &'stat
             view.device_tree(),
             MemKind::DeviceTree,
             "the memory map does not describe the device tree copy as the device tree",
+        ),
+        (
+            view.smbios(),
+            MemKind::Smbios,
+            "the memory map does not describe the SMBIOS copy as the SMBIOS copy",
         ),
         (
             view.initrd(),

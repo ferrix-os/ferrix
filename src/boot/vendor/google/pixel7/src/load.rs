@@ -453,6 +453,9 @@ fn write_boot_info(
         // and nothing reports what the previous kernel left (POSTMORTEM.md §3).
         pstore_phys: 0,
         pstore_len: 0,
+        // The phone's bootloader is not UEFI and offers no SMBIOS table.
+        smbios: 0,
+        smbios_len: 0,
     };
     // SAFETY: the info area is the loader's, larger than one boot info.
     unsafe { ptr::write_volatile(info.base as *mut BootInfo, boot_info) };

@@ -180,7 +180,9 @@ the net, input and serial cores do not yet, so a bind there may answer `EIO`.
   told about, 3.
 * **A processor's `topology/`.** Firmware's tables do not say siblings and
   packages reliably enough to print; `cpufreq` has no source at all.
-* **`/sys/kernel`, `/sys/firmware`, `/sys/power`, `/sys/module`.** Nothing true
+* **`/sys/kernel`, `/sys/power`, `/sys/module`, and `/sys/firmware` but for
+  `dmi/tables`** (and `/sys/class/dmi/id`, which [DMI.md](DMI.md) adds
+  while firmware gave an SMBIOS table the kernel accepted). Nothing true
   to put there yet. `/sys/firmware/devicetree/base` on the DK1 is the flattened
   tree as files, 3 points, when a program needs it.
 * **Writable attributes other than `bind`/`unbind`**, and `chmod`/`chown` in

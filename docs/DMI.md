@@ -56,7 +56,9 @@ that is not root, Wine among them, reads `/sys/class/dmi/id`.
 **Privacy.** The serial numbers and the UUID identify the one machine, so
 Linux lets only root read them, and so does Ferrix, with the same modes.
 Every other field names a model, not a machine.
-`docs/certification/VULNERABILITY-ANALYSIS.md` carries the entry (§5).
+`docs/certification/VULNERABILITY-ANALYSIS.md` carries the entry, under
+"T.IDENTIFY — a program that is not root fingerprints the machine from its
+firmware".
 
 ## 2. Where the table is
 
@@ -77,10 +79,20 @@ UEFI firmware publishes the entry points in its configuration table
 
 Linux prefers the 3.x entry point and falls back to the 2.x one when the
 3.x is absent or does not decode (dmi_scan.c:678-720). So does Ferrix.
-One difference, deliberate: Linux still accepts a 2.x entry point whose
-`_SM_` checksum fails when the `_DMI_` header after it checks, as "legacy
-DMI" (dmi_scan.c:609-635). Ferrix refuses it, because the constraint is
-that a bad checksum means no files.
+Linux corrects some firmware's 2.x version (dmi_scan.c:596-608): 2.31 and
+2.33 are read as 2.3, 2.51 as 2.6. So does Ferrix, and the corrected
+version decides one thing only, the UUID's byte order (§1).
+
+Two differences, deliberate:
+
+* Linux still accepts a 2.x entry point whose `_SM_` checksum fails when
+  the `_DMI_` header after it checks, as "legacy DMI" with a 15-byte entry
+  point (dmi_scan.c:609-635). Ferrix refuses it, because the constraint is
+  that a bad checksum means no files; Linux's 15-byte legacy entry point is
+  never shown.
+* Linux has no cap on the table's length. Ferrix refuses a table longer
+  than 1 MiB, and then falls back to the 2.x entry point if there is one,
+  as it does on any refusal of the 3.x one.
 
 ## 3. The design
 
@@ -92,17 +104,29 @@ firmware's memory is identity mapped, so the loader can read the entry
 point and the table where they are. It:
 
 1. reads at most 32 bytes at the entry point and validates them with
-   `ferrix_smbios::EntryPoint::parse` (anchor, length range, checksums);
-2. refuses a table longer than `SMBIOS_TABLE_MAX` (1 MiB) or of length 0;
+   `ferrix_smbios::EntryPoint::parse` (anchor, length range, both 2.x
+   checksums);
+2. refuses a table longer than `ferrix_smbios::TABLE_MAX` (1 MiB) or of
+   length 0, a table address whose end overflows or that the loader cannot
+   address (the 32-bit ARMv7-A loader, above 4 GiB), and an entry point or
+   table that overlaps what the UEFI memory map calls device memory
+   (`EfiMemoryMappedIO`, `EfiMemoryMappedIOPortSpace`);
 3. copies the entry point (padded to 32 bytes) and then the table into one
-   allocation of the loader's own `FERRIX_BOOT_INFO` memory type, which the
-   kernel's map reports as `MemKind::BootInfo` and which nothing reclaims
-   or writes;
+   allocation of a memory type of its own, `FERRIX_SMBIOS`, which the
+   kernel's map reports as `MemKind::Smbios` and which nothing reclaims or
+   writes, allocated below the direct map's end like everything else it
+   hands over;
 4. passes the copy's physical address and length in two new `BootInfo`
    fields, `smbios` and `smbios_len` (version 8), or zeros.
 
-It prints one line: `smbios 3.0 entry point, table of N bytes copied`, or
-why there is none.
+A refusal never stops the boot: the loader prints one line naming it,
+tries the 2.x entry point after a refused 3.x one, and passes zeros. When it
+copies, it prints `smbios 3.0 entry point (64-bit), table of N bytes
+copied`: the version and the length, nothing from the table.
+
+`BootInfo` version 8 is refused by a version 7 kernel and the other way
+round, as every version change is (`BootInfoError::VersionMismatch`), so a
+loader and a kernel go together; an A/B update carries both.
 
 The alternative, handing the kernel firmware's own address, was considered
 and refused: OVMF keeps the table in memory the UEFI map does not call RAM,
@@ -114,15 +138,19 @@ tree copy is (`discovery/fdt.rs`). The Pixel 7 loader passes zeros.
 
 ### 3.2 The kernel validates the copy once
 
-`discovery/smbios.rs`, once at boot, before any program runs:
+`discovery/smbios.rs` (item ring), once at boot, before any program runs:
 
-* fails closed when `smbios` is 0;
-* refuses a copy not wholly inside one `MemKind::BootInfo` region of the
-  map, or outside the direct map (the address is one it was handed, not one
-  it computed), or longer than 32 + `SMBIOS_TABLE_MAX`;
-* re-parses the entry point from the copy's first 32 bytes, with the same
-  checks as the loader, and refuses a table length that is not the copy's
-  length less 32;
+* `range`, a pure function of the offered address and length, the memory
+  map and the direct map's bounds, with checked arithmetic: nothing offered
+  is "none handed over"; a copy no longer than 32 bytes or longer than 32 +
+  1 MiB, one whose end overflows, one not wholly inside one
+  `MemKind::Smbios` region, or one not wholly inside the direct map is
+  refused by name;
+* then the one `from_raw_parts` of the copy, a `'static` shared borrow
+  (`SAFETY: (BOOT-DATA)`, as `discovery/fdt.rs`); no copy, no allocation;
+* `decode` re-parses the entry point from the copy's first 32 bytes, with
+  the same checks as the loader, and refuses a table length that is not the
+  copy's length less 32;
 * walks the table as Linux's `dmi_decode_table` does (dmi_scan.c:88-145):
   stop at the count (2.x) or type 127 (3.x), at a structure shorter than its
   4-byte header, or at the table's end; a structure whose string set does
@@ -131,7 +159,11 @@ tree copy is (`discovery/fdt.rs`). The Pixel 7 loader passes zeros.
 * keeps the result in a write-once static: borrowed slices of the copy (the
   entry point, the cut table) and the decoded identity fields.
 
-Any refusal leaves the static empty and prints why; then
+It prints one line: `smbios 3.0, N structures in M bytes: <sys_vendor>
+<product_name>`, those two strings with every byte outside printable ASCII
+(and the backslash) escaped as `\xNN`, or `smbios refused: <why>`, or
+`smbios none handed over`. Any refusal leaves the static empty and the boot
+goes on; then
 `/sys/class/dmi` and `/sys/firmware/dmi` do not exist. Never an empty
 string or an invented value in place of a table that did not validate.
 
@@ -149,10 +181,16 @@ of range.
 
 * `/sys/class/dmi/id`, a link to `/sys/devices/virtual/dmi/id` as on
   Linux, which holds the field files of §1 that the table has, with
-  Linux's modes, `modalias`, `uevent` (`MODALIAS=…`) and a `subsystem` link;
+  Linux's modes and owner root, `modalias`, `uevent` (`MODALIAS=dmi:…:`,
+  what Linux's `uevent_show` prints for this device) and a `subsystem` link
+  to `/sys/class/dmi`;
 * `/sys/firmware/dmi/tables/smbios_entry_point` and `DMI`, 0400, the bytes
   unaltered: the entry point as firmware wrote it (its own length, its
-  table address still firmware's), and the cut table.
+  table address still firmware's), and the cut table. `stat` gives their
+  real lengths, as Linux's binary attributes do; the text files say a page.
+
+`/sys/firmware` itself appears only with a table (Ferrix has nothing else
+to put there). Linux's `power/` directory under `dmi/id` is not shown.
 
 Values pass through unaltered: the strings' bytes as the table holds them,
 not re-encoded. What Linux formats (release, UUID, chassis type, the
@@ -172,17 +210,36 @@ none (the DK1's U-Boot, the Pixel 7's bootloader, which is not UEFI) has no
 
 ## 4. Checks
 
-* `ferrix-smbios` host tests: QEMU's own 2.x and 3.x tables as built
-  (fixtures), each hostile case of §3.2 refused or walked within bounds,
-  the identity fields and their formats against Linux's.
-* A boot check (`fs/sysfs/check.rs`): when the kernel holds a table, the
-  files exist with the modes of §1, read what the parse decoded, refuse a
-  write; when it holds none, `/sys/class/dmi` does not exist. Its boot
-  line names `sys_vendor` and `product_name`.
-* xtask boots x86_64 with `-smbios type=1,manufacturer=…,product=…`, and
-  test-boot fails unless the boot line carries exactly those strings.
-* A negative control: the kernel's checksum test inverted, run through
-  `gate.sh control`, fires on the missing line.
+* `ferrix-smbios` host tests (`src/lib/platform/smbios/src/tests.rs`):
+  tables laid out as QEMU's `hw/smbios/smbios.c` lays out types 0, 1, 3
+  and 127; each hostile case of §3.2 refused or walked within bounds (bad
+  checksums, a bad `_DMI_` header, entry point lengths just outside both
+  ranges, an entry point cut at every byte, a table at the cap and one byte
+  over, a length past the end, a structure shorter than its header,
+  unterminated strings, a count larger than the table, every truncation and
+  every single-byte change of a good table); Linux's version fixups, the
+  2.x count and count-0 walks, the 3.x stop at type 127, first-wins, a
+  0xFF/0xFF release, all-0x00 and all-0xFF UUIDs, strings of spaces, string
+  index 0 and past the set, bytes passed through, the modalias and the page
+  cut.
+* `discovery::smbios_check` (boot, FX-0909): `range` and `decode` fed a
+  forged machine -- none, outside the region, straddling its end, below
+  the direct map, overflowing, holding no table, a table one byte longer
+  than the entry point says, a bad checksum -- each refused by its name,
+  and a good copy accepted.
+* The sysfs boot check (`fs::sysfs::check::check_dmi`, FX-0890): with a
+  table, every field file the table has and `modalias` and both table
+  files have Linux's mode and uid 0, read what the parse decoded, refuse a
+  write with `EACCES`; a user (1000) and the global user a namespaced root
+  runs as (100000) get `EACCES` on the 0400 files and read the 0444 ones;
+  fields the table lacks are absent. With none, `/sys/class/dmi`,
+  `/sys/firmware` and `/sys/devices/virtual/dmi` do not exist.
+* Every QEMU boot xtask makes gives the machine `-smbios` with a vendor, a
+  product, and marker serials and UUID (`tools/common/xtask/src/smbios.rs`).
+  A test boot fails unless the kernel accepted a table on every
+  architecture, unless on x86-64 its line names exactly that vendor and
+  product, and if any marker appears anywhere in the serial log.
+* Negative controls through `gate.sh control`, each to read FIRED (§6).
 
 ## 5. What it is not
 
@@ -193,4 +250,9 @@ DMI (quirk tables, `dmesg`'s `DMI:` line) are not built.
 
 ## 6. Where it stands
 
-2026-10-15: design written, sent to the certification consultant.
+2026-10-15: design reviewed by the certification consultant, OK IF (1)-(23)
+(ledger line 1339; its predecessor's constraints at line 1285). Requirement
+ids L.discovery.2-6 and H.BOOT.16 reserved on branch `dmi-d1-reserve`, to
+land alone first (condition 13). The code is on branch `dmi-d1`; what it
+has run and what is left is in the handover,
+`~/.local/share/ferrix/handover/dmi-d1.md`, until it lands.

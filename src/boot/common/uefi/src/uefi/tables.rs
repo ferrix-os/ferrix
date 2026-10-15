@@ -63,6 +63,9 @@ impl MemoryType {
     /// The region the kernel keeps its log in across a reset, at the address
     /// `pstore::choose` gives (`docs/POSTMORTEM.md` §3.2).
     pub(crate) const FERRIX_PSTORE: MemoryType = MemoryType(0x8000_0006);
+    /// The loader's copy of firmware's SMBIOS tables, which the kernel keeps
+    /// for good.
+    pub(crate) const FERRIX_SMBIOS: MemoryType = MemoryType(0x8000_0007);
 }
 
 /// One entry of the UEFI memory map.
@@ -100,6 +103,24 @@ pub(crate) const ACPI_20_GUID: Guid = Guid::new(
 /// ACPI 1.0 root pointer, used only if 2.0 is absent.
 pub(crate) const ACPI_10_GUID: Guid = Guid::new(
     0xeb9d_2d30,
+    0x2d88,
+    0x11d3,
+    [0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d],
+);
+
+/// SMBIOS 3.x's 64-bit entry point, `_SM3_` (Linux `include/linux/efi.h`
+/// `SMBIOS3_TABLE_GUID`).
+pub(crate) const SMBIOS3_GUID: Guid = Guid::new(
+    0xf2fd_1544,
+    0x9794,
+    0x4a2c,
+    [0x99, 0x2e, 0xe5, 0xbb, 0xcf, 0x20, 0xe3, 0x94],
+);
+
+/// SMBIOS 2.x's 32-bit entry point, `_SM_` (Linux `include/linux/efi.h`
+/// `SMBIOS_TABLE_GUID`).
+pub(crate) const SMBIOS_GUID: Guid = Guid::new(
+    0xeb9d_2d31,
     0x2d88,
     0x11d3,
     [0x9a, 0x16, 0x00, 0x90, 0x27, 0x3f, 0xc1, 0x4d],

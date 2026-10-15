@@ -323,6 +323,25 @@ the traceability matrix reaches them since the same landing (`L.btrfs.*` and
 `H.STORE.*`, traced to the crates' host tests), with the requirements no test
 verifies yet in its baseline.
 
+### ferrix-smbios — the firmware's SMBIOS tables, one crate in the item
+
+Since 2026-10-15 (`docs/DMI.md`; consultant ledger line 1339) the loader
+copies firmware's SMBIOS entry point and structure table and the kernel
+checks the copy once at boot. Both parse it with `ferrix-smbios`
+(`src/lib/platform/smbios`), which the manifest puts in `item`:
+
+| Crate | Below it | Above it |
+|---|---|---|
+| `ferrix-smbios` | byte slices its caller lends; no trait, no allocation, no dependency | the entry point parse, the table walk and the identity decode, called by `src/boot/common/uefi` and `src/kernel/src/discovery/smbios.rs` |
+
+It is `forbid(unsafe_code)`, `no_std` without `alloc`, and denies
+`arithmetic_side_effects` as well as the workspace's panic lints, so every
+function is total over any bytes firmware wrote. What it hands sysfs, the
+`/sys/class/dmi/id` and `/sys/firmware/dmi/tables` files, is shown by
+`src/kernel/src/fs/sysfs.rs`, which stays load: the files' modes and their
+refusal to anyone but root are a claim about the configuration, not the
+item (VULNERABILITY-ANALYSIS.md, T.IDENTIFY).
+
 ### `load` — everything it runs and does not vouch for
 
 The VFS, btrfs's glue into it (`ferrix-btrfs-vfs` and the kernel's

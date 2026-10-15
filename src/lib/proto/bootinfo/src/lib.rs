@@ -77,8 +77,14 @@ pub const BOOTINFO_MAGIC: u64 = 0x4645_5252_4958_4249;
 /// vmap arena at random each boot, and says how, and how well. Version 8
 /// added [`BootInfo::pstore_phys`] and [`BootInfo::pstore_len`], the region
 /// the kernel keeps its log in across a reset ([`pstore`]), and
-/// [`MemKind::Pstore`].
-pub const BOOTINFO_VERSION: u32 = 8;
+/// [`MemKind::Pstore`]. Version 9 added [`BootInfo::smbios`] and
+/// [`BootInfo::smbios_len`]: the loader's copy of firmware's SMBIOS entry
+/// point and table (`docs/DMI.md`), and [`MemKind::Smbios`].
+pub const BOOTINFO_VERSION: u32 = 9;
+
+/// Bytes at the start of the loader's SMBIOS copy that hold the entry point,
+/// zero-padded past its own length; the structure table follows them.
+pub const SMBIOS_ENTRY_BYTES: u64 = 32;
 
 /// [`BootInfo::firmware_flags`]: [`BootInfo::firmware_time`] holds the time
 /// firmware's `GetTime` gave.
@@ -818,6 +824,9 @@ pub enum MemKind {
     /// The loader's copy of the flattened device tree, kept for the life of
     /// the system: stage 10 enumerates devices from it long after boot.
     DeviceTree = 13,
+    /// The loader's copy of firmware's SMBIOS entry point and table, kept
+    /// for the life of the system: sysfs shows it (`docs/DMI.md`).
+    Smbios = 15,
     /// A linear framebuffer.
     Framebuffer = 9,
     /// A device `MMIO` aperture.
@@ -984,7 +993,7 @@ pub fn allocator_owns(regions: impl IntoIterator<Item = MemRegion>, base: u64, l
 /// tables the loader installed before jumping to the kernel, which is to say
 /// inside the direct map at [`PHYSMAP_BASE`]. Fields named `_phys` are
 /// physical. None of them is a pointer type, so the structure is the same
-/// 344 bytes on every word width.
+/// 360 bytes on every word width.
 ///
 /// Read it through [`BootInfo::validate`] rather than field by field.
 #[repr(C)]
@@ -1096,13 +1105,21 @@ pub struct BootInfo {
     pub pstore_phys: u64,
     /// Its length in bytes, header page included; 0 when there is none.
     pub pstore_len: u64,
+
+    /// Physical address of the loader's copy of firmware's SMBIOS entry point
+    /// and structure table, or 0 if firmware offered none the loader accepted.
+    /// The entry point is in the first [`SMBIOS_ENTRY_BYTES`], the table after
+    /// them, in memory the map reports as [`MemKind::Smbios`].
+    pub smbios: u64,
+    /// Length of that copy in bytes: [`SMBIOS_ENTRY_BYTES`] and the table's.
+    pub smbios_len: u64,
 }
 
 // The claim the module documentation makes, asserted where it can fail: a
 // field whose size follows the pointer width would break it, and the loader
 // and the host tests would then disagree about a layout neither of them sees.
 const _: () = assert!(
-    size_of::<BootInfo>() == 344,
+    size_of::<BootInfo>() == 360,
     "BootInfo must be laid out identically on every word width"
 );
 const _: () = assert!(
@@ -1374,6 +1391,16 @@ impl<'a> BootView<'a> {
         }
     }
 
+    /// The loader's SMBIOS copy as a physical address and length, if present.
+    #[must_use]
+    pub const fn smbios(&self) -> Option<(u64, u64)> {
+        if self.info.smbios == 0 || self.info.smbios_len == 0 {
+            None
+        } else {
+            Some((self.info.smbios, self.info.smbios_len))
+        }
+    }
+
     /// The device tree as a physical address and length, if present.
     #[must_use]
     pub const fn device_tree(&self) -> Option<(u64, u64)> {
@@ -1542,6 +1569,8 @@ mod tests {
             kaslr: Kaslr::fixed(&LAYOUT, KASLR_DECLINED),
             pstore_phys: 0,
             pstore_len: 0,
+            smbios: 0,
+            smbios_len: 0,
         }
     }
 
@@ -1642,7 +1671,37 @@ mod tests {
             BootInfoError::VersionMismatch(7),
             "a version 7 loader writes no pstore fields, and must not be read as one that did"
         );
-        assert_eq!(BOOTINFO_VERSION, 8, "version 8 carries the pstore fields");
+    }
+
+    #[test]
+    fn rejects_the_version_before_the_smbios_fields() {
+        let map = regions();
+        let mut info = boot_info(&map, "");
+        info.version = 8;
+        assert_eq!(
+            // SAFETY: as in `rejects_a_mismatched_version`.
+            unsafe { info.validate() }.unwrap_err(),
+            BootInfoError::VersionMismatch(8),
+            "a version 8 loader writes no SMBIOS fields, and must not be read as one that did"
+        );
+        assert_eq!(BOOTINFO_VERSION, 9, "version 9 carries the SMBIOS fields");
+    }
+
+    #[test]
+    fn an_smbios_copy_needs_both_its_address_and_its_length() {
+        let map = regions();
+        let mut info = boot_info(&map, "");
+        // SAFETY: as in `rejects_a_mismatched_version`.
+        let view = unsafe { info.validate() }.unwrap();
+        assert_eq!(view.smbios(), None, "zeros, no copy");
+        info.smbios = 0x200_0000;
+        // SAFETY: as above.
+        let view = unsafe { info.validate() }.unwrap();
+        assert_eq!(view.smbios(), None, "no length, no copy");
+        info.smbios_len = 0x1000;
+        // SAFETY: as above.
+        let view = unsafe { info.validate() }.unwrap();
+        assert_eq!(view.smbios(), Some((0x200_0000, 0x1000)), "both given");
     }
 
     #[test]
@@ -1869,6 +1928,10 @@ mod tests {
         assert!(
             MemKind::DeviceTree.is_ram() && !MemKind::DeviceTree.is_reclaimable(),
             "the device tree copy is RAM the kernel keeps"
+        );
+        assert!(
+            MemKind::Smbios.is_ram() && !MemKind::Smbios.is_reclaimable(),
+            "the SMBIOS copy is RAM the kernel keeps"
         );
     }
 

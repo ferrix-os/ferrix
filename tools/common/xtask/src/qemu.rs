@@ -184,6 +184,7 @@ pub(crate) fn test_boot_lines(
                 namespace_problem(&watched.lines),
                 xstate_problem(arch, own_model, &watched.lines),
                 fault_problem(arch, &watched.lines),
+                crate::smbios::problem(arch, &watched.lines),
             ];
             if let Some(problem) = problems.into_iter().flatten().next() {
                 return Err(Error::new(format!(
@@ -2466,7 +2467,7 @@ fn qemu_command(
         }
     }
 
-    attach_rng(&mut command, arch);
+    attach_firmware_data(&mut command, arch);
     attach_display(&mut command, arch, args, &binary);
     attach_asked_for(&mut command, arch, args, &binary);
     attach_test_disk(&mut command, arch)?;
@@ -2530,6 +2531,13 @@ fn attach_firmware(command: &mut Command, arch: Arch, firmware: &Firmware) -> Re
         }
     }
     Ok(())
+}
+
+/// What firmware hands the guest besides its memory: the SMBIOS identity a
+/// test boot holds the kernel to (`smbios::problem`), and a random source.
+fn attach_firmware_data(command: &mut Command, arch: Arch) {
+    let _ = command.args(crate::smbios::arguments());
+    attach_rng(command, arch);
 }
 
 /// A virtio device on PCI, on every machine, for stage 10's enumeration to

@@ -15,6 +15,7 @@
 //! | [`acpi`] | the firmware tables, on x86-64 and on AArch64 under EDK2 |
 //! | [`fdt`] | the device tree, on every other machine |
 //! | [`pci`] | the PCI functions behind the ECAM windows either describes |
+//! | [`smbios`] | the firmware's SMBIOS tables, as the loader copied them |
 //! | [`devmgr`] | nothing: it starts `devmgr` and tells it what was found |
 //!
 //! The parsers themselves are host-testable crates in `src/lib/platform/`
@@ -46,4 +47,6 @@ pub(crate) mod fdt;
 pub(crate) mod finder;
 pub(crate) mod firmware;
 pub(crate) mod pci;
+pub(crate) mod smbios;
+pub(crate) mod smbios_check;
 pub(crate) mod tree;

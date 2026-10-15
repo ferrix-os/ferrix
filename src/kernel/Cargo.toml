@@ -22,6 +22,7 @@ ferrix-btrfs-vfs.workspace = true
 ferrix-btrfs-write.workspace = true
 ferrix-description.workspace = true
 ferrix-fdt.workspace = true
+ferrix-smbios.workspace = true
 ferrix-fbtext.workspace = true
 ferrix-frame.workspace = true
 ferrix-elf.workspace = true

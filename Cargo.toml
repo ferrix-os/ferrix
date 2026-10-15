@@ -28,6 +28,7 @@ members = [
     "src/lib/platform/elf",
     "src/lib/kernel/fbtext",
     "src/lib/platform/fdt",
+    "src/lib/platform/smbios",
     "src/lib/kernel/fallible",
     "src/lib/kernel/frame",
     "src/lib/kernel/heap",
@@ -157,6 +158,7 @@ ferrix-description = { path = "src/lib/platform/description" }
 ferrix-elf = { path = "src/lib/platform/elf" }
 ferrix-fbtext = { path = "src/lib/kernel/fbtext" }
 ferrix-fdt = { path = "src/lib/platform/fdt" }
+ferrix-smbios = { path = "src/lib/platform/smbios" }
 ferrix-frame = { path = "src/lib/kernel/frame" }
 ferrix-fallible = { path = "src/lib/kernel/fallible" }
 ferrix-heap = { path = "src/lib/kernel/heap" }

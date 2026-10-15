@@ -86,6 +86,7 @@ dependencies = [
  "ferrix-elf",
  "ferrix-paging",
  "ferrix-slots",
+ "ferrix-smbios",
 ]
 
 [[package]]
@@ -365,6 +366,7 @@ dependencies = [
  "ferrix-renderctl",
  "ferrix-sched",
  "ferrix-seccomp",
+ "ferrix-smbios",
  "ferrix-sndctl",
  "ferrix-sync",
  "ferrix-sysfs",
@@ -588,6 +590,10 @@ dependencies = [
  "ferrix-bootinfo",
  "ferrix-partition",
 ]
+
+[[package]]
+name = "ferrix-smbios"
+version = "0.1.0"
 
 [[package]]
 name = "ferrix-snd"
