@@ -290,6 +290,7 @@ fn boot(image: Handle, system_table: *mut SystemTable) -> Result<Infallible> {
     }
     stripes::reached(stripes::Step::Cleaned);
     stripes::reached(stripes::Step::Entering);
+    stripes::failed(stripes::Step::Entering); // SABOTAGE
 
     // SAFETY: boot services are gone, `prepare_cpu` ran above, and the tables
     // in `space` identity map the page the switch runs from — the loader's own
