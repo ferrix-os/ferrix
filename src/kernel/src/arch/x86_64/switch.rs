@@ -518,6 +518,10 @@ unsafe fn ferrix_fpu_restore(area: *const FpuArea, components: u64) {
     }
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the defining module's own call of a method made pub only for a raised check"
+)]
 /// Store the program state this processor holds into `state`.
 ///
 /// No base MSR is read (3b): the `FS` and `GS` bases are the record's, which
@@ -537,10 +541,6 @@ unsafe fn ferrix_fpu_restore(area: *const FpuArea, components: u64) {
 /// (CONTEXT) The registers must belong to the task `state` is for: it was the last task
 /// with user state to run on this processor. `blocked` must say whether that
 /// task is switched out blocked rather than runnable.
-#[allow(
-    clippy::disallowed_methods,
-    reason = "the defining module's own call of a method made pub only for a raised check"
-)]
 pub(crate) unsafe fn save_user_state(state: &mut UserState, blocked: bool) {
     state.selectors = cpu::read_data_selectors();
     // SAFETY: (CONTEXT) the caller switches tasks with interrupts masked, so these are

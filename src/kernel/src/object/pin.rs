@@ -443,6 +443,10 @@ impl fmt::Debug for Pin {
 }
 
 impl Pin {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the defining module's own call of a method made pub only for a raised check"
+    )]
     /// Pin `held`'s pages into `node`'s domain `domain`, writable when
     /// `flags` says so, for the process whose end is `owner`, against the
     /// device's budget.
@@ -454,10 +458,6 @@ impl Pin {
     /// counts; what the domain refused; [`PinError::NoMemory`] for the
     /// quarantine's record. The hold is then released and nothing is counted:
     /// nothing was mapped.
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "the defining module's own call of a method made pub only for a raised check"
-    )]
     pub fn new(
         node: &DeviceNode,
         domain: &Arc<Domain>,

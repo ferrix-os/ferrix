@@ -196,6 +196,10 @@ const R3_PATIENCE_NANOS: u64 = 100_000_000;
 /// looked for.
 const GRACE_NANOS: u64 = 2_000_000;
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 /// Checks R1 to R4 of `docs/NVIDIA.md` §12.3, on QEMU's `edu`, once its
 /// own vector has been delivered remapped: `None` where its message is not
 /// in remappable format, so no unit remaps it.
@@ -214,10 +218,6 @@ const GRACE_NANOS: u64 = 2_000_000;
 /// `edu`'s minted message is programmed back, masked, after each.
 ///
 /// Verifies: `L.x86_64.129`, L.iommu.54, H.DMA.9
-#[allow(
-    clippy::disallowed_methods,
-    reason = "a check of the core, calling the device's methods made pub for a raised check"
-)]
 fn check_forged(
     node: &DeviceNode,
     edu: Mmio,
@@ -368,11 +368,11 @@ fn forge(
     Ok(faulted && !arrived())
 }
 
-/// Program `edu`'s minted message back, masked.
 #[allow(
     clippy::disallowed_methods,
     reason = "a check of the core, calling the device's methods made pub for a raised check"
 )]
+/// Program `edu`'s minted message back, masked.
 fn restore(
     node: &DeviceNode,
     msi: &MsiFunction,
@@ -666,6 +666,10 @@ pub(super) fn check_node(
     Ok(())
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a check of the core, calling the device's methods made pub for a raised check"
+)]
 /// A PCI function's bus mastering is what `enable_dma` and `disable_dma`
 /// say, read back from its command register rather than taken from the
 /// node's own flag: set after the one, with memory decoding on; clear after
@@ -677,10 +681,6 @@ pub(super) fn check_node(
 /// with none has nothing to switch.
 ///
 /// Verifies: L.device.9
-#[allow(
-    clippy::disallowed_methods,
-    reason = "a check of the core, calling the device's methods made pub for a raised check"
-)]
 pub(super) fn check_dma_switch(nodes: &[Arc<DeviceNode>]) -> Result<(), Failure> {
     let Some(node) = nodes.iter().find(|node| node.config_phys().is_some()) else {
         return Ok(());
