@@ -6,7 +6,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | debug | 669 | 400 | 140 | **129** |
+| x86_64 | debug | 672 | 402 | 141 | **129** |
 | aarch64 | debug | 671 | 336 | 158 | **177** |
 | armv7a | debug | 1031 | 440 | 357 | **234** |
 
@@ -16,15 +16,15 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**669** unreached statements, debug profile.
+**672** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
-| Unreachable on the measured architecture | 178 | 27% |
-| Reached only when the kernel is stopping | 140 | 21% |
+| Unreachable on the measured architecture | 178 | 26% |
+| Reached only when the kernel is stopping | 142 | 21% |
 | Reached only when something has already failed | 73 | 11% |
 | Run, and credited to another line | 9 | 1% |
-| Hardware the measured machine does not have | 140 | 21% |
+| Hardware the measured machine does not have | 141 | 21% |
 | Needs a test | 129 | 19% |
 
 ### x86_64: Unreachable on the measured architecture — 178 statements
@@ -40,7 +40,7 @@ Justified. These statements belong to another architecture or another board, and
 | 1 | `item` | `init.rs` |
 | 1 | `item` | `power.rs` |
 
-### x86_64: Reached only when the kernel is stopping — 140 statements
+### x86_64: Reached only when the kernel is stopping — 142 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
@@ -60,6 +60,7 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 4 | `core` | `console/output.rs` |
 | 3 | `item` | `discovery/devmgr.rs` |
 | 3 | `core` | `panic/screen.rs` |
+| 2 | `item` | `discovery/smbios.rs` |
 | 2 | `core` | `sched/queue.rs` |
 | 1 | `core` | `arch/x86_64/mod.rs` |
 | 1 | `core` | `object/job.rs` |
@@ -106,7 +107,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `user/space.rs` |
 
-### x86_64: Hardware the measured machine does not have — 140 statements
+### x86_64: Hardware the measured machine does not have — 141 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -129,6 +130,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `discovery/acpi.rs` |
 | 1 | `item` | `discovery/devmgr.rs` |
+| 1 | `item` | `discovery/smbios.rs` |
 | 1 | `core` | `object/pin.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
@@ -161,7 +163,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `claim.rs` |
 | 1 | `core` | `mm.rs` |
 
-### x86_64: argued line by line — 296 statements
+### x86_64: argued line by line — 299 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -218,6 +220,8 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `discovery/devmgr.rs` | 1029 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1040 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1096 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
+| `discovery/smbios.rs` | 41, 46 | Reached only when the kernel is stopping | `Refusal::text` runs only for the boot line of a table the kernel refused (main.rs: `smbios refused: ...`). Every x86-64 machine the suite boots hands over a table the kernel accepts, 2.8 by default and 3.0 with smbios-entry-point-type=64 (DMI.md section 3.4; d1-boot-kvm-3, d1-boot-kvm-ep64-2), so a passing run never prints a refusal. The refusals themselves are driven by `discovery::smbios_check` by variant, without their words; the loader handing nothing is shown by control d1-ctl2-k1b (FIRED: `smbios none handed over`). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B)). |
+| `discovery/smbios.rs` | 148 | Hardware the measured machine does not have | `Shown` writes `-` only for a vendor or product string the table does not have. xtask gives every QEMU boot both through -smbios (tools/common/xtask/src/smbios.rs), and test-boot fails unless the kernel's line names exactly that vendor and product, so no measured run has a table lacking either. The crate's host tests cover a table without the strings (ferrix-smbios: index past the set, count 0). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B)). |
 | `early.rs` | 181 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
 | `hooks.rs` | 57 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
 | `hooks.rs` | 59 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |

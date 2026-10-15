@@ -1500,6 +1500,20 @@
       "category": "failure-path",
       "match": "let pointer = state_of(cpu)?.site.load(Ordering::Relaxed);",
       "why": "preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock."
+    },
+    {
+      "file": "discovery/smbios.rs",
+      "lines": "41, 46",
+      "category": "failure-path",
+      "match": "match self",
+      "why": "`Refusal::text` runs only for the boot line of a table the kernel refused (main.rs: `smbios   refused: ...`). Every x86-64 machine the suite boots hands over a table the kernel accepts, 2.8 by default and 3.0 with smbios-entry-point-type=64 (DMI.md section 3.4; d1-boot-kvm-3, d1-boot-kvm-ep64-2), so a passing run never prints a refusal. The refusals themselves are driven by `discovery::smbios_check` by variant, without their words; the loader handing nothing is shown by control d1-ctl2-k1b (FIRED: `smbios   none handed over`). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B))."
+    },
+    {
+      "file": "discovery/smbios.rs",
+      "lines": "148",
+      "category": "absent-hardware",
+      "match": "return f.write_str(\"-\")",
+      "why": "`Shown` writes `-` only for a vendor or product string the table does not have. xtask gives every QEMU boot both through -smbios (tools/common/xtask/src/smbios.rs), and test-boot fails unless the kernel's line names exactly that vendor and product, so no measured run has a table lacking either. The crate's host tests cover a table without the strings (ferrix-smbios: index past the set, count 0). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B))."
     }
   ]
 }
