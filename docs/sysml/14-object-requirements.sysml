@@ -1564,6 +1564,25 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.QUOTA.12";
             attribute :>> unit = ("user::vmo::Vmo::commit_and_write", "user::vmo::Vmo::zero_from");
         }
+        // Parents: H.QUOTA.12 for a reclaim inside a job at its limit, whose
+        // room must be had before a kill without taking the same pages back
+        // again and again; H.QUOTA.13 for the machine at its watermark,
+        // where program frames are refused and the reclaim anywhere is what
+        // lets them go on.
+        requirement <'L.object.191'> reclaimGoesRound : ItemLowLevel {
+            attribute :>> statement = "reclaim shall begin where the last reclaim
+                stopped, the object and the page, and go once round the live
+                cached objects from there in each pass, so that a page is not
+                taken again before the pages after it have been looked at.";
+            attribute :>> criterion = "A cgroup at its memory.max of 144 pages,
+                reading a 128-page stream in 16 steps of 8 pages and an 8-page
+                file again after each, with a 128-page file beside it read once,
+                has the 8-page file taken back no more than 16 pages (the
+                `reclaim` line of stage 13 that names memory.max).";
+            attribute :>> parent = ("H.QUOTA.12", "H.QUOTA.13");
+            attribute :>> unit = ("user::cache::reclaim", "user::cache::take_from",
+                "user::cache::hand_in", "user::cache::set_hand");
+        }
     }
 
     package SpeculationDomains {

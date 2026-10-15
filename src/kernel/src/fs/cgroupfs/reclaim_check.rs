@@ -28,6 +28,13 @@
 //!   finds nothing it may take, and the reader sleeps -- holding the file's
 //!   I/O lock and no spin lock, so the machine is not stopped (F-70) -- and
 //!   reads what it wrote;
+//! * `/check-rh`, at its `memory.max`, reads a hot file again between the
+//!   reads of a stream that need room, with a cold file beside it: reclaim
+//!   goes round the cache from where it last stopped, so the hot file is
+//!   taken back at most twice and the cold one gives the rest -- where a
+//!   reclaim that always began at the first file took the hot one back for
+//!   every read, the livelock of Endfield's install8 boot (`user::cache`,
+//!   "Where a reclaim starts");
 //! * `pgfault` counts the faults of a job's program.
 
 use alloc::boxed::Box;
@@ -265,10 +272,11 @@ fn all(harness: &mut Harness) -> Checked<u64> {
     limited.end(harness)?;
     sibling.end(harness)?;
     let at_max = max(harness)?;
+    let hot_and_cold = hot_and_cold(harness)?;
     let protected = protection(harness)?;
     tmpfs_read_throttled(harness)?;
     faults(harness)?;
-    Ok(stolen + at_max + protected)
+    Ok(stolen + at_max + hot_and_cold + protected)
 }
 
 /// `memory.high`, `.low` and `.min` read and write as Linux's do, and
@@ -457,6 +465,94 @@ fn max(harness: &mut Harness) -> Checked<u64> {
         return Err("a charge past memory.max killed, where its clean cache was room");
     }
     Ok(stolen)
+}
+
+/// Pages of `/check-rh`'s hot file, read again after each read of the stream.
+const HOT_PAGES: u64 = 8;
+/// Pages of its cold file, read once.
+const COLD_PAGES: u64 = 128;
+/// Pages of the stream each step reads, and the steps.
+const STEP_PAGES: u64 = 8;
+const STEPS: u64 = 16;
+
+/// `/check-rh` at its `memory.max`, which holds the hot file, the cold one
+/// and one step of the stream: each step reads the next pages of the
+/// stream, which need room, and then the hot file again, as a program's
+/// running code is faulted again. Reclaim goes round the cache from where
+/// the last one stopped (`user::cache`'s hand), so over the 16 steps the hot
+/// file's pages are taken back at most twice -- once a lap, and the lap is
+/// longer than what the steps take -- and the cold file gives the rest. A
+/// reclaim that began at the first file every time took the hot file back
+/// at every reclaim and never reached the cold one. Answers the pages the
+/// job's reclaim gave back.
+///
+/// Verifies: L.object.191
+fn hot_and_cold(harness: &mut Harness) -> Checked<u64> {
+    let group = Group::make(harness, b"/check-rh")?;
+    let limit = (HOT_PAGES + COLD_PAGES + STEP_PAGES) * PAGE_SIZE;
+    group.set(
+        harness,
+        "memory.max",
+        alloc::format!("{limit}\n").as_bytes(),
+    )?;
+    // The hot file made first, so it comes first in the cache's list.
+    let (hot, hot_source) = file(HOT_PAGES)?;
+    let (cold, _) = file(COLD_PAGES)?;
+    let (stream, _) = file(STEPS * STEP_PAGES)?;
+    let outcome = hot_and_cold_steps(&group, &*hot, &*cold, &*stream, &hot_source);
+    let stolen = group.number(harness, "memory.stat", "pgsteal")?;
+    let killed = group.number(harness, "memory.events", "oom_kill")?;
+    drop((hot, cold, stream));
+    group.end(harness)?;
+    let refilled = outcome?;
+    if killed != 0 {
+        return Err("a job reading at its memory.max was killed where its clean cache was room");
+    }
+    crate::console::println!(
+        "  reclaim  at memory.max a file read between the reclaims was taken back {refilled} \
+         pages in {STEPS} steps, the cold file beside it giving the rest: {stolen} pages"
+    );
+    if refilled > 2 * HOT_PAGES {
+        return Err(
+            "reclaim at a job's memory.max took back a file read between its reclaims again and \
+             again, and not the cold file beside it",
+        );
+    }
+    Ok(stolen)
+}
+
+/// [`hot_and_cold`]'s reads, as a task of `group`: the pages of the hot file
+/// its source filled again after the first read of each file.
+fn hot_and_cold_steps(
+    group: &Group,
+    hot: &dyn Pages,
+    cold: &dyn Pages,
+    stream: &dyn Pages,
+    hot_source: &Pattern,
+) -> Checked<u64> {
+    if !group.read_all(hot, HOT_PAGES)? || !group.read_all(cold, COLD_PAGES)? {
+        return Err("a file read at memory.max did not read as its source has it");
+    }
+    let filled = hot_source.filled.load(Ordering::Relaxed);
+    let len = usize::try_from(STEP_PAGES * PAGE_SIZE).map_err(|_| "reclaim check: too long")?;
+    let mut buf = fallible::try_filled(0_u8, len).map_err(|_| "reclaim check: no memory")?;
+    for step in 0..STEPS {
+        let first = step * STEP_PAGES;
+        let read = group.as_task(|| stream.read(first * PAGE_SIZE, &mut buf));
+        read.map_err(|_| "a read of a stream at memory.max failed")?;
+        let whole = buf
+            .chunks(PAGE_SIZE as usize)
+            .zip(first..)
+            .all(|(page, index)| {
+                page.iter()
+                    .enumerate()
+                    .all(|(at, &got)| got == byte(index, at))
+            });
+        if !whole || !group.read_all(hot, HOT_PAGES)? {
+            return Err("a file read at memory.max did not read as its source has it");
+        }
+    }
+    Ok(hot_source.filled.load(Ordering::Relaxed) - filled)
 }
 
 /// `memory.min` and `memory.low` on a child of a cgroup over its `memory.high`.

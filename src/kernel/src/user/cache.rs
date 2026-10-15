@@ -48,6 +48,20 @@
 //! looks at that under the pages lock it takes under
 //! ([`Vmo::take_clean_range`]).
 //!
+//! # Where a reclaim starts
+//!
+//! Where the last one stopped ([`HAND`]): the object and the page it would
+//! have looked at next. A reclaim that always started at the first object's
+//! first page took the oldest files' pages first -- the shell's, the loader's,
+//! the libraries every program runs -- and at the machine's floor each fault
+//! took back pages another processor was about to fault in again, and a
+//! download's cold cache at the end of the list was never reached: in a 1 GiB
+//! guest two compilers then built nothing, the likely cause of Endfield's
+//! install8 hang (2026-10-15; no register dump of it). Going round from where
+//! the last reclaim stopped takes each page once a lap, as a clock does; it
+//! does not know which pages are in use, so a hot page is still taken once
+//! a lap and faulted in again.
+//!
 //! # What `/proc/meminfo` reads
 //!
 //! [`totals`] counts every cached file's pages, whoever they are charged to:
@@ -115,27 +129,51 @@ pub(crate) struct Reclaimed {
     pub(crate) stolen: u64,
 }
 
+/// Where the next [`reclaim`] starts looking: the object the last one
+/// stopped in, and the page it would have looked at next. See "Where a
+/// reclaim starts".
+static HAND: SpinLock<Option<(Weak<Vmo>, u64)>> = SpinLock::new(None);
+
 /// Give back up to `want` clean cache pages charged to slot `scope` or
 /// beneath it, or, for [`quota::NONE`], to anyone (the machine out of
 /// frames). Counts `pgscan` and `pgsteal` in `scope` and above.
+///
+/// It starts where the last reclaim stopped ([`HAND`]) and goes round the
+/// list from there, so that a page is not taken again before the rest of
+/// the cache has been looked at.
 ///
 /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
 pub(crate) fn reclaim(scope: u32, want: u64) -> Reclaimed {
     let mut done = Reclaimed::default();
     let objects = live();
-    // Once sparing what `memory.low` protects, then without.
-    for low in [true, false] {
-        for vmo in &objects {
+    let (start, from) = hand_in(&objects);
+    let mut stopped = None;
+    // Once sparing what `memory.low` protects, then without; each pass once
+    // round the list from the hand, the hand's own object last again from its
+    // first page.
+    'passes: for low in [true, false] {
+        for step in 0..=objects.len() {
             if done.stolen >= want {
-                break;
+                break 'passes;
             }
-            let more = take_from(vmo, scope, want - done.stolen, low);
+            let at = start.wrapping_add(step) % objects.len().max(1);
+            let Some(vmo) = objects.get(at) else {
+                break;
+            };
+            let first = if step == 0 { from } else { 0 };
+            let (more, next) = take_from(vmo, scope, want - done.stolen, low, first);
             done.scanned += more.scanned;
             done.stolen += more.stolen;
+            stopped = Some(match next {
+                Some(page) => (at, page),
+                None => ((at + 1) % objects.len(), 0),
+            });
         }
-        if done.stolen >= want {
-            break;
-        }
+    }
+    if let Some((at, page)) = stopped
+        && let Some(vmo) = objects.get(at)
+    {
+        set_hand(Arc::downgrade(vmo), page);
     }
     if scope != quota::NONE {
         quota::count(scope, Counter::Scanned, done.scanned);
@@ -152,13 +190,43 @@ fn takes(owner: u32, scope: u32, low: bool) -> bool {
     owner != quota::NONE && quota::within(owner, scope) && !quota::protected(owner, scope, low)
 }
 
-/// [`reclaim`] in one object.
-fn take_from(vmo: &Arc<Vmo>, scope: u32, want: u64, low: bool) -> Reclaimed {
+/// Where in `objects` the hand points, and the page to start at there: the
+/// start of the list when the hand's object is gone or there is none.
+fn hand_in(objects: &[Arc<Vmo>]) -> (usize, u64) {
+    let hand = HAND
+        .lock()
+        .as_ref()
+        .map(|(object, page)| (object.as_ptr(), *page));
+    hand.and_then(|(object, page)| {
+        objects
+            .iter()
+            .position(|vmo| core::ptr::eq(Arc::as_ptr(vmo), object))
+            .map(|at| (at, page))
+    })
+    .unwrap_or((0, 0))
+}
+
+/// Move the hand. The one it replaces is dropped after the lock: a `Weak`
+/// that was the last reference to its allocation frees it.
+fn set_hand(object: Weak<Vmo>, page: u64) {
+    let old = HAND.lock().replace((object, page));
+    drop(old);
+}
+
+/// [`reclaim`] in one object, from page `from`: what it did, and the page
+/// to go on from, or `None` once it looked past the object's last page.
+fn take_from(
+    vmo: &Arc<Vmo>,
+    scope: u32,
+    want: u64,
+    low: bool,
+    from: u64,
+) -> (Reclaimed, Option<u64>) {
     let mut done = Reclaimed::default();
     if !vmo.reclaimable() {
-        return done;
+        return (done, None);
     }
-    let mut from = 0;
+    let mut from = from;
     while done.stolen < want {
         let Ok(mut picked) = fallible::try_with_capacity::<u64>(BATCH) else {
             break;
@@ -175,10 +243,10 @@ fn take_from(vmo: &Arc<Vmo>, scope: u32, want: u64, low: bool) -> Reclaimed {
         done.stolen += vmo.reclaim_clean(&mut picked);
         match next {
             Some(index) => from = index,
-            None => break,
+            None => return (done, None),
         }
     }
-    done
+    (done, Some(from))
 }
 
 /// What slot `scope` and the jobs beneath it hold in files' pages, in pages:

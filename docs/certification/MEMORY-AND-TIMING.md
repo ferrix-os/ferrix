@@ -1165,6 +1165,11 @@ Bounds of the locks the writable mount's reclaim adds (`L.object.188-190`):
   file's busy ranges, under its `dirty` and then `still` spin locks: O(picked
   x writers of that file at once), each step bounded. It calls the take with
   neither held.
+* `user::cache`'s `HAND` (2026-10-15) is a leaf spin lock held to copy or
+  replace one `Option` of a `Weak` and a page index, twice a reclaim; the
+  hand's object is found in the list of live objects with no lock held,
+  O(objects), the cost the list itself already has. The `Weak` it replaces
+  is dropped after the lock.
 * `user::cache::totals` takes each live cached object's pages lock once, for
   its page count: O(objects) per read of `/proc/meminfo`, nothing allocated
   but the list of live objects.
