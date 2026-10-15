@@ -72,7 +72,7 @@ const UID: u32 = 1000;
 /// # Errors
 ///
 /// Which rule failed.
-pub(crate) fn run() -> Result<Counts, &'static str> {
+pub fn run() -> Result<Counts, &'static str> {
     let mut counts = Counts::default();
     let mut tally = Tally {
         report: &mut counts,

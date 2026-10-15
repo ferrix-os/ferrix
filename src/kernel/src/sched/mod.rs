@@ -42,14 +42,14 @@
 mod borrow;
 mod borrow_check;
 mod check;
-pub(crate) mod direct;
+pub mod direct;
 mod preempt;
 mod preempt_check;
 mod queue;
 mod task;
-pub(crate) mod trip;
+pub mod trip;
 mod wait;
-pub(crate) mod work;
+pub mod work;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -65,17 +65,17 @@ use crate::smp::Topology;
 use queue::CpuQueue;
 use task::{DEAD, RUNNABLE};
 
-pub(crate) use borrow::{RunningSlot, with_current};
-pub(crate) use check::before_start as check_before_start;
-pub(crate) use check::run as run_checks;
-pub(crate) use preempt::counting as records_kept;
-pub(crate) use preempt::{
-    Preempt, PreemptState, lock_site, locks_held, lower_masked, preempt_count, preempt_disable,
-    preempt_enable, preempt_site, raise_masked,
-};
+pub(crate) use borrow::{RunningSlot};
+pub use borrow::{with_current};
+pub use check::before_start as check_before_start;
+pub use check::run as run_checks;
+pub use preempt::counting as records_kept;
+pub(crate) use preempt::{Preempt, PreemptState, lock_site, locks_held, lower_masked, preempt_count, preempt_site, raise_masked};
+pub use preempt::{preempt_disable, preempt_enable};
 pub(crate) use queue::{MIN_SLICE_NS, SLICE_NS};
-pub(crate) use task::{Task, TaskId, UserThread};
-pub(crate) use wait::{LastLook, WaitQueue};
+pub use task::{TaskId, UserThread};
+pub use task::{Task};
+pub use wait::{LastLook, WaitQueue};
 
 /// One run queue per logical processor.
 static QUEUES: Once<Vec<SpinLock<CpuQueue>>> = Once::new();
@@ -95,7 +95,7 @@ static REAPING: Once<Vec<AtomicBool>> = Once::new();
 
 /// How many locks that disable preemption `cpu`'s running context holds,
 /// for a check to print beside a result that preemption would explain.
-pub(crate) fn preemption_held(cpu: usize) -> u32 {
+pub fn preemption_held(cpu: usize) -> u32 {
     preempt_count(cpu)
 }
 
@@ -170,7 +170,7 @@ fn note_running(cpu: usize, id: TaskId, group: u32, seen: u64) {
 /// Stable for as long as the caller runs: only the task itself changes its
 /// group ([`regroup_current`], [`set_current_group`]), and the task holds the
 /// slot while it names it, so a charge made to the answer is to a live slot.
-pub(crate) fn running_group() -> u32 {
+pub fn running_group() -> u32 {
     let saved = <arch::Irq as IrqControl>::disable();
     let group = this_cpu()
         .and_then(|cpu| RUNNING_GROUP.get()?.get(cpu))
@@ -203,7 +203,7 @@ pub(crate) fn note_moved() {
 /// Have the running task run, and charge, in its process's job, if a move
 /// since it last looked changed that. Called on the way back to user mode,
 /// where the task holds no lock.
-pub(crate) fn regroup_current() {
+pub fn regroup_current() {
     let moves = MOVES.load(Ordering::Acquire);
     let saved = <arch::Irq as IrqControl>::disable();
     let cpu = this_cpu();
@@ -297,7 +297,7 @@ fn throttled_here(cpu: usize) -> bool {
 /// first -- a `SIGKILL`, a kill by its cgroup or the OOM killer, any signal:
 /// it is asked every [`THROTTLE_LOOK_NS`], so that a task a kill is for does
 /// not wait out the rest of a period (up to a second) to hear of it.
-pub(crate) fn throttle_current(leave: fn() -> bool) {
+pub fn throttle_current(leave: fn() -> bool) {
     if !quota::bandwidth_in_use() {
         return;
     }
@@ -323,7 +323,7 @@ const THROTTLE_LOOK_NS: u64 = 1_000_000;
 
 /// Run the calling task in `index`'s share, and charge what it does to it:
 /// for a check that acts as a program in a job would.
-pub(crate) fn set_current_group(index: u32) {
+pub fn set_current_group(index: u32) {
     if let Some(task) = current() {
         set_task_group(&task, index);
     }
@@ -372,7 +372,7 @@ fn rearm_here() {
 /// [`rearm_here`] on every processor: this one now, and the others by a kick,
 /// whose interrupt ends in a decision that arms the timer. For a `cpu.max`
 /// just written, which may bind tasks running anywhere.
-pub(crate) fn rearm_timers() {
+pub fn rearm_timers() {
     let here = this_cpu();
     let online = KICK_PENDING.get().map_or(0, Vec::len);
     for cpu in 0..online {
@@ -390,7 +390,7 @@ pub(crate) fn rearm_timers() {
 /// that may itself be running under that lock cannot do. The failure
 /// injection policy in `fallible.rs` is such a caller: it is asked from inside
 /// allocations, and the scheduler allocates. `None` before the scheduler runs.
-pub(crate) fn current_id() -> Option<TaskId> {
+pub fn current_id() -> Option<TaskId> {
     let saved = <arch::Irq as IrqControl>::disable();
     let id = this_cpu()
         .and_then(|cpu| RUNNING.get()?.get(cpu))
@@ -600,7 +600,7 @@ pub(crate) fn started() -> bool {
 /// then stopped at a sleeping lock taken in a system call, as if the caller
 /// held a spin lock. Stage 20's many-threaded builds, every `mmap` of which
 /// takes the space's layout lock, met it about one boot in six.
-pub(crate) fn may_block() -> bool {
+pub fn may_block() -> bool {
     if !started() || !arch::interrupts_enabled() {
         return false;
     }
@@ -690,7 +690,7 @@ pub(crate) fn call_entered() {
 /// interrupts masked that has looked at the reschedule flag itself: the fast
 /// path's entry and its frame tail's quiet exit (`nothing_due_here`), which
 /// need neither a second mask nor the decision.
-pub(crate) fn set_in_call_masked(in_call: bool) {
+pub fn set_in_call_masked(in_call: bool) {
     if let Some(flag) = this_cpu().and_then(|cpu| IN_CALL.get(cpu)) {
         flag.store(in_call, Ordering::Relaxed);
     }
@@ -698,7 +698,7 @@ pub(crate) fn set_in_call_masked(in_call: bool) {
 
 /// Whether this processor's running task is inside a system call, for the
 /// fast path's check: see [`IN_CALL`].
-pub(crate) fn in_call_here() -> bool {
+pub fn in_call_here() -> bool {
     this_cpu()
         .and_then(|cpu| IN_CALL.get(cpu))
         .is_some_and(|flag| flag.load(Ordering::Relaxed))
@@ -706,7 +706,7 @@ pub(crate) fn in_call_here() -> bool {
 
 /// The running task is leaving a system call: make the decision a wake made
 /// during it asked for, as an interrupt's exit would.
-pub(crate) fn call_left() {
+pub fn call_left() {
     let saved = <arch::Irq as IrqControl>::disable();
     let decide = this_cpu().is_some_and(|cpu| {
         if let Some(flag) = IN_CALL.get(cpu) {
@@ -769,7 +769,7 @@ fn init_resched_flags(online: usize) {
 ///
 /// If the machine has more processors than the domain can name, or there is
 /// no memory for a queue or an idle task's stack.
-pub(crate) fn init(topology: &'static Topology) -> Result<(), &'static str> {
+pub fn init(topology: &'static Topology) -> Result<(), &'static str> {
     let online = topology.count();
     let cpus =
         CpuSet::first(online).map_err(|_| "more processors than a scheduling domain holds")?;
@@ -1071,7 +1071,7 @@ fn has_work() -> bool {
 /// # Errors
 ///
 /// If there is no stack for it, or the scheduler is not up.
-pub(crate) fn spawn(
+pub fn spawn(
     name: &'static str,
     entry: fn(usize),
     argument: usize,
@@ -1137,7 +1137,7 @@ fn choose_cpu(allowed: &CpuSet, prefer: usize) -> Option<usize> {
 /// # Errors
 ///
 /// If there is no stack for it, or `cpu` has no run queue.
-pub(crate) fn spawn_on(
+pub fn spawn_on(
     name: &'static str,
     entry: fn(usize),
     argument: usize,
@@ -1160,7 +1160,7 @@ pub(crate) fn spawn_on(
 /// # Errors
 ///
 /// If there is no stack for it, or `cpu` has no run queue.
-pub(crate) fn spawn_on_in(
+pub fn spawn_on_in(
     name: &'static str,
     entry: fn(usize),
     argument: usize,
@@ -1190,7 +1190,7 @@ pub(crate) fn spawn_on_in(
 /// # Errors
 ///
 /// If there is no stack for it, or `cpu` has no run queue.
-pub(crate) fn spawn_in_group(
+pub fn spawn_in_group(
     name: &'static str,
     entry: fn(usize),
     argument: usize,
@@ -1223,7 +1223,7 @@ pub(crate) fn spawn_in_group(
 /// # Errors
 ///
 /// As [`prepare_user`].
-pub(crate) fn spawn_user(
+pub fn spawn_user(
     name: &'static str,
     entry: fn(usize),
     thread: Arc<dyn UserThread>,
@@ -1243,7 +1243,7 @@ pub(crate) fn spawn_user(
 /// # Errors
 ///
 /// If there is no processor to place it on, or no stack for it.
-pub(crate) fn prepare_user(
+pub fn prepare_user(
     name: &'static str,
     entry: fn(usize),
     thread: Arc<dyn UserThread>,
@@ -1295,7 +1295,8 @@ pub(crate) fn prepare_user(
 /// processor to forget the mapping, so one must be dropped in task context,
 /// with interrupts enabled and no lock held that keeps preemption off.
 #[must_use = "dropping a prepared task frees it instead of running it"]
-pub(crate) struct PreparedTask {
+#[derive(Debug)]
+pub struct PreparedTask {
     /// The task, which nothing has run.
     task: Arc<Task>,
     /// The processor it is placed on.
@@ -1310,7 +1311,7 @@ pub(crate) struct PreparedTask {
 
 impl PreparedTask {
     /// Put it on its processor's queue, where it runs.
-    pub(crate) fn launch(mut self) -> Arc<Task> {
+    pub fn launch(mut self) -> Arc<Task> {
         self.launched = true;
         enqueue(&self.task, self.cpu, self.queue);
         Arc::clone(&self.task)
@@ -1517,12 +1518,12 @@ extern "C" fn task_start(_argument: usize) -> ! {
 /// Count the running task as on its way out, for [`wait_until_reaper_quiet`],
 /// from before anything of its end can be observed. It must end through
 /// [`exit_leaving`], which takes the count back.
-pub(crate) fn begin_leaving() {
+pub fn begin_leaving() {
     let _ = LEAVING.fetch_add(1, Ordering::AcqRel);
 }
 
 /// End the running task, which [`begin_leaving`] counted.
-pub(crate) fn exit_leaving() -> ! {
+pub fn exit_leaving() -> ! {
     exit_counted(true)
 }
 
@@ -1569,7 +1570,7 @@ fn exit_counted(leaving: bool) -> ! {
 /// record's pointer without the run queue's lock (`borrow`). A caller that
 /// only uses the task while it runs borrows it with [`with_current`]
 /// instead, which raises no count.
-pub(crate) fn current() -> Option<Arc<Task>> {
+pub fn current() -> Option<Arc<Task>> {
     borrow::current_arc()
 }
 
@@ -1616,7 +1617,7 @@ fn audit_here(site: borrow::Site) {
 /// The queue is charged under its lock, as [`for_each_queue_charged`] does,
 /// so a reading taken mid-slice counts the slice so far and two readings
 /// never go backwards. The task is released after the lock is.
-pub(crate) fn current_runtime() -> u64 {
+pub fn current_runtime() -> u64 {
     let saved = <arch::Irq as IrqControl>::disable();
     let task = this_cpu().and_then(queue_of).and_then(|lock| {
         let mut queue = lock.lock();
@@ -1628,7 +1629,7 @@ pub(crate) fn current_runtime() -> u64 {
 }
 
 /// Give up the rest of this task's slice.
-pub(crate) fn yield_now() {
+pub fn yield_now() {
     let saved = <arch::Irq as IrqControl>::disable();
     if let Some(lock) = this_cpu().and_then(queue_of) {
         lock.lock().fair.yield_curr();
@@ -1638,7 +1639,7 @@ pub(crate) fn yield_now() {
 }
 
 /// Block the running task until `deadline`, by the counter's reckoning.
-pub(crate) fn sleep_until(deadline: u64) {
+pub fn sleep_until(deadline: u64) {
     let Some(task) = current() else {
         while crate::timer::now_nanos() < deadline {
             core::hint::spin_loop();
@@ -1651,7 +1652,7 @@ pub(crate) fn sleep_until(deadline: u64) {
 }
 
 /// Block the running task for `nanos`.
-pub(crate) fn sleep_for(nanos: u64) {
+pub fn sleep_for(nanos: u64) {
     sleep_until(crate::timer::now_nanos().saturating_add(nanos));
 }
 
@@ -1843,7 +1844,7 @@ fn wake_onto(task: &Arc<Task>, here: usize) -> Placed {
 }
 
 /// Make `task` runnable, wherever it is.
-pub(crate) fn wake(task: &Arc<Task>) {
+pub fn wake(task: &Arc<Task>) {
     // **Not re-placed here, and not detached from its sleeper set here
     // either.** Both were tried and both were withdrawn.
     //
@@ -1964,7 +1965,7 @@ pub(crate) fn interrupt(task: &Arc<Task>) {
 /// between processors and the weight has to reach the queue that really has
 /// it; a task on no queue still has its own record set, and is enqueued with
 /// it next time.
-pub(crate) fn set_weight(task: &Arc<Task>, weight: u32) {
+pub fn set_weight(task: &Arc<Task>, weight: u32) {
     // The task's own weight; its job's share scales what the queue is told.
     task.set_base_weight(weight);
     let weight = task.effective_weight();
@@ -2088,7 +2089,7 @@ pub(crate) fn reaping_anywhere() -> bool {
 
 /// How long a check counting frames waits for the reaper. Generous: stage 5
 /// ends having started a thousand tasks, and a loaded host is slow to reap.
-pub(crate) const REAPER_PATIENCE_NANOS: u64 = 20_000_000_000;
+pub const REAPER_PATIENCE_NANOS: u64 = 20_000_000_000;
 
 /// Wait until every task that has exited has been reaped, reaping on this
 /// processor meanwhile. `Err` when `patience_nanos` pass first.
@@ -2102,7 +2103,7 @@ pub(crate) const REAPER_PATIENCE_NANOS: u64 = 20_000_000_000;
 /// reference the caller holds to a task, a process or an address space, or a
 /// task that has not begun to end: that is the caller's to drop, and to wait
 /// for.
-pub(crate) fn wait_until_reaper_quiet(patience_nanos: u64) -> Result<(), &'static str> {
+pub fn wait_until_reaper_quiet(patience_nanos: u64) -> Result<(), &'static str> {
     wait_for_reaper(patience_nanos)
 }
 
@@ -2120,7 +2121,7 @@ pub(crate) fn wait_until_reaper_quiet(patience_nanos: u64) -> Result<(), &'stati
 ///
 /// When the task is not dead, or the reaper not quiet, within
 /// `patience_nanos`.
-pub(crate) fn wait_until_gone(task: &Task, patience_nanos: u64) -> Result<(), &'static str> {
+pub fn wait_until_gone(task: &Task, patience_nanos: u64) -> Result<(), &'static str> {
     let deadline = crate::timer::now_nanos().saturating_add(patience_nanos);
     while !task.is_dead() {
         if crate::timer::now_nanos() >= deadline {
@@ -2853,7 +2854,7 @@ fn reap_batch(whatever_is_there: bool) -> bool {
 ///
 /// For a task that can afford to be switched out part-way, which the idle
 /// task cannot: it uses [`reap_batch`].
-pub(crate) fn reap() -> usize {
+pub fn reap() -> usize {
     let waiting = ZOMBIES.lock().len();
     let count = reap_up_to(waiting);
     note_reaped(count);
@@ -3020,7 +3021,7 @@ fn for_each_queue_charged(mut visit: impl FnMut(usize, &mut CpuQueue)) {
 /// time is counted as user time: a task that has been neither interrupted nor
 /// descheduled since it was last charged has been running its program, since
 /// any long stay in the kernel blocks or is cut by the timer.
-pub(crate) fn charge_running() {
+pub fn charge_running() {
     let Some(queues) = QUEUES.get() else {
         return;
     };
@@ -3036,9 +3037,9 @@ pub(crate) fn charge_running() {
 
 /// What every processor's scheduling has done.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Summary {
+pub struct Summary {
     /// Context switches.
-    pub(crate) switches: u64,
+    pub switches: u64,
     /// Tasks moved from one processor to another.
     pub(crate) steals: u64,
     /// The most any task ran past its deadline before being switched out.
@@ -3051,7 +3052,7 @@ pub(crate) struct Summary {
 }
 
 /// Add up what every processor's scheduling has done.
-pub(crate) fn summary() -> Summary {
+pub fn summary() -> Summary {
     let mut summary = Summary::default();
     let Some(queues) = QUEUES.get() else {
         return summary;
@@ -3166,7 +3167,7 @@ pub(crate) fn print_picks(cpu: usize) {
 
 /// One processor's run queue, for a check or the boot log.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CpuReport {
+pub struct CpuReport {
     /// Its decaying load average, out of `ferrix_sched::LOAD_SCALE`.
     pub(crate) load: u64,
     /// The slice it is currently handing out.
@@ -3176,7 +3177,7 @@ pub(crate) struct CpuReport {
     /// The worst lag it measured while the last window was open.
     pub(crate) worst_lag: u64,
     /// The worst overrun it has served.
-    pub(crate) worst_overrun: u64,
+    pub worst_overrun: u64,
     /// Every overrun it served while the last window was open, added up.
     pub(crate) overrun_total: u64,
     /// Picks made while the last window was open.
@@ -3186,7 +3187,7 @@ pub(crate) struct CpuReport {
 }
 
 /// Read `cpu`'s queue, bringing its load average up to date first.
-pub(crate) fn cpu_report(cpu: usize) -> Option<CpuReport> {
+pub fn cpu_report(cpu: usize) -> Option<CpuReport> {
     let lock = queue_of(cpu)?;
     let saved = <arch::Irq as IrqControl>::disable();
     let report = {
@@ -3209,15 +3210,15 @@ pub(crate) fn cpu_report(cpu: usize) -> Option<CpuReport> {
 
 /// How one processor has spent its time since it joined the scheduler.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct CpuTime {
+pub struct CpuTime {
     /// Nanoseconds running a task other than the idle task.
-    pub(crate) busy_ns: u64,
+    pub busy_ns: u64,
     /// Nanoseconds running the idle task.
-    pub(crate) idle_ns: u64,
+    pub idle_ns: u64,
     /// Context switches.
-    pub(crate) switches: u64,
+    pub switches: u64,
     /// Tasks runnable on it, the running one included.
-    pub(crate) runnable: usize,
+    pub runnable: usize,
 }
 
 /// Every processor's [`CpuTime`], by logical number, each read up to the
@@ -3227,7 +3228,7 @@ pub(crate) struct CpuTime {
 /// # Errors
 ///
 /// [`fallible::AllocError`] when there is no memory for the list.
-pub(crate) fn cpu_times() -> Result<Vec<CpuTime>, fallible::AllocError> {
+pub fn cpu_times() -> Result<Vec<CpuTime>, fallible::AllocError> {
     let Some(queues) = QUEUES.get() else {
         return Ok(Vec::new());
     };
@@ -3254,13 +3255,13 @@ pub(crate) fn cpu_times() -> Result<Vec<CpuTime>, fallible::AllocError> {
 
 /// Tasks made since boot, the boot task and every processor's idle task
 /// among them, as Linux's `total_forks` counts its idle tasks.
-pub(crate) fn tasks_made() -> u64 {
+pub fn tasks_made() -> u64 {
     NEXT_ID.load(Ordering::Relaxed).saturating_sub(1)
 }
 
 /// The job this processor's run queue keeps processor time back for
 /// (`quota::Pending`), for a check: `quota::NONE` when none.
-pub(crate) fn pending_group_here() -> u32 {
+pub fn pending_group_here() -> u32 {
     let saved = <arch::Irq as IrqControl>::disable();
     let group = this_cpu()
         .and_then(queue_of)
@@ -3272,7 +3273,7 @@ pub(crate) fn pending_group_here() -> u32 {
 /// How many charges, on every processor, made the `cpu.max` walk
 /// (`quota::charge_cpu`): for stage 13's check that none does while no
 /// `cpu.max` is set.
-pub(crate) fn bandwidth_walks() -> u64 {
+pub fn bandwidth_walks() -> u64 {
     let Some(queues) = QUEUES.get() else {
         return 0;
     };
@@ -3289,7 +3290,7 @@ pub(crate) fn bandwidth_walks() -> u64 {
 /// interrupt's exit, or a `preempt_enable` that brings the count to zero,
 /// acts on. For the parked block's check of F-69 (L.sched.72), which needs
 /// the decision pending as it parks.
-pub(crate) fn ask_for_a_decision_here() {
+pub fn ask_for_a_decision_here() {
     let saved = <arch::Irq as IrqControl>::disable();
     if let Some(cpu) = this_cpu() {
         mark_resched(cpu);
@@ -3299,7 +3300,7 @@ pub(crate) fn ask_for_a_decision_here() {
 
 /// Whether a decision asked of this processor is still pending: see
 /// [`ask_for_a_decision_here`].
-pub(crate) fn decision_pending_here() -> bool {
+pub fn decision_pending_here() -> bool {
     let saved = <arch::Irq as IrqControl>::disable();
     let pending = this_cpu().is_some_and(resched_asked);
     <arch::Irq as IrqControl>::restore(saved);

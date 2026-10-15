@@ -32,7 +32,6 @@
 
 use super::cpu;
 
-pub(in crate::arch) mod check;
 
 /// Bytes in a saved frame. Must match [`TrapFrame`] exactly, and a multiple of
 /// eight, which is what the AAPCS requires of the stack at a call.

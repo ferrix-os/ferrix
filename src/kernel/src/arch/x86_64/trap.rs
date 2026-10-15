@@ -23,7 +23,6 @@ use core::cell::UnsafeCell;
 use super::cpu;
 use super::gdt;
 
-pub(in crate::arch) mod check;
 
 /// Vectors in an interrupt descriptor table. Fixed by the architecture.
 const VECTORS: usize = 256;
@@ -49,7 +48,7 @@ const MACHINE_CHECK: usize = 18;
 /// pushed has the lowest address and is the first field.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TrapFrame {
+pub struct TrapFrame {
     pub(crate) r15: u64,
     pub(crate) r14: u64,
     pub(crate) r13: u64,
@@ -670,7 +669,7 @@ pub(crate) fn report_trap(frame: &TrapFrame) {
 pub(crate) const fn advance_past_breakpoint(_frame: &mut TrapFrame) {}
 
 /// Raise a breakpoint, so the boot self-check can prove the trap path runs.
-pub(crate) fn breakpoint() {
+pub fn breakpoint() {
     // SAFETY: (PROBE) `int3` raises vector 3, for which the IDT holds a gate. It has no
     // effect other than entering the handler, which returns to the instruction
     // after it.

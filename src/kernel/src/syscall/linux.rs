@@ -47,7 +47,8 @@ const CREAT_FLAGS: u32 = O_CREAT | O_WRONLY | O_TRUNC;
 
 /// The Linux personality, as the item's dispatcher is composed with it:
 /// `main.rs` registers `syscall::dispatch_with::<Linux>` as the core's entry.
-pub(crate) struct Linux;
+#[derive(Debug)]
+pub struct Linux;
 
 impl Personality for Linux {
     fn answer(call: Syscall, args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {

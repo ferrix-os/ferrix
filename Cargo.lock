@@ -312,7 +312,76 @@ dependencies = [
 name = "ferrix-kernel"
 version = "0.1.0"
 dependencies = [
+ "ferrix-bootinfo",
+ "ferrix-crng",
+ "ferrix-elf",
+ "ferrix-kernel-core",
+ "ferrix-kernel-item",
+ "ferrix-kernel-load",
+ "ferrix-paging",
+ "ferrix-sched",
+ "ferrix-sync",
+ "ferrix-ustack",
+]
+
+[[package]]
+name = "ferrix-kernel-core"
+version = "0.1.0"
+dependencies = [
  "ferrix-acpi",
+ "ferrix-audit",
+ "ferrix-bootinfo",
+ "ferrix-cgroupfs",
+ "ferrix-chardevctl",
+ "ferrix-description",
+ "ferrix-elf",
+ "ferrix-fallible",
+ "ferrix-fbtext",
+ "ferrix-fdt",
+ "ferrix-frame",
+ "ferrix-heap",
+ "ferrix-kmem",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-objects",
+ "ferrix-paging",
+ "ferrix-pci",
+ "ferrix-qr",
+ "ferrix-sched",
+ "ferrix-sync",
+ "ferrix-vdso",
+ "ferrix-vfs",
+ "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-kernel-item"
+version = "0.1.0"
+dependencies = [
+ "ferrix-audit",
+ "ferrix-blkring",
+ "ferrix-bootinfo",
+ "ferrix-crng",
+ "ferrix-devmgr-proto",
+ "ferrix-elf",
+ "ferrix-fdt",
+ "ferrix-kernel-core",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-objects",
+ "ferrix-paging",
+ "ferrix-pci",
+ "ferrix-sched",
+ "ferrix-sync",
+ "ferrix-vfs",
+ "ferrix-virtio",
+ "ferrix-vma",
+]
+
+[[package]]
+name = "ferrix-kernel-load"
+version = "0.1.0"
+dependencies = [
  "ferrix-audit",
  "ferrix-blkring",
  "ferrix-block",
@@ -322,17 +391,14 @@ dependencies = [
  "ferrix-btrfs-write",
  "ferrix-cgroupfs",
  "ferrix-chardevctl",
- "ferrix-crng",
- "ferrix-description",
- "ferrix-devmgr-proto",
  "ferrix-displayctl",
  "ferrix-elf",
  "ferrix-fallible",
- "ferrix-fbtext",
  "ferrix-fdt",
  "ferrix-frame",
- "ferrix-heap",
  "ferrix-inputctl",
+ "ferrix-kernel-core",
+ "ferrix-kernel-item",
  "ferrix-kmem",
  "ferrix-linux-abi",
  "ferrix-logctl",
@@ -342,12 +408,10 @@ dependencies = [
  "ferrix-netring",
  "ferrix-nettcp",
  "ferrix-netwire",
- "ferrix-objects",
  "ferrix-paging",
  "ferrix-partition",
  "ferrix-pci",
  "ferrix-procfs",
- "ferrix-qr",
  "ferrix-renderctl",
  "ferrix-sched",
  "ferrix-seccomp",
@@ -357,7 +421,6 @@ dependencies = [
  "ferrix-ustack",
  "ferrix-vdso",
  "ferrix-vfs",
- "ferrix-virtio",
  "ferrix-vma",
 ]
 

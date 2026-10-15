@@ -87,7 +87,7 @@ use crate::user::space::AddressSpace;
 
 /// Why a VMO operation was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum VmoError {
+pub enum VmoError {
     /// The page index is past the end of the object.
     OutOfRange {
         /// The index asked for.
@@ -101,7 +101,7 @@ pub(crate) enum VmoError {
 
 /// Why [`Vmo::commit_run`] refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RunError {
+pub enum RunError {
     /// A file's object: its absent pages are the file's.
     NotAnonymous,
     /// No pages, or more than one buddy block of them.
@@ -163,7 +163,7 @@ pub(crate) enum Unmoved {
 /// the page absent and commit zeros in its place. So an object made over a
 /// source carries this, and a fault asks it first -- with no lock held, since
 /// a fill may wait for the disk.
-pub(crate) trait Filler: Send + Sync + fmt::Debug {
+pub trait Filler: Send + Sync + fmt::Debug {
     /// Fill page `index` of `vmo`, and perhaps a run after it, if the file
     /// has them and `vmo` lacks them. A page present already is left alone.
     ///
@@ -240,7 +240,7 @@ pub(crate) enum Commit {
 /// can name the same pages: two processes sharing memory, and from stage 8 a
 /// mapped file and a `read` file, are the same object seen twice.
 #[derive(Debug)]
-pub(crate) struct Vmo {
+pub struct Vmo {
     /// Which pages hold a frame, and which of those are held in place.
     pages: SpinLock<Pages>,
     /// The object's size in pages. Set at creation and only ever raised, by
@@ -460,7 +460,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`AllocError`] when memory has run out.
-    pub(crate) fn new_anonymous(pages: u64) -> Result<Arc<Vmo>, AllocError> {
+    pub fn new_anonymous(pages: u64) -> Result<Arc<Vmo>, AllocError> {
         // An object the running task's program made, which its job's
         // object limit counts.
         let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
@@ -473,7 +473,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`AllocError`] when memory has run out.
-    pub(crate) fn new_filled(
+    pub fn new_filled(
         pages: u64,
         filler: Option<Arc<dyn Filler>>,
     ) -> Result<Arc<Vmo>, AllocError> {
@@ -491,7 +491,7 @@ impl Vmo {
     /// may hand a program as a dmabuf (`interfaces::chardev::dmabuf`; the
     /// certification consultant's ledger 316, (2)). The same test as
     /// [`Vmo::commit_run`]'s.
-    pub(crate) fn is_anonymous(&self) -> bool {
+    pub fn is_anonymous(&self) -> bool {
         self.filler.is_none() && self.bound.load(Ordering::SeqCst) == u64::MAX
     }
 
@@ -641,7 +641,7 @@ impl Vmo {
     }
 
     /// Whether the object's mappings bypass the caches.
-    pub(crate) fn is_coherent(&self) -> bool {
+    pub fn is_coherent(&self) -> bool {
         self.coherent.load(Ordering::Acquire)
     }
 
@@ -653,7 +653,7 @@ impl Vmo {
     /// whose dirty lines may land on what the device wrote. Taken under the
     /// mappers' lock, so a mapping attached after this sees the flag, since
     /// every mapping attaches before a fault can reach it.
-    pub(crate) fn make_coherent(&self) -> bool {
+    pub fn make_coherent(&self) -> bool {
         let mappers = self.mappers.lock();
         if !mappers.is_empty() {
             return false;
@@ -663,12 +663,12 @@ impl Vmo {
     }
 
     /// The object's size in pages.
-    pub(crate) fn len_pages(&self) -> u64 {
+    pub fn len_pages(&self) -> u64 {
         self.len.load(Ordering::Relaxed)
     }
 
     /// The object's size in bytes.
-    pub(crate) fn len_bytes(&self) -> u64 {
+    pub fn len_bytes(&self) -> u64 {
         self.len_pages() * PAGE_SIZE
     }
 
@@ -677,12 +677,12 @@ impl Vmo {
     /// The difference between this and [`Vmo::len_pages`] is the reservation
     /// that has been promised and not yet paid for, which is what overcommit
     /// means and what the exit criterion measures.
-    pub(crate) fn committed(&self) -> usize {
+    pub fn committed(&self) -> usize {
         self.pages.lock().frames.len()
     }
 
     /// The frame holding page `index`, if it has been committed.
-    pub(crate) fn page(&self, index: u64) -> Option<Frame> {
+    pub fn page(&self, index: u64) -> Option<Frame> {
         self.pages.lock().frames.get(&index).copied()
     }
 
@@ -757,7 +757,7 @@ impl Vmo {
 
     /// How many address spaces name this object, counting a space once per
     /// id it names it by.
-    pub(crate) fn mapper_count(&self) -> usize {
+    pub fn mapper_count(&self) -> usize {
         self.mappers
             .lock()
             .iter()
@@ -891,7 +891,7 @@ impl Vmo {
     /// page there meanwhile, and that one wins. A frame that did not go in is
     /// still the caller's, to release. Nobody can have mapped a page that was
     /// absent, so nothing is taken down.
-    pub(crate) fn insert_absent(&self, index: u64, frame: Frame) -> bool {
+    pub fn insert_absent(&self, index: u64, frame: Frame) -> bool {
         if index >= self.len_pages() {
             return false;
         }
@@ -910,7 +910,7 @@ impl Vmo {
     /// The filesystem calls it under its inode lock, after a write or grow
     /// extends the file, and *before* it takes a truncated file's pages away,
     /// so a fault racing the truncation sees the new end first.
-    pub(crate) fn set_file_len(&self, len: u64) {
+    pub fn set_file_len(&self, len: u64) {
         self.bound.store(len.div_ceil(PAGE_SIZE), Ordering::SeqCst);
     }
 
@@ -944,7 +944,7 @@ impl Vmo {
     ///
     /// [`AllocError`] when there is no memory for the list; the mark is left
     /// as it was, so the next call reports the pages instead.
-    pub(crate) fn take_mapped_writes(&self) -> Result<Vec<u64>, AllocError> {
+    pub fn take_mapped_writes(&self) -> Result<Vec<u64>, AllocError> {
         let still = self.writably_mapped();
         let was = self.mapped_written.swap(still, Ordering::SeqCst);
         if !was && !still {
@@ -963,7 +963,7 @@ impl Vmo {
     }
 
     /// Whether a shared mapping may write the file: what refuses a write seal.
-    pub(crate) fn writably_mapped(&self) -> bool {
+    pub fn writably_mapped(&self) -> bool {
         self.shared_may_write.load(Ordering::SeqCst) > 0
     }
 
@@ -1005,7 +1005,7 @@ impl Vmo {
     }
 
     /// Whether page `index`, if absent, is its file's source to fill.
-    pub(crate) fn sourced(&self, index: u64) -> bool {
+    pub fn sourced(&self, index: u64) -> bool {
         self.filler
             .as_ref()
             .is_some_and(|filler| filler.is_sourced(index))
@@ -1018,7 +1018,7 @@ impl Vmo {
     /// # Errors
     ///
     /// As [`Vmo::read_page`].
-    pub(crate) fn read_present(
+    pub fn read_present(
         &self,
         index: u64,
         offset: usize,
@@ -1049,7 +1049,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`VmoError::OutOfRange`] past the end of the object or of the page.
-    pub(crate) fn read_page(
+    pub fn read_page(
         &self,
         index: u64,
         offset: usize,
@@ -1087,7 +1087,7 @@ impl Vmo {
     /// # Errors
     ///
     /// [`VmoError::OutOfRange`], or [`VmoError::OutOfMemory`].
-    pub(crate) fn write_page(
+    pub fn write_page(
         &self,
         index: u64,
         offset: usize,
@@ -1156,7 +1156,7 @@ impl Vmo {
     /// [`VmoError::OutOfRange`] past the end of the object or of the page,
     /// and [`VmoError::OutOfMemory`] when there is no frame for an absent
     /// page, or no room to record it.
-    pub(crate) fn commit_and_write(
+    pub fn commit_and_write(
         &self,
         index: u64,
         offset: usize,
@@ -1186,7 +1186,7 @@ impl Vmo {
     /// Zero page `index` from byte `from` to its end, if the object holds
     /// it, under the object's lock: what a truncation does to the page its
     /// cut falls in. A page the object lacks is left absent.
-    pub(crate) fn zero_from(&self, index: u64, from: usize) -> Result<(), VmoError> {
+    pub fn zero_from(&self, index: u64, from: usize) -> Result<(), VmoError> {
         let len = (PAGE_SIZE as usize).saturating_sub(from);
         self.check_span(index, from, len)?;
         let pages = self.pages.lock();
@@ -1226,7 +1226,7 @@ impl Vmo {
     ///
     /// Must not be called holding a spin lock; a caller holding an address
     /// space's lock uses [`Vmo::take_page`] and [`Vmo::retire`] instead.
-    pub(crate) fn replace(&self, index: u64, frame: Frame) -> Option<Frame> {
+    pub fn replace(&self, index: u64, frame: Frame) -> Option<Frame> {
         let retired = self.take_page(index, frame).ok()?;
         let old = retired.frame(index);
         self.retire(retired, None);
@@ -1273,7 +1273,7 @@ impl Vmo {
     /// forgotten by every space that maps it before its frame goes back.
     ///
     /// Must not be called holding a spin lock.
-    pub(crate) fn decommit_range(&self, first: u64, pages: u64) -> usize {
+    pub fn decommit_range(&self, first: u64, pages: u64) -> usize {
         match self.take_range(first, pages) {
             Ok(retired) => {
                 let given = retired.frames.len();
@@ -1347,7 +1347,7 @@ impl Vmo {
     /// committed, before or while the run is made; and
     /// [`RunError::OutOfMemory`] when the job is at its limit or there is no
     /// free block. Nothing is committed or charged then.
-    pub(crate) fn commit_run(&self, first: u64, pages: u64) -> Result<Frame, RunError> {
+    pub fn commit_run(&self, first: u64, pages: u64) -> Result<Frame, RunError> {
         if self.filler.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
             return Err(RunError::NotAnonymous);
         }
@@ -1388,7 +1388,7 @@ impl Vmo {
     /// Needs no memory: [`CHUNK`] pages at a time on the stack.
     ///
     /// Must not be called holding a spin lock.
-    pub(crate) fn give_back_run(&self, first: u64, block: Frame, pages: u64) {
+    pub fn give_back_run(&self, first: u64, block: Frame, pages: u64) {
         let mut page = 0;
         while page < pages {
             let mut chunk = [(0, 0); CHUNK];
@@ -1407,7 +1407,7 @@ impl Vmo {
     /// Whether any page of `first..first + pages` is held in place for a
     /// device: what [`Vmo::decommit_range`] skipped, and a range that must not
     /// be handed to anyone else.
-    pub(crate) fn holds_any(&self, first: u64, pages: u64) -> bool {
+    pub fn holds_any(&self, first: u64, pages: u64) -> bool {
         let end = first.saturating_add(pages);
         self.pages.lock().held.range(first..end).next().is_some()
     }
@@ -1487,7 +1487,7 @@ impl Vmo {
     /// Must not be called holding a spin lock. An object nobody maps — every
     /// file's today — costs no more than the split: phase two has nobody to
     /// ask.
-    pub(crate) fn decommit_from(&self, first: u64) -> usize {
+    pub fn decommit_from(&self, first: u64) -> usize {
         self.decommit_range(first, u64::MAX - first)
     }
 
@@ -1540,7 +1540,7 @@ impl Vmo {
     /// page map, never page by page, so its length costs nothing.
     ///
     /// Must not be called holding a spin lock.
-    pub(crate) fn cut_mappings(&self, first: u64) {
+    pub fn cut_mappings(&self, first: u64) {
         let runs = [(first, u64::MAX - first)];
         self.retire_runs(&[], false, &runs, None, true);
     }
@@ -1888,7 +1888,7 @@ impl Vmo {
     /// [`VmoError::OutOfMemory`] when a frame cannot be had. Pages committed
     /// before a failure stay committed, as [`Vmo::commit`] would leave them,
     /// and none is held.
-    pub(crate) fn hold(self: &Arc<Self>, first: u64, pages: u64) -> Result<Held, VmoError> {
+    pub fn hold(self: &Arc<Self>, first: u64, pages: u64) -> Result<Held, VmoError> {
         let len = self.len_pages();
         let end = first
             .checked_add(pages)
@@ -2095,7 +2095,7 @@ impl Pages {
 
 /// Pages of a VMO held in place, from [`Vmo::hold`]. Dropping it lets them go.
 #[derive(Debug)]
-pub(crate) struct Held {
+pub struct Held {
     /// The object, kept alive with its frames.
     vmo: Arc<Vmo>,
     /// The first page held.
@@ -2106,7 +2106,7 @@ pub(crate) struct Held {
 
 impl Held {
     /// The frame holding each page, in page order.
-    pub(crate) fn frames(&self) -> &[Frame] {
+    pub fn frames(&self) -> &[Frame] {
         &self.frames
     }
 }
@@ -2143,11 +2143,11 @@ impl Drop for Vmo {
 /// that check arms it, it disarms it before it returns, and the boot stops
 /// (FX-0908) if it is still armed after.
 #[derive(Debug)]
-pub(crate) struct ReclaimHook {
+pub struct ReclaimHook {
     /// The check that armed it, for the boot check's message.
-    pub(crate) armed_by: &'static str,
+    pub armed_by: &'static str,
     /// What it does there.
-    pub(crate) run: fn(&Vmo),
+    pub run: fn(&Vmo),
 }
 
 /// The hook [`Vmo::reclaim_clean`] calls, if a check armed one: a leaf lock,
@@ -2156,18 +2156,18 @@ pub(crate) struct ReclaimHook {
 static RECLAIM_HOOK: SpinLock<Option<&'static ReclaimHook>> = SpinLock::new(None);
 
 /// Arm `hook` in [`Vmo::reclaim_clean`]: stage 12's check only.
-pub(crate) fn arm_reclaim_hook(hook: &'static ReclaimHook) {
+pub fn arm_reclaim_hook(hook: &'static ReclaimHook) {
     *RECLAIM_HOOK.lock() = Some(hook);
 }
 
 /// Disarm it.
-pub(crate) fn disarm_reclaim_hook() {
+pub fn disarm_reclaim_hook() {
     *RECLAIM_HOOK.lock() = None;
 }
 
 /// The check that armed the hook, if one still has: for the boot check
 /// before init (`main.rs`'s `require_hooks_disarmed`).
-pub(crate) fn reclaim_hook_armed_by() -> Option<&'static str> {
+pub fn reclaim_hook_armed_by() -> Option<&'static str> {
     RECLAIM_HOOK.lock().map(|hook| hook.armed_by)
 }
 

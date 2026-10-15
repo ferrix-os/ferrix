@@ -9,7 +9,7 @@
 //! program executes in ring 3 takes the path under test: the stub, `classify`,
 //! the generic dispatcher's user fault and `fault_signal`, and the kill that
 //! ends the program with the signal. The programs are fixtures, and live here
-//! rather than beside the product's in `super::super`.
+//! rather than beside the product's in `ferrix_kernel_core::arch::x86_64::trap::super`.
 //!
 //! Before this, the one program the boot ended by a fault wrote through a null
 //! pointer (`object/check.rs`), so a divide error, an invalid opcode, a
@@ -17,9 +17,11 @@
 //! of `fault_signal` no boot had run, and nothing had touched a file mapping
 //! past its file's end, which the dispatcher turns into `SIGBUS` itself.
 
+#![cfg(target_arch = "x86_64")]
+
 use ferrix_linux_abi::types::{SIGBUS, SIGFPE, SIGILL, SIGSEGV};
 
-use super::super::cpu;
+use ferrix_kernel_core::arch::x86_64::cpu;
 use crate::console::println;
 
 /// `divl %ecx` with `%ecx` zero: `#DE`, vector 0.
@@ -1033,7 +1035,7 @@ fn check_thread_areas() -> Result<u32, &'static str> {
 fn run_program(name: &[u8], code: &[u8]) -> Result<i32, &'static str> {
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        ferrix_kernel_core::arch::x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         code,
     );
@@ -1385,10 +1387,10 @@ fn check_forged_64_bit_frames() -> Result<(), &'static str> {
 /// # Errors
 ///
 /// What did not come back, or did not end as it had to.
-pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
-    super::super::paranoid::check::run()?;
-    super::super::syscall::check::run()?;
-    super::super::syscall::check::run_decode()?;
-    super::super::gdt::check::run()?;
+pub fn check_exception_entry() -> Result<(), &'static str> {
+    crate::arch::x86_64::paranoid::check::run()?;
+    ferrix_kernel_core::arch::x86_64::syscall::check::run()?;
+    ferrix_kernel_core::arch::x86_64::syscall::check::run_decode()?;
+    ferrix_kernel_core::arch::x86_64::gdt::check::run()?;
     run()
 }

@@ -26,23 +26,23 @@ use crate::user::space::{Access, AddressSpace};
 
 /// What the checks saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// The task limit a fork bomb met, and how many processes it made.
-    pub(crate) tasks: u64,
+    pub tasks: u64,
     /// The memory limit a user space was faulted in to, in pages.
-    pub(crate) pages: u64,
+    pub pages: u64,
     /// How many of them were page tables.
-    pub(crate) tables: u64,
+    pub tables: u64,
     /// Bytes of kernel heap the limited job's space held beside them: its
     /// regions, charged as memory too.
-    pub(crate) heap: u64,
+    pub heap: u64,
     /// Pages a sibling committed after the limited job was refused.
-    pub(crate) sibling_pages: u64,
+    pub sibling_pages: u64,
     /// The object limit the objects met.
-    pub(crate) objects: u64,
+    pub objects: u64,
     /// The share of a processor, in tenths of a per cent, one task in its
     /// own job had against eight in another.
-    pub(crate) alone_share: u64,
+    pub alone_share: u64,
 }
 
 /// Run every quota check.
@@ -52,7 +52,7 @@ pub(crate) struct Report {
 /// Which property failed.
 ///
 /// Verifies: L.object.53, H.QUOTA.4
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let slots = quota::live_slots();
     let mut report = Report::default();
     {

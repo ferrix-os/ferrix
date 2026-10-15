@@ -1,0 +1,42 @@
+[package]
+name = "ferrix-kernel-core"
+description = "The Ferrix kernel's core ring: what every other part rests on"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The crate root sits beside the binary's main.rs, so that its modules are
+# found where every kernel file is today (docs/KERNEL-CRATES.md).
+[lib]
+path = "../src/kernel_core.rs"
+
+[dependencies]
+ferrix-acpi.workspace = true
+ferrix-audit.workspace = true
+ferrix-bootinfo.workspace = true
+ferrix-cgroupfs.workspace = true
+ferrix-chardevctl.workspace = true
+ferrix-description.workspace = true
+ferrix-elf.workspace = true
+ferrix-fallible.workspace = true
+ferrix-fbtext.workspace = true
+ferrix-fdt.workspace = true
+ferrix-frame.workspace = true
+ferrix-heap.workspace = true
+ferrix-kmem.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-objects.workspace = true
+ferrix-paging.workspace = true
+ferrix-pci.workspace = true
+ferrix-qr.workspace = true
+ferrix-sched.workspace = true
+ferrix-sync.workspace = true
+ferrix-vdso.workspace = true
+ferrix-vfs.workspace = true
+ferrix-vma.workspace = true
+
+[lints]
+workspace = true

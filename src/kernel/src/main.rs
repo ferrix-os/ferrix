@@ -12,60 +12,9 @@
 
 extern crate alloc;
 
-mod arch;
-mod audit;
-mod backtrace;
-mod boot_checks;
-mod checks;
-mod claim;
-mod console;
-mod device;
-mod discovery;
-mod early;
-mod fallible;
-mod fastpath;
-mod fs;
-mod hooks;
-mod init;
-mod init_check;
-mod interfaces;
-mod iommu;
-mod irq;
-mod mm;
-mod mmio;
-mod net;
-mod object;
-mod panic;
-// What belongs to one system on chip rather than to an architecture: the
-// kernel's part in a board's devices, each found in the device tree at boot
-// and a no-op on a machine without one, grouped by the vendor prefix of the
-// chip's `compatible`. The gs201 is the Pixel 7's Tensor G2; its watchdogs
-// are serviced from `arch::aarch64` alone.
-mod platform {
-    pub(crate) mod google {
-        pub(crate) mod gs201 {
-            pub(crate) mod usb;
-            #[allow(dead_code, reason = "only AArch64 has a gs201, the Pixel 7's")]
-            pub(crate) mod watchdog;
-        }
-    }
-    pub(crate) mod st {
-        pub(crate) mod stm32mp1;
-    }
-}
-mod power;
-mod random;
-mod sched;
-mod service_check;
-mod signal_frame;
-mod smp;
+use ferrix_kernel_load::*;
+
 mod stages_check;
-mod sync;
-mod syscall;
-mod timer;
-mod trap;
-mod user;
-mod vmap;
 
 use ferrix_bootinfo::{BootInfo, BootView, KASLR_FIXED_IMAGE, KASLR_MOVED, MemKind, PAGE_SIZE};
 use ferrix_paging::MapError;
@@ -374,7 +323,7 @@ fn require_hooks_disarmed() {
 /// The last line of boot before init: the success marker when every check
 /// ran, and the unchecked one, which no boot test accepts, when they were
 /// skipped.
-fn say_booted() {
+pub fn say_booted() {
     require_hooks_disarmed();
     panic::mark_booted();
     audit::record(

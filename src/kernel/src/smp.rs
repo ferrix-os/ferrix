@@ -21,7 +21,7 @@
 //! processor finds out which one it is without being told — an interrupt
 //! handler in particular, which is told nothing at all.
 
-pub(crate) mod check;
+pub mod check;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -60,7 +60,7 @@ pub(crate) struct Described {
 /// turns a segment-relative load into an ordinary pointer.
 #[repr(C)]
 #[derive(Debug)]
-pub(crate) struct PerCpu {
+pub struct PerCpu {
     /// This record's own address.
     this: u64,
     /// The kernel stack a system call from user mode lands on.
@@ -84,9 +84,9 @@ pub(crate) struct PerCpu {
     /// with the return address and flags.
     pub(crate) user_stack: u64,
     /// Logical number: this record's index in [`Topology`].
-    pub(crate) logical: usize,
+    pub logical: usize,
     /// What the machine calls this processor.
-    pub(crate) hardware_id: u64,
+    pub hardware_id: u64,
     /// Set by the processor itself once it is running kernel code with its
     /// own record installed. Never cleared: nothing takes a CPU offline.
     online: AtomicBool,
@@ -128,7 +128,7 @@ pub(crate) struct PerCpu {
     /// ([`SYSCALLS_WORD_OFFSET`]) and summed over every record by the reader,
     /// so that the count every call makes is no locked add on a line every
     /// processor writes.
-    pub(crate) syscalls: OwnCount,
+    pub syscalls: OwnCount,
 }
 
 /// A count in a [`PerCpu`] record: added to by its own processor alone,
@@ -142,7 +142,7 @@ pub(crate) struct PerCpu {
 /// count is exact for a reader that reads after the counting it wants, as
 /// `/proc/ferrix-seam` and the boot check do.
 #[derive(Debug)]
-pub(crate) struct OwnCount {
+pub struct OwnCount {
     /// The count.
     #[cfg(target_pointer_width = "64")]
     word: AtomicU64,
@@ -169,7 +169,7 @@ impl OwnCount {
     }
 
     /// The count, from any processor.
-    pub(crate) fn read(&self) -> u64 {
+    pub fn read(&self) -> u64 {
         #[cfg(target_pointer_width = "64")]
         {
             self.word.load(Ordering::Relaxed)
@@ -184,7 +184,7 @@ impl OwnCount {
 
 /// Where in a [`PerCpu`] record its Linux system call count is, for
 /// `arch::this_cpu_add`.
-pub(crate) const SYSCALLS_WORD_OFFSET: usize =
+pub const SYSCALLS_WORD_OFFSET: usize =
     core::mem::offset_of!(PerCpu, syscalls) + OwnCount::WORD_OFFSET;
 
 /// Where in a [`PerCpu`] record its preemption word is, for
@@ -200,7 +200,7 @@ pub(crate) const RUNNING_WORD_OFFSET: usize =
 
 impl PerCpu {
     /// Whether this processor has said it is running.
-    pub(crate) fn is_online(&self) -> bool {
+    pub fn is_online(&self) -> bool {
         self.online.load(Ordering::Acquire)
     }
 
@@ -212,7 +212,7 @@ impl PerCpu {
 
 /// The machine's processors.
 #[derive(Debug)]
-pub(crate) struct Topology {
+pub struct Topology {
     /// What this architecture calls a hardware identifier.
     id_name: &'static str,
     /// One record per processor, indexed by logical number. Index zero is the
@@ -287,27 +287,27 @@ impl Topology {
     }
 
     /// How many processors there are, the boot processor included.
-    pub(crate) fn count(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.cpus.len()
     }
 
     /// Every processor's record, by logical number.
-    pub(crate) const fn cpus(&self) -> &'static [PerCpu] {
+    pub const fn cpus(&self) -> &'static [PerCpu] {
         self.cpus
     }
 
     /// How many processors have said they are running.
-    pub(crate) fn online(&self) -> usize {
+    pub fn online(&self) -> usize {
         self.cpus.iter().filter(|cpu| cpu.is_online()).count()
     }
 
     /// The boot processor's hardware identifier.
-    pub(crate) fn boot_id(&self) -> u64 {
+    pub fn boot_id(&self) -> u64 {
         self.cpus.first().map_or(0, |cpu| cpu.hardware_id)
     }
 
     /// What this architecture calls a hardware identifier.
-    pub(crate) const fn id_name(&self) -> &'static str {
+    pub const fn id_name(&self) -> &'static str {
         self.id_name
     }
 }
@@ -316,7 +316,7 @@ impl Topology {
 static TOPOLOGY: Once<Topology> = Once::new();
 
 /// The processors, once [`discover`] has run.
-pub(crate) fn topology() -> Option<&'static Topology> {
+pub fn topology() -> Option<&'static Topology> {
     TOPOLOGY.get()
 }
 
@@ -354,7 +354,7 @@ static STOPPING: AtomicBool = AtomicBool::new(false);
 ///
 /// If the tables cannot be read, describe a list no machine could have, or
 /// the boot processor's record does not read back as its own.
-pub(crate) fn discover(view: &BootView<'_>) -> Result<&'static Topology, &'static str> {
+pub fn discover(view: &BootView<'_>) -> Result<&'static Topology, &'static str> {
     let topology = Topology::from_described(arch::describe_cpus(view)?)?;
     let topology = TOPOLOGY.call_once(|| topology);
 
@@ -389,7 +389,7 @@ const START_TIMEOUT_NANOS: u64 = 1_000_000_000;
 /// # Errors
 ///
 /// If a processor cannot be started, or is started and does not report in.
-pub(crate) fn start_secondaries(view: &BootView<'_>) -> Result<(), &'static str> {
+pub fn start_secondaries(view: &BootView<'_>) -> Result<(), &'static str> {
     let topology = TOPOLOGY
         .get()
         .ok_or("the processors have not been discovered")?;
@@ -1177,7 +1177,7 @@ fn service_tlb(me: &PerCpu) {
 }
 
 /// How many shootdowns have run.
-pub(crate) fn shootdowns() -> u64 {
+pub fn shootdowns() -> u64 {
     SHOOTDOWNS.load(Ordering::Relaxed)
 }
 
@@ -1579,17 +1579,17 @@ fn flush_here(pages: &TlbPages) {
 
 /// What the scoped shootdowns have cost so far.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct ScopedShootdowns {
+pub struct ScopedShootdowns {
     /// Those that interrupted at least one processor.
-    pub(crate) sent: u64,
+    pub sent: u64,
     /// The processors those interrupted, in all.
-    pub(crate) processors: u64,
+    pub processors: u64,
     /// Those that interrupted nobody.
-    pub(crate) unsent: u64,
+    pub unsent: u64,
 }
 
 /// How many scoped shootdowns have run, and how many processors they cost.
-pub(crate) fn scoped_shootdowns() -> ScopedShootdowns {
+pub fn scoped_shootdowns() -> ScopedShootdowns {
     ScopedShootdowns {
         sent: SCOPED_SHOOTDOWNS.load(Ordering::Relaxed),
         processors: SCOPED_TARGETS.load(Ordering::Relaxed),
@@ -1731,11 +1731,12 @@ pub(crate) fn grace_periods() -> u64 {
 /// The record of the processor this is running on, or `None` before the
 /// boot processor has installed its own.
 /// How many processors the machine has, or one before they have been counted.
-pub(crate) fn count() -> usize {
+pub fn count() -> usize {
     TOPOLOGY.get().map_or(1, Topology::count)
 }
 
-pub(crate) fn this_cpu() -> Option<&'static PerCpu> {
+/// DOC-OWED
+pub fn this_cpu() -> Option<&'static PerCpu> {
     if !LOCAL_READY.load(Ordering::Acquire) {
         return None;
     }

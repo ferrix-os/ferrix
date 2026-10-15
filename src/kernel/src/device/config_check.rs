@@ -105,30 +105,30 @@ pub(crate) const REFUSED_REENABLED: &str =
 
 /// What the checks did, for the boot's `config` lines.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// W1: apertures `device_aperture` answered as minted.
-    pub(crate) apertures: usize,
+    pub apertures: usize,
     /// W1: of those, above 4 GiB and longer than 4 GiB.
-    pub(crate) above_4_gib: usize,
+    pub above_4_gib: usize,
     /// W2: header fields read as enumeration read them, and capability and
     /// extended reads answered.
-    pub(crate) reads: usize,
+    pub reads: usize,
     /// W2: functions read.
-    pub(crate) functions: usize,
+    pub functions: usize,
     /// W4 and W5: writes refused whole and read back unchanged.
-    pub(crate) refused: usize,
+    pub refused: usize,
     /// W5: malformed accesses refused.
-    pub(crate) malformed: usize,
+    pub malformed: usize,
     /// W3: driver-writable fields written and read back.
-    pub(crate) written: usize,
+    pub written: usize,
     /// Why W3, W5 and W6 did not run, where they did not.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
     /// W6: rounds raced.
-    pub(crate) rounds: usize,
+    pub rounds: usize,
     /// W6: why it did not run, where it did not.
-    pub(crate) race_skipped: Option<&'static str>,
+    pub race_skipped: Option<&'static str>,
     /// W7: the register a provoked breach was found at.
-    pub(crate) breach: Option<Register>,
+    pub breach: Option<Register>,
 }
 
 /// Run W1 to W7.
@@ -136,7 +136,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first check that failed, by the message its control requires.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let side = Side::new()?;
     let mut report = Report::default();
     let result = (|| {

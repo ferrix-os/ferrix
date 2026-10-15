@@ -71,7 +71,7 @@ use crate::user::space::{Access, AddressSpace, SpaceError};
 /// its pages was unmapped is telling it about the kernel's address space, and
 /// the distinctions matter to the kernel's own log rather than to the program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UserError {
+pub enum UserError {
     /// The address, or the end of the range, is not a user address.
     NotUserRange,
     /// The range is so long that its end cannot be computed.
@@ -115,7 +115,7 @@ fn check_range(at: u64, len: u64) -> Result<(), UserError> {
 /// Whether `len` bytes from `at` lie in the program's half, without looking
 /// at whether they are mapped: Linux's `access_ok`, which some calls ask
 /// before anything else.
-pub(crate) fn is_user_range(at: u64, len: u64) -> bool {
+pub fn is_user_range(at: u64, len: u64) -> bool {
     check_range(at, len).is_ok()
 }
 
@@ -158,7 +158,7 @@ fn user_address(at: u64) -> Result<u64, UserError> {
 ///
 /// [`UserError`]. Nothing here panics, and nothing is copied at all if the
 /// range check fails.
-pub(crate) fn copy_from_user(
+pub fn copy_from_user(
     space: &AddressSpace,
     from: u64,
     out: &mut [u8],
@@ -183,7 +183,7 @@ pub(crate) fn copy_from_user(
 ///
 /// [`UserError`], for a range that is not the program's or a page it may not
 /// read.
-pub(crate) fn copy_from_user_present(
+pub fn copy_from_user_present(
     space: &AddressSpace,
     from: u64,
     out: &mut [u8],
@@ -243,7 +243,7 @@ fn copy_from_user_through(
 /// [`UserError`]. A partial copy is possible if a later page cannot be
 /// resolved, which matches Linux: `write` and its kin report the count they
 /// managed, and a caller that needs all-or-nothing must check the range first.
-pub(crate) fn copy_to_user(space: &AddressSpace, to: u64, data: &[u8]) -> Result<(), UserError> {
+pub fn copy_to_user(space: &AddressSpace, to: u64, data: &[u8]) -> Result<(), UserError> {
     let copied = copy_to_user_through(space, to, data, Through::Faulting)?;
     debug_assert!(copied, "a copy that faults pages in stopped short");
     Ok(())
@@ -264,7 +264,7 @@ pub(crate) fn copy_to_user(space: &AddressSpace, to: u64, data: &[u8]) -> Result
 ///
 /// [`UserError`], for a range that is not the program's or a page it may not
 /// write.
-pub(crate) fn copy_to_user_present(
+pub fn copy_to_user_present(
     space: &AddressSpace,
     to: u64,
     data: &[u8],
@@ -339,7 +339,7 @@ fn copy_to_user_through(
 ///
 /// [`UserError`], for a range that is not the program's or a page it may not
 /// write.
-pub(crate) fn fault_in_for_write(
+pub fn fault_in_for_write(
     space: &AddressSpace,
     at: u64,
     len: usize,
@@ -376,7 +376,7 @@ fn chunk_len(at: u64, remaining: usize) -> Result<usize, UserError> {
 /// [`UserError::Fault`] if the string is unterminated within `limit`, which is
 /// what Linux reports for a path that long — the program gets `EFAULT` rather
 /// than a truncated string it did not ask for.
-pub(crate) fn copy_cstr_from_user(
+pub fn copy_cstr_from_user(
     space: &AddressSpace,
     from: u64,
     limit: usize,
@@ -416,14 +416,14 @@ pub(crate) fn copy_cstr_from_user(
 /// Every structure a system call writes that is made of `long`s changes size
 /// with this, which is why the handlers compute their layouts from it rather
 /// than writing a size down.
-pub(crate) const WORD: usize = size_of::<usize>();
+pub const WORD: usize = size_of::<usize>();
 
 /// Write one C `int` or `unsigned int` -- four bytes on every architecture.
 ///
 /// # Errors
 ///
 /// `EFAULT` if the address is not writable user memory.
-pub(crate) fn put_u32(space: &AddressSpace, at: u64, value: u32) -> Result<(), Errno> {
+pub fn put_u32(space: &AddressSpace, at: u64, value: u32) -> Result<(), Errno> {
     copy_to_user(space, at, &value.to_le_bytes()).map_err(|_| Errno::EFAULT)
 }
 
@@ -436,7 +436,7 @@ pub(crate) fn put_u32(space: &AddressSpace, at: u64, value: u32) -> Result<(), E
 /// # Errors
 ///
 /// `EFAULT` if the address is not writable user memory.
-pub(crate) fn put_word(space: &AddressSpace, at: u64, value: u64) -> Result<(), Errno> {
+pub fn put_word(space: &AddressSpace, at: u64, value: u64) -> Result<(), Errno> {
     let bytes = value.to_le_bytes();
     let word = bytes.get(..WORD).ok_or(Errno::EFAULT)?;
     copy_to_user(space, at, word).map_err(|_| Errno::EFAULT)
@@ -447,7 +447,7 @@ pub(crate) fn put_word(space: &AddressSpace, at: u64, value: u64) -> Result<(), 
 /// # Errors
 ///
 /// `EFAULT` if the address is not readable user memory.
-pub(crate) fn get_u32(space: &AddressSpace, at: u64) -> Result<u32, Errno> {
+pub fn get_u32(space: &AddressSpace, at: u64) -> Result<u32, Errno> {
     let mut bytes = [0_u8; 4];
     copy_from_user(space, at, &mut bytes).map_err(|_| Errno::EFAULT)?;
     Ok(u32::from_le_bytes(bytes))
@@ -458,7 +458,7 @@ pub(crate) fn get_u32(space: &AddressSpace, at: u64) -> Result<u32, Errno> {
 /// # Errors
 ///
 /// `EFAULT` if the address is not readable user memory.
-pub(crate) fn get_word(space: &AddressSpace, at: u64) -> Result<u64, Errno> {
+pub fn get_word(space: &AddressSpace, at: u64) -> Result<u64, Errno> {
     let mut bytes = [0_u8; 8];
     let word = bytes.get_mut(..WORD).ok_or(Errno::EFAULT)?;
     copy_from_user(space, at, word).map_err(|_| Errno::EFAULT)?;

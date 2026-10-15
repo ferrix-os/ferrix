@@ -55,7 +55,7 @@ use crate::sync::SpinLock;
 use crate::syscall::native;
 use crate::timer;
 
-pub(crate) mod check;
+pub mod check;
 
 /// How often a READ waiting for the log looks at it again: often enough that
 /// a line reaches the host while it is still the newest, and seldom enough to
@@ -89,7 +89,7 @@ pub(crate) enum CreateError {
 /// # Errors
 ///
 /// [`Full`] when the item has no room for the registration.
-pub(crate) fn install() -> Result<(), Full> {
+pub fn install() -> Result<(), Full> {
     native::serve(NativeCall::LogControlCreate, control_create)
 }
 

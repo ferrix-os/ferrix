@@ -54,15 +54,15 @@ use crate::syscall::{fd, uaccess};
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// The number the check's disk was registered with, major half.
-    pub(crate) major: u32,
+    pub major: u32,
     /// And minor half.
-    pub(crate) minor: u32,
+    pub minor: u32,
     /// Sectors read back through the device `block_device` found.
-    pub(crate) sectors: u64,
+    pub sectors: u64,
     /// Frames the second run did not give back. Zero, or the check fails.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// The check disk's name.

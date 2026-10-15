@@ -47,14 +47,17 @@ const DISK_INDEX: u32 = 1;
 
 /// What the check found.
 #[derive(Debug)]
-pub(crate) struct Report {
-    pub(crate) files: u32,
-    pub(crate) directories: u32,
-    pub(crate) links: u32,
+pub struct Report {
+    /// DOC-OWED
+    pub files: u32,
+    /// DOC-OWED
+    pub directories: u32,
+    /// DOC-OWED
+    pub links: u32,
     /// Bytes of file data read back.
-    pub(crate) bytes: u64,
+    pub bytes: u64,
     /// Why nothing was checked: no second disk on this machine.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
 }
 
 /// Mount the fixture's disk and read its tree back.
@@ -62,7 +65,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// What did not match, as a sentence; the manifest line is printed first.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let rdev = makedev(VIRTIO_BLK_MAJOR, DISK_INDEX * 16);
     if fs::devfs::block_device(rdev).is_none() {
         return Ok(Report {

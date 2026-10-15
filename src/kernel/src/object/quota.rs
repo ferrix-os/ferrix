@@ -59,14 +59,14 @@ use crate::fallible::{self, AllocError};
 use crate::sync::SpinLock;
 
 /// No slot: the tree's root, a kernel thread, a frame nobody is charged for.
-pub(crate) const NONE: u32 = u32::MAX;
+pub const NONE: u32 = u32::MAX;
 
 /// A limit that is no limit.
-pub(crate) const UNLIMITED: u64 = u64::MAX;
+pub const UNLIMITED: u64 = u64::MAX;
 
 /// What a job is charged for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Resource {
+pub enum Resource {
     /// Memory, in bytes: the frames of its programs' memory and page tables,
     /// a page each, and the kernel heap the Linux personality holds for them
     /// ([`Resource::Kernel`], F-37). `memory.max` limits the sum, as Linux's
@@ -84,7 +84,7 @@ pub(crate) enum Resource {
 
 impl Resource {
     /// Every resource, in the order the slot keeps them.
-    pub(crate) const ALL: [Resource; RESOURCES] = [
+    pub const ALL: [Resource; RESOURCES] = [
         Resource::Memory,
         Resource::Objects,
         Resource::Tasks,
@@ -109,7 +109,7 @@ const RESOURCES: usize = 4;
 /// `memory.stat`. Each is counted in the job it happened in and in every job
 /// above it, as cgroup v2's hierarchical files report them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Counter {
+pub enum Counter {
     /// Times its use went over `memory.high` and was reclaimed.
     High,
     /// Pages reclaim looked at (`pgscan`).
@@ -153,7 +153,7 @@ pub(crate) const DEFAULT_PERIOD_NS: u64 = 100_000_000;
 
 /// The marks of `memory.high`, `memory.low` and `memory.min`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Mark {
+pub enum Mark {
     /// `memory.high`: above it, the job's pages are reclaimed. [`UNLIMITED`]
     /// for `max`.
     High,
@@ -181,14 +181,14 @@ const FRAME_BYTES: u64 = ferrix_bootinfo::PAGE_SIZE;
 
 /// A charge a limit refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Exceeded;
+pub struct Exceeded;
 
 /// `cpu.weight`'s default, and Linux's.
-pub(crate) const DEFAULT_WEIGHT: u32 = 100;
+pub const DEFAULT_WEIGHT: u32 = 100;
 /// The least `cpu.weight` takes.
-pub(crate) const MIN_WEIGHT: u32 = 1;
+pub const MIN_WEIGHT: u32 = 1;
 /// The most `cpu.weight` takes.
-pub(crate) const MAX_WEIGHT: u32 = 10_000;
+pub const MAX_WEIGHT: u32 = 10_000;
 
 /// The least effective weight a task is given, however many share its job:
 /// Linux's `MIN_SHARES`. Zero would be refused by the run queue.
@@ -326,7 +326,7 @@ fn slot(index: u32) -> Option<&'static Slot> {
 }
 
 /// How many slots are in use.
-pub(crate) fn live_slots() -> u64 {
+pub fn live_slots() -> u64 {
     LIVE.load(Ordering::Relaxed)
 }
 
@@ -437,7 +437,7 @@ fn release(index: u32) {
 ///
 /// [`Exceeded`], with nothing charged anywhere, and a refusal counted where
 /// the limit was.
-pub(crate) fn charge(index: u32, resource: Resource, amount: u64) -> Result<(), Exceeded> {
+pub fn charge(index: u32, resource: Resource, amount: u64) -> Result<(), Exceeded> {
     let mut at = index;
     while let Some(slot) = slot(at) {
         let (Some(used), Some(limit)) = (slot.used(resource), slot.limit(resource)) else {
@@ -478,7 +478,7 @@ fn record_refused(index: u32, at: u32, resource: Resource, amount: u64, limit: u
 /// would take past its limit, if any: after a refused charge, the job whose
 /// limit refused it, for the scoped OOM kill (`object::oom`). Read, not
 /// charged, so a slot under its limit again by now is not named.
-pub(crate) fn at_limit(index: u32, resource: Resource, amount: u64) -> Option<u32> {
+pub fn at_limit(index: u32, resource: Resource, amount: u64) -> Option<u32> {
     let mut at = index;
     while let Some(slot) = slot(at) {
         let (Some(used), Some(limit)) = (slot.used(resource), slot.limit(resource)) else {
@@ -515,7 +515,7 @@ static BANDWIDTHS: AtomicU32 = AtomicU32::new(0);
 static MACHINE_CPU: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 
 /// Whether any `cpu.max` is set.
-pub(crate) fn bandwidth_in_use() -> bool {
+pub fn bandwidth_in_use() -> bool {
     BANDWIDTHS.load(Ordering::Relaxed) != 0
 }
 
@@ -694,7 +694,7 @@ pub(crate) fn protected(owner: u32, scope: u32, low: bool) -> bool {
 }
 
 /// Count `amount` of `counter` in `index` and every slot above it.
-pub(crate) fn count(index: u32, counter: Counter, amount: u64) {
+pub fn count(index: u32, counter: Counter, amount: u64) {
     let mut at = index;
     while let Some(slot) = slot(at) {
         if let Some(held) = slot.counters.get(counter.at()) {
@@ -743,7 +743,7 @@ pub(crate) fn charge_regardless(index: u32, resource: Resource, amount: u64) {
 ///
 /// Never below zero: a count that would go there is a bug the boot check
 /// looks for, not a reason to wrap.
-pub(crate) fn uncharge(index: u32, resource: Resource, amount: u64) {
+pub fn uncharge(index: u32, resource: Resource, amount: u64) {
     uncharge_below(index, NONE, resource, amount);
 }
 
@@ -838,7 +838,7 @@ impl ferrix_kmem::Account for KernelHeap {
 /// process whatever its job, and cannot report the failure of -- a new
 /// process's first descriptors. Each such use is a constant a process,
 /// which the task limit bounds.
-pub(crate) fn charging_nobody<R>(work: impl FnOnce() -> R) -> R {
+pub fn charging_nobody<R>(work: impl FnOnce() -> R) -> R {
     let own = crate::sched::running_group();
     if own == NONE {
         return work();
@@ -920,20 +920,20 @@ impl Drop for Charge {
 
 /// One job's claim on its slot: made with the job, and let go as it drops.
 #[derive(Debug)]
-pub(crate) struct Quota {
+pub struct Quota {
     /// The slot.
     index: u32,
 }
 
 /// What a job holds of one resource, and may.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Usage {
+pub struct Usage {
     /// Its use, its descendants' included.
-    pub(crate) used: u64,
+    pub used: u64,
     /// Its limit, or [`UNLIMITED`].
-    pub(crate) limit: u64,
+    pub limit: u64,
     /// How many charges its limit refused.
-    pub(crate) refused: u64,
+    pub refused: u64,
 }
 
 impl Quota {
@@ -942,14 +942,14 @@ impl Quota {
     /// # Errors
     ///
     /// [`AllocError`].
-    pub(crate) fn new(parent: Option<&Quota>) -> Result<Quota, AllocError> {
+    pub fn new(parent: Option<&Quota>) -> Result<Quota, AllocError> {
         install_kernel_heap();
         let index = claim(parent.map_or(NONE, |parent| parent.index))?;
         Ok(Quota { index })
     }
 
     /// Its slot's index.
-    pub(crate) fn index(&self) -> u32 {
+    pub fn index(&self) -> u32 {
         self.index
     }
 
@@ -964,14 +964,14 @@ impl Quota {
 
     /// Set its limit on `resource`. A limit below its use refuses every
     /// charge until the use falls under it, and takes nothing away.
-    pub(crate) fn set_limit(&self, resource: Resource, limit: u64) {
+    pub fn set_limit(&self, resource: Resource, limit: u64) {
         if let Some(held) = slot(self.index).and_then(|slot| slot.limit(resource)) {
             held.store(limit, Ordering::Release);
         }
     }
 
     /// Its use of `resource`, its limit and its refusals.
-    pub(crate) fn usage(&self, resource: Resource) -> Usage {
+    pub fn usage(&self, resource: Resource) -> Usage {
         let read = |field: Option<&AtomicU64>, otherwise| {
             field.map_or(otherwise, |field| field.load(Ordering::Acquire))
         };
@@ -999,7 +999,7 @@ impl Quota {
     }
 
     /// How many of `counter` were counted in it and beneath it.
-    pub(crate) fn counted(&self, counter: Counter) -> u64 {
+    pub fn counted(&self, counter: Counter) -> u64 {
         slot(self.index)
             .and_then(|slot| slot.counters.get(counter.at()))
             .map_or(0, |held| held.load(Ordering::Acquire))
@@ -1083,19 +1083,19 @@ static RELEASE_HOOK: Once<fn(u32)> = Once::new();
 
 /// Have `hook` called with a job's slot as the job goes, before the slot
 /// lets go of its parent. Once; a second call is ignored.
-pub(crate) fn on_job_release(hook: fn(u32)) {
+pub fn on_job_release(hook: fn(u32)) {
     let _ = RELEASE_HOOK.call_once(|| hook);
 }
 
 /// The slot above `index`, or [`NONE`] at the top of a tree.
-pub(crate) fn parent_of(index: u32) -> u32 {
+pub fn parent_of(index: u32) -> u32 {
     slot(index).map_or(NONE, |slot| slot.parent.load(Ordering::Acquire))
 }
 
 /// Whether the job `index` was the quota of has gone. Read under the lock
 /// whoever keeps state per slot takes in its release hook, so that a task still
 /// holding the slot cannot start state the hook has already cleared.
-pub(crate) fn job_ended(index: u32) -> bool {
+pub fn job_ended(index: u32) -> bool {
     slot(index).is_some_and(|slot| slot.ended.load(Ordering::Acquire))
 }
 
@@ -1159,7 +1159,7 @@ pub(crate) fn adjust(index: u32, delta: i64) {
 /// the 128-bit formula's exactly while every entity weight is below 2^32
 /// (the assertion below): a task's base is a `u32`, and a job's is
 /// `cpu.weight` clamped to [`MAX_WEIGHT`] and scaled to task units.
-pub(crate) fn effective(index: u32, base: u32) -> u32 {
+pub fn effective(index: u32, base: u32) -> u32 {
     effective_with(index, base, 0)
 }
 
@@ -1168,7 +1168,7 @@ pub(crate) fn effective(index: u32, base: u32) -> u32 {
 /// counted in its word and not yet in the load it shares with the caller
 /// (`docs/OPAQUE-KERNEL.md` §9.11, J2; `ferrix_sched::carried_weight_with`).
 /// One walk, each level read once, as `effective`'s.
-pub(crate) fn effective_with(index: u32, base: u32, extra: i64) -> u32 {
+pub fn effective_with(index: u32, base: u32, extra: i64) -> u32 {
     let mut at = index;
     let levels = core::iter::from_fn(|| {
         let slot = slot(at)?;
@@ -1196,7 +1196,7 @@ const _: () = assert!(
 );
 
 /// The load of `index`, for a check.
-pub(crate) fn load(index: u32) -> i64 {
+pub fn load(index: u32) -> i64 {
     slot(index).map_or(0, |slot| slot.load.load(Ordering::Acquire))
 }
 
@@ -1323,7 +1323,7 @@ pub(crate) fn settle(pending: &mut Pending) {
 /// # Errors
 ///
 /// The first thing that was not so, by name.
-pub(crate) fn check_pending_charge() -> Result<(), &'static str> {
+pub fn check_pending_charge() -> Result<(), &'static str> {
     let parent = claim(NONE).map_err(|_| "pending charge check: no slot to claim")?;
     let outcome = match claim(parent) {
         Ok(child) => {
@@ -1382,6 +1382,6 @@ fn pending_cases(parent: u32, child: u32) -> Result<(), &'static str> {
 
 /// What `index` adds to its parent's load: its own weight while it is busy,
 /// nothing while idle. For a check.
-pub(crate) fn contributed(index: u32) -> i64 {
+pub fn contributed(index: u32) -> i64 {
     slot(index).map_or(0, |slot| slot.contributed.load(Ordering::Acquire))
 }

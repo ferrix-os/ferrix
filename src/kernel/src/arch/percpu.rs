@@ -53,7 +53,7 @@ use ferrix_sync::IrqControl;
 /// machine) that no other processor writes.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-pub(crate) unsafe fn this_cpu_add(offset: usize, delta: u64) -> u64 {
+pub unsafe fn this_cpu_add(offset: usize, delta: u64) -> u64 {
     // SAFETY: (SHARED) the caller's contract is `gs_xadd`'s.
     unsafe { super::x86_64::gs_xadd(offset, delta) }
 }

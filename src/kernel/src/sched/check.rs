@@ -102,13 +102,13 @@ const PATIENCE_NANOS: u64 = 20_000_000_000;
 
 /// What the checks found, for the boot log.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Threads that ran to completion.
-    pub(crate) threads: u64,
+    pub threads: u64,
     /// Context switches made along the way.
-    pub(crate) switches: u64,
+    pub switches: u64,
     /// Tasks moved between processors by work stealing.
-    pub(crate) steals: u64,
+    pub steals: u64,
     /// Shootdowns taken while the thousand ran and were reaped.
     ///
     /// A thread's kernel stack is given back by invalidating its address on
@@ -117,41 +117,41 @@ pub(crate) struct Report {
     /// machine. The reaper frees a batch of them under one shootdown
     /// (`crate::sched::REAP_BATCH`), which is why this is far below the
     /// thread count; a boot where it approaches that count is a regression.
-    pub(crate) shootdowns: u64,
+    pub shootdowns: u64,
     /// How many processors ran some of the thousand.
-    pub(crate) processors: u32,
+    pub processors: u32,
     /// Which ones, as a bit per processor. Printed beside the count because
     /// the count on its own invites being read as a capability: stealing is
     /// opportunistic, and a processor that lost every race for a task is not
     /// a processor that could not have run one. The fairness check below is
     /// the one that requires *every* processor to run something.
-    pub(crate) processor_mask: u64,
+    pub processor_mask: u64,
     /// Spinners the fairness check ran.
-    pub(crate) spinners: usize,
+    pub spinners: usize,
     /// The worst any task's service strayed from its share.
-    pub(crate) worst_lag: u64,
+    pub worst_lag: u64,
     /// What that had to stay inside: a slice, plus the worst overrun served.
-    pub(crate) bound: u64,
+    pub bound: u64,
     /// How long the sleep check actually slept.
-    pub(crate) slept: u64,
+    pub slept: u64,
     /// Guest milliseconds each of the nine checks took, in order.
-    pub(crate) spent_ms: [u64; 9],
+    pub spent_ms: [u64; 9],
     /// Spawns the placer sent to a processor other than the caller's.
-    pub(crate) placed_elsewhere: u64,
+    pub placed_elsewhere: u64,
     /// How many distinct processors new tasks were *placed* on, before any
     /// stealing or balancing could move them.
-    pub(crate) placed_on: u32,
+    pub placed_on: u32,
     /// The busiest and least busy load averages seen while every processor
     /// was running a spinner.
-    pub(crate) load_high: u64,
+    pub load_high: u64,
     /// The load average of an idle processor, after it has decayed.
-    pub(crate) load_low: u64,
+    pub load_low: u64,
     /// Tasks periodic balancing moved between processors that were all busy.
-    pub(crate) balanced: u64,
+    pub balanced: u64,
     /// The slice handed out with one runnable task, and with many.
-    pub(crate) slice_one: u64,
+    pub slice_one: u64,
     /// As above, with the queue full.
-    pub(crate) slice_many: u64,
+    pub slice_many: u64,
 }
 
 /// Tasks that have finished a phase.
@@ -177,7 +177,7 @@ static FINISHED: WaitQueue = WaitQueue::new();
 /// # Errors
 ///
 /// The first check that fails, as a sentence.
-pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
+pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     let mut report = Report::default();
     // Taken before anything is started, so that what is counted is what these
     // checks' own thousand threads cost: see `Report::shootdowns`.
@@ -1243,7 +1243,7 @@ fn describe_unstarted(tasks: &[Arc<Task>], started: u64, wanted_cpu: impl Fn(usi
 /// # Errors
 ///
 /// The first of these that did not hold, as a sentence.
-pub(crate) fn before_start() -> Result<(), &'static str> {
+pub fn before_start() -> Result<(), &'static str> {
     if super::started() {
         return Err("the checks for before the scheduler ran after it started");
     }

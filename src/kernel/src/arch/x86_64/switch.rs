@@ -25,7 +25,6 @@ use ferrix_sched::MAX_CPUS;
 use super::cpu;
 use super::gdt;
 
-pub(in crate::arch) mod check;
 
 /// Bytes the switch pushes: six registers and the return address.
 const FRAME_BYTES: u64 = 7 * 8;
@@ -178,7 +177,7 @@ pub(crate) unsafe fn prepare_stack(
 /// two words, whoever switches to it. Only the reset clears the mark.
 #[repr(C, align(64))]
 #[derive(Debug, Clone)]
-pub(crate) struct UserState {
+pub struct UserState {
     /// `FS_BASE`, which `arch_prctl(ARCH_SET_FS)` writes: the record the
     /// switch loads, never reads back.
     thread_pointer: u64,
@@ -207,9 +206,9 @@ pub(crate) struct UserState {
 /// registers. `FXSAVE` uses the first part alone.
 #[repr(C, align(64))]
 #[derive(Debug, Clone)]
-struct FpuArea {
+pub struct FpuArea {
     /// x87 and SSE, as `FXSAVE` lays them out.
-    legacy: [u8; 512],
+    pub legacy: [u8; 512],
     /// `XSTATE_BV`, which components the area holds rather than leaves in
     /// their initial state, then `XCOMP_BV` and reserved bytes, all zero.
     header: [u8; 64],
@@ -238,7 +237,7 @@ impl UserState {
     /// The bases are read from the MSRs here, not from the running task's
     /// record: a copy of what the processor holds, outside the switch, which
     /// is the one place that reads no base (3b).
-    pub(crate) unsafe fn capture() -> UserState {
+    pub unsafe fn capture() -> UserState {
         let mut state = UserState::new();
         // SAFETY: (CONTEXT) the caller's guarantee; the registers are the
         // running task's and it is not blocked.
@@ -275,7 +274,7 @@ impl UserState {
     /// `XSTATE_BV` says (Intel SDM Vol. 1 §13.8.1). The legacy region's other
     /// bytes are this task's own, from its last full save; no reader sees
     /// them ([`UserState::vectors`]).
-    pub(super) fn keep_vector_controls(&mut self, mxcsr: u32, control: u16) {
+    pub fn keep_vector_controls(&mut self, mxcsr: u32, control: u16) {
         let [c0, c1] = control.to_le_bytes();
         let [m0, m1, m2, m3] = mxcsr.to_le_bytes();
         let legacy = &mut self.fpu.legacy;
@@ -293,7 +292,7 @@ impl UserState {
 
     /// Whether the area holds only `MXCSR` and the control word, and the
     /// next switch to the task resets its vector registers.
-    pub(super) const fn is_unsaved(&self) -> bool {
+    pub const fn is_unsaved(&self) -> bool {
         self.unsaved
     }
 
@@ -325,7 +324,7 @@ impl UserState {
 
     /// Give the program `pointer` as its thread pointer, as `CLONE_SETTLS`
     /// asks.
-    pub(crate) const fn set_thread_pointer(&mut self, pointer: u64) {
+    pub const fn set_thread_pointer(&mut self, pointer: u64) {
         self.thread_pointer = pointer;
     }
 
@@ -340,7 +339,7 @@ impl UserState {
     /// child rather than a base (`docs/I386.md` §3.5). The child's `%gs`
     /// keeps its parent's selector and so reads through the new descriptor.
     /// False for an `index` past the three.
-    pub(crate) fn set_thread_area(&mut self, index: usize, descriptor: u64) -> bool {
+    pub fn set_thread_area(&mut self, index: usize, descriptor: u64) -> bool {
         self.tls
             .get_mut(index)
             .map(|slot| *slot = descriptor)
@@ -349,7 +348,7 @@ impl UserState {
 
     /// A program's state before it has run: no thread pointer, and the x87 and
     /// SSE control words a processor has at reset ([`FpuArea::initial`]).
-    pub(crate) const fn new() -> UserState {
+    pub const fn new() -> UserState {
         UserState {
             thread_pointer: 0,
             gs_base: 0,
@@ -363,19 +362,19 @@ impl UserState {
 
     /// The 512-byte `FXSAVE` area: what a signal frame carries as `fpstate`,
     /// through [`UserState::vectors`].
-    pub(super) fn fxsave(&self) -> [u8; 512] {
+    pub fn fxsave(&self) -> [u8; 512] {
         self.vectors().legacy
     }
 
     /// The same area, for `rt_sigreturn` to fill from the frame.
-    pub(super) fn fxsave_mut(&mut self) -> &mut [u8; 512] {
+    pub fn fxsave_mut(&mut self) -> &mut [u8; 512] {
         self.materialise();
         &mut self.fpu.legacy
     }
 
     /// Which components the area holds, `XSTATE_BV`: a component left out
     /// is in its initial state, all zero for AVX.
-    pub(super) fn xstate_bv(&self) -> u64 {
+    pub fn xstate_bv(&self) -> u64 {
         self.vectors()
             .header
             .first_chunk::<8>()
@@ -384,7 +383,7 @@ impl UserState {
 
     /// Set `XSTATE_BV`. `XRSTOR` refuses with `#GP` a component `XCR0` does
     /// not enable, so only those are kept.
-    pub(super) fn set_xstate_bv(&mut self, components: u64) {
+    pub fn set_xstate_bv(&mut self, components: u64) {
         let kept = components & cpu::extended_state_components();
         self.materialise();
         if let Some(word) = self.fpu.header.first_chunk_mut::<8>() {
@@ -394,12 +393,12 @@ impl UserState {
 
     /// The upper halves of the sixteen `YMM` registers, through
     /// [`UserState::vectors`].
-    pub(super) fn avx(&self) -> [u8; 256] {
+    pub fn avx(&self) -> [u8; 256] {
         self.vectors().avx
     }
 
     /// The same, for `rt_sigreturn` to fill from the frame.
-    pub(super) fn avx_mut(&mut self) -> &mut [u8; 256] {
+    pub fn avx_mut(&mut self) -> &mut [u8; 256] {
         self.materialise();
         &mut self.fpu.avx
     }
@@ -440,7 +439,7 @@ impl FpuArea {
     /// `0x037F` does the same for the x87. `XSTATE_BV` names x87 and SSE, so
     /// `XRSTOR` loads the control words rather than its own initial ones, and
     /// leaves AVX out, so it starts zero.
-    const fn initial(mxcsr: u32, control: u16) -> FpuArea {
+    pub const fn initial(mxcsr: u32, control: u16) -> FpuArea {
         let mut legacy = [0_u8; 512];
         let control = control.to_le_bytes();
         legacy[FCW_AT] = control[0];
@@ -624,7 +623,7 @@ static GS_SKIPS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS]
 static SS_RELOADS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; MAX_CPUS];
 
 /// Every processor's switches so far that loaded `SS` with kernel data.
-pub(crate) fn ss_reloads() -> u64 {
+pub fn ss_reloads() -> u64 {
     SS_RELOADS
         .iter()
         .map(|counter| counter.load(Ordering::Relaxed))
@@ -648,7 +647,7 @@ fn count(counters: &[AtomicU64; MAX_CPUS]) {
 
 /// This processor's fast resets so far that reset the x87, and that left it
 /// alone.
-pub(crate) fn x87_resets() -> (u64, u64) {
+pub fn x87_resets() -> (u64, u64) {
     let cpu = this_logical();
     let read = |counters: &[AtomicU64; MAX_CPUS]| {
         counters
@@ -660,7 +659,7 @@ pub(crate) fn x87_resets() -> (u64, u64) {
 
 /// This processor's switches so far that left `DS` or `ES` unloaded, 0 over
 /// 0.
-pub(crate) fn selector_skips() -> u64 {
+pub fn selector_skips() -> u64 {
     SELECTOR_SKIPS
         .get(this_logical())
         .map_or(0, |counter| counter.load(Ordering::Relaxed))
@@ -668,7 +667,7 @@ pub(crate) fn selector_skips() -> u64 {
 
 /// This processor's switches so far that left `FS` unloaded, and those that
 /// left `GS` unloaded, each 0 over 0.
-pub(crate) fn fs_gs_skips() -> (u64, u64) {
+pub fn fs_gs_skips() -> (u64, u64) {
     let cpu = this_logical();
     let read = |counters: &[AtomicU64; MAX_CPUS]| {
         counters
@@ -682,7 +681,7 @@ pub(crate) fn fs_gs_skips() -> (u64, u64) {
 /// left `FS` unloaded, and that left `GS` unloaded, in that order: for the
 /// fast path's counts, which show its direct switches taking the skips
 /// through the same `restore_user_state` (the consultant's E3 (iv) and K5).
-pub(crate) fn selector_skips_total() -> Option<[u64; 3]> {
+pub fn selector_skips_total() -> Option<[u64; 3]> {
     let total = |counters: &[AtomicU64; MAX_CPUS]| {
         counters
             .iter()
@@ -765,7 +764,7 @@ unsafe fn reset_vectors(state: &mut UserState) {
 ///
 /// (CONTEXT) Must be called by the user task whose registers these are, from inside its
 /// own system call.
-pub(crate) unsafe fn reset_user_state() {
+pub unsafe fn reset_user_state() {
     let fresh = UserState::new();
     // `execve` empties the thread-local slots and every selector, as Linux's
     // `flush_thread` and `start_thread` do: the new image starts with none of
@@ -899,7 +898,7 @@ pub(crate) fn enter_compat_segments() {
 ///
 /// `None` when every slot is taken (`ESRCH` on Linux) or `index` is past
 /// the three.
-pub(crate) fn set_thread_area(index: Option<usize>, descriptor: u64) -> Option<usize> {
+pub fn set_thread_area(index: Option<usize>, descriptor: u64) -> Option<usize> {
     with_interrupts_masked(|| {
         // SAFETY: (CONTEXT) interrupts masked, so these are the calling thread's.
         let mut tls = unsafe { gdt::read_tls() };
@@ -928,7 +927,7 @@ pub(crate) fn set_thread_area(index: Option<usize>, descriptor: u64) -> Option<u
 
 /// The descriptor in the calling thread's thread-local slot `index`, zero
 /// for an empty one: `get_thread_area`'s half that is the processor's.
-pub(crate) fn thread_area(index: usize) -> Option<u64> {
+pub fn thread_area(index: usize) -> Option<u64> {
     // SAFETY: (CONTEXT) interrupts masked by the closure's caller.
     with_interrupts_masked(|| unsafe { gdt::read_tls() }.get(index).copied())
 }

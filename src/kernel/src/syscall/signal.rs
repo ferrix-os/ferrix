@@ -401,7 +401,7 @@ impl Queue {
     /// # Errors
     ///
     /// [`AllocError`] when there is no memory for the origins.
-    fn new() -> Result<Queue, AllocError> {
+    pub fn new() -> Result<Queue, AllocError> {
         Ok(Queue {
             pending: 0,
             origins: fallible::try_boxed_filled(Origin::Kernel, NSIG as usize)?,
@@ -468,7 +468,7 @@ impl Signals {
     /// # Errors
     ///
     /// [`AllocError`] when there is no memory for the tables.
-    pub(crate) fn new() -> Result<Signals, AllocError> {
+    pub fn new() -> Result<Signals, AllocError> {
         Ok(Signals {
             actions: fallible::try_boxed_filled(Disposition::default(), NSIG as usize)?,
             shared: Queue::new()?,
@@ -499,7 +499,7 @@ impl Signals {
     /// # Errors
     ///
     /// [`AllocError`] when there is no memory for the tables.
-    pub(crate) fn for_fork(&self) -> Result<Signals, AllocError> {
+    pub fn for_fork(&self) -> Result<Signals, AllocError> {
         Ok(Signals {
             actions: fallible::try_boxed_slice(&self.actions)?,
             shared: Queue::new()?,

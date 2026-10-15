@@ -52,87 +52,87 @@ use crate::user::space::MMAP_MIN_ADDR;
 
 /// What the checks measured, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Numbers put through `dispatch`, across every check.
-    pub(crate) dispatched: u32,
+    pub dispatched: u32,
     /// How many of them were answered rather than refused.
-    pub(crate) answered: u32,
+    pub answered: u32,
     /// The architecture's number for `getpid`, printed so the boot log says
     /// which table this build actually used rather than asserting it silently.
-    pub(crate) getpid_number: usize,
+    pub getpid_number: usize,
     /// Pages the handler checks mapped, wrote through and gave back.
-    pub(crate) pages: u64,
+    pub pages: u64,
     /// Frames the whole check cost once everything was dropped. Zero, or a
     /// handler is leaking.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
     /// The status a program run in user mode exited with, if this
     /// architecture can run one yet.
-    pub(crate) user_status: Option<i32>,
+    pub user_status: Option<i32>,
     /// How many times each of two programs sharing one processor was switched
     /// to. Both at least twice, or they ran one after the other.
-    pub(crate) concurrent: Option<(u64, u64)>,
+    pub concurrent: Option<(u64, u64)>,
     /// The status a spinning program reported after being killed from outside.
-    pub(crate) killed: Option<i32>,
+    pub killed: Option<i32>,
     /// What a program that forks and waits exited with: 24 when right.
-    pub(crate) forked: Option<i32>,
+    pub forked: Option<i32>,
     /// The status a program that made threads exited with.
-    pub(crate) threaded: Option<i32>,
+    pub threaded: Option<i32>,
     /// How many programs whose last two threads called `exit` together each
     /// ended with their first thread's status.
-    pub(crate) exits_together: Option<u32>,
+    pub exits_together: Option<u32>,
     /// What a process ended with whose second thread replaced the program
     /// while its first waited: the new program's status when right.
-    pub(crate) dethreaded: Option<i32>,
+    pub dethreaded: Option<i32>,
     /// What a program of three threads, stopped and continued, was killed
     /// with afterwards: 137 when right.
-    pub(crate) stopped_threads: Option<i32>,
+    pub stopped_threads: Option<i32>,
     /// What a program of two threads, whose signals reached and were handed on
     /// to the thread that could take them, was killed with afterwards: 137
     /// when right.
-    pub(crate) handed_on: Option<i32>,
+    pub handed_on: Option<i32>,
     /// How many runs of that program gave back every frame once reaped, and in
     /// which measured window they first did.
-    pub(crate) reclaimed: Option<(u32, u32)>,
+    pub reclaimed: Option<(u32, u32)>,
     /// What a program that signals itself exited with once its handler had
     /// run and returned: 77 when right.
-    pub(crate) signalled: Option<i32>,
+    pub signalled: Option<i32>,
     /// What a program exited with whose parent and child each wrote a page
     /// they shared copy-on-write: 61 when right.
-    pub(crate) copied: Option<i32>,
+    pub copied: Option<i32>,
     /// What a program exited with whose child wrote a `MAP_SHARED` and a
     /// `MAP_PRIVATE` page: 62 when right.
-    pub(crate) shared: Option<i32>,
+    pub shared: Option<i32>,
     /// What a program that wrote a page after `mprotect` made it read-only was
     /// ended with: 139, `SIGSEGV`, when right.
-    pub(crate) narrowed: Option<i32>,
+    pub narrowed: Option<i32>,
     /// What a program exited with that `execve`d a program which exists, then
     /// one that does not: 42 and 2 when right.
-    pub(crate) execed: Option<(i32, i32)>,
+    pub execed: Option<(i32, i32)>,
     /// What a program exited with that was started with 57 as its start
     /// argument and exits with its first argument register: 57 when right.
-    pub(crate) started_with: Option<i32>,
+    pub started_with: Option<i32>,
     /// Processes the pid registry numbered, found, listed and let go.
-    pub(crate) pids: u32,
+    pub pids: u32,
     /// Whether an unmap on one processor was seen to wait for a copy holding
     /// its page on another; `false` with one processor, where it cannot run.
-    pub(crate) unmap_waited: bool,
+    pub unmap_waited: bool,
     /// Futex waiters a wake, a requeue and a wake across a `fork` roused: 3
     /// when right.
-    pub(crate) futex_woken: usize,
+    pub futex_woken: usize,
     /// How the vDSO answered a program's clock -- by reading the TSC or by
     /// making the system call -- or `None` on an architecture without one.
-    pub(crate) vdso: Option<&'static str>,
+    pub vdso: Option<&'static str>,
     /// Whether that vDSO is the signal return trampoline alone, with no
     /// clock for a program to call.
-    pub(crate) vdso_trampoline_only: bool,
+    pub vdso_trampoline_only: bool,
     /// Guest milliseconds each group of checks took, in order: the dispatch
     /// table, the handler checks with their leak window, and then each of the
     /// program checks.
-    pub(crate) spent_ms: [u64; 9],
+    pub spent_ms: [u64; 9],
 }
 
 /// Run them. `Err` names the first thing that was not true.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut counter = Counter::default();
     // Guest milliseconds per group, printed at the end as stage 5 prints its
     // own: these checks are the boot's largest single stretch, two seconds of
@@ -4885,7 +4885,7 @@ fn check_a_program_is_killed_from_outside() -> Result<Option<i32>, &'static str>
 // Stage 8: the calls that take a path
 // ---------------------------------------------------------------------------
 
-pub(crate) use paths::run_paths;
+pub use paths::run_paths;
 
 /// The path calls, against the real namespace under `/tmp`.
 ///
@@ -4916,6 +4916,7 @@ mod paths {
     use super::{map_rw, number_for};
     use crate::arch;
     use crate::arch::StatLayout;
+    use crate::syscall::stat::StatEncoding as _;
     use crate::fs;
     use crate::mm;
     use crate::syscall::process::{self, Process};
@@ -4923,23 +4924,23 @@ mod paths {
 
     /// What the path checks measured, for the boot log.
     #[derive(Debug)]
-    pub(crate) struct PathReport {
+    pub struct PathReport {
         /// Calls made on the measured run.
-        pub(crate) calls: u32,
+        pub calls: u32,
         /// Names `getdents64` reported from the directory it read in pieces.
-        pub(crate) listed: usize,
+        pub listed: usize,
         /// How many `getdents64` calls that took.
-        pub(crate) listing_calls: u32,
+        pub listing_calls: u32,
         /// Device nodes `mknodat` made and the check opened by number.
-        pub(crate) devices: usize,
+        pub devices: usize,
         /// Frames the measured run cost once everything was removed. Zero, or
         /// a path call is leaking.
-        pub(crate) leaked: i64,
+        pub leaked: i64,
         /// Dentries the namespace's cache held after the measured run that it
         /// did not hold before it. Reported beside `leaked` because the cache
         /// is the one thing that may legitimately keep memory across runs, and
         /// a frame it keeps is not a frame a call lost.
-        pub(crate) cache_growth: i64,
+        pub cache_growth: i64,
     }
 
     /// Where the checks work. The last of them removes it again.
@@ -4976,7 +4977,7 @@ mod paths {
 
     /// Run the checks twice and measure the second run, for the reason
     /// `check::run` gives: the first pays for size classes the heap keeps.
-    pub(crate) fn run_paths() -> Result<PathReport, &'static str> {
+    pub fn run_paths() -> Result<PathReport, &'static str> {
         // The reaper first. `check_syscalls`, just before this, starts
         // programs whose tasks exit, and the idle loop frees a finished task's
         // stack and its process's address space whenever it next runs. One
@@ -11731,7 +11732,7 @@ fn check_a_program_is_handed_its_start_argument() -> Result<Option<i32>, &'stati
 ///
 /// At the end of the file, and not among the path checks, so that no checked
 /// function above it moves off the lines its coverage was measured on.
-pub(crate) fn run_handles() -> Result<(), &'static str> {
+pub fn run_handles() -> Result<(), &'static str> {
     use ferrix_linux_abi::types::{AT_FDCWD, AT_HANDLE_CONNECTABLE, AT_HANDLE_FID};
     const CWD: u64 = AT_FDCWD as i64 as u64;
     let process = process::new_for_check().map_err(|_| "could not make a process")?;
@@ -11995,7 +11996,7 @@ fn seam_caller(number: usize) {
 ///
 /// A caller that could not start or did not finish, or a sum that is not
 /// exact.
-pub(crate) fn run_seam_count() -> Result<(usize, u64), &'static str> {
+pub fn run_seam_count() -> Result<(usize, u64), &'static str> {
     let number = number_for(Call::Getpid).ok_or("getpid has no number here")?;
     let online = crate::smp::topology().map_or(1, crate::smp::Topology::online);
     SEAM_DONE.store(0, Ordering::Release);

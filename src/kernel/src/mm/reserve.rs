@@ -207,7 +207,7 @@ fn enter(large: Option<Layout>) -> Result<(), AllocError> {
 /// # Errors
 ///
 /// [`AllocError`] when the heap cannot fill it.
-pub(crate) fn fill_reserve() -> Result<(), AllocError> {
+pub fn fill_reserve() -> Result<(), AllocError> {
     let section = reserve(None)?;
     drop(section);
     Ok(())
@@ -257,7 +257,7 @@ pub(super) fn bypassing_heap() -> bool {
 /// Make every section behave as if the heap had run dry, or stop. For the
 /// boot check in `object/alloc_check.rs`, which proves an operation inside a
 /// section completes on the reserve alone.
-pub(crate) fn bypass_heap_in_sections(on: bool) {
+pub fn bypass_heap_in_sections(on: bool) {
     BYPASS_HEAP.store(on, Ordering::Release);
 }
 
@@ -270,13 +270,13 @@ fn this_cpu_tag() -> Option<u64> {
 /// Make every section on this processor refused, as if the heap could not
 /// fill its reserve, or stop. For the boot check in `object/alloc_check.rs`,
 /// which runs with preemption off across the window.
-pub(crate) fn refuse_reserve_fills(on: bool) {
+pub fn refuse_reserve_fills(on: bool) {
     let tag = if on { this_cpu_tag().unwrap_or(0) } else { 0 };
     REFUSE_FILL.store(tag, Ordering::Release);
 }
 
 /// Allocations served from a reserve, and sections refused, since boot.
-pub(crate) fn reserve_counts() -> (u64, u64) {
+pub fn reserve_counts() -> (u64, u64) {
     (
         DRAWN.load(Ordering::Relaxed),
         REFUSED.load(Ordering::Relaxed),

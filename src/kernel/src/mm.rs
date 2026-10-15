@@ -61,18 +61,18 @@ use ferrix_sync::IrqSpinLock;
 
 use crate::fallible;
 
-pub(crate) mod check;
+pub mod check;
 mod reserve;
 mod unlinked;
 
-pub(crate) use reserve::{
-    Reserved, bypass_heap_in_sections, fill_reserve, refuse_reserve_fills, reserve, reserve_counts,
-};
+pub(crate) use reserve::{Reserved, reserve};
+pub use reserve::{fill_reserve};
+pub use reserve::{bypass_heap_in_sections, refuse_reserve_fills, reserve_counts};
 pub(crate) use unlinked::{Owner as TableOwner, UnlinkedTables, tables_kept};
 
 /// Why memory could not be brought up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum MemoryError {
+pub enum MemoryError {
     /// Firmware reported no usable memory at all.
     NoUsableMemory,
     /// No single usable region is large enough to hold the per-frame array.
@@ -204,19 +204,19 @@ fn with_heap<T>(body: impl FnOnce(&mut Heap) -> T) -> T {
 
 /// What memory looks like once it is up.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Stats {
+pub struct Stats {
     /// Frames the buddy allocator was given.
-    pub(crate) managed_frames: u64,
+    pub managed_frames: u64,
     /// Frames currently free.
-    pub(crate) free_frames: u64,
+    pub free_frames: u64,
     /// Bytes spent on the per-frame array.
-    pub(crate) page_array_bytes: u64,
+    pub page_array_bytes: u64,
     /// Physical address the per-frame array was placed at.
-    pub(crate) page_array_at: u64,
+    pub page_array_at: u64,
 }
 
 /// Bring up the frame allocator and the heap.
-pub(crate) fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
+pub fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
     PHYSMAP.store(view.raw().physmap_base, Ordering::Relaxed);
     PHYSMAP_PHYS.store(view.raw().physmap_phys, Ordering::Relaxed);
     ROOT_TABLE.store(view.raw().root_table_phys, Ordering::Relaxed);
@@ -295,7 +295,7 @@ pub(crate) const fn watermark_for(managed: u64) -> u64 {
 }
 
 /// Frames a program's memory and page tables may not take ([`WATERMARK`]).
-pub(crate) fn watermark() -> u64 {
+pub fn watermark() -> u64 {
     WATERMARK.load(Ordering::Relaxed)
 }
 
@@ -388,7 +388,7 @@ fn insert_region(frames: &mut Frames<'static>, region: &MemRegion, hole: u64, ho
 /// this task's allocations one at a time and this is the one
 /// (`fallible::frame_refused`), which reaches every caller's answer to an
 /// empty allocator without emptying it for the rest of the machine.
-pub(crate) fn allocate_frames(order: u8) -> Option<Frame> {
+pub fn allocate_frames(order: u8) -> Option<Frame> {
     if fallible::frame_refused() {
         return None;
     }
@@ -427,7 +427,7 @@ fn allocate_program_frames(order: u8) -> Option<Frame> {
 /// first toucher, and stays there until the frame is freed, by whoever and
 /// under whatever lock: the frame record keeps the job's slot, and
 /// [`release_frame`] and [`deallocate_frames`] take the charge back from it.
-pub(crate) fn allocate_user_frame() -> Option<Frame> {
+pub fn allocate_user_frame() -> Option<Frame> {
     let owner = crate::sched::running_group();
     crate::object::quota::charge_frame(owner).ok()?;
     let frame = allocate_program_frames(0).and_then(|frame| {
@@ -498,7 +498,7 @@ pub(crate) fn allocate_user_run(order: u8) -> Option<Frame> {
 /// memory that has to be one run longer than a block: the first frame, each
 /// block given back or split on its own as one from [`allocate_frames`]
 /// would be (`ferrix_frame::Frames::allocate_run`).
-pub(crate) fn allocate_frame_run(blocks: u64) -> Option<Frame> {
+pub fn allocate_frame_run(blocks: u64) -> Option<Frame> {
     if fallible::frame_refused() {
         return None;
     }
@@ -527,7 +527,7 @@ pub(crate) fn frame_state(frame: Frame) -> Option<ferrix_frame::State> {
 
 /// Take exactly `frame`, if it is free: for a check that must get back the
 /// frame it just gave up. `None` if something else has it.
-pub(crate) fn claim_frame(frame: Frame) -> Option<Frame> {
+pub fn claim_frame(frame: Frame) -> Option<Frame> {
     with_frames(|frames| frames.claim(frame))?
 }
 
@@ -535,12 +535,12 @@ pub(crate) fn claim_frame(frame: Frame) -> Option<Frame> {
 /// each given back on its own with [`release_frame`]: memory that must be
 /// contiguous when it is taken and is owned page by page after. Whether it
 /// was split.
-pub(crate) fn split_frames(frame: Frame, order: u8) -> bool {
+pub fn split_frames(frame: Frame, order: u8) -> bool {
     with_frames(|frames| frames.split(frame, order).is_ok()).unwrap_or(false)
 }
 
 /// Give back frames taken with [`allocate_frames`].
-pub(crate) fn deallocate_frames(frame: Frame, order: u8) {
+pub fn deallocate_frames(frame: Frame, order: u8) {
     count(Route::Freed, 1 << order);
     let owner = with_frames(|frames| {
         let owner = frames.owner(frame);
@@ -559,7 +559,7 @@ pub(crate) fn deallocate_frames(frame: Frame, order: u8) {
 /// for a frame that is not allocated, or one whose count would wrap. Both are
 /// kernel bugs rather than conditions a caller can recover from, so the caller
 /// that maps the page must treat `None` as "do not map it".
-pub(crate) fn share_frame(frame: Frame) -> Option<u32> {
+pub fn share_frame(frame: Frame) -> Option<u32> {
     with_frames(|frames| frames.share(frame).ok())?
 }
 
@@ -569,7 +569,7 @@ pub(crate) fn share_frame(frame: Frame) -> Option<u32> {
 /// freed through here rather than through [`deallocate_frames`], because a
 /// copy-on-write page may still be mapped by somebody else and the allocator
 /// refuses to free it while it is.
-pub(crate) fn release_frame(frame: Frame) -> bool {
+pub fn release_frame(frame: Frame) -> bool {
     // Qualified: `Released` is already `ferrix_paging`'s in this module, and
     // the two mean different things -- a page table given back versus a frame.
     let freed = with_frames(|frames| {
@@ -617,13 +617,13 @@ pub(crate) fn frame_owner(frame: Frame) -> u32 {
 ///
 /// For the fault handler's one real decision: a copy-on-write fault on a page
 /// nobody else holds any more does not need to copy anything.
-pub(crate) fn frame_references(frame: Frame) -> u32 {
+pub fn frame_references(frame: Frame) -> u32 {
     // NOALLOC: the frame allocator's per-frame record, looked up.
     with_frames(|frames| frames.entry(frame).map_or(0, PageEntry::refcount)).unwrap_or(0)
 }
 
 /// Frames currently free.
-pub(crate) fn free_frames() -> u64 {
+pub fn free_frames() -> u64 {
     with_frames(|frames| frames.free_frames()).unwrap_or(0)
 }
 
@@ -631,7 +631,7 @@ pub(crate) fn free_frames() -> u64 {
 /// it. `leaked` is the count expected at the end less the count found there:
 /// above zero the check kept frames, below it something outside the window
 /// gave frames back while it was open, which is not the check's leak.
-pub(crate) fn print_frame_delta(check: &str, leaked: i64) {
+pub fn print_frame_delta(check: &str, leaked: i64) {
     if leaked > 0 {
         crate::console::println!("  {check:<8} {leaked} frames not given back");
     } else if leaked < 0 {
@@ -643,7 +643,7 @@ pub(crate) fn print_frame_delta(check: &str, leaked: i64) {
 }
 
 /// Frames the allocator was given to manage: what `MemTotal` reports.
-pub(crate) fn managed_frames() -> u64 {
+pub fn managed_frames() -> u64 {
     with_frames(|frames| frames.managed_frames()).unwrap_or(0)
 }
 
@@ -653,7 +653,7 @@ pub(crate) fn heap_allocated() -> usize {
 }
 
 /// Pages the heap is holding for its size classes.
-pub(crate) fn heap_pages() -> usize {
+pub fn heap_pages() -> usize {
     with_heap(|heap| heap.slab_pages() + heap.large_pages())
 }
 
@@ -768,7 +768,7 @@ static ROOT_TABLE: AtomicU64 = AtomicU64::new(0);
 /// mechanism stage 6 uses for every anonymous user mapping, which is the point
 /// of testing it this way: a fault is resolved by *making the mapping true* and
 /// letting the instruction retry, never by stepping over it.
-pub(crate) const DEMAND_WINDOW: u64 = crate::vmap::DEMAND_WINDOW;
+pub const DEMAND_WINDOW: u64 = crate::vmap::DEMAND_WINDOW;
 
 /// Size of that window.
 pub(crate) const DEMAND_WINDOW_SIZE: u64 = 2 * 1024 * 1024;
@@ -921,7 +921,7 @@ pub(crate) fn map_demand_page(address: u64) -> Result<(), MemoryError> {
 }
 
 /// Translate a kernel virtual address the way the hardware would.
-pub(crate) fn translate(virt: u64) -> Option<u64> {
+pub fn translate(virt: u64) -> Option<u64> {
     with_tables(|mapper| {
         mapper
             .translate(&KernelPhysMem, VirtAddr(virt))
@@ -935,7 +935,7 @@ pub(crate) fn translate(virt: u64) -> Option<u64> {
 /// The counterpart of [`map_in`], and it takes no lock for the same reason
 /// that one does not: the caller owns the tree. An address space that other
 /// processors may be faulting in holds its own lock across this.
-pub(crate) fn translate_in(root: u64, virt: u64) -> Option<u64> {
+pub fn translate_in(root: u64, virt: u64) -> Option<u64> {
     let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
     mapper
         .translate(&KernelPhysMem, VirtAddr(virt))
@@ -944,7 +944,7 @@ pub(crate) fn translate_in(root: u64, virt: u64) -> Option<u64> {
 
 /// The flags of the leaf mapping `virt` in the tree rooted at `root`, as
 /// [`translate_in`] finds it: what a check reads a mapping's memory type from.
-pub(crate) fn flags_in(root: u64, virt: u64) -> Option<MapFlags> {
+pub fn flags_in(root: u64, virt: u64) -> Option<MapFlags> {
     let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
     mapper.leaf_flags(&KernelPhysMem, VirtAddr(virt))
 }
@@ -959,7 +959,7 @@ pub(crate) fn root_table() -> u64 {
 /// direct map. Read only over the kernel's own text and read-only data, which
 /// the loaders seal there ([`check::check_sealed_image`]); every frame the allocator
 /// hands out is outside that span, since the image is never freed.
-pub(crate) fn direct_map(phys: u64) -> u64 {
+pub fn direct_map(phys: u64) -> u64 {
     physmap(phys)
 }
 
@@ -978,7 +978,7 @@ pub(crate) fn direct_map(phys: u64) -> u64 {
 ///
 /// The runs are whole pages, so an answer for one byte holds for its page.
 /// Takes no lock and reads only atomics, so the panic path may ask it too.
-pub(crate) fn direct_map_ram(phys: u64) -> Option<u64> {
+pub fn direct_map_ram(phys: u64) -> Option<u64> {
     let count = RAM_RUN_COUNT.load(Ordering::Acquire);
     RAM_RUNS
         .iter()
@@ -1563,7 +1563,7 @@ pub(crate) fn image_span() -> (u64, u64) {
 
 /// What reclaiming early-boot memory recovered.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Reclaimed {
+pub struct Reclaimed {
     /// Frames the loader's own code and data occupied.
     pub(crate) loader_frames: u64,
     /// Frames the ACPI tables occupied.
@@ -1572,7 +1572,7 @@ pub(crate) struct Reclaimed {
 
 impl Reclaimed {
     /// Frames recovered in total.
-    pub(crate) const fn total(&self) -> u64 {
+    pub const fn total(&self) -> u64 {
         self.loader_frames + self.acpi_frames
     }
 }
@@ -1599,7 +1599,7 @@ impl Reclaimed {
 /// (KMEM) Every reference into loader or ACPI-reclaim memory must be dead. In this
 /// kernel that means being called from `kmain` after the last use of
 /// `crate::discovery::acpi::Firmware`, and it is called exactly once.
-pub(crate) unsafe fn reclaim_boot_memory(view: &BootView<'_>) -> Reclaimed {
+pub unsafe fn reclaim_boot_memory(view: &BootView<'_>) -> Reclaimed {
     let mut reclaimed = Reclaimed::default();
 
     let _ = with_frames(|frames| {
@@ -1669,7 +1669,7 @@ pub(crate) fn clear_root_slots(slots: core::ops::Range<usize>) {
 /// `write_bytes`, because a page handed out still holding the last owner's
 /// data is an information leak and from stage 6 the last owner is another
 /// process.
-pub(crate) fn zero_frame(frame: Frame) {
+pub fn zero_frame(frame: Frame) {
     // SAFETY: (FRAME) the caller has just taken `frame` from the buddy allocator, so
     // nothing else refers to it, and the direct map covers every frame of RAM
     // and is writable.
@@ -1835,7 +1835,7 @@ impl Held {
 /// The free frames and the heap's slab pages together, read until stable:
 /// what a [`FrameWindow`] holds constant, for a check that compares its own
 /// counts.
-pub(crate) fn held_frames() -> u64 {
+pub fn held_frames() -> u64 {
     Held::now().frames
 }
 
@@ -1860,13 +1860,13 @@ pub(crate) fn held_frames() -> u64 {
 /// Every report on a mismatch prints how each [`Route`] moved, so a failure
 /// names the way the frame went.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct FrameWindow {
+pub struct FrameWindow {
     opened: Held,
 }
 
 impl FrameWindow {
     /// Open a window on the frames as they stand.
-    pub(crate) fn open() -> FrameWindow {
+    pub fn open() -> FrameWindow {
         FrameWindow {
             opened: Held::now(),
         }
@@ -1879,13 +1879,13 @@ impl FrameWindow {
 
     /// Print what the window held at open and holds now, and how the heap
     /// and each route moved between: for a check about to fail on its count.
-    pub(crate) fn report(&self, check: &str) {
+    pub fn report(&self, check: &str) {
         self.report_at(check, &Held::now());
     }
 
     /// Frames kept since the window opened: above zero the check kept them,
     /// below zero something gave frames back inside the window.
-    pub(crate) fn kept(&self) -> i64 {
+    pub fn kept(&self) -> i64 {
         let now = Held::now();
         i64::try_from(self.opened.frames).unwrap_or(i64::MAX)
             - i64::try_from(now.frames).unwrap_or(i64::MAX)

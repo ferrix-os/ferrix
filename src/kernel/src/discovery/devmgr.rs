@@ -86,7 +86,7 @@ pub(crate) type ReadFile = fn(&[u8]) -> Result<Vec<u8>, Errno>;
 static READ_FILE: Once<ReadFile> = Once::new();
 
 /// Read `devmgr`'s files with `read`. The first registration stands.
-pub(crate) fn register_reader(read: ReadFile) {
+pub fn register_reader(read: ReadFile) {
     let _ = READ_FILE.call_once(|| read);
 }
 
@@ -99,7 +99,7 @@ fn no_files(_path: &[u8]) -> Result<Vec<u8>, Errno> {
 
 /// Whether a [`ReadFile`] is registered: the boot's check that [`start`]
 /// has something to read `devmgr` with.
-pub(crate) fn has_reader() -> bool {
+pub fn has_reader() -> bool {
     READ_FILE.get().is_some()
 }
 
@@ -113,7 +113,7 @@ const REQUEST_PATIENCE_NANOS: u64 = REPORT_PATIENCE_NANOS;
 
 /// The bus a driver drives devices on, as sysfs lists it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Bus {
+pub enum Bus {
     /// PCI functions: `/sys/bus/pci`.
     Pci,
     /// Device tree nodes: `/sys/bus/platform`.
@@ -155,7 +155,7 @@ static NEXT_TOKEN: AtomicU16 = AtomicU16::new(1);
 /// A driver's name, as the manifest gave it: a fixed array, so handing one
 /// out allocates nothing. Reads as the name without its padding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DriverName([u8; NAME_BYTES]);
+pub struct DriverName([u8; NAME_BYTES]);
 
 impl core::ops::Deref for DriverName {
     type Target = [u8];
@@ -170,7 +170,7 @@ impl core::ops::Deref for DriverName {
 /// # Errors
 ///
 /// [`AllocError`] when there is no memory for the list.
-pub(crate) fn drivers_on(bus: Bus) -> Result<Vec<(u16, DriverName)>, AllocError> {
+pub fn drivers_on(bus: Bus) -> Result<Vec<(u16, DriverName)>, AllocError> {
     let bindings = BINDINGS.lock();
     fallible::try_collect(
         bindings
@@ -185,7 +185,7 @@ pub(crate) fn drivers_on(bus: Bus) -> Result<Vec<(u16, DriverName)>, AllocError>
 }
 
 /// The driver that drives the device with index `device`, if one does.
-pub(crate) fn driver_of(device: usize) -> Option<(u16, DriverName)> {
+pub fn driver_of(device: usize) -> Option<(u16, DriverName)> {
     let bindings = BINDINGS.lock();
     let (_, driver) = bindings.bound.iter().find(|(at, _)| *at == device)?;
     let name = bindings.names.get(usize::from(*driver))?;
@@ -197,7 +197,7 @@ pub(crate) fn driver_of(device: usize) -> Option<(u16, DriverName)> {
 /// # Errors
 ///
 /// [`AllocError`] when there is no memory for the list.
-pub(crate) fn bound_to(driver: u16) -> Result<Vec<usize>, AllocError> {
+pub fn bound_to(driver: u16) -> Result<Vec<usize>, AllocError> {
     let mut devices: Vec<usize> = fallible::try_collect(
         BINDINGS
             .lock()
@@ -212,7 +212,7 @@ pub(crate) fn bound_to(driver: u16) -> Result<Vec<usize>, AllocError> {
 
 /// What a write to `bind` or `unbind` asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Request {
+pub enum Request {
     /// Start the driver on the device.
     Bind,
     /// Stop the driver the device has.
@@ -230,7 +230,7 @@ pub(crate) enum Request {
 /// take it -- or is not there; `EBUSY` when the device already has a
 /// driver; `EIO` when the driver was started and did not publish, or
 /// `devmgr` went; `ETIMEDOUT` when no answer came within the patience.
-pub(crate) fn request(kind: Request, device: usize, driver: u16) -> Result<(), Errno> {
+pub fn request(kind: Request, device: usize, driver: u16) -> Result<(), Errno> {
     let channel = CHANNEL.lock().clone().ok_or(Errno::ENODEV)?;
     let wire_device = u32::try_from(device).map_err(|_| Errno::ENODEV)?;
     let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
@@ -315,7 +315,7 @@ static UNRECORDED: AtomicU64 = AtomicU64::new(0);
 
 /// Take in what a message from `devmgr` says about drivers. Answers whether
 /// it was such a message.
-fn record(message: Message) -> bool {
+pub fn record(message: Message) -> bool {
     match message {
         Message::Driver { driver, bus } => {
             let bus = match bus {
@@ -379,15 +379,15 @@ fn forget_devmgr() {
 
 /// What `devmgr` reported, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Device nodes handed over.
-    pub(crate) devices: usize,
+    pub devices: usize,
     /// Driver images handed over.
-    pub(crate) drivers: usize,
+    pub drivers: usize,
     /// Drivers started whose disks the kernel accepted.
-    pub(crate) started: u32,
+    pub started: u32,
     /// Devices that matched a driver and got none.
-    pub(crate) failed: u32,
+    pub failed: u32,
 }
 
 /// Start `devmgr` and wait for its REPORT. `Ok(None)` when the image carries
@@ -397,7 +397,7 @@ pub(crate) struct Report {
 ///
 /// What did not happen, as a sentence: `devmgr` could not be started, or
 /// said nothing in time, or something other than REPORT.
-pub(crate) fn start() -> Result<Option<Report>, &'static str> {
+pub fn start() -> Result<Option<Report>, &'static str> {
     let Some(files) = read_files()? else {
         return Ok(None);
     };
@@ -434,7 +434,7 @@ struct Files {
 /// Read `devmgr`, the manifest and every driver it names through the
 /// registered reader, and note the names for sysfs. `Ok(None)` without
 /// `/sbin/devmgr`.
-fn read_files() -> Result<Option<Files>, &'static str> {
+pub fn read_files() -> Result<Option<Files>, &'static str> {
     let read = READ_FILE.get().copied().unwrap_or(no_files);
     let Ok(image) = read(PROGRAM) else {
         return Ok(None);
@@ -470,7 +470,7 @@ fn read_files() -> Result<Option<Files>, &'static str> {
 /// Write the DEVICES messages on `kernel_end`: `job` for the drivers, every
 /// device node twice, and `images` by the names [`read_files`] noted.
 /// Answers how many device nodes went.
-fn write_devices(
+pub fn write_devices(
     kernel_end: &Endpoint,
     images: Vec<Arc<Vmo>>,
     job: Arc<Job>,
@@ -586,7 +586,7 @@ const OPTION: &str = "ferrix.devmgr";
 static BY_INIT: AtomicBool = AtomicBool::new(false);
 
 /// Read [`OPTION`], once, early.
-pub(crate) fn read_option(view: &BootView<'_>) {
+pub fn read_option(view: &BootView<'_>) {
     let tree = crate::discovery::fdt::open(view).ok();
     let value = view.option(OPTION).or_else(|| {
         tree.as_ref()
@@ -607,7 +607,7 @@ pub(crate) fn read_option(view: &BootView<'_>) {
 }
 
 /// Whether pid 1 starts `devmgr` on this boot.
-pub(crate) fn by_init() -> bool {
+pub fn by_init() -> bool {
     BY_INIT.load(Ordering::Relaxed)
 }
 
@@ -618,7 +618,7 @@ pub(crate) fn by_init() -> bool {
 /// # Errors
 ///
 /// When there was no memory for it.
-pub(crate) fn make_drivers_job() -> Result<(), &'static str> {
+pub fn make_drivers_job() -> Result<(), &'static str> {
     let job = drivers_job()?;
     *DRIVERS_KEPT.lock() = Some(job);
     Ok(())
@@ -663,7 +663,7 @@ static HANDED: SpinLock<(usize, usize)> = SpinLock::new((0, 0));
 
 /// Wait until the `devmgr` pid 1 started has reported, or `deadline` passes.
 /// Whether it reported.
-pub(crate) fn wait_reported(deadline: u64) -> bool {
+pub fn wait_reported(deadline: u64) -> bool {
     REPORTED_QUEUE.wait_until_deadline(|| REPORTED.load(Ordering::Acquire), deadline)
 }
 
@@ -680,7 +680,7 @@ pub(crate) fn wait_reported(deadline: u64) -> bool {
 /// has started. `ALREADY_BOUND` while a `devmgr` it started lives;
 /// `BAD_STATE` after, until every process in that `devmgr`'s job has ended,
 /// and then every device is quiesced before the next one is handed them.
-pub(crate) fn devmgr_start(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
+pub fn devmgr_start(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
     let [starter, job, ..] = *registers;
     let core = caller.core();
     let job = starter_and_job(core, starter, job)?;
@@ -885,7 +885,7 @@ static DRIVER_ENDINGS: SpinLock<Vec<(Location, Arc<Exit>)>> = SpinLock::new(Vec:
 /// Note that `driver` mapped `node`'s registers or took its interrupt: it is
 /// that device's driver now. Cheap when it is already noted, which every call
 /// after its first is.
-pub(crate) fn note_driver(node: &device::DeviceNode, driver: &Process) {
+pub fn note_driver(node: &device::DeviceNode, driver: &Process) {
     let Some(location) = location_of(node) else {
         return;
     };
@@ -910,7 +910,7 @@ pub(crate) fn note_driver(node: &device::DeviceNode, driver: &Process) {
 
 /// The PCI location `devmgr`'s messages and every ring's HELLO name `node`
 /// by, if it is a PCI function.
-pub(crate) fn location_of(node: &device::DeviceNode) -> Option<Location> {
+pub fn location_of(node: &device::DeviceNode) -> Option<Location> {
     let device::Location::Pci(address) = node.location() else {
         return None;
     };
@@ -923,7 +923,7 @@ pub(crate) fn location_of(node: &device::DeviceNode) -> Option<Location> {
 
 /// How the driver of the device at `location` ended, if one was noted and
 /// has.
-pub(crate) fn driver_ending(location: Location) -> Option<(i32, Option<u32>)> {
+pub fn driver_ending(location: Location) -> Option<(i32, Option<u32>)> {
     let exit = DRIVER_ENDINGS
         .lock()
         .iter()
@@ -934,7 +934,7 @@ pub(crate) fn driver_ending(location: Location) -> Option<(i32, Option<u32>)> {
 
 /// Tell `devmgr` that the disk of the device at `location` is published.
 /// Nothing, before `devmgr` is started or if it is gone.
-pub(crate) fn published(location: Location) {
+pub fn published(location: Location) {
     let Some(channel) = CHANNEL.lock().clone() else {
         return;
     };
@@ -973,7 +973,7 @@ fn drivers_job() -> Result<Arc<Job>, &'static str> {
 
 /// The manifest's names, each NUL-padded to a driver name; an image without
 /// one lists no drivers.
-fn manifest(read: ReadFile) -> Result<Vec<[u8; NAME_BYTES]>, &'static str> {
+pub fn manifest(read: ReadFile) -> Result<Vec<[u8; NAME_BYTES]>, &'static str> {
     let Ok(text) = read(MANIFEST) else {
         return Ok(Vec::new());
     };

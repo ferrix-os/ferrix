@@ -19,42 +19,42 @@ use crate::user::space::AddressSpace;
 
 /// How many bytes a `siginfo_t` is, on every architecture Linux defines one
 /// for. A frame carries one already encoded.
-pub(crate) const SIGINFO_BYTES: usize = 128;
+pub const SIGINFO_BYTES: usize = 128;
 
 /// A frame the architecture could not write, or would not accept back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct BadFrame;
+pub struct BadFrame;
 
 /// `stack_t` as a frame records it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct StackRecord {
+pub struct StackRecord {
     /// `ss_sp`.
-    pub(crate) sp: u64,
+    pub sp: u64,
     /// `ss_flags`.
-    pub(crate) flags: i32,
+    pub flags: i32,
     /// `ss_size`.
-    pub(crate) size: u64,
+    pub size: u64,
 }
 
 /// Everything an architecture needs to put a handler's frame on the stack.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FrameRequest {
+pub struct FrameRequest {
     /// The signal.
-    pub(crate) signal: u32,
+    pub signal: u32,
     /// Its `siginfo_t`, already encoded.
-    pub(crate) info: [u8; SIGINFO_BYTES],
+    pub info: [u8; SIGINFO_BYTES],
     /// Where the handler is.
-    pub(crate) handler: u64,
+    pub handler: u64,
     /// The handler's `SA_*` flags.
-    pub(crate) flags: u64,
+    pub flags: u64,
     /// Where the handler returns to.
-    pub(crate) restorer: u64,
+    pub restorer: u64,
     /// The mask the frame saves, which `rt_sigreturn` puts back.
-    pub(crate) mask: u64,
+    pub mask: u64,
     /// The address the frame is built below, alternate stack already chosen.
-    pub(crate) stack: u64,
+    pub stack: u64,
     /// The alternate stack, as `uc_stack` records it.
-    pub(crate) altstack: StackRecord,
+    pub altstack: StackRecord,
     /// The ABI of the call that installed the handler: on x86-64 an i386
     /// handler is entered on an i386 frame and any other on a 64-bit one,
     /// whatever mode the interrupted code was in (Linux's `SA_IA32_ABI`).
@@ -62,7 +62,7 @@ pub(crate) struct FrameRequest {
         not(target_arch = "x86_64"),
         expect(dead_code, reason = "only x86-64 has a second frame to choose")
     )]
-    pub(crate) abi: crate::trap::Abi,
+    pub abi: crate::trap::Abi,
     /// Where the process's signal return page is, on an architecture that
     /// has one (ARMv7-A's, `syscall::sigpage`): what a handler without a
     /// restorer returns through (F-48).
@@ -70,18 +70,18 @@ pub(crate) struct FrameRequest {
         not(target_arch = "arm"),
         expect(dead_code, reason = "only ARMv7-A has a signal return page to read")
     )]
-    pub(crate) sigpage: Option<u64>,
+    pub sigpage: Option<u64>,
 }
 
 /// What an architecture read back out of a frame, besides the registers.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Restored {
+pub struct Restored {
     /// The mask the frame saved.
-    pub(crate) mask: u64,
+    pub mask: u64,
     /// The alternate stack the frame recorded, or `None` for a frame that
     /// records none -- i386's `sigframe`, whose `sigreturn` leaves the
     /// alternate stack as it is, as Linux's does.
-    pub(crate) altstack: Option<StackRecord>,
+    pub altstack: Option<StackRecord>,
 }
 
 /// A frame's bytes while they are built or read: offsets checked, so an

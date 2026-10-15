@@ -16,7 +16,7 @@ use ferrix_sync::Once;
 use crate::arch;
 use crate::console::println;
 
-pub(crate) mod check;
+pub mod check;
 
 /// Why the kernel was entered, in terms every architecture shares.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -78,17 +78,17 @@ static FAULTS_HANDLED: AtomicU64 = AtomicU64::new(0);
 static USER_INTERRUPTS: AtomicU64 = AtomicU64::new(0);
 
 /// How many breakpoints have been taken.
-pub(crate) fn breakpoint_count() -> u64 {
+pub fn breakpoint_count() -> u64 {
     BREAKPOINTS.load(Ordering::Relaxed)
 }
 
 /// How many page faults have been resolved.
-pub(crate) fn handled_fault_count() -> u64 {
+pub fn handled_fault_count() -> u64 {
     FAULTS_HANDLED.load(Ordering::Relaxed)
 }
 
 /// How many interrupts have arrived while a program was in user mode.
-pub(crate) fn user_interrupt_count() -> u64 {
+pub fn user_interrupt_count() -> u64 {
     USER_INTERRUPTS.load(Ordering::Relaxed)
 }
 
@@ -179,21 +179,21 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
 /// no constructor and nothing fallible in it: a trampoline that has already
 /// switched stacks must not meet a `Result`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SyscallArgs {
+pub struct SyscallArgs {
     /// Which table [`SyscallArgs::number`] is in: the entry's, not the
     /// process's, as Linux decides it (`in_compat_syscall()`).
-    pub(crate) abi: Abi,
+    pub abi: Abi,
     /// The number the program passed, in [`SyscallArgs::abi`]'s table.
-    pub(crate) number: usize,
+    pub number: usize,
     /// The six argument registers, in order. A call taking fewer leaves the
     /// rest as whatever the program happened to have in them, which is why no
     /// handler may read past its own arity.
-    pub(crate) args: [u64; 6],
+    pub args: [u64; 6],
     /// The instruction after the one that made the call: what the entry's
     /// saved program counter holds. Read by [`filter_system_call`] alone
     /// (`seccomp_data.instruction_pointer`, and a `SIGSYS`'s `si_call_addr`);
     /// zero from a kernel caller, which has no instruction.
-    pub(crate) ip: u64,
+    pub ip: u64,
 }
 
 /// The ABI a system call was made in, or a program is entered in.
@@ -204,7 +204,7 @@ pub(crate) struct SyscallArgs {
 /// Every other entry on every architecture is [`Abi::Native`], which is
 /// also what a record that was never given one holds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum Abi {
+pub enum Abi {
     /// The architecture's own: x86-64's, AArch64's, or ARMv7-A's EABI.
     #[default]
     Native,
@@ -223,7 +223,7 @@ pub(crate) enum Abi {
 /// data — an entry point and a stack pointer — keeps everything above the
 /// trap path free of any architecture's `TrapFrame`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Outcome {
+pub enum Outcome {
     /// Write this into the return register and resume the program.
     ///
     /// Already encoded as Linux encodes it: a value in `-4095..=-1` is
@@ -271,7 +271,7 @@ static SYSCALL_ENTRY: Once<SyscallEntry> = Once::new();
 
 /// Answer system calls with `entry` from now on. The first registration
 /// stands; `main.rs` makes it before anything can enter user mode.
-pub(crate) fn set_syscall_entry(entry: SyscallEntry) {
+pub fn set_syscall_entry(entry: SyscallEntry) {
     let _ = SYSCALL_ENTRY.call_once(|| entry);
 }
 
@@ -285,7 +285,7 @@ pub(crate) fn set_syscall_entry(entry: SyscallEntry) {
 /// paths `exit` and a fatal signal take, and answers [`Verdict::Errno`] for the
 /// call it is in the middle of. `docs/SECCOMP.md` §3.3, F-09's terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Verdict {
+pub enum Verdict {
     /// Nothing to add: go on as a kernel with no filter would.
     Continue,
     /// The call does not run, and fails with this errno. The core clamps it to
@@ -296,7 +296,7 @@ pub(crate) enum Verdict {
 }
 
 /// The largest errno a call returns: Linux's `MAX_ERRNO`.
-pub(crate) const MAX_ERRNO: u32 = 4095;
+pub const MAX_ERRNO: u32 = 4095;
 
 /// A registered look at a call before anything answers it, given the call as
 /// the entry read it. Runs with interrupts masked, as the entry holds them,
@@ -305,7 +305,7 @@ pub(crate) const MAX_ERRNO: u32 = 4095;
 /// bounded, short time -- a filter's program is up to 32,768 steps -- opens
 /// them itself for exactly that stretch and closes them again before it
 /// returns, as the dispatcher does around the call it serves.
-pub(crate) type SyscallFilter = fn(&SyscallArgs) -> Verdict;
+pub type SyscallFilter = fn(&SyscallArgs) -> Verdict;
 
 /// The registered filter, set once at bring-up, beside [`SYSCALL_ENTRY`] and
 /// for the same reason: which calls a program may make is the personality's
@@ -319,7 +319,7 @@ static SYSCALL_FILTER: Once<SyscallFilter> = Once::new();
 /// `filter`, after it did. A filter already registered by anyone else stands,
 /// and leaves the flag down, so its calls are never quiet. `main.rs` makes it
 /// before anything can enter user mode.
-pub(crate) fn set_quiet_syscall_filter(filter: SyscallFilter) {
+pub fn set_quiet_syscall_filter(filter: SyscallFilter) {
     let mut installed = false;
     let _ = SYSCALL_FILTER.call_once(|| {
         installed = true;
@@ -339,13 +339,13 @@ pub(crate) fn set_quiet_syscall_filter(filter: SyscallFilter) {
 ///
 /// With nothing registered every call goes on, and the core alone behaves as
 /// it did before the registration existed.
-pub(crate) fn filter_system_call(args: &SyscallArgs) -> Option<Outcome> {
+pub fn filter_system_call(args: &SyscallArgs) -> Option<Outcome> {
     ask(&SYSCALL_FILTER, args)
 }
 
 /// [`set_quiet_syscall_filter`]'s registration for any slot: the first
 /// registration stands.
-pub(crate) fn register(slot: &Once<SyscallFilter>, filter: SyscallFilter) {
+pub fn register(slot: &Once<SyscallFilter>, filter: SyscallFilter) {
     let _ = slot.call_once(|| filter);
 }
 
@@ -353,7 +353,7 @@ pub(crate) fn register(slot: &Once<SyscallFilter>, filter: SyscallFilter) {
 /// verdict, and the only place it is made. An errno is clamped here, in the
 /// core, so that no filter can write a value outside `-1..=-4095` or a positive
 /// one into a program's return register.
-pub(crate) fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outcome> {
+pub fn ask(slot: &Once<SyscallFilter>, args: &SyscallArgs) -> Option<Outcome> {
     let filter = slot.get()?;
     match filter(args) {
         Verdict::Continue => None,
@@ -387,7 +387,7 @@ unsafe extern "Rust" {
 /// The personality's quiet predicate, as `main.rs` defines it: whether the
 /// registered filter would let every call of the running task through
 /// without looking at it.
-pub(crate) type FilterQuiet = fn() -> bool;
+pub type FilterQuiet = fn() -> bool;
 
 // The declarations are the aliases' type, as `main.rs`'s definitions are.
 const _: FastWriteRead = ferrix_fast_write_read;
@@ -408,7 +408,7 @@ static QUIET_REGISTERED: AtomicBool = AtomicBool::new(false);
 /// filter is in place: a reader sees no filter (quiet), the filter without
 /// the flag (never quiet), or both (the predicate's answer), and never the
 /// flag beside a filter whose predicate was not registered with it.
-pub(crate) fn filter_quiet() -> bool {
+pub fn filter_quiet() -> bool {
     match (
         SYSCALL_FILTER.get(),
         QUIET_REGISTERED.load(Ordering::Acquire),
@@ -426,7 +426,7 @@ pub(crate) fn filter_quiet() -> bool {
     expect(dead_code, reason = "only x86-64's SYSCALL entry takes the fast path")
 )]
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum Fast {
+pub enum Fast {
     /// A test failed, and nothing changed: the entry goes on as for any
     /// call, from the filter.
     Declined,
@@ -443,7 +443,7 @@ pub(crate) enum Fast {
 /// The fast path, given the call's six argument registers. Entered from
 /// x86-64's `SYSCALL` entry alone, with interrupts masked, before the
 /// filter; returns with them masked.
-pub(crate) type FastWriteRead = fn(&[u64; 6]) -> Fast;
+pub type FastWriteRead = fn(&[u64; 6]) -> Fast;
 
 /// Whether this boot takes `channel_write_read` through the fast path: set
 /// at boot only when `ferrix.fastpath=on` (`fastpath.rs`), so that a clear
@@ -452,7 +452,7 @@ static FAST_PATH_ON: AtomicBool = AtomicBool::new(false);
 
 /// Take `channel_write_read` through the fast path from now on. Set once,
 /// before the first program, and only on a boot that asks for it.
-pub(crate) fn set_fast_write_read() {
+pub fn set_fast_write_read() {
     FAST_PATH_ON.store(true, Ordering::Release);
 }
 
@@ -460,7 +460,7 @@ pub(crate) fn set_fast_write_read() {
 /// `ferrix_fast_write_read`, called directly from the entry
 /// ([`fast_path_on`], [`fast_write_read_now`]) and named here for the
 /// checks that ask whether it is on.
-pub(crate) fn fast_write_read() -> Option<FastWriteRead> {
+pub fn fast_write_read() -> Option<FastWriteRead> {
     fast_path_on().then_some(fast_write_read_now as FastWriteRead)
 }
 
@@ -481,7 +481,7 @@ pub(crate) fn fast_write_read_now(a: &[u64; 6]) -> Fast {
 /// With nothing registered every call is `ENOSYS`, which is what a kernel
 /// with no dispatcher above its core can honestly say, and never a panic: the
 /// caller is a trap vector with a program waiting on it.
-pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
+pub fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> Outcome {
     // A program's call, marked so that a wake it makes leaves the decision to
     // its way out rather than to the timer (`sched::resched_here`).
     if regs.is_some() {
@@ -519,7 +519,7 @@ pub(crate) fn system_call(args: &SyscallArgs, regs: Option<&arch::UserRegs>) -> 
 /// types, and a trap path that had to name them would be back where F-02
 /// started.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FaultOutcome {
+pub enum FaultOutcome {
     /// Delivered to a handler, or queued, or discarded because the program
     /// ignores it. The program continues either way.
     Delivered,
@@ -533,27 +533,28 @@ pub(crate) enum FaultOutcome {
     NoProcess,
 }
 
+/// DOC-OWED
 #[derive(Debug)]
-pub(crate) struct ReturnPath {
+pub struct ReturnPath {
     /// Whether the way back has anything to do for the running task. Asked by
     /// [`attention_due`] when the task's pending-work word has a bit set, so
     /// the registers are only copied into an [`arch::UserContext`] when
     /// something will use them. It reads the state alone and clears no bit:
     /// the way out has cleared the word's before asking.
-    pub(crate) needs_attention: fn() -> bool,
+    pub needs_attention: fn() -> bool,
     /// Act on whatever `needs_attention` found. Does not return when the
     /// process has ended.
-    pub(crate) return_to_user: fn(&mut arch::UserContext),
+    pub return_to_user: fn(&mut arch::UserContext),
     /// Restore the registers a signal frame saved: `sigreturn`, and
     /// `rt_sigreturn` when the flag is set.
-    pub(crate) sigreturn: fn(&mut arch::UserContext, bool),
+    pub sigreturn: fn(&mut arch::UserContext, bool),
     /// Force a signal on the running program for a fault it took: the
     /// signal number, its `si_code`, and the faulting address.
     ///
     /// The second upcall the core owed an interface for. A fault becoming a
     /// `SIGSEGV` is the personality's policy, but deciding that a fault *is*
     /// the program's problem is the trap path's, and the trap path is core.
-    pub(crate) fault_signal: fn(u32, i32, u64) -> FaultOutcome,
+    pub fault_signal: fn(u32, i32, u64) -> FaultOutcome,
 }
 
 /// The registered return path, or null until the personality registers one.
@@ -568,7 +569,7 @@ static RETURN_PATH: AtomicPtr<ReturnPath> = AtomicPtr::new(ptr::null_mut());
 /// Called once, from init, before any user mode runs. A kernel built without
 /// a personality registers nothing and returns to user mode directly, which
 /// is the property that makes the core independently analysable.
-pub(crate) fn set_return_path(path: &'static ReturnPath) {
+pub fn set_return_path(path: &'static ReturnPath) {
     RETURN_PATH.store(ptr::from_ref(path).cast_mut(), Ordering::Release);
 }
 
@@ -581,7 +582,7 @@ pub(crate) fn set_return_path(path: &'static ReturnPath) {
 /// for. The personality is asked only when a bit is set -- or, with the
 /// self-checks on, when none is, to show that none should have been
 /// (`sched::work::audit`).
-pub(crate) fn attention_due(path: &ReturnPath) -> bool {
+pub fn attention_due(path: &ReturnPath) -> bool {
     if crate::sched::work::wants_attention(crate::sched::work::look()) {
         return (path.needs_attention)();
     }
@@ -590,7 +591,7 @@ pub(crate) fn attention_due(path: &ReturnPath) -> bool {
 
 /// Whether the way back to user mode has anything to do for the running
 /// task: a kill, a signal, a stop. What a throttled task looks for.
-pub(crate) fn must_attend() -> bool {
+pub fn must_attend() -> bool {
     return_path().is_some_and(|path| (path.needs_attention)())
 }
 

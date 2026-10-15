@@ -61,13 +61,14 @@ const LAST_LOOK_HOLDS: bool = true;
 /// So `ready` runs unpreemptible and must not block. One that blocks stops
 /// the machine with FX-0503, where it would otherwise corrupt the outer wait.
 #[must_use = "dropping it at once leaves the last look preemptible"]
-pub(crate) struct LastLook(());
+#[derive(Debug)]
+pub struct LastLook(());
 
 impl LastLook {
     /// Hold preemption off from here, before the task is marked blocked.
     /// The wait's own line is the site FX-0503 names if `ready` blocks.
     #[track_caller]
-    pub(crate) fn hold() -> LastLook {
+    pub fn hold() -> LastLook {
         if LAST_LOOK_HOLDS {
             super::preempt::preempt_disable();
         }
@@ -111,7 +112,7 @@ impl Drop for LastLook {
 /// `poll` that `poll`, `select` and `epoll_wait` reach through one, was
 /// audited against this when F-69 was fixed.
 #[derive(Debug)]
-pub(crate) struct WaitQueue {
+pub struct WaitQueue {
     /// Who is waiting.
     ///
     /// **Masking interrupts, so that a handler may wake the queue and a
@@ -184,7 +185,7 @@ fn count_wakes(queues: &[&WaitQueue], drained: &[bool]) {
 
 impl WaitQueue {
     /// A queue with nobody on it.
-    pub(crate) const fn new() -> WaitQueue {
+    pub const fn new() -> WaitQueue {
         WaitQueue {
             waiters: IrqSpinLock::new(Vec::new()),
             woken: AtomicU32::new(0),
@@ -213,7 +214,7 @@ impl WaitQueue {
     /// waker first leaves a stale entry in one of the two, and both tolerate
     /// it — waking a task that is already runnable is a no-op, and a sleeper
     /// whose deadline was cleared is dropped when it is next looked at.
-    pub(crate) fn wait_until_deadline(&self, ready: impl FnMut() -> bool, deadline: u64) -> bool {
+    pub fn wait_until_deadline(&self, ready: impl FnMut() -> bool, deadline: u64) -> bool {
         self.wait_sliced(ready, deadline, Some(RECHECK_NANOS))
     }
 
@@ -253,7 +254,7 @@ impl WaitQueue {
     ///   the state is read. Of two such fences one comes first, and the side
     ///   whose fence comes second sees the other's store: the waker finds the
     ///   task blocked and wakes it, or `ready` finds the process ending.
-    pub(crate) fn wait_trusting(&self, ready: impl FnMut() -> bool) -> bool {
+    pub fn wait_trusting(&self, ready: impl FnMut() -> bool) -> bool {
         self.wait_sliced(ready, u64::MAX, None)
     }
 
@@ -395,7 +396,7 @@ impl WaitQueue {
     /// `epoll_wait` pass a long one when every file they watch wakes a queue
     /// on every change, so a program waiting on quiet files is not woken
     /// every few milliseconds to find them still quiet.
-    pub(crate) fn wait_on_any(
+    pub fn wait_on_any(
         queues: &[&WaitQueue],
         mut ready: impl FnMut() -> bool,
         deadline: u64,
@@ -465,14 +466,14 @@ impl WaitQueue {
     }
 
     /// How many waits on this queue a wake has ended: see the field.
-    pub(crate) fn waits_ended_by_a_wake(&self) -> u32 {
+    pub fn waits_ended_by_a_wake(&self) -> u32 {
         self.woken.load(Ordering::Relaxed)
     }
 
     /// How many tasks are listed on the queue now, for the checks: one that
     /// means to show a waiter was ended by a wake has to know the waiter got
     /// onto the queue before the wake, not guess it from how long it gave it.
-    pub(crate) fn listed(&self) -> usize {
+    pub fn listed(&self) -> usize {
         self.waiters.lock().len()
     }
 
@@ -486,17 +487,17 @@ impl WaitQueue {
 
     /// How many tasks are listed, read without the list's lock: the fast
     /// path's T10 (`docs/OPAQUE-KERNEL.md` §9.7). See the field.
-    pub(crate) fn listed_now(&self) -> usize {
+    pub fn listed_now(&self) -> usize {
         self.count.load(Ordering::Acquire)
     }
 
     /// How many times the queue has been woken: see the field.
-    pub(crate) fn wakes(&self) -> u64 {
+    pub fn wakes(&self) -> u64 {
         self.wakes.load(Ordering::Relaxed)
     }
 
     /// Wake everything waiting.
-    pub(crate) fn wake_all(&self) {
+    pub fn wake_all(&self) {
         self.wake_all_with(super::Wake::Home);
     }
 

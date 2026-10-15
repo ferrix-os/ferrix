@@ -21,31 +21,31 @@ use crate::{arch, mm, vmap};
 
 /// What the checks found, for the boot log.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Rounds of work every processor ran.
-    pub(crate) rounds: u64,
+    pub rounds: u64,
     /// Inter-processor interrupts the secondaries took doing it.
-    pub(crate) ipis: u64,
+    pub ipis: u64,
     /// Times a page was moved to another frame under every processor.
-    pub(crate) remaps: u64,
+    pub remaps: u64,
     /// Shootdowns run by interrupt while it was. None where the architecture
     /// invalidates every processor's TLB itself.
-    pub(crate) shootdowns: u64,
+    pub shootdowns: u64,
     /// Grace periods the writer waited for.
-    pub(crate) grace_periods: u64,
+    pub grace_periods: u64,
     /// Read-side sections the readers ran meanwhile.
-    pub(crate) reads: u64,
+    pub reads: u64,
     /// What the contended counter came to.
-    pub(crate) counter: u64,
+    pub counter: u64,
     /// What it had to come to.
-    pub(crate) expected: u64,
+    pub expected: u64,
     /// Processors whose increments overlapped another's in time.
-    pub(crate) overlapping: u64,
+    pub overlapping: u64,
     /// The round of the contended count that showed them overlapping, or its
     /// last: a count of its own, since [`Report::rounds`] is `everywhere`'s.
-    pub(crate) counter_round: u64,
+    pub counter_round: u64,
     /// Updates the same count lost without the lock.
-    pub(crate) lost: u64,
+    pub lost: u64,
 }
 
 /// Run the checks.
@@ -53,7 +53,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// The first one that fails, as a sentence.
-pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
+pub fn run(topology: &Topology) -> Result<Report, &'static str> {
     let mut report = Report::default();
     everywhere(topology, &mut report)?;
     page_sets()?;
@@ -751,7 +751,7 @@ fn spin_for(nanos: u64) {
 /// processor it left.
 ///
 /// Verifies: L.smp.16
-pub(crate) fn migrating_shootdown(
+pub fn migrating_shootdown(
     topology: &Topology,
 ) -> Result<Option<(usize, usize)>, &'static str> {
     if arch::TLB_FLUSH_IS_BROADCAST || topology.online() < 3 {
@@ -974,14 +974,14 @@ fn late_round(held: usize, wait: LateWait) -> Result<super::Late, &'static str> 
 
 /// What [`late_answer`] saw.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct LateAnswers {
+pub struct LateAnswers {
     /// The processor kept from answering.
-    pub(crate) held: usize,
+    pub held: usize,
     /// How long the grace period waited for it, in microseconds.
-    pub(crate) grace_us: u64,
+    pub grace_us: u64,
     /// How long the shootdown waited for it, in microseconds; `None` where
     /// the architecture's invalidation is broadcast and nothing waits.
-    pub(crate) shootdown_us: Option<u64>,
+    pub shootdown_us: Option<u64>,
 }
 
 /// A processor that answers a wait past its late bound -- here kept from
@@ -1011,7 +1011,7 @@ pub(crate) struct LateAnswers {
 /// counted.
 ///
 /// Verifies: L.smp.33
-pub(crate) fn late_answer(topology: &Topology) -> Result<Option<LateAnswers>, &'static str> {
+pub fn late_answer(topology: &Topology) -> Result<Option<LateAnswers>, &'static str> {
     if topology.online() < 2 {
         return Ok(None);
     }

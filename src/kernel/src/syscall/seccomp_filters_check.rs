@@ -35,24 +35,24 @@ use crate::trap::{Abi, SyscallArgs, Verdict};
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls a filtered thread made through the core's entry.
-    pub(crate) calls: usize,
+    pub calls: usize,
     /// Answers `seccomp(2)` and `prctl` gave to what Chromium's probes ask.
-    pub(crate) probes: usize,
+    pub probes: usize,
     /// Children and threads that judged a call as their creator's chain did.
-    pub(crate) inherited: usize,
+    pub inherited: usize,
     /// Processes a filter ended with `SIGSYS` or `SIGKILL`.
-    pub(crate) killed: usize,
+    pub killed: usize,
     /// Filters in the longest chain made and released.
-    pub(crate) chain: usize,
+    pub chain: usize,
     /// What a call costs that chain, in nanoseconds: 6,554 runs of one step.
-    pub(crate) walk_many: u64,
+    pub walk_many: u64,
     /// What a call costs a chain of seven 4,096-instruction filters, the most
     /// steps there can be, in nanoseconds.
-    pub(crate) walk_long: u64,
+    pub walk_long: u64,
     /// What releasing the longest chain costs, in nanoseconds.
-    pub(crate) release: u64,
+    pub release: u64,
 }
 
 /// `PR_SET_NO_NEW_PRIVS` and `PR_GET_NO_NEW_PRIVS`.
@@ -217,7 +217,7 @@ fn judge_thread(thread: &Thread, call: usize) -> Option<u32> {
 /// # Errors
 ///
 /// Which property failed.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let before = seccomp::filtered_threads();
     let mut report = Report::default();
     probes(&mut report)?;

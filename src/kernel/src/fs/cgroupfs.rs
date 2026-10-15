@@ -1051,7 +1051,7 @@ fn writer() -> audit::Subject {
 }
 
 /// Record the writer setting `job`'s limit on `resource` to `limit`.
-fn limit_set(job: &Job, resource: Resource, limit: u64) {
+pub fn limit_set(job: &Job, resource: Resource, limit: u64) {
     audit::limit_set(
         audit::CGROUP_LIMIT,
         writer(),
@@ -1129,7 +1129,7 @@ fn set_io_max(job: &Job, data: &[u8]) -> Result<()> {
 }
 
 /// A write to `cpu.max`.
-fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
+pub fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
     let (_, period) = job.bandwidth();
     let max = ferrix_cgroupfs::cpu::parse_max(data, period / 1000).map_err(errno)?;
     let runtime = max.quota.map_or(quota::UNLIMITED, |us| us * 1000);
@@ -1149,7 +1149,7 @@ fn set_cpu_max(job: &Job, data: &[u8]) -> Result<()> {
 }
 
 /// Set `job`'s `cpu.weight`, from either file that does, and record it.
-fn set_weight(job: &Job, weight: u32) {
+pub fn set_weight(job: &Job, weight: u32) {
     if job.set_cpu_weight(weight) {
         audit::limit_set(
             audit::CGROUP_LIMIT,
@@ -1162,7 +1162,7 @@ fn set_weight(job: &Job, weight: u32) {
 }
 
 /// A write of `data` to a file of `job`, opened by `opener`.
-fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<usize> {
+pub fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<usize> {
     match kind {
         Kind::Procs => move_process(job, data, opener)?,
         Kind::Kill => {
@@ -1321,42 +1321,42 @@ pub(crate) fn relative_names(job: &Job, root: &Job) -> Result<Vec<String>> {
 
 /// What [`check`] counted, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Cgroups made and removed.
-    pub(crate) made: u32,
+    pub made: u32,
     /// Writes and names refused as Linux refuses them.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Waits on `cgroup.events` that a release's wake ended.
-    pub(crate) woken: u32,
+    pub woken: u32,
     /// Moves judged by the delegation rules, allowed and refused.
-    pub(crate) moves: u32,
+    pub moves: u32,
     /// Whether a child started by `CLONE_INTO_CGROUP` found itself there.
-    pub(crate) cloned: bool,
+    pub cloned: bool,
     /// Native registrations for `EMPTY` fired by the populated flip.
-    pub(crate) emptied: u32,
+    pub emptied: u32,
     /// Writes to the controllers' files refused as Linux refuses them.
-    pub(crate) controlled: u32,
+    pub controlled: u32,
     /// Processes the scoped OOM kill ended at a `memory.max`.
-    pub(crate) oom_killed: u64,
+    pub oom_killed: u64,
     /// What a native process that uid 1000 made in its delegated cgroup
     /// exited with: the low byte of what `getuid` answered it
     /// (`docs/AUTH.md` §7, P0).
-    pub(crate) created_as: u32,
+    pub created_as: u32,
     /// A delegatee's attempts on its own cgroup's limits, natively and
     /// through the files, refused.
-    pub(crate) limits_refused: u32,
+    pub limits_refused: u32,
     /// Pages of files' caches that reclaim gave back, inside the cgroup
     /// asking and no other, and that read back as the source has them.
-    pub(crate) reclaimed: u64,
+    pub reclaimed: u64,
     /// Checks of `cgroup.freeze` passed: a program frozen, held through
     /// `SIGCONT`, thawed, killed frozen, and the nested and moved cases.
-    pub(crate) frozen: u32,
+    pub frozen: u32,
     /// Periods of a `cpu.max` in which a program was throttled: held to a
     /// fifth of a processor, in its cgroup and beneath one.
-    pub(crate) throttled: u64,
+    pub throttled: u64,
     /// Requests the `io` controller charged to the right cgroups, and
     /// the ones `io.max` spaced out.
-    pub(crate) disk_requests: u32,
+    pub disk_requests: u32,
 }
 
 /// Where [`check`] mounts its cgroupfs: under `/tmp`, and gone afterwards.
@@ -1480,7 +1480,7 @@ impl Harness {
 /// # Errors
 ///
 /// The first thing that was not as Linux has it, by name.
-pub(crate) fn check() -> Checked<Report> {
+pub fn check() -> Checked<Report> {
     let ns = fs::namespace();
     let mut harness = Harness {
         ns,

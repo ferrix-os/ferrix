@@ -26,19 +26,19 @@
 
 /// A mapped register window.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Mmio {
+pub struct Mmio {
     /// Virtual address the window starts at, or zero when there is none.
     base: u64,
 }
 
 impl Mmio {
     /// A window that is not mapped. Every access is a no-op.
-    pub(crate) const fn unmapped() -> Self {
+    pub const fn unmapped() -> Self {
         Mmio { base: 0 }
     }
 
     /// A window at `base`, which must be a mapped device address.
-    pub(crate) const fn at(base: u64) -> Self {
+    pub const fn at(base: u64) -> Self {
         Mmio { base }
     }
 
@@ -51,7 +51,7 @@ impl Mmio {
     }
 
     /// Read an 8-bit register.
-    pub(crate) fn read8(self, offset: u64) -> u8 {
+    pub fn read8(self, offset: u64) -> u8 {
         let Some(at) = self.address(offset) else {
             return 0;
         };
@@ -60,7 +60,7 @@ impl Mmio {
     }
 
     /// Write an 8-bit register.
-    pub(crate) fn write8(self, offset: u64, value: u8) {
+    pub fn write8(self, offset: u64, value: u8) {
         let Some(at) = self.address(offset) else {
             return;
         };
@@ -69,7 +69,7 @@ impl Mmio {
     }
 
     /// Read a 16-bit register. The caller keeps `offset` even.
-    pub(crate) fn read16(self, offset: u64) -> u16 {
+    pub fn read16(self, offset: u64) -> u16 {
         let Some(at) = self.address(offset) else {
             return 0;
         };
@@ -79,7 +79,7 @@ impl Mmio {
     }
 
     /// Write a 16-bit register. The caller keeps `offset` even.
-    pub(crate) fn write16(self, offset: u64, value: u16) {
+    pub fn write16(self, offset: u64, value: u16) {
         let Some(at) = self.address(offset) else {
             return;
         };
@@ -88,7 +88,7 @@ impl Mmio {
     }
 
     /// Read a 32-bit register.
-    pub(crate) fn read32(self, offset: u64) -> u32 {
+    pub fn read32(self, offset: u64) -> u32 {
         let Some(at) = self.address(offset) else {
             return 0;
         };
@@ -100,7 +100,7 @@ impl Mmio {
     }
 
     /// Write a 32-bit register.
-    pub(crate) fn write32(self, offset: u64, value: u32) {
+    pub fn write32(self, offset: u64, value: u32) {
         let Some(at) = self.address(offset) else {
             return;
         };

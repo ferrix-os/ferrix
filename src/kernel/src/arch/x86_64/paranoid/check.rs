@@ -5,7 +5,7 @@
 //! Verification, not the entry: a file of its own so that the manifest counts
 //! it as the test it is (`tools/common/data/certification-item.json`,
 //! `test_file_patterns`). The system call window's check runs a real program
-//! -- [`super::super::USER_TEST_PROGRAM`], built into an ELF and loaded by
+//! -- [`ferrix_kernel_core::arch::x86_64::USER_TEST_PROGRAM`], built into an ELF and loaded by
 //! the Linux personality's loader -- because only a program's own `syscall`
 //! reaches the trampoline with its stack and `GS`. That is a fixture reached
 //! from the load ring, which a verification file may do and the core's
@@ -15,14 +15,16 @@
 //! A child of the entry's module, so it reads the entry's counters without
 //! the entry exporting them.
 
+#![cfg(target_arch = "x86_64")]
+
 use core::hint::spin_loop;
 use core::sync::atomic::Ordering;
 
 use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 use ferrix_sync::IrqControl;
 
-use super::super::cpu;
-use super::{BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, USER_NMIS, debug_hook};
+use ferrix_kernel_core::arch::x86_64::cpu;
+use ferrix_kernel_core::arch::x86_64::paranoid::{BREAKPOINTS, FOREIGN_GS, HOOK_RUNS, NMIS, USER_NMIS, debug_hook};
 use crate::console::println;
 use crate::sync::SpinLock;
 
@@ -175,8 +177,8 @@ fn check_nmi() -> Result<u64, &'static str> {
     let before = NMIS.load(Ordering::Relaxed);
     let foreign = FOREIGN_GS.load(Ordering::Relaxed);
 
-    let saved = <super::super::Irq as IrqControl>::disable();
-    let sent = super::super::apic::send_nmi_to_self();
+    let saved = <ferrix_kernel_core::arch::x86_64::Irq as IrqControl>::disable();
+    let sent = ferrix_kernel_core::arch::x86_64::apic::send_nmi_to_self();
     let deadline = crate::timer::now_nanos().saturating_add(NMI_PATIENCE_NANOS);
     while sent.is_ok()
         && NMIS.load(Ordering::Relaxed) == before
@@ -184,7 +186,7 @@ fn check_nmi() -> Result<u64, &'static str> {
     {
         spin_loop();
     }
-    <super::super::Irq as IrqControl>::restore(saved);
+    <ferrix_kernel_core::arch::x86_64::Irq as IrqControl>::restore(saved);
 
     sent?;
     let taken = NMIS.load(Ordering::Relaxed).wrapping_sub(before);
@@ -202,7 +204,7 @@ fn check_nmi() -> Result<u64, &'static str> {
 ///
 /// Instruction breakpoints on the stub's first instruction -- `swapgs`, with
 /// the program's `GS` and stack -- and on its `sysretq`, after the `swapgs`
-/// back, while [`super::super::USER_TEST_PROGRAM`] writes a line and exits. Debug
+/// back, while [`ferrix_kernel_core::arch::x86_64::USER_TEST_PROGRAM`] writes a line and exits. Debug
 /// registers are per processor, so the program and the task that arms them
 /// are pinned to one. Returns the hits at each, and the program's status.
 /// Verifies: `L.x86_64.25`, `L.x86_64.52`, `L.x86_64.87`
@@ -253,7 +255,7 @@ fn check_system_call_window(high_gs: bool) -> Result<(u64, u64, i32), &'static s
     let expected = if high_gs {
         HIGH_GS_STATUS
     } else {
-        super::super::USER_TEST_STATUS
+        ferrix_kernel_core::arch::x86_64::USER_TEST_STATUS
     };
     if status != expected {
         return Err("the program with breakpoints in its system calls exited wrongly");
@@ -274,12 +276,12 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
 
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        ferrix_kernel_core::arch::x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         if WINDOW_HIGH_GS.load(Ordering::Acquire) {
             HIGH_GS_PROGRAM
         } else {
-            super::super::USER_TEST_PROGRAM
+            ferrix_kernel_core::arch::x86_64::USER_TEST_PROGRAM
         },
     );
     let program = Executable {
@@ -301,7 +303,7 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
     // stack. Taken from `syscall`, whose declaration is the symbol's only one:
     // a second, of another type, is renamed `.1` by the release profile's link
     // and left undefined.
-    let entry = super::super::syscall::stub_address();
+    let entry = ferrix_kernel_core::arch::x86_64::syscall::stub_address();
     let sysret = (&raw const ferrix_syscall_sysret) as u64;
     // SAFETY: (PROBE) an instruction of the trampoline, not in the paranoid entry nor
     // on an IST stack, which is what a `#DB` there needs; unarmed until DR7.
@@ -324,7 +326,7 @@ fn run_with_window_breakpoints(cpu: usize) -> Result<i32, &'static str> {
     // and a handler that skipped the swap would find the kernel's GS anyway:
     // the breakpoints above would prove nothing.
     // SAFETY: (CONTEXT) a kernel task, with the kernel's GS, outside the trampoline.
-    let program_gs = unsafe { super::super::syscall::program_gs_base() };
+    let program_gs = unsafe { ferrix_kernel_core::arch::x86_64::syscall::program_gs_base() };
     if is_cpu_record(program_gs) {
         return Err("a program ran with a per-CPU record as its GS base");
     }
@@ -354,7 +356,7 @@ fn check_nmi_in_a_program() -> Result<Option<u64>, &'static str> {
     };
     let file = crate::syscall::image::build_with(
         ferrix_elf::Class::Elf64,
-        super::super::ARCH.elf_machine(),
+        ferrix_kernel_core::arch::x86_64::ARCH.elf_machine(),
         crate::syscall::image::Shape::Good,
         SPIN_PROGRAM,
     );
@@ -383,7 +385,7 @@ fn check_nmi_in_a_program() -> Result<Option<u64>, &'static str> {
         && crate::timer::now_nanos() < deadline
     {
         crate::sched::sleep_for(1_000_000);
-        sent = super::super::apic::send_nmi_to(other.hardware_id as u32);
+        sent = ferrix_kernel_core::arch::x86_64::apic::send_nmi_to(other.hardware_id as u32);
     }
     let taken = USER_NMIS.load(Ordering::Relaxed).wrapping_sub(before);
     // Let it go, whatever happened: its word, once its page is mapped.
@@ -436,7 +438,7 @@ fn check_breakpoints_do_not_nest() -> Result<u64, &'static str> {
 
     // Masked, so that arming, both breakpoints and disarming happen on one
     // processor.
-    let saved = <super::super::Irq as IrqControl>::disable();
+    let saved = <ferrix_kernel_core::arch::x86_64::Irq as IrqControl>::disable();
     // SAFETY: (PROBE) a kernel function outside the paranoid entry and the IST stacks;
     // unarmed until DR7, and disarmed below before interrupts open again.
     unsafe { cpu::write_breakpoint_address(0, breakpoint_target as fn() -> u64 as usize as u64) };
@@ -448,7 +450,7 @@ fn check_breakpoints_do_not_nest() -> Result<u64, &'static str> {
     debug_hook();
     // SAFETY: (PROBE) disarming.
     unsafe { cpu::write_dr7(0) };
-    <super::super::Irq as IrqControl>::restore(saved);
+    <ferrix_kernel_core::arch::x86_64::Irq as IrqControl>::restore(saved);
 
     if hits(0).wrapping_sub(targets) != 1 {
         return Err("an instruction breakpoint in the kernel did not fire exactly once");

@@ -128,7 +128,7 @@ fn ended_by(
 ///
 /// A waker whose waiter was never woken, came back early or answered other
 /// than its waker says.
-pub(crate) fn run() -> Result<u32, &'static str> {
+pub fn run() -> Result<u32, &'static str> {
     let mut wakers = 0;
 
     // Bytes written.

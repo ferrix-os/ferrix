@@ -87,7 +87,6 @@ use super::cpu;
 use super::trap::TrapFrame;
 use crate::panic::catalog;
 
-pub(super) mod check;
 
 /// `#DB`.
 const DEBUG: u64 = 1;
@@ -106,7 +105,7 @@ const DR6_BREAKPOINTS: u64 = 0xF;
 const RFLAGS_RF: u64 = 1 << 16;
 
 /// NMIs taken.
-static NMIS: AtomicU64 = AtomicU64::new(0);
+pub static NMIS: AtomicU64 = AtomicU64::new(0);
 
 /// NMIs taken since boot: for interrupt remapping's check R2, that a forged
 /// NMI-mode message arrived nowhere.
@@ -114,15 +113,15 @@ pub(crate) fn nmis() -> u64 {
     NMIS.load(Ordering::Relaxed)
 }
 /// Kernel `#DB`s taken for each hardware breakpoint, by the slot DR6 named.
-static BREAKPOINTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+pub static BREAKPOINTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 /// Paranoid handlers that found `GS` naming no processor's record.
-static FOREIGN_GS: AtomicU64 = AtomicU64::new(0);
+pub static FOREIGN_GS: AtomicU64 = AtomicU64::new(0);
 /// NMIs taken from ring 3, of [`NMIS`]: the ones whose entry found a
 /// program's `GS` base in the register and swapped.
-static USER_NMIS: AtomicU64 = AtomicU64::new(0);
+pub static USER_NMIS: AtomicU64 = AtomicU64::new(0);
 
 /// Runs of [`debug_hook`].
-static HOOK_RUNS: AtomicU64 = AtomicU64::new(0);
+pub static HOOK_RUNS: AtomicU64 = AtomicU64::new(0);
 
 /// Where `ferrix_paranoid_common` hands over, on the vector's own stack, with
 /// the kernel's `GS` and `DR7` clear.
@@ -207,6 +206,6 @@ fn note_gs() {
 /// Called by every kernel `#DB` handler run, so that the nesting check can put
 /// a breakpoint on code the handler executes.
 #[inline(never)]
-fn debug_hook() {
+pub fn debug_hook() {
     let _ = HOOK_RUNS.fetch_add(1, Ordering::Relaxed);
 }

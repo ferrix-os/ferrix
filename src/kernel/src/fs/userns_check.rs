@@ -56,7 +56,7 @@ const EVERY_CAPABILITY: &[u8] = b"CapEff:\t000001ffffffffff";
 const UID: u32 = 1000;
 
 /// What the check saw, for the boot line.
-pub(crate) fn run() -> Result<Counts, &'static str> {
+pub fn run() -> Result<Counts, &'static str> {
     let mut counts = Counts::default();
     let mut tally = Tally {
         report: &mut counts,
@@ -758,7 +758,7 @@ fn seen_uid(pid: u32, origin: Origin) -> Result<u32, &'static str> {
 /// never the namespace's 0. No personality supplies a uid to the audit trail
 /// yet, so this is the contact point a supplier would have to get right; the
 /// day one does, this check is the one that stops it recording the inside id.
-fn audited_as_the_kernel_knows_it(process: &Process) -> Result<(), &'static str> {
+pub fn audited_as_the_kernel_knows_it(process: &Process) -> Result<(), &'static str> {
     let subject = crate::audit::Subject::of(process);
     if subject.pid != process.pid() || subject.job != process.job().id() {
         return Err("an audit subject did not name the caller's process and job");

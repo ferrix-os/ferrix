@@ -79,19 +79,19 @@ const PATIENCE_NANOS: u64 = 5_000_000_000;
 
 /// What the check saw.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Why it did not run, if it did not.
-    pub(crate) skipped: Option<&'static str>,
+    pub skipped: Option<&'static str>,
     /// How many HELLOs were refused exactly as specified.
-    pub(crate) refusals: usize,
+    pub refusals: usize,
     /// How many slots the kernel posted for the driver to fill.
-    pub(crate) posted: u32,
+    pub posted: u32,
     /// How many frames the check handed up the stack.
-    pub(crate) received: u32,
+    pub received: u32,
     /// How many frames the kernel asked to have sent.
-    pub(crate) sent: u32,
+    pub sent: u32,
     /// How many frames went through a packet socket, in and out.
-    pub(crate) packet_frames: u32,
+    pub packet_frames: u32,
 }
 
 /// Run the check.
@@ -99,7 +99,7 @@ pub(crate) struct Report {
 /// # Errors
 ///
 /// A string naming what did not hold.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let Some(node) = device::devices().first().map(Arc::clone) else {
         report.skipped = Some("this machine has no device to hang a ring on");

@@ -53,20 +53,20 @@ const MARKER_PATH: &[u8] = b"/etc/ferrix/initramfs";
 
 /// What the checks measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// Whether the archive's marker, link and symbolic link were checked.
-    pub(crate) initramfs_verified: bool,
+    pub initramfs_verified: bool,
     /// Pages a file under `/tmp` committed while the check wrote it.
-    pub(crate) pages: u64,
+    pub pages: u64,
     /// Pages a store over a page source filled from it.
-    pub(crate) filled: u64,
+    pub filled: u64,
     /// Frames the tmpfs check cost once the file was gone. Zero, or the page
     /// store is leaking.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// Run them. `Err` names the first thing that was not true.
-pub(crate) fn run(built: &Built) -> Result<Report, &'static str> {
+pub fn run(built: &Built) -> Result<Report, &'static str> {
     let initramfs_verified = match built.unpacked {
         Some(_) => {
             check_the_archive_unpacked_intact()?;
@@ -606,13 +606,13 @@ fn check_a_store_distrusts_and_cuts_its_source(
 
 /// What the pipe and filesystem call checks measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CallsReport {
+pub struct CallsReport {
     /// Bytes the checks moved through a pipe, a FIFO, `sendfile`, `splice`
     /// and `copy_file_range`.
-    pub(crate) bytes: u64,
+    pub bytes: u64,
     /// Frames the second run cost. Zero, or a pipe, a FIFO's pipe or a file
     /// outlives its last descriptor.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
 }
 
 /// Where the checks keep their paths and buffers in the process's page.
@@ -714,7 +714,7 @@ const KERNEL_ADDRESS: u64 = u64::MAX - 0xFFF;
 
 /// Run the pipe and filesystem call checks: twice, measured on the second,
 /// for the reason [`run`] gives.
-pub(crate) fn run_calls() -> Result<CallsReport, &'static str> {
+pub fn run_calls() -> Result<CallsReport, &'static str> {
     let process = process::new_for_check()
         .map_err(|_| "could not make a process for the file system calls")?;
     let _warm = check_the_calls(&process)?;

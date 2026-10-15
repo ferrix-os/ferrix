@@ -27,18 +27,19 @@
 use ferrix_sync::Once;
 
 /// A list of at most `N` registrations of `T`, in the order they were made.
-pub(crate) struct Hooks<T: 'static, const N: usize> {
+#[derive(Debug)]
+pub struct Hooks<T: 'static, const N: usize> {
     /// Each registration, filled from the front.
     slots: [Once<&'static T>; N],
 }
 
 /// Every slot of a [`Hooks`] was already taken.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Full;
+pub struct Full;
 
 impl<T: 'static, const N: usize> Hooks<T, N> {
     /// An empty list.
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Hooks {
             slots: [const { Once::new() }; N],
         }
@@ -51,7 +52,7 @@ impl<T: 'static, const N: usize> Hooks<T, N> {
     /// [`Full`] when `N` registrations have been made already. The bound is
     /// the item's statement of how many it expects, so passing it is a boot
     /// that has changed shape, and the caller says so.
-    pub(crate) fn register(&self, hook: &'static T) -> Result<(), Full> {
+    pub fn register(&self, hook: &'static T) -> Result<(), Full> {
         for slot in &self.slots {
             let mut taken = false;
             let _ = slot.call_once(|| {
@@ -66,12 +67,12 @@ impl<T: 'static, const N: usize> Hooks<T, N> {
     }
 
     /// Every registration, in the order it was made.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &'static T> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &'static T> + '_ {
         self.slots.iter().filter_map(|slot| slot.get().copied())
     }
 
     /// How many registrations have been made.
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.iter().count()
     }
 }

@@ -73,26 +73,24 @@
 //! never be spliced into one sequence. The kernel's random generator is the
 //! item's, above this module, so bring-up draws it and hands it in.
 
-pub(crate) mod check;
+pub mod check;
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-pub(crate) use ferrix_audit::{
-    BOOTED, CGROUP_KILLED, CGROUP_LIMIT, CONFIG, CONTROL, Class, Config, DELEGATED, DEVICE_LIMIT,
-    DEVICE_LIMIT_SET, DEVMGR_STARTED, DMA_FAULT, DOMAIN, Event, INTERRUPT_FAULT, JOB_KILLED, LIMIT,
-    LIMIT_SET, NO_UID, OOM_KILLED, Outcome, POWER, PROCESS_MADE, QUIESCED, READER_GIVEN, RIGHTS,
-    ROOT_SWITCHED, Record, STARTER_GIVEN, SUPPRESSED, WIDEN, saturated, target,
-};
+pub(crate) use ferrix_audit::{CONFIG, Class, DMA_FAULT, INTERRUPT_FAULT, LIMIT, OOM_KILLED, POWER, SUPPRESSED};
+pub use ferrix_audit::{BOOTED, Config};
+pub use ferrix_audit::{CGROUP_KILLED, CGROUP_LIMIT, DEVICE_LIMIT, DEVICE_LIMIT_SET, Event, NO_UID, saturated};
+pub use ferrix_audit::{CONTROL, DELEGATED, DEVMGR_STARTED, DOMAIN, JOB_KILLED, LIMIT_SET, Outcome, PROCESS_MADE, QUIESCED, READER_GIVEN, RIGHTS, ROOT_SWITCHED, Record, STARTER_GIVEN, WIDEN, target};
 use ferrix_sync::IrqSpinLock;
 
 use crate::object::process::Process;
 use crate::object::quota::Resource;
 
 /// The high-value ring's length: 32 KiB of records.
-pub(crate) const HIGH_RECORDS: usize = 512;
+pub const HIGH_RECORDS: usize = 512;
 
 /// The refusal ring's length: 256 KiB of records.
-pub(crate) const REFUSAL_RECORDS: usize = 4096;
+pub const REFUSAL_RECORDS: usize = 4096;
 
 /// How many refusals charged to one budget a second are kept before the
 /// rest are folded into a *suppressed n* record.
@@ -112,14 +110,14 @@ pub(crate) const BOOT_RECORDS: usize = 8;
 /// Who a record is about: the process and its job, which the TSF attests,
 /// and beside them the uid the personality says, which it does not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Subject {
+pub struct Subject {
     /// The process, 0 for the kernel itself.
-    pub(crate) pid: u32,
+    pub pid: u32,
     /// The uid the personality gave, or [`NO_UID`]: personality-supplied
     /// data, never the TSF's identity of the subject (`AUDIT.md` §2).
-    pub(crate) uid: u32,
+    pub uid: u32,
     /// The process's job, 0 for the kernel itself.
-    pub(crate) job: u64,
+    pub job: u64,
     /// The job its refusals are charged to ([`budget_of`]). Not recorded:
     /// it keys the refusal ring's fairness.
     pub(crate) budget: u64,
@@ -127,7 +125,7 @@ pub(crate) struct Subject {
 
 impl Subject {
     /// The kernel, deciding for itself.
-    pub(crate) const KERNEL: Subject = Subject {
+    pub const KERNEL: Subject = Subject {
         pid: 0,
         uid: NO_UID,
         job: 0,
@@ -138,7 +136,7 @@ impl Subject {
     /// budget. Reads the process's job under its membership lock, so it is
     /// for callers that hold no lock; a record made with locks held works
     /// its subject out without one.
-    pub(crate) fn of(process: &Process) -> Subject {
+    pub fn of(process: &Process) -> Subject {
         let job = process.job();
         Subject {
             pid: process.pid(),
@@ -152,16 +150,16 @@ impl Subject {
 /// What a record's decision was about: an object's kind and identity, a
 /// device's location, a resource. Zero where nothing is named.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Target {
+pub struct Target {
     /// What kind of thing, numbered by the event.
-    pub(crate) kind: u32,
+    pub kind: u32,
     /// Which one.
-    pub(crate) id: u64,
+    pub id: u64,
 }
 
 impl Target {
     /// Nothing in particular.
-    pub(crate) const NONE: Target = Target { kind: 0, id: 0 };
+    pub const NONE: Target = Target { kind: 0, id: 0 };
 }
 
 /// The record of `event`, numbered later by the ring that keeps it.
@@ -193,7 +191,7 @@ fn record_of(
 
 /// Which of the two rings, or the pinned boot records.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Which {
+pub enum Which {
     /// Everything but refusals.
     High,
     /// Refusals, and the *suppressed n* records that count those not kept.
@@ -206,16 +204,16 @@ pub(crate) enum Which {
 
 /// What one read took out of a ring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Read {
+pub struct Read {
     /// Records copied to the front of the reader's buffer.
-    pub(crate) copied: usize,
+    pub copied: usize,
     /// The sequence number to read from next.
-    pub(crate) next: u64,
+    pub next: u64,
     /// Records between the number asked for and the first one copied that
     /// the ring no longer held.
-    pub(crate) lost: u64,
+    pub lost: u64,
     /// The boot's audit id.
-    pub(crate) id: u128,
+    pub id: u128,
 }
 
 /// A ring of `N` records, numbered from zero.
@@ -578,12 +576,12 @@ pub(crate) static STORE: Store<HIGH_RECORDS, REFUSAL_RECORDS> = Store::new();
 
 /// Start the kernel's audit function with the boot's audit `id`, drawn by
 /// bring-up from the random generator. False if it had already started.
-pub(crate) fn start(id: u128) -> bool {
+pub fn start(id: u128) -> bool {
     STORE.start(crate::timer::now_nanos(), id)
 }
 
 /// Record `event` in the kernel's store, now.
-pub(crate) fn record(
+pub fn record(
     event: Event,
     outcome: Outcome,
     status: i16,
@@ -616,7 +614,7 @@ pub(crate) fn record_numbered(
 }
 
 /// Record one item of the boot's configuration.
-pub(crate) fn config(key: Config, value: u32, more: u32) {
+pub fn config(key: Config, value: u32, more: u32) {
     record(
         CONFIG,
         Outcome::Done,
@@ -628,7 +626,7 @@ pub(crate) fn config(key: Config, value: u32, more: u32) {
 }
 
 /// A resource's number in a record (`ferrix_audit::resource`).
-pub(crate) fn resource_number(resource: Resource) -> u64 {
+pub fn resource_number(resource: Resource) -> u64 {
     match resource {
         Resource::Memory => ferrix_audit::resource::MEMORY,
         Resource::Objects => ferrix_audit::resource::OBJECTS,
@@ -672,7 +670,7 @@ pub(crate) fn limit_refused(
 /// Record `subject` setting `job`'s limit on resource number `resource` to
 /// `limit`, as `event` says: through its handle ([`LIMIT_SET`]) or its
 /// cgroup's file ([`CGROUP_LIMIT`]).
-pub(crate) fn limit_set(event: Event, subject: Subject, job: u64, resource: u64, limit: u64) {
+pub fn limit_set(event: Event, subject: Subject, job: u64, resource: u64, limit: u64) {
     let target = Target {
         kind: target::RESOURCE,
         id: resource,
@@ -691,7 +689,7 @@ pub(crate) fn limit_set(event: Event, subject: Subject, job: u64, resource: u64,
 /// in the kernel's list from `old` to `new` (`device_set_limit`), as
 /// `answered` says: [`DEVICE_LIMIT_SET`] when it was set, [`DEVICE_LIMIT`]
 /// with the status when it was refused.
-pub(crate) fn device_limit(
+pub fn device_limit(
     subject: Subject,
     device: usize,
     which: u64,
@@ -721,7 +719,7 @@ pub(crate) fn device_limit(
 }
 
 /// Record `subject` ending what `target` names, as `event` says.
-pub(crate) fn ended(event: Event, subject: Subject, target: Target, detail: [u32; 3]) {
+pub fn ended(event: Event, subject: Subject, target: Target, detail: [u32; 3]) {
     record(event, Outcome::Done, 0, subject, target, detail);
 }
 
@@ -751,7 +749,7 @@ pub(crate) fn oom_killed(pid: u32, limited: u64, resident: u64) {
 /// console's log keeps it: nothing made after the reader's last read is lost
 /// without a trace. A reader that read just before asking for the power
 /// action leaves none, or the few a device's driver made meanwhile.
-pub(crate) fn power(subject: Subject, action: u32) {
+pub fn power(subject: Subject, action: u32) {
     let number = record_numbered(
         POWER,
         Outcome::Done,
@@ -798,7 +796,7 @@ pub(crate) fn power(subject: Subject, action: u32) {
 
 /// How far the reader has read the high-value ring, for the native boot
 /// check: a read whose copy out failed must not move it.
-pub(crate) fn read_through_now() -> u64 {
+pub fn read_through_now() -> u64 {
     READ_THROUGH.load(Ordering::Acquire)
 }
 
@@ -808,16 +806,16 @@ pub(crate) fn read_through_now() -> u64 {
 static READ_THROUGH: AtomicU64 = AtomicU64::new(0);
 
 /// Note that the reader has read the high-value ring up to `next`.
-pub(crate) fn read_through(next: u64) {
+pub fn read_through(next: u64) {
     let _ = READ_THROUGH.fetch_max(next, Ordering::AcqRel);
 }
 
 /// The boot's audit id, 0 before the store starts.
-pub(crate) fn id() -> u128 {
+pub fn id() -> u128 {
     STORE.id()
 }
 
 /// Read the kernel's store: see [`Store::read_at`].
-pub(crate) fn read(which: Which, from: u64, out: &mut [Record]) -> Read {
+pub fn read(which: Which, from: u64, out: &mut [Record]) -> Read {
     STORE.read_at(crate::timer::now_nanos(), which, from, out)
 }

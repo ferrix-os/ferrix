@@ -108,7 +108,7 @@ pub(crate) fn is_root(rdev: u64) -> bool {
 }
 
 /// Read `ferrix.root`, once, early.
-pub(crate) fn init(view: &BootView<'_>) {
+pub fn init(view: &BootView<'_>) {
     match view.option(OPTION) {
         None | Some("btrfs") => {}
         Some("tmpfs") => TMPFS.store(true, Ordering::Relaxed),
@@ -132,7 +132,7 @@ pub(crate) fn process_context() -> Context {
 
 /// Put `/` on the root disk, if this machine has one and nothing asked for
 /// the tmpfs. Says what it did either way.
-pub(crate) fn switch() {
+pub fn switch() {
     // Any disk or partition labelled `ferrix-root`: an installed disk's is
     // its second partition (`docs/INSTALLER.md` §4.2).
     fs::partitions::scan();
@@ -368,7 +368,7 @@ const DEVMGR_PATIENCE_NANOS: u64 = 60_000_000_000;
 /// Under `ferrix.devmgr=init`: a task that waits for `devmgr`'s REPORT,
 /// then does what bring-up does without the option -- the switch and the
 /// data disk -- checks that pid 1 moved, and tells pid 1 where `/` is.
-pub(crate) fn switch_after_devmgr() {
+pub fn switch_after_devmgr() {
     if sched::spawn("root switch", after_devmgr, 0, ferrix_sched::NICE_0_WEIGHT).is_err() {
         println!("  root     no task to switch / on: it stays in memory");
         crate::init::notify_root(false);

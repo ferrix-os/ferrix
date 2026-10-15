@@ -107,28 +107,28 @@ const PING: &[u8] = b"ping";
 
 /// What the checks measured, for the boot log.
 #[derive(Debug)]
-pub(crate) struct Report {
+pub struct Report {
     /// Messages carried from one process to the other and read back intact.
-    pub(crate) messages: u32,
+    pub messages: u32,
     /// Handles that left one process's table and arrived in the other's.
-    pub(crate) moved: u32,
+    pub moved: u32,
     /// Calls refused with exactly the status they had to be refused with.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Frames the second run did not give back. Zero, or something leaks.
-    pub(crate) leaked: i64,
+    pub leaked: i64,
     /// Waits woken by the thing they waited for, rather than their deadline.
-    pub(crate) woken: u32,
+    pub woken: u32,
     /// Packets taken from a port, user and signal alike.
-    pub(crate) packets: u32,
+    pub packets: u32,
     /// Processes ended by killing a job they were in.
-    pub(crate) killed: u32,
+    pub killed: u32,
     /// Messages two programs in user mode exchanged with each other.
-    pub(crate) exchanged: u32,
+    pub exchanged: u32,
     /// Programs a process made from a VMO and started through a handle, whose
     /// ends it heard through that handle.
-    pub(crate) spawned: u32,
+    pub spawned: u32,
     /// Processes nobody started, ended when their last handle went.
-    pub(crate) abandoned: u32,
+    pub abandoned: u32,
 }
 
 /// Counts what happened, so the report is a measurement and not a claim.
@@ -173,7 +173,7 @@ struct Counter {
 }
 
 /// Run them. `Err` names the first thing that was not true.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     check_the_native_range_is_not_a_linux_one()?;
     // First of the channel checks, so a read that stops answering from its
     // queue fails here, on this rule, and not in a check built on it.
@@ -2160,32 +2160,32 @@ fn native_program(role: u8) -> Result<Arc<Process>, &'static str> {
 
 /// What the device checks measured, for the boot log.
 #[derive(Debug)]
-pub(crate) struct DeviceReport {
+pub struct DeviceReport {
     /// Apertures mapped into a process, and reached from a forked child.
-    pub(crate) mapped: u32,
+    pub mapped: u32,
     /// Prefetchable apertures mapped write-combining, and found so in the
     /// page table.
-    pub(crate) combined: u32,
+    pub combined: u32,
     /// Interrupts delivered to an object, waited on and acknowledged.
-    pub(crate) interrupts: u32,
+    pub interrupts: u32,
     /// VMO pages pinned for a device and found at their device addresses.
-    pub(crate) pinned: u32,
+    pub pinned: u32,
     /// Calls refused with exactly the status they had to be refused with.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
     /// Interrupt deliveries made to a waiting task.
-    pub(crate) delivered: u32,
+    pub delivered: u32,
     /// Those whose wait the delivery's wake ended, rather than its recheck.
-    pub(crate) wakes: u32,
+    pub wakes: u32,
     /// The longest any delivery took to become a returned wait, in
     /// nanoseconds: the host's latency as much as the kernel's, so reported
     /// and never judged.
-    pub(crate) slowest_wake: u64,
+    pub slowest_wake: u64,
     /// Edge-triggered MSI-X vectors found unmasked through their deliveries,
     /// and masked by the delivery past `interrupt::STORM_BOUND`.
-    pub(crate) coalesced: u32,
+    pub coalesced: u32,
     /// What those bounded deliveries took, in nanoseconds, all of it charged
     /// to the task that ran them: reported, never judged.
-    pub(crate) storm_nanos: u64,
+    pub storm_nanos: u64,
 }
 
 /// The device objects: I/O mappings and interrupts, minted from the device
@@ -2197,7 +2197,7 @@ pub(crate) struct DeviceReport {
 /// the boot log's `0 aperture mapped` said and nothing else did. So the
 /// counts are printed, and on a machine with a whole-page aperture a count of
 /// zero is a failure rather than a skip.
-pub(crate) fn run_devices() -> Result<DeviceReport, &'static str> {
+pub fn run_devices() -> Result<DeviceReport, &'static str> {
     let mut counter = Counter::default();
     check_a_device_gives_exactly_its_own_memory(&mut counter)?;
     check_write_combining(&mut counter)?;

@@ -24,7 +24,6 @@
 
 use super::cpu;
 
-pub(in crate::arch) mod check;
 
 /// Bytes in a saved frame. Must match [`TrapFrame`] exactly, and must be a
 /// multiple of sixteen because `AArch64` faults on a misaligned stack pointer.

@@ -95,17 +95,17 @@ use crate::syscall::program::ProgramFile;
 /// A program opened to be started: its image, and the path it was read from
 /// with its links resolved, which `/proc/self/exe` names.
 #[derive(Debug)]
-pub(crate) struct Opened {
+pub struct Opened {
     /// The file, with its headers read.
-    pub(crate) program: ProgramFile,
+    pub program: ProgramFile,
     /// Where it was read from, resolved.
-    pub(crate) exe: Vec<u8>,
+    pub exe: Vec<u8>,
 }
 
 /// An image to start: the one built into the kernel, or one opened from a
 /// file.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum Image<'a> {
+pub enum Image<'a> {
     /// The built-in program, in the archive the kernel keeps.
     BuiltIn(&'static [u8]),
     /// A file [`Launcher::open`] opened.
@@ -114,26 +114,26 @@ pub(crate) enum Image<'a> {
 
 /// Everything a program is started with, as `execve` would be told it.
 #[derive(Debug)]
-pub(crate) struct Start<'a> {
+pub struct Start<'a> {
     /// What runs.
-    pub(crate) image: Image<'a>,
+    pub image: Image<'a>,
     /// What `/proc/self/exe` names.
-    pub(crate) exe: &'a [u8],
+    pub exe: &'a [u8],
     /// What `AT_EXECFN` names: the path before it was resolved.
-    pub(crate) exec_fn: &'a [u8],
+    pub exec_fn: &'a [u8],
     /// Its arguments.
-    pub(crate) argv: &'a [&'a [u8]],
+    pub argv: &'a [&'a [u8]],
     /// Its environment.
-    pub(crate) env: &'a [&'a [u8]],
+    pub env: &'a [&'a [u8]],
     /// Its end of its bootstrap channel, for the launcher to hold in the new
     /// process for `process_bootstrap`; `None` when there was no memory for
     /// one.
-    pub(crate) bootstrap: Option<Transfer>,
+    pub bootstrap: Option<Transfer>,
 }
 
 /// Why a program that opened would not start.
 #[derive(Debug)]
-pub(crate) enum Failure {
+pub enum Failure {
     /// The dynamic linker it names could not be read.
     Linker(Errno),
     /// It would not load or run, as the personality put it.
@@ -157,27 +157,27 @@ pub(crate) type InterpreterLine = fn(&[u8]) -> Result<(Vec<u8>, Option<Vec<u8>>)
 /// the certified item, registered by the load ring with
 /// [`register_launcher`].
 #[derive(Debug)]
-pub(crate) struct Launcher {
+pub struct Launcher {
     /// Open the program at an absolute path in `/`.
-    pub(crate) open: fn(&[u8]) -> Result<Opened, Errno>,
+    pub open: fn(&[u8]) -> Result<Opened, Errno>,
     /// Read a `#!` line from the start of a file.
-    pub(crate) interpreter_line: InterpreterLine,
+    pub interpreter_line: InterpreterLine,
     /// Start a program as pid 1 with a fresh `AT_RANDOM` and its bootstrap,
     /// and wait for it to end: its status.
-    pub(crate) start: fn(Start<'_>) -> Result<i32, Failure>,
+    pub start: fn(Start<'_>) -> Result<i32, Failure>,
 }
 
 /// The registered [`Launcher`].
 static LAUNCHER: Once<&'static Launcher> = Once::new();
 
 /// Start programs with `launcher`. The first registration stands.
-pub(crate) fn register_launcher(launcher: &'static Launcher) {
+pub fn register_launcher(launcher: &'static Launcher) {
     let _ = LAUNCHER.call_once(|| launcher);
 }
 
 /// Whether a [`Launcher`] is registered: the boot's check that [`run`] will
 /// have something to start init with.
-pub(crate) fn has_launcher() -> bool {
+pub fn has_launcher() -> bool {
     LAUNCHER.get().is_some()
 }
 
@@ -190,7 +190,7 @@ static CHANNEL: SpinLock<Option<Arc<Endpoint>>> = SpinLock::new(None);
 /// kernel's end, and the program's (K2). What [`run`] gives each program it
 /// starts, and what the boot check reads. `None` when there was no memory
 /// for the channel or the message.
-pub(crate) fn bootstrap_channel() -> Option<(Arc<Endpoint>, Arc<Endpoint>)> {
+pub fn bootstrap_channel() -> Option<(Arc<Endpoint>, Arc<Endpoint>)> {
     let (kernel_end, program_end) = Endpoint::pair().ok()?;
     let hello = fallible::try_to_vec(&init_hello()).ok()?;
     kernel_end
@@ -202,7 +202,7 @@ pub(crate) fn bootstrap_channel() -> Option<(Arc<Endpoint>, Arc<Endpoint>)> {
 /// A bootstrap for the next program: its end of a new channel, the kernel's
 /// end kept in [`CHANNEL`] in place of the last program's. `None`, said on a
 /// line, when there is no memory for one; the program starts without.
-fn next_bootstrap() -> Option<Transfer> {
+pub fn next_bootstrap() -> Option<Transfer> {
     let Some((kernel_end, program_end)) = bootstrap_channel() else {
         println!("  init     no memory for a bootstrap channel; starting the program without one");
         return None;
@@ -248,7 +248,7 @@ fn next_bootstrap() -> Option<Transfer> {
 /// alone, after the hello (`docs/certification/AUDIT.md` §4): never
 /// duplicated or sent, so it stays in pid 1's table and goes with it. Given
 /// once; a later program of a command list gets none.
-fn give_audit(kernel_end: &Arc<Endpoint>) {
+pub fn give_audit(kernel_end: &Arc<Endpoint>) {
     if AUDIT_GIVEN.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -284,12 +284,12 @@ static AUDIT_GIVEN: AtomicBool = AtomicBool::new(false);
 /// The rights pid 1's audit handle carries: `READ`, and neither `DUPLICATE`
 /// nor `TRANSFER`, so it never leaves pid 1's table. The native boot check
 /// makes its handle with these, so a widening here fails it.
-pub(crate) const AUDIT_RIGHTS: Rights = Rights::READ;
+pub const AUDIT_RIGHTS: Rights = Rights::READ;
 
 /// Tell pid 1 where `/` is, on its bootstrap channel: the root volume, with
 /// pid 1 moved onto it, or still the tmpfs (`ferrix.devmgr=init`, L12). Said
 /// once, by `fs::root_disk`, once it knows.
-pub(crate) fn notify_root(switched: bool) {
+pub fn notify_root(switched: bool) {
     crate::audit::record(
         crate::audit::ROOT_SWITCHED,
         crate::audit::Outcome::Done,
@@ -336,7 +336,7 @@ static NAMED: Once<Vec<u8>> = Once::new();
 /// better reported at the start of a log than at the end of one. A path that
 /// is not absolute is refused here, since there is no working directory yet
 /// to resolve it from.
-pub(crate) fn read_option(view: &BootView<'_>) {
+pub fn read_option(view: &BootView<'_>) {
     let tree = crate::discovery::fdt::open(view).ok();
     let value = view.option(OPTION).or_else(|| {
         tree.as_ref()
@@ -360,17 +360,17 @@ pub(crate) fn read_option(view: &BootView<'_>) {
 /// is read: by the item's dependency rules this file names no archive or
 /// filesystem crate.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct InputEntry {
+pub struct InputEntry {
     /// Its name relative to the root, without a leading `./` or `/`.
-    pub(crate) name: &'static [u8],
+    pub name: &'static [u8],
     /// Whether it is a regular file.
-    pub(crate) regular: bool,
+    pub regular: bool,
     /// Whether it is a directory.
-    pub(crate) directory: bool,
+    pub directory: bool,
     /// Its link count, as the archive gives it.
-    pub(crate) links: u32,
+    pub links: u32,
     /// Its bytes, in the archive the kernel keeps for the whole boot.
-    pub(crate) data: &'static [u8],
+    pub data: &'static [u8],
 }
 
 /// What pid 1 is started with when nothing is named on the command line:
@@ -408,7 +408,7 @@ pub(crate) const COMMANDS_INPUT: &[u8] = b".ferrix/init/commands";
 /// has more than one link, any other name, a script with a NUL in it, which
 /// cannot survive being an argument, and a list of commands that does not
 /// end its last command with an empty argument.
-pub(crate) fn set_inputs(entries: impl Iterator<Item = InputEntry>) -> bool {
+pub fn set_inputs(entries: impl Iterator<Item = InputEntry>) -> bool {
     if INPUTS.get().is_some() {
         return false;
     }
@@ -534,7 +534,7 @@ const SHOWN_BYTES: usize = 60;
 ///
 /// Returns when the last program exits, which on an interactive session is
 /// when somebody types `exit`.
-pub(crate) fn run() {
+pub fn run() {
     let Some(&launcher) = LAUNCHER.get() else {
         println!("  init     nothing is registered to start a program with");
         return;
@@ -583,7 +583,7 @@ impl fmt::Display for Refusal {
 }
 
 /// A refusal for want of memory.
-fn no_memory(_: fallible::AllocError) -> Refusal {
+pub fn no_memory(_: fallible::AllocError) -> Refusal {
     Refusal::Open(Errno::ENOMEM)
 }
 
@@ -592,7 +592,7 @@ fn no_memory(_: fallible::AllocError) -> Refusal {
 /// A `#!` script runs under its interpreter with its own path as the last
 /// argument, one level deep, as `execve` runs one; any other file runs with
 /// its path as its only argument, as Linux starts `init=`.
-fn run_file(launcher: &Launcher, path: &[u8]) -> Result<i32, Refusal> {
+pub fn run_file(launcher: &Launcher, path: &[u8]) -> Result<i32, Refusal> {
     let mut opened = (launcher.open)(path).map_err(Refusal::Open)?;
     let mut argv: Vec<Vec<u8>> = Vec::new();
     if opened.program.head().starts_with(b"#!") {
@@ -673,7 +673,7 @@ fn run_built_in(launcher: &Launcher, inputs: Inputs) {
 
 /// Run each command in `list`, each with the program its `argv[0]` names in
 /// [`PROGRAM_DIR`].
-fn run_commands(launcher: &Launcher, list: &[u8]) {
+pub fn run_commands(launcher: &Launcher, list: &[u8]) {
     let Ok(commands) = parse(list) else {
         println!("  init     no memory to read the commands");
         return;
@@ -779,7 +779,7 @@ fn start(
 /// # Errors
 ///
 /// [`fallible::AllocError`] when there is no memory for the list.
-fn parse(list: &[u8]) -> Result<Vec<Vec<&[u8]>>, fallible::AllocError> {
+pub fn parse(list: &[u8]) -> Result<Vec<Vec<&[u8]>>, fallible::AllocError> {
     let mut commands = Vec::new();
     let mut current = Vec::new();
     for word in list.split(|byte| *byte == 0) {
