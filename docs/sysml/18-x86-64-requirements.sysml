@@ -854,6 +854,7 @@ package FerrixX8664Requirements {
                 "arch::x86_64::clock::start_tsc",
                 "arch::x86_64::clock::pit_finished",
                 "arch::x86_64::clock::calibrate_tsc",
+                "arch::x86_64::clock::cpuid_tsc_hz",
                 "arch::x86_64::clock::write64",
                 "arch::x86_64::clock::main_counter",
                 "arch::x86_64::clock::read64",
@@ -2405,17 +2406,26 @@ package FerrixX8664Requirements {
             attribute :>> statement = "Every processor, the boot processor in
                 apic::init and each application processor first in
                 secondary_start, shall read its own IA32_APIC_BASE before it uses
-                the local APIC's MMIO window, and one in x2APIC mode shall be taken
-                to disabled and then to xAPIC; where the platform locks legacy xAPIC
-                (IA32_XAPIC_DISABLE_STATUS), the boot shall stop naming the
-                processor.";
+                its local APIC. The boot processor shall choose x2APIC mode where
+                the platform locks legacy xAPIC (IA32_XAPIC_DISABLE_STATUS),
+                firmware left x2APIC on, or ferrix.apic=x2apic asks and CPUID
+                offers it, and xAPIC mode otherwise; every processor shall run in
+                that mode, every local APIC register access going through one
+                accessor that picks the MSR or the MMIO window. In xAPIC mode one
+                left in x2APIC mode shall be taken to disabled and then to xAPIC,
+                and one locked there shall stop the boot naming the processor.";
             attribute :>> criterion = "On x86-64 under KVM and TCG the check puts
                 the first application processor in x2APIC mode before its own look;
                 every processor looks, that one is switched to xAPIC and comes up,
                 and stage 4's apic line counts them; with secondary_start's look
-                removed that processor never comes up and stage 4 fails.";
+                removed that processor never comes up and stage 4 fails. With
+                ferrix.apic=x2apic every processor says it runs in x2APIC mode and
+                the boot passes; with the x2APIC end-of-interrupt write removed it
+                never reaches stage 3's line.";
             attribute :>> parent = ("H.IRQ.1", "H.FAIL.1");
             attribute :>> unit = ("arch::x86_64::apic::leave_x2apic",
+                "arch::x86_64::apic::choose_mode", "arch::x86_64::apic::enter_mode",
+                "arch::x86_64::apic::read_reg", "arch::x86_64::apic::write_reg",
                 "arch::x86_64::apic::xapic_locked", "arch::x86_64::apic::init",
                 "arch::x86_64::smp::secondary_start", "arch::x86_64::smp::CpuStarter::finish");
         }
