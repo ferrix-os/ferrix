@@ -388,7 +388,7 @@ extern "C" fn secondary_start(record: u64) -> ! {
     // failed allocation's shootdown sends included: in x2APIC mode it does
     // not exist, and INIT does not take a processor out of it (G6).
     apic::check::put_first_in_x2apic();
-    if let Err(problem) = apic::leave_x2apic() {
+    if let Err(problem) = apic::enter_mode() {
         let initial = core::arch::x86_64::__cpuid(1).ebx >> 24;
         crate::panic::fatal!(
             crate::panic::catalog::X2APIC_LOCKED,

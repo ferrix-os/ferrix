@@ -289,7 +289,7 @@ pub(crate) fn flush_tlb_page(address: u64) {
 /// other: its local APIC ID.
 pub(crate) fn send_ipi_to(hardware_id: u64) -> Result<(), &'static str> {
     let apic_id = u32::try_from(hardware_id)
-        .map_err(|_| "an APIC ID above 255 needs x2APIC mode, which is not written yet")?;
+        .map_err(|_| "an APIC ID wider than 32 bits")?;
     apic::send_ipi_to(apic_id)
 }
 
@@ -1695,7 +1695,7 @@ pub(crate) unsafe fn init_interrupts(view: &BootView<'_>) -> Result<Report, &'st
     }
     // SAFETY: (DEVICE) called once from `kmain`, on the boot CPU, after `init_traps`
     // filled the IDT and with interrupts masked.
-    unsafe { apic::init(&acpi)? };
+    unsafe { apic::init(&acpi, view.option(apic::OPTION))? };
 
     Ok(Report {
         counter,
