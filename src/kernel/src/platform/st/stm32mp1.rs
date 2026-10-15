@@ -86,7 +86,7 @@ use crate::{power, timer, vmap};
 /// # Errors
 ///
 /// [`Full`] when the device registry has no room for another binding.
-pub(crate) fn install(view: &BootView<'_>) -> Result<(), Full> {
+pub fn install(view: &BootView<'_>) -> Result<(), Full> {
     board::register_board(&DISPLAY)?;
     board::register_board(&usb::BINDING)?;
     board::register_board(&gpu::BINDING)?;

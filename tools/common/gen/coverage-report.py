@@ -68,6 +68,7 @@ import argparse
 import bisect
 import importlib.util
 import json
+import posixpath
 import re
 import struct
 import subprocess
@@ -260,7 +261,12 @@ def kernel_of(trace: Path, default: Path) -> Path:
 
 
 def relative(path: str) -> str | None:
-    """A line-table path as the boundary gate names it; None outside the kernel."""
+    """A line-table path as the boundary gate names it; None outside the kernel.
+
+    Since the kernel split (docs/KERNEL-CRATES.md) the line table names a file
+    through its crate's manifest directory, `src/kernel/core/../src/mm.rs`,
+    so the path is normalised first."""
+    path = posixpath.normpath(path)
     if "src/kernel/src/" not in path:
         return None
     return path.split("src/kernel/src/", 1)[1]

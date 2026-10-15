@@ -20,11 +20,11 @@ use crate::discovery::{acpi, fdt};
 /// How a machine describes itself: [`Description::Acpi`] with its opened
 /// tables, [`Description::Tree`] with its parsed tree, or
 /// [`Description::Neither`].
-pub(crate) type Description = ferrix_description::Description<acpi::Firmware, Fdt<'static>>;
+pub type Description = ferrix_description::Description<acpi::Firmware, Fdt<'static>>;
 
 /// The description `view`'s machine is read by: its ACPI tables if they
 /// open, else its device tree if it parses, else neither. The tree is not
 /// parsed when the tables open.
-pub(crate) fn of(view: &BootView<'_>) -> Description {
+pub fn of(view: &BootView<'_>) -> Description {
     ferrix_description::choose(acpi::Firmware::open(view), || fdt::open(view))
 }

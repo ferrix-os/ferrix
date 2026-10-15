@@ -119,11 +119,11 @@ use crate::user::vmo::{Commit, Kept, Own, Retired, ShadowCopies, Sharing, Vmo, V
 /// page there and a hint cannot round down into it. Nothing Linux would load is
 /// refused for it — a static ARM binary is linked at exactly this address, and
 /// the other two architectures link theirs higher.
-pub(crate) const MMAP_MIN_ADDR: u64 = 0x1_0000;
+pub const MMAP_MIN_ADDR: u64 = 0x1_0000;
 
 /// Why an address space operation was refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum SpaceError {
+pub enum SpaceError {
     /// No frame was available for a page table or a root.
     OutOfMemory,
     /// The range is not in the half of the address space user code gets.
@@ -175,7 +175,7 @@ impl fmt::Display for SpaceError {
 
 /// What a fault was trying to do, which decides whether it is allowed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Access {
+pub struct Access {
     /// The access wrote.
     pub(crate) write: bool,
     /// The access fetched an instruction.
@@ -184,12 +184,12 @@ pub(crate) struct Access {
 
 impl Access {
     /// A read.
-    pub(crate) const READ: Access = Access {
+    pub const READ: Access = Access {
         write: false,
         execute: false,
     };
     /// A write.
-    pub(crate) const WRITE: Access = Access {
+    pub const WRITE: Access = Access {
         write: true,
         execute: false,
     };
@@ -242,7 +242,7 @@ impl Inner {
 
 /// One process's address space.
 #[derive(Debug)]
-pub(crate) struct AddressSpace {
+pub struct AddressSpace {
     /// Physical frame of the root table.
     root: Frame,
     /// This space, as the objects it maps record it.
@@ -268,7 +268,7 @@ impl AddressSpace {
     /// # Errors
     ///
     /// [`SpaceError::OutOfMemory`] if there is no frame for the root.
-    pub(crate) fn new() -> Result<Arc<AddressSpace>, SpaceError> {
+    pub fn new() -> Result<Arc<AddressSpace>, SpaceError> {
         let root = mm::allocate_frames(0).ok_or(SpaceError::OutOfMemory)?;
         mm::zero_frame(root);
 
@@ -314,7 +314,7 @@ impl AddressSpace {
     ///
     /// [`SpaceError::BadRange`] for an `end` that is not a page boundary
     /// inside the user half, or below a region still mapped; nothing changes.
-    pub(crate) fn set_ceiling(&self, end: u64) -> Result<(), SpaceError> {
+    pub fn set_ceiling(&self, end: u64) -> Result<(), SpaceError> {
         if end > USER_VIRT_END {
             return Err(SpaceError::BadRange);
         }
@@ -327,12 +327,12 @@ impl AddressSpace {
 
     /// One past the highest address a mapping may reach: the user half's
     /// end, or a 32-bit program's lower ceiling.
-    pub(crate) fn ceiling(&self) -> u64 {
+    pub fn ceiling(&self) -> u64 {
         self.inner.lock().map.high()
     }
 
     /// The physical address of the root table, for whoever installs it.
-    pub(crate) fn root_table(&self) -> u64 {
+    pub fn root_table(&self) -> u64 {
         self.root * PAGE_SIZE
     }
 
@@ -365,7 +365,7 @@ impl AddressSpace {
     /// Interrupts must be masked across the call, so that the processor that
     /// joins is the one whose root is loaded, and the caller must not be
     /// preempted into a context expecting a different address space.
-    pub(crate) unsafe fn install(&self, replacing: Option<&AddressSpace>) {
+    pub unsafe fn install(&self, replacing: Option<&AddressSpace>) {
         // The speculation domains the barrier decision compares: the
         // outgoing space's read as it leaves, so that a program that left
         // its domain while it ran is out of it now (`docs/OPAQUE-KERNEL.md`
@@ -399,7 +399,7 @@ impl AddressSpace {
     ///
     /// (TRANSLATE) Nothing on this processor may still need a user address, and interrupts
     /// must be masked across the call.
-    pub(crate) unsafe fn uninstall(&self) {
+    pub unsafe fn uninstall(&self) {
         // As it leaves, for the next install's decision: see `install`.
         arch::left_space(self.domain());
         let cpu = this_logical_cpu();
@@ -439,7 +439,7 @@ const OUT: u64 = u64::MAX - 1;
 impl AddressSpace {
     /// The speculation domain the switch barrier decision reads: zero for
     /// none, which an unclaimed space and one out for good are too.
-    pub(crate) fn domain(&self) -> u64 {
+    pub fn domain(&self) -> u64 {
         match self.domain.load(Ordering::Acquire) {
             UNCLAIMED | OUT => 0,
             domain => domain,
@@ -688,12 +688,12 @@ fn sharing_of(flags: VmaFlags) -> Sharing {
 
 impl AddressSpace {
     /// How many regions the map holds.
-    pub(crate) fn region_count(&self) -> usize {
+    pub fn region_count(&self) -> usize {
         self.inner.lock().map.region_count()
     }
 
     /// The object this space knows as `id`, if it has one.
-    pub(crate) fn object(&self, id: u64) -> Option<Arc<Vmo>> {
+    pub fn object(&self, id: u64) -> Option<Arc<Vmo>> {
         self.inner.lock().objects.get(&id).map(Arc::clone)
     }
 
@@ -703,7 +703,7 @@ impl AddressSpace {
     /// covers, a private region -- whose pages are this space's alone, even
     /// while a `fork` shares them copy-on-write -- and a device region, which
     /// has no object.
-    pub(crate) fn shared_object_at(&self, address: u64) -> Option<(Arc<Vmo>, u64)> {
+    pub fn shared_object_at(&self, address: u64) -> Option<(Arc<Vmo>, u64)> {
         let inner = self.inner.lock();
         let region = inner.map.find(address)?;
         if !region.flags.shared {
@@ -730,12 +730,7 @@ impl AddressSpace {
     /// [`SpaceError::NotUserRange`] outside the user half,
     /// [`SpaceError::BadRange`] if it overlaps or is malformed, and
     /// [`SpaceError::OutOfMemory`] if the object cannot be made.
-    pub(crate) fn map_anonymous(
-        &self,
-        at: u64,
-        len: u64,
-        flags: VmaFlags,
-    ) -> Result<u64, SpaceError> {
+    pub fn map_anonymous(&self, at: u64, len: u64, flags: VmaFlags) -> Result<u64, SpaceError> {
         if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
             return Err(SpaceError::NotUserRange(at));
         }
@@ -863,7 +858,7 @@ impl AddressSpace {
     /// and a map marked copy-on-write with nobody to share with merely costs
     /// the parent a fault per page that then declines to copy anything,
     /// because the refcount says it is the only holder.
-    pub(crate) fn fork(&self) -> Result<Arc<AddressSpace>, SpaceError> {
+    pub fn fork(&self) -> Result<Arc<AddressSpace>, SpaceError> {
         let mut inner = self.inner.lock();
 
         // The child's root first, because it is the step most likely to fail
@@ -978,7 +973,7 @@ impl AddressSpace {
     /// [`SpaceError::NotMapped`] if no region covers the address, which is the
     /// segmentation fault, and [`SpaceError::Refused`] if the region does not
     /// permit the access, which is the other one.
-    pub(crate) fn fault(&self, address: u64, access: Access) -> Result<(), SpaceError> {
+    pub fn fault(&self, address: u64, access: Access) -> Result<(), SpaceError> {
         fault_requested();
         // A page of a file on a disk that reclaim takes between its fill and
         // its use is filled again; it is never used as zeros (`user::cache`).
@@ -1178,7 +1173,7 @@ impl AddressSpace {
     /// # Errors
     ///
     /// As [`AddressSpace::fill_file_page`].
-    pub(crate) fn fill_file_page_alone(&self, address: u64) -> Result<(), SpaceError> {
+    pub fn fill_file_page_alone(&self, address: u64) -> Result<(), SpaceError> {
         self.fill_file_pages(address, true)
     }
 
@@ -1440,7 +1435,7 @@ impl AddressSpace {
     ///
     /// As [`AddressSpace::fault`]; and [`SpaceError::Refused`] for a page of
     /// a device region, or one whose frame is not RAM.
-    pub(crate) fn with_page<R>(
+    pub fn with_page<R>(
         &self,
         address: u64,
         access: Access,
@@ -1489,7 +1484,7 @@ impl AddressSpace {
     /// [`SpaceError::Refused`] if the region does not permit the access, is a
     /// device's, or maps a frame that is not RAM, as for
     /// [`AddressSpace::with_page`].
-    pub(crate) fn with_present_page<R>(
+    pub fn with_present_page<R>(
         &self,
         address: u64,
         access: Access,
@@ -1535,7 +1530,7 @@ impl AddressSpace {
     /// taken before any spin lock, and after `Process`'s heap lock.
     ///
     /// [`unmap`]: AddressSpace::unmap
-    pub(crate) fn layout(&self) -> SleepLockGuard<'_, ()> {
+    pub fn layout(&self) -> SleepLockGuard<'_, ()> {
         self.layout.lock()
     }
 
@@ -1544,7 +1539,7 @@ impl AddressSpace {
     /// # Errors
     ///
     /// [`SpaceError::BadRange`] if the range is malformed.
-    pub(crate) fn unmap(&self, at: u64, len: u64) -> Result<(), SpaceError> {
+    pub fn unmap(&self, at: u64, len: u64) -> Result<(), SpaceError> {
         let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
         // Three phases, and the order between them is the whole point:
         // translations down, then every processor that may have them told, and
@@ -1908,14 +1903,14 @@ fn cut_shadow(shadow: &Arc<Vmo>, runs: &[(u64, u64)]) -> Option<ShadowCopies> {
 
 /// What a file mapping's id keeps beside its object.
 #[derive(Clone, Debug)]
-pub(crate) struct FileMapping {
+pub struct FileMapping {
     /// The open file it was mapped through.
-    pub(crate) file: Arc<dyn Any + Send + Sync>,
+    pub file: Arc<dyn Any + Send + Sync>,
     /// Whether this is a shared mapping that may write the file: of a file
     /// open for writing, made while no seal refused writes. Counted in the
     /// file object's may-write count for as long as the id is in the tables,
     /// and what `mprotect` asks before it makes a shared file mapping writable.
-    pub(crate) may_write: bool,
+    pub may_write: bool,
 }
 
 /// Where a private file mapping's fault puts a frame: page `index` of the
@@ -1999,7 +1994,7 @@ fn note(freeing: &mut Vec<Freeing>, range: Freeing) {
 
 /// Where [`AddressSpace::map_file`] puts a mapping.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum FilePlace {
+pub enum FilePlace {
     /// Exactly here: `MAP_FIXED`, with the range already cleared.
     Fixed(u64),
     /// Wherever it fits, near the hint if there is one.
@@ -2008,7 +2003,7 @@ pub(crate) enum FilePlace {
 
 /// Where `mremap` may put the region it resizes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Destination {
+pub enum Destination {
     /// Where it is, or nowhere: no `MREMAP_MAYMOVE`.
     InPlace,
     /// Where it is if it fits there, wherever it fits otherwise:
@@ -2061,7 +2056,7 @@ impl AddressSpace {
     /// may not move, or there is no gap it fits, or a private region that
     /// would move holds a page a device holds -- moving it would give the
     /// program a different frame from the device's at the same address.
-    pub(crate) fn remap(
+    pub fn remap(
         &self,
         old: u64,
         old_len: u64,
@@ -2522,18 +2517,18 @@ fn hold_type(
 /// `physical`, inside the window `whole..whole + whole_len` -- a render
 /// node's whole blob -- over which its memory type is held.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct WindowPages {
+pub struct WindowPages {
     /// The first page mapped.
-    pub(crate) physical: u64,
+    pub physical: u64,
     /// The window's first page.
-    pub(crate) whole: u64,
+    pub whole: u64,
     /// The window's length, whole pages.
-    pub(crate) whole_len: u64,
+    pub whole_len: u64,
 }
 
 impl WindowPages {
     /// `len` bytes from `physical`, a window of their own.
-    pub(crate) const fn all(physical: u64, len: u64) -> WindowPages {
+    pub const fn all(physical: u64, len: u64) -> WindowPages {
         WindowPages {
             physical,
             whole: physical,
@@ -2684,7 +2679,7 @@ impl AddressSpace {
     ///
     /// As [`AddressSpace::map_device`], and [`SpaceError::BadRange`] for
     /// pages outside their window.
-    pub(crate) fn map_window(
+    pub fn map_window(
         &self,
         place: FilePlace,
         len: u64,
@@ -2713,7 +2708,7 @@ impl AddressSpace {
     /// # Errors
     ///
     /// As [`AddressSpace::map_window`].
-    pub(crate) fn map_window_typed(
+    pub fn map_window_typed(
         &self,
         place: FilePlace,
         len: u64,
@@ -2839,7 +2834,7 @@ impl AddressSpace {
     ///
     /// [`SpaceError::BadRange`] if the length is malformed, and
     /// [`SpaceError::OutOfMemory`] if there is no hole big enough.
-    pub(crate) fn map_anywhere(
+    pub fn map_anywhere(
         &self,
         hint: Option<u64>,
         len: u64,
@@ -2902,7 +2897,7 @@ impl AddressSpace {
     /// pages, a range past the object's end, or one that overlaps a mapping;
     /// [`SpaceError::NotUserRange`] outside the user half; and
     /// [`SpaceError::OutOfMemory`] if no free range is long enough.
-    pub(crate) fn map_object(
+    pub fn map_object(
         &self,
         at: Option<u64>,
         len: u64,
@@ -2975,7 +2970,7 @@ impl AddressSpace {
     ///
     /// [`SpaceError::BadRange`] for an object that is not one page, and
     /// [`SpaceError::OutOfMemory`] if there is no room.
-    pub(crate) fn map_code_page(&self, vmo: Arc<Vmo>) -> Result<u64, SpaceError> {
+    pub fn map_code_page(&self, vmo: Arc<Vmo>) -> Result<u64, SpaceError> {
         if vmo.len_bytes() != PAGE_SIZE {
             return Err(SpaceError::BadRange);
         }
@@ -3036,7 +3031,7 @@ impl AddressSpace {
     /// page's address, or `None` if it is not mapped here. How a signal's
     /// delivery finds the vDSO's return trampoline, or ARMv7-A's return page,
     /// which the space maps once at exec and a fork keeps where it was.
-    pub(crate) fn shared_code_at(&self, vmo: &Arc<Vmo>) -> Option<u64> {
+    pub fn shared_code_at(&self, vmo: &Arc<Vmo>) -> Option<u64> {
         let inner = self.inner.lock();
         let id = inner
             .objects
@@ -3048,7 +3043,11 @@ impl AddressSpace {
         })
     }
 
-    pub(crate) fn map_shared_code(&self, vmo: Arc<Vmo>) -> Result<u64, SpaceError> {
+    /// Map `vmo`, two pages, shared into this space at a free address: the
+    /// first readable, the second readable and runnable. Answers where the
+    /// runnable page starts. How the vDSO, its data page and its code, is put
+    /// into a program's space (`syscall::vdso`).
+    pub fn map_shared_code(&self, vmo: Arc<Vmo>) -> Result<u64, SpaceError> {
         let len = 2 * PAGE_SIZE;
         if vmo.len_bytes() != len {
             return Err(SpaceError::BadRange);
@@ -3119,7 +3118,7 @@ impl AddressSpace {
     /// As [`AddressSpace::map_anonymous`] and [`AddressSpace::map_anywhere`],
     /// and [`SpaceError::BadRange`] for an offset that is not whole pages or a
     /// range that would leave the object.
-    pub(crate) fn map_file(
+    pub fn map_file(
         &self,
         place: FilePlace,
         len: u64,
@@ -3213,7 +3212,7 @@ impl AddressSpace {
 
     /// The open file a file mapping's region names by `id`, for
     /// `/proc/<pid>/maps`.
-    pub(crate) fn mapped_file(&self, id: u64) -> Option<Arc<dyn Any + Send + Sync>> {
+    pub fn mapped_file(&self, id: u64) -> Option<Arc<dyn Any + Send + Sync>> {
         self.inner
             .lock()
             .files
@@ -3243,7 +3242,7 @@ impl AddressSpace {
     /// [`SpaceError::BadRange`] if the range is malformed, or is not wholly
     /// mapped; [`SpaceError::Refused`] if it reaches a region `vmo_map` made,
     /// whose protection is its handle's to grant.
-    pub(crate) fn protect(&self, at: u64, len: u64, flags: VmaFlags) -> Result<(), SpaceError> {
+    pub fn protect(&self, at: u64, len: u64, flags: VmaFlags) -> Result<(), SpaceError> {
         if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
             return Err(SpaceError::NotUserRange(at));
         }
@@ -3297,7 +3296,7 @@ impl AddressSpace {
     ///
     /// `brk` needs it to place the heap above everything the ELF loader
     /// mapped, without the loader and the heap having to agree on a number.
-    pub(crate) fn highest_mapped(&self) -> Option<u64> {
+    pub fn highest_mapped(&self) -> Option<u64> {
         self.inner
             .lock()
             .map
@@ -3314,7 +3313,7 @@ impl AddressSpace {
 /// What `madvise` asks of a range, as far as the address space is concerned.
 /// `crate::syscall::memory::sys_madvise` turns Linux's `MADV_*` into these.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Advice {
+pub enum Advice {
     /// `MADV_DONTNEED`, and with `locked_too` `MADV_DONTNEED_LOCKED`: the
     /// range stays mapped, and its pages go. Private anonymous memory reads
     /// as zeros on its next touch and a private file mapping as the file,
@@ -3343,7 +3342,7 @@ pub(crate) enum Advice {
 
 /// Why [`AddressSpace::advise`] refused, as `madvise` reports it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Declined {
+pub enum Declined {
     /// Part of the range is mapped by nothing: `ENOMEM`, once every mapped
     /// part has been advised.
     Unmapped,
@@ -3457,7 +3456,7 @@ impl AddressSpace {
     /// # Errors
     ///
     /// As [`Declined`].
-    pub(crate) fn advise(&self, at: u64, len: u64, advice: Advice) -> Result<(), Declined> {
+    pub fn advise(&self, at: u64, len: u64, advice: Advice) -> Result<(), Declined> {
         let end = at.saturating_add(len);
         let mut advised = Advised {
             pages: TlbPages::new(),
@@ -3775,16 +3774,16 @@ impl Drop for AddressSpace {
 /// No name: the region map records none. `[heap]` and `[stack]` are things
 /// the process knows about its regions, not things the map knows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Region {
+pub struct Region {
     /// First address.
-    pub(crate) start: u64,
+    pub start: u64,
     /// First address past the end.
-    pub(crate) end: u64,
+    pub end: u64,
     /// Permissions and mapping kind.
-    pub(crate) flags: VmaFlags,
+    pub flags: VmaFlags,
     /// For a file mapping, the id [`AddressSpace::mapped_file`] finds its file
     /// by, and the byte offset of the region's first page in the file.
-    pub(crate) file: Option<(u64, u64)>,
+    pub file: Option<(u64, u64)>,
 }
 
 impl AddressSpace {
@@ -3795,16 +3794,13 @@ impl AddressSpace {
     /// [`fallible::AllocError`] when there is no memory for the list; a
     /// caller that only looks uses [`AddressSpace::with_regions`], which
     /// needs none.
-    pub(crate) fn regions(&self) -> Result<Vec<Region>, fallible::AllocError> {
+    pub fn regions(&self) -> Result<Vec<Region>, fallible::AllocError> {
         self.with_regions(|regions| fallible::try_collect(regions))
     }
 
     /// Show `visit` every region, lowest first, under the space's lock: it
     /// must not wait, and nothing can change the map while it looks.
-    pub(crate) fn with_regions<R>(
-        &self,
-        visit: impl FnOnce(&mut dyn Iterator<Item = Region>) -> R,
-    ) -> R {
+    pub fn with_regions<R>(&self, visit: impl FnOnce(&mut dyn Iterator<Item = Region>) -> R) -> R {
         let inner = self.inner.lock();
         let mut regions = inner.map.iter().map(|vma| Region {
             start: vma.range.start(),
@@ -3828,7 +3824,7 @@ impl AddressSpace {
     ///
     /// [`fallible::AllocError`] when there is no memory to list the objects
     /// in.
-    pub(crate) fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
+    pub fn resident_pages(&self) -> Result<u64, fallible::AllocError> {
         let inner = self.inner.lock();
         let mut objects = fallible::try_collect(inner.objects.values())?;
         objects.sort_unstable_by_key(|vmo| Arc::as_ptr(vmo));

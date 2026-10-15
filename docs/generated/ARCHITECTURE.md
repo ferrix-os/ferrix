@@ -121,11 +121,11 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 138 packages, 6856 elements, 217 relations. Model digest `9b5b48c186685d35`.
+26 files, 138 packages, 6871 elements, 220 relations. Model digest `b36eb98b59d4bf28`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
-| `#implemented` | 281 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
+| `#implemented` | 284 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
 | `#inProgress` | 25 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
@@ -539,7 +539,7 @@ flowchart LR
 
 ### The kernel
 
-src/kernel/: monolithic core, capability seams, userspace device drivers. Entered from the loader with the MMU on, three mappings in place and nothing else: no vectors, no allocator, no other CPU running.
+src/kernel/: monolithic core, capability seams, userspace device drivers. Entered from the loader with the MMU on, three mappings in place and nothing else: no vectors, no allocator, no other CPU running. Built as four crates along the rings (kernelCore, kernelItem, kernelLoad and the kernelCrate binary; docs/KERNEL-CRATES.md), its parts below by file.
 
 | Feature | Type | Maturity | Stage | Note |
 | --- | --- | --- | ---: | --- |
@@ -2794,7 +2794,10 @@ docs/ARCHITECTURE.md §9. src/lib/ is host-testable by design and is the only co
 | `src/lib/drivers/console/virtio-console` | `#implemented` | — | allowed | 15 | The virtio-console driver: bring-up, the control conversation until a named port is open, and that port's bytes (docs/CLIPBOARD.md §3). |
 | `src/lib/kernel/seccomp` | `#implemented` | 13 | `forbid` | — | The classic-BPF interpreter as a pure function over bytes. |
 | `src/boot/common/uefi` | `#implemented` | — | allowed | — |  |
-| `src/kernel` | `#implemented` | — | allowed | — |  |
+| `src/kernel` | `#implemented` | — | allowed | — | The binary, ferrix-kernel: main.rs, the composition root, and the raised stages_check.rs; it reaches the other three through ferrix_kernel_load's re-exports. |
+| `src/kernel/core` | `#implemented` | — | allowed | — | ferrix-kernel-core, root src/kernel/src/kernel_core.rs: every core-ring file. |
+| `src/kernel/item` | `#implemented` | — | allowed | — | ferrix-kernel-item, root src/kernel/src/kernel_item.rs: every item-ring file but main.rs; re-exports the core. |
+| `src/kernel/load` | `#implemented` | — | allowed | — | ferrix-kernel-load, root src/kernel/src/kernel_load.rs: every load-ring file, and the check files raised above their ring (raised_checks); re-exports the item and the core. |
 | `tools/common/xtask` | `#implemented` | — | allowed | 395 | Cross-compiles both halves and the native programs, writes the FAT32 image and the initramfs with its own writers, converts the ARMv7-A loader ELF to PE32, drives QEMU, runs the NAT gateway the network tests sit behind, and runs every gate. |
 | `src/tests/fuzz` | `#implemented` | — | allowed | — |  |
 
@@ -2856,77 +2859,122 @@ flowchart LR
   n51_FerrixStructure_Workspace_seccompBpf["seccompBpf<br>src/lib/kernel/seccomp"]
   n52_FerrixStructure_Workspace_bootCrate["bootCrate<br>src/boot/common/uefi"]
   n53_FerrixStructure_Workspace_kernelCrate["kernelCrate<br>src/kernel"]
-  n54_FerrixStructure_Workspace_xtask["xtask<br>tools/common/xtask"]
-  n55_FerrixStructure_Workspace_fuzz["fuzz<br>src/tests/fuzz"]
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n5_FerrixStructure_Workspace_acpi
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n40_FerrixStructure_Workspace_blkRing
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n39_FerrixStructure_Workspace_blockQueue
+  n54_FerrixStructure_Workspace_kernelCore["kernelCore<br>src/kernel/core"]
+  n55_FerrixStructure_Workspace_kernelItem["kernelItem<br>src/kernel/item"]
+  n56_FerrixStructure_Workspace_kernelLoad["kernelLoad<br>src/kernel/load"]
+  n57_FerrixStructure_Workspace_xtask["xtask<br>tools/common/xtask"]
+  n58_FerrixStructure_Workspace_fuzz["fuzz<br>src/tests/fuzz"]
+  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n56_FerrixStructure_Workspace_kernelLoad
   n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n0_FerrixStructure_Workspace_bootinfo
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n36_FerrixStructure_Workspace_btrfs
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n38_FerrixStructure_Workspace_btrfsVfs
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n37_FerrixStructure_Workspace_btrfsWrite
   n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n8_FerrixStructure_Workspace_crng
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n43_FerrixStructure_Workspace_devmgrProto
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n28_FerrixStructure_Workspace_displayctl
   n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n1_FerrixStructure_Workspace_elf
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n47_FerrixStructure_Workspace_fbtext
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n6_FerrixStructure_Workspace_fdt
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n2_FerrixStructure_Workspace_frameCrate
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n3_FerrixStructure_Workspace_heap
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n29_FerrixStructure_Workspace_inputctl
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n11_FerrixStructure_Workspace_linuxAbi
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n34_FerrixStructure_Workspace_nativeAbi
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n20_FerrixStructure_Workspace_netCore
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n23_FerrixStructure_Workspace_netlink
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n22_FerrixStructure_Workspace_netRing
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n19_FerrixStructure_Workspace_nettcp
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n18_FerrixStructure_Workspace_netwire
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n35_FerrixStructure_Workspace_objects
   n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n4_FerrixStructure_Workspace_paging
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n33_FerrixStructure_Workspace_pci
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n15_FerrixStructure_Workspace_procfs
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n48_FerrixStructure_Workspace_qr
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n45_FerrixStructure_Workspace_renderctl
   n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n9_FerrixStructure_Workspace_sched
   n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n7_FerrixStructure_Workspace_sync
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n16_FerrixStructure_Workspace_sysfs
   n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n12_FerrixStructure_Workspace_ustack
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n14_FerrixStructure_Workspace_vfs
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
-  n53_FerrixStructure_Workspace_kernelCrate -. "depends on" .-> n10_FerrixStructure_Workspace_vma
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n5_FerrixStructure_Workspace_acpi
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n32_FerrixStructure_Workspace_audit
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n0_FerrixStructure_Workspace_bootinfo
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n1_FerrixStructure_Workspace_elf
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n47_FerrixStructure_Workspace_fbtext
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n6_FerrixStructure_Workspace_fdt
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n2_FerrixStructure_Workspace_frameCrate
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n3_FerrixStructure_Workspace_heap
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n11_FerrixStructure_Workspace_linuxAbi
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n34_FerrixStructure_Workspace_nativeAbi
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n35_FerrixStructure_Workspace_objects
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n4_FerrixStructure_Workspace_paging
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n33_FerrixStructure_Workspace_pci
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n48_FerrixStructure_Workspace_qr
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n9_FerrixStructure_Workspace_sched
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n7_FerrixStructure_Workspace_sync
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n14_FerrixStructure_Workspace_vfs
+  n54_FerrixStructure_Workspace_kernelCore -. "depends on" .-> n10_FerrixStructure_Workspace_vma
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n54_FerrixStructure_Workspace_kernelCore
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n32_FerrixStructure_Workspace_audit
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n40_FerrixStructure_Workspace_blkRing
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n0_FerrixStructure_Workspace_bootinfo
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n8_FerrixStructure_Workspace_crng
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n43_FerrixStructure_Workspace_devmgrProto
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n1_FerrixStructure_Workspace_elf
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n6_FerrixStructure_Workspace_fdt
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n11_FerrixStructure_Workspace_linuxAbi
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n34_FerrixStructure_Workspace_nativeAbi
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n35_FerrixStructure_Workspace_objects
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n4_FerrixStructure_Workspace_paging
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n33_FerrixStructure_Workspace_pci
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n9_FerrixStructure_Workspace_sched
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n7_FerrixStructure_Workspace_sync
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n14_FerrixStructure_Workspace_vfs
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
+  n55_FerrixStructure_Workspace_kernelItem -. "depends on" .-> n10_FerrixStructure_Workspace_vma
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n54_FerrixStructure_Workspace_kernelCore
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n55_FerrixStructure_Workspace_kernelItem
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n32_FerrixStructure_Workspace_audit
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n40_FerrixStructure_Workspace_blkRing
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n39_FerrixStructure_Workspace_blockQueue
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n0_FerrixStructure_Workspace_bootinfo
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n36_FerrixStructure_Workspace_btrfs
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n38_FerrixStructure_Workspace_btrfsVfs
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n37_FerrixStructure_Workspace_btrfsWrite
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n28_FerrixStructure_Workspace_displayctl
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n1_FerrixStructure_Workspace_elf
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n6_FerrixStructure_Workspace_fdt
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n2_FerrixStructure_Workspace_frameCrate
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n29_FerrixStructure_Workspace_inputctl
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n11_FerrixStructure_Workspace_linuxAbi
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n31_FerrixStructure_Workspace_logctl
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n34_FerrixStructure_Workspace_nativeAbi
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n20_FerrixStructure_Workspace_netCore
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n22_FerrixStructure_Workspace_netRing
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n23_FerrixStructure_Workspace_netlink
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n19_FerrixStructure_Workspace_nettcp
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n18_FerrixStructure_Workspace_netwire
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n4_FerrixStructure_Workspace_paging
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n33_FerrixStructure_Workspace_pci
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n15_FerrixStructure_Workspace_procfs
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n45_FerrixStructure_Workspace_renderctl
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n9_FerrixStructure_Workspace_sched
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n51_FerrixStructure_Workspace_seccompBpf
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n30_FerrixStructure_Workspace_sndctl
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n7_FerrixStructure_Workspace_sync
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n16_FerrixStructure_Workspace_sysfs
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n12_FerrixStructure_Workspace_ustack
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n14_FerrixStructure_Workspace_vfs
+  n56_FerrixStructure_Workspace_kernelLoad -. "depends on" .-> n10_FerrixStructure_Workspace_vma
   n52_FerrixStructure_Workspace_bootCrate -. "depends on" .-> n0_FerrixStructure_Workspace_bootinfo
   n52_FerrixStructure_Workspace_bootCrate -. "depends on" .-> n1_FerrixStructure_Workspace_elf
   n52_FerrixStructure_Workspace_bootCrate -. "depends on" .-> n4_FerrixStructure_Workspace_paging
-  n54_FerrixStructure_Workspace_xtask -. "depends on" .-> n1_FerrixStructure_Workspace_elf
-  n54_FerrixStructure_Workspace_xtask -. "depends on" .-> n18_FerrixStructure_Workspace_netwire
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n5_FerrixStructure_Workspace_acpi
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n40_FerrixStructure_Workspace_blkRing
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n39_FerrixStructure_Workspace_blockQueue
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n36_FerrixStructure_Workspace_btrfs
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n13_FerrixStructure_Workspace_cpio
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n28_FerrixStructure_Workspace_displayctl
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n1_FerrixStructure_Workspace_elf
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n6_FerrixStructure_Workspace_fdt
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n2_FerrixStructure_Workspace_frameCrate
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n29_FerrixStructure_Workspace_inputctl
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n11_FerrixStructure_Workspace_linuxAbi
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n34_FerrixStructure_Workspace_nativeAbi
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n20_FerrixStructure_Workspace_netCore
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n23_FerrixStructure_Workspace_netlink
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n19_FerrixStructure_Workspace_nettcp
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n18_FerrixStructure_Workspace_netwire
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n35_FerrixStructure_Workspace_objects
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n33_FerrixStructure_Workspace_pci
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n45_FerrixStructure_Workspace_renderctl
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n30_FerrixStructure_Workspace_sndctl
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n7_FerrixStructure_Workspace_sync
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n12_FerrixStructure_Workspace_ustack
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n14_FerrixStructure_Workspace_vfs
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n42_FerrixStructure_Workspace_virtioBlk
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n25_FerrixStructure_Workspace_virtioGpu
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n27_FerrixStructure_Workspace_virtioInput
-  n55_FerrixStructure_Workspace_fuzz -. "depends on" .-> n24_FerrixStructure_Workspace_virtioNet
+  n57_FerrixStructure_Workspace_xtask -. "depends on" .-> n1_FerrixStructure_Workspace_elf
+  n57_FerrixStructure_Workspace_xtask -. "depends on" .-> n18_FerrixStructure_Workspace_netwire
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n5_FerrixStructure_Workspace_acpi
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n40_FerrixStructure_Workspace_blkRing
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n39_FerrixStructure_Workspace_blockQueue
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n36_FerrixStructure_Workspace_btrfs
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n13_FerrixStructure_Workspace_cpio
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n28_FerrixStructure_Workspace_displayctl
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n1_FerrixStructure_Workspace_elf
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n6_FerrixStructure_Workspace_fdt
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n2_FerrixStructure_Workspace_frameCrate
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n29_FerrixStructure_Workspace_inputctl
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n11_FerrixStructure_Workspace_linuxAbi
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n34_FerrixStructure_Workspace_nativeAbi
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n20_FerrixStructure_Workspace_netCore
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n23_FerrixStructure_Workspace_netlink
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n19_FerrixStructure_Workspace_nettcp
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n18_FerrixStructure_Workspace_netwire
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n35_FerrixStructure_Workspace_objects
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n33_FerrixStructure_Workspace_pci
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n45_FerrixStructure_Workspace_renderctl
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n30_FerrixStructure_Workspace_sndctl
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n7_FerrixStructure_Workspace_sync
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n12_FerrixStructure_Workspace_ustack
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n14_FerrixStructure_Workspace_vfs
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n42_FerrixStructure_Workspace_virtioBlk
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n25_FerrixStructure_Workspace_virtioGpu
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n27_FerrixStructure_Workspace_virtioInput
+  n58_FerrixStructure_Workspace_fuzz -. "depends on" .-> n24_FerrixStructure_Workspace_virtioNet
   n40_FerrixStructure_Workspace_blkRing -. "depends on" .-> n11_FerrixStructure_Workspace_linuxAbi
   n40_FerrixStructure_Workspace_blkRing -. "depends on" .-> n34_FerrixStructure_Workspace_nativeAbi
   n41_FerrixStructure_Workspace_blkServe -. "depends on" .-> n40_FerrixStructure_Workspace_blkRing
@@ -2973,12 +3021,15 @@ flowchart LR
   n26_FerrixStructure_Workspace_virtioSnd -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
   n24_FerrixStructure_Workspace_virtioNet -. "depends on" .-> n17_FerrixStructure_Workspace_virtio
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
-  class n0_FerrixStructure_Workspace_bootinfo,n1_FerrixStructure_Workspace_elf,n2_FerrixStructure_Workspace_frameCrate,n3_FerrixStructure_Workspace_heap,n4_FerrixStructure_Workspace_paging,n5_FerrixStructure_Workspace_acpi,n6_FerrixStructure_Workspace_fdt,n7_FerrixStructure_Workspace_sync,n8_FerrixStructure_Workspace_crng,n9_FerrixStructure_Workspace_sched,n10_FerrixStructure_Workspace_vma,n11_FerrixStructure_Workspace_linuxAbi,n12_FerrixStructure_Workspace_ustack,n13_FerrixStructure_Workspace_cpio,n14_FerrixStructure_Workspace_vfs,n15_FerrixStructure_Workspace_procfs,n16_FerrixStructure_Workspace_sysfs,n17_FerrixStructure_Workspace_virtio,n18_FerrixStructure_Workspace_netwire,n19_FerrixStructure_Workspace_nettcp,n20_FerrixStructure_Workspace_netCore,n21_FerrixStructure_Workspace_netServe,n22_FerrixStructure_Workspace_netRing,n23_FerrixStructure_Workspace_netlink,n24_FerrixStructure_Workspace_virtioNet,n25_FerrixStructure_Workspace_virtioGpu,n26_FerrixStructure_Workspace_virtioSnd,n27_FerrixStructure_Workspace_virtioInput,n28_FerrixStructure_Workspace_displayctl,n29_FerrixStructure_Workspace_inputctl,n30_FerrixStructure_Workspace_sndctl,n31_FerrixStructure_Workspace_logctl,n32_FerrixStructure_Workspace_audit,n33_FerrixStructure_Workspace_pci,n34_FerrixStructure_Workspace_nativeAbi,n35_FerrixStructure_Workspace_objects,n36_FerrixStructure_Workspace_btrfs,n37_FerrixStructure_Workspace_btrfsWrite,n38_FerrixStructure_Workspace_btrfsVfs,n39_FerrixStructure_Workspace_blockQueue,n40_FerrixStructure_Workspace_blkRing,n41_FerrixStructure_Workspace_blkServe,n42_FerrixStructure_Workspace_virtioBlk,n43_FerrixStructure_Workspace_devmgrProto,n44_FerrixStructure_Workspace_nativeCrate,n45_FerrixStructure_Workspace_renderctl,n46_FerrixStructure_Workspace_gc400,n47_FerrixStructure_Workspace_fbtext,n48_FerrixStructure_Workspace_qr,n49_FerrixStructure_Workspace_vdagent,n50_FerrixStructure_Workspace_virtioConsole,n51_FerrixStructure_Workspace_seccompBpf,n52_FerrixStructure_Workspace_bootCrate,n53_FerrixStructure_Workspace_kernelCrate,n54_FerrixStructure_Workspace_xtask,n55_FerrixStructure_Workspace_fuzz implemented
+  class n0_FerrixStructure_Workspace_bootinfo,n1_FerrixStructure_Workspace_elf,n2_FerrixStructure_Workspace_frameCrate,n3_FerrixStructure_Workspace_heap,n4_FerrixStructure_Workspace_paging,n5_FerrixStructure_Workspace_acpi,n6_FerrixStructure_Workspace_fdt,n7_FerrixStructure_Workspace_sync,n8_FerrixStructure_Workspace_crng,n9_FerrixStructure_Workspace_sched,n10_FerrixStructure_Workspace_vma,n11_FerrixStructure_Workspace_linuxAbi,n12_FerrixStructure_Workspace_ustack,n13_FerrixStructure_Workspace_cpio,n14_FerrixStructure_Workspace_vfs,n15_FerrixStructure_Workspace_procfs,n16_FerrixStructure_Workspace_sysfs,n17_FerrixStructure_Workspace_virtio,n18_FerrixStructure_Workspace_netwire,n19_FerrixStructure_Workspace_nettcp,n20_FerrixStructure_Workspace_netCore,n21_FerrixStructure_Workspace_netServe,n22_FerrixStructure_Workspace_netRing,n23_FerrixStructure_Workspace_netlink,n24_FerrixStructure_Workspace_virtioNet,n25_FerrixStructure_Workspace_virtioGpu,n26_FerrixStructure_Workspace_virtioSnd,n27_FerrixStructure_Workspace_virtioInput,n28_FerrixStructure_Workspace_displayctl,n29_FerrixStructure_Workspace_inputctl,n30_FerrixStructure_Workspace_sndctl,n31_FerrixStructure_Workspace_logctl,n32_FerrixStructure_Workspace_audit,n33_FerrixStructure_Workspace_pci,n34_FerrixStructure_Workspace_nativeAbi,n35_FerrixStructure_Workspace_objects,n36_FerrixStructure_Workspace_btrfs,n37_FerrixStructure_Workspace_btrfsWrite,n38_FerrixStructure_Workspace_btrfsVfs,n39_FerrixStructure_Workspace_blockQueue,n40_FerrixStructure_Workspace_blkRing,n41_FerrixStructure_Workspace_blkServe,n42_FerrixStructure_Workspace_virtioBlk,n43_FerrixStructure_Workspace_devmgrProto,n44_FerrixStructure_Workspace_nativeCrate,n45_FerrixStructure_Workspace_renderctl,n46_FerrixStructure_Workspace_gc400,n47_FerrixStructure_Workspace_fbtext,n48_FerrixStructure_Workspace_qr,n49_FerrixStructure_Workspace_vdagent,n50_FerrixStructure_Workspace_virtioConsole,n51_FerrixStructure_Workspace_seccompBpf,n52_FerrixStructure_Workspace_bootCrate,n53_FerrixStructure_Workspace_kernelCrate,n54_FerrixStructure_Workspace_kernelCore,n55_FerrixStructure_Workspace_kernelItem,n56_FerrixStructure_Workspace_kernelLoad,n57_FerrixStructure_Workspace_xtask,n58_FerrixStructure_Workspace_fuzz implemented
 ```
 
-**Figure 16 — The crate graph.** 114 `dependency` statements; an arrow points from the thing that needs to the thing it needs. [SVG](diagrams/crate-dependencies.svg) Source: `02-structure.sysml`.
+**Figure 16 — The crate graph.** 156 `dependency` statements; an arrow points from the thing that needs to the thing it needs. [SVG](diagrams/crate-dependencies.svg) Source: `02-structure.sysml`.
 
-- `kernelCrate` → `acpi`, `blkRing`, `blockQueue`, `bootinfo`, `btrfs`, `btrfsVfs`, `btrfsWrite`, `crng`, `devmgrProto`, `displayctl`, `elf`, `fbtext`, `fdt`, `frameCrate`, `heap`, `inputctl`, `linuxAbi`, `nativeAbi`, `netCore`, `netlink`, `netRing`, `nettcp`, `netwire`, `objects`, `paging`, `pci`, `procfs`, `qr`, `renderctl`, `sched`, `sync`, `sysfs`, `ustack`, `vfs`, `virtio` and `vma`
+- `kernelCrate` → `kernelLoad`, `bootinfo`, `crng`, `elf`, `paging`, `sched`, `sync` and `ustack`
+- `kernelCore` → `acpi`, `audit`, `bootinfo`, `elf`, `fbtext`, `fdt`, `frameCrate`, `heap`, `linuxAbi`, `nativeAbi`, `objects`, `paging`, `pci`, `qr`, `sched`, `sync`, `vfs` and `vma`
+- `kernelItem` → `kernelCore`, `audit`, `blkRing`, `bootinfo`, `crng`, `devmgrProto`, `elf`, `fdt`, `linuxAbi`, `nativeAbi`, `objects`, `paging`, `pci`, `sched`, `sync`, `vfs`, `virtio` and `vma`
+- `kernelLoad` → `kernelCore`, `kernelItem`, `audit`, `blkRing`, `blockQueue`, `bootinfo`, `btrfs`, `btrfsVfs`, `btrfsWrite`, `displayctl`, `elf`, `fdt`, `frameCrate`, `inputctl`, `linuxAbi`, `logctl`, `nativeAbi`, `netCore`, `netRing`, `netlink`, `nettcp`, `netwire`, `paging`, `pci`, `procfs`, `renderctl`, `sched`, `seccompBpf`, `sndctl`, `sync`, `sysfs`, `ustack`, `vfs` and `vma`
 - `bootCrate` → `bootinfo`, `elf` and `paging`
 - `xtask` → `elf` and `netwire`
 - `fuzz` → `acpi`, `blkRing`, `blockQueue`, `btrfs`, `cpio`, `displayctl`, `elf`, `fdt`, `frameCrate`, `inputctl`, `linuxAbi`, `nativeAbi`, `netCore`, `netlink`, `nettcp`, `netwire`, `objects`, `pci`, `renderctl`, `sndctl`, `sync`, `ustack`, `vfs`, `virtio`, `virtioBlk`, `virtioGpu`, `virtioInput` and `virtioNet`
@@ -5032,7 +5083,7 @@ Every diagram in this document, drawn from the model by tools/common/gen/sysml/d
 | 13 | Driver process and its subtypes | 9 nodes, 8 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
 | 14 | Driver bootstrap | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-bootstrap.svg](diagrams/ferrix-drivers-driver-bootstrap.svg) |
 | 15 | Filesystem and its subtypes | 7 nodes, 6 edges | `09-storage.sysml` | [ferrix-storage-filesystem.svg](diagrams/ferrix-storage-filesystem.svg) |
-| 16 | The crate graph | 56 nodes, 114 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |
+| 16 | The crate graph | 59 nodes, 156 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |
 | 17 | The roadmap, stage by stage | 30 nodes, 43 edges | `10-roadmap.sysml` | [roadmap-stages.svg](diagrams/roadmap-stages.svg) |
 | 18 | The gates and the rules they uphold | 16 nodes, 10 edges | `11-assurance.sysml` | [gates-and-rules.svg](diagrams/gates-and-rules.svg) |
 | 19 | Stages and the parts that answer them | 46 nodes, 31 edges | `10-roadmap.sysml` | [stages-and-parts.svg](diagrams/stages-and-parts.svg) |

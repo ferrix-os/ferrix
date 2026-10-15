@@ -147,7 +147,7 @@ pub(crate) fn interrupt_pending() -> bool {
 
 /// What the port sends from, for the boot line that says how the console
 /// sends.
-pub(crate) fn transmit_buffer() -> &'static str {
+pub fn transmit_buffer() -> &'static str {
     if HAS_FIFOS.load(Ordering::Relaxed) {
         "a 16550's FIFO"
     } else {

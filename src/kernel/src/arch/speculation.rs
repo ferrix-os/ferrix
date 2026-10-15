@@ -33,7 +33,7 @@ use super::machine_speculation as machine;
 
 /// Whether this kernel carries its side-channel defences: every build but one
 /// made with `--mitigations off`.
-pub(crate) const HARDENED: bool = !cfg!(ferrix_mitigations_off);
+pub const HARDENED: bool = !cfg!(ferrix_mitigations_off);
 
 /// `Some(index)` when `index < len`, clamped so that no mispredicted path can
 /// use it to reach past `len`; `None` otherwise.
@@ -43,7 +43,7 @@ pub(crate) const HARDENED: bool = !cfg!(ferrix_mitigations_off);
 /// that on the path a mispredicted comparison takes, the value it returns is
 /// zero rather than whatever the program asked for (Spectre variant 1).
 #[inline(always)]
-pub(crate) fn nospec_index(index: usize, len: usize) -> Option<usize> {
+pub fn nospec_index(index: usize, len: usize) -> Option<usize> {
     if index >= len {
         return None;
     }
@@ -62,7 +62,7 @@ pub(crate) fn nospec_below(value: u64, end: u64) -> Option<u64> {
 
 /// A set of defences, as bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct Defences(u32);
+pub struct Defences(u32);
 
 impl Defences {
     /// Nothing.
@@ -134,7 +134,7 @@ impl Defences {
 
     /// This set, written as the boot log writes it: the names, comma
     /// separated, or `none`.
-    pub(crate) fn names(self) -> impl core::fmt::Display {
+    pub fn names(self) -> impl core::fmt::Display {
         Names(self)
     }
 
@@ -206,7 +206,7 @@ pub(crate) fn applied_by(logical: usize) -> Option<Defences> {
 
 /// How many switch barriers have been issued so far, on every processor
 /// together.
-pub(crate) fn switch_barriers() -> u64 {
+pub fn switch_barriers() -> u64 {
     SWITCH_BARRIERS
         .iter()
         .map(|issued| issued.load(Ordering::Relaxed))
@@ -214,7 +214,7 @@ pub(crate) fn switch_barriers() -> u64 {
 }
 
 /// How many switch barriers processor `logical` has issued so far.
-pub(crate) fn switch_barriers_on(logical: usize) -> u64 {
+pub fn switch_barriers_on(logical: usize) -> u64 {
     SWITCH_BARRIERS
         .get(logical)
         .map_or(0, |issued| issued.load(Ordering::Relaxed))
@@ -224,7 +224,7 @@ pub(crate) fn switch_barriers_on(logical: usize) -> u64 {
 /// recorded what it applied. On `AArch64`, where each core decides for itself,
 /// a line per kind of core; elsewhere the boot processor decided for all of
 /// them and said so as it did, and this adds nothing.
-pub(crate) fn report_exposure() {
+pub fn report_exposure() {
     machine::report_once_started();
 }
 
@@ -325,7 +325,7 @@ static REFILLS_IN_DOMAIN: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; 
 
 /// How many in-domain refills processor `logical` has made: see
 /// [`REFILLS_IN_DOMAIN`].
-pub(crate) fn refills_in_domain_on(logical: usize) -> u64 {
+pub fn refills_in_domain_on(logical: usize) -> u64 {
     REFILLS_IN_DOMAIN
         .get(logical)
         .map_or(0, |refilled| refilled.load(Ordering::Relaxed))
@@ -337,7 +337,7 @@ pub(crate) fn refills_in_domain_on(logical: usize) -> u64 {
 /// from the processor by the check itself, not from the plan the switch
 /// follows, so that a switch that skipped the refill where it should not
 /// have is seen.
-pub(crate) fn refill_wanted_in_domain() -> bool {
+pub fn refill_wanted_in_domain() -> bool {
     machine::refill_wanted_in_domain()
 }
 
@@ -478,11 +478,11 @@ pub(crate) fn serve_wanted_barrier() {
 /// stage 9 stops the machine (FX-0908) naming the check that armed one still
 /// set.
 #[derive(Debug)]
-pub(crate) struct CheckHook {
+pub struct CheckHook {
     /// The check that armed it, for the boot check's message.
-    pub(crate) armed_by: &'static str,
+    pub armed_by: &'static str,
     /// What it does where it is called.
-    pub(crate) run: fn(),
+    pub run: fn(),
 }
 
 /// The hook [`leaving_domain`] calls between its scan and its grace period,
@@ -492,24 +492,24 @@ static LEAVE_HOOK: crate::sync::SpinLock<Option<&'static CheckHook>> =
     crate::sync::SpinLock::new(None);
 
 /// Arm `hook` in [`leaving_domain`]: stage 9's check only.
-pub(crate) fn arm_leave_hook(hook: &'static CheckHook) {
+pub fn arm_leave_hook(hook: &'static CheckHook) {
     *LEAVE_HOOK.lock() = Some(hook);
 }
 
 /// Disarm whatever hook [`leaving_domain`] holds.
-pub(crate) fn disarm_leave_hook() {
+pub fn disarm_leave_hook() {
     *LEAVE_HOOK.lock() = None;
 }
 
 /// The check that armed the hook [`leaving_domain`] still holds, if any: for
 /// the boot check after stage 9.
-pub(crate) fn leave_hook_armed_by() -> Option<&'static str> {
+pub fn leave_hook_armed_by() -> Option<&'static str> {
     LEAVE_HOOK.lock().map(|hook| hook.armed_by)
 }
 
 /// The domain processor `logical` last ran, for stage 9's check: zero for
 /// none.
-pub(crate) fn last_domain_on(logical: usize) -> u64 {
+pub fn last_domain_on(logical: usize) -> u64 {
     LAST_DOMAIN
         .get(logical)
         .map_or(0, |domain| domain.load(Ordering::SeqCst))
@@ -531,7 +531,7 @@ static BARRIER_DECISIONS: [AtomicU64; MAX_CPUS] = [const { AtomicU64::new(0) }; 
 
 /// How many switches processor `logical` has decided needed the predictor
 /// barrier: see [`BARRIER_DECISIONS`].
-pub(crate) fn barrier_decisions_on(logical: usize) -> u64 {
+pub fn barrier_decisions_on(logical: usize) -> u64 {
     BARRIER_DECISIONS
         .get(logical)
         .map_or(0, |decided| decided.load(Ordering::Relaxed))
@@ -567,7 +567,7 @@ pub(crate) fn entering_space(domain: u64) {
 /// Called by an architecture's `prepare_user_root` for a root that is about to
 /// belong to a new address space: no processor may treat it as the space it
 /// last ran.
-pub(crate) fn forget_root(root: u64) {
+pub fn forget_root(root: u64) {
     if !HARDENED {
         return;
     }

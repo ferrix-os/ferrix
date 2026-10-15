@@ -76,9 +76,9 @@ pub(super) fn before_wake(task: &Task) {
 
 /// What the check found, for its boot line: the tries it took.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// The try that reached a decision, from one.
-    pub(crate) tries: usize,
+    pub tries: usize,
 }
 
 /// The wake row's check. `Ok(None)` on a machine with one processor, where
@@ -90,7 +90,7 @@ pub(crate) struct Report {
 /// poster that never reached its wake in [`TRIES`] tries, or a task that
 /// could not be made or did not end.
 /// Verifies: `L.sched.32`, `L.sched.34`
-pub(crate) fn run() -> Result<Option<Report>, &'static str> {
+pub fn run() -> Result<Option<Report>, &'static str> {
     let count = crate::smp::count();
     if count < 2 {
         return Ok(None);

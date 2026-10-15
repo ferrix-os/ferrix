@@ -82,7 +82,7 @@ const CR4_SMAP: u64 = 1 << 21;
 
 /// `CR4.FSGSBASE` — `RDFSBASE`, `RDGSBASE`, `WRFSBASE` and `WRGSBASE` may run,
 /// in ring 3 too. Kept clear ([`forbid_user_base_writes`]).
-pub(crate) const CR4_FSGSBASE: u64 = 1 << 16;
+pub const CR4_FSGSBASE: u64 = 1 << 16;
 
 /// `CR4.OSXSAVE` — `XSAVE`, `XRSTOR` and `XSETBV` may run, and `CPUID` tells
 /// a program so (leaf 1, `ECX` bit 27), which is what it reads before it
@@ -91,11 +91,11 @@ const CR4_OSXSAVE: u64 = 1 << 18;
 
 /// The x87 and SSE state components, bits 0 and 1 of `XCR0`: the two
 /// `FXSAVE` already saved, and the least `XCR0` may hold.
-pub(crate) const XSTATE_X87_SSE: u64 = 0b011;
+pub const XSTATE_X87_SSE: u64 = 0b011;
 
 /// The AVX state component, bit 2: the upper halves of the sixteen `YMM`
 /// registers.
-pub(crate) const XSTATE_AVX: u64 = 0b100;
+pub const XSTATE_AVX: u64 = 0b100;
 
 /// The x87 state component alone, bit 0.
 pub(crate) const XSTATE_X87: u64 = 0b001;
@@ -135,7 +135,7 @@ pub(crate) fn x87_in_use() -> bool {
 }
 
 /// Whether `XGETBV` 1 may be asked, for the check.
-pub(crate) fn xinuse_readable() -> bool {
+pub fn xinuse_readable() -> bool {
     XINUSE_READABLE.load(Ordering::Relaxed)
 }
 
@@ -231,7 +231,7 @@ pub(crate) fn load_extended_state_on_this_cpu() {
 
 /// The state components the switch saves with `XSAVE`: zero to save with
 /// `FXSAVE`.
-pub(crate) fn extended_state_components() -> u64 {
+pub fn extended_state_components() -> u64 {
     XSAVE_COMPONENTS.load(Ordering::Relaxed)
 }
 
@@ -240,14 +240,14 @@ pub(crate) fn extended_state_components() -> u64 {
 /// value grants every protection key, so a reset would widen a program's own
 /// protection (`docs/OPAQUE-KERNEL.md` §9.8, 3a). Linux keeps it apart the
 /// same way.
-pub(crate) const XSTATE_PKRU: u64 = 1 << 9;
+pub const XSTATE_PKRU: u64 = 1 << 9;
 
 /// Every state component the switch's vector reset may initialise: the ones
 /// `XCR0` enables, never [`XSTATE_PKRU`]. The reference configuration enables
 /// x87, SSE and AVX only ([`enable_extended_state`]); a component past those
 /// is reviewed before it is enabled, and AMX's would also have to leave out a
 /// component armed in `IA32_XFD`.
-pub(crate) fn reset_components() -> u64 {
+pub fn reset_components() -> u64 {
     extended_state_components() & !XSTATE_PKRU
 }
 
@@ -375,7 +375,7 @@ pub(crate) fn enable_user_access_protection() -> (bool, bool) {
 /// Every processor runs this at its bring-up: the boot processor before
 /// its `CR4` is snapshotted for the others, and each of those after it has
 /// taken the snapshot, so that none trusts another's register.
-pub(crate) fn forbid_user_base_writes() -> bool {
+pub fn forbid_user_base_writes() -> bool {
     // SAFETY: (PROTECT) clearing the bit is legal on every processor, and
     // changes only whether four instructions the kernel never executes run.
     unsafe { write_cr4(read_cr4() & !CR4_FSGSBASE) };
@@ -384,7 +384,7 @@ pub(crate) fn forbid_user_base_writes() -> bool {
 
 /// Whether the processor has `FSGSBASE` to enable: `CPUID.(EAX=7,ECX=0):EBX`
 /// bit 0. Where it has not, setting the `CR4` bit is `#GP`.
-pub(crate) fn has_fsgsbase() -> bool {
+pub fn has_fsgsbase() -> bool {
     use core::arch::x86_64::{__cpuid, __cpuid_count};
 
     __cpuid(0).eax >= 7 && __cpuid_count(7, 0).ebx & 1 != 0
@@ -398,7 +398,7 @@ pub(crate) fn has_fsgsbase() -> bool {
 /// (PROBE) Only where [`has_fsgsbase`], with interrupts masked, and with
 /// [`forbid_user_base_writes`] called before they are opened: no program
 /// may run on this processor while the bit is set.
-pub(crate) unsafe fn permit_user_base_writes_for_check() {
+pub unsafe fn permit_user_base_writes_for_check() {
     // SAFETY: (PROBE) the caller's guarantee; the bit is one the processor has.
     unsafe { write_cr4(read_cr4() | CR4_FSGSBASE) };
 }
@@ -646,7 +646,7 @@ pub(crate) unsafe fn read_msr(msr: u32) -> u64 {
 }
 
 /// Control register 0: protection, paging, write protection, caching.
-pub(crate) fn read_cr0() -> u64 {
+pub fn read_cr0() -> u64 {
     let value: u64;
     // SAFETY: (SYSREG) reading CR0 has no side effects.
     unsafe {
@@ -656,7 +656,7 @@ pub(crate) fn read_cr0() -> u64 {
 }
 
 /// Control register 4: the paging and instruction-set extensions in force.
-pub(crate) fn read_cr4() -> u64 {
+pub fn read_cr4() -> u64 {
     let value: u64;
     // SAFETY: (SYSREG) reading CR4 has no side effects.
     unsafe {
@@ -1164,7 +1164,7 @@ pub(crate) fn rdtsc() -> u64 {
 /// (SYSREG) Changes which accesses raise `#DB` once `DR7` enables the slot. The kernel
 /// must be ready to take one there: not on the entry stubs, and not on an
 /// interrupt stack, which a nested `#DB` would land on.
-pub(crate) unsafe fn write_breakpoint_address(slot: usize, address: u64) {
+pub unsafe fn write_breakpoint_address(slot: usize, address: u64) {
     // Each: writing a debug address register at ring 0 changes nothing until
     // DR7 enables it, and the caller guarantees the address is one to trap on.
     match slot {
@@ -1193,7 +1193,7 @@ pub(crate) unsafe fn write_breakpoint_address(slot: usize, address: u64) {
 /// # Safety
 ///
 /// (SYSREG) As [`write_breakpoint_address`], for every slot `value` enables.
-pub(crate) unsafe fn write_dr7(value: u64) {
+pub unsafe fn write_dr7(value: u64) {
     // SAFETY: (SYSREG) the caller guarantees each enabled slot's address.
     unsafe {
         asm!("mov dr7, {}", in(reg) value, options(nomem, nostack, preserves_flags));
@@ -1268,7 +1268,7 @@ pub(crate) unsafe fn read_gdt() -> (u64, u16) {
 /// A 64-bit random number from the CPU: `RDSEED`, or `RDRAND` on a CPU that
 /// has only that, each tried ten times as Intel's guidance says; `None` on a
 /// CPU with neither, or one that kept reporting failure.
-pub(crate) fn hardware_random() -> Option<u64> {
+pub fn hardware_random() -> Option<u64> {
     use core::arch::x86_64::{__cpuid, __cpuid_count};
     let rdseed = __cpuid(0).eax >= 7 && __cpuid_count(7, 0).ebx & (1 << 18) != 0;
     let rdrand = __cpuid(1).ecx & (1 << 30) != 0;
@@ -1324,7 +1324,7 @@ pub(crate) fn hardware_random() -> Option<u64> {
 /// every publish and never reads `used.flags` or `avail_event` after one.
 /// Notification suppression or `VIRTIO_F_EVENT_IDX` in the item would need a
 /// full fence there, as Linux's `virtio_mb` is.
-pub(crate) fn dma_barrier() {
+pub fn dma_barrier() {
     core::sync::atomic::compiler_fence(Ordering::SeqCst);
 }
 

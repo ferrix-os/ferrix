@@ -105,11 +105,11 @@ static REGISTERED: IrqSpinLock<BTreeSet<u32>, arch::Irq> = IrqSpinLock::new(BTre
 /// Above a block device's queue depth, 32, so that a device completing a full
 /// queue while its driver is busy is not taken for a storm and made to pay the
 /// two writes the bound exists to save.
-pub(crate) const STORM_BOUND: u32 = 64;
+pub const STORM_BOUND: u32 = 64;
 
 /// Why an interrupt could not be claimed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InterruptError {
+pub enum InterruptError {
     /// Another `Interrupt` holds the line, or the kernel uses it.
     Taken,
     /// The interrupt controller cannot mask this line.
@@ -241,7 +241,7 @@ fn register_handler(number: u32) -> Result<(), InterruptError> {
 
 /// A device interrupt a driver holds, and with it the claim on its line.
 #[derive(Debug)]
-pub(crate) struct Interrupt {
+pub struct Interrupt {
     /// The line it claimed.
     line: Arc<Line>,
 }
@@ -263,7 +263,7 @@ impl Interrupt {
     ///
     /// [`InterruptError::Taken`], [`InterruptError::NotMaskable`], and
     /// [`InterruptError::NoMemory`].
-    pub(crate) fn new(vector: Vector) -> Result<Arc<Interrupt>, InterruptError> {
+    pub fn new(vector: Vector) -> Result<Arc<Interrupt>, InterruptError> {
         let number = vector.number();
         let line = fallible::try_arc(Line {
             vector,
@@ -315,7 +315,7 @@ impl Interrupt {
     /// [`InterruptError::AlreadyBound`] if it is bound to a port anyone still
     /// holds; [`InterruptError::NoMemory`] if the port could not promise room
     /// for the line's packet.
-    pub(crate) fn bind(&self, port: &Arc<Port>, key: u64) -> Result<(), InterruptError> {
+    pub fn bind(&self, port: &Arc<Port>, key: u64) -> Result<(), InterruptError> {
         // Promised before the binding's lock is taken, and given back as it
         // drops if the bind is refused.
         let promise = Promise::new(port).map_err(|_| InterruptError::NoMemory)?;
@@ -356,7 +356,7 @@ impl Interrupt {
     /// # Errors
     ///
     /// If the controller refuses to unmask, which a line it masked does not.
-    pub(crate) fn acknowledge(&self) -> Result<(), &'static str> {
+    pub fn acknowledge(&self) -> Result<(), &'static str> {
         self.line.pending.store(false, Ordering::Release);
         self.line.unacknowledged.store(0, Ordering::Release);
         let masked = self.line.masked.swap(false, Ordering::AcqRel);
@@ -367,19 +367,19 @@ impl Interrupt {
     }
 
     /// Times [`STORM_BOUND`] has masked the line, for the checks.
-    pub(crate) fn storms(&self) -> u32 {
+    pub fn storms(&self) -> u32 {
         self.line.storms.load(Ordering::Relaxed)
     }
 
     /// Whether the line reads back masked where it is masked, where that can
     /// be read (an MSI-X entry), for the checks.
-    pub(crate) fn reads_masked(&self) -> Option<bool> {
+    pub fn reads_masked(&self) -> Option<bool> {
         self.line.vector.reads_masked()
     }
 
     /// Whether a delivery leaves the line unmasked: an edge-triggered MSI-X
     /// vector, below [`STORM_BOUND`].
-    pub(crate) fn coalesces(&self) -> bool {
+    pub fn coalesces(&self) -> bool {
         self.line.vector.coalesces()
     }
 }
@@ -419,11 +419,11 @@ impl Drop for Interrupt {
 /// somebody else can claim the line while one is in flight. Its reference may
 /// be the last to a line given up meanwhile, whose drop only frees memory.
 #[derive(Debug)]
-pub(crate) struct Delivery(Arc<Line>);
+pub struct Delivery(Arc<Line>);
 
 impl Delivery {
     /// Mark the line pending, queue its packet, and wake its waiters.
-    pub(crate) fn fire(self) {
+    pub fn fire(self) {
         self.0.fire();
     }
 }
@@ -437,7 +437,7 @@ impl Delivery {
 /// entry for an MSI-X vector, which the controller cannot reach. A line nobody
 /// holds is masked at the controller and has nothing to deliver; an MSI-X
 /// entry nobody holds was masked by its holder's drop.
-pub(crate) fn take_delivery(number: u32) -> Option<Delivery> {
+pub fn take_delivery(number: u32) -> Option<Delivery> {
     let bound = BOUND.lock();
     match bound.get(&number) {
         Some(line) => {
@@ -455,7 +455,7 @@ pub(crate) fn take_delivery(number: u32) -> Option<Delivery> {
 ///
 /// Mask, mark, queue a bound interrupt's packet, and wake, and nothing else:
 /// see the module documentation for what an interrupt handler may not do.
-pub(crate) fn on_interrupt(number: u32) {
+pub fn on_interrupt(number: u32) {
     if let Some(delivery) = take_delivery(number) {
         delivery.fire();
     }

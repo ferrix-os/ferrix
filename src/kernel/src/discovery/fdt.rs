@@ -21,7 +21,7 @@ use ferrix_fdt::Fdt;
 /// If there is none, if it is not inside the direct map, or if it does not
 /// parse. The first is the ordinary case on x86-64 and on AArch64 under ACPI,
 /// and an error only to a caller that needed one.
-pub(crate) fn open(view: &BootView<'_>) -> Result<Fdt<'static>, &'static str> {
+pub fn open(view: &BootView<'_>) -> Result<Fdt<'static>, &'static str> {
     const OUTSIDE: &str = "the device tree is not inside the direct map";
 
     let (phys, len) = view

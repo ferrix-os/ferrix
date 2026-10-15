@@ -47,7 +47,7 @@ use crate::object::quota;
 /// program can read; the boot prints them when the shell exits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
-pub(crate) enum Count {
+pub enum Count {
     /// A full trip: the message delivered to a parked reader, the caller
     /// parked, and the processor handed over.
     Trip,
@@ -106,7 +106,7 @@ static COUNTED: [[AtomicU64; COUNTS]; COUNTED_PROCESSORS] =
     [const { [const { AtomicU64::new(0) }; COUNTS] }; COUNTED_PROCESSORS];
 
 /// Count one `what` on this processor. With interrupts masked.
-pub(crate) fn count(what: Count) {
+pub fn count(what: Count) {
     let row = this_cpu().map_or(0, |cpu| cpu.min(COUNTED_PROCESSORS - 1));
     if let Some(cell) = COUNTED.get(row).and_then(|row| row.get(what as usize)) {
         cell.store(
@@ -119,7 +119,7 @@ pub(crate) fn count(what: Count) {
 /// Take back one `what` this processor counted: for a check that parks
 /// through the receive half on a boot without the fast path, whose counters
 /// must not move there (L.sched.72's case). Masked, as [`count`] is made.
-pub(crate) fn uncount(what: Count) {
+pub fn uncount(what: Count) {
     let saved = <arch::Irq as IrqControl>::disable();
     let row = this_cpu().map_or(0, |cpu| cpu.min(COUNTED_PROCESSORS - 1));
     if let Some(cell) = COUNTED.get(row).and_then(|row| row.get(what as usize)) {
@@ -132,7 +132,7 @@ pub(crate) fn uncount(what: Count) {
 }
 
 /// Every count, summed over the processors, in [`Count`]'s order.
-pub(crate) fn counts() -> [u64; COUNTS] {
+pub fn counts() -> [u64; COUNTS] {
     let mut sums = [0_u64; COUNTS];
     for row in &COUNTED {
         for (sum, cell) in sums.iter_mut().zip(row) {
@@ -347,7 +347,7 @@ impl Drop for Direct {
 ///
 /// `last_look` was taken before the park set the task blocked, and is let go
 /// once the look is over (F-69, `super::LastLook`).
-pub(crate) fn block_parked(task: &Task, last_look: super::LastLook) -> bool {
+pub fn block_parked(task: &Task, last_look: super::LastLook) -> bool {
     core::sync::atomic::fence(Ordering::SeqCst);
     if work::has_end(task) {
         task.set_state(RUNNABLE);

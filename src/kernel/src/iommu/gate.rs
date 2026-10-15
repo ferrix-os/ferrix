@@ -116,7 +116,7 @@ pub(crate) fn poll(ready: impl FnMut() -> bool, deadline: u64) -> bool {
 }
 
 /// How many waits on a unit were made in a context that may block.
-pub(crate) fn waits_with_interrupts_on() -> u64 {
+pub fn waits_with_interrupts_on() -> u64 {
     WAITS_WITH_INTERRUPTS_ON.load(Ordering::Relaxed)
 }
 

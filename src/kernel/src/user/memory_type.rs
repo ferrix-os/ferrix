@@ -55,7 +55,7 @@ use crate::sync::SpinLock;
 
 /// How a processor maps a page of device memory.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum MemoryType {
+pub enum MemoryType {
     /// Device memory, uncacheable: an aperture of registers, or a window the
     /// device did not say may be cached.
     Device,
@@ -68,7 +68,7 @@ pub(crate) enum MemoryType {
 impl MemoryType {
     /// The type a device region with these attributes is mapped with: what
     /// `AddressSpace::fault_device` puts in the page table.
-    pub(crate) const fn of(cached: bool, combining: bool) -> MemoryType {
+    pub const fn of(cached: bool, combining: bool) -> MemoryType {
         if cached {
             MemoryType::Cached
         } else if combining {
@@ -147,7 +147,7 @@ fn release(start: u64, end: u64, kind: MemoryType) {
 
 /// How many claims are recorded: what stage 9's check compares across
 /// mappings of one range (L.user.109).
-pub(crate) fn claims() -> usize {
+pub fn claims() -> usize {
     CLAIMS.lock().len()
 }
 

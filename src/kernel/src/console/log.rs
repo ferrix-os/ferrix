@@ -54,7 +54,7 @@ use core::sync::atomic::{AtomicU8, AtomicU64, Ordering, fence};
 
 /// The log's length: Linux's default, `CONFIG_LOG_BUF_SHIFT` of 17, which is
 /// also what `syslog(2)` reports as the buffer's size.
-pub(crate) const CAPACITY: usize = 1 << 17;
+pub const CAPACITY: usize = 1 << 17;
 
 /// A ring of `N` bytes, `N` a power of two.
 pub(crate) struct Ring<const N: usize> {
@@ -66,13 +66,13 @@ pub(crate) struct Ring<const N: usize> {
 
 /// What one read took out.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Read {
+pub struct Read {
     /// Bytes copied to the front of the reader's buffer.
-    pub(crate) copied: usize,
+    pub copied: usize,
     /// Bytes between the cursor as it was given and the first byte copied
     /// that the ring no longer held: overwritten before this reader came for
     /// them.
-    pub(crate) lost: u64,
+    pub lost: u64,
 }
 
 impl<const N: usize> Ring<N> {
@@ -220,16 +220,16 @@ pub(crate) fn record(bytes: &[u8]) {
 }
 
 /// Read the kernel log from `cursor`: see [`Ring::read`].
-pub(crate) fn read(cursor: &mut u64, out: &mut [u8]) -> Read {
+pub fn read(cursor: &mut u64, out: &mut [u8]) -> Read {
     LOG.read(cursor, out)
 }
 
 /// How many bytes the kernel log has ever recorded.
-pub(crate) fn written() -> u64 {
+pub fn written() -> u64 {
     LOG.written()
 }
 
 /// How many bytes a reader of the kernel log at `cursor` has still to read.
-pub(crate) fn unread(cursor: u64) -> u64 {
+pub fn unread(cursor: u64) -> u64 {
     LOG.unread(cursor)
 }

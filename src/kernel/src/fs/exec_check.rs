@@ -115,23 +115,23 @@ static AFTER_EXEC: SpinLock<Option<(bool, bool)>> = SpinLock::new(None);
 
 /// What the check measured, for the boot log.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Report {
+pub struct Report {
     /// The program file's length.
-    pub(crate) bytes: u64,
+    pub bytes: u64,
     /// Pages of it read to load it.
-    pub(crate) loaded: u64,
+    pub loaded: u64,
     /// Pages of it read by the end, touches and the run included.
-    pub(crate) read: u64,
+    pub read: u64,
     /// Pages the file has.
-    pub(crate) pages: u64,
+    pub pages: u64,
     /// What the program exited with.
-    pub(crate) status: i32,
+    pub status: i32,
     /// What the fork that ran `/proc/self/exe` exited with.
-    pub(crate) self_status: i32,
+    pub self_status: i32,
 }
 
 /// Run it. `Ok(None)` on an architecture with no user-mode program to run.
-pub(crate) fn run() -> Result<Option<Report>, &'static str> {
+pub fn run() -> Result<Option<Report>, &'static str> {
     if arch::USER_TEST_PROGRAM.is_empty() {
         return Ok(None);
     }

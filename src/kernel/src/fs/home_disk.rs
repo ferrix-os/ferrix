@@ -48,7 +48,7 @@ pub(crate) fn is_home(rdev: u64) -> bool {
 
 /// Mount the home disk at `/home`, if this machine has one. Called after
 /// [`root_disk::switch`], so that `/home` lands in the `/` it chose.
-pub(crate) fn mount() {
+pub fn mount() {
     let Some((index, rdev)) = (FIRST..END)
         .map(|index| (index, makedev(VIRTIO_BLK_MAJOR, index * 16)))
         .filter(|&(_, rdev)| fs::devfs::block_device(rdev).is_some())

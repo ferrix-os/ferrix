@@ -17,11 +17,11 @@ static SKIPPED: AtomicBool = AtomicBool::new(false);
 
 /// Record that this boot skips the self-checks: `checks::init`, once, when
 /// it read `ferrix.checks=skip`.
-pub(crate) fn skip() {
+pub fn skip() {
     SKIPPED.store(true, Ordering::Relaxed);
 }
 
 /// Whether the self-checks run on this boot: true unless [`skip`] was called.
-pub(crate) fn run() -> bool {
+pub fn run() -> bool {
     !SKIPPED.load(Ordering::Relaxed)
 }

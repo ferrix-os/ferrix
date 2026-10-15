@@ -88,7 +88,7 @@ static CACHE: SpinLock<Vec<Weak<Vmo>>> = SpinLock::new(Vec::new());
 
 /// The heap one registration holds at most: its entry, with the room a
 /// growing list keeps beside it. Counted in a file's charge (F-37).
-pub(crate) const ENTRY_HEAP: usize = 2 * size_of::<Weak<Vmo>>();
+pub const ENTRY_HEAP: usize = 2 * size_of::<Weak<Vmo>>();
 
 /// Note `vmo` as a file's object.
 ///
@@ -122,11 +122,11 @@ fn live() -> Vec<Arc<Vmo>> {
 
 /// What [`reclaim`] did.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(crate) struct Reclaimed {
+pub struct Reclaimed {
     /// Pages looked at.
     pub(crate) scanned: u64,
     /// Pages given back.
-    pub(crate) stolen: u64,
+    pub stolen: u64,
 }
 
 /// Where the next [`reclaim`] starts looking: the object the last one
@@ -143,7 +143,7 @@ static HAND: SpinLock<Option<(Weak<Vmo>, u64)>> = SpinLock::new(None);
 /// the cache has been looked at.
 ///
 /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
-pub(crate) fn reclaim(scope: u32, want: u64) -> Reclaimed {
+pub fn reclaim(scope: u32, want: u64) -> Reclaimed {
     let mut done = Reclaimed::default();
     let objects = live();
     let (start, from) = hand_in(&objects);
@@ -251,7 +251,7 @@ fn take_from(
 
 /// What slot `scope` and the jobs beneath it hold in files' pages, in pages:
 /// on a disk, and on a memory filesystem.
-pub(crate) fn resident(scope: u32) -> (u64, u64) {
+pub fn resident(scope: u32) -> (u64, u64) {
     let (mut file, mut memory) = (0, 0);
     for vmo in live() {
         let disk = vmo.is_disk_file();
@@ -271,38 +271,38 @@ pub(crate) fn resident(scope: u32) -> (u64, u64) {
 
 /// Every cached file's pages, whoever they are charged to ([`totals`]).
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(crate) struct Totals {
+pub struct Totals {
     /// Pages of files on a disk.
-    pub(crate) disk: u64,
+    pub disk: u64,
     /// Pages of files on a memory filesystem: tmpfs, the initramfs, `memfd`.
-    pub(crate) memory: u64,
+    pub memory: u64,
     /// Of the disk pages, those written and not yet written back: a
     /// writable file's, which reclaim leaves.
-    pub(crate) dirty: u64,
+    pub dirty: u64,
     /// Of the disk pages, those reclaim may take now: every page of an
     /// object [`Vmo::reclaimable`] says so of, less its dirty ones. A page a
     /// write or a writeback holds still for the moment is among them.
-    pub(crate) reclaimable: u64,
+    pub reclaimable: u64,
 }
 
 impl Totals {
     /// `/proc/meminfo`'s `Cached`: every cached file's pages, a disk file's
     /// and a memory filesystem's, as Linux counts them.
-    pub(crate) fn cached(&self) -> u64 {
+    pub fn cached(&self) -> u64 {
         self.disk.saturating_add(self.memory)
     }
 
     /// `/proc/meminfo`'s `MemAvailable`, with `free` frames free: those and
     /// the pages reclaim may take now, never a dirty one or a memory
     /// filesystem's.
-    pub(crate) fn available(&self, free: u64) -> u64 {
+    pub fn available(&self, free: u64) -> u64 {
         free.saturating_add(self.reclaimable)
     }
 }
 
 /// What the page cache holds now, for `/proc/meminfo`: each live object's
 /// page count, which it keeps, rather than a walk of its pages.
-pub(crate) fn totals() -> Totals {
+pub fn totals() -> Totals {
     let mut out = Totals::default();
     for vmo in live() {
         let pages = vmo.committed() as u64;

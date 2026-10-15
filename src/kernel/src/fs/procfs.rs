@@ -74,7 +74,7 @@
 //! `/proc` numbers come from a counter and change when a name is looked up
 //! afresh.
 
-pub(crate) mod check;
+pub mod check;
 
 /// `/proc/<pid>/status` of `process`, as a reader of it would read it: for the
 /// boot checks of what a thread holds (`seccomp`), which cannot name a process
@@ -92,7 +92,7 @@ static COMMAND_LINE: ferrix_sync::Once<Vec<u8>> = ferrix_sync::Once::new();
 
 /// Keep the command line the loader passed, for `/proc/cmdline`. Once, at
 /// bring-up, from the crate root.
-pub(crate) fn remember_command_line(line: &str) {
+pub fn remember_command_line(line: &str) {
     // FATAL-ALLOC: boot only: the command line is copied once, as the kernel comes up.
     let _ = COMMAND_LINE.call_once(|| Vec::from(line.as_bytes()));
 }

@@ -32,17 +32,10 @@
 //! else -- no `pub use`, no items. A re-export here would let a core path
 //! reach an item name without the item-boundary check seeing a path to it.
 
-// ACPI is how the 64-bit pair describe themselves. An ARMv7-A machine has
-// none, and there this module is compiled and never called.
-#[allow(
-    dead_code,
-    reason = "ARMv7-A describes itself with a device tree, not ACPI"
-)]
-pub(crate) mod acpi;
-pub(crate) mod board;
-pub(crate) mod description;
-pub(crate) mod devmgr;
-pub(crate) mod fdt;
-pub(crate) mod finder;
-pub(crate) mod pci;
-pub(crate) mod tree;
+pub use ferrix_kernel_core::discovery::board;
+pub(crate) use ferrix_kernel_core::discovery::description;
+pub mod devmgr;
+pub use ferrix_kernel_core::discovery::fdt;
+pub use ferrix_kernel_core::discovery::finder;
+pub mod pci;
+pub use ferrix_kernel_core::discovery::tree;

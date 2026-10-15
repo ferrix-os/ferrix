@@ -73,7 +73,7 @@ pub(crate) struct Masked {
 
 /// x86-64's console line, as bring-up needs it.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct LiveLine {
+pub struct LiveLine {
     /// Its I/O APIC's MADT identifier.
     pub(crate) io_apic: u8,
     /// The vector it is routed to now, unmasked or not.
@@ -92,7 +92,7 @@ pub(crate) struct LiveLine {
     pub(crate) convert: fn(new: u8, handle: u16) -> Result<(), &'static str>,
     /// Loop `byte` back through the port to its own receiver, the port's
     /// transmit side quiet: for checks R5 and G3's service once.
-    pub(crate) loop_back: fn(byte: u8),
+    pub loop_back: fn(byte: u8),
 }
 
 /// What x86-64 registers for bring-up.
@@ -122,11 +122,13 @@ static ANY_REMAPPING: AtomicBool = AtomicBool::new(false);
 /// What each unit the DMAR lists ended in, refused ones included (G4).
 static STATES: Once<Vec<UnitState>> = Once::new();
 
+// CHECKS-ONLY: iommu/domain_check.rs
 /// Set only by check R10 (`iommu/check.rs`), for the length of the check:
 /// the machine's interrupts read as not isolated, so the isolated-
 /// interrupts mark's refusal can be shown on a machine whose interrupts
 /// are. Never set at run time.
-pub(super) static FORCED_UNISOLATED: AtomicBool = AtomicBool::new(false);
+#[doc(hidden)]
+pub static FORCED_UNISOLATED: AtomicBool = AtomicBool::new(false);
 
 /// PCI functions placed behind no unit, once stage 10's discovery has
 /// counted them; `usize::MAX` before.
@@ -342,19 +344,19 @@ pub(super) fn note_bypassing(bypassing: usize) {
 
 /// The console line's retired vector and the one it is delivered on now,
 /// once converted.
-pub(crate) fn console_vectors() -> Option<(u8, u8)> {
+pub fn console_vectors() -> Option<(u8, u8)> {
     let console = CONSOLE_VECTORS.load(Ordering::Acquire);
     (console != 0 && ANY_REMAPPING.load(Ordering::Acquire))
         .then_some(((console & 0xFF) as u8, (console >> 8 & 0xFF) as u8))
 }
 
 /// The console's line, where x86-64 registered one.
-pub(crate) fn live_line() -> Option<LiveLine> {
+pub fn live_line() -> Option<LiveLine> {
     HOOKS.get().and_then(|hooks| hooks.line)
 }
 
 /// Whether any unit remaps interrupts.
-pub(crate) fn any_remapping() -> bool {
+pub fn any_remapping() -> bool {
     ANY_REMAPPING.load(Ordering::Acquire)
 }
 
@@ -379,11 +381,7 @@ pub(crate) fn interrupts_isolated() -> bool {
 
 /// How a function's messages reach the processors.
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(
-    not(target_arch = "x86_64"),
-    expect(dead_code, reason = "only x86-64 programs a remapped message")
-)]
-pub(crate) enum Route {
+pub enum Route {
     /// No unit remaps: a compatibility-format message.
     Compatibility,
     /// Through this unit's interrupt remapping table.
@@ -398,7 +396,7 @@ pub(crate) enum Route {
 /// While a unit remaps: the function is placed behind no unit that remaps,
 /// or under another's source ID (`topology::Behind::Aliased`), so it gets no
 /// vector (`L.device.28`).
-pub(crate) fn route(requester: u16) -> Result<Route, &'static str> {
+pub fn route(requester: u16) -> Result<Route, &'static str> {
     if !ANY_REMAPPING.load(Ordering::Acquire) {
         return Ok(Route::Compatibility);
     }
@@ -456,7 +454,7 @@ pub(crate) fn function_isolated(function: Address) -> bool {
 /// (ruling 3): outside the sixty-four the architecture hands out, so no
 /// entry is indexed by it, and below the kernel's own IPI, timer and
 /// spurious vectors, so a forged one cannot be told for theirs.
-pub(crate) const CHECK_VECTOR: u8 = 0xFC;
+pub const CHECK_VECTOR: u8 = 0xFC;
 
 /// Whether check R1 or R2 is watching for [`CHECK_VECTOR`].
 static CHECK_WINDOW: AtomicBool = AtomicBool::new(false);
@@ -506,7 +504,7 @@ pub(crate) fn note_retired_delivery(_irq: u32) {
 
 /// Deliveries of [`CHECK_VECTOR`] outside a check's window, and on the
 /// console's retired vector: each fails the boot.
-pub(crate) fn stray_deliveries() -> (u64, u64) {
+pub fn stray_deliveries() -> (u64, u64) {
     (
         CHECK_STRAY.load(Ordering::Relaxed),
         RETIRED_DELIVERIES.load(Ordering::Relaxed),

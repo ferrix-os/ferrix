@@ -45,11 +45,11 @@ const MOUNT_POINT: &[u8] = b"/tmp/.mount-check";
 
 /// What the check saw, for the boot line.
 #[derive(Debug, Default)]
-pub(crate) struct Report {
+pub struct Report {
     /// Calls answered as Linux answers them.
-    pub(crate) calls: u32,
+    pub calls: u32,
     /// Of them, refusals with Linux's error.
-    pub(crate) refusals: u32,
+    pub refusals: u32,
 }
 
 /// The check's scratch page: paths are staged at the start, a read lands in
@@ -229,7 +229,7 @@ pub(super) fn page_for(process: &Process) -> Result<Page<'_>, &'static str> {
 }
 
 /// Run the check.
-pub(crate) fn run() -> Result<Report, &'static str> {
+pub fn run() -> Result<Report, &'static str> {
     let process =
         process::new_for_check().map_err(|_| "could not make a process for the mount check")?;
     let mut page = page_for(&process)?;

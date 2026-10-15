@@ -22,7 +22,7 @@ use crate::fallible;
 /// first that fails ends the node's list, as a bad specifier does, because a
 /// driver asks for its interrupts by position.
 #[derive(Debug)]
-pub(crate) struct VirtioMmio {
+pub struct VirtioMmio {
     /// The tree, on a machine it describes.
     tree: Option<Fdt<'static>>,
     /// Whether `find` ran out of memory adding a node.
@@ -32,7 +32,7 @@ pub(crate) struct VirtioMmio {
 impl VirtioMmio {
     /// The finder for `view`'s machine: none to find without a device tree
     /// it is read by.
-    pub(crate) fn new(view: &BootView<'_>) -> Self {
+    pub fn new(view: &BootView<'_>) -> Self {
         let tree = match description::of(view) {
             Description::Tree(tree) => Some(tree),
             _ => None,

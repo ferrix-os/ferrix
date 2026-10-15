@@ -114,7 +114,7 @@ static SCRATCH: ScratchCell = ScratchCell(UnsafeCell::new(Scratch {
 /// `mapped` bytes of `framebuffer` are mapped at `virt`. A format this kernel
 /// cannot draw in records nothing, and so does a mapping too small for a
 /// single line.
-pub(crate) fn install(framebuffer: &Framebuffer, virt: u64, mapped: u64) {
+pub fn install(framebuffer: &Framebuffer, virt: u64, mapped: u64) {
     if framebuffer.format == PixelFormat::Unknown {
         return;
     }
