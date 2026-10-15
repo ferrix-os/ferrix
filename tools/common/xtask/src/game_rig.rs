@@ -33,14 +33,26 @@ use std::process::Command;
 /// The script the shell runs: `measure.sh`, as the Linux guest runs it,
 /// with the compiler on the volume and the writer's file on its disk.
 const SCRIPT: &str = r#"export PATH=/data/rust/bin:/bin
-export RIG=/bin/rig
-export RIG_RUSTC=/data/rust/bin/rustc
-export RIG_HERE=/usr/share/game
-export RIG_CRATE=/usr/share/game/load-crate.rs
-export RIG_WORK=/tmp/rig-load
-export RIG_DISK=/data
-export RIG_WRITE_MIB=256
-sh /usr/share/game/measure.sh 30 || exit $?
+df /data
+w=1
+while [ "$w" -le 3 ]; do
+	( n=0; while :; do dd if=/dev/zero of=/data/floor-$w.bin bs=64k count=3200 2>/dev/null; rm -f /data/floor-$w.bin; n=$((n + 1)); echo "$n" >/tmp/floor-$w.count; done ) &
+	w=$((w + 1))
+done
+r=1
+while [ "$r" -le 3 ]; do
+	( n=0; while :; do /data/rust/bin/rustc --version >/dev/null 2>&1; cat /data/rust/bin/rustc >/dev/null; n=$((n + 1)); echo "$n" >/tmp/floor-r$r.count; done ) &
+	r=$((r + 1))
+done
+/bin/rig hold 70 >/tmp/hold.log 2>&1 &
+t=0
+while [ "$t" -lt 150 ]; do
+	sleep 4
+	set -- $(cat /proc/uptime)
+	echo "floor: t $1 writes $(cat /tmp/floor-1.count /tmp/floor-2.count /tmp/floor-3.count 2>/dev/null | tr '\n' ' ') reads $(cat /tmp/floor-r1.count /tmp/floor-r2.count /tmp/floor-r3.count 2>/dev/null | tr '\n' ' ') $(grep -E 'MemFree|^Cached|Dirty' /proc/meminfo | tr -s ' ' | tr '\n' ' ')"
+	t=$((t + 1))
+done
+echo "floor: done"
 exit 16
 "#;
 
