@@ -709,8 +709,8 @@ fn issue(destination: Option<u32>, command: u32) -> Result<(), &'static str> {
         // shootdown's request, say -- are fenced to be seen first (SDM
         // 11.12.3: `MFENCE; LFENCE`).
         core::sync::atomic::fence(Ordering::SeqCst);
-        // SAFETY: (SYSREG) `lfence` orders instruction issue and nothing else.
-        unsafe { core::arch::asm!("lfence", options(nostack, preserves_flags)) };
+        // SAFETY: (SYSREG) SSE2, which `LFENCE` needs, is part of x86-64.
+        unsafe { core::arch::x86_64::_mm_lfence() };
         let value = u64::from(destination.unwrap_or(0)) << 32 | u64::from(command);
         // SAFETY: (SYSREG) x2APIC mode: the interrupt command register's
         // MSR, written with a command this module built.
