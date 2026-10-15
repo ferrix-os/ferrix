@@ -150,8 +150,7 @@ fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
         let _ = write!(line, " at {}:{}", location.file(), location.line());
     }
     let _ = write!(line, ": {}", info.message());
-    let _ = line.write_str("
-");
+    let _ = line.write_str("\n");
     let _ = linux::write(2, line.bytes.get(..line.len).unwrap_or(&[]));
     exit(PANIC_STATUS)
 }
