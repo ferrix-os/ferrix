@@ -130,6 +130,26 @@ check's read past a mapped file's end:
 | **Certified item** | **6,902 / 7,664 — 90.1%** | **6,824 / 7,587 — 89.9%** | **6,251 / 7,400 — 84.5%** |
 | `load` (not claimed) | 9,598 / 13,745 — 69.8% | 9,377 / 13,718 — 68.4% | 9,463 / 13,775 — 68.7% |
 
+**x86-64 re-measured on 2026-10-15, on the kernel split** (branch
+`bs-a-s3b`, `docs/KERNEL-CRATES.md` §5; ledger 1477 (9)): the `coverage`
+profile, whose crate-local ThinLTO no longer inlines across the kernel's
+four crates, so more functions keep statements of their own. `core` 7,730 /
+8,692 -- 88.9%; `item` 2,057 / 2,418 -- 85.1%; **certified item 9,787 /
+11,110 -- 88.1%**, below the 89.0% `coverage-floor.json` records; `load`
+13,685 / 18,777 -- 72.9%. The suite ran at host loads of 18 to 38, with
+`--timeout 900`; `test-shell`, `test-vfs` and `test-jobs` stopped on load-
+timed checks and were run again alone under the plugin, and passed;
+`boot-legacy` and `boot-single` fail xtask's R8 expectation on every tree
+since N0g (a `docs/BACKLOG.md` row), their traces whole. Against the
+evidence it replaces (2026-09-27), 143 requirement statuses on x86-64 moved
+to *reached* and none away from it; 14 arguments whose statements are now
+reached were dropped and two trimmed to the lines still unreached
+(`~/ferrix-logs/bs-a/s3b/dropped-arguments-x86_64.json` on nazuna). Decision
+coverage over the same traces: the item's branches taken both ways 4,520 of
+15,150 (29.8%), against 4,018 of 12,618 (31.8%). AArch64 and ARMv7-A wait
+for an Arm QEMU the plugin loads in (`docs/BACKLOG.md`); their figures above
+are carried, not re-measured.
+
 The Arm pair's figures are a little below their previous measurement (90.2%
 and 84.8%) although the suite reached more: in between, init's start of
 `devmgr` (L12, `docs/INIT.md` §7.3) added statements to `devmgr.rs` that only
@@ -243,6 +263,17 @@ optimisation cuts the item's statement count by a third — 6,828 to 4,462 —
 because inlining and merging leave fewer distinct `is_stmt` rows to reach. The
 proportion reached moves 3.6 points. So a submission has to say which profile
 it measured, and this one measures both, which is what F-11 asked for.
+
+**The release profile over the whole suite, 2026-10-15** (the kernel split,
+ledger 1477 (9); `coverage-x86_64-release.json`, which held the one boot
+above until then): `cargo xtask coverage --arch x86_64 --release`, the
+sixteen boots of §3.1 on the release kernel, fat LTO over the kernel's four
+crates: `core` 5,171 / 5,885 -- 87.9%, `item` 1,388 / 1,684 -- 82.4%,
+**certified item 6,559 / 7,569 -- 86.7%**. The denominator is not the one-boot
+row's: the item has grown since 2026-09-25, and fat LTO over four crates
+need not give the code one crate gave, which is why it was measured again
+rather than carried. `boot-legacy` and `boot-single` failed xtask's R8
+expectation as in §3.1, their traces whole.
 
 **The debug build's debug information.** Every debug figure in this
 document and in `coverage-<arch>.json` was measured on a kernel built with

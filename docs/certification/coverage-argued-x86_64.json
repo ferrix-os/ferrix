@@ -33,9 +33,9 @@
     },
     {
       "file": "arch/x86_64/clock.rs",
-      "lines": "674-675, 681-682, 687, 691, 693-694",
+      "lines": "675, 681-682, 687, 691, 693",
       "category": "absent-hardware",
-      "match": "fn calibrate_tsc_against_hpet(",
+      "match": "let window = hpet_hz * CALIBRATION_MILLIS / 1000;",
       "why": "The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`."
     },
     {
@@ -51,13 +51,6 @@
       "category": "absent-hardware",
       "match": "for _ in 0..DRAIN_LIMIT {",
       "why": "As line 186, for `drain`: the second pass waits for the shift register, and QEMU's port reports the transmitter idle on the first read. The function's own comment says so: harmless under QEMU, whose port sends instantly."
-    },
-    {
-      "file": "arch/x86_64/console.rs",
-      "lines": "250, 255",
-      "category": "absent-hardware",
-      "match": "pub(crate) fn read_byte() -> Option<u8> {",
-      "why": "The prologue and epilogue of `read_byte`'s standalone copy, which runs only through the poll pointer `read_console_byte` hands `console::input::read_byte`: input stays polled when `console::input::init` finds no interrupt for the port, on an x86-64 machine whose MADT gives COM1's line no I/O APIC input. q35 routes COM1 through the I/O APIC, so input is interrupt-driven from before the first read, and the handler runs `read_byte` inlined into `take_console_byte`, which is reached."
     },
     {
       "file": "arch/x86_64/cpu.rs",
@@ -124,7 +117,7 @@
     },
     {
       "file": "arch/x86_64/speculation.rs",
-      "lines": "219, 224, 625, 631, 633, 642",
+      "lines": "219, 224, 625, 631, 633",
       "category": "absent-hardware",
       "match": "plan.spec_ctrl |= SPEC_CTRL_STIBP;",
       "why": "STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`."
@@ -368,27 +361,6 @@
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."
     },
     {
-      "file": "early.rs",
-      "lines": "176",
-      "category": "defensive",
-      "match": "return Err(EarlyError::KernelImage(phys));",
-      "why": "A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded."
-    },
-    {
-      "file": "hooks.rs",
-      "lines": "62",
-      "category": "credited-elsewhere",
-      "match": "let _ = slot.call_once(|| {",
-      "why": "Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill."
-    },
-    {
-      "file": "hooks.rs",
-      "lines": "64",
-      "category": "credited-elsewhere",
-      "match": "hook",
-      "why": "Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill."
-    },
-    {
       "file": "init.rs",
       "lines": "343",
       "category": "other-architecture",
@@ -582,20 +554,6 @@
       "lines": "989",
       "category": "defensive",
       "match": "return Err((DomainError::Tables, pinned));",
-      "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
-    },
-    {
-      "file": "iommu.rs",
-      "lines": "994",
-      "category": "defensive",
-      "match": "return Err((DomainError::Unit(why), pinned));",
-      "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
-    },
-    {
-      "file": "iommu.rs",
-      "lines": "997",
-      "category": "defensive",
-      "match": "}",
       "why": "A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it."
     },
     {
@@ -831,24 +789,10 @@
     },
     {
       "file": "main.rs",
-      "lines": "990",
-      "category": "failure-path",
-      "match": "Err(problem) => fatal!(",
-      "why": "The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE5_SCHEDULER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
-    },
-    {
-      "file": "main.rs",
       "lines": "1094",
       "category": "failure-path",
       "match": "Err(problem) => fatal!(",
       "why": "The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
-    },
-    {
-      "file": "main.rs",
-      "lines": "1204",
-      "category": "failure-path",
-      "match": "if let Err(problem) = random::check() {",
-      "why": "The failure arm in `report_clock_and_random`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `RANDOM_GENERATOR` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves."
     },
     {
       "file": "main.rs",
@@ -922,23 +866,9 @@
     },
     {
       "file": "mm.rs",
-      "lines": "634",
-      "category": "failure-path",
-      "match": "pub fn print_frame_delta(check: &str, leaked: i64) {",
-      "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
-    },
-    {
-      "file": "mm.rs",
       "lines": "640",
       "category": "failure-path",
       "match": "leaked.unsigned_abs()",
-      "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
-    },
-    {
-      "file": "mm.rs",
-      "lines": "643",
-      "category": "failure-path",
-      "match": "}",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
@@ -989,13 +919,6 @@
       "category": "defensive",
       "match": "};",
       "why": "`Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice."
-    },
-    {
-      "file": "object/pin.rs",
-      "lines": "587",
-      "category": "absent-hardware",
-      "match": "if !KEPT.swap(true, Ordering::Relaxed) {",
-      "why": "A pin closed whose device may still reach its pages: one into an untranslated domain, or one its domain would not unpin. Every PCI function the measured machine pins for sits behind a translating unit (VT-d on x86-64's q35, the SMMUv3 on AArch64's `virt`), whose unpin succeeds, so the frames are freed; ARMv7-A, whose `virt` has no SMMU, reaches this line."
     },
     {
       "file": "object/pin.rs",
@@ -1173,6 +1096,20 @@
       "why": "The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path."
     },
     {
+      "file": "sched/preempt.rs",
+      "lines": "427-428",
+      "category": "failure-path",
+      "match": "site.map_or(\"?\", |site| site.file()),",
+      "why": "unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message."
+    },
+    {
+      "file": "sched/preempt.rs",
+      "lines": "476",
+      "category": "failure-path",
+      "match": "let pointer = state_of(cpu)?.site.load(Ordering::Relaxed);",
+      "why": "preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock."
+    },
+    {
       "file": "sched/queue.rs",
       "lines": "256",
       "category": "defensive",
@@ -1198,13 +1135,6 @@
       "lines": "464",
       "category": "defensive",
       "match": "super::note_missing_slot();",
-      "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."
-    },
-    {
-      "file": "sched/queue.rs",
-      "lines": "482",
-      "category": "defensive",
-      "match": "task.return_run_slot(refused.slot);",
       "why": "A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants."
     },
     {
@@ -1297,13 +1227,6 @@
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
-    },
-    {
-      "file": "syscall/native.rs",
-      "lines": "2064",
-      "category": "defensive",
-      "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
-      "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
@@ -1479,27 +1402,6 @@
       "category": "defensive",
       "match": "let _ = mm::unmap_kernel(stack.base, allocation.len, |_, _| {});",
       "why": "A device window among the stacks being freed. Stacks are made only by `allocate_stack`, as anonymous memory, and callers free only stacks they made; the arm frees such a window without giving its frames to the buddy allocator, since they are a device's."
-    },
-    {
-      "file": "sched/preempt.rs",
-      "lines": "253-254",
-      "category": "failure-path",
-      "match": "let _ = unsafe { arch::this_cpu_add(crate::smp::PREEMPT_WORD_OFFSET, delta) };",
-      "why": "The release's add-back: a release found the count, or for a lock the locks held, already zero, so the word is put back before unmatched() stops the machine with SCHEDULE_WITH_PREEMPTION_HELD (FX-0503). A kernel that releases every lock on the processor that took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message."
-    },
-    {
-      "file": "sched/preempt.rs",
-      "lines": "427-428",
-      "category": "failure-path",
-      "match": "site.map_or(\"?\", |site| site.file()),",
-      "why": "unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message."
-    },
-    {
-      "file": "sched/preempt.rs",
-      "lines": "476",
-      "category": "failure-path",
-      "match": "let pointer = state_of(cpu)?.site.load(Ordering::Relaxed);",
-      "why": "preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock."
     }
   ]
 }

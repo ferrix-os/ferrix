@@ -6,7 +6,7 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | debug | 669 | 400 | 140 | **129** |
+| x86_64 | coverage | 1323 | 395 | 202 | **726** |
 | aarch64 | debug | 671 | 336 | 158 | **177** |
 | armv7a | debug | 1030 | 440 | 357 | **233** |
 
@@ -16,71 +16,71 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**669** unreached statements, debug profile.
+**1323** unreached statements, coverage profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
-| Unreachable on the measured architecture | 178 | 27% |
-| Reached only when the kernel is stopping | 140 | 21% |
-| Reached only when something has already failed | 73 | 11% |
-| Run, and credited to another line | 9 | 1% |
-| Hardware the measured machine does not have | 140 | 21% |
-| Needs a test | 129 | 19% |
+| Unreachable on the measured architecture | 185 | 14% |
+| Reached only when the kernel is stopping | 135 | 10% |
+| Reached only when something has already failed | 68 | 5% |
+| Run, and credited to another line | 7 | 1% |
+| Hardware the measured machine does not have | 202 | 15% |
+| Needs a test | 726 | 55% |
 
-### x86_64: Unreachable on the measured architecture — 178 statements
+### x86_64: Unreachable on the measured architecture — 185 statements
 
 Justified. These statements belong to another architecture or another board, and no run on x86_64 can reach them. The same code is ordinary covered code where it belongs, so this justification is per configuration and the other architectures owe their own.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 127 | `core` | `iommu/smmuv3.rs` |
+| 134 | `core` | `iommu/smmuv3.rs` |
 | 45 | `core` | `iommu.rs` |
 | 3 | `item` | `main.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 | 1 | `item` | `init.rs` |
 | 1 | `item` | `power.rs` |
 
-### x86_64: Reached only when the kernel is stopping — 140 statements
+### x86_64: Reached only when the kernel is stopping — 135 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 21 | `item` | `main.rs` |
+| 19 | `item` | `main.rs` |
 | 19 | `core` | `sched/mod.rs` |
 | 18 | `core` | `trap.rs` |
-| 17 | `core` | `mm.rs` |
-| 13 | `core` | `panic.rs` |
+| 15 | `core` | `mm.rs` |
+| 14 | `core` | `panic.rs` |
 | 8 | `core` | `console.rs` |
 | 6 | `core` | `arch/x86_64/trap.rs` |
 | 6 | `core` | `console/input.rs` |
 | 6 | `core` | `smp.rs` |
 | 5 | `core` | `arch/x86_64/paranoid.rs` |
-| 5 | `core` | `sched/preempt.rs` |
 | 4 | `core` | `console/output.rs` |
 | 3 | `item` | `discovery/devmgr.rs` |
 | 3 | `core` | `panic/screen.rs` |
+| 3 | `core` | `sched/preempt.rs` |
 | 2 | `core` | `sched/queue.rs` |
 | 1 | `core` | `arch/x86_64/mod.rs` |
 | 1 | `core` | `object/job.rs` |
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### x86_64: Reached only when something has already failed — 73 statements
+### x86_64: Reached only when something has already failed — 68 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 10 | `item` | `syscall/native.rs` |
 | 9 | `item` | `discovery/devmgr.rs` |
-| 8 | `core` | `iommu.rs` |
+| 9 | `item` | `syscall/native.rs` |
 | 8 | `core` | `user/space.rs` |
+| 6 | `core` | `iommu.rs` |
 | 6 | `core` | `object/port.rs` |
 | 4 | `core` | `object/pin.rs` |
-| 4 | `core` | `sched/queue.rs` |
 | 4 | `core` | `vmap.rs` |
 | 3 | `core` | `object/process.rs` |
+| 3 | `core` | `sched/queue.rs` |
 | 3 | `core` | `trap.rs` |
 | 2 | `core` | `arch/x86_64/cpu.rs` |
 | 2 | `core` | `arch/x86_64/mod.rs` |
@@ -89,39 +89,37 @@ Justified, line by line. Each of these runs only when hardware misbehaves or an 
 | 1 | `core` | `arch/x86_64/clock.rs` |
 | 1 | `core` | `arch/x86_64/smp.rs` |
 | 1 | `core` | `console/output.rs` |
-| 1 | `core` | `early.rs` |
 | 1 | `core` | `mm.rs` |
 | 1 | `core` | `user/vmo.rs` |
 
-### x86_64: Run, and credited to another line — 9 statements
+### x86_64: Run, and credited to another line — 7 statements
 
 Justified, line by line. The statement runs, and a test shows what it does, but the line table gives it a statement row only in an inlined copy that cannot execute it; the copy that does run carries its instructions under another line's row. No run can credit the line, and no test could make one. Each argument names the test and the row that carries it.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 2 | `core` | `hooks.rs` |
 | 2 | `core` | `mm.rs` |
 | 2 | `item` | `syscall/native.rs` |
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `user/space.rs` |
 
-### x86_64: Hardware the measured machine does not have — 140 statements
+### x86_64: Hardware the measured machine does not have — 202 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 50 | `item` | `discovery/pci.rs` |
-| 39 | `core` | `device.rs` |
-| 8 | `core` | `arch/x86_64/clock.rs` |
-| 7 | `core` | `arch/x86_64/speculation.rs` |
+| 76 | `core` | `device.rs` |
+| 65 | `item` | `discovery/pci.rs` |
+| 21 | `core` | `iommu/vtd.rs` |
+| 6 | `core` | `arch/x86_64/clock.rs` |
+| 6 | `core` | `arch/x86_64/speculation.rs` |
 | 6 | `core` | `discovery/fdt.rs` |
 | 5 | `core` | `iommu.rs` |
-| 5 | `core` | `iommu/vtd.rs` |
-| 4 | `core` | `arch/x86_64/console.rs` |
 | 3 | `item` | `init.rs` |
 | 3 | `item` | `main.rs` |
+| 2 | `core` | `arch/x86_64/console.rs` |
 | 2 | `core` | `console/output.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 | 1 | `core` | `arch/x86_64/smp.rs` |
@@ -129,39 +127,42 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `console/input.rs` |
 | 1 | `core` | `discovery/acpi.rs` |
 | 1 | `item` | `discovery/devmgr.rs` |
-| 1 | `core` | `object/pin.rs` |
 | 1 | `item` | `syscall/native.rs` |
 
-### x86_64: Needs a test — 129 statements
+### x86_64: Needs a test — 726 statements
 
 **The real gap.** No argument covers these; they are reachable on the measured configuration and nothing exercised them. This is the number that has to reach zero for DO-178C table A-7 objective 5. [COVERAGE-WORKLIST.md](COVERAGE-WORKLIST.md) groups them by module.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 40 | `item` | `discovery/pci/virtio.rs` |
-| 21 | `core` | `arch/x86_64/trap.rs` |
-| 13 | `item` | `discovery/devmgr.rs` |
-| 12 | `item` | `syscall/native.rs` |
-| 5 | `core` | `arch/x86_64/syscall.rs` |
-| 4 | `core` | `object/channel.rs` |
-| 3 | `core` | `arch/x86_64/switch.rs` |
-| 3 | `core` | `console/screen.rs` |
-| 3 | `item` | `init.rs` |
-| 3 | `item` | `main.rs` |
-| 3 | `core` | `object/process.rs` |
-| 3 | `item` | `syscall/program.rs` |
-| 2 | `core` | `arch/x86_64/mod.rs` |
-| 2 | `core` | `irq.rs` |
-| 2 | `core` | `object/mod.rs` |
-| 2 | `item` | `random.rs` |
-| 2 | `core` | `sched/mod.rs` |
-| 2 | `core` | `vmap.rs` |
-| 1 | `core` | `arch/x86_64/signal/compat.rs` |
-| 1 | `core` | `audit.rs` |
-| 1 | `core` | `claim.rs` |
-| 1 | `core` | `mm.rs` |
+| 89 | `item` | `syscall/native.rs` |
+| 58 | `item` | `main.rs` |
+| 46 | `core` | `user/vmo.rs` |
+| 39 | `item` | `discovery/pci/virtio.rs` |
+| 37 | `core` | `sched/direct.rs` |
+| 30 | `core` | `object/channel.rs` |
+| 26 | `core` | `discovery/board.rs` |
+| 26 | `core` | `sched/queue.rs` |
+| 24 | `core` | `arch/x86_64/trap.rs` |
+| 24 | `item` | `init.rs` |
+| 22 | `core` | `arch/x86_64/speculation.rs` |
+| 20 | `core` | `discovery/tree.rs` |
+| 19 | `core` | `arch/x86_64/syscall.rs` |
+| 19 | `core` | `user/space.rs` |
+| 17 | `core` | `arch/x86_64/mod.rs` |
+| 17 | `item` | `discovery/devmgr.rs` |
+| 17 | `core` | `sched/mod.rs` |
+| 15 | `core` | `iommu.rs` |
+| 15 | `core` | `iommu/remapping.rs` |
+| 12 | `core` | `arch/x86_64/clock.rs` |
+| 12 | `core` | `sched/preempt.rs` |
+| 12 | `core` | `sched/task.rs` |
+| 12 | `core` | `trap.rs` |
+| 8 | `core` | `arch/x86_64/cpu.rs` |
+| 7 | `core` | `arch/x86_64/switch.rs` |
+| 103 | | *and 35 more files* |
 
-### x86_64: argued line by line — 296 statements
+### x86_64: argued line by line — 277 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -170,10 +171,9 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `arch/speculation.rs` | 132 | Hardware the measured machine does not have | `with`'s only rows in the image are in `Plan::for_processor`'s arms for a speculation control the processor offers -- enhanced, automatic or always-on IBRS, STIBP, SSBD, IBPB. QEMU's TCG emulates none of them (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl`), and `x86_cpu` asks for them only under a hypervisor. The same arms run under KVM: gate 6 on the AMD reference host prints `speculation defences: ..., AutoIBRS, STIBP, SSBD, predictor barrier on switch, ...`. The unconditional defences are folded into a constant and carry no row. |
 | `arch/speculation.rs` | 168 | Unreachable on the measured architecture | `none` names an empty set of defences, which only a `--mitigations off` build records: on x86-64 every processor's plan in the certified build starts from the index clamps, the SWAPGS fence, the cleared entry registers and the RSB fill (`Plan::for_processor`, `x86_64/speculation.rs`), and no architecture's certified plan is empty -- ARMv7-A's and AArch64's hold the index clamp on every core, a Cortex-A7's included. That build is another configuration, not the one certified. |
 | `arch/x86_64/clock.rs` | 646 | Reached only when something has already failed | The loop's second pass: the HPET's main counter read the same value twice in a row. At the 10 MHz or more the HPET specification requires, one read through the device window takes longer than a tick, so a counter that is counting always differs on the next read. What it defends against is a timer block firmware left present but stopped, which it reports as an error after a million reads instead of dividing by zero elapsed time later. |
-| `arch/x86_64/clock.rs` | 674-675, 681-682, 687, 691, 693-694 | Hardware the measured machine does not have | The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`. |
+| `arch/x86_64/clock.rs` | 675, 681-682, 687, 691, 693 | Hardware the measured machine does not have | The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`. |
 | `arch/x86_64/console.rs` | 209 | Hardware the measured machine does not have | The row is the loop's second and later passes, for a transmit holding register still full when a byte is to be written. QEMU's 16550 passes each byte to its character device as it is written and reports the register empty again at once, so the first read of the line status always finds room. A real UART at 115200 baud is busy for 87 us a byte. |
 | `arch/x86_64/console.rs` | 236 | Hardware the measured machine does not have | As line 186, for `drain`: the second pass waits for the shift register, and QEMU's port reports the transmitter idle on the first read. The function's own comment says so: harmless under QEMU, whose port sends instantly. |
-| `arch/x86_64/console.rs` | 250, 255 | Hardware the measured machine does not have | The prologue and epilogue of `read_byte`'s standalone copy, which runs only through the poll pointer `read_console_byte` hands `console::input::read_byte`: input stays polled when `console::input::init` finds no interrupt for the port, on an x86-64 machine whose MADT gives COM1's line no I/O APIC input. q35 routes COM1 through the I/O APIC, so input is interrupt-driven from before the first read, and the handler runs `read_byte` inlined into `take_console_byte`, which is reached. |
 | `arch/x86_64/cpu.rs` | 851, 857 | Reached only when something has already failed | The triple fault is `reset`'s last way, taken only after the FADT's reset register and ten pulses of the keyboard controller's reset line have each failed to reset the machine. On q35 the FADT names port 0xCF9, which resets it at once: the suite's `boot-reset` gate shows the loader starting again. Reaching this would take a machine that ignores both documented resets. |
 | `arch/x86_64/mod.rs` | 1603, 1605 | Reached only when something has already failed | The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for. |
 | `arch/x86_64/mod.rs` | 1666 | Reached only when the kernel is stopping | `halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run. |
@@ -183,7 +183,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `arch/x86_64/paranoid.rs` | 172 | Reached only when the kernel is stopping | A #DB in the kernel that no armed hardware breakpoint raised -- a single step or a general detect, neither of which the kernel asks for -- which it stops on. The breakpoints the stage 3 check arms each set their DR6 bit. |
 | `arch/x86_64/smp.rs` | 56 | Hardware the measured machine does not have | An x2APIC entry in the MADT, which firmware writes only for a processor whose APIC ID does not fit the eight bits of a local APIC entry: on QEMU, more than 255 processors with interrupt remapping in x2APIC mode. The suite boots four and one; q35's firmware describes each with a local APIC entry. |
 | `arch/x86_64/smp.rs` | 256 | Reached only when something has already failed | The trampoline's length is fixed when the image is built, by three symbols around the assembly in this file, and is well under a page. The refusal defends against an edit that grows it past 4 KiB, which would otherwise be copied over whatever follows its frame below one mebibyte. |
-| `arch/x86_64/speculation.rs` | 219, 224, 625, 631, 633, 642 | Hardware the measured machine does not have | STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`. |
+| `arch/x86_64/speculation.rs` | 219, 224, 625, 631, 633 | Hardware the measured machine does not have | STIBP and SSBD in IA32_SPEC_CTRL, AMD's automatic IBRS in EFER, and reading each back: planned and applied only on a processor that offers them. QEMU's TCG offers none (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl [bit 26]`, `stibp`, `ssbd`, `auto-ibrs`). Gate 6's KVM boot on the AMD reference host applies all three and reads them back on every processor: `speculation defences read back on 4 processors`. |
 | `arch/x86_64/speculation.rs` | 639 | Hardware the measured machine does not have | AMD's VIRT_SPEC_CTRL, used for SSBD only on a processor that offers it without SSBD in IA32_SPEC_CTRL: a guest of an older AMD host. Neither TCG nor the KVM reference host (which offers SSBD directly) presents that combination. |
 | `arch/x86_64/trap.rs` | 512, 536 | Reached only when the kernel is stopping | `vector_name`'s standalone copy, called by `report_trap` and by the paranoid entry's fatal arms, both of which run only when the kernel is stopping. `classify` carries its own inlined copy, which the stage 3 fault check reaches with a program's `hlt`. |
 | `arch/x86_64/trap.rs` | 635, 638-639, 654 | Reached only when the kernel is stopping | The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it. |
@@ -218,9 +218,6 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `discovery/devmgr.rs` | 1029 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1040 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `discovery/devmgr.rs` | 1096 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
-| `early.rs` | 176 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
-| `hooks.rs` | 62 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
-| `hooks.rs` | 64 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
 | `init.rs` | 343 | Unreachable on the measured architecture | `/chosen/bootargs`, read only when the loader handed over a device tree; the x86-64 loader hands over ACPI and never a device tree. |
 | `init.rs` | 580 | Hardware the measured machine does not have | A named init that opened and then would not start: an image whose named program is there and is not one the loader takes. The suite's options boot names one that is not there, which is the refusal's other arm. |
 | `init.rs` | 620 | Hardware the measured machine does not have | /sbin/init starting, or failing for a reason other than not being there: an image that carries a /sbin/init, which none xtask builds does -- every image names its program or builds one in. |
@@ -249,8 +246,6 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `iommu.rs` | 915 | Hardware the measured machine does not have | A frame above what a translated domain's tables address (TRANSLATED_BITS): RAM that high, which no suite machine has. |
 | `iommu.rs` | 976 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
 | `iommu.rs` | 989 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 994 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
-| `iommu.rs` | 997 | Reached only when something has already failed | A unit that never finished an operation, tables that would not unmap a page they mapped, or an invalidation the unit never completed: the domain keeps the pin for good rather than free what a device may reach. A working unit -- every unit QEMU emulates answers at once -- never takes it. |
 | `iommu.rs` | 1218 | Reached only when something has already failed | A VT-d unit that would not enable: its functions get untranslated domains. QEMU's unit always enables. |
 | `iommu.rs` | 1236-1237 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
 | `iommu.rs` | 1240-1242 | Unreachable on the measured architecture | Programs the IORT's SMMUv3 description, which only an Arm machine's ACPI has; x86-64 firmware describes its IOMMU in the DMAR and has no IORT. |
@@ -284,9 +279,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `main.rs` | 700 | Reached only when the kernel is stopping | The failure arm in `check_btrfs_write`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE12_WRITE` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 903 | Reached only when the kernel is stopping | The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `PROCESSOR_DISCOVERY` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 935 | Reached only when the kernel is stopping | The failure arm in `bring_up_processors`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
-| `main.rs` | 990 | Reached only when the kernel is stopping | The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE5_SCHEDULER` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 1094 | Reached only when the kernel is stopping | The failure arm in `start_scheduler`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `STAGE4_SMP` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
-| `main.rs` | 1204 | Reached only when the kernel is stopping | The failure arm in `report_clock_and_random`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `RANDOM_GENERATOR` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 1318 | Reached only when the kernel is stopping | The failure arm in `register_load`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `LOAD_REGISTRATION` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 1388 | Reached only when the kernel is stopping | The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
 | `main.rs` | 1395 | Reached only when the kernel is stopping | The failure arm in `start_console_input`: it runs only when the bring-up or self-check it follows has reported a property broken, and it stops the machine with the catalogue's `CONSOLE_INPUT` and FERRIX-PANIC. A passing boot is by definition one that never takes it; making it run means breaking what that step proves. |
@@ -297,9 +290,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `main.rs` | 1587 | Hardware the measured machine does not have | The layout moved by the loader without a random source: a machine whose firmware offers the loader neither RNG protocol nor instruction. Every QEMU machine the suite boots gives it one (EFI_RNG_PROTOCOL from virtio-rng, or RDRAND/RNDR), so KASLR is always random there. |
 | `mm.rs` | 374 | Reached only when something has already failed | The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it. |
 | `mm.rs` | 506 | Run, and credited to another line | Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates. |
-| `mm.rs` | 634 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
 | `mm.rs` | 640 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
-| `mm.rs` | 643 | Reached only when the kernel is stopping | Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot. |
 | `mm.rs` | 1329 | Run, and credited to another line | The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`. |
 | `mm.rs` | 1882-1884 | Reached only when the kernel is stopping | `FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it. |
 | `mm.rs` | 1900-1903 | Reached only when the kernel is stopping | The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count. |
@@ -307,7 +298,6 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `object/interrupt.rs` | 302-303 | Reached only when something has already failed | The interrupt controller refused to unmask a line it had just registered a handler for. A vector is minted by its device node only for a line the controller can route (`device::DeviceNode::vector`), and unmasking one is a register write the controller does not refuse; the branch unclaims the line so a controller that did refuse would not leave it claimed. |
 | `object/job.rs` | 136 | Reached only when the kernel is stopping | The root job is made once, by bring-up, before any program exists to be told memory ran out; the allocation is FATAL-ALLOC by design (`tools/common/check/check-fallible-alloc.py` lists it) and this is the panic it ends in. A run reaching it is a boot that ran out of memory before its first program. |
 | `object/pin.rs` | 564 | Reached only when something has already failed | `Pin::new` fills both fields, and only this `drop` takes them, once; they are `Option`s so that the drop can move them out. The `else` is the pattern's other half, reached only if a pin were dropped twice. |
-| `object/pin.rs` | 587 | Hardware the measured machine does not have | A pin closed whose device may still reach its pages: one into an untranslated domain, or one its domain would not unpin. Every PCI function the measured machine pins for sits behind a translating unit (VT-d on x86-64's q35, the SMMUv3 on AArch64's `virt`), whose unpin succeeds, so the frames are freed; ARMv7-A, whose `virt` has no SMMU, reaches this line. |
 | `object/pin.rs` | 637-638, 643 | Reached only when something has already failed | A dead driver's pin whose frames could not all be shared into the quarantine: `mm::share_frame` fails only for a frame the allocator does not count as one order-0 allocation, and drivers pin only VMOs, whose frames are allocator order-0 frames. Were one not, the pin is kept for good, mapped and held, never freed -- which is what the branch does. |
 | `object/port.rs` | 117 | Reached only when something has already failed | A packet that found no room. The queue's capacity is kept at PORT_CAPACITY plus every registration's and binding's promised packet (`Promise::new` reserves before a registration is accepted), so a packet either kind of limit allows always fits; the count is what would show the accounting broken. |
 | `object/port.rs` | 268 | Reached only when something has already failed | A packet taken by a wait whose buffer faulted, put back when the queue is at capacity and cannot grow. Its slot is taken meanwhile only if a user packet was queued between the take and the put-back, and then the reserve must also fail; the object edge check puts packets back into a queue with room (`object/edge_check.rs`). The line after the loss is its return. |
@@ -333,14 +323,12 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `sched/mod.rs` | 3154 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
 | `sched/mod.rs` | 3159 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
 | `sched/mod.rs` | 3169 | Reached only when the kernel is stopping | The fairness window's remembered picks, printed for a fairness check that has failed. Called only on that failure path. |
-| `sched/preempt.rs` | 253-254 | Reached only when the kernel is stopping | The release's add-back: a release found the count, or for a lock the locks held, already zero, so the word is put back before unmatched() stops the machine with SCHEDULE_WITH_PREEMPTION_HELD (FX-0503). A kernel that releases every lock on the processor that took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. |
 | `sched/preempt.rs` | 427-428 | Reached only when the kernel is stopping | unmatched(), carried from sched/mod.rs 257-258 where the same arm stood before 2b: a lock taken on one processor was released on another, or a release had nothing to lower. It names where the count was last raised and stops the machine with SCHEDULE_WITH_PREEMPTION_HELD; a kernel that releases every lock where it took it never takes it. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. |
 | `sched/preempt.rs` | 476 | Reached only when the kernel is stopping | preempt_site, carried from sched/mod.rs 266: where a processor's count was last raised, read only by the two failure reports that name it (unmatched(), and schedule_from's switch with the count raised); neither runs in a passing boot. Shown reached by the negative controls on 3bb22d1bf, logs in ~/.local/share/ferrix/logs/step2a/: 2b-ctl-unmatched-enable (a release with nothing raised) and the three atomicity controls 2b-ctl-x86-address-then-add, 2b-ctl-arm-unmasked-a64 and 2b-ctl-arm-unmasked-a32-smp2, each of which reached this path and stopped the boot on FX-0503's message. The switch's report was reached by 2b-ctl-sleep-holding-lock. |
 | `sched/queue.rs` | 256 | Reached only when something has already failed | A pick the queue's tree made that a brute-force scan of the same queue disagrees with: EEVDF choosing other than the eligible task with the earliest deadline. Counted for the stage 5 fairness check, which requires zero; a correct tree never takes it. |
 | `sched/queue.rs` | 268-269 | Reached only when the kernel is stopping | The remembered picks, read only by print_picks, which only a failed fairness check calls. |
 | `sched/queue.rs` | 364 | Reached only when something has already failed | The times of a queue whose processor has not joined the scheduler: only between sched::init and a secondary's arrival, before any program can read /proc/stat, or on a machine where a processor failed to start, which stage 4 refuses. |
 | `sched/queue.rs` | 464 | Reached only when something has already failed | A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants. |
-| `sched/queue.rs` | 482 | Reached only when something has already failed | A task queued without its run slot, or refused by the fair class: the slot is missing only if the task is already queued, which every caller's is_queued check rules out, and the fair class refuses only a duplicate identifier or a zero weight, neither of which the kernel makes. Counted (MISSING_SLOTS) and required zero by check_invariants. |
 | `sched/wait.rs` | 291 | Run, and credited to another line | Run by stage 5's sched::check::before_start, which waits on a queue before the scheduler starts and requires the wait to last until its deadline. In that monomorph the ready closure is `\|\| false`, folded into the loop, and the spin carries no row of its own; the rows of this line are in the monomorphs whose waits all run with the scheduler up. |
 | `sched/wait.rs` | 567 | Reached only when the kernel is stopping | The debug assertion's own row is its panic call: a sleeping lock taken where a task may not block. The condition runs on every sleeping-lock acquisition under another row. |
 | `smp.rs` | 983, 987-988 | Reached only when the kernel is stopping | The failure arm of a `debug_assert!` and its message's arguments: a shootdown requested while holding a lock that disables preemption, which the assertion exists to stop on. It holds on every run of the suite. |
@@ -354,7 +342,6 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `syscall/native.rs` | 1985 | Reached only when something has already failed | The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros. |
 | `syscall/native.rs` | 2051 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
 | `syscall/native.rs` | 2054 | Reached only when something has already failed | A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place. |
-| `syscall/native.rs` | 2064 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 2070-2071 | Reached only when something has already failed | An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock. |
 | `syscall/native.rs` | 2551 | Hardware the measured machine does not have | A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine. |
 | `trap.rs` | 32 | Reached only when something has already failed | The Interrupt arm of `Trap`'s derived Debug. The only formatting of a `Trap` is the `signal ... ended by signal` line in `user_fault_as`, whose trap comes from `user_fault` or `handle_page_fault`; `dispatch` sends every Interrupt to the controller and never there. Reaching this would mean the dispatcher had treated a device interrupt as a program's fault. |
