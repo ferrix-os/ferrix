@@ -1068,6 +1068,14 @@ in the ledger, and not a gate.
 | **M7** | **Evidence**: `ITEM.md`, ST, SAFETY-MANUAL, MEMORY-AND-TIMING, TRACEABILITY, VULNERABILITY-ANALYSIS and CLAIM rewritten for the new boundary; the stack-depth check; coverage at 100%-or-justified on the whole kernel; the register recounted | 40 | the stack-depth and coverage checks in `xtask check`, each with a control; the consultant's review of each document recorded |
 | **M8** | **Split** `linuxd`: `netd`, the device servers, the console server; then several Linux partitions | 45 | `test-net`, compositor, audio and card rows unchanged; a kill-and-restart row per server on K13; a two-partition row (one partition's `linuxd` killed, the other's programs unaffected) |
 
+*M5 and the kernel's crates* (2026-10-15, `docs/KERNEL-CRATES.md`): the
+kernel is built as four crates along the rings, and the load is one of
+them, `ferrix-kernel-load`, built against the core's and the item's `pub`
+items, which `docs/generated/KERNEL-INTERFACE.md` lists. The lift moves what
+that crate holds out of ring 0; the interface it calls is the items the list
+shows named by `load`, and the 26 checks raised into it (`raised_checks`) are the
+part of the item's self-checks M5 must find another home for.
+
 **Maximum-certification streams** (§6.5), run beside M1 to M8 and finished
 before the claim:
 

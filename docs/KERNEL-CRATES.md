@@ -323,5 +323,118 @@ review and the regenerated evidence), S4 1.
   S3 lists. An exception in `check-crate-layering.sh` for crate roots (shape
   B, conditions B1 to B5) only if shape A does not compile, with the error in
   the S3 commit.
-* S3 and S4: not started. D5 (`KERNEL-INTERFACE.md`) and the
-  `disallowed-methods` list come with S3, which makes the first `pub`.
+* **S3** (branch `bs-a-s3b`; the consultant's rulings during it, ledger
+  lines 1585 and 1630; its code review cites them): the split, §5.
+* S4: the edit figures per ring are in `docs/TEST-TIME.md` with S3's; the
+  kernel clippy step after an edit in each ring too.
+
+## 5. S3 as built
+
+**The crates.** `src/kernel/{core,item,load}/Cargo.toml`, each `[lib] path`
+to its root beside `main.rs` (`kernel_core.rs`, `kernel_item.rs`,
+`kernel_load.rs`, each classed in its ring); the binary keeps `main.rs` and
+declares only `stages_check`. `kernel_crates` in the manifest says which
+crate holds which ring; `raised_checks` lists the 26 check files of §2,
+each with its own ring (`file_ring`) and the crate that builds it. The
+roots declare their crate's top-level modules, and the mixed directories
+by inline modules (§3 (1)): the core's root holds `discovery`'s six core
+children, `syscall::uaccess` and `platform::google::gs201::watchdog`; the
+load's root the raised checks and the load's children of `syscall` and
+`platform`. An upper root and each of its inline modules re-export the
+crate below with a glob, so `crate::mm::x` in a load file names what it
+named before; an item `mod.rs` re-exports only core children
+(`discovery`'s `board`, `description`, `fdt`, `finder` and `tree`, and
+`syscall::uaccess`).
+
+**Shape A for the architecture checks** (ledger line 1579): the load's root
+declares `arch::{x86_64,aarch64,armv7a}::{trap,switch,paranoid}::check`
+with no `cfg` and no re-export of an architecture's module; each of those
+files starts with `#![cfg(target_arch = "..")]` and names the core through
+`use ferrix_kernel_core::arch::<isa> as core_<isa>;` and
+`use ferrix_kernel_core::arch::<isa>::<parent> as core_<parent>;`, its
+`super::super::` and `super::` paths edited to those names (the listed
+mechanical edits; doc comments that only mention `super::` kept). It
+compiled; no exception to the layering rule was needed. The drivers of the
+native call checks, `drive_native_words` and `drive_system_call`, are
+re-exported per architecture by `arch/stage_check.rs` (a raised check under
+`arch/`), and the load's root names them once, without a `cfg`: `pub use
+stage_check::{drive_native_words, drive_system_call};` (ledger line 1585,
+Q2). The core's `arch/mod.rs`, `aarch64/mod.rs`, `armv7a/mod.rs` and
+`x86_64/mod.rs` no longer re-export them.
+
+**Visibility, by the compiler's errors.** Nothing in the kernel was `pub`;
+2,609 declarations are now, 2,362 of them `pub(crate)` before and 37
+`pub(super)`, the rest private items the crates above use, the roots'
+module lines and the re-export lines a split `use` list gained. Each was
+raised by `~/ferrix-logs/bs-a/s3b/raise.py`, which reads one crate's
+`cargo check` errors (E0603, E0624, E0616, E0451, E0364, E0365, the
+private-type error and unresolved paths through a crate below), raises the
+declaration the error names -- for a `use` list only the names asked for,
+split into a `pub use` of their own -- and logs it with the file that
+needed it (`raise-log.jsonl`, 2,470 entries, 43 reverted: a first pass read
+the compiler's "consider importing" spans as definitions, which the log
+marks); it ran on each crate and each architecture until it raised nothing.
+The 15 items with no `///` that `missing_docs` then asked for are
+documented; 17 types `missing_debug_implementations` asked for derive
+`Debug`, two (`ConfigWrites`, `Stopped`) allow it with a reason; clippy's
+lints for exported items (`new_without_default`, `len_without_is_empty`)
+are allowed per item with a reason. Two things were not mechanical:
+`syscall/stat.rs`'s inherent `impl StatLayout`, an enum the core's facade
+defines, became a trait, `StatEncoding`, with the same bodies (Rust allows
+an inherent `impl` only in the type's crate); and 4 `expect(dead_code)`
+attributes on items now `pub` were removed, since `dead_code` does not look
+at a `pub` item, and one `expect(clippy::unnecessary_wraps)`, which clippy
+does not apply to exported functions.
+
+**The interface** (§3 (4); ledger line 1531, D5): `tools/common/gen/kernel-interface.py`
+lists every `pub` of a core or item file in
+`docs/generated/KERNEL-INTERFACE.md` -- 2,126 declarations, 53 checks-only
+-- with the crates above that name each, and `--check`, in `cargo xtask
+check`, fails on a list that differs from the tree, on a `pub` no crate
+above names and no named item's signature carries (a dead interface), and
+on a `pub` item that is not checks-only naming a checks-only type or a
+kernel trait implemented for one (ledger line 1630, F2.2).
+
+**Checks-only** (§3 (4)(b)): 39 items -- free functions, statics,
+constants and types made `pub` from private or `pub(super)` for a raised
+check alone -- carry `// CHECKS-ONLY:` and `#[doc(hidden)]`; the gate
+refuses a path to one from product code outside the item's own module.
+14 methods and foreign functions of that kind carry `#[doc(hidden)]`, and
+the generator writes them into `.clippy.toml`'s `disallowed-methods`; the
+raised checks that call them allow the lint for the file, the defining
+modules per function with a reason. Fields (ledger line 1630): a
+`DeviceNode`'s six fields the configuration check reads, and the `wait` of
+a `Pin` the pin check sets, stay private behind seven checks-only accessors
+(`device::node_bars` and the rest, `object::pin::set_wait`; F1); the 11
+fields of the nine checks-only types are `pub` (F2). Modules made `pub`
+only for raised checks are not marked (F3); the layering rule keeps load
+product code out of an architecture's own module. A product file naming a
+raised check, or a check file of another crate, fails the gate (Q2.2,
+F3.2), the composition root excepted.
+
+**F-76** (ledger line 1585, Q1): the core's and the item's manifests name
+25 libraries no ring classifies; each crate lists exactly those under
+`unclassified_deps`, F-76's debt register, which the gate holds to the
+manifest and to what the crate's files name.
+
+**Shown unchanged against `main`** (line 1477 (7); `main` 814a95809 after
+the rebase, S2's baseline 89a7cf74c for the boots): no function moved
+between files, and of 8,281 function bodies 36 differ, every one in a
+raised architecture check (the path edits above), in
+`device/config_check.rs` or `object/pin/check.rs` (the accessors); the new
+functions are the accessors. The boundary gate's three ring lists differ by
+the three roots; its counts move by lines added and removed, not by code
+moved: item product 94,954 to 95,109, core 70,706 to 70,950, load 73,057
+to 73,244, upward references 0, composition-root edges 28, hooks 2. The unsafe audit's
+output is byte-identical; the panic audit's 8 exemptions and the catalog
+are the same; TRACEABILITY.md's statuses are main's, but for the accessor count (916 to
+923, the seven accessors) and x86-64's re-measure below; the four boots' lines are the same but for the
+two that vary from boot to boot (the thread hand-off's wording, the seam
+trip's figures). The coverage evidence was carried with the line matching
+blind to visibility (`~/ferrix-logs/bs-a/s3b/carry_vis.py`), and every
+carried line checked to stay in its function (`span_check.py`, F-75).
+
+**Coverage** (line 1477 (9)): x86-64's evidence is measured again on the
+split, debug and release (`docs/certification/VERIFICATION.md` §3.1 and
+§3.2): 143 x86-64 requirement statuses moved to *reached*, none away. The
+Arm pair's is carried until an Arm QEMU loads the plugin (`docs/BACKLOG.md`).
