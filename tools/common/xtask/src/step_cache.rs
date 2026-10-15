@@ -1155,10 +1155,14 @@ fn analyse(
     // Children, from the clone and fork lines.
     let mut parsed: BTreeMap<u32, Vec<Call>> = BTreeMap::new();
     let mut children: BTreeSet<u32> = BTreeSet::new();
+    let mut unstamped = None;
     for (pid, lines) in files {
         let mut calls = Vec::new();
         for line in lines {
             if let Some(call) = parse_line(line)? {
+                if call.time == 0 {
+                    let _ = unstamped.get_or_insert_with(|| line.clone());
+                }
                 if matches!(call.name.as_str(), "clone" | "clone3" | "fork" | "vfork")
                     && call.returned > 0
                 {
@@ -1209,6 +1213,13 @@ fn analyse(
                 walk.one_call(call, &mut cwd, &mut queue)?;
             }
         }
+    }
+    // Without strace's stamps every creation would seem to come before
+    // every read, and the order of C2 would go unchecked (the consultant,
+    // ledger 1508).
+    if let Some(line) = unstamped {
+        walk.traced
+            .refuse(format!("a call without strace's time stamp: {line}"));
     }
     Ok(walk.traced)
 }

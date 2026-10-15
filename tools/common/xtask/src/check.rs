@@ -392,6 +392,9 @@ impl Counts {
     }
 }
 
+/// A system bus address with nothing at it.
+const NO_SYSTEM_BUS: &str = "unix:path=/nonexistent/ferrix-check-has-no-system-bus";
+
 /// The Linux-ABI workspaces `check` reaches as units, by name and place.
 const LINUX_WORKSPACES: &[(&str, &str)] = &[
     ("init", "src/user/system/linux/init"),
@@ -873,7 +876,12 @@ fn compositor(root: &std::path::Path) -> Result<()> {
         let _ = command
             .current_dir(&dir)
             .args(arguments)
-            .env("CARGO_TARGET_DIR", own_target_dir("compositor"));
+            .env("CARGO_TARGET_DIR", own_target_dir("compositor"))
+            // No system bus: the GPU tests' virgl_test_server asks it
+            // something, and a host daemon answers from state no step-cache
+            // record holds (the certification consultant, ledger 1508). The
+            // tests pass without it; it is the same with the cache on or off.
+            .env("DBUS_SYSTEM_BUS_ADDRESS", NO_SYSTEM_BUS);
         command
     };
     if cfg!(windows) {

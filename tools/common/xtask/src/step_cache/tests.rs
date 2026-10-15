@@ -34,15 +34,49 @@ fn context(root: &Path) -> Context {
     }
 }
 
-/// A trace directory holding `traces`, one file per pid.
+/// A trace directory holding `traces`, one file per pid, each line given
+/// a time stamp as `strace -ttt` writes one (`1.<n>`) unless it has one.
 fn traces(root: &Path, traces: &[(u32, &str)]) -> PathBuf {
     let directory = root.join("traces");
     let _ = std::fs::remove_dir_all(&directory);
     std::fs::create_dir_all(&directory).unwrap();
     for (pid, text) in traces {
-        std::fs::write(directory.join(format!("t.{pid}")), text).unwrap();
+        let stamped: String = text
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                if stamp(line).0 == 0 {
+                    format!("1.{:06} {line}\n", 500_000 + index)
+                } else {
+                    format!("{line}\n")
+                }
+            })
+            .collect();
+        std::fs::write(directory.join(format!("t.{pid}")), stamped).unwrap();
     }
     directory
+}
+
+/// [`traces`], with the lines as given.
+fn unstamped_traces(root: &Path, text: &str) -> PathBuf {
+    let directory = root.join("traces");
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("t.100"), text).unwrap();
+    directory
+}
+
+#[test]
+fn a_call_without_a_time_stamp_is_refused() {
+    let root = scratch("unstamped");
+    let line = "access(\"/etc/hostname\", R_OK) = 0\n";
+    let directory = unstamped_traces(&root, line);
+    let traced = read_traces(&directory, &root, &context(&root)).unwrap();
+    assert!(traced.refused.unwrap_or_default().contains("time stamp"));
+    let directory = unstamped_traces(&root, &format!("1.000001 {line}"));
+    let traced = read_traces(&directory, &root, &context(&root)).unwrap();
+    assert_eq!(traced.refused, None);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 /// A record of the unit traced as `trace`, made at `root`.

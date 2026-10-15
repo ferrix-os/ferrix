@@ -739,6 +739,56 @@ shorter than the image, and a block a guest wrote into the image since the
 last build); with the comparison made to say every block is the same, four
 of the six fail.
 
+### Cut B2: `check`'s units by their inputs (bs-b-stepcache)
+
+`FERRIX_STEP_CACHE=on` makes each of `check`'s workspaces of their own --
+the compositor's, init's, auth's, pkg's, the installer's, media's, adbd's,
+nvos's and every app's -- a unit that is skipped when a run that passed read
+exactly the inputs it would read now (`tools/common/xtask/src/step_cache.rs`
+says how, `docs/certification/TOOLS.md` says what it shall and shall not
+do). On a miss the unit runs under `strace -ff -ttt` as `cargo xtask
+check-unit`; when it passes, the record keeps the contents of every file it
+read or looked up, every directory it listed, every other path it looked up
+and every program it ran, with xtask's digest, the environment, the
+toolchains, the kernel release, the processor and the render devices. A unit
+that talks to a process the trace does not see (a network socket, a Unix
+socket it did not bind), reads a temporary file it had not made fresh, or
+reads another step's outputs is run and not recorded. The log says `ran,
+recorded`, `ran, not recorded: <why>` or `cached pass from <time> on
+<commit>, <target directory>` for each unit, and counts both. loom (the
+kernel's orderings) and every step of the main workspace stay uncached: they
+read the certified item (the certification consultant, ledger lines 1447,
+1461, 1494 and 1508).
+
+**It is off unless asked for**, and release runs and the baseline keep it
+off: a gate turns it on only once its end-to-end control has fired through
+`gate.sh`'s host-side control mode (proposed with the pool's T1/T2,
+`~/.local/share/ferrix/fleet/gate.sh.proposed-bsb`).
+
+`cargo xtask check-side` in one worktree and target directory, at a load of
+about 20 to 30:
+
+| Run | Wall |
+|---|---:|
+| Warm, unchanged tree, no cache | 65.8 s |
+| First run with the cache, recording all 25 units | 223.2 s (load 36-48) |
+| Warm, unchanged tree, every unit a cached pass | **7.9 s** |
+
+**The compositor runs with no system bus.** Its GPU tests start
+`virgl_test_server --use-egl-surfaceless`, which asked the system D-Bus
+something; a host daemon answers from state no record holds, so a unit that
+talks to it is not recorded (the consultant, ledger 1508). `check` now sets
+`DBUS_SYSTEM_BUS_ADDRESS` to an address with nothing at it for the
+compositor's steps, cached or not; its 1,040 tests pass so.
+
+**Controls.** A broken assertion in hyprix's `plane.rs` after a cached pass:
+the compositor's unit missed, ran, and failed the run. A same-size edit of
+`src/lib/init/restart/src/lib.rs` (a type renamed to a name of its length),
+a file init's unit only looks up on a warm build: init missed, ran, and
+failed the run with the compile error; with the file restored, every
+recorded unit was a cached pass again. Each of the cache's 15 checks
+sabotaged in turn fails the unit tests that hold it.
+
 ## The compile: the baseline, 2026-10-15 (bs-a)
 
 The other half of the customer's target above: what a warm rebuild spends
@@ -946,6 +996,7 @@ a file init's unit only looks up on a warm build: init missed, ran, and
 failed the run with the compile error; with the file restored, every
 recorded unit was a cached pass again. Each of the cache's 15 checks
 sabotaged in turn fails the unit tests that hold it.
+
 
 ## Next
 
