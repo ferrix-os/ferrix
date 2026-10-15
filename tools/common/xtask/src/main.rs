@@ -163,6 +163,7 @@ mod steamcmd;
 mod step_cache;
 mod symbolize;
 mod sysfs;
+mod test_cache;
 mod test_disk;
 mod test_runs;
 mod threads;

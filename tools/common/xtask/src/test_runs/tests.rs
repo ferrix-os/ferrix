@@ -37,6 +37,7 @@ fn ended(path: &str, status: &str) -> Ended {
         output: Vec::new(),
         seconds: "0.0".to_owned(),
         failure: None,
+        cache: None,
     }
 }
 
@@ -126,7 +127,11 @@ fn a_binary_gets_cargo_s_environment_directory_and_arguments() {
         "env -0 > '{0}.env'; pwd > '{0}.pwd'; printf '%s\\n' \"$@\" > '{0}.args'",
         dump.display()
     );
-    let status = run(&words(&["sh", "-c", &script, "sh", "one", "two words"]), "");
+    let status = run(
+        &words(&["sh", "-c", &script, "sh", "one", "two words"]),
+        "",
+        None,
+    );
     assert_eq!(status, "0");
     let mut child: Vec<String> = std::fs::read_to_string(format!("{}.env", dump.display()))
         .unwrap()
@@ -166,14 +171,14 @@ fn a_binary_gets_cargo_s_environment_directory_and_arguments() {
 
 #[test]
 fn an_exit_code_and_a_signal_are_reported() {
-    assert_eq!(run(&words(&["sh", "-c", "exit 3"]), ""), "3");
-    assert!(run(&words(&["sh", "-c", "kill -KILL $$"]), "").starts_with("a signal"));
-    assert!(run(&words(&["/nonexistent/binary"]), "").starts_with("could not start"));
+    assert_eq!(run(&words(&["sh", "-c", "exit 3"]), "", None), "3");
+    assert!(run(&words(&["sh", "-c", "kill -KILL $$"]), "", None).starts_with("a signal"));
+    assert!(run(&words(&["/nonexistent/binary"]), "", None).starts_with("could not start"));
 }
 
 #[test]
 fn a_binary_whose_check_is_gone_is_killed() {
-    let status = run(&words(&["sleep", "30"]), "999999999");
+    let status = run(&words(&["sleep", "30"]), "999999999", None);
     assert!(status.starts_with("killed"), "{status}");
 }
 

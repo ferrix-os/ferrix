@@ -913,6 +913,56 @@ One worktree at a load of about 11-14, warm:
 The 84 test binaries' results (passed, failed, ignored, per binary) were the
 same both ways.
 
+### Cut B5: the test binaries outside the item, cached (P2, bs-b2-p2)
+
+With `FERRIX_STEP_CACHE=on`, each host test binary of a package the item
+does not link is a unit of the step cache (`tools/common/xtask/src/test_cache.rs`):
+`check` writes the cache's plan into the test runs' directory before cargo
+starts, and `test-wait` keys each such binary's run on the binary's SHA-256,
+its arguments, its directory, the `CARGO_BIN_EXE_*` programs it is given (by
+digest), its environment, the host and what `strace` saw it read; a record of
+a pass on the same key and inputs stands for the run, its line saying
+`cached pass <origin>`. On a miss it runs traced and is recorded when it
+passes. **Never cached**, each saying why in its line (`ran (never cached:
+<why>)`): a package under a path of the item (the kernel, the loader, the item
+and core crates of `certification-item.json` and its allow-list) and every
+package one of them links, through dependencies or build dependencies on any
+target -- which takes in the libraries the kernel links that the
+classification does not name yet (F-76); a package whose manifest the reader
+does not take whole; one depending on a crate that draws new inputs each run
+(`proptest`, `quickcheck`, `rand` and the like, none in the workspace) or
+seeding its tests from entropy or the clock (none outside the item); a binary
+whose package cargo does not name, or names at another place than the plan.
+The certification consultant's design review, ledger line 1594 (P2.1-P2.5).
+
+Of the workspace's 75 host packages, 26 are cacheable today: xtask and the
+ring-3 drivers' and protocols' libraries (adb, argon2, the virtio drivers, usb,
+nvme, svc, pkg, restart, ...). xtask's own tests read the item, so its runs are
+never recorded; a passed traced run that could not be recorded keeps the unit
+untraced for a day (`unrecordable`), since tracing made xtask's tests 3-8 s
+untraced into 15-34 s traced, on the tests' critical path.
+
+One worktree, warm, unchanged tree, alternating (load 19-34):
+
+| Run | `check` | test binaries after cargo returned | binaries run |
+|---|---:|---:|---:|
+| cache off (P1 only) | 104.1 s, 115.7 s | 22.4 s, 14.7 s | 80 |
+| cache on, every record standing | **45.2 s, 47.4 s** | 18.1 s, 16.9 s | 54 (26 cached passes) |
+| cache on, recording (first run after an xtask change) | 408.7 s | 22.1 s | 80 |
+
+(The whole `check` falls mostly by the side workspaces' cache, Cut B2.) **What
+P2 itself saves is small:** the 26 cached binaries ran 2.9 s of the 55.1 s the
+80 binaries ran in all (`p2-offB`), and the tests' wall time is set by the item's
+`ferrix-btrfs-write` (18-23 s), which always runs. P2 removes work, not the
+critical path; what remains on it is the item's tests and the audits beside
+(*P3*).
+
+**Controls.** Unit tests hold the key (binary, programs, arguments, directory:
+each changed is a miss), the closure over what the item links, the plan's
+package and place, the manifest reader failing closed, a keyed unit reading
+its keyed files only, and the not-traced memo; each of 11 sabotages of those
+checks fails a test (`~/ferrix-logs/bs-b2/sabotage/p2.log`).
+
 ## The compile: the baseline, 2026-10-15 (bs-a)
 
 The other half of the customer's target above: what a warm rebuild spends

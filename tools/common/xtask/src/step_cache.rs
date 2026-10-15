@@ -187,6 +187,10 @@ const ENVIRONMENT_IGNORED: &[&str] = &[
     "TERM_PROGRAM_VERSION",
     "VTE_VERSION",
     "_",
+    // The test runs' directory and the `check` they belong to, which
+    // `test-wait` has and the binary it runs does not.
+    "FERRIX_TEST_RUNS",
+    "FERRIX_TEST_RUNS_OWNER",
     UNIT_VARIABLE,
     VARIABLE,
 ];
@@ -252,7 +256,7 @@ pub(crate) fn unit(
         return Ok(Outcome::Ran);
     }
     let mut context = Context::once()?.clone();
-    context.unit_target = absolute(target)?;
+    context.unit_targets = vec![absolute(target)?];
     let context = &context;
     let directory = store.join(file_name(name));
     if let Some((origin, inputs)) = lookup(name, &directory, context) {
@@ -281,21 +285,25 @@ fn file_name(name: &str) -> String {
 }
 
 /// Whether `strace` runs here.
-fn strace_works() -> bool {
+pub(crate) fn strace_works() -> bool {
     Command::new("strace")
         .arg("-V")
         .output()
         .is_ok_and(|output| output.status.success())
 }
 
-/// Run the unit as a traced child, and record it when it passes and the
-/// trace allows.
-fn run_traced(name: &str, directory: &Path, context: &Context) -> Result<()> {
-    std::fs::create_dir_all(directory)?;
-    let traces = directory.join(format!("trace-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&traces);
-    std::fs::create_dir_all(&traces)?;
-    let status = Command::new("strace")
+/// `strace` as every unit runs under it, writing one trace per process
+/// into `traces`, made empty here: the program and its arguments follow.
+/// `kill_on_exit` has strace kill what it traces if it is killed itself.
+///
+/// # Errors
+///
+/// `traces` not made.
+pub(crate) fn strace(traces: &Path, kill_on_exit: bool) -> Result<Command> {
+    let _ = std::fs::remove_dir_all(traces);
+    std::fs::create_dir_all(traces)?;
+    let mut command = Command::new("strace");
+    let _ = command
         .args([
             "-ff",
             "-qq",
@@ -311,8 +319,57 @@ fn run_traced(name: &str, directory: &Path, context: &Context) -> Result<()> {
             "trace=%file,%process,%network,chdir,fchdir,io_uring_setup,pidfd_getfd",
         ])
         .arg("-o")
-        .arg(traces.join("t"))
-        .arg("--")
+        .arg(traces.join("t"));
+    if kill_on_exit {
+        let _ = command.arg("--kill-on-exit");
+    }
+    let _ = command.arg("--");
+    Ok(command)
+}
+
+/// Where the records of unit `name` are in `store`.
+pub(crate) fn unit_directory(store: &Path, name: &str) -> PathBuf {
+    store.join(file_name(name))
+}
+
+/// The origin and input count of a record in `directory` that holds now
+/// for unit `name`: a cached pass, or `None`.
+pub(crate) fn cached(name: &str, directory: &Path, context: &Context) -> Option<(String, usize)> {
+    lookup(name, directory, context)
+}
+
+/// Record unit `name`, which passed, from the traces it left in `traces`
+/// (its first process started in `cwd`), into `directory`; the traces are
+/// removed. What the log says of it: `ran, recorded` or `ran, not
+/// recorded: <why>`.
+///
+/// # Errors
+///
+/// The record not written.
+pub(crate) fn record_pass(
+    name: &str,
+    traces: &Path,
+    cwd: &Path,
+    directory: &Path,
+    context: &Context,
+) -> Result<String> {
+    let made = record_from(name, traces, cwd, context);
+    let _ = std::fs::remove_dir_all(traces);
+    match made {
+        Ok(text) => {
+            write_record(directory, &text)?;
+            Ok("ran, recorded".to_owned())
+        }
+        Err(why) => Ok(format!("ran, not recorded: {why}")),
+    }
+}
+
+/// Run the unit as a traced child, and record it when it passes and the
+/// trace allows.
+fn run_traced(name: &str, directory: &Path, context: &Context) -> Result<()> {
+    std::fs::create_dir_all(directory)?;
+    let traces = directory.join(format!("trace-{}", std::process::id()));
+    let status = strace(&traces, false)?
         .arg(std::env::current_exe()?)
         .arg("check-unit")
         .current_dir(&context.root)
@@ -325,15 +382,8 @@ fn run_traced(name: &str, directory: &Path, context: &Context) -> Result<()> {
             "{name} failed ({status}; it ran as `cargo xtask check-unit` under strace)"
         )));
     }
-    let made = record(name, &traces, context);
-    let _ = std::fs::remove_dir_all(&traces);
-    match made {
-        Ok(text) => {
-            write_record(directory, &text)?;
-            println!("   {name}: ran, recorded");
-        }
-        Err(why) => println!("   {name}: ran, not recorded: {why}"),
-    }
+    let said = record_pass(name, &traces, &context.root, directory, context)?;
+    println!("   {name}: {said}");
     Ok(())
 }
 
@@ -360,11 +410,32 @@ pub(crate) struct Context {
     item: Vec<String>,
     /// xtask's own binary, which every unit starts.
     xtask: PathBuf,
-    /// The unit's own target directory, the one part of the target
+    /// The unit's own target directories, the parts of the target
     /// directory whose files it may read without having made them.
-    unit_target: PathBuf,
+    unit_targets: Vec<PathBuf>,
+    /// Files in the target directory whose digests the prelude holds (a
+    /// test binary and the programs it is given), which it may read.
+    keyed: Vec<PathBuf>,
+    /// Whether the unit's inputs may be the item's (`Keyed::reads_item`).
+    reads_item: bool,
     /// `$XDG_RUNTIME_DIR`, a temporary directory like `/tmp`.
     runtime: Option<PathBuf>,
+}
+
+/// What a unit other than a workspace of its own is keyed on besides its
+/// trace (a test binary, an analysis of the item).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Keyed {
+    /// Lines added to the prelude, which a record must repeat exactly.
+    pub(crate) lines: Vec<String>,
+    /// Files in the target directory whose digests `lines` hold: the unit
+    /// may read them although no step of its own made them.
+    pub(crate) files: Vec<PathBuf>,
+    /// The unit's own target directories, whose files are its outputs.
+    pub(crate) targets: Vec<PathBuf>,
+    /// Whether it may read the item: only a unit whose `lines` hold the
+    /// whole item's digest (the consultant's P3.1, ledger 1594).
+    pub(crate) reads_item: bool,
 }
 
 /// This process's [`Context`], made once: xtask's own digest alone is a
@@ -383,14 +454,93 @@ impl Context {
 
     /// This process's.
     fn here() -> Result<Context> {
+        let mut context = Context::bare()?;
+        let exe = std::fs::read(std::env::current_exe()?)?;
+        context.prelude = vec![
+            format!("xtask {}", sha256::hex(&exe)),
+            format!("env {}", context.environment_digest()),
+            format!("host {}", host_digest()),
+        ];
+        context.origin = origin(&context.root, &context.target);
+        Ok(context)
+    }
+
+    /// What a process this one starts needs to make its own context
+    /// without reading xtask's binary and asking git again: the prelude's
+    /// xtask and host lines and the origin, one per line.
+    ///
+    /// # Errors
+    ///
+    /// This process's context not made.
+    pub(crate) fn shared() -> Result<String> {
+        let context = Context::once()?;
+        let line = |prefix: &str| {
+            context
+                .prelude
+                .iter()
+                .find(|line| line.starts_with(prefix))
+                .cloned()
+                .unwrap_or_default()
+        };
+        Ok(format!(
+            "{}\n{}\norigin {}\n",
+            line("xtask "),
+            line("host "),
+            context.origin
+        ))
+    }
+
+    /// The context of a process that [`Context::shared`]'s maker started:
+    /// its xtask, host and origin, and this process's own environment.
+    ///
+    /// # Errors
+    ///
+    /// `shared` not as `Context::shared` writes it, or the item's paths not
+    /// read.
+    pub(crate) fn from_shared(shared: &str) -> Result<Context> {
+        let mut lines = shared.lines();
+        let mut next = |prefix: &str| {
+            lines
+                .next()
+                .filter(|line| line.starts_with(prefix))
+                .map(str::to_owned)
+                .ok_or_else(|| Error::new(format!("the shared context has no {prefix}line")))
+        };
+        let xtask = next("xtask ")?;
+        let host = next("host ")?;
+        let origin = next("origin ")?;
+        let mut context = Context::bare()?;
+        context.prelude = vec![xtask, format!("env {}", context.environment_digest()), host];
+        context.origin = origin.trim_start_matches("origin ").to_owned();
+        Ok(context)
+    }
+
+    /// This context for a unit keyed on `keyed` besides its trace.
+    pub(crate) fn keyed(&self, keyed: Keyed) -> Context {
+        let mut context = self.clone();
+        context.prelude.extend(keyed.lines);
+        context.keyed = keyed.files;
+        context.unit_targets = keyed.targets;
+        context.reads_item = keyed.reads_item;
+        context
+    }
+
+    /// The worktree.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Where this run is, with no prelude and no origin yet.
+    fn bare() -> Result<Context> {
         let root = std::fs::canonicalize(paths::workspace_root())?;
+        let item = item_paths(&root)?;
         let target = absolute(&paths::target_dir())?;
         let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
         let cargo_home =
             std::env::var_os("CARGO_HOME").map_or_else(|| home.join(".cargo"), PathBuf::from);
         let rustup_home =
             std::env::var_os("RUSTUP_HOME").map_or_else(|| home.join(".rustup"), PathBuf::from);
-        let mut context = Context {
+        let context = Context {
             root,
             target,
             home,
@@ -399,19 +549,13 @@ impl Context {
             temporary: std::env::temp_dir(),
             prelude: Vec::new(),
             origin: String::new(),
-            item: Vec::new(),
             xtask: std::env::current_exe()?,
-            unit_target: PathBuf::new(),
+            unit_targets: Vec::new(),
+            keyed: Vec::new(),
+            reads_item: false,
             runtime: std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+            item,
         };
-        let exe = std::fs::read(std::env::current_exe()?)?;
-        context.prelude = vec![
-            format!("xtask {}", sha256::hex(&exe)),
-            format!("env {}", context.environment_digest()),
-            format!("host {}", host_digest()),
-        ];
-        context.origin = origin(&context.root, &context.target);
-        context.item = item_paths(&context.root)?;
         Ok(context)
     }
 
@@ -438,24 +582,32 @@ impl Context {
 
     /// `text` with the target directory and the root written as
     /// placeholders.
-    fn placeholders(&self, text: &str) -> String {
+    pub(crate) fn placeholders(&self, text: &str) -> String {
         text.replace(&*self.target.to_string_lossy(), "${TARGET}")
             .replace(&*self.root.to_string_lossy(), "${ROOT}")
     }
 
     /// The excluded roots, as paths here.
     fn excluded(&self) -> Vec<(PathBuf, &'static str)> {
-        EXCLUDED
-            .iter()
-            .map(|(root, why)| {
-                let path = root
-                    .replace("${TARGET}", &self.unit_target.to_string_lossy())
-                    .replace("${RUSTUP_HOME}", &self.rustup_home.to_string_lossy())
-                    .replace("${CARGO_HOME}", &self.cargo_home.to_string_lossy())
-                    .replace("${HOME}", &self.home.to_string_lossy());
-                (PathBuf::from(path), *why)
-            })
-            .collect()
+        let mut excluded = Vec::new();
+        for (root, why) in EXCLUDED {
+            if root.starts_with("${TARGET}") {
+                // One root per target directory of the unit's own.
+                for target in &self.unit_targets {
+                    excluded.push((
+                        PathBuf::from(root.replace("${TARGET}", &target.to_string_lossy())),
+                        *why,
+                    ));
+                }
+                continue;
+            }
+            let path = root
+                .replace("${RUSTUP_HOME}", &self.rustup_home.to_string_lossy())
+                .replace("${CARGO_HOME}", &self.cargo_home.to_string_lossy())
+                .replace("${HOME}", &self.home.to_string_lossy());
+            excluded.push((PathBuf::from(path), *why));
+        }
+        excluded
     }
 
     /// Whether `path` is under an excluded root.
@@ -498,7 +650,7 @@ impl Context {
     }
 
     /// `path` as a record writes it: `./<relative>` inside the root.
-    fn written(&self, path: &Path) -> String {
+    pub(crate) fn written(&self, path: &Path) -> String {
         match path.strip_prefix(&self.root) {
             Ok(relative) => format!("./{}", relative.to_string_lossy()),
             Err(_) => path.to_string_lossy().into_owned(),
@@ -642,7 +794,7 @@ fn civil_from_days(days: u64) -> (u64, u64, u64) {
 /// loader, the crates `certification-item.json` puts in the item or the
 /// core, and the crates on its infrastructure allow-list, which item
 /// crates build on.
-fn item_paths(root: &Path) -> Result<Vec<String>> {
+pub(crate) fn item_paths(root: &Path) -> Result<Vec<String>> {
     let mut item = vec!["src/kernel/".to_owned(), "src/boot/".to_owned()];
     let classification = root.join("tools/common/data/certification-item.json");
     let text = std::fs::read_to_string(&classification)
@@ -1525,10 +1677,11 @@ impl Walk<'_> {
             return;
         }
         let real = Self::real(path);
-        if let Some(item) = self
-            .context
-            .item_path(&real)
-            .or_else(|| self.context.item_path(path))
+        if !self.context.reads_item
+            && let Some(item) = self
+                .context
+                .item_path(&real)
+                .or_else(|| self.context.item_path(path))
         {
             self.traced
                 .refuse(format!("it read the certified item ({item})"));
@@ -1548,8 +1701,10 @@ impl Walk<'_> {
             return;
         }
         if real.starts_with(&self.context.target) {
-            // xtask itself, in the prelude; and what the run made.
+            // xtask itself and the keyed files, in the prelude; and what
+            // the run made.
             if real == self.context.xtask
+                || self.context.keyed.contains(&real)
                 || self.made_before_now(path)
                 || self.made_before_now(&real)
             {
@@ -1586,10 +1741,11 @@ impl Walk<'_> {
         if self.context.is_temporary(&real) || self.context.is_excluded(&real) {
             return;
         }
-        if let Some(item) = self
-            .context
-            .item_path(&real)
-            .or_else(|| self.context.item_path(path))
+        if !self.context.reads_item
+            && let Some(item) = self
+                .context
+                .item_path(&real)
+                .or_else(|| self.context.item_path(path))
         {
             self.traced.refuse(format!(
                 "it looked up a path of the certified item ({item})"
@@ -1725,8 +1881,19 @@ fn elf_interpreter(bytes: &[u8]) -> Option<PathBuf> {
 
 /// The text of a record of the unit traced in `traces`, or why there is
 /// none.
+#[cfg(test)]
 fn record(name: &str, traces: &Path, context: &Context) -> std::result::Result<String, String> {
-    let traced = read_traces(traces, &context.root, context)?;
+    record_from(name, traces, &context.root, context)
+}
+
+/// A record of the unit traced in `traces`, the traced run's first process started in `cwd`.
+fn record_from(
+    name: &str,
+    traces: &Path,
+    cwd: &Path,
+    context: &Context,
+) -> std::result::Result<String, String> {
+    let traced = read_traces(traces, cwd, context)?;
     if let Some(why) = traced.refused {
         return Err(why);
     }

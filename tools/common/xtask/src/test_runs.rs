@@ -30,7 +30,10 @@
 //! as one binary's tests already do; every binary runs to its end, where
 //! cargo stopped at the first that failed; and the output comes after the
 //! steps that ran meanwhile. `FERRIX_TESTS_IN_TURN=1` runs them as cargo
-//! does; release runs and the baseline use it.
+//! does, for diagnosing a test (ledger line 1619).
+//!
+//! With the step cache on, a binary outside the item may be a cached pass
+//! instead of a run (`crate::test_cache`); the item's always run.
 
 use std::collections::BTreeSet;
 use std::io::{BufRead as _, BufReader};
@@ -74,9 +77,18 @@ pub(crate) fn launch(
     root: &Path,
     arguments: &[String],
     directory: &Path,
+    cache: Option<&str>,
 ) -> Result<Launched> {
     let _ = std::fs::remove_dir_all(directory);
     std::fs::create_dir_all(directory)?;
+    // The step cache's plan for the binaries outside the item
+    // (`crate::test_cache`), before any binary starts.
+    if let Some(plan) = cache {
+        std::fs::write(directory.join(crate::test_cache::FILE), plan)?;
+        println!(
+            "   the test binaries outside the item may be cached passes (FERRIX_STEP_CACHE=on)"
+        );
+    }
     let exe = std::env::current_exe()?;
     let exe = exe
         .to_str()
@@ -156,6 +168,17 @@ pub(crate) struct Ended {
     pub(crate) seconds: String,
     /// Why it counts as failed, when it does.
     pub(crate) failure: Option<String>,
+    /// What the step cache said of it, when it is on.
+    pub(crate) cache: Option<String>,
+}
+
+impl Ended {
+    /// Whether a record of a pass stood for its run.
+    pub(crate) fn cached(&self) -> bool {
+        self.cache
+            .as_deref()
+            .is_some_and(|said| said.starts_with("cached pass"))
+    }
 }
 
 impl Launched {
@@ -173,8 +196,12 @@ impl Launched {
             .collect();
         let mut failures: Vec<String> = Vec::new();
         for one in &ended {
+            let cache = one
+                .cache
+                .as_ref()
+                .map_or(String::new(), |said| format!("; {said}"));
             println!(
-                "\n     Ran {} (side by side): {}, {} s",
+                "\n     Ran {} (side by side): {}, {} s{cache}",
                 one.command.join(" "),
                 one.status,
                 one.seconds
@@ -189,8 +216,17 @@ impl Launched {
             failures.push("cargo test started no test binary through the runner".to_owned());
         }
         let failed = ended.iter().filter(|one| one.failure.is_some()).count();
+        let cached = ended.iter().filter(|one| one.cached()).count();
+        let cache = if ended.iter().any(|one| one.cache.is_some()) {
+            format!(
+                " (the step cache: {} ran, {cached} cached passes)",
+                ended.len() - cached
+            )
+        } else {
+            String::new()
+        };
         println!(
-            "\n-- the test binaries, {AT_ONCE} at once: {} ran, {} passed, {failed} failed; {:.1} s after cargo returned",
+            "\n-- the test binaries, {AT_ONCE} at once: {} ran, {} passed, {failed} failed{cache}; {:.1} s after cargo returned",
             ended.len(),
             ended.len() - failed,
             self.began.elapsed().as_secs_f64()
@@ -265,6 +301,9 @@ pub(crate) fn wait_for(directory: &Path, index: usize) -> Ended {
     let output = std::fs::read(record("out")).unwrap_or_default();
     let seconds = std::fs::read_to_string(record("seconds"))
         .map_or_else(|_| "?".to_owned(), |text| text.trim().to_owned());
+    let cache = std::fs::read_to_string(record("cache"))
+        .ok()
+        .map(|text| text.trim().to_owned());
     let Ok(status) = std::fs::read_to_string(record("status")) else {
         return Ended {
             command,
@@ -272,6 +311,7 @@ pub(crate) fn wait_for(directory: &Path, index: usize) -> Ended {
             output,
             seconds,
             failure: Some("it never reported how it ended".to_owned()),
+            cache,
         };
     };
     let status = status.trim().to_owned();
@@ -291,6 +331,7 @@ pub(crate) fn wait_for(directory: &Path, index: usize) -> Ended {
         output,
         seconds,
         failure,
+        cache,
     }
 }
 
@@ -448,16 +489,26 @@ pub(crate) fn wait(arguments: &[String]) -> Result<()> {
     let status = match take_slot(&directory) {
         Err(error) => format!("no slot: {error}"),
         Ok(_slot) => {
-            std::fs::write(
-                record("digests"),
-                digests(command, &environment_binaries())?,
-            )?;
+            let digests = digests(command, &environment_binaries())?;
+            std::fs::write(record("digests"), &digests)?;
+            let cwd = std::env::current_dir()?;
             let began = Instant::now();
-            let status = run(command, &owner);
+            let (status, cache) = match crate::test_cache::way(&directory, command, &cwd, &digests)
+            {
+                crate::test_cache::Way::Off => (run(command, &owner, None), None),
+                crate::test_cache::Way::Never(why) => (
+                    run(command, &owner, None),
+                    Some(format!("ran (never cached: {why})")),
+                ),
+                crate::test_cache::Way::Unit(unit) => run_unit(&unit, command, &owner, &cwd),
+            };
             std::fs::write(
                 record("seconds"),
                 format!("{:.1}", began.elapsed().as_secs_f64()),
             )?;
+            if let Some(said) = cache {
+                std::fs::write(record("cache"), said)?;
+            }
             status
         }
     };
@@ -468,14 +519,74 @@ pub(crate) fn wait(arguments: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// A test binary's run through the step cache: a cached pass when a record
+/// stands, otherwise run under `strace` and recorded when it passes. Its
+/// status and what the cache says of it.
+fn run_unit(
+    unit: &crate::test_cache::Unit,
+    command: &[String],
+    owner: &str,
+    cwd: &Path,
+) -> (String, Option<String>) {
+    if let Some((origin, inputs)) =
+        crate::step_cache::cached(&unit.name, &unit.directory, &unit.context)
+    {
+        let flake = unit
+            .flake
+            .map_or(String::new(), |row| format!(" [flake row: {row}]"));
+        let said = format!("cached pass {origin} ({inputs} inputs unchanged){flake}");
+        // In its output too, where its tests' lines would be.
+        println!("{} ({}): {said}", unit.name, command.join(" "));
+        return ("0".to_owned(), Some(said));
+    }
+    if let Some(why) = unit.unrecordable() {
+        return (
+            run(command, owner, None),
+            Some(format!(
+                "ran, not traced: its traced run within the day was not recorded: {why}"
+            )),
+        );
+    }
+    if let Err(error) = std::fs::create_dir_all(&unit.directory) {
+        return (
+            run(command, owner, None),
+            Some(format!(
+                "ran, not recorded: {}: {error}",
+                unit.directory.display()
+            )),
+        );
+    }
+    let traces = unit.directory.join(format!("trace-{}", std::process::id()));
+    let status = run(command, owner, Some(&traces));
+    if status != "0" {
+        let _ = std::fs::remove_dir_all(&traces);
+        return (status, Some("ran, failed, not recorded".to_owned()));
+    }
+    let said =
+        crate::step_cache::record_pass(&unit.name, &traces, cwd, &unit.directory, &unit.context)
+            .unwrap_or_else(|error| format!("ran, not recorded: {error}"));
+    unit.remember(&said);
+    (status, Some(said))
+}
+
 /// Run `command` with this process's environment less this module's
 /// variables, while the `check` named `owner` lives: its status, `0` for
-/// success.
-pub(crate) fn run(command: &[String], owner: &str) -> String {
+/// success. With `traces`, under `strace`, its traces written there.
+pub(crate) fn run(command: &[String], owner: &str, traces: Option<&Path>) -> String {
     let Some((binary, rest)) = command.split_first() else {
         return "no test binary".to_owned();
     };
-    let child = Command::new(binary)
+    let mut process = match traces {
+        None => Command::new(binary),
+        Some(traces) => match crate::step_cache::strace(traces, true) {
+            Ok(mut strace) => {
+                let _ = strace.arg(binary);
+                strace
+            }
+            Err(error) => return format!("could not start strace: {error}"),
+        },
+    };
+    let child = process
         .args(rest)
         .env_remove(VARIABLE)
         .env_remove(OWNER)

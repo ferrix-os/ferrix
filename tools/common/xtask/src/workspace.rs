@@ -110,7 +110,7 @@ fn is_kernel_place(member: &str) -> bool {
 }
 
 /// The strings in the manifest's `members = [ ... ]`, comments skipped.
-fn member_paths(manifest: &str) -> Result<Vec<String>> {
+pub(crate) fn member_paths(manifest: &str) -> Result<Vec<String>> {
     let start = manifest
         .find("members = [")
         .ok_or_else(|| Error::new("the workspace manifest has no `members = [` list"))?;
@@ -135,7 +135,7 @@ fn member_paths(manifest: &str) -> Result<Vec<String>> {
 }
 
 /// The `name` of a member manifest's `[package]`.
-fn package_name(manifest: &str) -> Option<String> {
+pub(crate) fn package_name(manifest: &str) -> Option<String> {
     let package = manifest.split("[package]").nth(1)?;
     let section = package.split("\n[").next()?;
     section.lines().find_map(|line| {

@@ -1185,11 +1185,13 @@ fn launch_host_tests() -> Result<Option<crate::test_runs::Launched>> {
     let mut arguments: Vec<String> = vec!["test".to_owned(), "--workspace".to_owned()];
     arguments.extend(sorted_members()?.excludes());
     arguments.push("--all-targets".to_owned());
+    let cache = crate::test_cache::plan(&paths::workspace_root())?;
     crate::test_runs::launch(
         &cargo_binary(),
         &paths::workspace_root(),
         &arguments,
         &directory,
+        cache.as_deref(),
     )
     .map(Some)
 }

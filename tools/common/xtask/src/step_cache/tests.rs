@@ -29,7 +29,9 @@ fn context(root: &Path) -> Context {
         origin: "from the test".to_owned(),
         item: vec!["item/".to_owned()],
         xtask: root.join("target/debug/xtask"),
-        unit_target: root.join("target/check-unit"),
+        unit_targets: vec![root.join("target/check-unit")],
+        keyed: Vec::new(),
+        reads_item: false,
         runtime: None,
     }
 }
@@ -601,4 +603,66 @@ fn gate_sh_s_settings_are_not_part_of_the_environment() {
     ] {
         assert!(!environment_ignored(kept), "{kept}");
     }
+}
+
+/// A keyed unit's context at `root`: a test binary in the target directory
+/// keyed by `digest`, no target directory of its own.
+fn keyed_context(root: &Path, digest: &str, reads_item: bool) -> Context {
+    context(root).keyed(Keyed {
+        lines: vec![format!("test-binary {digest} ${{TARGET}}/debug/deps/t-1")],
+        files: vec![root.join("target/debug/deps/t-1")],
+        targets: Vec::new(),
+        reads_item,
+    })
+}
+
+#[test]
+fn a_keyed_unit_reads_its_keyed_files_and_misses_when_its_key_changes() {
+    let root = sample_root("keyed");
+    let r = root.display();
+    let run = format!(
+        "execve(\"{r}/target/debug/deps/t-1\", [\"t-1\"], 0x1 /* 1 vars */) = 0\n{}",
+        sample_trace(&root)
+    );
+    let directory = traces(&root, &[(100, &run)]);
+    let text = record("unit", &directory, &keyed_context(&root, "1111", false)).unwrap();
+    assert!(text.contains("test-binary 1111 "), "{text}");
+    assert!(
+        !text
+            .lines()
+            .any(|line| line.starts_with("F ") && line.ends_with("deps/t-1")),
+        "the keyed binary is no input: {text}"
+    );
+    assert!(holds("unit", &text, &keyed_context(&root, "1111", false)).is_some());
+    // Another binary, or no key at all (a workspace unit's context).
+    assert!(holds("unit", &text, &keyed_context(&root, "2222", false)).is_none());
+    assert!(holds("unit", &text, &context(&root)).is_none());
+    // The same execve without the binary keyed reads another step's output.
+    let unkeyed = context(&root).keyed(Keyed::default());
+    let traced = read_traces(&directory, &root, &unkeyed).unwrap();
+    assert!(
+        traced
+            .refused
+            .unwrap_or_default()
+            .contains("another step's output")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn only_a_unit_keyed_on_the_item_may_read_it() {
+    let root = sample_root("item-keyed");
+    std::fs::create_dir_all(root.join("item")).unwrap();
+    std::fs::write(root.join("item/a.rs"), b"fn a() {}").unwrap();
+    let r = root.display();
+    let read = format!("openat(AT_FDCWD<{r}>, \"item/a.rs\", O_RDONLY) = 3<{r}/item/a.rs>\n");
+    let directory = traces(&root, &[(100, &read)]);
+    let refused = read_traces(&directory, &root, &keyed_context(&root, "1111", false))
+        .unwrap()
+        .refused;
+    assert!(refused.unwrap_or_default().contains("certified item"));
+    let traced = read_traces(&directory, &root, &keyed_context(&root, "1111", true)).unwrap();
+    assert_eq!(traced.refused, None);
+    assert!(traced.inputs.contains(&Input::File(root.join("item/a.rs"))));
+    std::fs::remove_dir_all(root).unwrap();
 }
