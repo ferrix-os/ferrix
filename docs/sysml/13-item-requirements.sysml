@@ -749,11 +749,15 @@ package FerrixItemRequirements {
         requirement <'H.DMA.5'> registersOnlyThroughApertures : ItemHighLevel {
             attribute :>> statement = "A driver shall reach device registers only
                 through an I/O mapping of an aperture it holds, and an aperture that
-                is not whole pages or that covers an MSI-X table shall be withheld.";
+                is not whole pages, or that covers the MSI-X table or pending-bit
+                array of a function whose MSI-X the kernel may enable, shall be
+                withheld; a function whose MSI-X the kernel never enables has its
+                MSI-X Enable held at 0.";
             attribute :>> criterion = "The `devices` line counts the apertures
                 withheld for partial pages and for MSI-X ranges; a mapping of a
                 withheld range is refused; a program reaches only the aperture it
-                was given (the `handles` line).";
+                was given (the `handles` line); a held-off function's Enable reads 0
+                and is refused when it reads 1 (the `msix-off` line).";
             attribute :>> parent = ("O.DMA", "O.CAPABILITY", "ASR-4");
         }
     }

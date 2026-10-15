@@ -1641,3 +1641,36 @@ fn a_requester_id_packs_bus_device_and_function() {
     assert_eq!(id(0xff, 31, 7), 0xffff, "the last function of the last bus");
     assert_eq!(id(1, 0, 1), 0x0101, "a function on a secondary bus");
 }
+
+#[test]
+fn only_the_yt6801_is_held_off_and_only_qemus_e1000e_is_checked() {
+    assert!(msix::msi_preferred(0x1F0A, 0x6801));
+    assert!(!msix::msi_preferred(0x1F0A, 0x6800));
+    assert!(!msix::msi_preferred(0x8086, 0x10D3));
+    assert_eq!(
+        msix::MSI_PREFERRED,
+        [(0x1F0A, 0x6801)],
+        "the reference list"
+    );
+    assert!(msix::held_off_check_case(0x8086, 0x10D3, (0x1AF4, 0x1100)));
+    // A real 82574L: Intel's own subsystem, or a board maker's.
+    assert!(!msix::held_off_check_case(0x8086, 0x10D3, (0x8086, 0x0000)));
+    assert!(!msix::held_off_check_case(0x8086, 0x10D3, (0x8086, 0xA01F)));
+    assert!(!msix::held_off_check_case(0x8086, 0x10D3, (0x1AF4, 0x0000)));
+    assert!(!msix::held_off_check_case(0x1F0A, 0x6801, (0x1AF4, 0x1100)));
+}
+
+#[test]
+fn holding_msix_off_clears_enable_and_sets_the_function_mask() {
+    let mut bus = Bus::new();
+    let mut d = Device::endpoint(1, 1);
+    d.capabilities(0x98);
+    d.capability(0x98, ID_MSIX, 0);
+    // Left on by firmware, unmasked, 6 entries.
+    d.put16(0x9A, 0x8000 | 5);
+    bus.put(at(0, 1, 0), d);
+    assert!(msix::hold_off(&mut bus, at(0, 1, 0), 0x98));
+    assert_eq!(bus.device(at(0, 1, 0)).get16(0x9A), 0x4000 | 5);
+    // A function whose control will not take the write: refused.
+    assert!(!msix::hold_off(&mut bus, at(0, 9, 0), 0x98), "no function");
+}

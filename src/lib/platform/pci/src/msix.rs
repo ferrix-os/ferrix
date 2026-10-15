@@ -17,6 +17,7 @@
 
 use crate::bar::Region;
 use crate::capability::{BarOffset, MSIX_ENTRY_SIZE, MsiX};
+use crate::{Address, ConfigSpace};
 
 /// Offset in a table entry of the message address's low half.
 pub const ENTRY_ADDRESS_LOW: u64 = 0x0;
@@ -148,6 +149,61 @@ impl Ranges {
     pub fn as_slice(&self) -> &[(u64, u64)] {
         self.ranges.get(..self.len).unwrap_or(&[])
     }
+}
+
+/// The functions whose MSI-X the kernel never enables, by vendor and device:
+/// their MSI-X table shares its page with registers their driver needs, so
+/// the kernel holds MSI-X off, grants the page as an ordinary aperture and
+/// offers the function's one MSI vector instead (`docs/DEVMGR.md` §3; the
+/// consultant's review of 2026-10-15, ledger line 1097, D1).
+///
+/// Fixed at build: nothing a driver, devmgr or a boot option supplies adds
+/// to it. The Motorcomm YT6801's glue registers -- its PHY's reset, its
+/// eFuse, its interrupt delivery -- are in the page with its table at
+/// `0x1200` of BAR 0.
+pub const MSI_PREFERRED: [(u16, u16); 1] = [(0x1F0A, 0x6801)];
+
+/// Whether `vendor:device` is in [`MSI_PREFERRED`].
+#[must_use]
+pub fn msi_preferred(vendor: u16, device: u16) -> bool {
+    MSI_PREFERRED.contains(&(vendor, device))
+}
+
+/// QEMU's `e1000e` (`hw/net/e1000e.c`): an Intel 82574L model with both an
+/// MSI capability (`msi_init` at 0xD0, one message) and an MSI-X table in a
+/// BAR of its own. Stage 10's check of the held-off path runs on it.
+pub const QEMU_E1000E: (u16, u16) = (0x8086, 0x10D3);
+
+/// The subsystem xtask gives its `e1000e` (`subsys_ven=0x1af4,subsys=0x1100`,
+/// the properties `hw/net/e1000e.c` declares; QEMU's own default for other
+/// devices, `PCI_SUBVENDOR_ID_REDHAT_QUMRANET` and `PCI_SUBDEVICE_ID_QEMU`):
+/// no real 82574L carries it, so a real card never meets the check.
+pub const QEMU_SUBSYSTEM: (u16, u16) = (0x1AF4, 0x1100);
+
+/// Whether a function is the one stage 10's held-off check may run on:
+/// QEMU's `e1000e` with QEMU's subsystem, never a real 82574L.
+#[must_use]
+pub fn held_off_check_case(vendor: u16, device: u16, subsystem: (u16, u16)) -> bool {
+    (vendor, device) == QEMU_E1000E && subsystem == QEMU_SUBSYSTEM
+}
+
+/// Hold a function's MSI-X off: write its control with Enable clear and
+/// Function Mask set -- firmware may have left MSI-X on -- and answer whether
+/// it reads back so. `capability` is the MSI-X capability's offset.
+pub fn hold_off<C: ConfigSpace + ?Sized>(
+    space: &mut C,
+    function: Address,
+    capability: u16,
+) -> bool {
+    let at = capability + CAPABILITY_CONTROL;
+    let control = space.read16(function, at);
+    space.write16(
+        function,
+        at,
+        (control & !CONTROL_ENABLE) | CONTROL_FUNCTION_MASK,
+    );
+    let back = space.read16(function, at);
+    back & CONTROL_ENABLE == 0 && back & CONTROL_FUNCTION_MASK != 0
 }
 
 /// The pages of `region` that hold the MSI-X table or pending-bit array, as

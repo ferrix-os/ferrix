@@ -175,6 +175,7 @@ pub(crate) fn test_boot_lines(
                 entropy_problem(&watched.lines),
                 devmgr_problem(&watched.lines),
                 msi_problem(arch, &watched.lines),
+                held_off_problem(arch, &watched.lines),
                 cleaning_problem(arch, &watched.lines),
                 remap_problem(arch, &watched.lines),
                 queue_problem(arch, &watched.lines),
@@ -351,6 +352,32 @@ fn msi_problem(arch: Arch, lines: &[String]) -> Option<String> {
         ));
     }
     None
+}
+
+/// What stage 10's held-off check prints when it passed.
+const HELD_OFF_PASSED: &str = "held off: Enable 0, table and pending bits granted";
+
+/// Why an x86-64 boot did not run stage 10's held-off check, if it did
+/// not.
+///
+/// `device::check::check_held_off` runs only on QEMU's `e1000e` with QEMU's
+/// subsystem, and every x86-64 machine this tool boots has one behind a
+/// root port (`attach_rng`), so here it must have run and passed: the
+/// kernel's path for a function whose MSI-X it holds off (the YT6801's) is
+/// otherwise reached only on the hardware.
+///
+/// Verifies: L.device.35, L.device.36, L.device.37
+fn held_off_problem(arch: Arch, lines: &[String]) -> Option<String> {
+    if arch != Arch::X86_64 {
+        return None;
+    }
+    if lines
+        .iter()
+        .any(|line| line.contains("  msix-off ") && line.contains(HELD_OFF_PASSED))
+    {
+        return None;
+    }
+    Some("stage 10's held-off check never ran on QEMU's e1000e".to_owned())
 }
 
 /// What stage 10's IOMMU check prints when a VT-d unit whose walk does not
@@ -2541,6 +2568,17 @@ fn attach_rng(command: &mut Command, arch: Arch) {
             "pcie-root-port,id=ferrix.port1,chassis=2,slot=2",
             "-device",
             "edu,bus=ferrix.port1",
+            // QEMU's e1000e, both MSI and MSI-X, with QEMU's subsystem
+            // (the properties `hw/net/e1000e.c` declares), which no real
+            // 82574L carries: stage 10's held-off check runs on it
+            // (`device::check::check_held_off`), and no driver does. Its
+            // netdev is a hub port with nothing else on the hub.
+            "-device",
+            "pcie-root-port,id=ferrix.port2,chassis=9,slot=9",
+            "-netdev",
+            "hubport,id=ferrix.nonet,hubid=9",
+            "-device",
+            "e1000e,bus=ferrix.port2,subsys_ven=0x1af4,subsys=0x1100,netdev=ferrix.nonet",
             // A 64-bit prefetchable BAR of 8 GiB, which firmware can only
             // place above 4 GiB: what `device_aperture` must report whole
             // (`docs/NVIDIA.md` §12.1, check W1).
@@ -3694,9 +3732,9 @@ mod tests {
     use super::{
         Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER,
         blocks_compatibility_format, cleaning_problem, config_problem, devmgr_problem,
-        entropy_problem, fault_problem, iommu_problem, msi_problem, namespace_problem,
-        parse_qemu_version, power_off_problem, queue_problem, remap_problem, send_lines,
-        version_translates, xstate_problem,
+        entropy_problem, fault_problem, held_off_problem, iommu_problem, msi_problem,
+        namespace_problem, parse_qemu_version, power_off_problem, queue_problem, remap_problem,
+        send_lines, version_translates, xstate_problem,
     };
 
     /// A byte that is not UTF-8 is shown, not the end of the guest's
@@ -4065,6 +4103,20 @@ mod tests {
         let silent = lines(&["FERRIX-BOOT-OK stages 1-12"]);
         assert!(queue_problem(Arch::X86_64, &silent).is_some());
         assert_eq!(queue_problem(Arch::AArch64, &silent), None, "no VT-d");
+    }
+
+    #[test]
+    fn an_x86_64_boot_without_the_held_off_check_fails() {
+        let passed = lines(&[
+            "  msix-off 0000:03:00.0 held off: Enable 0, table and pending bits granted, one MSI vector minted, MSI-X turned on refused",
+        ]);
+        assert_eq!(held_off_problem(Arch::X86_64, &passed), None);
+        assert!(held_off_problem(Arch::X86_64, &lines(&["FERRIX-BOOT-OK"])).is_some());
+        assert_eq!(
+            held_off_problem(Arch::AArch64, &lines(&["FERRIX-BOOT-OK"])),
+            None,
+            "no e1000e on Arm"
+        );
     }
 
     #[test]

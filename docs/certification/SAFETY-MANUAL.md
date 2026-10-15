@@ -435,7 +435,14 @@ path. Through such a mirror a driver can move a BAR, so the device decodes
 an address range it was not given and may answer another device's driver's
 accesses; rewrite its MSI message; or turn bus mastering on, which the IOMMU
 still confines (H.DMA.1-3). The MSI-X table and its pending-bit array are
-kernel-owned structures in a BAR too, withheld from every aperture. The
+kernel-owned structures in a BAR too, withheld from every aperture -- except
+for a function in the build's MSI-preferred list (`L.device.35`, today only
+the Motorcomm YT6801), whose MSI-X the kernel holds disabled for good and
+whose table page it grants: there this assumption extends to the device,
+which shall ignore its MSI-X table while MSI-X Enable is clear, as PCIe
+requires; a device that honoured its table anyway would send messages its
+driver wrote. Enable reading 1 on such a function is refused as a breach
+(`L.device.36`). The
 integrator shall use drivers that write no kernel-owned register or
 structure -- the command register, the BARs, the MSI and MSI-X
 capabilities, the MSI-X table and pending-bit array -- through any BAR path:

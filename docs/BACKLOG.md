@@ -707,6 +707,16 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P3 — hardware variants and later stages
 
+* **The YT6801's first run on the N150 box** (`docs/roadmap/networking.md`,
+  the YT6801 section's checklist, 2026-10-15, `net-yt6801`): the driver and
+  the core logic are proven on host models only, and the kernel's held-off
+  MSI-X path on QEMU's `e1000e`, not on the chip (the consultant's D7, ledger
+  line 1097). The run must show the devices line with `1F0A:6801`, MSI-X
+  Enable 0 and an aperture over BAR 0's `0x1000`-`0x1FFF`; one MSI vector
+  whose deliveries count under traffic; and the MSI capability and MSI-X
+  control read with `device_config_read` before and after the chip's
+  `SYS_RESET`. A re-mint after a reset that cleared the MSI capability needs
+  a design review of its own. Needs the PO's hardware approval and the box.
 * **xHCI's first run on a PC** (`docs/XHCI.md` §9, 2026-10-10,
   `xhci-driver`): the driver is gated against QEMU's `qemu-xhci` and a model
   only, and §8 lists what neither showed -- the hand-over from firmware,

@@ -58,6 +58,16 @@
 //! from it, minted the same way: `INTx` off, the message programmed and
 //! masked. Ampere GPUs signal this way (`docs/NVIDIA.md` §2.3).
 //!
+//! So does a function in `ferrix_pci::msix::MSI_PREFERRED` -- the Motorcomm
+//! YT6801, whose MSI-X table shares a page with registers its driver needs.
+//! Stage 10 holds its MSI-X off before the node is built (Enable 0,
+//! Function Mask 1, read back), and the kernel never enables it: the device
+//! then ignores its table (PCIe 6.0 §7.7.2.2), so the table's page is granted
+//! as aperture and its MSI capability's one vector offered.
+//! [`DeviceNode::verify_config`] refuses the node if Enable reads 1 at a
+//! read-back, and an MSI mint made while it reads 1 is refused (`L.device.35`-`L.device.37`; the
+//! consultant's review of 2026-10-15).
+//!
 //! Masking an MSI-X vector is a write to its entry's mask bit, and masking an
 //! MSI vector a write to its capability's mask bit, or its enable bit where it
 //! has none. The interrupt controller can reach neither, so [`Vector::mask`]
@@ -604,6 +614,15 @@ impl MsiFunction {
         }
         {
             let mut config = node.config_writes()?;
+            // Never MSI and MSI-X on at once: a function whose MSI-X is held
+            // off and reads enabled has been rewritten behind the kernel.
+            if let Some(capability) = node.msix_off
+                && config.read16(ConfigWrites::FUNCTION, capability + CAPABILITY_CONTROL)
+                    & CONTROL_ENABLE
+                    != 0
+            {
+                return Err("the function's MSI-X reads enabled where the kernel holds it off");
+            }
             let value = config.read16(ConfigWrites::FUNCTION, COMMAND);
             config.write16(
                 ConfigWrites::FUNCTION,
@@ -1041,6 +1060,13 @@ pub(crate) struct Seen<'a> {
     pub(crate) intx: Option<GicInterrupt>,
     /// Its MSI capability, decoded, if it has one.
     pub(crate) msi: Option<Msi>,
+    /// Whether enumeration held its MSI-X off -- Enable clear and Function
+    /// Mask set, read back so -- because it is in
+    /// `ferrix_pci::msix::MSI_PREFERRED` (or is stage 10's check case): its
+    /// table and pending-bit pages are then granted as aperture and its MSI
+    /// vector offered instead. Set only by `discovery::pci` before the node
+    /// is built, never from anything a program supplies.
+    pub(crate) msix_held_off: bool,
     /// What its configuration window starts from.
     pub(crate) config: &'a ConfigFound,
 }
@@ -1186,6 +1212,11 @@ pub(crate) struct DeviceNode {
     msix: Option<MsixTable>,
     /// A PCI function's MSI capability, when it has no MSI-X table to offer.
     msi: Option<MsiFunction>,
+    /// For a function whose MSI-X the kernel holds off ([`Seen::msix_held_off`]),
+    /// the offset of its MSI-X capability: Enable must read 0 there for
+    /// good, which [`DeviceNode::verify_config`] holds it to and an MSI mint
+    /// requires.
+    msix_off: Option<u16>,
     /// The node's one configuration lock: every write of a published PCI
     /// function's configuration space, the kernel's and a driver's, is made
     /// holding it, through the [`ConfigWrites`] it guards -- bus mastering's
@@ -1267,6 +1298,7 @@ impl DeviceNode {
             vectors: Vec::new(),
             msix: None,
             msi: None,
+            msix_off: None,
             config: IrqSpinLock::new(ConfigState::found(0)),
             config_map: Once::new(),
             config_bytes: 0,
@@ -1376,6 +1408,11 @@ impl DeviceNode {
     /// an assigned memory BAR, clear of reserved memory, and `config_phys`
     /// says where the function's configuration space is -- unless `seen`
     /// gives the function an `INTx` line, which is then its one vector.
+    ///
+    /// A function whose MSI-X enumeration held off ([`Seen::msix_held_off`])
+    /// has no table: MSI-X stays disabled, so the device ignores it (PCIe
+    /// 6.0 §7.7.2.2), and its pages are granted with the rest of the BAR.
+    /// Its MSI capability's one vector is offered instead.
     pub(crate) fn pci(
         address: Address,
         seen: &Seen<'_>,
@@ -1387,6 +1424,15 @@ impl DeviceNode {
         let mut node = DeviceNode::empty(Location::Pci(address));
         node.window(seen);
         let identity = seen.identity;
+        // Held off, the table is neither offered nor withheld: the kernel
+        // never enables MSI-X on the function, and every byte of the BAR is
+        // the driver's.
+        let held_off = seen.msix_held_off && msix.is_some();
+        let found = msix;
+        if held_off {
+            node.msix_off = found.map(|(capability, _)| capability.offset);
+        }
+        let msix = if held_off { None } else { msix };
         // With a line, the table stays withheld from the apertures below but
         // is never offered: nothing on the machine could take its messages.
         let offered = if seen.intx.is_some() { None } else { msix };
@@ -1423,9 +1469,11 @@ impl DeviceNode {
                 .any(|region| matches!(region.bar, Bar::Memory { .. }));
             return node;
         }
-        let table = msix.map(|(_, table)| table);
+        // The table's pages are recorded either way; held off, they are
+        // granted with the rest of the BAR.
+        let table = found.map(|(_, table)| table);
         for region in regions {
-            node.mint_bar(region, table, reserved);
+            node.mint_bar(region, table, held_off, reserved);
         }
         node.msix = seen
             .config_phys
@@ -1447,9 +1495,16 @@ impl DeviceNode {
     /// Mint the apertures of one BAR of a function whose memory decoding is
     /// on, if it is an assigned memory BAR: everything but the pages of
     /// `table`'s MSI-X table and pending-bit array, which are recorded as
-    /// withheld instead; and record the BAR's address, for
-    /// [`DeviceNode::verify_config`].
-    fn mint_bar(&mut self, region: &Region, table: Option<&MsiX>, reserved: &Reserved) {
+    /// withheld instead -- or, for a function whose MSI-X is `held_off`,
+    /// everything, the table's pages recorded all the same; and record the
+    /// BAR's address, for [`DeviceNode::verify_config`].
+    fn mint_bar(
+        &mut self,
+        region: &Region,
+        table: Option<&MsiX>,
+        held_off: bool,
+        reserved: &Reserved,
+    ) {
         let Bar::Memory {
             address: base,
             prefetchable,
@@ -1480,7 +1535,8 @@ impl DeviceNode {
                 self.interrupt_tables.push((start, len));
             }
         }
-        for &(offset, len) in msix::mappable(region, table, PAGE_SIZE).as_slice() {
+        let granted = if held_off { None } else { table };
+        for &(offset, len) in msix::mappable(region, granted, PAGE_SIZE).as_slice() {
             if let Some(start) = base.checked_add(offset) {
                 let source = Source::Bar {
                     slot: region.index,
@@ -1953,12 +2009,12 @@ impl DeviceNode {
             // Under the lock, so no kernel sequence is half written, and so
             // the state read is the one the registers were last written to.
             let config = self.config_writes().ok()?;
-            config_breach(&config, &self.bars, self.msi.as_ref().map(|msi| &msi.msi)).or_else(
-                || {
+            config_breach(&config, &self.bars, self.msi.as_ref().map(|msi| &msi.msi))
+                .or_else(|| {
                     let table = self.msix.as_ref()?;
                     msix_control_breach(&config, table.capability)
-                },
-            )
+                })
+                .or_else(|| msix_off_breach(&config, self.msix_off?))
         };
         breach.or_else(|| {
             let (entry, read, minted) = self.msix.as_ref()?.rewritten()?;
@@ -2326,6 +2382,21 @@ fn msix_control_breach(config: &ConfigWrites<'_>, capability: u16) -> Option<Bre
         register: Register::MsixControl,
         read: u64::from(control),
         minted: u64::from(minted),
+    })
+}
+
+/// A function whose MSI-X the kernel holds off, read with Enable set: a
+/// driver or its firmware turned it on through a mirror of configuration
+/// space, and the table the driver can write would then direct messages.
+/// Only Enable is compared: the Function Mask the kernel wrote may be
+/// cleared by the chip's own reset, which leaves the table inert all the
+/// same while Enable reads 0.
+fn msix_off_breach(config: &ConfigWrites<'_>, capability: u16) -> Option<Breach> {
+    let control = config.read16(ConfigWrites::FUNCTION, capability + CAPABILITY_CONTROL);
+    (control & CONTROL_ENABLE != 0).then_some(Breach {
+        register: Register::MsixControl,
+        read: u64::from(control),
+        minted: u64::from(control & !CONTROL_ENABLE),
     })
 }
 

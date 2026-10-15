@@ -60,6 +60,7 @@ use ferrix_pci::header::{
     SUBCLASS_HOST_BRIDGE,
 };
 use ferrix_pci::msi::Msi;
+use ferrix_pci::msix as pci_msix;
 use ferrix_pci::topology::Bridge;
 use ferrix_pci::virtio::{self as virtio_pci, SharedMemory, TYPE_ENTROPY, TYPE_GPU, Transport};
 use ferrix_pci::walk::{Function, Walk};
@@ -703,27 +704,23 @@ fn check_host(
         let secondary_bus = BusNumbers::read(&space, function.address)
             .ok()
             .map(|numbers| numbers.secondary);
-        // An MSI capability, offered by the registry only where there is no
-        // MSI-X table (`DeviceNode::pci`).
-        let msi = pci_capability::find(&space, function.address, ID_MSI)
-            .ok()
-            .flatten()
-            .map(|capability| Msi::read(&space, function.address, capability));
-        let config = for_the_window(&space, &function, host.window.layout().function_bytes());
+        let seen = Seen {
+            config_phys,
+            identity: &function.identity,
+            transport: transport.as_ref(),
+            subsystem,
+            secondary_bus,
+            msi: None,
+            host_visible: host_visible.as_ref(),
+            intx,
+            msix_held_off: false,
+            config: &for_the_window(&space, &function, host.window.layout().function_bytes()),
+        };
         // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
-        nodes.push(DeviceNode::pci(
-            function.address,
-            &Seen {
-                config_phys,
-                identity: &function.identity,
-                transport: transport.as_ref(),
-                subsystem,
-                secondary_bus,
-                msi,
-                host_visible: host_visible.as_ref(),
-                intx,
-                config: &config,
-            },
+        nodes.push(node_of(
+            &mut space,
+            &function,
+            &seen,
             &regions,
             msix.as_ref(),
             decoding,
@@ -731,6 +728,171 @@ fn check_host(
         ));
     }
     Ok(())
+}
+
+/// The node for `seen`'s function, with its MSI capability found here: its
+/// MSI-X held off first if it is to be ([`held_off`]), and the MSI
+/// capability and configuration window read again, fresh, since the check
+/// case may have written the function and put it back. An MSI capability is
+/// offered only where no MSI-X table is (`DeviceNode::pci`).
+fn node_of(
+    space: &mut Space,
+    function: &Function,
+    seen: &Seen<'_>,
+    regions: &[Region],
+    msix: Option<&(Capability, MsiX)>,
+    decoding: bool,
+    reserved: &Reserved,
+) -> DeviceNode {
+    let capability = pci_capability::find(&*space, function.address, ID_MSI)
+        .ok()
+        .flatten();
+    let read = |space: &Space| capability.map(|found| Msi::read(space, function.address, found));
+    let seen = &Seen {
+        msi: read(space),
+        ..*seen
+    };
+    let msix_held_off = held_off(space, function, seen, regions, msix, decoding, reserved);
+    let msi = read(space);
+    let config = for_the_window(space, function, seen.config.bytes);
+    DeviceNode::pci(
+        function.address,
+        &Seen {
+            msi,
+            msix_held_off,
+            config: &config,
+            ..*seen
+        },
+        regions,
+        msix,
+        decoding,
+        reserved,
+    )
+}
+
+/// Whether `seen`'s function has its MSI-X held off, holding it off if so:
+/// only a function with both capabilities, its configuration space placed,
+/// no line and its memory decoded, and in `MSI_PREFERRED`. Anything else
+/// keeps today's path, the table withheld and MSI-X offered. Before that,
+/// QEMU's `e1000e` with QEMU's subsystem gets stage 10's check of the path
+/// ([`held_off_check`]), under `ferrix.checks`.
+fn held_off(
+    space: &mut Space,
+    function: &Function,
+    seen: &Seen<'_>,
+    regions: &[Region],
+    msix: Option<&(Capability, MsiX)>,
+    decoding: bool,
+    reserved: &Reserved,
+) -> bool {
+    let eligible = msix.is_some()
+        && seen.msi.is_some()
+        && seen.config_phys.is_some()
+        && seen.intx.is_none()
+        && decoding;
+    if !eligible {
+        return false;
+    }
+    let identity = function.identity;
+    if crate::checks::run()
+        && pci_msix::held_off_check_case(identity.vendor, identity.device, seen.subsystem)
+    {
+        let scratch = Seen {
+            msix_held_off: true,
+            ..*seen
+        };
+        held_off_check(space, function, &scratch, regions, msix, reserved);
+    }
+    pci_msix::msi_preferred(identity.vendor, identity.device)
+        && hold_msix_off(space, function.address, msix)
+}
+
+/// Hold the MSI-X of a function in `ferrix_pci::msix::MSI_PREFERRED` off
+/// (`ferrix_pci::msix::hold_off`): Enable 0 and Function Mask 1, written
+/// and read back here, at stage 10, before its node is built or published.
+/// A function that does not read back so keeps today's path -- its table
+/// withheld and its MSI-X offered -- and one line says so.
+fn hold_msix_off(space: &mut Space, function: Address, msix: Option<&(Capability, MsiX)>) -> bool {
+    let Some((capability, _)) = msix else {
+        return false;
+    };
+    let held = pci_msix::hold_off(space, function, capability.offset);
+    if !held {
+        crate::println!(
+            "  pci      {function} would not hold its MSI-X off: its table stays withheld and \
+             MSI-X offered"
+        );
+    }
+    held
+}
+
+/// Where `msix`'s table and pending-bit array lie, as `(phys, len)` each,
+/// through the BARs in `regions`.
+fn table_ranges(regions: &[Region], msix: &MsiX) -> [(u64, u64); 2] {
+    let place = |at: ferrix_pci::capability::BarOffset, len: u64| {
+        regions
+            .iter()
+            .find(|region| region.index == at.bar)
+            .and_then(|region| match region.bar {
+                bar::Bar::Memory { address, .. } => address.checked_add(u64::from(at.offset)),
+                bar::Bar::Io { .. } => None,
+            })
+            .map_or((0, 0), |phys| (phys, len))
+    };
+    [
+        place(msix.table, msix.table_len()),
+        place(msix.pending, msix.pending_len()),
+    ]
+}
+
+/// Stage 10's check of the held-off path (`device::check::check_held_off`),
+/// on QEMU's `e1000e` only (`ferrix_pci::msix::held_off_check_case`, under
+/// `ferrix.checks`): its MSI-X held off through this walk's space, a
+/// scratch node built from `seen` as if the function were in
+/// `MSI_PREFERRED`, the check run on it, and the node dropped unpublished.
+///
+/// One function, one truth (the consultant's V2, choice (a)): every write
+/// is stage 10's, before any node is published; the command register, MSI
+/// control and MSI-X control are written back as found afterwards -- MSI
+/// off, MSI-X off, bus mastering and `INTx` as they were -- and the caller
+/// builds the published node from fresh reads. The scratch node's mapping
+/// of configuration space is never unmapped, as no node's is.
+fn held_off_check(
+    space: &mut Space,
+    function: &Function,
+    seen: &Seen<'_>,
+    regions: &[Region],
+    msix: Option<&(Capability, MsiX)>,
+    reserved: &Reserved,
+) {
+    let (Some((capability, table)), Some(msi)) = (msix, seen.msi) else {
+        return;
+    };
+    let address = function.address;
+    let command = space.read16(address, COMMAND);
+    let msix_control_at = capability.offset + pci_msix::CAPABILITY_CONTROL;
+    let msix_control = space.read16(address, msix_control_at);
+    let msi_control_at = msi.capability + ferrix_pci::msi::CONTROL;
+    let msi_control = space.read16(address, msi_control_at);
+    let outcome = if pci_msix::hold_off(space, address, capability.offset) {
+        let scratch = DeviceNode::pci(address, seen, regions, msix, true, reserved);
+        let outcome = device::check::check_held_off(&scratch, table_ranges(regions, table));
+        drop(scratch);
+        outcome
+    } else {
+        Err(device::Failure {
+            location: device::Location::Pci(address),
+            what: "QEMU's e1000e would not hold its MSI-X off",
+        })
+    };
+    space.write16(
+        address,
+        msi_control_at,
+        msi_control & !ferrix_pci::msi::CONTROL_ENABLE,
+    );
+    space.write16(address, msix_control_at, msix_control);
+    space.write16(address, COMMAND, command);
+    let _ = device::check::HELD_OFF.call_once(|| outcome);
 }
 
 /// What `function`'s configuration window starts from: its `bytes` of

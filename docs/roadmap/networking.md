@@ -547,6 +547,70 @@ given the listener's flag, so a server that accepted on a non-blocking
 listener and then read with a timeout saw `EAGAIN` before the client's bytes
 arrived. The boot checks ask both families.
 
+**Written ahead — the N150 box's wired port, a Motorcomm YT6801
+(2026-10-15, branch `net-yt6801`).** The box's gigabit port is a YT6801, PCI
+`1F0A:6801`: a Synopsys DesignWare Ethernet QoS core ("dwmac4") at offset
+`0x2000` of BAR 0, a YT8531S PHY inside the chip at MDIO address 0, and
+Motorcomm's own registers in BAR 0's second page -- the PHY's reset, an eFuse
+holding the MAC address, and an out-of-band wake-on-LAN block that holds the
+DMA's interrupts back until it is disabled. The facts are from Linux's
+`dwmac-motorcomm.c` and Motorcomm's series posted to netdev (v4); no code was
+taken from either. It is three crates and a kernel change:
+
+* `src/lib/drivers/net/dwmac` (`ferrix-dwmac`): the core as logic over
+  registers, a clock and DMA memory -- software reset, the PHY over the core's
+  MDIO in clause 22, one channel and one queue each way with sixteen-byte
+  descriptors, tails written one past each ring as doorbells, written-back
+  lengths checked against the buffer, a fatal bus error terminal, memory given
+  back only after a reset seen to finish. 26 host tests against a model of the
+  core that walks the rings by device address over scattered pages and lies
+  when asked (a reset that never ends, a busy bus, no PHY, lengths past the
+  buffer, error summaries, context descriptors, split frames, a bus error).
+* `src/lib/drivers/net/yt6801` (`ferrix-yt6801`): the chip around the core --
+  its reset, the PHY's release, the address from the eFuse's patch region
+  (else what firmware left in the core, else a locally administered
+  `02:1f:0a:…`), interrupts let out, and the core's options for one vector.
+  10 host tests against a model of BAR 0 that refuses any touch of the MSI-X
+  table.
+* `src/user/system/native/drivers/net/yt6801` (`yt6801`): the process, the
+  virtio-net program with this device under it, over `ferrix-netserve`; it
+  polls every millisecond until it has seen an interrupt and asks the PHY
+  about the link every 250 ms, sending LINK on a change. `devmgr` starts it on
+  `1F0A:6801`.
+* The kernel: the chip's MSI-X table shares the page with those registers,
+  and the kernel never grants a page holding a table it uses. For this one
+  function it holds MSI-X off for good and grants BAR 0 whole, offering the
+  MSI vector instead (`docs/DEVMGR.md` §3, `L.device.35`-`37`, the
+  consultant's OK IF of 2026-10-15). Stage 10 checks that path on QEMU's
+  `e1000e`, so every x86-64 boot exercises it.
+
+**Proven** on the host models and, for the kernel's path, on QEMU's `e1000e`.
+**Not proven:** anything about the chip itself. QEMU models no dwmac4 core at
+all (9.2 and 10.2 have only the NPCM GMAC and the XGMAC), so the driver has
+never met real hardware. The first boot on the box must print, and the
+session reading it must check:
+
+1. The devices line and `yt6801   0x… 1f0a:6801 apertures … vectors 1
+   msix_table_size 0`, and the aperture lines: one aperture of BAR 0 from
+   offset 0 covering at least `0x4000` (the glue's page granted).
+2. That MSI-X control reads Enable 0 (`device_config_read` of the MSI-X
+   capability) and that the one MSI vector's deliveries count under traffic.
+3. The MSI capability and MSI-X control read before and after the chip's
+   `SYS_RESET` -- if the reset clears the MSI capability the node is refused at
+   the next HELLO, which fails closed but ends the NIC until reboot.
+4. `yt6801   address … from Efuse` (the eFuse's address; `Firmware` or
+   `Generated` means the eFuse read nothing -- read the `eFuse` field).
+5. `yt6801   core 0x…` with no "did not come up" line: the core's software
+   reset finished (`ResetTimeout` means the PHY gave the core no clock).
+6. The PHY identifier: `phy 0x4f51e91a` expected for the YT8531S.
+7. `yt6801   first interrupt` within a second of traffic: interrupts are
+   delivered (without it the driver still works by polling, slowly).
+8. `yt6801   link Up { speed: Thousand, full_duplex: true }` with a cable to
+   a gigabit switch, and then `ping` and `wget` as `test-net` does.
+9. Linux disables ASPM's L1 on this chip because some cards deliver no MSI
+   with it on; Ferrix leaves link power management as firmware set it. If
+   step 7 fails, that is the first suspect.
+
 **Exit, and it is met:** under `xtask`'s gateway — which is where this
 criterion's *"under QEMU's user-mode network"* now reads — busybox configures
 `eth0` with `ip`, and `route` and `netstat` report through `/proc/net`. `wget`

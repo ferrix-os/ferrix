@@ -158,10 +158,10 @@ package FerrixDeviceRequirements {
         requirement <'L.device.3'> interruptTablesNeverGranted : ItemLowLevel {
             attribute :>> statement = "DeviceNode::pci shall keep a function's
                 MSI-X table and pending-bit pages out of every aperture it
-                grants.";
-            attribute :>> criterion = "For every published PCI function, the whole
-                of each MSI-X table or pending-bit range, its first byte and its
-                last byte are refused.";
+                grants, unless the function's MSI-X is held off (L.device.35).";
+            attribute :>> criterion = "For every published PCI function whose MSI-X
+                is not held off, the whole of each MSI-X table or pending-bit
+                range, its first byte and its last byte are refused.";
             attribute :>> parent = "H.DMA.5";
             attribute :>> unit = "device::DeviceNode::pci";
         }
@@ -347,7 +347,7 @@ package FerrixDeviceRequirements {
         }
         requirement <'L.device.22'> msiMintedMaskedAndDelivered : ItemLowLevel {
             attribute :>> statement = "A PCI function with an MSI capability and no
-                MSI-X table shall be offered one vector, minted once with INTx off --
+                MSI-X table the kernel uses shall be offered one vector, minted once with INTx off --
                 written under the node's command-register lock, which bus mastering's
                 writes take too (L.object.117) -- and the message masked, none past the one
                 message, and no vector allocated for a 32-bit capability the
@@ -567,6 +567,55 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.DMA.9";
             attribute :>> unit = ("iommu::remapping::route",
                 "arch::x86_64::msi::msi_allocate", "iommu::name_functions_without_vectors");
+        }
+        requirement <'L.device.35'> heldOffFunctionGetsItsTablePage : ItemLowLevel {
+            attribute :>> statement = "A PCI function in the build's MSI-preferred
+                list (ferrix_pci::msix::MSI_PREFERRED, exactly 1F0A:6801) with both an
+                MSI-X table and an MSI capability, its configuration space placed, no
+                INTx line and its memory decoded shall have its MSI-X held off at
+                stage 10 before its node is built -- Enable written 0 and Function
+                Mask 1, and read back so -- and only then be granted its table and
+                pending-bit pages as aperture, offered no MSI-X table and its MSI
+                capability's one vector; one that does not read back so keeps its
+                table withheld and its MSI-X offered.";
+            attribute :>> criterion = "On x86-64 test-boot requires the msix-off
+                line, from the check run on a scratch node enumeration builds for
+                QEMU's e1000e with QEMU's subsystem as if it were listed, and never
+                publishes: Enable reads 0 and Function Mask 1, the table's and the
+                pending-bit array's whole ranges and their first and last bytes lie
+                in its apertures, as do the table pages it records, it offers no
+                MSI-X table and one vector, and its MSI mints once, masked, on a number with no
+                handler. Host tests: the list is exactly 1F0A:6801, the check case
+                refuses 8086:10D3 with any subsystem but QEMU's, and hold_off reads
+                back Enable 0 and Function Mask 1. With the hold skipped, the table
+                still withheld, or the MSI vector not offered, the boot fails. The
+                1F0A:6801 arm is reached only on the hardware.";
+            attribute :>> parent = ("H.DMA.5", "H.IRQ.1");
+            attribute :>> unit = ("discovery::pci::held_off", "discovery::pci::hold_msix_off",
+                "device::DeviceNode::pci", "device::MsiFunction::of");
+        }
+        requirement <'L.device.36'> heldOffMsixReadBack : ItemLowLevel {
+            attribute :>> statement = "DeviceNode::verify_config shall refuse a node
+                whose MSI-X the kernel holds off when its MSI-X Enable reads 1, naming
+                MSI-X control; the Function Mask the kernel wrote is not compared,
+                since the chip's own reset may clear it while Enable stays 0.";
+            attribute :>> criterion = "On x86-64, with Enable written 1 on the
+                scratch node of L.device.35 -- the mirror case -- verify_config
+                reports MSI-X control and the node reads refused (the msix-off line);
+                with the comparison removed the boot fails.";
+            attribute :>> parent = ("H.DMA.5", "H.IRQ.1");
+            attribute :>> unit = ("device::DeviceNode::verify_config",
+                "device::msix_off_breach");
+        }
+        requirement <'L.device.37'> noMsiWhileMsixOn : ItemLowLevel {
+            attribute :>> statement = "MsiFunction::mint shall refuse a function
+                whose MSI-X the kernel holds off when its MSI-X Enable, read under the
+                node's configuration lock at the mint, reads 1.";
+            attribute :>> criterion = "On x86-64 the scratch node of L.device.35,
+                with Enable written 1, is refused its MSI vector when asked again
+                (the msix-off line); with the refusal removed the boot fails.";
+            attribute :>> parent = "H.IRQ.1";
+            attribute :>> unit = "device::MsiFunction::mint";
         }
         requirement <'L.device.38'> theFirmwareFramebufferLentExactly : ItemLowLevel {
             attribute :>> statement = "The boot framebuffer shall stay in the

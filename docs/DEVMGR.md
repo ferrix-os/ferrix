@@ -125,7 +125,28 @@ a driver's death or of its restart (§4), printed the same way.
    `01:08:02`, an NVM Express controller, is a disk driven by `nvme`
    (`docs/NVME.md`): matched by what it is, since every vendor's drive has
    that class and none of them a row of its own. Its START carries no
-   register blocks; the driver asks `device_aperture` for its BAR.
+   register blocks; the driver asks `device_aperture` for its BAR. Motorcomm's
+   YT6801 gigabit adapter (`1F0A:6801`) is a network interface driven by
+   `yt6801` over a net ring, as virtio-net is by `net`
+   (`docs/roadmap/networking.md`).
+
+   The YT6801 is also the one function whose MSI-X the kernel never enables.
+   Its MSI-X table, at `0x1200` of BAR 0, shares a page with the chip's own
+   registers -- its PHY's reset, its eFuse, the switch that lets its DMA
+   interrupts out -- and the kernel grants no driver a page holding a table
+   it uses. So stage 10 holds the function's MSI-X off before its node is
+   built (Enable 0 and Function Mask 1, read back), grants BAR 0 whole, and
+   offers its MSI capability's one vector; `verify_config` refuses the node
+   if Enable reads 1 at a read-back, and an MSI mint made while it reads 1
+   is refused. The list is a
+   const in `ferrix_pci::msix` (`MSI_PREFERRED`), fixed at build: nothing a
+   driver, `devmgr` or a boot option supplies adds to it. Requirements
+   `L.device.35` to `L.device.37`; the design is the consultant's OK IF of
+   2026-10-15 (option D, ledger line 1097, D1-D9, with V1-V6 at lines
+   1110-1116 in place of a test build flag). QEMU has no YT6801, so stage
+   10 checks the path on a scratch node it builds for QEMU's `e1000e` (with
+   QEMU's subsystem, `1AF4:1100`, which no real 82574L carries) and never
+   publishes; the YT6801's own row is reached only on the box (`BACKLOG.md`).
 2. Each device keeps the kernel's default pin budget, 66560 pages, unless
    its kind's rule says otherwise (§3.1). Devices of one kind are named in
    PCI order — `vda`, `vdb`, … for disks, as `docs/BLOCK-RING.md` §6.1

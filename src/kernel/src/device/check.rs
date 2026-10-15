@@ -75,7 +75,9 @@ fn check_msix(node: &DeviceNode, report: &mut Report) -> Result<(), Failure> {
 
 /// The message-signalled vector checks, on the published nodes: the first
 /// MSI-X table's ([`check_msix`]) and QEMU's `edu` device's MSI
-/// ([`check_msi`]).
+/// ([`check_msi`]); and the outcome of the held-off check enumeration ran
+/// on its scratch node ([`check_held_off`]), if the machine had the case,
+/// so that a failure there stops stage 10 as any other.
 pub(super) fn check_vectors(
     published: &[Arc<DeviceNode>],
     report: &mut Report,
@@ -84,7 +86,8 @@ pub(super) fn check_vectors(
     if let Some(node) = published.iter().find(|node| node.msix.is_some()) {
         check_msix(node, report)?;
     }
-    check_msi(published, report)
+    check_msi(published, report)?;
+    HELD_OFF.get().copied().unwrap_or(Ok(()))
 }
 
 /// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
@@ -636,7 +639,15 @@ pub(super) fn check_node(
         }
         report.refusals += 1;
     }
-    for &(start, len) in &node.interrupt_tables {
+    // A function in the build's MSI-preferred list whose MSI-X was held off
+    // has its table pages granted (L.device.35); every other function's are
+    // refused -- an unlisted one whatever the node says of its MSI-X, and a
+    // listed one whose hold did not read back.
+    let granted = node.msix_off.is_some()
+        && node.pci_function().is_some_and(|function| {
+            ferrix_pci::msix::msi_preferred(function.vendor, function.device)
+        });
+    for &(start, len) in node.interrupt_tables.iter().filter(|_| !granted) {
         report.msix_withheld += 1;
         // The whole range, its first byte and its last: a driver that could
         // reach any of them could rewrite which interrupt the device raises.
@@ -1028,4 +1039,147 @@ fn mode_bytes(node: &DeviceNode) -> u64 {
     node.framebuffer_mode().map_or(0, |mode| {
         u64::from(mode.stride) * u64::from(mode.height) * 4
     })
+}
+
+/// What [`check_held_off`] found, kept from stage 10's enumeration, which
+/// runs it, until [`super::publish`] reports it: `None` where no function
+/// was its case (no QEMU `e1000e`, or `ferrix.checks=skip`).
+pub(crate) static HELD_OFF: ferrix_sync::Once<Result<(), Failure>> = ferrix_sync::Once::new();
+
+/// The held-off path, on a scratch node: QEMU's `e1000e` with QEMU's
+/// subsystem (`ferrix_pci::msix::held_off_check_case`), built by
+/// enumeration a second time as if it were in `MSI_PREFERRED` and never
+/// published. Its MSI-X was held off through enumeration's own
+/// configuration space before the node was built
+/// (`ferrix_pci::msix::hold_off`), and `table` is where its MSI-X table and
+/// pending-bit array lie, `(phys, len)` each. Required:
+///
+/// * MSI-X Enable reads 0 and Function Mask 1;
+/// * the table's and the pending-bit array's whole ranges, and their first
+///   and last bytes, lie inside the node's apertures -- granted, not
+///   withheld -- as do the table pages the node records;
+/// * the node offers no MSI-X table and one vector, its MSI message;
+/// * that message mints once (the same vector asked again), on a number
+///   with no handler, masked as minted;
+/// * with Enable written 1 -- the mirror case, a driver or its firmware
+///   turning MSI-X on behind the kernel -- the mint is refused and
+///   [`DeviceNode::verify_config`] reports MSI-X control and refuses the
+///   node.
+///
+/// No delivery is raised: QEMU's `msix_notify` sends nothing while MSI-X is
+/// disabled (`hw/pci/msix.c`: `msix_function_masked` is set whenever Enable
+/// is clear, and a masked vector only sets its pending bit), and `e1000e`
+/// takes the MSI-X path only when MSI-X is enabled (`hw/net/e1000e_core.c`),
+/// so a message written into the table could never be sent (the
+/// consultant's V3, ledger line 1110). No domain is made and bus mastering
+/// is never turned on.
+///
+/// What it leaves behind: the one MSI vector, and on a machine that remaps
+/// interrupts its remapping entry, spent for good, as `edu`'s are; the
+/// scratch node's mapping of configuration space, kept for the machine's
+/// life as every node's is; and the MSI address, data and mask it
+/// programmed, left in the capability with MSI Enable clear, where nothing
+/// sends them.
+///
+/// The writes are stage 10's, before any node is published: enumeration
+/// restores the function's command register, MSI and MSI-X control after
+/// this returns, and builds the published node from fresh reads.
+///
+/// Verifies: L.device.35, L.device.36, L.device.37
+pub(crate) fn check_held_off(node: &DeviceNode, table: [(u64, u64); 2]) -> Result<(), Failure> {
+    let fail = |what| Failure {
+        location: node.location(),
+        what,
+    };
+    let capability = node
+        .msix_off
+        .ok_or_else(|| fail("a held-off function's node does not hold its MSI-X off"))?;
+    let control = {
+        let config = node
+            .config_writes()
+            .map_err(|_| fail("a held-off function's configuration space could not be mapped"))?;
+        config.read16(
+            ConfigWrites::FUNCTION,
+            capability + super::CAPABILITY_CONTROL,
+        )
+    };
+    if control & super::CONTROL_ENABLE != 0 || control & super::CONTROL_FUNCTION_MASK == 0 {
+        return Err(fail(
+            "a held-off function's MSI-X did not read Enable 0 and Function Mask 1",
+        ));
+    }
+    let granted = |phys: u64| {
+        node.apertures()
+            .iter()
+            .any(|aperture| aperture.phys() <= phys && phys < aperture.end())
+    };
+    for (phys, len) in table {
+        let last = phys.saturating_add(len.max(1) - 1);
+        let whole = (phys..=last).step_by(4).all(granted);
+        if !granted(phys) || !granted(last) || !whole {
+            return Err(fail(
+                "a held-off function's MSI-X table or pending-bit array was not granted",
+            ));
+        }
+    }
+    if node.interrupt_tables.is_empty()
+        || !node
+            .interrupt_tables
+            .iter()
+            .all(|&(start, len)| granted(start) && granted(start + (len - 1)))
+    {
+        return Err(fail("a held-off function's table pages were not granted"));
+    }
+    let offered = node.pci_function().map(|function| function.msix_table_size);
+    if node.msix.is_some() || offered != Some(0) || node.vector_count() != 1 {
+        return Err(fail("a held-off function offered its MSI-X table"));
+    }
+    let msi = node
+        .msi
+        .as_ref()
+        .ok_or_else(|| fail("a held-off function offered no MSI vector"))?;
+    let first = msi
+        .mint(node)
+        .map_err(|_| fail("a held-off function's MSI vector could not be minted"))?;
+    if msi.mint(node).ok() != Some(first) {
+        return Err(fail(
+            "a held-off function's MSI was minted twice as different vectors",
+        ));
+    }
+    if irq::is_registered(first.number()) {
+        return Err(fail(
+            "a held-off function's MSI was minted on a number with a handler",
+        ));
+    }
+    if msi.is_masked(node) != Some(true) {
+        return Err(fail("a held-off function's minted MSI was not masked"));
+    }
+    // The mirror case.
+    {
+        let mut config = node
+            .config_writes()
+            .map_err(|_| fail("a held-off function's configuration space could not be mapped"))?;
+        let at = capability + super::CAPABILITY_CONTROL;
+        let control = config.read16(ConfigWrites::FUNCTION, at);
+        config.write16(ConfigWrites::FUNCTION, at, control | super::CONTROL_ENABLE);
+    }
+    if msi.mint(node).is_ok() {
+        return Err(fail(
+            "a held-off function's MSI was minted with its MSI-X reading enabled",
+        ));
+    }
+    match node.verify_config() {
+        Err(breach) if breach.register == super::Register::MsixControl && node.is_refused() => {}
+        _ => {
+            return Err(fail(
+                "a held-off function's MSI-X turned on was not refused by verify_config",
+            ));
+        }
+    }
+    crate::println!(
+        "  msix-off {} held off: Enable 0, table and pending bits granted, one MSI vector \
+         minted, MSI-X turned on refused",
+        node.location()
+    );
+    Ok(())
 }
