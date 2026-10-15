@@ -860,8 +860,9 @@ copies of small functions inlined into every caller no longer made.
 
 **The measured build is unchanged.** At one source, the `coverage`
 profile's kernel and the dev profile as it was (`--config
-profile.dev.lto=false`) have byte-identical `.text` on all three
-architectures. The dev kernel the gates boot now has about ten thousand
+profile.dev.lto=false`) are the same ELF file, byte for byte, on all
+three architectures (so every loadable section, `.text`, `.rodata`, `.data`
+and the relocations, is the same; `cmp` on the whole files). The dev kernel the gates boot now has about ten thousand
 more statement rows (functions that were inlined everywhere and dropped
 now exist on their own): x86-64 61,046 against 51,145, aarch64 58,737
 against 48,964, armv7a 59,147 against 49,578. No coverage figure measures
@@ -879,7 +880,7 @@ the plugin at all (`libdrcov.so` is built for QEMU 10.2.1's plugin API 5,
 the `qemu-system-aarch64` and `-arm` on PATH are 9.2.4 with API 4). The
 next full measurement needs a 10.2 Arm QEMU and `--timeout`. Until then the
 build it will measure is the one main's gates booted: its `.text` is main's
-dev kernel's, byte for byte.
+dev kernel's ELF, byte for byte.
 
 **The rows, and the load.** On dbe733179 `check`, `build --arch all
 --release`, `test-boot` on x86-64 (KVM and TCG), AArch64, ARMv7-A and

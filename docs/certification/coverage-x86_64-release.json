@@ -1,6 +1,6 @@
 {
   "arch": "x86_64",
-  "profile": "debug",
+  "profile": "release",
   "traces": 1,
   "blocks_executed": 134229,
   "blocks_in_image": 79261,
