@@ -401,6 +401,10 @@ fn write_fp_area(space: &AddressSpace, fpstate: u64) -> Result<(), BadFrame> {
     fp_area(&state)?.write(space, fpstate)
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the home of a method made pub only for a raised check: pub(super) before the split"
+)]
 /// [`write_fp_area`]'s bytes for `state`: the `FXSAVE` image, and the rest of
 /// the `XSAVE` area after it when the switch saves AVX. A 32-bit frame
 /// carries the same bytes after its `fsave` environment (`compat`).
@@ -630,6 +634,10 @@ fn xstate_in(space: &AddressSpace, at: u64, legacy: &FrameBytes) -> Option<(u64,
     Some((area.u64_at(XSTATE_BV).ok()?, avx))
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the home of a method made pub only for a raised check: pub(super) before the split"
+)]
 /// Load the x87 and SSE registers from the `FXSAVE` area at `at`, and the
 /// AVX registers from the `XSAVE` area it may begin.
 fn restore_fpu(space: &AddressSpace, at: u64) -> Result<(), BadFrame> {

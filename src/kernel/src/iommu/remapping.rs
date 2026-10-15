@@ -122,7 +122,7 @@ static ANY_REMAPPING: AtomicBool = AtomicBool::new(false);
 /// What each unit the DMAR lists ended in, refused ones included (G4).
 static STATES: Once<Vec<UnitState>> = Once::new();
 
-// CHECKS-ONLY: iommu/domain_check.rs
+// CHECKS-ONLY: iommu/domain_check.rs; home: super
 /// Set only by check R10 (`iommu/check.rs`), for the length of the check:
 /// the machine's interrupts read as not isolated, so the isolated-
 /// interrupts mark's refusal can be shown on a machine whose interrupts

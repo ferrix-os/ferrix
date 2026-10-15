@@ -90,7 +90,7 @@ pub(super) fn check_vectors(
     HELD_OFF.get().copied().unwrap_or(Ok(()))
 }
 
-// CHECKS-ONLY: device/config_check.rs
+// CHECKS-ONLY: device/config_check.rs; home: super
 /// QEMU's `edu` test device: MSI and no MSI-X, and a register that raises
 /// its interrupt on request (QEMU's `docs/specs/edu.rst`).
 #[doc(hidden)]

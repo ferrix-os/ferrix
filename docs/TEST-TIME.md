@@ -1234,6 +1234,9 @@ brackets, since at these loads they are the host's more than the build's:
   against 33,432 on x86-64), and its text segment is 7.52 MB against 7.16
   (`llvm-size`). The release
   kernel, linked with fat LTO, is one module either way.
+* The IPC round trip on the release kernel, ABAB against `main`, read
+  0.988 (0.713 to 1.164) on a busy host: inconclusive, owed on a quiet one
+  (`docs/BACKLOG.md`).
 
 ## The cold build: the baseline, 2026-10-15 (bs-c)
 

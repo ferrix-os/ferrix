@@ -282,6 +282,7 @@ ferrix_enter_user:
     user_spsr = const USER_SPSR,
 );
 
+// CHECKS-ONLY: arch/aarch64/trap/check.rs; home: super
 /// `SPSR_EL1` for a program: `EL0t`, with debug, asynchronous aborts and FIQs
 /// masked and IRQs open.
 ///
@@ -291,6 +292,7 @@ ferrix_enter_user:
 /// program's root. A program is a task of its own now, carrying its space, so
 /// a tick in EL0 is an ordinary preemption and the scheduler puts the right
 /// root back when it returns.
+#[doc(hidden)]
 pub const USER_SPSR: u64 = (1 << 9) | (1 << 8) | (1 << 6);
 
 unsafe extern "C" {
