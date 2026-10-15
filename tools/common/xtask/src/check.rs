@@ -344,16 +344,26 @@ fn side_workspaces(root: &std::path::Path) -> Result<()> {
     // (the certification consultant, ledger line 1447).
     loom(root)?;
     let mut counts = Counts::default();
-    counts.add(step_cache::unit("compositor", || compositor(root))?);
+    counts.add(step_cache::unit(
+        "compositor",
+        &own_target_dir("compositor"),
+        || compositor(root),
+    )?);
     for (name, relative) in LINUX_WORKSPACES {
-        counts.add(step_cache::unit(name, || {
+        counts.add(step_cache::unit(name, &own_target_dir(name), || {
             linux_workspace(root, name, relative)
         })?);
     }
     step("auth: no sabotage in the environment", no_sabotage)?;
-    counts.add(step_cache::unit("media", || media(root))?);
-    counts.add(step_cache::unit("adbd", || adbd(root))?);
-    counts.add(step_cache::unit("nvos", || nvos(root))?);
+    counts.add(step_cache::unit("media", &own_target_dir("media"), || {
+        media(root)
+    })?);
+    counts.add(step_cache::unit("adbd", &own_target_dir("adbd"), || {
+        adbd(root)
+    })?);
+    counts.add(step_cache::unit("nvos", &own_target_dir("nvos"), || {
+        nvos(root)
+    })?);
     apps(&mut counts)?;
     if step_cache::store().is_some() {
         println!(
@@ -902,7 +912,11 @@ fn apps(counts: &mut Counts) -> Result<()> {
             &format!("app {name}: nothing outside its folder names it"),
             || crate::apps::stays_in_its_folder(app),
         )?;
-        counts.add(step_cache::unit(&format!("app:{name}"), || app_steps(app))?);
+        counts.add(step_cache::unit(
+            &format!("app:{name}"),
+            &paths::target_dir().join("apps").join(name),
+            || app_steps(app),
+        )?);
     }
     Ok(())
 }

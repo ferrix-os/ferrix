@@ -28,6 +28,9 @@ fn context(root: &Path) -> Context {
         ],
         origin: "from the test".to_owned(),
         item: vec!["item/".to_owned()],
+        xtask: root.join("target/debug/xtask"),
+        unit_target: root.join("target/check-unit"),
+        runtime: None,
     }
 }
 
@@ -139,7 +142,7 @@ fn what_may_not_be_recorded_is_refused() {
         ),
         (
             "openat(AT_FDCWD</>, \"/tmp/not-mine\", O_RDONLY) = 3</tmp/not-mine>\n",
-            "did not make",
+            "had not made",
         ),
         ("mount(\"a\", \"b\", NULL, 0, NULL) = 0\n", "does not know"),
     ];
@@ -157,7 +160,8 @@ fn what_may_not_be_recorded_is_refused() {
     assert!(traced.inputs.is_empty());
     // A temporary file the run made itself, in another process, may be read.
     let made = "openat(AT_FDCWD</>, \"/tmp/mine\", O_RDONLY) = 3</tmp/mine>\n";
-    let maker = "openat(AT_FDCWD</>, \"/tmp/mine\", O_WRONLY|O_CREAT, 0600) = 3</tmp/mine>\n";
+    let maker =
+        "openat(AT_FDCWD</>, \"/tmp/mine\", O_WRONLY|O_CREAT|O_EXCL, 0600) = 3</tmp/mine>\n";
     let directory = traces(
         &root,
         &[
@@ -198,12 +202,12 @@ fn an_unchanged_tree_holds_and_paths_are_kept_relative() {
     let text = record_of(&root, &sample_trace(&root));
     assert!(text.contains("F ") && text.contains(" ./f\n"), "{text}");
     assert_eq!(
-        holds(&text, &context(&root)),
+        holds("unit", &text, &context(&root)),
         Some(("from the test".to_owned(), 4))
     );
     // The same tree elsewhere -- another slot's worktree -- holds too.
     let other = sample_root("holds-elsewhere");
-    assert!(holds(&text, &context(&other)).is_some());
+    assert!(holds("unit", &text, &context(&other)).is_some());
     std::fs::remove_dir_all(root).unwrap();
     std::fs::remove_dir_all(other).unwrap();
 }
@@ -212,7 +216,7 @@ fn an_unchanged_tree_holds_and_paths_are_kept_relative() {
 #[test]
 fn every_kind_of_change_is_a_miss() {
     type Change = fn(&Path, &mut Context);
-    let changes: [(&str, Change); 8] = [
+    let changes: [(&str, Change); 9] = [
         ("content", |root, _| {
             std::fs::write(root.join("f"), b"two").unwrap();
         }),
@@ -221,6 +225,9 @@ fn every_kind_of_change_is_a_miss() {
         }),
         ("an absent path appearing", |root, _| {
             std::fs::write(root.join("gone"), b"").unwrap();
+        }),
+        ("a looked-up file's bytes, its size kept", |root, _| {
+            std::fs::write(root.join("sized"), b"54321").unwrap();
         }),
         ("a probed file's size", |root, _| {
             std::fs::write(root.join("sized"), b"123456").unwrap();
@@ -243,9 +250,9 @@ fn every_kind_of_change_is_a_miss() {
         let root = sample_root("miss");
         let text = record_of(&root, &sample_trace(&root));
         let mut here = context(&root);
-        assert!(holds(&text, &here).is_some(), "{what}: held before");
+        assert!(holds("unit", &text, &here).is_some(), "{what}: held before");
         change(&root, &mut here);
-        if holds(&text, &here).is_some() {
+        if holds("unit", &text, &here).is_some() {
             still_held.push(what);
         }
         std::fs::remove_dir_all(root).unwrap();
@@ -279,15 +286,15 @@ fn a_toolchains_version_is_part_of_the_record() {
     );
     let text = record_of(&root, &trace);
     assert!(text.contains("\ntoolchain "), "{text}");
-    assert!(holds(&text, &context(&root)).is_some());
+    assert!(holds("unit", &text, &context(&root)).is_some());
     install("#!/bin/sh\necho \"rustc 1.0.1 (def 2026-02-01)\"\n");
-    assert_eq!(holds(&text, &context(&root)), None);
+    assert_eq!(holds("unit", &text, &context(&root)), None);
     // And the components installed.
     install("#!/bin/sh\necho \"rustc 1.0.0 (abc 2026-01-01)\"\n");
-    assert!(holds(&text, &context(&root)).is_some());
+    assert!(holds("unit", &text, &context(&root)).is_some());
     std::fs::create_dir_all(toolchain.join("lib/rustlib")).unwrap();
     std::fs::write(toolchain.join("lib/rustlib/components"), "clippy\n").unwrap();
-    assert_eq!(holds(&text, &context(&root)), None);
+    assert_eq!(holds("unit", &text, &context(&root)), None);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -297,15 +304,19 @@ fn a_record_that_does_not_parse_or_names_another_store_is_a_miss() {
     let text = record_of(&root, &sample_trace(&root));
     let here = context(&root);
     assert_eq!(
-        holds(&text.replace(MAGIC, "ferrix-step-cache 0"), &here),
+        holds("unit", &text.replace(MAGIC, "ferrix-step-cache 0"), &here),
         None
     );
-    assert_eq!(holds(&format!("{text}Q what\n"), &here), None);
+    assert_eq!(holds("unit", &format!("{text}Q what\n"), &here), None);
     assert_eq!(
-        holds(&text.replace("excluded /proc", "excluded /nowhere"), &here),
+        holds(
+            "unit",
+            &text.replace("excluded /proc", "excluded /nowhere"),
+            &here
+        ),
         None
     );
-    assert_eq!(holds("", &here), None);
+    assert_eq!(holds("unit", "", &here), None);
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -351,4 +362,168 @@ fn an_elf_and_a_script_name_their_interpreters() {
 fn the_date_is_the_civil_one() {
     assert_eq!(civil_from_days(0), (1970, 1, 1));
     assert_eq!(civil_from_days(20_376), (2025, 10, 15));
+}
+
+/// Whether the trace `text` (one process, pid 100) is refused, and why.
+fn refused(root: &Path, text: &str) -> Option<String> {
+    let directory = traces(root, &[(100, text)]);
+    read_traces(&directory, root, &context(root))
+        .unwrap()
+        .refused
+}
+
+#[test]
+fn a_socket_the_run_did_not_bind_is_refused() {
+    let root = scratch("sockets");
+    let connect = "connect(5<UNIX:[1]>, {sa_family=AF_UNIX, sun_path=\"/run/daemon\"}, 110) = 0\n";
+    assert!(
+        refused(&root, connect)
+            .unwrap_or_default()
+            .contains("did not bind")
+    );
+    let abstract_name = "connect(5<UNIX:[1]>, {sa_family=AF_UNIX, sun_path=@\"x\"}, 4) = 0\n";
+    assert!(
+        refused(&root, abstract_name)
+            .unwrap_or_default()
+            .contains("did not bind")
+    );
+    let bound = "bind(4<UNIX:[2]>, {sa_family=AF_UNIX, sun_path=\"/tmp/mine.sock\"}, 110) = 0\n\
+                 connect(5<UNIX:[1]>, {sa_family=AF_UNIX, sun_path=\"/tmp/mine.sock\"}, 110) = 0\n";
+    assert_eq!(refused(&root, bound), None);
+    let renamed = "1.1 bind(4<UNIX:[2]>, {sa_family=AF_UNIX, sun_path=\"/tmp/s/w.1.binding\"}, 56) = 0\n\
+                   1.2 rename(\"/tmp/s/w.1.binding\", \"/tmp/s/w\") = 0\n\
+                   1.3 connect(5<UNIX:[1]>, {sa_family=AF_UNIX, sun_path=\"/tmp/s/w\"}, 40) = 0\n";
+    assert_eq!(refused(&root, renamed), None);
+    let failed = "connect(5<UNIX:[1]>, {sa_family=AF_UNIX, sun_path=\"/run/nscd/socket\"}, 110) = -1 ENOENT (No such file or directory)\n";
+    assert_eq!(refused(&root, failed), None);
+    assert!(
+        refused(&root, "io_uring_setup(8, 0x7ffd) = 3\n")
+            .unwrap_or_default()
+            .contains("io_uring_setup")
+    );
+    assert!(
+        refused(&root, "pidfd_getfd(3, 4, 0) = 5\n")
+            .unwrap_or_default()
+            .contains("pidfd_getfd")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_temporary_file_counts_as_made_only_when_its_contents_are_fresh() {
+    let root = scratch("fresh");
+    // Opened to write, not created anew: what it held before is read.
+    let kept = "1.000001 openat(AT_FDCWD</>, \"/tmp/old\", O_RDWR|O_CREAT, 0600) = 3</tmp/old>\n\
+                1.000002 openat(AT_FDCWD</>, \"/tmp/old\", O_RDONLY) = 3</tmp/old>\n";
+    assert!(
+        refused(&root, kept)
+            .unwrap_or_default()
+            .contains("had not made")
+    );
+    for fresh in [
+        "O_WRONLY|O_CREAT|O_TRUNC",
+        "O_RDWR|O_CREAT|O_EXCL",
+        "O_RDWR|O_TMPFILE",
+    ] {
+        let trace = format!(
+            "1.000001 openat(AT_FDCWD</>, \"/tmp/new\", {fresh}, 0600) = 3</tmp/new>\n\
+             1.000002 openat(AT_FDCWD</>, \"/tmp/new\", O_RDONLY) = 3</tmp/new>\n"
+        );
+        assert_eq!(refused(&root, &trace), None, "{fresh}");
+    }
+    // Read before it was made, in another process.
+    let reader = "1.000001 openat(AT_FDCWD</>, \"/tmp/late\", O_RDONLY) = 3</tmp/late>\n";
+    let maker = "1.000009 openat(AT_FDCWD</>, \"/tmp/late\", O_WRONLY|O_CREAT|O_TRUNC, 0600) = 3</tmp/late>\n";
+    let directory = traces(
+        &root,
+        &[
+            (
+                100,
+                &format!("0.000001 clone(flags=SIGCHLD) = 101\n{reader}"),
+            ),
+            (101, maker),
+        ],
+    );
+    let traced = read_traces(&directory, &root, &context(&root)).unwrap();
+    assert!(traced.refused.unwrap_or_default().contains("had not made"));
+    // Under a directory the run made, a file is fresh.
+    let made_dir = "1.000001 mkdir(\"/tmp/d\", 0700) = 0\n\
+                    1.000002 openat(AT_FDCWD</>, \"/tmp/d/f\", O_RDONLY) = 3</tmp/d/f>\n";
+    assert_eq!(refused(&root, made_dir), None);
+    // /dev/shm is a temporary directory, not an excluded one.
+    let shm = "openat(AT_FDCWD</>, \"/dev/shm/x\", O_RDONLY) = 3</dev/shm/x>\n";
+    assert!(
+        refused(&root, shm)
+            .unwrap_or_default()
+            .contains("had not made")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn another_steps_outputs_are_refused_and_the_units_own_are_not_inputs() {
+    let root = scratch("outputs");
+    let r = root.display();
+    let other = format!(
+        "openat(AT_FDCWD<{r}>, \"target/debug/libx.rlib\", O_RDONLY) = 3<{r}/target/debug/libx.rlib>\n"
+    );
+    assert!(
+        refused(&root, &other)
+            .unwrap_or_default()
+            .contains("another step's output")
+    );
+    let own = format!(
+        "openat(AT_FDCWD<{r}>, \"target/check-unit/debug/liby.rlib\", O_RDONLY) = 3<{r}/target/check-unit/debug/liby.rlib>\n"
+    );
+    let directory = traces(&root, &[(100, &own)]);
+    let traced = read_traces(&directory, &root, &context(&root)).unwrap();
+    assert_eq!(traced.refused, None);
+    assert!(traced.inputs.is_empty());
+    let made = format!(
+        "1.1 openat(AT_FDCWD<{r}>, \"target/debug/z\", O_WRONLY|O_CREAT|O_TRUNC, 0644) = 3<{r}/target/debug/z>\n\
+         1.2 openat(AT_FDCWD<{r}>, \"target/debug/z\", O_RDONLY) = 3<{r}/target/debug/z>\n"
+    );
+    assert_eq!(refused(&root, &made), None);
+    let xtask = format!("execve(\"{r}/target/debug/xtask\", [\"xtask\"], 0x1 /* 1 vars */) = 0\n");
+    assert_eq!(refused(&root, &xtask), None);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_path_with_dotdot_is_judged_where_it_leads() {
+    let root = scratch("dotdot");
+    std::fs::create_dir_all(root.join("item")).unwrap();
+    std::fs::write(root.join("item/k.rs"), b"k").unwrap();
+    let escape = "access(\"/tmp/../ITEM\", R_OK) = 0\n"
+        .replace("/ITEM", &root.join("item/k.rs").display().to_string());
+    assert!(
+        refused(&root, &escape)
+            .unwrap_or_default()
+            .contains("certified item"),
+        "{escape}"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_record_of_another_unit_is_a_miss() {
+    let root = sample_root("other-unit");
+    let text = record_of(&root, &sample_trace(&root));
+    assert!(holds("unit", &text, &context(&root)).is_some());
+    assert_eq!(holds("another", &text, &context(&root)), None);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn the_item_list_fails_closed_when_a_crate_has_no_path() {
+    let root = scratch("item-list");
+    std::fs::create_dir_all(root.join("tools/common/data")).unwrap();
+    std::fs::write(
+        root.join("tools/common/data/certification-item.json"),
+        "{\n  \"crates\": {\n    \"members\": {\n      \"a\": {\n        \"path\": \"src/lib/a\",\n        \"ring\": \"item\"\n      }\n    }\n  }\n}\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("Cargo.toml"), "").unwrap();
+    assert!(item_paths(&root).is_err());
+    std::fs::remove_dir_all(root).unwrap();
 }

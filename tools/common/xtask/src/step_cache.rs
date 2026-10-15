@@ -80,7 +80,7 @@ const NEVER: &[&str] = &[];
 const EXCLUDED: &[(&str, &str)] = &[
     (
         "${TARGET}",
-        "the target directory: the steps' outputs, judged by cargo's own fingerprints",
+        "the unit's own target directory: its outputs, judged by cargo's own fingerprints",
     ),
     ("/proc", "the kernel's view of running processes"),
     ("/sys", "the kernel's view of devices"),
@@ -171,8 +171,20 @@ const ENVIRONMENT_IGNORED: &[&str] = &[
 ];
 
 /// Prefixes of environment variables left out, for the same reason.
-const ENVIRONMENT_IGNORED_PREFIXES: &[&str] =
-    &["ANTHROPIC_", "CLAUDE_", "OTEL_", "SSH_", "TMUX", "XDG_"];
+const ENVIRONMENT_IGNORED_PREFIXES: &[&str] = &[
+    "ANTHROPIC_",
+    "CLAUDE_",
+    "OTEL_",
+    "SSH_",
+    "TMUX",
+    "XDG_ACTIVATION",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_GREETER",
+    "XDG_MENU_PREFIX",
+    "XDG_SEAT",
+    "XDG_SESSION",
+    "XDG_VTNR",
+];
 
 /// Where the store is, or `None` when the cache is off: `on` keeps it in
 /// the target directory. A store shared between target directories (gate
@@ -199,7 +211,11 @@ pub(crate) enum Outcome {
 /// # Errors
 ///
 /// The unit failing.
-pub(crate) fn unit(name: &str, inline: impl FnOnce() -> Result<()>) -> Result<Outcome> {
+pub(crate) fn unit(
+    name: &str,
+    target: &Path,
+    inline: impl FnOnce() -> Result<()>,
+) -> Result<Outcome> {
     let Some(store) = store() else {
         inline()?;
         return Ok(Outcome::Ran);
@@ -214,9 +230,11 @@ pub(crate) fn unit(name: &str, inline: impl FnOnce() -> Result<()>) -> Result<Ou
         inline()?;
         return Ok(Outcome::Ran);
     }
-    let context = Context::once()?;
+    let mut context = Context::once()?.clone();
+    context.unit_target = absolute(target)?;
+    let context = &context;
     let directory = store.join(file_name(name));
-    if let Some((origin, inputs)) = lookup(&directory, context) {
+    if let Some((origin, inputs)) = lookup(name, &directory, context) {
         let flake = FLAKY_BUT_CACHED
             .iter()
             .find(|(unit, _)| *unit == name)
@@ -257,8 +275,20 @@ fn run_traced(name: &str, directory: &Path, context: &Context) -> Result<()> {
     let _ = std::fs::remove_dir_all(&traces);
     std::fs::create_dir_all(&traces)?;
     let status = Command::new("strace")
-        .args(["-ff", "-qq", "-y", "-s", "4096", "-e", "signal=none"])
-        .args(["-e", "trace=%file,%process,%network,chdir,fchdir"])
+        .args([
+            "-ff",
+            "-qq",
+            "-y",
+            "-ttt",
+            "-s",
+            "4096",
+            "-e",
+            "signal=none",
+        ])
+        .args([
+            "-e",
+            "trace=%file,%process,%network,chdir,fchdir,io_uring_setup,pidfd_getfd",
+        ])
         .arg("-o")
         .arg(traces.join("t"))
         .arg("--")
@@ -307,6 +337,13 @@ pub(crate) struct Context {
     origin: String,
     /// The certified item's paths, relative to the root, each ending in `/`.
     item: Vec<String>,
+    /// xtask's own binary, which every unit starts.
+    xtask: PathBuf,
+    /// The unit's own target directory, the one part of the target
+    /// directory whose files it may read without having made them.
+    unit_target: PathBuf,
+    /// `$XDG_RUNTIME_DIR`, a temporary directory like `/tmp`.
+    runtime: Option<PathBuf>,
 }
 
 /// This process's [`Context`], made once: xtask's own digest alone is a
@@ -342,6 +379,9 @@ impl Context {
             prelude: Vec::new(),
             origin: String::new(),
             item: Vec::new(),
+            xtask: std::env::current_exe()?,
+            unit_target: PathBuf::new(),
+            runtime: std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
         };
         let exe = std::fs::read(std::env::current_exe()?)?;
         context.prelude = vec![
@@ -388,7 +428,7 @@ impl Context {
             .iter()
             .map(|(root, why)| {
                 let path = root
-                    .replace("${TARGET}", &self.target.to_string_lossy())
+                    .replace("${TARGET}", &self.unit_target.to_string_lossy())
                     .replace("${RUSTUP_HOME}", &self.rustup_home.to_string_lossy())
                     .replace("${CARGO_HOME}", &self.cargo_home.to_string_lossy())
                     .replace("${HOME}", &self.home.to_string_lossy());
@@ -404,11 +444,28 @@ impl Context {
             .any(|(root, _)| path.starts_with(root))
     }
 
-    /// Whether `path` is the temporary directory or under it.
+    /// The temporary directories: what a unit finds in them is no input,
+    /// and it may read only what it made there.
+    fn temporaries(&self) -> Vec<&Path> {
+        let mut roots = vec![
+            self.temporary.as_path(),
+            Path::new("/tmp"),
+            Path::new("/var/tmp"),
+            Path::new("/dev/shm"),
+        ];
+        roots.extend(self.runtime.as_deref());
+        roots
+    }
+
+    /// Whether `path` is a temporary directory or under one.
     fn is_temporary(&self, path: &Path) -> bool {
-        path.starts_with(&self.temporary)
-            || path.starts_with("/tmp")
-            || path.starts_with("/var/tmp")
+        self.temporaries().iter().any(|root| path.starts_with(root))
+    }
+
+    /// Whether `path` is a temporary directory itself, which any unit may
+    /// look at.
+    fn is_temporary_root(&self, path: &Path) -> bool {
+        self.temporaries().contains(&path)
     }
 
     /// The toolchain directory `path` is in, when it is in one.
@@ -482,11 +539,22 @@ fn host_text() -> String {
             .to_owned()
     };
     let processors = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
+    // Which render devices there are: a GPU's tests take another path.
+    let mut gpus: Vec<String> = std::fs::read_dir("/dev/dri")
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    gpus.sort();
     format!(
-        "{}\n{}\n{}\n{processors}\n",
+        "{}\n{}\n{}\n{processors}\n{}\n",
         release.trim(),
         first("model name"),
-        first("flags")
+        first("flags"),
+        gpus.join(" ")
     )
 }
 
@@ -562,10 +630,12 @@ fn item_paths(root: &Path) -> Result<Vec<String>> {
     // in that order; the allow-list names packages, found in the
     // workspace manifest.
     let mut ring = "";
+    let mut kept = 0;
     for line in text.lines() {
         let line = line.trim();
         if let Some(value) = json_string(line, "ring") {
             ring = if value == "item" || value == "core" {
+                kept += 1;
                 "kept"
             } else {
                 ""
@@ -577,8 +647,22 @@ fn item_paths(root: &Path) -> Result<Vec<String>> {
             ring = "";
         }
     }
+    // Fail closed: every item or core crate's path found, or no cache
+    // (the consultant's C5, ledger 1494).
+    if item.len() != 2 + kept {
+        return Err(Error::new(format!(
+            "certification-item.json names {kept} item or core crates, and {} paths were read for them",
+            item.len() - 2
+        )));
+    }
     let manifest = std::fs::read_to_string(root.join("Cargo.toml"))?;
-    for package in allow_listed(&text) {
+    let allowed = allow_listed(&text);
+    if text.contains("\"infrastructure_allowlist\"") && allowed.is_empty() {
+        return Err(Error::new(
+            "certification-item.json has an infrastructure allow-list, and no crate was read from it",
+        ));
+    }
+    for package in allowed {
         let prefix = format!("{package} = {{ path = \"");
         if let Some(rest) = manifest
             .lines()
@@ -677,6 +761,22 @@ pub(crate) struct Call {
     pub(crate) error: Option<String>,
     /// The path a returned descriptor names (`= 3</path>`).
     pub(crate) returned_path: Option<String>,
+    /// When it was made, in microseconds, as `strace -ttt` stamps it; 0
+    /// for a line without a stamp.
+    pub(crate) time: u64,
+}
+
+/// A line's `strace -ttt` stamp, `<seconds>.<microseconds> `, taken off:
+/// the time in microseconds and the rest.
+fn stamp(line: &str) -> (u64, &str) {
+    if let Some((first, rest)) = line.split_once(' ')
+        && let Some((seconds, micros)) = first.split_once('.')
+        && let (Ok(seconds), Ok(micros)) = (seconds.parse::<u64>(), micros.parse::<u64>())
+        && micros < 1_000_000
+    {
+        return (seconds * 1_000_000 + micros, rest);
+    }
+    (0, line)
 }
 
 /// Parse one line, `None` for a line that is no call (a signal, an exit).
@@ -685,7 +785,7 @@ pub(crate) struct Call {
 ///
 /// A line that is a call but does not parse.
 pub(crate) fn parse_line(line: &str) -> std::result::Result<Option<Call>, String> {
-    let line = line.trim_end();
+    let (time, line) = stamp(line.trim_end());
     // `<detached ...>`: a thread that left in the middle of a call strace
     // could not name, as a process exits.
     if line.starts_with("+++")
@@ -743,6 +843,7 @@ pub(crate) fn parse_line(line: &str) -> std::result::Result<Option<Call>, String
         returned,
         error,
         returned_path,
+        time,
     }))
 }
 
@@ -978,7 +1079,6 @@ const IGNORED: &[&str] = &[
     "shutdown",
     "pidfd_open",
     "pidfd_send_signal",
-    "pidfd_getfd",
     "inotify_add_watch",
     "fanotify_mark",
 ];
@@ -1024,7 +1124,7 @@ fn merge_unfinished(text: &str) -> std::result::Result<Vec<String>, String> {
                 return Err("two calls unfinished at once in one thread".to_owned());
             }
             pending = Some(head.to_owned());
-        } else if line.starts_with("<... ") {
+        } else if stamp(line).1.starts_with("<... ") {
             let head = pending.take().ok_or("a resumed call that never started")?;
             let tail = line
                 .split_once("resumed>")
@@ -1080,13 +1180,20 @@ fn analyse(
             roots.len()
         ));
     };
-    // Twice: the first pass finds every temporary file the run made, in
-    // whichever process, so that the second judges a read of one by the
-    // whole run rather than by the order the processes are walked in.
-    let mut created: BTreeSet<PathBuf> = BTreeSet::new();
-    let mut traced = Traced::default();
-    for _ in 0..2 {
-        traced = Traced::default();
+    // Twice: the first pass finds every path the run made fresh and every
+    // socket it bound, in whichever process and when; the second judges each
+    // read against them, by the time strace stamped on each call.
+    let mut walk = Walk {
+        context,
+        traced: Traced::default(),
+        created: BTreeMap::new(),
+        bound: BTreeSet::new(),
+        judging: false,
+        now: 0,
+    };
+    for judging in [false, true] {
+        walk.traced = Traced::default();
+        walk.judging = judging;
         let mut queue = vec![(*first, root.to_path_buf())];
         let mut seen = BTreeSet::new();
         while let Some((pid, mut cwd)) = queue.pop() {
@@ -1094,329 +1201,440 @@ fn analyse(
                 continue;
             }
             let Some(calls) = parsed.get(&pid) else {
-                // A child that made no call this traces.
+                // A thread or child that made no call this traces.
                 continue;
             };
             for call in calls {
-                one_call(
-                    call,
-                    &mut cwd,
-                    context,
-                    &mut traced,
-                    &mut created,
-                    &mut queue,
-                )?;
+                walk.now = call.time;
+                walk.one_call(call, &mut cwd, &mut queue)?;
             }
         }
     }
-    Ok(traced)
+    Ok(walk.traced)
 }
 
-/// An `open`: a file or directory read, a file written, or a lookup that
-/// failed.
-fn on_open(
-    call: &Call,
-    path: &Path,
-    context: &Context,
-    traced: &mut Traced,
-    created: &mut BTreeSet<PathBuf>,
-) {
-    let writes = ["O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_TMPFILE"]
-        .iter()
-        .any(|flag| call.arguments.contains(flag));
-    if call.returned < 0 {
-        note_absent(context, traced, path, call);
-        return;
-    }
-    // A descriptor reopened through `/proc/self/fd` (cargo's
-    // jobserver) is a pipe or a socket, no file of any tree.
-    if call
-        .returned_path
-        .as_ref()
-        .is_some_and(|opened| !opened.starts_with('/'))
-    {
-        if !path.starts_with("/proc") && !path.starts_with("/dev") {
-            traced.refuse(format!(
-                "{} opened as {:?}",
-                path.display(),
-                call.returned_path
-            ));
+/// The analysis of one run's traces.
+struct Walk<'a> {
+    /// Where the run was.
+    context: &'a Context,
+    /// What it found.
+    traced: Traced,
+    /// Paths the run made fresh, by when (microseconds), in the first pass.
+    created: BTreeMap<PathBuf, u64>,
+    /// Unix socket addresses the run bound.
+    bound: BTreeSet<String>,
+    /// The second pass, which judges; the first only collects.
+    judging: bool,
+    /// The time of the call being looked at.
+    now: u64,
+}
+
+impl Walk<'_> {
+    /// Fold one call in.
+    fn one_call(
+        &mut self,
+        call: &Call,
+        cwd: &mut PathBuf,
+        queue: &mut Vec<(u32, PathBuf)>,
+    ) -> std::result::Result<(), String> {
+        let name = call.name.as_str();
+        let strings = strings(&call.arguments)?;
+        // The working directory, as strace names it on any `AT_FDCWD`.
+        if let Some((_, rest)) = call.arguments.split_once("AT_FDCWD<")
+            && let Some((directory, _)) = rest.split_once(">,").or_else(|| rest.split_once('>'))
+        {
+            *cwd = PathBuf::from(directory);
         }
-        return;
+        let paths: Vec<PathBuf> = strings
+            .iter()
+            .map(|(text, directory)| {
+                let base = directory
+                    .as_ref()
+                    .map_or_else(|| cwd.clone(), PathBuf::from);
+                joined(&base, text)
+            })
+            .collect();
+        let first = paths.first().cloned();
+        match name {
+            "clone" | "clone3" | "fork" | "vfork" => {
+                if call.returned > 0 {
+                    queue.push((
+                        u32::try_from(call.returned).map_err(|_| "a bad pid")?,
+                        cwd.clone(),
+                    ));
+                }
+            }
+            "chdir" => {
+                if let Some(path) = first {
+                    self.probe(&path, call, true);
+                    if call.returned == 0 {
+                        *cwd = path;
+                    }
+                }
+            }
+            "fchdir" => {
+                if call.returned == 0
+                    && let Some((_, rest)) = call.arguments.split_once('<')
+                    && let Some((directory, _)) = rest.rsplit_once('>')
+                {
+                    *cwd = PathBuf::from(directory);
+                }
+            }
+            "socket" | "bind" | "connect" | "sendto" | "sendmsg" | "sendmmsg"
+            | "io_uring_setup" | "pidfd_getfd" => self.network(call),
+            "open" | "openat" | "openat2" | "creat" => {
+                let Some(path) = first else {
+                    return Err(format!("an {name} without a path"));
+                };
+                self.open(call, &path);
+            }
+            "execve" | "execveat" => {
+                let Some(path) = first else {
+                    return Err(format!("an {name} without a path"));
+                };
+                if call.returned < 0 {
+                    self.absent(&path, call);
+                } else {
+                    for program in std::iter::once(path.clone()).chain(interpreters(&path)) {
+                        self.read(&program, Input::File(program.clone()));
+                    }
+                }
+            }
+            "readlink" | "readlinkat" => {
+                let Some(path) = first else {
+                    return Err(format!("a {name} without a path"));
+                };
+                if call.returned < 0 {
+                    self.absent(&path, call);
+                } else {
+                    self.read(&path, Input::Link(path.clone()));
+                }
+            }
+            _ if PROBES.contains(&name) => {
+                // An empty path with AT_EMPTY_PATH is a descriptor's, already
+                // recorded when it was opened.
+                if let Some(path) = first
+                    && !strings.first().is_some_and(|(text, _)| text.is_empty())
+                {
+                    let follow = !call.arguments.contains("AT_SYMLINK_NOFOLLOW") && name != "lstat";
+                    self.probe(&path, call, follow);
+                }
+            }
+            _ if WRITES.contains(&name) => self.change(call, &paths),
+            _ if IGNORED.contains(&name) => {}
+            // A number Linux does not know (Ferrix's own calls, which a host
+            // test may try): it failed, and did nothing.
+            _ if name.starts_with("syscall_0x") && call.returned < 0 => {}
+            _ => self.refuse(format!("a call this does not know: {name}")),
+        }
+        Ok(())
     }
-    let opened = call
-        .returned_path
-        .as_ref()
-        .map_or_else(|| path.to_path_buf(), PathBuf::from);
-    if writes {
-        note_write(context, traced, created, &opened);
-    } else if call.arguments.contains("O_DIRECTORY") || opened.is_dir() {
-        note_read(
-            context,
-            traced,
-            created,
-            &opened,
-            Input::Directory(opened.clone()),
-        );
-    } else {
-        note_read(
-            context,
-            traced,
-            created,
-            &opened,
-            Input::File(opened.clone()),
-        );
-    }
-}
 
-/// A call that changes the file system, or tried to: `paths` are its
-/// string arguments as paths.
-fn on_write(
-    call: &Call,
-    paths: &[PathBuf],
-    context: &Context,
-    traced: &mut Traced,
-    created: &mut BTreeSet<PathBuf>,
-) {
-    // A symbolic link's first string is what it points to, which is text,
-    // not a path written.
-    let first = usize::from(matches!(call.name.as_str(), "symlink" | "symlinkat"));
-    for path in paths.iter().skip(first) {
+    /// The calls of sockets and of descriptors taken from elsewhere: a
+    /// socket of the network, or a Unix one the run did not bind, is a
+    /// process this trace does not see.
+    fn network(&mut self, call: &Call) {
+        let name = call.name.as_str();
+        match name {
+            "socket" => {
+                let domain = call.arguments.split(',').next().unwrap_or_default().trim();
+                if call.returned >= 0 && domain != "AF_UNIX" && domain != "AF_LOCAL" {
+                    self.refuse(format!("it opened a {domain} socket"));
+                }
+            }
+            "bind" => {
+                if call.returned == 0
+                    && let Some(address) = unix_address(&call.arguments)
+                {
+                    let _ = self.bound.insert(address);
+                }
+            }
+            "connect" | "sendto" | "sendmsg" | "sendmmsg" => {
+                // Talking to a socket the run did not bind is reading from
+                // a process this trace does not see.
+                // A socket bound under a name of its own and renamed into
+                // place (the compositor's) is the run's too.
+                if call.returned >= 0
+                    && let Some(address) = unix_address(&call.arguments)
+                    && !self.bound.contains(&address)
+                    && !(address.starts_with('/') && self.made_before_now(Path::new(&address)))
+                {
+                    self.refuse(format!(
+                        "it talked to the socket {address}, which it did not bind"
+                    ));
+                }
+            }
+            "io_uring_setup" | "pidfd_getfd" if call.returned >= 0 => {
+                self.refuse(format!("it called {name}, whose reads this cannot trace"));
+            }
+            _ => {}
+        }
+    }
+
+    /// Refuse to record, in the judging pass.
+    fn refuse(&mut self, why: String) {
+        if self.judging {
+            self.traced.refuse(why);
+        }
+    }
+
+    /// Remember that `path` was made fresh now, in the first pass.
+    fn made(&mut self, path: &Path) {
+        if !self.judging {
+            let at = self.created.entry(path.to_path_buf()).or_insert(self.now);
+            *at = (*at).min(self.now);
+        }
+    }
+
+    /// Whether `path`, or a directory above it, was made fresh no later
+    /// than now.
+    fn made_before_now(&self, path: &Path) -> bool {
+        path.ancestors()
+            .any(|above| self.created.get(above).is_some_and(|at| *at <= self.now))
+    }
+
+    /// An `open`: a file or directory read, a file written, or a lookup
+    /// that failed.
+    fn open(&mut self, call: &Call, path: &Path) {
+        let flag =
+            |flag: &str| call.arguments.contains(flag) || call.name == "creat" && flag == "O_TRUNC";
+        let writes = ["O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_TMPFILE"]
+            .iter()
+            .any(|name| flag(name));
         if call.returned < 0 {
-            // A change that did not happen -- a mkdir of a directory
-            // already there -- only looked the path up.
-            note_absent(context, traced, path, call);
-        } else {
-            note_write(context, traced, created, path);
+            self.absent(path, call);
+            return;
         }
-    }
-}
-
-/// Fold one call into `traced`.
-fn one_call(
-    call: &Call,
-    cwd: &mut PathBuf,
-    context: &Context,
-    traced: &mut Traced,
-    created: &mut BTreeSet<PathBuf>,
-    queue: &mut Vec<(u32, PathBuf)>,
-) -> std::result::Result<(), String> {
-    let name = call.name.as_str();
-    let strings = strings(&call.arguments)?;
-    // The working directory, as strace names it on any `AT_FDCWD`.
-    if let Some((_, rest)) = call.arguments.split_once("AT_FDCWD<")
-        && let Some((directory, _)) = rest.split_once(">,").or_else(|| rest.split_once('>'))
-    {
-        *cwd = PathBuf::from(directory);
-    }
-    let path_of = |index: usize| -> Option<PathBuf> {
-        strings.get(index).map(|(text, directory)| {
-            let base = directory
-                .as_ref()
-                .map_or_else(|| cwd.clone(), PathBuf::from);
-            joined(&base, text)
-        })
-    };
-    match name {
-        "clone" | "clone3" | "fork" | "vfork" => {
-            if call.returned > 0 {
-                queue.push((
-                    u32::try_from(call.returned).map_err(|_| "a bad pid")?,
-                    cwd.clone(),
+        // A descriptor reopened through `/proc/self/fd` (cargo's jobserver)
+        // is a pipe or a socket, no file of any tree.
+        if call
+            .returned_path
+            .as_ref()
+            .is_some_and(|opened| !opened.starts_with('/'))
+        {
+            if !path.starts_with("/proc") && !path.starts_with("/dev") {
+                self.refuse(format!(
+                    "{} opened as {:?}",
+                    path.display(),
+                    call.returned_path
                 ));
             }
+            return;
         }
-        "chdir" => {
-            if let Some(path) = path_of(0) {
-                note_probe(context, traced, created, &path, call, true);
-                if call.returned == 0 {
-                    *cwd = path;
-                }
+        let opened = call
+            .returned_path
+            .as_ref()
+            .map_or_else(|| path.to_path_buf(), PathBuf::from);
+        if writes {
+            // Fresh contents only when the call guarantees them: a new file
+            // (O_EXCL, O_TMPFILE) or one emptied (O_TRUNC).
+            if flag("O_EXCL") || flag("O_TMPFILE") || flag("O_TRUNC") {
+                self.made(&opened);
             }
+            self.write(&opened);
+        } else if call.arguments.contains("O_DIRECTORY") || opened.is_dir() {
+            self.read(&opened, Input::Directory(opened.clone()));
+        } else {
+            self.read(&opened, Input::File(opened.clone()));
         }
-        "fchdir" => {
-            if call.returned == 0
-                && let Some((_, rest)) = call.arguments.split_once('<')
-                && let Some((directory, _)) = rest.rsplit_once('>')
-            {
-                *cwd = PathBuf::from(directory);
-            }
-        }
-        "socket" => {
-            let domain = call.arguments.split(',').next().unwrap_or_default().trim();
-            if call.returned >= 0 && domain != "AF_UNIX" && domain != "AF_LOCAL" {
-                traced.refuse(format!("it opened a {domain} socket"));
-            }
-        }
-        "open" | "openat" | "openat2" => {
-            let Some(path) = path_of(0) else {
-                return Err(format!("an {name} without a path"));
-            };
-            on_open(call, &path, context, traced, created);
-        }
-        "execve" | "execveat" => {
-            let Some(path) = path_of(0) else {
-                return Err(format!("an {name} without a path"));
-            };
+    }
+
+    /// A call that changes the file system, or tried to: `paths` are its
+    /// string arguments as paths.
+    fn change(&mut self, call: &Call, paths: &[PathBuf]) {
+        // A symbolic link's first string is what it points to, which is
+        // text, not a path written.
+        let name = call.name.as_str();
+        let first = usize::from(matches!(name, "symlink" | "symlinkat"));
+        for path in paths.iter().skip(first) {
             if call.returned < 0 {
-                note_absent(context, traced, &path, call);
+                // A change that did not happen -- a mkdir of a directory
+                // already there -- only looked the path up.
+                self.absent(path, call);
             } else {
-                for program in std::iter::once(path.clone()).chain(interpreters(&path)) {
-                    note_read(
-                        context,
-                        traced,
-                        created,
-                        &program,
-                        Input::File(program.clone()),
-                    );
-                }
+                self.write(path);
             }
         }
-        "readlink" | "readlinkat" => {
-            let Some(path) = path_of(0) else {
-                return Err(format!("a {name} without a path"));
+        // What a successful call makes new: a directory, a node, and the
+        // target of a rename or a link.
+        if call.returned >= 0 {
+            let fresh = match name {
+                "mkdir" | "mkdirat" | "mknod" | "mknodat" | "rename" | "renameat" | "renameat2"
+                | "link" | "linkat" | "symlink" | "symlinkat" => paths.last(),
+                _ => None,
             };
-            if call.returned < 0 {
-                note_absent(context, traced, &path, call);
-            } else {
-                note_read(context, traced, created, &path, Input::Link(path.clone()));
+            if let Some(path) = fresh {
+                self.made(path);
             }
         }
-        _ if PROBES.contains(&name) => {
-            // An empty path with AT_EMPTY_PATH is a descriptor's, already
-            // recorded when it was opened.
-            if let Some(path) = path_of(0)
-                && !strings.first().is_some_and(|(text, _)| text.is_empty())
+    }
+
+    /// The path the roots are judged by: where it leads now, or, gone,
+    /// with `..` taken away lexically, so that `..` or a link cannot carry
+    /// a path out of a root it seems to be in.
+    fn real(path: &Path) -> PathBuf {
+        let lexical = lexical(path);
+        // /proc's links name the process that looks, which is not the
+        // unit's but this one: they are judged as written.
+        if lexical.starts_with("/proc") || lexical.starts_with("/dev/fd") {
+            return lexical;
+        }
+        std::fs::canonicalize(path).unwrap_or(lexical)
+    }
+
+    /// A path read: recorded, unless excluded; refused when it is the
+    /// item's, a temporary file the run had not made yet, or another
+    /// step's outputs.
+    fn read(&mut self, path: &Path, input: Input) {
+        if !self.judging {
+            return;
+        }
+        if not_utf8(&mut self.traced, path) {
+            return;
+        }
+        let real = Self::real(path);
+        if let Some(item) = self
+            .context
+            .item_path(&real)
+            .or_else(|| self.context.item_path(path))
+        {
+            self.traced
+                .refuse(format!("it read the certified item ({item})"));
+            return;
+        }
+        if self.context.is_temporary(&real) {
+            if !self.context.is_temporary_root(&real)
+                && !self.made_before_now(path)
+                && !self.made_before_now(&real)
             {
-                let follow = !call.arguments.contains("AT_SYMLINK_NOFOLLOW") && name != "lstat";
-                note_probe(context, traced, created, &path, call, follow);
+                self.traced
+                    .refuse(format!("it read {}, which it had not made", path.display()));
+            }
+            return;
+        }
+        if self.context.is_excluded(&real) {
+            return;
+        }
+        if real.starts_with(&self.context.target) {
+            // xtask itself, in the prelude; and what the run made.
+            if real == self.context.xtask
+                || self.made_before_now(path)
+                || self.made_before_now(&real)
+            {
+                return;
+            }
+            // A lookup there -- the dynamic loader's search of the
+            // directories cargo puts on LD_LIBRARY_PATH -- is an input like
+            // any other; reading another step's outputs is not recorded.
+            if !matches!(input, Input::Probe(..)) {
+                self.traced
+                    .refuse(format!("it read {}, another step's output", path.display()));
+                return;
             }
         }
-        _ if WRITES.contains(&name) => {
-            let paths: Vec<PathBuf> = (0..strings.len()).filter_map(path_of).collect();
-            on_write(call, &paths, context, traced, created);
+        let _ = self.traced.inputs.insert(input);
+    }
+
+    /// A path looked up.
+    fn probe(&mut self, path: &Path, call: &Call, follow: bool) {
+        if call.returned < 0 {
+            self.absent(path, call);
+        } else {
+            self.read(path, Input::Probe(path.to_path_buf(), follow));
         }
-        _ if IGNORED.contains(&name) => {}
-        // A number Linux does not know (Ferrix's own calls, which a host
-        // test may try): it failed, and did nothing.
-        _ if name.starts_with("syscall_0x") && call.returned < 0 => {}
-        _ => traced.refuse(format!("a call this does not know: {name}")),
     }
-    Ok(())
-}
 
-/// A path read: recorded, unless excluded; refused when it is the item's,
-/// or a temporary file the unit did not make.
-fn note_read(
-    context: &Context,
-    traced: &mut Traced,
-    created: &BTreeSet<PathBuf>,
-    path: &Path,
-    input: Input,
-) {
-    if not_utf8(traced, path) {
-        return;
-    }
-    if let Some(item) = context.item_path(path) {
-        traced.refuse(format!("it read the certified item ({item})"));
-        return;
-    }
-    if context.is_temporary(path) {
-        if path != Path::new("/tmp") && path != context.temporary && !made_here(created, path) {
-            traced.refuse(format!("it read {}, which it did not make", path.display()));
+    /// A lookup that failed: the path, absent, is an input as much as a
+    /// file.
+    fn absent(&mut self, path: &Path, call: &Call) {
+        if !self.judging || not_utf8(&mut self.traced, path) {
+            return;
         }
-        return;
-    }
-    if context.is_excluded(path) {
-        return;
-    }
-    let _ = traced.inputs.insert(input);
-}
-
-/// A path looked up.
-fn note_probe(
-    context: &Context,
-    traced: &mut Traced,
-    created: &BTreeSet<PathBuf>,
-    path: &Path,
-    call: &Call,
-    follow: bool,
-) {
-    if call.returned < 0 {
-        note_absent(context, traced, path, call);
-    } else {
-        note_read(
-            context,
-            traced,
-            created,
-            path,
-            Input::Probe(path.to_path_buf(), follow),
-        );
-    }
-}
-
-/// A lookup that failed: the path, absent, is an input as much as a file.
-fn note_absent(context: &Context, traced: &mut Traced, path: &Path, call: &Call) {
-    if not_utf8(traced, path) {
-        return;
-    }
-    if context.is_temporary(path) || context.is_excluded(path) {
-        return;
-    }
-    if let Some(item) = context.item_path(path) {
-        traced.refuse(format!(
-            "it looked up a path of the certified item ({item})"
-        ));
-        return;
-    }
-    match call.error.as_deref() {
-        Some("ENOENT" | "ENOTDIR") => {
-            let _ = traced.inputs.insert(Input::Probe(
-                path.to_path_buf(),
-                !call.arguments.contains("AT_SYMLINK_NOFOLLOW"),
+        let real = Self::real(path);
+        if self.context.is_temporary(&real) || self.context.is_excluded(&real) {
+            return;
+        }
+        if let Some(item) = self
+            .context
+            .item_path(&real)
+            .or_else(|| self.context.item_path(path))
+        {
+            self.traced.refuse(format!(
+                "it looked up a path of the certified item ({item})"
             ));
+            return;
         }
-        // Failures that say nothing about the path: a call the kernel
-        // lacks, an interrupted one, an executable bit being looked for.
-        // EINVAL from readlink: the path is no link, which its type says.
-        Some(
-            "ENOSYS" | "EINTR" | "EAGAIN" | "EACCES" | "EPERM" | "ENXIO" | "ENODATA" | "EOPNOTSUPP"
-            | "ENOEXEC" | "ELOOP" | "EISDIR" | "EINVAL" | "EEXIST" | "ENOTEMPTY" | "EXDEV"
-            | "EBUSY",
-        ) => {
-            let _ = traced.inputs.insert(Input::Probe(
-                path.to_path_buf(),
-                !call.arguments.contains("AT_SYMLINK_NOFOLLOW"),
-            ));
+        match call.error.as_deref() {
+            // Absent, or failures that say nothing more than the path's
+            // state does, which the record keeps: a call the kernel lacks,
+            // an interrupted one, an executable bit looked for, readlink's
+            // EINVAL on what is no link, a mkdir of what exists.
+            Some(
+                "ENOENT" | "ENOTDIR" | "ENOSYS" | "EINTR" | "EAGAIN" | "EACCES" | "EPERM" | "ENXIO"
+                | "ENODATA" | "EOPNOTSUPP" | "ENOEXEC" | "ELOOP" | "EISDIR" | "EINVAL" | "EEXIST"
+                | "ENOTEMPTY" | "EXDEV" | "EBUSY",
+            ) => {
+                let _ = self.traced.inputs.insert(Input::Probe(
+                    path.to_path_buf(),
+                    !call.arguments.contains("AT_SYMLINK_NOFOLLOW"),
+                ));
+            }
+            other => self.traced.refuse(format!(
+                "{} on {} failed with {}",
+                call.name,
+                path.display(),
+                other.unwrap_or("no error name")
+            )),
         }
-        other => traced.refuse(format!(
-            "{} on {} failed with {}",
-            call.name,
-            path.display(),
-            other.unwrap_or("no error name")
-        )),
+    }
+
+    /// A path written: allowed in the target directory, the temporary
+    /// directories and `/dev` (and the excluded caches), refused anywhere
+    /// else.
+    fn write(&mut self, path: &Path) {
+        if !self.judging || not_utf8(&mut self.traced, path) {
+            return;
+        }
+        let real = Self::real(path);
+        if self.context.is_temporary(&real)
+            || self.context.is_excluded(&real)
+            || real.starts_with(&self.context.target)
+        {
+            return;
+        }
+        self.traced.refuse(format!("it wrote {}", path.display()));
     }
 }
 
-/// A path written: allowed in the target directory, the temporary
-/// directory and `/dev` (and the excluded caches), refused anywhere else.
-fn note_write(
-    context: &Context,
-    traced: &mut Traced,
-    created: &mut BTreeSet<PathBuf>,
-    path: &Path,
-) {
-    if not_utf8(traced, path) {
-        return;
+/// `path` with `.` and `..` taken away lexically.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                let _ = out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
     }
-    if context.is_temporary(path) {
-        let _ = created.insert(path.to_path_buf());
-        return;
+    out
+}
+
+/// The Unix socket address in a call's arguments: `sun_path="/run/x"`, or
+/// an abstract one, `sun_path=@"name"`.
+fn unix_address(arguments: &str) -> Option<String> {
+    if !arguments.contains("AF_UNIX") {
+        return None;
     }
-    if context.is_excluded(path) {
-        return;
-    }
-    traced.refuse(format!("it wrote {}", path.display()));
+    let (_, rest) = arguments.split_once("sun_path=")?;
+    let (abstract_name, rest) = match rest.strip_prefix('@') {
+        Some(rest) => ("@", rest),
+        None => ("", rest),
+    };
+    let rest = rest.strip_prefix('"')?;
+    let (text, _) = unquote(rest.as_bytes(), 0).ok()?;
+    Some(format!("{abstract_name}{text}"))
 }
 
 /// Whether `path` came from a string that is not UTF-8, refusing the
@@ -1427,11 +1645,6 @@ fn not_utf8(traced: &mut Traced, path: &Path) -> bool {
         return true;
     }
     false
-}
-
-/// Whether `path` is, or is under, a path the unit made.
-fn made_here(created: &BTreeSet<PathBuf>, path: &Path) -> bool {
-    created.iter().any(|made| path.starts_with(made))
 }
 
 /// The programs the kernel starts `program` with without the program
@@ -1567,7 +1780,10 @@ fn state_of(input: &Input) -> std::result::Result<String, String> {
                 std::fs::symlink_metadata(path)
             };
             let what = match metadata {
-                Ok(metadata) if metadata.is_file() => format!("file:{}", metadata.len()),
+                // A file looked up is kept by its bytes, not its size: cargo
+                // stats a warm build's sources and never opens them, and an
+                // edit can keep a size (the consultant's B1, ledger 1494).
+                Ok(metadata) if metadata.is_file() => format!("file:{}", file_digest(path)?),
                 Ok(metadata) => kind_letter(metadata.file_type()).to_owned(),
                 Err(error) => match error.raw_os_error() {
                     Some(code) => format!("error:{code}"),
@@ -1750,7 +1966,7 @@ fn records(directory: &Path) -> Vec<(SystemTime, PathBuf)> {
 
 /// The origin and input count of the first record in `directory` whose
 /// every line holds now.
-fn lookup(directory: &Path, context: &Context) -> Option<(String, usize)> {
+fn lookup(name: &str, directory: &Path, context: &Context) -> Option<(String, usize)> {
     for (modified, path) in records(directory) {
         if SystemTime::now()
             .duration_since(modified)
@@ -1763,7 +1979,7 @@ fn lookup(directory: &Path, context: &Context) -> Option<(String, usize)> {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        if let Some(found) = holds(&text, context) {
+        if let Some(found) = holds(name, &text, context) {
             return Some(found);
         }
     }
@@ -1772,12 +1988,14 @@ fn lookup(directory: &Path, context: &Context) -> Option<(String, usize)> {
 
 /// Whether every line of the record `text` holds now: its origin and how
 /// many inputs it checked, or `None`.
-pub(crate) fn holds(text: &str, context: &Context) -> Option<(String, usize)> {
+pub(crate) fn holds(name: &str, text: &str, context: &Context) -> Option<(String, usize)> {
     let mut lines = text.lines();
     if lines.next()? != MAGIC {
         return None;
     }
-    let _unit = lines.next()?.strip_prefix("unit ")?;
+    if lines.next()?.strip_prefix("unit ")? != name {
+        return None;
+    }
     let origin = lines.next()?.strip_prefix("origin ")?.to_owned();
     for expected in &context.prelude {
         if lines.next()? != expected {

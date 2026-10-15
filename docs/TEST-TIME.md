@@ -904,40 +904,48 @@ the compositor's, init's, auth's, pkg's, the installer's, media's, adbd's,
 nvos's and every app's -- a unit that is skipped when a run that passed read
 exactly the inputs it would read now (`tools/common/xtask/src/step_cache.rs`
 says how, `docs/certification/TOOLS.md` says what it shall and shall not
-do). On a miss the unit runs under `strace -ff` as `cargo xtask check-unit`;
-when it passes, the record keeps every file it read, directory it listed,
-path it looked up and program it ran, with xtask's digest, the environment,
-the toolchains, the kernel release and the processor. The log says `ran,
-recorded` or `cached pass from <time> on <commit>, <target directory>` for
-each unit, and counts both. loom (the kernel's orderings) and every step of
-the main workspace stay uncached: they read the certified item (the
-certification consultant, ledger lines 1447 and 1461).
+do). On a miss the unit runs under `strace -ff -ttt` as `cargo xtask
+check-unit`; when it passes, the record keeps the contents of every file it
+read or looked up, every directory it listed, every other path it looked up
+and every program it ran, with xtask's digest, the environment, the
+toolchains, the kernel release, the processor and the render devices. A unit
+that talks to a process the trace does not see (a network socket, a Unix
+socket it did not bind), reads a temporary file it had not made fresh, or
+reads another step's outputs is run and not recorded. The log says `ran,
+recorded`, `ran, not recorded: <why>` or `cached pass from <time> on
+<commit>, <target directory>` for each unit, and counts both. loom (the
+kernel's orderings) and every step of the main workspace stay uncached: they
+read the certified item (the certification consultant, ledger lines 1447,
+1461 and 1494).
 
 **It is off unless asked for**, and release runs and the baseline keep it
 off: a gate turns it on only once its end-to-end control has fired through
-`gate.sh`'s host-side control mode (proposed with the pool's T1/T2).
+`gate.sh`'s host-side control mode (proposed with the pool's T1/T2,
+`~/.local/share/ferrix/fleet/gate.sh.proposed-bsb`).
 
 `cargo xtask check-side` in one worktree and target directory, at a load of
-about 20:
+about 20 to 30:
 
 | Run | Wall |
 |---|---:|
 | Warm, unchanged tree, no cache | 65.8 s |
-| First run with the cache, recording all 25 units | 93.8 s (strace cost nothing measurable: the compositor's unit 42.9 s traced, 47.5 s plain) |
-| Warm, unchanged tree, every unit a cached pass | **3.7 s** |
-| After a kernel edit (no unit reads `src/kernel/`) | every unit a cached pass |
+| First run with the cache, recording | 108.9 s |
+| Warm, unchanged tree, cached | **52.4 s**: 24 units cached passes, the compositor's run |
+| The same with the compositor cached too (before the code review's fixes) | 3.7 s |
 
-In the pool, these units are `check`'s critical path: 110 s (median, a
-warm slot on the same tree), 273 s and 537 s (new trees). With them cached,
-`check` takes as long as its main workspace's steps.
+**The compositor is not recorded on nazuna**: its GPU test starts
+`virgl_test_server --use-egl-surfaceless`, which connects to the system
+D-Bus (`/run/dbus/system_bus_socket`), a process the trace cannot see, so
+the unit runs every time. It is the largest unit (39 s of the 110 s in the
+pool's warm median); the other 24 together took the rest.
 
 **Controls.** A broken assertion in hyprix's `plane.rs` after a cached pass:
-the compositor's unit missed, ran, and failed the run with the test's
-failure; with the file restored, every unit was a cached pass again. Each
-of the cache's checks sabotaged in turn (a file's digest, a listing's, a
-looked-up path's kind and size, the prelude, the toolchains, an unreadable
-input, the item refusal) fails the unit tests that hold it, eleven
-invalidations in all.
+the compositor's unit missed, ran, and failed the run. A same-size edit of
+`src/lib/init/restart/src/lib.rs` (a type renamed to a name of its length),
+a file init's unit only looks up on a warm build: init missed, ran, and
+failed the run with the compile error; with the file restored, every
+recorded unit was a cached pass again. Each of the cache's 15 checks
+sabotaged in turn fails the unit tests that hold it.
 
 ## Next
 
