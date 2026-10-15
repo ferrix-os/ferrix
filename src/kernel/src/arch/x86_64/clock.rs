@@ -137,6 +137,9 @@ const BY_HPET: &str = "TSC, calibrated against the HPET";
 const BY_KVM: &str = "TSC, vouched for and rated by KVM's paravirtual clock";
 /// What row 3 answers.
 const BY_PIT: &str = "TSC";
+/// The TSC at the rate `CPUID` leaves 0x15/0x16 report, for a machine whose
+/// PIT did not answer: Alder Lake and later may gate the 8254 off entirely.
+const BY_CPUID: &str = "TSC, at the rate CPUID leaf 0x15/0x16 reports";
 /// What row 4 answers.
 const THE_HPET: &str = "HPET";
 /// What row 5 answers.
@@ -267,8 +270,25 @@ pub(super) enum Source {
 /// everything from the scheduler up would be built on a guess.
 pub(crate) fn init(acpi: &Acpi<'_, DirectMap>) -> Result<&'static str, &'static str> {
     let hpet = match hpet_address(acpi) {
-        Some(phys) => Some(open_hpet(phys)?),
-        None => None,
+        Some(phys) => {
+            crate::console::println!("  clock    opening the HPET at {phys:#x}");
+            match open_hpet(phys) {
+                Ok(opened) => Some(opened),
+                // Firmware describing a timer block it left powered down or
+                // gated is a real machine's trap, not a reason to stop the
+                // boot: carry on as a machine with no HPET would.
+                Err(why) => {
+                    crate::console::println!(
+                        "  clock    WARNING: {why}; going on as if there were no HPET"
+                    );
+                    None
+                }
+            }
+        }
+        None => {
+            crate::console::println!("  clock    firmware describes no HPET");
+            None
+        }
     };
     let invariant = invariant_tsc();
     let kvm = if invariant {
@@ -684,7 +704,10 @@ fn calibrate_tsc_against_hpet(regs: Mmio, hpet_hz: u64, mask: u64) -> Option<u64
         }
         spins = spins.saturating_add(1);
         // As `calibrate_tsc`: a counter that stops is not one to hang on.
-        if spins > 200_000_000 {
+        // Three device reads a spin, each up to a microsecond on real
+        // hardware: twenty million is a minute at the very worst, where ten
+        // milliseconds of a live counter is some thousands of spins.
+        if spins > 20_000_000 {
             return None;
         }
     };
@@ -695,9 +718,45 @@ fn calibrate_tsc_against_hpet(regs: Mmio, hpet_hz: u64, mask: u64) -> Option<u64
 
 /// Measure the TSC against the PIT and use that.
 fn start_tsc() -> Result<&'static str, &'static str> {
-    let hz = calibrate_tsc().ok_or("no HPET, and the PIT did not answer")?;
+    crate::console::println!("  clock    measuring the TSC against PIT channel 2 (bounded)");
+    if let Some(hz) = calibrate_tsc() {
+        COUNTER_HZ.store(hz, Ordering::Relaxed);
+        return Ok(BY_PIT);
+    }
+    crate::console::println!(
+        "  clock    WARNING: PIT channel 2 never reached terminal count (gated 8254?);          asking CPUID leaf 0x15/0x16 for the TSC's rate"
+    );
+    let hz = cpuid_tsc_hz().ok_or("no HPET, the PIT did not answer, and CPUID reports no TSC rate")?;
     COUNTER_HZ.store(hz, Ordering::Relaxed);
-    Ok(BY_PIT)
+    Ok(BY_CPUID)
+}
+
+/// The TSC's rate as the processor itself reports it, the way Linux's
+/// `native_calibrate_tsc` reads it: leaf 0x15's crystal times its ratio, or,
+/// where the crystal is not enumerated, leaf 0x16's base frequency.
+fn cpuid_tsc_hz() -> Option<u64> {
+    use core::arch::x86_64::__cpuid;
+    let highest = __cpuid(0).eax;
+    if highest < 0x15 {
+        return None;
+    }
+    let tsc = __cpuid(0x15);
+    let (denominator, numerator, crystal) =
+        (u64::from(tsc.eax), u64::from(tsc.ebx), u64::from(tsc.ecx));
+    let base_hz = if highest >= 0x16 {
+        u64::from(__cpuid(0x16).eax & 0xFFFF) * 1_000_000
+    } else {
+        0
+    };
+    if denominator != 0 && numerator != 0 && crystal != 0 {
+        return Some(crystal * numerator / denominator);
+    }
+    // No crystal: leaf 0x16's base frequency is the TSC's on every part
+    // that reports it (Linux derives the crystal from it the same way).
+    if base_hz != 0 {
+        return Some(base_hz);
+    }
+    None
 }
 
 /// Whether channel 2's output is high, meaning it reached terminal count.
@@ -733,9 +792,14 @@ fn calibrate_tsc() -> Option<u64> {
     let mut spins = 0u32;
     while !pit_finished() {
         spins = spins.saturating_add(1);
-        // About a second of spinning on any real CPU. A PIT that never
-        // finishes is a machine that cannot be calibrated, not one to hang on.
-        if spins > 200_000_000 {
+        // A read of port 0x61 takes about a microsecond on real hardware,
+        // so ten milliseconds is some ten thousand spins and five million
+        // is a few seconds. A PIT that never finishes -- gated off, as
+        // Alder Lake and later may leave the 8254 -- is a machine that
+        // cannot be calibrated this way, not one to hang on.
+        if spins > 5_000_000 {
+            // SAFETY: (DEVICE) put port 0x61 back exactly as it was found.
+            unsafe { cpu::outb(PIT_GATE, saved) };
             return None;
         }
     }
