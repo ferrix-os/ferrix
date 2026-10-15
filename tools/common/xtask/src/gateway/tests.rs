@@ -1328,9 +1328,16 @@ fn probes_a_shut_window_and_resumes_when_it_opens() {
         Some((stream.expected, 1)),
         "a window that stays shut is probed again, at the same place"
     );
+    // Measured from `shut`, which comes before the gateway saw the window
+    // shut: the first probe went at least `persist` after that and the second
+    // at least twice that after the first. From `first_at` instead, any delay
+    // in noticing the first probe shortened the gap (399.996 ms of 400 under
+    // load, bsb-mp2-check, 2026-10-15); without the doubling the second comes
+    // at `persist * 2` and still fails here.
     assert!(
-        second_at.duration_since(first_at) >= persist * 2,
-        "after twice as long: {:?}",
+        second_at.duration_since(shut) >= persist * 3,
+        "after twice as long: {:?} after the shut, {:?} after the first",
+        second_at.duration_since(shut),
         second_at.duration_since(first_at)
     );
 
