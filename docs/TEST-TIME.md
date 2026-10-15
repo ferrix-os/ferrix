@@ -476,6 +476,146 @@ a run with C: under 20 GB; then a cold and a warm `check` measured to
 the end. Not done: a retry when WSL fails to start a program, which
 would also hide a real failure, so it waits until the disk is ruled out.
 
+## The pool at saturation, 2026-10-14/15 (gate-throughput-1015)
+
+About ten agents queued gates through `gate.sh` overnight. Read from
+`logs/queue/pool-summary`, 2026-10-14T22:00:59Z to 2026-10-15T01:00:48Z:
+177 runs, each matched to its log (all 177 matched on commit and run length),
+whose header gives the tree, the slot, the load and the free space at the
+start, and whose output gives the crates compiled. The host was sampled
+with `vmstat 5` and `/proc/pressure` for two minutes at 01:03Z. The scripts,
+the parsed runs and the sample are in
+`~/.local/share/ferrix/logs/gate-throughput-1015/`.
+
+### Where the time goes
+
+| | Runs | Waited | Ran |
+|---|---:|---:|---:|
+| All | 177 | 283,156 s (78.7 h) | 45,521 s (12.6 h) |
+| Median a run | | 1,576 s | 190 s |
+| Mean wait, runs ending 22:xx / 23:xx / 00:xx | 57 / 55 / 64 | 929 / 1,842 / 1,983 s | |
+
+86% of a gate was the queue, as on 2026-10-04 (85%). The five slots ran
+12.6 of their 15 slot-hours (84% busy), so the queue is set by how much
+work there is: an hour of run time cut is an hour or more of waiting cut.
+
+**Per slot.** Slots 1 and 2 are never shed; slots 3 to 5 are shed under
+50 GB free.
+
+| Slot | Runs | Ran | Sheds | Cold `check` (900+ crates compiled) |
+|---|---:|---:|---:|---:|
+| 1 | 47 | 10,102 s | 0 | 0 |
+| 2 | 38 | 10,140 s | 0 | 0 |
+| 3 | 30 | 8,927 s | 3 | 3 |
+| 4 | 32 | 7,993 s | 5 | 3 |
+| 5 | 30 | 8,359 s | 2 | 2 |
+
+**Warm is not one thing.** A slot is warm for the tree it last built. The
+same command on the tree the slot's previous run had, against a tree new to
+the slot (medians, controls left out):
+
+| Command | Same tree | New tree | Cold slot |
+|---|---:|---:|---:|
+| `check` | 271 s (4) | 332 s (17, warm deps) / 492 s (26, all) | 621 s (8) |
+| `test-boot --arch x86_64` | 81 s (13) | 170 s (17) | |
+| `test-boot --arch armv7a` | 103 s (7) | 193 s (7) | |
+| `test-boot --arch aarch64` | 121 s (3) | 151 s (5) | |
+| `test-net --arch x86_64` | 66 s (2) | 156 s (16) | |
+| `build --arch all --release` | 201 s (3) | 262 s (5) | |
+
+**The processor, not memory or the disk's speed.** The load at a run's start
+had a median of 32 (9 to 43) on 24 threads. A warm `test-boot` on a tree the
+slot had already built took 59 to 139 s at load 24 to 36, where a quiet host
+takes 12 to 20 s (*Measured, 2026-09-27* and *2026-09-28* above): the load
+multiplies a boot by three to seven. In the sample, guest time was 41-77% of
+the processor, user 4-54%, idle 0-11%, I/O wait 0-3%; `/proc/pressure/cpu`
+some 14-45%, `memory` some 0.00-0.20 (27 GB of swap held, but swapping in
+and out near zero), `io` some 4-29% and full 0.4-6% while 15-280 MB/s were
+written. A third of the processor went to guests outside the pool: the
+Endfield download boot's QEMU at 384% averaged over its 3.8 hours, a second
+Endfield guest at 428% (8 processors), a desktop guest at 78%; two `test-net
+--smp 4` gate guests ran at 340% each. The load cap counts them all: at
+01:12Z the load was 46, so 39 runs waited with slot 3 free.
+
+### Runs no verdict needed
+
+| What | Runs | Ran | Measured on |
+|---|---:|---:|---:|
+| A tree built again in another slot: rows of one commit queued as separate runs, each taking whichever slot freed | 56 of 151 runs on the 29 trees with more than one run; the 29 trees were built in 94 (tree, slot) pairs, 65 more than one each | about 5,480 s more than in a slot that had the tree (the table above, kind by kind) | the image row as seven runs: `pc2-*` on d4378e691 in all five slots, `vn3-*` and `pm-*` in four, `yt2-*`, `gw2-*`, `ca2-*` in three or four |
+| The image row on a change that does not reach the image: only xtask judges or fetch scripts outside `src/`, owed today because `gate-rows` gives every `tools/common/xtask/` path the image row | 10 boots and builds on 5 commits; 2 of them on commits that touch no file the image is built or booted by | 1,176 s; 341 s of it on those 2 | `ca2-*` on 3cc6d1e2d (`claude_code.rs`, and `main.rs`, which also builds the image): five boots and a release build, 623 s; `cd5-boot-kvm` and `nb2-boot-kvm` (`main.rs`, `qemu.rs`); `es-w-boot-x86` on af91b1f87 (`wine.rs` alone) and `po-main-boot-e31` on e31ba0c8e (`frames.rs` alone) |
+| Measurement repeats in a saturated pool, where the figure measures the neighbours | 9 (`gw2-meas-*`, `-r2`, `-r3` at three sizes, load 23-35) | 1,331 s | |
+| The same tree and arguments passed twice | 1 (`yc-xlat3` after `yc-xlat2`) | 258 s | |
+| `check-docs` beside a `check` of the same tree, which runs the same steps | 2 (`cf-docsgen-docs`, `cd5-docs`) | 127 s | |
+| A `check` that failed on a Python audit after eight minutes of cargo: the audits run beside the cargo steps and finish in seconds, but `check` reports at its end | 3 | 1,142 s | `vn-check` (device-access allow-list, 506 s), `yt2-check2` (complexity budget, 371 s), `pm-check` (unsafe audit, 265 s) |
+
+Not counted as waste: the 38 controls (8,842 s), each a different edit; and
+the other 25 failed runs, which found something. All failed runs together
+ran 9,894 s, 22% of the night. One failure was the pool's own: `pc2-check3`
+stopped on the incremental ICE (`docs/BACKLOG.md`, 2026-10-15) and its rerun
+`pc2-check4` took 1,007 s.
+
+### The shed line thrashes
+
+There were ten sheds between 22:21 and 00:45 (slot 3 three times, slot 4
+five, slot 5 twice), 43 more from 18:00 to 22:00, and 210 in the file.
+**Each of the ten was followed by a run in the same slot within 2 to 210 s,
+eight of them within 50 s**, and that run built from nothing. Shedding a
+slot gives back 20-27 GB, which lifts free space over 50 GB at once, so the
+next pass of the wait loop takes the empty slot again. The disk gained
+nothing it kept, and paid for it in builds: 8 cold `check`s at 621 s against
+332 s warm, **2,677 s**, and about 250 GB written to re-warm (ten slots of
+about 25 GB) while I/O pressure was 13-29%. The first boots in a re-warmed
+slot were not measurably slower than new-tree boots in a warm one at
+tonight's load, so the cost is in `check`.
+
+The line sits where the disk is. Free space at a run's start had a median of
+58 GB (20 to 94). The kept slots are large: `target-os7c` and
+`target-gate-slot-2` hold 52 GB each, 14 GB of slot 2's in rustc's
+incremental caches (`debug/incremental`), 9.6 GB in `apps/`; slot 3 held
+24 GB 50 minutes after it was made again. Five slots grown to that size do
+not fit beside tonight's 66 GB free. A policy that does not thrash needs a
+gap between the line where a slot is given back and the line where it is
+made again, at least what a cold slot grows to:
+
+- **Make room before giving a slot back:** under the line, an idle slot's
+  incremental caches go first (any slot, 1 and 2 too). They only cost the
+  next build of a changed crate its incremental reuse, and the slot stays
+  warm. A slot above 2 is deleted only if free space is still under the
+  line afterwards.
+- **Shed under 35 GB, make again at 65** (`GATE_SHED_GB`, `GATE_OPEN_GB`).
+  35 GB keeps 15 GB above the refusal at 20 for the warm runs in flight. A
+  slot with no target dir is made again only at 65 GB, the line plus the
+  25-30 GB it grows to, so a slot given back stays given back until the
+  disk can hold it. Tonight, 18 of 177 runs started under 35 GB free (22:00
+  to 22:14 and 23:19); the rest started with 35 GB or more, where only the
+  incremental trim would have run.
+
+A pool that keeps fewer slots warm, rather than five slots of which three
+come and go, is the other answer, and the right one if the disk stays at
+97%. Free space on `/` is the customer's (morning questions).
+
+### Cuts, ranked by run time saved on these 177 runs
+
+| # | Cut | Removes | Saved, measured on | Where |
+|---|---|---|---:|---|
+| T1 | **One tree, one slot.** Each slot remembers the tree it last checked out. A waiting run whose tree a free slot last built takes that slot out of turn, and the head of the queue prefers it. The rows of one commit queued together then run one after another in the slot that built it. Later, in xtask: `gate-rows --since main --run`, the owed rows as one invocation in one slot, one checkout and one build per architecture. | the same tree built again in another slot | up to **5,480 s (1.5 h, 12%)**, the 56 runs above; the slot memory alone about half to three quarters of that, since a commit's queued rows still start in the first two slots that free. At 00:57Z `h6-*` queued 24 runs on one commit at once | `gate.sh` (`gate.sh.proposed`); xtask for `--run` |
+| T2 | **No shed thrash**: incremental caches first, shed under 35 GB, made again only at 65 | cold `check`s in re-made slots; ~250 GB of writes a night | **2,677 s (0.7 h)**, the 8 cold checks; and slots that stay warm | `gate.sh` (`gate.sh.proposed`) |
+| T3 | **Runs no verdict needs**: measure in a quiet window or with `GATE_SLOT` when the pool is idle, not at load 23-35; a passed tree is not run again; `check` already runs what `check-docs` does | measurements of the neighbours, repeats | **1,716 s (0.5 h)**: `gw2-meas-*` 1,331 s, `yc-xlat3` 258 s, `cf-docsgen-docs` and `cd5-docs` 127 s | the agents' briefs; the product owner declines them |
+| T4 | **Audits first**: `check` runs the audits (seconds, no build) before the cargo steps, and stops when one fails; or the agent runs `cargo xtask check-docs`, which runs them, before it queues `check` | eight minutes of cargo before an audit's verdict | **about 1,050 s (0.3 h)**, `vn-check`, `yt2-check2`, `pm-check` | `check.rs` |
+| T5 | **`gate-rows` narrower for xtask judges**: a change only to a test's judge (`claude_code.rs`, `wine.rs`, `frames.rs`, `netboot.rs`) or a fetch script owes `check` and its own test, not the five boots and the release build; the files that build, start or read every image (`main.rs`, `qemu.rs`, `cargo.rs`, `paths.rs`, `parallel.rs`, `initramfs.rs`, `builds.rs`) keep the image row | image rows the change does not reach | **341 s** on the 2 commits that touched only judges; up to 1,176 s if `main.rs`'s command table were told apart from its image build, which a path rule cannot do | `gate_rows.rs` and *What a landing runs*; it narrows a gate, so the certification consultant first |
+| T6 | **Priority for runs that block a landing** (`GATE_PRIORITY=1`): served before the others, first come first served among themselves | no run time; a landing's wait. `po-main-boot-e31`, the boot of `main` after a landing, waited 1,182 s for 151 s of running | latency | `gate.sh` (`gate.sh.proposed`) |
+| T7 | **A load-aware pool**, to measure: guests outside the pool used a third of the processor, the load cap then held 39 runs with a slot free, and a boot ran three to seven times slower than on a quiet host. Measure each slot count's runs an hour at a known load before choosing one; an Endfield guest is the customer's, not the pool's to stop | | not measured | `gate.sh` |
+| T8 | **`CARGO_INCREMENTAL=0` in the slots**, to measure: 14 GB a big slot and the ICE of `pc2-check3` against a slower rebuild of a changed crate | | not measured | `gate.sh` |
+
+T1 to T5 together take about 11,260 s, 3.1 of the night's 12.6 run-hours
+(25%). With the slots 84% busy, the queue shortens by about as much.
+
+**`gate.sh.proposed`** (`~/.local/share/ferrix/fleet/`, not installed; the
+coordinator decides, and installs it with `mv` once no run is waiting,
+*Changing the pool* in the product-owner skill) carries T1, T2 and T6. It
+keeps every verdict, log and line format the same; a run taken out of turn,
+and one with priority, says so in its log's `queued` line.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a
