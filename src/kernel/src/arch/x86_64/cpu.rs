@@ -589,7 +589,7 @@ pub(crate) unsafe fn write_msr(msr: u32, value: u64) {
 }
 
 /// `IA32_PAT`: the page attribute table.
-const IA32_PAT: u32 = 0x277;
+pub(super) const IA32_PAT: u32 = 0x277;
 
 /// Program this processor's page attribute table with
 /// [`ferrix_paging::X86_PAT`], whose entry 1 is write-combining, and say

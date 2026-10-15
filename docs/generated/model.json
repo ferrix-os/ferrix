@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "7ef1cd268791cb446248ca16b0cce72f958bac11a44661f3279712a1ba252e5f",
+  "digest": "75466d0c0135e4455f44914b861c4225471448ed8d3c3adf7c39c3529d44962b",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 138,
-    "elements": 6896,
+    "elements": 6901,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -66321,7 +66321,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theFirmwareFramebufferLentExactly",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"The boot framebuffer shall stay in the ranges withheld from every aperture but one: on x86-64 under ferrix.efifb, and only there, at most one node, whose one aperture starts at the framebuffer's first byte and is its visible lines in whole pages, not prefetchable, with no vector. None shall be made when the framebuffer is in memory the allocator owns, its size does not hold its lines, its layout is not four bytes a pixel, its first pixel is off a page, or another reserved range lies inside the lines; and an aperture of the node's kind shall be withheld when it reaches past the framebuffer or lies in a reserved range that is not the framebuffer.\"",
+                  "value": "\"The boot framebuffer shall stay in the ranges withheld from every aperture but one: on x86-64 under ferrix.efifb, and only there, at most one node, whose one aperture starts at the framebuffer's first byte and is its visible lines in whole pages, prefetchable, with no vector. None shall be made when the framebuffer is in memory the allocator owns, its size does not hold its lines, its layout is not four bytes a pixel, its first pixel is off a page, or another reserved range lies inside the lines; and an aperture of the node's kind shall be withheld when it reaches past the framebuffer or lies in a reserved range that is not the framebuffer.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 631
@@ -66332,7 +66332,7 @@
                   "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theFirmwareFramebufferLentExactly",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Every boot lends a made-up 1024x768 framebuffer exactly its visible lines as one aperture of its own source; refuses one crossed by another reservation, one the allocator owns, one a page short, one of an unknown layout and one off a page; withholds a lent aperture reaching past the framebuffer and one inside another reserved range; and withholds an ordinary window at the framebuffer. A node without the option or off x86-64 fails the boot. Under ferrix.efifb the published node holds one aperture equal to the framebuffer's lines and no vector (test-compositor --boot firmware-screen). With the exemption granted to any aperture, or either clause of Reserved::lends dropped, or a node made without the option, the boot panics.\"",
+                  "value": "\"Every boot lends a made-up 1024x768 framebuffer exactly its visible lines as one aperture of its own source, prefetchable; refuses one crossed by another reservation, one the allocator owns, one a page short, one of an unknown layout and one off a page; withholds a lent aperture reaching past the framebuffer and one inside another reserved range; and withholds an ordinary window at the framebuffer. A node without the option or off x86-64 fails the boot. Under ferrix.efifb the published node holds one prefetchable aperture equal to the framebuffer's lines and no vector (test-compositor --boot firmware-screen). With the exemption granted to any aperture, or either clause of Reserved::lends dropped, or a node made without the option, or the aperture minted not prefetchable, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 644
@@ -66378,10 +66378,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theFirmwareFramebufferTakesNoPin",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"The firmware framebuffer's node shall reach no memory: it shall get no domain; vmo_pin, plain or contiguous, and device_set_limit on it shall answer WRONG_TYPE; and before the node is published the kernel shall take, and never give back, a hold of its own mapping's memory type over the aperture, so that every user mapping of it is held to that type (L.user.109).\"",
+                  "value": "\"The firmware framebuffer's node shall reach no memory: it shall get no domain; vmo_pin, plain or contiguous, and device_set_limit on it shall answer WRONG_TYPE; and before the node is published the kernel shall take, and never give back, a hold of write-combining, its own window's memory type (L.device.43), over the aperture, so that every user mapping of it is held to that type (L.user.109) and only io_mapping_map_combining maps it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 660
+                    "line": 662
                   }
                 },
                 {
@@ -66389,10 +66389,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theFirmwareFramebufferTakesNoPin",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Under ferrix.efifb the node's domain is refused and none was made, its DMA is off, a hold of the aperture as another type than the kernel's is refused while one of the kernel's type is not, and vmo_pin (plain and PIN_CONTIGUOUS) and device_set_limit(PIN_PAGES) through the calls answer WRONG_TYPE (W8; test-compositor --boot firmware-screen). With the node reaching memory, vmo_pin's refusal removed, or the hold not taken, the boot panics.\"",
+                  "value": "\"Under ferrix.efifb the node's domain is refused and none was made, its DMA is off, a hold of the aperture as device or cached memory is refused while one as write-combining is not, and vmo_pin (plain and PIN_CONTIGUOUS) and device_set_limit(PIN_PAGES) through the calls answer WRONG_TYPE; io_mapping_map of the window is refused and io_mapping_map_combining given, its user leaf write-combining and not device (W8; test-compositor --boot firmware-screen). With the node reaching memory, vmo_pin's refusal removed, the hold not taken or taken as device memory, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 668
+                    "line": 672
                   }
                 },
                 {
@@ -66403,7 +66403,7 @@
                   "value": "(\"H.DMA.3\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 669
+                    "line": 673
                   }
                 },
                 {
@@ -66414,7 +66414,7 @@
                   "value": "(\"device::DeviceNode::reaches_memory\", \"device::DeviceNode::domain\", \"discovery::firmware::refuses\", \"syscall::native::vmo_pin\", \"syscall::native::set_limit_on\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 672
+                    "line": 676
                   }
                 }
               ]
@@ -66427,7 +66427,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 674
+                "line": 678
               },
               "children": [
                 {
@@ -66438,7 +66438,7 @@
                   "value": "\"While the firmware framebuffer is lent to its own node, every PCI function one of whose BARs holds it shall be driven by nobody: every native call that needs MANAGE on a device reaches it through device_in, and on such a function each shall answer BAD_STATE, configuration reads and I/O mappings included.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 680
+                    "line": 684
                   }
                 },
                 {
@@ -66449,7 +66449,7 @@
                   "value": "\"Under ferrix.efifb every function whose BAR ranges, read again from the published nodes, overlap the framebuffer is marked; the VGA function that holds it answers a configuration read and an io_mapping_create BAD_STATE (W2 and W8, the config line: one function); and no other node's aperture overlaps the framebuffer (test-compositor --boot firmware-screen). With the function left driven, or the mark minting leaves never set, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 688
+                    "line": 692
                   }
                 },
                 {
@@ -66460,7 +66460,7 @@
                   "value": "(\"H.DMA.5\", \"H.DEV.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 689
+                    "line": 693
                   }
                 },
                 {
@@ -66471,7 +66471,7 @@
                   "value": "(\"device::yield_framebuffer_holder\", \"device::DeviceNode::yielded\", \"device::DeviceNode::mint_bar\", \"syscall::native::device_in\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 692
+                    "line": 696
                   }
                 }
               ]
@@ -66484,7 +66484,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 694
+                "line": 698
               },
               "children": [
                 {
@@ -66495,7 +66495,7 @@
                   "value": "\"The boot console shall stop drawing on the framebuffer, waiting out a draw in flight, before the firmware framebuffer's node exists, so that no kernel draw but a panic's meets a ring-3 driver's on its pages.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 698
+                    "line": 702
                   }
                 },
                 {
@@ -66506,7 +66506,7 @@
                   "value": "\"Under ferrix.efifb ferrix.fbcon the console draws the boot until the node is made, and stage 10's check of the published node finds it stopped; hyprix's picture on the framebuffer then holds no console pixel (test-compositor --boot firmware-screen). With the stop moved after the node is published, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 704
+                    "line": 708
                   }
                 },
                 {
@@ -66517,7 +66517,7 @@
                   "value": "(\"H.DMA.5\", \"H.FAIL.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 705
+                    "line": 709
                   }
                 },
                 {
@@ -66528,7 +66528,7 @@
                   "value": "(\"console::screen::stop\", \"discovery::firmware::FirmwareFramebuffer::lend\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 707
+                    "line": 711
                   }
                 }
               ]
@@ -66541,7 +66541,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 709
+                "line": 713
               },
               "children": [
                 {
@@ -66552,7 +66552,7 @@
                   "value": "\"DeviceNode::describe shall report the firmware framebuffer's node as TREE_FIRMWARE_FB with one aperture and no vector, and its width, height, stride and pixel layout, as it was minted, in the fields a tree node leaves zero.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 713
+                    "line": 717
                   }
                 },
                 {
@@ -66563,7 +66563,7 @@
                   "value": "\"Under ferrix.efifb the node's device_info, read back through the call, names TREE_FIRMWARE_FB, one aperture, no vector and the minted mode (W8, the config line; test-compositor --boot firmware-screen), and efifb starts at the firmware's mode. With the mode fields not written, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 719
+                    "line": 723
                   }
                 },
                 {
@@ -66574,7 +66574,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 720
+                    "line": 724
                   }
                 },
                 {
@@ -66585,7 +66585,64 @@
                   "value": "\"device::DeviceNode::describe\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 721
+                    "line": 725
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theLentFramebufferWriteCombining",
+              "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theLentFramebufferWriteCombining",
+              "kind": "requirement",
+              "shortName": "L.device.43",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 727
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theLentFramebufferWriteCombining",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"On x86-64 under ferrix.efifb the firmware framebuffer's node shall not be made unless every processor programmed its PAT (L.x86_64.127); and before the kernel's hold is taken and the node published, every page of the kernel's panic window over the framebuffer shall be mapped write-combining and none as device memory, the change reaching every processor's TLB first (L.mm.31, L.smp.14).\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 734
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theLentFramebufferWriteCombining",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Under ferrix.efifb stage 10's check of the published node reads every page of the kernel's window back write-combining, not device, writable and not user's, as the type the hold keeps; reads this processor's IA32_PAT back as X86_PAT and every processor counted as programmed; and efifb says it mapped the window write-combining (test-compositor --boot firmware-screen). With the kernel's change of type skipped, the boot panics.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 742
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theLentFramebufferWriteCombining",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.MEM.15\", \"H.DMA.5\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 743
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IsolatedInterrupts::theLentFramebufferWriteCombining",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"discovery::firmware::FirmwareFramebuffer::lend\", \"mm::protect_kernel\", \"panic::screen::window\", \"arch::x86_64::framebuffer::pat\", \"arch::x86_64::framebuffer::mtrr_type\", \"arch::x86_64::framebuffer::drain_write_combining\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 748
                   }
                 }
               ]

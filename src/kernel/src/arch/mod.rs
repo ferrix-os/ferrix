@@ -408,6 +408,29 @@ pub(crate) use armv7a::LENDS_FRAMEBUFFER;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::LENDS_FRAMEBUFFER;
 
+// The lent firmware framebuffer's write-combining, x86-64's alone
+// (`docs/DISPLAY.md` §8): a PAT entry and the MTRRs' type read back, and the
+// fence that empties the write-combining buffers. The Arm kernels lend no
+// framebuffer and keep their panic screen's mapping as it was.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{drain_write_combining, mtrr_type, pat};
+
+/// Nothing to drain: no framebuffer is mapped write-combining here.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn drain_write_combining() {}
+
+/// No page attribute table here.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn pat() -> Option<u64> {
+    None
+}
+
+/// No MTRRs here.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn mtrr_type(_phys: u64, _len: u64) -> Option<u8> {
+    None
+}
+
 // Full-entropy bytes firmware hands out, where it has a TRNG to ask.
 #[cfg(target_arch = "aarch64")]
 pub(crate) use aarch64::firmware_entropy;

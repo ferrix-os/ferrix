@@ -551,7 +551,7 @@ reference machine boots.
 | H3 | xHCI with HID | 21 |
 | H4 | USB mass storage | 5 |
 | H5 | i8042 keyboard and touchpad | 5 |
-| H6 | Firmware framebuffer display for hyprix (built 2026-10-15, `docs/DISPLAY.md` §8; write-combining and the N150 left) | 5 |
+| H6 | Firmware framebuffer display for hyprix (built 2026-10-15, `docs/DISPLAY.md` §8; its window write-combining on branch h6-wc; the N150 run left) | 5 |
 | H7 | The reference PC's exit, and what it finds | 8 |
 | | **Real PCs** | **73** |
 | | **Total** | **251** |

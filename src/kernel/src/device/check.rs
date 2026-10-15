@@ -809,7 +809,7 @@ fn check_lent_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(
 /// only node whose aperture overlaps the framebuffer -- which `check_node`'s
 /// reserved test already holds of every other. At most one such node.
 ///
-/// Verifies: L.device.1, L.device.38, L.device.39, L.device.40, L.device.41
+/// Verifies: L.device.1, L.device.38, L.device.39, L.device.40, L.device.41, L.device.43
 fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
     let mut seen = 0;
     // Only the framebuffer's own node holds a lent aperture.
@@ -873,22 +873,20 @@ fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Fa
         {
             return Err(fail("the firmware framebuffer node would take pins"));
         }
-        // The kernel's type hold: a mapping of another type than its own is
-        // refused, one of its own is not.
-        use crate::discovery::firmware::{KERNEL_MAPPING, refuses};
+        // The kernel's type hold: write-combining, the type of its own
+        // window; an uncached mapping is refused, a write-combining one is
+        // not.
+        use crate::discovery::firmware::refuses;
         use crate::user::memory_type::MemoryType;
-        let other = if KERNEL_MAPPING == MemoryType::Device {
-            MemoryType::Combining
-        } else {
-            MemoryType::Device
-        };
-        if !refuses(aperture.phys, aperture.len, other)
-            || refuses(aperture.phys, aperture.len, KERNEL_MAPPING)
+        if !refuses(aperture.phys, aperture.len, MemoryType::Device)
+            || !refuses(aperture.phys, aperture.len, MemoryType::Cached)
+            || refuses(aperture.phys, aperture.len, MemoryType::Combining)
         {
             return Err(fail(
                 "the framebuffer's memory type is not held as the kernel's",
             ));
         }
+        check_combining(aperture).map_err(fail)?;
         // The boot console, which draws through a slice it holds alone, has
         // stopped: a driver can map the window from now on.
         if crate::console::screen::drawing() {
@@ -947,7 +945,7 @@ fn check_lending() -> Result<(), &'static str> {
             if aperture.phys == AT
                 && aperture.len == VISIBLE
                 && aperture.source == super::Source::Framebuffer
-                && !aperture.cacheable => {}
+                && aperture.cacheable => {}
         _ => return Err("the framebuffer was not lent exactly its visible lines"),
     }
     let crossed = Reserved::synthetic(Some((AT, SIZE)), &[memory, (AT + VISIBLE / 2, 4096)])
@@ -1181,5 +1179,41 @@ pub(crate) fn check_held_off(node: &DeviceNode, table: [(u64, u64); 2]) -> Resul
          minted, MSI-X turned on refused",
         node.location()
     );
+    Ok(())
+}
+
+/// The lent framebuffer is write-combining wherever it is mapped
+/// (`docs/DISPLAY.md` §8), read back rather than timed: its aperture is
+/// prefetchable, so `io_mapping_map_combining` maps it; every processor
+/// programmed its PAT, and this one's reads `X86_PAT` whole, whose entry 1,
+/// the one a write-combining leaf selects, is write-combining; and every
+/// page of the kernel's own window on it reads back write-combining, not
+/// device, writable and not user's -- the type the kernel's hold keeps,
+/// compared with what the leaves say rather than taken from the constant.
+/// W8 reads a driver's mapping of it back the same way.
+///
+/// Verifies: L.device.38, L.device.39, L.device.43
+fn check_combining(aperture: &super::Aperture) -> Result<(), &'static str> {
+    use crate::discovery::firmware::KERNEL_MAPPING;
+    use crate::user::memory_type::MemoryType;
+    if !aperture.cacheable {
+        return Err("the firmware framebuffer's aperture is not prefetchable");
+    }
+    if crate::arch::write_combining_processors() != Some(crate::smp::count())
+        || crate::arch::pat() != Some(ferrix_paging::X86_PAT)
+    {
+        return Err("a processor's PAT is not the table with entry 1 write-combining");
+    }
+    let (window, mapped) =
+        crate::panic::screen::window().ok_or("the kernel has no window on the lent framebuffer")?;
+    let root = crate::mm::root_table();
+    for page in 0..mapped.div_ceil(PAGE_SIZE) {
+        let flags = crate::mm::flags_in(root, window + page * PAGE_SIZE)
+            .ok_or("the kernel's window on the lent framebuffer has a hole")?;
+        let kind = MemoryType::of(false, flags.write_combining && !flags.device);
+        if kind != MemoryType::Combining || kind != KERNEL_MAPPING || !flags.write || flags.user {
+            return Err("the kernel's window on the lent framebuffer is not write-combining");
+        }
+    }
     Ok(())
 }

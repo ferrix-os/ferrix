@@ -252,6 +252,7 @@ fn lent(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         return Err("a pin budget for the firmware framebuffer's node was not refused WRONG_TYPE");
     }
     report.lent += 1;
+    combining(side, node, manager, report)?;
     for holder in devices().iter().filter(|other| other.yielded()) {
         let Some(bar) = holder.bars.iter().flatten().next() else {
             continue;
@@ -264,6 +265,51 @@ fn lent(side: &Side, report: &mut Report) -> Result<(), &'static str> {
         }
         report.lent += 1;
     }
+    Ok(())
+}
+
+/// W8's mapping of the lent window, through the calls `efifb` makes: an
+/// uncached mapping is refused (the kernel holds the pages write-combining),
+/// and `io_mapping_map_combining` maps the window onto the framebuffer with
+/// a user leaf that reads back write-combining and not device.
+///
+/// Verifies: L.device.39, L.device.43
+fn combining(
+    side: &Side,
+    node: &Arc<DeviceNode>,
+    manager: Handle,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let aperture = node
+        .apertures()
+        .first()
+        .copied()
+        .ok_or(MODE_NOT_AS_MINTED)?;
+    side.put(SPEC, &aperture.phys().to_ne_bytes())?;
+    side.put(SPEC + 8, &aperture.len().to_ne_bytes())?;
+    let mapping = side.handle(
+        nr::IO_MAPPING_CREATE,
+        &[reg(manager), SPEC],
+        "io_mapping_create of the lent framebuffer failed",
+    )?;
+    if side.call(nr::IO_MAPPING_MAP, &[reg(mapping), 0]) != Err(status::ALREADY_BOUND) {
+        return Err("the lent framebuffer was mapped uncached");
+    }
+    report.lent += 1;
+    let at = side
+        .call(nr::IO_MAPPING_MAP_COMBINING, &[reg(mapping), 0])
+        .map_err(|_| "the lent framebuffer was not mapped write-combining")? as u64;
+    let space = side.process.space();
+    space
+        .fault(at, crate::user::space::Access::READ)
+        .map_err(|_| "the lent framebuffer's first page could not be faulted in")?;
+    let flags = crate::mm::flags_in(space.root_table(), at);
+    if crate::mm::translate_in(space.root_table(), at) != Some(aperture.phys())
+        || !flags.is_some_and(|flags| flags.write_combining && !flags.device)
+    {
+        return Err("a driver's mapping of the lent framebuffer is not write-combining");
+    }
+    report.lent += 1;
     Ok(())
 }
 

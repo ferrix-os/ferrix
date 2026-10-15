@@ -11,8 +11,11 @@
 //!    publishes for the framebuffer under `ferrix.efifb` -- the driver's end
 //!    of the display control channel, and the framebuffer's one window. The
 //!    mode is in START's fields a tree node leaves zero (`TREE_FIRMWARE_FB`).
-//! 2. The window is mapped as device memory, the one type the kernel lets
-//!    a mapping of it have (its own, for a panic). HELLO offers one scanout
+//! 2. The window is mapped write-combining, the one type the kernel lets a
+//!    mapping of it have (its own, for a panic): the stores of a frame leave
+//!    the processor in bursts, not one at a time. After READY, eight full
+//!    frames are copied and timed, and the median said: the figure a real
+//!    machine gives for a frame (`docs/DISPLAY.md` §8). HELLO offers one scanout
 //!    at the firmware's size with that one timing listed, says it copies,
 //!    and has no cursor plane. READY brings
 //!    the card VMO back with `READ | MAP` and never `WRITE`, and it is mapped
@@ -21,7 +24,8 @@
 //!    kernel would refuse a pin of this node. SCANOUT shows a buffer, copying
 //!    all of it that fits; FLUSH copies the rectangle that changed when it is
 //!    of the buffer on screen, and FLIPPED answers it at once, since there is
-//!    no blanking to wait for. DETACH forgets a buffer, taking it off the
+//!    no blanking to wait for. Every copy ends with a store fence, after
+//!    which, and not before, the frame counts as shown. DETACH forgets a buffer, taking it off the
 //!    screen first if it is there.
 //! 4. STOP, or the core closing its end, ends the run. What was copied last
 //!    stays on the screen, and a panic is drawn over it by the kernel.
@@ -67,6 +71,9 @@ const MAX_BUFFERS: usize = 8;
 
 /// The port key the control channel's signals arrive under.
 const KEY_CONTROL: u64 = 1;
+
+/// Full frames copied and timed after READY, for the figure.
+const TIMED_FRAMES: usize = 8;
 
 /// The refresh the one timing is made for. Firmware says none; a timing
 /// needs a clock, and 60 Hz is what every monitor runs.
@@ -152,7 +159,7 @@ struct Screen {
 
 impl Screen {
     /// The screen START describes: its mode, checked against its window, and
-    /// the window mapped as device memory.
+    /// the window mapped write-combining.
     fn map(device: &Device<Kernel>, start: &Start) -> Result<Screen, Step> {
         if start.pci_device_id != TREE_FIRMWARE_FB {
             return Err(Step::Identity);
@@ -181,7 +188,7 @@ impl Screen {
                 len: len as u64,
             })
             .map_err(|_| Step::Window)?;
-        let base = mapping.map(None).map_err(|_| Step::Window)?;
+        let base = mapping.map_combining(None).map_err(|_| Step::Window)?;
         Ok(Screen {
             _mapping: mapping,
             base,
@@ -294,12 +301,14 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         if screen.rgbx { "RGBX" } else { "BGRX" }
     ));
     let port = port::create(Kernel).map_err(|_| Step::Events)?;
+    say(format_args!("efifb: window mapped write-combining"));
     let card = introduce(&control, &port, start.location, &screen)?;
     let card_bytes = card.size().map_err(|_| Step::Memory)?;
     let card_len = usize::try_from(card_bytes).map_err(|_| Step::Memory)?;
     let card_base = card
         .map(None, card_len, Protection::Read, 0)
         .map_err(|_| Step::Memory)?;
+    time_frames(&screen, card_base, card_len);
     control
         .wait_async(&port, Signals::READABLE | Signals::PEER_CLOSED, KEY_CONTROL)
         .map_err(|_| Step::Events)?;
@@ -508,7 +517,14 @@ impl Serving {
     /// Copy `changed`, a rectangle of buffer `id` in the buffer's pixels, to
     /// the screen, where the scanout's rectangle puts it; whatever lies
     /// outside the buffer, the scanout's rectangle or the screen is left.
+    /// The fence after it makes the copy shown.
     fn copy(&self, id: u32, changed: Rect) {
+        self.copy_rows(id, changed);
+        shown();
+    }
+
+    /// [`Serving::copy`]'s stores, without the fence.
+    fn copy_rows(&self, id: u32, changed: Rect) {
         let (Some(buffer), Some((_, shown))) = (self.buffer(id), self.shown) else {
             return;
         };
@@ -546,6 +562,71 @@ impl Serving {
             }
         }
     }
+}
+
+/// Make every store to the write-combining window visible before what
+/// follows -- FLIPPED, above all: `sfence` on x86-64, the one architecture
+/// the window is lent on, a full device barrier elsewhere.
+fn shown() {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: a fence: it changes no register or memory. Not `nomem`, so the
+    // compiler keeps the copy's stores before it.
+    unsafe {
+        core::arch::asm!("sfence", options(nostack, preserves_flags));
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    ferrix_rt::device_barrier();
+}
+
+/// Copy the first full frame of the card to the screen [`TIMED_FRAMES`]
+/// times, each ended by the fence, and say the median: the frame-copy
+/// figure (`docs/DISPLAY.md` §8). What the card holds before any buffer is
+/// attached is shown for those few frames and overwritten by the first.
+/// In QEMU the number says nothing about write-combining; on a PC it is
+/// what a frame of the software renderer costs to show.
+fn time_frames(screen: &Screen, card_base: usize, card_len: usize) {
+    let row = screen.width * PIXEL;
+    if card_len < row * screen.height {
+        say(format_args!(
+            "efifb: full-frame copy not timed: the card is smaller than a frame"
+        ));
+        return;
+    }
+    let mut times = [0_u64; TIMED_FRAMES];
+    for time in &mut times {
+        let Ok(before) = ferrix_rt::linux::monotonic_nanos() else {
+            return;
+        };
+        for line in 0..screen.height {
+            let source = (card_base + line * row) as *const u32;
+            let target = (screen.base + line * screen.pitch) as *mut u32;
+            for column in 0..screen.width {
+                // SAFETY: the card is mapped readable for `card_len` bytes,
+                // checked above to hold a frame of `width` pixels a row; the
+                // window holds `height` lines of `pitch` bytes (START's
+                // check in `Screen::map`); both are four-byte aligned.
+                let pixel = unsafe { ptr::read_volatile(source.wrapping_add(column)) };
+                // SAFETY: as above, a pixel of the mapped window.
+                unsafe {
+                    ptr::write_volatile(target.wrapping_add(column), turned(pixel, screen.rgbx))
+                };
+            }
+        }
+        shown();
+        let Ok(after) = ferrix_rt::linux::monotonic_nanos() else {
+            return;
+        };
+        *time = after.saturating_sub(before);
+    }
+    times.sort_unstable();
+    let median = times.get(TIMED_FRAMES / 2).copied().unwrap_or(0);
+    say(format_args!(
+        "efifb: full-frame copy {}x{}: median {} us over {} (write-combining)",
+        screen.width,
+        screen.height,
+        median / 1000,
+        TIMED_FRAMES
+    ));
 }
 
 /// A pixel of the card's `XRGB8888` as the screen holds it: unchanged on a

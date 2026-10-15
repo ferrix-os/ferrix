@@ -1371,12 +1371,13 @@ impl DeviceNode {
             stride: framebuffer.stride,
             layout,
         });
-        // Not prefetchable, so a driver can map it only as device memory:
-        // the type the kernel's own mapping of it for the panic screen has
-        // on x86-64, the one architecture the node is minted on
-        // (`discovery::firmware`), and the type the hold it takes there
-        // keeps every user mapping to.
-        node.mint_from(framebuffer.phys, len, false, Source::Framebuffer, reserved);
+        // Prefetchable: a GOP framebuffer is linear memory, which a read
+        // changes nothing in, so `io_mapping_map_combining` may map it --
+        // and only it, since write-combining is the type the kernel's own
+        // window takes when the node is lent on x86-64, the one architecture
+        // it is lent on, and the hold it takes there keeps every user mapping
+        // to (`discovery::firmware`).
+        node.mint_from(framebuffer.phys, len, true, Source::Framebuffer, reserved);
         if node.apertures.len() != 1 {
             return Err("the framebuffer overlaps memory the kernel uses");
         }
