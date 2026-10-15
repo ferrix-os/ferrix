@@ -79,6 +79,24 @@ pub(crate) fn set_kernel_build(
     Ok(())
 }
 
+/// Whether this run's debug kernels carry the full DWARF: `--gdb`.
+static FULL_DEBUG: AtomicBool = AtomicBool::new(false);
+
+/// Say whether every debug kernel this run builds carries the full DWARF,
+/// locals and types for a debugger, rather than the dev profile's line tables
+/// (`Cargo.toml`): `main` calls it once, with whether `--gdb` was given. It
+/// is a `--config` of its own, so cargo keeps both builds side by side.
+pub(crate) fn set_full_debug(full: bool) {
+    FULL_DEBUG.store(full, Ordering::Relaxed);
+}
+
+/// The `--config` that gives a kernel built in `profile` the full DWARF, when
+/// `full` ([`FULL_DEBUG`]) asks for it: only a debug kernel's, since the
+/// release profiles keep their own `debug` setting.
+fn full_debug_config(profile: &str, full: bool) -> Option<&'static str> {
+    (profile == "debug" && full).then_some("profile.dev.debug=true")
+}
+
 /// The cargo profile a kernel is built in, and so the directory cargo puts
 /// it in: `iterate` only for a release kernel with `--iterate`.
 fn kernel_profile(release: bool) -> &'static str {
@@ -116,12 +134,16 @@ pub(crate) fn mitigations_off_target_dir() -> PathBuf {
 fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {
     let target = arch.kernel_target();
     let profile = kernel_profile(release);
-    let build = if profile == "iterate" {
+    let mut build = if profile == "iterate" {
         println!("  with --iterate: thin LTO, not the release kernel a gate builds");
         build("ferrix-kernel", target, false)?.args(["--profile", "iterate"])
     } else {
         build("ferrix-kernel", target, release)?
     };
+    if let Some(config) = full_debug_config(profile, FULL_DEBUG.load(Ordering::Relaxed)) {
+        println!("  with --gdb: the full DWARF");
+        build = build.args(["--config", config]);
+    }
     if !MITIGATIONS_OFF.load(Ordering::Relaxed) {
         let made = paths::target_dir()
             .join(target)
@@ -277,7 +299,11 @@ pub(crate) fn build_ahead(arches: &[Arch], release: bool) -> Result<()> {
         "release" => {
             let _ = kernel.arg("--release");
         }
-        _ => {}
+        profile => {
+            if let Some(config) = full_debug_config(profile, FULL_DEBUG.load(Ordering::Relaxed)) {
+                let _ = kernel.args(["--config", config]);
+            }
+        }
     }
     if MITIGATIONS_OFF.load(Ordering::Relaxed) {
         for target in &kernels {
@@ -542,6 +568,19 @@ pub(crate) fn cargo() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_debug_kernel_under_gdb_gets_the_full_dwarf() {
+        assert_eq!(
+            full_debug_config("debug", true),
+            Some("profile.dev.debug=true")
+        );
+        assert_eq!(full_debug_config("debug", false), None, "line tables");
+        for profile in ["release", "iterate"] {
+            assert_eq!(full_debug_config(profile, true), None, "{profile}");
+            assert_eq!(full_debug_config(profile, false), None, "{profile}");
+        }
+    }
 
     fn kernel_with(program: Option<&[u8]>, script: &str) -> (Kernel, tempfile_dir::Dir) {
         let dir = tempfile_dir::Dir::new();

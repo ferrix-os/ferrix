@@ -739,6 +739,98 @@ shorter than the image, and a block a guest wrote into the image since the
 last build); with the comparison made to say every block is the same, four
 of the six fail.
 
+## The compile: the baseline, 2026-10-15 (bs-a)
+
+The other half of the customer's target above: what a warm rebuild spends
+in rustc after a one-line edit in the kernel (branches `bs-a-*`). Measured
+on `main` 4605abd72 in a worktree and target directory of its own, at
+`nice 10`, loads 13 to 46 on 24 threads. Wall times on nazuna swing by a
+factor of three with the other sessions' load and disk writeback, so each
+comparison below alternates its two sides edit by edit and also gives the
+processor time (`user`) and the bytes written (`/usr/bin/time %O`), which
+the load does not move. The edit is `~/ferrix-logs/bs-a/scripts/edit.sh`:
+a new `let _ = core::hint::black_box(N_u32);` in `sys_eventfd`
+(`src/kernel/src/syscall/eventfd.rs`, load ring), clean for rustfmt and
+clippy; logs and scripts in `~/ferrix-logs/bs-a/`.
+
+### Where an edit's compile goes (x86-64, debug)
+
+| Kernel rustc | Wall | What |
+|---|---:|---|
+| cold (`-Z time-passes`, load 40) | 48.4 s | type check 4.5, borrow check 7.8, monomorphization 4.0, codegen 17.1, crate-local ThinLTO 16.2 |
+| after the edit (load 40) | 23.9 s | **persisting the incremental dep graph 19.8 s** (178 MB `dep-graph.bin` and 100 MB query cache: the crate is 237k lines), ThinLTO 4.1, codegen 0.8, link 0.35 |
+| after the edit, processor time | | 26 CPU-s, 476 MB written; ThinLTO is about 17 CPU-s of it |
+
+* **The kernel is one crate**: whatever file changes, rustc re-hashes,
+  re-checks what depends on it and writes the whole crate's incremental
+  state again (280 MB). That part grows with the crate, not with the edit.
+* **rustc runs ThinLTO inside the crate** in the dev profile (opt-level 1,
+  incremental, 256 codegen units): about 17 of an edit's 26 CPU-s.
+* **The debug kernel's ELF is 148 MB, 137 MB of it DWARF** (`.debug_info`
+  57, `.debug_str` 34, `.debug_loc` 29); objects, ELF and image carry it.
+  aarch64 146 MB, armv7a 182 MB.
+* The link is 0.35 s (rust-lld); the host crates link with rust-lld too
+  (the default for x86_64-unknown-linux-gnu since Rust 1.90). No linker
+  change is owed.
+
+`check` after the edit, 118 s at load 35-39 (warm): its compile steps are
+the **kernel clippy**, 38 s, six passes (three targets, mitigations on and
+off) of 6.3 CPU-s each, 4.5 s of which is clippy's lint pass over the whole
+crate and 2.4 s the dep graph again; and **the Ferrocene type check**, 18 s
+for three targets (105 s the first time after a cold build). The rest is not
+compiling: the host tests' run time, 45 s (`ferrix-btrfs-write` 20 s, xtask
+14 s, `ferrix-btrfs` 6 s), and, beside them, the audits (29 s) and the side
+workspaces (114 s, the compositor's tests 39 s; bs-b's section above). A
+warm `check` after a kernel edit spends about 300 CPU-s in all.
+
+### What a compile in seconds needs
+
+| Cost (one kernel edit) | What removes it | State |
+|---|---|---|
+| DWARF: 148 MB ELF, 476 MB written an edit | line tables only in the dev profile | **Cut C1**, below |
+| crate-local ThinLTO, 17 CPU-s an edit | `lto = "off"` in the dev profile: 2.4 CPU-s an edit, 301 MB written | allowed by the consultant (ledger 1472) by one of two routes: a coverage re-measure on three arches, or a `coverage` profile keeping today's settings |
+| one 237k-line crate: dep graph and lint pass grow with it | the crate split along the rings: core (104k lines) <- item (14k) <- load (122k) <- the binary; an edit in load then recompiles about half of today's crate, an edit in core all of it | design OK IF (1)-(12), ledger 1477; four conditions to answer in the design before code |
+| six kernel clippy passes, each linting the whole crate | the split (lints only the crates the edit reaches) | with the split |
+
+### Cut C1: line tables only in the dev profile (bs-a-dev-profile)
+
+`[profile.dev] debug = "line-tables-only"` (was `true`), for the whole
+workspace; `--gdb` builds the kernel with the full DWARF again
+(`--config profile.dev.debug=true`, kept beside the other build). The
+release profile, the reference configuration, is unchanged. Nothing reads
+more than the line tables: xtask's symbolizer reads the symbol table, and
+`coverage-report.py` and `decision-coverage.py` read `objdump
+--dwarf=decodedline`.
+
+| | Before | After |
+|---|---:|---:|
+| Debug kernel ELF, x86-64 / aarch64 / armv7a | 148 / 146 / 182 MB | **49 / 49 / 59 MB** |
+| Kernel rustc after the edit: processor time, written | 26 CPU-s, 476 MB | **20 CPU-s, 332 MB** |
+| `build --arch x86_64` after the edit (4 rounds alternated, load 18-22, before bs-b's image cut) | 20.9, 23.3, 24.8, 27.4 s; 27 CPU-s; 988 MB written | **5.8, 5.8, 9.1, 14.5 s**; 20.5 CPU-s; 845 MB written |
+| `check` after the edit (2 rounds alternated, load 22-28) | 133, 100 s; 299, 295 CPU-s | 150, 160 s; 298, 295 CPU-s |
+
+`check` does not move: clippy and the type checks make no code, so the
+debug level does not reach them, and its wall time is the load's.
+An image now carries a 47 MB kernel and a 17 MB initramfs (the native
+programs' line tables) where it carried 145 and 29 MB.
+
+**The debug coverage build changes slightly.** The code is not byte for
+byte the same (x86-64 `.text` 6,608,708 bytes against 6,603,684), so the
+statement rows `coverage-report.py` counts in `src/kernel/src` differ in a
+few places, at the same source:
+
+| Architecture | Rows, full DWARF | Rows, line tables | Only before | Only after | In the residual |
+|---|---:|---:|---:|---:|---|
+| x86_64 | 51,137 | 51,145 | 20 | 28 | `mm.rs` 872 (no row of its own with line tables) |
+| aarch64 | 48,942 | 48,964 | 8 | 30 | none |
+| armv7a | 49,567 | 49,578 | 20 | 31 | none |
+
+`carry-coverage.py` carries by source line and cannot see a change made
+only in the generated code, so the coverage figures name the build they
+measured: full DWARF until this landing, line tables from the next
+re-measure (`docs/certification/VERIFICATION.md` §3.2). The certification
+consultant's review: ledger line 1463.
+
 ## Next
 
 Phase 2 in the order the numbers give: (3) stop rather than wait for a

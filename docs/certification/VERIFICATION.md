@@ -244,6 +244,18 @@ because inlining and merging leave fewer distinct `is_stmt` rows to reach. The
 proportion reached moves 3.6 points. So a submission has to say which profile
 it measured, and this one measures both, which is what F-11 asked for.
 
+**The debug build's debug information.** Every debug figure in this
+document and in `coverage-<arch>.json` was measured on a kernel built with
+the full DWARF (`debug = true`). From the landing of `bs-a-dev-profile`
+(2026-10-15, the certification consultant's ledger line 1463) the dev
+profile builds line tables only, and the next full re-measure is on that
+build. The code differs slightly, so the statement rows do: at one source,
+x86-64 counts 51,145 rows against 51,137 (48 differ, one of them the
+residual's `mm.rs` 872), AArch64 48,964 against 48,942 and ARMv7-A 49,578
+against 49,567, none of them in a residual (`docs/TEST-TIME.md`, Cut C1).
+`carry-coverage.py` carries by source line and cannot see such a change, so
+it is stated here.
+
 **The three architectures agree**, within four points, on one boot and on the
 suite. The table published on 2026-09-25 had ARMv7-A at 70.8% against 46.6%
 and 46.1% for the 64-bit pair, and explained the gap by x86-64's larger

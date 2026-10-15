@@ -364,7 +364,16 @@ panic = "abort"
 # `opt-level = 0` produces a kernel too large for a comfortable early boot and
 # leans on stack frames a 16 KiB kernel stack cannot afford.
 opt-level = 1
-debug = true
+# Line tables and function names, not the full DWARF: a backtrace, `xtask`'s
+# symbolizer and the coverage reports (`objdump --dwarf=decodedline`) read
+# nothing else. The full DWARF made the x86-64 debug kernel 148 MB, line
+# tables 49 MB, and an incremental rebuild after a one-line kernel edit wrote
+# 476 MB with it and 332 MB without, in 26 s of processor time against 20 s
+# (docs/TEST-TIME.md, "Compile, 2026-10-15"). `--gdb` builds the kernel with
+# the full DWARF (`tools/common/xtask/src/cargo.rs`), for a debugger's locals.
+# The profile is the whole workspace's: the host tests, xtask and the native
+# programs are built with line tables too.
+debug = "line-tables-only"
 overflow-checks = true
 
 [profile.release]

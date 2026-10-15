@@ -458,7 +458,8 @@ OPTIONS:
     --accel <auto|tcg|whpx|kvm|hvf>      QEMU accelerator      [default: auto for run
                                          without --gdb, tcg otherwise]
     --gdb                                Wait for a debugger on :1234, with nokaslr in CMDLINE.TXT so the
-                                         kernel runs where its ELF's symbols say
+                                         kernel runs where its ELF's symbols say, and a debug kernel
+                                         built with the full DWARF rather than line tables
     --net                                run, test-boot, test-shell, test-vfs, run-compositor:
                                          a virtio-net device,
                                          behind xtask's own NAT gateway (10.0.2.2, guest 10.0.2.15);
@@ -708,6 +709,7 @@ fn command_of(args: &Args) -> Result<&str> {
 /// set once, here, rather than threaded through each of them.
 fn set_for_the_run(args: &Args) -> Result<()> {
     cargo::set_kernel_build(args.mitigations, args.iterate, args.release)?;
+    cargo::set_full_debug(args.gdb);
     fat::set_strip_kernel(args.strip_kernel);
     everything::set_steam_preinstall(args.steam_preinstall);
     Ok(())
