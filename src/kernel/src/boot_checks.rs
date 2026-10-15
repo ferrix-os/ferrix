@@ -3,9 +3,9 @@
 //!
 //! The item's `checks` module parses the option and says what it asked for;
 //! the flag itself lives here, in the core, so that a check the core runs
-//! inside a bring-up -- the local APIC's mode on every processor
-//! (`arch::x86_64::apic::check`), the VT-d units firmware left on and the
-//! console line's masked byte (`iommu::check`) -- can ask without naming a
+//! inside a bring-up -- the x86-64 local APIC's mode on every processor
+//! (its `apic/check.rs`), the VT-d units firmware left on and the console
+//! line's masked byte (`iommu::check`) -- can ask without naming a
 //! module above the core (`docs/KERNEL-CRATES.md` §3 (3)). The item writes it
 //! once, downward, as it does `sched::work::set_auditing`.
 
