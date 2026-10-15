@@ -219,9 +219,9 @@ package FerrixDeviceRequirements {
                 mastering and memory decoding, and disable_dma shall clear its bus
                 mastering and keep its memory decoding.";
             attribute :>> criterion = "On the first published function with a
-                configuration space, its command register reads bus mastering and
-                decoding on after enable_dma, and bus mastering off with decoding
-                on after disable_dma.";
+                configuration space that is not a bridge (class 06), its command
+                register reads bus mastering and decoding on after enable_dma, and
+                bus mastering off with decoding on after disable_dma.";
             attribute :>> parent = "H.DEV.4";
             attribute :>> unit = ("device::DeviceNode::enable_dma",
                 "device::DeviceNode::disable_dma", "device::DeviceNode::set_bus_master");
