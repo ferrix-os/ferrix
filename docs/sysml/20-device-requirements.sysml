@@ -177,13 +177,15 @@ package FerrixDeviceRequirements {
         requirement <'L.device.5'> nodesShareNothing : ItemLowLevel {
             attribute :>> statement = "publish shall take from a later node an
                 aperture an earlier one holds, so that no two published nodes'
-                apertures overlap, and publish no device tree vector that is not a
-                shared peripheral interrupt or that two nodes hold.";
+                apertures overlap, widen a PCI BAR aperture shorter than a page and
+                starting on one to that page only when no other aperture and no
+                reserved range lies in the page, and publish no device tree vector
+                that is not a shared peripheral interrupt or that two nodes hold.";
             attribute :>> criterion = "Sorted by start, no two published apertures
                 overlap; every device tree vector is 32 or above and held by one
                 node.";
             attribute :>> parent = ("H.DMA.5", "H.IRQ.1");
-            attribute :>> unit = "device::publish";
+            attribute :>> unit = ("device::publish", "device::widen_lone_partial_bars");
         }
         requirement <'L.device.6'> msixMintedOnce : ItemLowLevel {
             attribute :>> statement = "MsixTable::mint shall mint an entry once and
