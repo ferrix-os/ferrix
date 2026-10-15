@@ -35,9 +35,7 @@
 //! # What reaches the disk
 //!
 //! Whatever a program `fsync`s or `sync`s, at once; everything else at the
-//! next commit, which [`commit_forever`] makes every [`COMMIT_INTERVAL`]
-//! (for the data and home disks too, and for them even when `/` stays in
-//! memory: [`start_committer`]) —
+//! next commit, which [`commit_forever`] makes every [`COMMIT_INTERVAL`] —
 //! Linux's btrfs commits every 30 seconds by default for the same reason —
 //! and once more when the kernel powers the machine off itself ([`sync`]).
 //!
@@ -228,48 +226,18 @@ fn switch_to(rdev: u64) -> Result<Installed, &'static str> {
         }
     }
     let _ = ROOT_RDEV.call_once(|| rdev);
-    if !start_committer() {
-        println!("  root     no commit task: only sync and fsync reach the disk");
-    }
-    Ok(installed)
-}
-
-/// Whether [`commit_forever`] has been started: by the root's switch, or by
-/// the first writable data or home disk when `/` stays in memory.
-static COMMITTER: AtomicBool = AtomicBool::new(false);
-
-/// Start the one committer of every writable volume, unless it runs
-/// already: whichever of the root, `/data` and `/home` is mounted writable
-/// first starts it, and it commits all three, so a data disk under a root in
-/// memory is committed every [`COMMIT_INTERVAL`] too, not only at `sync`.
-/// Before 2026-10-15 only the root's switch started it, and a boot with `/`
-/// in memory -- every test boot, `test-endfield-proton` among them -- held
-/// what was written on `/data` in memory until a `sync`, an `fsync`, 32 MiB
-/// of writes or the power-off: an hour of the launcher's registry and the
-/// last files the game's unpacking wrote were not on the disk
-/// (`docs/WINE.md` §10).
-///
-/// Whether a committer runs now.
-pub(crate) fn start_committer() -> bool {
-    if COMMITTER.swap(true, Ordering::SeqCst) {
-        return true;
-    }
-    let spawned = sched::spawn(
-        "disk commit",
+    if sched::spawn(
+        "root commit",
         commit_forever,
         0,
         ferrix_sched::NICE_0_WEIGHT,
     )
-    .is_ok();
-    if !spawned {
-        COMMITTER.store(false, Ordering::SeqCst);
+    .is_err()
+    {
+        println!("  root     no commit task: only sync and fsync reach the disk");
     }
-    spawned
+    Ok(installed)
 }
-
-/// The interval [`commit_forever`] commits at, in whole seconds, for the
-/// mount lines.
-pub(crate) const COMMIT_SECONDS: u64 = COMMIT_INTERVAL / 1_000_000_000;
 
 /// Unpack the initramfs into the volume, unless it already has this one.
 fn install(inside: &Context) -> Result<Installed, &'static str> {
