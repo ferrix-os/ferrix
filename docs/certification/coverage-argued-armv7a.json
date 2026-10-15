@@ -554,21 +554,21 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "441",
+      "lines": "440",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "970",
+      "lines": "969",
       "category": "defensive",
       "match": ".or_else(|_| root.new_child())",
       "why": "A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1097",
+      "lines": "1096",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."

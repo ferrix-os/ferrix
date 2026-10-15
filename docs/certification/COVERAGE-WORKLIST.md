@@ -88,7 +88,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `discovery/devmgr.rs` | `item` | 13 | 78 | 82 | 11 | 402, 569, 597, 604, 754, 848, 852-853, 871, 876, 1087 |
+| `discovery/devmgr.rs` | `item` | 13 | 78 | 82 | 11 | 402, 568, 596, 603, 753, 847, 851-852, 870, 875, 1086 |
 | `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 31 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495-496, 498-499, 504, 512, 527, 548, 556, 558, 567, 615, 620, 625, 653, 679, 684, 697, 704, 795 |
 
 ---
