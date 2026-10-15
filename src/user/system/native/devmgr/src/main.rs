@@ -505,18 +505,12 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         };
         let name = driver_name(&given.names, driver);
         let Some(plan) = plan_for(kind, &info, &mut disks) else {
-            say(format_args!(
-                "devmgr   {name} {:#010x}: no plan for the device; not started",
-                info.location
-            ));
+            say_unstarted(name, info.location, "no plan for the device; not started");
             failed += 1;
             continue;
         };
         let Some(slot) = started.get_mut(count as usize) else {
-            say(format_args!(
-                "devmgr   {name} {:#010x}: no slot left; not started",
-                info.location
-            ));
+            say_unstarted(name, info.location, "no slot left; not started");
             failed += 1;
             continue;
         };
@@ -536,49 +530,17 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                     await_settled(&bootstrap);
                 }
                 drop(bootstrap);
-                // One at a time: the kernel's PUBLISHED for this disk before
-                // the next driver starts, so disks register in PCI order
-                // and two drivers never race to be vda.
-                //
-                // A port driver and an engine's publish to no subsystem, and
-                // a bus host's devices publish when they are found, so
-                // waiting for any of them would wait for ever and the kill
-                // below would count a working driver failed. It is started
-                // and taken at its word.
-                let published = if matches!(
+                let published = settle(
+                    channel,
+                    &port,
                     kind,
-                    Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu
-                ) {
-                    true
-                } else {
-                    await_boot(channel, &port, info.location, u64::from(count), &mut inbox)
-                };
-                say(format_args!(
-                    "devmgr   {name} {:#010x} {:04x}:{:04x}: {}",
                     info.location,
-                    info.vendor_id,
-                    info.device_id,
-                    if published {
-                        "started"
-                    } else {
-                        "ended before it published"
-                    }
-                ));
-                if !published {
-                    say(format_args!(
-                        "devmgr   {name} {:#010x}: exit status {}",
-                        info.location,
-                        died_status(exit_of(&process))
-                    ));
-                }
+                    u64::from(count),
+                    &mut inbox,
+                );
+                say_started(name, &info, published, &process);
                 if published {
-                    let _ = channel.write(
-                        &Message::Bound {
-                            device: index,
-                            driver: u32::from(driver),
-                        }
-                        .encode(),
-                    );
+                    bound(channel, index, driver);
                 }
                 *slot = Some(Started {
                     index,
@@ -601,16 +563,7 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                 count += 1;
             }
             Err(()) => {
-                say(format_args!(
-                    "devmgr   {name} {:#010x}: could not be started",
-                    info.location
-                ));
-                if let Plan::Gpu(program) = plan {
-                    say(format_args!(
-                        "devmgr   gpu {} not started: {program} could not be started",
-                        gpu::Place(info.location)
-                    ));
-                }
+                say_start_failed(name, info.location, &plan);
                 failed += 1;
             }
         }
@@ -624,6 +577,81 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         images: &given.images,
     };
     serve(channel, &port, &mut started, &drivers, &mut inbox)
+}
+
+/// Whether the driver of `kind` just started at `location` published.
+///
+/// One at a time: the kernel's PUBLISHED for this disk before the next
+/// driver starts, so disks register in PCI order and two drivers never race
+/// to be vda.
+///
+/// A port driver and an engine's publish to no subsystem, and a bus host's
+/// devices publish when they are found, so waiting for any of them would
+/// wait for ever and the kill after would count a working driver failed. It
+/// is started and taken at its word.
+fn settle(
+    channel: &Channel<Kernel>,
+    port: &Port<Kernel>,
+    kind: Kind,
+    location: u32,
+    key: u64,
+    inbox: &mut Inbox,
+) -> bool {
+    matches!(
+        kind,
+        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu
+    ) || await_boot(channel, port, location, key, inbox)
+}
+
+/// The console line for a driver started at boot, and its exit status when
+/// it ended before it published.
+fn say_started(name: &str, info: &DeviceInfo, published: bool, process: &Process<Kernel>) {
+    say(format_args!(
+        "devmgr   {name} {:#010x} {:04x}:{:04x}: {}",
+        info.location,
+        info.vendor_id,
+        info.device_id,
+        if published {
+            "started"
+        } else {
+            "ended before it published"
+        }
+    ));
+    if !published {
+        say(format_args!(
+            "devmgr   {name} {:#010x}: exit status {}",
+            info.location,
+            died_status(exit_of(process))
+        ));
+    }
+}
+
+/// Tell the kernel driver image `driver` is bound to device `index`.
+fn bound(channel: &Channel<Kernel>, index: u32, driver: u16) {
+    let _ = channel.write(
+        &Message::Bound {
+            device: index,
+            driver: u32::from(driver),
+        }
+        .encode(),
+    );
+}
+
+/// The console lines for a driver that could not be started, a GPU's own
+/// line besides.
+fn say_start_failed(name: &str, location: u32, plan: &Plan) {
+    say_unstarted(name, location, "could not be started");
+    if let Plan::Gpu(program) = plan {
+        say(format_args!(
+            "devmgr   gpu {} not started: {program} could not be started",
+            gpu::Place(location)
+        ));
+    }
+}
+
+/// The console line for a device whose driver was not started, and `why`.
+fn say_unstarted(name: &str, location: u32, why: &str) {
+    say(format_args!("devmgr   {name} {location:#010x}: {why}"));
 }
 
 /// [`await_published`] for a driver started at boot, which has no deadline.
