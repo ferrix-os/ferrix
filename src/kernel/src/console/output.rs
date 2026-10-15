@@ -254,6 +254,24 @@ pub(super) fn start() {
     INTERRUPT_DRIVEN.store(true, Ordering::Relaxed);
 }
 
+/// Stop queuing and poll out what the ring holds: the transmit interrupt
+/// does not come on this machine.
+///
+/// The N150 box has a port at COM1 that loops back and receives, but its
+/// transmit interrupt never arrived, and [`check`] found every task's write
+/// left in the ring. A machine whose serial line nobody reads is not stopped
+/// for it: its writers poll, as before the interrupt was installed.
+pub(crate) fn fall_back_to_polling() {
+    INTERRUPT_DRIVEN.store(false, Ordering::Relaxed);
+    let mut port = PORT.lock();
+    let wake = port.flush();
+    arch::drain_console();
+    drop(port);
+    if wake {
+        wake_writers();
+    }
+}
+
 /// Whether the port's interrupt is installed, so that a writer with interrupts
 /// on may queue rather than poll.
 pub(super) fn interrupt_driven() -> bool {
