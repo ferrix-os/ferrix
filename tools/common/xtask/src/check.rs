@@ -41,7 +41,10 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "loom" => loom(&paths::workspace_root()),
         "check-ferrousli" => ferrousli(&paths::workspace_root()),
         "host-clippy" => host_clippy(),
-        "host-test" => host_test(),
+        "host-test" => match launch_host_tests()? {
+            Some(launched) => launched.finish(),
+            None => Ok(()),
+        },
         "host-doctest" => host_doctest(),
         "host-doc" => host_doc(),
         "check-apps" => apps(&mut Counts::default()),
@@ -307,7 +310,26 @@ fn main_workspace(root: &std::path::Path, args: &Args) -> Result<bool> {
     // them, so they are linted per target below, and what of them can be
     // tested lives in `src/lib/proto/native`.
     step("clippy (host)", host_clippy)?;
-    step("tests", host_test)?;
+    // The test binaries run side by side with each other and with the steps
+    // below, which build while they run; their outputs and verdict come
+    // after those (`crate::test_runs`, `docs/TEST-TIME.md`, P1).
+    let mut launched = None;
+    step("tests", || {
+        launched = launch_host_tests()?;
+        Ok(())
+    })?;
+    let rest = after_the_tests(root, args);
+    let tests = match launched {
+        Some(launched) => step("tests: the binaries, side by side", || launched.finish()),
+        None => Ok(()),
+    };
+    tests?;
+    rest
+}
+
+/// The main workspace's steps after the tests: whether `--fast` skipped the
+/// cross-target clippies.
+fn after_the_tests(root: &std::path::Path, args: &Args) -> Result<bool> {
     step("doc tests", host_doctest)?;
     step("documentation", host_doc)?;
 
@@ -1147,6 +1169,29 @@ pub(crate) fn host_clippy() -> Result<()> {
 /// `cargo test` over every host member, every target: `cargo xtask host-test`.
 pub(crate) fn host_test() -> Result<()> {
     host_cargo(&["test"], &["--all-targets"], &[], "cargo test")
+}
+
+/// [`host_test`] with the test binaries started through this program as
+/// cargo's runner and left running (`crate::test_runs`), or `None` when
+/// they ran in turn, as `FERRIX_TESTS_IN_TURN` or a non-Unix host asks.
+fn launch_host_tests() -> Result<Option<crate::test_runs::Launched>> {
+    if !crate::test_runs::side_by_side() {
+        host_test()?;
+        return Ok(None);
+    }
+    let directory = paths::target_dir()
+        .join("test-runs")
+        .join(std::process::id().to_string());
+    let mut arguments: Vec<String> = vec!["test".to_owned(), "--workspace".to_owned()];
+    arguments.extend(sorted_members()?.excludes());
+    arguments.push("--all-targets".to_owned());
+    crate::test_runs::launch(
+        &cargo_binary(),
+        &paths::workspace_root(),
+        &arguments,
+        &directory,
+    )
+    .map(Some)
 }
 
 /// The doc tests `--all-targets` skips: `cargo xtask host-doctest`.

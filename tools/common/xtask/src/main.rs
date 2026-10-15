@@ -164,6 +164,7 @@ mod step_cache;
 mod symbolize;
 mod sysfs;
 mod test_disk;
+mod test_runs;
 mod threads;
 mod uboot_env;
 mod uefi_vars;
@@ -658,7 +659,7 @@ OPTIONS:
 
 fn main() -> ExitCode {
     orphans::install();
-    match run() {
+    match test_runs::command().unwrap_or_else(run) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("\nxtask: {error}");

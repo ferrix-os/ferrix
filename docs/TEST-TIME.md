@@ -823,6 +823,90 @@ target directory emptied, alternating in one worktree:
 | 2 (load 31 / 31) | 43.2 s | 17.0 s |
 | Warm, nothing changed | 6.7 s | 2.8 s |
 
+### The main workspace: the plan (bs-b, design, 2026-10-15)
+
+With the side workspaces cached, `check`'s critical path is its main
+workspace, whose steps run one after another. From the gate's logs of
+2026-10-15 (`bsb-sc8-check-hit`, slot 2, same tree; `bsb-gt-check`, a tree
+new to slot 1 by one commit; `bsb-sc8-check`, new by several):
+
+| Step | Same tree | One commit | Several |
+|---|---:|---:|---:|
+| formatting, terminal font, btrfs allocation, crate layering | 10.6 s | 7 s | 13 s |
+| clippy (host) | 1.1 s | 8.5 s | 19.4 s |
+| tests: build | 0.7 s | 11.5 s | |
+| tests: the ~90 test binaries, one after another | 49 s | 33 s | 68 s |
+| doc tests | 4.6 s | 3.6 s | 4.9 s |
+| documentation | 0.2 s | 4.3 s | 317.7 s |
+| clippy, cross-target (kernel both settings, loaders, natives) | ~2 s | ~8 s | 44 s |
+| beside: the audits (the architecture document 26-41 s) | 39 s | 26 s | 41 s |
+
+Of the tests' running time, `ferrix-btrfs-write` takes 17-20 s, `ferrix-btrfs`
+7-13 s, xtask 3-9 s and `ferrix-qr` 1-2 s; the other ~85 binaries are under
+a second each, about 10 s together with their start-up. **cargo 1.97 lets two
+`cargo test` runs in one target directory overlap** (its build lock is not
+held while test binaries run): the two btrfs crates' tests took 30.3 s one
+after the other and 17.6 s side by side.
+
+**P1, side by side (no cached result; the same build, binaries and checks).**
+`cargo test --workspace` runs with a test runner (`target.'cfg(all())'.runner`,
+`cargo xtask test-runner`) that starts each test binary in the background with
+exactly the program, arguments, environment and directory cargo gives it,
+and returns. While the binaries run, at most a few at once, `check` goes on
+with the doc tests, the documentation and the cross-target clippies, which
+build under cargo's lock; then it waits for every binary, prints each one's
+output whole in the order cargo started them, and fails if any failed (every
+binary runs to its end, where cargo stopped at the first failing one).
+Expected: the tests' 33-68 s overlap the 10-360 s of what follows them, and
+the binaries' own time falls to about the longest one's (`ferrix-btrfs-write`,
+20 s).
+
+**P2, a test binary's run keyed by its inputs (needs its own design review:
+the item crates' tests are item evidence).** A test binary is a file whose
+bytes are all of its compiled code; an edit that does not reach it leaves it
+byte for byte the same. Each binary's run would be a step-cache unit: the
+binary's SHA-256, the runtime inputs strace records as for the side
+workspaces, the environment and the host. A kernel edit, which no host test
+binary links, would then run no test binary at all; an edit to one library,
+only the binaries that link it.
+
+**P3, the cross-target clippies and the audits as units (needs its own
+design review).** The kernel's clippy in both settings (8-25 s on a new
+tree) and the audits beside (26-41 s) read the item; both could be units of
+the step cache on the same rules.
+
+What stays: the formatting, layering and font checks (10 s, seconds each),
+and on a tree new to its slot the documentation's and clippy's rebuild of
+what changed, which is cargo's.
+
+### Cut B4: the test binaries side by side (P1, bs-b-mainpar)
+
+`check` gives cargo `xtask test-runner` as the tests' runner
+(`tools/common/xtask/src/test_runs.rs`): each binary starts in the background
+with cargo's program, arguments, environment and directory, **6 at once**,
+and `check` goes on with the doc tests, the documentation and the
+cross-target clippies, then waits for every binary and prints each one's
+output whole with its path, exit status and time, and a count of binaries
+run, passed and failed. It fails closed: a binary that failed, died of a
+signal, could not start or never reported, one whose binary or
+`CARGO_BIN_EXE_*` files changed while it ran (their SHA-256 at its start and
+end), a "Running" line of cargo's without its record or the other way
+round, and no binary at all, each fail `check`; a binary whose `check` is
+gone is killed. `FERRIX_TESTS_IN_TURN=1` runs them as cargo does, and release
+runs and the reference configuration's baseline use it until a row shows
+both ways give the same results (the certification consultant's design
+review, ledger line 1594).
+
+One worktree at a load of about 11-14, warm:
+
+| Run | In turn | Side by side |
+|---|---:|---:|
+| `cargo xtask host-test` | 33.4 s, 30.4 s | 28.6 s, 18.5 s |
+| `cargo xtask check`, unchanged tree, step cache on | 44.0 s | **30.4 s** |
+
+The 84 test binaries' results (passed, failed, ignored, per binary) were the
+same both ways.
+
 ## The compile: the baseline, 2026-10-15 (bs-a)
 
 The other half of the customer's target above: what a warm rebuild spends
