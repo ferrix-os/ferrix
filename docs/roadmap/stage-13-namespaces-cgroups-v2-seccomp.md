@@ -365,6 +365,14 @@ idle, moves its running task to another job, or `cpu.stat` is read), and
 `cpu.max`'s part of the charge is made only while some `cpu.max` is set; no
 quota changed. The `cpu.max` checks have flaked under load on ARMv7-A,
 AArch64 and x86-64 TCG; the rows are in `docs/BACKLOG.md` (*P1 flakes*).
+On 2026-10-16 (fl-cg, F-78) a throttled task stopped waking every
+millisecond to look for a kill -- each look was charged to its job, a
+quarter over the quota on an idle host -- and sleeps to its period's end,
+cut by its own wake; the share-of-the-wall-clock rows are addressed by it
+and watched. The same day the throttled-kill check began to see its program
+running before writing the quota (about one ARMv7-A `--smp 2` boot in
+twenty had stopped there, the waiter never let run), and the freeze check to
+read `cpu.stat` only once every task is switched out.
 
 **Still to do:** reclaim of a writable btrfs mount's clean pages, of the
 dentry and inode caches, and `memory.reclaim`; `io.weight` and `io.latency`;
