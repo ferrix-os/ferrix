@@ -37,7 +37,7 @@ open queue. Never load the whole file at once.
 
 1. Read `HANDOVER.md`, then the tail of `reviews.md` up to its open queue.
 2. Tell the product owner your session name. Names change on every restart,
-   and the owners table in `docs/BACKLOG.md` says who the PO is. Don't run
+   and the product owner's latest handover says who the PO is. Don't run
    `ListAgents` just to look around, because it wakes idle sessions. Use it
    only when you need to reach a session whose name you don't know.
 3. Work the open queue top to bottom.

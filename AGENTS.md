@@ -24,7 +24,7 @@ The customer owns Ferrix. The customer decides scope and priority, says
 which session holds which role, and settles everything listed under
 *Waiting on the customer* in `docs/BACKLOG.md`. A decision the customer gave
 in one session is real only once it is written down as a dated entry under
-*Decisions* in `docs/BACKLOG.md`. A decision that lives only in a message
+*Decisions* in `docs/backlog/DECISIONS.md`. A decision that lives only in a message
 between two sessions gets reverted by a third.
 
 ---
