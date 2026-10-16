@@ -2175,6 +2175,7 @@ fn elf_interpreter(bytes: &[u8]) -> Option<PathBuf> {
 /// The text of a record of the unit traced in `traces`, or why there is
 /// none.
 #[cfg(test)]
+#[cfg(target_os = "linux")]
 fn record(name: &str, traces: &Path, context: &Context) -> std::result::Result<String, String> {
     record_from(name, traces, &context.root, context)
 }
@@ -2672,5 +2673,10 @@ pub(crate) fn holds(name: &str, text: &str, context: &Context) -> Option<(String
     Some((origin, inputs))
 }
 
+// The cache records only on Linux, where `strace` is ([`unit`] and
+// [`unit_logged`] run every unit plainly elsewhere), and its tests feed it
+// Linux traces and Unix paths: on Windows the trace parser reads the `\`
+// of a path as an escape. Nothing of it runs off Linux, so neither do they.
 #[cfg(test)]
+#[cfg(target_os = "linux")]
 mod tests;

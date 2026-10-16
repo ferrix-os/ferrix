@@ -660,5 +660,10 @@ fn take_slot(directory: &Path) -> Result<std::fs::File> {
     }
 }
 
+// Binaries run side by side only on Unix ([`side_by_side`]; a waiter's
+// owner is looked up in `/proc`), and the tests run `/bin/true`, `sh`
+// and a signal. Off Unix `cargo test` runs them in turn, as before, and
+// nothing of this module runs, so neither do its tests.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;

@@ -724,5 +724,9 @@ pub(crate) fn unit_name(package: &str, binary: &Path) -> String {
     format!("test:{package}:{kind}/{stem}")
 }
 
+// The test binaries' cache is the step cache's, which records only on
+// Linux (`step_cache`), and its tests take Unix paths and binary names
+// without `.exe`. Nothing of it runs off Linux, so neither do they.
 #[cfg(test)]
+#[cfg(target_os = "linux")]
 mod tests;
