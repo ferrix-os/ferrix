@@ -186,6 +186,24 @@ fn until_running(process: &Process, failure: &'static str) -> Checked<()> {
                 try_word(process, 4),
                 states,
             );
+            let threads: Vec<(bool, bool, bool)> = process
+                .threads()
+                .iter()
+                .map(|thread| {
+                    (
+                        thread.signal_pending(),
+                        process.must_park(),
+                        process.must_leave(thread),
+                    )
+                })
+                .collect();
+            let diag: Vec<u64> = futex::DIAG
+                .iter()
+                .map(|count| count.load(core::sync::atomic::Ordering::Relaxed))
+                .collect();
+            crate::console::println!(
+                "  freeze   threads (pending, park, leave) {threads:?}, futex (entries, rounds, restarts, eagain, woken) {diag:?}"
+            );
             crate::sched::sleep_for(20_000_000);
         }
     }

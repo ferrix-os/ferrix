@@ -597,7 +597,12 @@ fn wait(
 /// word listed before it was woken in between; `EFAULT` for a word that
 /// cannot be read; `ENOMEM` if an entry cannot be listed; `ERESTARTSYS` for
 /// a signal; `ETIMEDOUT` once `deadline` passes.
+/// DIAG: entries, rounds, restarts, eagain, woken.
+pub(crate) static DIAG: [core::sync::atomic::AtomicU64; 5] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 5];
+
 fn wait_on(process: &dyn Host, words: &[Word], deadline: Option<u64>) -> Result<usize, Errno> {
+    DIAG[0].fetch_add(1, Ordering::Relaxed);
     let mut buckets = fallible::try_with_capacity(words.len()).map_err(|_| Errno::ENOMEM)?;
     buckets.extend(words.iter().map(|word| AtomicUsize::new(word.key.bucket())));
     let sleeper = fallible::try_arc(Sleeper {
@@ -615,6 +620,7 @@ fn wait_on(process: &dyn Host, words: &[Word], deadline: Option<u64>) -> Result<
                 for listed in 0..slot {
                     drop(unlist(&sleeper, listed));
                 }
+                DIAG[3].fetch_add(1, Ordering::Relaxed);
                 return match sleeper.woken.load(Ordering::Acquire) {
                     NOT_WOKEN => Err(error),
                     woken => Ok(woken),
@@ -623,6 +629,7 @@ fn wait_on(process: &dyn Host, words: &[Word], deadline: Option<u64>) -> Result<
         }
 
         sleep(&sleeper, process, deadline);
+        DIAG[1].fetch_add(1, Ordering::Relaxed);
 
         // Off the table however it left, and under the lock, so that a waker
         // which found it has finished rousing it before this returns. The
@@ -635,9 +642,11 @@ fn wait_on(process: &dyn Host, words: &[Word], deadline: Option<u64>) -> Result<
         // whoever the waker meant it for.
         let woken = sleeper.woken.load(Ordering::Acquire);
         if woken != NOT_WOKEN {
+            DIAG[4].fetch_add(1, Ordering::Relaxed);
             return Ok(woken);
         }
         if process.wait_interrupted() {
+            DIAG[2].fetch_add(1, Ordering::Relaxed);
             // A restart code, not `EINTR`: a futex wait restarts under
             // `SA_RESTART`, which is how glibc's and musl's condition
             // variables survive a handled signal. The way back settles it.
