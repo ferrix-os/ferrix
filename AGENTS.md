@@ -58,8 +58,8 @@ branches (customer, 2026-10-04):
   `batch.sh join <session> <ref> <tag>`, with `--gate FILE` for the lines its
   row adds beyond the profile (one xtask command a line, as `gate.sh run`
   takes it), or `--profile kvm` when it owes only the KVM boot. Then
-  `batch.sh wait <tag>`, again after each exit 3, until it says PASSED,
-  FAILED, DROPPED or MAIN-RED. `batch.sh profile` prints what `full` runs.
+  `batch.sh wait <tag>`, again after each exit 3, until it says PASSED
+  (possibly with FLAKY gates named), FAILED, DROPPED or MAIN-RED. `batch.sh profile` prints what `full` runs.
 * **One run for all.** The batch closes ten minutes after its first entry
   joined, or at four entries. It stacks the entries' commits on `main` in
   join order as branch `batch/<id>` and runs the union of their gates once on
@@ -67,8 +67,17 @@ branches (customer, 2026-10-04):
   first by the pool's own past run times, so the slots fill together
   and finish together. An entry that does not apply on the ones before it is
   DROPPED with its conflicts and rebases.
-* **A failure costs one round more, not one row per branch.** The failed
-  gates alone run on the stack's prefixes, all at once while they fit the
+* **A flake fails nobody (2026-10-16).** The failed gates run once more on
+  the same tip, as *Re-verifying* asks ("rerun once"). A gate that passes
+  then is a flake: the batch goes on as if it had passed, the gate's first
+  log is kept and listed in `fleet/batch/flakes.log` with the line that
+  failed, and the PASSED verdict names it under FLAKY. The lander files or
+  extends that flake's row in `docs/BACKLOG.md` the same day. Until then a
+  flake in a batch's run FAILED its last entry and sent the others round
+  again: 11 of the 13 FAILED verdicts to 2026-10-14 never saw their failure
+  a second time.
+* **A failure costs one round more, not one row per branch.** Only gates
+  that failed twice go on. They alone run on the stack's prefixes, all at once while they fit the
   slots, so a batch of four finds its failing entry in one round. That entry
   is FAILED with the logs; the others go back to the front of the next batch
   and run the whole row again without it. When the first entry fails, `main`
