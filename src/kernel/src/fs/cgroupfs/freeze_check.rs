@@ -192,6 +192,16 @@ fn running(process: &Process) -> Checked<bool> {
         && try_word(process, 4).is_some_and(|count| count != 0))
 }
 
+/// Every task of `process` blocked and off its run queue: switched out, its
+/// last slice charged (`CpuQueue::detach_current`, under the queue's lock
+/// with the charge), or ended.
+fn switched_out(process: &Process) -> bool {
+    process
+        .tasks()
+        .iter()
+        .all(|task| task.is_dead() || (task.is_blocked() && !task.is_queued()))
+}
+
 /// Require `cgroup.events` of `tail` to read exactly `expected`.
 fn events(harness: &Harness, tail: &[u8], expected: &[u8], what: &'static str) -> Checked<()> {
     let mut path = Vec::from(tail);
@@ -343,10 +353,13 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
         return Err("cgroup.events did not poll POLLPRI when its cgroup froze");
     }
     // `frozen 1` is said when the last thread is counted parked, which is a
-    // moment before it is asleep: the tasks get a little while to be blocked.
+    // moment before it is asleep: the tasks get a little while to be blocked,
+    // and switched out -- a task marks itself blocked and runs on into the
+    // switch, which charges `cpu.stat` the slice it ends, so a usage read
+    // between the two moves once more without anything having run parked.
     until(
         process,
-        &|| Ok(job.frozen_seen() && process.every_task_blocked()),
+        &|| Ok(job.frozen_seen() && switched_out(process)),
         "a frozen cgroup's tasks are not all blocked",
     )?;
     let still = (word(process, 0)?, word(process, 4)?);
