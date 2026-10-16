@@ -118,7 +118,10 @@ pub(crate) fn launch(
             let line = line?;
             eprintln!("{line}");
             if let Some(binary) = running_binary(&line) {
-                running.push(binary);
+                // cargo names a binary under a target directory inside
+                // `root` relative to it, as CI's is; the runner is given
+                // the whole path.
+                running.push(root.join(binary).to_string_lossy().into_owned());
             }
         }
     }
@@ -137,11 +140,29 @@ pub(crate) fn launch(
 }
 
 /// The binary a line of cargo's names, when it says it runs one:
-/// `     Running unittests src/lib.rs (<path>)`.
+/// `     Running unittests src/lib.rs (<path>)`, in colour or not (CI sets
+/// `CARGO_TERM_COLOR=always`, and cargo then colours a pipe too).
 pub(crate) fn running_binary(line: &str) -> Option<String> {
+    let line = uncoloured(line);
     let rest = line.trim_start().strip_prefix("Running ")?;
     let (_, path) = rest.rsplit_once(" (")?;
     Some(path.strip_suffix(')')?.to_owned())
+}
+
+/// `line` without its terminal escape sequences (`ESC [ ... <letter>`).
+fn uncoloured(line: &str) -> String {
+    let mut plain = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some((before, after)) = rest.split_once("\x1b[") {
+        plain.push_str(before);
+        // The sequence ends at its first letter.
+        rest = after
+            .find(|character: char| character.is_ascii_alphabetic())
+            .and_then(|end| after.get(end + 1..))
+            .unwrap_or("");
+    }
+    plain.push_str(rest);
+    plain
 }
 
 /// The test binaries a `cargo test` started through the runner, running.

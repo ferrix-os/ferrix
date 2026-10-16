@@ -25,6 +25,17 @@ fn cargo_s_running_lines_name_their_binaries() {
         running_binary("     Running tests/x (y).rs (/t/debug/deps/x-2)"),
         Some("/t/debug/deps/x-2".to_owned())
     );
+    // In colour, as cargo writes it with CARGO_TERM_COLOR=always (CI).
+    assert_eq!(
+        running_binary(
+            "\x1b[1m\x1b[92m     Running\x1b[0m unittests src/lib.rs (target/debug/deps/a-1)"
+        ),
+        Some("target/debug/deps/a-1".to_owned())
+    );
+    assert_eq!(
+        running_binary("\x1b[1m\x1b[92m   Compiling\x1b[0m a v0.1.0 (/src/a)"),
+        None
+    );
     assert_eq!(running_binary("   Compiling a v0.1.0 (/src/a)"), None);
     assert_eq!(running_binary("test a ... ok"), None);
 }
