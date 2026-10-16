@@ -1777,10 +1777,11 @@ pub(super) fn check_console_output() {
         Ok(None) => {
             println!("  output   the port is polled: it has no interrupt this kernel installed");
         }
-        // A writer that could not wait is this kernel's mistake; a transmit
-        // interrupt that does not come is the machine's (the N150 box), and
-        // its output is polled instead.
-        Err(problem) if crate::sched::may_block() => {
+        // A transmit interrupt that never comes is the machine's (the N150
+        // box's COM1), and its output is polled instead; every other
+        // failure is this kernel's, and stops it. The reference boots fail
+        // on the WARNING line (xtask's `fallback_problem`).
+        Err(problem @ console::output::Failure::NeverCame) => {
             console::output::fall_back_to_polling();
             println!(
                 "  output   WARNING: {problem}; the port is polled from now on, as before its \

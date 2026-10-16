@@ -172,6 +172,7 @@ pub(crate) fn test_boot_lines(
             let own_model = std::env::var_os("FERRIX_X86_CPU").is_none();
             // In the order each is reported: the first that fails is said.
             let problems = [
+                fallback_problem(&watched.lines),
                 entropy_problem(&watched.lines),
                 devmgr_problem(&watched.lines),
                 msi_problem(arch, &watched.lines),
@@ -295,6 +296,33 @@ fn count_before(line: &str, suffix: &str) -> Option<u32> {
         .rsplit(' ')
         .next()
         .and_then(|count| count.parse::<u32>().ok())
+}
+
+/// What the console's transmit check prints when it falls back to polling.
+const OUTPUT_WARNING: &str = "  output   WARNING:";
+/// What the x86-64 clock prints for a fallback it took.
+const CLOCK_WARNING: &str = "  clock    WARNING:";
+/// The one clock warning a reference boot prints by design: TCG offers no
+/// invariant TSC, so the HPET is its clock (`docs/CLOCK.md` §5).
+const HPET_IS_THE_CLOCK: &str = "the HPET is the clock";
+
+/// Why a boot that reached the marker took a fallback meant only for
+/// hardware that misbehaves, if it did: the console's polling when the
+/// transmit interrupt never came (FX-0504's one exception), or one of the
+/// x86-64 clock's -- an HPET that would not open, a PIT that did not count.
+/// Every machine this tool boots has a working transmit interrupt, HPET and
+/// PIT, so on any of them a fallback is a regression the kernel would
+/// otherwise survive in silence.
+/// Verifies: `L.console.12`, `L.x86_64.38`
+fn fallback_problem(lines: &[String]) -> Option<String> {
+    let line = lines.iter().find(|line| {
+        line.contains(OUTPUT_WARNING)
+            || (line.contains(CLOCK_WARNING) && !line.contains(HPET_IS_THE_CLOCK))
+    })?;
+    Some(format!(
+        "the kernel took a fallback no machine this tool boots should need: `{}`",
+        line.trim()
+    ))
 }
 
 /// Why a boot that reached the marker still failed the DMA check, if it did.
@@ -3802,10 +3830,42 @@ mod tests {
     use super::{
         Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, R8_LINE, REMAP_LINES, SUCCESS_MARKER,
         UNCHECKED_MARKER, X2APIC_ALL, blocks_compatibility_format, cleaning_problem,
-        config_problem, devmgr_problem, entropy_problem, fault_problem, held_off_problem,
-        iommu_problem, msi_problem, namespace_problem, parse_qemu_version, power_off_problem,
-        queue_problem, remap_problem, send_lines, version_translates, xstate_problem,
+        config_problem, devmgr_problem, entropy_problem, fallback_problem, fault_problem,
+        held_off_problem, iommu_problem, msi_problem, namespace_problem, parse_qemu_version,
+        power_off_problem, queue_problem, remap_problem, send_lines, version_translates,
+        xstate_problem,
     };
+
+    /// A reference boot that fell back to polling its console, or took one
+    /// of the x86-64 clock's fallbacks, fails; TCG's HPET line does not.
+    #[test]
+    fn fallbacks_fail_a_reference_boot() {
+        let line = |text: &str| format!("    3.20 | {text}");
+        let tcg = line(
+            "  clock    WARNING: the HPET is the clock, three device reads a reading, and no \
+             clock in the vDSO (every clock_gettime is a system call): CPUID reports no \
+             invariant TSC",
+        );
+        let polled = line(
+            "  output   WARNING: the transmit ring still held a task's write two seconds later; \
+             the port is polled from now on, as before its interrupt was installed",
+        );
+        let hpet = line(
+            "  clock    WARNING: the HPET's counter did not move; going on as if there were no HPET",
+        );
+        let pit = line(
+            "  clock    WARNING: PIT channel 2 never reached terminal count (gated 8254?); asking \
+             CPUID leaf 0x15/0x16 for the TSC's rate",
+        );
+        assert_eq!(
+            fallback_problem(&[tcg.clone(), line("  output   a task's line")]),
+            None
+        );
+        for fallback in [polled, hpet, pit] {
+            let problem = fallback_problem(&[tcg.clone(), fallback]);
+            assert!(problem.is_some_and(|problem| problem.contains("fallback")));
+        }
+    }
 
     /// A byte that is not UTF-8 is shown, not the end of the guest's
     /// output: the lines after it still arrive (`batch-20261005T114127Z-b0-3`).

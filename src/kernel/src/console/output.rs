@@ -381,6 +381,29 @@ pub(crate) fn stalls() -> u64 {
     STALLS.load(Ordering::Relaxed)
 }
 
+/// Why [`check`] failed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Failure {
+    /// A task's write was still in the transmit ring two seconds later: the
+    /// port's transmit interrupt never came. The N150 box's COM1 does this;
+    /// its writers may fall back to polling ([`fall_back_to_polling`]).
+    NeverCame,
+    /// Anything else: this kernel's own defect, which stops the boot
+    /// (FX-0504).
+    Defect(&'static str),
+}
+
+impl core::fmt::Display for Failure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Failure::NeverCame => {
+                f.write_str("the transmit ring still held a task's write two seconds later")
+            }
+            Failure::Defect(what) => f.write_str(what),
+        }
+    }
+}
+
 /// What [`check`] established.
 pub(crate) struct Checked {
     /// The bytes the check's line is on the wire.
@@ -408,13 +431,18 @@ const CHECK_LINE: &[u8] = concat!(
 ///
 /// # Errors
 ///
-/// A description of the first property that did not hold.
-pub(crate) fn check() -> Result<Option<Checked>, &'static str> {
+/// The first property that did not hold: [`Failure::NeverCame`] for a
+/// task's write still in the ring two seconds later, the one failure that is
+/// the machine's rather than this kernel's, and [`Failure::Defect`] for
+/// every other.
+pub(crate) fn check() -> Result<Option<Checked>, Failure> {
     if !interrupt_driven() {
         return Ok(None);
     }
     if !crate::sched::may_block() {
-        return Err("the transmit check ran where a writer could not wait");
+        return Err(Failure::Defect(
+            "the transmit check ran where a writer could not wait",
+        ));
     }
     let interrupt_before = BY_INTERRUPT.load(Ordering::Relaxed);
     let writer_before = BY_WRITER.load(Ordering::Relaxed);
@@ -427,10 +455,12 @@ pub(crate) fn check() -> Result<Option<Checked>, &'static str> {
     // times what the line takes on the slowest port.
     let deadline = crate::timer::now_nanos().saturating_add(2_000_000_000);
     if !WRITERS.wait_until_deadline(|| HELD.load(Ordering::Relaxed) == 0, deadline) {
-        return Err("the transmit ring still held a task's write two seconds later");
+        return Err(Failure::NeverCame);
     }
     if stalls() != stalls_before {
-        return Err("the transmit interrupt stopped coming, and the ring was polled out");
+        return Err(Failure::Defect(
+            "the transmit interrupt stopped coming, and the ring was polled out",
+        ));
     }
     let by_interrupt = BY_INTERRUPT
         .load(Ordering::Relaxed)
@@ -439,7 +469,9 @@ pub(crate) fn check() -> Result<Option<Checked>, &'static str> {
         .load(Ordering::Relaxed)
         .wrapping_sub(writer_before);
     if by_interrupt.saturating_add(BURST as u64) < line as u64 {
-        return Err("a task's write was not left to the transmit interrupt");
+        return Err(Failure::Defect(
+            "a task's write was not left to the transmit interrupt",
+        ));
     }
     Ok(Some(Checked {
         line,
