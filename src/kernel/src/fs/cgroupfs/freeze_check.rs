@@ -160,8 +160,8 @@ pub(super) fn wait_running(process: &Process) -> Checked<()> {
 /// the wait gave up and fail with `failure`.
 fn until_running(process: &Process, failure: &'static str) -> Checked<()> {
     let outcome = until(process, &|| running(process), failure);
-    if outcome == Err(failure) {
-        for _ in 0..3 {
+    if outcome.is_ok() || outcome == Err(failure) {
+        for _ in 0..(if outcome.is_ok() { 1 } else { 3 }) {
             let states: Vec<(u8, usize, bool, u64, u64, u64, u32)> = process
                 .tasks()
                 .iter()
@@ -178,8 +178,9 @@ fn until_running(process: &Process, failure: &'static str) -> Checked<()> {
                 })
                 .collect();
             crate::console::println!(
-                "  freeze   gave up: waiter's record {:?}, waiters on its word {}, counts {:?} {:?}, \
+                "  freeze   {}: waiter's record {:?}, waiters on its word {}, counts {:?} {:?}, \
                  tasks (state, processor, queued, runtime us, switches, preemptions, weight) {:?}",
+                if outcome.is_ok() { "running" } else { "gave up" },
                 try_word(process, 12),
                 futex::waiters_on(process, PAGE + 8),
                 try_word(process, 0),
@@ -201,8 +202,13 @@ fn until_running(process: &Process, failure: &'static str) -> Checked<()> {
                 .iter()
                 .map(|count| count.load(core::sync::atomic::Ordering::Relaxed))
                 .collect();
+            let resumes: Vec<u64> = process::DIAG_RESUME
+                .iter()
+                .map(|slot| slot.load(core::sync::atomic::Ordering::Relaxed))
+                .collect();
+            let tids: Vec<u32> = process.threads().iter().map(|thread| thread.tid()).collect();
             crate::console::println!(
-                "  freeze   threads (pending, park, leave) {threads:?}, futex (entries, rounds, restarts, eagain, woken) {diag:?}"
+                "  freeze   threads (pending, park, leave) {threads:?}, futex (entries, rounds, restarts, eagain, woken) {diag:?}, tids {tids:?} resumes {resumes:x?}"
             );
             crate::sched::sleep_for(20_000_000);
         }

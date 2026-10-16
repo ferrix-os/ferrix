@@ -323,6 +323,11 @@ unsafe extern "C" {
 pub(crate) struct UserRegs(pub(super) TrapFrame);
 
 impl UserRegs {
+    /// DIAG: r0, r8, pc.
+    pub(crate) const fn diag(&self) -> (u32, u32, u32) {
+        (self.0.r[0], self.0.r[8], self.0.pc)
+    }
+
     /// The same registers, as a child sees them: the call returned zero.
     pub(crate) const fn for_child(&self) -> UserRegs {
         let mut frame = self.0;

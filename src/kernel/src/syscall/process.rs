@@ -2488,6 +2488,13 @@ fn end_thread(status: Option<i32>, group: bool) -> ! {
 /// Returning ends the task, which is what happens if the process was killed
 /// before it ever ran. A check that makes a system call in the process first
 /// -- `execve`, in `fs::exec_check` -- enters the program through here after.
+/// DIAG: the last resumes: tid, r0, pc, r8's top half.
+pub(crate) static DIAG_RESUME: [core::sync::atomic::AtomicU64; 8] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 8];
+/// DIAG: next slot.
+pub(crate) static DIAG_RESUME_AT: core::sync::atomic::AtomicU64 =
+    core::sync::atomic::AtomicU64::new(0);
+
 pub(crate) fn run_program(_argument: usize) {
     let Some(process) = current() else {
         return;
@@ -2508,6 +2515,18 @@ pub(crate) fn run_program(_argument: usize) {
         leave_current();
     }
     let resume = thread::current().and_then(|thread| thread.take_resume());
+    #[cfg(target_arch = "arm")]
+    {
+        let tid = thread::current().map_or(0, |thread| thread.tid());
+        let (r0, r8, pc) = resume.as_ref().map_or((u32::MAX, 0, 0), |regs| regs.diag());
+        let at = DIAG_RESUME_AT.fetch_add(1, Ordering::Relaxed) % 8;
+        if let Some(slot) = DIAG_RESUME.get(at as usize) {
+            slot.store(
+                (u64::from(tid) << 48) | (u64::from(r0 & 0xffff) << 32) | (u64::from(pc & 0xffff) << 16) | u64::from(r8 >> 16),
+                Ordering::Relaxed,
+            );
+        }
+    }
     if let Some(regs) = resume {
         drop(process);
         // SAFETY: this task was spawned in the child's address space with its
