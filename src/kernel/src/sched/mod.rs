@@ -88,6 +88,12 @@ static NEED_RESCHED: Once<Vec<AtomicBool>> = Once::new();
 /// yet taken. See [`kick`].
 static KICK_PENDING: Once<Vec<AtomicBool>> = Once::new();
 
+/// Per processor: the kicks it has been sent that have begun, counted before
+/// each sets its flag, and those that have set it, counted after. For stage
+/// 5's last-look check, which must tell a flag a kick set from one a look
+/// left up: see [`quiet_kicks`].
+static KICKS: Once<Vec<(AtomicUsize, AtomicUsize)>> = Once::new();
+
 /// One flag per processor, set while its idle task holds an exited task's
 /// stack it is about to free. Read by the checks that count frames, which
 /// must not measure while a free is in flight: see [`reaping_anywhere`].
@@ -742,7 +748,15 @@ fn kick(cpu: usize) {
     // where `preempt_on_irq_exit` reads the flag. That is why there is no
     // scheduler hook in the IPI handler, and why a processor woken by
     // somebody else's shootdown finds this flag and acts on it just as well.
+    // Begun before the flag and done after it, for `quiet_kicks`.
+    let counts = KICKS.get().and_then(|counts| counts.get(cpu));
+    if let Some((begun, _)) = counts {
+        let _ = begun.fetch_add(1, Ordering::SeqCst);
+    }
     mark_resched(cpu);
+    if let Some((_, done)) = counts {
+        let _ = done.fetch_add(1, Ordering::SeqCst);
+    }
     let pending = KICK_PENDING.get().and_then(|marks| marks.get(cpu));
     if pending.is_some_and(|mark| mark.swap(true, Ordering::AcqRel)) {
         return;
@@ -757,6 +771,31 @@ fn init_resched_flags(online: usize) {
     let _ = NEED_RESCHED.call_once(|| (0..online).map(|_| AtomicBool::new(false)).collect());
     // FATAL-ALLOC: boot only: stage 5 makes each processor's scheduling state once, as the scheduler starts.
     let _ = KICK_PENDING.call_once(|| (0..online).map(|_| AtomicBool::new(false)).collect());
+    let pair = |_| (AtomicUsize::new(0), AtomicUsize::new(0));
+    // FATAL-ALLOC: boot only: stage 5 makes each processor's scheduling state once, as the scheduler starts.
+    let _ = KICKS.call_once(|| (0..online).map(pair).collect());
+}
+
+/// The kicks `cpu` has been sent that have begun, if none is between its
+/// count and its flag; `None` while one is.
+///
+/// Done is read first: done never passes begun, so a begun read after it and
+/// equal to it means that no kick was part-way at that read. Every kick
+/// counted then set its flag before it; one that begins after it moves the
+/// count [`kicks_begun`] reads. So a flag found up later, with that count
+/// unmoved, was set by no kick since this read.
+fn quiet_kicks(cpu: usize) -> Option<usize> {
+    let (begun, done) = KICKS.get().and_then(|counts| counts.get(cpu))?;
+    let done = done.load(Ordering::SeqCst);
+    (begun.load(Ordering::SeqCst) == done).then_some(done)
+}
+
+/// The kicks `cpu` has been sent that have begun: see [`quiet_kicks`].
+fn kicks_begun(cpu: usize) -> usize {
+    KICKS
+        .get()
+        .and_then(|counts| counts.get(cpu))
+        .map_or(0, |(begun, _)| begun.load(Ordering::SeqCst))
 }
 
 /// Bring up the scheduler, and make the context calling it a task.
@@ -2058,6 +2097,15 @@ fn resched_asked(cpu: usize) -> bool {
         .get()
         .and_then(|flags| flags.get(cpu))
         .is_some_and(|flag| flag.load(Ordering::Relaxed))
+}
+
+/// [`resched_asked`], ordered before a read of [`kicks_begun`] after it: a
+/// flag a kick set is read with that kick's count.
+fn resched_asked_ordered(cpu: usize) -> bool {
+    NEED_RESCHED
+        .get()
+        .and_then(|flags| flags.get(cpu))
+        .is_some_and(|flag| flag.load(Ordering::SeqCst))
 }
 
 /// Whether an interrupt asked `cpu` to reschedule, clearing the request.

@@ -33,7 +33,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_sched::{CpuSet, LOAD_SCALE, NICE_0_WEIGHT, weight_of_nice};
 use ferrix_sync::IrqControl;
@@ -1583,6 +1583,7 @@ fn last_look_case(how: usize, lost: &'static str) -> Result<(), &'static str> {
     LAST_LOOK_HELD.store(false, Ordering::Release);
     LAST_LOOK_TICKED.store(false, Ordering::Release);
     LAST_LOOK_DECIDED.store(false, Ordering::Release);
+    LAST_LOOK_KICKS.store(usize::MAX, Ordering::Release);
 
     // On this processor, so that the switch the waiter invites is this
     // processor's, and a lost waiter has no other processor to be found on.
@@ -1648,43 +1649,60 @@ fn drained_in_its_last_look(how: usize) {
     // Made by now: the hold's drop, with the request pending and interrupts
     // on, decides it. Another processor can ask again meanwhile, though: see
     // `left_undecided`.
-    let decided = super::current().is_some_and(|me| returned && !left_undecided(me.cpu()));
+    let decided = super::current().is_some_and(|me| returned && !left_undecided(&me));
     LAST_LOOK_DECIDED.store(decided, Ordering::Release);
     finish();
 }
 
-/// How long [`left_undecided`] waits, masked, for the kick behind a request
-/// it found to show.
-const KICK_SHOWS_NANOS: u64 = 1_000_000;
+/// [`super::quiet_kicks`] for the last look's processor, read just before
+/// the look asks for its decision, or `usize::MAX` for `None`: see
+/// [`left_undecided`].
+static LAST_LOOK_KICKS: AtomicUsize = AtomicUsize::new(usize::MAX);
 
-/// Whether a request for a decision on `cpu`, this processor, is still
-/// pending and is not another processor's.
+/// `switches` of the last look's waiter as its look began: see
+/// [`left_undecided`].
+static LAST_LOOK_SWITCHES: AtomicU64 = AtomicU64::new(0);
+
+/// Whether the request for a decision `me`'s last look made on its
+/// processor is still pending: the flag up, set by no kick, and `me` not
+/// switched since its look.
 ///
-/// A `kick` from another processor sets the flag before it marks its
-/// interrupt on its way, and the interrupt can take milliseconds to arrive
-/// on an emulated machine. A flag read in between is a new request whose
-/// interrupt's exit makes it, not the look's request left unmade (seen once
-/// on armv7a TCG with four processors, `fx1012-stk-thr`, 2026-10-12). So a
-/// flag found up is looked at with interrupts masked, which keeps any exit
-/// from taking it, and is the look's own unless the kick's mark shows within
-/// [`KICK_SHOWS_NANOS`]. A kick that comes then as well as an unmade decision
-/// would pass the case; the control removes the decision on every run.
-fn left_undecided(cpu: usize) -> bool {
+/// **Switched means decided.** The decision the drop makes may switch `me`
+/// out, and another task on this processor may then raise the flag -- a
+/// wake from a kernel thread (`resched_here`), or a timer's interrupt while
+/// that task held preemption off -- and block, which switches `me` back in
+/// with no interrupt's exit to take the flag. `schedule` leaves the flag
+/// alone. That flag is not the look's (seen on armv7a TCG at two
+/// processors, 1 in 14 boots with the kick counts below in place, fl-k
+/// 2026-10-16), and a switch since the look is the decision made. A switch
+/// with no decision at the drop would be an interrupt's exit, which takes
+/// the flag in any case.
+///
+/// **And a kick's flag is not the look's.**
+///
+/// A `kick` from another processor sets the flag too, at any time. Its
+/// interrupt's exit makes that decision, not the look's request left unmade,
+/// but a processor stalled between `kick`'s flag and its interrupt --
+/// milliseconds on an emulated machine, longer when a host preempts a
+/// virtual processor -- leaves the flag up for as long as it likes. Seen on
+/// armv7a TCG at four processors (`fx1012-stk-thr`, 2026-10-12), and again
+/// under 63d708bef's wait of 1 ms for the kick's mark (`d1-coverage-2`,
+/// x86-64 TCG, 2026-10-15; `n150k-a32smp2`, armv7a TCG at two processors,
+/// 2026-10-16). So each kick is counted as begun before its flag and done
+/// after it, and the flag left up is the look's own only if no kick was
+/// part-way when the look read the counts and none has begun since
+/// ([`super::quiet_kicks`]): no window and no wait. A kick part-way at that
+/// read, or one since, as well as an unmade decision would pass the case;
+/// the control removes the decision on every run.
+fn left_undecided(me: &Arc<Task>) -> bool {
+    let cpu = me.cpu();
+    // Masked, so that no interrupt's exit takes an unmade request first.
     let saved = <crate::arch::Irq as IrqControl>::disable();
-    let kicked = || {
-        super::KICK_PENDING
-            .get()
-            .and_then(|marks| marks.get(cpu))
-            .is_some_and(|mark| mark.load(Ordering::Acquire))
-    };
-    let mut pending = super::resched_asked(cpu);
-    if pending {
-        let until = crate::timer::now_nanos().saturating_add(KICK_SHOWS_NANOS);
-        while !kicked() && crate::timer::now_nanos() < until {
-            core::hint::spin_loop();
-        }
-        pending = !kicked();
-    }
+    let quiet = LAST_LOOK_KICKS.load(Ordering::Acquire);
+    let pending = quiet != usize::MAX
+        && super::resched_asked_ordered(cpu)
+        && super::kicks_begun(cpu) == quiet
+        && me.switches() == LAST_LOOK_SWITCHES.load(Ordering::Acquire);
     <crate::arch::Irq as IrqControl>::restore(saved);
     pending
 }
@@ -1693,6 +1711,9 @@ fn left_undecided(cpu: usize) -> bool {
 /// runnable, its condition met, and the switch `how` names invited.
 fn last_look_race(me: &Arc<Task>, how: usize) {
     let switches = me.switches();
+    LAST_LOOK_SWITCHES.store(switches, Ordering::Release);
+    let kicks = super::quiet_kicks(me.cpu()).unwrap_or(usize::MAX);
+    LAST_LOOK_KICKS.store(kicks, Ordering::Release);
     me.set_state(super::task::RUNNABLE);
     LAST_LOOK_QUEUE.wake_all();
     me.set_state(BLOCKED);
