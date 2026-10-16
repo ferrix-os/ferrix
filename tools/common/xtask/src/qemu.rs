@@ -177,7 +177,7 @@ pub(crate) fn test_boot_lines(
                 msi_problem(arch, &watched.lines),
                 held_off_problem(arch, &watched.lines),
                 cleaning_problem(arch, &watched.lines),
-                remap_problem(arch, &watched.lines),
+                remap_problem(arch, own_model, &watched.lines),
                 queue_problem(arch, &watched.lines),
                 config_problem(arch, &watched.lines),
                 iommu_problem(&watched.lines),
@@ -440,7 +440,7 @@ fn queue_problem(arch: Arch, lines: &[String]) -> Option<String> {
 /// (`docs/NVIDIA.md` §12.3, N0g): the unit's bring-up with `CFIS` read back
 /// clear, check R9, R1 to R3, `L.device.28`, R10, R5, the stray deliveries,
 /// and R8, each by the words that say it held.
-const REMAP_LINES: [(&str, &str); 9] = [
+const REMAP_LINES: [(&str, &str); 8] = [
     (
         "remapping on (256 entries, xAPIC format), CFIS=0 read back",
         "the VT-d unit never said it remaps with compatibility format blocked",
@@ -470,14 +470,40 @@ const REMAP_LINES: [(&str, &str); 9] = [
         "the check vector or the console's retired vector was delivered, or never counted",
     ),
     (
-        "processors looked at their local APIC's mode before using its window; 1 put in x2APIC mode",
-        "check R8 never put a processor in x2APIC mode and saw it switched back",
-    ),
-    (
         "byte received while it was masked read by the service after its conversion",
         "the console's line was never serviced once after its conversion",
     ),
 ];
+
+/// Check R8's line: how many processors looked at their local APIC's mode,
+/// and how many of them the check put in x2APIC mode first.
+const R8_LINE: &str = " processors looked at their local APIC's mode before using its window; ";
+
+/// Why check R8's line does not show the check run, if it does not.
+///
+/// The kernel puts the first application processor in x2APIC mode where the
+/// processor offers it. A boot with one processor has no application
+/// processor, and a boot whose CPU model is replaced (`FERRIX_X86_CPU`, as
+/// `boot-legacy` does with a model that offers no x2APIC) has none to put,
+/// so on those the line says 0 put and the check had nothing to do; every
+/// other boot must say 1 (2026-10-16: the line was demanded as "1 put" on
+/// all of them).
+fn r8_problem(own_model: bool, lines: &[String]) -> Option<String> {
+    const NEVER: &str = "check R8 never put a processor in x2APIC mode and saw it switched back";
+    let read = lines.iter().find_map(|line| {
+        let (before, after) = line.split_once(R8_LINE)?;
+        let processors: u64 = before.split_whitespace().last()?.parse().ok()?;
+        let put: u64 = after.split_whitespace().next()?.parse().ok()?;
+        after
+            .contains("put in x2APIC mode by the check and switched to xAPIC")
+            .then_some((processors, put))
+    });
+    match read {
+        Some((_, 1)) => None,
+        Some((processors, 0)) if processors == 1 || !own_model => None,
+        _ => Some(NEVER.to_owned()),
+    }
+}
 
 /// What the kernel prints for each interrupt request a check makes its unit
 /// refuse, before the reason.
@@ -492,7 +518,7 @@ const PROVOKED_INTERRUPT: &str = " is made to send an interrupt its unit refuses
 /// exactly R1's and R2's 0x25 and R3's 0x26: any other reason fails by name.
 ///
 /// Verifies: L.iommu.50, L.iommu.54, `L.x86_64.129`, `L.x86_64.130`, `L.x86_64.131`
-fn remap_problem(arch: Arch, lines: &[String]) -> Option<String> {
+fn remap_problem(arch: Arch, own_model: bool, lines: &[String]) -> Option<String> {
     if arch != Arch::X86_64 {
         return None;
     }
@@ -509,6 +535,9 @@ fn remap_problem(arch: Arch, lines: &[String]) -> Option<String> {
         if !lines.iter().any(|line| line.contains(text)) {
             return Some(problem.to_owned());
         }
+    }
+    if let Some(problem) = r8_problem(own_model, lines) {
+        return Some(problem);
     }
     let mut reasons: Vec<&str> = lines
         .iter()
@@ -3761,11 +3790,11 @@ fn prepare_vars(arch: Arch, code: &Path, template: Option<&Path>) -> Result<Path
 #[cfg(test)]
 mod tests {
     use super::{
-        Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, REMAP_LINES, SUCCESS_MARKER, UNCHECKED_MARKER,
-        blocks_compatibility_format, cleaning_problem, config_problem, devmgr_problem,
-        entropy_problem, fault_problem, held_off_problem, iommu_problem, msi_problem,
-        namespace_problem, parse_qemu_version, power_off_problem, queue_problem, remap_problem,
-        send_lines, version_translates, xstate_problem,
+        Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, R8_LINE, REMAP_LINES, SUCCESS_MARKER,
+        UNCHECKED_MARKER, blocks_compatibility_format, cleaning_problem, config_problem,
+        devmgr_problem, entropy_problem, fault_problem, held_off_problem, iommu_problem,
+        msi_problem, namespace_problem, parse_qemu_version, power_off_problem, queue_problem,
+        remap_problem, send_lines, version_translates, xstate_problem,
     };
 
     /// A byte that is not UTF-8 is shown, not the end of the guest's
@@ -4088,6 +4117,7 @@ mod tests {
             .iter()
             .map(|(text, _)| format!("    6.0 |   remap    {text}"))
             .collect();
+        whole.push(r8_line(4, 1));
         for reason in [
             "0x25 (compatibility format blocked)",
             "0x25 (compatibility format blocked)",
@@ -4097,13 +4127,13 @@ mod tests {
                 "  iommu    stream 0x200 is made to send an interrupt its unit refuses with reason {reason}, on purpose"
             ));
         }
-        assert_eq!(remap_problem(Arch::X86_64, &whole), None);
-        assert_eq!(remap_problem(Arch::AArch64, &[]), None, "no VT-d");
+        assert_eq!(remap_problem(Arch::X86_64, true, &whole), None);
+        assert_eq!(remap_problem(Arch::AArch64, true, &[]), None, "no VT-d");
         for missing in 0..whole.len() {
             let mut cut = whole.clone();
             let _ = cut.remove(missing);
             assert!(
-                remap_problem(Arch::X86_64, &cut).is_some(),
+                remap_problem(Arch::X86_64, true, &cut).is_some(),
                 "line {missing} missing"
             );
         }
@@ -4113,12 +4143,42 @@ mod tests {
                 .to_owned(),
         );
         assert!(
-            remap_problem(Arch::X86_64, &stray).is_some(),
+            remap_problem(Arch::X86_64, true, &stray).is_some(),
             "another reason"
         );
-        let mut off = whole;
+        let mut off = whole.clone();
         off.push("  iommu    vt-d unit 0xfed90000: remapping not enabled: x".to_owned());
-        assert!(remap_problem(Arch::X86_64, &off).is_some());
+        assert!(remap_problem(Arch::X86_64, true, &off).is_some());
+
+        let fresh = |lines: &[String]| {
+            lines
+                .iter()
+                .filter(|l| !l.contains(R8_LINE))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // Boot-single and boot-legacy: nothing for R8 to put.
+        for (own, processors, put, fails) in [
+            (true, 1, 0, false),
+            (false, 4, 0, false),
+            (true, 4, 0, true),
+            (true, 4, 2, true),
+            (false, 4, 2, true),
+        ] {
+            let mut lines = fresh(&whole);
+            lines.push(r8_line(processors, put));
+            assert_eq!(
+                remap_problem(Arch::X86_64, own, &lines).is_some(),
+                fails,
+                "{processors} processors, {put} put, own model {own}"
+            );
+        }
+    }
+
+    fn r8_line(processors: u64, put: u64) -> String {
+        format!(
+            "    6.0 |   apic     {processors}{R8_LINE}{put} put in x2APIC mode by the check and switched to xAPIC; firmware left x2APIC on, on 0 processors; switched to xAPIC"
+        )
     }
 
     #[test]
