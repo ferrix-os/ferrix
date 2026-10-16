@@ -289,13 +289,39 @@ fn drive(arch: Arch, port: u16, dump: &Path, watching: &mut Watching<'_>) -> Res
     )?;
     launch_probe(&mut qmp, watching, arch, 1, 1)?;
 
-    // Off: Settings has the keyboard again, its filter still `probe`.
+    // Off: Settings has the keyboard again, its filter still `probe`, once
+    // the launcher that held it has closed. Under load the Return used to
+    // go out a moment after the launcher's scope stopped and before the
+    // compositor had handed the keys back (rm-comp, load 26.5, 2026-10-16),
+    // so wait for the launcher to close, give the compositor a moment, and
+    // type; a Return that still brought no change is typed once more, which
+    // cannot turn the switch back on as nothing was toggled.
+    let closed = watching.read_more(Instant::now() + PATIENCE, |lines| {
+        lines
+            .iter()
+            .any(|line| line.contains("app-fuzzel-") && line.contains(": stopped"))
+    })?;
+    if !closed {
+        return Err(with_the_transcript(
+            &Error::new(format!(
+                "{arch}: the launcher's scope never stopped after Game Probe"
+            )),
+            watching,
+        ));
+    }
     std::thread::sleep(Duration::from_secs(2));
     press(&mut qmp, &["f2"])?;
+    let off = "settings: game mode off for probe.desktop";
+    let came = watching.read_more(Instant::now() + Duration::from_secs(8), |lines| {
+        count(lines, off) >= 1
+    })?;
+    if !came {
+        press(&mut qmp, &["f2"])?;
+    }
     wait(
         watching,
         arch,
-        ("settings: game mode off for probe.desktop", 1),
+        (off, 1),
         "Return in Settings did not turn Game Probe's switch off",
     )?;
     println!("  {arch}: Game Probe's switch is off");
