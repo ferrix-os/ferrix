@@ -21,7 +21,18 @@ use std::process::Command;
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, btrfs_disk, qemu};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-btrfs",
+    help_at: 170,
+    help: &[
+        "test-btrfs    Boot, write a tree on the blank btrfs disk, and require host btrfs check to find nothing",
+    ],
+    run: |_, args| test_btrfs(args, |arch| crate::build_image(arch, args)),
+}];
 
 /// What the guest prints when its half passed.
 const WROTE: &str = "read back as they were written";

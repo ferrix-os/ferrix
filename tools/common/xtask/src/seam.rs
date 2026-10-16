@@ -20,7 +20,18 @@ use std::process::{Command, Stdio};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result, initramfs, qemu, sha256, test_disk};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "bench-seam",
+    help_at: 450,
+    help: &[
+        "bench-seam    Boot a stock Linux kernel on the same QEMU machine and time a 4 KiB O_DIRECT read of the pattern disk at depths 1 and 32: the in-kernel reference for the seam boot line (tools/common/fetch/fetch-linux-reference.sh first)",
+    ],
+    run: |_, args| bench_seam(args),
+}];
 
 /// Reads at each depth, as the kernel's own measurement makes.
 const READS: u32 = 1024;

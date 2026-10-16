@@ -20,6 +20,19 @@ use crate::paths::Arch;
 use crate::{Error, Result, cargo, fat, initramfs, native, paths, ports, qemu, sem, shell};
 use std::path::Path;
 
+use crate::task::Task;
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "bench-pipe",
+    help_at: 420,
+    help: &[
+        "bench-pipe    Boot src/tests/pipe-bench as init --rounds times (5) and time Linux-ABI round trips",
+        "              between two processes: a pipe, a Unix stream socket and a futex ping-pong of 8 bytes",
+    ],
+    run: |_, args| bench_pipe(args),
+}];
+
 /// The tests the program runs, in its order.
 const TESTS: &[&str] = &[
     "null-getppid",

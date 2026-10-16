@@ -25,7 +25,18 @@ use crate::args::Args;
 use crate::display::{Qmp, free_port, json_string};
 use crate::paths::{self, Arch};
 use crate::qemu::Watching;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-input",
+    help_at: 320,
+    help: &[
+        "test-input    Boot src/user/system/linux/compositor/evecho as init with virtio-input, send a key and a touch over QMP, and require them back",
+    ],
+    run: |_, args| test_input(args),
+}];
 
 /// What evecho prints once it has opened every device.
 const READY: &str = "evecho: ready";

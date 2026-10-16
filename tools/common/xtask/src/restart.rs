@@ -51,11 +51,33 @@ use std::time::{Duration, Instant};
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, btrfs_check, btrfs_disk, cargo, fat, initramfs, native, ports, qemu};
 use crate::{uutils, zinc};
 
 mod update;
 mod usb;
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-restart",
+        help_at: 470,
+        help: &[
+            "test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|usb|nvme|all; gpu if not given)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-usb",
+        help_at: 480,
+        help: &[
+            "test-usb      Boot a shell beside a qemu-xhci with a hub, a keyboard, a mouse and a stick: type, point, unplug",
+            "              and plug in again over QMP, read the stick, kill the driver twice; then a negative control (x86_64)",
+        ],
+        run,
+    },
+];
 
 /// How long to wait for the answer to one line.
 const PATIENCE: Duration = Duration::from_secs(30);

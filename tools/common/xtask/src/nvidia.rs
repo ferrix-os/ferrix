@@ -37,8 +37,21 @@ use crate::args::Args;
 use crate::native::{self, Built};
 use crate::nvrm::{self, CORE_IN_VOLUME};
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, btrfs_disk, cargo, fat, test_disk};
 use crate::{chrome, initramfs, ports, rustc, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "run-nvidia",
+    help_at: 630,
+    help: &[
+        "run-nvidia    Boot Ferrix on the RTX 3060 in libvirt's ferrix-3060 domain (the patched QEMU as root, the sharing",
+        "              domains shut off), nvrm as its driver with its core and the GSP firmware on the NVIDIA volume;",
+        "              print the serial port until nvrm is up or stops, then destroy the domain (x86_64)",
+    ],
+    run: |_, args| run_nvidia(args),
+}];
 
 /// The libvirt connection.
 const CONNECTION: &str = "qemu:///system";

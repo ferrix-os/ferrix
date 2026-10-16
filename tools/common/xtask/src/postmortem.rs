@@ -31,7 +31,18 @@ use crate::args::Args;
 use crate::display::Qmp;
 use crate::paths::{self, Arch};
 use crate::qemu::{self, Watching};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-postmortem",
+    help_at: 500,
+    help: &[
+        "test-postmortem  the kernel's log across a warm reset: a panic, a QMP reset, the next loader quotes it; and ferrix.pstore=off (x86_64, aarch64)",
+    ],
+    run: |_, args| test_postmortem(args, crate::build_image),
+}];
 
 /// The kernel's line once the region is attached.
 const MIRRORING: &str = "pstore   mirroring the log to ";

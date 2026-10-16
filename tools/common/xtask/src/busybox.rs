@@ -14,7 +14,16 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, cargo, ferrousli};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "busybox",
+    help_at: 1080,
+    help: &["busybox       Build busybox against ferrousli (x86_64) for --init ferrousli"],
+    run: |_, args| build(args.single_arch()?).map(|_| ()),
+}];
 
 /// The `--init` value that names ferrousli's busybox rather than a path.
 pub(crate) const INIT_NAME: &str = "ferrousli";

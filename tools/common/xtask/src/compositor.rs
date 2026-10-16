@@ -118,6 +118,156 @@ use protocols::{
 };
 use user_desktop::{test_everything_desktop, test_fuzzel, test_fuzzel_user};
 
+use crate::task::Task;
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "run-compositor",
+        help_at: 120,
+        help: &[
+            "run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show",
+        ],
+        run: |_, args| run_compositor(args),
+    },
+    Task {
+        name: "test-compositor",
+        help_at: 300,
+        help: &[
+            "test-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, and require its background on every pixel",
+        ],
+        run: |_, args| test_compositor(args),
+    },
+    Task {
+        name: "test-video",
+        help_at: 310,
+        help: &[
+            "test-video    Boot a wallpaper that moves and require the screen to show its frames in turn",
+        ],
+        run: |_, args| test_video(args),
+    },
+    Task {
+        name: "test-foot",
+        help_at: 370,
+        help: &[
+            "test-foot     Boot the compositor with foot, the ported Wayland terminal, and require its font and its text on screen",
+        ],
+        run: |_, args| test_foot(args),
+    },
+    Task {
+        name: "test-vkgears",
+        help_at: 380,
+        help: &[
+            "test-vkgears  Boot the compositor with vkgears and the Venus card, and require it drew frames on the host's GPU (Linux hosts)",
+        ],
+        run: |_, args| test_vkgears(args),
+    },
+    Task {
+        name: "test-claude-desktop",
+        help_at: 680,
+        help: &[
+            "test-claude-desktop  Anthropic's Claude desktop app, which tools/common/fetch/fetch-claude-desktop.sh fetches,",
+            "              started on the run-compositor --everything desktop: require its window, class com.anthropic.Claude,",
+            "              and its sign-in screen drawn in it; network-dependent: the screen is claude.ai's, over the",
+            "              gateway, and is not a landing row outside the app's own files; no account is used",
+            "              (docs/CLAUDE-CODE.md §7.8, x86_64)",
+        ],
+        run: |_, args| test_claude_desktop(args),
+    },
+    Task {
+        name: "test-frames",
+        help_at: 820,
+        help: &[
+            "test-frames   yserver's volume, and stage 24's frame recorder (tools/common/game) on a paced GLX client through",
+            "              yserver on hyprix: require yserver's msc to move as a clock, and a 50 ms stall every ten seconds to be",
+            "              counted as the refreshes it missed, by msc and by time alike (docs/GAME-PATH.md §2.4, R1)",
+        ],
+        run: |_, args| frames::test_frames(args),
+    },
+    Task {
+        name: "run-steam",
+        help_at: 730,
+        help: &[
+            "run-steam     The same boot, the screen dumped into build/x86_64/steam/ every few seconds until the timeout",
+        ],
+        run: |_, args| steam_window::run(args, false),
+    },
+    Task {
+        name: "test-steam-window",
+        help_at: 720,
+        help: &[
+            "test-steam-window  Attach the volume tools/common/fetch/fetch-steam-window.sh makes, and require Steam's sign-in window",
+            "              on hyprix, drawn through yserver, over the network (docs/STEAM.md)",
+        ],
+        run: |_, args| steam_window::run(args, true),
+    },
+    Task {
+        name: "test-steam-store",
+        help_at: 740,
+        help: &[
+            "test-steam-store  Steam as run-compositor --everything starts it, its 64-bit side on ferrousli: require its sign-in",
+            "              window, then, with the test account in ~/.config/ferrix/steam-test-account (FERRIX_STEAM_ACCOUNT_FILE),",
+            "              sign in and require its store on the screen; without the file the store step is skipped (docs/STEAM.md)",
+        ],
+        run: test_steam_store,
+    },
+    Task {
+        name: "test-steam-game",
+        help_at: 750,
+        help: &[
+            "test-steam-game  The same, then require Teeworlds installed from Steam, started by it and drawing in its window;",
+            "              needs the account file",
+        ],
+        run: test_steam_store,
+    },
+    Task {
+        name: "bench-chrome",
+        help_at: 890,
+        help: &[
+            "bench-chrome  Chrome in a window, left alone, scrolled and pointed at: processor time, frames and memory per phase",
+        ],
+        run: |_, args| bench_chrome(args),
+    },
+    Task {
+        name: "bench-chrome-video",
+        help_at: 900,
+        help: &[
+            "bench-chrome-video  Chrome playing a video with its sound: processor time, frames shown and dropped, underruns, and gaps in what the card played",
+        ],
+        run: |_, args| bench_chrome_video(args),
+    },
+    Task {
+        name: "test-unity",
+        help_at: 790,
+        help: &[
+            "test-unity    Attach the volume tools/common/fetch/fetch-unity.sh makes, and require Unity's Spaceship Demo to start in",
+            "              Wine on DXVK and lavapipe, load its benchmark's scene and draw it, moving, in its window on hyprix",
+            "              (docs/WINE.md §9)",
+        ],
+        run: |_, args| unity::test_unity(args),
+    },
+    Task {
+        name: "test-endfield-launcher",
+        help_at: 800,
+        help: &[
+            "test-endfield-launcher  Attach the volume tools/common/fetch/fetch-endfield-launcher.sh makes, and require",
+            "              Arknights: Endfield's Windows launcher in Wine on hyprix through yserver, on the network: its window,",
+            "              its first screen drawn, and Gryphline's server answering it; it never logs in (docs/WINE.md §8)",
+        ],
+        run: |_, args| endfield::test_endfield_launcher(args, endfield::Wine::Debian),
+    },
+    Task {
+        name: "test-endfield-proton",
+        help_at: 810,
+        help: &[
+            "test-endfield-proton  The same in GE-Proton's Wine, on the volume FERRIX_ENDFIELD_WINE=proton",
+            "              tools/common/fetch/fetch-endfield-launcher.sh makes, after the 32-bit cmd /c ver (docs/WINE.md §10;",
+            "              --everything: on run-compositor --everything's merged volume, started by its gryphlink)",
+        ],
+        run: |_, args| endfield::test_endfield_launcher(args, endfield::Wine::Proton),
+    },
+];
+
 /// The compositor's own background: `src/user/system/linux/compositor/render`'s `Style::BACKGROUND`,
 /// which is Hyprland's `misc:background_color` default.
 const BACKGROUND: [u8; 3] = [0x11, 0x11, 0x11];

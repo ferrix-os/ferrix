@@ -59,7 +59,39 @@ use ferrix_partition::{ESP, Guid, Partition, write_table};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result, fat, qemu};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "netboot",
+        help_at: 40,
+        help: &[
+            "netboot       Build the x86_64 image and serve it over HTTP to a machine booting the netboot stick, until",
+            "              stopped; logs every request (docs/NETBOOT.md)",
+        ],
+        run,
+    },
+    Task {
+        name: "netboot-stick",
+        help_at: 50,
+        help: &[
+            "netboot-stick Write build/x86_64/ferrix-netboot-stick.img: iPXE on a GUID partition table, chaining",
+            "              http://<--server>/ferrix/boot.ipxe (tools/common/fetch/fetch-ipxe.sh first)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-netboot",
+        help_at: 60,
+        help: &[
+            "test-netboot  Boot the netboot stick under QEMU from a server this runs, to the boot marker; then the",
+            "              negative control, the server serving under another path, must fail with iPXE's error",
+        ],
+        run,
+    },
+];
 
 /// The iPXE release the stick carries.
 const IPXE_VERSION: &str = "2.0.0";

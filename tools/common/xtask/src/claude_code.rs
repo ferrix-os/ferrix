@@ -52,7 +52,22 @@ use std::time::Duration;
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, busybox, cargo, fat, initramfs, native, qemu, rustc, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-claude-code",
+    help_at: 670,
+    help: &[
+        "test-claude-code  Attach the volume tools/common/fetch/fetch-claude-code.sh makes, and require Claude Code to start and,",
+        "              against a stub Messages API xtask serves, run a Bash command on Ferrix for its model",
+        "              (--everything: as `claude` on run-compositor --everything's merged volume, on ferrousli's",
+        "              loader and libc.so.6 as that desktop runs it, unless --interpreter glibc; --arch aarch64:",
+        "              the linux-arm64 build on fetch-claude-code.sh arm64's volume)",
+    ],
+    run: |_, args| test_claude_code(args),
+}];
 
 /// glibc's paths, each a link into the volume: the loader where Claude Code's
 /// and bash's `PT_INTERP` name it, and the directories it searches.

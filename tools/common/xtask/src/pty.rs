@@ -20,7 +20,18 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::qemu::Watching;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-pty",
+    help_at: 360,
+    help: &[
+        "test-pty      Boot the term app as init, run a program on a pseudoterminal, and require its output back",
+    ],
+    run: |_, args| test_pty(args),
+}];
 
 /// What the terminal prints once the program has finished.
 const MARKER: &str = "term: ";

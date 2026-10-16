@@ -36,7 +36,18 @@ use crate::args::Args;
 use crate::display::{DEVICE_ID, Image, Qmp, free_port, mismatches, parse_ppm};
 use crate::paths::{self, Arch};
 use crate::qemu::Watching;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-seat",
+    help_at: 350,
+    help: &[
+        "test-seat     Boot the compositor with a client, type into it over QMP, and require the key and the keybind to land",
+    ],
+    run: |_, args| test_seat(args),
+}];
 
 /// What the compositor prints once it is on a screen.
 const MARKER: &str = "hyprix: card0";

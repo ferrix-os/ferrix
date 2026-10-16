@@ -58,7 +58,36 @@
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, qemu, rustc, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-chrome",
+        help_at: 660,
+        help: &[
+            "test-chrome   Attach the volume tools/common/fetch/fetch-chrome.sh makes, and require headless Chrome to run a page's script and draw it",
+        ],
+        run,
+    },
+    Task {
+        name: "test-chrome-window",
+        help_at: 870,
+        help: &[
+            "test-chrome-window  The same volume, and require Chrome in a window on the compositor, its page on the screen",
+        ],
+        run,
+    },
+    Task {
+        name: "test-chrome-audio",
+        help_at: 880,
+        help: &[
+            "test-chrome-audio   The same window on a page playing 440 Hz, and require the tone in QEMU's wav file of the virtio-snd card",
+        ],
+        run,
+    },
+];
 
 /// The page whose DOM Chrome is asked for: its script writes a number only
 /// V8 could have computed into an element, so the DOM carries it as text the

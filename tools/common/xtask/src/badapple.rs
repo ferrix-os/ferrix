@@ -37,7 +37,28 @@ use crate::args::Args;
 use crate::display::{DEVICE_ID, Image, Qmp, free_port, parse_ppm};
 use crate::paths::{self, Arch};
 use crate::qemu::Watching;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "run-badapple",
+        help_at: 130,
+        help: &[
+            "run-badapple  Boot the badapple app's player as init: all of Bad Apple!! in a window, heard on this host's sound server (tools/common/fetch/fetch-badapple.sh first)",
+        ],
+        run: |_, args| run_badapple(args),
+    },
+    Task {
+        name: "test-badapple",
+        help_at: 340,
+        help: &[
+            "test-badapple Boot the badapple app's player as init, play 30 s of Bad Apple!!, and require the held frame on the screen, the song in QEMU's wav file, and the two in step",
+        ],
+        run: |_, args| test_badapple(args),
+    },
+];
 
 /// The app the player and the video format are, found by its name.
 const APP: &str = "badapple";

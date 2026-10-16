@@ -30,7 +30,18 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::qemu::Watching;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-audio",
+    help_at: 330,
+    help: &[
+        "test-audio    Boot src/user/system/linux/compositor/tone as init with virtio-snd, play a second of a counter, and require every frame back from QEMU's wav file",
+    ],
+    run: |_, args| test_audio(args),
+}];
 
 /// What every line tone prints begins with: the boot is watched from its
 /// first, so a failure in the restart's rounds, before the stream it plays

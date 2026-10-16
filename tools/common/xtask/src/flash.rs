@@ -18,7 +18,42 @@ use std::path::{Path, PathBuf};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "flash",
+        help_at: 1200,
+        help: &["flash         Copy the loader and kernel onto a board's boot partition"],
+        run: |_, args| flash_board(args),
+    },
+    Task {
+        name: "deploy",
+        help_at: 1220,
+        help: &["deploy        flash, then watch-serial: one command for a board"],
+        run: |_, args| deploy(args),
+    },
+];
+
+/// `flash`: build the board's files and write them to its card.
+fn flash_board(args: &Args) -> Result<()> {
+    let arch = args.single_arch()?;
+    let files = crate::build_board_files(arch, args)?;
+    run(arch, &files, args)
+}
+
+/// `deploy`: the whole of a board round-trip. Separate commands exist
+/// because each half is useful alone -- reflashing without watching,
+/// watching a board someone else reset -- but the common case is both, and
+/// a command per step is a command per step to forget.
+fn deploy(args: &Args) -> Result<()> {
+    let arch = args.single_arch()?;
+    let files = crate::build_board_files(arch, args)?;
+    run(arch, &files, args)?;
+    crate::serial::watch(Some(&files.kernel), args)
+}
 
 /// Where the loader goes, less the architecture's file name.
 const BOOT_DIRECTORY: &str = "EFI/BOOT";

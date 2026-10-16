@@ -56,7 +56,19 @@ use crate::btrfs_check::Checker;
 use crate::paths::{self, Arch};
 use crate::ports::{Content, File};
 use crate::qemu::{self, SUCCESS_MARKER, Watching};
+use crate::task::Task;
 use crate::{Error, Result, btrfs_disk, cargo, fat, initramfs, native, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-init",
+    help_at: 400,
+    help: &[
+        "test-init     Boot /sbin/init as pid 1, type at the shell its getty gives, and require its session, a failing",
+        "              service's restart budget, a service's cgroup, and a shutdown btrfs check finds clean",
+    ],
+    run: |_, args| test_init(args),
+}];
 
 /// Where the init is, and what `ferrix.init=` names.
 pub(crate) const PATH: &str = "/sbin/init";

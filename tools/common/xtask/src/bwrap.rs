@@ -41,7 +41,19 @@ use std::path::PathBuf;
 use crate::args::Args;
 use crate::paths::Arch;
 use crate::ports::{Content, File};
+use crate::task::Task;
 use crate::{Error, Result, busybox, cargo, fat, initramfs, native, qemu, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-bwrap",
+    help_at: 710,
+    help: &[
+        "test-bwrap    Boot with / in memory and require Debian's bubblewrap, which tools/common/fetch/fetch-bwrap.sh fetches,",
+        "              to run Steam's requirements check and a pressure-vessel-shaped container as root (docs/NAMESPACES.md §8)",
+    ],
+    run: |_, args| test_bwrap(args),
+}];
 
 /// Where `fetch-bwrap.sh` writes, unless `FERRIX_BWRAP` names another
 /// directory, and what it writes there.

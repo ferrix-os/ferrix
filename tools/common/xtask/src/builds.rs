@@ -40,7 +40,27 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::task::Task;
 use crate::{Error, Result, paths, sha256};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "builds-execute",
+    help_at: 930,
+    help: &[
+        "builds-execute  Make every build in --plan DIR here, keeping the outputs in DIR/store (see tools/common/xtask/src/builds.rs)",
+    ],
+    run: |_, args| execute_plan(args),
+}];
+
+/// `builds-execute`: carry out the plan in `--plan DIR`.
+fn execute_plan(args: &crate::args::Args) -> Result<()> {
+    let plan = args
+        .plan
+        .as_deref()
+        .ok_or_else(|| Error::new("builds-execute needs --plan DIR"))?;
+    execute(Path::new(plan)).map(|_| ())
+}
 
 /// The variable that switches between building, recording and replaying.
 const VARIABLE: &str = "FERRIX_BUILDS";

@@ -37,7 +37,30 @@
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, busybox, cargo, fat, initramfs, native, qemu, rustc, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-steamcmd",
+        help_at: 690,
+        help: &[
+            "test-steamcmd Attach the volume tools/common/fetch/fetch-steamcmd.sh makes, and require Valve's 32-bit steamcmd to update itself",
+            "              and log in to Steam anonymously, over the network",
+        ],
+        run,
+    },
+    Task {
+        name: "test-steam-bootstrap",
+        help_at: 700,
+        help: &[
+            "test-steam-bootstrap  Attach the volume tools/common/fetch/fetch-steam.sh makes, and require Valve's steam.sh to update the",
+            "              client and run it until it asks for an X display, over the network",
+        ],
+        run,
+    },
+];
 
 /// glibc's i386 paths, each a link into the volume: the loader where
 /// steamcmd's `PT_INTERP` names it, and the directory it searches; and the

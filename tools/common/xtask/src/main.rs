@@ -90,6 +90,26 @@ mod clipboard;
 // test-clipboard's codec, which nothing else here speaks.
 #[cfg(not(unix))]
 use ferrix_vdagent as _;
+/// Elsewhere, test-clipboard only says where it runs.
+#[cfg(not(unix))]
+mod clipboard {
+    use crate::task::Task;
+    use crate::{Error, Result};
+
+    /// The command `crate::clipboard` answers on Unix, refused.
+    pub(crate) const TASKS: &[Task] = &[Task {
+        name: "test-clipboard",
+        help_at: 270,
+        help: &[
+            "test-clipboard  Boot the desktop with its clipboard port on a socket xtask speaks vdagent over, and carry text both ways",
+        ],
+        run: |_, _| -> Result<()> {
+            Err(Error::new(
+                "test-clipboard serves the clipboard port on a Unix socket: run it on the Linux host",
+            ))
+        },
+    }];
+}
 mod compositor;
 mod console;
 mod container;
@@ -164,6 +184,7 @@ mod steamcmd;
 mod step_cache;
 mod symbolize;
 mod sysfs;
+mod task;
 mod test_cache;
 mod test_disk;
 mod test_runs;
@@ -189,6 +210,7 @@ use std::process::ExitCode;
 
 use args::Args;
 use paths::Arch;
+use task::Task;
 
 /// What went wrong, in a form that can be printed and turned into an exit code.
 #[derive(Debug)]
@@ -221,236 +243,9 @@ impl From<std::io::Error> for Error {
 /// The result type every xtask step returns.
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-const USAGE: &str = "\
-Ferrix build driver
-
-USAGE:
-    cargo xtask <COMMAND> [OPTIONS]
-
-COMMANDS:
-    build         Compile the loader and kernel and write a bootable image
-    slot-image    build, and also write build/<arch>/ferrix-slot.img: the image's kernel, initramfs and command line
-                  as a system slot, for `bootctl try` (docs/AB-BOOT.md)
-    live          Write build/<arch>/ferrix-live.img, the installer's live medium: a GUID partition table and
-                  an EFI system partition holding the image with ferrix-install, / in memory (x86_64, aarch64)
-    netboot       Build the x86_64 image and serve it over HTTP to a machine booting the netboot stick, until
-                  stopped; logs every request (docs/NETBOOT.md)
-    netboot-stick Write build/x86_64/ferrix-netboot-stick.img: iPXE on a GUID partition table, chaining
-                  http://<--server>/ferrix/boot.ipxe (tools/common/fetch/fetch-ipxe.sh first)
-    test-netboot  Boot the netboot stick under QEMU from a server this runs, to the boot marker; then the
-                  negative control, the server serving under another path, must fail with iPXE's error
-    n150-install  Write build/x86_64/n150-disk.img for the N150 box's NVMe drive: a GUID partition table, the
-                  box's desktop (or --image) in its EFI system partition, and a btrfs root at the rest of the
-                  disk with a program tree at /data (docs/N150.md); a file only, never a device
-    test-n150     Write that disk with a fixture tree and boot it under OVMF as the machine's one NVMe boot
-                  disk, GOP display only; /data read, written, kept across a power cycle, btrfs check after
-    test-n150-sata  test-n150 with that disk as a SATA drive on q35's AHCI controller, served by the
-                  ahci driver, in place of the NVMe drive
-    test-n150-desktop  Write the box's disk with its desktop and the launcher's tree and boot it so: hyprix on
-                  the firmware framebuffer, yserver, the video host blocked, a lease, a picture on the screen
-    run           Boot the image under QEMU, attached to the terminal
-    run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show
-    run-badapple  Boot the badapple app's player as init: all of Bad Apple!! in a window, heard on this host's sound server (tools/common/fetch/fetch-badapple.sh first)
-    remote-desktop  Send this tree to another machine, boot the desktop there and watch it here over VNC
-    wallpapers    Convert pictures for run-compositor's desktop and keep them on this machine
-    everything-volume  Make run-compositor --everything's volume from the fetched ones (on Windows, in WSL)
-    test-btrfs    Boot, write a tree on the blank btrfs disk, and require host btrfs check to find nothing
-    test-powerfail  Kill QEMU while it writes btrfs, replay at the next boot, and require btrfs check to pass, --seeds times
-    test-boot     Boot the image under QEMU and assert the kernel came up, moved (KASLR) unless built
-                  --mitigations off or told nokaslr
-    test-kaslr    Boot the image twice and require the loader to have put the kernel somewhere new
-    test-shell    Boot with a static busybox built in and require its script's output; again with it
-                  started from a file by ferrix.init=; under busybox, require reboot(2) to commit /data
-    test-apps     Boot once with every app in src/user/apps that has [[smoke]] checks, and require each
-                  check's line
-    test-pkg      Boot with pkg, the package manager, and require it to install, run and remove the stat
-                  service, to replace a package with its next version and back (`pkg install --replace`),
-                  and to refuse a changed package or replacement, a missing dependency and a needed removal
-    install-app   Build the app --app NAME for this machine and put it in the running system in the place of
-                  the version installed, with `pkg install --replace` (on Ferrix, as root; --to DIR installs
-                  into the root at DIR instead, which is the only way it runs on another system)
-    test-vfs      Boot with busybox in the initramfs and require stage 8's exit programs and applets
-    test-net      Boot with a network device and require busybox to configure it and fetch a file
-    test-clipboard  Boot the desktop with its clipboard port on a socket xtask speaks vdagent over, and carry text both ways
-    test-adb      Boot adbd with a network, and drive it with this machine's adb: shell, push, pull, forward, reboot
-    test-display  Boot src/user/system/linux/compositor/blank as init with a virtio-gpu, and require its colour on every pixel
-    test-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, and require its background on every pixel
-    test-video    Boot a wallpaper that moves and require the screen to show its frames in turn
-    test-input    Boot src/user/system/linux/compositor/evecho as init with virtio-input, send a key and a touch over QMP, and require them back
-    test-audio    Boot src/user/system/linux/compositor/tone as init with virtio-snd, play a second of a counter, and require every frame back from QEMU's wav file
-    test-badapple Boot the badapple app's player as init, play 30 s of Bad Apple!!, and require the held frame on the screen, the song in QEMU's wav file, and the two in step
-    test-seat     Boot the compositor with a client, type into it over QMP, and require the key and the keybind to land
-    test-pty      Boot the term app as init, run a program on a pseudoterminal, and require its output back
-    test-foot     Boot the compositor with foot, the ported Wayland terminal, and require its font and its text on screen
-    test-vkgears  Boot the compositor with vkgears and the Venus card, and require it drew frames on the host's GPU (Linux hosts)
-    test-jobs     Boot an interactive shell on the console, type a session with jobs at it, and require the answers
-    test-init     Boot /sbin/init as pid 1, type at the shell its getty gives, and require its session, a failing
-                  service's restart budget, a service's cgroup, and a shutdown btrfs check finds clean
-    bench-ipc     Boot --init's shell and time a channel round trip between two native processes
-                  (/sbin/ipc-bench): the floor of a native call and the trip, in nanoseconds
-    bench-pipe    Boot src/tests/pipe-bench as init --rounds times (5) and time Linux-ABI round trips
-                  between two processes: a pipe, a Unix stream socket and a futex ping-pong of 8 bytes
-    hw-fingerprint  Print this host's and --arch's guest's canonical hardware description and its SHA-256, the key
-                  hot-path results are filed by (docs/HOTPATHS.md)
-    test-ipc-equiv
-                  Boot /sbin/ipc-equiv with ferrix.fastpath=off, and on x86-64 again with on, and
-                  require channel_write_read's cases to answer the same (docs/OPAQUE-KERNEL.md §9.7)
-    bench-seam    Boot a stock Linux kernel on the same QEMU machine and time a 4 KiB O_DIRECT read of the pattern disk at depths 1 and 32: the in-kernel reference for the seam boot line (tools/common/fetch/fetch-linux-reference.sh first)
-    test-auth     Boot init with authd, type at the shell its getty gives, and require each refusal of
-                  docs/AUTH.md: a wrong password, an unknown account, a user naming another, the throttle
-                  (with --sabotage NAME, against an authd with that refusal turned off, which must fail)
-    test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|usb|nvme|all; gpu if not given)
-    test-usb      Boot a shell beside a qemu-xhci with a hub, a keyboard, a mouse and a stick: type, point, unplug
-                  and plug in again over QMP, read the stick, kill the driver twice; then a negative control (x86_64)
-    test-nvme     Boot a shell with / on an NVMe drive below a PCIe switch and a second drive of 4096-byte blocks:
-                  read known blocks, write and read back, flush, kill the drivers under load (--boot io, the default);
-                  a read QEMU fails must fail upward and nothing else (--boot fault); time 4 KiB reads beside
-                  virtio-blk's (--boot bench) (x86_64; docs/NVME.md)
-    test-postmortem  the kernel's log across a warm reset: a panic, a QMP reset, the next loader quotes it; and ferrix.pstore=off (x86_64, aarch64)
-    test-ab-boot  A/B system slots under OVMF: a trial that panics comes back on the good slot at the next reset, a good trial is kept (x86_64)
-    test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64);
-                  --slots: the A/B layout, bootctl's status, try, good and rollback, and their refusals
-    test-sysfs    Boot a shell beside a card, input devices and a network adapter, read sysfs, and unbind and bind the card through it
-    test-threads  Boot threads-test as init and require std::thread, Mutex, mpsc and /proc's thread count (--i686: the x86-64
-                  image runs a 32-bit x86 build of it)
-    test-sem      Boot sem-test as init and require System V semaphores across forks: a SEM_UNDO mutex, undo at a kill,
-                  EINTR, EIDRM and timeouts (--i686: 32-bit x86, through ipc(117), as Steam calls them)
-    test-pipewait Boot pipewait-test as init and require a read blocked on a pipe to be ended by a caught signal
-                  (EINTR, and a restart under SA_RESTART), SIGKILL, a stop and continue, and a freeze and thaw
-    test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment
-                  attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through
-                  ipc(117) and 395-398)
-    test-container  Boot container-test as init and require stage 13's exit: uid 1000 runs a pid 1 in a user namespace
-                  and six more, under a memory.max that reclaims and then OOM-kills it alone, with a seccomp filter
-                  that blocks a call
-    test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,
-                  a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits, and mincore (--i686: 32-bit x86)
-    test-uvm      Build NVIDIA's UVM against uvm-kpi and ferrousli from the tree tools/common/fetch/fetch-nvidia.sh fetches
-                  (or FERRIX_NVIDIA_SRC's), boot it as init, and require its 15 GPU-free self-tests to pass; then a krealloc
-                  control that must fail one (x86_64)
-    test-nvrm     Build nvrm and its core, put the core on a volume, and boot nvrm as devmgr's Gpu driver on QEMU's
-                  pci-testdev: handed over (marked, interrupts isolated, budget set, the core loaded, nvrm up with its
-                  device), and refused for a budget too small
-                  and for interrupts not isolated (x86_64)
-    test-nvrm-link
-                  Build nvrm-link-test and its core from fetch-nvidia.sh's objects, run RM's no-GPU path (init,
-                  root client, NV01_DEVICE_0 refused) on the host and on Ferrix from a volume, and each control
-                  the core's loader must refuse (x86_64)
-    run-nvidia    Boot Ferrix on the RTX 3060 in libvirt's ferrix-3060 domain (the patched QEMU as root, the sharing
-                  domains shut off), nvrm as its driver with its core and the GSP firmware on the NVIDIA volume;
-                  print the serial port until nvrm is up or stops, then destroy the domain (x86_64)
-    test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`
-    test-game-rig Stage 24's R3 without the card: the game path's load on the rustc volume, every processor at
-                  least 97% busy under it, the clock line the TSC, and a timed sleep's overshoot (x86_64)
-    test-chrome   Attach the volume tools/common/fetch/fetch-chrome.sh makes, and require headless Chrome to run a page's script and draw it
-    test-claude-code  Attach the volume tools/common/fetch/fetch-claude-code.sh makes, and require Claude Code to start and,
-                  against a stub Messages API xtask serves, run a Bash command on Ferrix for its model
-                  (--everything: as `claude` on run-compositor --everything's merged volume, on ferrousli's
-                  loader and libc.so.6 as that desktop runs it, unless --interpreter glibc; --arch aarch64:
-                  the linux-arm64 build on fetch-claude-code.sh arm64's volume)
-    test-claude-desktop  Anthropic's Claude desktop app, which tools/common/fetch/fetch-claude-desktop.sh fetches,
-                  started on the run-compositor --everything desktop: require its window, class com.anthropic.Claude,
-                  and its sign-in screen drawn in it; network-dependent: the screen is claude.ai's, over the
-                  gateway, and is not a landing row outside the app's own files; no account is used
-                  (docs/CLAUDE-CODE.md §7.8, x86_64)
-    test-steamcmd Attach the volume tools/common/fetch/fetch-steamcmd.sh makes, and require Valve's 32-bit steamcmd to update itself
-                  and log in to Steam anonymously, over the network
-    test-steam-bootstrap  Attach the volume tools/common/fetch/fetch-steam.sh makes, and require Valve's steam.sh to update the
-                  client and run it until it asks for an X display, over the network
-    test-bwrap    Boot with / in memory and require Debian's bubblewrap, which tools/common/fetch/fetch-bwrap.sh fetches,
-                  to run Steam's requirements check and a pressure-vessel-shaped container as root (docs/NAMESPACES.md §8)
-    test-steam-window  Attach the volume tools/common/fetch/fetch-steam-window.sh makes, and require Steam's sign-in window
-                  on hyprix, drawn through yserver, over the network (docs/STEAM.md)
-    run-steam     The same boot, the screen dumped into build/x86_64/steam/ every few seconds until the timeout
-    test-steam-store  Steam as run-compositor --everything starts it, its 64-bit side on ferrousli: require its sign-in
-                  window, then, with the test account in ~/.config/ferrix/steam-test-account (FERRIX_STEAM_ACCOUNT_FILE),
-                  sign in and require its store on the screen; without the file the store step is skipped (docs/STEAM.md)
-    test-steam-game  The same, then require Teeworlds installed from Steam, started by it and drawing in its window;
-                  needs the account file
-    test-wine     Attach the volume tools/common/fetch/fetch-wine.sh makes, and require Debian's 64-bit Wine to make a
-                  prefix with wineboot, its cmd to print the Windows version, and its notepad to draw a window on
-                  hyprix through yserver (docs/WINE.md)
-    test-wine-sync  Attach the volume tools/common/fetch/fetch-proton.sh makes, and require GE-Proton's Wine to take
-                  fsync (futex_waitv) with WINEFSYNC=1 and its 64-bit and 32-bit waits to go through it; prints the
-                  bench's turn times and wineserver's processor time with fsync off and on (docs/WINE.md §11)
-    test-dxvk     The same volume, with DXVK and a Direct3D 11 program from tools/common/fetch/fetch-dxvk.sh: require the
-                  program's frame, drawn through DXVK on lavapipe with no card, to be the one xtask draws, then its
-                  frames presented through a swap chain in a window on hyprix through yserver (docs/WINE.md §6)
-    test-unity    Attach the volume tools/common/fetch/fetch-unity.sh makes, and require Unity's Spaceship Demo to start in
-                  Wine on DXVK and lavapipe, load its benchmark's scene and draw it, moving, in its window on hyprix
-                  (docs/WINE.md §9)
-    test-endfield-launcher  Attach the volume tools/common/fetch/fetch-endfield-launcher.sh makes, and require
-                  Arknights: Endfield's Windows launcher in Wine on hyprix through yserver, on the network: its window,
-                  its first screen drawn, and Gryphline's server answering it; it never logs in (docs/WINE.md §8)
-    test-endfield-proton  The same in GE-Proton's Wine, on the volume FERRIX_ENDFIELD_WINE=proton
-                  tools/common/fetch/fetch-endfield-launcher.sh makes, after the 32-bit cmd /c ver (docs/WINE.md §10;
-                  --everything: on run-compositor --everything's merged volume, started by its gryphlink)
-    test-frames   yserver's volume, and stage 24's frame recorder (tools/common/game) on a paced GLX client through
-                  yserver on hyprix: require yserver's msc to move as a clock, and a 50 ms stall every ten seconds to be
-                  counted as the refreshes it missed, by msc and by time alike (docs/GAME-PATH.md §2.4, R1)
-    frames        Build the frame recorder and its test client and print their SHA-256; with --from <RECORD>, summarise
-                  a record from either system: frame times, and missed refreshes by msc and by time (--fps: the refresh)
-    test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo
-                  to reach it
-    test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window
-                  one of the compositor's, by title and class and on the screen, the server started as
-                  run-compositor --everything starts it (--everything: on that desktop's merged volume)
-    test-xlatency  The same boot with stage 24's latency probe: QEMU's tablet moved under xlatency, each motion timed on
-                  the host to the frame that shows it and counted in refreshes, then vptr and the probe in the guest
-                  (docs/GAME-PATH.md §2.4, R2)
-    test-chrome-window  The same volume, and require Chrome in a window on the compositor, its page on the screen
-    test-chrome-audio   The same window on a page playing 440 Hz, and require the tone in QEMU's wav file of the virtio-snd card
-    bench-chrome  Chrome in a window, left alone, scrolled and pointed at: processor time, frames and memory per phase
-    bench-chrome-video  Chrome playing a video with its sound: processor time, frames shown and dropped, underruns, and gaps in what the card played
-    test-selfhost  Run `cargo xtask build` on Ferrix from that toolchain and this checkout, and boot the image it made;
-                  with --plan DIR, have Ferrix make every build a FERRIX_BUILDS=record:DIR run wrote down;
-                  with --volume IMG, judge a volume Ferrix built on elsewhere (the Pixel 7's selfhost.sh):
-                  btrfs check, then boot the image it holds
-    test-devloop  Walk the development loop on Ferrix (docs/DEV-ON-FERRIX.md): clone a fixture over HTTP, build and
-                  test it with the volume's Cargo, run it as a service, change it, commit and push, and require
-                  `svc restart` to put the new build in the running system (on ferrousli's loader and libc.so.6,
-                  as run-compositor --everything runs the toolchain, unless --interpreter glibc; x86_64)
-    builds-execute  Make every build in --plan DIR here, keeping the outputs in DIR/store (see tools/common/xtask/src/builds.rs)
-    coverage      Run every boot gate under QEMU's drcov plugin (FERRIX_DRCOV) with --init, and
-                  require the certified item's statement coverage to hold its recorded floor
-    check         Run every quality gate (fmt, clippy, layering, audits, tests, docs)
-    host-clippy   check's host clippy step alone, as CI runs it
-    host-test     check's host test step alone, as CI runs it
-    host-doctest  check's doc test step alone, as CI runs it
-    host-doc      check's documentation step alone, as CI runs it
-    check-docs    check's commit hooks, audits and generated-document checks alone, no cargo
-                  step: the gate of a change to docs/ and top-level Markdown only
-    check-ferrocene
-                  check's build of the kernel and the item's crates with Rust 1.95.0, the
-                  upstream Rust of Ferrocene 26.05 (not Ferrocene's own compiler), alone
-    gate-rows --since <ref> [--moved <old main>]
-                  The gate rows docs/BACKLOG.md asks of the changes since <ref>; with
-                  --moved, whether a rebase from <old main> asks for a gate again
-    check-ferrousli
-                  check --ferrousli's ferrousli steps alone, as CI runs them
-    miri          CI's Miri steps alone, --jobs crates at a time, building nothing else
-                  (needs a nightly toolchain with miri)
-    loom          check's loom models alone (src/tests/loom): the wait's and the way out's
-                  orderings, each with a control that must fail
-    native-clippy check's clippy of the native programs for --arch, as CI runs it
-    model-doc     Regenerate docs/generated/ from the SysML model
-    busybox       Build busybox against ferrousli (x86_64) for --init ferrousli
-    uutils        Build uutils/coreutils against ferrousli (x86_64), the utilities replacing busybox's
-    ports         Build the libraries ported onto ferrousli that apps build against (x86_64: libcxx, zlib; Arm: zlib); the ported programs are apps
-    apps          List the apps in src/user/apps, each checked against its app.toml (docs/APPS.md)
-    check-apps    check's steps for the apps alone: each app's formatting, clippy, tests and folder
-    check-side    check's steps for the workspaces of their own (loom, compositor, Linux programs, adbd, nvos, apps), which check runs beside its main workspace
-    check-unit    one of check-side's units, the one FERRIX_CHECK_UNIT names, as the step cache runs it under strace (FERRIX_STEP_CACHE=on caches passed units by their inputs, docs/TEST-TIME.md)
-    check-audit   one of check's audits, the one FERRIX_CHECK_UNIT names (audit:<name>), as the step cache runs it under strace keyed on the whole item
-    build-apps    Build every app's package, or --app's, for --arch: scripts too, which run and
-                  run-compositor never start, and take the last of
-    new-app       Write a new app's folder: --app NAME, --abi native (the default) or linux
-    components    The parts of the tree in repositories of their own (components.toml): each checkout against its pin
-    pin-components  Pin every clean component checkout that moved past its pin, once its commit is pushed
-    flash         Copy the loader and kernel onto a board's boot partition
-    watch-serial  Watch a real serial port for the kernel's boot report
-    deploy        flash, then watch-serial: one command for a board
-
+/// `--help` after its commands: the options, which every command shares
+/// (`crate::task::usage` puts the commands before them).
+const OPTIONS: &str = "
 OPTIONS:
     --arch <x86_64|aarch64|armv7a|all>   Target architecture   [default: host]
     --release                            Build with optimisations
@@ -691,20 +486,121 @@ fn build(args: &Args) -> Result<()> {
     Ok(())
 }
 
-/// `builds-execute`: carry out the plan in `--plan DIR`.
-fn builds_execute(args: &Args) -> Result<()> {
-    let plan = args
-        .plan
-        .as_deref()
-        .ok_or_else(|| Error::new("builds-execute needs --plan DIR"))?;
-    builds::execute(std::path::Path::new(plan)).map(|_| ())
-}
+/// Every module's table of the commands it answers (`crate::task`): a new
+/// module with commands adds its line here, beside its `mod` line above.
+const TASKS: &[&[Task]] = &[
+    MAIN_TASKS,
+    adbd::TASKS,
+    apps::TASKS,
+    audio::TASKS,
+    auth::TASKS,
+    badapple::TASKS,
+    btrfs_check::TASKS,
+    builds::TASKS,
+    busybox::TASKS,
+    bwrap::TASKS,
+    check::TASKS,
+    chrome::TASKS,
+    claude_code::TASKS,
+    clipboard::TASKS,
+    components::TASKS,
+    compositor::TASKS,
+    coverage::TASKS,
+    devloop::TASKS,
+    display::TASKS,
+    dxvk::TASKS,
+    everything::TASKS,
+    flash::TASKS,
+    frames::TASKS,
+    gate_rows::TASKS,
+    hotpath::TASKS,
+    init::TASKS,
+    input::TASKS,
+    installer::TASKS,
+    ipc::TASKS,
+    jobs::TASKS,
+    n150::TASKS,
+    netboot::TASKS,
+    nvidia::TASKS,
+    nvme::TASKS,
+    omz::TASKS,
+    pipe_bench::TASKS,
+    pkg::TASKS,
+    ports::TASKS,
+    postmortem::TASKS,
+    powerfail::TASKS,
+    pty::TASKS,
+    remote::TASKS,
+    restart::TASKS,
+    rustc::TASKS,
+    seam::TASKS,
+    seat::TASKS,
+    sem::TASKS,
+    serial::TASKS,
+    slot_image::TASKS,
+    steamcmd::TASKS,
+    sysfs::TASKS,
+    uutils::TASKS,
+    wallpaper::TASKS,
+    wine_sync::TASKS,
+    yserver::TASKS,
+];
 
-/// `flash`: build the board's files and write them to its card.
-fn flash_board(args: &Args) -> Result<()> {
-    let arch = args.single_arch()?;
-    let files = build_board_files(arch, args)?;
-    flash::run(arch, &files, args)
+/// The commands this file carries out itself.
+const MAIN_TASKS: &[Task] = &[
+    Task {
+        name: "run",
+        help_at: 110,
+        help: &["run           Boot the image under QEMU, attached to the terminal"],
+        run: |_, args| run_machine(args.clone()),
+    },
+    Task {
+        name: "test-boot",
+        help_at: 190,
+        help: &[
+            "test-boot     Boot the image under QEMU and assert the kernel came up, moved (KASLR) unless built",
+            "              --mitigations off or told nokaslr",
+        ],
+        run: |_, args| test_boot(args),
+    },
+    Task {
+        name: "test-kaslr",
+        help_at: 200,
+        help: &[
+            "test-kaslr    Boot the image twice and require the loader to have put the kernel somewhere new",
+        ],
+        run: |_, args| test_kaslr(args),
+    },
+    Task {
+        name: "test-shell",
+        help_at: 210,
+        help: &[
+            "test-shell    Boot with a static busybox built in and require its script's output; again with it",
+            "              started from a file by ferrix.init=; under busybox, require reboot(2) to commit /data",
+        ],
+        run: |_, args| test_shell(args),
+    },
+    Task {
+        name: "test-vfs",
+        help_at: 250,
+        help: &[
+            "test-vfs      Boot with busybox in the initramfs and require stage 8's exit programs and applets",
+        ],
+        run: |_, args| test_vfs(args),
+    },
+    Task {
+        name: "test-net",
+        help_at: 260,
+        help: &[
+            "test-net      Boot with a network device and require busybox to configure it and fetch a file",
+        ],
+        run: |_, args| test_net(args),
+    },
+];
+
+/// `--help`: every command's lines, then the options.
+fn usage() -> String {
+    task::usage(TASKS, OPTIONS)
 }
 
 /// The command `args` name, with the parts of the tree that live in
@@ -713,7 +609,7 @@ fn flash_board(args: &Args) -> Result<()> {
 /// them (`crate::components`).
 fn command_of(args: &Args) -> Result<&str> {
     let Some(command) = args.command.as_deref() else {
-        println!("{USAGE}");
+        println!("{}", usage());
         return Err(Error::new("no command given"));
     };
     // A unit `check` runs under the step cache is a child of a run that
@@ -740,7 +636,7 @@ fn run() -> Result<()> {
     set_for_the_run(&args)?;
 
     if args.help {
-        println!("{USAGE}");
+        println!("{}", usage());
         return Ok(());
     }
 
@@ -752,99 +648,12 @@ fn run() -> Result<()> {
         return parallel::run(command, &args);
     }
 
-    match command {
-        "build" | "slot-image" => slot_image::build(command, &args),
-        "run" => run_machine(args),
-        "test-btrfs" => btrfs_check::test_btrfs(&args, |arch| build_image(arch, &args)),
-        "test-powerfail" => powerfail::test_powerfail(&args, |arch| build_parts(arch, &args)),
-        "test-postmortem" => postmortem::test_postmortem(&args, build_image),
-        "test-boot" => test_boot(&args),
-        "test-kaslr" => test_kaslr(&args),
-        "test-shell" => test_shell(&args),
-        "test-vfs" => test_vfs(&args),
-        "test-net" => test_net(&args),
-        "test-adb" => adbd::test_adb(&args, program_for),
-        #[cfg(unix)]
-        "test-clipboard" => clipboard::test_clipboard(&args),
-        #[cfg(not(unix))]
-        "test-clipboard" => Err(Error::new(
-            "test-clipboard serves the clipboard port on a Unix socket: run it on the Linux host",
-        )),
-        "test-display" => display::test_display(&args),
-        "run-compositor" => compositor::run_compositor(&args),
-        "run-badapple" => badapple::run_badapple(&args),
-        "remote-desktop" => remote::remote_desktop(&args),
-        "wallpapers" => wallpaper::import(&args),
-        "everything-volume" => everything::volume().map(drop),
-        "test-compositor" => compositor::test_compositor(&args),
-        "test-video" => compositor::test_video(&args),
-        "test-foot" => compositor::test_foot(&args),
-        "test-vkgears" => compositor::test_vkgears(&args),
-        "test-input" => input::test_input(&args),
-        "test-audio" => audio::test_audio(&args),
-        "test-badapple" => badapple::test_badapple(&args),
-        "test-seat" => seat::test_seat(&args),
-        "test-pty" => pty::test_pty(&args),
-        "test-jobs" => jobs::test_jobs(&args),
-        "test-init" => init::test_init(&args),
-        "test-auth" => auth::test_auth(&args),
-        "test-restart" | "test-usb" | "test-nvme" => driver_gate(command, &args),
-        "bench-seam" | "bench-ipc" | "bench-pipe" => bench(command, &args),
-        "hw-fingerprint" => hotpath::hw_fingerprint(&args),
-        "test-ipc-equiv" => ipc::test_ipc_equiv(&args),
-        "test-sysfs" => sysfs::test_sysfs(&args),
-        "live" | "test-install" | "test-ab-boot" => installer::run(command, &args),
-        "netboot" | "netboot-stick" | "test-netboot" => netboot::run(command, &args),
-        c if c == "n150-install" || c.starts_with("test-n150") => n150::run(command, &args),
-        "test-threads" | "test-sem" | "test-shm" | "test-pipewait" | "test-container"
-        | "test-procfs" | "test-uvm" | "test-nvrm" | "test-nvrm-link" => sem::run(command, &args),
-        "test-apps" => apps::test_apps(&args),
-        "test-pkg" | "install-app" => pkg::run(command, &args),
-        "coverage" => coverage::run(&args),
-        "test-rustc" | "test-game-rig" => rustc::run(command, &args),
-        "test-chrome" | "test-chrome-window" | "test-chrome-audio" => chrome::run(command, &args),
-        "test-claude-code" => claude_code::test_claude_code(&args),
-        "test-claude-desktop" => compositor::test_claude_desktop(&args),
-        "test-steamcmd" | "test-steam-bootstrap" => steamcmd::run(command, &args),
-        "test-bwrap" => bwrap::test_bwrap(&args),
-        name if WINE_GATES.contains(&name) => wine_gate(command, &args),
-        "test-frames" => compositor::frames::test_frames(&args),
-        "frames" => frames::run(&args),
-        "run-nvidia" => nvidia::run_nvidia(&args),
-        "run-steam" => compositor::steam_window::run(&args, false),
-        "test-steam-window" => compositor::steam_window::run(&args, true),
-        "test-steam-store" | "test-steam-game" => compositor::test_steam_store(command, &args),
-        "bench-chrome" => compositor::bench_chrome(&args),
-        "bench-chrome-video" => compositor::bench_chrome_video(&args),
-        "test-selfhost" | "test-devloop" => devloop::run(command, &args),
-        "builds-execute" => builds_execute(&args),
-        name if check::COMMANDS.contains(&name) => check::command(command, &args),
-        "native-clippy" => args
-            .arches()?
-            .into_iter()
-            .try_for_each(check::native_clippy),
-        "model-doc" => check::model_doc(),
-        "busybox" => busybox::build(args.single_arch()?).map(|_| ()),
-        "uutils" => uutils::build(args.single_arch()?).map(|_| ()),
-        "ports" => ports::build(args.single_arch()?),
-        "apps" => apps::list(),
-        "build-apps" => apps::build_apps(&args),
-        "new-app" => apps::new_app(&args),
-        "omz" => omz::install(args.from.as_deref()),
-        "zsh-functions" => omz::install_functions(args.from.as_deref()),
-        "flash" => flash_board(&args),
-        "watch-serial" => serial::watch(None, &args),
-        // The whole of a board round-trip. Separate commands exist because
-        // each half is useful alone — reflashing without watching, watching a
-        // board someone else reset — but the common case is both, and a
-        // command per step is a command per step to forget.
-        "deploy" => {
-            let arch = args.single_arch()?;
-            let files = build_board_files(arch, &args)?;
-            flash::run(arch, &files, &args)?;
-            serial::watch(Some(&files.kernel), &args)
-        }
-        other => Err(Error::new(format!("unknown command `{other}`\n\n{USAGE}"))),
+    match task::find(TASKS, command) {
+        Some(task) => (task.run)(command, &args),
+        None => Err(Error::new(format!(
+            "unknown command `{command}`\n\n{}",
+            usage()
+        ))),
     }
 }
 
@@ -1171,7 +980,7 @@ fn build_init_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)> {
 /// exactly as [`build_image`] arranges for QEMU, so a card boots to the shell
 /// an image does. Without one the files are the ones they always were. Either
 /// way the archive carries the tree's native programs, as an image's does.
-fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
+pub(crate) fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
     // `--compositor`: the desktop instead, which `compositor` knows how to make.
     if args.compositor {
         return compositor::board_files(arch, args);
@@ -1203,60 +1012,6 @@ fn build_board_files(arch: Arch, args: &Args) -> Result<flash::BoardFiles> {
         initramfs,
         defaults: None,
     })
-}
-
-/// The gates that kill drivers from a shell: every kind's
-/// (`test-restart`), and the NVMe driver's own with its drives (`test-nvme`).
-fn driver_gate(command: &str, args: &Args) -> Result<()> {
-    if command == "test-nvme" {
-        nvme::test_nvme(args)
-    } else {
-        restart::run(command, args)
-    }
-}
-
-/// The gates of the X server and the Windows programs on it: yserver's and
-/// Wine's (`test-yserver`, `test-xwindow`, `test-wine`), Proton's fsync
-/// (`test-wine-sync`), stage 24's latency
-/// probe on yserver (`test-xlatency`), DXVK's (`test-dxvk`), Unity's
-/// Spaceship Demo (`test-unity`), and Endfield's launcher in Debian's Wine
-/// (`test-endfield-launcher`) and in GE-Proton's (`test-endfield-proton`).
-const WINE_GATES: &[&str] = &[
-    "test-yserver",
-    "test-xwindow",
-    "test-xlatency",
-    "test-wine",
-    "test-wine-sync",
-    "test-dxvk",
-    "test-unity",
-    "test-endfield-launcher",
-    "test-endfield-proton",
-];
-
-/// One of [`WINE_GATES`].
-fn wine_gate(command: &str, args: &Args) -> Result<()> {
-    use compositor::endfield::{Wine, test_endfield_launcher};
-    match command {
-        "test-yserver" | "test-xwindow" | "test-xlatency" | "test-wine" => {
-            yserver::run(command, args)
-        }
-        "test-wine-sync" => wine_sync::test_wine_sync(args),
-        "test-dxvk" => dxvk::test_dxvk(args),
-        "test-unity" => compositor::unity::test_unity(args),
-        "test-endfield-launcher" => test_endfield_launcher(args, Wine::Debian),
-        _ => test_endfield_launcher(args, Wine::Proton),
-    }
-}
-
-/// The boot benchmarks: the seam's disk read against Linux's (`bench-seam`),
-/// a channel round trip between two native processes (`bench-ipc`), and
-/// Linux-ABI round trips between two processes (`bench-pipe`).
-fn bench(command: &str, args: &Args) -> Result<()> {
-    match command {
-        "bench-ipc" => ipc::bench_ipc(args),
-        "bench-pipe" => pipe_bench::bench_pipe(args),
-        _ => seam::bench_seam(args),
-    }
 }
 
 /// The program `init` names for `arch`, with `{arch}` replaced by its name,

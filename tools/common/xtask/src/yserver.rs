@@ -18,7 +18,51 @@
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, busybox, cargo, fat, initramfs, native, qemu, rustc, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-yserver",
+        help_at: 840,
+        help: &[
+            "test-yserver  Attach the volume tools/common/fetch/fetch-yserver.sh makes, start yserver headless on lavapipe and require xdpyinfo",
+            "              to reach it",
+        ],
+        run,
+    },
+    Task {
+        name: "test-xwindow",
+        help_at: 850,
+        help: &[
+            "test-xwindow  The same volume, yserver as a client of the compositor: its root must be the screen's size, and xev's window",
+            "              one of the compositor's, by title and class and on the screen, the server started as",
+            "              run-compositor --everything starts it (--everything: on that desktop's merged volume)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-xlatency",
+        help_at: 860,
+        help: &[
+            "test-xlatency  The same boot with stage 24's latency probe: QEMU's tablet moved under xlatency, each motion timed on",
+            "              the host to the frame that shows it and counted in refreshes, then vptr and the probe in the guest",
+            "              (docs/GAME-PATH.md §2.4, R2)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-wine",
+        help_at: 760,
+        help: &[
+            "test-wine     Attach the volume tools/common/fetch/fetch-wine.sh makes, and require Debian's 64-bit Wine to make a",
+            "              prefix with wineboot, its cmd to print the Windows version, and its notepad to draw a window on",
+            "              hyprix through yserver (docs/WINE.md)",
+        ],
+        run,
+    },
+];
 
 /// glibc's x86-64 paths and the data files yserver and its libraries name
 /// absolutely, each a link into the volume.

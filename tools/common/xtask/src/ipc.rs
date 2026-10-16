@@ -11,7 +11,31 @@
 
 use crate::args::Args;
 use crate::hotpath::record::{self, Boot, Measurement, Reference};
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, qemu, shell};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "bench-ipc",
+        help_at: 410,
+        help: &[
+            "bench-ipc     Boot --init's shell and time a channel round trip between two native processes",
+            "              (/sbin/ipc-bench): the floor of a native call and the trip, in nanoseconds",
+        ],
+        run: |_, args| bench_ipc(args),
+    },
+    Task {
+        name: "test-ipc-equiv",
+        help_at: 440,
+        help: &[
+            "test-ipc-equiv",
+            "              Boot /sbin/ipc-equiv with ferrix.fastpath=off, and on x86-64 again with on, and",
+            "              require channel_write_read's cases to answer the same (docs/OPAQUE-KERNEL.md §9.7)",
+        ],
+        run: |_, args| test_ipc_equiv(args),
+    },
+];
 
 /// What the shell runs.
 const SCRIPT: &str = r#"/sbin/ipc-bench

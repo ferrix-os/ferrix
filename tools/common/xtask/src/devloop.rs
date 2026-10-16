@@ -47,8 +47,35 @@ use std::path::Path;
 use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::ports::{Content, File};
+use crate::task::Task;
 use crate::{Error, Result, apps, busybox, cargo, fat, init, initramfs, native, net, qemu, rustc};
 use crate::{shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-selfhost",
+        help_at: 910,
+        help: &[
+            "test-selfhost  Run `cargo xtask build` on Ferrix from that toolchain and this checkout, and boot the image it made;",
+            "              with --plan DIR, have Ferrix make every build a FERRIX_BUILDS=record:DIR run wrote down;",
+            "              with --volume IMG, judge a volume Ferrix built on elsewhere (the Pixel 7's selfhost.sh):",
+            "              btrfs check, then boot the image it holds",
+        ],
+        run,
+    },
+    Task {
+        name: "test-devloop",
+        help_at: 920,
+        help: &[
+            "test-devloop  Walk the development loop on Ferrix (docs/DEV-ON-FERRIX.md): clone a fixture over HTTP, build and",
+            "              test it with the volume's Cargo, run it as a service, change it, commit and push, and require",
+            "              `svc restart` to put the new build in the running system (on ferrousli's loader and libc.so.6,",
+            "              as run-compositor --everything runs the toolchain, unless --interpreter glibc; x86_64)",
+        ],
+        run,
+    },
+];
 
 /// The fixture's files, by their path in its repository.
 const FIXTURE: &[(&str, &str)] = &[

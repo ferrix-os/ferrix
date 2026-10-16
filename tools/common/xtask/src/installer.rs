@@ -35,7 +35,38 @@ use ferrix_partition::{ESP, Guid, Partition, write_table};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, ports, qemu, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "live",
+        help_at: 30,
+        help: &[
+            "live          Write build/<arch>/ferrix-live.img, the installer's live medium: a GUID partition table and",
+            "              an EFI system partition holding the image with ferrix-install, / in memory (x86_64, aarch64)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-install",
+        help_at: 520,
+        help: &[
+            "test-install  Boot the live medium, install it on a blank disk with ferrix-install, then boot that disk alone (x86_64);",
+            "              --slots: the A/B layout, bootctl's status, try, good and rollback, and their refusals",
+        ],
+        run,
+    },
+    Task {
+        name: "test-ab-boot",
+        help_at: 510,
+        help: &[
+            "test-ab-boot  A/B system slots under OVMF: a trial that panics comes back on the good slot at the next reset, a good trial is kept (x86_64)",
+        ],
+        run,
+    },
+];
 
 /// Where the installer goes in the initramfs.
 const PROGRAM_PATH: &str = "sbin/ferrix-install";

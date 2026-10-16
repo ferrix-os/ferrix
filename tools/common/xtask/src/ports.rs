@@ -25,7 +25,18 @@
 use std::path::{Path, PathBuf};
 
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "ports",
+    help_at: 1100,
+    help: &[
+        "ports         Build the libraries ported onto ferrousli that apps build against (x86_64: libcxx, zlib; Arm: zlib); the ported programs are apps",
+    ],
+    run: |_, args| build(args.single_arch()?),
+}];
 
 /// The ports `cargo xtask ports` builds, in order, each a directory of
 /// `src/user/system/linux/ferrousli/tools/ports/` holding a `build.sh`: the

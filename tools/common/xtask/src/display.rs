@@ -31,7 +31,18 @@ use std::time::{Duration, Instant};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-display",
+    help_at: 290,
+    help: &[
+        "test-display  Boot src/user/system/linux/compositor/blank as init with a virtio-gpu, and require its colour on every pixel",
+    ],
+    run: |_, args| test_display(args),
+}];
 
 /// What `--init` names `src/user/system/linux/compositor/blank` by, built for the architecture
 /// first, so `run --display --init blank` shows its screen in a window.

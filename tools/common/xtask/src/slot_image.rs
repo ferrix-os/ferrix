@@ -14,7 +14,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use ferrix_slots::slot::SlotHeader;
 
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "build",
+        help_at: 10,
+        help: &["build         Compile the loader and kernel and write a bootable image"],
+        run: build,
+    },
+    Task {
+        name: "slot-image",
+        help_at: 20,
+        help: &[
+            "slot-image    build, and also write build/<arch>/ferrix-slot.img: the image's kernel, initramfs and command line",
+            "              as a system slot, for `bootctl try` (docs/AB-BOOT.md)",
+        ],
+        run: build,
+    },
+];
 
 /// Whether images written this run get a slot image beside them.
 static WANTED: AtomicBool = AtomicBool::new(false);

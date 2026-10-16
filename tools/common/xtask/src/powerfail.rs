@@ -31,7 +31,18 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::btrfs_check::Checker;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, btrfs_disk, qemu};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-powerfail",
+    help_at: 180,
+    help: &[
+        "test-powerfail  Kill QEMU while it writes btrfs, replay at the next boot, and require btrfs check to pass, --seeds times",
+    ],
+    run: |_, args| test_powerfail(args, |arch| crate::build_parts(arch, args)),
+}];
 
 /// What the churn prints once it is writing.
 const CHURNING: &str = "btrfs-pf churning on vdc";

@@ -33,7 +33,18 @@ use std::time::{Duration, Instant};
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, init, initramfs, native, qemu, uutils, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-jobs",
+    help_at: 390,
+    help: &[
+        "test-jobs     Boot an interactive shell on the console, type a session with jobs at it, and require the answers",
+    ],
+    run: |_, args| test_jobs(args),
+}];
 
 /// What the getty prints as it gives the console a session: `Ferrix <host>
 /// on /dev/console`.

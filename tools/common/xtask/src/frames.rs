@@ -35,7 +35,19 @@ use std::process::Command;
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "frames",
+    help_at: 830,
+    help: &[
+        "frames        Build the frame recorder and its test client and print their SHA-256; with --from <RECORD>, summarise",
+        "              a record from either system: frame times, and missed refreshes by msc and by time (--fps: the refresh)",
+    ],
+    run: |_, args| run(args),
+}];
 
 /// The recorder's source, under `tools/common/game/`.
 const RECORDER: &str = "framerec.c";

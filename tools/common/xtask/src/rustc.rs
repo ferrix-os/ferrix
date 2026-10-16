@@ -44,7 +44,29 @@
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, ports, qemu, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-rustc",
+        help_at: 640,
+        help: &[
+            "test-rustc    Attach the rustc volume tools/common/fetch/fetch-rustc-sysroot.sh makes, run `rustc hello.rs && ./hello`",
+        ],
+        run,
+    },
+    Task {
+        name: "test-game-rig",
+        help_at: 650,
+        help: &[
+            "test-game-rig Stage 24's R3 without the card: the game path's load on the rustc volume, every processor at",
+            "              least 97% busy under it, the clock line the TSC, and a timed sleep's overshoot (x86_64)",
+        ],
+        run,
+    },
+];
 
 /// The script the shell runs. Version checks first, so a failure says whether
 /// the toolchain ran at all or only its link failed.

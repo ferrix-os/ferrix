@@ -36,11 +36,22 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::args::Args;
+use crate::task::Task;
 use crate::{Error, Result};
 
 mod config;
 
 pub(crate) use config::Settings;
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "wallpapers",
+    help_at: 150,
+    help: &[
+        "wallpapers    Convert pictures for run-compositor's desktop and keep them on this machine",
+    ],
+    run: |_, args| import(args),
+}];
 
 /// The variable that names the wallpapers directory, where it is not the
 /// usual one.

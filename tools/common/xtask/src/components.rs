@@ -29,7 +29,28 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::paths::workspace_root;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "components",
+        help_at: 1180,
+        help: &[
+            "components    The parts of the tree in repositories of their own (components.toml): each checkout against its pin",
+        ],
+        run: |name, _| command(name),
+    },
+    Task {
+        name: "pin-components",
+        help_at: 1190,
+        help: &[
+            "pin-components  Pin every clean component checkout that moved past its pin, once its commit is pushed",
+        ],
+        run: |name, _| command(name),
+    },
+];
 
 /// The manifest, at the root of the tree.
 pub(crate) const MANIFEST: &str = "components.toml";

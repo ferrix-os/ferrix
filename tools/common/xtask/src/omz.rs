@@ -19,7 +19,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::ports::{Content, File};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "omz",
+        help_at: 0,
+        help: &[],
+        run: |_, args| install(args.from.as_deref()),
+    },
+    Task {
+        name: "zsh-functions",
+        help_at: 0,
+        help: &[],
+        run: |_, args| install_functions(args.from.as_deref()),
+    },
+];
 
 /// Where zsh's function tree goes in the image: the directory zinc's default
 /// `fpath` is made of. oh-my-zsh calls `compinit`, `is-at-least`,

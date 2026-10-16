@@ -33,9 +33,57 @@ use ferrix_partition::{ESP, Guid, LINUX_FILESYSTEM, Partition, usable, write_tab
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{
     Error, Result, btrfs_check, cargo, fat, initramfs, native, qemu, sha256, uutils, zinc,
 };
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "n150-install",
+        help_at: 70,
+        help: &[
+            "n150-install  Write build/x86_64/n150-disk.img for the N150 box's NVMe drive: a GUID partition table, the",
+            "              box's desktop (or --image) in its EFI system partition, and a btrfs root at the rest of the",
+            "              disk with a program tree at /data (docs/N150.md); a file only, never a device",
+        ],
+        run,
+    },
+    Task {
+        name: "test-n150",
+        help_at: 80,
+        help: &[
+            "test-n150     Write that disk with a fixture tree and boot it under OVMF as the machine's one NVMe boot",
+            "              disk, GOP display only; /data read, written, kept across a power cycle, btrfs check after",
+        ],
+        run,
+    },
+    Task {
+        name: "test-n150-sata",
+        help_at: 90,
+        help: &[
+            "test-n150-sata  test-n150 with that disk as a SATA drive on q35's AHCI controller, served by the",
+            "              ahci driver, in place of the NVMe drive",
+        ],
+        run,
+    },
+    Task {
+        name: "test-n150-desktop",
+        help_at: 100,
+        help: &[
+            "test-n150-desktop  Write the box's disk with its desktop and the launcher's tree and boot it so: hyprix on",
+            "              the firmware framebuffer, yserver, the video host blocked, a lease, a picture on the screen",
+        ],
+        run,
+    },
+    Task {
+        name: "test-n150*",
+        help_at: 0,
+        help: &[],
+        run,
+    },
+];
 
 #[cfg(test)]
 mod tests;
@@ -130,7 +178,7 @@ pub(crate) fn layout(disk_bytes: u64, esp_bytes: u64) -> Result<Layout> {
 }
 
 /// `n150-install`, `test-n150`, `test-n150-sata` and `test-n150-desktop`;
-/// any other name is refused, since main.rs hands over every `test-n150*`.
+/// any other name is refused, since [`TASKS`] takes every `test-n150*`.
 pub(crate) fn run(command: &str, args: &Args) -> Result<()> {
     if args.arches()?.iter().any(|&arch| arch != Arch::X86_64) {
         return Err(Error::new(format!(

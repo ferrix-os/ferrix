@@ -24,7 +24,46 @@ use ferrix_pkg::record::{self, Installed, Record};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, ports, qemu, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-apps",
+        help_at: 220,
+        help: &[
+            "test-apps     Boot once with every app in src/user/apps that has [[smoke]] checks, and require each",
+            "              check's line",
+        ],
+        run: |_, args| test_apps(args),
+    },
+    Task {
+        name: "apps",
+        help_at: 1110,
+        help: &[
+            "apps          List the apps in src/user/apps, each checked against its app.toml (docs/APPS.md)",
+        ],
+        run: |_, _| list(),
+    },
+    Task {
+        name: "build-apps",
+        help_at: 1160,
+        help: &[
+            "build-apps    Build every app's package, or --app's, for --arch: scripts too, which run and",
+            "              run-compositor never start, and take the last of",
+        ],
+        run: |_, args| build_apps(args),
+    },
+    Task {
+        name: "new-app",
+        help_at: 1170,
+        help: &[
+            "new-app       Write a new app's folder: --app NAME, --abi native (the default) or linux",
+        ],
+        run: |_, args| new_app(args),
+    },
+];
 
 /// Where apps are, and where a new app goes, from the workspace's root: the
 /// ferrix-os/apps repository's checkout (`components.toml`).

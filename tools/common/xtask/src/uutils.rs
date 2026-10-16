@@ -17,7 +17,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, cargo, ferrousli};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "uutils",
+    help_at: 1090,
+    help: &[
+        "uutils        Build uutils/coreutils against ferrousli (x86_64), the utilities replacing busybox's",
+    ],
+    run: |_, args| build(args.single_arch()?).map(|_| ()),
+}];
 
 /// The environment variable naming the install directory, and its default.
 const VAR: &str = "FERRIX_UUTILS";

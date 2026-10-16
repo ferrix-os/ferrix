@@ -15,7 +15,16 @@ use std::time::{Duration, Instant};
 
 use crate::args::Args;
 use crate::qemu::{PANIC_MARKER, SUCCESS_MARKER, UNCHECKED_MARKER};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "watch-serial",
+    help_at: 1210,
+    help: &["watch-serial  Watch a real serial port for the kernel's boot report"],
+    run: |_, args| watch(None, args),
+}];
 
 /// The line speed every board this targets uses, and what the STM32MP157-DK's
 /// device tree asks for in `stdout-path`: `serial0:115200n8`.

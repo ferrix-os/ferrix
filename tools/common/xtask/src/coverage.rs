@@ -29,7 +29,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "coverage",
+    help_at: 940,
+    help: &[
+        "coverage      Run every boot gate under QEMU's drcov plugin (FERRIX_DRCOV) with --init, and",
+        "              require the certified item's statement coverage to hold its recorded floor",
+    ],
+    run: |_, args| run(args),
+}];
 
 /// Boots started by this process with a plugin, which numbers their traces.
 static BOOTS: AtomicU32 = AtomicU32::new(0);

@@ -29,8 +29,19 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::gateway::Forward;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::vfs::{self, Expect};
 use crate::{Error, Result, cargo, fat, initramfs, native, ports, qemu, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-adb",
+    help_at: 280,
+    help: &[
+        "test-adb      Boot adbd with a network, and drive it with this machine's adb: shell, push, pull, forward, reboot",
+    ],
+    run: |_, args| test_adb(args, crate::program_for),
+}];
 
 /// Where adbd goes in the initramfs: in `/bin`, where the kernel's command
 /// list finds its programs.

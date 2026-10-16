@@ -29,7 +29,18 @@ use std::time::{Duration, Instant};
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, qemu, uutils, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-sysfs",
+    help_at: 530,
+    help: &[
+        "test-sysfs    Boot a shell beside a card, input devices and a network adapter, read sysfs, and unbind and bind the card through it",
+    ],
+    run: |_, args| test_sysfs(args),
+}];
 
 /// How long to wait for the answer to one line.
 const PATIENCE: Duration = Duration::from_secs(30);

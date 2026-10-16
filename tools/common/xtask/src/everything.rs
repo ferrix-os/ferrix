@@ -49,7 +49,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "everything-volume",
+    help_at: 160,
+    help: &[
+        "everything-volume  Make run-compositor --everything's volume from the fetched ones (on Windows, in WSL)",
+    ],
+    run: |_, _| volume().map(drop),
+}];
 
 /// Room for what the boot writes on the volume -- Chrome's profile and
 /// caches, and what a compile leaves -- the two scripts' spares together,

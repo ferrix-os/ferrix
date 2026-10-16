@@ -17,7 +17,100 @@ use std::path::{Path, PathBuf};
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, native, qemu, shell};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-threads",
+        help_at: 540,
+        help: &[
+            "test-threads  Boot threads-test as init and require std::thread, Mutex, mpsc and /proc's thread count (--i686: the x86-64",
+            "              image runs a 32-bit x86 build of it)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-sem",
+        help_at: 550,
+        help: &[
+            "test-sem      Boot sem-test as init and require System V semaphores across forks: a SEM_UNDO mutex, undo at a kill,",
+            "              EINTR, EIDRM and timeouts (--i686: 32-bit x86, through ipc(117), as Steam calls them)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-pipewait",
+        help_at: 560,
+        help: &[
+            "test-pipewait Boot pipewait-test as init and require a read blocked on a pipe to be ended by a caught signal",
+            "              (EINTR, and a restart under SA_RESTART), SIGKILL, a stop and continue, and a freeze and thaw",
+        ],
+        run,
+    },
+    Task {
+        name: "test-shm",
+        help_at: 570,
+        help: &[
+            "test-shm      Boot shm-test as init and require System V shared memory as Chromium's MIT-SHM uses it: a segment",
+            "              attached by two processes, removed while attached, gone at the last detach (--i686: 32-bit x86, through",
+            "              ipc(117) and 395-398)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-container",
+        help_at: 580,
+        help: &[
+            "test-container  Boot container-test as init and require stage 13's exit: uid 1000 runs a pid 1 in a user namespace",
+            "              and six more, under a memory.max that reclaims and then OOM-kills it alone, with a seccomp filter",
+            "              that blocks a call",
+        ],
+        run,
+    },
+    Task {
+        name: "test-procfs",
+        help_at: 590,
+        help: &[
+            "test-procfs   Boot procfs-test as init and require /proc/self/fd links to stat as fstat (sockets, anonymous files, a pipe,",
+            "              a memfd), /proc/net/tcp's inode to match, and every /proc inode number to fit 32 bits, and mincore (--i686: 32-bit x86)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-uvm",
+        help_at: 600,
+        help: &[
+            "test-uvm      Build NVIDIA's UVM against uvm-kpi and ferrousli from the tree tools/common/fetch/fetch-nvidia.sh fetches",
+            "              (or FERRIX_NVIDIA_SRC's), boot it as init, and require its 15 GPU-free self-tests to pass; then a krealloc",
+            "              control that must fail one (x86_64)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-nvrm",
+        help_at: 610,
+        help: &[
+            "test-nvrm     Build nvrm and its core, put the core on a volume, and boot nvrm as devmgr's Gpu driver on QEMU's",
+            "              pci-testdev: handed over (marked, interrupts isolated, budget set, the core loaded, nvrm up with its",
+            "              device), and refused for a budget too small",
+            "              and for interrupts not isolated (x86_64)",
+        ],
+        run,
+    },
+    Task {
+        name: "test-nvrm-link",
+        help_at: 620,
+        help: &[
+            "test-nvrm-link",
+            "              Build nvrm-link-test and its core from fetch-nvidia.sh's objects, run RM's no-GPU path (init,",
+            "              root client, NV01_DEVICE_0 refused) on the host and on Ferrix from a volume, and each control",
+            "              the core's loader must refuse (x86_64)",
+        ],
+        run,
+    },
+];
 
 /// The Rust target the program is built for on `arch`: with `i686`, x86-64's
 /// program is 32-bit x86, which the kernel runs in compatibility mode through

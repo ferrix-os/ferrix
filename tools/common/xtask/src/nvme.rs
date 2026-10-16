@@ -43,10 +43,24 @@ use std::time::{Duration, Instant};
 use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::restart::{self, Kind};
+use crate::task::Task;
 use crate::{
     Error, Result, btrfs_check, btrfs_disk, cargo, fat, initramfs, native, qemu, sha256, test_disk,
     uutils, zinc,
 };
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-nvme",
+    help_at: 490,
+    help: &[
+        "test-nvme     Boot a shell with / on an NVMe drive below a PCIe switch and a second drive of 4096-byte blocks:",
+        "              read known blocks, write and read back, flush, kill the drivers under load (--boot io, the default);",
+        "              a read QEMU fails must fail upward and nothing else (--boot fault); time 4 KiB reads beside",
+        "              virtio-blk's (--boot bench) (x86_64; docs/NVME.md)",
+    ],
+    run: |_, args| test_nvme(args),
+}];
 
 /// How long to wait for the answer to one line.
 const PATIENCE: Duration = Duration::from_secs(60);

@@ -42,7 +42,18 @@ use std::time::{Duration, Instant};
 
 use crate::args::Args;
 use crate::paths;
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "remote-desktop",
+    help_at: 140,
+    help: &[
+        "remote-desktop  Send this tree to another machine, boot the desktop there and watch it here over VNC",
+    ],
+    run: |_, args| remote_desktop(args),
+}];
 
 /// The ref the code is pushed to over there. Not `refs/heads/...` on purpose:
 /// a checkout refuses a push to the branch it has checked out, and a ref

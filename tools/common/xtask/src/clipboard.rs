@@ -34,10 +34,21 @@ use ferrix_vdagent::message::{ClipboardType, Message, Selection, Shape, Types, c
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result, compositor, qemu};
 
 // A watched desktop's clipboard, bridged to the host's Wayland one.
 pub(crate) mod host;
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-clipboard",
+    help_at: 270,
+    help: &[
+        "test-clipboard  Boot the desktop with its clipboard port on a socket xtask speaks vdagent over, and carry text both ways",
+    ],
+    run: |_, args| test_clipboard(args),
+}];
 
 /// What the guest copies for the host to take. No quote in it: it goes on a
 /// `zinc -c '...'` line.

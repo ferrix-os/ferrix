@@ -23,7 +23,20 @@
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, busybox, cargo, fat, initramfs, native, qemu, rustc, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-wine-sync",
+    help_at: 770,
+    help: &[
+        "test-wine-sync  Attach the volume tools/common/fetch/fetch-proton.sh makes, and require GE-Proton's Wine to take",
+        "              fsync (futex_waitv) with WINEFSYNC=1 and its 64-bit and 32-bit waits to go through it; prints the",
+        "              bench's turn times and wineserver's processor time with fsync off and on (docs/WINE.md §11)",
+    ],
+    run: |_, args| test_wine_sync(args),
+}];
 
 /// Where [`SCRIPT`] is in the image.
 const RUN_PATH: &str = "bin/wine-sync";

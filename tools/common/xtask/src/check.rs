@@ -11,31 +11,138 @@ use crate::args::Args;
 use crate::cargo::{self, cargo as cargo_binary};
 use crate::paths::{self, Arch};
 use crate::step_cache;
+use crate::task::Task;
 use crate::workspace;
 use crate::{Error, Result};
 
-/// The commands [`command`] answers: `check`, and its steps run alone.
-pub(crate) const COMMANDS: &[&str] = &[
-    "check",
-    "miri",
-    "loom",
-    "check-ferrousli",
-    "host-clippy",
-    "host-test",
-    "host-doctest",
-    "host-doc",
-    "check-apps",
-    "check-side",
-    "check-unit",
-    "check-audit",
-    "check-docs",
-    "check-ferrocene",
-    "gate-rows",
-    "components",
-    "pin-components",
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "check",
+        help_at: 950,
+        help: &[
+            "check         Run every quality gate (fmt, clippy, layering, audits, tests, docs)",
+        ],
+        run: command,
+    },
+    Task {
+        name: "miri",
+        help_at: 1040,
+        help: &[
+            "miri          CI's Miri steps alone, --jobs crates at a time, building nothing else",
+            "              (needs a nightly toolchain with miri)",
+        ],
+        run: command,
+    },
+    Task {
+        name: "loom",
+        help_at: 1050,
+        help: &[
+            "loom          check's loom models alone (src/tests/loom): the wait's and the way out's",
+            "              orderings, each with a control that must fail",
+        ],
+        run: command,
+    },
+    Task {
+        name: "check-ferrousli",
+        help_at: 1030,
+        help: &[
+            "check-ferrousli",
+            "              check --ferrousli's ferrousli steps alone, as CI runs them",
+        ],
+        run: command,
+    },
+    Task {
+        name: "host-clippy",
+        help_at: 960,
+        help: &["host-clippy   check's host clippy step alone, as CI runs it"],
+        run: command,
+    },
+    Task {
+        name: "host-test",
+        help_at: 970,
+        help: &["host-test     check's host test step alone, as CI runs it"],
+        run: command,
+    },
+    Task {
+        name: "host-doctest",
+        help_at: 980,
+        help: &["host-doctest  check's doc test step alone, as CI runs it"],
+        run: command,
+    },
+    Task {
+        name: "host-doc",
+        help_at: 990,
+        help: &["host-doc      check's documentation step alone, as CI runs it"],
+        run: command,
+    },
+    Task {
+        name: "check-apps",
+        help_at: 1120,
+        help: &[
+            "check-apps    check's steps for the apps alone: each app's formatting, clippy, tests and folder",
+        ],
+        run: command,
+    },
+    Task {
+        name: "check-side",
+        help_at: 1130,
+        help: &[
+            "check-side    check's steps for the workspaces of their own (loom, compositor, Linux programs, adbd, nvos, apps), which check runs beside its main workspace",
+        ],
+        run: command,
+    },
+    Task {
+        name: "check-unit",
+        help_at: 1140,
+        help: &[
+            "check-unit    one of check-side's units, the one FERRIX_CHECK_UNIT names, as the step cache runs it under strace (FERRIX_STEP_CACHE=on caches passed units by their inputs, docs/TEST-TIME.md)",
+        ],
+        run: command,
+    },
+    Task {
+        name: "check-audit",
+        help_at: 1150,
+        help: &[
+            "check-audit   one of check's audits, the one FERRIX_CHECK_UNIT names (audit:<name>), as the step cache runs it under strace keyed on the whole item",
+        ],
+        run: command,
+    },
+    Task {
+        name: "check-docs",
+        help_at: 1000,
+        help: &[
+            "check-docs    check's commit hooks, audits and generated-document checks alone, no cargo",
+            "              step: the gate of a change to docs/ and top-level Markdown only",
+        ],
+        run: command,
+    },
+    Task {
+        name: "check-ferrocene",
+        help_at: 1010,
+        help: &[
+            "check-ferrocene",
+            "              check's build of the kernel and the item's crates with Rust 1.95.0, the",
+            "              upstream Rust of Ferrocene 26.05 (not Ferrocene's own compiler), alone",
+        ],
+        run: command,
+    },
+    Task {
+        name: "native-clippy",
+        help_at: 1060,
+        help: &["native-clippy check's clippy of the native programs for --arch, as CI runs it"],
+        run: |_, args| args.arches()?.into_iter().try_for_each(native_clippy),
+    },
+    Task {
+        name: "model-doc",
+        help_at: 1070,
+        help: &["model-doc     Regenerate docs/generated/ from the SysML model"],
+        run: |_, _| model_doc(),
+    },
 ];
 
-/// `check`, or one of its steps run alone, by the command's name.
+/// `check`, or one of its steps run alone, by the command's name
+/// (the names [`TASKS`] gives it).
 pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
     match name {
         "miri" => miri_all(args.jobs),
@@ -60,8 +167,6 @@ pub(crate) fn command(name: &str, args: &Args) -> Result<()> {
         "check-audit" => check_audit(),
         "check-docs" => docs(),
         "check-ferrocene" => ferrocene_rust(),
-        "gate-rows" => crate::gate_rows::run(args),
-        "components" | "pin-components" => crate::components::command(name),
         _ => run(args),
     }
 }

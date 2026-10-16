@@ -15,8 +15,20 @@ pub(crate) mod record;
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Result, qemu};
 use json::Value;
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "hw-fingerprint",
+    help_at: 430,
+    help: &[
+        "hw-fingerprint  Print this host's and --arch's guest's canonical hardware description and its SHA-256, the key",
+        "              hot-path results are filed by (docs/HOTPATHS.md)",
+    ],
+    run: |_, args| hw_fingerprint(args),
+}];
 
 /// What the fingerprint's text says it is, so a later layout is a new name.
 pub(crate) const FINGERPRINT_SCHEMA: &str = "ferrix-hw-fingerprint/1";

@@ -20,7 +20,20 @@ use std::process::Command;
 
 use crate::args::Args;
 use crate::paths::{self, Arch};
+use crate::task::Task;
 use crate::{Error, Result};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "gate-rows",
+    help_at: 1020,
+    help: &[
+        "gate-rows --since <ref> [--moved <old main>]",
+        "              The gate rows docs/BACKLOG.md asks of the changes since <ref>; with",
+        "              --moved, whether a rebase from <old main> asks for a gate again",
+    ],
+    run: |_, args| run(args),
+}];
 
 /// What a change's paths ask of its gate.
 #[derive(Debug, Default, PartialEq, Eq)]

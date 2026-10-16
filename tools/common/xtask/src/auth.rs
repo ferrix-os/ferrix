@@ -51,7 +51,20 @@ use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::ports::{Content, File};
 use crate::qemu::{self, SUCCESS_MARKER, Watching};
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, init, initramfs, native, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-auth",
+    help_at: 460,
+    help: &[
+        "test-auth     Boot init with authd, type at the shell its getty gives, and require each refusal of",
+        "              docs/AUTH.md: a wrong password, an unknown account, a user naming another, the throttle",
+        "              (with --sabotage NAME, against an authd with that refusal turned off, which must fail)",
+    ],
+    run: |_, args| test_auth(args),
+}];
 
 /// What only a sabotaged `authd` carries (`src/user/system/linux/auth/authd/src/sabotage.rs`).
 const MARKER: &[u8] = b"FERRIX-AUTH-SABOTAGED-BUILD";

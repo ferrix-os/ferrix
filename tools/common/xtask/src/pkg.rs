@@ -21,7 +21,32 @@ use ferrix_pkg::record::{self, Installed, Record};
 use crate::args::Args;
 use crate::paths::{self, Arch};
 use crate::ports::{Content, File};
+use crate::task::Task;
 use crate::{Error, Result, cargo, fat, initramfs, native, qemu, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[
+    Task {
+        name: "test-pkg",
+        help_at: 230,
+        help: &[
+            "test-pkg      Boot with pkg, the package manager, and require it to install, run and remove the stat",
+            "              service, to replace a package with its next version and back (`pkg install --replace`),",
+            "              and to refuse a changed package or replacement, a missing dependency and a needed removal",
+        ],
+        run,
+    },
+    Task {
+        name: "install-app",
+        help_at: 240,
+        help: &[
+            "install-app   Build the app --app NAME for this machine and put it in the running system in the place of",
+            "              the version installed, with `pkg install --replace` (on Ferrix, as root; --to DIR installs",
+            "              into the root at DIR instead, which is the only way it runs on another system)",
+        ],
+        run,
+    },
+];
 
 /// The workspace.
 const DIR: &str = "src/user/system/linux/pkg";

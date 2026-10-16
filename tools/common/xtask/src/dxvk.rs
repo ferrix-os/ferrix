@@ -24,7 +24,20 @@
 
 use crate::args::Args;
 use crate::paths::Arch;
+use crate::task::Task;
 use crate::{Error, Result, busybox, cargo, fat, initramfs, native, qemu, rustc, shell, zinc};
+
+/// This module's `cargo xtask` commands (`crate::task`).
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "test-dxvk",
+    help_at: 780,
+    help: &[
+        "test-dxvk     The same volume, with DXVK and a Direct3D 11 program from tools/common/fetch/fetch-dxvk.sh: require the",
+        "              program's frame, drawn through DXVK on lavapipe with no card, to be the one xtask draws, then its",
+        "              frames presented through a swap chain in a window on hyprix through yserver (docs/WINE.md §6)",
+    ],
+    run: |_, args| test_dxvk(args),
+}];
 
 /// Where DXVK's DLLs and the program are in the image.
 const DIRECTORY: &str = "dxvk";
