@@ -19,7 +19,7 @@ miniz_oxide = { version = "0.9.1", default-features = false, features = ["with-a
 # Its default features are its compressor and decompressor, which are the
 # whole reason it is here.
 lzokay-native = "0.1.0"
-ruzstd = { version = "0.9.0", default-features = false }
+ruzstd = { version = "0.9.1", default-features = false }
 
 [lints]
 workspace = true

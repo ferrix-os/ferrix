@@ -68,7 +68,7 @@ put an undetected error into the product.
 | `qrcode` | 0.14.1 | MIT OR Apache-2.0 |
 | `quote` | 1.0.47 | MIT OR Apache-2.0 |
 | `rqrr` | 0.11.0 | (MIT OR Apache-2.0) AND ISC |
-| `ruzstd` | 0.9.0 | MIT |
+| `ruzstd` | 0.9.1 | MIT |
 | `syn` | 2.0.119 | MIT OR Apache-2.0 |
 | `thiserror` | 1.0.69 | MIT OR Apache-2.0 |
 | `thiserror-impl` | 1.0.69 | MIT OR Apache-2.0 |
