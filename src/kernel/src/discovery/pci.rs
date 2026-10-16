@@ -1092,12 +1092,12 @@ fn examine_all(
         // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
         examined.push((function, seen));
     }
-    // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
     let spans = examined
         .iter()
         .flat_map(|(function, (regions, ..))| {
             memory_spans(regions).map(move |span| (function.address, span))
         })
+        // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
         .collect();
     Ok((examined, spans))
 }
@@ -1184,11 +1184,11 @@ fn turn_decoding_on(
     if own.is_empty() {
         return false;
     }
-    // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
     let others: Vec<(u64, u64)> = spans
         .iter()
         .filter(|&&(owner, _)| owner != address)
         .map(|&(_, span)| span)
+        // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
         .collect();
     if let Some(why) = decoding_refusal(&own, &others, reserved) {
         crate::println!("  pci      {address}: firmware left memory decoding off; left off: {why}");
