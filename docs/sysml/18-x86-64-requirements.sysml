@@ -835,14 +835,25 @@ package FerrixX8664Requirements {
         requirement <'L.x86_64.38'> counterFrequencyKnown : ItemLowLevel {
             attribute :>> statement = "clock::init shall bring up a 64-bit counter
                 and its frequency, opening the HPET first where firmware describes
-                one: the invariant TSC measured over 10 ms of the HPET where both
-                exist; else, with no invariant TSC, the TSC at the rate KVM's time
-                page states where kvm_word vouches for it; else, with no HPET, the
-                TSC measured against PIT channel 2; else a 64-bit HPET at its
-                stated period; else the TSC measured against a 32-bit HPET.";
+                one, and going on as a machine with no HPET, with a clock WARNING
+                line, where it fails to open: the invariant TSC measured over 10 ms
+                of the HPET where both exist; else, with no invariant TSC, the TSC
+                at the rate KVM's time page states where kvm_word vouches for it;
+                else, with no HPET, the TSC measured against PIT channel 2, a rate
+                under 200 MHz refused as a PIT not counting; else, with no HPET and
+                no PIT rate, the TSC at the rate CPUID leaf 0x15 states (crystal
+                times ratio), or failing that leaf 0x16's base frequency, an
+                approximation Linux makes only for models it names; else a 64-bit
+                HPET at its stated period; else the TSC measured against a 32-bit
+                HPET. The PIT wait shall end after 5,000,000 polls and the HPET
+                measurement's after 20,000,000.";
             attribute :>> criterion = "counter_hz agrees with a reference the
                 counter was not calibrated from, within a stated tolerance, on each
-                path a gate boots.";
+                path a gate boots. Made-up CPUID leaves give the crystal's rate,
+                the base frequency's, and none. A reference boot that prints a
+                clock WARNING line other than TCG's HPET line fails test-boot.
+                Under KVM with no HPET and no PIT the boot takes the CPUID path;
+                QEMU reports neither leaf, so it stops there.";
             attribute :>> parent = "H.SCHED.5";
             attribute :>> unit = ("arch::x86_64::clock::init",
                 "arch::x86_64::clock::adopt",
@@ -855,6 +866,7 @@ package FerrixX8664Requirements {
                 "arch::x86_64::clock::pit_finished",
                 "arch::x86_64::clock::calibrate_tsc",
                 "arch::x86_64::clock::cpuid_tsc_hz",
+                "arch::x86_64::clock::rate_of_leaves",
                 "arch::x86_64::clock::write64",
                 "arch::x86_64::clock::main_counter",
                 "arch::x86_64::clock::read64",
@@ -863,12 +875,16 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::inb");
         }
         requirement <'L.x86_64.39'> counterBringUpRefusesDeadTimer : ItemLowLevel {
-            attribute :>> statement = "clock::init shall fail with a named reason,
-                not answer a counter, when the HPET's counter does not advance or
-                the PIT never reaches its terminal count.";
-            attribute :>> criterion = "With the HPET's counter held still, and with
-                no HPET and the PIT's output held low, init answers an error, 2 of
-                2.";
+            attribute :>> statement = "open_hpet shall fail with a named reason
+                when the HPET's counter does not advance, which clock::init takes
+                for a machine with no HPET (L.x86_64.38); and clock::init shall
+                fail with a named reason, not answer a counter, when with no HPET
+                the PIT never reaches its terminal count or counts under 200 MHz
+                and CPUID states no TSC rate.";
+            attribute :>> criterion = "With the HPET's counter held still the
+                boot says so on a clock WARNING line and test-boot fails it; with
+                no HPET and no PIT (QEMU hpet=off,pit=off, whose CPUID states no
+                rate) init answers an error.";
             attribute :>> parent = "H.SCHED.5";
             attribute :>> unit = ("arch::x86_64::clock::open_hpet",
                 "arch::x86_64::clock::calibrate_tsc",

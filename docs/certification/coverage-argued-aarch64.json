@@ -358,59 +358,31 @@
     },
     {
       "file": "console/output.rs",
-      "lines": "271",
+      "lines": "289",
       "category": "absent-hardware",
       "match": "WRITERS.wake_all();",
       "why": "Wakes writers that waited for room in the transmit ring. An emulated port sends instantly, so no writer ever waits for room on a QEMU machine."
     },
     {
       "file": "console/output.rs",
-      "lines": "296",
+      "lines": "314",
       "category": "absent-hardware",
       "match": "wake_writers();",
       "why": "A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once."
     },
     {
       "file": "console/output.rs",
-      "lines": "305",
+      "lines": "323",
       "category": "absent-hardware",
       "match": "let _ = WRITERS.wait_until_deadline(",
       "why": "A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once."
     },
     {
       "file": "console/output.rs",
-      "lines": "396",
+      "lines": "440",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "399",
-      "category": "failure-path",
-      "match": "return Err(\"the transmit check ran where a writer could not ",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "412",
-      "category": "failure-path",
-      "match": "return Err(\"the transmit ring still held a task's write two ",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "415",
-      "category": "failure-path",
-      "match": "return Err(\"the transmit interrupt stopped coming, and the r",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "424",
-      "category": "failure-path",
-      "match": "return Err(\"a task's write was not left to the transmit inte",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",

@@ -26,14 +26,14 @@
     },
     {
       "file": "arch/x86_64/clock.rs",
-      "lines": "646",
+      "lines": "666",
       "category": "defensive",
       "match": "if spins > 1_000_000 {",
       "why": "The loop's second pass: the HPET's main counter read the same value twice in a row. At the 10 MHz or more the HPET specification requires, one read through the device window takes longer than a tick, so a counter that is counting always differs on the next read. What it defends against is a timer block firmware left present but stopped, which it reports as an error after a million reads instead of dividing by zero elapsed time later."
     },
     {
       "file": "arch/x86_64/clock.rs",
-      "lines": "674-675, 681-682, 687, 691, 693-694",
+      "lines": "694-695, 701-702, 714, 716-717",
       "category": "absent-hardware",
       "match": "fn calibrate_tsc_against_hpet(",
       "why": "The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`."
@@ -68,14 +68,14 @@
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1606, 1608",
+      "lines": "1605, 1607",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1669",
+      "lines": "1668",
       "category": "failure-path",
       "match": "cpu::hlt();",
       "why": "`halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run."
@@ -271,38 +271,10 @@
     },
     {
       "file": "console/output.rs",
-      "lines": "396",
+      "lines": "440",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "399",
-      "category": "failure-path",
-      "match": "return Err(\"the transmit check ran where a writer could not ",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "412",
-      "category": "failure-path",
-      "match": "return Err(\"the transmit ring still held a task's write two ",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "415",
-      "category": "failure-path",
-      "match": "return Err(\"the transmit interrupt stopped coming, and the r",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
-    },
-    {
-      "file": "console/output.rs",
-      "lines": "424",
-      "category": "failure-path",
-      "match": "return Err(\"a task's write was not left to the transmit inte",
-      "why": "A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",

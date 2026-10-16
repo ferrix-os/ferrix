@@ -183,13 +183,22 @@ package FerrixConsoleRequirements {
         requirement <'L.console.12'> aStalledPortIsPolledOut : ItemLowLevel {
             attribute :>> statement = "unstall shall poll the transmit ring out to the
                 port, and count a stall, when the port has taken none of its bytes for
-                a tenth of a second.";
+                a tenth of a second; and when the transmit check (FX-0504) finds a
+                task's write still in the ring two seconds later, the one failure
+                it does not stop for, fall_back_to_polling shall stop queuing and
+                poll out what the ring holds, so that writers poll as before the
+                port's interrupt was installed, with an output WARNING line. Every
+                other failure of the check stops the boot.";
             attribute :>> criterion = "With the port's transmit interrupt suppressed, a
                 line queued reaches the port at the first write made after 100 ms,
-                and the stall count rises by 1.";
+                and the stall count rises by 1. With the transmit interrupt never
+                raised on a reference boot, the boot prints the WARNING line and
+                test-boot fails on it; with the writer made not to queue, the boot
+                stops with FX-0504.";
             attribute :>> parent = ("H.BOOT.8", "H.TRAP.14");
             attribute :>> unit = ("console::output::Transmit::unstall",
-                "console::output::stalls");
+                "console::output::stalls", "console::output::fall_back_to_polling",
+                "console::output::Failure::fmt");
         }
         requirement <'L.console.13'> drainSendsEverything : ItemLowLevel {
             attribute :>> statement = "drain shall poll out everything the transmit

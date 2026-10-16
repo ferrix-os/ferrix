@@ -6,9 +6,9 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | debug | 672 | 402 | 141 | **129** |
-| aarch64 | debug | 671 | 336 | 158 | **177** |
-| armv7a | debug | 1025 | 439 | 352 | **234** |
+| x86_64 | debug | 667 | 398 | 140 | **129** |
+| aarch64 | debug | 667 | 332 | 158 | **177** |
+| armv7a | debug | 1021 | 435 | 352 | **234** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -16,15 +16,15 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**672** unreached statements, debug profile.
+**667** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
-| Unreachable on the measured architecture | 178 | 26% |
-| Reached only when the kernel is stopping | 142 | 21% |
+| Unreachable on the measured architecture | 178 | 27% |
+| Reached only when the kernel is stopping | 138 | 21% |
 | Reached only when something has already failed | 73 | 11% |
 | Run, and credited to another line | 9 | 1% |
-| Hardware the measured machine does not have | 141 | 21% |
+| Hardware the measured machine does not have | 140 | 21% |
 | Needs a test | 129 | 19% |
 
 ### x86_64: Unreachable on the measured architecture — 178 statements
@@ -40,7 +40,7 @@ Justified. These statements belong to another architecture or another board, and
 | 1 | `item` | `init.rs` |
 | 1 | `item` | `power.rs` |
 
-### x86_64: Reached only when the kernel is stopping — 142 statements
+### x86_64: Reached only when the kernel is stopping — 138 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
@@ -57,7 +57,6 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 6 | `core` | `smp.rs` |
 | 5 | `core` | `arch/x86_64/paranoid.rs` |
 | 5 | `core` | `sched/preempt.rs` |
-| 4 | `core` | `console/output.rs` |
 | 3 | `item` | `discovery/devmgr.rs` |
 | 3 | `core` | `panic/screen.rs` |
 | 2 | `item` | `discovery/smbios.rs` |
@@ -107,7 +106,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `user/space.rs` |
 
-### x86_64: Hardware the measured machine does not have — 141 statements
+### x86_64: Hardware the measured machine does not have — 140 statements
 
 **Not a justification, a configuration statement.** Enumeration and setup for devices this QEMU invocation does not present. A different machine would reach some of it, so the honest closure is either to measure on a machine that has the hardware or to state which devices the claim excludes.
 
@@ -115,7 +114,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 |---:|---|---|
 | 50 | `item` | `discovery/pci.rs` |
 | 39 | `core` | `device.rs` |
-| 8 | `core` | `arch/x86_64/clock.rs` |
+| 7 | `core` | `arch/x86_64/clock.rs` |
 | 7 | `core` | `arch/x86_64/speculation.rs` |
 | 6 | `core` | `discovery/fdt.rs` |
 | 5 | `core` | `iommu.rs` |
@@ -163,7 +162,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `claim.rs` |
 | 1 | `core` | `mm.rs` |
 
-### x86_64: argued line by line — 299 statements
+### x86_64: argued line by line — 294 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -171,14 +170,14 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 |---|---|---|---|
 | `arch/speculation.rs` | 132 | Hardware the measured machine does not have | `with`'s only rows in the image are in `Plan::for_processor`'s arms for a speculation control the processor offers -- enhanced, automatic or always-on IBRS, STIBP, SSBD, IBPB. QEMU's TCG emulates none of them (`TCG doesn't support requested feature: CPUID.07H:EDX.spec-ctrl`), and `x86_cpu` asks for them only under a hypervisor. The same arms run under KVM: gate 6 on the AMD reference host prints `speculation defences: ..., AutoIBRS, STIBP, SSBD, predictor barrier on switch, ...`. The unconditional defences are folded into a constant and carry no row. |
 | `arch/speculation.rs` | 168 | Unreachable on the measured architecture | `none` names an empty set of defences, which only a `--mitigations off` build records: on x86-64 every processor's plan in the certified build starts from the index clamps, the SWAPGS fence, the cleared entry registers and the RSB fill (`Plan::for_processor`, `x86_64/speculation.rs`), and no architecture's certified plan is empty -- ARMv7-A's and AArch64's hold the index clamp on every core, a Cortex-A7's included. That build is another configuration, not the one certified. |
-| `arch/x86_64/clock.rs` | 646 | Reached only when something has already failed | The loop's second pass: the HPET's main counter read the same value twice in a row. At the 10 MHz or more the HPET specification requires, one read through the device window takes longer than a tick, so a counter that is counting always differs on the next read. What it defends against is a timer block firmware left present but stopped, which it reports as an error after a million reads instead of dividing by zero elapsed time later. |
-| `arch/x86_64/clock.rs` | 674-675, 681-682, 687, 691, 693-694 | Hardware the measured machine does not have | The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`. |
+| `arch/x86_64/clock.rs` | 666 | Reached only when something has already failed | The loop's second pass: the HPET's main counter read the same value twice in a row. At the 10 MHz or more the HPET specification requires, one read through the device window takes longer than a tick, so a counter that is counting always differs on the next read. What it defends against is a timer block firmware left present but stopped, which it reports as an error after a million reads instead of dividing by zero elapsed time later. |
+| `arch/x86_64/clock.rs` | 694-695, 701-702, 714, 716-717 | Hardware the measured machine does not have | The whole of the measurement against the HPET, which `init` calls only for an invariant TSC or a 32-bit HPET; the measured TCG processor has neither. Gate 6 under KVM runs it on every boot, as its `calibrated against the HPET` line says. The PIT's measurement beside it is reached, by the suite's `boot-legacy` gate on a q35 with `hpet=off`. |
 | `arch/x86_64/console.rs` | 209 | Hardware the measured machine does not have | The row is the loop's second and later passes, for a transmit holding register still full when a byte is to be written. QEMU's 16550 passes each byte to its character device as it is written and reports the register empty again at once, so the first read of the line status always finds room. A real UART at 115200 baud is busy for 87 us a byte. |
 | `arch/x86_64/console.rs` | 236 | Hardware the measured machine does not have | As line 186, for `drain`: the second pass waits for the shift register, and QEMU's port reports the transmitter idle on the first read. The function's own comment says so: harmless under QEMU, whose port sends instantly. |
 | `arch/x86_64/console.rs` | 250, 255 | Hardware the measured machine does not have | The prologue and epilogue of `read_byte`'s standalone copy, which runs only through the poll pointer `read_console_byte` hands `console::input::read_byte`: input stays polled when `console::input::init` finds no interrupt for the port, on an x86-64 machine whose MADT gives COM1's line no I/O APIC input. q35 routes COM1 through the I/O APIC, so input is interrupt-driven from before the first read, and the handler runs `read_byte` inlined into `take_console_byte`, which is reached. |
 | `arch/x86_64/cpu.rs` | 851, 857 | Reached only when something has already failed | The triple fault is `reset`'s last way, taken only after the FADT's reset register and ten pulses of the keyboard controller's reset line have each failed to reset the machine. On q35 the FADT names port 0xCF9, which resets it at once: the suite's `boot-reset` gate shows the loader starting again. Reaching this would take a machine that ignores both documented resets. |
-| `arch/x86_64/mod.rs` | 1606, 1608 | Reached only when something has already failed | The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for. |
-| `arch/x86_64/mod.rs` | 1669 | Reached only when the kernel is stopping | `halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run. |
+| `arch/x86_64/mod.rs` | 1605, 1607 | Reached only when something has already failed | The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for. |
+| `arch/x86_64/mod.rs` | 1668 | Reached only when the kernel is stopping | `halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run. |
 | `arch/x86_64/paranoid.rs` | 134 | Reached only when the kernel is stopping | An exception nested on its own interrupt stack, which the stack's occupancy count exists to catch and stop on (FX-9006): the entry clears DR7 so that a breakpoint on the handler's own path cannot nest, and the stage 3 check shows it does not. |
 | `arch/x86_64/paranoid.rs` | 149 | Reached only when the kernel is stopping | A machine check, a hardware error the kernel stops on. QEMU raises one only when a host tool injects it (`mce` in the monitor), which no gate does, and a run that took one would be a failing run. |
 | `arch/x86_64/paranoid.rs` | 150, 152 | Reached only when the kernel is stopping | Any vector but #DB, NMI and #MC reaching the paranoid entry: only the double fault's gate also names an IST stack here, and a double fault stops the kernel. |
@@ -206,11 +205,7 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `console/input.rs` | 352 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/output.rs` | 148 | Hardware the measured machine does not have | The ring full when a writer that may not wait queues a byte: the oldest byte is polled out to make room. Only a port slower than its writers fills the ring, and an emulated port sends instantly. |
 | `console/output.rs` | 186 | Reached only when something has already failed | Bytes that have waited a tenth of a second with nothing sent: the transmit interrupt stopped coming. console::output::check requires the stall count to stay where it was, and a working port never takes it. |
-| `console/output.rs` | 396 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
-| `console/output.rs` | 399 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 412 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 415 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 424 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `console/output.rs` | 440 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
 | `discovery/devmgr.rs` | 96-98 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
 | `discovery/devmgr.rs` | 372-374 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 377 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
@@ -389,16 +384,16 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**671** unreached statements, debug profile.
+**667** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 121 | 18% |
-| Reached only when the kernel is stopping | 124 | 18% |
+| Reached only when the kernel is stopping | 120 | 18% |
 | Reached only when something has already failed | 81 | 12% |
 | Run, and credited to another line | 10 | 1% |
 | Hardware the measured machine does not have | 158 | 24% |
-| Needs a test | 177 | 26% |
+| Needs a test | 177 | 27% |
 
 ### aarch64: Unreachable on the measured architecture — 121 statements
 
@@ -411,7 +406,7 @@ Justified. These statements belong to another architecture or another board, and
 | 11 | `core` | `platform/google/gs201/watchdog.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 
-### aarch64: Reached only when the kernel is stopping — 124 statements
+### aarch64: Reached only when the kernel is stopping — 120 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
@@ -426,7 +421,6 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 6 | `core` | `console/input.rs` |
 | 5 | `core` | `console.rs` |
 | 5 | `core` | `sched/preempt.rs` |
-| 4 | `core` | `console/output.rs` |
 | 3 | `item` | `discovery/devmgr.rs` |
 | 2 | `core` | `sched/queue.rs` |
 | 1 | `core` | `object/job.rs` |
@@ -532,7 +526,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/pin.rs` |
 | 1 | `core` | `object/quota.rs` |
 
-### aarch64: argued line by line — 291 statements
+### aarch64: argued line by line — 287 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -597,14 +591,10 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `console/input.rs` | 348 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/input.rs` | 352 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/output.rs` | 186 | Reached only when something has already failed | Bytes that have waited a tenth of a second with nothing sent: the transmit interrupt stopped coming. console::output::check requires the stall count to stay where it was, and a working port never takes it. |
-| `console/output.rs` | 271 | Hardware the measured machine does not have | Wakes writers that waited for room in the transmit ring. An emulated port sends instantly, so no writer ever waits for room on a QEMU machine. |
-| `console/output.rs` | 296 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
-| `console/output.rs` | 305 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
-| `console/output.rs` | 396 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
-| `console/output.rs` | 399 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 412 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 415 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 424 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `console/output.rs` | 289 | Hardware the measured machine does not have | Wakes writers that waited for room in the transmit ring. An emulated port sends instantly, so no writer ever waits for room on a QEMU machine. |
+| `console/output.rs` | 314 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
+| `console/output.rs` | 323 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
+| `console/output.rs` | 440 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
 | `discovery/devmgr.rs` | 96-98 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
 | `discovery/devmgr.rs` | 372-374 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
 | `discovery/devmgr.rs` | 377 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
@@ -766,12 +756,12 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**1025** unreached statements, debug profile.
+**1021** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 174 | 17% |
-| Reached only when the kernel is stopping | 178 | 17% |
+| Reached only when the kernel is stopping | 174 | 17% |
 | Reached only when something has already failed | 68 | 7% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 352 | 34% |
@@ -790,7 +780,7 @@ Justified. These statements belong to another architecture or another board, and
 | 2 | `core` | `arch/armv7a/console.rs` |
 | 1 | `core` | `arch/speculation.rs` |
 
-### armv7a: Reached only when the kernel is stopping — 178 statements
+### armv7a: Reached only when the kernel is stopping — 174 statements
 
 Justified. The panic report, its catalogue and the backtrace walker run when the kernel has already decided to stop. Exercising them means crashing deliberately, which only `test-shell`'s `ferrix.onexit=panic` boot does -- and a passing run that reached the rest would be a failing run.
 
@@ -806,7 +796,6 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 6 | `core` | `console/input.rs` |
 | 5 | `core` | `console.rs` |
 | 5 | `core` | `sched/preempt.rs` |
-| 4 | `core` | `console/output.rs` |
 | 2 | `core` | `sched/queue.rs` |
 | 1 | `core` | `object/job.rs` |
 | 1 | `core` | `sched/wait.rs` |
@@ -911,7 +900,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `irq.rs` |
 | 5 | | *and 5 more files* |
 
-### armv7a: argued line by line — 377 statements
+### armv7a: argued line by line — 373 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -958,14 +947,10 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `console/input.rs` | 348 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/input.rs` | 352 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::input::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
 | `console/output.rs` | 186 | Reached only when something has already failed | Bytes that have waited a tenth of a second with nothing sent: the transmit interrupt stopped coming. console::output::check requires the stall count to stay where it was, and a working port never takes it. |
-| `console/output.rs` | 271 | Hardware the measured machine does not have | Wakes writers that waited for room in the transmit ring. An emulated port sends instantly, so no writer ever waits for room on a QEMU machine. |
-| `console/output.rs` | 296 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
-| `console/output.rs` | 305 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
-| `console/output.rs` | 396 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
-| `console/output.rs` | 399 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 412 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 415 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `console/output.rs` | 424 | Reached only when the kernel is stopping | A failure return of the boot self-check `console::output::check`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `console/output.rs` | 289 | Hardware the measured machine does not have | Wakes writers that waited for room in the transmit ring. An emulated port sends instantly, so no writer ever waits for room on a QEMU machine. |
+| `console/output.rs` | 314 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
+| `console/output.rs` | 323 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
+| `console/output.rs` | 440 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
 | `console/screen.rs` | 111, 115 | Hardware the measured machine does not have | Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it. |
 | `console/screen.rs` | 121-123 | Hardware the measured machine does not have | Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it. |
 | `console/screen.rs` | 126 | Hardware the measured machine does not have | Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it. |

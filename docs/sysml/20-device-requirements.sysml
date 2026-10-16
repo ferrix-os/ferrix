@@ -136,13 +136,24 @@ package FerrixDeviceRequirements {
                 an aperture that overlaps memory the kernel uses, so that no
                 published aperture does -- every aperture but the firmware
                 framebuffer node's, whose one exemption, inside the boot
-                framebuffer alone, is L.device.38.";
+                framebuffer alone, is L.device.38. PCI enumeration shall turn on
+                memory decoding that firmware left off only for an endpoint every
+                memory BAR of which is assigned, clear of every reserved range
+                (RAM among them) and of every other function's assigned memory BAR
+                on its host bridge, and otherwise leave it off with a line naming
+                why.";
             attribute :>> criterion = "Every aperture of every published node is
                 clear of every reserved range, the firmware framebuffer node's
-                clear of every one but the framebuffer.";
+                clear of every one but the framebuffer. On made-up BARs,
+                decoding_refusal allows assigned BARs clear of everything and
+                refuses a BAR unassigned, one over a reserved range and one over
+                another function's BAR; with the reserved test removed, stage 10
+                fails.";
             attribute :>> parent = ("H.MEM.10", "H.DMA.5");
             attribute :>> unit = ("device::DeviceNode::mint", "device::Reserved::covers",
-                "device::Aperture::overlaps");
+                "device::Aperture::overlaps", "discovery::pci::decoding_refusal",
+                "discovery::pci::turn_decoding_on", "discovery::pci::decoding_after",
+                "discovery::pci::memory_spans", "discovery::pci::examine_all");
         }
         requirement <'L.device.2'> anApertureGrantsExactlyItsRange : ItemLowLevel {
             attribute :>> statement = "DeviceNode::aperture shall grant a range
@@ -177,13 +188,23 @@ package FerrixDeviceRequirements {
         requirement <'L.device.5'> nodesShareNothing : ItemLowLevel {
             attribute :>> statement = "publish shall take from a later node an
                 aperture an earlier one holds, so that no two published nodes'
-                apertures overlap, and publish no device tree vector that is not a
-                shared peripheral interrupt or that two nodes hold.";
+                apertures overlap; widen a PCI BAR aperture shorter than a page and
+                starting on one to that page only when nothing else lies in the
+                page -- no aperture of any node, published or dropped, no assigned
+                memory BAR of any PCI function, decoded, undecoded or withheld, no
+                withheld MSI-X table or pending-bit array span, and no reserved
+                range; and publish no device tree vector that is not a shared
+                peripheral interrupt or that two nodes hold.";
             attribute :>> criterion = "Sorted by start, no two published apertures
                 overlap; every device tree vector is 32 or above and held by one
-                node.";
+                node. On made-up nodes a 2 KiB BAR alone in its page is widened to
+                the page, and one whose page also holds another node's aperture,
+                another function's withheld MSI-X span, an undecoded function's
+                assigned BAR or a reserved range is not; with the interrupt tables
+                left out of the page test, stage 10 fails.";
             attribute :>> parent = ("H.DMA.5", "H.IRQ.1");
-            attribute :>> unit = "device::publish";
+            attribute :>> unit = ("device::publish", "device::occupants",
+                "device::page_neighbour", "device::widen_lone_partial_bars");
         }
         requirement <'L.device.6'> msixMintedOnce : ItemLowLevel {
             attribute :>> statement = "MsixTable::mint shall mint an entry once and
