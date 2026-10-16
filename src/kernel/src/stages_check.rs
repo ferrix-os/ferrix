@@ -1781,7 +1781,7 @@ pub(super) fn check_console_output() {
         // box's COM1), and its output is polled instead; every other
         // failure is this kernel's, and stops it. The reference boots fail
         // on the WARNING line (xtask's `fallback_problem`).
-        Err(problem @ console::output::Failure::NeverCame) => {
+        Err(problem) if problem.falls_back() => {
             console::output::fall_back_to_polling();
             println!(
                 "  output   WARNING: {problem}; the port is polled from now on, as before its \

@@ -3850,6 +3850,11 @@ mod tests {
             "  output   WARNING: the transmit ring still held a task's write two seconds later; \
              the port is polled from now on, as before its interrupt was installed",
         );
+        let silent = line(
+            "  output   WARNING: the transmit interrupt sent nothing for 50 ms while a task's \
+             write waited in the ring (given up after 50.312 ms); the port is polled from now \
+             on, as before its interrupt was installed",
+        );
         let hpet = line(
             "  clock    WARNING: the HPET's counter did not move; going on as if there were no HPET",
         );
@@ -3861,7 +3866,7 @@ mod tests {
             fallback_problem(&[tcg.clone(), line("  output   a task's line")]),
             None
         );
-        for fallback in [polled, hpet, pit] {
+        for fallback in [polled, silent, hpet, pit] {
             let problem = fallback_problem(&[tcg.clone(), fallback]);
             assert!(problem.is_some_and(|problem| problem.contains("fallback")));
         }

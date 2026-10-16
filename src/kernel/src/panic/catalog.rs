@@ -707,10 +707,11 @@ pub(crate) static CONSOLE_OUTPUT: Explanation = Explanation {
               port itself, the ring to have emptied within two seconds, and no writer to have \
               found the port stalled and polled the ring out. A failure means program output \
               is again being polled out of the port with interrupts masked, or the interrupt \
-              stopped coming partway. One failure does not stop the boot: a task's write still \
-              in the ring two seconds later, the transmit interrupt never having come (the N150 \
-              box's COM1), makes the port polled from then on with an `output   WARNING` line, \
-              and `cargo xtask test-boot` fails every reference boot that prints that line.",
+              stopped coming partway. One failure does not stop the boot: a task's write left \
+              in the ring while the transmit interrupt sends nothing for 50 ms, or still there \
+              two seconds later, the interrupt never having come (the N150 box's COM1), makes \
+              the port polled from then on with an `output   WARNING` line, and \
+              `cargo xtask test-boot` fails every reference boot that prints that line.",
     causes: &[
         "The transmit interrupt is never raised or never reaches the handler: the port's \
          enable bit in `arch::console::transmit_interrupt` is wrong for the port (on an \

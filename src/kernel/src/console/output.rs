@@ -84,6 +84,28 @@ const LOW_WATER: usize = CAPACITY - CHUNK;
 /// baud, so a port that is merely slow never comes near it.
 const STALL_SECONDS_DIVISOR: u64 = 10;
 
+/// The transmit check gives up on the port's transmit interrupt when it has
+/// sent nothing for this long while a task's write waited in the ring: 50 ms.
+///
+/// The interrupt is owed once the FIFO the writer filled has drained, and
+/// again each time it drains after: 1.4 ms for a 16550's or an STM32 USART's
+/// sixteen bytes at 115200 baud, 2.8 ms for a PL011's thirty-two, and 16.7 ms
+/// for sixteen bytes even at 9600, a rate no port here runs at. So 50 ms is
+/// eighteen times the longest wait a working port at 115200 can owe, and three
+/// times one at 9600; it is above the 20 to 30 ms the boot's `late` check
+/// keeps a processor from answering on purpose, and below [`STALL_SECONDS_DIVISOR`]'s
+/// tenth of a second, so the check gives up before a writer can find the port
+/// stalled and poll it out under it. It is measured from the last byte the
+/// interrupt sent, never from the start, so a long ring that the interrupt is
+/// draining is waited for (up to [`CHECK_LIMIT_NANOS`]). The N150 box's COM1,
+/// whose interrupt never comes, waited two seconds here before.
+const SILENT_NANOS: u64 = 50_000_000;
+
+/// The longest the transmit check waits for its line to go out at all, the
+/// interrupt still sending: two seconds, a hundred times what the line takes
+/// on the slowest port, and five times a full ring at 115200 baud.
+const CHECK_LIMIT_NANOS: u64 = 2_000_000_000;
+
 /// What waits to be sent, and the state of the port's transmit interrupt.
 pub(super) struct Transmit {
     /// The bytes, oldest first.
@@ -384,18 +406,43 @@ pub(crate) fn stalls() -> u64 {
 /// Why [`check`] failed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Failure {
-    /// A task's write was still in the transmit ring two seconds later: the
-    /// port's transmit interrupt never came. The N150 box's COM1 does this;
-    /// its writers may fall back to polling ([`fall_back_to_polling`]).
+    /// A task's write waited in the transmit ring while the port's transmit
+    /// interrupt sent nothing for [`SILENT_NANOS`]: the interrupt never came,
+    /// or stopped coming. The N150 box's COM1 does this; its writers may fall
+    /// back to polling ([`fall_back_to_polling`]). `waited_us` is how long
+    /// the check waited in all.
+    Silent {
+        /// Microseconds from the write to giving up.
+        waited_us: u64,
+    },
+    /// A task's write was still in the transmit ring two seconds later, the
+    /// interrupt still sending: as [`Failure::Silent`], the machine's, and
+    /// fallen back from the same way.
     NeverCame,
     /// Anything else: this kernel's own defect, which stops the boot
     /// (FX-0504).
     Defect(&'static str),
 }
 
+impl Failure {
+    /// Whether this is the machine's failure rather than this kernel's, one
+    /// the boot goes on from by polling ([`fall_back_to_polling`]).
+    pub(crate) const fn falls_back(&self) -> bool {
+        matches!(self, Failure::Silent { .. } | Failure::NeverCame)
+    }
+}
+
 impl core::fmt::Display for Failure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Failure::Silent { waited_us } => write!(
+                f,
+                "the transmit interrupt sent nothing for {} ms while a task's write waited \
+                 in the ring (given up after {}.{:03} ms)",
+                SILENT_NANOS / 1_000_000,
+                waited_us / 1000,
+                waited_us % 1000,
+            ),
             Failure::NeverCame => {
                 f.write_str("the transmit ring still held a task's write two seconds later")
             }
@@ -431,10 +478,12 @@ const CHECK_LINE: &[u8] = concat!(
 ///
 /// # Errors
 ///
-/// The first property that did not hold: [`Failure::NeverCame`] for a
-/// task's write still in the ring two seconds later, the one failure that is
-/// the machine's rather than this kernel's, and [`Failure::Defect`] for
-/// every other.
+/// The first property that did not hold: [`Failure::Silent`] for a task's
+/// write left in the ring while the transmit interrupt sent nothing for
+/// [`SILENT_NANOS`], and [`Failure::NeverCame`] for one still there two
+/// seconds later, the failures that are the machine's rather than this
+/// kernel's ([`Failure::falls_back`]), and [`Failure::Defect`] for every
+/// other.
 pub(crate) fn check() -> Result<Option<Checked>, Failure> {
     if !interrupt_driven() {
         return Ok(None);
@@ -451,10 +500,38 @@ pub(crate) fn check() -> Result<Option<Checked>, Failure> {
     super::write_bytes(CHECK_LINE);
     let line = CHECK_LINE.len().saturating_add(1);
 
-    // What the writer left, the interrupt sends; two seconds is a hundred
-    // times what the line takes on the slowest port.
-    let deadline = crate::timer::now_nanos().saturating_add(2_000_000_000);
-    if !WRITERS.wait_until_deadline(|| HELD.load(Ordering::Relaxed) == 0, deadline) {
+    // What the writer left, the interrupt sends. The wait looks again every
+    // few milliseconds of its own accord (`wait_until_deadline`), so it sees
+    // the interrupt's count move, and gives up once it has stood still for
+    // SILENT_NANOS with bytes still waiting.
+    let start = crate::timer::now_nanos();
+    let deadline = start.saturating_add(CHECK_LIMIT_NANOS);
+    let mut seen = interrupt_before;
+    let mut moved_at = start;
+    let mut silent = false;
+    let drained = WRITERS.wait_until_deadline(
+        || {
+            if HELD.load(Ordering::Relaxed) == 0 {
+                return true;
+            }
+            let now = crate::timer::now_nanos();
+            let sent = BY_INTERRUPT.load(Ordering::Relaxed);
+            if sent != seen {
+                seen = sent;
+                moved_at = now;
+                return false;
+            }
+            silent = now.saturating_sub(moved_at) >= SILENT_NANOS;
+            silent
+        },
+        deadline,
+    );
+    if silent {
+        return Err(Failure::Silent {
+            waited_us: crate::timer::now_nanos().saturating_sub(start) / 1000,
+        });
+    }
+    if !drained {
         return Err(Failure::NeverCame);
     }
     if stalls() != stalls_before {
