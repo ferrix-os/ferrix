@@ -80,6 +80,13 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
+    },
+    {
+      "ids": ["L.sched.73"],
+      "owner": "po-pipe",
+      "branch": "pipe-epipe",
+      "date": "2026-10-16",
+      "purpose": "F-77: a wait marks its task blocked under its queue's lock, so a wake that drains it as it is listed still wakes it (the certification consultant's OK IF, ledger 2026-10-16 line 1898, condition 10 at line 1912)"
     }
   ]
 }
