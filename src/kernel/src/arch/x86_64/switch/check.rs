@@ -81,6 +81,10 @@ pub(crate) struct Report {
 /// against a loaded host under TCG.
 const PATIENCE_NANOS: u64 = 60_000_000_000;
 
+/// Wakes beside a program that left the x87 initial, at most, for the fast
+/// reset's x87-left branch to be seen taken once: see [`run`].
+const QUIET_TRIES: usize = 4;
+
 /// The handle a fixture finds its channel under: the first a fresh process
 /// is given.
 const BOOTSTRAP: Handle = Handle(1);
@@ -610,24 +614,46 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         // The fast reset's two x87 branches, each seen taken (the
         // consultant's V5): beside a program that used the x87, and beside
         // one that left it initial, which only `XINUSE` can tell.
+        //
+        // **Only where `XINUSE` is seen to say "initial" of an initial x87.**
+        // `XINUSE[i]` clear means component i is initial, but set means it
+        // may or may not be (Intel SDM Vol. 1 §13.6): the processor, or a
+        // hypervisor's save and restore of the guest's registers in between,
+        // may leave the x87's bit up, and the switch then resets an x87 that
+        // was initial already, which is right. A GitHub-hosted runner's KVM
+        // did so once (run 38898365266, 2026-10-16). So the probe, woken
+        // after a quiet program, says first whether this processor reports
+        // the x87 initial at all, and the left branch is demanded only then,
+        // within [`QUIET_TRIES`] wakes, since a hypervisor's restore can
+        // raise the bit on any one of them.
         let fast = cpu::reset_components() == cpu::XSTATE_X87_SSE | cpu::XSTATE_AVX;
+        report.xinuse = check_xinuse_tells_nothing()?;
+        let reports_initial = matches!(
+            report.xinuse,
+            Some((_, quiet)) if u64::try_from(quiet).is_ok_and(|bits| bits & cpu::XSTATE_X87 == 0)
+        );
         let before = super::x87_resets();
         run_vector_case(Wake::Message)?;
         let after = super::x87_resets();
         if fast && after.0 <= before.0 {
             return Err("a wake beside a program that used the x87 did not reset the x87");
         }
-        run_vector_case_beside(Wake::Message, false)?;
+        report.reset += 1;
+        for _ in 0..QUIET_TRIES {
+            run_vector_case_beside(Wake::Message, false)?;
+            report.reset += 1;
+            if super::x87_resets().1 > after.1 {
+                break;
+            }
+        }
         let last = super::x87_resets();
-        if fast && cpu::xinuse_readable() && last.1 <= after.1 {
+        if fast && reports_initial && last.1 <= after.1 {
             return Err(
                 "a wake beside a program that left the x87 initial reset it: XINUSE was not read",
             );
         }
-        report.reset += 2;
         report.x87 = (last.0 - before.0, last.1 - before.1);
         report.fast = fast;
-        report.xinuse = check_xinuse_tells_nothing()?;
         for wake in [Wake::Message, Wake::Signal] {
             run_sending_vector_case(wake)?;
             report.reset += 1;
