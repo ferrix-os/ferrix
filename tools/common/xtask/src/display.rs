@@ -121,6 +121,13 @@ pub(crate) fn free_port() -> Result<u16> {
     Ok(listener.local_addr()?.port())
 }
 
+/// How long one read of QMP waits before it is tried again.
+const QMP_STEP: Duration = Duration::from_secs(30);
+
+/// How long QEMU may take to answer one QMP command in all, on a host loaded
+/// enough that a screendump takes minutes.
+const QMP_PATIENCE: Duration = Duration::from_secs(150);
+
 /// A QMP session.
 pub(crate) struct Qmp {
     reader: BufReader<TcpStream>,
@@ -143,13 +150,13 @@ impl Qmp {
                 Err(_) => std::thread::sleep(Duration::from_millis(100)),
             }
         };
-        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+        stream.set_read_timeout(Some(QMP_STEP))?;
         let writer = stream.try_clone()?;
         let mut session = Self {
             reader: BufReader::new(stream),
             writer,
         };
-        let greeting = session.line()?;
+        let greeting = session.line("its greeting")?;
         if !greeting.contains("\"QMP\"") {
             return Err(Error::new(format!("QMP greeted with `{greeting}`")));
         }
@@ -157,12 +164,43 @@ impl Qmp {
         Ok(session)
     }
 
-    fn line(&mut self) -> Result<String> {
+    /// One line from QEMU, waiting for `what` up to [`QMP_PATIENCE`].
+    ///
+    /// The socket's read timeout is [`QMP_STEP`], and a read that runs out of
+    /// it reports `WouldBlock`, which is "Resource temporarily unavailable"
+    /// and nothing else: it ended `test-compositor`'s twin boot with no word
+    /// of what was waited for (n1-h6-comp, 2026-10-15, load 29, after a
+    /// screendump QEMU did not answer within 30 s). A step that ran out is
+    /// waited on again, the half line read so far kept, until the patience
+    /// is spent; then the error says what, and for how long.
+    fn line(&mut self, what: &str) -> Result<String> {
+        use std::io::ErrorKind::{Interrupted, TimedOut, WouldBlock};
+        let started = Instant::now();
         let mut line = String::new();
-        if self.reader.read_line(&mut line)? == 0 {
-            return Err(Error::new("QMP closed the connection"));
+        loop {
+            match self.reader.read_line(&mut line) {
+                Ok(0) => {
+                    return Err(Error::new(format!(
+                        "QMP closed the connection while {what} was awaited"
+                    )));
+                }
+                Ok(_) => return Ok(line),
+                Err(error) if error.kind() == Interrupted => {}
+                Err(error) if matches!(error.kind(), WouldBlock | TimedOut) => {
+                    if started.elapsed() >= QMP_PATIENCE {
+                        return Err(Error::new(format!(
+                            "QMP said nothing for {} s while {what} was awaited: {error}",
+                            started.elapsed().as_secs()
+                        )));
+                    }
+                }
+                Err(error) => {
+                    return Err(Error::new(format!(
+                        "reading QMP while {what} was awaited: {error}"
+                    )));
+                }
+            }
         }
-        Ok(line)
     }
 
     /// Run `command` with `arguments`, a JSON object's text, and return the
@@ -174,7 +212,7 @@ impl Qmp {
         };
         self.writer.write_all(request.as_bytes())?;
         loop {
-            let line = self.line()?;
+            let line = self.line(&format!("the reply to `{command}`"))?;
             if line.contains("\"event\"") {
                 continue;
             }
