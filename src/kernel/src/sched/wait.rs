@@ -41,6 +41,67 @@ const WAKE_BATCH: usize = 4;
 /// off, to show their checks fire (F-69). False, it compiles to nothing.
 const LAST_LOOK_HOLDS: bool = true;
 
+/// No task: what [`LISTED_MEET`] holds when no check has armed it.
+const NO_MEET: u64 = u64::MAX;
+
+/// The task a boot check holds just after a wait has listed it, or
+/// [`NO_MEET`]: see [`arm_listed_meet`]. A wait reads it once a pass, a
+/// relaxed load, and a task never armed never waits there.
+static LISTED_MEET: AtomicU64 = AtomicU64::new(NO_MEET);
+
+/// Where the armed task is in the meet: [`MEET_ARRIVED`] once it is there,
+/// [`MEET_RELEASED`] once the check lets it go on.
+static LISTED_MEET_STAGE: AtomicU32 = AtomicU32::new(0);
+
+/// See [`LISTED_MEET_STAGE`].
+const MEET_ARRIVED: u32 = 1;
+
+/// See [`LISTED_MEET_STAGE`].
+const MEET_RELEASED: u32 = 2;
+
+/// How long a task waits in the meet for the check to let it go.
+const LISTED_MEET_PATIENCE_NANOS: u64 = 2_000_000_000;
+
+/// Hold `task`'s next wait at the point just after it is listed, until
+/// [`release_listed_meet`], for the boot check that a wake draining it
+/// there does not lose it (`sched::check`, L.sched.73): the window between
+/// the listing and the `BLOCKED` mark that `wait_until_deadline` closes by
+/// marking it under the list's lock. Before the task waits; one wait only.
+/// Only `sched::check` calls it: nothing else may hold a wait there.
+pub(crate) fn arm_listed_meet(task: super::TaskId) {
+    LISTED_MEET_STAGE.store(0, Ordering::Release);
+    LISTED_MEET.store(task, Ordering::Release);
+}
+
+/// Whether the armed task has reached the meet: listed, and held there.
+pub(crate) fn listed_meet_arrived() -> bool {
+    LISTED_MEET_STAGE.load(Ordering::Acquire) == MEET_ARRIVED
+}
+
+/// Let the task held in the meet go on, and disarm it.
+pub(crate) fn release_listed_meet() {
+    LISTED_MEET.store(NO_MEET, Ordering::Release);
+    LISTED_MEET_STAGE.store(MEET_RELEASED, Ordering::Release);
+}
+
+/// The meet itself, for `task` just listed: nothing unless a check armed it
+/// for this task, and then a spin until the check lets it go, bounded by
+/// [`LISTED_MEET_PATIENCE_NANOS`]. It spins, holding nothing but what the
+/// wait holds there, so the check must run on another processor.
+fn listed_meet(task: super::TaskId) {
+    if LISTED_MEET.load(Ordering::Relaxed) != task {
+        return;
+    }
+    LISTED_MEET.store(NO_MEET, Ordering::Relaxed);
+    LISTED_MEET_STAGE.store(MEET_ARRIVED, Ordering::Release);
+    let until = crate::timer::now_nanos().saturating_add(LISTED_MEET_PATIENCE_NANOS);
+    while LISTED_MEET_STAGE.load(Ordering::Acquire) != MEET_RELEASED
+        && crate::timer::now_nanos() < until
+    {
+        core::hint::spin_loop();
+    }
+}
+
 /// No switch from a wait's `set_state(BLOCKED)` to the end of its last look
 /// (F-69, `docs/roadmap/stage-05-tasks-scheduler.md`).
 ///
@@ -233,17 +294,20 @@ impl WaitQueue {
     ///
     /// # Why no wake is missed
     ///
-    /// The task is listed on this queue, then marked blocked, then `ready` is
-    /// looked at, and a wake finds it only if it is listed and blocked. For
-    /// each waker of `channel_write_read`'s wait:
+    /// The task is listed on this queue and marked blocked under the queue's
+    /// lock, then `ready` is looked at, so a wake that drains its entry finds
+    /// it blocked and makes it runnable, whatever `ready` then says. For each
+    /// waker of `channel_write_read`'s wait:
     /// - **A message and the peer's close**, the end's state word. The writer
     ///   and the closer set it under the end's inbox lock and then take this
     ///   queue's lock to wake it; `ready` reads it with one load
     ///   (`readable_or_closed`). A drain before the listing passes the store
-    ///   on through this queue's lock. A drain after it, with the task not
-    ///   yet marked blocked, is a store then a load on each side, so the
-    ///   waker makes a `SeqCst` fence before its wake, paired with this
-    ///   one (`docs/OPAQUE-KERNEL.md` §9.8, 2e, condition 5).
+    ///   on through this queue's lock. A drain after it finds the task
+    ///   marked blocked, since both are done under that lock, and wakes it;
+    ///   the waker's `SeqCst` fence before its wake, paired with this one,
+    ///   is no longer needed for this, and is kept: it dates from when the
+    ///   mark came after the lock, and taking it out is a change of its own,
+    ///   to be measured (`docs/OPAQUE-KERNEL.md` §9.8, 2e, condition 5).
     /// - **A kill and another thread's `execve`**, a fence pair. They take no
     ///   lock this wait takes: they post `END` to the process's tasks, which
     ///   `ready` reads, and wake them (`sched::work::wake_posted`), which
@@ -302,41 +366,48 @@ impl WaitQueue {
             });
             let wake_at = if slice < deadline { slice } else { deadline };
 
-            // **Findable at every instant, which fixes the order.** Interrupts
-            // are on here, and any interrupt exit may switch this task out. A
-            // switch that finds it `BLOCKED` takes it off the run queue and
+            // **Findable at every instant, which fixes the order.** A switch
+            // that finds the task `BLOCKED` takes it off the run queue and
             // files it as a sleeper only if it has a deadline. So `BLOCKED` is
-            // set last, once the deadline and the waiter entry both exist.
-            // Set first, a switch between the lines lost the task: blocked,
-            // no deadline to wake it, on no list a waker reads.
+            // set last, once the deadline and the waiter entry both exist;
+            // set first, a switch between the lines lost the task: blocked,
+            // no deadline to wake it, on no list a waker reads. Under the
+            // hold below no interrupt exit switches it before its block, but
+            // the order is kept so that nothing depends on the hold alone.
             //
             // With no memory to list it, it is not listed, and sleeps to the
             // slice's end instead of until a wake: the condition is looked at
             // then as it would be anyway (finding F-23). A wait that trusts
             // its wakes files no deadline while it is listed, and a recheck's
             // when it could not be.
-            let listed = {
+            //
+            // **And no switch from `BLOCKED` to the end of the last look**,
+            // so the hold comes first (`LastLook`, F-69).
+            let last_look = LastLook::hold();
+            // **Blocked before the list's lock is let go.** A waker drains
+            // the list under that lock and then wakes what it took, so it
+            // finds every entry it takes already marked blocked, and its wake
+            // makes the task runnable. Marked after the lock, a drain in
+            // between found the task runnable and did nothing: a wake whose
+            // change did not yet satisfy `ready` -- one 1 KiB read of a full
+            // pipe, for a writer of 4 KiB -- then left it blocked on no list,
+            // and every later wake missed it. On a trusting wait that was for
+            // good: `wget | head` stopped with both asleep (pipe-epipe).
+            {
                 let mut waiters = self.waiters.lock();
                 let listed = fallible::try_push(&mut waiters, Arc::clone(&task)).is_ok();
                 self.count.store(waiters.len(), Ordering::Release);
-                listed
-            };
-            let wake_at = if listed || wake_at != u64::MAX {
-                wake_at
-            } else {
-                crate::timer::now_nanos().saturating_add(RECHECK_NANOS)
-            };
-            if wake_at != u64::MAX {
-                task.set_sleep_deadline(wake_at);
+                let wake_at = if listed || wake_at != u64::MAX {
+                    wake_at
+                } else {
+                    crate::timer::now_nanos().saturating_add(RECHECK_NANOS)
+                };
+                if wake_at != u64::MAX {
+                    task.set_sleep_deadline(wake_at);
+                }
+                task.set_state(BLOCKED);
             }
-            // **And no switch from `BLOCKED` to the end of the last look.** A
-            // wake can drain the entry above while the task is still runnable,
-            // and that drain does nothing. A switch inside the window would
-            // then take the task off its run queue with no entry left to wake
-            // it and, on a trusting wait, no deadline either. See `LastLook`
-            // (F-69).
-            let last_look = LastLook::hold();
-            task.set_state(BLOCKED);
+            listed_meet(task.id);
             // A wait that trusts its wakes has no recheck to find a wake it
             // missed, so the store above is ordered before `ready`'s loads
             // for the wakers that take no lock this wait takes: a kill and
@@ -419,6 +490,13 @@ impl WaitQueue {
             let slice = crate::timer::now_nanos().saturating_add(recheck);
             let wake_at = if slice < deadline { slice } else { deadline };
             task.set_sleep_deadline(wake_at);
+            // As the single queue's: no switch until the last look is over,
+            // and blocked before any queue lists it, so that a waker finds
+            // every entry it drains marked blocked. Marked after the
+            // listings, a drain of one queue in between did nothing, and a
+            // wake that did not yet satisfy `ready` cost a recheck.
+            let last_look = LastLook::hold();
+            task.set_state(BLOCKED);
             // Not listed on a queue there is no memory to list it on, as in
             // `wait_until_deadline`: that queue's wake is missed and the
             // recheck finds what it would have said.
@@ -427,11 +505,6 @@ impl WaitQueue {
                 let _ = fallible::try_push(&mut waiters, Arc::clone(&task));
                 queue.count.store(waiters.len(), Ordering::Release);
             }
-            // As the single queue's: no switch until the last look is over.
-            // Here a lost wake costs a recheck, not the task, since this
-            // wait is always filed under its deadline.
-            let last_look = LastLook::hold();
-            task.set_state(BLOCKED);
             if ready() {
                 task.set_state(RUNNABLE);
                 drop(last_look);

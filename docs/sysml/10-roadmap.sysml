@@ -184,9 +184,12 @@ package FerrixRoadmap {
             doc /* A wait holds preemption off from before it sets BLOCKED
                  * to the end of its last look at its condition (F-69,
                  * L.sched.71-72, 2026-10-08), so that a switch inside that
-                 * span cannot count as the task's block and a wake that
-                 * drained its entry while it ran is not lost: no task is ever
-                 * blocked and still queued. Found as a stall of bench-ipc on
+                 * span cannot count as the task's block: no task is ever
+                 * blocked and still queued. A wake that drained its entry while
+                 * it ran is not lost since F-77 (L.sched.73, 2026-10-16): the
+                 * single-queue wait marks the task blocked under the queue's
+                 * lock, with the listing, so the drain finds it blocked and
+                 * wakes it. Found as a stall of bench-ipc on
                  * ARMv7-A under TCG; the defect is older than the fast path.
                  * Stage 5's and stage 9's cases require it. A cheaper hold
                  * is owed (about 60 ns a round trip on the general path). */

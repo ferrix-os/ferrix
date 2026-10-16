@@ -210,6 +210,7 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     super::preempt_check::run(topology)?;
     a_running_processor_is_not_idle_across_switches(topology)?;
     a_drained_waiter_survives_its_last_look()?;
+    a_waiter_drained_as_it_is_listed_is_woken(topology)?;
     mark!(0);
     sleeping(&mut report)?;
     a_running_processor_is_not_idle()?;
@@ -1715,6 +1716,124 @@ fn last_look_race(me: &Arc<Task>, how: usize) {
     }
     let held = me.is_queued() && me.switches() == switches && me.state() == BLOCKED;
     LAST_LOOK_HELD.store(held, Ordering::Release);
+}
+
+/// The queue the listed-drain case's waiter waits on, and nothing else does.
+static LISTED_QUEUE: WaitQueue = WaitQueue::new();
+
+/// The listed-drain waiter's condition.
+static LISTED_READY: AtomicBool = AtomicBool::new(false);
+
+/// Set once the checker has armed the meet for the listed-drain waiter, which
+/// waits for it before it waits on [`LISTED_QUEUE`].
+static LISTED_ARMED: AtomicBool = AtomicBool::new(false);
+
+/// How long the listed-drain case lets its waiter block after the useless
+/// wake before it makes the condition true.
+const LISTED_SETTLE_NANOS: u64 = 50_000_000;
+
+/// A waiter whose entry a wake drains just as it is listed, with its
+/// condition not yet met, is still woken by the next wake (L.sched.73).
+///
+/// The wake `wget | head` lost (pipe-epipe, 2026-10-16): a pipe writer of
+/// 4 KiB waits on a full pipe, and its reader's 1 KiB read wakes it. If that
+/// wake drained the writer's entry after the listing and before the writer
+/// marked itself blocked, it found the writer runnable and did nothing; the
+/// writer's last look found too little room and it blocked on no list. The
+/// next reads woke nobody, the reader waited for bytes, and the two slept for
+/// good, since a pipe's waits trust their wakes.
+///
+/// The waiter is held at that point by the wait's meet
+/// (`wait::arm_listed_meet`) on a processor of its own, and the checker, on
+/// this one, wakes the queue there with the condition still false: the
+/// useless wake. Then it lets the waiter go, gives it time to block, makes
+/// the condition true and wakes the queue again. With the waiter marked
+/// blocked under the list's lock the first wake makes it runnable and it
+/// lists itself again, so the second ends its wait. Marked after the lock,
+/// the second wake finds no entry, and the waiter is lost.
+///
+/// Verifies: L.sched.73
+fn a_waiter_drained_as_it_is_listed_is_woken(topology: &Topology) -> Result<(), &'static str> {
+    let here = super::current()
+        .ok_or("the checking task is not running")?
+        .cpu();
+    let Some(there) = (0..topology.online()).find(|&cpu| cpu != here) else {
+        // One processor: the meet spins where the checker would have to run.
+        crate::console::println!(
+            "  tasks    a wake that drains a waiter as it is listed: not run, one processor"
+        );
+        return Ok(());
+    };
+    let allocations = crate::vmap::usage().allocations;
+    DONE.store(0, Ordering::Release);
+    LISTED_READY.store(false, Ordering::Release);
+    LISTED_ARMED.store(false, Ordering::Release);
+    let waiter = super::spawn_on(
+        "check-listed-drain",
+        drained_as_it_is_listed,
+        0,
+        NICE_0_WEIGHT,
+        there,
+        CpuSet::of(there),
+    )?;
+    super::wait::arm_listed_meet(waiter.id);
+    LISTED_ARMED.store(true, Ordering::Release);
+    let deadline = crate::timer::now_nanos().saturating_add(LAST_LOOK_PATIENCE_NANOS);
+    while !super::wait::listed_meet_arrived() && crate::timer::now_nanos() < deadline {
+        core::hint::spin_loop();
+    }
+    if !super::wait::listed_meet_arrived() {
+        super::wait::release_listed_meet();
+        LISTED_READY.store(true, Ordering::Release);
+        LISTED_QUEUE.wake_all();
+        wait_for(
+            || DONE.load(Ordering::Acquire) >= 1,
+            "the listed-drain waiter never finished",
+        )?;
+        reap_to(allocations, "the listed-drain waiter")?;
+        return Err("the listed-drain waiter never reached the meet after its listing");
+    }
+    // The useless wake: it drains the entry, and the condition is still false.
+    LISTED_QUEUE.wake_all();
+    super::wait::release_listed_meet();
+    super::sleep_for(LISTED_SETTLE_NANOS);
+    LISTED_READY.store(true, Ordering::Release);
+    LISTED_QUEUE.wake_all();
+    let deadline = crate::timer::now_nanos().saturating_add(LAST_LOOK_PATIENCE_NANOS);
+    let finished = FINISHED.wait_until_deadline(|| DONE.load(Ordering::Acquire) >= 1, deadline);
+    if !finished {
+        let blocked_off_its_list = waiter.state() == BLOCKED && LISTED_QUEUE.listed() == 0;
+        // Woken by hand so the boot goes on: its condition is met now.
+        super::wake(&waiter);
+        wait_for(
+            || DONE.load(Ordering::Acquire) >= 1,
+            "a listed-drain waiter lost did not finish once woken by hand",
+        )?;
+        reap_to(allocations, "a lost listed-drain waiter")?;
+        drop(waiter);
+        return Err(if blocked_off_its_list {
+            "a wake that drained a waiter as it was listed left it blocked on no list: the next \
+             wake missed it"
+        } else {
+            "the listed-drain waiter never finished its wait, and was not found blocked off its list"
+        });
+    }
+    reap_to(allocations, "the listed-drain waiter")?;
+    drop(waiter);
+    crate::console::println!(
+        "  tasks    a wake that drains a waiter as it is listed: woken again by the next"
+    );
+    Ok(())
+}
+
+/// The waiter of [`a_waiter_drained_as_it_is_listed_is_woken`]: once the
+/// meet is armed, a trusting wait for [`LISTED_READY`].
+fn drained_as_it_is_listed(_argument: usize) {
+    while !LISTED_ARMED.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+    let _ = LISTED_QUEUE.wait_trusting(|| LISTED_READY.load(Ordering::Acquire));
+    finish();
 }
 
 /// Whether the blocking case's waker found its waiter blocked and off its run

@@ -851,8 +851,8 @@
     "sched/wait.rs": {
       "ring": "core",
       "lines": [
-        286,
-        562
+        350,
+        635
       ]
     },
     "object/mod.rs": {

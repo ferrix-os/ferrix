@@ -1178,9 +1178,9 @@
     "sched/wait.rs": {
       "ring": "core",
       "lines": [
-        271,
-        416,
-        562
+        335,
+        487,
+        635
       ]
     },
     "arch/arm_common/pl011.rs": {

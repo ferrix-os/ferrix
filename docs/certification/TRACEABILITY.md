@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 132 | 81 | 51 |
-| Low (`L.*`) | 912 | 650 | 262 |
+| Low (`L.*`) | 913 | 651 | 262 |
 
-1945 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1946 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1947 |
-| Accessors, covered by the requirement they serve | 935 |
+| Named by a low-level requirement | 1948 |
+| Accessors, covered by the requirement they serve | 936 |
 | Check code in a product file | 78 |
-| Named by none | 916 |
+| Named by none | 918 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -667,6 +667,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.66` | The direct switch shall plan a fold of its job loads from the peer's join and the caller's word before the charge, only at a job both are counted in, and shall settle it once the caller's leave has answered: by the net in one adjustment when the leave answered as planned, and otherwise by the peer's join and then the caller's leave, each in its own job. | ferrix-sched's host test drives the kernel's plan and settlement against a model of quota::adjust over 40,000 random job trees of depth 1 to 8 with siblings and nested jobs, the two tasks in one job, siblings, nested either way and apart, equal and unequal weights, and finds every job's load and contribution and both weights equal to the general sequence's; with a fold planned at a job the two do not share, it fails. | H.SCHED.13 | `sched::direct::Direct::hand_over`, `sched::queue::PendingJoin::settle` | `src/lib/kernel/sched/src/tests.rs::the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them` | host test | host test | host test |
 | `L.sched.71` | No switch shall take place between a wait's setting its task blocked and the end of its last look (WaitQueue's single-queue and many-queue waits); an interrupt's exit, or a preempt_enable inside the look, shall leave the decision it asks for pending until the look is over, and that decision shall then be made. On a wait that blocks, its block's switch is that decision, the count lowered with interrupts masked for it. | Stage 5's last-look case: a waiter that drains its own entry while runnable, meets its condition and invites a switch inside its last look, once by a lock's release and once by a timer interrupt's exit, finishes its wait, stays queued and unswitched through the look, and has the decision made after it; with the hold off, or on main's code without it, the case fails with its sentence for a waiter left blocked on no run queue (F-69's controls). Its blocking sub-case: a waiter whose last look invites a decision by a lock's release and fails stays queued, unswitched and blocked through the look, is found blocked off its run queue by its waker, and returns true with the count at zero and interrupts on; with the hold off and the drained cases left out, it fails with its own sentence. | H.OBJ.11, H.SCHED.2 | `sched::wait::LastLook::hold`, `sched::wait::LastLook::drop`, `sched::wait::WaitQueue::wait_sliced`, `sched::wait::WaitQueue::wait_on_any`, `sched::wait::LastLook::block`, `sched::block_ending_hold` | `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look`, `src/kernel/src/sched/check.rs::a_blocking_look_ends_in_its_switch` | not reached | not reached | not reached |
 | `L.sched.72` | No switch shall take place between the receive half's park setting its task blocked and the end of its last look at END; an END posted while the task still ran shall be found by that look and end the park. | Stage 9's parked-block case: a reader that posts END to itself through the poster, asks for a decision and parks on an empty end comes back woken in every try, at least one try parking with the decision still pending; with the hold taken after the park, or off, the case fails with its sentence for a reader left blocked on no run queue (F-69's controls). | H.OBJ.11 | `syscall::native::park_for_reply`, `object::channel::Endpoint::park`, `sched::direct::block_parked`, `sched::wait::LastLook::block`, `sched::block_ending_hold` | `src/kernel/src/object/fast_path_check.rs::check_an_end_before_the_park` | not built | not built | not built |
+| `L.sched.73` | A single-queue wait shall mark its task blocked under the queue's lock, with the listing, so that a wake which drains the entry makes the task runnable even when the change it brings does not yet meet the wait's condition, and the task lists itself again for the next wake. | Stage 5's listed-drain case: a trusting waiter held by the wait's meet just after its listing, on a processor of its own, whose queue the checker wakes there with the condition false, then wakes again with it true, finishes its wait; with the mark moved after the list's lock, the case fails with its sentence for a waiter left blocked on no list (pipe-epipe's control). | H.OBJ.11, H.SCHED.2 | `sched::wait::WaitQueue::wait_sliced`, `sched::wait::listed_meet` | `src/kernel/src/sched/check.rs::a_waiter_drained_as_it_is_listed_is_woken` | not reached | not reached | not reached |
 
 ### Discovery
 
@@ -1979,6 +1980,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/check.rs::a_blocking_look_ends_in_its_switch` | kernel | L.sched.71 |
 | `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look` | kernel | L.sched.71 |
 | `src/kernel/src/sched/check.rs::a_running_processor_is_not_idle_across_switches` | kernel | L.sched.50 |
+| `src/kernel/src/sched/check.rs::a_waiter_drained_as_it_is_listed_is_woken` | kernel | L.sched.73 |
 | `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | kernel | L.sched.52 |
 | `src/kernel/src/sched/check.rs::many_tasks` | kernel | L.x86_64.17 |
 | `src/kernel/src/sched/check.rs::sleeping` | kernel | L.x86_64.91 |

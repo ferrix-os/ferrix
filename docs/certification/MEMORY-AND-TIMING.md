@@ -761,9 +761,19 @@ decision waits, until the span ends:
   (`call_left` at count zero, or an interrupt's exit), as it did across
   `block` before F-69, and is decided there again.
 
-The span's contents, its bound and L.sched.7's deferral are unchanged.
+L.sched.7's deferral is unchanged. Since F-77 (2026-10-16) the
+single-queue wait raises the count before it lists the task, so the span
+also holds the listing: the waiter list's lock, one fallible push and the
+deadline's store, with `set_state` made under that lock. The list's lock
+masks interrupts, and its masked span now holds `set_state` too: one swap
+and `quota::adjust`'s lock-free walk up the job tree, bounded by the tree's
+depth, as under the run-queue lock where `wake_at_home` makes it.
+`wait_on_any` raises it before `BLOCKED` and its listings, which the span
+now holds, one lock and one push a queue.
 
 The span holds:
+* the listing, under the list's lock, for the single-queue wait and for
+  `wait_on_any`;
 * `set_state`;
 * the fence, made only for a trusting wait;
 * one call of the wait's `ready`;

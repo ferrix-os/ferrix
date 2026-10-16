@@ -667,5 +667,21 @@ package FerrixSchedRequirements {
                 "object::channel::Endpoint::park", "sched::direct::block_parked",
                 "sched::wait::LastLook::block", "sched::block_ending_hold");
         }
+        requirement <'L.sched.73'> aWaiterDrainedAsItIsListedIsWoken : ItemLowLevel {
+            attribute :>> statement = "A single-queue wait shall mark its task
+                blocked under the queue's lock, with the listing, so that a wake
+                which drains the entry makes the task runnable even when the change
+                it brings does not yet meet the wait's condition, and the task lists
+                itself again for the next wake.";
+            attribute :>> criterion = "Stage 5's listed-drain case: a trusting waiter
+                held by the wait's meet just after its listing, on a processor of its
+                own, whose queue the checker wakes there with the condition false,
+                then wakes again with it true, finishes its wait; with the mark moved
+                after the list's lock, the case fails with its sentence for a waiter
+                left blocked on no list (pipe-epipe's control).";
+            attribute :>> parent = ("H.OBJ.11", "H.SCHED.2");
+            attribute :>> unit = ("sched::wait::WaitQueue::wait_sliced",
+                "sched::wait::listed_meet");
+        }
     }
 }

@@ -26,6 +26,10 @@ abstraction is not retrofitted.
   *Every architecture* table: a function that returns onto a
   different stack from the one it was called on, which Rust cannot express.
 
+* **A wait marks its task blocked under its queue's lock** (F-77, L.sched.73,
+  2026-10-16), so a wake that drains it before its condition holds still
+  wakes it; stage 5's listed-drain case requires it.
+
 **Exit criterion met, and in the boot test on all three architectures.** A
 thousand kernel threads, all spawned on one processor so that the only way the
 others get any is by taking them, run bounded work to completion and give every
@@ -320,6 +324,30 @@ decision. The request is decided at the lowering:
   switch is a preemption and leaves it queued.
 * If it did not, the task is listed (or filed under its deadline), so the
   switch is its block, which is what follows anyway.
+
+Since F-77 (2026-10-16) the single-queue wait runs in this order: the hold;
+then, under the waiter list's lock, the listing, the deadline and `BLOCKED`;
+then the listed meet (below); the fence of a trusting wait; and the last
+look. `wait_on_any` takes the hold and marks the task `BLOCKED` before its
+listings.
+
+**A wake that drains a waiter as it is listed wakes it (F-77,
+L.sched.73).** F-69's step 1 also lost a task with no switch at all. The
+drain between the listing and `BLOCKED` did nothing; when its change did
+not yet meet the condition -- one 1 KiB read of a full pipe, for a writer of
+4 KiB -- the last look failed and the task blocked on no list, missed by
+every later wake. A pipe's waits trust their wakes, so `wget -O - URL | head
+-c 64MiB` stopped for good with both programs asleep (the BACKLOG row
+blamed the last reader's close; `head` had not exited). Marked under the
+list's lock, every entry a waker drains is blocked, so the drain makes the
+task runnable, its failed look blocks a runnable task that stays current,
+and it lists itself again. In `wait_on_any` the same drain cost a recheck;
+marking before the listings is a latency change there. Stage 5's
+listed-drain case holds a trusting waiter on another processor at the
+wait's meet (`wait::arm_listed_meet`; one relaxed load a pass otherwise),
+wakes its queue there with the condition false, then with it true, and
+requires the wait to end; with the mark after the lock it fails with "a
+wake that drained a waiter as it was listed left it blocked on no list".
 
 Linux closes the same window the other way round: `__schedule(SM_PREEMPT)`
 never dequeues a preempted task, whatever its state. That rule was weighed
