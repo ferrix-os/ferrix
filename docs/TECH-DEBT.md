@@ -137,8 +137,11 @@ The certification consultant reviewed the three proposals on 2026-10-17
 1956, which hold the full conditions). In the consultant's order:
 
 1. **xtask commands register themselves** (§4, central registries): OK, no
-   item question; the full row per landing. About 5 points. In progress on
-   branch `xtask-registry`. The panic catalog's half was **withdrawn**: a
+   item question; the full row per landing. **Done 2026-10-17** (f3261d9c5,
+   5 points estimated, about 3.5 spent): each module holds its own
+   `TASKS` table (`tools/common/xtask/src/task.rs`), so a new command is
+   one entry in its own module's file. Left: flags are still one `Args`
+   struct, so a new flag still edits `args.rs` and main.rs's options text. The panic catalog's half was **withdrawn**: a
    reservation file only moves its conflict, and `catalog.rs` is item code.
 2. **`docs/generated/` made, not committed**: OK IF. Only output made
    deterministically from the tree leaves it; `check-docs` generates it
