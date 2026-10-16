@@ -1043,32 +1043,52 @@ const QUIET_PROGRAM: &[u8] = &[0xb8, 0x18, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xeb, 0
 /// What a program woken from a blocking native call reads in `XINUSE` must
 /// not depend on what the program that ran before it did (the consultant's
 /// V4): the probe is woken once after a program that filled every vector
-/// register and the x87, and once after one that touched none, and both
-/// read the same bits. Answers them. Only where `XGETBV` 1 is offered.
+/// register and the x87, and once after one that touched none. Answers the
+/// two readings. Only where `XGETBV` 1 is offered.
+///
+/// **Only a bit set after the busy program and clear after the quiet one
+/// tells, and only if every pair shows one.** `XINUSE[i]` clear means
+/// component i is initial; set means initial or not (Intel SDM Vol. 1
+/// §13.6), and a processor or a hypervisor's save and restore may raise a
+/// bit of a component that is initial. A reset that left the busy
+/// program's state would show as a bit set after it and clear after the
+/// quiet program, whose state is initial whatever the reset does, on every
+/// pair. A bit set after the quiet program alone carries nothing of the
+/// busy one: a GitHub-hosted AMD runner's KVM read SSE's so once (run
+/// 38916181570, 2026-10-16, "after a busy program 0x0, after a quiet one
+/// 0x2"). So a pair that differs only that way passes, and one with a bit
+/// the busy program alone set is made again, up to [`PROBE_TRIES`] pairs.
 ///
 /// Verifies: `L.x86_64.155`
 fn check_xinuse_tells_nothing() -> Result<Option<(i32, i32)>, &'static str> {
     if !cpu::xinuse_readable() {
         return Ok(None);
     }
-    let after_busy = run_probe(true)?;
-    let after_quiet = run_probe(false)?;
-    if !(40..48).contains(&after_busy) || !(40..48).contains(&after_quiet) {
-        println!("  vectors  the XINUSE probe ended with {after_busy} and {after_quiet}");
-        return Err("the XINUSE probe did not read XINUSE after its wake");
+    let mut pair = (0, 0);
+    for _ in 0..PROBE_TRIES {
+        let after_busy = run_probe(true)?;
+        let after_quiet = run_probe(false)?;
+        if !(40..48).contains(&after_busy) || !(40..48).contains(&after_quiet) {
+            println!("  vectors  the XINUSE probe ended with {after_busy} and {after_quiet}");
+            return Err("the XINUSE probe did not read XINUSE after its wake");
+        }
+        pair = (after_busy - 40, after_quiet - 40);
+        if pair.0 & !pair.1 == 0 {
+            return Ok(Some(pair));
+        }
     }
-    if after_busy != after_quiet {
-        println!(
-            "  vectors  XINUSE after a busy program {:#x}, after a quiet one {:#x}",
-            after_busy - 40,
-            after_quiet - 40
-        );
-        return Err(
-            "a task resumed from a blocking native call read in XINUSE whether the program before it used the vector registers",
-        );
-    }
-    Ok(Some((after_busy - 40, after_quiet - 40)))
+    println!(
+        "  vectors  XINUSE after a busy program {:#x}, after a quiet one {:#x}",
+        pair.0, pair.1
+    );
+    Err(
+        "a task resumed from a blocking native call read in XINUSE whether the program before it used the vector registers",
+    )
 }
+
+/// Pairs of probes at most that [`check_xinuse_tells_nothing`] makes while
+/// each shows a bit set after the busy program alone.
+const PROBE_TRIES: usize = 3;
 
 /// One run of the probe, woken by a message after the other program -- the
 /// vector program in mode `b` when `busy`, [`QUIET_PROGRAM`] otherwise --

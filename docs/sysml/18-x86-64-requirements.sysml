@@ -318,8 +318,9 @@ package FerrixX8664Requirements {
                 the fast reset's x87 branches taken where XGETBV 1 is offered and the
                 probe, woken after a quiet program, reads the x87's XINUSE bit clear
                 (set may mean initial, SDM Vol. 1 13.6), and a probe woken after a
-                busy and after a quiet program reads the same
-                XINUSE; with VZEROALL, the x87 reset or LDMXCSR removed, or the XINUSE
+                busy and after a quiet program reads no XINUSE bit set after the busy
+                one and clear after the quiet one, in one of up to three pairs; with
+                the x87 reset done by FNINIT, VZEROALL, the x87 reset or LDMXCSR removed, or the XINUSE
                 test inverted, the check fails by name.";
             attribute :>> parent = "H.SCHED.12";
             attribute :>> unit = ("arch::x86_64::switch::restore_user_state",
