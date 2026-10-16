@@ -42,8 +42,6 @@ const POSTER_BOUND_NANOS: u64 = 50_000_000;
 /// poster's wake has begun: waiting for the lock, or past a read it made
 /// without it.
 const SETTLE_NANOS: u64 = 1_000_000;
-/// How soon the blocker must be back once it has blocked.
-const WOKEN_BOUND_NANOS: u64 = 100_000_000;
 /// How long the ready flag is waited for.
 const READY_BOUND_NANOS: u64 = 2_000_000_000;
 /// How many tries a run makes before a poster that never reached its wake
@@ -144,14 +142,23 @@ fn one_try(home: usize, elsewhere: usize) -> Result<bool, &'static str> {
         }
         super::super::sleep_for(100_000);
     }
-    // Back within the bound once it blocked; the bound runs from when it
-    // could first have blocked.
-    let deadline = crate::timer::now_nanos()
-        .saturating_add(POSTER_BOUND_NANOS + SETTLE_NANOS + WOKEN_BOUND_NANOS);
-    while !WOKEN.load(Ordering::Acquire) && crate::timer::now_nanos() < deadline {
+    // **Judged once the poster's wake is over, by the blocker's state, not
+    // by how soon the blocker runs.** The poster ends only after `notify`
+    // returns, and its wake waits for the blocker's lock, which the blocker
+    // lets go only once it has marked itself blocked: so with the poster
+    // gone, a wake that kept the row has made the blocker runnable, and only
+    // one that read the state without the lock left it blocked. A bound of
+    // 100 ms on the blocker's return failed a boot at host load 38
+    // (dev-on-ferrix, 2026-10-11) where the blocker was runnable and not
+    // yet run.
+    let deadline = crate::timer::now_nanos().saturating_add(super::super::REAPER_PATIENCE_NANOS);
+    while !poster.is_dead() {
+        if crate::timer::now_nanos() >= deadline {
+            return Err("the wake row: the poster never finished its wake");
+        }
         super::super::sleep_for(1_000_000);
     }
-    let woken = WOKEN.load(Ordering::Acquire);
+    let woken = WOKEN.load(Ordering::Acquire) || blocker.state() != task::BLOCKED;
     if !woken {
         // Woken for real, so that it ends: this wake comes after the block.
         super::super::wake(&blocker);

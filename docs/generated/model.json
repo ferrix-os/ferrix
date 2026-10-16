@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "5675298960e27211266533b04da9cfc7eef77b099908356ec0075e001c510264",
+  "digest": "824bf9cc953bb146d57f37a382c23c1ba51decd8aff3f1757b9ae79bf15d31b5",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -35417,7 +35417,7 @@
                   "qualifiedName": "FerrixSchedRequirements::Wakes::aWakeReadsStateUnderTheHomeLock",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"At two processors or more, a blocker that holds its own run-queue lock while a poster on another processor reaches its wake, then marks itself blocked and lets the lock go, is woken within 100 ms (the `wakerow` line); with a lock-free exit in wake_at_home the check fails by name.\"",
+                  "value": "\"At two processors or more, a blocker that holds its own run-queue lock while a poster on another processor reaches its wake, then marks itself blocked and lets the lock go, is no longer blocked once the poster's wake has returned (the `wakerow` line); with a lock-free exit in wake_at_home the check fails by name.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 184

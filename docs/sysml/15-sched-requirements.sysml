@@ -179,8 +179,8 @@ package FerrixSchedRequirements {
                 out before it that reads the state without the lock.";
             attribute :>> criterion = "At two processors or more, a blocker that holds
                 its own run-queue lock while a poster on another processor reaches its
-                wake, then marks itself blocked and lets the lock go, is woken within
-                100 ms (the `wakerow` line); with a lock-free exit in wake_at_home the
+                wake, then marks itself blocked and lets the lock go, is no longer
+                blocked once the poster's wake has returned (the `wakerow` line); with a lock-free exit in wake_at_home the
                 check fails by name.";
             attribute :>> parent = "H.SCHED.1";
             attribute :>> unit = ("sched::wake_at_home", "sched::wake_onto");
