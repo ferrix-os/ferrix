@@ -383,6 +383,7 @@ fn measured(harness: &Harness, program: &Running) -> Checked<u64> {
     crate::sched::sleep_for(150_000_000);
     let counted = freeze_check::counts(&program.process)?;
     let held = share(harness, b"/check-c/cpu.stat")?;
+    crate::console::println!("  cpu      DIAG held {held}");
     if !(HELD_LEAST..=HELD_MOST).contains(&held) {
         crate::console::println!("  cpu      held to {held} thousandths of the wall clock");
         return Err(
