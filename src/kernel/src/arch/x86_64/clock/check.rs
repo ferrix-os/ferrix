@@ -38,7 +38,31 @@ pub(in crate::arch::x86_64) fn run() -> Result<(), &'static str> {
     time_page_given_back()?;
     time_page_read_whole()?;
     reason_only_for_the_hpet()?;
+    cpuid_rates()?;
     counter_matches_machine()
+}
+
+/// The TSC's rate from made-up `CPUID` leaves 0x15 and 0x16, the last
+/// counter `start_tsc` falls back to: an Alder Lake N's crystal of 38.4 MHz
+/// at 625/16 is 1.5 GHz; with no crystal, leaf 0x16's 2,400 MHz base is
+/// 2.4 GHz; with neither, no rate.
+///
+/// Verifies: `L.x86_64.38`
+fn cpuid_rates() -> Result<(), &'static str> {
+    use super::rate_of_leaves;
+    if rate_of_leaves([16, 625, 38_400_000], 0) != Some(1_500_000_000) {
+        return Err("leaf 0x15's crystal and ratio were not taken for the TSC's rate");
+    }
+    if rate_of_leaves([16, 625, 38_400_000], 2400) != Some(1_500_000_000) {
+        return Err("leaf 0x16's base was taken where leaf 0x15 gives the whole rate");
+    }
+    if rate_of_leaves([16, 625, 0], 2400) != Some(2_400_000_000) {
+        return Err("leaf 0x16's base frequency was not taken where leaf 0x15 has no crystal");
+    }
+    if rate_of_leaves([0, 0, 0], 0).is_some() || rate_of_leaves([0, 625, 38_400_000], 0).is_some() {
+        return Err("a TSC rate was made up from leaves that state none");
+    }
+    Ok(())
 }
 
 /// A machine as [`choose`] is told of it, and the counter it must get.

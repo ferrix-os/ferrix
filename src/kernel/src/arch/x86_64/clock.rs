@@ -732,9 +732,8 @@ fn start_tsc() -> Result<&'static str, &'static str> {
     Ok(BY_CPUID)
 }
 
-/// The TSC's rate as the processor itself reports it, the way Linux's
-/// `native_calibrate_tsc` reads it: leaf 0x15's crystal times its ratio, or,
-/// where the crystal is not enumerated, leaf 0x16's base frequency.
+/// The TSC's rate as the processor itself reports it ([`rate_of_leaves`]
+/// on this processor's leaves 0x15 and 0x16).
 fn cpuid_tsc_hz() -> Option<u64> {
     use core::arch::x86_64::__cpuid;
     let highest = __cpuid(0).eax;
@@ -742,22 +741,38 @@ fn cpuid_tsc_hz() -> Option<u64> {
         return None;
     }
     let tsc = __cpuid(0x15);
-    let (denominator, numerator, crystal) =
-        (u64::from(tsc.eax), u64::from(tsc.ebx), u64::from(tsc.ecx));
-    let base_hz = if highest >= 0x16 {
-        u64::from(__cpuid(0x16).eax & 0xFFFF) * 1_000_000
+    let base_mhz = if highest >= 0x16 {
+        __cpuid(0x16).eax & 0xFFFF
     } else {
         0
     };
+    rate_of_leaves([tsc.eax, tsc.ebx, tsc.ecx], base_mhz)
+}
+
+/// The TSC's rate from `CPUID` leaf 0x15's denominator, numerator and
+/// crystal hertz, and leaf 0x16's base frequency in MHz (0 where the leaf
+/// is absent): the crystal times its ratio, where all three are given, as
+/// Linux's `native_calibrate_tsc` reads it; else the base frequency.
+///
+/// The second is an approximation. Linux takes the base frequency for the
+/// TSC's rate only on the models it names (it derives their crystal from
+/// it); on a part whose TSC does not run at its base frequency the rate is
+/// off by their ratio, and nothing on this path measures it against a
+/// reference.
+pub(super) fn rate_of_leaves(
+    [denominator, numerator, crystal]: [u32; 3],
+    base_mhz: u32,
+) -> Option<u64> {
+    let (denominator, numerator, crystal) = (
+        u64::from(denominator),
+        u64::from(numerator),
+        u64::from(crystal),
+    );
     if denominator != 0 && numerator != 0 && crystal != 0 {
         return Some(crystal * numerator / denominator);
     }
-    // No crystal: leaf 0x16's base frequency is the TSC's on every part
-    // that reports it (Linux derives the crystal from it the same way).
-    if base_hz != 0 {
-        return Some(base_hz);
-    }
-    None
+    let base_hz = u64::from(base_mhz & 0xFFFF) * 1_000_000;
+    (base_hz != 0).then_some(base_hz)
 }
 
 /// Whether channel 2's output is high, meaning it reached terminal count.
