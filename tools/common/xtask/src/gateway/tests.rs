@@ -122,10 +122,44 @@ impl Guest {
     /// Peeked for before it is taken, as the gateway does in `next_frame`: on
     /// Windows a receive that times out can lose the frame arriving as it does.
     fn frame(&self) -> Option<Vec<u8>> {
+        use std::io::ErrorKind::{
+            ConnectionRefused, ConnectionReset, Interrupted, TimedOut, WouldBlock,
+        };
         let mut buffer = [0_u8; 2048];
-        let _ = self.socket.peek(&mut buffer).ok()?;
-        let len = self.socket.recv(&mut buffer).ok()?;
-        Some(buffer[..len].to_vec())
+        // Only the read timeout means no frame. A receive that a signal cut
+        // short (EINTR: a socket with a read timeout is never restarted) used
+        // to end the wait at once, which is how the SYN-ACK test failed in
+        // under three seconds of a five-second patience (po-ci-check-colour-2,
+        // 2026-10-16); it is tried again, as is the pending ICMP error a connected UDP socket
+        // reports once (refused, reset); any other error is named.
+        for _ in 0..100 {
+            match self.socket.peek(&mut buffer) {
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        Interrupted | ConnectionRefused | ConnectionReset
+                    ) =>
+                {
+                    continue;
+                }
+                Err(error) if matches!(error.kind(), WouldBlock | TimedOut) => return None,
+                Err(error) => {
+                    panic!("the guest's socket failed while waiting for a frame: {error}")
+                }
+            }
+            match self.socket.recv(&mut buffer) {
+                Ok(len) => return Some(buffer[..len].to_vec()),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        Interrupted | ConnectionRefused | ConnectionReset
+                    ) => {}
+                Err(error) if matches!(error.kind(), WouldBlock | TimedOut) => return None,
+                Err(error) => panic!("the guest's socket failed taking a frame: {error}"),
+            }
+        }
+        panic!("the guest's socket was interrupted a hundred times in a row");
     }
 
     /// The next frame carrying `ethertype`, skipping anything else.
