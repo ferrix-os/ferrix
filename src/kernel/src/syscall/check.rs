@@ -18,7 +18,7 @@
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use ferrix_bootinfo::{KERNEL_HALF_BASE, PAGE_SIZE};
 use ferrix_linux_abi::errno::Errno;
@@ -7864,6 +7864,14 @@ const FUTEX_LONG_SECONDS: u64 = 2;
 /// the boot's single most expensive check and proved nothing extra.
 const FUTEX_FORGOTTEN_NANOS: u64 = 200_000_000;
 
+/// When the bucket check's requeue had been made, for its try's judgement: see
+/// `a_requeue_crosses_buckets`.
+static REQUEUED_AT: AtomicU64 = AtomicU64::new(0);
+
+/// Tries the bucket check's timed-out requeue makes while its requeue comes
+/// too late to find the waiter.
+const FUTEX_LATE_TRIES: usize = 3;
+
 /// How long the check waits for its waiter to start waiting, or to return.
 const FUTEX_PATIENCE_NANOS: u64 = 30_000_000_000;
 
@@ -8473,6 +8481,59 @@ fn wake_one(process: &Process, word: u64) -> Result<usize, Errno> {
     )
 }
 
+/// [`a_requeue_crosses_buckets`]'s second case: a waiter on `word` requeued
+/// to another bucket and never woken sleeps to its timeout.
+fn a_requeued_waiter_times_out(
+    process: &Arc<Process>,
+    word: u64,
+    timeout: u64,
+) -> Result<(), &'static str> {
+    // **Again only if the requeue came too late to test anything.** The
+    // waiter's timeout runs from its start, so a requeue made
+    // FUTEX_FORGOTTEN_NANOS or more after the try began may find the waiter
+    // already gone: nothing moved, and nothing about the buckets learned. An
+    // emulated four-processor ARMv7-A under load got there late once
+    // (os07-b5, 2026-10-08). A requeue made sooner found the waiter still
+    // waiting, whatever the host did, and any failure then is the kernel's.
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        let started = crate::timer::now_nanos();
+        REQUEUED_AT.store(0, Ordering::Release);
+        let outcome = wait_then_wake(
+            process,
+            word,
+            timeout,
+            (0, FUTEX_FORGOTTEN_NANOS),
+            |process, word| {
+                let moved = match a_word_in_another_bucket(process, word) {
+                    Some(target) => requeue_one(process, word, target),
+                    None => Ok(0),
+                };
+                // After the requeue, so that a stall inside it counts as late.
+                REQUEUED_AT.store(crate::timer::now_nanos(), Ordering::Release);
+                moved
+            },
+        );
+        let at = match REQUEUED_AT.load(Ordering::Acquire) {
+            0 => crate::timer::now_nanos(),
+            at => at,
+        };
+        let late = at.saturating_sub(started) >= FUTEX_FORGOTTEN_NANOS;
+        match outcome {
+            Err(problem) if problem == SLEPT_THROUGH_WAKE => break,
+            Err(_) if late && tries < FUTEX_LATE_TRIES => {}
+            Err(_) => {
+                return Err(
+                    "a futex waiter requeued and left to time out failed for another reason",
+                );
+            }
+            Ok(_) => return Err("a futex waiter requeued and never woken came back woken"),
+        }
+    }
+    Ok(())
+}
+
 /// The futex table is in buckets by key, and a requeue between two words in
 /// different buckets must move its waiter into the other one: a wake on the
 /// second word then rouses it, and neither word has anyone left on it. A
@@ -8521,22 +8582,7 @@ fn a_requeue_crosses_buckets() -> Result<(), &'static str> {
         return Err("a waiter requeued to another futex bucket and woken there left an entry");
     }
 
-    match wait_then_wake(
-        &process,
-        word,
-        timeout,
-        (0, FUTEX_FORGOTTEN_NANOS),
-        |process, word| match a_word_in_another_bucket(process, word) {
-            Some(target) => requeue_one(process, word, target),
-            None => Ok(0),
-        },
-    ) {
-        Err(problem) if problem == SLEPT_THROUGH_WAKE => {}
-        Err(_) => {
-            return Err("a futex waiter requeued and left to time out failed for another reason");
-        }
-        Ok(_) => return Err("a futex waiter requeued and never woken came back woken"),
-    }
+    a_requeued_waiter_times_out(&process, word, timeout)?;
     if futex::waiters_on(&process, word) != 0 || futex::waiters_on(&process, target) != 0 {
         return Err(
             "a futex waiter requeued to another bucket and timed out left its entry behind",
