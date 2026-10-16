@@ -1033,6 +1033,9 @@ fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Fa
 /// source; not when another reserved range lies inside it, nor when it is
 /// memory the allocator owns, nor when its size is one page short of its
 /// lines; and an ordinary window at the same address is still withheld.
+/// A framebuffer whose size is exactly its visible bytes, ending inside a
+/// page (800 x 600), is lent its lines in whole pages, unless its size is
+/// one byte short of them or another range reaches into that last page.
 /// Nothing here is published.
 ///
 /// Verifies: L.device.38
@@ -1088,7 +1091,54 @@ fn check_lending() -> Result<(), &'static str> {
     if window.apertures_minted() != 0 {
         return Err("an ordinary window over the framebuffer was minted");
     }
+    check_lending_exact(AT)?;
     check_lending_refusals(&screen, &lone, AT, SIZE)
+}
+
+/// [`check_lending`]'s framebuffer that ends inside a page: 800 x 600 with
+/// firmware's size exactly its 1,920,000 visible bytes is lent 469 whole
+/// pages, refused when its size is one byte short of them, and withheld when
+/// another range starts in the last of its pages.
+///
+/// Verifies: L.device.38
+fn check_lending_exact(at: u64) -> Result<(), &'static str> {
+    use ferrix_bootinfo::{Framebuffer, PixelFormat};
+
+    const VISIBLE: u64 = 800 * 600 * 4;
+    const PAGES: u64 = VISIBLE.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+    let small = Framebuffer {
+        phys: at,
+        size: VISIBLE,
+        width: 800,
+        height: 600,
+        stride: 800,
+        format: PixelFormat::Bgrx8888,
+        reclaimable: 0,
+        reserved: 0,
+    };
+    let memory = (0, at);
+    let lone = Reserved::synthetic(Some((at, VISIBLE)), &[memory]).map_err(|_| "no memory")?;
+    let node = DeviceNode::firmware_framebuffer(&small, &lone)
+        .map_err(|_| "an 800 x 600 framebuffer of exactly its lines was not lent")?;
+    match node.apertures.as_slice() {
+        [aperture] if aperture.phys == at && aperture.len == PAGES => {}
+        _ => return Err("an 800 x 600 framebuffer was not lent its lines in whole pages"),
+    }
+    let short = Framebuffer {
+        size: VISIBLE - 1,
+        ..small
+    };
+    let short_lone =
+        Reserved::synthetic(Some((at, VISIBLE - 1)), &[memory]).map_err(|_| "no memory")?;
+    if DeviceNode::firmware_framebuffer(&short, &short_lone).is_ok() {
+        return Err("an 800 x 600 framebuffer one byte short of its lines was lent");
+    }
+    let tail = Reserved::synthetic(Some((at, VISIBLE)), &[memory, (at + VISIBLE, 64)])
+        .map_err(|_| "no memory")?;
+    if DeviceNode::firmware_framebuffer(&small, &tail).is_ok() {
+        return Err("a framebuffer was lent a last page another range reaches into");
+    }
+    Ok(())
 }
 
 /// [`check_lending`]'s other refusals, against the same framebuffer

@@ -433,3 +433,9 @@ Done; removed from the backlog on 2026-10-16.
 | Item | Owner | Stage |
 |---|---|---|
 | `test-auth --arch all` failed once on x86-64 on 2026-10-03, in stage 20's matrix record run on 184fa4c7d at a load of 10 to 26: init's log line `auth.service[533]: auth: service=passwd ... result=changed` reached the console on the same line as `passwd`'s own "the password for ferrix is changed", so the check read neither, and it saw no `authd: running as auth (uid 90)`. A rerun of the same tree right after passed on all three architectures. The check reads the console, which init's journal and the shell share; matching within a line rather than whole lines, or reading the journal, would end it. Kept: `~/.local/share/ferrix/selfhost-matrix/run-2026-10-03/record/auth.log` on nazuna | open | 15 |
+
+### fl-068
+
+| Item | Owner | Stage |
+|---|---|---|
+| **Open (2026-10-17, efifb-size; consultant ledger 1968, condition (7)).** The N150 box started through systemd-boot comes up at 800x600 and its GOP reports exactly the visible bytes, 1,920,000, which end inside a page; before branch `efifb-size` the kernel refused it ("the framebuffer's size does not hold its lines") and efifb had no screen. The branch lends it (the framebuffer is withheld as its size in whole pages, `device::framebuffer_span`; `docs/DISPLAY.md` §8), proven on made-up ranges by `check_lending_exact` on every boot, but no QEMU boot has a GOP size that ends mid-page. Owed: a netboot of the landed `main` on the box with `--kernel-option ferrix.efifb` and a desktop image, through the PO's hardware rules, whose serial log shows `display  firmware framebuffer 800x600 lent to a driver (ferrix.efifb)` and whose screen shows efifb's desktop. The boot's `reserved ... digest` line will differ from a boot of an older kernel on the box (the framebuffer's range now enters it page-rounded); that is expected, not a gathering change. Cite the log in this row and close it | the PO, on the box | 10 |

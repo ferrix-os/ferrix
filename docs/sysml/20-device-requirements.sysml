@@ -708,23 +708,27 @@ package FerrixDeviceRequirements {
         }
         requirement <'L.device.38'> theFirmwareFramebufferLentExactly : ItemLowLevel {
             attribute :>> statement = "The boot framebuffer shall stay in the
-                ranges withheld from every aperture but one: on x86-64 under
-                ferrix.efifb, and only there, at most one node, whose one
-                aperture starts at the framebuffer's first byte and is its visible
-                lines in whole pages, prefetchable, with no vector. None shall
-                be made when the framebuffer is in memory the allocator owns, its
-                size does not hold its lines, its layout is not four bytes a
-                pixel, its first pixel is off a page, or another reserved range
-                lies inside the lines; and an aperture of the node's kind shall be
-                withheld when it reaches past the framebuffer or lies in a
-                reserved range that is not the framebuffer.";
+                ranges withheld from every aperture but one, withheld as its size
+                in whole pages: on x86-64 under ferrix.efifb, and only there, at
+                most one node, whose one aperture starts at the framebuffer's
+                first byte and is its visible lines in whole pages, prefetchable,
+                with no vector. None shall be made when the framebuffer is in
+                memory the allocator owns, its size does not hold its lines, its
+                layout is not four bytes a pixel, its first pixel is off a page,
+                or another reserved range lies inside the lines' whole pages; and
+                an aperture of the node's kind shall be withheld when it reaches
+                past the framebuffer's size in whole pages or lies in a reserved
+                range that is not the framebuffer.";
             attribute :>> criterion = "Every boot lends a made-up 1024x768
                 framebuffer exactly its visible lines as one aperture of its own
                 source, prefetchable; refuses one crossed by another reservation, one the
                 allocator owns, one a page short, one of an unknown layout and
                 one off a page; withholds a lent aperture reaching past the
                 framebuffer and one inside another reserved range; and withholds
-                an ordinary window at the framebuffer. A node without the option
+                an ordinary window at the framebuffer. It lends a made-up 800x600
+                framebuffer whose size is exactly its 1,920,000 visible bytes its
+                lines in whole pages (469), refuses it one byte short, and
+                withholds it when another range starts in its last page. A node without the option
                 or off x86-64 fails the boot. Under ferrix.efifb the published
                 node holds one prefetchable aperture equal to the framebuffer's
                 lines and no vector (test-compositor --boot firmware-screen). With
@@ -733,6 +737,7 @@ package FerrixDeviceRequirements {
                 the aperture minted not prefetchable, the boot panics.";
             attribute :>> parent = "H.DMA.5";
             attribute :>> unit = ("device::DeviceNode::firmware_framebuffer",
+                "device::framebuffer_span",
                 "device::Reserved::lends", "device::Reserved::covers",
                 "device::Reserved::synthetic", "device::Reserved::framebuffer",
                 "discovery::firmware::FirmwareFramebuffer::new",

@@ -413,7 +413,7 @@ impl Reserved {
         let framebuffer = view.raw().framebuffer;
         if framebuffer.is_present() && framebuffer.size > 0 {
             reserved.framebuffer = Some(reserved.ranges.len());
-            reserved.add(framebuffer.phys, framebuffer.size);
+            reserved.add(framebuffer.phys, framebuffer_span(framebuffer.size));
         }
         // Firmware's own `MMIO` descriptions are left out: they are where it
         // says device memory is, and a BAR is device memory.
@@ -500,7 +500,7 @@ impl Reserved {
         let mut reserved = Reserved::default();
         if let Some((start, len)) = framebuffer {
             reserved.framebuffer = Some(0);
-            fallible::try_push(&mut reserved.ranges, (start, start + len))?;
+            fallible::try_push(&mut reserved.ranges, (start, start + framebuffer_span(len)))?;
         }
         for &(start, len) in others {
             fallible::try_push(&mut reserved.ranges, (start, start + len))?;
@@ -514,6 +514,16 @@ impl Reserved {
             .and_then(|index| self.ranges.get(index))
             .copied()
     }
+}
+
+/// How much the boot framebuffer of `size` bytes reserves: its size in whole
+/// pages. Firmware may report exactly its visible bytes, which at 800 x 600
+/// end inside a page (1,920,000 bytes), while an aperture is whole pages;
+/// the rest of that last page is the framebuffer's to lend, and any other
+/// range reaching into it -- the memory map's RAM, a device window -- still
+/// withholds the aperture ([`Reserved::covers`]).
+const fn framebuffer_span(size: u64) -> u64 {
+    size.div_ceil(PAGE_SIZE).saturating_mul(PAGE_SIZE)
 }
 
 /// A PCI function's MSI capability, for one that has no MSI-X table, and
@@ -1364,10 +1374,14 @@ impl DeviceNode {
         let visible = u64::from(framebuffer.stride)
             .saturating_mul(u64::from(framebuffer.height))
             .saturating_mul(4);
-        let len = visible.div_ceil(PAGE_SIZE).saturating_mul(PAGE_SIZE);
-        if len > framebuffer.size {
+        // The visible bytes against the size firmware gave, before either
+        // is rounded to pages: GOP may report exactly the visible bytes
+        // (the N150 box at 800 x 600 after systemd-boot), and the page
+        // rounding is [`framebuffer_span`]'s, which `Reserved` lends.
+        if visible > framebuffer.size {
             return Err("the framebuffer's size does not hold its lines");
         }
+        let len = visible.div_ceil(PAGE_SIZE).saturating_mul(PAGE_SIZE);
         let mut node = DeviceNode::empty(Location::Tree(framebuffer.phys));
         node.binding = TREE_FIRMWARE_FB;
         node.mode = Some(FramebufferMode {

@@ -1070,21 +1070,29 @@ vertical blanking, no GPU.
    (`ferrix_native_abi::types`), when the option is on, the machine is
    x86-64, and the framebuffer is usable: outside the allocator's memory
    (§2.4's `reclaimable` 0), four bytes a pixel, its first pixel on a page,
-   and a size that holds its lines. Its one aperture is the visible lines in
-   whole pages, prefetchable; it has no vector. `device_info` carries
+   and a size that holds its lines. That size is compared with the visible
+   bytes as firmware gave it, and may end inside a page: the N150 box at
+   800x600 after systemd-boot reports exactly its 1,920,000 visible bytes.
+   Its one aperture is the visible lines in whole pages, prefetchable; it
+   has no vector. `device_info` carries
    the mode in fields a tree node leaves zero: width, height, the stride in
    pixels and the layout (`FRAMEBUFFER_BGRX` or `FRAMEBUFFER_RGBX`). The
    boot line is `display  firmware framebuffer WxH lent to a driver
    (ferrix.efifb)`, or `... not lent (ferrix.efifb): <why>`.
 2. **Kernel, the one exemption.** The boot framebuffer stays in the ranges
-   stage 10 withholds from every aperture (`device::Reserved`). The node's
-   own aperture, and only it, is minted inside that range, and only while it
-   lies wholly inside it and overlaps nothing else reserved. Every boot,
-   whether or not the option is on, checks the exemption against made-up
-   ranges (`device::check::check_lending`): a clear framebuffer is lent
-   exactly its lines, one crossed by another reservation, one the allocator
-   owns and one a page short are not, and an ordinary window at the same
-   address is still withheld.
+   stage 10 withholds from every aperture (`device::Reserved`), withheld as
+   firmware's size in whole pages (`device::framebuffer_span`), so the
+   page-rounded aperture of a size that ends inside a page still lies wholly
+   inside it. The node's own aperture, and only it, is minted inside that
+   range, and only while it lies wholly inside it and overlaps nothing else
+   reserved. Every boot, whether or not the option is on, checks the
+   exemption against made-up ranges (`device::check::check_lending`): a
+   clear framebuffer is lent exactly its lines, one crossed by another
+   reservation, one the allocator owns and one a page short are not, and an
+   ordinary window at the same address is still withheld; an 800x600 one
+   whose size is exactly its 1,920,000 visible bytes is lent its lines in
+   469 whole pages, is refused one byte short of them, and is withheld when
+   another range starts in its last page (`check_lending_exact`).
 3. **Kernel, no DMA.** The node is memory, not a device that reaches memory:
    it gets no IOMMU domain, `vmo_pin` and `device_set_limit` on it answer
    `WRONG_TYPE`. The kernel maps the same pages for its panic screen, and
