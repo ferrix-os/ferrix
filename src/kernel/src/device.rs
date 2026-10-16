@@ -1249,6 +1249,10 @@ pub(crate) struct DeviceNode {
     /// `(phys, len)`: memory the device has that no aperture may reach,
     /// because whoever writes the table chooses which interrupt it raises.
     interrupt_tables: Vec<(u64, u64)>,
+    /// Every assigned memory BAR of a PCI function, by slot, as `(base,
+    /// size)`: decoded or not, its apertures published or not. What a page
+    /// widened for another BAR must not reach ([`occupants`]).
+    assigned: [Option<(u64, u64)>; 6],
     /// Whether memory BARs were left out because the function's memory
     /// decoding was off.
     undecoded: bool,
@@ -1307,6 +1311,7 @@ impl DeviceNode {
             domain: SpinLock::new(None),
             withheld: 0,
             interrupt_tables: Vec::new(),
+            assigned: [None; 6],
             undecoded: false,
             withheld_vectors: 0,
             binding: 0,
@@ -1464,6 +1469,14 @@ impl DeviceNode {
                 .host_visible
                 .and_then(|window| Window::of(window, regions, reserved)),
         });
+        for region in regions {
+            if let Bar::Memory { address, .. } = region.bar
+                && address != 0
+                && let Some(slot) = node.assigned.get_mut(usize::from(region.index))
+            {
+                *slot = Some((address, region.size));
+            }
+        }
         if !decoding {
             node.undecoded = regions
                 .iter()
@@ -2418,46 +2431,142 @@ pub(crate) fn claim_line(id: u32, taken: &mut BTreeSet<u32>) -> bool {
     id >= FIRST_SHARED_INTERRUPT && !irq::is_registered(id) && taken.insert(id)
 }
 
+/// Memory a page widened for a sub-page BAR could reach: an aperture, an
+/// assigned memory BAR, or a withheld interrupt table, of any node.
+#[derive(Clone, Copy, Debug)]
+struct Occupant {
+    /// Where it starts.
+    start: u64,
+    /// Where it ends, exclusive.
+    end: u64,
+    /// The node and BAR slot it belongs to, for a BAR's own aperture and
+    /// span, which the BAR's page test leaves out; `None` for anything no
+    /// widening may ever be granted over (an interrupt table, a device tree
+    /// window).
+    owner: Option<(usize, u8)>,
+    /// What it is, for the refusal's line.
+    what: &'static str,
+}
+
+/// Everything in `nodes` a widened page must not reach, taken before
+/// `publish` drops clashing apertures: every aperture, every assigned memory
+/// BAR of every PCI function -- decoded or left undecoded, its apertures
+/// published, withheld as reserved or dropped as clashes -- and every
+/// withheld MSI-X table and pending-bit array span.
+fn occupants(nodes: &[DeviceNode]) -> Vec<Occupant> {
+    let mut all = Vec::new();
+    for (index, node) in nodes.iter().enumerate() {
+        for aperture in &node.apertures {
+            let owner = match aperture.source {
+                Source::Bar { slot, .. } => Some((index, slot)),
+                _ => None,
+            };
+            // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+            all.push(Occupant {
+                start: aperture.phys,
+                end: aperture.end(),
+                owner,
+                what: "another aperture",
+            });
+        }
+        for (slot, bar) in (0u8..).zip(node.assigned.iter()) {
+            if let Some((base, size)) = *bar {
+                // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+                all.push(Occupant {
+                    start: base,
+                    end: base.saturating_add(size),
+                    owner: Some((index, slot)),
+                    what: "an assigned memory BAR",
+                });
+            }
+        }
+        for &(start, len) in &node.interrupt_tables {
+            // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+            all.push(Occupant {
+                start,
+                end: start.saturating_add(len),
+                owner: None,
+                what: "a withheld MSI-X table or pending-bit array",
+            });
+        }
+    }
+    all
+}
+
+/// What else lies in the page `start..start + PAGE_SIZE` that BAR `own`
+/// would be widened to, if anything: an occupant not the BAR's own, or a
+/// reserved range.
+fn page_neighbour(
+    own: (usize, u8),
+    start: u64,
+    occupants: &[Occupant],
+    reserved: &Reserved,
+    widened: Aperture,
+) -> Option<&'static str> {
+    let end = start.saturating_add(PAGE_SIZE);
+    if let Some(occupant) = occupants.iter().find(|occupant| {
+        occupant.owner != Some(own) && occupant.start < end && start < occupant.end
+    }) {
+        return Some(occupant.what);
+    }
+    reserved.covers(widened).then_some("a reserved range")
+}
+
 /// Widen each PCI BAR aperture shorter than a page, starting on a page
-/// boundary, to that whole page when nothing else lies in the page: no other
-/// aperture of any node (`claimed` holds them all) and nothing reserved.
+/// boundary, to that whole page when nothing else lies in the page: none of
+/// `occupants` ([`occupants`]: any node's aperture, any function's assigned
+/// memory BAR, any withheld interrupt table) but the BAR's own, and nothing
+/// reserved. Each widening or refusal is said on the console when `say`.
 ///
 /// A driver maps whole pages only ([`Aperture::whole_pages`]), and real
 /// hardware has BARs shorter than one: an Intel PCH's AHCI ABAR is 2 KiB,
 /// where QEMU's is 4 KiB. A page that holds such a BAR and nothing else maps
-/// no neighbour's registers; one that is shared stays refused.
-fn widen_lone_partial_bars(nodes: &mut [DeviceNode], claimed: &[(u64, u64)], reserved: &Reserved) {
-    for node in nodes.iter_mut() {
+/// no neighbour's registers or interrupt table; one that is shared stays
+/// refused.
+fn widen_lone_partial_bars(
+    nodes: &mut [DeviceNode],
+    occupants: &[Occupant],
+    reserved: &Reserved,
+    say: bool,
+) {
+    for (index, node) in nodes.iter_mut().enumerate() {
         let location = node.location;
         for aperture in &mut node.apertures {
+            let Source::Bar {
+                slot, offset: 0, ..
+            } = aperture.source
+            else {
+                continue;
+            };
             if aperture.whole_pages()
-                || !matches!(aperture.source, Source::Bar { offset: 0, .. })
                 || !aperture.phys.is_multiple_of(PAGE_SIZE)
                 || aperture.len > PAGE_SIZE
             {
                 continue;
             }
-            let (start, end) = (aperture.phys, aperture.phys + PAGE_SIZE);
-            let shared = claimed.iter().any(|&(from, to)| {
-                (from, to) != (aperture.phys, aperture.end()) && from < end && start < to
-            });
             let widened = Aperture {
                 len: PAGE_SIZE,
                 ..*aperture
             };
-            if shared || reserved.covers(widened) {
+            if let Some(what) =
+                page_neighbour((index, slot), aperture.phys, occupants, reserved, widened)
+            {
+                if say {
+                    crate::println!(
+                        "  device   {location} BAR of {} bytes at {:#x} shares its page with {what}: not mappable",
+                        aperture.len,
+                        aperture.phys
+                    );
+                }
+                continue;
+            }
+            if say {
                 crate::println!(
-                    "  device   {location} BAR of {} bytes at {:#x} shares its page: not mappable",
+                    "  device   {location} BAR of {} bytes at {:#x} has its page alone: mapped as the page",
                     aperture.len,
                     aperture.phys
                 );
-                continue;
             }
-            crate::println!(
-                "  device   {location} BAR of {} bytes at {:#x} has its page alone: mapped as the page",
-                aperture.len,
-                aperture.phys
-            );
             *aperture = widened;
         }
     }
@@ -2610,6 +2719,9 @@ pub(crate) fn publish<'f>(
         ..Report::default()
     };
 
+    // What a page widened for a sub-page BAR must not reach, before clashes
+    // are dropped: a dropped aperture is still the device's registers.
+    let occupied = occupants(&nodes);
     // Two nodes with overlapping apertures are two drivers for one set of
     // registers, so a later node loses what an earlier one already holds.
     let mut claimed: Vec<(u64, u64)> = Vec::new();
@@ -2628,7 +2740,7 @@ pub(crate) fn publish<'f>(
         });
         node.withheld += before - node.apertures.len();
     }
-    widen_lone_partial_bars(&mut nodes, &claimed, reserved);
+    widen_lone_partial_bars(&mut nodes, &occupied, reserved, true);
 
     yield_framebuffer_holder(&mut nodes);
 

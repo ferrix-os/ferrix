@@ -799,8 +799,113 @@ impl Write for Fnv {
 /// [`check_lent_framebuffer`].
 pub(super) fn check_together(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
     check_exclusive(nodes)?;
+    check_widening()
+        .and_then(|()| check_decoding_refusals())
+        .map_err(|what| Failure {
+            location: Location::Tree(0),
+            what,
+        })?;
     check_input_functions()?;
     check_lent_framebuffer(nodes, reserved)
+}
+
+/// `publish`'s widening of a BAR shorter than a page, on made-up nodes: a
+/// 2 KiB BAR alone in its page is widened to the page, and one whose page
+/// also holds another node's aperture, another node's withheld MSI-X span, an
+/// undecoded function's assigned BAR, or a reserved range, is left as it was.
+/// Nothing here is published.
+///
+/// Verifies: L.device.5
+fn check_widening() -> Result<(), &'static str> {
+    use super::{Aperture, Source, occupants, widen_lone_partial_bars};
+
+    // Far above any machine's RAM or MMIO this kernel boots on; the
+    // ranges are only compared, never mapped.
+    const AT: u64 = 0x7f00_0000_0000;
+    const BAR: u64 = 2048;
+    let address = Address::new(0, 0, 0, 0).ok_or("no PCI address")?;
+    let candidate = || {
+        let mut node = DeviceNode::empty(Location::Pci(address));
+        node.assigned[5] = Some((AT, BAR));
+        // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+        node.apertures.push(Aperture {
+            phys: AT,
+            len: BAR,
+            cacheable: false,
+            source: Source::Bar {
+                slot: 5,
+                offset: 0,
+                wide: false,
+            },
+        });
+        node
+    };
+    let widened = |mut nodes: Vec<DeviceNode>, reserved: &Reserved| {
+        let occupied = occupants(&nodes);
+        widen_lone_partial_bars(&mut nodes, &occupied, reserved, false);
+        nodes
+            .first()
+            .and_then(|node| node.apertures.first())
+            .is_some_and(|aperture| aperture.len == PAGE_SIZE)
+    };
+    let nothing = Reserved::synthetic(None, &[]).map_err(|_| "no memory")?;
+    if !widened(alloc::vec![candidate()], &nothing) {
+        return Err("a BAR shorter than a page and alone in it was not widened to the page");
+    }
+    let neighbour = AT + BAR;
+    let mut tree = DeviceNode::empty(Location::Tree(neighbour));
+    tree.mint(neighbour, 256, false, &nothing);
+    if widened(alloc::vec![candidate(), tree], &nothing) {
+        return Err("a BAR was widened over another node's aperture");
+    }
+    let mut table = DeviceNode::empty(Location::Pci(address));
+    // FATAL-ALLOC: boot only: stage 10 builds the device registry once, before any program runs.
+    table.interrupt_tables.push((neighbour, BAR));
+    if widened(alloc::vec![candidate(), table], &nothing) {
+        return Err("a BAR was widened over another function's withheld MSI-X table");
+    }
+    let mut undecoded = DeviceNode::empty(Location::Pci(address));
+    undecoded.assigned[0] = Some((neighbour, BAR));
+    undecoded.undecoded = true;
+    if widened(alloc::vec![candidate(), undecoded], &nothing) {
+        return Err("a BAR was widened over an undecoded function's assigned BAR");
+    }
+    let reserved = Reserved::synthetic(None, &[(neighbour, 256)]).map_err(|_| "no memory")?;
+    if widened(alloc::vec![candidate()], &reserved) {
+        return Err("a BAR was widened over a reserved range");
+    }
+    Ok(())
+}
+
+/// PCI enumeration's refusal to turn memory decoding on, on made-up BARs: a
+/// function whose memory BARs are assigned, clear of reserved memory and of
+/// every other function's, may have it turned on; one with a BAR unassigned,
+/// one overlapping a reserved range (RAM among them), and one overlapping
+/// another function's BAR may not.
+///
+/// Verifies: L.device.1
+fn check_decoding_refusals() -> Result<(), &'static str> {
+    use crate::discovery::pci::decoding_refusal;
+
+    const AT: u64 = 0x7f00_0000_0000;
+    const SIZE: u64 = 0x4000;
+    let own = [(AT, SIZE), (AT + SIZE, PAGE_SIZE)];
+    let elsewhere = [(AT + 0x10_0000, SIZE), (0, SIZE)];
+    let nothing = Reserved::synthetic(None, &[]).map_err(|_| "no memory")?;
+    if decoding_refusal(&own, &elsewhere, &nothing).is_some() {
+        return Err("decoding was refused to assigned BARs clear of everything");
+    }
+    if decoding_refusal(&[(AT, SIZE), (0, PAGE_SIZE)], &elsewhere, &nothing).is_none() {
+        return Err("decoding was allowed with a memory BAR unassigned");
+    }
+    let ram = Reserved::synthetic(None, &[(AT + SIZE + 0x800, 0x1000)]).map_err(|_| "no memory")?;
+    if decoding_refusal(&own, &elsewhere, &ram).is_none() {
+        return Err("decoding was allowed over a reserved range");
+    }
+    if decoding_refusal(&own, &[(AT + 0x2000, PAGE_SIZE)], &nothing).is_none() {
+        return Err("decoding was allowed over another function's BAR");
+    }
+    Ok(())
 }
 
 /// [`check_framebuffer`] on the published nodes, then [`check_lending`]

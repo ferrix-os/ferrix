@@ -680,10 +680,9 @@ fn check_host(
 
     learn_bridges(&space, &found)?;
 
-    for function in found {
-        let (regions, msix, decoding, transport, host_visible) =
-            check_function(&mut space, function, reserved, report)?;
-        let decoding = decoding_after(&mut space, &function, &regions, decoding);
+    let (examined, spans) = examine_all(&mut space, found, reserved, report)?;
+    for (function, (regions, msix, decoding, transport, host_visible)) in examined {
+        let decoding = decoding_after(&mut space, &function, &regions, decoding, &spans, reserved);
         // Where the function's configuration space is, which minting one of
         // its MSI-X vectors writes to turn MSI-X on.
         let config_phys = host
@@ -1074,37 +1073,125 @@ fn check_function(
     Ok((regions, msix, decoding, found_transport, host_visible))
 }
 
+/// Every function in `found` examined ([`check_function`]), and every memory
+/// BAR of them all by function, so that turning one's decoding on can be
+/// weighed against every other function's BARs on the host.
+///
+/// # Errors
+///
+/// The first function's examination that failed.
+fn examine_all(
+    space: &mut Space,
+    found: Vec<Function>,
+    reserved: &Reserved,
+    report: &mut Report,
+) -> Result<(Vec<(Function, Examined)>, Spans), Failure> {
+    let mut examined: Vec<(Function, Examined)> = Vec::new();
+    for function in found {
+        let seen = check_function(space, function, reserved, report)?;
+        // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
+        examined.push((function, seen));
+    }
+    // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
+    let spans = examined
+        .iter()
+        .flat_map(|(function, (regions, ..))| {
+            memory_spans(regions).map(move |span| (function.address, span))
+        })
+        .collect();
+    Ok((examined, spans))
+}
+
+/// Every memory BAR on a host, as `(base, size)`, by the function it is one of.
+type Spans = Vec<(Address, (u64, u64))>;
+
+/// The `(base, size)` of each memory BAR in `regions`, assigned or not.
+fn memory_spans(regions: &[Region]) -> impl Iterator<Item = (u64, u64)> + '_ {
+    regions.iter().filter_map(|region| match region.bar {
+        bar::Bar::Memory { address, .. } => Some((address, region.size)),
+        _ => None,
+    })
+}
+
 /// Whether `function` decodes memory once [`turn_decoding_on`] had its say:
-/// `decoding` as firmware left it, or on now.
+/// `decoding` as firmware left it, or on now. `spans` is every memory BAR of
+/// every function on the host, by function.
 fn decoding_after(
     space: &mut Space,
     function: &Function,
     regions: &[Region],
     decoding: bool,
+    spans: &[(Address, (u64, u64))],
+    reserved: &Reserved,
 ) -> bool {
-    decoding || turn_decoding_on(space, function.address, function.identity.kind, regions)
+    decoding || turn_decoding_on(space, function, regions, spans, reserved)
+}
+
+/// Why memory decoding may not be turned on for a function whose memory BARs
+/// are `own`, as `(base, size)`, if it may not: a BAR not assigned, one that
+/// overlaps a reserved range -- RAM, firmware's, the kernel's own devices --
+/// or one that overlaps `others`, every other function's assigned memory BAR
+/// on the host. Firmware's stale assignment is not decoded over memory that
+/// is already something else's.
+pub(crate) fn decoding_refusal(
+    own: &[(u64, u64)],
+    others: &[(u64, u64)],
+    reserved: &Reserved,
+) -> Option<&'static str> {
+    if own.is_empty() {
+        return Some("it has no memory BAR");
+    }
+    if own.iter().any(|&(base, _)| base == 0) {
+        return Some("a memory BAR is not assigned");
+    }
+    if own
+        .iter()
+        .any(|&(base, size)| reserved.overlaps(base, size))
+    {
+        return Some("a memory BAR overlaps reserved memory or RAM");
+    }
+    let overlap = |(base, size): (u64, u64), (from, len): (u64, u64)| {
+        from != 0 && base < from.saturating_add(len) && from < base.saturating_add(size)
+    };
+    if own
+        .iter()
+        .any(|&mine| others.iter().any(|&other| overlap(mine, other)))
+    {
+        return Some("a memory BAR overlaps another function's");
+    }
+    None
 }
 
 /// Turn memory decoding on for an endpoint firmware left it off for, when
-/// every memory BAR it has is assigned: firmware with no driver of its own
-/// for a device -- a NIC on a board with no UEFI network stack -- leaves it
-/// undecoded, and an undecoded function publishes no apertures. Memory
-/// decoding only: bus mastering stays the driver's to ask for. Whether it
-/// was turned on, said on the console.
+/// [`decoding_refusal`] finds nothing against its memory BARs: firmware with
+/// no driver of its own for a device -- a NIC on a board with no UEFI
+/// network stack -- leaves it undecoded, and an undecoded function publishes
+/// no apertures. Memory decoding only: bus mastering stays the driver's to
+/// ask for. Whether it was turned on, or why not, said on the console.
 fn turn_decoding_on(
     space: &mut Space,
-    address: Address,
-    kind: HeaderKind,
+    function: &Function,
     regions: &[Region],
+    spans: &[(Address, (u64, u64))],
+    reserved: &Reserved,
 ) -> bool {
-    let memory = || {
-        regions.iter().filter_map(|region| match region.bar {
-            bar::Bar::Memory { address, .. } => Some(address),
-            _ => None,
-        })
-    };
-    let count = memory().count();
-    if kind != HeaderKind::Endpoint || count == 0 || memory().any(|address| address == 0) {
+    let address = function.address;
+    if function.identity.kind != HeaderKind::Endpoint {
+        return false;
+    }
+    // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
+    let own: Vec<(u64, u64)> = memory_spans(regions).collect();
+    if own.is_empty() {
+        return false;
+    }
+    // FATAL-ALLOC: boot only: PCI enumeration runs once, at stage 10, before any program runs.
+    let others: Vec<(u64, u64)> = spans
+        .iter()
+        .filter(|&&(owner, _)| owner != address)
+        .map(|&(_, span)| span)
+        .collect();
+    if let Some(why) = decoding_refusal(&own, &others, reserved) {
+        crate::println!("  pci      {address}: firmware left memory decoding off; left off: {why}");
         return false;
     }
     let command = space.read16(address, COMMAND);
@@ -1113,7 +1200,7 @@ fn turn_decoding_on(
     crate::println!(
         "  pci      {address}: firmware left memory decoding off; {} it on for {} assigned BARs",
         if on { "turned" } else { "could not turn" },
-        count
+        own.len()
     );
     on
 }
