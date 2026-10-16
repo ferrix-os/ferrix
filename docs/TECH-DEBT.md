@@ -130,47 +130,40 @@ on luck") is the pattern for all of them.
 floor (27 before btrfs joined it), 313 requirements not yet verified, 27
 files on the assembly allow-list.
 
-## 5. Paying it down, first three
+## 5. Paying it down
 
-Each is a proposal for the customer to schedule; none is started. The first
-two change how the certified item's evidence is made, so each needs the
-certification consultant's design review before any code.
+The certification consultant reviewed the three proposals on 2026-10-17
+(ledger `~/.local/share/ferrix/cert-consultant/reviews.md` lines 1950 and
+1956, which hold the full conditions). In the consultant's order:
 
-### 5.1 Self-checks out of the production boot
-
-Keep in the kernel the checks the item's evidence needs at boot (each named
-by a requirement's `/// Verifies:` tag); build the rest only into a test
-kernel (`--features checks`, the default of every `test-*` gate) or move
-them to host tests where they need no hardware. Replace every frame-counted
-wait with a wait on the state the check reads, as `sched::wait_until_gone`
-does. Interest removed: the first hotspot's conflicts, the largest flake
-source, and boot time on every gate and every user's machine.
-Open questions for the consultant: whether evidence from a test kernel
-counts for the production one (it is the same code with checks compiled
-in, which DO-178C accepts only with an argument), and which checks are
-evidence at all. About 13 points to design and split the first stage's
-checks; then a few points per stage.
-
-### 5.2 Generated files made, not committed
-
-`docs/generated/` and the coverage residuals become build outputs: CI makes
-them and publishes them, and `check-docs` checks only that they *can* be
-made from the tree. Coverage anchors move from line numbers to the function
-and a stable statement index, so a change that moves code carries nothing.
-Interest removed: 18% of all commits stop touching generated files; rebases
-stop colliding on them; the carry step and its review go. Open question for
-the consultant: certification wants the evidence fixed per baseline, which
-a tagged release's published copy gives, but the reviews must agree that it
-replaces the committed one. About 8 points for the documents, 13 for the
-anchors.
-
-### 5.3 Registration instead of central lists
-
-Each xtask test command and each panic number lives with its own module
-and registers itself: a table per module that a build step collects (the
-way `gen-panic-catalog.py` already generates `PANICS.md`), so a new feature
-adds a file and edits no shared one. Interest removed: the conflicts of
-every parallel feature in `main.rs`, `args.rs` and `catalog.rs`. No
-certification question for xtask; the panic catalog is item evidence, so
-the consultant reviews its new shape. About 5 points for xtask, 5 for the
-catalog.
+1. **xtask commands register themselves** (§4, central registries): OK, no
+   item question; the full row per landing. About 5 points. In progress on
+   branch `xtask-registry`. The panic catalog's half was **withdrawn**: a
+   reservation file only moves its conflict, and `catalog.rs` is item code.
+2. **`docs/generated/` made, not committed**: OK IF. Only output made
+   deterministically from the tree leaves it; `check-docs` generates it
+   twice and requires the same bytes, and fails if a check or generator
+   starts reading `docs/generated/` (none does: `model.json` is no
+   evidence). Measured coverage, the human-written coverage evidence and
+   `TRACEABILITY.md` stay committed. About 8 points.
+3. **Split `syscall/check.rs` and `stages_check.rs` per topic, and convert
+   their waits**: a pure move under standing pattern SP-2
+   (`docs/CONVENTIONS.md`), carried by span until F-75 is fixed; each wait
+   conversion under SP-1. No design review.
+4. **Coverage anchors by function, not line**: OK IF. Anchor = function
+   path + statement index + hash of the normalized body; an edited body
+   drops its evidence, a moved one carries it. A change to a T2 tool, so it
+   needs tool requirements, a validation suite (a seeded move carries, an
+   edit drops, a rename drops) and one full re-measure on all three
+   architectures against the line-anchored set. About 13 points.
+5. **Checks compiled out of the production boot**, last: OK IF (1)-(7).
+   The rule is the reverse of this document's first draft: a
+   `/// Verifies:` check is verification and may leave the shipped image;
+   a check the safety manual, security target or timing analysis claims as
+   run-time detection stays, as product code. First a classification table
+   (DIAGNOSTIC / VERIFICATION / UNCLAIMED) the consultant reviews; the
+   switch is an xtask `--cfg ferrix_checks`, never a Cargo feature; a gate
+   that shows product object code identical in both images; the production
+   image booted and its coverage published on every gate's architecture.
+   Evidence from the test kernel counts for the production one only with
+   that gate.

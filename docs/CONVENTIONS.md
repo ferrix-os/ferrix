@@ -203,6 +203,42 @@ do not need it. The review checks the rules the evidence rests on:
 The review is internal, not independent verification in the standards'
 sense (F-27, F-29).
 
+### Standing patterns: approved once, audited after
+
+Three shapes of change to the item need no per-landing review (the
+consultant, 2026-10-17, ledger line 1956). The commit carries the pattern's
+check-list answered item by item ("SP-1: (a) yes ..."); the consultant
+audits on `main` afterwards, and a false check-list sends its author back to
+per-landing review.
+
+* **SP-1, a flake fix in check code only.** (a) Only files matching
+  `test_file_patterns` change; (b) no `Verifies` tag, requirement statement
+  or id changes; (c) a frame-counted or sleep wait becomes a wait on the
+  state the check reads, with a stated timeout that fails loudly; (d) the
+  check's negative control re-run with `gate.sh control --expect` on the
+  landing patch, FIRED, its log and hash cited; (e) the flake's BACKLOG row
+  named and updated; (f) `carry-coverage.py` then
+  `gen-coverage-justification.py --check`, dropped anchors listed; (g) the
+  gates that boot the check PASSED on the landing hash. A new product helper
+  (a scheduler wait primitive, say) is not SP-1.
+* **SP-2, a pure move or split of item or check code.** Each moved function
+  listed old file to new file; a script diff showing every moved body
+  byte-identical; TRACEABILITY's requirement statuses and each
+  architecture's residual count identical to `main`'s (any turned row stops
+  the landing for review); the same boot lines on the four boots;
+  `check-item-boundary.py` passing with no ring change; no visibility widened
+  beyond `pub(crate)`; a moved `unsafe` keeps its trace. Until F-75 is fixed
+  the evidence is carried by span (`docs/backlog/red.md`, F-75's row).
+* **SP-3, a new check for an existing requirement, no product change.**
+  SP-1's (a); its `Verifies` names an existing id whose whole statement the
+  check proves; its negative control FIRED through `gate.sh`; traceability
+  regenerated, the only status change towards verified; the rows PASSED on
+  the landing hash.
+
+No pattern covers core product code, `unsafe`, countermeasures, requirement
+statements or new ids, ring moves, changes to the coverage tool, or
+findings: those keep the review above.
+
 ## Requirement ids are reserved before they are written
 
 On 2026-10-01 three unlanded branches each took "the next free id on
