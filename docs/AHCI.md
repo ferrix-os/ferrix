@@ -6,11 +6,12 @@ NVMe drive `docs/N150.md` had planned for. It booted the box's root on
 2026-10-15, from the unlanded branch `ahci` (4a0db8a97).
 
 **Evidence on `main`: QEMU q35 only.** `test-n150-sata` is a q35 test of the
-N150's disk configuration, not the box. What the box needed beyond the
-driver as landed (`ahci-land`) -- the C-bit fix and BSY wait (§3), the
-COMRESET of a link firmware left down, and the kernel's bring-up -- is
-parked on `ahci-n150-kernel` (a013115f6); §2 describes that branch's
-driver where they differ. Outside the certified item, as every driver process is
+N150's disk configuration, not the box. The driver's fixes from the box
+-- the C-bit fix and BSY wait (§3), the COMRESET of a link firmware left
+down -- landed with it (`ahci-land`). The kernel's bring-up the box also
+needs (the 2 KiB ABAR mapped as its page, decoding turned on, the
+console's and the clock's fallbacks, x2APIC) is on `main` since the n150k landing (ledger 1884),
+evidenced on QEMU only and not yet run on the box with checks on (BACKLOG). Outside the certified item, as every driver process is
 (`tools/common/data/certification-item.json`).
 
 ## 1. What it is
@@ -65,8 +66,8 @@ is up, naming its model, serial and size; one per failed request, up to
 
 ## 3. What the box taught it
 
-Seen on the unlanded branch `ahci`; the fix is parked on
-`ahci-n150-kernel`.
+Seen on the branch `ahci` before it landed; the fix is on `main` with
+the driver (`ahci-land`).
 
 QEMU completes a command at once, which hid one bug the box did not: every
 command header set the C bit (clear BSY on R_OK), so a real HBA cleared

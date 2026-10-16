@@ -95,6 +95,25 @@ W2's refused configuration read of the holder; its picture check is that no
 console pixel survives on the screen. §3's coverage runs do not give the
 option, so those lines are owed (`coverage-owed.json`).
 
+**Paths only the N150 box takes** (ledger 1822, 1884). No QEMU machine the
+suite boots has a BAR shorter than a page, a function firmware left
+undecoded, a missing transmit interrupt, an HPET that fails to open, or a
+TSC rate from CPUID, so those product paths are evidenced by stage 10's and
+stage 3's checks over made-up input (`check_widening` L.device.5,
+`check_decoding_refusals` L.device.1, `cpuid_rates` L.x86_64.38), by
+test-boot failing a reference boot on any fallback's WARNING line
+(`fallback_problem`, L.console.12 and L.x86_64.38), and by gate controls:
+the interrupt tables left out of the widening's page test, the reserved
+test of decoding defeated, the transmit interrupt never enabled, the
+writer made not to queue (FX-0504), the HPET's counter held still, the
+CPUID arithmetic halved, and the x2APIC end-of-interrupt removed under
+`ferrix.apic=x2apic` each fail the boot. The no-HPET, no-PIT case of
+L.x86_64.39 is the control `n150k3-ctl-no-clock` (KVM, `hpet=off,pit=off`:
+the 200 MHz floor's WARNING, then "no HPET, the PIT did not answer, and
+CPUID reports no TSC rate"); QEMU implements neither CPUID leaf, so the
+CPUID rate itself is BACKLOG's box row. x2APIC mode is booted by
+test-boot with `--kernel-option ferrix.apic=x2apic` under KVM and TCG.
+
 ---
 
 ## 3. Structural coverage

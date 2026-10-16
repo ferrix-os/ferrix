@@ -587,8 +587,8 @@ taken from either. It is three crates and a kernel change:
 **On the box (2026-10-15, built from branch `ahci` 4a0db8a97, `docs/N150.md`
 §13):** the link came up at 1 Gbit and the launcher reached the internet.
 The firmware had left the function's memory decoding off; enumeration
-turning it on is parked on `ahci-n150-kernel` (a013115f6), so from `main`
-the NIC does not come up on the box until that lands. The MSI vector never
+turns it on from `main` since the n150k landing (ledger 1884), where it is clear of memory and every
+other BAR, evidenced on QEMU only and not yet run on the box with checks on (BACKLOG). The MSI vector never
 delivers, so the driver runs on its polling fallback; why MSI never arrives
 on the box is not known.
 

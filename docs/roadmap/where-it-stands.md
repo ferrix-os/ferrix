@@ -587,9 +587,7 @@ keyboard, `/` on its SATA drive through a new AHCI driver, the YT6801's
 network, and `gryphlink` showing the launcher with its online notices; not
 logged in, nothing downloaded, and slow (an uncached framebuffer, and USB
 and NIC polling because MSI never arrives; `docs/N150.md` §13). The
-driver is on `main`; the kernel bring-up is parked on `ahci-n150-kernel`
-(a013115f6), so from `main` the box does not yet run the SATA path, the
-NIC or the boot console's fallback. Before that, Endfield's own launcher, a 64-bit Qt program with
+driver is on `main`, and the kernel bring-up since the n150k landing (ledger 1884), evidenced on QEMU only and not yet run on the box with checks on (BACKLOG). Before that, Endfield's own launcher, a 64-bit Qt program with
 QtWebEngine, drew its first screen on Ferrix in Wine, fetching its news
 over the network. On Ferrix, `arch_prctl` answers
 `ARCH_SET_GS` since 2026-10-10, which 64-bit Wine could not start without

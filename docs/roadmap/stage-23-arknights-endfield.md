@@ -191,9 +191,7 @@ since been deleted from the guest on the customer's word.
   Performance is really bad: the framebuffer was uncached (write-combining
   is on `main` since, untried on the box) and, with no MSI arriving, USB
   and the NIC poll ([`docs/N150.md`](../N150.md) §13). The kernel
-  bring-up is parked on `ahci-n150-kernel` (a013115f6): from `main` the
-  box does not yet run the SATA path, the NIC or the boot console's
-  fallback.
+  bring-up is on `main` since the n150k landing (ledger 1884), evidenced on QEMU only and not yet run on the box with checks on (BACKLOG).
 * *Not known, and worth stating:* whether ACE accepts Wine or Proton on
   Linux on bare metal. The reports above are of that, not of a VM, and
   none was checked here; ACE has broken under Wine more than once in 2026.
