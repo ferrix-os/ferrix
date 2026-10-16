@@ -80,7 +80,12 @@ table are in `docs/BACKLOG.md`. This skill does not repeat them.
   in the same minute, that is the account's usage limit, not a stall. Don't
   break locks or reassign work over that kind of silence.
 * Every failure seen on a gate has a row with its log, filed the day it was
-  seen.
+  seen. That includes each line of `fleet/batch/flakes.log`, the gates a
+  batch passed only on their rerun: no row filed means the flake goes unseen.
+* Once a week, `python3 tools/common/gen/debt-report.py`: read it as
+  `docs/TECH-DEBT.md` §3 says, and give a hotspot whose fix share or
+  coupling grew a row, or a paydown landing when it costs more than it is
+  worth.
 
 ## Running agents
 
