@@ -128,7 +128,7 @@ fn usage(harness: &Harness) -> Checked<u64> {
 }
 
 /// Wait until `ready`, or fail with `failure`.
-fn until(
+pub(super) fn until(
     process: &Process,
     ready: &dyn Fn() -> Checked<bool>,
     failure: &'static str,
@@ -150,11 +150,33 @@ fn until(
 
 /// Wait until the program has both counts moving and its waiter waiting.
 pub(super) fn wait_running(process: &Process) -> Checked<()> {
-    until(
+    until_running(
         process,
-        &|| running(process),
         "the program never had both counts moving and its waiter waiting",
     )
+}
+
+/// Wait until `process` is [`running`]; if it never is, say what each part
+/// of it read when the wait gave up, and fail with `failure`.
+fn until_running(process: &Process, failure: &'static str) -> Checked<()> {
+    let outcome = until(process, &|| running(process), failure);
+    if outcome == Err(failure) {
+        let tasks: Vec<(u8, u64)> = process
+            .tasks()
+            .iter()
+            .map(|task| (task.state(), task.runtime() / 1000))
+            .collect();
+        crate::console::println!(
+            "  freeze   gave up: the waiter's record {:?}, {} waiting on its word, counts {:?} \
+             and {:?}, tasks (state, microseconds run) {:?}",
+            try_word(process, 12),
+            futex::waiters_on(process, PAGE + 8),
+            try_word(process, 0),
+            try_word(process, 4),
+            tasks,
+        );
+    }
+    outcome
 }
 
 /// The program's two counts.
@@ -168,6 +190,16 @@ fn running(process: &Process) -> Checked<bool> {
         && futex::waiters_on(process, PAGE + 8) == 1
         && try_word(process, 0).is_some_and(|count| count != 0)
         && try_word(process, 4).is_some_and(|count| count != 0))
+}
+
+/// Every task of `process` blocked and off its run queue: switched out, its
+/// last slice charged (`CpuQueue::detach_current`, under the queue's lock
+/// with the charge), or ended.
+fn switched_out(process: &Process) -> bool {
+    process
+        .tasks()
+        .iter()
+        .all(|task| task.is_dead() || (task.is_blocked() && !task.is_queued()))
 }
 
 /// Require `cgroup.events` of `tail` to read exactly `expected`.
@@ -280,9 +312,8 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
     if !harness.reads(b"/check-fz/cgroup.freeze", b"0\n") {
         return Err("a new cgroup's cgroup.freeze does not read 0");
     }
-    until(
+    until_running(
         process,
-        &|| running(process),
         "the program never had both counts moving and its waiter waiting",
     )?;
     events(
@@ -322,10 +353,13 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
         return Err("cgroup.events did not poll POLLPRI when its cgroup froze");
     }
     // `frozen 1` is said when the last thread is counted parked, which is a
-    // moment before it is asleep: the tasks get a little while to be blocked.
+    // moment before it is asleep: the tasks get a little while to be blocked,
+    // and switched out -- a task marks itself blocked and runs on into the
+    // switch, which charges `cpu.stat` the slice it ends, so a usage read
+    // between the two moves once more without anything having run parked.
     until(
         process,
-        &|| Ok(job.frozen_seen() && process.every_task_blocked()),
+        &|| Ok(job.frozen_seen() && switched_out(process)),
         "a frozen cgroup's tasks are not all blocked",
     )?;
     let still = (word(process, 0)?, word(process, 4)?);
@@ -407,9 +441,8 @@ fn thaw_and_kill(harness: &mut Harness, process: &Process, still: (u32, u32)) ->
 fn kill_a_frozen_program(harness: &mut Harness) -> Checked<u32> {
     let program = start(harness, b"/check-fz")?;
     let process = &program.process;
-    until(
+    until_running(
         process,
-        &|| running(process),
         "a second program never had both counts moving and its waiter waiting",
     )?;
     let _ = harness

@@ -323,19 +323,38 @@ const KILL_NANOS: u64 = 250_000_000;
 /// the OOM killer reaches it the same way). The quota is a millisecond in a
 /// second, so the wait a kill that was not heard would cost is long.
 ///
+/// The program is seen running -- both counts moving, its waiter in its
+/// `FUTEX_WAIT` -- before the quota is written under it, not after: a
+/// millisecond a second, shared by three threads that wake together at each
+/// period's start, need not ever let the waiter be the one that runs, and
+/// on a slow emulated processor it did not for ten seconds (the waiter never
+/// made its call; FX-1301's "never had both counts moving"). Then the check
+/// waits for what it is about: the quota counted as run out and every thread
+/// asleep, which a throttled program is until the period ends.
+///
 /// Verifies: L.sched.3, H.QUOTA.10
 fn killed_throttled(harness: &mut Harness) -> Checked<u64> {
     if crate::arch::USER_STOPPED_PROGRAM.is_empty() {
         return Ok(0);
     }
     let _ = harness
-        .write(b"/check-c/cpu.max", b"1000 1000000\n")
-        .map_err(|_| "cpu.max refused 1000 1000000")?;
+        .write(b"/check-c/cpu.max", b"max 100000\n")
+        .map_err(|_| "cpu.max refused max")?;
     let program = freeze_check::start(harness, b"/check-c")?;
-    let ready = freeze_check::wait_running(&program.process);
-    // It has used its millisecond and is asleep until the period's end.
-    crate::sched::sleep_for(100_000_000);
-    let throttled = number(harness, b"/check-c/cpu.stat", "nr_throttled");
+    let throttled = freeze_check::wait_running(&program.process).and_then(|()| {
+        let _ = harness
+            .write(b"/check-c/cpu.max", b"1000 1000000\n")
+            .map_err(|_| "cpu.max refused 1000 1000000")?;
+        // It uses its millisecond and is asleep until the period's end.
+        freeze_check::until(
+            &program.process,
+            &|| {
+                Ok(number(harness, b"/check-c/cpu.stat", "nr_throttled")? != 0
+                    && program.process.every_task_blocked())
+            },
+            "a program under cpu.max 1000 1000000 was never throttled asleep",
+        )
+    });
     let asked = crate::timer::now_nanos();
     kill::send(&program.process, SIGKILL, Origin::Kernel);
     let deadline = asked.saturating_add(10_000_000_000);
@@ -344,10 +363,7 @@ fn killed_throttled(harness: &mut Harness) -> Checked<u64> {
     drop(program);
     let _ = harness.write(b"/check-c/cpu.max", b"max 100000\n");
     let emptied = freeze_check::wait_empty(harness, b"/check-c");
-    ready?;
-    if throttled? == 0 {
-        return Err("a program under cpu.max 1000 1000000 was not throttled by its first second");
-    }
+    throttled?;
     if took > KILL_NANOS {
         crate::console::println!(
             "  cpu      a SIGKILL took {} ms to end a throttled program",
