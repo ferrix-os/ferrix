@@ -150,11 +150,33 @@ fn until(
 
 /// Wait until the program has both counts moving and its waiter waiting.
 pub(super) fn wait_running(process: &Process) -> Checked<()> {
-    until(
+    until_running(
         process,
-        &|| running(process),
         "the program never had both counts moving and its waiter waiting",
     )
+}
+
+/// Wait until `process` is [`running`], or say what each part of it read when
+/// the wait gave up and fail with `failure`.
+fn until_running(process: &Process, failure: &'static str) -> Checked<()> {
+    let outcome = until(process, &|| running(process), failure);
+    if outcome == Err(failure) {
+        let states: Vec<(u8, usize)> = process
+            .tasks()
+            .iter()
+            .map(|task| (task.state(), task.cpu()))
+            .collect();
+        crate::console::println!(
+            "  freeze   gave up: waiter's record {:?}, waiters on its word {}, counts {:?} {:?}, \
+             tasks (state, processor) {:?}",
+            try_word(process, 12),
+            futex::waiters_on(process, PAGE + 8),
+            try_word(process, 0),
+            try_word(process, 4),
+            states,
+        );
+    }
+    outcome
 }
 
 /// The program's two counts.
@@ -280,9 +302,8 @@ fn freeze_a_program(harness: &mut Harness) -> Checked<u32> {
     if !harness.reads(b"/check-fz/cgroup.freeze", b"0\n") {
         return Err("a new cgroup's cgroup.freeze does not read 0");
     }
-    until(
+    until_running(
         process,
-        &|| running(process),
         "the program never had both counts moving and its waiter waiting",
     )?;
     events(
@@ -407,9 +428,8 @@ fn thaw_and_kill(harness: &mut Harness, process: &Process, still: (u32, u32)) ->
 fn kill_a_frozen_program(harness: &mut Harness) -> Checked<u32> {
     let program = start(harness, b"/check-fz")?;
     let process = &program.process;
-    until(
+    until_running(
         process,
-        &|| running(process),
         "a second program never had both counts moving and its waiter waiting",
     )?;
     let _ = harness
