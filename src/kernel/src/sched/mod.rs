@@ -313,13 +313,10 @@ pub(crate) fn throttle_current(leave: fn() -> bool) {
         if leave() {
             return;
         }
-        sleep_until(until.min(now.saturating_add(THROTTLE_LOOK_NS)));
+        sleep_until(until);
     }
 }
 
-/// How long a throttled task sleeps before it looks again for a reason to
-/// leave: a millisecond, the tick.
-const THROTTLE_LOOK_NS: u64 = 1_000_000;
 
 /// Run the calling task in `index`'s share, and charge what it does to it:
 /// for a check that acts as a program in a job would.
