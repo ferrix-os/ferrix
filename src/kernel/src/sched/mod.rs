@@ -300,9 +300,22 @@ fn throttled_here(cpu: usize) -> bool {
 /// machine with no `cpu.max` set pays one load.
 ///
 /// The wait is cut where `leave` says the task has something to deal with
-/// first -- a `SIGKILL`, a kill by its cgroup or the OOM killer, any signal:
-/// it is asked every [`THROTTLE_LOOK_NS`], so that a task a kill is for does
-/// not wait out the rest of a period (up to a second) to hear of it.
+/// first -- a `SIGKILL`, a kill by its cgroup or the OOM killer, any signal,
+/// a stop: each is posted with a wake of the task by name
+/// (`work::notify`), which ends the sleep for `leave` to be asked again, so
+/// that a task a kill is for does not wait out the rest of a period (up to
+/// a second) to hear of it. A `cpu.max` raised under it lets it go at the
+/// end of that period, as before.
+///
+/// **Asleep until then, not looking every millisecond (F-78).** A throttled
+/// task that woke at each tick to ask ran in the kernel a thousand times a
+/// second, and what it ran was charged to the job whose quota it had used
+/// up: on an idle host's emulated processors `cpu.max 20000 100000`
+/// measured 255 to 286 thousandths of the wall clock, where it now measures
+/// 209 to 210. Loaded hosts' sightings of 714 to 1050 (stage 13's "was not
+/// held to a fifth" rows) are from before the change and were not measured
+/// again under the same load after it. The cost: a wake missed here would
+/// hold a task to its period's end, where it held it a millisecond.
 pub(crate) fn throttle_current(leave: fn() -> bool) {
     if !quota::bandwidth_in_use() {
         return;
@@ -316,16 +329,21 @@ pub(crate) fn throttle_current(leave: fn() -> bool) {
         let Some(until) = quota::throttled_until(group, now) else {
             return;
         };
+        let _ = WaitQueue::wait_on_any(
+            &[&THROTTLED],
+            || leave() || quota::throttled_until(group, crate::timer::now_nanos()).is_none(),
+            until,
+            until.saturating_sub(now),
+        );
         if leave() {
             return;
         }
-        sleep_until(until.min(now.saturating_add(THROTTLE_LOOK_NS)));
     }
 }
 
-/// How long a throttled task sleeps before it looks again for a reason to
-/// leave: a millisecond, the tick.
-const THROTTLE_LOOK_NS: u64 = 1_000_000;
+/// What a throttled task sleeps on: nothing wakes it but the task's own
+/// wake and its period's end.
+static THROTTLED: WaitQueue = WaitQueue::new();
 
 /// Run the calling task in `index`'s share, and charge what it does to it:
 /// for a check that acts as a program in a job would.

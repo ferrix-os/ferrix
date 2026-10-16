@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "eed1014bafe09071ac81b15621874fc93c48896dd09b4263dc2f5f72b7db0f0a",
+  "digest": "20692d85c7669e0083ef5e8cb45d48a86d1531cd5a649abc51f92c4134c9d454",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -34938,7 +34938,7 @@
                   "qualifiedName": "FerrixSchedRequirements::Decisions::aThrottledTaskLeavesForAKill",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"throttle_current shall hold a task whose job or one above it has used its cpu.max quota until the period ends, looking every millisecond whether the way back to user mode has a kill, a signal or a stop to deal with, and leaving the wait if so.\"",
+                  "value": "\"throttle_current shall hold a task whose job or one above it has used its cpu.max quota until the period ends, and leave the wait before then when a kill, a signal or a stop is posted to the task.\"",
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 49

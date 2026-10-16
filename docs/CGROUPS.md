@@ -666,10 +666,14 @@ by whoever looks first. A task alone on a processor gets no tick, so
 and `nr_periods`, `nr_throttled` and `throttled_usec` where `cpu` is enabled;
 `nice_usec`, `core_sched.force_idle_usec` and the burst keys have no source.
 The limit is in the audit trail as a cgroup limit (`resource::CPU_MAX`).
-A throttled task sleeps to its period's end, in slices of a millisecond at each
-of which it asks whether a kill, a signal or a stop is for it (a victim of
-`SIGKILL`, `cgroup.kill` or the OOM killer is not held to the period's end), so
-a raised quota lets it go at the end of that period. `cpu.max` throttles a
+A throttled task sleeps to its period's end, woken before then only by a wake
+of the task itself, which every kill, signal and stop is posted with; it then
+asks whether one is for it (a victim of `SIGKILL`, `cgroup.kill` or the OOM
+killer is not held to the period's end), so a raised quota lets it go at the
+end of that period. Until 2026-10-16 it slept in slices of a millisecond and
+asked at each, and those looks were charged to the job whose quota they were
+waiting out, a throttled job using a quarter more than its quota on an idle
+host (F-78). `cpu.max` throttles a
 native task too, a ring-3 driver included. `cpu.idle` and `cpu.max.burst` are not built.
 
 **The charge kept back (po11-cpumax, 2026-10-08).** Walking the job's slots
