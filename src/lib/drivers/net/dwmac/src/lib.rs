@@ -596,6 +596,11 @@ impl<R: Registers, C: Clock, M: Memory, B: Pages> Driver<R, C, M, B> {
             regs::MAC_CST | regs::MAC_ACS | regs::MAC_DM,
         );
         regs.write(regs::MAC_INTERRUPT_ENABLE, 0);
+        // Out of power-down. The core's software reset leaves PMT as it
+        // was, and firmware or a wake-on-LAN set-up can leave PWRDWN with
+        // magic packets armed: the N150 box's YT6801 comes up with 0x3, and
+        // then sends but never receives (2026-10-17).
+        regs.write(regs::MAC_PMT_CONTROL_STATUS, 0);
         regs.write(regs::MMC_RX_INTERRUPT_MASK, u32::MAX);
         regs.write(regs::MMC_TX_INTERRUPT_MASK, u32::MAX);
         regs.write(regs::MMC_IPC_RX_INTERRUPT_MASK, u32::MAX);

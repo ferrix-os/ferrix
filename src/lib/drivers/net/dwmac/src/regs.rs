@@ -39,6 +39,10 @@ pub const RXQ0_ENABLED: u32 = 0b10;
 /// MAC interrupt enable: none are used.
 pub const MAC_INTERRUPT_ENABLE: u32 = 0x0B4;
 
+/// MAC PMT control and status: power-down, and the wake-up frames that end
+/// it. With `PWRDWN` set the receiver drops every frame but a wake-up one.
+pub const MAC_PMT_CONTROL_STATUS: u32 = 0x0C0;
+
 /// The core's release, in its low byte as `0x41` for 4.10 and so on.
 pub const MAC_VERSION: u32 = 0x110;
 /// Hardware feature register 1: FIFO sizes and address width.

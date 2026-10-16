@@ -265,6 +265,14 @@ fn bring_up_resets_the_core_and_programs_it() {
 }
 
 #[test]
+fn bring_up_takes_the_mac_out_of_a_power_down_its_reset_left() {
+    let rig = Rig::new();
+    rig.model.borrow_mut().pmt_after_reset = 0x3;
+    let _driver = rig.init(yt6801());
+    assert_eq!(rig.reg(regs::MAC_PMT_CONTROL_STATUS), 0);
+}
+
+#[test]
 fn every_receive_buffer_is_lent_at_bring_up_by_its_scattered_address() {
     let rig = Rig::new();
     let options = yt6801();

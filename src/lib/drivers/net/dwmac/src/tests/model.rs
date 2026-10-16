@@ -192,6 +192,10 @@ pub(crate) struct Model {
     /// The DMA stopped on a fatal bus error.
     pub(crate) bus_error: bool,
     pub(crate) resets: u32,
+    /// What PMT control and status holds after a software reset, which does
+    /// not clear it: the N150 box's YT6801 comes up with 0x3, power-down
+    /// with magic packets armed.
+    pub(crate) pmt_after_reset: u32,
     /// Every tail pointer write, (register, value).
     pub(crate) tails: Vec<(u32, u32)>,
 }
@@ -220,6 +224,7 @@ impl Model {
             missed: 0,
             bus_error: false,
             resets: 0,
+            pmt_after_reset: 0,
             tails: Vec::new(),
         }
     }
@@ -270,6 +275,7 @@ impl Model {
         self.rx_current = 0;
         self.reset_reads = 2;
         self.set_reg(regs::DMA_MODE, regs::DMA_SWR);
+        self.set_reg(regs::MAC_PMT_CONTROL_STATUS, self.pmt_after_reset);
     }
 
     pub(crate) fn register_read(&mut self, offset: u32) -> u32 {
