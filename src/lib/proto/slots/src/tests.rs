@@ -507,7 +507,7 @@ fn the_gpt_scan_trusts_nothing() {
     bad[0] = b'X';
     assert_eq!(
         gpt::parse_header(&bad, DISK_BLOCKS, 512),
-        Err(GptError::Header)
+        Err(GptError::NoSignature)
     );
     let mut bad = header.clone();
     bad[40] ^= 1;

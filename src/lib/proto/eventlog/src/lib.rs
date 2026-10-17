@@ -39,7 +39,7 @@
 #![forbid(unsafe_code)]
 
 use ferrix_bootinfo::pstore::{self, HEADER_BYTES, Text};
-use ferrix_slots::gpt::Part;
+use ferrix_slots::gpt::{GptError, Lookup, Part};
 use ferrix_slots::record::{ControlDisk, DeviceError};
 
 pub use ferrix_slots::gpt::EVENTS_TYPE;
@@ -211,6 +211,65 @@ impl Geometry {
             return None;
         }
         RECORDS_OFFSET.checked_add(u64::from(slot).checked_mul(RECORD_LEN as u64)?)
+    }
+}
+
+/// What a writer learned of the boot disk's partition table, for
+/// [`classify`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scan {
+    /// The disk could not be read, or its table could not: a firmware or
+    /// device failure.
+    Unreadable,
+    /// The table was read, and `gpt::find_one` answered.
+    Scanned(Result<Part, Lookup>),
+}
+
+/// Whether the boot disk has an event log, and whether it can take a record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Store {
+    /// No log: no GUID partition table at all, or none of the log's type.
+    /// The pstore goes on as PM3's (`docs/POSTMORTEM.md` §3.3).
+    Absent,
+    /// One log, usable.
+    Present(Geometry),
+    /// A log may be there and cannot be used: the record must not be let go
+    /// (fail closed).
+    Unusable(Unusable),
+}
+
+/// Why a log that may be there cannot be used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unusable {
+    /// The disk or its table could not be read.
+    Read,
+    /// The table is damaged, or the log's entry is outside the usable blocks
+    /// or overlaps another.
+    Table(GptError),
+    /// More than one partition of the log's type.
+    Many,
+    /// The partition is too small, or the disk's block size is not one the
+    /// log is kept on.
+    Geometry(Refusal),
+}
+
+/// Decide from `scan` whether the boot disk's log is absent, usable, or
+/// present but unusable, on a disk of `block_size`-byte blocks. Only a disk
+/// with no GPT signature and a table with no partition of the log's type
+/// are absent; every other failure is [`Store::Unusable`], so that a record
+/// is never dropped on the machine that has a log because the log could not
+/// be read (the consultant's (2), ledger line 2195).
+#[must_use]
+pub fn classify(scan: Scan, block_size: u32) -> Store {
+    match scan {
+        Scan::Unreadable => Store::Unusable(Unusable::Read),
+        Scan::Scanned(Err(Lookup::Missing | Lookup::Table(GptError::NoSignature))) => Store::Absent,
+        Scan::Scanned(Err(Lookup::Many)) => Store::Unusable(Unusable::Many),
+        Scan::Scanned(Err(Lookup::Table(why))) => Store::Unusable(Unusable::Table(why)),
+        Scan::Scanned(Ok(part)) => match Geometry::of(&part, block_size) {
+            Ok(geometry) => Store::Present(geometry),
+            Err(why) => Store::Unusable(Unusable::Geometry(why)),
+        },
     }
 }
 

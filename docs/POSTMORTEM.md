@@ -175,8 +175,15 @@ staged:
    region is **not** renewed: it stays allocated (so the kernel never uses
    its pages), is not handed over, and the boot goes without a pstore, said
    on the console; the record waits in RAM for the next boot or the
-   inspection Linux (the consultant's E2). A disk with no event log
-   partition keeps PM3's behaviour: the record is reported, then renewed.
+   inspection Linux (the consultant's E2). The same holds when a log may be
+   there and cannot be used (`ferrix_eventlog::classify`, fail closed):
+   more than one partition of the log's type, a damaged table or entry
+   array, a log entry outside the usable blocks or overlapping another, a
+   partition too small or a block size the log is not kept on, or a failed
+   read of the disk or its table. Only a disk with no GPT signature (or a
+   boot volume that is a whole disk) and a table with no partition of the
+   log's type count as absent, and keep PM3's behaviour: the record is
+   reported, then renewed.
    Then write a fresh header: sequence = previous + 1 (or 1), `written` = 0.
    The ring is not cleared (1 MiB of writes for nothing: only `written`
    decides what is text).
@@ -418,9 +425,12 @@ left for its own review. Nothing is ever logged as "power loss" or "hang".
 ### 4.2 What writes it, and nothing else (E1)
 
 * **EL1** The loader writes only blocks of the boot disk's one partition of
-  the event log's type, through that disk's Block I/O; none, or more than
-  one (`gpt::find_one`'s `Missing` and `Many`), or a damaged table, or an
-  entry outside the usable blocks or overlapping another -> no write, said.
+  the event log's type, through that disk's Block I/O. `classify` decides
+  (host test `a_present_but_unusable_log_is_never_taken_for_absent`): no
+  GPT signature or no partition of the type -> absent, no write, nothing
+  said; more than one, a damaged table, an entry outside the usable blocks
+  or overlapping another, a partition too small, a failed read -> unusable:
+  no write, said, and the pstore record kept in RAM (§3.3, 4).
 * **EL2** Every block address it reads or writes comes from
   `Geometry::lba`, which refuses an offset that is not a whole block or a
   block not wholly inside the partition (host test
@@ -478,13 +488,23 @@ starting with boot 1's panic line. Host tests in `ferrix-eventlog`: the
 formats and every refused field, the CRC across head and text, the text's
 composition and truncation, 300 hostile regions, idempotence, the collapse,
 the ring's wrap, torn appends, torn header copies, and the range check.
-Controls (`fleet/gate.sh control`): the append moved after the pstore
-header's renewal (the gate: boot 2 keeps nothing); the record's CRC check
-removed (`a_record_round_trips_and_a_changed_byte_is_refused`); the range
-check removed (`no_address_outside_the_partition`); the identity check
-removed (`the_same_pstore_record_is_appended_once`).
+Controls (`fleet/gate.sh control`, each FIRED): `ev-ctl-order`, the append
+moved after the pstore header's renewal (the gate: boot 2 keeps nothing);
+and with `--expect-host` on `check`: `ev2-ctl-crc`, the record's CRC check
+removed (`a_record_round_trips_and_a_changed_byte_is_refused`);
+`ev2-ctl-range`, the range check removed
+(`no_address_outside_the_partition`); `ev2-ctl-identity`, the identity check
+removed (`the_same_pstore_record_is_appended_once`); `ev2-ctl-classify`, a
+table with two logs answered as absent
+(`a_present_but_unusable_log_is_never_taken_for_absent`).
 
 ## 5. Where it stands
+
+2026-10-17, PM4: code verdict **OK IF (1)-(6)** (consultant ledger line
+2195), after the design's OK IF (E1)-(E12) (line 2153). E1's deviation,
+accepted: the loader writes through the boot disk's whole-disk Block I/O,
+every address bounded by `Geometry::lba`, not the partition's own handle,
+as AB-BOOT's control record does.
 
 2026-10-11:
 

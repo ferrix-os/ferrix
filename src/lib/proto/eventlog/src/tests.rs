@@ -539,3 +539,61 @@ fn a_header_copy_torn_falls_back_to_the_other() {
     assert_eq!(header.map(|h| h.appended), Some(2));
     assert_eq!(listing(&mut disk).len(), 2);
 }
+
+/// Verifies the absent/unusable decision (the consultant's (2)).
+#[test]
+fn a_present_but_unusable_log_is_never_taken_for_absent() {
+    use ferrix_slots::gpt::{GptError, Lookup};
+    let unusable = |store: Store| matches!(store, Store::Unusable(_));
+    // Absent: no GPT at all, or no partition of the type.
+    assert_eq!(
+        classify(Scan::Scanned(Err(Lookup::Missing)), 512),
+        Store::Absent
+    );
+    assert_eq!(
+        classify(
+            Scan::Scanned(Err(Lookup::Table(GptError::NoSignature))),
+            512
+        ),
+        Store::Absent
+    );
+    // Unusable: two logs, an overlapping one, a damaged table or array, a
+    // too small one, a block size the log is not kept on, a read error.
+    assert_eq!(
+        classify(Scan::Scanned(Err(Lookup::Many)), 512),
+        Store::Unusable(Unusable::Many)
+    );
+    for why in [
+        GptError::Overlap,
+        GptError::Range,
+        GptError::Entries,
+        GptError::Header,
+    ] {
+        assert_eq!(
+            classify(Scan::Scanned(Err(Lookup::Table(why))), 512),
+            Store::Unusable(Unusable::Table(why)),
+            "{why:?}"
+        );
+    }
+    let small = Part {
+        last_lba: N150.first_lba + 16 + 63,
+        ..N150
+    };
+    assert!(
+        unusable(classify(Scan::Scanned(Ok(small)), 512)),
+        "too small"
+    );
+    assert!(
+        unusable(classify(Scan::Scanned(Ok(N150)), 520)),
+        "block size"
+    );
+    assert_eq!(
+        classify(Scan::Unreadable, 512),
+        Store::Unusable(Unusable::Read)
+    );
+    // Usable: the box's.
+    assert_eq!(
+        classify(Scan::Scanned(Ok(N150)), 512),
+        Store::Present(geometry())
+    );
+}

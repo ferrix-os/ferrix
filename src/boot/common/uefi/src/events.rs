@@ -13,7 +13,7 @@
 use core::ptr;
 
 use ferrix_bootinfo::pstore::{self, HEADER_BYTES};
-use ferrix_eventlog::{self as eventlog, AppendError, Geometry, Outcome, RECORD_LEN};
+use ferrix_eventlog::{self as eventlog, AppendError, Geometry, Outcome, RECORD_LEN, Scan, Store};
 use ferrix_slots::gpt::{self, Lookup};
 
 use crate::console::println;
@@ -24,7 +24,7 @@ use crate::uefi::tables::MemoryType;
 const SHOWN: usize = 160;
 
 /// The event log on the boot disk, opened.
-pub(crate) struct Store {
+pub(crate) struct Log {
     disk: Disk,
     geometry: Geometry,
 }
@@ -39,30 +39,45 @@ pub(crate) enum Kept {
     Failed,
 }
 
-/// Open the boot disk's event log, or say why there is none. `None` with
-/// nothing said when the boot disk has no partition table or no partition
-/// of the log's type: every machine set up without one.
-pub(crate) fn open(services: &Services) -> Option<Store> {
-    let disk = services.boot_disk().ok().flatten()?;
-    let part = match find(services, &disk) {
-        Ok(part) => part,
-        Err(Lookup::Missing | Lookup::Table(gpt::GptError::Header)) => return None,
-        Err(why) => {
-            println!("  events   not used: the partition table ({why:?}); nothing written");
-            return None;
+/// The boot disk's event log, as [`open`] found it.
+pub(crate) enum Opened {
+    /// None: no partition table, or no partition of the log's type. PM3's
+    /// path: the record is reported and renewed.
+    Absent,
+    /// One, usable.
+    Present(Log),
+    /// One may be there and cannot be used: a record found must be kept in
+    /// RAM, not renewed (fail closed; `ferrix_eventlog::classify`).
+    Unusable,
+}
+
+/// Open the boot disk's event log. Absent is said nothing of: every machine
+/// set up without one; unusable is said.
+pub(crate) fn open(services: &Services) -> Opened {
+    let disk = match services.boot_disk() {
+        // A volume that is a whole disk, today's bare FAT image: no table.
+        Ok(None) => return Opened::Absent,
+        Ok(Some(disk)) => disk,
+        Err(_) => {
+            println!("  events   the boot disk cannot be opened: a record found stays in RAM");
+            return Opened::Unusable;
         }
     };
-    match Geometry::of(&part, disk.block_size) {
-        Ok(geometry) => Some(Store { disk, geometry }),
-        Err(why) => {
-            println!("  events   not used: the partition ({why:?}); nothing written");
-            None
+    let scan = scan(services, &disk);
+    match eventlog::classify(scan, disk.block_size) {
+        Store::Absent => Opened::Absent,
+        Store::Present(geometry) => Opened::Present(Log { disk, geometry }),
+        Store::Unusable(why) => {
+            println!(
+                "  events   the event log cannot be used ({why:?}): a record found stays in RAM"
+            );
+            Opened::Unusable
         }
     }
 }
 
 /// Keep the panic record the pstore region holds in the log.
-pub(crate) fn keep(store: &mut Store, services: &Services, region: Allocation) -> Kept {
+pub(crate) fn keep(store: &mut Log, services: &Services, region: Allocation) -> Kept {
     let Some(mut buffers) = Buffers::new(services) else {
         println!("  events   no memory for the append: the record stays in RAM");
         return Kept::Failed;
@@ -108,7 +123,7 @@ pub(crate) fn keep(store: &mut Store, services: &Services, region: Allocation) -
 }
 
 /// Say what the log holds: how many records, and the newest.
-pub(crate) fn summary(store: &mut Store, services: &Services) {
+pub(crate) fn summary(store: &mut Log, services: &Services) {
     let Some(mut buffers) = Buffers::new(services) else {
         return;
     };
@@ -125,7 +140,7 @@ pub(crate) fn summary(store: &mut Store, services: &Services) {
 }
 
 /// The summary line of a log with a header.
-fn newest(store: &mut Store, header: &eventlog::Header, buffer: &mut [u8]) {
+fn newest(store: &mut Log, header: &eventlog::Header, buffer: &mut [u8]) {
     let held = header.appended.min(u64::from(store.geometry.records()));
     let Some(slot) = header.newest_slot(store.geometry.records()) else {
         println!(
@@ -173,24 +188,32 @@ fn failed(why: AppendError) {
     println!("  events   the append failed ({why:?}): the record stays in RAM for the next boot");
 }
 
-/// Read the GPT and find the log's partition.
-fn find(services: &Services, disk: &Disk) -> Result<gpt::Part, Lookup> {
+/// Read the GPT and look for the log's partition: what `classify` decides
+/// from. A block size the log cannot be read in, a failed read or a failed
+/// allocation is `Unreadable`.
+fn scan(services: &Services, disk: &Disk) -> Scan {
     let size = u64::from(disk.block_size);
     if !(512..=u64::from(eventlog::MAX_BLOCK)).contains(&size) {
-        return Err(Lookup::Table(gpt::GptError::Header));
+        return Scan::Unreadable;
     }
-    let block = read(services, disk, 1, size).ok_or(Lookup::Table(gpt::GptError::Header))?;
+    let Some(block) = read(services, disk, 1, size) else {
+        return Scan::Unreadable;
+    };
     let header = gpt::parse_header(block.bytes(size), disk.blocks(), disk.block_size);
     block.free(services);
-    let header = header.map_err(Lookup::Table)?;
+    let header = match header {
+        Ok(header) => header,
+        Err(why) => return Scan::Scanned(Err(Lookup::Table(why))),
+    };
     let array_bytes = header.array_bytes();
-    let array = read(
+    let Some(array) = read(
         services,
         disk,
         header.entries_lba,
         array_bytes.div_ceil(size) * size,
-    )
-    .ok_or(Lookup::Table(gpt::GptError::Entries))?;
+    ) else {
+        return Scan::Unreadable;
+    };
     let found = gpt::find_one(
         &header,
         array.bytes(array_bytes),
@@ -198,7 +221,7 @@ fn find(services: &Services, disk: &Disk) -> Result<gpt::Part, Lookup> {
         gpt::EVENTS_TYPE,
     );
     array.free(services);
-    found
+    Scan::Scanned(found)
 }
 
 /// Pages of the loader's own, read from the disk.

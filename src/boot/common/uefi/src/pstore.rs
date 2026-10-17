@@ -64,7 +64,7 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
     // bytes, identity mapped under boot services, and nothing else refers to
     // it; it is read before anything writes it.
     let header = unsafe { ptr::read_volatile(region.address as *const [u8; HEADER_BYTES]) };
-    let mut store = events::open(services);
+    let mut opened = events::open(services);
     let sequence = match pstore::validate(&header, region.len) {
         Ok(found) => {
             report(region, &found);
@@ -72,16 +72,20 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
             // (POSTMORTEM §4, E2); a failed append keeps the region as it
             // is, still allocated so the kernel never uses its pages, and
             // this boot goes without one.
-            if let Some(store) = store.as_mut() {
-                let kept = events::keep(store, services, region);
-                if matches!(kept, events::Kept::Failed) {
-                    events::summary(store, services);
-                    println!(
-                        "  pstore   boot {}'s record kept in RAM, not handed over: {NONE}",
-                        found.sequence
-                    );
-                    return None;
+            let kept = match &mut opened {
+                events::Opened::Absent => events::Kept::NotAPanic,
+                events::Opened::Unusable => events::Kept::Failed,
+                events::Opened::Present(log) => events::keep(log, services, region),
+            };
+            if matches!(kept, events::Kept::Failed) {
+                if let events::Opened::Present(log) = &mut opened {
+                    events::summary(log, services);
                 }
+                println!(
+                    "  pstore   boot {}'s record kept in RAM, not handed over: {NONE}",
+                    found.sequence
+                );
+                return None;
             }
             found.sequence.wrapping_add(1).max(1)
         }
@@ -93,8 +97,8 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
             1
         }
     };
-    if let Some(store) = store.as_mut() {
-        events::summary(store, services);
+    if let events::Opened::Present(log) = &mut opened {
+        events::summary(log, services);
     }
     renew(region, sequence);
     // The Arm architectures turn the caches off in the switch to the kernel,

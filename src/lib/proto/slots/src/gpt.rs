@@ -127,7 +127,10 @@ impl Layout {
 /// Why a disk has no A/B layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GptError {
-    /// The header is not a GPT header, or is damaged.
+    /// Block 1 does not start with the GPT signature: the disk has no GUID
+    /// partition table at all.
+    NoSignature,
+    /// The header has the signature but is damaged, or does not fit the disk.
     Header,
     /// The entry array's CRC-32 does not match, or it is too large.
     Entries,
@@ -149,7 +152,7 @@ pub enum GptError {
 /// blocks of `block_size` bytes.
 pub fn parse_header(sector: &[u8], blocks: u64, block_size: u32) -> Result<Header, GptError> {
     if sector.get(..8) != Some(&SIGNATURE[..]) {
-        return Err(GptError::Header);
+        return Err(GptError::NoSignature);
     }
     let size = le32(sector, 12).ok_or(GptError::Header)? as usize;
     if !(92..=512).contains(&size) || size > sector.len() || size > block_size as usize {
