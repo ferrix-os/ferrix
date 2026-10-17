@@ -27,11 +27,10 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`random`](#random) | 2 | 2 | 2 | 1 |
 | [`audit`](#audit) | 1 | - | - | 1 |
 | [`claim`](#claim) | 1 | - | - | 1 |
-| [`iommu`](#iommu) | - | 1 | 1 | 1 |
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
 | [`user`](#user) | - | - | 1 | 1 |
-| **Total** | **129** | **177** | **233** | 38 |
+| **Total** | **129** | **176** | **232** | 37 |
 
 ---
 
@@ -88,6 +87,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | epoll-ready-list, a wait queue's marks and epoll's ready list (L.sched.74, L.sched.75, L.sched.76; consultant ledger 2029, condition (12)) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet (carry-coverage.py dropped no anchor). | sched/wait.rs: ReadyList::{new, queue, reserve, take, tells, listed}, Mark::{new, clear, is_listed, tell}, WaitQueue::{hook, unhook, count_hooks, hooks, tell_marks}, wake_all_with's count read and tell, Drop for WaitQueue, arm_hook_meet/hook_meet_arrived/release_hook_meet/hook_meet; sched/mark_check.rs (check code). Reached on every boot by stage 5's three mark cases and by every epoll wait from stage 8 on: measure them on each architecture's run. Failure paths, argued rather than reached: hook's refused push and refused box (no memory; reached by fs::epoll_check's refused-hook case through fallible::inject_once, which is load-ring evidence), unhook's refused shrink (no memory: the list keeps its room), Mark::tell's overflow store (reached by the listed-once case), ReadyList::take's short-room arm (defensive: every caller reserves the list's own room), count_hooks's saturating conversion (more than u32::MAX marks cannot be charged), and hook_meet's patience running out (a check that never releases it). Negative controls on the landing's change commit (named in the commit message): er-ctl-74a the tell taken out of wake_all_with, er-ctl-74b unhook leaving the entry, er-ctl-74c the drop telling nothing, er-ctl-75 the count read before the meet, er-ctl-76a the listing ignoring the mark's state, er-ctl-76b the overflow not flagged, er-ctl-76c the list's queue not woken. |
 | cr0-ne, CR0's x87 controls on every x86-64 processor (L.x86_64.178, F-79; consultant ledger 2098, condition (6)) | x86_64 | new code; no coverage run has measured it yet (carry-coverage.py dropped no anchor). | arch/x86_64/cpu.rs take_x87_controls, x87_controls_held, write_cr0; mod.rs init_traps' x87 lines and check_x87_controls; smp.rs secondary_start's take and X87_CONTROLS_TAKEN count and CpuStarter::new's CR0 with NE masked; trap/check.rs check_x87_controls and look_at_x87_controls (check code). Reached on every x86-64 boot, by the bring-up of each processor and stage 4's x87 line: measure them on the x86-64 run. Arms argued rather than reached: init_traps' "which firmware had left clear" arm (QEMU's firmware sets CR0.NE, so no emulated boot reaches it; control A, cr0ne-ctl-a, reaches the clear reading's effect and the N150's AMI firmware reaches the arm itself -- other-configuration), and its "did not take" arm (a CR0 that will not hold NE, MP, EM and TS as written: no x86-64 processor -- absent-hardware; controls A and B reach stage 4's refusal). check_x87_controls' "did not report" and bring-up-count refusals are defensive (run_everywhere either reaches every processor or errs first; control B reaches the read-back refusal before the count). |
 | m0-flags, M0's build flags and the boot line (consultant ledger 2208, condition (4)) | x86_64, aarch64, armv7a | audit/check.rs pinned()'s lines 310, 314, 323, 327 and 328 left the verification map: carry-coverage.py dropped them from `reached` as edited (BOOT_RECORDS 8 -> 9); no residual or argued anchor was dropped. | audit/check.rs pinned(), H.AUD.2's verifier: the lines BOOT_RECORDS 9 changed (298's ten records, 310's read, 314's nine sequence numbers, 320's refusal, 323's ring read, 327-328's resumed read), reached on every boot by the stage's audit check: measure them on each architecture's run. With them the new item code no run has measured yet: build_flags.rs report and audit_words (the build line and Config::Build's words, reached on every boot), audit/check.rs kernel_store's Config::Build row, and boot_checks.rs's COMPILED_IN in run. |
+| vtd-n150, VT-d on the N150's units (consultant ledger 2122 (15), 2174, 2235 (C1)) | x86_64, aarch64, armv7a | 13 anchors carry-coverage.py dropped as unmeasured: x86_64 residual iommu.rs 263 and iommu/vtd.rs 470, argument iommu.rs:263; aarch64 and armv7a each residual iommu/vtd.rs 396, 401, 404, 439-441, 443, 469-470, 485, 654-655, 657, 863 and iommu.rs 263, 1176, 1191, 1213, arguments iommu.rs:263, 1191, 1213 (other-architecture). audit/check.rs pinned()'s lines changed again (BOOT_RECORDS 9 -> 10) and kernel_store's Config::Vtd row is new. | the new item code no run has measured: iommu/vtd.rs open's accept path, say_refused, translate's PMR arms, take_fault's record scan, install's Walk::aw, map/unmap/resolve's four-level arms; iommu.rs explicit_dmar, record_scopes, record_catch_alls, say_unit, translates, vtd_off_asked, report_unchecked_faults and vtd_unit_for's catch-all; audit/check.rs pinned() at eleven records and kernel_store's Config::Vtd row. QEMU reaches the four-level arms only on --vtd-aw48's row and none of the version-4/5, catch-all, RMRR-hold, PMR-clear or multi-record arms: those stay argued with the N150's log (BACKLOG fl-071). |
 
 ---
 
@@ -158,7 +158,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 325, 718, 1341 |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 326, 722, 1349 |
 
 ---
 
@@ -241,14 +241,6 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `claim.rs` | `core` | 1 | 0 | 0 | 0 | - |
-
----
-
-## `iommu`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `iommu.rs` | `core` | 0 | 1 | 1 | 0 | - |
 
 ---
 
