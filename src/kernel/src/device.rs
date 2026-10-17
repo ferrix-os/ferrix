@@ -1824,6 +1824,13 @@ impl DeviceNode {
         } else {
             command & !COMMAND_BUS_MASTER
         };
+        // CONTROL: a host bridge whose Bus Master Enable is hard-wired 1, as
+        // on Alder Lake-N.
+        let value = if self.pci.as_ref().is_some_and(|f| f.class >> 8 == 0x0600) {
+            value | COMMAND_BUS_MASTER
+        } else {
+            value
+        };
         config.write16(ConfigWrites::FUNCTION, COMMAND, value);
         config.state.bus_master = on;
         config.state.memory |= on;
@@ -2003,10 +2010,15 @@ impl DeviceNode {
             Ok(mut config) => {
                 self.refused.store(true, Ordering::Release);
                 let command = config.read16(ConfigWrites::FUNCTION, COMMAND);
+                let hardwired = if self.pci.as_ref().is_some_and(|f| f.class >> 8 == 0x0600) {
+                    COMMAND_BUS_MASTER
+                } else {
+                    0
+                };
                 config.write16(
                     ConfigWrites::FUNCTION,
                     COMMAND,
-                    command & !COMMAND_BUS_MASTER,
+                    (command & !COMMAND_BUS_MASTER) | hardwired,
                 );
                 config.state.bus_master = false;
             }

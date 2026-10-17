@@ -301,8 +301,18 @@ fn bus_master_toggles(node: &DeviceNode, host: bool) -> Result<bool, &'static st
         .map_err(|_| "a function's configuration space could not be mapped to probe it")?;
     let registers = crate::mmio::Mmio::at(config);
     let at = u64::from(COMMAND);
+    if node.pci_function().is_some_and(|f| f.class >> 8 == 0x0600) {
+        // CONTROL: the hard-wired bit reads 1 from the start.
+        registers.write16(at, registers.read16(at) | COMMAND_BUS_MASTER);
+    }
     let found = registers.read16(at);
     let wrote = |value: u16| {
+        // CONTROL: as the hard-wired host bridge in device.rs.
+        let value = if node.pci_function().is_some_and(|f| f.class >> 8 == 0x0600) {
+            value | COMMAND_BUS_MASTER
+        } else {
+            value
+        };
         registers.write16(at, value);
         registers.read16(at)
     };
