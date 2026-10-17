@@ -266,6 +266,8 @@ fn introduce(
         timings,
         // The framebuffer reads nothing on its own: every frame is copied.
         copies: true,
+        // The core's own choice of connector type.
+        connectors: [0; MAX_SCANOUTS],
     };
     let share = port
         .as_owned()

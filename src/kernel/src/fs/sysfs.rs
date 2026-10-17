@@ -1575,7 +1575,7 @@ fn render(dir: Dir, attr: Attr) -> Result<Vec<u8>> {
                 .nth(head)
                 .ok_or(Errno::ENOENT)?;
             match attr {
-                Attr::Edid => out.extend_from_slice(shown.edid(head).unwrap_or_default()),
+                Attr::Edid => out.extend_from_slice(&shown.edid(head).unwrap_or_default()),
                 Attr::Status => drm_text::status(&mut out, connector.connected),
                 Attr::Enabled => drm_text::enabled(&mut out, connector.connected),
                 _ => drm_text::modes(&mut out, &connector.modes),

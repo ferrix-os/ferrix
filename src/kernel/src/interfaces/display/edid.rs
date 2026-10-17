@@ -1,5 +1,6 @@
 //! The EDID each connector carries: the file `drm.edid_firmware=` names for
-//! it, read from `/lib/firmware` when the card is taken up.
+//! it, read from `/lib/firmware` when the card is taken up, or else the one
+//! its driver read from the display (displayctl v10's EDID).
 //!
 //! `docs/DISPLAY.md` §7 says why here and not in the driver. Linux's DRM
 //! core does the same in `drm_edid_load.c`; the grammar and the checks are
@@ -25,15 +26,17 @@ pub(crate) fn connector_name(kind: u32, head: usize) -> String {
     format!("{}-{}", connector_type_name(kind), head.saturating_add(1))
 }
 
-/// Each head's EDID, for the `heads` connectors of type `kind` on card
-/// `card`: what the command line's `drm.edid_firmware` names for each, read
+/// Each head's EDID, for card `card`'s connectors of types `kinds`, one a
+/// head: what the command line's `drm.edid_firmware` names for each, read
 /// and checked, with a boot line for each file named.
-pub(crate) fn load(card: u32, kind: u32, heads: usize) -> Vec<Option<Vec<u8>>> {
+pub(crate) fn load(card: u32, kinds: &[u32]) -> Vec<Option<Vec<u8>>> {
     let setting = core::str::from_utf8(fs::procfs::command_line())
         .ok()
         .and_then(|line| option_in(line, PARAMETER));
-    (0..heads)
-        .map(|head| {
+    kinds
+        .iter()
+        .enumerate()
+        .map(|(head, &kind)| {
             let connector = connector_name(kind, head);
             let file = setting.and_then(|setting| edid::firmware_for(setting, &connector))?;
             let found = read(file);
@@ -77,6 +80,58 @@ pub(crate) fn load(card: u32, kind: u32, heads: usize) -> Vec<Option<Vec<u8>>> {
             found.ok().map(|(bytes, _)| bytes)
         })
         .collect()
+}
+
+/// The EDID card `card`'s driver read from the display on `connector`,
+/// checked as a file is, with a line saying what it is: `None` for none, for
+/// bytes that are not an EDID, and for one a file `drm.edid_firmware` names
+/// wins over (`overridden`), which is kept rather than this.
+pub(crate) fn from_driver(
+    card: u32,
+    connector: &str,
+    bytes: &[u8],
+    overridden: bool,
+) -> Option<Vec<u8>> {
+    if bytes.is_empty() {
+        println!("  display  card{card} {connector}: its driver says the display has no EDID");
+        return None;
+    }
+    let mut taken = bytes.to_vec();
+    let checked = match edid::check(&mut taken) {
+        Ok(checked) => checked,
+        Err(why) => {
+            println!(
+                "  display  card{card} {connector}: its driver's EDID is not an EDID: {why}; \
+                 the connector has none from it"
+            );
+            return None;
+        }
+    };
+    taken.truncate(checked.len);
+    let said = edid::identity(&taken).map(|monitor| {
+        let text = |part: Option<edid::Text>| {
+            part.map(|text| format!(" {}", text.as_str()))
+                .unwrap_or_default()
+        };
+        format!(
+            "{}{}{}",
+            monitor.manufacturer(),
+            text(monitor.name),
+            text(monitor.serial)
+        )
+    });
+    println!(
+        "  display  card{card} {connector}: EDID from its driver: {}, {} extension{}{}",
+        said.as_deref().unwrap_or("?"),
+        checked.extensions,
+        if checked.extensions == 1 { "" } else { "s" },
+        if overridden {
+            format!("; the file {PARAMETER} names is kept")
+        } else {
+            String::new()
+        }
+    );
+    Some(taken)
 }
 
 /// Read `/lib/firmware/<file>` and check it, or say why not.

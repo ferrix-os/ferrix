@@ -452,6 +452,8 @@ fn introduce(
         timings,
         // The LTDC reads the pinned pages itself.
         copies: false,
+        // The core's own choice of connector type.
+        connectors: [0; MAX_SCANOUTS],
     };
     let share = port
         .as_owned()

@@ -38,6 +38,7 @@ fn hello() -> Hello {
         cursor: true,
         timings: Timings::NONE,
         copies: false,
+        connectors: [0; MAX_SCANOUTS],
     }
 }
 
@@ -319,9 +320,10 @@ fn fields_lie_where_the_specification_puts_them() {
     // 16 of header and fields, 16 scanouts of 12, 12 for what the card said
     // about 3D, 4 for whether it has a cursor plane, and 4 + 16 x 24 for
     // the timings a card that runs only some lists, 16 x 4 for each
-    // scanout's refresh, and 4 for the flags.
-    assert_eq!(bytes.len(), 680);
-    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 9, "VERSION");
+    // scanout's refresh, 4 for the flags, and 16 x 4 for each scanout's
+    // connector type.
+    assert_eq!(bytes.len(), 744);
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 10, "VERSION");
     assert_eq!(u32_at(bytes, 612), 74_998, "scanout 0's refresh");
     assert!(bytes[616..].iter().all(|&byte| byte == 0));
     assert_eq!(u16::from_le_bytes([bytes[10], bytes[11]]), 1);
@@ -1163,4 +1165,90 @@ fn only_a_copying_driver_is_handed_buffers_it_can_map() {
     }
     assert_eq!(CARD_VMO_RIGHTS.0 & Rights::MAP.0, 0);
     assert_ne!(CARD_VMO_COPY_RIGHTS.0 & Rights::MAP.0, 0);
+}
+
+#[test]
+fn a_connector_type_is_drms_and_only_for_a_scanout_the_card_has() {
+    let mut told = hello();
+    told.connectors[0] = 11;
+    assert_eq!(told.validate(&Hello::HANDLE_RIGHTS), Ok(()));
+    let encoded = Message::Hello(told).encode();
+    assert_eq!(
+        u32_at(encoded.as_bytes(), 680),
+        11,
+        "scanout 0's connector type"
+    );
+    assert_eq!(
+        Message::decode(encoded.as_bytes()),
+        Ok(Message::Hello(told))
+    );
+    // A type DRM has but no display socket is, and one past the scanouts.
+    let mut writeback = hello();
+    writeback.connectors[0] = 18;
+    assert_eq!(
+        writeback.validate(&Hello::HANDLE_RIGHTS),
+        Err(Refusal::Mode)
+    );
+    let mut past = hello();
+    past.connectors[1] = 11;
+    assert_eq!(past.validate(&Hello::HANDLE_RIGHTS), Err(Refusal::Mode));
+}
+
+fn edid(scanout: u32, length: usize) -> Edid {
+    let mut edid = Edid {
+        scanout,
+        length: u32::try_from(length).expect("a length"),
+        bytes: [0; EDID_BYTES],
+    };
+    for (index, byte) in edid.bytes.iter_mut().take(length).enumerate() {
+        *byte = (index % 251) as u8 + 1;
+    }
+    edid
+}
+
+#[test]
+fn an_edid_is_its_length_of_bytes_and_zero_after() {
+    let sent = edid(0, 384);
+    let encoded = Message::Edid(sent).encode();
+    let bytes = encoded.as_bytes();
+    assert_eq!(bytes.len(), 528);
+    assert_eq!(
+        [u32_at(bytes, 0), u32_at(bytes, 8), u32_at(bytes, 12)],
+        [EDID, 0, 384]
+    );
+    assert_eq!(Message::decode(bytes), Ok(Message::Edid(sent)));
+    assert_eq!(sent.as_bytes().len(), 384);
+    // A byte set past the length, a length past the buffer, a scanout past
+    // the most a card has: each malformed.
+    let mut bent = bytes.to_vec();
+    bent[16 + 384] = 1;
+    assert_eq!(Message::decode(&bent), Err(MessageError::Field));
+    let mut long = bytes.to_vec();
+    long[12..16].copy_from_slice(&(EDID_BYTES as u32 + 1).to_le_bytes());
+    assert_eq!(Message::decode(&long), Err(MessageError::Field));
+    let mut far = bytes.to_vec();
+    far[8..12].copy_from_slice(&(MAX_SCANOUTS as u32).to_le_bytes());
+    assert_eq!(Message::decode(&far), Err(MessageError::Field));
+    // None is a length of 0.
+    let none = edid(0, 0);
+    assert_eq!(
+        Message::decode(Message::Edid(none).encode().as_bytes()),
+        Ok(Message::Edid(none))
+    );
+}
+
+#[test]
+fn the_core_takes_an_edid_for_a_scanout_its_driver_has() {
+    let mut core = session();
+    assert_eq!(
+        core.receive(&Message::Edid(edid(0, 128))),
+        Ok(Event::Edid { scanout: 0 })
+    );
+    // The card has one scanout: the second is a lie, and the session stays
+    // broken after it.
+    assert_eq!(
+        core.receive(&Message::Edid(edid(1, 128))),
+        Err(Refusal::Protocol)
+    );
+    assert!(core.is_broken());
 }

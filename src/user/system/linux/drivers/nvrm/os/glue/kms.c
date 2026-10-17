@@ -210,6 +210,9 @@ struct kms_head {
     NvU32 head;
     NvKmsKapiDisplay display;
     NvU32 pitch;
+    NvU32 connector;    /* NvKmsConnectorType */
+    NvU32 edid_bytes;
+    NvU8 edid[NVKMS_KAPI_EDID_BUFFER_SIZE];
 };
 
 /* What is on screen, kept so that it stays there. */
@@ -405,6 +408,14 @@ static int kms_scan(struct kms_head *lit, const struct NvKmsKapiDeviceResourcesI
                 lit->mode.timings.pixelClockHz / 1000);
         lit->display = displays[i];
         lit->head = (NvU32)__builtin_ctz(info.headMask);
+        {
+            struct NvKmsKapiConnectorInfo socket;
+            memset(&socket, 0, sizeof(socket));
+            lit->connector = kapi.getConnectorInfo(lit->device, info.connectorHandle, &socket)
+                                 ? socket.type : NVKMS_CONNECTOR_TYPE_UNKNOWN;
+        }
+        lit->edid_bytes = dyn->edid.bufferSize <= sizeof(lit->edid) ? dyn->edid.bufferSize : 0;
+        memcpy(lit->edid, dyn->edid.buffer, lit->edid_bytes);
         return kms_light(lit, res);
     }
     return -ENODEV;
@@ -675,6 +686,9 @@ static int kms_card_start(struct kms_head *lit)
     hello.height = t->vVisible;
     hello.refresh_mhz = t->refreshRate;
     hello.count = 1;
+    hello.connector = lit->connector;
+    hello.edid_bytes = lit->edid_bytes;
+    memcpy(hello.edid, lit->edid, lit->edid_bytes);
     hello.timings[0].clock_khz = t->pixelClockHz / 1000;
     hello.timings[0].hdisplay = (NvU16)t->hVisible;
     hello.timings[0].hsync_start = (NvU16)t->hSyncStart;

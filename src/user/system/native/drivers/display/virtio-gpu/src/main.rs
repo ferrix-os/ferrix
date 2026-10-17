@@ -1601,6 +1601,8 @@ fn hello(driver: &mut Gpu, port: &Port<Kernel>, location: u32) -> Result<Hello, 
         timings: Timings::NONE,
         // The device reads the pinned pages itself.
         copies: false,
+        // The core's own choice of connector type.
+        connectors: [0; MAX_SCANOUTS],
     })
 }
 

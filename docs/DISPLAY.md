@@ -159,6 +159,7 @@ others.
 | `CURSOR` | core → driver | scanout, buffer id (64 × 64; 0 for none), sequence, hotspot, place; only to a card whose `HELLO` said it has a cursor plane | — |
 | `MOVE` | core → driver | scanout, place; nothing answers it; the same | — |
 | `MODES` | driver → core | each scanout's preferred mode and refresh, as `HELLO` gives them, in `HELLO`'s place; sent unasked when the device's displays change, and nothing answers it (protocol version 6, 2026-09-26; the refresh since 7) | — |
+| `EDID` | driver → core | a scanout, a length (0: none) and up to 512 bytes, so that HELLO stays the longest message: the display's own EDID as the driver read it; nothing answers it, and a file `drm.edid_firmware` names wins over it (protocol version 10, 2026-10-17, §7) | — |
 
 **Each message maps to device commands:**
 
@@ -908,6 +909,19 @@ the firmware left no framebuffer on this board, so a panic is serial only,
 as §2.4 says.
 
 ## 7. A connector's EDID: `drm.edid_firmware=` (2026-09-26)
+
+**And a driver's, since 2026-10-17 (displayctl v10).** A driver that can
+read its display's EDID, as nvrm can from NVKMS on the RTX 3060, sends it
+in an `EDID` message after READY. The core checks it as it checks a file
+(`edid::check`), says what it is on the console (`card0 HDMI-A-1: EDID from
+its driver: ...`), and gives it to the connector's `EDID` property and
+`/sys/class/drm/card0-*/edid`; a file `drm.edid_firmware` names for the
+connector wins over it, as on Linux. The connectors are told they changed,
+so a program reads it again. HELLO also carries each scanout's connector
+type (DRM's, 0 for the core's own choice), so the 3060's monitor is
+`HDMI-A-1` rather than `Virtual-1`. `run-compositor --nvidia` no longer
+carries this machine's monitor's EDID to the guest (the 3060's showed the
+Lenovo's name on another monitor); `--edid` still names one.
 
 **Why.** A `hyprland.conf` names its monitors by description --
 `monitor = desc:Lenovo Group Limited R27qe Gen2 UTP03KBB, preferred, 2560x0, 1`

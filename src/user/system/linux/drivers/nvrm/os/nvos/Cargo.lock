@@ -39,6 +39,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-chardevctl",
  "ferrix-displayctl",
+ "ferrix-linux-abi",
  "ferrix-native",
  "ferrix-native-abi",
 ]

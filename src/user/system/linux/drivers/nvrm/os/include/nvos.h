@@ -158,6 +158,9 @@ struct nvos_display_hello {
     NvU32 width, height, refresh_mhz;
     NvU32 count;        /* timings set, the running one first */
     struct nvos_display_timing timings[16];
+    NvU32 connector;    /* the display's NvKmsConnectorType */
+    NvU32 edid_bytes;   /* of edid, the display's own */
+    NvU8 edid[2048];
 };
 struct nvos_display_event {
     NvU32 kind;         /* NVOS_DISPLAY_* */

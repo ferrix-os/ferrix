@@ -770,7 +770,10 @@ virtio-gpu, seen over VNC or SPICE.
   running mode and sets displayctl v8's `copies` flag; each FLUSH copies
   the flushed rectangle from the buffer's own VMO, which ferrix-nvos maps
   read-only at ATTACH and unmaps at DETACH (displayctl v9), into the VRAM
-  surface, and is answered at once. No cursor plane yet: the compositor
+  surface, and is answered at once. Its HELLO names the lit display's
+  connector type and it sends the display's own EDID (displayctl v10), so
+  the card's connector is `HDMI-A-1` with the monitor's real name. No
+  cursor plane yet: the compositor
   draws the pointer. Double buffering with a flip at vertical blanking, the
   mode list and a cursor are next.
 * **The desktop.** `cargo xtask run-compositor --nvidia` builds the

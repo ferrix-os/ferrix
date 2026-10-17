@@ -216,6 +216,22 @@ pub const SUBPIXEL_UNKNOWN: u32 = 0;
 
 /// `DRM_MODE_CONNECTOR_Unknown`.
 pub const CONNECTOR_UNKNOWN: u32 = 0;
+/// `DRM_MODE_CONNECTOR_VGA`.
+pub const CONNECTOR_VGA: u32 = 1;
+/// `DRM_MODE_CONNECTOR_DVII`.
+pub const CONNECTOR_DVII: u32 = 2;
+/// `DRM_MODE_CONNECTOR_DVID`.
+pub const CONNECTOR_DVID: u32 = 3;
+/// `DRM_MODE_CONNECTOR_LVDS`.
+pub const CONNECTOR_LVDS: u32 = 7;
+/// `DRM_MODE_CONNECTOR_DisplayPort`, which a program names `DP-1`.
+pub const CONNECTOR_DISPLAYPORT: u32 = 10;
+/// `DRM_MODE_CONNECTOR_eDP`.
+pub const CONNECTOR_EDP: u32 = 14;
+/// `DRM_MODE_CONNECTOR_DSI`.
+pub const CONNECTOR_DSI: u32 = 16;
+/// `DRM_MODE_CONNECTOR_USB`.
+pub const CONNECTOR_USB: u32 = 20;
 /// `DRM_MODE_CONNECTOR_VIRTUAL`: what virtio-gpu reports.
 pub const CONNECTOR_VIRTUAL: u32 = 15;
 /// `DRM_MODE_CONNECTOR_HDMIA`: an HDMI type A socket, which a program names

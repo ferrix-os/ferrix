@@ -345,7 +345,19 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
     // naming its monitors by description finds this one (`crate::edid`).
     // Only the EDID's name for itself is taken: the screen keeps the modes
     // the card offers, so it still follows its window (`docs/DISPLAY.md` §7).
-    let defaults = match crate::edid::for_run(args.edid.as_deref())? {
+    // Not on the 3060: it drives a real monitor, whose own EDID its driver
+    // reads and hands the card (displayctl v10), and this machine's monitor
+    // would be a stranger's name on it. `--edid` still names one.
+    let asked = if args.nvidia && args.edid.is_none() {
+        println!(
+            "  edid: none carried: the 3060's monitor gives its own, through its driver \
+             (--edid names one of this machine's)"
+        );
+        Some("none")
+    } else {
+        args.edid.as_deref()
+    };
+    let defaults = match crate::edid::for_run(asked)? {
         Some(edid) => {
             carried.ports.extend(edid.files);
             format!("{} {}\n", DESKTOP_DEFAULTS.trim_end(), edid.argument)

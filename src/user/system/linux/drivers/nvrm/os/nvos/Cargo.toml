@@ -34,6 +34,8 @@ ferrix-native-abi = { path = "../../../../../../../lib/proto/native-abi" }
 ferrix-chardevctl = { path = "../../../../../../../lib/proto/chardevctl" }
 # The display core's control protocol: HELLO, ATTACH, FLUSH (N6).
 ferrix-displayctl = { path = "../../../../../../../lib/proto/displayctl" }
+# DRM's connector types, which HELLO names (displayctl v10).
+ferrix-linux-abi = { path = "../../../../../../../lib/proto/linux-abi" }
 
 # ---------------------------------------------------------------------------
 # Lints

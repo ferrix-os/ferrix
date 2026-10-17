@@ -202,6 +202,12 @@ pub(crate) struct Card {
     /// Each head's EDID, where `drm.edid_firmware` named one that could be
     /// read ([`edid::load`]); `None` for a head without.
     edids: Vec<Option<Vec<u8>>>,
+    /// Each head's connector type, as its driver's HELLO said, or 0 for the
+    /// core's own choice ([`Card::connector_type`]).
+    connectors: [u32; MAX_SCANOUTS],
+    /// Each head's EDID as its driver read it from the display (EDID,
+    /// displayctl v10), checked; a file `drm.edid_firmware` names wins.
+    driver_edids: SpinLock<Vec<Option<Vec<u8>>>>,
 }
 
 /// The VMO a buffer id was given, and how much of the card's budget it takes.
@@ -332,7 +338,7 @@ impl State {
             }
             // Nobody waits for either: [`serve`] ends at STOPPED and takes
             // MODES's modes itself.
-            Event::Stopped | Event::Modes => false,
+            Event::Stopped | Event::Modes | Event::Edid { .. } => false,
         };
         if wanted {
             if self.events.len() >= MAX_EVENTS {
@@ -464,11 +470,17 @@ impl Card {
     /// connectors that have the `EDID` property.
     pub(crate) fn carries_edid(&self, head: usize) -> bool {
         self.edids.get(head).is_some_and(Option::is_some)
+            || self
+                .driver_edids
+                .lock()
+                .get(head)
+                .is_some_and(Option::is_some)
     }
 
     /// `head`'s EDID while a display is there, as Linux's property holds the
-    /// blob only while the connector is connected, and none otherwise.
-    pub(crate) fn edid(&self, head: usize) -> Option<&[u8]> {
+    /// blob only while the connector is connected, and none otherwise: the
+    /// file `drm.edid_firmware` names for it, or else its driver's.
+    pub(crate) fn edid(&self, head: usize) -> Option<Vec<u8>> {
         let connected = self
             .modes
             .lock()
@@ -477,7 +489,32 @@ impl Card {
         if !connected {
             return None;
         }
-        self.edids.get(head)?.as_deref()
+        if let Some(file) = self.edids.get(head).and_then(Option::as_ref) {
+            return Some(file.clone());
+        }
+        self.driver_edids.lock().get(head)?.clone()
+    }
+
+    /// `head`'s connector type: what its driver's HELLO said, or else a
+    /// board's HDMI output's for a board's display controller and a virtual
+    /// card's for any other.
+    pub(crate) fn connector_type(&self, head: usize) -> u32 {
+        match self.connectors.get(head).copied().unwrap_or(0) {
+            0 => drm::connector_type(self.hdmi),
+            kind => kind,
+        }
+    }
+
+    /// Take `head`'s EDID from its driver, checked, in the card's task: the
+    /// connectors are told they changed, so a program reads it again.
+    fn edid_from_driver(&self, head: usize, bytes: &[u8]) {
+        let overridden = self.edids.get(head).is_some_and(Option::is_some);
+        let connector = edid::connector_name(self.connector_type(head), head);
+        let taken = edid::from_driver(self.index, &connector, bytes, overridden);
+        if let Some(slot) = self.driver_edids.lock().get_mut(head) {
+            *slot = taken;
+        }
+        let _ = self.modes_changed.fetch_add(1, Ordering::AcqRel);
     }
 
     /// Whether the driver is gone.
@@ -1143,11 +1180,20 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     let hdmi = matches!(start.device.location(), device::Location::Tree(_)) && !framebuffer;
     // Read before READY, as Linux reads an override at the connector's first
     // probe: from the initramfs, which takes no time a driver would notice.
-    let edids = edid::load(
-        index,
-        drm::connector_type(hdmi),
-        usize::from(hello.scanouts).min(MAX_SCANOUTS),
-    );
+    let heads = usize::from(hello.scanouts).min(MAX_SCANOUTS);
+    let kinds: Vec<u32> = hello
+        .connectors
+        .iter()
+        .take(heads)
+        .map(|&kind| {
+            if kind == 0 {
+                drm::connector_type(hdmi)
+            } else {
+                kind
+            }
+        })
+        .collect();
+    let edids = edid::load(index, &kinds);
     let card = Arc::new(Card {
         index,
         node: start.device.index(),
@@ -1175,6 +1221,8 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
         hdmi,
         timings: hello.timings,
         edids,
+        connectors: hello.connectors,
+        driver_edids: SpinLock::new(vec![None; heads]),
     });
 
     // Announced and listed before devmgr is told. devmgr answers a bind
@@ -1350,6 +1398,12 @@ fn serve(card: &Card) {
         let accepted = card.state.lock().session.receive(&decoded);
         match accepted {
             Ok(Event::Stopped) => break,
+            Ok(Event::Edid { scanout }) => {
+                if let Message::Edid(edid) = &decoded {
+                    card.edid_from_driver(scanout as usize, edid.as_bytes());
+                }
+                card.changed.wake_all();
+            }
             Ok(Event::Modes) => {
                 let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
                 for (into, mode) in modes.iter_mut().zip(card.state.lock().session.modes()) {

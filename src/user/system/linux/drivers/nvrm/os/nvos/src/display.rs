@@ -19,9 +19,10 @@
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use ferrix_displayctl::message::{
-    Hello, MAX_BYTES, MAX_SCANOUTS, MAX_TIMINGS, Message, PORT_RIGHTS, Rect, ScanoutMode, Status,
-    Timing, Timings, VERSION,
+    EDID_BYTES, Edid, Hello, MAX_BYTES, MAX_SCANOUTS, MAX_TIMINGS, Message, PORT_RIGHTS, Rect,
+    ScanoutMode, Status, Timing, Timings, VERSION,
 };
+use ferrix_linux_abi::drm;
 use ferrix_native::channel::{Channel, ReadError};
 use ferrix_native::handle::{Object, OwnedHandle};
 use ferrix_native::pending::Protection;
@@ -140,6 +141,34 @@ pub struct CHello {
     pub count: u32,
     /// The timings.
     pub timings: [CTiming; MAX_TIMINGS],
+    /// The lit display's connector, as NVKMS names its type
+    /// (`NvKmsConnectorType`).
+    pub connector: u32,
+    /// How many of `edid` are the display's EDID; 0 for none.
+    pub edid_bytes: u32,
+    /// The display's own EDID, as NVKMS read it (`NVKMS_KAPI_EDID_BUFFER_SIZE`).
+    pub edid: [u8; NVKMS_EDID_BYTES],
+}
+
+/// The most EDID NVKMS reads, and C hands over: `NVKMS_KAPI_EDID_BUFFER_SIZE`.
+pub const NVKMS_EDID_BYTES: usize = 2048;
+
+/// DRM's connector type for NVKMS's `NvKmsConnectorType` `nv`, as Linux's
+/// nvidia-drm maps it (`nvidia-drm-connector.c`), or 0 for one it calls
+/// unknown, which leaves the core its own choice.
+const fn drm_connector(nv: u32) -> u32 {
+    match nv {
+        // DP, and the two kinds that carry it: USB-C and a serializer.
+        0 | 7 | 9 => drm::CONNECTOR_DISPLAYPORT,
+        1 => drm::CONNECTOR_VGA,
+        2 => drm::CONNECTOR_DVII,
+        3 => drm::CONNECTOR_DVID,
+        5 => drm::CONNECTOR_LVDS,
+        6 => drm::CONNECTOR_HDMIA,
+        8 => drm::CONNECTOR_DSI,
+        // ADC and UNKNOWN.
+        _ => 0,
+    }
 }
 
 /// One message for C (`struct nvos_display_event`).
@@ -249,6 +278,34 @@ fn hello(c: &CHello) -> Hello {
         cursor: false,
         timings,
         copies: true,
+        connectors: {
+            let mut connectors = [0; MAX_SCANOUTS];
+            connectors[0] = drm_connector(c.connector);
+            connectors
+        },
+    }
+}
+
+/// The EDID message for C's display: what NVKMS read, or none for one the
+/// message cannot carry, which is said.
+fn edid(c: &CHello) -> Edid {
+    let read = usize::try_from(c.edid_bytes).unwrap_or(usize::MAX);
+    let length = if read <= EDID_BYTES {
+        read
+    } else {
+        say!(
+            "display: the monitor's EDID is {read} bytes, more than displayctl's {EDID_BYTES}; none sent"
+        );
+        0
+    };
+    let mut bytes = [0; EDID_BYTES];
+    if let (Some(into), Some(from)) = (bytes.get_mut(..length), c.edid.get(..length)) {
+        into.copy_from_slice(from);
+    }
+    Edid {
+        scanout: 0,
+        length: u32::try_from(length).unwrap_or(0),
+        bytes,
     }
 }
 
@@ -265,7 +322,8 @@ pub unsafe extern "C" fn nvos_display_start(described: *const CHello) -> NvStatu
         return status::INVALID_ARGUMENT;
     }
     // SAFETY: the caller vouches for it.
-    let hello = hello(unsafe { &*described });
+    let described = unsafe { &*described };
+    let hello = hello(described);
     let device = device::handle();
     if device == 0 {
         return status::INVALID_STATE;
@@ -327,6 +385,11 @@ pub unsafe extern "C" fn nvos_display_start(described: *const CHello) -> NvStatu
             return status::INVALID_STATE;
         }
     };
+    // The display's own EDID, which only the driver can read; the core
+    // keeps a file drm.edid_firmware names over it.
+    if let Err(why) = channel.write(Message::Edid(edid(described)).encode().as_bytes()) {
+        say!("display: the EDID not written: {why:?}");
+    }
     say!(
         "display: card{} ready, its buffers up to {} MiB, each mapped read-only at ATTACH",
         ready.card,
@@ -557,4 +620,53 @@ pub extern "C" fn nvos_display_stopped() {
 }
 
 // The protocol's version this bridge was written against.
-const _: () = assert!(VERSION == 9);
+const _: () = assert!(VERSION == 10);
+
+#[cfg(test)]
+mod tests {
+    use super::{CHello, CTiming, MAX_TIMINGS, NVKMS_EDID_BYTES, drm, drm_connector, edid, hello};
+
+    fn described(connector: u32, edid_bytes: u32) -> CHello {
+        let mut c = CHello {
+            width: 1024,
+            height: 600,
+            refresh_mhz: 59_821,
+            count: 0,
+            timings: [CTiming::default(); MAX_TIMINGS],
+            connector,
+            edid_bytes,
+            edid: [0; NVKMS_EDID_BYTES],
+        };
+        for (index, byte) in c.edid.iter_mut().enumerate() {
+            *byte = (index % 200) as u8 + 1;
+        }
+        c
+    }
+
+    #[test]
+    fn nvkms_connectors_are_named_as_nvidia_drm_names_them() {
+        assert_eq!(drm_connector(6), drm::CONNECTOR_HDMIA);
+        assert_eq!(drm_connector(0), drm::CONNECTOR_DISPLAYPORT);
+        assert_eq!(
+            drm_connector(7),
+            drm::CONNECTOR_DISPLAYPORT,
+            "USB-C carries DP"
+        );
+        assert_eq!(drm_connector(3), drm::CONNECTOR_DVID);
+        assert_eq!(drm_connector(10), 0, "unknown leaves the core its choice");
+        let said = hello(&described(6, 0));
+        assert_eq!(said.connectors[0], drm::CONNECTOR_HDMIA);
+        assert!(said.connectors[1..].iter().all(|&kind| kind == 0));
+    }
+
+    #[test]
+    fn the_edid_message_carries_what_nvkms_read_and_no_more() {
+        let sent = edid(&described(6, 384));
+        assert_eq!((sent.scanout, sent.length), (0, 384));
+        assert_eq!(sent.as_bytes().len(), 384);
+        assert!(sent.bytes[384..].iter().all(|&byte| byte == 0));
+        // One the message cannot carry is none; none is none.
+        assert_eq!(edid(&described(6, 1024)).length, 0);
+        assert_eq!(edid(&described(6, 0)).length, 0);
+    }
+}

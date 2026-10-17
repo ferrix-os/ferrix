@@ -1001,7 +1001,7 @@ fn get_blob(process: &Process, card: &Card, arg: u64) -> Result<usize, Errno> {
     let head = head_of_blob(card, request.blob_id).ok_or(Errno::ENOENT)?;
     let bytes = card.edid(head).ok_or(Errno::ENOENT)?;
     if ferrix_displayctl::edid::answer_blob(&mut request, bytes.len()) {
-        uaccess::copy_to_user(process.space(), request.data, bytes).map_err(|_| Errno::EFAULT)?;
+        uaccess::copy_to_user(process.space(), request.data, &bytes).map_err(|_| Errno::EFAULT)?;
     }
     write_arg(process, arg, &request)
 }
@@ -1336,8 +1336,8 @@ fn version(process: &Process, arg: u64) -> Result<usize, Errno> {
     Ok(0)
 }
 
-/// The type every connector of a card has: a board's HDMI output's, or a
-/// virtual card's.
+/// The type a connector has when its driver names none: a board's HDMI
+/// output's, or a virtual card's.
 pub(crate) const fn connector_type(hdmi: bool) -> u32 {
     if hdmi {
         drm::CONNECTOR_HDMIA
@@ -1392,7 +1392,7 @@ pub(crate) fn connectors(card: &Card) -> Vec<ConnectorView> {
         .map(|head| {
             let modes = modes_of(card, head);
             ConnectorView {
-                kind: connector_type(card.hdmi),
+                kind: card.connector_type(head),
                 kind_index: u32::try_from(head).unwrap_or(0).saturating_add(1),
                 connected: !modes.is_empty(),
                 modes: modes
@@ -1448,7 +1448,7 @@ fn connector(process: &Process, card: &Card, arg: u64) -> Result<usize, Errno> {
     connector.count_props = u32::try_from(properties.len()).unwrap_or(0);
     connector.count_encoders = 1;
     connector.encoder_id = object_id(head, ENCODER);
-    connector.connector_type = connector_type(card.hdmi);
+    connector.connector_type = card.connector_type(head);
     // Linux numbers connectors of one type from one upwards, and a program
     // prints the name as `Virtual-1`, `Virtual-2`.
     connector.connector_type_id = u32::try_from(head).unwrap_or(0).saturating_add(1);

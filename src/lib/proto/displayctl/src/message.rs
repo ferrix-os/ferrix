@@ -6,7 +6,7 @@
 //! [`Ready::HANDLE_RIGHTS`] say what they must be.
 //!
 //! ```text
-//! HELLO     driver -> core, 680 bytes, handles [driver port]
+//! HELLO     driver -> core, 744 bytes, handles [driver port]
 //!   8 version u16   10 scanouts u16   12 location u32
 //!   16 scanout 0: width u32, height u32, enabled u32   ... 16 of them, 12 bytes each
 //!   208 virgl u16   210 capsets u16   212 capset u32   216 capset_bytes u32
@@ -17,6 +17,8 @@
 //!       hsync positive, bit 1 vsync positive)   ... 16 of them, 24 bytes each
 //!   612 scanout 0's refresh_mhz u32   ... 16 of them, 4 bytes each
 //!   676 flags u32: bit 0 the driver copies pixels with its processor
+//!   680 scanout 0's connector type u32 (DRM's, 0 for the core's own
+//!       choice)   ... 16 of them, 4 bytes each
 //! READY     core -> driver, 24 bytes, handles [core port]
 //!   8 card u32   12 reserved   16 card_bytes u64
 //! REFUSED   core -> driver, 12 bytes: 8 reason u32
@@ -40,6 +42,9 @@
 //!   24 hot_x u32   28 hot_y u32   32 x i32   36 y i32
 //! MOVE      core -> driver, 24 bytes, not answered
 //!   8 scanout u32   12 reserved   16 x i32   20 y i32
+//! EDID      driver -> core, 528 bytes, not answered
+//!   8 scanout u32   12 length u32 (0: none)   16 the EDID, 512 bytes,
+//!   zero past its length
 //! MODES     driver -> core, 264 bytes, not answered
 //!   8 scanout 0: width u32, height u32, enabled u32   ... 16 of them, as HELLO's
 //!   200 scanout 0's refresh_mhz u32   ... 16 of them, as HELLO's
@@ -89,6 +94,20 @@
 //! out again (E-02). READY's `card_bytes` is now only the most the card's
 //! buffers may take together.
 //!
+//! Each scanout's connector type (version 10) is DRM's `connector_type`
+//! for the socket the display is on -- `HDMIA` for an HDMI port of a GPU --
+//! or 0, which leaves the core its own choice: a board's display
+//! controller's HDMI, `Virtual` otherwise. A driver that knows what its
+//! scanouts are says so, so that a program sees `HDMI-A-1` and not
+//! `Virtual-1` for a real monitor.
+//!
+//! EDID (version 10) is the display's own EDID for a scanout, as the
+//! driver read it from the monitor, at most [`EDID_BYTES`]; a length of 0
+//! says it has none now. Nothing answers it, and it may come at any time
+//! after READY, as a monitor that is plugged in brings a new one. The core
+//! checks it as it checks a file `drm.edid_firmware` names, and a file
+//! named there wins over it, as it does on Linux.
+//!
 //! HELLO's timings are for a card that runs only the modes it can make a
 //! clock for -- a board's HDMI output, not a virtio-gpu, which shows any
 //! size and lists none. The first is the mode the scanout runs now and has
@@ -98,13 +117,13 @@
 
 use ::core::fmt;
 
-use ferrix_linux_abi::drm::FORMAT_XRGB8888;
+use ferrix_linux_abi::drm::{self, FORMAT_XRGB8888};
 use ferrix_native_abi::rights::Rights;
 
 /// The protocol version this crate speaks. 5 added HELLO's timings, 6 MODES,
 /// 7 each scanout's refresh, 8 HELLO's flags, 9 a VMO a buffer, carried by
-/// its ATTACH.
-pub const VERSION: u16 = 9;
+/// its ATTACH, 10 each scanout's connector type and EDID.
+pub const VERSION: u16 = 10;
 
 /// HELLO's type.
 pub const HELLO: u32 = 1;
@@ -138,6 +157,17 @@ pub const CURSOR: u32 = 14;
 pub const MOVE: u32 = 15;
 /// MODES's type.
 pub const MODES: u32 = 16;
+/// EDID's type.
+pub const EDID: u32 = 17;
+
+/// The most bytes of EDID one EDID message carries: a base block and three
+/// extensions, which nearly every monitor's fits. More would make EDID the
+/// longest message, and every message on a kernel stack that much longer: at
+/// 2048 bytes, `encode` overflowed the stack of the syscall that attaches a
+/// buffer (2026-10-17). A driver says nothing of a longer one.
+pub const EDID_BYTES: usize = 512;
+/// Bytes of EDID.
+pub const EDID_MESSAGE_BYTES: usize = 16 + EDID_BYTES;
 
 /// The width and height of a buffer CURSOR shows: the one cursor size
 /// virtio-gpu's host shows.
@@ -164,14 +194,36 @@ const HELLO_REFRESH_AT: usize = TIMINGS_AT + 4 + MAX_TIMINGS * TIMING_BYTES;
 const HELLO_FLAGS_AT: usize = HELLO_REFRESH_AT + MAX_SCANOUTS * REFRESH_BYTES;
 /// HELLO's flag for a driver that copies pixels with its processor.
 pub const HELLO_COPIES: u32 = 1;
+/// Where HELLO's connector types lie: after its flags.
+const HELLO_CONNECTORS_AT: usize = HELLO_FLAGS_AT + 4;
 /// Bytes of HELLO.
-pub const HELLO_BYTES: usize = HELLO_FLAGS_AT + 4;
+pub const HELLO_BYTES: usize = HELLO_CONNECTORS_AT + MAX_SCANOUTS * 4;
 /// Where MODES's refreshes lie: after its scanouts.
 const MODES_REFRESH_AT: usize = HEADER_BYTES + MAX_SCANOUTS * SCANOUT_BYTES;
 /// Bytes of MODES.
 pub const MODES_BYTES: usize = MODES_REFRESH_AT + MAX_SCANOUTS * REFRESH_BYTES;
 /// Bytes of the longest message.
 pub const MAX_BYTES: usize = HELLO_BYTES;
+
+const _: () = assert!(
+    EDID_MESSAGE_BYTES <= HELLO_BYTES,
+    "HELLO stays the longest message: messages live on kernel stacks"
+);
+
+/// The connector types a HELLO may name, besides 0: DRM's, for the sockets
+/// a display is plugged into.
+pub const CONNECTOR_TYPES: [u32; 10] = [
+    drm::CONNECTOR_VGA,
+    drm::CONNECTOR_DVII,
+    drm::CONNECTOR_DVID,
+    drm::CONNECTOR_LVDS,
+    drm::CONNECTOR_DISPLAYPORT,
+    drm::CONNECTOR_HDMIA,
+    drm::CONNECTOR_EDP,
+    drm::CONNECTOR_VIRTUAL,
+    drm::CONNECTOR_DSI,
+    drm::CONNECTOR_USB,
+];
 
 /// The largest width or height a mode may have: `docs/DISPLAY.md` §2.2.
 pub const MAX_DIMENSION: u32 = 8192;
@@ -389,6 +441,9 @@ pub struct Hello {
     /// Whether the driver shows a buffer by copying it with the processor,
     /// and so is handed buffer VMOs it can map ([`HELLO_COPIES`]).
     pub copies: bool,
+    /// Each scanout's connector type, DRM's ([`CONNECTOR_TYPES`]), or 0
+    /// for the core's own choice; entries past `scanouts` are zero.
+    pub connectors: [u32; MAX_SCANOUTS],
 }
 
 /// Why the core refuses a driver.
@@ -479,6 +534,12 @@ impl Hello {
         }
         validate_modes(&self.modes, self.scanouts)?;
         self.validate_timings()?;
+        for (index, &kind) in self.connectors.iter().enumerate() {
+            let fine = kind == 0 || (index < count && CONNECTOR_TYPES.contains(&kind));
+            if !fine {
+                return Err(Refusal::Mode);
+            }
+        }
         // A card that did not get `VIRTIO_GPU_F_VIRGL` has no capability
         // sets to speak of, and one that did and reports none has nothing a
         // 3D driver could use. Either way the pair has to agree, or the
@@ -835,6 +896,9 @@ pub enum Message {
         /// The image's top edge on the scanout.
         y: i32,
     },
+    /// Driver to core: a scanout's EDID as its display gave it. Not
+    /// answered.
+    Edid(Edid),
     /// Driver to core: each scanout's preferred mode now, in HELLO's place.
     /// Not answered.
     Modes {
@@ -842,6 +906,27 @@ pub enum Message {
         /// zero.
         modes: [ScanoutMode; MAX_SCANOUTS],
     },
+}
+
+/// EDID: the display's own EDID for a scanout, or none.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Edid {
+    /// The scanout.
+    pub scanout: u32,
+    /// How many of `bytes` are the EDID: 0 for none, at most [`EDID_BYTES`].
+    pub length: u32,
+    /// The EDID, zero past `length`.
+    pub bytes: [u8; EDID_BYTES],
+}
+
+impl Edid {
+    /// The EDID's bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.bytes
+            .get(..usize::try_from(self.length).unwrap_or(0))
+            .unwrap_or(&[])
+    }
 }
 
 /// Why bytes are not a message.
@@ -893,6 +978,7 @@ impl Message {
             Self::Cursor { .. } => CURSOR,
             Self::Move { .. } => MOVE,
             Self::Modes { .. } => MODES,
+            Self::Edid(_) => EDID,
         }
     }
 
@@ -911,6 +997,7 @@ impl Message {
             FLIPPED | MOVE => 24,
             STOP | STOPPED => HEADER_BYTES,
             MODES => MODES_BYTES,
+            EDID => EDID_MESSAGE_BYTES,
             _ => return None,
         })
     }
@@ -1005,6 +1092,13 @@ impl Message {
                 put_modes(bytes, HEADER_BYTES, &modes);
                 put_refreshes(bytes, MODES_REFRESH_AT, &modes);
             }
+            Self::Edid(edid) => {
+                put32(bytes, 8, edid.scanout);
+                put32(bytes, 12, edid.length);
+                if let Some(into) = bytes.get_mut(16..16 + EDID_BYTES) {
+                    into.copy_from_slice(&edid.bytes);
+                }
+            }
         }
         out
     }
@@ -1094,6 +1188,7 @@ fn decode_body(kind: u32, bytes: &[u8]) -> Option<Message> {
         MODES => Message::Modes {
             modes: get_refreshes(bytes, MODES_REFRESH_AT, get_modes(bytes, HEADER_BYTES)?)?,
         },
+        EDID => decode_edid(bytes)?,
         _ => return None,
     })
 }
@@ -1166,6 +1261,9 @@ fn put_hello(bytes: &mut [u8], hello: &Hello) {
         HELLO_FLAGS_AT,
         if hello.copies { HELLO_COPIES } else { 0 },
     );
+    for (index, &kind) in hello.connectors.iter().enumerate() {
+        put32(bytes, HELLO_CONNECTORS_AT + index * 4, kind);
+    }
 }
 
 /// HELLO's timing at `index`: `None` for flags other than the two sync
@@ -1187,6 +1285,28 @@ fn get_timing(bytes: &[u8], index: usize) -> Option<Timing> {
         hsync_high: flags & 1 != 0,
         vsync_high: flags & 2 != 0,
     })
+}
+
+/// EDID, from `bytes`: `None` for a length past [`EDID_BYTES`], a scanout
+/// past [`MAX_SCANOUTS`], or a byte set past the length.
+fn decode_edid(bytes: &[u8]) -> Option<Message> {
+    let scanout = get32(bytes, 8).filter(|&scanout| (scanout as usize) < MAX_SCANOUTS)?;
+    let length = get32(bytes, 12).filter(|&length| length as usize <= EDID_BYTES)?;
+    let mut edid = Edid {
+        scanout,
+        length,
+        bytes: [0; EDID_BYTES],
+    };
+    edid.bytes.copy_from_slice(bytes.get(16..16 + EDID_BYTES)?);
+    if edid
+        .bytes
+        .get(length as usize..)?
+        .iter()
+        .any(|&byte| byte != 0)
+    {
+        return None;
+    }
+    Some(Message::Edid(edid))
 }
 
 /// HELLO, from `bytes`: `None` for a field outside its range.
@@ -1225,6 +1345,13 @@ fn decode_hello(bytes: &[u8]) -> Option<Message> {
             0 => false,
             HELLO_COPIES => true,
             _ => return None,
+        },
+        connectors: {
+            let mut connectors = [0; MAX_SCANOUTS];
+            for (index, kind) in connectors.iter_mut().enumerate() {
+                *kind = get32(bytes, HELLO_CONNECTORS_AT + index * 4)?;
+            }
+            connectors
         },
     }))
 }

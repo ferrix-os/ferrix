@@ -90,6 +90,11 @@ pub enum Event {
     /// The scanouts' preferred modes changed; [`Session::modes`] has the
     /// new ones.
     Modes,
+    /// The driver sent `scanout`'s EDID; the message has the bytes.
+    Edid {
+        /// The scanout.
+        scanout: u32,
+    },
 }
 
 /// What the session remembers of a buffer, whichever way it was made.
@@ -438,6 +443,11 @@ impl Session {
             Message::Detached { buffer, status } => self.on_detached(buffer, status),
             Message::Stopped if self.stopping => Ok(Event::Stopped),
             Message::Modes { modes } => self.on_modes(modes),
+            // A scanout the driver has; the bytes are the core's to check
+            // as it checks a file's, which the decode left as they came.
+            Message::Edid(edid) if (edid.scanout as usize) < self.scanouts => Ok(Event::Edid {
+                scanout: edid.scanout,
+            }),
             _ => Err(self.violation()),
         }
     }
