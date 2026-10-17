@@ -336,7 +336,7 @@ pub fn options(mac: [u8; 6]) -> Options {
     Options {
         mac,
         transmit_entries: 64,
-        receive_entries: 128,
+        receive_entries: 64,
         buffer_bytes: 2048,
         bus: Bus {
             clock_range: 2,
