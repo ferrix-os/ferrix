@@ -80,6 +80,13 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
+    },
+    {
+      "ids": ["L.iommu.59-72"],
+      "owner": "vtd-n150",
+      "branch": "vtd-n150",
+      "date": "2026-10-17",
+      "purpose": "VT-d on the N150's units: version {1,4,5}, four-level walks, INCLUDE_PCI_ALL, every fault record, drain, window bounds, RMRR units remap only, PMR, x2APIC, FECTL, ferrix.vtd=off and the unchecked-boot fault line (consultant's OK IF, ledger 2026-10-17 line 2122)"
     }
   ]
 }
