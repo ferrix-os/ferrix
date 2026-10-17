@@ -591,7 +591,23 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
     report_cmd32(arch, &said);
     report_cpu(arch, &said);
+    if wine == Wine::Proton && dispatch_refused(&said) {
+        return Err(Error::new(format!(
+            "{arch}: GE-Proton's Wine said `{NO_DISPATCH}`: Syscall User Dispatch was refused \
+             (docs/SECCOMP.md §13)"
+        )));
+    }
     judge(arch, &said, yellow, &dump)
+}
+
+/// What GE-Proton's ntdll logs on each thread when the kernel refuses
+/// `prctl(PR_SET_SYSCALL_USER_DISPATCH)`.
+const NO_DISPATCH: &str = "could not enable syscall user dispatch";
+
+/// Whether a line says the kernel refused Syscall User Dispatch: an
+/// expected absence since Ferrix has it.
+fn dispatch_refused(lines: &[String]) -> bool {
+    lines.iter().any(|line| line.contains(NO_DISPATCH))
 }
 
 /// What the script puts before the processor time it measured.
@@ -656,6 +672,14 @@ mod tests {
 
     /// The fetch script pins a version, and the title the script waits for
     /// is the one the judge looks for.
+    #[test]
+    fn a_refused_dispatch_is_found_in_the_lines() {
+        let quiet = vec!["endfield: wine: 0024:fixme:ntdll:stub".to_owned()];
+        assert!(!dispatch_refused(&quiet));
+        let refused = vec![format!("endfield: wine: 0024:err:seh:{NO_DISPATCH}")];
+        assert!(dispatch_refused(&refused));
+    }
+
     #[test]
     fn the_pin_and_the_title_agree() {
         assert!(!pinned().is_empty());

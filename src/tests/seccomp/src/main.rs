@@ -1012,6 +1012,115 @@ fn emulate() -> Step {
     }
 }
 
+/// What DW-Proton's handler writes for its self-test: `STATUS_INVALID_PARAMETER`.
+#[cfg(target_arch = "x86_64")]
+const DW_ANSWER: u64 = 0xC000_000D;
+/// Where DW-Proton's self-test maps its page.
+#[cfg(target_arch = "x86_64")]
+const DW_PAGE: usize = 0x6000_0000_0000;
+/// The `si_code` the DW handler found.
+#[cfg(target_arch = "x86_64")]
+static DW_CODE: AtomicI32 = AtomicI32::new(0);
+
+/// DW-Proton's `SIGSYS` handler, as far as its self-test needs it: the
+/// result written into `RAX`.
+#[cfg(target_arch = "x86_64")]
+extern "C" fn dw_sigsys(_signal: c_int, info: *mut libc::siginfo_t, context: *mut c_void) {
+    if info.is_null() || context.is_null() {
+        return;
+    }
+    // SAFETY: the kernel passes a live `siginfo_t` and `ucontext_t`.
+    let (info, context) = unsafe { (&*info, &mut *context.cast::<libc::ucontext_t>()) };
+    DW_CODE.store(info.si_code, Ordering::Release);
+    if let Some(slot) = context.uc_mcontext.gregs.get_mut(libc::REG_RAX as usize) {
+        *slot = DW_ANSWER as _;
+    }
+}
+
+/// **dwproton**: DW-Proton 11.0-14's own self-test, as its `install_bpf`
+/// runs it (`docs/SECCOMP.md` §13, the design's 7.3): a filter that traps by
+/// `instruction_pointer`, a page at 0x600000000000 holding `syscall`, and
+/// RAX = 0xffff from it. Before the filter the call answers `-ENOSYS` ("no
+/// filter yet"); after it, the handler's `STATUS_INVALID_PARAMETER`. x86-64
+/// only, the one ABI DW's filter is for.
+fn dwproton() -> Step {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let child = fork_with(|| {
+            // SAFETY: a zeroed `sigaction` with the fields set is valid.
+            let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+            action.sa_sigaction = dw_sigsys as *const () as usize;
+            action.sa_flags = libc::SA_SIGINFO;
+            // SAFETY: `action` is alive for the call.
+            if unsafe { libc::sigaction(libc::SIGSYS, &action, std::ptr::null_mut()) } != 0 {
+                return 2;
+            }
+            // SAFETY: an anonymous mapping at a fixed address that must be free.
+            let page = unsafe {
+                libc::mmap(
+                    DW_PAGE as *mut c_void,
+                    4096,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | 0x10_0000,
+                    -1,
+                    0,
+                )
+            };
+            if page != DW_PAGE as *mut c_void {
+                return 3;
+            }
+            // `mov %rdi,%rax; syscall; ret`.
+            let stub: [u8; 6] = [0x48, 0x89, 0xF8, 0x0F, 0x05, 0xC3];
+            // SAFETY: the page is ours and writable; then made executable.
+            unsafe {
+                std::ptr::copy_nonoverlapping(stub.as_ptr(), page.cast::<u8>(), stub.len());
+                if libc::mprotect(page, 4096, libc::PROT_READ | libc::PROT_EXEC) != 0 {
+                    return 3;
+                }
+            }
+            // SAFETY: the page holds the stub, which keeps the C convention.
+            let call: extern "C" fn(u64) -> u64 =
+                unsafe { std::mem::transmute::<usize, extern "C" fn(u64) -> u64>(DW_PAGE) };
+            if call(0xFFFF) != (-libc::ENOSYS) as i64 as u64 {
+                return 4;
+            }
+            if no_new_privs().is_err() {
+                return 2;
+            }
+            // `ld instruction_pointer` (high word); `jeq 0x6000`: TRAP; else
+            // ALLOW. DW's own filter names more ranges; this is the one its
+            // self-test exercises.
+            let program = vec![
+                stmt(BPF_LD_W_ABS, 12),
+                jump(BPF_JEQ_K, (DW_PAGE >> 32) as u32, 0, 1),
+                stmt(BPF_RET_K, RET_TRAP),
+                stmt(BPF_RET_K, RET_ALLOW),
+            ];
+            if install(&program, FLAG_SPEC_ALLOW).0 != 0 {
+                return 5;
+            }
+            if call(0xFFFF) != DW_ANSWER {
+                return 6;
+            }
+            if DW_CODE.load(Ordering::Acquire) != 1 {
+                return 7;
+            }
+            0
+        })?;
+        return match reap(child) {
+            0 => Ok(()),
+            3 => Err("the page at 0x600000000000 could not be mapped".into()),
+            4 => Err("0xffff from the page did not answer -ENOSYS before the filter".into()),
+            5 => Err("DW-Proton's filter was refused".into()),
+            6 => Err("DW-Proton's self-test did not get its handler's answer".into()),
+            7 => Err("DW-Proton's trap did not say SYS_SECCOMP".into()),
+            other => Err(format!("the DW child failed at step {other}")),
+        };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    Ok(())
+}
+
 /// **ignored**: with `SIGSYS` ignored, or blocked though a handler is installed,
 /// a trapped call still ends the process by `SIGSYS`: Linux's
 /// `force_sig_info_to_task` resets a blocked or ignored `SIGSYS` to its default.
@@ -1466,7 +1575,7 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some(CHILD) {
         std::process::exit(filtered_child());
     }
-    let steps: [Named; 12] = [
+    let steps: [Named; 13] = [
         ("probes", probes),
         ("errno", errno_filters),
         ("order", order),
@@ -1474,6 +1583,7 @@ fn main() {
         ("status", status),
         ("twoarch", two_architectures),
         ("emulate", emulate),
+        ("dwproton", dwproton),
         ("ignored", ignored),
         ("kill", kill),
         ("strict", strict),

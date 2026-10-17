@@ -40,6 +40,7 @@ const STEPS: &[&str] = &[
     "seccomp: status ok",
     "seccomp: twoarch ok",
     "seccomp: emulate ok",
+    "seccomp: dwproton ok",
     "seccomp: ignored ok",
     "seccomp: kill ok",
     "seccomp: strict ok",

@@ -2164,4 +2164,28 @@ step (`G`, with its step).
   the entry (`arch::drive_system_call`). The cases that end their process
   run in processes of their own and are read by their exit status.
 * **Guest**: `cargo xtask test-sud`, x86-64 and i386 on the x86-64 kernel,
-  with two negative controls as Cargo features.
+  with two negative controls as Cargo features. Its `nt` step makes the NT
+  calls a Windows program's own code was seen making directly under Wine
+  (0x04, 0x19, 0x1a, 0x34, 0x25) from pages high in the user half where an
+  image sits.
+* **seccomp `TRAP` as DW-Proton uses it**: `test-seccomp`'s `dwproton`
+  step runs DW-Proton 11.0-14's own self-test (a filter on
+  `instruction_pointer`, 0xffff from a page at 0x600000000000, `-ENOSYS`
+  before the filter and the handler's `STATUS_INVALID_PARAMETER` after).
+* **Wine**: `cargo xtask test-wine-dispatch` runs
+  `tools/common/test/direct-syscall.c` (a `syscall` with
+  `NtQueryInformationProcess`'s number from the program's own `.text`,
+  compared with ntdll's answer) in GE-Proton's Wine on Proton's volume,
+  and requires `DIRECT-SYSCALL PASS` with no thread saying it could not
+  enable dispatch. The same program passes on nazuna's Linux under the
+  same Proton, in bubblewrap as `ace-linux-ref.sh` runs Endfield.
+  `test-endfield-proton` also requires that no Wine thread says so.
+* **Negative controls** (`gate.sh control --expect`, each on the check's
+  own message): k1 the range tested at the instruction's own address; k2
+  the selector never read; k3 and k4 an invalid or unreadable selector
+  taken as ALLOW; k5 dispatch judged after seccomp; k6 a fork child given
+  its creator's settings; k7 `execve` not clearing them (`test-sud`,
+  `--expect-line`); k8 `si_code` 1; k9 `Errno(ENOSYS)` for `Trap`; k10 the
+  watch bit never raised; k11 `OFF` not lowering it; k12 a native-range
+  number killed; k13 the i386 conversion taking code 1 only; k14 `quiet()`
+  reading the seccomp state alone; k15 a `Dead` thread dispatched.

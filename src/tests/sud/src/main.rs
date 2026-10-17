@@ -1000,9 +1000,9 @@ fn seccomp_order() -> Step {
 
 /// The NT numbers a Windows program's own code was seen making directly
 /// under Wine (x64 numbering: NtWaitForSingleObject, NtQueryInformationProcess,
-/// NtDelayExecution, NtQueryInformationThread).
+/// NtWaitForMultipleObjects32, NtDelayExecution, NtQueryInformationThread).
 #[cfg(target_arch = "x86_64")]
-const NT_CALLS: [u64; 4] = [0x04, 0x19, 0x34, 0x25];
+const NT_CALLS: [u64; 5] = [0x04, 0x19, 0x1A, 0x34, 0x25];
 /// Where such code sat: a mapped image's address, high in the user half,
 /// as the observed calls came from 0x6ffff8... and 0x7fff....
 #[cfg(target_arch = "x86_64")]
