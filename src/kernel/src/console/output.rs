@@ -99,7 +99,7 @@ const STALL_SECONDS_DIVISOR: u64 = 10;
 /// interrupt sent, never from the start, so a long ring that the interrupt is
 /// draining is waited for (up to [`CHECK_LIMIT_NANOS`]). The N150 box's COM1,
 /// whose interrupt never comes, waited two seconds here before.
-const SILENT_NANOS: u64 = 50_000_000;
+const SILENT_NANOS: u64 = u64::MAX;
 
 /// The longest the transmit check waits for its line to go out at all, the
 /// interrupt still sending: two seconds, a hundred times what the line takes
