@@ -24,7 +24,8 @@
 //!    still works, slowly), then every 250 ms, which is how often the PHY is
 //!    asked about the link. A change goes to the kernel as LINK. A 250 ms
 //!    look that finds frames no interrupt announced goes back to every
-//!    millisecond: on the N150 box one packet arrived with no vector minted,
+//!    millisecond for the rest of the run: on the N150 box one packet arrived
+//!    with no vector minted, and later ones only now and then,
 //!    and the download then ran at what sends rang in.
 //! 5. STOP resets the core, and STOPPED goes back only if the reset was seen
 //!    to finish; otherwise the pins are kept and the process exits without
@@ -930,7 +931,9 @@ fn serve(
     let mut interrupted = false;
     // Whether this turn follows a wait that ended at its deadline.
     let mut polled = false;
-    let mut said_unannounced = false;
+    // Set once a deadline found frames no interrupt announced: from then on
+    // an interrupt no longer lengthens the wait.
+    let mut unreliable = false;
     let mut next_link = 0;
     control
         .wait_async(
@@ -959,16 +962,17 @@ fn serve(
         // interrupts are not arriving after all -- on the N150 box one
         // packet came with no vector minted, and every frame after it then
         // waited for the 250 ms look or for a send to ring the bell. Back to
-        // looking every millisecond, until an interrupt comes again.
+        // looking every millisecond, for good: on the box the interrupts that
+        // do come are sporadic (209 in five minutes of downloading, against
+        // tens of thousands of frames), and each one had put the wait back
+        // to 250 ms until a look found frames again.
         if polled && interrupted && turn.received > 0 {
             interrupted = false;
-            if !said_unannounced {
-                said_unannounced = true;
-                let _ = writeln!(
-                    Say,
-                    "yt6801   frames no interrupt announced: polling every millisecond again"
-                );
-            }
+            unreliable = true;
+            let _ = writeln!(
+                Say,
+                "yt6801   frames no interrupt announced: polling every millisecond from now on"
+            );
         }
         polled = false;
         if let Some(bell) = ring.side.publish(&mut ring.ring) {
@@ -1004,7 +1008,7 @@ fn serve(
                 );
             }
             Ok(packet) if packet.key == KEY_INTERRUPT => {
-                if !interrupted {
+                if !interrupted && !unreliable {
                     interrupted = true;
                     let _ = writeln!(Say, "yt6801   first interrupt: polling every 250 ms now");
                 }
