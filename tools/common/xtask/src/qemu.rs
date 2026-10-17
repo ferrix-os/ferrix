@@ -2407,7 +2407,57 @@ pub(crate) fn arm_cpu(arch: Arch) -> String {
 /// QEMU's command, on the host processors `pin` names (`--pin`) unless it is
 /// `none`: by `taskset`, which then runs QEMU in its own place, so the child
 /// is still QEMU's own pid.
-fn pinned(binary: &Path, pin: Option<&str>, quota: Option<u32>) -> Command {
+/// The least `--cpu-quota` that has booted the image (2 processors at 40 %
+/// of two host processors, `docs/BTRFS-PRESSURE.md`).
+const LEAST_CPU_QUOTA: u32 = 40;
+
+/// Why a `--cpu-quota` machine would not boot, so it is refused here rather
+/// than read later as a kernel defect: stage 4's contention self-check
+/// (FX-0407) needs two of the guest's processors to run at the same moment
+/// at least once, which no share of one host processor gives, and below
+/// [`LEAST_CPU_QUOTA`] it has not been seen to boot. `None` for a machine
+/// with no quota, or one that may boot.
+fn quota_refusal(quota: Option<u32>, pin: Option<&str>, processors: u32) -> Option<String> {
+    let percent = quota?;
+    if percent < LEAST_CPU_QUOTA {
+        return Some(format!(
+            "--cpu-quota {percent} is below {LEAST_CPU_QUOTA}, the least that has booted: \
+             stage 4's contention self-check (FX-0407) panics on a machine that slow"
+        ));
+    }
+    let host = pin.filter(|&cpus| cpus != "none").map(host_processors);
+    if processors > 1 && host == Some(1) {
+        return Some(format!(
+            "--cpu-quota with {processors} processors pinned to one host processor cannot \
+             boot: stage 4's contention self-check (FX-0407) needs two of them to run at \
+             once; pin to two or more, or give --smp 1"
+        ));
+    }
+    None
+}
+
+/// How many host processors `taskset -c`'s list names: `22,23`, `0-3`.
+fn host_processors(list: &str) -> usize {
+    list.split(',')
+        .map(|part| match part.split_once('-') {
+            Some((from, to)) => match (from.trim().parse::<usize>(), to.trim().parse::<usize>()) {
+                (Ok(from), Ok(to)) if to >= from => to - from + 1,
+                _ => 1,
+            },
+            None => 1,
+        })
+        .sum()
+}
+
+fn pinned(
+    binary: &Path,
+    pin: Option<&str>,
+    quota: Option<u32>,
+    processors: u32,
+) -> Result<Command> {
+    if let Some(why) = quota_refusal(quota, pin, processors) {
+        return Err(Error::new(why));
+    }
     if let Some(percent) = quota {
         // A transient user scope: no root, and the quota goes with QEMU when
         // it exits. `systemd-run --scope` runs the command as itself, so the
@@ -2419,15 +2469,15 @@ fn pinned(binary: &Path, pin: Option<&str>, quota: Option<u32>) -> Command {
             let _ = scoped.args(["taskset", "-c", cpus]);
         }
         let _ = scoped.arg(binary);
-        return scoped;
+        return Ok(scoped);
     }
     match pin.filter(|&cpus| cpus != "none") {
         Some(cpus) => {
             let mut taskset = Command::new("taskset");
             let _ = taskset.args(["-c", cpus]).arg(binary);
-            taskset
+            Ok(taskset)
         }
-        None => Command::new(binary),
+        None => Ok(Command::new(binary)),
     }
 }
 
@@ -2462,7 +2512,7 @@ fn qemu_command(
     // the guest was emulated without anybody having to guess.
     println!("  qemu: {arch} under {accelerator}, {processors} processors");
 
-    let mut command = pinned(&binary, args.pin.as_deref(), args.cpu_quota);
+    let mut command = pinned(&binary, args.pin.as_deref(), args.cpu_quota, processors)?;
     let _ = command.current_dir(paths::workspace_root());
 
     let _ = command.args(accelerator_arguments(&accelerator, kernel)?);
@@ -3877,6 +3927,18 @@ fn prepare_vars(arch: Arch, code: &Path, template: Option<&Path>) -> Result<Path
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_quota_too_small_to_boot_is_refused() {
+        use super::quota_refusal;
+        assert_eq!(quota_refusal(None, Some("23"), 4), None);
+        assert!(quota_refusal(Some(25), Some("22,23"), 2).is_some());
+        assert!(quota_refusal(Some(40), Some("23"), 4).is_some());
+        assert_eq!(quota_refusal(Some(40), Some("22,23"), 2), None);
+        assert_eq!(quota_refusal(Some(40), Some("20-23"), 4), None);
+        assert_eq!(quota_refusal(Some(40), Some("23"), 1), None);
+        assert_eq!(quota_refusal(Some(50), None, 4), None);
+    }
+
     use super::{
         Arch, POWER_OFF_FAILED, POWER_OFF_MARKER, R8_LINE, REMAP_LINES, SUCCESS_MARKER,
         UNCHECKED_MARKER, X2APIC_ALL, blocks_compatibility_format, cleaning_problem,

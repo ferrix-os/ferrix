@@ -65,6 +65,25 @@ impl Rows {
 /// Stage 13's exit test (`docs/BACKLOG.md`, *What a landing runs*).
 const TEST_CONTAINER: &str = "test-container --arch all";
 
+/// The memory-pressure row (`docs/BACKLOG.md`, *What a landing runs*;
+/// consultant ledger 2026-10-17 line 2314 (7)): its default form, about
+/// 2.5 min. The starved form depends on the host and is never a row.
+const TEST_BTRFS_PRESSURE: &str = "test-btrfs-pressure --arch x86_64 --accel kvm \
+     --init ~/.local/share/ferrix/busybox/{arch}/bin/busybox.static";
+
+/// What asks for [`TEST_BTRFS_PRESSURE`]: the page cache and its reclaim,
+/// the frame allocator and its watermark, btrfs, and the job's memory charge.
+const PRESSURED: &[&str] = &[
+    "src/kernel/src/fs/pages.rs",
+    "src/kernel/src/user/cache.rs",
+    "src/kernel/src/user/vmo.rs",
+    "src/kernel/src/mm.rs",
+    "src/kernel/src/mm/",
+    "src/kernel/src/fs/btrfs",
+    "src/lib/fs/btrfs",
+    "src/kernel/src/object/quota.rs",
+];
+
 /// The table's image row: anything the image contains, and the default.
 /// Both `x86_64` accelerators are named, so the row means the same thing on
 /// every host (`docs/BACKLOG.md`, *Name the accelerator*).
@@ -191,6 +210,14 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
             rows,
             "no row of the table names this path, so the widest one; narrow it by hand if \
              you know better, and say why",
+        );
+    }
+    if PRESSURED.iter().any(|prefix| under(prefix)) {
+        rows.add(&[TEST_BTRFS_PRESSURE]);
+        reason(
+            rows,
+            "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
+             test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
         );
     }
 }
@@ -500,6 +527,26 @@ mod tests {
             rows_of(&["src/lib/proto/other/src/lib.rs"]).commands,
             ["check", "test-boot --arch armv7a --smp 2"]
         );
+    }
+
+    #[test]
+    fn the_page_cache_and_btrfs_add_the_pressure_row_and_other_kernel_code_does_not() {
+        for path in [
+            "src/kernel/src/fs/pages.rs",
+            "src/kernel/src/user/cache.rs",
+            "src/kernel/src/mm.rs",
+            "src/kernel/src/fs/btrfs_write_check.rs",
+            "src/lib/fs/btrfs-vfs/src/rw.rs",
+            "src/kernel/src/object/quota.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            assert!(
+                rows.commands.iter().any(|c| c == TEST_BTRFS_PRESSURE),
+                "{path}"
+            );
+        }
+        let rows = rows_of(&["src/kernel/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_BTRFS_PRESSURE));
     }
 
     #[test]
