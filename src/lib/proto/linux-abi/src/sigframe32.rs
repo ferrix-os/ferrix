@@ -181,8 +181,9 @@ pub const RETCODE: [u8; 8] = [0x58, 0xb8, 0x77, 0x00, 0x00, 0x00, 0xcd, 0x80];
 /// field because it also carries `clock_t`s and `sigval`s, which a signal
 /// queued by a program brings.
 ///
-/// One origin is not the move: a system call a seccomp filter trapped
-/// (`SIGSYS`, `si_code` `SYS_SECCOMP`), whose union starts with a pointer that is
+/// One origin is not the move: a system call a seccomp filter trapped or
+/// Syscall User Dispatch dispatched (`SIGSYS`, `si_code` `SYS_SECCOMP` or
+/// `SYS_USER_DISPATCH`), whose union starts with a pointer that is
 /// eight bytes wide here and four there, so the two `int`s behind it are at 24
 /// and 28 here and at 16 and 20 there. It is converted field by field:
 /// `si_errno` and `si_code` where they are, `_call_addr` truncated to the low
@@ -191,7 +192,7 @@ pub const RETCODE: [u8; 8] = [0x58, 0xb8, 0x77, 0x00, 0x00, 0x00, 0xcd, 0x80];
 #[must_use]
 pub fn siginfo_from_64(info: &[u8; SIGINFO_SIZE]) -> [u8; SIGINFO_SIZE] {
     let mut out = [0_u8; SIGINFO_SIZE];
-    if is_seccomp_trap(info) {
+    if is_sigsys_trap(info) {
         // `si_signo`, `si_errno`, `si_code`.
         if let (Some(to), Some(from)) = (out.get_mut(..12), info.get(..12)) {
             to.copy_from_slice(from);
@@ -215,15 +216,16 @@ pub fn siginfo_from_64(info: &[u8; SIGINFO_SIZE]) -> [u8; SIGINFO_SIZE] {
     out
 }
 
-/// Whether `info` is the `siginfo` of a system call a seccomp filter trapped:
-/// `SIGSYS` (31) with `si_code` `SYS_SECCOMP` (1).
-fn is_seccomp_trap(info: &[u8; SIGINFO_SIZE]) -> bool {
+/// Whether `info` is the `siginfo` of a system call taken away as a signal:
+/// `SIGSYS` (31) with `si_code` `SYS_SECCOMP` (1), a seccomp filter's trap,
+/// or `SYS_USER_DISPATCH` (2), a dispatch. Both carry `_sigsys`.
+fn is_sigsys_trap(info: &[u8; SIGINFO_SIZE]) -> bool {
     let word = |at: usize| {
         info.get(at..at + 4)
             .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
             .map(i32::from_le_bytes)
     };
-    word(0) == Some(31) && word(8) == Some(1)
+    word(0) == Some(31) && matches!(word(8), Some(1 | 2))
 }
 
 /// A 32-bit program's `struct sigaction`, as `rt_sigaction` reads and writes

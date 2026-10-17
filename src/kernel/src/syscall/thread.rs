@@ -37,6 +37,7 @@ use crate::sync::SpinLock;
 use crate::syscall::pidns::Numbers;
 use crate::syscall::process::Process;
 use crate::syscall::seccomp;
+use crate::syscall::seccomp::user_dispatch::Dispatch;
 use crate::syscall::signal::{self, Inherited, Signals, ThreadSignals};
 
 /// One line of execution through a process.
@@ -84,10 +85,17 @@ pub(crate) struct Thread {
     /// given back after it. A thread with no bit set pays this load and
     /// nothing else.
     watched: AtomicU8,
+    /// Its Syscall User Dispatch settings (`seccomp::user_dispatch`), which
+    /// Linux keeps per thread (`task_struct.syscall_dispatch`). A leaf lock,
+    /// written only by the thread itself, never copied to a thread or
+    /// process made of it, and cleared by `execve`.
+    dispatch: SpinLock<Dispatch>,
 }
 
 /// [`Thread::watched`]'s bit for seccomp state.
 pub(crate) const WATCH_SECCOMP: u8 = 1 << 0;
+/// [`Thread::watched`]'s bit for Syscall User Dispatch, while it is on.
+pub(crate) const WATCH_DISPATCH: u8 = 1 << 1;
 
 impl Thread {
     /// The first thread of `process`, numbered by its pid, blocking nothing.
@@ -192,6 +200,8 @@ impl Thread {
             resume: SpinLock::new(None),
             seccomp: SpinLock::new(seccomp),
             watched: AtomicU8::new(watched),
+            // Off for every thread made, whatever its creator had.
+            dispatch: SpinLock::new(Dispatch::OFF),
         }
     }
 
@@ -233,6 +243,33 @@ impl Thread {
         self.set_watch(WATCH_SECCOMP, held.is_active());
         drop(held);
         answer
+    }
+
+    /// Change its Syscall User Dispatch settings under their leaf lock, and
+    /// raise or lower its watch bit for them.
+    pub(crate) fn with_dispatch<R>(&self, change: impl FnOnce(&mut Dispatch) -> R) -> R {
+        let mut held = self.dispatch.lock();
+        let answer = change(&mut held);
+        self.set_watch(WATCH_DISPATCH, held.is_on());
+        drop(held);
+        answer
+    }
+
+    /// Turn its Syscall User Dispatch off: the old program's, which `execve`
+    /// clears as Linux's `begin_new_exec` does.
+    pub(crate) fn clear_dispatch(&self) {
+        self.with_dispatch(|dispatch| *dispatch = Dispatch::OFF);
+    }
+
+    /// A copy of its Syscall User Dispatch settings, the lock let go before
+    /// the copy is used.
+    pub(crate) fn dispatch(&self) -> Dispatch {
+        *self.dispatch.lock()
+    }
+
+    /// Whether its Syscall User Dispatch is on: its watch bit, one load.
+    pub(crate) fn is_dispatching(&self) -> bool {
+        self.watched.load(Ordering::Acquire) & WATCH_DISPATCH != 0
     }
 
     /// Read its seccomp state under its leaf lock, changing nothing and

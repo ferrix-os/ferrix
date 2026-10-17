@@ -1311,6 +1311,7 @@ fn trapped_in_the_task(env: &Env) -> Result<usize, &'static str> {
         .with_signals(signal::take_next)
         .ok_or("a trapped call raised no signal its handler could take")?;
     let signal::Origin::Sys {
+        code,
         errno,
         call_addr,
         syscall,
@@ -1320,6 +1321,7 @@ fn trapped_in_the_task(env: &Env) -> Result<usize, &'static str> {
         return Err("a trapped call raised a signal that is not a seccomp trap");
     };
     if taken.signal != SIGSYS_NUMBER
+        || code != signal::SYS_SECCOMP
         || errno != 0x1234
         || call_addr != 0x1000
         || syscall != getppid as i32

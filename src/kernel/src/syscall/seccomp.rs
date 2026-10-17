@@ -32,6 +32,9 @@
 //! ([`may_install`]): otherwise a program could run a set-user-id file under
 //! a filter that makes it believe it had dropped privileges.
 
+pub(crate) mod user_dispatch;
+pub(crate) mod user_dispatch_check;
+
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
@@ -423,7 +426,12 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     // `exit` takes, and the entry opens them a few instructions later anyway.
     // The hook returns with them masked again, as the core's contract has it.
     arch::enable_interrupts();
-    let decision = decide(&thread, args);
+    // Syscall User Dispatch first, as Linux judges it before seccomp; but a
+    // thread a filter is ending gets its end, never a dispatch (condition 7).
+    let decision = match dispatch_first(&thread, args) {
+        Some(verdict) => Decision::Verdict(verdict),
+        None => decide(&thread, args),
+    };
     arch::disable_interrupts();
     // The thread is dropped before it leaves: nothing after the task ends runs
     // to drop it.
@@ -432,6 +440,16 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
         Decision::Verdict(verdict) => verdict,
         Decision::Leave(status) => process::exit_thread_current(status),
     }
+}
+
+/// Syscall User Dispatch's answer for a call of `thread`, which is watched:
+/// `None` when it has none (it is off, the call is in range or allowed) or
+/// when a filter has marked the thread `Dead`, whose end [`decide`] gives.
+fn dispatch_first(thread: &Thread, args: &SyscallArgs) -> Option<Verdict> {
+    if !thread.is_dispatching() || thread.read_seccomp(|state| state.mode == Mode::Dead) {
+        return None;
+    }
+    user_dispatch::judge(thread, args)
 }
 
 /// Whether [`check`] would let every call of the running task through
@@ -625,6 +643,7 @@ fn trap(thread: &Thread, args: &SyscallArgs, errno: u32, log: bool) -> Decision 
         return kill_process(thread, args, TRAP);
     }
     let origin = Origin::Sys {
+        code: crate::syscall::signal::SYS_SECCOMP,
         errno,
         call_addr: seen.instruction_pointer,
         syscall: seen.nr,
@@ -940,6 +959,11 @@ pub(crate) fn dispatch(
             option::PR_GET_SPECULATION_CTRL => Some(speculation_get(a[1], [a[2], a[3], a[4]])),
             option::PR_SET_SPECULATION_CTRL => Some(speculation_set(a[1], a[2], [a[3], a[4]])),
             option::PR_GET_SECCOMP => Some(prctl_get(process)),
+            user_dispatch::PR_SET_SYSCALL_USER_DISPATCH => Some(
+                thread::current_of(process)
+                    .ok_or(Errno::ESRCH)
+                    .and_then(|thread| user_dispatch::prctl_set(&thread, [a[1], a[2], a[3], a[4]])),
+            ),
             option::PR_SET_SECCOMP => Some(
                 thread::current_of(process)
                     .ok_or(Errno::ESRCH)

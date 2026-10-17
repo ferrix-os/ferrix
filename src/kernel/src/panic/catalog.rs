@@ -1612,6 +1612,41 @@ pub(crate) static STAGE13_SECCOMP_FILTERS: Explanation = Explanation {
          src/kernel/src/syscall/thread.rs; docs/SECCOMP.md §3.4 to §3.7",
 };
 
+/// For `check_user_dispatch` in `stages_check.rs`, when
+/// `syscall::seccomp::user_dispatch_check::run` fails.
+pub(crate) static STAGE13_USER_DISPATCH: Explanation = Explanation {
+    code: "FX-1304",
+    title: "Syscall User Dispatch did not judge, dispatch or refuse a call as Linux does",
+    meaning: "`prctl(PR_SET_SYSCALL_USER_DISPATCH)` (docs/SECCOMP.md §13, the consultant's \
+              ledger line 2323) lets a program, Proton's Wine, take back the system calls its \
+              own code makes from outside a range it names. \
+              `syscall::seccomp::user_dispatch_check::run` asks prctl's rows of the module and \
+              makes a dispatching thread's calls through the core's own entry, in a task that \
+              is a real thread of a check process. A call from inside the range must run; one \
+              from outside must run when the selector byte says ALLOW and be handed back with \
+              a SIGSYS of si_code SYS_USER_DISPATCH, its registers as they were, when it says \
+              BLOCK or there is none; a selector of any other value must end the process with \
+              SIGSYS and one that cannot be read with SIGSEGV; dispatch must be judged before \
+              seccomp's filters, and never for a thread a filter is ending; no thread, fork \
+              child or native child may start with it; and the count of watched threads the \
+              entry reads first must be back where it was. On AArch64 and ARMv7-A every mode \
+              must be refused with EINVAL, as Linux refuses it there.",
+    causes: &[
+        "`seccomp::user_dispatch::judge` tests the range against another address than the one \
+         after the call, or reads the selector where it should not.",
+        "`Thread::with_dispatch` does not raise or lower the thread's WATCH_DISPATCH bit, or \
+         `seccomp::FILTERED_THREADS` is not counted with it, so the entry never looks.",
+        "`seccomp::check` asks seccomp's chain before dispatch, or dispatches a thread whose \
+         seccomp state is Dead.",
+        "`Thread::with` copies its creator's dispatch settings, or `execve` keeps them.",
+        "`Origin::Sys` carries another si_code than SYS_USER_DISPATCH for a dispatch, or the \
+         verdict is not `Verdict::Trap`, so the call's number is lost from its registers.",
+    ],
+    see: "src/kernel/src/syscall/seccomp/user_dispatch.rs; \
+          src/kernel/src/syscall/seccomp/user_dispatch_check.rs; \
+          src/kernel/src/syscall/seccomp.rs check; docs/SECCOMP.md §13",
+};
+
 /// For `check_smbios` in `stages_check.rs`, when `discovery::smbios_check::run`
 /// fails.
 pub(crate) static SMBIOS: Explanation = Explanation {
@@ -3435,6 +3470,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_CGROUPFS,
     &STAGE13_SECCOMP,
     &STAGE13_SECCOMP_FILTERS,
+    &STAGE13_USER_DISPATCH,
     &INIT_EXITED,
     &INIT_CALLS,
     &INIT_INPUTS,

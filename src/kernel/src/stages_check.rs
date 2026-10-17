@@ -84,6 +84,7 @@ pub(super) fn check_programs() {
     // each entry with frames of the check's own.
     check_seccomp();
     check_seccomp_filters();
+    check_user_dispatch();
 
     // A mount's own flags, enforced and shown; under /tmp, after the root.
     check_mount_flags();
@@ -357,6 +358,40 @@ pub(super) fn check_seccomp_filters() {
         checked.sync_hold,
         checked.sync_holds,
     );
+}
+
+/// Syscall User Dispatch (`docs/SECCOMP.md` §13, ledger 2323): `prctl`'s rows,
+/// the range and the selector judged at the entry before seccomp, the
+/// `SIGSYS` it forces, and nothing inherited.
+pub(super) fn check_user_dispatch() {
+    let checked = match syscall::seccomp::user_dispatch_check::run() {
+        Ok(checked) => checked,
+        Err(problem) => fatal!(
+            catalog::STAGE13_USER_DISPATCH,
+            "syscall user dispatch self-check failed: {problem}"
+        ),
+    };
+    if checked.built {
+        println!(
+            "  dispatch {} prctl rows answered as Linux answers them, {} calls of a dispatching \
+             thread judged through the entry, {} processes a dispatch ended; a call costs {} ns \
+             in range, {} ns reading an ALLOW selector, {} ns dispatched; watched back to {}",
+            checked.rows,
+            checked.calls,
+            checked.ended,
+            checked.in_range,
+            checked.selector,
+            checked.dispatch,
+            syscall::seccomp::filtered_threads(),
+        );
+    } else {
+        println!(
+            "  dispatch {} prctl rows answered EINVAL, as Linux answers them on this \
+             architecture; watched back to {}",
+            checked.rows,
+            syscall::seccomp::filtered_threads(),
+        );
+    }
 }
 
 /// A mount's own flags: `ro`, `nodev`, `noexec` and `nosuid` enforced,
