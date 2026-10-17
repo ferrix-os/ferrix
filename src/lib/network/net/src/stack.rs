@@ -835,6 +835,8 @@ impl Stack {
 
     /// A datagram socket's connect only records where sends go.
     fn connect_datagram(&mut self, id: SocketId, remote: Endpoint) -> Result<(), Error> {
+        let bound = self.sockets.get(&id.0).ok_or(Error::NoSocket)?.local();
+        let remote = towards_self(remote, bound.address);
         let source = self.source_for(remote.address)?;
         let family = self.sockets.get(&id.0).ok_or(Error::NoSocket)?.family();
         let port = match self.sockets.get(&id.0) {
@@ -868,6 +870,8 @@ impl Stack {
 
     /// A stream socket's connect starts the handshake.
     fn connect_stream(&mut self, id: SocketId, remote: Endpoint, now: Millis) -> Result<(), Error> {
+        let bound = self.sockets.get(&id.0).ok_or(Error::NoSocket)?.local();
+        let remote = towards_self(remote, bound.address);
         let source = self.source_for(remote.address)?;
         let family = self.sockets.get(&id.0).ok_or(Error::NoSocket)?.family();
         let bound = self
@@ -944,6 +948,47 @@ pub(crate) fn unspecified(family: Family) -> IpAddress {
         Family::V4 => IpAddress::V4(Ipv4::UNSPECIFIED),
         Family::V6 => IpAddress::V6(Ipv6::UNSPECIFIED),
     }
+}
+
+/// Where a connect or a datagram to `remote` goes, for a socket bound to
+/// `bound`: the unspecified address means this host, exactly as on Linux.
+///
+/// * IPv4 `0.0.0.0` (`__ip_route_output_key`, which `ip_route_connect` and
+///   `udp_sendmsg` reach): the socket's own bound address, or `127.0.0.1`
+///   when it is not bound to one.
+/// * IPv6 `::` (`tcp_v6_connect`, `ip6_datagram_connect`, `udpv6_sendmsg`):
+///   `::1`; for a socket bound to an IPv4-mapped address, `127.0.0.1`. A
+///   mapped `::ffff:0.0.0.0` reaches here as IPv4 `0.0.0.0` (the caller
+///   normalises it), as Linux hands it to `tcp_v4_connect`.
+///
+/// The destination is Linux's; the delivery is not yet, for one case. Linux
+/// delivers a packet to any of the host's own addresses through the loopback
+/// (its local table). This stack has no local table: a packet to one of the
+/// host's own non-loopback addresses is routed like any other and leaves on
+/// the wire. So a socket bound to a non-loopback address that connects or
+/// sends to `0.0.0.0` is sent to that address *on the wire*, where Linux
+/// would deliver it locally (docs/backlog, the local table's row). The
+/// unbound case, and a socket bound to a loopback address, go to the
+/// loopback as on Linux.
+///
+/// A hosts file that sends a name to `0.0.0.0` -- the usual way to block a
+/// host -- relies on it: on Linux a connect to a closed port is refused at
+/// once by the loopback. Routed out of the default route instead, the SYN
+/// went unanswered and every connect to a blocked host took the six SYN
+/// retransmits (about two minutes) to fail.
+pub(crate) fn towards_self(remote: Endpoint, bound: IpAddress) -> Endpoint {
+    let address = match remote.address {
+        IpAddress::V4(address) if address.is_unspecified() => match bound {
+            IpAddress::V4(own) if !own.is_unspecified() => IpAddress::V4(own),
+            _ => IpAddress::V4(Ipv4::LOOPBACK),
+        },
+        IpAddress::V6(address) if address.is_unspecified() => match bound {
+            IpAddress::V4(own) if !own.is_unspecified() => IpAddress::V4(Ipv4::LOOPBACK),
+            _ => IpAddress::V6(Ipv6::LOOPBACK),
+        },
+        _ => return remote,
+    };
+    Endpoint::new(address, remote.port)
 }
 
 /// Whether `socket` is a TCP socket that has been told to listen.

@@ -437,3 +437,79 @@ fn a_port_is_free_again_once_its_listener_has_gone() {
         .listen(second, 4)
         .expect("listening in its place");
 }
+
+#[test]
+fn a_connection_to_the_unspecified_address_is_refused_by_the_loopback_at_once() {
+    // A hosts file's `0.0.0.0 blocked.example` must fail the connect at
+    // once, as on Linux, not after the SYN's retransmits out of the default
+    // route: the clock does not move here.
+    let mut wire = Wire::new();
+    let client = wire.one.open_tcp(Family::V4);
+    let now = wire.now;
+    wire.one
+        .connect(client, at(Ipv4::UNSPECIFIED, 443), now)
+        .expect("the unspecified address means this host");
+    wire.exchange();
+    assert_eq!(state(&wire.one, client), Some(State::Closed));
+    assert_eq!(wire.one.take_error(client), Some(Error::Refused));
+    assert_eq!(
+        wire.one.remote_endpoint(client),
+        Some(at(Ipv4::LOOPBACK, 443))
+    );
+}
+
+#[test]
+fn a_connection_to_the_unspecified_address_reaches_a_loopback_listener() {
+    let mut host = Alone::new();
+    let listener = host.stack.open_tcp(Family::V4);
+    host.stack
+        .bind(listener, at(Ipv4::LOOPBACK, 8_090))
+        .expect("bound");
+    host.stack.listen(listener, 4).expect("listening");
+    let client = host.stack.open_tcp(Family::V4);
+    host.stack
+        .connect(client, at(Ipv4::UNSPECIFIED, 8_090), host.now)
+        .expect("a connect to 0.0.0.0");
+    host.settle();
+    assert_eq!(state(&host.stack, client), Some(State::Established));
+    assert!(host.stack.accept(listener).is_ok());
+}
+
+#[test]
+fn a_connection_to_the_ipv6_unspecified_address_is_refused_by_the_loopback_at_once() {
+    let mut wire = Wire::new();
+    let client = wire.one.open_tcp(Family::V6);
+    let now = wire.now;
+    wire.one
+        .connect(client, at_v6(crate::addr::Ipv6::UNSPECIFIED, 443), now)
+        .expect("`::` means this host");
+    wire.exchange();
+    assert_eq!(state(&wire.one, client), Some(State::Closed));
+    assert_eq!(wire.one.take_error(client), Some(Error::Refused));
+    assert_eq!(
+        wire.one.remote_endpoint(client),
+        Some(at_v6(crate::addr::Ipv6::LOOPBACK, 443))
+    );
+}
+
+#[test]
+fn a_bound_socket_s_connection_to_the_unspecified_address_goes_to_its_own_address_on_the_wire() {
+    // Linux's __ip_route_output_key: daddr 0 becomes the bound saddr, not
+    // 127.0.0.1. Linux then delivers it locally; this stack has no local
+    // table yet, so the SYN leaves on eth0 (an ARP for its own address
+    // first). This pins today's behaviour; the local table's backlog row
+    // changes it.
+    let mut wire = Wire::new();
+    let client = wire.one.open_tcp(Family::V4);
+    wire.one
+        .bind(client, at(ONE, 0))
+        .expect("the host owns that address");
+    let now = wire.now;
+    wire.one
+        .connect(client, at(Ipv4::UNSPECIFIED, 444), now)
+        .expect("0.0.0.0 means the bound address");
+    assert_eq!(wire.one.remote_endpoint(client), Some(at(ONE, 444)));
+    let frame = wire.one.poll_transmit(now).expect("a frame for the wire");
+    assert!(!wire.one.is_loopback(frame.interface));
+    assert_eq!(state(&wire.one, client), Some(State::SynSent));
+}

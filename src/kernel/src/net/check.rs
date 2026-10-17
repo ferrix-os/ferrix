@@ -15,7 +15,8 @@
 //! * a TCP connection to a listening port is made and accepted, carries bytes
 //!   in both directions, and ends as a clean close at both ends;
 //! * a connection to a port nobody listens on is refused rather than left to
-//!   time out;
+//!   time out, and so is one to the unspecified address of either family,
+//!   which means this host on connect, as on Linux;
 //! * a port a socket listens on is its own: a second socket may not bind an
 //!   overlapping address on it, nor listen beside it having bound first,
 //!   `EADDRINUSE` both, though both set `SO_REUSEADDR` -- as Linux keeps a
@@ -114,6 +115,21 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         Family::V4,
         IpAddress::V4(Ipv4::LOOPBACK),
         7_781,
+    )?;
+    // The unspecified address means this host on connect, as on Linux: a
+    // hosts file's `0.0.0.0 blocked.example` is refused at once by the
+    // loopback, rather than sent out of the default route to time out.
+    refused(
+        &mut report,
+        Family::V4,
+        IpAddress::V4(Ipv4::UNSPECIFIED),
+        7_784,
+    )?;
+    refused(
+        &mut report,
+        Family::V6,
+        IpAddress::V6(Ipv6::UNSPECIFIED),
+        7_785,
     )?;
     listeners_keep_their_port(&mut report, 7_783)?;
     raw_icmp(&mut report)?;

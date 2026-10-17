@@ -12,7 +12,7 @@ use ferrix_netwire::{icmpv4, icmpv6, udp};
 
 use crate::addr::{Endpoint, IpAddress, Ipv6};
 use crate::socket::{Error, Socket};
-use crate::stack::{Millis, Stack, unspecified};
+use crate::stack::{Millis, Stack, towards_self, unspecified};
 
 /// What a receive answered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -59,10 +59,10 @@ impl Stack {
         if socket.write_shut {
             return Err(Error::ShutDown);
         }
-        let destination = normalise(to.or(socket.remote).ok_or(Error::NotConnected)?);
-        if destination.address.is_unspecified() {
-            return Err(Error::Unreachable);
-        }
+        let destination = towards_self(
+            normalise(to.or(socket.remote).ok_or(Error::NotConnected)?),
+            socket.local.address,
+        );
         let options = socket.options;
         let bound = socket.local;
         let source = if bound.address.is_unspecified() {

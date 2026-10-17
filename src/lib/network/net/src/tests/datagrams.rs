@@ -431,3 +431,51 @@ fn an_unreachable_comes_back_over_ipv6_as_well() {
         Err(Error::PortUnreachable)
     );
 }
+
+#[test]
+fn a_datagram_to_the_unspecified_address_crosses_the_loopback() {
+    let mut host = Alone::new();
+    let server = host.stack.open_udp(Family::V4);
+    host.stack
+        .bind(server, at(Ipv4::LOOPBACK, 7_090))
+        .expect("a loopback address may be bound");
+    let client = host.stack.open_udp(Family::V4);
+    let sent = host
+        .stack
+        .send(
+            client,
+            b"self",
+            Some(at(Ipv4::UNSPECIFIED, 7_090)),
+            host.now,
+        )
+        .expect("0.0.0.0 means this host, as on Linux");
+    assert_eq!(sent, 4);
+    host.settle();
+    let mut out = [0_u8; 8];
+    let received = host
+        .stack
+        .recv(server, &mut out, false)
+        .expect("the datagram arrived");
+    assert_eq!(out.get(..received.bytes), Some(b"self".as_slice()));
+}
+
+#[test]
+fn a_bound_socket_s_datagram_to_the_unspecified_address_goes_to_its_own_address_on_the_wire() {
+    // As the stream case: the bound address is Linux's choice, and with no
+    // local table the datagram leaves on eth0 rather than being delivered
+    // locally as Linux would. Before 0.0.0.0 meant this host, the send was
+    // refused as unreachable.
+    let mut wire = Wire::new();
+    let client = wire.one.open_udp(Family::V4);
+    wire.one
+        .bind(client, at(ONE, 9_200))
+        .expect("the host owns that address");
+    let now = wire.now;
+    let sent = wire
+        .one
+        .send(client, b"own", Some(at(Ipv4::UNSPECIFIED, 9_201)), now)
+        .expect("0.0.0.0 means the bound address");
+    assert_eq!(sent, 3);
+    let frame = wire.one.poll_transmit(now).expect("a frame for the wire");
+    assert!(!wire.one.is_loopback(frame.interface));
+}
