@@ -201,9 +201,75 @@ pub fn claims(hierarchy: bool, named: Address, function: Address, bridges: &[Bri
     }
 }
 
+/// What a DMAR's explicit scopes -- endpoints and sub-hierarchies, of every
+/// unit on the segment, refused ones included -- say of one function.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Explicit<U> {
+    /// A scope of unit `U` reaches it as its own requester.
+    Own(U),
+    /// None does, but one reaches it under an alias, or a scope's path could
+    /// not be followed: it may be one of those.
+    Unfollowed,
+    /// No scope reaches it.
+    None,
+}
+
+/// A segment's catch-all unit, as the DMAR says (`INCLUDE_PCI_ALL`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CatchAll<U> {
+    /// None.
+    None,
+    /// Exactly one: unit `U`.
+    One(U),
+    /// More than one, which is not allowed: none is believed.
+    Several,
+}
+
+/// Where a function is placed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Placed<U> {
+    /// Behind unit `U`, as its own requester ID.
+    Unit(U),
+    /// Behind no unit.
+    Nothing,
+    /// Firmware says something that cannot be followed: never given a domain.
+    Unresolved,
+}
+
+/// Where `function` is placed, from what the explicit scopes said and the
+/// segment's catch-all: the one decision both the discovery report and the
+/// domains ask, so the two cannot disagree.
+///
+/// An explicit scope outranks the catch-all, whether or not its unit came
+/// up: a function a refused unit's scope names is behind that unit, not the
+/// catch-all. A function no explicit scope reaches is the catch-all's only
+/// when its own requester ID reaches its root bus ([`own_to_root`]): one
+/// behind a PCIe-to-PCI bridge arrives as the bridge's alias and is
+/// unresolved, as two catch-alls make every such function.
+#[must_use]
+pub fn place<U>(
+    explicit: Explicit<U>,
+    catch_all: CatchAll<U>,
+    function: Address,
+    bridges: &[Bridge],
+) -> Placed<U> {
+    match explicit {
+        Explicit::Own(unit) => Placed::Unit(unit),
+        Explicit::Unfollowed => Placed::Unresolved,
+        Explicit::None => match catch_all {
+            CatchAll::None => Placed::Nothing,
+            CatchAll::Several => Placed::Unresolved,
+            CatchAll::One(unit) if own_to_root(function, bridges) => Placed::Unit(unit),
+            CatchAll::One(_) => Placed::Unresolved,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Behind, Bridge, behind, claims, follow_path, own_to_root};
+    use super::{
+        Behind, Bridge, CatchAll, Explicit, Placed, behind, claims, follow_path, own_to_root, place,
+    };
     use crate::Address;
 
     fn at(bus: u8, device: u8, function: u8) -> Address {
@@ -480,5 +546,143 @@ mod tests {
         ];
         assert_eq!(behind(at(3, 1, 0), at(0, 2, 0), &bridges), Behind::Aliased);
         assert!(!own_to_root(at(3, 1, 0), &bridges));
+    }
+
+    /// The N150 box's bridges, from its `lspci` (`box-2026-10-16/lspci.txt`):
+    /// two PCIe root ports, 00:1c.0 with the YT6801 on bus 1 and 00:1c.6
+    /// with the WLAN on bus 2.
+    fn box_bridges() -> [Bridge; 2] {
+        [
+            Bridge {
+                address: at(0, 0x1C, 0),
+                secondary: 1,
+                subordinate: 1,
+                forwards_requester: true,
+            },
+            Bridge {
+                address: at(0, 0x1C, 6),
+                secondary: 2,
+                subordinate: 2,
+                forwards_requester: true,
+            },
+        ]
+    }
+
+    /// The box's 27 functions (`lspci.txt`).
+    const BOX_FUNCTIONS: [(u8, u8, u8); 27] = [
+        (0, 0x00, 0),
+        (0, 0x02, 0),
+        (0, 0x04, 0),
+        (0, 0x0A, 0),
+        (0, 0x0D, 0),
+        (0, 0x14, 0),
+        (0, 0x14, 2),
+        (0, 0x15, 0),
+        (0, 0x15, 1),
+        (0, 0x15, 2),
+        (0, 0x15, 3),
+        (0, 0x16, 0),
+        (0, 0x17, 0),
+        (0, 0x19, 0),
+        (0, 0x19, 1),
+        (0, 0x1A, 0),
+        (0, 0x1C, 0),
+        (0, 0x1C, 6),
+        (0, 0x1E, 0),
+        (0, 0x1E, 2),
+        (0, 0x1E, 3),
+        (0, 0x1F, 0),
+        (0, 0x1F, 3),
+        (0, 0x1F, 4),
+        (0, 0x1F, 5),
+        (1, 0x00, 0),
+        (2, 0x00, 0),
+    ];
+
+    /// Verifies: `L.iommu.62`
+    #[test]
+    fn every_box_function_is_placed_behind_a_unit() {
+        let bridges = box_bridges();
+        let mut behind_dmar1 = 0;
+        for (bus, device, function) in BOX_FUNCTIONS {
+            let address = at(bus, device, function);
+            // dmar0's one endpoint scope names the iGPU.
+            let explicit = if (bus, device, function) == (0, 2, 0) {
+                Explicit::Own("dmar0")
+            } else {
+                Explicit::None
+            };
+            match place(explicit, CatchAll::One("dmar1"), address, &bridges) {
+                Placed::Unit("dmar0") => assert_eq!(address, at(0, 2, 0)),
+                Placed::Unit("dmar1") => behind_dmar1 += 1,
+                other => panic!("{address}: {other:?}"),
+            }
+        }
+        assert_eq!(
+            behind_dmar1, 26,
+            "26 behind dmar1, 1 behind dmar0, 0 bypassing"
+        );
+        assert_eq!(
+            place(
+                Explicit::None,
+                CatchAll::One("dmar1"),
+                at(1, 0, 0),
+                &bridges
+            ),
+            Placed::Unit("dmar1"),
+            "the YT6801 below root port 00:1c.0, as its own requester"
+        );
+    }
+
+    /// Verifies: `L.iommu.62`
+    #[test]
+    fn the_catch_all_takes_no_alias_and_two_take_nothing() {
+        let bridges = machine();
+        // Bus 2 is behind the PCIe-to-PCI bridge at 01:00.0 of `machine`.
+        let aliased = at(2, 1, 0);
+        assert_eq!(
+            place(Explicit::None, CatchAll::One(1), aliased, &bridges),
+            Placed::Unresolved,
+            "behind a PCIe-to-PCI bridge"
+        );
+        assert_eq!(
+            place(
+                Explicit::None,
+                CatchAll::Several::<u8>,
+                at(0, 3, 0),
+                &bridges
+            ),
+            Placed::Unresolved
+        );
+        assert_eq!(
+            place(Explicit::None, CatchAll::None::<u8>, at(0, 3, 0), &bridges),
+            Placed::Nothing
+        );
+        assert_eq!(
+            place(
+                Explicit::Unfollowed,
+                CatchAll::One(1),
+                at(0, 3, 0),
+                &bridges
+            ),
+            Placed::Unresolved,
+            "an unfollowed scope is never the catch-all's"
+        );
+    }
+
+    /// Verifies: `L.iommu.63`
+    #[test]
+    fn an_explicit_scope_outranks_the_catch_all() {
+        // Unit `None` stands for a refused unit, as the kernel records one.
+        assert_eq!(
+            place(
+                Explicit::Own(None),
+                CatchAll::One(Some(1)),
+                at(0, 2, 0),
+                &box_bridges()
+            ),
+            Placed::Unit(None),
+            "a refused unit's function is not handed to the catch-all"
+        );
     }
 }

@@ -97,6 +97,24 @@ pub(crate) fn check_firmware_left_on(unit: &super::vtd::Unit) {
     let _ = FIRMWARE_QUEUES_STOPPED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 }
 
+/// Stage 10, at bring-up, after a VT-d unit's `open`, checks or not: its
+/// fault event reads back masked, as `open` left it. A unit's own fault
+/// messages are never remapped, so one firmware left armed would deliver
+/// wherever firmware aimed it.
+///
+/// Halts rather than returning, as every other stage's check does.
+///
+/// Verifies: L.iommu.70
+pub(crate) fn check_fault_events_masked(unit: &super::vtd::Unit) {
+    if !unit.fault_events_masked() {
+        fatal!(
+            catalog::STAGE10_IOMMU,
+            "stage 10 self-check failed: VT-d unit {:#x}'s fault event did not read back masked",
+            unit.phys()
+        );
+    }
+}
+
 /// Stage 10: no IOMMU recorded a fault that no check provoked. Answers how
 /// many DMA faults were read from a unit, for the audit record's end-of-boot
 /// check, which runs after this since reading the faults is what records them.
@@ -108,9 +126,9 @@ pub(crate) fn check_dma_faults() -> u64 {
     let audit = super::audit_faults();
     println!(
         "  iommu    {} DMA faults recorded that no check provoked, {} of them unit events other \
-         than a refused access, across {} translating units; {} late faults from the \
-         out-of-domain probe",
-        audit.stray, audit.stray_events, audit.units, audit.provoked,
+         than a refused access, across {} units that translate or remap ({} translating); {} \
+         late faults from the out-of-domain probe",
+        audit.stray, audit.stray_events, audit.units, audit.translating, audit.provoked,
     );
     check_stray_deliveries();
     if audit.stray == 0 {

@@ -183,6 +183,7 @@ pub(crate) fn test_boot_lines(
                 queue_problem(arch, &watched.lines),
                 config_problem(arch, &watched.lines),
                 iommu_problem(&watched.lines),
+                walk_problem(arch, args, &watched.lines),
                 namespace_problem(&watched.lines),
                 xstate_problem(arch, own_model, &watched.lines),
                 fault_problem(arch, &watched.lines),
@@ -633,6 +634,10 @@ fn config_problem(arch: Arch, lines: &[String]) -> Option<String> {
 /// firmware puts behind a unit.
 const BEHIND_IOMMU: &str = " PCI functions behind one";
 
+/// What it prints after the number of functions placed behind a unit that
+/// does not translate.
+const UNTRANSLATED: &str = " of them untranslated";
+
 /// What it prints after the number of functions whose description it could
 /// not follow.
 const UNRESOLVED: &str = " unresolved";
@@ -675,6 +680,19 @@ fn iommu_problem(lines: &[String]) -> Option<String> {
             line.trim()
         ));
     }
+    // A line without the untranslated count is one from before units that
+    // only remap; one with it must say 0 on x86-64, whose machine has one
+    // unit that translates (an Arm device tree SMMU is left alone).
+    if line.contains(UNTRANSLATED)
+        && line.contains(" VT-d units")
+        && !line.contains(" 0 VT-d units")
+        && count_before(line, UNTRANSLATED) != Some(0)
+    {
+        return Some(format!(
+            "a PCI function was placed behind a VT-d unit that does not translate: `{}`",
+            line.trim()
+        ));
+    }
     if count_before(line, UNRESOLVED) != Some(0) {
         return Some(format!(
             "an IOMMU description could not be followed: `{}`",
@@ -689,6 +707,33 @@ fn iommu_problem(lines: &[String]) -> Option<String> {
             "a PCI function was placed behind no IOMMU: `{}`",
             line.trim()
         ));
+    }
+    None
+}
+
+/// What the kernel prints of a VT-d unit that translates with three-level
+/// tables, QEMU's default, and with four, which `--vtd-aw48` offers.
+const WALKS: [&str; 2] = ["translating (three-level)", "translating (four-level)"];
+
+/// Why an x86-64 boot's VT-d unit did not walk the tables the machine was
+/// given: four-level under `--vtd-aw48` (QEMU's `aw-bits=48` offers both,
+/// and the widest is taken), three-level otherwise.
+///
+/// Verifies: L.iommu.60
+fn walk_problem(arch: Arch, args: &Args, lines: &[String]) -> Option<String> {
+    if arch != Arch::X86_64 {
+        return None;
+    }
+    let [three, four] = WALKS;
+    let (wanted, other) = if args.vtd_aw48 {
+        (four, three)
+    } else {
+        (three, four)
+    };
+    if lines.iter().any(|line| line.contains(other))
+        || !lines.iter().any(|line| line.contains(wanted))
+    {
+        return Some(format!("the VT-d unit never said `{wanted}`"));
     }
     None
 }
@@ -2375,13 +2420,22 @@ pub(crate) fn x86_machine(accelerator: &str) -> String {
 /// remapping on, as the kernel drives it (`docs/NVIDIA.md` §12.3, N0g), and
 /// extended interrupt mode off, since the kernel runs xAPIC and programs
 /// `IRTA.EIME` = 0 -- QEMU's `auto` would offer it under the split irqchip.
-pub(crate) const INTEL_IOMMU: &str = "intel-iommu,intremap=on,eim=off";
+/// Its guest address width is 39 bits, so the unit offers three-level tables
+/// alone and the kernel walks three: QEMU's default has been 48 since 9.x,
+/// which offers four as well, and the kernel takes the widest
+/// (`L.iommu.60`); `--vtd-aw48` is the row that walks four.
+pub(crate) const INTEL_IOMMU: &str = "intel-iommu,intremap=on,eim=off,aw-bits=39";
 
 /// [`INTEL_IOMMU`] without interrupt remapping: the unit translates DMA and
 /// remaps no interrupt, so `device_isolation`'s bit 1 is clear for every
 /// device. Only `test-nvrm`'s refused hand-over boots it
 /// (`Args::unisolated_interrupts`).
-pub(crate) const INTEL_IOMMU_UNISOLATED: &str = "intel-iommu,intremap=off";
+pub(crate) const INTEL_IOMMU_UNISOLATED: &str = "intel-iommu,intremap=off,aw-bits=39";
+
+/// [`INTEL_IOMMU`] with a 48-bit guest address width, so the unit offers
+/// four-level tables beside three and the kernel takes four, as the N150's
+/// units, which offer four alone, make it (`--vtd-aw48`).
+pub(crate) const INTEL_IOMMU_AW48: &str = "intel-iommu,intremap=on,eim=off,aw-bits=48";
 
 /// Which CPU model the `virt` machine emulates for an Arm architecture.
 ///
@@ -2575,11 +2629,7 @@ fn qemu_command(
                 // interrupts (`INTEL_IOMMU`), unless the boot is
                 // `test-nvrm`'s without.
                 "-device",
-                if args.unisolated_interrupts {
-                    INTEL_IOMMU_UNISOLATED
-                } else {
-                    INTEL_IOMMU
-                },
+                intel_iommu(args),
             ]);
             attach_intel_gpu_standin(&mut command, args);
             x86_heads(&mut command, args);
@@ -2699,6 +2749,20 @@ fn attach_firmware(command: &mut Command, arch: Arch, firmware: &Firmware) -> Re
         }
     }
     Ok(())
+}
+
+/// The x86-64 machine's VT-d unit: remapping interrupts (`INTEL_IOMMU`,
+/// three-level tables), with four-level tables for `--vtd-aw48`
+/// (`INTEL_IOMMU_AW48`), or without remapping for `test-nvrm`'s unisolated
+/// boot (`INTEL_IOMMU_UNISOLATED`).
+fn intel_iommu(args: &Args) -> &'static str {
+    if args.unisolated_interrupts {
+        INTEL_IOMMU_UNISOLATED
+    } else if args.vtd_aw48 {
+        INTEL_IOMMU_AW48
+    } else {
+        INTEL_IOMMU
+    }
 }
 
 /// `test-intel-uapi`'s stand-in for ADL-N's GPU at 00:02.0
@@ -3955,7 +4019,7 @@ mod tests {
         config_problem, devmgr_problem, entropy_problem, fallback_problem, fault_problem,
         held_off_problem, iommu_problem, msi_problem, namespace_problem, parse_qemu_version,
         power_off_problem, queue_problem, remap_problem, send_lines, version_translates,
-        xstate_problem,
+        walk_problem, xstate_problem,
     };
 
     /// A reference boot that fell back to polling its console, or took one
@@ -4472,7 +4536,7 @@ mod tests {
     #[test]
     fn a_boot_that_placed_functions_behind_an_iommu_passes() {
         let boot = lines(&[
-            "  iommu    1 VT-d units, 0 SMMUv3s; 6 PCI functions behind one, 0 bypassing, 0 unresolved",
+            "  iommu    1 VT-d units, 0 SMMUv3s; 6 PCI functions behind one, 0 of them untranslated, 0 bypassing, 0 unresolved",
             "  iommu    pci 0000:00:02.0 behind the VtD unit at 0xfed90000 as stream 0x10",
         ]);
         assert_eq!(iommu_problem(&boot), None);
@@ -4494,6 +4558,37 @@ mod tests {
         assert!(iommu_problem(&bypassing).is_some(), "two bypassing");
         let silent = lines(&["FERRIX-BOOT-OK stages 1-12"]);
         assert!(iommu_problem(&silent).is_some(), "no line at all");
+        let held = lines(&[
+            "  iommu    2 VT-d units, 0 SMMUv3s; 6 PCI functions behind one, 1 of them untranslated, 0 bypassing, 0 unresolved",
+        ]);
+        assert!(
+            iommu_problem(&held).is_some(),
+            "one behind a unit that only remaps"
+        );
+    }
+
+    #[test]
+    fn the_walk_is_the_one_the_machine_offers() {
+        let mut args = crate::args::Args::default();
+        let three =
+            lines(&["  iommu    vt-d unit 0xfed90000: translating (three-level), queue on"]);
+        let four = lines(&["  iommu    vt-d unit 0xfed90000: translating (four-level), queue on"]);
+        assert_eq!(walk_problem(Arch::X86_64, &args, &three), None);
+        assert!(
+            walk_problem(Arch::X86_64, &args, &four).is_some(),
+            "four without aw-bits=48"
+        );
+        args.vtd_aw48 = true;
+        assert_eq!(walk_problem(Arch::X86_64, &args, &four), None);
+        assert!(
+            walk_problem(Arch::X86_64, &args, &three).is_some(),
+            "three under aw-bits=48"
+        );
+        assert_eq!(
+            walk_problem(Arch::AArch64, &args, &three),
+            None,
+            "x86-64 only"
+        );
     }
 
     #[test]

@@ -1154,6 +1154,16 @@ twice at bring-up, once to mask it and once to write its remappable entry,
 and the entry and its invalidation are made between the two, never under
 it. The check vector 0xFC's handler only counts and acknowledges.
 
+A fault take (`iommu::vtd::Unit::take_fault`, under the unit's `taken`
+lock, an `IrqSpinLock`) reads the unit's fault recording registers from the
+one `FSTS.FRI` names round all of them (`L.iommu.64`): at most
+`CAP.NFR` + 1 = 256 records, four register reads each, with interrupts
+masked on that processor; the N150's units and QEMU's have one record, so
+the hold is what it was. The end-of-boot audit's 256 takes a unit bound how
+often it is entered. Protected memory regions, where a unit has them, are
+turned off once at bring-up with a wait bounded by the unit's patience,
+100 ms (`L.iommu.68`).
+
 A failed invalidation -- the status not written within the patience, or
 `IQE`, `ICE` or `ITE` seen -- answers an error and its caller releases
 nothing (`L.iommu.48`), so memory the unit may still reach stays held for
