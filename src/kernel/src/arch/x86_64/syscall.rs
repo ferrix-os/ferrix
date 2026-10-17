@@ -182,10 +182,9 @@ core::arch::global_asm!(
 .endif
 .endm
 
-.section .text
-.globl ferrix_syscall_stub
-.align 16
-ferrix_syscall_stub:
+// Off the user stack and into a `SyscallFrame`, with every register the
+// program chose cleared: the first half of both system call entries below.
+.macro FERRIX_SYSCALL_SAVE
     // Off the user stack first, before anything can be pushed. `swapgs` makes
     // GS the kernel's; the two GS-relative words are the only memory this
     // code can name without a stack.
@@ -231,7 +230,50 @@ ferrix_syscall_stub:
     xorl %r14d, %r14d
     xorl %r15d, %r15d
 .endif
+.endm
 
+// Overwrite the branch history a program left, before the kernel takes an
+// indirect branch it could steer (Branch History Injection, CVE-2024-2201):
+// Linux 6.18.54's `clear_bhb_loop` (`arch/x86/entry/entry_64.S`), five
+// calls deep with five taken jumps at each depth, which Linux runs on every
+// part without `BHI_CTRL`. The calls and returns keep the loop stream
+// detector from replaying the loop without recording its branches; the
+// `.skip`s put each `ret` in the second half of its cache line, as there;
+// the `lfence` keeps anything after from running before the history is
+// overwritten. Touches EAX, ECX, the flags and 48 bytes of stack, and leaves
+// EAX and ECX zero. Called by the entries below and in `super::trap` when
+// `super::speculation` planned it.
+.section .text
+.globl ferrix_clear_bhb
+.align 64
+ferrix_clear_bhb:
+    movl ${bhb_outer}, %ecx
+    call 1f
+    jmp 5f
+.align 64, 0xcc
+.skip 27, 0xcc
+1:  call 2f
+    ret
+.align 64, 0xcc
+.skip 14, 0xcc
+2:  movl ${bhb_inner}, %eax
+3:  jmp 4f
+    nop
+4:  sub $1, %eax
+    jnz 3b
+    sub $1, %ecx
+    jnz 1b
+    ret
+5:  lfence
+    ret
+
+.section .text
+// The entry `LSTAR` names on a processor that needs no branch-history loop.
+.globl ferrix_syscall_stub
+.align 16
+ferrix_syscall_stub:
+    FERRIX_SYSCALL_SAVE
+ferrix_syscall_common:
     cld
     movq %rsp, %rdi
     callq ferrix_syscall_entry
@@ -260,6 +302,18 @@ ferrix_syscall_stub:
 .globl ferrix_syscall_sysret
 ferrix_syscall_sysret:
     sysretq
+
+// The entry `LSTAR` names on a processor that needs the branch-history loop
+// (`super::speculation`'s BHI plan): the same frame, the loop, and the same
+// way on. Chosen by the MSR rather than by a test of the plan here, so no
+// mispredicted branch can carry a system call past the loop to the
+// kernel's indirect branches.
+.globl ferrix_syscall_stub_bhb
+.align 16
+ferrix_syscall_stub_bhb:
+    FERRIX_SYSCALL_SAVE
+    call ferrix_clear_bhb
+    jmp ferrix_syscall_common
 
 // Enter ring 3 for the first time.
 //   rdi = entry point, rsi = user stack pointer
@@ -359,6 +413,8 @@ ferrix_resume_user:
     hardened = const super::speculation::ENTRY_HARDENING,
     clear = sym super::speculation::CLEAR_CPU_BUFFERS,
     selector = sym super::speculation::VERW_SELECTOR,
+    bhb_outer = const super::speculation::BHB_LOOP_OUTER,
+    bhb_inner = const super::speculation::BHB_LOOP_INNER,
     enosys = const ferrix_linux_abi::errno::Errno::ENOSYS.0,
     options(att_syntax)
 );
@@ -377,13 +433,41 @@ fn cstar_stub_address() -> u64 {
 /// profile's link-time optimisation into one of them and a renamed
 /// `ferrix_syscall_stub.1` nothing defines, which is how the release build
 /// stopped linking once the window check declared it as a `static`.
+///
+/// Which of the two entries: the one that runs the branch-history loop where
+/// `super::speculation` planned it (BHI), the other everywhere else.
 pub(super) fn stub_address() -> u64 {
-    ferrix_syscall_stub as *const () as usize as u64
+    if super::speculation::clears_branch_history() {
+        ferrix_syscall_stub_bhb as *const () as usize as u64
+    } else {
+        ferrix_syscall_stub as *const () as usize as u64
+    }
+}
+
+/// Point this processor's `LSTAR` at [`stub_address`] and say whether it
+/// reads back so: `speculation::apply`'s, on a processor whose plan has the
+/// branch-history loop, since `init` may have run before the plan was made.
+pub(super) fn point_entry() -> bool {
+    let entry = stub_address();
+    // SAFETY: (ENTRY) the address of a function in the kernel's own text, the
+    // entry `init` writes once the plan is made; both build the same frame.
+    unsafe { cpu::write_msr(IA32_LSTAR, entry) };
+    entry_is_planned()
+}
+
+/// Whether this processor's `LSTAR` names [`stub_address`]: for the boot
+/// check.
+pub(super) fn entry_is_planned() -> bool {
+    // SAFETY: (ENTRY) `IA32_LSTAR` exists on every 64-bit x86; reading it
+    // changes nothing.
+    unsafe { cpu::read_msr(IA32_LSTAR) == stub_address() }
 }
 
 unsafe extern "C" {
     /// The `LSTAR` entry point, defined in the block above.
     fn ferrix_syscall_stub();
+    /// The `LSTAR` entry point that runs the branch-history loop.
+    fn ferrix_syscall_stub_bhb();
     /// Enter ring 3 at `entry` on `stack`.
     fn ferrix_enter_user(entry: u64, stack: u64, argument: u64) -> !;
     /// The `CSTAR` entry point, defined in the block above.
