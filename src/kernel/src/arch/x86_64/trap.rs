@@ -160,6 +160,13 @@ ferrix_trap_from_user:
     xorl %r13d, %r13d
     xorl %r14d, %r14d
     xorl %r15d, %r15d
+    // And the branch history it left, where the BHI plan says
+    // (`super::speculation`): before the handler's first indirect branch.
+    // A test mispredicted past the call lands on the fence below, and waits
+    // there until the test resolves and sends it back to the call.
+    testb $1, {bhb}(%rip)
+    jz 1f
+    call ferrix_clear_bhb
 .endif
 1:
     // Both ways out of the test above, a fence: a processor that mispredicts
@@ -269,6 +276,17 @@ ferrix_paranoid_common:
     jz 1f
     cmpq $1, 120(%rsp)
     je 4f
+    // An NMI or machine check from ring 3: the branch history the program
+    // left, overwritten where the BHI plan says, and fenced on both ways out
+    // of the test, before the handler's first indirect branch. Its registers
+    // are not cleared (SPECULATION.md section 9).
+.if {hardened}
+    testb $1, {bhb}(%rip)
+    jz 5f
+    call ferrix_clear_bhb
+5:
+    lfence
+.endif
 1:
     // Count this stack's occupants in the word above the frame, which the
     // TSS's IST entry points at. Two is a second exception on a stack the first
@@ -319,6 +337,7 @@ ferrix_paranoid_common:
     hardened = const super::speculation::ENTRY_HARDENING,
     clear = sym super::speculation::CLEAR_CPU_BUFFERS,
     selector = sym super::speculation::VERW_SELECTOR,
+    bhb = sym super::speculation::CLEAR_BRANCH_HISTORY,
     options(att_syntax)
 );
 

@@ -831,8 +831,9 @@ package FerrixX8664Requirements {
                 IBRS where IA32_ARCH_CAPABILITIES offers it, else AutoIBRS, else
                 IBRS; STIBP unless enhanced IBRS; SSBD unless the processor reports
                 it is not affected; the IBPB barrier where IBPB is offered; VERW on
-                exit only for an Intel processor with MD_CLEAR and without MDS_NO;
-                ERAPS in place of the in-domain refill only where CPUID 0x8000_0021
+                exit for an Intel processor with MD_CLEAR and without MDS_NO, and
+                where L.x86_64.179 asks it for RFDS; BHI_DIS_S or the
+                branch-history loop where L.x86_64.180 asks one; ERAPS in place of the in-domain refill only where CPUID 0x8000_0021
                 EAX bit 24 is set and CR4.PCIDE is clear; and offered shall decode
                 those bits from CPUID and IA32_ARCH_CAPABILITIES.";
             attribute :>> criterion = "For each row of a table of CPUID and
@@ -840,22 +841,133 @@ package FerrixX8664Requirements {
                 expected set.";
             attribute :>> parent = "H.TRAP.3";
             attribute :>> unit = ("arch::x86_64::speculation::offered",
+                "arch::x86_64::speculation::leaf_or_zero",
+                "arch::x86_64::speculation::vendor",
                 "arch::x86_64::speculation::Plan::for_processor",
                 "arch::x86_64::speculation::store_bypass_immune",
                 "arch::x86_64::speculation::mds_exposed");
         }
         requirement <'L.x86_64.33'> speculationExposureReported : ItemLowLevel {
-            attribute :>> statement = "report_exposure shall print one `cpu` line
-                saying, for Spectre v2 into ring 0, between programs, store bypass
-                and Meltdown, whether the plan covers it, the processor is not
-                affected, or it is uncovered (AoU-11).";
+            attribute :>> statement = "report_exposure shall print a `cpu` line
+                saying, for Spectre v2 into ring 0, between programs, store bypass,
+                Meltdown, MDS, RFDS and BHI, whether the plan covers it, the
+                processor is not affected, or it is uncovered (AoU-11), and a second
+                `cpu` line saying the same for the hazards of L.x86_64.181.";
             attribute :>> criterion = "Under TCG's qemu64 the line reports Spectre
                 v2 into ring 0 not covered and Meltdown not affected; under KVM with
                 auto-IBRS offered it reports it covered.";
             attribute :>> parent = "H.TRAP.3";
             attribute :>> unit = ("arch::x86_64::speculation::report_exposure",
                 "arch::x86_64::speculation::meltdown_exposed",
-                "arch::x86_64::speculation::store_bypass_immune");
+                "arch::x86_64::speculation::store_bypass_immune",
+                "arch::x86_64::speculation::mds_exposure",
+                "arch::x86_64::speculation::rfds_exposure",
+                "arch::x86_64::speculation::bhi_exposure",
+                "arch::x86_64::speculation::Exposure::fmt");
+        }
+        requirement <'L.x86_64.179'> registerFileClearedWhereRfdsReaches : ItemLowLevel {
+            attribute :>> statement = "With the speculation switch on, rfds shall
+                answer not affected for a processor whose IA32_ARCH_CAPABILITIES
+                says RFDS_NO (bit 27); otherwise affected where it says RFDS_CLEAR
+                (bit 28), and for an Intel processor under a hypervisor, of a family
+                other than 6, of a family 6 model Linux 6.18.54's cpu_vuln_blacklist
+                lists for RFDS (an Alder or Raptor Lake, 0x97 or 0xb7, only where it
+                is hybrid or its core is an Atom), or of a family 6 model neither of
+                that Linux's two tables names; and not affected otherwise. An
+                affected processor saying RFDS_CLEAR shall have VERW run on every
+                return to ring 3 -- SYSRET, IRET and the paranoid entries' restore
+                -- on every processor; one without it shall be reported RFDS NOT
+                covered on the exposure line.";
+            attribute :>> criterion = "rfds_decisions gives each described
+                processor its verdict and plan -- the N150's Gracemont with
+                RFDS_CLEAR (VERW on exit), without it (NOT covered, no VERW), with
+                RFDS_NO (none); every listed model with old microcode; an Alder Lake
+                without and with E-cores and a Raptor Lake on an Atom core; a Kaby
+                Lake on bare metal (not affected) and as a guest (affected); a guest
+                without IA32_ARCH_CAPABILITIES; two unknown family 6 models and
+                family 19, each without and with RFDS_CLEAR; a Zen 5 -- or the boot
+                panics (FX-0307). Negative controls: the plan's RFDS arm removed,
+                and the unknown model answered not affected, each panic. The VERW on
+                the exits is MDS's, run when CLEAR_CPU_BUFFERS is set; no gate's
+                processor is RFDS-affected with RFDS_CLEAR, so its running there is
+                hardware evidence (the N150 boot's defences line, VERW on exit).";
+            attribute :>> parent = "H.TRAP.3";
+            attribute :>> unit = ("arch::x86_64::speculation::rfds",
+                "arch::x86_64::speculation::listed",
+                "arch::x86_64::speculation::Plan::for_processor",
+                "arch::x86_64::speculation::Plan::add_ring3_crossings",
+                "arch::x86_64::speculation::offered",
+                "arch::x86_64::speculation::init");
+        }
+        requirement <'L.x86_64.180'> branchHistoryKeptFromRingZero : ItemLowLevel {
+            attribute :>> statement = "With the speculation switch on, bhi shall
+                answer not affected for an AMD or Hygon processor, and for any other
+                without enhanced IBRS (IA32_ARCH_CAPABILITIES bit 1) outside a
+                hypervisor; for every other processor, BHI_NO notwithstanding, the
+                plan shall set IA32_SPEC_CTRL bit 10 (BHI_DIS_S) where CPUID.(7,2)
+                EDX bit 4 (BHI_CTRL) and IA32_SPEC_CTRL are offered, read back with
+                the register's other bits on every processor; and otherwise run
+                ferrix_clear_bhb, Linux 6.18.54's clear_bhb_loop with 5 calls of 5
+                taken jumps, on every entry from ring 3 before any indirect branch:
+                SYSCALL through an LSTAR pointed at the entry that calls it, read
+                back on every processor; a trap or interrupt from ring 3 behind a
+                test whose mispredicted way meets the entry's lfence; and an NMI or
+                machine check from ring 3 the same, fenced on both ways.";
+            attribute :>> criterion = "bhi_decisions gives each described
+                processor its verdict and plan -- the N150's Gracemont (the loop),
+                with BHI_CTRL (BHI_DIS_S in the SPEC_CTRL value), with BHI_NO
+                without and with BHI_CTRL (the same two), an Intel guest hiding
+                enhanced IBRS (the loop), a Skylake without it on bare metal (none),
+                a Zen 5 bare and as a guest (none) -- or the boot panics (FX-0307).
+                Every hardened boot runs ferrix_clear_bhb once and finds LSTAR naming
+                the entry the plan chose. Negative control: the plan's loop arm
+                removed panics. A boot on an Intel model under TCG (Snowridge, no
+                IA32_ARCH_CAPABILITIES) plans the loop and passes every stage with
+                it on every entry; BHI_DIS_S's write is hardware evidence, no gate's
+                processor offering BHI_CTRL.";
+            attribute :>> parent = "H.TRAP.3";
+            attribute :>> unit = ("arch::x86_64::speculation::bhi",
+                "arch::x86_64::speculation::Plan::for_processor",
+                "arch::x86_64::speculation::Plan::add_ring3_crossings",
+                "arch::x86_64::speculation::apply",
+                "arch::x86_64::speculation::clears_branch_history",
+                "arch::x86_64::speculation::clear_branch_history",
+                "arch::x86_64::syscall::stub_address",
+                "arch::x86_64::syscall::point_entry",
+                "arch::x86_64::syscall::entry_is_planned");
+        }
+        requirement <'L.x86_64.181'> everyLinuxHazardNamed : ItemLowLevel {
+            attribute :>> statement = "With the speculation switch on,
+                other_exposures shall decide ITS, MMIO stale data, SRBDS, TAA,
+                Retbleed, SRSO and TSA as Linux 6.18.54's cpu_set_bug_bits and
+                vulnerable_to_its do, every stepping of a listed model taken as
+                affected; answer covered only for an Intel part's Retbleed where
+                enhanced IBRS is planned, and for an AMD part's SRSO where it says
+                SRSO_USER_KERNEL_NO and IBPB_BRTYPE and the switch barrier is
+                planned; answer every other affected one NOT covered; and answer
+                VMSCAPE not affected, the item running no guest.";
+            attribute :>> criterion = "exposure_decisions gives each described
+                processor its eight verdicts -- the N150's Gracemont none affected;
+                an Ice Lake ITS, MMIO stale data and SRBDS NOT covered, and ITS not
+                affected with ITS_NO; an Intel guest ITS NOT covered; a part with
+                TSX TAA NOT covered; a Skylake Retbleed NOT covered without enhanced
+                IBRS and covered with it; a Zen 3 SRSO and TSA NOT covered and
+                Retbleed not; a Zen 2 Retbleed NOT covered; a Zen 5 with
+                SRSO_USER_KERNEL_NO and IBPB_BRTYPE nothing NOT covered and SRSO
+                covered; QEMU's qemu64 none affected -- or the boot panics
+                (FX-0307).";
+            attribute :>> parent = "H.TRAP.3";
+            attribute :>> unit = ("arch::x86_64::speculation::other_exposures",
+                "arch::x86_64::speculation::intel_listed",
+                "arch::x86_64::speculation::listed",
+                "arch::x86_64::speculation::its_exposure",
+                "arch::x86_64::speculation::mmio_exposure",
+                "arch::x86_64::speculation::srbds_exposure",
+                "arch::x86_64::speculation::taa_exposure",
+                "arch::x86_64::speculation::retbleed_exposure",
+                "arch::x86_64::speculation::srso_exposure",
+                "arch::x86_64::speculation::tsa_exposure",
+                "arch::x86_64::speculation::report_exposure");
         }
     }
 

@@ -80,13 +80,6 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
-    },
-    {
-      "ids": ["L.x86_64.179-181"],
-      "owner": "rfds-bhi",
-      "branch": "rfds-bhi",
-      "date": "2026-10-17",
-      "purpose": "F-84 (RFDS) and F-85 (BHI), the consultant's NOT YET at ledger line 2294 (6): RFDS decided from RFDS_NO, RFDS_CLEAR and Linux's model table, failing closed, and VERW on every return to ring 3; BHI decided as Linux's table does, BHI_DIS_S read back where BHI_CTRL is offered, else the BHB-clearing loop on every entry from ring 3; the exposure lines naming RFDS, BHI and the rest of Linux's hazards"
     }
   ]
 }

@@ -92,20 +92,25 @@ impl Defences {
     /// x86-64: the return stack buffer refilled at the same switch.
     pub(crate) const RSB_FILL: Defences = Defences(1 << 9);
     /// x86-64: `VERW` clears the processor's buffers on every return to
-    /// ring 3 (MDS).
+    /// ring 3 (MDS), and its register file where microcode says
+    /// `RFDS_CLEAR` (RFDS).
     pub(crate) const BUFFERS_CLEARED: Defences = Defences(1 << 10);
-    /// `AArch64`: the branch history overwritten on every entry from EL0.
+    /// The branch history overwritten on every entry from a program: from
+    /// EL0 on `AArch64` (Spectre-BHB), from ring 3 on x86-64 (BHI).
     pub(crate) const BHB_LOOP: Defences = Defences(1 << 11);
     /// x86-64: AMD's ERAPS, which empties the return address predictor at
     /// every `CR3` write that flushes the TLB, so a switch of address space
     /// inside one speculation domain needs no software refill
     /// (`docs/OPAQUE-KERNEL.md` §9.10).
     pub(crate) const ERAPS: Defences = Defences(1 << 12);
+    /// x86-64: `IA32_SPEC_CTRL.BHI_DIS_S`, so a program's branch history
+    /// does not steer the kernel's indirect branches (BHI).
+    pub(crate) const BHI_DIS_S: Defences = Defences(1 << 13);
     /// A defence was written and did not read back: the boot check fails.
     pub(crate) const READ_BACK_FAILED: Defences = Defences(1 << 30);
 
     /// Every defence, with the name a boot log gives it.
-    const NAMES: [(Defences, &'static str); 13] = [
+    const NAMES: [(Defences, &'static str); 14] = [
         (Defences::CLAMPED_INDICES, "clamped indices"),
         (Defences::SWAPGS_FENCE, "SWAPGS fence"),
         (Defences::ENTRY_REGISTERS_CLEARED, "entry registers cleared"),
@@ -119,6 +124,7 @@ impl Defences {
         (Defences::BUFFERS_CLEARED, "VERW on exit"),
         (Defences::BHB_LOOP, "BHB loop on entry"),
         (Defences::ERAPS, "ERAPS empties the RSB on switch"),
+        (Defences::BHI_DIS_S, "BHI_DIS_S"),
     ];
 
     /// Whether every defence in `other` is in this set.
