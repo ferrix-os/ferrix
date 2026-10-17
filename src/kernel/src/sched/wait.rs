@@ -15,10 +15,45 @@
 //! sees it. Marking itself runnable again is enough to cancel the block,
 //! because the scheduler decides whether a task leaves the run queue by
 //! reading that state, under the run queue's lock, at the moment it switches.
+//!
+//! # Marks
+//!
+//! A queue can also tell something that is not a task: a [`Mark`], which
+//! every wake tells once after the tasks it drained, and the queue's drop
+//! tells it is gone. A mark puts a number -- an epoll registration's serial
+//! -- on its [`ReadyList`], once until the list's taker clears it, and wakes
+//! the list's own queue. An epoll set hooks a mark of each registration on
+//! the queues its file names, so its wait looks at only what was woken and
+//! sleeps on its list's queue alone (`fs::epoll`), as Linux's
+//! `ep_poll_callback` arranges. Marks and lists are this module's own types:
+//! what runs under a queue's hook lock, interrupts masked, in every wake, an
+//! interrupt handler's included, is core code, never the load's.
+//!
+//! The order that closes the lost wake-up for a mark: the hooker lists the
+//! mark under the hook lock, then stores the count under the waiter lock,
+//! then looks at the condition; a waker changes the condition, reads the
+//! count under the waiter lock it takes anyway, then tells the marks under
+//! the hook lock. A waker whose waiter-lock section begins after the
+//! hooker's store sees the count and, through the two locks, the mark; one
+//! whose section came before made its change before the hooker's look,
+//! which sees it. So a queue nothing hooks costs a wake one relaxed load
+//! inside a lock it already holds, and no fence.
+//!
+//! **Lock order.** A queue's hook lock is held while its marks are told. A
+//! mark takes its list's lock, a leaf, lets it go, and wakes the list's
+//! queue: that queue's waiter lock, the run queue's lock in
+//! [`super::wake_with`], then that queue's own hook lock follow. The chain
+//! is bounded and acyclic only because a list's queue is hooked by nothing
+//! but the marks of the epoll sets that contain the set it belongs to, and
+//! `fs::epoll` refuses a loop of sets and a depth past `MAX_NESTS`: at most
+//! `MAX_NESTS + 1` hook locks deep. Nothing takes a hook lock while holding
+//! a waiter lock or a run queue's lock: a wake lets its waiter lock go
+//! before it wakes a task or tells a mark. Hooking and unhooking take the
+//! hook lock, then the waiter lock, one after the other, never nested.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_sync::IrqSpinLock;
 
@@ -96,6 +131,60 @@ fn listed_meet(task: super::TaskId) {
     LISTED_MEET_STAGE.store(MEET_ARRIVED, Ordering::Release);
     let until = crate::timer::now_nanos().saturating_add(LISTED_MEET_PATIENCE_NANOS);
     while LISTED_MEET_STAGE.load(Ordering::Acquire) != MEET_RELEASED
+        && crate::timer::now_nanos() < until
+    {
+        core::hint::spin_loop();
+    }
+}
+
+/// The task a boot check holds in its next wake just before the wake's
+/// waiter-lock section, or [`NO_MEET`]: see [`arm_hook_meet`]. A wake reads
+/// it once, a relaxed load, and a task never armed never waits there.
+static HOOK_MEET: AtomicU64 = AtomicU64::new(NO_MEET);
+
+/// The queue whose wake [`HOOK_MEET`]'s task is held in.
+static HOOK_MEET_QUEUE: AtomicUsize = AtomicUsize::new(0);
+
+/// Where the armed waker is in the meet, as [`LISTED_MEET_STAGE`] is.
+static HOOK_MEET_STAGE: AtomicU32 = AtomicU32::new(0);
+
+/// Hold `task`'s next wake of `queue` just before its waiter-lock section,
+/// until [`release_hook_meet`], for the boot check that a mark hooked
+/// meanwhile is told by that wake (`sched::mark_check`, L.sched.75). One
+/// wake only. Only `sched::mark_check` calls it.
+pub(crate) fn arm_hook_meet(task: super::TaskId, queue: &WaitQueue) {
+    HOOK_MEET_STAGE.store(0, Ordering::Release);
+    HOOK_MEET_QUEUE.store(core::ptr::from_ref(queue).addr(), Ordering::Release);
+    HOOK_MEET.store(task, Ordering::Release);
+}
+
+/// Whether the armed waker has reached the meet.
+pub(crate) fn hook_meet_arrived() -> bool {
+    HOOK_MEET_STAGE.load(Ordering::Acquire) == MEET_ARRIVED
+}
+
+/// Let the waker held in the meet go on, and disarm it.
+pub(crate) fn release_hook_meet() {
+    HOOK_MEET.store(NO_MEET, Ordering::Release);
+    HOOK_MEET_STAGE.store(MEET_RELEASED, Ordering::Release);
+}
+
+/// The meet itself, in a wake of `queue`: nothing unless a check armed it
+/// for the running task and this queue, and then a spin until the check
+/// lets it go, bounded by [`LISTED_MEET_PATIENCE_NANOS`]. The check runs on
+/// another processor.
+fn hook_meet(queue: &WaitQueue) {
+    let armed = HOOK_MEET.load(Ordering::Relaxed);
+    if armed == NO_MEET
+        || HOOK_MEET_QUEUE.load(Ordering::Relaxed) != core::ptr::from_ref(queue).addr()
+        || super::current().is_none_or(|task| task.id != armed)
+    {
+        return;
+    }
+    HOOK_MEET.store(NO_MEET, Ordering::Relaxed);
+    HOOK_MEET_STAGE.store(MEET_ARRIVED, Ordering::Release);
+    let until = crate::timer::now_nanos().saturating_add(LISTED_MEET_PATIENCE_NANOS);
+    while HOOK_MEET_STAGE.load(Ordering::Acquire) != MEET_RELEASED
         && crate::timer::now_nanos() < until
     {
         core::hint::spin_loop();
@@ -232,7 +321,228 @@ pub(crate) struct WaitQueue {
     /// have changed, which is what `epoll`'s edge-triggered mode reads as an
     /// event.
     wakes: AtomicU64,
+    /// What else every wake tells: see [`Mark`].
+    ///
+    /// Masking interrupts for the reason the waiter list does: a handler's
+    /// wake calls them.
+    ///
+    /// Boxed, and only once a mark is first hooked: a queue is inside many
+    /// objects, a channel's half and a disk's 64 completion slots among
+    /// them, and nearly none is ever hooked.
+    #[expect(
+        clippy::box_collection,
+        reason = "AUDIT: a thin pointer while no mark is hooked, which is nearly always"
+    )]
+    hooks: IrqSpinLock<Option<alloc::boxed::Box<Vec<Arc<Mark>>>>, arch::Irq>,
+    /// How many marks are listed, stored under the *waiter* lock after the
+    /// hook list changed and read by a wake under the same lock: the order
+    /// the module doc's "Marks" gives, which is what lets a wake skip the
+    /// hook lock when it is zero without missing a mark (L.sched.75).
+    hooked: AtomicU32,
 }
+
+/// A [`Mark`]'s state: not on its list.
+const IDLE: u8 = 0;
+/// On its list, put there by a queue going, which woke nobody.
+const QUIET: u8 = 1;
+/// On its list, and the list's queue woken for it.
+const WOKEN: u8 = 2;
+
+/// Where marks put their numbers: an epoll set's ready list.
+///
+/// The list's room is reserved by its owner, one place for each mark it
+/// made, before any can be told, so a mark never allocates; a mark that
+/// finds no room flags the list overflowed instead, and the taker then looks
+/// at everything (L.sched.76).
+#[derive(Debug)]
+pub(crate) struct ReadyList {
+    /// The numbers of the marks told since the taker last took them, and
+    /// whether the list's queue was woken for one of them since.
+    serials: IrqSpinLock<Listed, arch::Irq>,
+    /// A mark found no room.
+    overflowed: AtomicBool,
+    /// Woken when a mark is first told it was woken: what the list's owner
+    /// sleeps on.
+    queue: Arc<WaitQueue>,
+    /// Every time a mark of this list was told anything.
+    tells: AtomicU64,
+}
+
+impl ReadyList {
+    /// An empty list with its own queue.
+    ///
+    /// # Errors
+    ///
+    /// [`fallible::AllocError`] for no memory.
+    pub(crate) fn new() -> Result<Arc<ReadyList>, fallible::AllocError> {
+        let queue = fallible::try_arc(WaitQueue::new())?;
+        fallible::try_arc(ReadyList {
+            serials: IrqSpinLock::new(Listed {
+                serials: Vec::new(),
+                woken: false,
+            }),
+            overflowed: AtomicBool::new(false),
+            queue,
+            tells: AtomicU64::new(0),
+        })
+    }
+
+    /// The queue a wake of any of its marks wakes.
+    pub(crate) fn queue(&self) -> &Arc<WaitQueue> {
+        &self.queue
+    }
+
+    /// Room for at least `room` numbers, answering the room it has.
+    ///
+    /// # Errors
+    ///
+    /// [`fallible::AllocError`] for no memory: the room is as it was.
+    pub(crate) fn reserve(&self, room: usize) -> Result<usize, fallible::AllocError> {
+        let mut listed = self.serials.lock();
+        let more = room.saturating_sub(listed.serials.len());
+        fallible::try_reserve(&mut listed.serials, more)?;
+        Ok(listed.serials.capacity())
+    }
+
+    /// Move the numbers told since the last take into `into`, as far as its
+    /// room goes, and answer whether the list overflowed since then (or
+    /// `into` had too little room): the caller then looks at every number it
+    /// knows, and clears *every* mark it holds before it looks, since a mark
+    /// that found the list full is marked and not on it. The marks stay on
+    /// the list until the caller clears each ([`Mark::clear`]), which it does
+    /// before it looks at what the number names.
+    pub(crate) fn take(&self, into: &mut Vec<u64>) -> bool {
+        let mut overflowed = false;
+        {
+            let mut listed = self.serials.lock();
+            for &serial in listed.serials.iter() {
+                overflowed |= fallible::push_within(into, serial).is_err();
+            }
+            listed.serials.clear();
+            // The next mark told of a wake wakes the queue again.
+            listed.woken = false;
+        }
+        self.overflowed.swap(false, Ordering::AcqRel) || overflowed
+    }
+
+    /// How many times its marks were told anything: a count that moves with
+    /// every wake of a queue they are hooked on.
+    pub(crate) fn tells(&self) -> u64 {
+        self.tells.load(Ordering::Relaxed)
+    }
+
+    /// Fill the list's room with a number no mark has, for the check that a
+    /// mark which then finds no room is not lost (`fs::epoll_check`): an
+    /// overflow nothing else can reach, since a list's room is reserved for
+    /// every mark that could be on it. Allocates nothing.
+    pub(crate) fn crowd(&self) {
+        let mut listed = self.serials.lock();
+        while fallible::push_within(&mut listed.serials, u64::MAX).is_ok() {}
+    }
+
+    /// How many numbers are on it, for the checks.
+    pub(crate) fn listed(&self) -> usize {
+        self.serials.lock().serials.len()
+    }
+}
+
+/// A ready list's numbers, and whether its queue was woken since they were
+/// last taken.
+#[derive(Debug)]
+struct Listed {
+    serials: Vec<u64>,
+    woken: bool,
+}
+
+/// What a queue tells, besides waking its tasks: one number on one
+/// [`ReadyList`].
+#[derive(Debug)]
+pub(crate) struct Mark {
+    /// The number it puts on the list.
+    serial: u64,
+    /// [`IDLE`], [`QUIET`] or [`WOKEN`].
+    state: AtomicU8,
+    /// The list.
+    list: Arc<ReadyList>,
+}
+
+impl Mark {
+    /// A mark putting `serial` on `list`, on no queue yet.
+    ///
+    /// # Errors
+    ///
+    /// [`fallible::AllocError`] for no memory.
+    pub(crate) fn new(
+        list: &Arc<ReadyList>,
+        serial: u64,
+    ) -> Result<Arc<Mark>, fallible::AllocError> {
+        fallible::try_arc(Mark {
+            serial,
+            state: AtomicU8::new(IDLE),
+            list: Arc::clone(list),
+        })
+    }
+
+    /// Off the list as far as its next telling knows: the taker's half, done
+    /// after [`ReadyList::take`] and before it looks at what the number
+    /// names. A swap, so that a telling which found the mark still listed --
+    /// and so neither listed it nor woke anyone -- is ordered before the
+    /// taker's look, which then sees its change.
+    pub(crate) fn clear(&self) {
+        let _ = self.state.swap(IDLE, Ordering::AcqRel);
+    }
+
+    /// Whether it is on its list, for the checks.
+    pub(crate) fn is_listed(&self) -> bool {
+        self.state.load(Ordering::Acquire) != IDLE
+    }
+
+    /// Told of a wake (`woken`) or of its queue going (L.sched.76): on the
+    /// list once until cleared, with the list's leaf lock held only for the
+    /// push; the list's queue woken, after that lock is let go, by the first
+    /// wake told to any of its marks since the list was last taken -- never
+    /// by a going. Allocates nothing and drops nothing.
+    ///
+    /// One wake a take is enough: a task waiting on the list's queue lists
+    /// itself there before its last look takes the list, so a mark listed
+    /// after an earlier wake drained it is taken by that look, and one listed
+    /// after the look finds the flag the take cleared and wakes it.
+    fn tell(&self, woken: bool) {
+        let _ = self.list.tells.fetch_add(1, Ordering::Relaxed);
+        let was = if woken {
+            self.state.swap(WOKEN, Ordering::AcqRel)
+        } else {
+            match self
+                .state
+                .compare_exchange(IDLE, QUIET, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(was) | Err(was) => was,
+            }
+        };
+        // Listed and its wake made since the list was taken: nothing to do.
+        if was == WOKEN || (!woken && was != IDLE) {
+            return;
+        }
+        let wake = {
+            let mut listed = self.list.serials.lock();
+            if was == IDLE && fallible::push_within(&mut listed.serials, self.serial).is_err() {
+                self.list.overflowed.store(true, Ordering::Release);
+            }
+            let wake = woken && !listed.woken;
+            if wake {
+                listed.woken = true;
+            }
+            wake
+        };
+        if wake {
+            self.list.queue.wake_all();
+        }
+    }
+}
+
+/// The fewest hooks a hook list keeps room for before it gives memory
+/// back: see [`WaitQueue::unhook`].
+const HOOKS_KEPT: usize = 8;
 
 /// Count a wait ended on each of `queues` whose wake took the task off it.
 fn count_wakes(queues: &[&WaitQueue], drained: &[bool]) {
@@ -251,6 +561,103 @@ impl WaitQueue {
             woken: AtomicU32::new(0),
             count: AtomicUsize::new(0),
             wakes: AtomicU64::new(0),
+            hooks: IrqSpinLock::new(None),
+            hooked: AtomicU32::new(0),
+        }
+    }
+
+    /// Have every wake of this queue tell `mark`, from now on: listed under
+    /// the hook lock, then counted under the waiter lock, in the order the
+    /// module doc's "Marks" argues. Every wake whose waiter-lock section
+    /// begins after this returns tells it (L.sched.75), so a caller that
+    /// looks at its condition after this sees every change no telling
+    /// reports.
+    ///
+    /// # Errors
+    ///
+    /// [`fallible::AllocError`] when there is no memory to list it: the mark
+    /// is not listed, and no wake tells it.
+    pub(crate) fn hook(&self, mark: &Arc<Mark>) -> Result<(), fallible::AllocError> {
+        let listed = {
+            let mut hooks = self.hooks.lock();
+            if hooks.is_none() {
+                *hooks = Some(fallible::try_box(Vec::new())?);
+            }
+            let Some(list) = hooks.as_mut() else {
+                return Err(fallible::AllocError);
+            };
+            fallible::try_push(list, Arc::clone(mark))?;
+            list.len()
+        };
+        self.count_hooks(listed);
+        Ok(())
+    }
+
+    /// Stop telling `mark`, which [`WaitQueue::hook`] listed: no wake whose
+    /// hook lock is taken after this returns tells it (L.sched.74). A mark
+    /// listed twice is taken off once.
+    ///
+    /// The entry is dropped under the hook lock, which is safe only because
+    /// it is never the last reference: the caller holds `mark`. A list down
+    /// to a quarter of its room gives half back, fallibly, so a queue that
+    /// lives as long as the kernel (the net core's progress queue) does not
+    /// keep the room of the most registrations it ever had; so the room is
+    /// at most four places for each mark listed, past [`HOOKS_KEPT`], which
+    /// is what an owner charges for a mark it hooks.
+    pub(crate) fn unhook(&self, mark: &Arc<Mark>) {
+        let (listed, given_back) = {
+            let mut hooks = self.hooks.lock();
+            let Some(list) = hooks.as_mut() else {
+                return;
+            };
+            if let Some(at) = list.iter().position(|held| Arc::ptr_eq(held, mark)) {
+                let _ = list.swap_remove(at);
+            }
+            let given_back = if list.is_empty() {
+                // The last one gone: the box goes too.
+                hooks.take().map(|list| (Some(list), None))
+            } else if list.capacity() > HOOKS_KEPT && list.len() * 4 <= list.capacity() {
+                match fallible::try_with_capacity(list.capacity() / 2) {
+                    Ok(mut smaller) => {
+                        // NOALLOC: half the room for at most a quarter of it.
+                        smaller.append(list);
+                        Some((None, Some(core::mem::replace(&mut **list, smaller))))
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+            (hooks.as_ref().map_or(0, |list| list.len()), given_back)
+        };
+        drop(given_back);
+        self.count_hooks(listed);
+    }
+
+    /// Store how many marks are listed, under the waiter lock: the second
+    /// half of [`WaitQueue::hook`] and [`WaitQueue::unhook`].
+    fn count_hooks(&self, listed: usize) {
+        let listed = u32::try_from(listed).unwrap_or(u32::MAX);
+        let _waiters = self.waiters.lock();
+        self.hooked.store(listed, Ordering::Relaxed);
+    }
+
+    /// How many marks are listed, read without a lock: what a debug build's
+    /// assertion on the fast path reads (`object::channel::sendable`).
+    pub(crate) fn hooked_now(&self) -> u32 {
+        self.hooked.load(Ordering::Relaxed)
+    }
+
+    /// How many marks are listed, for the checks.
+    pub(crate) fn hooks(&self) -> usize {
+        self.hooks.lock().as_ref().map_or(0, |list| list.len())
+    }
+
+    /// Tell every mark listed, under the hook lock.
+    fn tell_marks(&self, woken: bool) {
+        let hooks = self.hooks.lock();
+        for mark in hooks.iter().flat_map(|list| list.iter()) {
+            mark.tell(woken);
         }
     }
 
@@ -588,7 +995,9 @@ impl WaitQueue {
     pub(crate) fn wake_all_with(&self, how: super::Wake) {
         let _ = self.wakes.fetch_add(1, Ordering::Relaxed);
         let mut few: [Option<Arc<Task>>; WAKE_BATCH] = [const { None }; WAKE_BATCH];
-        let many = {
+        let hooked_now = || self.hooked.load(Ordering::Relaxed);
+        hook_meet(self);
+        let (many, hooked) = {
             let mut waiters = self.waiters.lock();
             let taken = if waiters.len() <= WAKE_BATCH {
                 for (slot, task) in few.iter_mut().zip(waiters.drain(..)) {
@@ -599,10 +1008,26 @@ impl WaitQueue {
                 core::mem::take(&mut *waiters)
             };
             self.count.store(0, Ordering::Release);
-            taken
+            // Read under the waiter lock, where `hook` stores it: the
+            // module doc's "Marks" (L.sched.75).
+            (taken, hooked_now())
         };
         for task in few.iter().flatten().chain(&many) {
             super::wake_with(task, how);
+        }
+        if hooked != 0 {
+            self.tell_marks(true);
+        }
+    }
+}
+
+/// A queue going tells its marks so, and wakes nothing (L.sched.74): an
+/// epoll registration whose file held the queue is then dropped at its set's
+/// next wait, rather than at its once-a-second rescan.
+impl Drop for WaitQueue {
+    fn drop(&mut self) {
+        if *self.hooked.get_mut() != 0 {
+            self.tell_marks(false);
         }
     }
 }

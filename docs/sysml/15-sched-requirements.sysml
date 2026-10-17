@@ -683,5 +683,59 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::wait::WaitQueue::wait_sliced",
                 "sched::wait::listed_meet");
         }
+        requirement <'L.sched.74'> aWakeTellsItsMarks : ItemLowLevel {
+            attribute :>> statement = "Every wake of a wait queue shall tell each
+                mark listed on it exactly once, after waking the tasks it drained; a
+                mark taken off shall be told by no wake that takes the hook lock after
+                the taking-off returns; a queue dropped shall tell each mark still
+                listed that it is gone, and wake nothing.";
+            attribute :>> criterion = "Stage 5's told case: a mark hooked on a queue is
+                told once by each of three wakes and its number listed each time, is
+                told by no wake once unhooked, and is told it is gone, listed and
+                with its list's queue not woken, when a queue it is hooked on is
+                dropped; with the telling taken out of the wake, the unhook leaving
+                the entry, or the drop telling nothing, the case fails with its
+                sentence.";
+            attribute :>> parent = ("H.OBJ.11", "H.SCHED.2");
+            attribute :>> unit = ("sched::wait::WaitQueue::hook",
+                "sched::wait::WaitQueue::unhook",
+                "sched::wait::WaitQueue::wake_all_with",
+                "sched::wait::WaitQueue::drop");
+        }
+        requirement <'L.sched.75'> aMarkHookedIsToldByLaterWakes : ItemLowLevel {
+            attribute :>> statement = "A mark listed by hook shall be told by every
+                wake whose waiter-lock section begins after hook returns; the count of
+                listed marks shall be stored and read only under the waiter lock.";
+            attribute :>> criterion = "Stage 5's published case: a waker on a processor
+                of its own, held by the wake's meet just before its waiter-lock
+                section, tells a mark the checker hooks on the queue while it is
+                held; with the count read before the meet, outside the waiter lock,
+                the case fails with its sentence for a mark the wake did not tell.";
+            attribute :>> parent = ("H.OBJ.11", "H.SCHED.2");
+            attribute :>> unit = ("sched::wait::WaitQueue::hook",
+                "sched::wait::WaitQueue::wake_all_with",
+                "sched::wait::hook_meet");
+        }
+        requirement <'L.sched.76'> aMarkIsListedOnceAndWakesItsList : ItemLowLevel {
+            attribute :>> statement = "A mark told of a wake shall put its number on
+                its ready list at most once until the list's taker clears it, shall
+                flag the list overflowed rather than grow it when it is full, and
+                shall wake the list's queue when told it was woken unless a mark of
+                the list has woken it since the list was last taken, never when told
+                it is gone.";
+            attribute :>> criterion = "Stage 5's listed-once case: a mark told twice
+                before its taker clears it is listed once and wakes its list's queue
+                once; a second mark of the same list told before the next take wakes
+                it no more, and the first mark told after a take wakes it again; a
+                list one place short of its marks, all told, is flagged overflowed
+                and holds as many as it had room for; and the told case's drop wakes
+                nothing. With the listing ignoring the mark's state, the overflow flag
+                not set, or the list's queue not woken, the case fails with its
+                sentence.";
+            attribute :>> parent = ("H.OBJ.11", "H.SCHED.2");
+            attribute :>> unit = ("sched::wait::Mark::tell",
+                "sched::wait::Mark::clear", "sched::wait::ReadyList::take",
+                "sched::wait::ReadyList::reserve");
+        }
     }
 }

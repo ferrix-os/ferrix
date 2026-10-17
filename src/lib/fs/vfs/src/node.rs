@@ -495,8 +495,29 @@ pub trait Inode: Send + Sync + fmt::Debug {
     /// Answers whether every change to what [`Inode::poll`] reports wakes one
     /// of them. A wait may then sleep long between its own looks; when not --
     /// the default, which names no queue -- it keeps looking often.
+    ///
+    /// **The contract `true` makes**, which an epoll set relies on more than
+    /// a `poll` does, since it hooks the queues once and looks at the object
+    /// again only when one of them is woken (the kernel's `fs::epoll`):
+    ///
+    /// * every change [`Inode::poll`] can report wakes a queue named here;
+    /// * a change of *which* queues are named here -- a socket naming its
+    ///   peer's once it connects -- wakes one of the queues it named before,
+    ///   so a watcher looks again and finds the new ones.
+    ///
+    /// It is asked inside a wait's last look, with preemption held off: it
+    /// may take spin locks, and must not block or take a sleeping lock.
     fn poll_queues(&self, visit: &mut dyn FnMut(WakeSource)) -> bool {
         let _ = visit;
+        false
+    }
+
+    /// Whether [`Inode::poll_queues`] names the same queues, and gives the
+    /// same answer, for this object's whole life: an epoll registration then
+    /// hooks them once and never asks again. The default, no, makes it ask
+    /// at every look, which an object whose queues change -- a socket that
+    /// connects -- needs.
+    fn poll_queues_fixed(&self) -> bool {
         false
     }
 

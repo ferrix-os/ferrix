@@ -17,7 +17,6 @@ use ferrix_vfs::{OpenFile, Whence};
 
 use super::{Checked, Harness};
 use crate::fs::epoll::{self, Interest};
-use crate::fs::wake::Sources;
 use crate::object::job::KILLED_STATUS;
 use crate::sched::WaitQueue;
 use crate::sync::SpinLock;
@@ -73,7 +72,6 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
             .write(b"/check-e/cgroup.procs", listed.as_bytes())
             .map_err(|_| "writing a pid to cgroup.procs failed")?;
     }
-    let job = first.job();
 
     let events = harness
         .open_read(b"/check-e/cgroup.events")
@@ -106,7 +104,7 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
         return Err("an epoll on an unchanged cgroup.events reported an event");
     }
 
-    let woken = wait_through_the_releases(&job, &set, [&first, &second])?;
+    let woken = wait_through_the_releases(&set, [&first, &second])?;
     drop((first, second));
 
     let ready = events.poll();
@@ -138,17 +136,19 @@ pub(super) fn run(harness: &mut Harness) -> Checked<u32> {
 
 /// Start the waiter on `set`, release `members` one at a time, and require
 /// the waiter to sleep through the first and be woken by the last with
-/// `EPOLLPRI` and the cookie. Answers how many of its waits the job's wake
-/// ended.
+/// `EPOLLPRI` and the cookie. Answers how many of its waits a wake ended: the
+/// job's, through the registration's mark on the set's queue.
 fn wait_through_the_releases(
-    job: &Arc<crate::object::job::Job>,
     set: &Arc<OpenFile>,
     members: [&Arc<process::Process>; 2],
 ) -> Checked<u32> {
     let [first, last] = members;
+    // The waiter sleeps on the set's queue, which the job's wake wakes
+    // through the registration's mark (`fs::epoll`'s ready list).
+    let watching = epoll::of(set).ok_or("an epoll set is not one")?;
     *WAITER_ANSWER.lock() = None;
     *WAITER_SET.lock() = Some(Arc::clone(set));
-    let ended_before = job.events().waits_ended_by_a_wake();
+    let ended_before = watching.queue().waits_ended_by_a_wake();
     let waiter = crate::sched::spawn(
         "cgroup-events-waiter",
         waiter,
@@ -158,7 +158,7 @@ fn wait_through_the_releases(
     // The release must find the waiter on the queue: a fixed sleep would
     // only assume it got there (see the eventfd check's `until_listed`).
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while job.events().listed() == 0
+    while watching.queue().listed() == 0
         && WAITER_ANSWER.lock().is_none()
         && crate::timer::now_nanos() < deadline
     {
@@ -187,8 +187,8 @@ fn wait_through_the_releases(
             return Err("an epoll on cgroup.events did not report EPOLLPRI at the last release");
         }
     }
-    let ended = job
-        .events()
+    let ended = watching
+        .queue()
         .waits_ended_by_a_wake()
         .wrapping_sub(ended_before);
     if ended == 0 {
@@ -217,9 +217,14 @@ pub(super) fn waiter(_argument: usize) {
             if crate::timer::now_nanos() >= deadline {
                 return None;
             }
-            let mut sources = Sources::new();
-            sources.add(&file);
-            let _ = sources.wait(|| !set.ready(1).is_empty(), deadline);
+            // On the set's queue, which the job's wake wakes through the
+            // registration's mark, as `epoll_wait` sleeps.
+            let _ = crate::fs::wake::wait_on(
+                set.queue(),
+                || !set.ready(1).is_empty(),
+                deadline,
+                set.trusted(),
+            );
         }
     });
     *WAITER_ANSWER.lock() = Some(answer);

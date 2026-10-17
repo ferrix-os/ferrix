@@ -827,6 +827,11 @@ impl Inode for EventsFile {
         visit(fs::wake::shared(self.queue()));
         true
     }
+
+    /// The same queues, and the same answer, for its whole life.
+    fn poll_queues_fixed(&self) -> bool {
+        true
+    }
 }
 
 /// The thread ids in `cgroup.threads`, as the reader's namespace numbers them.

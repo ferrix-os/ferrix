@@ -542,7 +542,16 @@ fn time_a_waiter(process: &Arc<Process>, page: u64, how: HowWaits) -> Result<Tim
         file: Arc::clone(&file),
         how,
     });
-    let timed = wait_out_a_signal(process, &inner, how)?;
+    // An `epoll_wait` sleeps on its set's queue, which the signal's wake
+    // wakes through the registration's hook (`fs::epoll`'s ready list).
+    let set = match how {
+        HowWaits::Epoll => Some(
+            crate::fs::epoll::of(&*opened(process, target)?).ok_or("an epoll set is not one")?,
+        ),
+        HowWaits::Read | HowWaits::Poll => None,
+    };
+    let timed = wait_out_a_signal(process, &inner, how, set.as_deref())?;
+    drop(set);
     if how != HowWaits::Read {
         // The signal the waiter was told of, still to be taken.
         let nonblocking = create(process, page, bit(SIGUSR1), SFD_NONBLOCK)?;
@@ -605,10 +614,17 @@ fn wait_out_a_signal(
     process: &Process,
     inner: &SignalFd,
     how: HowWaits,
+    set: Option<&crate::fs::epoll::Epoll>,
 ) -> Result<Timed, &'static str> {
-    let ended_before = inner.waits_ended_by_a_wake();
+    let ended = || {
+        set.map_or_else(
+            || inner.waits_ended_by_a_wake(),
+            |set| set.queue().waits_ended_by_a_wake(),
+        )
+    };
+    let ended_before = ended();
     let waiter = crate::sched::spawn("signalfd-waiter", waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
-    until_listed(inner);
+    until_listed(inner, set);
     if ANSWER.lock().is_some() {
         return Err("a read, poll or epoll_wait on a signalfd with nothing pending did not wait");
     }
@@ -637,7 +653,7 @@ fn wait_out_a_signal(
         return Err("a read, poll or epoll_wait woken by a signal did not answer it");
     }
     let late = back.saturating_sub(sent);
-    if inner.waits_ended_by_a_wake() == ended_before {
+    if ended() == ended_before {
         return Ok(Timed::Rechecked(late));
     }
     if late > LATE_LIMIT_NANOS {
@@ -650,12 +666,10 @@ fn wait_out_a_signal(
 /// patience runs out -- whichever is first. The check that follows says
 /// which. Only then is the signal sent, so the waiter is waiting when it
 /// arrives however long the host took to run it.
-fn until_listed(inner: &SignalFd) {
+fn until_listed(inner: &SignalFd, set: Option<&crate::fs::epoll::Epoll>) {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while inner.waiters_listed() == 0
-        && ANSWER.lock().is_none()
-        && crate::timer::now_nanos() < deadline
-    {
+    let listed = || set.map_or_else(|| inner.waiters_listed(), |set| set.queue().listed());
+    while listed() == 0 && ANSWER.lock().is_none() && crate::timer::now_nanos() < deadline {
         crate::sched::sleep_for(LISTED_LOOK_NANOS);
     }
 }

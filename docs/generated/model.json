@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "5c16d8cb7d37c33a05a8273faf1353d7ecf5767bca22e4d6211d452796584d96",
+  "digest": "dec6d98a1b15f683686d974eec88697671335f82ae7c59ec70fd0d9fa9bd21c2",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 138,
-    "elements": 6935,
+    "elements": 6950,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -37144,6 +37144,177 @@
                   "source": {
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 684
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aWakeTellsItsMarks",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWakeTellsItsMarks",
+              "kind": "requirement",
+              "shortName": "L.sched.74",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 686
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWakeTellsItsMarks",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Every wake of a wait queue shall tell each mark listed on it exactly once, after waking the tasks it drained; a mark taken off shall be told by no wake that takes the hook lock after the taking-off returns; a queue dropped shall tell each mark still listed that it is gone, and wake nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 691
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWakeTellsItsMarks",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 5's told case: a mark hooked on a queue is told once by each of three wakes and its number listed each time, is told by no wake once unhooked, and is told it is gone, listed and with its list's queue not woken, when a queue it is hooked on is dropped; with the telling taken out of the wake, the unhook leaving the entry, or the drop telling nothing, the case fails with its sentence.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 698
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWakeTellsItsMarks",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.OBJ.11\", \"H.SCHED.2\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 699
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWakeTellsItsMarks",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::wait::WaitQueue::hook\", \"sched::wait::WaitQueue::unhook\", \"sched::wait::WaitQueue::wake_all_with\", \"sched::wait::WaitQueue::drop\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 703
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aMarkHookedIsToldByLaterWakes",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkHookedIsToldByLaterWakes",
+              "kind": "requirement",
+              "shortName": "L.sched.75",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 705
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkHookedIsToldByLaterWakes",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A mark listed by hook shall be told by every wake whose waiter-lock section begins after hook returns; the count of listed marks shall be stored and read only under the waiter lock.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 708
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkHookedIsToldByLaterWakes",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 5's published case: a waker on a processor of its own, held by the wake's meet just before its waiter-lock section, tells a mark the checker hooks on the queue while it is held; with the count read before the meet, outside the waiter lock, the case fails with its sentence for a mark the wake did not tell.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 713
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkHookedIsToldByLaterWakes",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.OBJ.11\", \"H.SCHED.2\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 714
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkHookedIsToldByLaterWakes",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::wait::WaitQueue::hook\", \"sched::wait::WaitQueue::wake_all_with\", \"sched::wait::hook_meet\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 717
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aMarkIsListedOnceAndWakesItsList",
+              "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkIsListedOnceAndWakesItsList",
+              "kind": "requirement",
+              "shortName": "L.sched.76",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/15-sched-requirements.sysml",
+                "line": 719
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkIsListedOnceAndWakesItsList",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A mark told of a wake shall put its number on its ready list at most once until the list's taker clears it, shall flag the list overflowed rather than grow it when it is full, and shall wake the list's queue when told it was woken unless a mark of the list has woken it since the list was last taken, never when told it is gone.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 725
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkIsListedOnceAndWakesItsList",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 5's listed-once case: a mark told twice before its taker clears it is listed once and wakes its list's queue once; a second mark of the same list told before the next take wakes it no more, and the first mark told after a take wakes it again; a list one place short of its marks, all told, is flagged overflowed and holds as many as it had room for; and the told case's drop wakes nothing. With the listing ignoring the mark's state, the overflow flag not set, or the list's queue not woken, the case fails with its sentence.\"",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 734
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkIsListedOnceAndWakesItsList",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.OBJ.11\", \"H.SCHED.2\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 735
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aMarkIsListedOnceAndWakesItsList",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::wait::Mark::tell\", \"sched::wait::Mark::clear\", \"sched::wait::ReadyList::take\", \"sched::wait::ReadyList::reserve\")",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 738
                   }
                 }
               ]

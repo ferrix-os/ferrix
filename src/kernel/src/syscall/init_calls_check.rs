@@ -539,7 +539,11 @@ fn check_a_packet_wakes_the_wait(
     set: i32,
     the_port: &Arc<Port>,
 ) -> Result<u64, &'static str> {
-    let wakes_before = the_port.waiters().waits_ended_by_a_wake();
+    // The wait sleeps on the set's queue, which the port's wake wakes
+    // through the registration's hook (`fs::epoll`'s ready list).
+    let set_file = fd::file(&side.process, set).map_err(|_| "the epoll set is gone")?;
+    let the_set = crate::fs::epoll::of(&set_file).ok_or("an epoll set is not one")?;
+    let wakes_before = the_set.queue().waits_ended_by_a_wake();
     *LATE_PORT.lock() = Some(Arc::clone(the_port));
     let task = crate::sched::spawn("port-fd check", queue_late, 0, ferrix_sched::NICE_0_WEIGHT)
         .map_err(|_| "no task to queue a packet from")?;
@@ -547,10 +551,11 @@ fn check_a_packet_wakes_the_wait(
     let reported = events(side, set, 5_000)?;
     let took = crate::timer::now_nanos().saturating_sub(started);
     crate::sched::wait_until_gone(&task, crate::sched::REAPER_PATIENCE_NANOS)?;
-    let woken = the_port
-        .waiters()
+    let woken = the_set
+        .queue()
         .waits_ended_by_a_wake()
         .wrapping_sub(wakes_before);
+    drop((the_set, set_file));
     if reported != [(EPOLLIN, PORT_COOKIE)] {
         crate::console::println!(
             "  initcall epoll_wait on a port's descriptor reported {} events after {} ms",

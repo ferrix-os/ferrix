@@ -1242,6 +1242,46 @@ after the reclaim, on the boot processor.
   the entry point or the walked table, bounded by the copy's length; it
   takes no lock but the `Once`'s completed check.
 
+### 2.2q A wait queue's marks (`sched::wait`, epoll's ready list, 2026-10-17)
+
+A wait queue's wake tells every mark hooked on it (`L.sched.74`), and that
+walk runs with interrupts masked under the queue's hook lock, from whatever
+woke the queue, an interrupt handler included. Its bound:
+
+* **Per mark**, an atomic swap and, for a mark not yet listed, the push of
+  its number onto its ready list under that list's leaf lock (room reserved
+  in advance, so nothing allocates); the list's queue is woken at most once
+  between two takes of the list (`L.sched.76`), after the leaf lock is let
+  go.
+* **Marks on one queue** are bounded by the registrations charged to the
+  jobs that made them: a queue many jobs share (the net core's progress
+  queue, every inet registration of a namespace) carries all of theirs
+  (`VULNERABILITY-ANALYSIS.md`, T.EXHAUST path 11).
+* **Nesting**: a list's queue is hooked only by the marks of the epoll sets
+  that hold its set, at most `MAX_NESTS` deep, so the chain of hook locks is
+  at most `MAX_NESTS + 1` long, and acyclic (`fs::epoll`'s `NESTING` lock
+  makes the depth check and the add one step).
+* **Measured** (x86_64 under KVM on nazuna, `hookwalk`, a static program run
+  as init, 800 registrations of dups of one eventfd): a write whose wake
+  finds 800 marks not yet listed costs 13.1 us against 1.0 us with none, a
+  12 us walk, 15 ns a mark; with the 800 already listed, 6.9 us; with the
+  set nested once in another, 13.2 us. Logs in the landing message.
+* **Charged** per registration: the file it pins, its mark, four places in
+  each of up to 8 queues' mark lists and one boxed list header for each
+  (`fs::epoll::HOOK_ROOM`, an upper bound).
+* **Unhook** searches the queue's mark list linearly, under its hook lock,
+  so removing every registration of a queue with n marks is O(n^2); the
+  list gives half its room back once a quarter full, and is freed with its
+  last mark.
+
+Lock order: a queue's hook lock, then a mark's list lock (a leaf, let go),
+then the list queue's waiter lock, the run queue's lock in `wake_with`, and
+that queue's hook lock, and so on up the nesting. An epoll set's state lock
+is taken before a queue's hook and waiter locks (hooking, unhooking) and
+before its list's lock (taking), never after either; `NESTING`, a sleeping
+lock, before a set's state lock. Nothing takes a hook lock under a waiter
+lock or a run queue's lock.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

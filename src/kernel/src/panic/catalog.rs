@@ -2586,8 +2586,20 @@ pub(crate) static STAGE8_EPOLL: Explanation = Explanation {
               with the file. A set holding a set must poll readable and report the inner set's \
               cookie when the inner set has something; a set added to itself is EINVAL, to a set \
               it holds ELOOP, and a sixth set in a chain ELOOP. The refusals are Linux's, in \
-              Linux's order, and the run is done twice and must leave no frame behind.",
+              Linux's order, and the run is done twice and must leave no frame behind. And the \
+              ready list: a wait on 64 pipes with one written looks at no more than two files, a \
+              wait asleep on 64 is ended by the write's wake, a unix socket registered before its \
+              connect is looked at again after it, a file written between a wait's hook and its \
+              look is reported, a registration whose hook is refused is looked at by every \
+              wait with its set no longer trusted, a wait with no memory to gather what to \
+              hook distrusts what it could not, and a mark that found its ready list full still \
+              wakes a wait afterwards.",
     causes: &[
+        "A wait looks at registrations nothing woke (the rescan taken every time), a \
+         registration's queues are not hooked before its file is looked at, or a refused hook \
+         leaves the registration trusted: `Epoll::ready` and `Epoll::hook_named`.",
+        "A file changes what it reports, or which queues it names, without waking a queue it \
+         named (the `Inode::poll_queues` contract): a connect that wakes only the listener.",
         "An inode's `poll_changes` does not move when its readiness changes, or a queue it reads \
          is woken without `WaitQueue::wake_all`, so an edge-triggered registration misses the data \
          written after a drain.",

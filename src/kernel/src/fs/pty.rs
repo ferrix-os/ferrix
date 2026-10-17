@@ -575,6 +575,11 @@ impl Inode for MasterFile {
         true
     }
 
+    /// The same queues, and the same answer, for its whole life.
+    fn poll_queues_fixed(&self) -> bool {
+        true
+    }
+
     fn poll_changes(&self) -> Option<u64> {
         Some(self.pty.changed.wakes())
     }
@@ -685,6 +690,11 @@ impl Inode for SlaveFile {
 
     fn poll_queues(&self, visit: &mut dyn FnMut(ferrix_vfs::WakeSource)) -> bool {
         visit(crate::fs::wake::shared(&self.pty.changed));
+        true
+    }
+
+    /// The same queues, and the same answer, for its whole life.
+    fn poll_queues_fixed(&self) -> bool {
         true
     }
 

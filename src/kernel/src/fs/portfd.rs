@@ -129,6 +129,11 @@ impl Inode for PortFile {
         true
     }
 
+    /// The same queues, and the same answer, for its whole life.
+    fn poll_queues_fixed(&self) -> bool {
+        true
+    }
+
     fn poll_changes(&self) -> Option<u64> {
         Some(self.port.waiters().wakes())
     }

@@ -7,9 +7,9 @@
 //! waited on (`EPERM`) before whether the set is a set (`EINVAL`); a wait
 //! checks `maxevents` and the buffer's range before the descriptor.
 //!
-//! A wait sleeps on the wait queues of every registered file and of the set
-//! itself, as `poll` does (see [`crate::fs::wake`]), until one is woken, the
-//! timeout passes or a signal arrives. A signal ends it with `EINTR`, never a
+//! A wait sleeps on the set's own queue, which a wake of any registered
+//! file's queue wakes (the set's ready list, [`crate::fs::epoll`]), until it
+//! is woken, the timeout passes or a signal arrives. A signal ends it with `EINTR`, never a
 //! restart, because `epoll_wait` is one of the calls Linux does not restart
 //! even under `SA_RESTART`.
 
@@ -23,8 +23,8 @@ use ferrix_linux_abi::types::{
 };
 use ferrix_vfs::OpenFile;
 
+use crate::fs;
 use crate::fs::epoll::{self, Event, Interest};
-use crate::fs::wake::Sources;
 use crate::syscall::fd;
 use crate::syscall::poll;
 use crate::syscall::process::Process;
@@ -227,15 +227,18 @@ fn wait(
         if process.signal_pending() {
             return Err(Errno::EINTR);
         }
-        // Asleep on every registered file's queues, and the set's own, until
-        // one is woken, a signal wakes the task or the deadline passes. A
-        // look in between is a set with something to report; the loop asks
-        // again for what, and delivers it.
-        let mut sources = Sources::new();
-        sources.add(&file);
-        let _ = sources.wait(
-            || !set.ready(1).is_empty() || process.signal_pending(),
+        // Asleep on the set's queue, which a wake of any registered file's
+        // queue wakes, until it is woken, a signal wakes the task or the
+        // deadline passes. A look in between is a set with something to
+        // report; the loop asks again for what, and delivers it. So is a
+        // look that found the set no longer trusted: the loop sleeps again
+        // with the shorter recheck.
+        let trusted = set.trusted();
+        let _ = fs::wake::wait_on(
+            set.queue(),
+            || !set.ready(1).is_empty() || process.signal_pending() || set.trusted() != trusted,
             deadline.unwrap_or(u64::MAX),
+            trusted,
         );
     }
 }

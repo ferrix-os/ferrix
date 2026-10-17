@@ -343,7 +343,7 @@ fn a_blocked_read_is_woken() -> Result<bool, &'static str> {
         0,
         ferrix_sched::NICE_0_WEIGHT,
     )?;
-    until_listed(&inner, || READER_ANSWER.lock().is_some());
+    until_listed(|| inner.readers_listed(), || READER_ANSWER.lock().is_some());
     crate::sched::sleep_for(STILL_WAITING_NANOS);
     if READER_ANSWER.lock().is_some() {
         return Err("a read of an empty blocking eventfd did not wait");
@@ -369,7 +369,8 @@ fn a_blocked_read_is_woken() -> Result<bool, &'static str> {
     Ok(inner.waits_ended_by_a_wake() != ended_before)
 }
 
-/// Wait until a task is listed on `counter`'s readable queue, `answered` says
+/// Wait until a task is listed on `counter`'s readable queue (`listed`, for
+/// a wait listed elsewhere: an `epoll_wait` on its set's queue), `answered` says
 /// the task came back without one, or the patience runs out -- whichever is
 /// first. The check that follows says which it was.
 ///
@@ -379,9 +380,9 @@ fn a_blocked_read_is_woken() -> Result<bool, &'static str> {
 /// quiet one, a spawned task can wait longer than 20 ms for its first turn;
 /// the write would then find nobody to wake and the task would read the value
 /// without waiting, which the check would blame on the wake.
-fn until_listed(counter: &eventfd::EventFd, answered: impl Fn() -> bool) {
+fn until_listed(listed: impl Fn() -> usize, answered: impl Fn() -> bool) {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while counter.readers_listed() == 0 && !answered() && crate::timer::now_nanos() < deadline {
+    while listed() == 0 && !answered() && crate::timer::now_nanos() < deadline {
         crate::sched::sleep_for(LISTED_LOOK_NANOS);
     }
 }
@@ -571,11 +572,29 @@ fn a_wait_is_woken(process: &Arc<Process>, page: u64, how: HowWaits) -> Result<b
             set
         }
     };
+    // A `poll` sleeps on the eventfd's queues; an `epoll_wait` on its set's,
+    // which the eventfd's wake wakes through the registration's hook
+    // (`fs::epoll`'s ready list): the wake that ends it is counted there.
+    let set = match how {
+        HowWaits::Poll => None,
+        HowWaits::Epoll => {
+            let file = fd::file(process, target).map_err(|_| "the epoll set is gone")?;
+            Some(fs::epoll::of(&file).ok_or("an epoll set is not one")?)
+        }
+    };
+    let listed = || match &set {
+        Some(set) => set.queue().listed(),
+        None => inner.readers_listed(),
+    };
+    let ended = || match &set {
+        Some(set) => set.queue().waits_ended_by_a_wake(),
+        None => inner.waits_ended_by_a_wake(),
+    };
     *WAITER_ANSWER.lock() = None;
     *WAITER_SUBJECT.lock() = Some((Arc::clone(process), page, target, how));
-    let ended_before = inner.waits_ended_by_a_wake();
+    let ended_before = ended();
     let waiter = crate::sched::spawn("poll-waiter", poll_waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
-    until_listed(&inner, || WAITER_ANSWER.lock().is_some());
+    until_listed(listed, || WAITER_ANSWER.lock().is_some());
     crate::sched::sleep_for(STILL_WAITING_NANOS);
     if WAITER_ANSWER.lock().is_some() {
         return Err("a poll or epoll_wait on an empty eventfd did not wait");
@@ -592,7 +611,8 @@ fn a_wait_is_woken(process: &Arc<Process>, page: u64, how: HowWaits) -> Result<b
     if answer != Some(Ok(1)) {
         return Err("a poll or epoll_wait did not answer one ready eventfd after a write");
     }
-    let woken = inner.waits_ended_by_a_wake() != ended_before;
+    let woken = ended() != ended_before;
+    drop(set);
     drop(file);
     if how == HowWaits::Epoll {
         closed(process, target)?;

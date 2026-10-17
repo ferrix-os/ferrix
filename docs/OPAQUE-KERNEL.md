@@ -1783,7 +1783,14 @@ The letters are used by parts 3 and 6.
   wake them, and the fast path, whose message never enters the inbox, would
   not. `WRITABLE` and `read_small`'s `was_full` wake are unaffected: the
   peer's inbox is empty (A2), so it was not full, and the general path's
-  read makes no such wake either.
+  read makes no such wake either. T10 does not ask whether a mark is
+  hooked on the queue (`sched::wait`'s marks, which an epoll set's ready list
+  hooks on the queues files name): none can be. A channel half's queue is
+  inline in `Half`, never an `Arc<WaitQueue>` or a `&'static` one, so no
+  object's `poll_queues` can name it as a `WakeSource`, and nothing can hook
+  it. A debug build asserts it in `sendable`. A change that makes a channel's
+  queue nameable adds the test to T10 and goes back to the consultant
+  (epoll-ready-list's review, ledger 2026-10-17 line 2029, condition (5)).
 
 *Under this processor's run-queue lock (send half):*
 - **T11** The parked peer's home is this processor.

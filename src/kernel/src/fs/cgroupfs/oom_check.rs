@@ -25,7 +25,7 @@ use super::events_check::{
 use super::{Checked, Harness};
 use crate::arch;
 use crate::fs::epoll::{self, Interest};
-use crate::object::job::{Job, KILLED_STATUS};
+use crate::object::job::KILLED_STATUS;
 use crate::object::oom;
 use crate::syscall::process::{self, Process};
 use crate::syscall::{exec, image};
@@ -146,7 +146,6 @@ fn check_the_kill(
     program: &Arc<Process>,
     sibling: &Arc<Process>,
 ) -> Checked<u64> {
-    let job = program.job();
     let events = harness
         .open_read(b"/check-m/v/memory.events")
         .map_err(|_| "memory.events did not open")?;
@@ -170,11 +169,14 @@ fn check_the_kill(
         .map_err(|_| "epoll refused to watch memory.events")?;
 
     let kills = oom::kills();
-    let ended_before = job.memory_events().waits_ended_by_a_wake();
-    let answer = run_watched(&job, &set, program)?;
+    // The waiter sleeps on the set's queue, which the kill's wake wakes
+    // through the registration's mark (`fs::epoll`'s ready list).
+    let watching = epoll::of(&set).ok_or("an epoll set is not one")?;
+    let ended_before = watching.queue().waits_ended_by_a_wake();
+    let answer = run_watched(&watching, &set, program)?;
     let status = answer.status;
-    let woken = job
-        .memory_events()
+    let woken = watching
+        .queue()
         .waits_ended_by_a_wake()
         .wrapping_sub(ended_before);
 
@@ -250,12 +252,16 @@ struct Watched {
 
 /// Start the waiter on `set`, then the program, and wait for both.
 /// Verifies: `L.sched.35`, `L.syscall.20`
-fn run_watched(job: &Arc<Job>, set: &Arc<OpenFile>, program: &Arc<Process>) -> Checked<Watched> {
+fn run_watched(
+    watching: &epoll::Epoll,
+    set: &Arc<OpenFile>,
+    program: &Arc<Process>,
+) -> Checked<Watched> {
     *WAITER_ANSWER.lock() = None;
     *WAITER_SET.lock() = Some(Arc::clone(set));
     let task = crate::sched::spawn("oom-events-waiter", waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while job.memory_events().listed() == 0
+    while watching.queue().listed() == 0
         && WAITER_ANSWER.lock().is_none()
         && crate::timer::now_nanos() < deadline
     {

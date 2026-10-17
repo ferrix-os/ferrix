@@ -206,8 +206,9 @@ pub(super) fn check_epoll() {
     };
     println!(
         "  epoll    {} events delivered by level, edge and one-shot registrations and a set inside \
-         a set, {} calls refused as Linux refuses them; {} frames leaked",
-        checked.events, checked.refusals, checked.leaked,
+         a set, {} calls refused as Linux refuses them; a wait on 64 pipes with one written looked \
+         at {} files; {} frames leaked",
+        checked.events, checked.refusals, checked.looked, checked.leaked,
     );
 }
 

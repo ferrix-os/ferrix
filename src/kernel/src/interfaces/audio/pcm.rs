@@ -230,6 +230,11 @@ impl Inode for PcmFile {
         true
     }
 
+    /// The same queues, and the same answer, for its whole life.
+    fn poll_queues_fixed(&self) -> bool {
+        true
+    }
+
     fn poll_changes(&self) -> Option<u64> {
         Some(self.card.changed.wakes())
     }
@@ -598,6 +603,11 @@ impl Inode for ControlFile {
 
     fn poll_queues(&self, visit: &mut dyn FnMut(ferrix_vfs::WakeSource)) -> bool {
         visit(crate::fs::wake::shared(&self.card.changed));
+        true
+    }
+
+    /// The same queues, and the same answer, for its whole life.
+    fn poll_queues_fixed(&self) -> bool {
         true
     }
 

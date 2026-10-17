@@ -772,6 +772,10 @@ impl Socket {
         *self.send.lock() = Some(Arc::clone(&target.receive));
         *self.peer_name.lock() = peer_name;
         *self.peer_credentials.lock() = Some(target.credentials);
+        // Its readiness now reads the peer's queue, and changed with no
+        // queue of its own woken: wake them, so a wait already watching it
+        // (an epoll registration made before the connect) looks again.
+        self.receive.wake_both();
         Ok(())
     }
 
@@ -840,6 +844,9 @@ impl Socket {
                 *self.peer_name.lock() = peer_name;
                 *self.peer_credentials.lock() = Some(listened);
                 target.arrivals.wake_all();
+                // This end is writable now, and its readiness reads the far
+                // end's queues: wake its own, as `connect_datagram` does.
+                self.receive.wake_both();
                 return Ok(());
             }
             drop(server);

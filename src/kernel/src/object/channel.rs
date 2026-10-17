@@ -1061,6 +1061,13 @@ fn sendable<'a>(
     if peer.observed.load(Ordering::Acquire) || peer.waiters.listed_now() != 0 {
         return Err(Count::T10);
     }
+    // No mark can be hooked on the peer's queue, which the fast path would
+    // leave untold: it is inline in `Half`, so no `poll_queues` can name it
+    // (`docs/OPAQUE-KERNEL.md` §9.7, T10). Asserted where it costs nothing.
+    debug_assert!(
+        peer.waiters.hooked_now() == 0,
+        "a mark is hooked on a channel's queue, which T10 does not test"
+    );
     Ok(reader)
 }
 

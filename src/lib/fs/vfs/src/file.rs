@@ -469,6 +469,12 @@ impl OpenFile {
         self.io.poll_changes()
     }
 
+    /// What the opened object's [`Inode::poll_queues_fixed`] answers: `false`
+    /// for a file opened with `O_PATH`, which names none.
+    pub fn poll_queues_fixed(&self) -> bool {
+        !self.path_only && self.io.poll_queues_fixed()
+    }
+
     /// What the opened object's [`Inode::poll_queues`] answers: nothing, and
     /// `false`, for a file opened with `O_PATH`.
     pub fn poll_queues(&self, visit: &mut dyn FnMut(crate::WakeSource)) -> bool {

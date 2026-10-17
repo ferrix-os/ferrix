@@ -393,6 +393,11 @@ impl Inode for PacketSocket {
         true
     }
 
+    /// The same queues, and the same answer, for its whole life.
+    fn poll_queues_fixed(&self) -> bool {
+        true
+    }
+
     fn read_stream(&self, buf: &mut [u8], nonblock: bool) -> ferrix_vfs::Result<usize> {
         self.recv(buf, 0, nonblock)
             .map(|(received, _from)| received.bytes)

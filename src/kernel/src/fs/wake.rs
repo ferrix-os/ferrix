@@ -149,6 +149,30 @@ impl Sources {
     }
 }
 
+/// Sleep on one queue until `ready`, a wake of it, or `deadline`, looking
+/// again of its own accord as a [`Sources`] wait does: every second when
+/// `trusted`, every few milliseconds otherwise. Counted among the looks.
+///
+/// What an `epoll_wait` sleeps on: its set's own queue, which every wake of a
+/// registered file's queue wakes (`fs::epoll`'s ready list).
+pub(crate) fn wait_on(
+    queue: &WaitQueue,
+    mut ready: impl FnMut() -> bool,
+    deadline: u64,
+    trusted: bool,
+) -> bool {
+    let counted = || {
+        let _ = LOOKS.fetch_add(1, Ordering::Relaxed);
+        ready()
+    };
+    let recheck = if trusted {
+        TRUSTED_RECHECK_NANOS
+    } else {
+        UNTRUSTED_RECHECK_NANOS
+    };
+    WaitQueue::wait_on_any(&[queue], counted, deadline, recheck)
+}
+
 /// A queue inside an object, as a source a wait can hold.
 pub(crate) fn shared(queue: &Arc<WaitQueue>) -> WakeSource {
     WakeSource::Shared(Arc::clone(queue) as Arc<dyn core::any::Any + Send + Sync>)

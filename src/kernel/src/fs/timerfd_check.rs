@@ -698,7 +698,17 @@ fn time_a_waiter(process: &Arc<Process>, page: u64, how: HowWaits) -> Result<Tim
         file: Arc::clone(&file),
         how,
     });
-    let timed = wait_out_a_deadline(process, page, timer, &inner)?;
+    // An `epoll_wait` sleeps on its set's queue, which the deadline's wake
+    // wakes through the registration's hook (`fs::epoll`'s ready list).
+    let set = match how {
+        HowWaits::Epoll => {
+            let file = fd::file(process, target).map_err(|_| "the epoll set is gone")?;
+            Some(crate::fs::epoll::of(&file).ok_or("an epoll set is not one")?)
+        }
+        HowWaits::Read | HowWaits::Poll => None,
+    };
+    let timed = wait_out_a_deadline(process, page, timer, &inner, set.as_deref())?;
+    drop(set);
     // The expiration the waiter was told of, still to be taken. A waiter its
     // recheck ended may have been told of none.
     if how != HowWaits::Read
@@ -752,10 +762,17 @@ fn wait_out_a_deadline(
     page: u64,
     timer: i32,
     inner: &TimerFd,
+    epoll_set: Option<&crate::fs::epoll::Epoll>,
 ) -> Result<Timed, &'static str> {
-    let ended_before = inner.waits_ended_by_a_wake();
+    let ended = || {
+        epoll_set.map_or_else(
+            || inner.waits_ended_by_a_wake(),
+            |set| set.queue().waits_ended_by_a_wake(),
+        )
+    };
+    let ended_before = ended();
     let waiter = crate::sched::spawn("timerfd-waiter", waiter, 0, ferrix_sched::NICE_0_WEIGHT)?;
-    until_listed(inner);
+    until_listed(inner, epoll_set);
     if ANSWER.lock().is_some() {
         return Err("a read, poll or epoll_wait on a disarmed timerfd did not wait");
     }
@@ -784,7 +801,7 @@ fn wait_out_a_deadline(
         return Err("a waiter on a timerfd came back before the deadline");
     }
     let late = back - deadline;
-    if inner.waits_ended_by_a_wake() == ended_before {
+    if ended() == ended_before {
         return Ok(Timed::Rechecked(late));
     }
     if late > LATE_LIMIT_NANOS {
@@ -797,12 +814,10 @@ fn wait_out_a_deadline(
 /// patience runs out -- whichever is first. The check that follows says
 /// which. Only then is the timer armed, so the waiter is waiting when it
 /// expires however long the host took to run it.
-fn until_listed(timer: &TimerFd) {
+fn until_listed(timer: &TimerFd, set: Option<&crate::fs::epoll::Epoll>) {
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while timer.readers_listed() == 0
-        && ANSWER.lock().is_none()
-        && crate::timer::now_nanos() < deadline
-    {
+    let listed = || set.map_or_else(|| timer.readers_listed(), |set| set.queue().listed());
+    while listed() == 0 && ANSWER.lock().is_none() && crate::timer::now_nanos() < deadline {
         crate::sched::sleep_for(LISTED_LOOK_NANOS);
     }
 }
