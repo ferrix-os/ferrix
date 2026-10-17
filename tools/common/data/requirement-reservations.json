@@ -80,6 +80,13 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
+    },
+    {
+      "ids": ["L.sched.77-79"],
+      "owner": "syncwake",
+      "branch": "syncwake",
+      "date": "2026-10-17",
+      "purpose": "Idle poll before a halt (os-35 part C, piece 1 of STALLS.md recommendation 2): a kick to a polling processor sends no interrupt and is never lost, a kick absorbed before a halt still lets a later kick run the task, and ferrix.haltpoll selects where the poll runs (consultant design verdict, ledger 2026-10-17 line 2301, piece 1 (1))"
     }
   ]
 }
