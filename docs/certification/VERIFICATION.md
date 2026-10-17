@@ -104,8 +104,11 @@ stage 3's checks over made-up input (`check_widening` L.device.5,
 test-boot failing a reference boot on any fallback's WARNING line
 (`fallback_problem`, L.console.12 and L.x86_64.38), and by gate controls:
 the interrupt tables left out of the widening's page test, the reserved
-test of decoding defeated, the transmit interrupt never enabled, the
-writer made not to queue (FX-0504), the HPET's counter held still, the
+test of decoding defeated, the transmit interrupt never enabled (the check
+gives up after 50 ms of the interrupt's silence: `stx-ctl-silent-kvm`,
+`stx-ctl-silent-tcg`, `stx-ctl-silent-a64`; and, with that bound taken
+away, at its two-second cap: `stx-ctl-cap-kvm`), the writer made not to
+queue (FX-0504), the HPET's counter held still, the
 CPUID arithmetic halved, and the x2APIC end-of-interrupt removed under
 `ferrix.apic=x2apic` each fail the boot. The no-HPET, no-PIT case of
 L.x86_64.39 is the control `n150k3-ctl-no-clock` (KVM, `hpet=off,pit=off`:

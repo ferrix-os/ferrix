@@ -257,21 +257,21 @@
     },
     {
       "file": "console/output.rs",
-      "lines": "148",
+      "lines": "170",
       "category": "absent-hardware",
       "match": "if let Some(oldest) = self.ring.pop() {",
       "why": "The ring full when a writer that may not wait queues a byte: the oldest byte is polled out to make room. Only a port slower than its writers fills the ring, and an emulated port sends instantly."
     },
     {
       "file": "console/output.rs",
-      "lines": "186",
+      "lines": "208",
       "category": "defensive",
       "match": "self.flush()",
       "why": "Bytes that have waited a tenth of a second with nothing sent: the transmit interrupt stopped coming. console::output::check requires the stall count to stay where it was, and a working port never takes it."
     },
     {
       "file": "console/output.rs",
-      "lines": "440",
+      "lines": "489",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one."

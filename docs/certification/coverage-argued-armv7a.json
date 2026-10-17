@@ -295,35 +295,35 @@
     },
     {
       "file": "console/output.rs",
-      "lines": "186",
+      "lines": "208",
       "category": "defensive",
       "match": "self.flush()",
       "why": "Bytes that have waited a tenth of a second with nothing sent: the transmit interrupt stopped coming. console::output::check requires the stall count to stay where it was, and a working port never takes it."
     },
     {
       "file": "console/output.rs",
-      "lines": "289",
+      "lines": "311",
       "category": "absent-hardware",
       "match": "WRITERS.wake_all();",
       "why": "Wakes writers that waited for room in the transmit ring. An emulated port sends instantly, so no writer ever waits for room on a QEMU machine."
     },
     {
       "file": "console/output.rs",
-      "lines": "314",
+      "lines": "336",
       "category": "absent-hardware",
       "match": "wake_writers();",
       "why": "A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once."
     },
     {
       "file": "console/output.rs",
-      "lines": "323",
+      "lines": "345",
       "category": "absent-hardware",
       "match": "let _ = WRITERS.wait_until_deadline(",
       "why": "A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once."
     },
     {
       "file": "console/output.rs",
-      "lines": "440",
+      "lines": "489",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one."

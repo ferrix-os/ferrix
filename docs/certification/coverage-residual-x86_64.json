@@ -656,9 +656,9 @@
     "console/output.rs": {
       "ring": "core",
       "lines": [
-        148,
-        186,
-        440
+        170,
+        208,
+        489
       ]
     },
     "arch/x86_64/syscall.rs": {

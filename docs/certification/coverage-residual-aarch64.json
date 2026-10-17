@@ -660,11 +660,11 @@
     "console/output.rs": {
       "ring": "core",
       "lines": [
-        186,
-        289,
-        314,
-        323,
-        440
+        208,
+        311,
+        336,
+        345,
+        489
       ]
     },
     "console/input.rs": {
