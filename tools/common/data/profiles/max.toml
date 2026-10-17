@@ -37,6 +37,7 @@ runtime_trades = "none"
 "ferrix.init" = ["*"]
 "ferrix.onexit" = ["*"]
 "ferrix.panic" = ["halt"]
+"ferrix.vtd" = ["on"]
 console = ["*"]
 
 # The build settings that change code without a cfg (BF4), compared with the
