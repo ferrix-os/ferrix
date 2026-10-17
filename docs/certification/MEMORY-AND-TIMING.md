@@ -241,7 +241,16 @@ frames always took: clean cache reclaimed first, then the fault fails
   the floor the kernel's own allocations held the free count under the
   watermark by more than a run, so eight reclaims of a run each gave pages
   back and no retry found a frame -- a write answered `ENOSPC` with
-  hundreds of megabytes of clean cache left, `docs/BTRFS-PRESSURE.md`). The fill runs from a read and from a
+  hundreds of megabytes of clean cache left, `docs/BTRFS-PRESSURE.md`).
+  The bound: the watermark is at most `WATERMARK_MOST` (8192 frames), so one
+  machine-wide reclaim steals at most 8192 + `MAX_FILL_RUN` = 8224 pages,
+  and a frame takes at most 8 reclaims; the scan stays bounded as before by
+  reclaim's two passes round the live list, not by what is asked for, and
+  no lock is held across a reclaim (`take_from` holds a pages lock per
+  batch only). A job's reclaim at its `memory.max` still asks for one run.
+  Evidence: `gate.sh` logs `btp-pressure` (test-btrfs-pressure, x86_64
+  KVM, passed) and `btp-ctl` (its control: the shortfall dropped,
+  `No space left on device`, fired), ledger line 2314. The fill runs from a read and from a
   fault through a mapping (`Filler::fill`) under that same bound: one
   fill takes at most 32 frames (128 KiB), charged to the reader's job,
   and the 8-reclaim bound applies per frame; since 2026-10-15 a read on a

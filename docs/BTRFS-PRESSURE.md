@@ -1,5 +1,13 @@
 # btrfs under memory pressure (`test-btrfs-pressure`)
 
+**Where it stands (2026-10-17).** The certification consultant's review of
+branch `btrfs-pressure`: OK IF (1)-(8), ledger line 2314. The floor's
+`ENOSPC` is fixed on the branch (not landed); the gate is an owed row for
+the page cache, reclaim, the frame allocator, btrfs and the memory charge
+(`docs/BACKLOG.md`, *What a landing runs*). Open: F-86 to F-88 at
+`memory.max`, and F-89, the N150 stopping during the launcher's delete,
+which waits on a box run.
+
 Every other btrfs gate writes a little into a lot of memory, so the page
 cache never fills and reclaim is never reached. This gate makes a small
 machine write gigabytes through a writable btrfs the way Endfield's launcher
@@ -37,6 +45,14 @@ argue, and because in the `memory.max` boot a writer stopped moving with it
 own (see "At memory.max"), but an unbounded loop there would be one more
 way for it to never end.
 
+The bound, as `docs/certification/MEMORY-AND-TIMING.md` states it: the
+watermark is at most `WATERMARK_MOST`, 8192 frames, so one machine-wide
+reclaim steals at most 8192 + 32 = 8224 pages, and a frame takes at most 8
+reclaims; the scan stays bounded by reclaim's two passes round the live
+list, not by what is asked for, and no lock is held across a reclaim. A
+job's reclaim at `memory.max` still asks for one run. Evidence: `gate.sh`
+logs `btp-pressure` and `btp-ctl` (below), ledger line 2314.
+
 ## The gate
 
 ```
@@ -72,19 +88,25 @@ writers and two readers fail it every time.
 
 ## Results (2026-10-17, nazuna, KVM, x86-64, debug kernel)
 
-| Run | Kernel | Machine | Result | Time |
-|---|---|---|---|---|
-| negative control | main f16c98ae7 | 4 vCPUs, 768 MiB | all three writers `ENOSPC` ("No space left on device") within 36 s of the floor, 29 GiB free | 59 s |
-| the fix | branch `btrfs-pressure` | 4 vCPUs, 768 MiB | 144 files, 7584 MiB written; deleted in 1 s; longest probe stall 7 cs | 2 min 22 s |
-| starved, the fix | branch | 2 vCPUs, `--cpu-quota 40 --pin 22,23` | 7584 MiB written in 480 s; deleted in 6 s; longest stall 42 cs | 8 min 37 s |
+The cited evidence, through `gate.sh` (logs under
+`~/.local/share/ferrix/logs/queue/`):
 
-One processor and a quarter of it (`--cpu-quota 25 --pin 23`, 4 vCPUs)
-does not boot: stage 4's self-check needs two processors to overlap at
-least once (FX-0407). `--smp 2` on two host processors at 40 % boots.
+| Tag | Commit | Run | Result |
+|---|---|---|---|
+| `btp-pressure` | ce79aee91 | `test-btrfs-pressure --arch x86_64 --accel kvm --init <musl busybox.static>` | `run: PASSED`, KVM: 144 files, 7584 MiB written in 117 s, deleted in 1 s, longest probe stall 7 cs; the boot 138 s |
+| `btp-ctl` | ce79aee91 | control: `run.saturating_add(short)` -> `{ let _ = short; run }` in `fs/pages.rs` | `control: FIRED (line, no panic)`: all three writers `No space left on device`, the first at 26 s |
 
-Transcripts: `~/.local/share/ferrix/n150-linux/pressure-gate/` on nazuna
-(`run14-main-control.log`, `run15-fix-final.log`, `run13-A-starved.log` and
-the serial logs beside them).
+The control is `--expect-line`, since the failure is a guest's line and
+not a kernel panic, which `gate.sh`'s `--expect` requires.
+
+History, not cited (bare xtask transcripts with no `gate.sh` header,
+`~/.local/share/ferrix/n150-linux/pressure-gate/`): main f16c98ae7 failed
+the same way in 59 s (`run14-main-control.log`); the starved form with the
+fix (`--smp 2 --cpu-quota 40 --pin 22,23`) wrote 7584 MiB in 480 s and
+deleted it in 6 s with the probe at most 42 cs late (`run13-A-starved.log`).
+One host processor at a quarter (`--cpu-quota 25 --pin 23`, 4 vCPUs) does
+not boot: stage 4's contention self-check needs two processors to run at
+once (FX-0407), and `xtask` now refuses such a machine before QEMU starts.
 
 ## At memory.max
 
@@ -104,5 +126,7 @@ that are not this fix's and not the box's (it has no `memory.max`):
   seven minutes of heartbeats, the rest of the machine answering). On
   main the writers die of the floor's `ENOSPC` before they get there.
 
-The script retries a step that met `ENOMEM` and says how often
-(`pressure: note:`); the other two fail the boot.
+These are F-86, F-87 and F-88 (`docs/certification/FINDINGS.md`). The
+script retries a step that met `ENOMEM` and says how often
+(`pressure: note:`); the other two fail the boot. The cgroup form joins the
+rows when they close.
