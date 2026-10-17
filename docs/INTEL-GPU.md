@@ -1,0 +1,508 @@
+# The N150's Intel GPU: a render driver so Mesa's anv and iris run on Ferrix
+
+Version 1, 2026-10-18, a design with no code. Asked for by the customer on
+2026-10-18. The N150 box (`docs/N150.md`) draws every frame with Mesa's
+lavapipe today. That keeps its four cores busy (load about 10) and may be
+what breaks Endfield's Qt user interface. On Linux the same box uses
+Intel's i915 driver with Mesa's anv (Vulkan) and iris (GL). This document
+decides how Ferrix gets the same, and sizes the work. `docs/N150.md` §7 had
+deferred it as "i915/xe uAPI for Mesa ANV, ~150-250 points render-only,
+first guess". This design replaces that guess.
+
+**What the design recommends, in one paragraph.** Write a **new ring-3
+driver in Rust** for the Xe-LP (Gen12.0) GT. Render only: execlist
+submission on the render engine, with **no GuC and no firmware**. The
+driver serves the **i915 uAPI**, not xe, as a forwarded render node through
+the chardev core that NVIDIA's `nvrm` already uses (`docs/NVIDIA.md` §4.4).
+It serves only the subset that Mesa 25/26's anv and iris call on Gen12:
+softpin, no relocations, a VM per context, timeline fences and syncobjs.
+Debian 13's Mesa 25.0.7 already carries the anv and iris binaries in the
+packages the volumes pin. The kernel needs five changes in the certified
+item, each small and each reviewed. About **82 points** to Endfield's
+renderer on anv, 93 with the screen (§7), against 200 or more for porting i915.
+
+**No certification claim.** The N150 box lies outside the reference
+configuration (`docs/N150.md`, "No certification claim"). The driver is a
+ring-3 program and outside the item, as every driver is. The kernel changes
+of §5 are inside the item and go to the consultant one by one.
+
+---
+
+## 1. The device
+
+| What | Value | From |
+|---|---|---|
+| Function | `00:02.0`, `8086:46d4`, "Alder Lake-N [Intel Graphics]", class 0300 | the box's `lspci -nn`, 2026-10-16 (`~/.local/share/ferrix/n150-linux/box-2026-10-16/lspci.txt`) |
+| BAR0 (GTTMMADR) | 16 MiB at `0x6000000000`, 64-bit, non-prefetchable: registers in the lower half, the GGTT's page table entries in the upper 8 MiB | same, `lspci-vvv.txt`; i915 `gt/intel_ggtt.c` |
+| BAR2 (GMADR) | 256 MiB at `0x4000000000`, prefetchable: the aperture through the GGTT. **The firmware's framebuffer, which `ferrix.efifb` lends to hyprix, is in it** | same; `docs/N150.md` §1 |
+| Interrupts | one MSI, maskable, **32-bit address**, no MSI-X | `lspci-vvv.txt` (`MSI: Count=1/1 Maskable+ 64bit-`) |
+| IOMMU | behind `dmar0` (0xfed90000, VER 4.0), the unit that serves only the iGPU. An RMRR covers `0x7c000000-0x803fffff` (stolen memory and the GGTT's backing) | `vtd-design.md` §1, §3.9 |
+| GT | Xe-LP, Gen12.0 (IP 12.0), 24 EUs. One render engine (RCS0), one copy engine (BCS0), video engines. No compute engine, no local memory, LLC shared with the cores | Intel's specification; i915 `i915_pci.c` |
+| Linux's view | i915 binds the device as **Alder Lake-P, subplatform N** (`INTEL_ADLN_IDS` → `adl_p_info`, `i915_pci.c:862`). xe lists it (`adl_n_desc`, `xe_pci.c:238`) but with `require_force_probe = true`, so xe does not bind it by default | Linux 7.0 source |
+
+What i915 does on this device by default (Linux 7.0, `gt/uc/intel_uc.c`
+`uc_expand_default_options`): it turns on **GuC submission and HuC**, since
+only Tiger Lake, Rocket Lake and Alder Lake-S are excluded. ADL-N loads
+ADL-S's GuC blob, `tgl_guc_70.bin`, because "ADL-N does not support
+HWConfig" (`intel_uc_fw.c:290-300`), and HuC `tgl_huc.bin`. The display
+needs DMC firmware (`adlp_dmc.bin`). With `i915.enable_guc=0`, i915 runs
+ADL-P/N on **execlists**. That path still exists in i915 for every Gen12.0
+part, and Genode runs Alder Lake on it (§3.3). Only Gen12.55 and later
+need GuC.
+
+## 2. Which uAPI: i915, not xe
+
+Mesa chooses its back end from the name that `DRM_IOCTL_VERSION` returns:
+`"i915"` gives `INTEL_KMD_TYPE_I915` and `"xe"` gives `INTEL_KMD_TYPE_XE`
+(`src/intel/dev/intel_kmd.c:44-47`). anv and iris each carry both back ends
+(`src/intel/vulkan/{i915,xe}/`, `src/gallium/drivers/iris/{i915,xe}/`). So
+Ferrix's driver picks the uAPI, and Mesa follows it. (Checked in Mesa
+26.1.0-devel, `~/aosp17/external/mesa3d`. Debian's 25.0.7 has the same
+split.)
+
+| | i915 uAPI | xe uAPI |
+|---|---|---|
+| What Mesa thinks of it on ADL-N | the supported path | `intel_device_info.c`: for `verx10 < 200`, "Support for this platform is experimental with Xe KMD, bug reports may be ignored." |
+| What Linux runs on this box | i915 | xe only with `force_probe` |
+| GPU address space | userspace picks addresses (softpin). The kernel binds the objects that each execbuffer lists | userspace binds explicitly (`VM_BIND`) |
+| Sync | syncobj fence arrays, plus implicit sync through objects' write flags and dma-buf sync files | syncobjs only, explicit |
+| Ioctls Mesa uses | 25 i915 ioctls plus the common ones (§2.1) | about 10 xe ioctls plus the common ones |
+| Sparse resources | through TR-TT on Gen12 (`anv_physical_device.c:2813`), which DXVK at feature level 11 does not need | through `VM_BIND` |
+
+xe is the cleaner interface. It is still the wrong choice here. Mesa
+upstream calls xe on this generation experimental and may ignore bugs found
+on it, and Linux does not run it on this hardware. Every DXVK, Unity or Qt
+failure would then be on a path nobody else runs. i915's larger surface
+costs about 4 points more in the front end (§7, M3), and it is the path
+that Mesa's CI, Debian and every ADL-N laptop exercise. If the front end is
+kept apart from the GT code (§4), an xe front end could be added later at
+the same cost.
+
+**crocus is not involved.** It is Mesa's GL driver for Gen4 to Gen7.5. GL
+on Gen12 is iris, and Vulkan is anv (not hasvk, which is Gen7/8).
+
+### 2.1 The surface anv and iris need
+
+The ioctls below are those that `src/intel/{vulkan,common,dev}` and
+`src/gallium/drivers/iris` call, from a grep of Mesa 26.1-devel. The
+numbers were printed from Linux 7.0's UAPI headers
+(`/usr/src/linux-headers-7.0.0-29/include/uapi/drm/`, byte-identical to the
+v7.0 tag's `include/uapi/drm/i915_drm.h` and `xe_drm.h`) by a throwaway
+probe (Appendix A). They are not written from memory.
+
+**Common DRM**, served by the driver through the forwarded node:
+
+| Ioctl | Number | What the driver does |
+|---|---|---|
+| `VERSION` | `0xc0406400` | name `i915`. This is what selects Mesa's back end |
+| `GET_CAP` | `0xc010640c` | `SYNCOBJ`, `SYNCOBJ_TIMELINE`, `PRIME` (import and export) |
+| `SET_CLIENT_CAP` | `0x4010640d` | accepted, no effect on a render node |
+| `GEM_CLOSE` | `0x40086409` | drops a handle |
+| `PRIME_HANDLE_TO_FD` / `PRIME_FD_TO_HANDLE` | `0xc00c642d` / `0xc00c642e` | a VMO dmabuf through `chardev_dmabuf_install` and its resolve (`docs/NVIDIA.md` §4.4) |
+| `SYNCOBJ_CREATE`, `DESTROY`, `HANDLE_TO_FD`, `FD_TO_HANDLE`, `WAIT`, `RESET`, `SIGNAL`, `TIMELINE_WAIT`, `QUERY`, `TRANSFER`, `TIMELINE_SIGNAL` | `0xc00864bf` … `0xc01864cd` | syncobjs are the driver's own objects, per file. A sync-file export or import goes through `chardev_sync_install` and `resolve` (`chardev/sync.rs`). A wait is a request answered when its fence signals or its deadline passes |
+| `GEM_FLINK`, `GEM_OPEN` | `0xc008640a`, `0xc010640b` | `EPERM` on a render node, as on Linux |
+
+**i915**:
+
+| Ioctl | Number | Subset served |
+|---|---|---|
+| `I915_GETPARAM` | `0xc0106446` | the parameters anv refuses to start without (`vulkan/i915/anv_device.c:69-128`): `HAS_WAIT_TIMEOUT`, `HAS_EXECBUF2`, `MMAP_VERSION` ≥ 1, `HAS_EXEC_SOFTPIN`, `HAS_EXEC_FENCE_ARRAY`, `HAS_EXEC_ASYNC`, `HAS_EXEC_CAPTURE`, `HAS_EXEC_TIMELINE_FENCES`. Plus `CHIPSET_ID`, `REVISION`, `CS_TIMESTAMP_FREQUENCY`, `EU_TOTAL`, `SUBSLICE_TOTAL`, `SLICE_MASK`, `SUBSLICE_MASK`, `HAS_CONTEXT_ISOLATION`, `HAS_EXEC_NO_RELOC`, `HAS_EXEC_HANDLE_LUT`, `HAS_EXEC_BATCH_FIRST`, `HAS_EXEC_FENCE`, `HAS_LLC` (1), `HAS_USERPTR_PROBE` (0 until K7), `MMAP_GTT_VERSION`, `CMD_PARSER_VERSION` (0), `PXP_STATUS` (`ENODEV`), `PERF_REVISION` (`EINVAL`). Anything else is `EINVAL`, as for an unknown parameter |
+| `I915_QUERY` | `0xc0106479` | `TOPOLOGY_INFO`, `GEOMETRY_SUBSLICES`, `ENGINE_INFO` (RCS0, BCS0 later), `MEMORY_REGIONS` (system memory only). `HWCONFIG_BLOB` returns `ENODEV` (ADL-N has no HWConfig, §1), as do `GUC_SUBMISSION_VERSION` and `PERF_CONFIG` |
+| `I915_GEM_CREATE` / `_CREATE_EXT` | `0xc010645b` / `0xc018647c` | a VMO, pinned into the device's domain at first use. The extensions are memory regions (system only) and `SET_PAT` (Gen12 PAT index, checked against the table of §3.4). Protected content is refused |
+| `I915_GEM_MMAP_OFFSET` | `0xc0206464` | `WB` and `WC` (WC needs K6) by offset, then `mmap` answered with `MapReply::Vmo`. `GTT` and `UC` modes are `ENODEV`, which anv and iris handle |
+| `I915_GEM_MMAP` | — | legacy. `ENODEV` makes Mesa use `MMAP_OFFSET` |
+| `I915_GEM_EXECBUFFER2_WR` | `0xc0406469` | **softpin only**: every object `EXEC_OBJECT_PINNED` with `SUPPORTS_48B_ADDRESS`, `NO_RELOC` and `HANDLE_LUT` required, a relocation count of 0 required (anything else is `EINVAL`). `BATCH_FIRST`, `FENCE_ARRAY` and the timeline-fences extension, `FENCE_OUT`, and `EXEC_OBJECT_WRITE` / `ASYNC` for implicit sync on shared objects. `CAPTURE` is accepted and ignored. Engines by the context's engine map |
+| `I915_GEM_WAIT`, `I915_GEM_BUSY` | `0xc010646c`, `0xc0086457` | from each object's last fences |
+| `I915_GEM_SET_TILING`, `GET_TILING` | `0xc0106461`, `0xc0106462` | recorded and answered. Tiling has no kernel meaning on Gen12 with softpin, since there are no fences |
+| `I915_GEM_SET_CACHING`, `SET_DOMAIN` | `0x4008646f`, `0x400c645f` | recorded. On an LLC part, domains mean nothing for a WB mapping |
+| `I915_GEM_MADVISE` | `0xc00c6466` | recorded. Nothing is purged (no shrinker) |
+| `I915_GEM_USERPTR` | `0xc0186473` | `ENODEV` until K7. anv uses it only for `VK_EXT_external_memory_host` |
+| `I915_GEM_GET_APERTURE` | `0x80106463` | GGTT and VM sizes |
+| `I915_GEM_CONTEXT_CREATE_EXT` (and the legacy `CONTEXT_CREATE`, as one with no extensions), `DESTROY`, `GETPARAM`, `SETPARAM` | `0xc010646d`, `0x4008646e`, `0xc0186474`, `0xc0186475` | parameters: `ENGINES`, `VM`, `GTT_SIZE`, `RECOVERABLE`, `PRIORITY` (low and normal only; higher needs privilege, as on Linux), `BANNABLE`, `PERSISTENCE` (0 only), `NO_ERROR_CAPTURE`, `LOW_LATENCY` (accepted). `SSEU`, `CONTEXT_IMAGE` and `PROTECTED_CONTENT` return `EINVAL`/`ENODEV` |
+| `I915_GEM_VM_CREATE`, `VM_DESTROY` | `0xc010647a`, `0x4010647b` | a 48-bit, 4-level PPGTT per VM |
+| `I915_GET_RESET_STATS` | `0xc0186472` | per context: hung batches and pending batches. anv turns them into `VK_ERROR_DEVICE_LOST` |
+| `I915_REG_READ` | `0xc0106471` | the render ring's `TIMESTAMP` only, as i915's whitelist allows |
+
+**And on the dmabuf**, which the kernel serves (§5, K5):
+`DMA_BUF_IOCTL_EXPORT_SYNC_FILE` `0xc0086202` and `IMPORT_SYNC_FILE`
+`0x40086203`. **anv refuses the device without the export**
+(`i915_gem_supports_dma_buf_sync_file`, `common/i915/intel_gem.c:317`, the
+"kernel missing dma-buf sync file import/export" error). Ferrix's dmabuf
+today answers `ENOTTY` to every ioctl except `DMA_BUF_IOCTL_SYNC`
+(`docs/NVIDIA.md` §4.4, N3b), so this is on M3's path.
+
+That is 25 i915 ioctls, 11 syncobj ioctls, 8 other common ones and 2 on
+the dmabuf. The front end is a parser and a table per ioctl, host-tested
+against the struct layouts that a probe prints, as
+`src/lib/proto/linux-abi` does for virtio-gpu.
+
+## 3. The hardware side, render only
+
+### 3.1 What render-only leaves out
+
+* **The display engine.** The firmware lit the panel, and the plane scans
+  out of stolen memory through GGTT entries the firmware wrote. The driver
+  never touches the display registers, the DMC, the power wells of the
+  display, or the GGTT entries behind the lit plane (§3.3). The screen stays
+  the firmware's mode, as with `ferrix.efifb` today (§4.3).
+* **GuC, HuC, GSC.** No firmware is loaded (§3.2).
+* **Video, compute, OA, PXP.** Not exposed. VDBOX and VEBOX are left in
+  reset and their power gates on.
+
+### 3.2 Submission: execlists, not GuC
+
+Two choices exist on this GT. Execlists: the driver writes context
+descriptors into the engine's submit queue (`RING_EXECLIST_SQ_CONTENTS`,
+`base + 0x510`), loads them with `RING_EXECLIST_CONTROL` (`base + 0x550`),
+and reads completions from the context status buffer. GuC: the driver loads
+GuC firmware, speaks its CT protocol, and lets the GuC schedule.
+
+Execlists, because:
+
+* **No firmware.** GuC means loading `tgl_guc_70.bin` by DMA through the
+  GGTT. It also means the ADS, the CT buffers, and the GuC's ABI, which
+  changes with each 70.x release (`intel_guc_submission.c` alone is 6,014
+  lines). Execlists need nothing from the volume.
+* **It runs on this hardware.** Linux 7.0's i915 keeps execlists for all
+  of Gen12.0 (`intel_execlists_submission.c`, 4,176 lines, of which a
+  render-only driver needs the core: ELSQ, CSB, preemption off at first).
+  Genode's driver submits through `GEN12_EXECLIST_SQ_CONTENTS` on Alder Lake
+  (§3.3). M0 shows it on this box under Linux with `i915.enable_guc=0`
+  before any Ferrix code is written.
+* **Less hidden state.** A hang under execlists is in registers the driver
+  can read. A hang under GuC is a firmware log.
+
+What execlists cost: GuC's SLPC frequency control is gone. The driver
+requests frequencies itself through `GEN6_RPNSWREQ` (`0xa008`), as i915's
+host RPS does, and turns on RC6 (`GEN6_RC_CONTROL`, `0xa090`) itself.
+Without RPS the GT stays near its lowest frequency, and M4 is where that is
+fixed. If execlists ever turn out not to be enough, GuC submission can be a
+later slice behind the same front end.
+
+### 3.3 What a non-Linux kernel does with this GPU
+
+| OS | How | What it shows here |
+|---|---|---|
+| **FreeBSD** (drm-kmod) | Linux's i915 compiled against `linuxkpi`, an emulation of Linux's kernel interfaces, in ring 0, re-based on Linux releases | a port runs, but the compatibility layer grows with every Linux release, and it is ring 0 |
+| **OpenBSD** (inteldrm) | Linux's i915 with OpenBSD's own `drm_linux.c` shims, in ring 0 | as FreeBSD's: a port tracks Linux by hand |
+| **Haiku** | `intel_extreme`: modesetting only. 3D is llvmpipe | nothing for render |
+| **Fuchsia** | `msd-intel-gen`, a new C++ driver under the Magma interface, written for Gen9.5 and **Gen12**; Mesa's anv on a Magma back end ([source](https://fuchsia.googlesource.com/fuchsia/+/main/src/graphics/drivers/msd-intel-gen/)) | a new driver outside a monolithic kernel carries anv on Gen12 |
+| **Genode** | `repos/os/src/driver/gpu/intel`, a **new user-level C++ driver** of about 7,500 lines (`main.cc` 2,638, `mmio.h` 2,167, `context.h` 971, plus GGTT, PPGTT, RC6, reset and workarounds headers). It submits by execlists on Gen8 to Gen12 including Alder Lake (`_submit_execlist_gen12`), and it serves Mesa's iris through a client-side libdrm that maps i915 ioctls onto its session (`repos/libports/src/lib/libdrm/ioctl_iris.cc`). It has done Gen12 since 22.11 ([release notes](https://genode.org/documentation/release-notes/22.11)) | **the nearest precedent**: a microkernel system, the driver in user space, execlists, Mesa unchanged above an i915-shaped interface |
+
+### 3.4 The pieces, and where Linux has each
+
+| Piece | What the driver does | Linux reference (7.0) |
+|---|---|---|
+| **Forcewake** | Takes the render and GT domains before touching their registers: `FORCEWAKE_RENDER_GEN9` `0xa278` with its ack `0xd84`, and `FORCEWAKE_GT_GEN9` `0xa188` with its ack `0x130044`. Masked writes, waits on the acks with a bound, and the shadowed-register list (writes that need no wake) | `intel_uncore.c` (Gen12 ranges), `gt/intel_gt_regs.h` |
+| **Identity** | Device and revision from config space. Slices and DSS from `GEN12_GT_GEOMETRY_DSS_ENABLE` `0x913c`, EUs from `GEN11_EU_DISABLE` `0x9134`. CS timestamp frequency from `RPM_CONFIG0`, and RP0/RP1/RPn from `GEN6_RP_STATE_CAP` | `gt/intel_sseu.c`, `gt/intel_gt_clock_utils.c`, `gt/intel_rps.c` |
+| **GGTT** | The 8 MiB of PTEs in BAR0's upper half: 4 GiB of global space. The driver owns one range for its rings, context images and status pages. **It never rewrites the PTEs that back the lit plane or the firmware framebuffer's aperture window** (found at M1 by reading the plane's surface address and walking the PTEs read-only) | `gt/intel_ggtt.c` (gen8 PTE format, `GEN8_GTT_ADDR`), stolen-memory base from config `0x5c` (`INTEL_BSM`) |
+| **PPGTT** | A 4-level, 48-bit table per VM. PTEs carry the pinned pages' device addresses and a PAT index | `gt/gen8_ppgtt.c` (1,085 lines) |
+| **PAT and MOCS** | The Gen12 PAT table (`GEN12_PAT_INDEX(i)` at `0x4800 + 4i`). MOCS is the TGL/ADL table, written into every context's image and the global registers. anv's `SET_PAT` indices are checked against it | `gt/intel_gtt.c` (`tgl_setup_private_ppat`), `gt/intel_mocs.c` |
+| **Workarounds** | Gen12 and ADL-P's GT, context, engine and whitelist lists: about 50 entries (`gen12_ctx_workarounds_init` 17 `Wa_` lines, plus the GT, engine and `tgl_whitelist_build` lists that cover ADL-P). Each is applied and read back. The whitelist (`RING_FORCE_TO_NONPRIV`) is what user batches may write, and anv relies on it | `gt/intel_workarounds.c` (3,129 lines in all) |
+| **Rings and LRC** | One ring and one context image per context per engine. The image's register state comes from the Gen12 offsets table, and its PDPs point at the context's VM. The **default image** is recorded as i915 records it: the first context is run, then its saved image is copied for every new one (`intel_gt.c:603`). Gen12 needs no golden render-state batch (`intel_renderstate.c` stops at Gen9) | `gt/intel_lrc.c` (1,978 lines), `gt/gen8_engine_cs.c` (flushes; on Gen12 including the **AUX-table invalidation** anv's compression needs, `gen12_get_aux_inv_reg`) |
+| **Submission** | Execlist submit queue, context status buffer, the per-context seqno in the hardware status page. A user interrupt on each batch's end | `gt/intel_execlists_submission.c` |
+| **Interrupts** | Gen11+ layout: `GEN11_GFX_MSTR_IRQ` `0x190010`, `GEN11_GT_INTR_DW(x)` `0x190018`, then the identity registers (`GEN11_IIR_REG_SELECTOR` `0x190070`, `GEN11_INTR_IDENTITY_REG` `0x190060`). One MSI. **MSI never arrived on this box under Ferrix so far** (`docs/N150.md` §13; the cause is in the drivers, `vtd-design.md` §0), so the driver also polls the status page at a bounded rate until a first interrupt is seen, as `usbhid` does | `gt/intel_gt_irq.c`, `i915_irq.c` (`gen11_irq_handler`) |
+| **Hang and reset** | A per-engine heartbeat. On a hang the engine is reset (`GEN11_GRDOM` domains, not a full-GT or function-level reset, §4.3), the guilty context is banned, and its fences complete with an error. Never an FLR while the firmware's plane is the screen | `gt/intel_reset.c` |
+| **Power** | RC6 and RPS by host requests. RC6 needs no DMC (DMC is the display's) | `gt/intel_rc6.c`, `gt/intel_rps.c` |
+
+Linux's sizes, to calibrate: i915 without display, GVT, selftests, PXP and
+perf is 142,421 lines of C. Its display alone is 198,986. xe without
+display and tests is 123,363. The pieces above come to roughly 15,000 lines
+of i915's code, and a Rust driver that leaves out what Ferrix does not need
+(shmem backing, the shrinker, relocations, the command parser, GVT, PMU,
+sysfs, debugfs) should come to about 12,000 to 18,000 lines, the uAPI front
+end included.
+
+### 3.5 Port i915, or write a driver: write one
+
+**Porting** means running i915's GT and GEM code, about 140,000 lines, in a
+ring-3 process over a compatibility layer. The host's `i915.ko` (Linux 7.0)
+imports **1,252 kernel symbols**, 546 of them from DRM, dma-fence,
+dma-resv and TTM. It depends on `drm_display_helper`, `ttm`, `drm_buddy`,
+`cec` and `i2c-algo-bit`. xe imports the same count, and needs `drm_gpuvm`,
+`drm_exec`, `gpu-sched` and `drm_gpusvm_helper` on top, plus GuC (xe has
+execlists only as a debugging mode, `force_execlist`). Three things make
+this worse than NVIDIA's port, which worked:
+
+1. **No OS seam.** NVIDIA's RM is written OS-agnostic over about 260
+   functions (`docs/NVIDIA.md` §2.2), so `nvrm` implemented those. i915 is
+   written against Linux's internals: `shmem` page-cache backing for GEM
+   objects, page-fault handlers for its mmaps, MMU notifiers for userptr,
+   the shrinker, RCU, `ww_mutex`, `dma_resv`, and runtime PM. FreeBSD's
+   linuxkpi, which hosts it, has grown over a decade.
+2. **Faults a ring-3 driver cannot serve.** i915's `mmap_offset` fills
+   pages from a fault handler. In Ferrix no page fault is served by a
+   ring-3 driver (`interfaces/chardev/mod.rs`, N5: the fault windows of
+   `docs/NVIDIA.md` §11.4 are not built). A port would need them, which is
+   a large item change.
+3. **It tracks Linux.** Every i915 fix comes with Linux's internal
+   interfaces as they change. A Rust driver that answers a stable uAPI
+   changes only when Mesa's use of it does.
+
+A port's size: the compatibility layer, plus the DRM core pieces (GEM,
+syncobj, prime, dma-fence, dma-resv, `drm_mm`), plus bring-up. **200 to
+300 points**, most of them in code that is neither Ferrix's nor the
+driver's.
+
+**A new driver** does the twelve pieces of §3.4 and the front end of §2.1.
+Genode shows the GT part at about 7,500 lines of C++. Fuchsia shows a new
+driver carrying anv on Gen12. The register sequences are learned by reading
+i915. i915 is MIT-licensed in its source files, but, as with etnaviv for the
+GC400 (`docs/GPU.md` §6.3), its code is read and not copied, and every step
+names the Linux function it follows. Intel's public PRMs for Tiger Lake and
+Alder Lake (volumes 2 and 8) are the second source. **About 82 points**
+(§7). This is the recommendation.
+
+## 4. Where it lives in Ferrix
+
+### 4.1 The driver
+
+* `src/lib/drivers/gpu/intel-xelp`: the host-tested logic. Register maps
+  and masked-write helpers; GGTT and PPGTT entry encoders; the LRC image
+  builder from the Gen12 offset table; the ELSQ and CSB state machine; the
+  workaround table with its read-back; the PAT and MOCS tables; the uAPI
+  front end (one parser per ioctl, the layouts pinned against a probe's
+  output). A model of the submission port, like the GC400's front-end
+  model (`docs/GPU.md` §6.3), runs execlist traces through it.
+* `src/user/system/native/drivers/gpu/intel`: the process. It is a
+  **native** program on `ferrix-rt` with one event loop on a port:
+  chardev requests, the interrupt packet, and deadlines through
+  `port_wait`'s deadline. It does not need `nvrm`'s Linux personality,
+  because nothing in it sleeps inside foreign code. A request that must
+  wait (`GEM_WAIT`, `SYNCOBJ_WAIT`, a full ring) is answered later, when
+  its fence signals or its deadline passes. Whether the chardev core takes
+  replies out of order is to be confirmed in its code before M3 (its table
+  is keyed by request id).
+* **devmgr**: a match for `8086:46d4` (the ADL-N ids, `INTEL_ADLN_IDS`)
+  with class 03 to the `Gpu` kind, under a kernel option of its own
+  (`ferrix.intelgpu`) at first. The kind brings the pin budget of N0f, set
+  much larger for an integrated GPU that has no memory of its own (§8, R5),
+  and the isolated-interrupts mark (§4.4).
+
+### 4.2 The node, and how Mesa finds it
+
+The driver asks for a chardev control and lists only `RENDER_MINOR`. It
+then serves `/dev/dri/renderD<N>`, numbered by the kernel, every request
+forwarded undecoded as `nvrm`'s are (`interfaces/chardev`,
+`ferrix_chardevctl::node`). The core today names major 195's minors after
+NVIDIA's nodes, and a HELLO needs only to be non-empty, so a render-only
+HELLO fits as built. That is checked in code under K3 before it is relied
+on. libdrm finds the PCI identity through `/sys/dev/char/226:<N>/device`
+(`docs/SYSFS.md`), which the render node already gets. Mesa's userspace
+is Debian 13's `mesa-vulkan-drivers` (anv: `libvulkan_intel.so`,
+`intel_icd.x86_64.json`) and `mesa-libgallium` (iris) at 25.0.7, which
+`fetch-yserver.sh` already pins. Today only lavapipe is extracted from
+them, so no Mesa build is needed. GEM objects are VMOs, and their mmaps are
+`MapReply::Vmo`. Dmabufs are VMO dmabufs, so hyprix's
+`zwp_linux_dmabuf_v1` path (`compositor/hyprix/src/dmabuf.rs`) can map
+them.
+
+### 4.3 The screen
+
+`ferrix.efifb` **yields** the function that holds the framebuffer: every
+call needing `MANAGE` on `00:02.0` answers `BAD_STATE`, and devmgr cannot
+start a driver for it (`docs/DISPLAY.md` §8, step 4). That rule is right,
+since a driver could reset or remap the memory under the screen, and this
+design keeps its intent. Under `ferrix.intelgpu`:
+
+* the framebuffer is not lent to efifb; the Intel driver holds the
+  function;
+* the Intel driver serves `card0` itself, as a **copying card**: the same
+  `copies` contract efifb and `nvrm` have (`docs/DISPLAY.md` §2.1). It
+  copies flushed rectangles into the lit plane's surface through a
+  write-combining BAR2 window, and later with a BCS blit;
+* it keeps the GGTT entries behind that surface and never resets the
+  display or the function (engine resets only, §3.4). The kernel's panic
+  screen keeps its write-combining hold on the same pages (`DISPLAY.md` §8
+  step 3).
+
+Before K4 lands, M1 to M3 run with neither option. The boot console stays
+the screen's (`ferrix.fbcon`), the driver touches no GGTT entry it did not
+allocate, and the box is reached over ssh (`fx.sh`).
+
+### 4.4 Isolation and DMA
+
+* **Device to memory.** Every GEM object is a VMO pinned into the device's
+  IOMMU domain (`vmo_pin`, addresses identity-mapped, `iommu.rs`), so the
+  GPU reaches only pinned pages. That holds only when `dmar0` translates.
+  On the box today neither unit is driven (degraded trusted mode,
+  `n150-linux/FINDINGS.md` item 3). `vtd-n150` (unlanded) brings `dmar0` up
+  for interrupt remapping with translation **off**, because of the RMRR
+  (`vtd-design.md` §3.9(a)). Its slice 2, an identity-mapped RMRR domain
+  for `00:02.0` with the driver's pins added to it, is this design's K2. So
+  the rule proposed for the consultant is this. **M1 and M2 may run on the
+  box untranslated**, with the driver's own command streams only and the
+  degraded mode announced as today. **No client's command buffer runs (M3
+  on) until `dmar0` translates.** The GPU executes what programs hand it,
+  and without translation one bad PPGTT entry is DMA anywhere.
+* **Client to client.** Each VM is its own PPGTT, and batches run
+  non-privileged from it (`MI_BATCH_BUFFER_START` with the PPGTT address
+  space). The hardware itself refuses privileged commands and register
+  writes outside the whitelist in such batches. This is the driver's
+  property, and the hardware's, outside the item, as it is i915's on Linux.
+  Gen12 has no command parser (`CMD_PARSER_VERSION` 0), and Linux relies on
+  the same hardware rule.
+* **Driver to clients.** As for `nvrm`: copies only within a waiting
+  request, dmabufs and sync files through the core's calls, no reach into a
+  process that is not waiting (V-10 in `VULNERABILITY-ANALYSIS.md`). The
+  node is 0666 like NVIDIA's, so V-11's parser-surface argument applies to
+  this driver's front end too, and its parsers are fuzzed.
+* **Interrupts.** The `Gpu` kind's isolated-interrupts mark requires every
+  unit to remap (`L.device.27`). That needs `vtd-n150` slice 1 on the box,
+  so the driver's first boots poll (§3.4) until it lands.
+
+## 5. What the certified item must review
+
+| # | Change | Ring | Points |
+|---|---|---|---|
+| K1 | `vtd-n150` on the box (designed, reviewed OK IF, branch unlanded) | core | not counted: its own row |
+| K2 | `dmar0` translating: an RMRR identity domain for `00:02.0`, refused when it overlaps usable RAM, never detached; the driver's pins added to it (`vtd-design.md` §3.9(b)) | core | 5 |
+| K3 | A render-only chardev driver: devmgr's `Gpu` kind for Intel, the ADL-N match under `ferrix.intelgpu`, a HELLO of `RENDER_MINOR` alone, the budget sized for an iGPU | load (chardev), devmgr outside | 3 |
+| K4 | The screen's hand-over: under `ferrix.intelgpu`, the function is not yielded, the Intel node may be a copying card (`display::check`'s rule), and the lent range's GGTT entries and the panic screen's hold are argued | load (display) and item (device yield) | 5 |
+| K5 | `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` and `IMPORT_SYNC_FILE` on chardev dmabufs: one fence slot per dmabuf that the serving driver sets with a sync file of its own, and an export that hands out a `sync_file` | load (chardev dmabuf, sync) | 5 |
+| K6 | Write-combining VMO mappings for a chardev mmap reply (`MAP_VMO` with `MAP_WRITE_COMBINING`, refused today) | item (user memory types) | 2 |
+| K7 | Client-page pins for `I915_GEM_USERPTR` (`request_pin`, not built; designed in `docs/NVIDIA.md` §4.3) | load | 3, only if a gate needs it |
+
+The driver itself, Mesa, and the uAPI front end are ring 3 and outside the
+item. `check-item-boundary.py` gains a line refusing any path under
+`src/kernel` that names `i915`/`xe`/`intel-xelp`, as it does for `nvidia`.
+New requirement ids for K2 to K6 are reserved at the design review
+(`tools/common/data/requirement-reservations.json`). Their review asks for
+what CONVENTIONS.md lists: negative controls that fire, traced `unsafe`,
+coverage carried.
+
+## 6. What can be tested without the hardware
+
+QEMU emulates no Intel GPU, and nazuna has none (two NVIDIA cards and an
+AMD iGPU). So:
+
+* **Host tests** (`cargo test`, CI): every encoder and table above,
+  pinned against i915's numbers. The LRC image's offsets, the PTE formats,
+  the workaround list with masks, MOCS and PAT. The ELSQ/CSB state machine
+  through the submission model, with traces of the CSB events that M2
+  records on the box replayed. Every uAPI parser, its layout pinned against
+  Appendix A's probe, fuzzed.
+* **A fake back end in QEMU** (`test-intel-uapi`, x86-64 KVM): the same
+  driver with its GT replaced by a back end that completes every batch at
+  once and runs nothing. It answers as `8086:46d4` on a fake node and
+  publishes `renderD<N>`. Mesa's anv runs against it with `INTEL_NO_HW=1`,
+  so `vulkaninfo` and an offscreen `vkcube` exercise every ioctl of M3:
+  objects, mmaps, contexts, VMs, execbuffer, syncobjs, sync files and
+  dmabufs, with garbage pixels. That is the gate for the front end, K3, K5
+  and K6 on every architecture's runner that can boot it.
+* **The kernel changes**: K3 to K6 have QEMU checks as the chardev core's
+  have now (`chardev/check.rs`). K2's RMRR domain is host-tested on the
+  box's DMAR (`box-2026-10-17/DMAR.bin`). Its boot check needs QEMU's
+  intel-iommu with an RMRR, which may need the patch route of
+  `vtd-design.md`.
+* **On the box only**: M0 to M5's exits. Forcewake, the fuses, the GGTT,
+  every command executed, interrupts, resets, RPS, and every picture.
+
+## 7. Milestones and points
+
+| Slice | What | Points |
+|---|---|---|
+| **M0** | Linux reference on the box (needs a BOX-HOLDER slot): the inspection Linux with `i915.ko` and `tgl_guc_70`/`tgl_huc`/`adlp_dmc`. Record dmesg, `i915_engine_info`, `i915_gpu_info`, the fuses, RP0/RPn, and the plane's surface and its GGTT entries. Then boot with `i915.enable_guc=0` and run `vulkaninfo` and `vkcube` on anv, to show execlists work on ADL-N | 2 |
+| **M1** | **The device answers.** devmgr starts the driver (K3's match). BAR0 mapped, forcewake taken with acks, the identity read: 24 EUs and the DSS mask, CS timestamp frequency, RP0/RPn. The GGTT walked read-only, with the plane's entries found. One `intel:` line on the box's log per fact, compared with M0 | 5 |
+| **M2** | **A GPU command executes.** The driver's GGTT range, a 4-level PPGTT, PAT and MOCS, the workaround lists read back, RCS0's ring and LRC with the recorded default image, an execlist submission and its CSB. Then `MI_STORE_DWORD_IMM` into a pinned page, a `XY_FAST_COPY_BLT` on BCS0, and a batch from a PPGTT. Completion by MSI, or by the bounded poll, both counted. A deliberately hung batch is reset and banned | 16 |
+| **M3** | **anv's `vulkaninfo`.** The front end of §2.1, syncobjs and sync files, `renderD<N>`, the fake back end and `test-intel-uapi` (§6), anv and iris extracted from the pinned debs. Exit: on the box, `vulkaninfo` names "Intel(R) Graphics (ADL-N)" through anv, and `eglinfo` names iris. Needs K2, K3, K5 (K6 if anv maps WC) | 18 |
+| **M4** | **`vkcube`.** Several contexts and VMs, implicit sync on shared objects, dmabufs to hyprix (`zwp_linux_dmabuf_v1`) or the WSI's copy path (`MESA_VK_WSI_DEBUG=sw`), RPS and RC6, recovery under `GET_RESET_STATS`. Exit: `vkcube` turning in a hyprix window on the box, `glmark2-es2-wayland` on iris, and an offscreen frame's hash within range | 12 |
+| **M5** | **Endfield's renderer.** DXVK on anv in Wine, presenting through yserver by the WSI's copy path (no DRI3 yet, `docs/STEAM.md`), the pin budget for a game's working set, and Mesa's shader cache on `/data`. Unity's *Spaceship Demo* (`test-unity`) first, then the GRYPHLINK launcher's Qt UI and the game. Exit: frames per second against lavapipe's on the same scene, and the load average | 14 |
+| **M6** | **The screen.** K4: `card0` from the Intel driver over the lit plane, efifb's role taken, flushes by BCS blit | 6 |
+
+* **Kernel (§5):** K2 5, K3 3, K4 5, K5 5, K6 2: **20 points**, plus K7's
+  3 if a gate needs userptr. K4 belongs to M6; the rest are on M3's path.
+* **Driver and gates:** M0 to M5 come to **67 points**, and M6 to 6.
+* **In all, to Endfield on anv: about 82 points** (M0 to M5, 67, and K2,
+  K3, K5 and K6, 15). With the screen (M6 and K4) about 93, and about 96
+  with K7. That is against
+  the 150 to 250 first guessed, and 200 to 300 for a port (§3.5).
+
+M2 is the widest estimate. A wrong context image or a missing workaround
+shows up as a GPU that does nothing, and the first signal is an empty CSB.
+M0's register dumps are what M2 is compared against. M5 is the next widest:
+it is where Mesa's real use of the uAPI meets corners the fake back end
+never reached.
+
+**Order.** M0 first, because it decides execlists on real hardware for 2
+points. M1 and M2 can run on the box before VT-d translates (§4.4). M3
+waits on K2, so `vtd-n150` and its slice 2 are on this path's critical line
+and should be started with M1. K5 and the fake back end can be built beside
+M1 and M2, without the box.
+
+## 8. Risks
+
+1. **Execlists on ADL-N** have a defect i915 hides because it uses GuC by
+   default. M0 tests that first. If it holds, GuC submission becomes a
+   slice of about 10 points (firmware load through the GGTT, CT, ADS).
+2. **VT-d on the box** (K1, K2). Translation for `00:02.0` is the item's
+   hardest change here. If the RMRR identity domain breaks the firmware's
+   scan-out, the box's screen goes dark. `ferrix.vtd=off` (`vtd-design.md`
+   §3.10) is the way back.
+3. **MSI on the box** has never arrived for any driver (`docs/N150.md`
+   §13). The driver polls, at a bounded rate, until it does. Frames still
+   work, at some cost in latency and power.
+4. **Mesa's corners.** anv on i915 may use an ioctl path no grep found:
+   `CONTEXT_IMAGE`, TR-TT register writes for sparse, OA. Each one meets a
+   loud refusal that names the ioctl and parameter (`intel: unserved …`).
+   Missing ones are added as M3 to M5 find them. `ANV_DEBUG=no-sparse` and
+   `INTEL_DEBUG=noccs` are the fallbacks when sparse or compression turns
+   out to be the cause.
+5. **Memory.** The iGPU has no memory of its own: every buffer is pinned
+   RAM, with no shrinker. N0f's budget (an eighth of RAM, at least 1 GiB,
+   sized for `nvrm`) is too small for a game on 16 GB. The `Gpu` kind
+   needs a larger budget for an integrated part, and the 16 GB box has no
+   swap (`docs/N150.md` §6).
+6. **Speed.** 24 EUs at up to about 1 GHz are well under Endfield's
+   minimum (a GTX 1060). The goal is to take the load off the cores and
+   keep Qt's UI responsive, not to make the game playable. M5 records
+   frame rates against lavapipe's.
+7. **The anti-cheat.** A GPU driver changes nothing ACE is shown beyond a
+   real Intel device's identity through Vulkan. Nothing in this design is
+   built to disguise anything (`docs/N150.md` §8).
+
+## 9. Decisions for the customer
+
+* **D1**: a new Rust driver, not a port of i915 (§3.5).
+* **D2**: the i915 uAPI, not xe (§2).
+* **D3**: execlists, no GuC, decided again after M0 (§3.2).
+* **D4**: the order M0, then M1 and M2 on the box untranslated, with M3
+  waiting on `dmar0` translating (§4.4). This is subject to the
+  consultant's verdict.
+
+## 10. Where it stands
+
+2026-10-18: this design, on branch `intel-gpu-design`, docs only. Nothing
+is built. Nothing has run on the box: it was held by `fxvalidate`, and the
+inspection Linux of 2026-10-16 had no `i915.ko` loaded (simpledrm only),
+so its dmesg holds no GPU facts beyond `lspci`. The design goes to the
+certification consultant for a design review of K2 to K7
+(`~/.local/share/ferrix/n150-linux/intel-gpu-review-request.md`). The
+references are fetched to `~/.local/share/ferrix/intel-gpu-ref/linux` (the
+v7.0 tag, sparse: `drivers/gpu/drm/{i915,xe}`, `include/uapi/drm`,
+`include/drm/intel`, 37 MB). Mesa 26.1.0-devel is in
+`~/aosp17/external/mesa3d`.
+
+## Appendix A: the probe that printed the numbers
+
+Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out
+of the tree:
+
+```
+gcc -w -D__user= -I/usr/src/linux-headers-7.0.0-29/include/uapi \
+    -I/usr/src/linux-headers-7.0.0-29-generic/arch/x86/include/generated/uapi \
+    -I/usr/src/linux-headers-7.0.0-29/arch/x86/include/uapi -o ioctls ioctls.c
+```
+
+`ioctls.c` includes `<drm/drm.h>`, `<drm/i915_drm.h>`, `<drm/xe_drm.h>`,
+`<linux/dma-buf.h>` and `<linux/sync_file.h>`, and prints each
+`DRM_IOCTL_*` value of §2.1. The struct sizes it printed:
+`drm_i915_gem_execbuffer2` 64 bytes, `drm_i915_gem_exec_object2` 56. For
+comparison, the xe ioctls: `XE_DEVICE_QUERY` `0xc0286440`, `XE_GEM_CREATE`
+`0xc0386441`, `XE_GEM_MMAP_OFFSET` `0xc0286442`, `XE_VM_CREATE`
+`0xc0206443`, `XE_VM_DESTROY` `0x40186444`, `XE_VM_BIND` `0x40886445`,
+`XE_EXEC_QUEUE_CREATE` `0xc0306446`, `XE_EXEC_QUEUE_DESTROY` `0x40186447`,
+`XE_EXEC_QUEUE_GET_PROPERTY` `0xc0286448`, `XE_EXEC` `0x40386449`,
+`XE_WAIT_USER_FENCE` `0xc048644a`. Before the front end is written, the
+probe becomes `src/lib/proto/linux-abi`'s `probe/i915.c`, claimed line by
+line as `virtgpu.c` is.
