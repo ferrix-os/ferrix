@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 ferrix-bootinfo.workspace = true
 ferrix-elf.workspace = true
+ferrix-eventlog.workspace = true
 ferrix-paging.workspace = true
 ferrix-slots.workspace = true
 ferrix-smbios.workspace = true

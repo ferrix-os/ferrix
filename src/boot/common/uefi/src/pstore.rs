@@ -11,6 +11,7 @@ use core::ptr;
 use ferrix_bootinfo::pstore::{self, Found, HEADER_BYTES, Switch, Text};
 
 use crate::console::println;
+use crate::events;
 use crate::load::{DirectMap, describe};
 use crate::services::{Allocation, Services};
 use crate::uefi::tables::MemoryType;
@@ -63,9 +64,25 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
     // bytes, identity mapped under boot services, and nothing else refers to
     // it; it is read before anything writes it.
     let header = unsafe { ptr::read_volatile(region.address as *const [u8; HEADER_BYTES]) };
+    let mut store = events::open(services);
     let sequence = match pstore::validate(&header, region.len) {
         Ok(found) => {
             report(region, &found);
+            // Kept in the event log before the fresh header lets it go
+            // (POSTMORTEM §4, E2); a failed append keeps the region as it
+            // is, still allocated so the kernel never uses its pages, and
+            // this boot goes without one.
+            if let Some(store) = store.as_mut() {
+                let kept = events::keep(store, services, region);
+                if matches!(kept, events::Kept::Failed) {
+                    events::summary(store, services);
+                    println!(
+                        "  pstore   boot {}'s record kept in RAM, not handed over: {NONE}",
+                        found.sequence
+                    );
+                    return None;
+                }
+            }
             found.sequence.wrapping_add(1).max(1)
         }
         Err(why) => {
@@ -76,10 +93,10 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
             1
         }
     };
-    let fresh = pstore::encode(pstore::CAPACITY, sequence);
-    // SAFETY: as above; the header is the region's first bytes, and the ring
-    // after it is left as it is: only the count decides what is text.
-    unsafe { ptr::write_volatile(region.address as *mut [u8; HEADER_BYTES], fresh) };
+    if let Some(store) = store.as_mut() {
+        events::summary(store, services);
+    }
+    renew(region, sequence);
     // The Arm architectures turn the caches off in the switch to the kernel,
     // which checks this header before it writes a byte there; nothing here
     // writes the region again. No-op on x86-64.
@@ -89,6 +106,16 @@ pub(crate) fn take(services: &Services, cmdline: &str, direct: DirectMap) -> Opt
         region.address
     );
     Some(region)
+}
+
+/// Write a fresh header for boot `sequence` over the region's.
+fn renew(region: Allocation, sequence: u64) {
+    let fresh = pstore::encode(pstore::CAPACITY, sequence);
+    // SAFETY: the region is the loader's own allocation of `pstore::LEN`
+    // bytes, identity mapped under boot services; the header is its first
+    // bytes, and the ring after it is left as it is: only the count decides
+    // what is text.
+    unsafe { ptr::write_volatile(region.address as *mut [u8; HEADER_BYTES], fresh) };
 }
 
 /// Where the region goes on this machine: `pstore::choose` over the

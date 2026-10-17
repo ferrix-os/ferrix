@@ -20,6 +20,7 @@
 mod arch;
 mod bootlog;
 mod console;
+mod events;
 mod kaslr;
 mod load;
 mod netreport;
