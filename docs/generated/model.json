@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "a09000445dc87dc45e17f0bd85647bd7114ac060ae58898fc1f692ed285daa1b",
+  "digest": "c23a10dcc6ca1f4c963759cd98ed7f0c152688a1ecf7d17cac894b598cc2ede4",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 139,
-    "elements": 6985,
+    "elements": 7051,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -25221,7 +25221,7 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theBootsRecordsPinned",
                               "kind": "attribute",
                               "redefines": "statement",
-                              "value": "\"The first nine system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
+                              "value": "\"The first ten system records shall stay readable, numbered as the high-value ring numbered them, however far that ring has wrapped, and no record after them shall join them.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
                                 "line": 1305
@@ -25232,7 +25232,7 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Audit::theBootsRecordsPinned",
                               "kind": "attribute",
                               "redefines": "criterion",
-                              "value": "\"Ten system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, the ring reports records lost, and a read of the boot records from 6 copies 4 and resumes at 10.\"",
+                              "value": "\"Eleven system records and a grant in a ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, 10, the ring reports records lost, and a read of the boot records from 6 copies 5 and resumes at 11.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
                                 "line": 1309
@@ -37815,10 +37815,10 @@
                   "qualifiedName": "FerrixIommuRequirements::BringUpAndDomains::aUnitItCannotDriveIsLeftAlone",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"bring_up shall leave alone, count and say why, a unit that is not what the driver needs -- a VT-d unit not of version 1, without three-level tables or needing its write buffer flushed, an SMMUv3 without an AArch64 stage 2, 8 stream ID bits or 4 KiB tables with 40-bit output, either left translating by firmware -- or for which there is no frame, and shall unmap its registers.\"",
+                  "value": "\"bring_up shall leave alone, count and say why, a unit that is not what the driver needs -- a VT-d unit ferrix_paging::vtd::unit::accept refuses (a major version other than 1, 4 or 5, neither three- nor four-level tables, a guest address width below 39 bits, a write buffer to flush, no invalidation queue, fault records or IOTLB register past its first page), an SMMUv3 without an AArch64 stage 2, 8 stream ID bits or 4 KiB tables with 40-bit output, either left translating by firmware -- or for which there is no frame, and shall unmap its registers. A refused VT-d unit's line shall print its VER, CAP and ECAP.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 145
+                    "line": 149
                   }
                 },
                 {
@@ -37829,7 +37829,7 @@
                   "value": "\"Each of those units is counted 1 left alone with its reason on the bring-up line, 0 translating, and its register window is unmapped.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 148
+                    "line": 152
                   }
                 },
                 {
@@ -37840,7 +37840,7 @@
                   "value": "\"H.DMA.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 149
+                    "line": 153
                   }
                 },
                 {
@@ -37848,10 +37848,10 @@
                   "qualifiedName": "FerrixIommuRequirements::BringUpAndDomains::aUnitItCannotDriveIsLeftAlone",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"iommu::bring_up_vtd\", \"iommu::bring_up_smmu\", \"iommu::vtd::Unit::open\", \"iommu::smmuv3::Unit::open\")",
+                  "value": "(\"iommu::bring_up_vtd\", \"iommu::bring_up_smmu\", \"iommu::vtd::Unit::open\", \"iommu::smmuv3::Unit::open\", \"iommu::vtd::say_refused\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 151
+                    "line": 156
                   }
                 }
               ]
@@ -37864,7 +37864,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 153
+                "line": 158
               },
               "children": [
                 {
@@ -37875,7 +37875,7 @@
                   "value": "\"Once a unit translates, a function behind it with no domain shall reach nothing: VT-d finds no context entry, and every SMMUv3 stream table entry is valid and aborting until a domain is attached.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 157
+                    "line": 162
                   }
                 },
                 {
@@ -37886,7 +37886,7 @@
                   "value": "\"A DMA by a function behind a translating unit that has been given no domain is refused and recorded against its stream.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 160
+                    "line": 165
                   }
                 },
                 {
@@ -37897,7 +37897,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 161
+                    "line": 166
                   }
                 },
                 {
@@ -37908,7 +37908,7 @@
                   "value": "(\"iommu::vtd::Unit::enable\", \"iommu::smmuv3::Unit::open\", \"iommu::smmuv3::write_entry\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 163
+                    "line": 168
                   }
                 }
               ]
@@ -37921,7 +37921,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 165
+                "line": 170
               },
               "children": [
                 {
@@ -37932,7 +37932,7 @@
                   "value": "\"domain_for shall give a function the DMAR puts behind a translating VT-d unit a domain on that unit as its source ID, and one an IORT root complex sends to a translating SMMUv3 a domain on it as the stream the mapping gives.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 169
+                    "line": 174
                   }
                 },
                 {
@@ -37943,7 +37943,7 @@
                   "value": "\"On x86-64 and AArch64 the entropy device's domain names a stream, and its unit records the probe's refused write against that stream: 1 or more out-of-domain writes faulted (the `pci` line).\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 173
+                    "line": 178
                   }
                 },
                 {
@@ -37954,7 +37954,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 174
+                    "line": 179
                   }
                 },
                 {
@@ -37965,7 +37965,7 @@
                   "value": "(\"iommu::domain_for\", \"iommu::vtd_unit_for\", \"iommu::smmu_stream_for\", \"iommu::endpoints\", \"iommu::Domain::with\", \"iommu::Translation::stream\", \"iommu::vtd::Unit::attach\", \"iommu::vtd::Unit::install\", \"iommu::vtd::read_entry\", \"iommu::vtd::write_entry\", \"iommu::smmuv3::Unit::attach\", \"iommu::smmuv3::read_entry\", \"iommu::smmuv3::write_entry\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 180
+                    "line": 185
                   }
                 }
               ]
@@ -37978,7 +37978,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 182
+                "line": 187
               },
               "children": [
                 {
@@ -37989,7 +37989,7 @@
                   "value": "\"domain_for shall give an untranslated domain to a function no translating unit covers, including every function before bring_up and every function behind an SMMUv3 only a device tree describes.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 186
+                    "line": 191
                   }
                 },
                 {
@@ -38000,7 +38000,7 @@
                   "value": "\"On ARMv7-A the first PCI function's domain is untranslated, and so is a domain made before bring_up.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 188
+                    "line": 193
                   }
                 },
                 {
@@ -38011,7 +38011,7 @@
                   "value": "\"H.DMA.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 189
+                    "line": 194
                   }
                 },
                 {
@@ -38022,7 +38022,7 @@
                   "value": "(\"iommu::domain_for\", \"iommu::Domain::untranslated\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 190
+                    "line": 195
                   }
                 }
               ]
@@ -38035,7 +38035,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 192
+                "line": 197
               },
               "children": [
                 {
@@ -38046,7 +38046,7 @@
                   "value": "\"The first pin into an untranslated domain shall say on the console, once, that device DMA reaches all of memory: degraded trusted mode.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 195
+                    "line": 200
                   }
                 },
                 {
@@ -38057,7 +38057,7 @@
                   "value": "\"An ARMv7-A boot prints the degraded trusted mode line exactly once, and an x86-64 or AArch64 boot, whose pins are translated, 0 times.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 198
+                    "line": 203
                   }
                 },
                 {
@@ -38068,7 +38068,7 @@
                   "value": "\"H.DMA.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 199
+                    "line": 204
                   }
                 },
                 {
@@ -38079,7 +38079,7 @@
                   "value": "\"iommu::Domain::pin\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 200
+                    "line": 205
                   }
                 }
               ]
@@ -38092,7 +38092,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 202
+                "line": 207
               },
               "children": [
                 {
@@ -38103,7 +38103,7 @@
                   "value": "\"A unit shall refuse a second domain for a function or stream that has one, and domain_for shall then answer an untranslated domain and say why, never two domains translating one device.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 206
+                    "line": 211
                   }
                 },
                 {
@@ -38114,7 +38114,7 @@
                   "value": "\"For the first PCI function, whose translated domain the stage 10 check pinned through, a second domain_for answers an untranslated domain.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 209
+                    "line": 214
                   }
                 },
                 {
@@ -38125,7 +38125,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 210
+                    "line": 215
                   }
                 },
                 {
@@ -38136,7 +38136,7 @@
                   "value": "(\"iommu::domain_for\", \"iommu::vtd::Unit::attach\", \"iommu::vtd::Unit::install\", \"iommu::smmuv3::Unit::attach\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 212
+                    "line": 217
                   }
                 }
               ]
@@ -38149,7 +38149,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 214
+                "line": 219
               },
               "children": [
                 {
@@ -38160,7 +38160,7 @@
                   "value": "\"A translated domain dropped with no page pinned shall detach from its unit, so that the function can be given a domain again.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 217
+                    "line": 222
                   }
                 },
                 {
@@ -38171,7 +38171,7 @@
                   "value": "\"A translated domain made for a PCI function that had none, dropped with nothing pinned, is followed by a second domain_for for the function that is translated.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 220
+                    "line": 225
                   }
                 },
                 {
@@ -38182,7 +38182,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 221
+                    "line": 226
                   }
                 },
                 {
@@ -38193,7 +38193,7 @@
                   "value": "(\"iommu::Domain::drop\", \"iommu::Translation::detach\", \"iommu::vtd::Unit::detach\", \"iommu::smmuv3::Unit::detach\", \"iommu::smmuv3::Unit::release\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 224
+                    "line": 229
                   }
                 }
               ]
@@ -38206,7 +38206,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 226
+                "line": 231
               },
               "children": [
                 {
@@ -38217,7 +38217,7 @@
                   "value": "\"detach shall return a domain's identifier or VMID and its root table, and on an SMMUv3 the doorbell's tables, only after the unit has forgotten the domain, and shall keep them when the unit never answers.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 230
+                    "line": 235
                   }
                 },
                 {
@@ -38228,7 +38228,7 @@
                   "value": "\"Attaching and detaching a domain N times leaves the free-frame count and the identifiers in use as they were; a detach whose invalidation times out frees 0 frames.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 233
+                    "line": 238
                   }
                 },
                 {
@@ -38239,7 +38239,7 @@
                   "value": "(\"H.DMA.8\", \"H.MEM.9\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 234
+                    "line": 239
                   }
                 },
                 {
@@ -38250,7 +38250,7 @@
                   "value": "(\"iommu::vtd::Unit::detach\", \"iommu::smmuv3::Unit::detach\", \"iommu::smmuv3::Unit::release\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 236
+                    "line": 241
                   }
                 }
               ]
@@ -38263,7 +38263,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 238
+                "line": 243
               },
               "children": [
                 {
@@ -38274,7 +38274,7 @@
                   "value": "\"A translated domain dropped while pages are still pinned into it shall stay attached, its tables and context entry or stream table entry kept.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 241
+                    "line": 246
                   }
                 },
                 {
@@ -38285,7 +38285,7 @@
                   "value": "\"A domain dropped holding a pin of one page still translates that page's address afterwards, and its function is refused a new domain.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 244
+                    "line": 249
                   }
                 },
                 {
@@ -38296,7 +38296,7 @@
                   "value": "\"H.DMA.8\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 245
+                    "line": 250
                   }
                 },
                 {
@@ -38307,7 +38307,7 @@
                   "value": "\"iommu::Domain::drop\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 246
+                    "line": 251
                   }
                 }
               ]
@@ -38320,7 +38320,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 248
+                "line": 253
               },
               "children": [
                 {
@@ -38331,7 +38331,7 @@
                   "value": "\"attach shall refuse a stream past the SMMUv3's table, a unit with no identifier or VMID left, and a function or stream it cannot record for want of memory or a frame, and a refused attach shall give back the root table it took and write no entry.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 252
+                    "line": 257
                   }
                 },
                 {
@@ -38342,7 +38342,7 @@
                   "value": "\"Each refusal leaves the free-frame count, the identifiers in use and the context or stream table entry as they were.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 255
+                    "line": 260
                   }
                 },
                 {
@@ -38353,7 +38353,7 @@
                   "value": "(\"H.DMA.3\", \"H.MEM.11\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 256
+                    "line": 261
                   }
                 },
                 {
@@ -38364,7 +38364,7 @@
                   "value": "(\"iommu::vtd::Unit::attach\", \"iommu::vtd::Unit::install\", \"iommu::smmuv3::Unit::attach\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 258
+                    "line": 263
                   }
                 }
               ]
@@ -38377,7 +38377,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 260
+                "line": 265
               },
               "children": [
                 {
@@ -38388,7 +38388,7 @@
                   "value": "\"Every SMMUv3 domain shall map the GICv2m MSI doorbell page at its own address, so that a device's MSI writes, which the unit translates like any DMA, reach the interrupt controller.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 264
+                    "line": 269
                   }
                 },
                 {
@@ -38399,7 +38399,7 @@
                   "value": "\"A device in a translated SMMUv3 domain that completes a request by MSI-X has the completion delivered, and a domain without the doorbell mapped has its MSI write faulted.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 267
+                    "line": 272
                   }
                 },
                 {
@@ -38410,7 +38410,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 268
+                    "line": 273
                   }
                 },
                 {
@@ -38421,7 +38421,7 @@
                   "value": "(\"iommu::smmuv3::Unit::attach\", \"iommu::smmuv3::Unit::detach\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 270
+                    "line": 275
                   }
                 }
               ]
@@ -38435,7 +38435,7 @@
           "doc": "src/kernel/src/iommu.rs, Domain::pin and Domain::unpin: the domain side of every pin, the same for both kinds of unit, and the unit's flush that ends an unpin.",
           "source": {
             "file": "docs/sysml/16-iommu-requirements.sysml",
-            "line": 274
+            "line": 279
           },
           "children": [
             {
@@ -38446,7 +38446,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 279
+                "line": 284
               },
               "children": [
                 {
@@ -38457,7 +38457,7 @@
                   "value": "\"pin shall map each frame it is given at its own physical address, answer each page's device address in the order the frames were given, and count the pages it holds.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 282
+                    "line": 287
                   }
                 },
                 {
@@ -38468,7 +38468,7 @@
                   "value": "\"A pin of two frames through the first PCI function's domain answers the frames' physical addresses in order, the domain resolves each to itself, and its pinned-page count rises by 2.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 286
+                    "line": 291
                   }
                 },
                 {
@@ -38479,7 +38479,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 287
+                    "line": 292
                   }
                 },
                 {
@@ -38490,7 +38490,7 @@
                   "value": "(\"iommu::Domain::pin\", \"iommu::map_all\", \"iommu::Translation::changing\", \"iommu::Translation::map\", \"iommu::Translation::flush\", \"iommu::Translation::resolve\", \"iommu::Pinned::addresses\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 291
+                    "line": 296
                   }
                 }
               ]
@@ -38503,7 +38503,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 293
+                "line": 298
               },
               "children": [
                 {
@@ -38514,7 +38514,7 @@
                   "value": "\"unpin shall take a pin's pages out of its domain's tables and count them back.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 295
+                    "line": 300
                   }
                 },
                 {
@@ -38525,7 +38525,7 @@
                   "value": "\"After its own domain unpins the two-frame pin, the pinned-page count is back where it was and, on a translated domain, neither frame's address resolves.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 298
+                    "line": 303
                   }
                 },
                 {
@@ -38536,7 +38536,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 299
+                    "line": 304
                   }
                 },
                 {
@@ -38547,7 +38547,7 @@
                   "value": "(\"iommu::Domain::unpin\", \"iommu::Translation::unmap\", \"iommu::Translation::resolve\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 301
+                    "line": 306
                   }
                 }
               ]
@@ -38560,7 +38560,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 303
+                "line": 308
               },
               "children": [
                 {
@@ -38571,7 +38571,7 @@
                   "value": "\"unpin shall refuse a pin another domain took with Foreign, and hand the pin back unchanged.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 305
+                    "line": 310
                   }
                 },
                 {
@@ -38582,7 +38582,7 @@
                   "value": "\"A domain asked to unpin the two-frame pin of another domain refuses Foreign and hands the pin back, which its own domain then unpins.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 308
+                    "line": 313
                   }
                 },
                 {
@@ -38593,7 +38593,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 309
+                    "line": 314
                   }
                 },
                 {
@@ -38604,7 +38604,7 @@
                   "value": "\"iommu::Domain::unpin\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 310
+                    "line": 315
                   }
                 }
               ]
@@ -38617,7 +38617,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 312
+                "line": 317
               },
               "children": [
                 {
@@ -38628,7 +38628,7 @@
                   "value": "\"pin shall refuse a pin of no frames with Empty.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 314
+                    "line": 319
                   }
                 },
                 {
@@ -38639,7 +38639,7 @@
                   "value": "\"A pin of an empty list of frames is refused Empty.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 316
+                    "line": 321
                   }
                 },
                 {
@@ -38650,7 +38650,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 317
+                    "line": 322
                   }
                 },
                 {
@@ -38661,7 +38661,7 @@
                   "value": "\"iommu::Domain::pin\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 318
+                    "line": 323
                   }
                 }
               ]
@@ -38674,7 +38674,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 320
+                "line": 325
               },
               "children": [
                 {
@@ -38685,7 +38685,7 @@
                   "value": "\"pin shall refuse with OutOfRange, mapping nothing, a frame whose address does not fit in 64 bits or, in a translated domain, in the 39 bits its tables reach.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 323
+                    "line": 328
                   }
                 },
                 {
@@ -38696,7 +38696,7 @@
                   "value": "\"A pin into a translated domain naming one frame at or above 2^39 bytes, beside one below, is refused OutOfRange with the pinned-page count unchanged and neither address resolving.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 326
+                    "line": 331
                   }
                 },
                 {
@@ -38707,7 +38707,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 327
+                    "line": 332
                   }
                 },
                 {
@@ -38718,7 +38718,7 @@
                   "value": "\"iommu::Domain::pin\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 328
+                    "line": 333
                   }
                 }
               ]
@@ -38731,7 +38731,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 330
+                "line": 335
               },
               "children": [
                 {
@@ -38742,7 +38742,7 @@
                   "value": "\"A pin into a translated domain of a page already pinned there shall be refused with AlreadyPinned.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 332
+                    "line": 337
                   }
                 },
                 {
@@ -38753,7 +38753,7 @@
                   "value": "\"On a translated domain, a vmo_pin of a page already pinned into it is refused ALREADY_BOUND.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 334
+                    "line": 339
                   }
                 },
                 {
@@ -38764,7 +38764,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 335
+                    "line": 340
                   }
                 },
                 {
@@ -38775,7 +38775,7 @@
                   "value": "(\"iommu::map_all\", \"iommu::Domain::pin\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 336
+                    "line": 341
                   }
                 }
               ]
@@ -38788,7 +38788,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 338
+                "line": 343
               },
               "children": [
                 {
@@ -38799,7 +38799,7 @@
                   "value": "\"A pin refused part-way shall unmap every page it had mapped, and give back the tables that emptied once the unit has forgotten them.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 341
+                    "line": 346
                   }
                 },
                 {
@@ -38810,7 +38810,7 @@
                   "value": "\"A pin of three frames whose third is already pinned is refused, and afterwards the first two do not resolve and the free-frame count is as it was.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 344
+                    "line": 349
                   }
                 },
                 {
@@ -38821,7 +38821,7 @@
                   "value": "(\"H.DMA.3\", \"H.MEM.11\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 345
+                    "line": 350
                   }
                 },
                 {
@@ -38832,7 +38832,7 @@
                   "value": "\"iommu::map_all\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 346
+                    "line": 351
                   }
                 }
               ]
@@ -38845,7 +38845,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 348
+                "line": 353
               },
               "children": [
                 {
@@ -38856,7 +38856,7 @@
                   "value": "\"unpin shall return only once the unit has completed the invalidation of the pages it took out, and shall answer Unit, handing the pin back, when the unit never completes it.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 352
+                    "line": 357
                   }
                 },
                 {
@@ -38867,7 +38867,7 @@
                   "value": "\"An unpin from a unit made never to finish its invalidation answers Unit and hands the pin back; from a unit that finishes, it returns after the unit's completion was read.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 355
+                    "line": 360
                   }
                 },
                 {
@@ -38878,7 +38878,7 @@
                   "value": "\"H.DMA.8\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 356
+                    "line": 361
                   }
                 },
                 {
@@ -38889,7 +38889,7 @@
                   "value": "(\"iommu::Domain::unpin\", \"iommu::Translation::flush\", \"iommu::vtd::Unit::flush\", \"iommu::vtd::Unit::invalidate_iotlb\", \"iommu::smmuv3::Unit::flush\", \"iommu::smmuv3::Unit::command\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 359
+                    "line": 364
                   }
                 }
               ]
@@ -38902,7 +38902,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 361
+                "line": 366
               },
               "children": [
                 {
@@ -38913,7 +38913,7 @@
                   "value": "\"A table an unpin or an undone pin empties shall go back to the frame allocator only after the unit's invalidation has completed, and shall be kept when it has not.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 364
+                    "line": 369
                   }
                 },
                 {
@@ -38924,7 +38924,7 @@
                   "value": "\"An unpin that empties a table frees it only after the flush answers; with the flush made to fail, the table stays out of the allocator.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 367
+                    "line": 372
                   }
                 },
                 {
@@ -38935,7 +38935,7 @@
                   "value": "\"H.DMA.8\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 368
+                    "line": 373
                   }
                 },
                 {
@@ -38946,7 +38946,7 @@
                   "value": "(\"iommu::Domain::unpin\", \"iommu::map_all\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 369
+                    "line": 374
                   }
                 }
               ]
@@ -38959,7 +38959,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 371
+                "line": 376
               },
               "children": [
                 {
@@ -38970,7 +38970,7 @@
                   "value": "\"A VT-d unit in caching mode shall be told to forget a domain's cached translations after a map as well as after an unmap, since it caches entries that were not present.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 374
+                    "line": 379
                   }
                 },
                 {
@@ -38981,7 +38981,7 @@
                   "value": "\"Under a VT-d unit in caching mode, a device reaches a page pinned after the same address had been walked while unmapped, with 0 faults recorded.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 377
+                    "line": 382
                   }
                 },
                 {
@@ -38992,7 +38992,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 378
+                    "line": 383
                   }
                 },
                 {
@@ -39003,7 +39003,7 @@
                   "value": "\"iommu::vtd::Unit::flush\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 379
+                    "line": 384
                   }
                 }
               ]
@@ -39016,7 +39016,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 381
+                "line": 386
               },
               "children": [
                 {
@@ -39027,7 +39027,7 @@
                   "value": "\"A wait on a unit made in a context that may block shall be made with interrupts on, and counted.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 383
+                    "line": 388
                   }
                 },
                 {
@@ -39038,7 +39038,7 @@
                   "value": "\"On a translated domain, the boot task's unpin of the two-frame pin raises the count of unit waits made in a context that may block.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 386
+                    "line": 391
                   }
                 },
                 {
@@ -39049,7 +39049,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 387
+                    "line": 392
                   }
                 },
                 {
@@ -39060,7 +39060,7 @@
                   "value": "(\"iommu::gate::poll\", \"iommu::vtd::Unit::wait\", \"iommu::smmuv3::Unit::wait\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 389
+                    "line": 394
                   }
                 }
               ]
@@ -39074,7 +39074,7 @@
           "doc": "src/kernel/src/iommu/gate.rs: how an operation waits for a unit without masking interrupts.",
           "source": {
             "file": "docs/sysml/16-iommu-requirements.sysml",
-            "line": 393
+            "line": 398
           },
           "children": [
             {
@@ -39085,7 +39085,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 397
+                "line": 402
               },
               "children": [
                 {
@@ -39096,7 +39096,7 @@
                   "value": "\"poll shall answer true once the unit answers before the deadline, and false after one last look past it.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 399
+                    "line": 404
                   }
                 },
                 {
@@ -39107,7 +39107,7 @@
                   "value": "\"A wait on a unit that never answers, with its deadline already past, answers false; a wait by a task that may block, on a unit that answers on its 101st look, with a deadline 5 s away, answers true.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 403
+                    "line": 408
                   }
                 },
                 {
@@ -39118,7 +39118,7 @@
                   "value": "\"H.DMA.8\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 404
+                    "line": 409
                   }
                 },
                 {
@@ -39129,7 +39129,7 @@
                   "value": "(\"iommu::gate::poll\", \"iommu::gate::look\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 405
+                    "line": 410
                   }
                 }
               ]
@@ -39142,7 +39142,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 407
+                "line": 412
               },
               "children": [
                 {
@@ -39153,7 +39153,7 @@
                   "value": "\"A gate shall admit one operation at a time, refuse the next once its patience has passed, and admit the next once the holder leaves.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 410
+                    "line": 415
                   }
                 },
                 {
@@ -39164,7 +39164,7 @@
                   "value": "\"With a gate held, an entry with a patience of 10 ms is refused; once the holder leaves, an entry is admitted.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 412
+                    "line": 417
                   }
                 },
                 {
@@ -39175,7 +39175,7 @@
                   "value": "\"H.DMA.8\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 413
+                    "line": 418
                   }
                 },
                 {
@@ -39186,7 +39186,7 @@
                   "value": "(\"iommu::gate::Gate::enter_within\", \"iommu::gate::Gate::enter\", \"iommu::gate::Entered::drop\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 415
+                    "line": 420
                   }
                 }
               ]
@@ -39199,7 +39199,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 417
+                "line": 422
               },
               "children": [
                 {
@@ -39210,7 +39210,7 @@
                   "value": "\"A task waiting to enter a held gate shall sleep, and shall be woken and admitted when the holder leaves.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 419
+                    "line": 424
                   }
                 },
                 {
@@ -39221,7 +39221,7 @@
                   "value": "\"A second task waiting on a gate the first holds for 10 ms is admitted after the first leaves and before its own patience has passed, having slept meanwhile.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 422
+                    "line": 427
                   }
                 },
                 {
@@ -39232,7 +39232,7 @@
                   "value": "\"H.SCHED.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 423
+                    "line": 428
                   }
                 },
                 {
@@ -39243,7 +39243,7 @@
                   "value": "(\"iommu::gate::Gate::enter_within\", \"iommu::gate::Entered::drop\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 425
+                    "line": 430
                   }
                 }
               ]
@@ -39256,7 +39256,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 427
+                "line": 432
               },
               "children": [
                 {
@@ -39267,7 +39267,7 @@
                   "value": "\"A unit's commands shall run one at a time, each waited for up to the unit's patience, and one the unit does not finish, or an SMMUv3 command it stops on, shall answer an error.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 430
+                    "line": 435
                   }
                 },
                 {
@@ -39278,7 +39278,7 @@
                   "value": "\"A command to a unit made never to finish answers an error within its patience, and an SMMUv3 command queue stopped with an error answers it refused.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 433
+                    "line": 438
                   }
                 },
                 {
@@ -39289,7 +39289,7 @@
                   "value": "\"H.DMA.8\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 434
+                    "line": 439
                   }
                 },
                 {
@@ -39300,7 +39300,7 @@
                   "value": "(\"iommu::vtd::Unit::command\", \"iommu::vtd::Unit::invalidate_context\", \"iommu::vtd::Unit::invalidate_iotlb\", \"iommu::smmuv3::Unit::command\", \"iommu::smmuv3::Unit::control\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 438
+                    "line": 443
                   }
                 }
               ]
@@ -39314,7 +39314,7 @@
           "doc": "src/kernel/src/iommu.rs, the faults half, and the fault readers of iommu/vtd.rs and iommu/smmuv3.rs.",
           "source": {
             "file": "docs/sysml/16-iommu-requirements.sysml",
-            "line": 442
+            "line": 447
           },
           "children": [
             {
@@ -39325,7 +39325,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 446
+                "line": 451
               },
               "children": [
                 {
@@ -39336,7 +39336,7 @@
                   "value": "\"A fault shall print as its unit recorded it: a refused access by its stream, page and direction, an SMMUv3 event by its type's name, an event queue's overflow and a VT-d unit's lost fault as such.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 450
+                    "line": 455
                   }
                 },
                 {
@@ -39347,7 +39347,7 @@
                   "value": "\"A refused read and a refused write, a lost SMMUv3 event, a VT-d overflow and SMMUv3 events 0x10 and 0xFF each print the words given for them, 0xFF as reserved.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 453
+                    "line": 458
                   }
                 },
                 {
@@ -39358,7 +39358,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 454
+                    "line": 459
                   }
                 },
                 {
@@ -39369,7 +39369,7 @@
                   "value": "(\"iommu::Fault::fmt\", \"iommu::smmuv3::event_name\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 455
+                    "line": 460
                   }
                 }
               ]
@@ -39382,7 +39382,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 457
+                "line": 462
               },
               "children": [
                 {
@@ -39390,10 +39390,10 @@
                   "qualifiedName": "FerrixIommuRequirements::Faults::aVtdFaultIsReadWhole",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"A VT-d unit's take_fault shall answer the refused access its first record holds as the source ID, page and direction the unit wrote.\"",
+                  "value": "\"A VT-d unit's take_fault shall answer the refused access the first full record holds, reading from the one FSTS.FRI names round every record CAP.NFR counts, as the source ID, page and direction the unit wrote.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 460
+                    "line": 466
                   }
                 },
                 {
@@ -39404,7 +39404,7 @@
                   "value": "\"On x86-64 the probe reads its fault back as a write by the entropy device's stream to the probe's page: 1 or more out-of-domain writes faulted (the `pci` line).\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 463
+                    "line": 469
                   }
                 },
                 {
@@ -39415,7 +39415,7 @@
                   "value": "\"H.DMA.2\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 464
+                    "line": 470
                   }
                 },
                 {
@@ -39426,7 +39426,7 @@
                   "value": "(\"iommu::vtd::Unit::take_fault\", \"iommu::Translation::take_fault\", \"iommu::Domain::take_fault\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 466
+                    "line": 472
                   }
                 }
               ]
@@ -39439,7 +39439,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 468
+                "line": 474
               },
               "children": [
                 {
@@ -39450,7 +39450,7 @@
                   "value": "\"An SMMUv3's take_fault shall answer a translation, address size, access flag or permission event as a refused access by its stream, page and direction.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 471
+                    "line": 477
                   }
                 },
                 {
@@ -39461,7 +39461,7 @@
                   "value": "\"On AArch64 the probe reads its fault back as a write by the entropy device's stream to the probe's page: 1 or more out-of-domain writes faulted (the `pci` line).\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 474
+                    "line": 480
                   }
                 },
                 {
@@ -39472,7 +39472,7 @@
                   "value": "\"H.DMA.2\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 475
+                    "line": 481
                   }
                 },
                 {
@@ -39483,7 +39483,7 @@
                   "value": "(\"iommu::smmuv3::Unit::take_fault\", \"iommu::smmuv3::read_entry\", \"iommu::Translation::take_fault\", \"iommu::Domain::take_fault\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 478
+                    "line": 484
                   }
                 }
               ]
@@ -39496,7 +39496,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 480
+                "line": 486
               },
               "children": [
                 {
@@ -39507,7 +39507,7 @@
                   "value": "\"A VT-d unit's take_fault shall clear each record it answers, and answer a primary fault overflow, once the record is empty, as an Overflow against the record taken last, and clear it.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 484
+                    "line": 490
                   }
                 },
                 {
@@ -39518,7 +39518,7 @@
                   "value": "\"With the record full and a second fault dropped, take_fault answers the full record's access, then 1 Overflow naming it, then nothing.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 487
+                    "line": 493
                   }
                 },
                 {
@@ -39529,7 +39529,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 488
+                    "line": 494
                   }
                 },
                 {
@@ -39540,7 +39540,7 @@
                   "value": "\"iommu::vtd::Unit::take_fault\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 489
+                    "line": 495
                   }
                 }
               ]
@@ -39553,7 +39553,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 491
+                "line": 497
               },
               "children": [
                 {
@@ -39564,7 +39564,7 @@
                   "value": "\"An SMMUv3's take_fault shall consume each event it answers, answer every event type but the four refused accesses as an Event naming it, and answer an event queue that overflowed as Lost, first and acknowledged.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 495
+                    "line": 501
                   }
                 },
                 {
@@ -39575,7 +39575,7 @@
                   "value": "\"A queue holding a C_BAD_STREAMID event answers Event(0x02); a queue whose overflow flag differs from the acknowledgement answers Lost once and then its events, each once.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 498
+                    "line": 504
                   }
                 },
                 {
@@ -39586,7 +39586,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 499
+                    "line": 505
                   }
                 },
                 {
@@ -39597,7 +39597,7 @@
                   "value": "\"iommu::smmuv3::Unit::take_fault\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 500
+                    "line": 506
                   }
                 }
               ]
@@ -39610,7 +39610,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 502
+                "line": 508
               },
               "children": [
                 {
@@ -39621,7 +39621,7 @@
                   "value": "\"enable shall clear a fault firmware left recorded in a VT-d unit, and its overflow, before translation goes on.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 505
+                    "line": 511
                   }
                 },
                 {
@@ -39632,7 +39632,7 @@
                   "value": "\"A unit brought up with a fault and an overflow left recorded answers no fault from take_fault afterwards.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 507
+                    "line": 513
                   }
                 },
                 {
@@ -39643,7 +39643,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 508
+                    "line": 514
                   }
                 },
                 {
@@ -39654,7 +39654,7 @@
                   "value": "\"iommu::vtd::Unit::enable\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 509
+                    "line": 515
                   }
                 }
               ]
@@ -39667,7 +39667,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 511
+                "line": 517
               },
               "children": [
                 {
@@ -39678,7 +39678,7 @@
                   "value": "\"provoke shall clear the unit's faults and register the device's stream and the page, saying so on the console, before the device is made to write it.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 514
+                    "line": 520
                   }
                 },
                 {
@@ -39689,7 +39689,7 @@
                   "value": "\"After provoke, the unit holds no fault, and the stream and page are registered and printed on the `on purpose` line.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 517
+                    "line": 523
                   }
                 },
                 {
@@ -39700,7 +39700,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 518
+                    "line": 524
                   }
                 },
                 {
@@ -39711,7 +39711,7 @@
                   "value": "(\"iommu::Domain::provoke\", \"iommu::Domain::clear_faults\", \"iommu::record_provoked\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 520
+                    "line": 526
                   }
                 }
               ]
@@ -39724,7 +39724,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 522
+                "line": 528
               },
               "children": [
                 {
@@ -39735,7 +39735,7 @@
                   "value": "\"A refused access by a registered stream to its registered page, and a VT-d overflow whose full record held one, shall not be counted stray, however late it is read.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 525
+                    "line": 531
                   }
                 },
                 {
@@ -39746,7 +39746,7 @@
                   "value": "\"A fault equal to a registered stream and page, taken through a domain and again by the audit, leaves the stray count unchanged; the same fault at another page raises it by 1.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 528
+                    "line": 534
                   }
                 },
                 {
@@ -39757,7 +39757,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 529
+                    "line": 535
                   }
                 },
                 {
@@ -39768,7 +39768,7 @@
                   "value": "(\"iommu::provoked\", \"iommu::count_if_stray\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 530
+                    "line": 536
                   }
                 }
               ]
@@ -39781,7 +39781,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 532
+                "line": 538
               },
               "children": [
                 {
@@ -39792,7 +39792,7 @@
                   "value": "\"A fault taken that no check provoked shall be counted stray, and apart when it is not a refused access, whether a check, the clearing before a probe or the audit took it.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 535
+                    "line": 541
                   }
                 },
                 {
@@ -39803,7 +39803,7 @@
                   "value": "\"An SMMUv3 event and a VT-d overflow no check registered each raise the stray count and the stray-event count by 1.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 538
+                    "line": 544
                   }
                 },
                 {
@@ -39814,7 +39814,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 539
+                    "line": 545
                   }
                 },
                 {
@@ -39825,7 +39825,7 @@
                   "value": "(\"iommu::count_if_stray\", \"iommu::Domain::take_fault\", \"iommu::Domain::clear_faults\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 541
+                    "line": 547
                   }
                 }
               ]
@@ -39838,7 +39838,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 543
+                "line": 549
               },
               "children": [
                 {
@@ -39846,10 +39846,10 @@
                   "qualifiedName": "FerrixIommuRequirements::Faults::theAuditReadsEveryUnit",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"audit_faults shall take the faults every translating unit holds, up to 256 a unit, and report the faults no check provoked since translation went on, the first it read itself, and the provoked ones it found late.\"",
+                  "value": "\"audit_faults shall take the faults every unit that translates or remaps holds, up to 256 a unit, a VT-d unit an RMRR holds to remapping only included, and report the faults no check provoked since translation went on, the first it read itself, and the provoked ones it found late, and how many of the units read translate.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 547
+                    "line": 555
                   }
                 },
                 {
@@ -39860,7 +39860,18 @@
                   "value": "\"With 1 stray fault left in a unit's record, the audit reports 1 unit read, 1 stray and that fault as the first.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 549
+                    "line": 557
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::theAuditReadsEveryUnit",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"ferrix_paging::vtd::unit::audited answers true for a unit that translates, remaps or both, and false only for one that does neither.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 560
                   }
                 },
                 {
@@ -39871,7 +39882,7 @@
                   "value": "\"H.DMA.6\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 550
+                    "line": 561
                   }
                 },
                 {
@@ -39882,7 +39893,7 @@
                   "value": "(\"iommu::audit_faults\", \"iommu::drain\", \"iommu::recorded\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 552
+                    "line": 563
                   }
                 }
               ]
@@ -39895,7 +39906,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 554
+                "line": 565
               },
               "children": [
                 {
@@ -39906,7 +39917,7 @@
                   "value": "\"Every fault read from a unit, by the fault audit or through a domain, shall be written to the audit record as one DMA_FAULT, refused, naming the device's stream and the page it addressed, with the kernel as its subject.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 558
+                    "line": 569
                   }
                 },
                 {
@@ -39917,7 +39928,7 @@
                   "value": "\"On a boot that read a DMA fault from a unit -- the out-of-domain probe's, wherever its entropy request completed -- the audit record holds a DMA_FAULT, refused, with pid 0, and a boot that read none owes none; with the record's event swapped at recorded, or its subject made a process, the end-of-boot audit check fails naming it.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 564
+                    "line": 575
                   }
                 },
                 {
@@ -39928,7 +39939,7 @@
                   "value": "\"H.DMA.2\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 565
+                    "line": 576
                   }
                 },
                 {
@@ -39939,7 +39950,7 @@
                   "value": "(\"iommu::recorded\", \"iommu::counted\", \"audit::record\", \"audit::Store::record_at\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 567
+                    "line": 578
                   }
                 }
               ]
@@ -39952,7 +39963,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 569
+                "line": 580
               },
               "children": [
                 {
@@ -39963,7 +39974,7 @@
                   "value": "\"A DMAR scope's path shall be followed through each bridge's secondary bus, and a function shall count as its own requester only if every bridge from it up to its root bus is a PCIe port (root, upstream or downstream): behind a PCIe-to-PCI or conventional bridge, on a bus two bridges claim, or under a loop of bus numbers, it is aliased, never its own. The decision every placement asks (claims) shall answer aliased wherever the walk below a named bridge does.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 577
+                    "line": 588
                   }
                 },
                 {
@@ -39974,7 +39985,7 @@
                   "value": "\"Host tests: a path is followed through each bridge's secondary bus; a function behind a root port or a switch is its own requester; one named by a path through a PCIe-to-PCI bridge, on a bus two bridges claim, on a bus no bridge explains below a named bridge, or under a loop of bus numbers is not; only Express port types 4, 5 and 6 forward a requester ID; a scope path with an odd byte is not whole. ferrix_pci::topology::claims, which iommu::claims answers with, claims a two-hop endpoint through a PCIe-to-PCI bridge, a function on a bus no bridge explains below a named bridge and one on a bus two bridges claim as aliased, what PCIe ports alone reach as its own, and nothing outside the scope; with claims answering own whenever the scope reaches the function, three of those tests fail.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 589
+                    "line": 600
                   }
                 },
                 {
@@ -39985,7 +39996,7 @@
                   "value": "\"H.DMA.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 590
+                    "line": 601
                   }
                 },
                 {
@@ -39996,7 +40007,7 @@
                   "value": "(\"discovery::pci::learn_bridges\", \"iommu::claims\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 591
+                    "line": 602
                   }
                 }
               ]
@@ -40009,7 +40020,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 593
+                "line": 604
               },
               "children": [
                 {
@@ -40017,10 +40028,10 @@
                   "qualifiedName": "FerrixIommuRequirements::Faults::aFunctionBelowARootPortIsPlaced",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"place_dmar shall place a function that a DRHD's endpoint or sub-hierarchy scope reaches, as its own requester, behind that DRHD's unit, and domain_for shall attach a translated domain for it on that unit; a function the scope reaches under an alias, or by a path that is not whole, shall be unresolved and get no domain.\"",
+                  "value": "\"place_dmar shall place a function that a DRHD's endpoint or sub-hierarchy scope reaches, as its own requester, behind that DRHD's unit, and domain_for shall attach a translated domain for it on that unit if the unit translates; a function the scope reaches under an alias, or by a path that is not whole, shall be unresolved and get no domain. A function no explicit scope reaches is placed as L.iommu.62 says, through the same ferrix_pci::topology::place for the report and the domains.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 599
+                    "line": 612
                   }
                 },
                 {
@@ -40031,7 +40042,7 @@
                   "value": "\"On x86-64 under KVM and TCG every PCI function, the virtio-rng and edu below PCIe root ports included, is placed behind the unit with 0 bypassing and 0 unresolved, and the out-of-domain probe's write from the rng below a root port (stream 0x100) is faulted by the unit; with domains not following scopes the boot panics on the rng's untranslated DMA, and with placement ignoring sub-hierarchies test-boot fails on 2 bypassing.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 606
+                    "line": 619
                   }
                 },
                 {
@@ -40042,7 +40053,7 @@
                   "value": "\"H.DMA.1\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 607
+                    "line": 620
                   }
                 },
                 {
@@ -40050,10 +40061,10 @@
                   "qualifiedName": "FerrixIommuRequirements::Faults::aFunctionBelowARootPortIsPlaced",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"iommu::place_dmar\", \"iommu::Scope::places\", \"iommu::vtd_unit_for\", \"iommu::learn_bridge\", \"iommu::bring_up_vtd\")",
+                  "value": "(\"iommu::place_dmar\", \"iommu::Scope::places\", \"iommu::vtd_unit_for\", \"iommu::learn_bridge\", \"iommu::bring_up_vtd\", \"iommu::explicit_dmar\", \"iommu::record_scopes\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 609
+                    "line": 623
                   }
                 }
               ]
@@ -40066,7 +40077,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 611
+                "line": 625
               },
               "children": [
                 {
@@ -40077,7 +40088,7 @@
                   "value": "\"A VT-d unit without ECAP.QI shall be left alone, with the reason printed. On a unit brought up, every context-cache and IOTLB invalidation -- at enable, attach, detach, after an unmap or a caching-mode map, and the quarantine's release -- shall be made through the unit's invalidation queue: the descriptor and a fenced wait descriptor behind it are written and cleaned to memory, the tail is moved past both, and the invalidation completes only when the wait's status word reads that submission's own sequence number. No register-based invalidation shall be issued.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 621
+                    "line": 635
                   }
                 },
                 {
@@ -40088,7 +40099,7 @@
                   "value": "\"On x86-64 under KVM and TCG the iommu line counts the context-cache and IOTLB invalidations queued, both more than 0, and no unit reads back a register-based invalidation pending; test-boot requires the line. With one flush put back on the register path, QEMU never performs it while the queue is on and the boot fails at stage 10. Host tests: each descriptor is laid out as the specification says and passes QEMU's reserved-bit masks; the queue registers name sixteen-byte slots; a full queue is never taken for an empty one.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 630
+                    "line": 644
                   }
                 },
                 {
@@ -40099,7 +40110,7 @@
                   "value": "(\"H.DMA.2\", \"H.DMA.8\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 631
+                    "line": 645
                   }
                 },
                 {
@@ -40110,7 +40121,7 @@
                   "value": "(\"iommu::vtd::Unit::open\", \"iommu::vtd::Unit::enable\", \"iommu::vtd::Unit::start_queue\", \"iommu::vtd::Unit::submit\", \"iommu::vtd::Unit::submit_and_wait\", \"iommu::vtd::Unit::write_descriptors\", \"iommu::vtd::Unit::await_completion\", \"iommu::vtd::Unit::status_word\", \"iommu::vtd::Unit::invalidate_context\", \"iommu::vtd::Unit::invalidate_iotlb\", \"iommu::vtd::Unit::register_invalidation_pending\", \"iommu::register_invalidations_pending\", \"iommu::vtd::invalidations\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 639
+                    "line": 653
                   }
                 }
               ]
@@ -40123,7 +40134,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 641
+                "line": 655
               },
               "children": [
                 {
@@ -40134,7 +40145,7 @@
                   "value": "\"A VT-d invalidation whose wait status is not written within the unit's patience, or during which FSTS reads IQE, ICE or ITE, shall answer an error, and its caller shall release nothing the unit may still reach: an unpin hands the pin back and its frames are kept and counted in kept. ICE shall be cleared (written one) and counted as soon as it is taken, so that it fails that invalidation only. After IQE or ITE the unit shall be marked failed: every later invalidation on it answers an error without touching the queue, and the failure is reported once to the end-of-boot fault audit as a stray fault.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 651
+                    "line": 665
                   }
                 },
                 {
@@ -40145,7 +40156,7 @@
                   "value": "\"On x86-64 under KVM and TCG check R7 unpins a two-page pin whose wait descriptor, through the check-only Wait::Unwritten, writes no status: the invalidation fails, the two pages move from live to kept and the frames stay held, and the iommu line says exactly one invalidation failed, as R7 made it; with Pin::drop taking the error for success the boot panics with 'frames released after a failed invalidation'. On every unit an ICE the check plants fails one invalidation, is cleared and counted, and the next invalidation completes with the unit not failed; with the clear dropped the boot panics with 'an invalidation after a cleared completion error failed'. QEMU's unit cannot raise ICE, so the check plants it in the unit's software mirror of FSTS; that writing one clears it on a real unit rests on the specification's write-one-to-clear semantics for FSTS.ICE, not on a boot. Host tests: a wait writes its sequence number, or with Unwritten nothing, as a valid descriptor; a stopped queue is never taken for a completion, nor a completion error for a timeout.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 668
+                    "line": 682
                   }
                 },
                 {
@@ -40156,7 +40167,7 @@
                   "value": "(\"H.DMA.8\", \"H.DMA.3\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 669
+                    "line": 683
                   }
                 },
                 {
@@ -40167,7 +40178,7 @@
                   "value": "(\"iommu::vtd::Unit::submit\", \"iommu::vtd::Unit::await_completion\", \"iommu::vtd::Unit::fault_status\", \"iommu::vtd::Unit::clear_errors\", \"iommu::vtd::Unit::fail\", \"iommu::vtd::Unit::take_fault\", \"iommu::vtd::Unit::flush\", \"iommu::Domain::unpin_waiting\", \"iommu::Translation::flush\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 674
+                    "line": 688
                   }
                 }
               ]
@@ -40180,7 +40191,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 676
+                "line": 690
               },
               "children": [
                 {
@@ -40191,7 +40202,7 @@
                   "value": "\"A VT-d unit firmware left remapping interrupts shall have IRE cleared and read back clear, and one whose invalidation queue firmware left on shall have the queue drained, QIE cleared and read back clear, each within the unit's patience, before the kernel's own setup; then any IQE, ICE or ITE firmware left in FSTS shall be cleared and FSTS read back clear of them. A unit that does not shall be left alone with the reason printed. GCMD writes shall not repeat CFI.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 684
+                    "line": 698
                   }
                 },
                 {
@@ -40202,7 +40213,7 @@
                   "value": "\"On x86-64 under KVM and TCG, before each unit's enable, the check turns its queue on as firmware would and ends it with a completed wait, and open's path turns it off and reads it off; the iommu line counts it on every unit. With the QIE clear dropped from that path, the boot panics with 'firmware left its invalidation queue on and it would not stop'.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 690
+                    "line": 704
                   }
                 },
                 {
@@ -40213,7 +40224,7 @@
                   "value": "\"H.DMA.2\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 691
+                    "line": 705
                   }
                 },
                 {
@@ -40224,7 +40235,7 @@
                   "value": "(\"iommu::vtd::stop_firmware\", \"iommu::vtd::wait_for\", \"iommu::vtd::clear_stale_errors\", \"iommu::vtd::Unit::command\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 694
+                    "line": 708
                   }
                 }
               ]
@@ -40237,7 +40248,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 696
+                "line": 710
               },
               "children": [
                 {
@@ -40248,7 +40259,7 @@
                   "value": "\"On a VT-d unit whose ECAP.C is clear, every root, context and second-level entry the kernel writes shall be noted and cleaned from the processor's caches to memory (clflush of each line written, then mfence) before the change that wrote it is published: before the context-cache or IOTLB invalidation that publishes an attach or a detach, and before a map or an unmap returns. A change whose record still holds a write not cleaned at that point shall be refused -- an attach or detach before its invalidation, a map or unmap with an error, so that the pin unwinds or the frames are kept -- and counted. That every write to memory the unit walks is noted rests on construction: write_entry, table and the mapper's writes through Walked are vtd.rs's only writers of that memory. On a unit whose ECAP.C is set, nothing shall be noted or cleaned.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 710
+                    "line": 724
                   }
                 },
                 {
@@ -40259,7 +40270,7 @@
                   "value": "\"On x86-64 under KVM and TCG, where QEMU's unit reports ECAP.C clear, the iommu line counts the entry writes noted and cleaned and the changes that each found them cleaned before their own publish point, and test-boot requires the line; the check proves each change's noted writes were cleaned, not that every write was noted. With the clean before an unmap's return dropped, the unmap is refused with the line 'a VT-d change was refused: a table write was not cleaned to memory before it was published' and the boot stops at stage 10's next pin; with the clean before an attach's invalidation dropped, both attaches are refused and the boot panics naming the VT-d changes refused for a table write not cleaned to memory. Host tests: every entry the mapper writes, on a map and on an unmap, is cleaned after it is written; a walker that snoops cleans nothing; a write noted and not cleaned reads as unpublished, and a full record cleans early.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 725
+                    "line": 739
                   }
                 },
                 {
@@ -40270,7 +40281,7 @@
                   "value": "(\"H.DMA.2\", \"H.DMA.3\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 726
+                    "line": 740
                   }
                 },
                 {
@@ -40281,7 +40292,7 @@
                   "value": "(\"iommu::vtd::Unit::open\", \"iommu::vtd::Unit::writes\", \"iommu::vtd::Unit::publish\", \"iommu::vtd::Unit::map\", \"iommu::vtd::Unit::unmap\", \"iommu::vtd::Unit::detach\", \"iommu::vtd::Unit::invalidate_context\", \"iommu::vtd::Unit::invalidate_iotlb\", \"iommu::vtd::write_entry\", \"iommu::vtd::require_published\", \"iommu::vtd::settle\", \"iommu::vtd::cleaning\", \"iommu::map_all\", \"mm::WalkerClean::clean\", \"arch::x86_64::cpu::clean_for_walker\", \"arch::x86_64::cpu::clflush_line\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 734
+                    "line": 748
                   }
                 }
               ]
@@ -40294,7 +40305,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 736
+                "line": 750
               },
               "children": [
                 {
@@ -40305,7 +40316,7 @@
                   "value": "\"On a VT-d unit whose ECAP.C is clear, every table frame the kernel zeroes for the unit to walk -- the root table, a context table, a domain's second-level root and each second-level table the mapper adds -- shall be cleaned to memory whole before any entry that links it is written.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 741
+                    "line": 755
                   }
                 },
                 {
@@ -40316,7 +40327,7 @@
                   "value": "\"On x86-64 under KVM and TCG the iommu line counts the fresh tables cleaned, more than 0. Host tests: each table the mapper adds below the root is cleaned whole before the entry that links it is written.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 745
+                    "line": 759
                   }
                 },
                 {
@@ -40327,7 +40338,7 @@
                   "value": "(\"H.DMA.2\", \"H.DMA.3\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 746
+                    "line": 760
                   }
                 },
                 {
@@ -40338,7 +40349,7 @@
                   "value": "(\"iommu::vtd::table\", \"iommu::vtd::Unit::attach\", \"iommu::vtd::Unit::install\", \"mm::map_io\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 748
+                    "line": 762
                   }
                 }
               ]
@@ -40351,7 +40362,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 750
+                "line": 764
               },
               "children": [
                 {
@@ -40362,7 +40373,7 @@
                   "value": "\"An SMMUv3 whose IDR0.COHACC is clear shall be left alone, with the reason printed. One that is brought up shall have CR1 set, while its queues and translation are off, to write-back cacheable, inner shareable accesses to its stream table and queues, read back as written, and each stream table entry's stage-2 walk shall be write-back cacheable and inner shareable.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 756
+                    "line": 770
                   }
                 },
                 {
@@ -40373,7 +40384,7 @@
                   "value": "\"On AArch64 the SMMUv3 is brought up and the out-of-domain write is faulted through it; with COHACC's test inverted, the unit is left alone as not snooping and test-boot fails on no write outside a translated domain faulted.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 760
+                    "line": 774
                   }
                 },
                 {
@@ -40384,7 +40395,7 @@
                   "value": "(\"H.DMA.2\", \"H.DMA.3\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 761
+                    "line": 775
                   }
                 },
                 {
@@ -40395,7 +40406,748 @@
                   "value": "(\"iommu::smmuv3::Unit::open\", \"iommu::smmuv3::Unit::program\", \"iommu::smmuv3::Unit::attach\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 763
+                    "line": 777
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aUnitIsOfAVersionReadAgainst",
+              "qualifiedName": "FerrixIommuRequirements::Faults::aUnitIsOfAVersionReadAgainst",
+              "kind": "requirement",
+              "shortName": "L.iommu.59",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 779
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitIsOfAVersionReadAgainst",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"ferrix_paging::vtd::unit::accept shall take a VT-d unit whose VER major version is 1, 4 or 5 -- the revisions whose legacy-mode register interface the driver was read against: QEMU's unit and the N150's dmar0 and dmar1 -- and refuse any other with the reason 'it is of a version this driver was not read against (it reads 1, 4 and 5)'.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 785
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitIsOfAVersionReadAgainst",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: the N150's dmar0 (VER 4.0) and dmar1 (5.0) with their CAP and ECAP as the box's Linux read them, and QEMU's unit at aw-bits 39 and 48 (VER 1.0), are accepted; VER 0.0, 2.0, 3.0, 6.0, 15.0 and 15.15 are refused with that reason. On x86-64 under KVM and TCG QEMU's unit is brought up.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 790
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitIsOfAVersionReadAgainst",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.1\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 791
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitIsOfAVersionReadAgainst",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd::Unit::open\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 792
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theWidestWalkOffered",
+              "qualifiedName": "FerrixIommuRequirements::Faults::theWidestWalkOffered",
+              "kind": "requirement",
+              "shortName": "L.iommu.60",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 794
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::theWidestWalkOffered",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"accept shall give a unit four-level tables when CAP.SAGAW bit 2 is set, three-level when only bit 1 is, and refuse one with neither; it shall refuse a unit whose guest address width, CAP.MGAW plus one, is below the 39 bits a domain reaches. A context entry's address width shall be the walk's: 1 for three levels, 2 for four.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 800
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::theWidestWalkOffered",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: the N150's units (SAGAW 0x4) walk four levels, QEMU's at aw-bits 39 three and at aw-bits 48 (SAGAW 0x6) four; SAGAW 0x8 is refused; an MGAW field of 38 (39 bits, the box's) is accepted and 37 refused. On x86-64 test-boot, whose unit is QEMU's at aw-bits=39, says 'translating (three-level)', and test-boot --vtd-aw48 says 'translating (four-level)' and passes every stage 10 DMA check on those tables; with the context entry's width written as 1 under a four-level walk the --vtd-aw48 boot fails.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 809
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::theWidestWalkOffered",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.2\", \"H.DMA.3\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 810
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::theWidestWalkOffered",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd::Unit::open\", \"iommu::vtd::Unit::install\", \"iommu::vtd::Unit::map\", \"iommu::vtd::Unit::unmap\", \"iommu::vtd::Unit::resolve\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 813
+                  }
+                }
+              ]
+            },
+            {
+              "name": "fourLevelTablesWalkAsTheUnitWalks",
+              "qualifiedName": "FerrixIommuRequirements::Faults::fourLevelTablesWalkAsTheUnitWalks",
+              "kind": "requirement",
+              "shortName": "L.iommu.61",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 815
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::fourLevelTablesWalkAsTheUnitWalks",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"ferrix_paging::vtd::VtdFourLevel shall walk four levels from the 512 GiB level over 48 bits with the same entries as VtdSecondLevel: table entries granting read and write, leaves read and write as asked, the superpage bit only on 2 MiB and 1 GiB leaves, and never a 512 GiB leaf.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 820
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::fourLevelTablesWalkAsTheUnitWalks",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: the generic walk properties hold through it; its leaves equal VtdSecondLevel's at each level; a page at 0, 2 GiB and 2^39 - 4 KiB maps, resolves and sits at the 4 KiB level, under root index 0.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 824
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::fourLevelTablesWalkAsTheUnitWalks",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.3\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 825
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::fourLevelTablesWalkAsTheUnitWalks",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd::Unit::map\", \"iommu::vtd::Unit::unmap\", \"iommu::vtd::Unit::resolve\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 827
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aFunctionNoScopeNamesIsTheCatchAlls",
+              "qualifiedName": "FerrixIommuRequirements::Faults::aFunctionNoScopeNamesIsTheCatchAlls",
+              "kind": "requirement",
+              "shortName": "L.iommu.62",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 829
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aFunctionNoScopeNamesIsTheCatchAlls",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A PCI function no DRHD's explicit scope reaches shall be placed behind its segment's one INCLUDE_PCI_ALL unit, wherever that DRHD stands in the table, when its own requester ID reaches its root bus; one behind an aliasing bridge shall be unresolved, and with two or more INCLUDE_PCI_ALL units on a segment every such function shall be unresolved, which a line says.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 836
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aFunctionNoScopeNamesIsTheCatchAlls",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests on the N150's DMAR bytes: one catch-all, dmar1 at 0xFED91000, with I/O APIC 2 at 00:1e.7 and HPET 0 at 00:1e.6; with the box's 27 functions and two root ports, 26 are placed behind dmar1, the YT6801 at 01:00.0 among them, and the iGPU behind dmar0; a function behind a PCIe-to-PCI bridge is unresolved; two catch-alls give Several and every such function unresolved; an unfollowed explicit scope is never the catch-all's.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 843
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aFunctionNoScopeNamesIsTheCatchAlls",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.1\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 844
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aFunctionNoScopeNamesIsTheCatchAlls",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::place_dmar\", \"iommu::vtd_unit_for\", \"iommu::record_catch_alls\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 846
+                  }
+                }
+              ]
+            },
+            {
+              "name": "anExplicitScopeOutranksTheCatchAll",
+              "qualifiedName": "FerrixIommuRequirements::Faults::anExplicitScopeOutranksTheCatchAll",
+              "kind": "requirement",
+              "shortName": "L.iommu.63",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 848
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anExplicitScopeOutranksTheCatchAll",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A function an explicit scope of a VT-d unit reaches as its own requester shall be that unit's, whether or not the unit came up: a refused unit's function shall get no domain from the catch-all.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 852
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anExplicitScopeOutranksTheCatchAll",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: place with an explicit scope of a refused unit and a catch-all answers the refused unit.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 854
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anExplicitScopeOutranksTheCatchAll",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.1\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 855
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anExplicitScopeOutranksTheCatchAll",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd_unit_for\", \"iommu::bring_up_vtd\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 856
+                  }
+                }
+              ]
+            },
+            {
+              "name": "everyFaultRecordIsRead",
+              "qualifiedName": "FerrixIommuRequirements::Faults::everyFaultRecordIsRead",
+              "kind": "requirement",
+              "shortName": "L.iommu.64",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 858
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::everyFaultRecordIsRead",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"ferrix_paging::vtd::unit::fault_records shall give every one of a unit's CAP.NFR + 1 fault recording registers once, from the one FSTS.FRI names round, at most 256, and take_fault shall read them in that order.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 862
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::everyFaultRecordIsRead",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: 33 records with FRI 5 are read 5, 6, 7 ... 32, 0 ... 4; one record is read alone; an FRI past NFR wraps; 256 records give 256. The N150's units and QEMU's have one record each, at 0x400 on the box.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 866
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::everyFaultRecordIsRead",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.6\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 867
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::everyFaultRecordIsRead",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd::Unit::take_fault\", \"iommu::vtd::Unit::enable\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 868
+                  }
+                }
+              ]
+            },
+            {
+              "name": "registersInsideTheWindow",
+              "qualifiedName": "FerrixIommuRequirements::Faults::registersInsideTheWindow",
+              "kind": "requirement",
+              "shortName": "L.iommu.65",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 870
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::registersInsideTheWindow",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"accept shall refuse a unit whose fault recording registers, CAP.NFR + 1 of 16 bytes from CAP.FRO * 16, or whose IOTLB register, ending at ECAP.IRO * 16 + 16, reach past the first 4 KiB page the kernel maps.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 874
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::registersInsideTheWindow",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: FRO 0xC00 with 64 records (ending at 0x1000) and IRO 0xFF are accepted; 65 records, FRO 0x1000 and IRO 0x100 are refused.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 877
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::registersInsideTheWindow",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.1\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 878
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::registersInsideTheWindow",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"iommu::vtd::Unit::open\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 879
+                  }
+                }
+              ]
+            },
+            {
+              "name": "invalidationsDrainWhenTheUnitCan",
+              "qualifiedName": "FerrixIommuRequirements::Faults::invalidationsDrainWhenTheUnitCan",
+              "kind": "requirement",
+              "shortName": "L.iommu.66",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 881
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::invalidationsDrainWhenTheUnitCan",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"An IOTLB invalidation shall set DR when the unit's CAP.DRD is set and DW when its CAP.DWD is, so that it completes only once the reads and writes that used the old translations have.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 885
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::invalidationsDrainWhenTheUnitCan",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: the N150's units drain both ways and a unit without the bits neither; DR is bit 7 and DW bit 6 of the descriptor, outside QEMU's reserved mask. On x86-64 QEMU's unit, which reports both, takes every invalidation without IQE.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 889
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::invalidationsDrainWhenTheUnitCan",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.8\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 890
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::invalidationsDrainWhenTheUnitCan",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd::Unit::open\", \"iommu::vtd::Unit::invalidate_iotlb\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 891
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aUnitAnRmrrNamesRemapsOnly",
+              "qualifiedName": "FerrixIommuRequirements::Faults::aUnitAnRmrrNamesRemapsOnly",
+              "kind": "requirement",
+              "shortName": "L.iommu.67",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 893
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitAnRmrrNamesRemapsOnly",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A VT-d unit an RMRR holds -- one naming, by a single-hop endpoint scope, a function behind it, or one the table alone cannot place, which holds every unit on its segment, a malformed RMRR included -- shall be brought up with its queue and interrupt remapping and its translation left off; its line shall say that its functions' DMA is untranslated and reaches all of memory, its functions shall get untranslated domains, and the discovery line shall count them apart as untranslated, never as translated.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 901
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitAnRmrrNamesRemapsOnly",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests on the N150's DMAR bytes: the RMRR 0x7C000000-0x803FFFFF names 00:02.0 and holds dmar0, not dmar1; an RMRR for a function no scope names holds the catch-all; one with a two-hop or odd path, or beside a sub-hierarchy scope, and a short RMRR, hold every unit; 26 functions behind a unit that translates and one behind dmar0 count 27 behind, 1 untranslated. QEMU's DMAR has no RMRR, so the boot half rests on the N150's log.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 908
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitAnRmrrNamesRemapsOnly",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\", \"H.FAIL.1\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 909
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::aUnitAnRmrrNamesRemapsOnly",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::bring_up_vtd\", \"iommu::say_unit\", \"iommu::domain_for\", \"iommu::discover\", \"iommu::translates\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 912
+                  }
+                }
+              ]
+            },
+            {
+              "name": "protectedRegionsAreOnlyReadWhereTheyExist",
+              "qualifiedName": "FerrixIommuRequirements::Faults::protectedRegionsAreOnlyReadWhereTheyExist",
+              "kind": "requirement",
+              "shortName": "L.iommu.68",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 914
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::protectedRegionsAreOnlyReadWhereTheyExist",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"accept shall report protected memory regions exactly when CAP.PLMR or CAP.PHMR is set, and only then shall translate read PMEN; finding PRS set it shall clear EPM after TE is on and wait, bounded, for PRS clear, and on a timeout fail the unit with translation left on. The unit's line says which.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 919
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::protectedRegionsAreOnlyReadWhereTheyExist",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests: both N150 units report protected regions and QEMU's does not. The clearing arm runs on hardware only, argued from the specification and Linux's iommu_disable_protect_mem_regions; the N150's log says which arm its units took.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 924
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::protectedRegionsAreOnlyReadWhereTheyExist",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.DMA.3\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 925
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::protectedRegionsAreOnlyReadWhereTheyExist",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd::Unit::open\", \"iommu::vtd::Unit::translate\", \"iommu::vtd::Protected::says\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 927
+                  }
+                }
+              ]
+            },
+            {
+              "name": "faultEventsMasked",
+              "qualifiedName": "FerrixIommuRequirements::Faults::faultEventsMasked",
+              "kind": "requirement",
+              "shortName": "L.iommu.70",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 929
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::faultEventsMasked",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"open shall write FECTL.IM, masking the unit's fault event, and bring-up shall read it back masked or stop the boot.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 932
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::faultEventsMasked",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"On x86-64 every boot reads QEMU's unit's FECTL back masked; with open writing FECTL 0, the boot stops at stage 10 naming the unit.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 935
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::faultEventsMasked",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.IRQ.3\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 936
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::faultEventsMasked",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd::Unit::open\", \"iommu::vtd::Unit::fault_events_masked\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 938
+                  }
+                }
+              ]
+            },
+            {
+              "name": "ferrixVtdOffLeavesEveryUnitAlone",
+              "qualifiedName": "FerrixIommuRequirements::Faults::ferrixVtdOffLeavesEveryUnitAlone",
+              "kind": "requirement",
+              "shortName": "L.iommu.71",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 940
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::ferrixVtdOffLeavesEveryUnitAlone",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"ferrix_paging::vtd::unit::switched_off shall answer true for the command-line value 'off' alone; with it, bring_up shall leave every VT-d unit alone with one line calling it a recovery configuration, not an evaluated one, and the audit record's configuration shall hold Vtd 0, else 1.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 945
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::ferrixVtdOffLeavesEveryUnitAlone",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host test: 'off' switches off; no value, '', 'on', 'OFF', 'off ' and '0' do not. Every checked boot reads Vtd 1 back from the audit record.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 948
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::ferrixVtdOffLeavesEveryUnitAlone",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.1\", \"H.AUD.7\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 949
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::ferrixVtdOffLeavesEveryUnitAlone",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"iommu::vtd_off_asked\", \"iommu::bring_up_vtd\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 950
+                  }
+                }
+              ]
+            },
+            {
+              "name": "anUncheckedBootSaysItsFaults",
+              "qualifiedName": "FerrixIommuRequirements::Faults::anUncheckedBootSaysItsFaults",
+              "kind": "requirement",
+              "shortName": "L.iommu.72",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/16-iommu-requirements.sysml",
+                "line": 952
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anUncheckedBootSaysItsFaults",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"A boot that skips its checks shall read every unit's fault records last, as audit_faults does, and print one line of how many it found, interrupt requests' faults among them, and the first; never stopping the boot.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 956
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anUncheckedBootSaysItsFaults",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"test-init's boot with ferrix.checks=skip (checks_skipped) prints the 'faults recorded in an unchecked boot' line; with the line renamed that boot fails.\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 959
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anUncheckedBootSaysItsFaults",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.6\", \"H.AUD.12\")",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 960
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixIommuRequirements::Faults::anUncheckedBootSaysItsFaults",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"iommu::report_unchecked_faults\"",
+                  "source": {
+                    "file": "docs/sysml/16-iommu-requirements.sysml",
+                    "line": 961
                   }
                 }
               ]
@@ -40409,7 +41161,7 @@
           "doc": "src/kernel/src/iommu/remapping.rs and the interrupt-remapping half of iommu/vtd.rs: NVIDIA's N0g, docs/NVIDIA.md section 12.3, which closes F-57.",
           "source": {
             "file": "docs/sysml/16-iommu-requirements.sysml",
-            "line": 767
+            "line": 965
           },
           "children": [
             {
@@ -40420,7 +41172,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 772
+                "line": 970
               },
               "children": [
                 {
@@ -40431,7 +41183,7 @@
                   "value": "\"A VT-d unit shall remap interrupts only where the DMAR says INTR_REMAP and the unit's ECAP.IR is set. Such a unit shall be given one zeroed interrupt remapping table of 256 entries, cleaned whole before it is linked, pointed at by IRTA in xAPIC format (EIME 0) and taken with SIRTP, every cached entry invalidated, before IRE. IRE shall be set without CFI and GSTS read back: a unit whose CFIS reads set shall have IRE cleared again and count as not blocking compatibility format, and a unit that remaps with CFIS clear shall say so on its line.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 781
+                    "line": 979
                   }
                 },
                 {
@@ -40442,7 +41194,7 @@
                   "value": "\"On x86-64 under KVM (split irqchip) and TCG, on the patched QEMU whose CFIS follows CFI, the unit's line says remapping on (256 entries, xAPIC format), CFIS=0 read back, and test-boot requires it and fails on 'remapping not enabled'; with CFI set in the IRE write the unit reads CFIS set, turns remapping off and test-boot fails. Host test: IRTA holds the table with EIME 0 and 256 entries.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 788
+                    "line": 986
                   }
                 },
                 {
@@ -40453,7 +41205,7 @@
                   "value": "(\"H.DMA.9\", \"H.DMA.2\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 789
+                    "line": 987
                   }
                 },
                 {
@@ -40464,7 +41216,7 @@
                   "value": "(\"iommu::vtd::Unit::open\", \"iommu::vtd::unit_frames\", \"iommu::vtd::Unit::enable\", \"iommu::vtd::Unit::start_table\", \"iommu::vtd::Unit::start_remapping\", \"iommu::vtd::Unit::translate\", \"iommu::bring_up_vtd\", \"iommu::remapping::bring_up\", \"iommu::remapping::record\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 794
+                    "line": 992
                   }
                 }
               ]
@@ -40477,7 +41229,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 796
+                "line": 994
               },
               "children": [
                 {
@@ -40488,7 +41240,7 @@
                   "value": "\"An interrupt remapping table entry shall be written only while it is not present: its high quadword, the source ID it checks, first, then its low quadword with P last, both cleaned to memory on a unit that does not snoop, then the entry invalidated index by index in the interrupt entry cache and waited for, before the message or I/O APIC entry that names it is programmed. A present entry shall never be rewritten, and an index whose invalidation failed shall not be used.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 804
+                    "line": 1002
                   }
                 },
                 {
@@ -40499,7 +41251,7 @@
                   "value": "\"On x86-64 under KVM and TCG the console's present entry is offered a rewrite on every unit that remaps and each refuses it, the console's next delivery still coming through it (the remap line); with the refusal of a present entry dropped, the boot panics with 'a present interrupt entry was rewritten'. The invalidation's order is argued from the code: remap's last statement is the invalidation and its wait, and QEMU does not cache entries, so a check of a skipped invalidation would prove nothing (the consultant's acceptance, 2026-10-02).\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 813
+                    "line": 1011
                   }
                 },
                 {
@@ -40510,7 +41262,7 @@
                   "value": "(\"H.DMA.9\", \"H.DMA.8\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 814
+                    "line": 1012
                   }
                 },
                 {
@@ -40521,7 +41273,7 @@
                   "value": "(\"iommu::vtd::Unit::remap\", \"iommu::vtd::Unit::invalidate_interrupt_entry\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 816
+                    "line": 1014
                   }
                 }
               ]
@@ -40534,7 +41286,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 818
+                "line": 1016
               },
               "children": [
                 {
@@ -40545,7 +41297,7 @@
                   "value": "\"Every interrupt remapping entry the kernel writes shall be present, record its faults (FPD 0), name one physical destination (DM 0, RH 0) in fixed delivery mode, remap and never post (IM 0), carry the vector minted and the trigger of its source -- edge for a message, the input's for an I/O APIC line -- and check the requester's whole source ID (SQ 00, SVT 01).\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 824
+                    "line": 1022
                   }
                 },
                 {
@@ -40556,7 +41308,7 @@
                   "value": "\"Host test: an entry carries exactly those fields and none of QEMU's reserved bits; with SVT 0 in the builder, check R3's message naming another function's entry is delivered and the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 828
+                    "line": 1026
                   }
                 },
                 {
@@ -40567,7 +41319,7 @@
                   "value": "\"H.DMA.9\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 829
+                    "line": 1027
                   }
                 },
                 {
@@ -40578,7 +41330,7 @@
                   "value": "(\"iommu::remapping::remap_message\", \"iommu::remapping::prepare_console\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 831
+                    "line": 1029
                   }
                 }
               ]
@@ -40591,7 +41343,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 833
+                "line": 1031
               },
               "children": [
                 {
@@ -40602,7 +41354,7 @@
                   "value": "\"A VT-d fault record whose reason is 0x20 to 0x26 shall be read as an interrupt fault, with its reason and the entry index it named and no page, recorded in the audit as INTERRUPT_FAULT, and counted stray unless a check registered its stream and reason before provoking it.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 838
+                    "line": 1036
                   }
                 },
                 {
@@ -40613,7 +41365,7 @@
                   "value": "\"On x86-64 under KVM and TCG checks R1 and R2 read fault 0x25 and R3 fault 0x26 from edu's source ID, each registered, and the end-of-boot audit counts no stray fault; test-boot requires exactly those three reasons provoked and fails on any other. Host test: a fault record's reason tells an interrupt request from DMA, and its index is FI's bits 63:48.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 844
+                    "line": 1042
                   }
                 },
                 {
@@ -40624,7 +41376,7 @@
                   "value": "(\"H.DMA.9\", \"H.DMA.6\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 845
+                    "line": 1043
                   }
                 },
                 {
@@ -40635,7 +41387,7 @@
                   "value": "(\"iommu::vtd::Unit::take_fault\", \"iommu::provoked\", \"iommu::recorded\", \"iommu::interrupt_reason_name\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 847
+                    "line": 1045
                   }
                 }
               ]
@@ -40648,7 +41400,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/16-iommu-requirements.sysml",
-                "line": 849
+                "line": 1047
               },
               "children": [
                 {
@@ -40659,7 +41411,7 @@
                   "value": "\"The machine's interrupts shall count as isolated exactly when every unit its DMAR lists, refused ones included, remaps with CFIS read clear, and stage 10's discovery placed no PCI function behind no unit; a device's, when the machine's are and the unit it is placed behind as its own requester remaps. Before discovery they are not isolated.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 855
+                    "line": 1053
                   }
                 },
                 {
@@ -40670,7 +41422,7 @@
                   "value": "\"Host test: the rule over a list of units, one refused, one with CFIS set, and a function bypassing, each clears it. On x86-64 check R10 reads device_isolation 0x3 for edu, and bit 1 clear while the check forces the machine's interrupts not isolated.\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 860
+                    "line": 1058
                   }
                 },
                 {
@@ -40681,7 +41433,7 @@
                   "value": "\"H.DMA.9\"",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 861
+                    "line": 1059
                   }
                 },
                 {
@@ -40692,7 +41444,7 @@
                   "value": "(\"iommu::remapping::interrupts_isolated\", \"iommu::remapping::function_isolated\", \"iommu::remapping::note_bypassing\", \"iommu::report\", \"iommu::programmed_unit_for\")",
                   "source": {
                     "file": "docs/sysml/16-iommu-requirements.sysml",
-                    "line": 864
+                    "line": 1062
                   }
                 }
               ]
