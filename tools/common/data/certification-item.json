@@ -116,6 +116,21 @@
       "H.FAIL.1 and SAFETY-MANUAL 3 claim; any other value is said and taken",
       "as halt (ITEM.md 5, AoU-32)."
     ],
+    "vtd": "on",
+    "vtd_settings": [
+      "on",
+      "off"
+    ],
+    "vtd_why": [
+      "`ferrix.vtd=off` leaves every VT-d unit alone (L.iommu.71): no DMA is",
+      "translated, no interrupt remapped, the isolated-interrupts mark is",
+      "refused, and the audit record's Vtd configuration item reads 0. `on`,",
+      "the default and the reference, drives every unit accept takes; any",
+      "other value is driven as `on`. `off` is for recovering a machine whose",
+      "units break its boot, outside the reference configuration (ITEM.md 5,",
+      "SAFETY-MANUAL AoU-8; the certification consultant's ledger 2026-10-17,",
+      "lines 2122 (11) and 2174 (5))."
+    ],
     "driver_updates": "absent",
     "driver_updates_settings": [
       "absent",
