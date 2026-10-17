@@ -12,6 +12,8 @@
 //! makes is one descriptor and a wait descriptor behind it, so the queue is
 //! never more than a few deep.
 
+pub use super::unit::Drain;
+
 /// One descriptor: its low quadword, then its high one, as the unit reads
 /// them from the queue.
 pub type Descriptor = [u64; 2];
@@ -38,6 +40,11 @@ const GRANULARITY_DOMAIN: u64 = 2 << 4;
 /// Context-cache granularity: one source ID (bits 47:32) in one domain
 /// (bits 31:16).
 const GRANULARITY_DEVICE: u64 = 3 << 4;
+
+/// IOTLB invalidate: drain writes.
+const DRAIN_WRITE: u64 = 1 << 6;
+/// IOTLB invalidate: drain reads.
+const DRAIN_READ: u64 = 1 << 7;
 
 /// Interrupt entry cache invalidate: one index (bits 47:32), not every
 /// entry.
@@ -118,15 +125,25 @@ pub const fn context(scope: ContextScope) -> Descriptor {
     }
 }
 
-/// An IOTLB invalidation of `scope`. The drain bits are left clear: QEMU's
-/// unit and every unit the kernel drives order an invalidation after the
-/// requests before it without them.
+/// An IOTLB invalidation of `scope`, draining as `drain` says: `DR` (bit 7)
+/// and `DW` (bit 6) make the invalidation complete only once the reads and
+/// writes that used the old translations have, which the kernel asks for
+/// whenever the unit can drain (`CAP.DRD`, `CAP.DWD`), as Linux's
+/// `qi_flush_iotlb` does. Without it a DMA in flight through a mapping just
+/// taken away could land after the wait, in a frame already given back.
 #[must_use]
-pub const fn iotlb(scope: IotlbScope) -> Descriptor {
-    match scope {
-        IotlbScope::Global => [TYPE_IOTLB | GRANULARITY_GLOBAL, 0],
-        IotlbScope::Domain(domain) => [TYPE_IOTLB | GRANULARITY_DOMAIN | (domain as u64) << 16, 0],
+pub const fn iotlb(scope: IotlbScope, drain: Drain) -> Descriptor {
+    let mut low = match scope {
+        IotlbScope::Global => TYPE_IOTLB | GRANULARITY_GLOBAL,
+        IotlbScope::Domain(domain) => TYPE_IOTLB | GRANULARITY_DOMAIN | (domain as u64) << 16,
+    };
+    if drain.read {
+        low |= DRAIN_READ;
     }
+    if drain.write {
+        low |= DRAIN_WRITE;
+    }
+    [low, 0]
 }
 
 /// An interrupt entry cache invalidation of `scope`, with no index mask.

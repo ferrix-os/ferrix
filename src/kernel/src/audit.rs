@@ -106,8 +106,22 @@ const FAIR_SLOTS: usize = 32;
 /// A fairness window's length, in nanoseconds.
 const SECOND: u64 = 1_000_000_000;
 
-/// How many of the first system records are pinned ([`Which::Boot`]).
-pub(crate) const BOOT_RECORDS: usize = 9;
+/// How many of the first system records are pinned ([`Which::Boot`]): the
+/// start-up record, the [`CONFIG_ITEMS`] configuration items bring-up
+/// records, and the boot brought up.
+pub(crate) const BOOT_RECORDS: usize = 10;
+
+/// How many configuration items bring-up records (`main.rs`'s
+/// `start_audit`, `audit::check::kernel_store`): one per [`Config`] value.
+pub(crate) const CONFIG_ITEMS: usize = 8;
+
+// A configuration item added without a pinned record for it would push the
+// boot-brought-up record out of the boot's own records, as it did once on
+// vtd-n150 (the consultant's C1, ledger 2026-10-17 line 2235).
+const _: () = assert!(
+    BOOT_RECORDS == 2 + CONFIG_ITEMS,
+    "BOOT_RECORDS must hold the start-up record, every configuration item and the boot brought up"
+);
 
 /// Who a record is about: the process and its job, which the TSF attests,
 /// and beside them the uid the personality says, which it does not.
@@ -200,7 +214,7 @@ pub(crate) enum Which {
     Refusals,
     /// The first [`BOOT_RECORDS`] system records, numbered as the
     /// high-value ring numbered them, which never wraps: a record past the
-    /// first nine is kept in the high-value ring alone.
+    /// first ten is kept in the high-value ring alone.
     Boot,
 }
 

@@ -290,6 +290,10 @@ pub enum Config {
     /// to 3 and the level's in bits 4 to 7. The same set as the `build`
     /// boot line, from the same `cfg`s.
     Build = 7,
+    /// `ferrix.vtd`: 1 when the kernel drives the VT-d units it accepts, 0
+    /// when `ferrix.vtd=off` left every one alone (a recovery
+    /// configuration, not an evaluated one).
+    Vtd = 8,
 }
 
 /// Whether the decision recorded went for the subject or against it.

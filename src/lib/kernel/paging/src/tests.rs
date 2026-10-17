@@ -18,7 +18,7 @@ use std::vec::Vec;
 use super::aarch64::{AArch64, MAIR_DEVICE, MAIR_EL1, MAIR_NORMAL, MAIR_NORMAL_NC};
 use super::armv7a::{Armv7a, MAIR0, MAIR1};
 use super::stage2::ArmStage2;
-use super::vtd::VtdSecondLevel;
+use super::vtd::{VtdFourLevel, VtdSecondLevel};
 use super::x86_64::X86_64;
 use super::*;
 
@@ -1708,6 +1708,75 @@ fn the_walk_behaves_the_same_through_vt_d() {
         MapFlags::DMA,
         MapFlags::DMA_READ_ONLY,
     ]);
+}
+
+/// Verifies: `L.iommu.61`
+#[test]
+fn the_walk_behaves_the_same_through_four_vt_d_levels() {
+    walk_properties::<VtdFourLevel>();
+    every_dma_flag_survives_a_descriptor::<VtdFourLevel>(&[MapFlags::DMA, MapFlags::DMA_READ_ONLY]);
+}
+
+/// Verifies: `L.iommu.61`
+#[test]
+fn four_vt_d_levels_start_at_the_512_gib_level_and_share_the_entries() {
+    assert_eq!(
+        VtdFourLevel::ROOT_LEVEL,
+        Level::ROOT,
+        "four tables to a page"
+    );
+    assert_eq!(levels::<VtdFourLevel>(), 4);
+    assert_eq!(levels::<VtdSecondLevel>(), 3);
+    assert!(
+        !VtdFourLevel::supports_block(Level::ROOT),
+        "no 512 GiB leaf"
+    );
+    assert!(VtdFourLevel::supports_block(Level::GIGABYTE));
+    assert!(VtdFourLevel::supports_block(Level::MEGABYTE));
+    assert!(VtdFourLevel::is_canonical(VirtAddr((1 << 48) - 1)));
+    assert!(!VtdFourLevel::is_canonical(VirtAddr(1 << 48)));
+    for (frame, level, flags) in [
+        (0x7F_FFFF_F000, Level::PAGE, MapFlags::DMA),
+        (0x20_0000, Level::MEGABYTE, MapFlags::DMA_READ_ONLY),
+        (0x4000_0000, Level::GIGABYTE, MapFlags::DMA),
+    ] {
+        assert_eq!(
+            VtdFourLevel::leaf_descriptor(PhysAddr(frame), level, flags),
+            VtdSecondLevel::leaf_descriptor(PhysAddr(frame), level, flags),
+            "the same leaf at {level:?}"
+        );
+    }
+    assert_eq!(
+        VtdFourLevel::table_descriptor(PhysAddr(0x1000), MapFlags::DMA_READ_ONLY),
+        0x1000 | 0b11
+    );
+
+    // A domain's addresses are below 2^39, so the top table only ever
+    // holds its first entry: what the unit walks from the context entry's
+    // root with AW = 2.
+    let (mut memory, mut mapper) = Memory::with_root::<VtdFourLevel>();
+    mapper.pages_only();
+    let last = (1_u64 << 39) - PAGE_SIZE;
+    for at in [0, 0x8000_0000, last] {
+        mapper
+            .map_range(
+                &mut memory,
+                VirtAddr(at),
+                PhysAddr(at),
+                PAGE_SIZE,
+                MapFlags::DMA,
+            )
+            .unwrap();
+        assert_eq!(
+            mapper.translate(&memory, VirtAddr(at + 0x123)),
+            Some(PhysAddr(at + 0x123))
+        );
+        assert_eq!(
+            mapper.mapping_level(&memory, VirtAddr(at)),
+            Some(Level::PAGE)
+        );
+    }
+    assert_eq!(Level::ROOT.index(VirtAddr(last)), 0, "root index 0");
 }
 
 #[test]

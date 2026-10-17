@@ -103,13 +103,6 @@
       "purpose": "The Intel GPU's kernel changes K2-K6 (docs/INTEL-GPU.md section 5; the consultant's design review, ledger 2026-10-18 line 2352, which asks for one reservation before any code). K2, core: L.iommu.73-78, dmar0's RMRR identity domain for 00:02.0 (exactly the RMRR's pages, refused over usable RAM or unaligned, its frames reserved for the boot, driver pins over it refused and never removing an RMRR entry, never detached across restarts). K3's L.object.192 and 194-196, L.device.44-45 and H.DMA.10 were written by intel-k3, which released L.object.193 and 197 unwritten. K4's L.device.46-48 were written by intel-k4, which released L.device.49 unwritten. K5's L.object.198-202 were released unwritten by intel-k5: its rules are the chardev core's, in the load ring, held by the chardev check and its controls. K6's L.user.132-133 were written by intel-k6, which released L.user.134 unwritten. Each landing releases its own ids; none for K7"
     },
     {
-      "ids": ["L.iommu.59-72"],
-      "owner": "vtd-n150",
-      "branch": "vtd-n150",
-      "date": "2026-10-17",
-      "purpose": "VT-d on the N150's units: version {1,4,5}, four-level walks, INCLUDE_PCI_ALL, every fault record, drain, window bounds, RMRR units remap only, PMR, x2APIC, FECTL, ferrix.vtd=off and the unchecked-boot fault line (consultant's OK IF, ledger 2026-10-17 line 2122)"
-    },
-    {
       "ids": ["H.OBJ.19", "L.object.197-202"],
       "owner": "mk-k6",
       "branch": "mk/k6",
