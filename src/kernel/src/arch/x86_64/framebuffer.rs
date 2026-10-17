@@ -60,7 +60,9 @@ pub(crate) fn framebuffer_flags() -> MapFlags {
         unsafe { cpu::read_msr(cpu::IA32_PAT) }
     });
     WINDOW_PAT.store(pat.unwrap_or(0), Ordering::Release);
-    MapFlags::x86_framebuffer(pat)
+    // Control (c)'s base: write-combining forced, whatever the table.
+    let _ = MapFlags::x86_framebuffer(pat);
+    MapFlags::KERNEL_COMBINING
 }
 
 /// The table [`framebuffer_flags`] chose the window's type by, when it read
