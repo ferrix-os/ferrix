@@ -101,7 +101,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixMemory` | `04-memory.sysml` | docs/ARCHITECTURE.md §4. The physical allocator, the heap, the page-table arithmetic and the kernel arena since stage 2; VMOs, process address spaces, demand paging and copy-on-write since stage 6, file mappings since stage 8. Reclaim is stage 13's and not built. |
 | `FerrixScheduling` | `05-scheduling.sysml` | Stages 3 to 5 run today: interrupts, a clock, every processor online, IPIs, TLB shootdown, grace periods, fair locks, and tasks scheduled by EEVDF in one Throughput domain. Stage 14's real-time domains are designed here (docs/ARCHITECTURE.md §5) and not yet written. |
 | `FerrixObjects` | `06-objects.sysml` | docs/ARCHITECTURE.md §2 and §3. The constants for the Linux half are in src/lib/proto/linux-abi and for the native half in src/lib/proto/native-abi. The objects a handle can name exist in src/kernel/src/object, the core half of a process among them; the POSIX half and threads in src/kernel/src/syscall. No handle names an address space or a thread yet. |
-| `FerrixIsolation` | `07-isolation.sysml` | docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters are built (S1 to S3, docs/SECCOMP.md); SECCOMP_RET_TRAP and TSYNC are not. |
+| `FerrixIsolation` | `07-isolation.sysml` | docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries, its filters, SECCOMP_RET_TRAP and TSYNC are built (S1 to S5, docs/SECCOMP.md), and test-seccomp runs a guest program on four ABIs (S6). |
 | `FerrixDrivers` | `08-drivers.sysml` | docs/ARCHITECTURE.md §7. The kernel enumerates buses because that needs ACPI or a device tree and privileged access; it does not drive devices. Everything from the device node outward is stage 10, which is done: the drivers are processes devmgr starts. What it still owes is named on the part that owes it. |
 | `FerrixStorage` | `09-storage.sysml` | docs/ARCHITECTURE.md §8. Block core, VFS, the small in-kernel filesystems and btrfs in three stages. What exists today is marked on each part. |
 | `FerrixRoadmap` | `10-roadmap.sysml` | docs/ROADMAP.md as requirements: one per stage, each with its exit criterion, its status, the boot test that verifies it, and the part of the system that satisfies or will satisfy it. Each stage's status keyword says whether it is done; docs/ROADMAP.md's "Where it stands" is the prose this follows. |
@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 139 packages, 7005 elements, 217 relations. Model digest `99a4632a753e8a08`.
+26 files, 139 packages, 7010 elements, 217 relations. Model digest `351af076a6a8740b`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -2161,7 +2161,7 @@ The item answers every call on the core's objects in a match the compiler holds 
 
 ### Isolation
 
-docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters are built (S1 to S3, docs/SECCOMP.md); SECCOMP_RET_TRAP and TSYNC are not.
+docs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries, its filters, SECCOMP_RET_TRAP and TSYNC are built (S1 to S5, docs/SECCOMP.md), and test-seccomp runs a guest program on four ABIs (S6).
 
 **NamespaceKind** — `Pid`, `Mount`, `Uts`, `Ipc`, `Net`, `User`, `Cgroup` and `Time`. 
 
@@ -2226,7 +2226,7 @@ Built (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup
 
 `#inProgress`  ·  stage 13
 
-Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able. Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per thread, the actions but SECCOMP_RET_TRAP, and the hook at all four entries; the fast path's quiet predicate reads a live count of filtered threads.
+Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able. Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per thread, every action but TRACE and USER_NOTIF (ENOSYS), TSYNC under the thread-list lock, and the hook at all four entries; the fast path's quiet predicate reads a live count of filtered threads.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -4478,6 +4478,7 @@ flowchart LR
 | `L.syscall.23` | `everySignalPostsSignal` | — | — | — |
 | `L.trap.5` | `noEntryMeansEnosys` | — | — | — |
 | `L.trap.6` | `aMovedProcessRunsInItsNewJob` | — | — | — |
+| `L.trap.8` | `aTrapAnswersOnlyTheCallsOwnRegister` | — | — | — |
 | `L.trap.7` | `theRegisteredFilterIsAskedFirst` | — | — | — |
 | `L.x86_64.129` | `messagesAreRemappable` | — | — | — |
 | `L.x86_64.130` | `theConsoleLineIsConverted` | — | — | — |
