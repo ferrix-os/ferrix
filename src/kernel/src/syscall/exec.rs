@@ -102,8 +102,52 @@ pub(crate) enum ExecError {
 /// Below the space's end rather than at it, because the top page is left
 /// unmapped deliberately — a program that walks off the end of its stack
 /// should fault rather than wrap to zero.
-fn stack_top(abi: Abi) -> u64 {
+const fn stack_top(abi: Abi) -> u64 {
     (load::user_end(abi) - PAGE_SIZE) & !(ferrix_ustack::STACK_ALIGN - 1)
+}
+
+/// How far below the stack's top the vDSO ends: 128 MiB, Linux's least gap
+/// between the stack's top and `mmap_base` (`MIN_GAP`, `mm/util.c`), where
+/// Linux's top-down search, and with it its vDSO, starts.
+const VDSO_GAP: u64 = 128 * 1024 * 1024;
+
+/// One past the vDSO's last page in a program's own space: 128 MiB below
+/// the stack's top, at `0x7FFF_F7FF_F000` on x86-64, where an unrandomised
+/// Linux places it. Its data page and image are the two pages below.
+///
+/// Not just below the stack's guard, where the top-down search put it
+/// before: that is `0x7FFF_FF6F_D000`, inside the range Wine's preloader
+/// reserves for itself on x86-64, `0x7FFF_FE00_0000..0x7FFF_FFFF_0000`
+/// (`loader/preloader.c`, `preload_info`, still so in GE-Proton 11). The
+/// preloader maps that range `PROT_NONE` with `MAP_FIXED`, which took the
+/// vDSO away, and drops `AT_SYSINFO_EHDR` when it points into it, so every
+/// Windows program's `clock_gettime` became a system call -- about 126
+/// thousand of them per sampler window on the N150 while the launcher
+/// downloaded. Here the vDSO is 96 MiB below that range. The 119 MiB
+/// between the vDSO and the stack's guard stay free; `mmap`'s search may use
+/// them, as `MAP_FIXED` and hints may on Linux.
+pub(crate) const VDSO_END: u64 = stack_top(Abi::Native) - VDSO_GAP;
+
+/// The range Wine's x86-64 preloader reserves at the top of the user half.
+const WINE_PRELOADER_TOP: core::ops::Range<u64> = 0x7FFF_FE00_0000..0x7FFF_FFFF_0000;
+
+const _: () = assert!(
+    VDSO_END <= stack_top(Abi::Native) - STACK_SIZE - STACK_GUARD,
+    "the vDSO must lie below the stack and its guard"
+);
+const _: () = assert!(
+    VDSO_END <= WINE_PRELOADER_TOP.start || VDSO_END - 2 * PAGE_SIZE >= WINE_PRELOADER_TOP.end,
+    "the vDSO must lie outside the range Wine's preloader reserves"
+);
+const _: () = assert!(
+    VDSO_END - 2 * PAGE_SIZE > load::pie_base(Abi::Native),
+    "the vDSO must lie above where a position-independent program is placed"
+);
+
+/// Whether the two pages ending at `end` meet the range Wine's x86-64
+/// preloader reserves, for the vDSO's placement check.
+pub(crate) const fn meets_wine_preloader_range(end: u64) -> bool {
+    end > WINE_PRELOADER_TOP.start && end - 2 * PAGE_SIZE < WINE_PRELOADER_TOP.end
 }
 
 /// The program's pointer width, as `src/lib/kernel/ustack` wants it told: this build's

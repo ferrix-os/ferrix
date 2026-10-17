@@ -71,6 +71,7 @@ pub(crate) fn check_the_vdso() -> Result<Option<Answered>, &'static str> {
     check_the_image(&image)?;
     let answered = check_the_data_page()?;
     check_the_mapping()?;
+    check_the_placement()?;
     check_a_program_reads_the_clock_through_it()?;
     Ok(Some(answered))
 }
@@ -186,6 +187,50 @@ fn check_the_mapping() -> Result<(), &'static str> {
         if space.protect(page, PAGE_SIZE, VmaFlags::READ_WRITE).is_ok() {
             return Err("mprotect made the vDSO's pages writable");
         }
+    }
+    Ok(())
+}
+
+/// A program's space, laid out as exec lays it out, has the vDSO's two
+/// pages ending at [`exec::VDSO_END`], 128 MiB below the stack's top: below
+/// the stack's guard with nothing between them, and outside the range Wine's
+/// x86-64 preloader reserves, `0x7FFF_FE00_0000..0x7FFF_FFFF_0000`, which
+/// the vDSO sat in when the search placed it below the guard.
+///
+/// Verifies: L.user.131
+fn check_the_placement() -> Result<(), &'static str> {
+    let class = if size_of::<usize>() == 8 {
+        Class::Elf64
+    } else {
+        Class::Elf32
+    };
+    let file = image::build_with(
+        class,
+        crate::arch::ARCH.elf_machine(),
+        image::Shape::Good,
+        crate::arch::USER_VDSO_PROGRAM,
+    );
+    let space = AddressSpace::new().map_err(|_| "could not make an address space")?;
+    let _ = exec::load_into(&space, crate::syscall::load::Source::Bytes(&file), None)
+        .map_err(|_| "a program could not be loaded to place the vDSO beside its stack")?;
+    let at = vdso::map_into(&space).ok_or("the vDSO could not be mapped beside a stack")?;
+    if at + PAGE_SIZE != exec::VDSO_END {
+        return Err("the vDSO does not end 128 MiB below the stack's top");
+    }
+    if exec::meets_wine_preloader_range(at + PAGE_SIZE) {
+        return Err("the vDSO lies in the range Wine's preloader reserves");
+    }
+    let regions = space
+        .regions()
+        .map_err(|_| "could not list a space's regions")?;
+    let above = regions
+        .iter()
+        .filter(|region| region.start >= at + PAGE_SIZE)
+        .min_by_key(|region| region.start);
+    if !above
+        .is_some_and(|region| !region.flags.read && !region.flags.write && !region.flags.execute)
+    {
+        return Err("something but the stack's guard lies above the vDSO");
     }
     Ok(())
 }

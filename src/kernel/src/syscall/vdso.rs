@@ -110,9 +110,15 @@ fn vdso() -> Option<&'static Vdso> {
 /// Map the vDSO into `space` and answer where its image is, for
 /// `AT_SYSINFO_EHDR`: `None` with no vDSO, or no room for one, and the
 /// program is started without, as it would be on an architecture without.
+///
+/// Its two pages end at [`exec::VDSO_END`](super::exec::VDSO_END), 128 MiB
+/// below the stack's top, which keeps them out of the range Wine's preloader
+/// reserves at the top of the user half.
 pub(crate) fn map_into(space: &AddressSpace) -> Option<u64> {
     let vdso = vdso()?;
-    space.map_shared_code(Arc::clone(&vdso.vmo)).ok()
+    space
+        .map_shared_code(Arc::clone(&vdso.vmo), super::exec::VDSO_END)
+        .ok()
 }
 
 /// The name of the return trampoline a signal handler without

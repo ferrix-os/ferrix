@@ -80,13 +80,6 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
-    },
-    {
-      "ids": ["L.user.131"],
-      "owner": "vdso-wine",
-      "branch": "vdso-wine",
-      "date": "2026-10-17",
-      "purpose": "The vDSO placed 128 MiB below the stack's top, outside the range Wine's x86-64 preloader reserves (0x7ffffe000000..0x7fffffff0000), so a preloader-started program keeps AT_SYSINFO_EHDR"
     }
   ]
 }

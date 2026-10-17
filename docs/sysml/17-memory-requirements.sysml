@@ -1986,6 +1986,20 @@ package FerrixMemoryRequirements {
                 "user::space::AddressSpace::with_page", "user::space::permits",
                 "user::space::AddressSpace::protect");
         }
+        requirement <'L.user.131'> theVdsoIsClearOfWinesRange : ItemLowLevel {
+            attribute :>> statement = "map_shared_code shall map a two-page object to
+                end at the address it is asked for when that range is free; the
+                vDSO is asked for 128 MiB below the stack's top, below the stack's
+                guard and outside 0x7ffffe000000..0x7fffffff0000, the range Wine's
+                x86-64 preloader reserves, so that a program it starts keeps
+                AT_SYSINFO_EHDR.";
+            attribute :>> criterion = "Where the architecture has a vDSO with a clock,
+                a space a program was loaded into as exec loads it maps the vDSO's
+                image at exec::VDSO_END less a page, outside Wine's range, with the
+                stack's guard the next region above it (the `vdso` line).";
+            attribute :>> parent = "H.SCHED.9";
+            attribute :>> unit = "user::space::AddressSpace::map_shared_code";
+        }
         requirement <'L.user.77'> aSpaceFindsItsTrampoline : ItemLowLevel {
             attribute :>> statement = "shared_code_at shall answer where
                 map_shared_code put an object in the space, so that a signal's return

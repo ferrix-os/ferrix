@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "dec6d98a1b15f683686d974eec88697671335f82ae7c59ec70fd0d9fa9bd21c2",
+  "digest": "09f22b9f5a7a559981bce25b24df5930f289e11d1d82543b33b555ff49311da8",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 138,
-    "elements": 6950,
+    "elements": 6955,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -49354,6 +49354,63 @@
               ]
             },
             {
+              "name": "theVdsoIsClearOfWinesRange",
+              "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theVdsoIsClearOfWinesRange",
+              "kind": "requirement",
+              "shortName": "L.user.131",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/17-memory-requirements.sysml",
+                "line": 1989
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theVdsoIsClearOfWinesRange",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"map_shared_code shall map a two-page object to end at the address it is asked for when that range is free; the vDSO is asked for 128 MiB below the stack's top, below the stack's guard and outside 0x7ffffe000000..0x7fffffff0000, the range Wine's x86-64 preloader reserves, so that a program it starts keeps AT_SYSINFO_EHDR.\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 1995
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theVdsoIsClearOfWinesRange",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Where the architecture has a vDSO with a clock, a space a program was loaded into as exec loads it maps the vDSO's image at exec::VDSO_END less a page, outside Wine's range, with the stack's guard the next region above it (the `vdso` line).\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 1999
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theVdsoIsClearOfWinesRange",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.SCHED.9\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2000
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theVdsoIsClearOfWinesRange",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"user::space::AddressSpace::map_shared_code\"",
+                  "source": {
+                    "file": "docs/sysml/17-memory-requirements.sysml",
+                    "line": 2001
+                  }
+                }
+              ]
+            },
+            {
               "name": "aSpaceFindsItsTrampoline",
               "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::aSpaceFindsItsTrampoline",
               "kind": "requirement",
@@ -49361,7 +49418,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 1989
+                "line": 2003
               },
               "children": [
                 {
@@ -49372,7 +49429,7 @@
                   "value": "\"shared_code_at shall answer where map_shared_code put an object in the space, so that a signal's return trampoline is found at its place in the mapped vDSO.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 1992
+                    "line": 2006
                   }
                 },
                 {
@@ -49383,7 +49440,7 @@
                   "value": "\"On an architecture whose vDSO holds only its signal return trampoline, a fresh space the vDSO is mapped into finds the trampoline at the mapped image plus the trampoline's offset (the `vdso` line).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 1996
+                    "line": 2010
                   }
                 },
                 {
@@ -49394,7 +49451,7 @@
                   "value": "\"H.TRAP.4\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 1997
+                    "line": 2011
                   }
                 },
                 {
@@ -49405,7 +49462,7 @@
                   "value": "\"user::space::AddressSpace::shared_code_at\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 1998
+                    "line": 2012
                   }
                 }
               ]
@@ -49418,7 +49475,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2000
+                "line": 2014
               },
               "children": [
                 {
@@ -49429,7 +49486,7 @@
                   "value": "\"shared_object_at shall name, for an address in a shared region, the object and byte offset every space mapping that object names it by.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2003
+                    "line": 2017
                   }
                 },
                 {
@@ -49440,7 +49497,7 @@
                   "value": "\"A parent waiting without FUTEX_PRIVATE_FLAG on a MAP_SHARED word is not woken by its fork child's private-keyed wake of the same word and is woken by the child's shared wake.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2006
+                    "line": 2020
                   }
                 },
                 {
@@ -49451,7 +49508,7 @@
                   "value": "\"H.MEM.16\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2007
+                    "line": 2021
                   }
                 },
                 {
@@ -49462,7 +49519,7 @@
                   "value": "\"user::space::AddressSpace::shared_object_at\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2008
+                    "line": 2022
                   }
                 }
               ]
@@ -49475,7 +49532,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2013
+                "line": 2027
               },
               "children": [
                 {
@@ -49486,7 +49543,7 @@
                   "value": "\"advise with Discard or Free on private anonymous memory shall give the range's frames back at once and leave the range mapped, reading zeros, its neighbours untouched; a hint shall drop nothing.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2017
+                    "line": 2031
                   }
                 },
                 {
@@ -49497,7 +49554,7 @@
                   "value": "\"Of 10 written pages, MADV_DONTNEED of pages 1 to 8 gives back exactly 8 frames, lowers the resident count by 8, pages 1 to 8 read 0 and pages 0 and 9 their pattern; MADV_FREE the same; 12 hints over all 10 pages each answer 0 and every page keeps its pattern.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2022
+                    "line": 2036
                   }
                 },
                 {
@@ -49508,7 +49565,7 @@
                   "value": "(\"H.MEM.9\", \"H.MEM.6\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2023
+                    "line": 2037
                   }
                 },
                 {
@@ -49519,7 +49576,7 @@
                   "value": "(\"user::space::AddressSpace::advise\", \"user::space::AddressSpace::advise_region\", \"user::space::Advised::take\", \"user::space::AddressSpace::begin_shootdown\", \"user::space::AddressSpace::shoot\", \"user::space::AddressSpace::resident_pages\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2029
+                    "line": 2043
                   }
                 }
               ]
@@ -49532,7 +49589,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2031
+                "line": 2045
               },
               "children": [
                 {
@@ -49543,7 +49600,7 @@
                   "value": "\"advise dropping a page a fork left shared shall take only this space's reference, so the other space keeps the page's contents.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2034
+                    "line": 2048
                   }
                 },
                 {
@@ -49554,7 +49611,7 @@
                   "value": "\"After a fork, the parent's MADV_DONTNEED of a written page leaves the parent reading 0 there and the child reading the page's pattern.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2037
+                    "line": 2051
                   }
                 },
                 {
@@ -49565,7 +49622,7 @@
                   "value": "\"H.MEM.8\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2038
+                    "line": 2052
                   }
                 },
                 {
@@ -49576,7 +49633,7 @@
                   "value": "(\"user::space::AddressSpace::advise\", \"user::space::AddressSpace::advise_region\", \"user::space::Advised::take\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2041
+                    "line": 2055
                   }
                 }
               ]
@@ -49589,7 +49646,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2043
+                "line": 2057
               },
               "children": [
                 {
@@ -49600,7 +49657,7 @@
                   "value": "\"advise shall drop a private file mapping's copies and show the file there again, drop only a shared file mapping's translations, take no page out of the file, and refuse Free and Remove on a file mapping as Linux does.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2047
+                    "line": 2061
                   }
                 },
                 {
@@ -49611,7 +49668,7 @@
                   "value": "\"Two copied pages of a private memfd mapping, dropped, give back exactly 2 frames and show the file's bytes; a shared mapping dropped still shows what it wrote, as the file does; MADV_FREE is EINVAL on both, MADV_REMOVE EACCES on the private and EOPNOTSUPP on the shared; the file's committed count is unchanged.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2052
+                    "line": 2066
                   }
                 },
                 {
@@ -49622,7 +49679,7 @@
                   "value": "\"H.MEM.9\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2053
+                    "line": 2067
                   }
                 },
                 {
@@ -49633,7 +49690,7 @@
                   "value": "(\"user::space::AddressSpace::advise\", \"user::space::AddressSpace::advise_region\", \"user::space::Advised::take\", \"user::space::removable\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2056
+                    "line": 2070
                   }
                 }
               ]
@@ -49646,7 +49703,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2058
+                "line": 2072
               },
               "children": [
                 {
@@ -49657,7 +49714,7 @@
                   "value": "\"advise with Remove on shared anonymous memory shall take the range's pages out of the object, so every space that maps it reads zeros there and the frames go back, and Discard there shall keep the contents.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2062
+                    "line": 2076
                   }
                 },
                 {
@@ -49668,7 +49725,7 @@
                   "value": "\"Of 4 written shared pages seen by a fork child, MADV_REMOVE of pages 1 and 2 gives back exactly 2 frames, both spaces read 0 there and the pattern at pages 0 and 3; MADV_DONTNEED of page 0 keeps its pattern; MADV_FREE there is EINVAL.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2066
+                    "line": 2080
                   }
                 },
                 {
@@ -49679,7 +49736,7 @@
                   "value": "(\"H.MEM.6\", \"H.MEM.9\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2067
+                    "line": 2081
                   }
                 },
                 {
@@ -49690,7 +49747,7 @@
                   "value": "(\"user::space::AddressSpace::advise\", \"user::space::AddressSpace::advise_region\", \"user::space::removable\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2069
+                    "line": 2083
                   }
                 }
               ]
@@ -49703,7 +49760,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2071
+                "line": 2085
               },
               "children": [
                 {
@@ -49714,7 +49771,7 @@
                   "value": "\"advise shall advise every mapped part of a range and then answer Unmapped for a part no region maps, and shall refuse Remove on private anonymous memory as Invalid.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2074
+                    "line": 2088
                   }
                 },
                 {
@@ -49725,7 +49782,7 @@
                   "value": "\"MADV_REMOVE on private anonymous memory is EINVAL; madvise of 0 bytes answers 0; over two pages whose second is unmapped MADV_DONTNEED is ENOMEM and the first page reads 0 after, and MADV_WILLNEED is ENOMEM.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2078
+                    "line": 2092
                   }
                 },
                 {
@@ -49736,7 +49793,7 @@
                   "value": "\"H.MEM.9\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2079
+                    "line": 2093
                   }
                 },
                 {
@@ -49747,7 +49804,7 @@
                   "value": "(\"user::space::AddressSpace::advise\", \"user::space::AddressSpace::advise_region\", \"user::space::removable\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2081
+                    "line": 2095
                   }
                 }
               ]
@@ -49760,7 +49817,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2083
+                "line": 2097
               },
               "children": [
                 {
@@ -49771,7 +49828,7 @@
                   "value": "\"advise shall refuse as Invalid any advice that drops pages on a device region, and Discard without locked_too, Free and Remove on an mlocked region, dropping nothing there.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2086
+                    "line": 2100
                   }
                 },
                 {
@@ -49782,7 +49839,7 @@
                   "value": "\"MADV_DONTNEED, MADV_FREE and MADV_REMOVE on an mlocked region and MADV_DONTNEED on an I/O mapping are each EINVAL, 4 of 4, with 0 frames given back and the pages' contents kept; MADV_DONTNEED_LOCKED on the mlocked region drops it.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2090
+                    "line": 2104
                   }
                 },
                 {
@@ -49793,7 +49850,7 @@
                   "value": "\"H.MEM.9\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2091
+                    "line": 2105
                   }
                 },
                 {
@@ -49804,7 +49861,7 @@
                   "value": "\"user::space::AddressSpace::advise_region\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2092
+                    "line": 2106
                   }
                 }
               ]
@@ -49817,7 +49874,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2094
+                "line": 2108
               },
               "children": [
                 {
@@ -49828,7 +49885,7 @@
                   "value": "\"advise that has no memory to note what it would take shall answer NoMemory before taking the region's pages or translations, the parts before it already advised.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2097
+                    "line": 2111
                   }
                 },
                 {
@@ -49839,7 +49896,7 @@
                   "value": "\"With each allocation of an MADV_DONTNEED over three regions failed in turn, each run answers 0 or EAGAIN, the pages of the refused region and after it keep their contents, and 0 frames are kept.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2101
+                    "line": 2115
                   }
                 },
                 {
@@ -49850,7 +49907,7 @@
                   "value": "\"H.MEM.11\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2102
+                    "line": 2116
                   }
                 },
                 {
@@ -49861,7 +49918,7 @@
                   "value": "(\"user::space::Advised::take\", \"user::space::AddressSpace::advise_region\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2104
+                    "line": 2118
                   }
                 }
               ]
@@ -49874,7 +49931,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2109
+                "line": 2123
               },
               "children": [
                 {
@@ -49885,7 +49942,7 @@
                   "value": "\"protect shall take the range's translations out of the tables, so the next access is judged by the new permissions, and keep the pages' contents.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2112
+                    "line": 2126
                   }
                 },
                 {
@@ -49896,7 +49953,7 @@
                   "value": "\"After mprotect of a written page to read-only the page does not translate, a copy into it is refused, and a copy out of it reads what was written.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2115
+                    "line": 2129
                   }
                 },
                 {
@@ -49907,7 +49964,7 @@
                   "value": "\"H.MEM.1\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2116
+                    "line": 2130
                   }
                 },
                 {
@@ -49918,7 +49975,7 @@
                   "value": "(\"user::space::AddressSpace::protect\", \"user::space::AddressSpace::begin_shootdown\", \"user::space::AddressSpace::shoot\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2119
+                    "line": 2133
                   }
                 }
               ]
@@ -49931,7 +49988,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2121
+                "line": 2135
               },
               "children": [
                 {
@@ -49942,7 +49999,7 @@
                   "value": "\"protect shall invalidate the old translation on the processor that made the call, so the program's next write to a page it made read-only faults.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2124
+                    "line": 2138
                   }
                 },
                 {
@@ -49953,7 +50010,7 @@
                   "value": "\"The `mprotect` program, pinned to another processor where there is one, writes a page, makes it read-only and writes again, and is ended by SIGSEGV (status 139), not exit 1.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2127
+                    "line": 2141
                   }
                 },
                 {
@@ -49964,7 +50021,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2128
+                    "line": 2142
                   }
                 },
                 {
@@ -49975,7 +50032,7 @@
                   "value": "(\"user::space::AddressSpace::protect\", \"user::space::AddressSpace::shoot\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2130
+                    "line": 2144
                   }
                 }
               ]
@@ -49988,7 +50045,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2132
+                "line": 2146
               },
               "children": [
                 {
@@ -49999,7 +50056,7 @@
                   "value": "\"protect shall reach every processor that may hold the space's translations, so that a thread on another processor cannot write through the writable entry it cached before.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2135
+                    "line": 2149
                   }
                 },
                 {
@@ -50010,7 +50067,7 @@
                   "value": "\"On a machine with two processors or more, a child that wrote a shared page and holds still on its processor has the page protected read-only from this one: the page no longer translates, and the child's next write ends it with SIGSEGV, 11, instead of answering (the `rmap` line).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2140
+                    "line": 2154
                   }
                 },
                 {
@@ -50021,7 +50078,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2141
+                    "line": 2155
                   }
                 },
                 {
@@ -50032,7 +50089,7 @@
                   "value": "(\"user::space::AddressSpace::protect\", \"user::space::AddressSpace::begin_shootdown\", \"user::space::AddressSpace::shoot\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2144
+                    "line": 2158
                   }
                 }
               ]
@@ -50045,7 +50102,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2146
+                "line": 2160
               },
               "children": [
                 {
@@ -50056,7 +50113,7 @@
                   "value": "\"protect shall refuse with Refused to make writable a range reaching a shared file mapping that may not write its file, before changing anything.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2149
+                    "line": 2163
                   }
                 },
                 {
@@ -50067,7 +50124,7 @@
                   "value": "\"mprotect to read-write of a shared read-only mapping of a file opened read-only answers EACCES.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2151
+                    "line": 2165
                   }
                 },
                 {
@@ -50078,7 +50135,7 @@
                   "value": "\"H.MEM.1\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2152
+                    "line": 2166
                   }
                 },
                 {
@@ -50089,7 +50146,7 @@
                   "value": "\"user::space::AddressSpace::protect\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2153
+                    "line": 2167
                   }
                 }
               ]
@@ -50102,7 +50159,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2158
+                "line": 2172
               },
               "children": [
                 {
@@ -50113,7 +50170,7 @@
                   "value": "\"forget_runs shall take down every translation the space has of the object's named pages and answer the processors that may still cache one, so that the object's shootdown reaches them before the frame goes back.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2162
+                    "line": 2176
                   }
                 },
                 {
@@ -50124,7 +50181,7 @@
                   "value": "\"On a machine with two processors or more, with a shared page touched by a parent and its fork child on two processors, decommitting it leaves it translated in neither space; the given-up frame, claimed and poisoned, is not what the child then reads (it reads 0) or writes (the poison stays whole), and the page comes back in another frame.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2168
+                    "line": 2182
                   }
                 },
                 {
@@ -50135,7 +50192,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2169
+                    "line": 2183
                   }
                 },
                 {
@@ -50146,7 +50203,7 @@
                   "value": "(\"user::space::AddressSpace::forget_runs\", \"user::space::AddressSpace::forget_in\", \"user::space::AddressSpace::begin_shootdown\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2172
+                    "line": 2186
                   }
                 }
               ]
@@ -50159,7 +50216,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2174
+                "line": 2188
               },
               "children": [
                 {
@@ -50170,7 +50227,7 @@
                   "value": "\"forget_runs shall ask for the whole TLB of the space's processors to be flushed, and answer them, whenever a shootdown of the space has begun and not returned, even when it found no translation to take down.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2178
+                    "line": 2192
                   }
                 },
                 {
@@ -50181,7 +50238,7 @@
                   "value": "\"A decommit of a page whose translation a concurrent unmap has taken out of the tables, but whose shootdown has not returned, is answered with the space's processors and a whole-TLB flush, and the frame is claimed back only after that flush.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2183
+                    "line": 2197
                   }
                 },
                 {
@@ -50192,7 +50249,7 @@
                   "value": "\"H.MEM.17\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2184
+                    "line": 2198
                   }
                 },
                 {
@@ -50203,7 +50260,7 @@
                   "value": "(\"user::space::AddressSpace::forget_runs\", \"user::space::AddressSpace::begin_shootdown\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2186
+                    "line": 2200
                   }
                 }
               ]
@@ -50216,7 +50273,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2188
+                "line": 2202
               },
               "children": [
                 {
@@ -50227,7 +50284,7 @@
                   "value": "\"A page of a file mapping wholly past the file's end shall be refused, shared or private, and a truncation shall take a private mapping's copies past the cut, so the file grown back shows zeros there.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2192
+                    "line": 2206
                   }
                 },
                 {
@@ -50238,7 +50295,7 @@
                   "value": "\"A file of 2 pages and 100 bytes, mapped 4 pages shared and 4 private and cut to 1 page: page 0 still reads, pages 1 to 3 are refused in each mapping, 3 of 3 and 3 of 3; grown back to 2 pages, page 1 reads 0 in both.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2196
+                    "line": 2210
                   }
                 },
                 {
@@ -50249,7 +50306,7 @@
                   "value": "(\"H.MEM.1\", \"H.MEM.6\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2197
+                    "line": 2211
                   }
                 },
                 {
@@ -50260,7 +50317,7 @@
                   "value": "(\"user::space::commit_page\", \"user::space::AddressSpace::fault_private_file\", \"user::space::AddressSpace::forget_runs\", \"user::space::cut_shadow\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2200
+                    "line": 2214
                   }
                 }
               ]
@@ -50273,7 +50330,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2205
+                "line": 2219
               },
               "children": [
                 {
@@ -50284,7 +50341,7 @@
                   "value": "\"A shared file mapping shall show the file's own pages, so that a write through it is what the file reads back and a write to the file is what it shows.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2208
+                    "line": 2222
                   }
                 },
                 {
@@ -50295,7 +50352,7 @@
                   "value": "\"A shared mapping of a file of 2 pages and 100 bytes shows those bytes and zeros to the end of the third page; bytes written through it are what the file reads back, and bytes written to the file are what it shows.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2212
+                    "line": 2226
                   }
                 },
                 {
@@ -50306,7 +50363,7 @@
                   "value": "\"H.MEM.1\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2213
+                    "line": 2227
                   }
                 },
                 {
@@ -50317,7 +50374,7 @@
                   "value": "(\"user::space::AddressSpace::map_file\", \"user::space::AddressSpace::add_file\", \"user::space::file_placement\", \"user::space::AddressSpace::resolve\", \"user::space::commit_page\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2216
+                    "line": 2230
                   }
                 }
               ]
@@ -50330,7 +50387,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2218
+                "line": 2232
               },
               "children": [
                 {
@@ -50341,7 +50398,7 @@
                   "value": "\"A private file mapping shall show the file until it writes a page and then keep that page to itself, so that neither its writes nor a read into it reach the file or a shared mapping, while the file's writes still show through pages it has not copied.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2223
+                    "line": 2237
                   }
                 },
                 {
@@ -50352,7 +50409,7 @@
                   "value": "\"The private mapping shows the file's first page; a write through it and a read() into it each show in it and in neither the file nor the shared mapping; a write to the file shows through a page it never copied and not through one it did.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2227
+                    "line": 2241
                   }
                 },
                 {
@@ -50363,7 +50420,7 @@
                   "value": "\"H.MEM.8\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2228
+                    "line": 2242
                   }
                 },
                 {
@@ -50374,7 +50431,7 @@
                   "value": "(\"user::space::AddressSpace::map_file\", \"user::space::AddressSpace::add_file\", \"user::space::AddressSpace::fault_private_file\", \"user::space::AddressSpace::install_page\", \"user::space::AddressSpace::with_page\", \"user::space::writable_in_place\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2234
+                    "line": 2248
                   }
                 }
               ]
@@ -50387,7 +50444,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2236
+                "line": 2250
               },
               "children": [
                 {
@@ -50398,7 +50455,7 @@
                   "value": "\"fork shall give the child the private file mapping's copies, and the child's write into one shall reach neither the parent nor the file.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2239
+                    "line": 2253
                   }
                 },
                 {
@@ -50409,7 +50466,7 @@
                   "value": "\"A fork child reads the parent's private copy; its write into a page the parent copied before the fork is seen by neither the parent nor the file.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2242
+                    "line": 2256
                   }
                 },
                 {
@@ -50420,7 +50477,7 @@
                   "value": "\"H.MEM.8\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2243
+                    "line": 2257
                   }
                 },
                 {
@@ -50431,7 +50488,7 @@
                   "value": "(\"user::space::AddressSpace::fork\", \"user::space::attach_child\", \"user::space::AddressSpace::fault_private_file\", \"user::space::AddressSpace::copy_shadow_page\", \"user::space::writable_in_place\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2248
+                    "line": 2262
                   }
                 }
               ]
@@ -50444,7 +50501,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2250
+                "line": 2264
               },
               "children": [
                 {
@@ -50455,7 +50512,7 @@
                   "value": "\"A program's write to a private file mapping's page it has only read shall copy the page and go through, not fault on the file's read-only page forever, and shall not reach the file.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2253
+                    "line": 2267
                   }
                 },
                 {
@@ -50466,7 +50523,7 @@
                   "value": "\"A program reads a private file page then writes it, and answers within 10 s with the file's word before and its marker after; forked and the child dropped, its next write answers too; the file's first word is unchanged.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2257
+                    "line": 2271
                   }
                 },
                 {
@@ -50477,7 +50534,7 @@
                   "value": "\"H.MEM.8\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2258
+                    "line": 2272
                   }
                 },
                 {
@@ -50488,7 +50545,7 @@
                   "value": "(\"user::space::AddressSpace::fault_private_file\", \"user::space::AddressSpace::install_page\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2260
+                    "line": 2274
                   }
                 }
               ]
@@ -50501,7 +50558,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2262
+                "line": 2276
               },
               "children": [
                 {
@@ -50512,7 +50569,7 @@
                   "value": "\"map_file shall place a fixed private mapping exactly where asked, showing the file, an executable one not writable, and a writable one made read-only by protect keeping what was written.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2266
+                    "line": 2280
                   }
                 },
                 {
@@ -50523,7 +50580,7 @@
                   "value": "\"A fixed read-execute file mapping lands at its address, shows the file's first page and refuses a write; a fixed read-write one lands next to it, takes a write, and after mprotect to read-only keeps it and refuses the next write.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2270
+                    "line": 2284
                   }
                 },
                 {
@@ -50534,7 +50591,7 @@
                   "value": "(\"H.MEM.1\", \"H.MEM.18\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2271
+                    "line": 2285
                   }
                 },
                 {
@@ -50545,7 +50602,7 @@
                   "value": "(\"user::space::AddressSpace::map_file\", \"user::space::file_placement\", \"user::space::AddressSpace::fault_private_file\", \"user::space::AddressSpace::protect\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2275
+                    "line": 2289
                   }
                 }
               ]
@@ -50558,7 +50615,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2277
+                "line": 2291
               },
               "children": [
                 {
@@ -50569,7 +50626,7 @@
                   "value": "\"with_regions shall show each region with its permissions, share mode and file, so that /proc/<pid>/maps names a shared writable file mapping by its file.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2280
+                    "line": 2294
                   }
                 },
                 {
@@ -50580,7 +50637,7 @@
                   "value": "\"/proc/<pid>/maps of the check's process has a line marked rw-s that ends in the mapped file's path.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2282
+                    "line": 2296
                   }
                 },
                 {
@@ -50591,7 +50648,7 @@
                   "value": "\"H.MEM.1\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2283
+                    "line": 2297
                   }
                 },
                 {
@@ -50602,7 +50659,7 @@
                   "value": "\"user::space::AddressSpace::with_regions\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2284
+                    "line": 2298
                   }
                 }
               ]
@@ -50615,7 +50672,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2289
+                "line": 2303
               },
               "children": [
                 {
@@ -50626,7 +50683,7 @@
                   "value": "\"fault shall be refused when the frame or page table it needs would pass the running task's job's memory limit, without holding back a sibling job, and a space's drop shall give every frame and table it was charged for back.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2293
+                    "line": 2307
                   }
                 },
                 {
@@ -50637,7 +50694,7 @@
                   "value": "\"Faulting a space in page by page as a task of a job limited to 48 pages' worth stops short of 48 pages, the refusal counted and the job's memory within one page of its limit; a sibling faults all 48 in; with both spaces dropped every level's memory and kernel memory read 0 (the `quota` line).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2298
+                    "line": 2312
                   }
                 },
                 {
@@ -50648,7 +50705,7 @@
                   "value": "\"H.QUOTA.2\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2299
+                    "line": 2313
                   }
                 },
                 {
@@ -50659,7 +50716,7 @@
                   "value": "(\"user::space::AddressSpace::fault\", \"user::space::AddressSpace::resolve\", \"user::space::commit_page\", \"user::space::AddressSpace::drop\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2302
+                    "line": 2316
                   }
                 }
               ]
@@ -50672,7 +50729,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2304
+                "line": 2318
               },
               "children": [
                 {
@@ -50683,7 +50740,7 @@
                   "value": "\"Every address space operation that allocates -- fork, the maps, fault, remap and unmap -- shall answer a refused allocation with OutOfMemory or absorb it, and keep no frame.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2307
+                    "line": 2321
                   }
                 },
                 {
@@ -50694,7 +50751,7 @@
                   "value": "\"With the n-th allocation failed alone for every n until a run in which none was, each run of the fork, move, shared, split, cut, object, stacks, code and page scenarios ends in success or out of memory, never another refusal, the run with nothing failed succeeds, and each scenario's frame window keeps 0 frames (the `sweep` line).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2313
+                    "line": 2327
                   }
                 },
                 {
@@ -50705,7 +50762,7 @@
                   "value": "\"H.MEM.11\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2314
+                    "line": 2328
                   }
                 },
                 {
@@ -50716,7 +50773,7 @@
                   "value": "(\"user::space::AddressSpace::add_region\", \"user::space::AddressSpace::abandon_region\", \"user::space::unrooted\", \"user::space::inherited\", \"user::space::attach_child\", \"user::space::map_error\", \"user::space::remap_object\", \"user::space::AddressSpace::fork\", \"user::space::AddressSpace::map_file\", \"user::space::AddressSpace::add_file\", \"user::space::AddressSpace::map_window\", \"user::space::AddressSpace::map_object\", \"user::space::AddressSpace::map_shared_code\", \"user::space::AddressSpace::add_fresh\", \"user::space::AddressSpace::drop_fresh\", \"user::space::AddressSpace::move_private\", \"user::space::AddressSpace::remap_backing\", \"user::space::note\", \"user::space::AddressSpace::give_back\", \"user::space::AddressSpace::drop_unnamed\", \"user::space::Named::of\", \"user::space::drop_objects\", \"user::space::AddressSpace::drop\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2331
+                    "line": 2345
                   }
                 }
               ]
@@ -50729,7 +50786,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2333
+                "line": 2347
               },
               "children": [
                 {
@@ -50740,7 +50797,7 @@
                   "value": "\"The address space operations stage 6 checks shall give back every frame they took and every page table their takedowns emptied, none left on a shootdown list dropped unreleased.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2337
+                    "line": 2351
                   }
                 },
                 {
@@ -50751,7 +50808,7 @@
                   "value": "\"After stage 6's object and address space checks 0 page tables are counted kept (mm::tables_kept), and the held frame count is what it was before them, 0 frames leaked (the `objects` line).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2341
+                    "line": 2355
                   }
                 },
                 {
@@ -50762,7 +50819,7 @@
                   "value": "(\"H.MEM.9\", \"H.MEM.7\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2342
+                    "line": 2356
                   }
                 },
                 {
@@ -50773,7 +50830,7 @@
                   "value": "(\"user::space::AddressSpace::unmap\", \"user::space::AddressSpace::take_down\", \"user::space::AddressSpace::protect\", \"user::space::AddressSpace::unmap_copied_on_write\", \"user::space::AddressSpace::clear_for_remap\", \"user::space::AddressSpace::shoot\", \"user::space::AddressSpace::drop\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2349
+                    "line": 2363
                   }
                 }
               ]
@@ -50786,7 +50843,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2354
+                "line": 2368
               },
               "children": [
                 {
@@ -50797,7 +50854,7 @@
                   "value": "\"set_ceiling shall move the top of the window every mapping may reach, refusing an end past the user half or below a region still mapped and changing nothing then.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2357
+                    "line": 2371
                   }
                 },
                 {
@@ -50808,7 +50865,7 @@
                   "value": "\"With the ceiling set to 4 GiB less a page, an anywhere mapping lands below it and a fixed one reaching past it is refused; setting it past the user half, or below a mapped region, is refused BadRange and ceiling() reads as before.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2361
+                    "line": 2375
                   }
                 },
                 {
@@ -50819,7 +50876,7 @@
                   "value": "\"H.MEM.1\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2362
+                    "line": 2376
                   }
                 },
                 {
@@ -50830,7 +50887,7 @@
                   "value": "\"user::space::AddressSpace::set_ceiling\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2363
+                    "line": 2377
                   }
                 }
               ]
@@ -50843,7 +50900,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2365
+                "line": 2379
               },
               "children": [
                 {
@@ -50854,7 +50911,7 @@
                   "value": "\"fault shall have a file's object read a page of a file on a disk before mapping it, and answer a page the filesystem could not read with Unreadable and one it had no memory for with OutOfMemory.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2369
+                    "line": 2383
                   }
                 },
                 {
@@ -50865,7 +50922,7 @@
                   "value": "\"A shared and a private mapping of a file on a disk show its bytes, not zeros, on their first touch; a page whose read fails ends the program with SIGBUS.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2372
+                    "line": 2386
                   }
                 },
                 {
@@ -50876,7 +50933,7 @@
                   "value": "\"H.MEM.1\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2373
+                    "line": 2387
                   }
                 },
                 {
@@ -50887,7 +50944,7 @@
                   "value": "(\"user::space::AddressSpace::fill_file_page\", \"user::space::AddressSpace::fill_file_pages\", \"user::space::AddressSpace::fill_file_page_alone\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2376
+                    "line": 2390
                   }
                 }
               ]
@@ -50900,7 +50957,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2378
+                "line": 2392
               },
               "children": [
                 {
@@ -50911,7 +50968,7 @@
                   "value": "\"fault shall stop a debug kernel, naming the outermost lock's site, when it is asked to resolve a fault while a lock that disables preemption is held.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2381
+                    "line": 2395
                   }
                 },
                 {
@@ -50922,7 +50979,7 @@
                   "value": "\"In a debug build, a fault asked for while a spin lock is held stops the kernel with the assertion's message and that lock's file and line.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2384
+                    "line": 2398
                   }
                 },
                 {
@@ -50933,7 +50990,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2385
+                    "line": 2399
                   }
                 },
                 {
@@ -50944,7 +51001,7 @@
                   "value": "(\"user::space::fault_requested\", \"user::space::AddressSpace::fault\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2387
+                    "line": 2401
                   }
                 }
               ]
@@ -50957,7 +51014,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2389
+                "line": 2403
               },
               "children": [
                 {
@@ -50968,7 +51025,7 @@
                   "value": "\"unmap shall give back no page of its range, and no page table it emptied, before the shootdown covering them has returned from every processor in the space's set.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2392
+                    "line": 2406
                   }
                 },
                 {
@@ -50979,7 +51036,7 @@
                   "value": "\"On a machine with two processors or more, a page a program on another processor keeps reading is unmapped from this one; its frame, claimed back and poisoned the moment it is free, is never what the program reads: 0 poisoned reads, and the program faults.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2397
+                    "line": 2411
                   }
                 },
                 {
@@ -50990,7 +51047,7 @@
                   "value": "(\"H.MEM.7\", \"H.MEM.17\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2398
+                    "line": 2412
                   }
                 },
                 {
@@ -51001,7 +51058,7 @@
                   "value": "(\"user::space::AddressSpace::unmap\", \"user::space::AddressSpace::take_down\", \"user::space::AddressSpace::give_back\", \"user::space::AddressSpace::begin_shootdown\", \"user::space::AddressSpace::shoot\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2403
+                    "line": 2417
                   }
                 }
               ]
@@ -51014,7 +51071,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2405
+                "line": 2419
               },
               "children": [
                 {
@@ -51025,7 +51082,7 @@
                   "value": "\"map_code_page shall map a one-page object as a single read-and-run shared page, never writable, and refuse an object of any other size before changing the space.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2408
+                    "line": 2422
                   }
                 },
                 {
@@ -51036,7 +51093,7 @@
                   "value": "\"A two-page object is refused with BadRange and the space keeps its regions; a one-page object maps as one region read, execute and shared and not writable, one page long, and unmapping it leaves the space's regions as they were (the sweep's page scenario, the `sweep` line).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2413
+                    "line": 2427
                   }
                 },
                 {
@@ -51047,7 +51104,7 @@
                   "value": "\"H.MEM.18\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2414
+                    "line": 2428
                   }
                 },
                 {
@@ -51058,7 +51115,7 @@
                   "value": "\"user::space::AddressSpace::map_code_page\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2415
+                    "line": 2429
                   }
                 }
               ]

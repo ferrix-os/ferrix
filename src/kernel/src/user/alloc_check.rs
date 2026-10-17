@@ -460,7 +460,10 @@ fn map_shared_code(_: u64) -> Result<(), Refusal> {
     let space_ = space(AddressSpace::new(), "a fresh space was refused")?;
     let before = space_.region_count();
     let small = Vmo::new_anonymous(1)?;
-    if !matches!(space_.map_shared_code(small), Err(SpaceError::BadRange)) {
+    if !matches!(
+        space_.map_shared_code(small, crate::syscall::exec::VDSO_END),
+        Err(SpaceError::BadRange)
+    ) {
         return Err(Refusal::Wrong(
             "a one-page object was not refused as shared code",
         ));
@@ -472,7 +475,7 @@ fn map_shared_code(_: u64) -> Result<(), Refusal> {
     }
     let vmo = Vmo::new_anonymous(2)?;
     let code = space(
-        space_.map_shared_code(vmo),
+        space_.map_shared_code(vmo, crate::syscall::exec::VDSO_END),
         "mapping shared code was refused",
     )?;
     let regions = space_.regions()?;

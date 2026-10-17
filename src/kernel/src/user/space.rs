@@ -3016,10 +3016,11 @@ impl AddressSpace {
         Ok(at)
     }
 
-    /// Map the two pages of `vmo` wherever there is room: the first to be
-    /// read, the second to be read and run. What the Linux personality maps
-    /// its vDSO with, a data page and the code that reads it. Returns where
-    /// the second page went.
+    /// Map the two pages of `vmo`, ending at `end` if that is free and
+    /// wherever there is room if it is not: the first to be read, the second
+    /// to be read and run. What the Linux personality maps its vDSO with, a
+    /// data page and the code that reads it. Returns where the second page
+    /// went.
     ///
     /// The object is the kernel's, one for every process, so the region may
     /// never be written through: it is shared, so `fork` shares it rather
@@ -3048,7 +3049,7 @@ impl AddressSpace {
         })
     }
 
-    pub(crate) fn map_shared_code(&self, vmo: Arc<Vmo>) -> Result<u64, SpaceError> {
+    pub(crate) fn map_shared_code(&self, vmo: Arc<Vmo>, end: u64) -> Result<u64, SpaceError> {
         let len = 2 * PAGE_SIZE;
         if vmo.len_bytes() != len {
             return Err(SpaceError::BadRange);
@@ -3056,7 +3057,7 @@ impl AddressSpace {
         let mut inner = self.inner.lock();
         let at = inner
             .map
-            .find_free(len, PAGE_SIZE, None)
+            .find_free(len, PAGE_SIZE, end.checked_sub(len))
             .ok_or(SpaceError::OutOfMemory)?;
         if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
             return Err(SpaceError::NotUserRange(at));
