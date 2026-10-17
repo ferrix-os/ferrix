@@ -119,6 +119,14 @@ the command line is read (§3.3), and takes the region with
 `AllocatePages(AllocateAddress)` of memory type `0x8000_0006`
 (`FERRIX_PSTORE`, beside the five Ferrix types already in use).
 
+**Version 2.1 (2026-10-17, panic-reboot):** the rule is first tried with
+**1 GiB** in place of 64 MiB (`PREFERRED_ABOVE_LOWEST`), and only a map with
+no room there (a 512 MiB board) takes 64 MiB. Linux's EFI stub on a firmware
+without an RNG protocol decompresses its kernel at 16 MiB, past 72 MiB for
+Ubuntu's 7.0, before `memmap=` is read, so the N150 box's inspection Linux
+overwrote a region at 64 MiB; at 1 GiB it keeps it with `nokaslr
+memmap=2M$0x40000000`. Still derived from the map alone.
+
 Why chosen: EDK2 allocates top-down, so its boot-time allocations sit at the
 top of low RAM and the bottom of RAM above its own early work area stays
 conventional from boot to boot of the same machine and firmware; the rule

@@ -96,17 +96,41 @@ fn capacities_outside_the_bounds_are_refused() {
 const MIB: u64 = 1 << 20;
 
 #[test]
-fn the_choice_is_the_lowest_aligned_place_sixty_four_mebibytes_up() {
+fn the_choice_is_one_gibibyte_up_where_it_fits() {
     // A PC: low memory, then a big range from 1 MiB.
     let map = [(0x1000, 0x9_F000), (MIB, 2047 * MIB)];
-    assert_eq!(choose(map, 4096 * MIB, LEN), Some(64 * MIB), "a PC");
+    assert_eq!(choose(map, 4096 * MIB, LEN), Some(1024 * MIB), "a PC");
     // The same map in another order gives the same address.
     let turned = [(MIB, 2047 * MIB), (0x1000, 0x9_F000)];
     assert_eq!(
         choose(turned, 4096 * MIB, LEN),
-        Some(64 * MIB),
+        Some(1024 * MIB),
         "order does not matter"
     );
+    // A range ending just short of 1 GiB plus the region: sixty-four
+    // mebibytes up instead.
+    let short = [(0x1000, 0x9_F000), (MIB, 1024 * MIB)];
+    assert_eq!(
+        choose(short, 4096 * MIB, LEN),
+        Some(64 * MIB),
+        "no room at 1 GiB"
+    );
+}
+
+#[test]
+fn the_n150_box() {
+    // The SOYO M4 Pro's map below 4 GiB as Linux's e820 shows it
+    // (2026-10-16), and its RAM above: the region at 1 GiB, where the
+    // inspection Linux reserves it.
+    let map = [
+        (0, 0x9_E000),
+        (0x9_F000, 0x1000),
+        (MIB, 0x3e55_c000 - MIB),
+        (0x3e55_d000, 0x3e59_3000 - 0x3e55_d000),
+        (0x3e59_4000, 0x7023_0000 - 0x3e59_4000),
+        (0x1_0000_0000, 0x3_8000_0000),
+    ];
+    assert_eq!(choose(map, u64::MAX, LEN), Some(0x4000_0000), "the N150");
 }
 
 #[test]

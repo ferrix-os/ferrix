@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 132 | 81 | 51 |
-| Low (`L.*`) | 918 | 656 | 262 |
+| High (`H.*`) | 133 | 82 | 51 |
+| Low (`L.*`) | 922 | 659 | 263 |
 
-1965 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1971 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1967 |
+| Named by a low-level requirement | 1973 |
 | Accessors, covered by the requirement they serve | 951 |
 | Check code in a product file | 81 |
-| Named by none | 923 |
+| Named by none | 922 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -127,7 +127,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | ASR-3 | `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.14`, `H.OBJ.15`, `H.IRQ.1`, `H.DEV.1` |
 | ASR-4 | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.5`, `H.DEV.2`, `H.DEV.4` |
 | ASR-5 | `H.MEM.6` |
-| ASR-6 | `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4` |
+| ASR-6 | `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
 | ASR-7 | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.5` |
 | ASR-8 | `H.SCHED.1`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.5`, `H.SCHED.13` |
 | ASR-9 | `H.STORE.2`, `H.STORE.3`, `H.STORE.4`, `H.STORE.5`, `H.STORE.6`, `H.STORE.7`, `H.STORE.8` |
@@ -140,7 +140,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | O.AUDIT | `H.AUD.1`, `H.AUD.2`, `H.AUD.3`, `H.AUD.4`, `H.AUD.5`, `H.AUD.6`, `H.AUD.7`, `H.AUD.8`, `H.AUD.9`, `H.AUD.10`, `H.AUD.11`, `H.AUD.12`, `H.AUD.13` |
 | O.CAPABILITY | `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1` |
 | O.DMA | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.4`, `H.DMA.5`, `H.DEV.2`, `H.DEV.4` |
-| O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4` |
+| O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
 | O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.STORE.7` |
@@ -341,10 +341,11 @@ Each system-level requirement, and the high-level requirements that name it as t
 
 | Id | Statement | Criterion | Parent | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|
-| `H.FAIL.1` | On a failed internal consistency check the kernel shall stop every other processor, print a diagnostic naming the failure and its catalogued explanation, and halt without returning to user mode. | A boot told to panic at its end (`ferrix.onexit=panic`) ends with the FX-1501 report and no program output after it; every panic site in the item has a catalogue entry (`check-panic-audit.py`). | O.FAILSAFE, ASR-6 | *baselined* | — | — | — |
+| `H.FAIL.1` | On a failed internal consistency check the kernel shall stop every other processor, print a diagnostic naming the failure and its catalogued explanation, and halt without returning to user mode, or, where H.FAIL.5 applies, reset the machine after the report. | A boot told to panic at its end (`ferrix.onexit=panic`) ends with the FX-1501 report and no program output after it; every panic site in the item has a catalogue entry (`check-panic-audit.py`). | O.FAILSAFE, ASR-6 | *baselined* | — | — | — |
 | `H.FAIL.2` | The allocator every kernel stack comes from shall give each an unmapped guard page directly below and above it. | A kernel stack allocated, written at its first and last word and freed has the page below and the page above it untranslated, and gives back every frame it took. | O.FAILSAFE, ASR-6 | `src/kernel/src/mm/check.rs::check_stacks` | reached | reached | reached |
 | `H.FAIL.3` | A kernel stack overflow shall end in the halt and diagnostic of the safe state, never in a write below the stack. | A kernel thread that recurses past its stack ends the boot in a report naming the fault -- on x86-64 a double fault taken on its own stack (FX-9004) -- on each architecture, 3 of 3. | O.FAILSAFE, ASR-6 | *baselined* | — | — | — |
 | `H.FAIL.4` | Once a failure report has begun, a line the kernel writes shall reach the console port after a bounded wait even when the port's lock is held and will never be released. | A report begun while another context holds the port's lock for good reaches the port whole, after at most 10,000,000 attempts at the lock, on each architecture, 3 of 3. | O.FAILSAFE, ASR-6 | *baselined* | — | — | — |
+| `H.FAIL.5` | With ferrix.panic=reset read after stage 1's check, the first failure report shall, once its diagnostic and the reset line are on the port, in the pstore record and on the screen, wait 10 seconds on the free-running counter where its rate is known and reset the machine; with no value, halt, any other value, or in a report on another processor, it shall halt. | In cargo xtask test-postmortem (x86-64 under KVM, AArch64): a boot with ferrix.onexit=panic ferrix.panic=reset prints the reset line and the loader's banner comes again at least 9.5 s and at most 60 s later, quoting the panic; the same boot without the option and with ferrix.panic=Reset says it halts and prints no reset line. | O.FAILSAFE, ASR-6 | `tools/common/xtask/src/postmortem.rs::reset_by_itself` | xtask gate | xtask gate | xtask gate |
 
 ### Storage (`H.STORE`)
 
@@ -1531,6 +1532,15 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.console.43` | attach shall mirror the log into the loader's region only when it is whole pages, a header page and a ring of a power of two from 4 KiB to 16 MiB, wholly inside one Pstore entry of the memory map, RAM the direct map covers at both ends, and its header is valid with nothing recorded; else it shall say why in one line and write nothing there. | At boot, placement refuses a region made up inside the kernel image's entry and, around the loader's region, one not on a page, one no longer than its header, one whose ring is not a power of two and one running past its entry, and takes the loader's region: 5 of 5 refused when a region was attached, 1 of 1 when none. The header clause is ferrix-bootinfo's validate, whose host tests refuse a wrong magic, version, header length, capacity, region length, CRC and count: every_field_is_checked and capacities_outside_the_bounds_are_refused. By inspection of check: a valid header with a count other than 0 is refused, and nothing is written to the region before every clause passes (adopt is its only writer). | H.BOOT.1 | `console::pstore::attach`, `console::pstore::check`, `console::pstore::placement` | `src/kernel/src/console/log_check.rs::check_pstore_placement`, `src/lib/proto/bootinfo/src/pstore/tests.rs::every_field_is_checked`, `src/lib/proto/bootinfo/src/pstore/tests.rs::capacities_outside_the_bounds_are_refused` | not reached | not reached | not reached |
 | `L.console.44` | conclude shall write the pstore region back from the caches after the report's last line is drained and before the screen is drawn, taking no lock and allocating nothing; an abridged report shall write nothing back. finish shall write it back before the reset ferrix.onexit=reset asks for, after its last line. | In test-postmortem's boot 1, the unlogged `written back for the next boot` line comes straight after the report's explanation, and the region saved after it holds that explanation (x86-64 and AArch64); in test-boot --reset, the loader that comes back quotes the kernel's resetting line as the log's last (x86-64 and AArch64). Neither write-back is observable under QEMU, whose caches are the host's: the hardware run is a BACKLOG row. | H.FAIL.1 | `console::pstore::write_back`, `panic::conclude`, `power::finish` | `tools/common/xtask/src/postmortem.rs::write_back_problem`, `tools/common/xtask/src/qemu.rs::reset_problem` | xtask gate | xtask gate | xtask gate |
 
+### PanicReset
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.panic.1` | read_option shall arm the reset once, for exactly the value reset of ferrix.panic; no option or halt shall leave it unarmed, and any other value shall be said as not understood and leave it unarmed. | In test-postmortem, a boot with ferrix.panic=reset says it resets after the report; one with ferrix.panic=Reset says the value is not understood, its report says it halts and holds no reset line; one with no option holds no reset line. | H.FAIL.5 | `panic::reset::read_option`, `panic::reset::armed` | `tools/common/xtask/src/postmortem.rs::misspelt` | xtask gate | xtask gate | xtask gate |
+| `L.panic.2` | When armed, conclude shall say in its stopped line that the processor resets the machine, print and drain the reset line before the pstore write-back and the screen, and after the screen wait and reset instead of halting. | In test-postmortem's reset case boot 1's report says the processor resets the machine after the report, holds the reset line, and the machine starts again by itself. | H.FAIL.5 | `panic::conclude`, `panic::reset::announce` | `tools/common/xtask/src/postmortem.rs::reset_by_itself` | xtask gate | xtask gate | xtask gate |
+| `L.panic.3` | wait_then_reset shall wait 10 seconds on the free-running counter, reading nothing but counter_hz and counter_now, taking no lock and allocating nothing, wait not at all when the rate is 0, and then call arch::reset. | In test-postmortem's reset case the loader's banner comes again at least 9.5 s and at most 60 s after the reset line. By inspection: the function's body is the counter loop and the reset. | H.FAIL.5 | `panic::reset::wait_then_reset` | `tools/common/xtask/src/postmortem.rs::reset_by_itself` | xtask gate | xtask gate | xtask gate |
+| `L.panic.4` | When armed and the reset announced, abridged on the processor that announced it shall go on to wait_then_reset; on any other processor it shall halt. (On x86-64 a fault taken before the kernel's GS base is installed reads another register value and may halt: the fail-safe direction.) | A fault forced inside screen::draw under ferrix.panic=reset still ends in the reset in test-postmortem's reset case, and fails it with abridged's reset removed (gate.sh control, the commit names both runs). By inspection: resetting_here compares this processor's per-CPU register with the announcer's. | H.FAIL.5 | `panic::abridged`, `panic::reset::resetting_here` | *baselined* | — | — | — |
+
 ### Superblocks
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
@@ -2348,7 +2358,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/jobs.rs::test_jobs` | gate | L.x86_64.115 |
 | `tools/common/xtask/src/main.rs::test_shell` | gate | L.init.1 |
 | `tools/common/xtask/src/main.rs::test_vfs` | gate | L.init.1 |
+| `tools/common/xtask/src/postmortem.rs::misspelt` | gate | L.panic.1 |
 | `tools/common/xtask/src/postmortem.rs::region_problem` | gate | L.console.42 |
+| `tools/common/xtask/src/postmortem.rs::reset_by_itself` | gate | H.FAIL.5, L.panic.2, L.panic.3 |
 | `tools/common/xtask/src/postmortem.rs::write_back_problem` | gate | L.console.44 |
 | `tools/common/xtask/src/qemu.rs::cleaning_problem` | gate | L.iommu.56 |
 | `tools/common/xtask/src/qemu.rs::config_problem` | gate | L.device.24, L.device.25 |

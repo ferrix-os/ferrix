@@ -55,6 +55,15 @@ pub const HEADER_BYTES: usize = WRITTEN_OFFSET + 8;
 /// it decompresses, measured 2026-10-15), so 16 MiB, the first choice, lost
 /// every record there.
 pub const ABOVE_LOWEST: u64 = 64 << 20;
+/// Where the region goes first, above the lowest conventional memory, when
+/// the map has room there: past where another operating system booted on
+/// the same machine puts its own image. Linux's EFI stub on a firmware with
+/// no RNG protocol decompresses the kernel at 16 MiB (Ubuntu's 7.0 reaches
+/// past 72 MiB), before its `memmap=` reservation takes effect, so a region
+/// at 64 MiB is lost to the inspection Linux of the N150 box, and one at
+/// 1 GiB is kept with `nokaslr memmap=2M$0x40000000`. A machine whose map has
+/// no room there (a 512 MiB board) takes [`ABOVE_LOWEST`].
+pub const PREFERRED_ABOVE_LOWEST: u64 = 1 << 30;
 /// The alignment of the region's address.
 pub const ALIGN: u64 = 2 << 20;
 
@@ -217,10 +226,11 @@ pub fn validate(header: &[u8; HEADER_BYTES], len: u64) -> Result<Found, Refusal>
 
 /// Where the region goes, given the conventional memory the firmware's map
 /// describes as `(base, len)` ranges in any order, and the end of the direct
-/// map: the lowest [`ALIGN`]ed address at least [`ABOVE_LOWEST`] above the
-/// lowest conventional byte rounded down to [`ALIGN`], whose `len` bytes lie
-/// inside one range and end at or below `direct_end`. The same map gives the same address, which is
-/// how the next boot finds it again with nothing stored.
+/// map: the lowest [`ALIGN`]ed address at least [`PREFERRED_ABOVE_LOWEST`]
+/// above the lowest conventional byte rounded down to [`ALIGN`], whose `len`
+/// bytes lie inside one range and end at or below `direct_end`; if there is
+/// none, the same with [`ABOVE_LOWEST`]. The same map gives the same address,
+/// which is how the next boot finds it again with nothing stored.
 pub fn choose(
     conventional: impl IntoIterator<Item = (u64, u64)> + Clone,
     direct_end: u64,
@@ -232,7 +242,31 @@ pub fn choose(
         .filter(|&(_, size)| size != 0)
         .map(|(base, _)| base)
         .min()?;
-    let floor = (lowest & !(ALIGN - 1)).checked_add(ABOVE_LOWEST)?;
+    let lowest = lowest & !(ALIGN - 1);
+    lowest_fit(
+        conventional.clone(),
+        lowest.checked_add(PREFERRED_ABOVE_LOWEST)?,
+        direct_end,
+        len,
+    )
+    .or_else(|| {
+        lowest_fit(
+            conventional,
+            lowest.checked_add(ABOVE_LOWEST)?,
+            direct_end,
+            len,
+        )
+    })
+}
+
+/// The lowest [`ALIGN`]ed address at or above `floor` whose `len` bytes lie
+/// inside one of the `conventional` ranges and end at or below `direct_end`.
+fn lowest_fit(
+    conventional: impl IntoIterator<Item = (u64, u64)>,
+    floor: u64,
+    direct_end: u64,
+    len: u64,
+) -> Option<u64> {
     conventional
         .into_iter()
         .filter_map(|(base, size)| {

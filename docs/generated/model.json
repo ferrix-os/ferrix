@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "7e65d544a381131386beb803460da0dc8679f7048ddd08cced65c1580d07ac70",
+  "digest": "c688877f796dd9ecb529f7e67bebb91e59e08dea8f3710ee68100b1e98ed7aa2",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -108,8 +108,8 @@
     }
   ],
   "summary": {
-    "packages": 138,
-    "elements": 6955,
+    "packages": 139,
+    "elements": 6980,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -25785,10 +25785,10 @@
                               "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::haltOnInconsistency",
                               "kind": "attribute",
                               "redefines": "statement",
-                              "value": "\"On a failed internal consistency check the kernel shall stop every other processor, print a diagnostic naming the failure and its catalogued explanation, and halt without returning to user mode.\"",
+                              "value": "\"On a failed internal consistency check the kernel shall stop every other processor, print a diagnostic naming the failure and its catalogued explanation, and halt without returning to user mode, or, where H.FAIL.5 applies, reset the machine after the report.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1439
+                                "line": 1440
                               }
                             },
                             {
@@ -25799,7 +25799,7 @@
                               "value": "\"A boot told to panic at its end (`ferrix.onexit=panic`) ends with the FX-1501 report and no program output after it; every panic site in the item has a catalogue entry (`check-panic-audit.py`).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1443
+                                "line": 1444
                               }
                             },
                             {
@@ -25810,7 +25810,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1444
+                                "line": 1445
                               }
                             }
                           ]
@@ -25823,7 +25823,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1446
+                            "line": 1447
                           },
                           "children": [
                             {
@@ -25834,7 +25834,7 @@
                               "value": "\"The allocator every kernel stack comes from shall give each an unmapped guard page directly below and above it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1449
+                                "line": 1450
                               }
                             },
                             {
@@ -25845,7 +25845,7 @@
                               "value": "\"A kernel stack allocated, written at its first and last word and freed has the page below and the page above it untranslated, and gives back every frame it took.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1452
+                                "line": 1453
                               }
                             },
                             {
@@ -25856,7 +25856,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1453
+                                "line": 1454
                               }
                             }
                           ]
@@ -25869,7 +25869,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1456
+                            "line": 1457
                           },
                           "children": [
                             {
@@ -25880,7 +25880,7 @@
                               "value": "\"A kernel stack overflow shall end in the halt and diagnostic of the safe state, never in a write below the stack.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1458
+                                "line": 1459
                               }
                             },
                             {
@@ -25891,7 +25891,7 @@
                               "value": "\"A kernel thread that recurses past its stack ends the boot in a report naming the fault -- on x86-64 a double fault taken on its own stack (FX-9004) -- on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1461
+                                "line": 1462
                               }
                             },
                             {
@@ -25902,7 +25902,7 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1462
+                                "line": 1463
                               }
                             }
                           ]
@@ -25915,7 +25915,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1466
+                            "line": 1467
                           },
                           "children": [
                             {
@@ -25926,7 +25926,7 @@
                               "value": "\"Once a failure report has begun, a line the kernel writes shall reach the console port after a bounded wait even when the port's lock is held and will never be released.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1469
+                                "line": 1470
                               }
                             },
                             {
@@ -25937,7 +25937,7 @@
                               "value": "\"A report begun while another context holds the port's lock for good reaches the port whole, after at most 10,000,000 attempts at the lock, on each architecture, 3 of 3.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1472
+                                "line": 1473
                               }
                             },
                             {
@@ -25948,7 +25948,53 @@
                               "value": "(\"O.FAILSAFE\", \"ASR-6\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1473
+                                "line": 1474
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "resetAfterTheReportWhenAsked",
+                          "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::resetAfterTheReportWhenAsked",
+                          "kind": "requirement",
+                          "shortName": "H.FAIL.5",
+                          "type": "ItemHighLevel",
+                          "source": {
+                            "file": "docs/sysml/13-item-requirements.sysml",
+                            "line": 1478
+                          },
+                          "children": [
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::resetAfterTheReportWhenAsked",
+                              "kind": "attribute",
+                              "redefines": "statement",
+                              "value": "\"With ferrix.panic=reset read after stage 1's check, the first failure report shall, once its diagnostic and the reset line are on the port, in the pstore record and on the screen, wait 10 seconds on the free-running counter where its rate is known and reset the machine; with no value, halt, any other value, or in a report on another processor, it shall halt.\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1484
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::resetAfterTheReportWhenAsked",
+                              "kind": "attribute",
+                              "redefines": "criterion",
+                              "value": "\"In cargo xtask test-postmortem (x86-64 under KVM, AArch64): a boot with ferrix.onexit=panic ferrix.panic=reset prints the reset line and the loader's banner comes again at least 9.5 s and at most 60 s later, quoting the panic; the same boot without the option and with ferrix.panic=Reset says it halts and prints no reset line.\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1490
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::resetAfterTheReportWhenAsked",
+                              "kind": "attribute",
+                              "redefines": "parent",
+                              "value": "(\"O.FAILSAFE\", \"ASR-6\")",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1491
                               }
                             }
                           ]
@@ -25962,7 +26008,7 @@
                       "doc": "The btrfs reader and write path, `ferrix-btrfs` and `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the `Device` and `WriteDevice` traits the kernel's block layer answers, above it `Volume` and `WriteVolume`; the VFS glue on top (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so these promise what the two crates do at `Volume` and `WriteVolume`, not what a program sees through a mount. The low-level requirements are part 24. Some sit under a requirement here by decomposition rather than as a case of its criterion: L.btrfs.31 and .70 (a node's address and generation) refine H.STORE.2, whose criterion tests a data sector, and L.btrfs.16 and .92 (superblock stripes) refine H.STORE.5, whose criterion tests the trees' consistency.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1477
+                        "line": 1495
                       },
                       "children": [
                         {
@@ -25973,7 +26019,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1493
+                            "line": 1511
                           },
                           "children": [
                             {
@@ -25984,7 +26030,7 @@
                               "value": "\"The btrfs reader and writer shall answer every volume image, whatever its bytes, with a value or an error, without reading or writing outside a buffer, panicking or looping without bound.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1497
+                                "line": 1515
                               }
                             },
                             {
@@ -25995,7 +26041,7 @@
                               "value": "\"Each of 4,096 single-byte patches of a superblock, and of a leaf, parses or is refused, and every accessor of what parses answers, 0 panics. The decoders' own totality, and the `btrfs_read` fuzzer's resealed images, are their low-level requirements' and outside this criterion; the write path, which parses every node through the reader, has no hostile-image check of its own yet (TODO.md).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1504
+                                "line": 1522
                               }
                             },
                             {
@@ -26006,7 +26052,7 @@
                               "value": "\"O.MEDIA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1505
+                                "line": 1523
                               }
                             }
                           ]
@@ -26019,7 +26065,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1507
+                            "line": 1525
                           },
                           "children": [
                             {
@@ -26030,7 +26076,7 @@
                               "value": "\"A block whose checksum disagrees with its contents shall never be returned as valid: the reader shall read another copy where the chunk keeps one, and otherwise answer an error.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1511
+                                "line": 1529
                               }
                             },
                             {
@@ -26041,7 +26087,7 @@
                               "value": "\"With the first copy of a DUP data sector damaged, a file read returns the file's bytes from the second; with both damaged, it answers DataChecksum and hands back none of the sector's bytes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1515
+                                "line": 1533
                               }
                             },
                             {
@@ -26052,7 +26098,7 @@
                               "value": "(\"O.MEDIA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1516
+                                "line": 1534
                               }
                             }
                           ]
@@ -26065,7 +26111,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1518
+                            "line": 1536
                           },
                           "children": [
                             {
@@ -26076,7 +26122,7 @@
                               "value": "\"Until a commit's superblock is written, the volume on the device shall be exactly the last commit, whatever of the commit's other writes have reached it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1521
+                                "line": 1539
                               }
                             },
                             {
@@ -26087,7 +26133,7 @@
                               "value": "\"500 inserts committed, and the commit's writes replayed without its superblocks onto the volume as it was, leave a volume that checks clean and holds exactly the last commit's items.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1524
+                                "line": 1542
                               }
                             },
                             {
@@ -26098,7 +26144,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1525
+                                "line": 1543
                               }
                             }
                           ]
@@ -26111,7 +26157,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1527
+                            "line": 1545
                           },
                           "children": [
                             {
@@ -26122,7 +26168,7 @@
                               "value": "\"What a commit or a log commit returned success for shall be found, no older, when the volume is opened after a power cut at any later point, the log replayed if the superblock names one.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1531
+                                "line": 1549
                               }
                             },
                             {
@@ -26133,7 +26179,7 @@
                               "value": "\"Of 100 cuts over 4 random scenarios of writes, logs and commits, each rebuilt as the device may have left the disk, every one opens, checks clean down to free space and checksums, and rolls back no completed promise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1535
+                                "line": 1553
                               }
                             },
                             {
@@ -26144,7 +26190,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1536
+                                "line": 1554
                               }
                             }
                           ]
@@ -26157,7 +26203,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1538
+                            "line": 1556
                           },
                           "children": [
                             {
@@ -26168,7 +26214,7 @@
                               "value": "\"Each commit shall leave the extent tree, the block groups' usage, the free-space tree and the superblock's totals agreeing with the trees, so that no block in use is free.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1541
+                                "line": 1559
                               }
                             },
                             {
@@ -26179,7 +26225,7 @@
                               "value": "\"After 3,000 random edits on the blank fixture, committed as they go, the writer's checker finds every tree block's and data extent's references, each block group's usage and free space and the superblock's total consistent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1545
+                                "line": 1563
                               }
                             },
                             {
@@ -26190,7 +26236,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1546
+                                "line": 1564
                               }
                             }
                           ]
@@ -26203,7 +26249,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1548
+                            "line": 1566
                           },
                           "children": [
                             {
@@ -26214,7 +26260,7 @@
                               "value": "\"An operation the volume has no room for shall be refused with no space before it changes anything, leaving the transaction able to commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1551
+                                "line": 1569
                               }
                             },
                             {
@@ -26225,7 +26271,7 @@
                               "value": "\"On a 128 MiB volume, creates until its trees are full end in NoSpace with the transaction not aborted, its commit succeeds, and a deletion still makes room for another create.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1554
+                                "line": 1572
                               }
                             },
                             {
@@ -26236,7 +26282,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1555
+                                "line": 1573
                               }
                             }
                           ]
@@ -26249,7 +26295,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1557
+                            "line": 1575
                           },
                           "children": [
                             {
@@ -26260,7 +26306,7 @@
                               "value": "\"An allocation the btrfs writer cannot make shall be answered to its caller as an error, aborting the transaction if an edit had begun, and never as a panic or a stop of the element.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1560
+                                "line": 1578
                               }
                             },
                             {
@@ -26271,7 +26317,7 @@
                               "value": "\"With every allocation of the writer's operations failed in turn, each operation succeeds or answers an error, no panic is taken, and the volume reopened from the device is the last commit and checks clean.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1564
+                                "line": 1582
                               }
                             },
                             {
@@ -26282,7 +26328,7 @@
                               "value": "(\"O.QUOTA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1565
+                                "line": 1583
                               }
                             }
                           ]
@@ -26295,7 +26341,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1567
+                            "line": 1585
                           },
                           "children": [
                             {
@@ -26306,7 +26352,7 @@
                               "value": "\"An operation that fails after it changed something shall abort its transaction, so that none of it is committed, and the volume reloaded at its last commit shall take no further change.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1571
+                                "line": 1589
                               }
                             },
                             {
@@ -26317,7 +26363,7 @@
                               "value": "\"Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1575
+                                "line": 1593
                               }
                             },
                             {
@@ -26328,7 +26374,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1576
+                                "line": 1594
                               }
                             }
                           ]
@@ -72989,6 +73035,246 @@
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
                     "line": 627
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "PanicReset",
+          "qualifiedName": "FerrixConsoleRequirements::PanicReset",
+          "kind": "package",
+          "doc": "`ferrix.panic=reset` (src/kernel/src/panic/reset.rs), the N150 stop-gap of 2026-10-17 (consultant ledger line 2143): the reset a failure report ends in when asked. Its own family, L.panic, since panic.rs had no low-level ids; here beside the pstore it exists for. The device-tree read of the option gets an id when it is built.",
+          "source": {
+            "file": "docs/sysml/23-console-requirements.sysml",
+            "line": 631
+          },
+          "children": [
+            {
+              "name": "theOptionArmsOnlyOnReset",
+              "qualifiedName": "FerrixConsoleRequirements::PanicReset::theOptionArmsOnlyOnReset",
+              "kind": "requirement",
+              "shortName": "L.panic.1",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 639
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theOptionArmsOnlyOnReset",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"read_option shall arm the reset once, for exactly the value reset of ferrix.panic; no option or halt shall leave it unarmed, and any other value shall be said as not understood and leave it unarmed.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 643
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theOptionArmsOnlyOnReset",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem, a boot with ferrix.panic=reset says it resets after the report; one with ferrix.panic=Reset says the value is not understood, its report says it halts and holds no reset line; one with no option holds no reset line.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 648
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theOptionArmsOnlyOnReset",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.5\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 649
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theOptionArmsOnlyOnReset",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"panic::reset::read_option\", \"panic::reset::armed\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 650
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theReportAnnouncesTheReset",
+              "qualifiedName": "FerrixConsoleRequirements::PanicReset::theReportAnnouncesTheReset",
+              "kind": "requirement",
+              "shortName": "L.panic.2",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 652
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theReportAnnouncesTheReset",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"When armed, conclude shall say in its stopped line that the processor resets the machine, print and drain the reset line before the pstore write-back and the screen, and after the screen wait and reset instead of halting.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 656
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theReportAnnouncesTheReset",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem's reset case boot 1's report says the processor resets the machine after the report, holds the reset line, and the machine starts again by itself.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 659
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theReportAnnouncesTheReset",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.5\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 660
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theReportAnnouncesTheReset",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"panic::conclude\", \"panic::reset::announce\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 661
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theWaitIsTheCounterOnly",
+              "qualifiedName": "FerrixConsoleRequirements::PanicReset::theWaitIsTheCounterOnly",
+              "kind": "requirement",
+              "shortName": "L.panic.3",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 663
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theWaitIsTheCounterOnly",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"wait_then_reset shall wait 10 seconds on the free-running counter, reading nothing but counter_hz and counter_now, taking no lock and allocating nothing, wait not at all when the rate is 0, and then call arch::reset.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 667
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theWaitIsTheCounterOnly",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem's reset case the loader's banner comes again at least 9.5 s and at most 60 s after the reset line. By inspection: the function's body is the counter loop and the reset.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 671
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theWaitIsTheCounterOnly",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.5\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 672
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::theWaitIsTheCounterOnly",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"panic::reset::wait_then_reset\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 673
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aFaultInTheScreenStillResets",
+              "qualifiedName": "FerrixConsoleRequirements::PanicReset::aFaultInTheScreenStillResets",
+              "kind": "requirement",
+              "shortName": "L.panic.4",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 675
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::aFaultInTheScreenStillResets",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"When armed and the reset announced, abridged on the processor that announced it shall go on to wait_then_reset; on any other processor it shall halt. (On x86-64 a fault taken before the kernel's GS base is installed reads another register value and may halt: the fail-safe direction.)\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 680
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::aFaultInTheScreenStillResets",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A fault forced inside screen::draw under ferrix.panic=reset still ends in the reset in test-postmortem's reset case, and fails it with abridged's reset removed (gate.sh control, the commit names both runs). By inspection: resetting_here compares this processor's per-CPU register with the announcer's.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 685
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::aFaultInTheScreenStillResets",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.5\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 686
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::PanicReset::aFaultInTheScreenStillResets",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"panic::abridged\", \"panic::reset::resetting_here\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 687
                   }
                 }
               ]
