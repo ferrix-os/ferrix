@@ -186,7 +186,9 @@ consultant session before `land.sh take` when a change:
 * changes a requirement, a check or a baseline under `docs/sysml/` or
   `tools/common/data/`, or anything in `docs/certification/`.
 
-Find the consultant with `ListAgents`; its name changes between sessions.
+Since 2026-10-04 each session briefs a consultant subagent of its own (the
+`certification-consultant` agent) with AGENTS.md's section and the ledger,
+instead of looking for a standing consultant session.
 Ring-3 programs, xtask-only changes and docs outside `docs/certification/`
 do not need it. The review checks the rules the evidence rests on:
 * no upward reference across the item boundary;
@@ -264,10 +266,6 @@ consultant with the rest of the review when the ids are written.
 A `/// Verifies:` tag is read one line at a time: write one tag line per
 line of ids. A tag wrapped onto a second line ends in an empty id, and none
 of its ids count.
-
-The check that verifies the ids names them on one `/// Verifies:` line
-each: write one tag line per line of ids. A tag wrapped onto a second line
-ends in an empty id, and none of its ids count.
 
 ## Where a new file goes
 
