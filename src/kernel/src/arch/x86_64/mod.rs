@@ -219,9 +219,10 @@ pub(crate) unsafe fn init_traps() {
         "off, as built"
     };
     crate::console::println!("  cpu      descriptor table addresses kept from ring 3: UMIP {umip}");
-    // Each secondary programs its own in `smp::secondary_start`.
-    let pat = if cpu::program_pat() {
-        let _ = PAT_PROGRAMMED.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+    // Programmed already, by `program_memory_types` before the framebuffer
+    // window was mapped; said here, where the line has always been. Each
+    // secondary programs its own in its trampoline and `smp::secondary_start`.
+    let pat = if boot_pat_programmed() {
         "entry 1 write-combining"
     } else {
         "not programmed, so write-combining is refused and stage 9 stops the boot"
@@ -1881,23 +1882,51 @@ pub(crate) static BASE_WRITES_FORBIDDEN: core::sync::atomic::AtomicUsize =
 pub(crate) static PAT_PROGRAMMED: core::sync::atomic::AtomicUsize =
     core::sync::atomic::AtomicUsize::new(0);
 
+/// Whether the boot processor's PAT was programmed and read back, by
+/// [`program_memory_types`]: what the framebuffer window's type and each
+/// secondary's trampoline write are decided by.
+static BOOT_PAT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Secondaries that arrived in `smp::secondary_start` with `IA32_PAT`
+/// already [`ferrix_paging::X86_PAT`], written by their trampoline before
+/// paging was on: stage 9 requires every one.
+pub(crate) static PAT_AT_ENTRY: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
+
+/// Program the boot processor's page attribute table, entry 1
+/// write-combining, and count it: the first thing `kmain` does
+/// (`map_boot_framebuffer`), before the framebuffer window is mapped and
+/// before the first line, so that the window can be write-combining from
+/// its first map (`L.x86_64.127`, `L.x86_64.176`). Before the IDT: the one
+/// write is to a register CPUID reported, with types the SDM defines, so it
+/// cannot fault (`cpu::program_pat`). Once, on the boot processor.
+pub(crate) fn program_memory_types() {
+    if cpu::program_pat() {
+        let _ = PAT_PROGRAMMED.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+        BOOT_PAT.store(true, core::sync::atomic::Ordering::Release);
+    }
+}
+
+/// Whether [`program_memory_types`] programmed the boot processor's PAT and
+/// read it back.
+pub(crate) fn boot_pat_programmed() -> bool {
+    BOOT_PAT.load(core::sync::atomic::Ordering::Acquire)
+}
+
+/// Secondaries whose trampoline had written their PAT before they arrived.
+pub(crate) fn pat_at_entry() -> usize {
+    PAT_AT_ENTRY.load(core::sync::atomic::Ordering::Acquire)
+}
+
 /// How many processors programmed their PAT with its write-combining entry.
 pub(crate) fn write_combining_processors() -> Option<usize> {
     Some(PAT_PROGRAMMED.load(core::sync::atomic::Ordering::Acquire))
 }
 
-/// How the kernel maps a framebuffer in early boot: as a device.
-/// Write-combining needs the PAT entry each processor programs only later,
-/// at its bring-up, and these tables ignore `uncached`, which would leave a
-/// framebuffer write-back. A framebuffer lent under `ferrix.efifb` is
-/// changed to write-combining when it is lent, once every processor has
-/// programmed its PAT (`discovery::firmware`).
-pub(crate) const FRAMEBUFFER_FLAGS: ferrix_paging::MapFlags =
-    ferrix_paging::MapFlags::KERNEL_DEVICE;
-
 /// Whether `ferrix.efifb` may lend the framebuffer to a ring-3 driver: yes,
-/// since [`FRAMEBUFFER_FLAGS`] is device memory, the type an aperture's user
-/// mapping takes (`discovery::firmware`).
+/// since the kernel's window on it is write-combining from its first map
+/// (`framebuffer::framebuffer_flags`), a type a prefetchable aperture's
+/// user mapping takes too (`discovery::firmware`).
 pub(crate) const LENDS_FRAMEBUFFER: bool = true;
 
 /// Entropy from firmware's TRNG: none, since a PC has no SMCCC. The CPU's
@@ -1994,4 +2023,7 @@ pub(crate) const USER_GETUID_PROGRAM: &[u8] = &[
 // The lent firmware framebuffer's write-combining (`docs/DISPLAY.md` §8),
 // last for the same reason.
 mod framebuffer;
-pub(crate) use framebuffer::{drain_write_combining, mtrr_type, pat};
+pub(crate) use framebuffer::check::check_framebuffer_window;
+pub(crate) use framebuffer::{
+    drain_write_combining, flush_window, framebuffer_flags, mtrr_type, pat,
+};

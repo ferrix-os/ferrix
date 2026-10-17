@@ -21,6 +21,13 @@
 //! starts again at the top, and the row after the newest line is kept blank,
 //! so the newest line is the one above the gap.
 //!
+//! On x86-64 the framebuffer is mapped write-combining (`arch::framebuffer_flags`),
+//! whose stores may wait in a processor's fill buffers past the board's
+//! release, a plain store: every draw ends with them drained
+//! (`arch::drain_write_combining`) while it still holds the board, so a
+//! draw on another processor, the panic screen, or a driver the screen is
+//! lent to after [`stop`] meets none of them arriving late.
+//!
 //! It stops for good when a panic draws its own screen over it, and when a
 //! display driver takes the screen (`display::`). `docs/ARCHITECTURE.md` §1
 //! names the framebuffer as one of the kernel's two output devices; this is
@@ -256,6 +263,7 @@ pub(crate) fn start(view: &BootView<'_>) {
     for &byte in kept.get(from..).unwrap_or_default() {
         board.put(byte);
     }
+    crate::arch::drain_write_combining();
     *BOARD.lock() = Some(board);
     ENABLED.store(true, Ordering::Release);
 }
@@ -275,6 +283,7 @@ pub(crate) fn milestone(row: usize) {
         && let Some(board) = board.as_mut()
     {
         board.stripe(row);
+        crate::arch::drain_write_combining();
     }
 }
 
@@ -291,6 +300,7 @@ pub(super) fn put(byte: u8) {
         && let Some(board) = board.as_mut()
     {
         board.put(byte);
+        crate::arch::drain_write_combining();
     }
 }
 

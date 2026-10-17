@@ -821,22 +821,23 @@ package FerrixDeviceRequirements {
         requirement <'L.device.43'> theLentFramebufferWriteCombining : ItemLowLevel {
             attribute :>> statement = "On x86-64 under ferrix.efifb the firmware
                 framebuffer's node shall not be made unless every processor
-                programmed its PAT (L.x86_64.127); and before the kernel's hold
-                is taken and the node published, every page of the kernel's
-                panic window over the framebuffer shall be mapped
-                write-combining and none as device memory, the change reaching
-                every processor's TLB first (L.mm.31, L.smp.14).";
+                programmed its PAT (L.x86_64.127) and every page of the kernel's
+                panic window over the framebuffer reads back write-combining,
+                writable, not user's and none as device memory (L.x86_64.176),
+                read before the boot console is stopped and the kernel's hold is
+                taken.";
             attribute :>> criterion = "Under ferrix.efifb stage 10's check of the
                 published node reads every page of the kernel's window back
                 write-combining, not device, writable and not user's, as the
                 type the hold keeps; reads this processor's IA32_PAT back as
                 X86_PAT and every processor counted as programmed; and efifb
                 says it mapped the window write-combining (test-compositor
-                --boot firmware-screen). With the kernel's change of type
-                skipped, the boot panics.";
+                --boot firmware-screen). The lend's read-back answers false on a
+                device page (stage 9, L.x86_64.176); with it answering true for
+                any page, the boot panics.";
             attribute :>> parent = ("H.MEM.15", "H.DMA.5");
             attribute :>> unit = ("discovery::firmware::FirmwareFramebuffer::lend",
-                "mm::protect_kernel", "panic::screen::window",
+                "discovery::firmware::window_combining", "panic::screen::window",
                 "arch::x86_64::framebuffer::pat",
                 "arch::x86_64::framebuffer::mtrr_type",
                 "arch::x86_64::framebuffer::drain_write_combining");

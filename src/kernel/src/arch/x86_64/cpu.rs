@@ -602,10 +602,15 @@ pub(super) const IA32_PAT: u32 = 0x277;
 /// `false` on a processor whose `CPUID` says it has no PAT, which no x86-64
 /// processor is.
 ///
-/// Called once per processor, at its bring-up: Ferrix has no processor
-/// hotplug, no S3 resume and no UEFI runtime calls, any of which can leave a
-/// processor with another table. Whichever is added must call this again
-/// before that processor runs anything that reaches a write-combining
+/// Called once per processor, at its bring-up: on the boot processor first
+/// thing in `kmain`, before the framebuffer window is mapped
+/// (`super::program_memory_types`), and on each secondary in
+/// `smp::secondary_start`, after its trampoline already wrote the same
+/// table before paging was on. Before the boot processor's IDT, too: the
+/// write is to a register CPUID reported, of types the SDM defines, so it
+/// cannot fault. Ferrix has no processor hotplug, no S3 resume and no UEFI
+/// runtime calls, any of which can leave a processor with another table.
+/// Whichever is added must call this again before that processor runs anything that reaches a write-combining
 /// mapping, and `object::io_mapping::combining_ready` refuses
 /// write-combining while the count it keeps is short.
 pub(crate) fn program_pat() -> bool {

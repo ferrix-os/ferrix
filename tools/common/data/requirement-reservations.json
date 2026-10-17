@@ -80,13 +80,6 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
-    },
-    {
-      "ids": ["L.x86_64.176"],
-      "owner": "fbcon-wc-early",
-      "branch": "fbcon-wc-early",
-      "date": "2026-10-17",
-      "purpose": "The kernel's framebuffer window mapped write-combining from its first map, only once the boot processor's IA32_PAT reads back X86_PAT, as device memory otherwise (consultant design review, ledger line 1994)"
     }
   ]
 }

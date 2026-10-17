@@ -147,9 +147,11 @@ impl EarlyMemory {
     }
 
     /// Map `len` bytes of a framebuffer at `virt`, with the attributes
-    /// [`arch::FRAMEBUFFER_FLAGS`] gives: write-combining where the
-    /// architecture has it, so the boot console's stores may gather into
-    /// bursts rather than go out one at a time.
+    /// [`arch::framebuffer_flags`] gives: write-combining where the
+    /// architecture has it -- on x86-64 once the boot processor's PAT reads
+    /// back the kernel's table, device memory otherwise -- so the boot
+    /// console's stores may gather into bursts rather than go out one at a
+    /// time.
     ///
     /// # Errors
     ///
@@ -160,7 +162,7 @@ impl EarlyMemory {
         phys: u64,
         len: u64,
     ) -> Result<(), EarlyError> {
-        self.map_window(virt, phys, len, arch::FRAMEBUFFER_FLAGS)
+        self.map_window(virt, phys, len, arch::framebuffer_flags())
     }
 
     /// [`EarlyMemory::map_device`] with the attributes `flags` gives.

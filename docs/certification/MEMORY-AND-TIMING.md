@@ -878,15 +878,20 @@ two types are mapped at once, so the effect is stale data over the
 device's own memory, not a machine-wide one (VULNERABILITY-ANALYSIS
 T.DMA path 7). A flush when a cached hold is released would close it.
 
-**The lent framebuffer's type change (`ferrix.efifb` only).** Lending the
-firmware framebuffer (`discovery::firmware`) changes the kernel's own
-panic window from uncacheable to write-combining with `mm::protect_kernel`:
-one walk under the kernel's table lock over the window's leaves, at most
-`FRAMEBUFFER_WINDOW_SIZE` / 4 KiB of them, then one shootdown of every
-processor's TLB, global entries included. It runs once per boot, at stage
-10, before any program, and only under the option; the reference
-configuration never reaches it. Then one hold, kept for good, adds one
-entry here.
+**The lent framebuffer's read-back (`ferrix.efifb` only).** The kernel's
+own panic window is write-combining from its first map on x86-64
+(L.x86_64.176), so lending the firmware framebuffer
+(`discovery::firmware`) changes no type: `window_combining` reads the
+window's leaves back, one table walk per page, at most
+`FRAMEBUFFER_WINDOW_SIZE` / 4 KiB of them, under no lock -- safe only
+because the kernel's upper-half intermediate tables are never freed, so a
+walk cannot meet a table given back under it -- and no shootdown follows. It runs once per boot, at stage 10, before
+any program, and only under the option; the reference configuration never
+reaches it (stage 9's check calls it on every x86-64 boot, twice). Then one
+hold, kept for good, adds one entry here. At the window's first map, on
+every x86-64 boot with a framebuffer, `flush_window` flushes each cache
+line of the window once (8 MiB at 1920x1080 is 131,072 lines), before any
+other processor runs.
 
 ### 2.2g The pin quarantine's lock (`object::pin::QUARANTINE`)
 

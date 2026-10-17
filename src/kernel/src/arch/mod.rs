@@ -392,12 +392,38 @@ pub(crate) use armv7a::flush_for_device;
 pub(crate) use x86_64::flush_for_device;
 
 // How a framebuffer is mapped: write-combining where the architecture has it.
+// On x86-64 that is decided by the boot processor's PAT as it read back
+// before the map (`x86_64::framebuffer`); the Arm kernels map their constant.
 #[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::FRAMEBUFFER_FLAGS;
+use aarch64::FRAMEBUFFER_FLAGS;
 #[cfg(target_arch = "arm")]
-pub(crate) use armv7a::FRAMEBUFFER_FLAGS;
+use armv7a::FRAMEBUFFER_FLAGS;
 #[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::FRAMEBUFFER_FLAGS;
+pub(crate) use x86_64::{
+    check_framebuffer_window, flush_window, framebuffer_flags, program_memory_types,
+};
+
+/// Nothing to read back: the Arm kernels' framebuffer mapping is their
+/// constant, unchanged.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn check_framebuffer_window() -> Result<(), &'static str> {
+    Ok(())
+}
+
+/// The Arm kernels' framebuffer flags, normal non-cacheable: their constant.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn framebuffer_flags() -> ferrix_paging::MapFlags {
+    FRAMEBUFFER_FLAGS
+}
+
+/// No page attribute table to program before the framebuffer is mapped.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn program_memory_types() {}
+
+/// Nothing to flush before the first store: the Arm kernels keep the
+/// framebuffer's mapping as it was.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn flush_window(_virt: u64, _len: u64) {}
 
 // Whether `ferrix.efifb` may lend the framebuffer to a ring-3 driver: only
 // where a user mapping of an aperture can take the kernel's own type for it.

@@ -16,17 +16,17 @@
 //!
 //! The kernel maps the framebuffer for the panic screen, and a driver maps
 //! the same pages: the two must be one type (`user::memory_type`). On x86-64
-//! that type is write-combining. The kernel maps the framebuffer uncached in
-//! early boot, before any processor has programmed the PAT entry
-//! write-combining selects, so lending it changes the kernel's window to
-//! write-combining first (every processor's TLB flushed before that
-//! returns), mints the aperture prefetchable, so that
-//! `io_mapping_map_combining` maps it, and takes a hold of write-combining
-//! over it which it never gives back: a mapping of any other type is
-//! refused. No cache line of the pages can exist to be flushed at the
-//! change: the old type, uncacheable, allocates none. The Arm kernels map it
-//! normal non-cacheable, which no user mapping of an aperture can match yet,
-//! so the option is not honoured there and says so.
+//! that type is write-combining. The kernel maps its window write-combining
+//! from its first map in early boot, the boot processor's PAT programmed
+//! first and every secondary's in its trampoline
+//! (`arch::framebuffer_flags`, `L.x86_64.176`), so lending it changes no type:
+//! the lend reads every page of the window back write-combining
+//! ([`window_combining`]) and refuses otherwise, mints the aperture
+//! prefetchable, so that `io_mapping_map_combining` maps it, and takes a
+//! hold of write-combining over it which it never gives back: a mapping of
+//! any other type is refused. The Arm kernels map it normal non-cacheable,
+//! which no user mapping of an aperture can match yet, so the option is not
+//! honoured there and says so.
 //!
 //! # The boot console
 //!
@@ -117,23 +117,40 @@ impl FirmwareFramebuffer {
             .ok_or("the framebuffer has no aperture")?;
         let (window, mapped) =
             crate::panic::screen::window().ok_or("the kernel has no window on the framebuffer")?;
+        // The kernel's own window has been write-combining since its first
+        // map (`arch::framebuffer_flags`); it is read back, not changed, and
+        // a page of any other type refuses the lend before the console is
+        // stopped or anything is minted.
+        if !window_combining(window, mapped) {
+            return Err("the kernel's window on the framebuffer is not write-combining");
+        }
         // A driver may map the window from now on: the boot console, which
         // draws through a slice it holds alone, stops first.
         crate::console::screen::stop();
-        // The kernel's own window, uncached since early boot, becomes
-        // write-combining before anything else can map the pages: every
-        // processor's TLB has dropped the uncached translation when this
-        // returns. Nothing writes the window meanwhile but a panic, which
-        // stops the other processors first.
-        crate::mm::protect_kernel(window, mapped, ferrix_paging::MapFlags::KERNEL_COMBINING)
-            .map_err(
-                |_| "the kernel's window on the framebuffer could not be made write-combining",
-            )?;
         let hold = memory_type::hold(phys, len, KERNEL_MAPPING)
             .map_err(|_| "the framebuffer's memory type could not be held")?;
         let _ = KERNEL_TYPE.call_once(|| hold);
         Ok(node)
     }
+}
+
+/// Whether every page of the kernel's `virt..virt + len` reads back mapped
+/// write-combining, not as device memory, writable and not user's, in the
+/// kernel's root table: what the lend requires of the kernel's window on
+/// the framebuffer, and refuses it on otherwise (L.device.43). One leaf
+/// read per page of the window, under no lock but the table walk's own.
+pub(crate) fn window_combining(virt: u64, len: u64) -> bool {
+    let root = crate::mm::root_table();
+    len != 0
+        && (0..len.div_ceil(ferrix_bootinfo::PAGE_SIZE)).all(|page| {
+            crate::mm::flags_in(root, virt + page * ferrix_bootinfo::PAGE_SIZE).is_some_and(
+                |flags| {
+                    MemoryType::of(false, flags.write_combining && !flags.device) == KERNEL_MAPPING
+                        && flags.write
+                        && !flags.user
+                },
+            )
+        })
 }
 
 /// Whether a node may exist at all: the option was given, on x86-64.
