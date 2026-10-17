@@ -19,15 +19,22 @@
 //!    one -- and says so, because the core's reset may then never finish.
 //! 3. Every vector the function offers is bound to one port: one MSI vector
 //!    with the page granted, the MSI-X entries otherwise.
-//! 4. The loop polls as well as waits: every millisecond until a first
+//! 4. On one MSI the chip's message comes from the glue's aggregator, whose
+//!    latch every drain clears after it ([`ferrix_yt6801::rearm`]): without
+//!    that the N150 box heard its first interrupt and about 209 more in five
+//!    minutes of downloading tens of thousands of frames.
+//! 5. The loop polls as well as waits: every millisecond until a first
 //!    interrupt is seen (on a chip whose interrupts never arrive the driver
 //!    still works, slowly), then every 250 ms, which is how often the PHY is
-//!    asked about the link. A change goes to the kernel as LINK. A 250 ms
-//!    look that finds frames no interrupt announced goes back to every
-//!    millisecond for the rest of the run: on the N150 box one packet arrived
-//!    with no vector minted, and later ones only now and then,
-//!    and the download then ran at what sends rang in.
-//! 5. STOP resets the core, and STOPPED goes back only if the reset was seen
+//!    asked about the link. A change goes to the kernel as LINK. Two 250 ms
+//!    looks in a row that find frames no interrupt announced, with none in
+//!    the [`QUIET_NANOS`] before, go back to every millisecond for the rest
+//!    of the run: interrupts that come only now and then would otherwise
+//!    leave the download running at what sends rang in.
+//! 6. Every [`STATS_NANOS`] with traffic it says how many interrupts came
+//!    against how many frames, and which way it is waiting, so a run on the
+//!    hardware shows whether the interrupts carry the traffic.
+//! 7. STOP resets the core, and STOPPED goes back only if the reset was seen
 //!    to finish; otherwise the pins are kept and the process exits without
 //!    it.
 //!
@@ -102,6 +109,19 @@ const POLL_UNSEEN_NANOS: u64 = 1_000_000;
 
 /// How often the PHY is asked about the link.
 const LINK_POLL_NANOS: u64 = 250_000_000;
+
+/// How long without an interrupt before frames a look finds count as ones
+/// no interrupt announced: far above the glue's moderation (200 each way),
+/// so a frame still inside it when a look lands is not one.
+const QUIET_NANOS: u64 = 50_000_000;
+
+/// Looks in a row that must find unannounced frames before the driver
+/// stops trusting its interrupts: one alone may be a burst's first frame
+/// landing just before a look.
+const MISSES_TO_POLL: u32 = 2;
+
+/// How often the interrupts and frames are counted out on the console.
+const STATS_NANOS: u64 = 10_000_000_000;
 
 /// The name the interface takes in the net core.
 const INTERFACE_NAME: &[u8] = b"eth0";
@@ -593,6 +613,10 @@ struct Adapter {
     transmit: View,
     /// Where frames that arrived are read.
     receive: View,
+    /// Whether the glue's page is mapped, and its interrupt latch with it.
+    glue: bool,
+    /// Drains after which the glue's latch was found set and cleared.
+    latched: u64,
 }
 
 impl Nic for Adapter {
@@ -624,6 +648,11 @@ impl Nic for Adapter {
             .card
             .drain(core.get_mut(..room).unwrap_or_default())
             .map_err(|_| DeviceError::NeedsReset)?;
+        // After the drain, so that what the drain missed is announced:
+        // `ferrix_yt6801::rearm`.
+        if self.glue && ferrix_yt6801::rearm(&mut self.card.registers().0) != 0 {
+            self.latched += 1;
+        }
         for (slot, event) in out.iter_mut().zip(core.iter().take(drained.events)) {
             *slot = match *event {
                 CoreEvent::Received {
@@ -793,6 +822,8 @@ fn bring_up(device: &Device<Kernel>, mut bar: Bar, location: u32) -> Result<Adap
         card,
         transmit: transmit_view,
         receive: receive_view,
+        glue,
+        latched: 0,
     })
 }
 
@@ -931,9 +962,13 @@ fn serve(
     let mut interrupted = false;
     // Whether this turn follows a wait that ended at its deadline.
     let mut polled = false;
-    // Set once a deadline found frames no interrupt announced: from then on
-    // an interrupt no longer lengthens the wait.
+    // Set once looks found frames no interrupt announced: from then on an
+    // interrupt no longer lengthens the wait.
     let mut unreliable = false;
+    // Looks in a row that found frames no interrupt announced.
+    let mut misses = 0;
+    let mut last_interrupt = 0;
+    let mut stats = Stats::new(now(), adapter.latched);
     let mut next_link = 0;
     control
         .wait_async(
@@ -958,23 +993,32 @@ fn serve(
         let turn = serve
             .turn(&mut ring.ring, &mut ring.data, &mut ring.side, adapter)
             .map_err(|_| Step::Serve)?;
-        // Frames a deadline found that no interrupt announced: the
-        // interrupts are not arriving after all -- on the N150 box one
-        // packet came with no vector minted, and every frame after it then
-        // waited for the 250 ms look or for a send to ring the bell. Back to
-        // looking every millisecond, for good: on the box the interrupts that
-        // do come are sporadic (209 in five minutes of downloading, against
-        // tens of thousands of frames), and each one had put the wait back
-        // to 250 ms until a look found frames again.
-        if polled && interrupted && turn.received > 0 {
-            interrupted = false;
-            unreliable = true;
-            let _ = writeln!(
-                Say,
-                "yt6801   frames no interrupt announced: polling every millisecond from now on"
-            );
+        stats.turn(&turn, polled);
+        // Frames a deadline found that no interrupt announced, with none
+        // for long before: the interrupts are not arriving after all, and
+        // every frame would wait for the 250 ms look or for a send to ring
+        // the bell. Back to looking every millisecond, for good: interrupts
+        // that come only now and then (the N150 box's, before the glue's
+        // latch was cleared: 209 in five minutes of downloading) would each
+        // put the wait back to 250 ms until a look found frames again.
+        if polled && interrupted {
+            let unannounced =
+                turn.received > 0 && now().saturating_sub(last_interrupt) > QUIET_NANOS;
+            misses = if unannounced { misses + 1 } else { 0 };
+            if misses >= MISSES_TO_POLL {
+                interrupted = false;
+                unreliable = true;
+                let _ = writeln!(
+                    Say,
+                    "yt6801   frames no interrupt announced: polling every millisecond from now on"
+                );
+            }
         }
         polled = false;
+        let at = now();
+        if at.saturating_sub(stats.since) >= STATS_NANOS {
+            stats.say(at, adapter.latched, interrupted);
+        }
         if let Some(bell) = ring.side.publish(&mut ring.ring) {
             let _ = ring
                 .completion
@@ -1008,6 +1052,8 @@ fn serve(
                 );
             }
             Ok(packet) if packet.key == KEY_INTERRUPT => {
+                last_interrupt = now();
+                stats.interrupts += 1;
                 if !interrupted && !unreliable {
                     interrupted = true;
                     let _ = writeln!(Say, "yt6801   first interrupt: polling every 250 ms now");
@@ -1024,6 +1070,87 @@ fn serve(
             // The kernel's bell: the next turn looks.
             _ => {}
         }
+    }
+}
+
+/// What the loop counts between two lines of [`STATS_NANOS`].
+struct Stats {
+    /// When the count began.
+    since: u64,
+    /// Interrupt packets taken.
+    interrupts: u64,
+    /// Frames received.
+    received: u64,
+    /// Frames handed to the core to send.
+    sent: u64,
+    /// Turns after a wait that ended at its deadline.
+    looks: u64,
+    /// Of those, the ones that found frames.
+    found: u64,
+    /// The adapter's latch count when the count began.
+    latched: u64,
+}
+
+impl Stats {
+    /// A count beginning at `since`.
+    const fn new(since: u64, latched: u64) -> Stats {
+        Stats {
+            since,
+            interrupts: 0,
+            received: 0,
+            sent: 0,
+            looks: 0,
+            found: 0,
+            latched,
+        }
+    }
+
+    /// Count `turn`, which followed a deadline if `polled`.
+    fn turn(&mut self, turn: &ferrix_netserve::Turn, polled: bool) {
+        self.received += u64::from(turn.received);
+        self.sent += u64::from(turn.sent);
+        if polled {
+            self.looks += 1;
+            if turn.received > 0 {
+                self.found += 1;
+            }
+        }
+    }
+
+    /// Say the count, if anything moved, and begin the next at `at`.
+    ///
+    /// `interrupts/s` against `frames in/s` is the line to read: with the
+    /// interrupts carrying the traffic there are a few frames per
+    /// interrupt and few of the looks find any; with them silent the looks
+    /// (a thousand a second) find the frames.
+    fn say(&mut self, at: u64, latched: u64, interrupted: bool) {
+        let elapsed = at.saturating_sub(self.since).max(1);
+        if self.interrupts + self.received + self.sent > 0 {
+            let per_second = |count: u64| count.saturating_mul(1_000_000_000) / elapsed;
+            let per_interrupt_tenths = self.received.saturating_mul(10) / self.interrupts.max(1);
+            let _ = writeln!(
+                Say,
+                "yt6801   {} ms: {} interrupts ({}/s), {} frames in ({}/s), {} out, {}.{} in per \
+                 interrupt; {} of {} looks found frames; latch cleared {} times; {}",
+                elapsed / 1_000_000,
+                self.interrupts,
+                per_second(self.interrupts),
+                self.received,
+                per_second(self.received),
+                self.sent,
+                per_interrupt_tenths / 10,
+                per_interrupt_tenths % 10,
+                self.found,
+                self.looks,
+                latched.saturating_sub(self.latched),
+                if interrupted {
+                    "waking on interrupts"
+                } else {
+                    "polling every millisecond"
+                }
+            );
+        }
+        *self = Stats::new(at, latched);
     }
 }
 
@@ -1067,6 +1194,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
             );
         }
     }
+    say_link_power(&device);
     let bar = Bar::map(&device, info.apertures)?;
     if !bar.covers(GMAC_OFFSET, GMAC_OFFSET + 0x1200) {
         let _ = writeln!(Say, "yt6801   the core's registers are not mapped");
@@ -1079,6 +1207,56 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     let outcome = serve(&mut ring, &mut adapter, &vectors, &control);
     let reset = finish(adapter, &control);
     outcome.and(reset)
+}
+
+/// Say what the function's configuration space holds of its link's power
+/// states and its MSI: read only, nothing written.
+///
+/// Linux's `dwmac-motorcomm` turns ASPM L1 off on every YT6801 because
+/// some boards "don't deliver MSI(X) with ASPM enabled"; Ferrix leaves the
+/// link as firmware set it, and a driver may not write Link Control. The
+/// line shows which the box has, so a run whose interrupts stay rare can
+/// be told apart from one the latch explains.
+fn say_link_power(device: &Device<Kernel>) {
+    /// The capability list's start, and the IDs looked for in it.
+    const CAPABILITIES: u16 = 0x34;
+    const EXPRESS: u32 = 0x10;
+    const MSI: u32 = 0x05;
+    let read = |offset: u16, width: u8| device.config_read(offset, width).ok();
+    let mut express = None;
+    let mut msi = None;
+    let mut at = read(CAPABILITIES, 1).map_or(0, |pointer| pointer as u16 & 0xFC);
+    // At most 48 capabilities fit in the space: a list that loops ends.
+    for _ in 0..48 {
+        if at < 0x40 {
+            break;
+        }
+        let Some(header) = read(at, 2) else {
+            break;
+        };
+        match header & 0xFF {
+            EXPRESS => express = express.or(Some(at)),
+            MSI => msi = msi.or(Some(at)),
+            _ => {}
+        }
+        at = (header >> 8) as u16 & 0xFC;
+    }
+    let link = express.and_then(|cap| read(cap + 0x10, 2));
+    let control = msi.and_then(|cap| read(cap + 0x02, 2));
+    match link {
+        Some(link) => {
+            let _ = writeln!(
+                Say,
+                "yt6801   link control {link:#06x}: ASPM L0s {} L1 {}; MSI control {}",
+                if link & 0b01 != 0 { "on" } else { "off" },
+                if link & 0b10 != 0 { "on" } else { "off" },
+                control.map_or(-1, i64::from),
+            );
+        }
+        None => {
+            let _ = writeln!(Say, "yt6801   link control unreadable");
+        }
+    }
 }
 
 /// Reset the core and say STOPPED, or leave without saying it.

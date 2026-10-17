@@ -10,7 +10,7 @@ use ferrix_dwmac::{Clock, Registers, regs};
 
 use crate::{
     Efuse, GMAC_OFFSET, Gmac, MacSource, enable_interrupts, generated, glue, options, prepare,
-    valid_unicast,
+    rearm, valid_unicast,
 };
 
 /// BAR 0 of a YT6801: the glue's registers, an eFuse, and the core's
@@ -30,6 +30,24 @@ struct Chip {
     resets: u32,
     /// Every write, in order.
     writes: Vec<(u32, u32)>,
+    /// How a write clears the aggregator's latched status.
+    clears: Clears,
+    /// The sources whose line is raised now: a level the aggregator
+    /// latches again as soon as it is cleared.
+    raised: u32,
+    /// MSIs the aggregator has sent.
+    messages: u32,
+}
+
+/// What clears a bit of [`glue::MGMT_INT_CTRL0`]'s status: undocumented,
+/// so the tests try both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Clears {
+    /// Writing it 0, as Motorcomm's driver does when it re-enables.
+    #[default]
+    Zero,
+    /// Writing it 1, as Motorcomm's driver does when it masks.
+    One,
 }
 
 impl Chip {
@@ -50,6 +68,39 @@ impl Chip {
 
     fn reg(&self, offset: u32) -> u32 {
         self.registers.get(&offset).copied().unwrap_or(0)
+    }
+
+    /// Whether the aggregator's unmasked status is set: what it sends on.
+    fn asserted(&self) -> bool {
+        let value = self.reg(glue::MGMT_INT_CTRL0);
+        value & glue::MGMT_STATUS & !(value >> glue::MGMT_MASK_SHIFT) != 0
+    }
+
+    /// Set the aggregator to `value`, latch the raised lines into it, and
+    /// send an MSI if its unmasked status went from clear to set.
+    fn aggregate(&mut self, value: u32) {
+        let was = self.asserted();
+        let value = value | (self.raised & glue::MGMT_STATUS);
+        let _ = self.registers.insert(glue::MGMT_INT_CTRL0, value);
+        if !was && self.asserted() {
+            self.messages += 1;
+        }
+    }
+
+    /// An event on `sources`: their lines go up, and stay up while
+    /// `level`, as the core's per-channel lines do in interrupt mode 2
+    /// until the channel's status is cleared.
+    fn event(&mut self, sources: u32, level: bool) {
+        let value = self.reg(glue::MGMT_INT_CTRL0) | sources;
+        if level {
+            self.raised |= sources;
+        }
+        self.aggregate(value);
+    }
+
+    /// The core's channel status cleared: its lines go down.
+    fn channel_cleared(&mut self) {
+        self.raised = 0;
     }
 }
 
@@ -87,6 +138,15 @@ impl Registers for Bar {
                     chip.reset_at = Some(chip.clock.get());
                 }
                 let _ = chip.registers.insert(offset, value);
+            }
+            glue::MGMT_INT_CTRL0 => {
+                let before = chip.reg(offset) & glue::MGMT_STATUS;
+                let written = value & glue::MGMT_STATUS;
+                let status = match chip.clears {
+                    Clears::Zero => before & written,
+                    Clears::One => before & !written,
+                };
+                chip.aggregate((value & !glue::MGMT_STATUS) | status);
             }
             glue::EFUSE_OP_CTRL_0 => {
                 let _ = chip.registers.insert(offset, value);
@@ -279,7 +339,11 @@ fn interrupts_are_let_out() {
         .insert(glue::MGMT_INT_CTRL0, 0xFFFF_0000);
     enable_interrupts(&mut rig.bar);
     let chip = rig.chip.borrow();
-    assert_eq!(chip.reg(glue::MGMT_INT_CTRL0), 0);
+    assert_eq!(
+        chip.reg(glue::MGMT_INT_CTRL0),
+        glue::MGMT_STATUS_MISC << glue::MGMT_MASK_SHIFT,
+        "the channels let through, the core's own line held back"
+    );
     assert_eq!(chip.reg(glue::OOB_WOL_CTRL) & glue::OOB_WOL_DISABLE, 1);
     assert_eq!(chip.reg(glue::INT_MODERATION), 200 | (200 << 16));
 }
@@ -296,10 +360,106 @@ fn the_core_is_reached_at_its_offset() {
 #[test]
 fn the_options_are_one_vector_s() {
     let options = options(MAC);
-    assert_eq!(options.interrupt_mode, 0);
+    assert_eq!(options.interrupt_mode, 2, "per-channel lines, as levels");
     assert_eq!(options.bus.phy, 0);
     assert_eq!(options.bus.clock_range, 2);
     assert!(options.bus.preamble_suppression);
     assert_eq!(options.mac, MAC);
     assert_eq!(generated([0, 0, 0])[0] & 0b11, 0b10, "local, unicast");
+}
+
+/// A chip with its interrupts let out, clearing its latch by `clears`.
+fn running(clears: Clears) -> Rig {
+    let mut rig = Rig::new();
+    rig.chip.borrow_mut().clears = clears;
+    enable_interrupts(&mut rig.bar);
+    rig
+}
+
+#[test]
+fn a_latch_left_set_sends_one_message_and_no_more() {
+    // The negative control: what the driver did before `rearm`.
+    let rig = running(Clears::Zero);
+    let mut chip = rig.chip.borrow_mut();
+    chip.event(glue::MGMT_STATUS_RX & 1, false);
+    chip.event(glue::MGMT_STATUS_RX & 1, false);
+    chip.event(glue::MGMT_STATUS_TX, false);
+    assert_eq!(chip.messages, 1);
+}
+
+#[test]
+fn rearming_lets_every_event_out_whatever_clears_the_latch() {
+    for clears in [Clears::Zero, Clears::One] {
+        let mut rig = running(clears);
+        for round in 1..=5 {
+            rig.chip.borrow_mut().event(glue::MGMT_STATUS_RX & 1, false);
+            assert_eq!(rig.chip.borrow().messages, round, "{clears:?}");
+            assert_eq!(rearm(&mut rig.bar), 1, "{clears:?}");
+            let chip = rig.chip.borrow();
+            assert_eq!(
+                chip.reg(glue::MGMT_INT_CTRL0),
+                glue::MGMT_RUNNING,
+                "{clears:?}: the latch clear, the mask as it runs"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_event_the_drain_did_not_see_is_announced_at_the_rearm() {
+    for clears in [Clears::Zero, Clears::One] {
+        let mut rig = running(clears);
+        rig.chip.borrow_mut().event(glue::MGMT_STATUS_RX & 1, true);
+        assert_eq!(rig.chip.borrow().messages, 1);
+        // The drain: the channel's status cleared, the rings read; then a
+        // frame lands that the read missed, and its line is up again.
+        rig.chip.borrow_mut().channel_cleared();
+        rig.chip.borrow_mut().event(glue::MGMT_STATUS_RX & 1, true);
+        assert_eq!(rig.chip.borrow().messages, 1, "latched already: no edge");
+        // The rearm masks, clears and unmasks: the raised line latches
+        // again and the mask coming off sends its message.
+        assert_ne!(rearm(&mut rig.bar), 0);
+        assert_eq!(rig.chip.borrow().messages, 2, "{clears:?}");
+        // The next drain takes it; its rearm finds the line down and leaves
+        // the latch clear, and the next frame sends afresh.
+        rig.chip.borrow_mut().channel_cleared();
+        let _ = rearm(&mut rig.bar);
+        assert_eq!(rig.chip.borrow().messages, 2, "{clears:?}");
+        assert!(!rig.chip.borrow().asserted(), "{clears:?}");
+        rig.chip.borrow_mut().event(glue::MGMT_STATUS_RX & 1, true);
+        assert_eq!(rig.chip.borrow().messages, 3, "{clears:?}");
+    }
+}
+
+#[test]
+fn clearing_without_the_mask_would_lose_a_raised_line() {
+    // The negative control for the mask: a clear alone, with the line up,
+    // leaves the latch set and sends nothing, and nothing after it sends.
+    let rig = running(Clears::Zero);
+    rig.chip.borrow_mut().event(glue::MGMT_STATUS_RX & 1, true);
+    let mut bar = Bar(Rc::clone(&rig.chip));
+    bar.write(glue::MGMT_INT_CTRL0, glue::MGMT_RUNNING);
+    let mut chip = rig.chip.borrow_mut();
+    assert_eq!(chip.messages, 1);
+    chip.channel_cleared();
+    chip.event(glue::MGMT_STATUS_RX & 1, true);
+    assert_eq!(chip.messages, 1);
+}
+
+#[test]
+fn the_cores_own_line_sends_nothing() {
+    let rig = running(Clears::Zero);
+    let mut chip = rig.chip.borrow_mut();
+    chip.event(glue::MGMT_STATUS_MISC, true);
+    assert_eq!(chip.messages, 0);
+    chip.event(glue::MGMT_STATUS_TX, false);
+    assert_eq!(chip.messages, 1);
+}
+
+#[test]
+fn a_quiet_latch_costs_one_read() {
+    let mut rig = running(Clears::Zero);
+    let writes = rig.chip.borrow().writes.len();
+    assert_eq!(rearm(&mut rig.bar), 0);
+    assert_eq!(rig.chip.borrow().writes.len(), writes);
 }

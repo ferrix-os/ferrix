@@ -27,9 +27,20 @@
 //! this chip it does not use MSI-X at all: it holds MSI-X disabled, grants
 //! the page as an ordinary aperture, and offers the function's one MSI
 //! vector instead (`docs/DEVMGR.md`, the consultant's review of
-//! 2026-10-15). One vector carries everything: [`options`] sets the core's
-//! interrupt mode to 0, every interrupt out through one line, which is
-//! Linux's MSI fallback too.
+//! 2026-10-15).
+//!
+//! # One MSI is the glue's aggregator
+//!
+//! With MSI-X off the chip's one message comes from an aggregator in the
+//! glue ([`glue::MGMT_INT_CTRL0`]): it latches the core's per-channel
+//! interrupt lines and sends the MSI as its status goes from clear to set.
+//! The latch stays set until software clears it, so a driver that only
+//! clears the core's channel status hears the first event and almost none
+//! after. The recipe is Motorcomm's own driver's for MSI: the core in
+//! interrupt mode 2 ([`options`]), the core's own line masked in the
+//! aggregator ([`enable_interrupts`]), and the latch cleared after every
+//! drain ([`rearm`]). Linux's `dwmac-motorcomm` runs the chip on MSI-X and
+//! does none of it.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -70,9 +81,28 @@ pub mod glue {
     /// Bit 0 of [`OOB_WOL_CTRL`]: the block disabled, without which the
     /// DMA's interrupts are never delivered.
     pub const OOB_WOL_DISABLE: u32 = 1 << 0;
-    /// Management interrupts: status in bits 15:0, mask in 31:16. Linux
-    /// writes 0.
+    /// The glue's interrupt aggregator: what the chip turns into its one
+    /// MSI when MSI-X is off. Status in bits 15:0, latched, one bit per
+    /// source ([`MGMT_STATUS_RX`], [`MGMT_STATUS_TX`], [`MGMT_STATUS_MISC`]);
+    /// a mask in bits 31:16, a set bit holding that source back.
     pub const MGMT_INT_CTRL0: u32 = 0x1100;
+    /// [`MGMT_INT_CTRL0`]'s status bits.
+    pub const MGMT_STATUS: u32 = 0xFFFF;
+    /// A receive channel's per-channel interrupt, one bit for each of four.
+    pub const MGMT_STATUS_RX: u32 = 0x000F;
+    /// The transmit channel's per-channel interrupt.
+    pub const MGMT_STATUS_TX: u32 = 0x0010;
+    /// The core's own line (`sbd_intr_o`): the MAC's, the MTL's and the
+    /// DMA's abnormal events.
+    pub const MGMT_STATUS_MISC: u32 = 0x0020;
+    /// Where [`MGMT_INT_CTRL0`]'s mask starts.
+    pub const MGMT_MASK_SHIFT: u32 = 16;
+    /// [`MGMT_INT_CTRL0`]'s mask with every source held back.
+    pub const MGMT_MASK_ALL: u32 = 0xFFFF << MGMT_MASK_SHIFT;
+    /// [`MGMT_INT_CTRL0`] while the driver runs, as Motorcomm's driver
+    /// leaves it on one MSI: status clear, the channels' interrupts let
+    /// through, the core's own line held back.
+    pub const MGMT_RUNNING: u32 = MGMT_STATUS_MISC << MGMT_MASK_SHIFT;
     /// Interrupt moderation: receive in bits 11:0, transmit in 27:16.
     pub const INT_MODERATION: u32 = 0x1108;
     /// The MSI-X table, which the driver never touches.
@@ -311,14 +341,56 @@ pub fn prepare<R: Registers, C: Clock>(bar: &mut R, clock: &mut C, seed: [u8; 3]
     }
 }
 
-/// Let the DMA's interrupts out: management interrupts masked as Linux
-/// leaves them, moderation at 200 each way, and the wake-on-LAN block
-/// disabled. After the core's bring-up, and again after a return from
-/// D3hot.
+/// Let the DMA's interrupts out: the aggregator cleared and its channel
+/// sources let through ([`glue::MGMT_RUNNING`]), moderation at 200 each
+/// way, and the wake-on-LAN block disabled. After the core's bring-up, and
+/// again after a return from D3hot.
+///
+/// Linux's `dwmac-motorcomm` writes 0 to the aggregator, letting the core's
+/// own line through too; it runs the chip on MSI-X, where the aggregator
+/// does not decide what is sent. On one MSI it does, and Motorcomm's own
+/// driver holds that line back, so this does as well: nothing the driver
+/// uses is announced on it, and a source the driver never clears (a MAC
+/// or counter status) would hold the aggregator raised for good.
 pub fn enable_interrupts<R: Registers>(bar: &mut R) {
-    bar.write(glue::MGMT_INT_CTRL0, 0);
+    bar.write(glue::MGMT_INT_CTRL0, glue::MGMT_RUNNING);
     bar.write(glue::INT_MODERATION, 200 | (200 << 16));
     bar.write(glue::OOB_WOL_CTRL, glue::OOB_WOL_DISABLE);
+}
+
+/// Let the next MSI out: clear what the aggregator latched, and return it
+/// (0 if nothing was, in which case nothing is written).
+///
+/// The aggregator latches each source's interrupt and sends one message as
+/// its unmasked status goes from clear to set. Motorcomm's driver clears the
+/// latch after every service on MSI, and never on MSI-X: a latch left set
+/// sends nothing more. On the N150 box a driver that never cleared it had
+/// one interrupt at bring-up and about 209 more in five minutes of
+/// downloading tens of thousands of frames (2026-10-17).
+///
+/// After the drain, as Motorcomm's driver does it: the core's channel
+/// status cleared and the rings read first, then the latch. In interrupt
+/// mode 2 the per-channel lines are levels, raised while the channel's
+/// status is, so an event after the channel's status was cleared still
+/// holds its line up here and the aggregator latches it again. The latch
+/// is cleared with every source masked and only then unmasked, so a source
+/// latched again sends a message as the mask comes off, rather than
+/// staying set with no edge to send on -- the frame a drain did not see
+/// is announced, never left to the next poll.
+///
+/// Two writes, because what clears a status bit is not documented:
+/// Motorcomm's driver writes the value it read back when it masks, and
+/// writes the field 0 when it unmasks, so either a write of 1 or a write of
+/// 0 clears it. The first write masks every source and puts back what was
+/// read; the second writes the status 0 under [`glue::MGMT_RUNNING`]'s
+/// mask. Whichever the chip obeys, the latch holds only what is raised now.
+pub fn rearm<R: Registers>(bar: &mut R) -> u32 {
+    let status = bar.read(glue::MGMT_INT_CTRL0) & glue::MGMT_STATUS;
+    if status != 0 {
+        bar.write(glue::MGMT_INT_CTRL0, glue::MGMT_MASK_ALL | status);
+        bar.write(glue::MGMT_INT_CTRL0, glue::MGMT_RUNNING);
+    }
+    status
 }
 
 /// The core's options on this chip, for `mac`.
@@ -326,9 +398,12 @@ pub fn enable_interrupts<R: Registers>(bar: &mut R) {
 /// The MDIO clock range is 2 (a CSR clock of 20 to 35 MHz: the chip runs
 /// from a 25 MHz crystal), with preamble suppression, as Motorcomm's
 /// driver sets them. The FIFO is believed up to 80 KiB and the receive
-/// FIFO split four ways, as the chip's four receive queues share it. One
-/// interrupt for everything ([`ferrix_dwmac::Options::interrupt_mode`] 0),
-/// because one MSI vector is all there is. Receive has the most descriptors
+/// FIFO split four ways, as the chip's four receive queues share it. The
+/// core's interrupt mode is 2 ([`ferrix_dwmac::Options::interrupt_mode`]),
+/// as Motorcomm's driver sets it on MSI and MSI-X alike: the per-channel
+/// lines are levels, raised while the channel's status is, and those are
+/// what the glue's aggregator latches and turns into the one MSI
+/// ([`rearm`]). Receive has the most descriptors
 /// a ring may have, 128: 5 ms of frames at 300 Mbit/s, for a driver that
 /// polls when its interrupt does not come.
 #[must_use]
@@ -344,7 +419,7 @@ pub fn options(mac: [u8; 6]) -> Options {
             phy: 0,
         },
         gigabit: true,
-        interrupt_mode: 0,
+        interrupt_mode: 2,
         fifo_cap: 81920,
         rx_fifo_share: 4,
     }
