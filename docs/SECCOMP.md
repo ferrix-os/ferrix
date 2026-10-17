@@ -1960,6 +1960,37 @@ all`, `test-init --arch all`, `test-shell` on x86-64 (zinc, ferrousli, the
 musl and the glibc busybox) and `test-vfs` on x86-64 (ferrousli and the
 musl busybox) (tags `batch-20261014T172957Z-1` to `-16`).
 
+**Landed 2026-10-18, under the consultant's OK IF of ledger line 2331.**
+S4 to S6 were rebased onto `main` c5b033646 as `sud-s4` 96e29c3c8, and
+every row and control was run again there (ledger line 2323's (1)):
+`check`, `test-boot` on x86-64 under KVM and TCG, AArch64 and ARMv7-A,
+`test-threads --arch all`, `test-seccomp --arch all`, `test-shell` on
+x86-64 (zinc, ferrousli, the musl and the Debian busybox), `test-vfs` on
+x86-64 (ferrousli and the musl busybox) and `test-init --arch all`, each
+`run: PASSED` (tags `sud-a-r1` to `sud-a-r14`). The sixteen controls each
+`control: FIRED (panic)` on x86-64 under KVM, on the same message as
+before (tags `sud-a-t1-f` to `-t7-f`, `-k6-f`, `-s2-f` to `-s4-f`,
+`-b1-f` to `-b4-f`, `-s1b-f`; INDEX lines 16112 to 16148). `sud-a-s1-f`
+did not fire, and stays recorded. The script that rebuilt the controls
+from their logs kept only the changed lines of s1's two-site
+replacement, so the 5 ms delay before `with_live_threads`' lock was not
+where the original put it. `sud-a-s1b-f` is the original sabotage, and
+it fired. Before the take, S4 to S6 were rebased again onto `main`
+6ff6b1a5f, with conflicts only in `docs/certification` counts (F-72
+counted among F-86 to F-89: 28 open, 59 closed, of 87) and the
+regenerated pages. The `src/` range-diff is `=` throughout. carry-coverage
+carried every anchor, `gen-coverage-justification --check` is current.
+On that rebase, 36823db6d, every row and control was run once more
+(tags `sudS4-r1` to `-r16` and the sixteen `sudS4-` controls, INDEX lines
+16158 to 16190), more than the ruling of line 2331 owes: each row
+`run: PASSED` but `test-init --arch all` (`sudS4-r6`), which stopped on
+its x86-64 half because the gate slot had no `sshdt` built ("cargo xtask
+build-apps --app sshdt builds it"), an environment gap, not this change;
+its row stands from `sud-a`'s batch under the ruling. The controls each
+`control: FIRED (panic)`, `s1` too, rebuilt from the original two-site
+sabotage. The `check` row on the landing hash, this commit, is tag
+`sudS4-landing-check`.
+
 **S6, first part, built (2026-10-01, os-7c, `stage13-s6`).** `cargo xtask
 test-seccomp` (§8.2): the guest program `src/tests/seccomp`, Rust with the
 `libc` crate, built for x86-64, i386 (run on x86-64 through `int $0x80`),
