@@ -22,8 +22,11 @@
  * on claims of its own. A node's rules are proved on every boot, before the
  * nodes are published, by device/check.rs, which `device::publish` runs.
  * The quiesce is proved by block_ring/check.rs, which drives
- * `device_quiesce` through a driver's life and death on the first PCI
- * function, and by xtask's `test-init`, which restarts `devmgr`. What no
+ * `device_quiesce` through a driver's life and death on the subject it
+ * chooses: a host bridge first, else a function found mastering that is
+ * no bridge, display or framebuffer holder, each shown first to take Bus
+ * Master Enable off and on (mass storage and serial bus last); and by
+ * xtask's `test-init`, which restarts `devmgr`. What no
  * check proves waits in the baseline as check-writing work.
  *
  * Ids are `L.claim.<n>`, `L.device.<n>` and `L.quiesce.<n>`, numbered

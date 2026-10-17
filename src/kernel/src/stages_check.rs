@@ -1318,7 +1318,10 @@ pub(super) fn check_ring_control() {
         report.rewrites,
     );
     if let Some(why) = report.skipped {
-        println!("  ring     not checked: {why}");
+        println!(
+            "  ring     not checked: {why} ({} passed over)",
+            report.passed_over
+        );
     } else {
         println!(
             "  ring     {} calls and HELLOs refused as specified, {} disk published from an \
@@ -1326,6 +1329,13 @@ pub(super) fn check_ring_control() {
              died, {} frames leaked",
             report.refusals, report.published, report.leaked,
         );
+        if let Some((at, vendor, device, class)) = report.subject {
+            println!(
+                "  ring     its rings made for {at} ({vendor:04x}:{device:04x}, class \
+                 {class:06x}), after {} function(s) whose bus mastering would not go off and on",
+                report.passed_over
+            );
+        }
     }
 }
 

@@ -8,7 +8,9 @@
 //! the ring-3 driver's check, which needs the native runtime and a program in
 //! the image, and comes after this.
 //!
-//! What is required, on a machine with a PCI function:
+//! What is required, on a machine with a PCI function whose bus mastering
+//! the kernel can turn off (the subject, chosen as `subject` says; it is
+//! left with bus mastering off):
 //!
 //! * `block_ring_create` refuses a device handle without `MANAGE`, a handle
 //!   that is not a device, and a device that already has a ring;
@@ -111,7 +113,14 @@ pub(crate) struct Report {
     /// Fields of a posted completion a cheating driver rewrote after the
     /// kernel read them, none of which it acted on ([`super::reread_check`]).
     pub(crate) rewrites: u32,
-    /// Why nothing was checked, on a machine with no PCI function.
+    /// The function the rings were made for, with its vendor and device
+    /// identifiers and class code.
+    pub(crate) subject: Option<(device::Location, u16, u16, u32)>,
+    /// Functions passed over because their bus mastering would not go off
+    /// and on again.
+    pub(crate) passed_over: usize,
+    /// Why nothing was checked, on a machine with no PCI function, or none
+    /// whose bus mastering the kernel can turn off.
     pub(crate) skipped: Option<&'static str>,
 }
 
@@ -124,7 +133,8 @@ pub(super) struct Counter {
     pub(super) published: u32,
 }
 
-/// Run the check. `Err` names the first thing that was not true.
+/// Run the check on the function `subject` chooses, which it leaves with
+/// bus mastering off. `Err` names the first thing that was not true.
 ///
 /// # Errors
 ///
@@ -136,17 +146,20 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let rewrites = super::reread_check::run()?.rewrites;
     // Nor here: its two tree nodes are its own, and it leaves `vda` free.
     super::tree_check::run()?;
-    let Some(node) = device::devices()
-        .iter()
-        .find(|node| matches!(node.location(), device::Location::Pci(_)))
-        .cloned()
-    else {
+    let (subject, passed_over) = subject()?;
+    let Some(node) = subject else {
         return Ok(Report {
             refusals: 0,
             published: 0,
             leaked: 0,
             rewrites,
-            skipped: Some("no PCI function to make a ring for"),
+            subject: None,
+            passed_over,
+            skipped: Some(if passed_over == 0 {
+                "no PCI function to make a ring for"
+            } else {
+                "no PCI function whose bus mastering the kernel can turn off"
+            }),
         });
     };
     // Twice, measured on the second, for the reason `syscall::check::run`
@@ -187,8 +200,123 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         published: counter.published,
         leaked,
         rewrites,
+        subject: node
+            .pci_function()
+            .map(|f| (node.location(), f.vendor, f.device, f.class)),
+        passed_over,
         skipped: None,
     })
+}
+
+/// PCI class and subclass: host bridge.
+const CLASS_HOST_BRIDGE: u32 = 0x0600;
+/// PCI base class: mass storage controller.
+const CLASS_STORAGE: u32 = 0x01;
+/// PCI base class: display controller.
+const CLASS_DISPLAY: u32 = 0x03;
+/// PCI base class: bridge.
+const CLASS_BRIDGE: u32 = 0x06;
+/// PCI base class: serial bus controller.
+const CLASS_SERIAL_BUS: u32 = 0x0C;
+
+/// The function the check makes its rings for, and how many it passed over
+/// because their Bus Master Enable would not go off and on again.
+///
+/// The quiesce a death round asks for has to turn the subject's bus
+/// mastering off, and the check reads that it did; PCI lets a host bridge
+/// hold Bus Master Enable at 1 (Alder Lake-N's 00:00.0 reads 0x0006 whatever
+/// is written), and there the kernel's quiesce rightly fails, since the
+/// function's DMA cannot be turned off. So each candidate first shows,
+/// through the check's own mapping and never the kernel's paths under test,
+/// that its bit goes off and on, and is put back as found.
+///
+/// Host bridges come first, as the first function did before on every
+/// machine the gates run: a host bridge's bus mastering is no DMA engine of
+/// its own. Then, as W7's fallback (`device::config_check`), any other
+/// function that is no bridge and no display, lends no framebuffer, is not
+/// refused and was found mastering, so that the probe never sets bus
+/// mastering on a DMA engine firmware left off; mass storage and serial bus
+/// controllers last, since firmware may still drive them.
+///
+/// The subject is left as the last death round's quiesce leaves it: bus
+/// mastering off, and the kernel's record of the command register agreeing.
+/// It is not put back as found: a write behind that record would make the
+/// next `verify_config`, at a real driver's HELLO, refuse a conforming node.
+/// Off is the restrictive direction, and a driver that later claims the
+/// function turns bus mastering on again at its first pin, through
+/// `enable_dma`.
+fn subject() -> Result<(Option<Arc<DeviceNode>>, usize), &'static str> {
+    let class = |node: &Arc<DeviceNode>| node.pci_function().map(|function| function.class >> 8);
+    let usable = |node: &&Arc<DeviceNode>| {
+        matches!(node.location(), device::Location::Pci(_))
+            && node
+                .pci_function()
+                .is_some_and(|function| function.config_phys.is_some())
+            && !node.yielded()
+            && node.framebuffer_mode().is_none()
+            && !node.is_refused()
+    };
+    let host = |node: &&Arc<DeviceNode>| class(node) == Some(CLASS_HOST_BRIDGE);
+    let other = |node: &&Arc<DeviceNode>| {
+        class(node).is_some_and(|c| !matches!(c >> 8, CLASS_BRIDGE | CLASS_DISPLAY))
+    };
+    let late = |node: &&Arc<DeviceNode>| {
+        class(node).is_some_and(|c| matches!(c >> 8, CLASS_STORAGE | CLASS_SERIAL_BUS))
+    };
+    let nodes = device::devices();
+    let candidates = nodes
+        .iter()
+        .filter(usable)
+        .filter(host)
+        .map(|node| (node, true))
+        .chain(
+            nodes
+                .iter()
+                .filter(usable)
+                .filter(other)
+                .filter(|node| !late(node))
+                .chain(nodes.iter().filter(usable).filter(other).filter(late))
+                .map(|node| (node, false)),
+        );
+    let mut passed_over = 0;
+    for (node, host) in candidates {
+        if bus_master_toggles(node, host)? {
+            return Ok((Some(Arc::clone(node)), passed_over));
+        }
+        passed_over += 1;
+    }
+    Ok((None, passed_over))
+}
+
+/// Whether `node`'s Bus Master Enable goes off and on when written, through
+/// a mapping of the check's own, with the command register put back as found
+/// after. A function that is no `host` bridge and was found not mastering is
+/// passed over unwritten.
+fn bus_master_toggles(node: &DeviceNode, host: bool) -> Result<bool, &'static str> {
+    let config_phys = node
+        .pci_function()
+        .and_then(|function| function.config_phys)
+        .ok_or("the node is not a PCI function after all")?;
+    let config = crate::vmap::map_device(config_phys, 256)
+        .map_err(|_| "a function's configuration space could not be mapped to probe it")?;
+    let registers = crate::mmio::Mmio::at(config);
+    let at = u64::from(COMMAND);
+    let found = registers.read16(at);
+    let wrote = |value: u16| {
+        registers.write16(at, value);
+        registers.read16(at)
+    };
+    let toggles = (host || found & COMMAND_BUS_MASTER != 0) && {
+        let off = wrote(found & !COMMAND_BUS_MASTER) & COMMAND_BUS_MASTER == 0;
+        let on = wrote(found | COMMAND_BUS_MASTER) & COMMAND_BUS_MASTER != 0;
+        off && on
+    };
+    let restored = wrote(found) == found;
+    let _ = crate::vmap::unmap_device(config);
+    if !restored {
+        return Err("the block ring check could not put back a command register it probed");
+    }
+    Ok(toggles)
 }
 
 /// Wait until every ring task of the rounds so far has stopped and the reaper

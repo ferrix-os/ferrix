@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "3978c5e160a211e25c208dec9f61de1e6fda17dc4985103fde5f69ee72c6f1c1",
+  "digest": "72dcdc1b21be5ba5d27d083889ad176a82b198bb0786c7fd5ac838a39dcbb82e",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -84,7 +84,7 @@
     },
     {
       "path": "docs/sysml/20-device-requirements.sysml",
-      "synopsis": "Ferrix — SysML v2 model, part 20: the low-level requirements of a device's claim, its node, and its quiesce.\n\nWhat each unit of src/kernel/src/claim.rs and src/kernel/src/device.rs does, and the quiesce in src/kernel/src/syscall/native.rs, as `ItemLowLevel` requirements (part 13 defines the format): a device claimed through its core's control channels, the number its node is published under, the apertures and vectors a node hands out and nothing past them, the MSI-X vectors it mints, the bus mastering a quiesce turns off, and the quiesce itself, which waits out every core that serves the device before the next driver is given it. The objects a driver holds for a device -- its mapping, its interrupt, its pins -- are object/'s (part 14); the domain under them is iommu's (part 16).\n\nThe format and its rules are the object/ pilot's (W-8 step 3): a requirement names every function that carries its behaviour as its `unit`; one check proves a whole requirement; a statement says no more than its criterion tests; an accessor needs no requirement of its own.\n\nWhat proves what. The claims and numbers are proved by service_check.rs, on claims of its own. A node's rules are proved on every boot, before the nodes are published, by device/check.rs, which `device::publish` runs. The quiesce is proved by block_ring/check.rs, which drives `device_quiesce` through a driver's life and death on the first PCI function, and by xtask's `test-init`, which restarts `devmgr`. What no check proves waits in the baseline as check-writing work.\n\nIds are `L.claim.<n>`, `L.device.<n>` and `L.quiesce.<n>`, numbered through each part; `L.quiesce` names the behaviour, whose units are in syscall/native.rs."
+      "synopsis": "Ferrix — SysML v2 model, part 20: the low-level requirements of a device's claim, its node, and its quiesce.\n\nWhat each unit of src/kernel/src/claim.rs and src/kernel/src/device.rs does, and the quiesce in src/kernel/src/syscall/native.rs, as `ItemLowLevel` requirements (part 13 defines the format): a device claimed through its core's control channels, the number its node is published under, the apertures and vectors a node hands out and nothing past them, the MSI-X vectors it mints, the bus mastering a quiesce turns off, and the quiesce itself, which waits out every core that serves the device before the next driver is given it. The objects a driver holds for a device -- its mapping, its interrupt, its pins -- are object/'s (part 14); the domain under them is iommu's (part 16).\n\nThe format and its rules are the object/ pilot's (W-8 step 3): a requirement names every function that carries its behaviour as its `unit`; one check proves a whole requirement; a statement says no more than its criterion tests; an accessor needs no requirement of its own.\n\nWhat proves what. The claims and numbers are proved by service_check.rs, on claims of its own. A node's rules are proved on every boot, before the nodes are published, by device/check.rs, which `device::publish` runs. The quiesce is proved by block_ring/check.rs, which drives `device_quiesce` through a driver's life and death on the subject it chooses: a host bridge first, else a function found mastering that is no bridge, display or framebuffer holder, each shown first to take Bus Master Enable off and on (mass storage and serial bus last); and by xtask's `test-init`, which restarts `devmgr`. What no check proves waits in the baseline as check-writing work.\n\nIds are `L.claim.<n>`, `L.device.<n>` and `L.quiesce.<n>`, numbered through each part; `L.quiesce` names the behaviour, whose units are in syscall/native.rs."
     },
     {
       "path": "docs/sysml/21-armv7a-requirements.sysml",
@@ -64183,7 +64183,7 @@
       "kind": "package",
       "source": {
         "file": "docs/sysml/20-device-requirements.sysml",
-        "line": 33
+        "line": 36
       },
       "children": [
         {
@@ -64193,7 +64193,7 @@
           "doc": "src/kernel/src/claim.rs: a device claimed through a core's control channel, which a quiesce waits out, and the numbers the cores' nodes are published under.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 36
+            "line": 39
           },
           "children": [
             {
@@ -64204,7 +64204,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 41
+                "line": 44
               },
               "children": [
                 {
@@ -64215,7 +64215,7 @@
                   "value": "\"Claims::claim shall record a claim of a node nobody holds, and refuse a second claim of it while the first stands.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 44
+                    "line": 47
                   }
                 },
                 {
@@ -64226,7 +64226,7 @@
                   "value": "\"A published node nobody holds is claimed, and a second claim of it is refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 46
+                    "line": 49
                   }
                 },
                 {
@@ -64237,7 +64237,7 @@
                   "value": "\"H.DEV.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 47
+                    "line": 50
                   }
                 },
                 {
@@ -64248,7 +64248,7 @@
                   "value": "(\"claim::Claims::claim\", \"claim::Claims::claim_up_to\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 48
+                    "line": 51
                   }
                 }
               ]
@@ -64261,7 +64261,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 50
+                "line": 53
               },
               "children": [
                 {
@@ -64272,7 +64272,7 @@
                   "value": "\"Claims::claim_up_to shall record up to its limit of claims of one node, each through its own channel, and refuse one more.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 53
+                    "line": 56
                   }
                 },
                 {
@@ -64283,7 +64283,7 @@
                   "value": "\"At a limit of 2, two claims of one node through two channels are recorded and a third is refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 55
+                    "line": 58
                   }
                 },
                 {
@@ -64294,7 +64294,7 @@
                   "value": "\"H.DEV.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 56
+                    "line": 59
                   }
                 },
                 {
@@ -64305,7 +64305,7 @@
                   "value": "\"claim::Claims::claim_up_to\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 57
+                    "line": 60
                   }
                 }
               ]
@@ -64318,7 +64318,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 59
+                "line": 62
               },
               "children": [
                 {
@@ -64329,7 +64329,7 @@
                   "value": "\"Claims::wait_until_released shall answer ByADriver, at once, while any driver end a node is claimed through is still open.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 62
+                    "line": 65
                   }
                 },
                 {
@@ -64340,7 +64340,7 @@
                   "value": "\"With a node claimed through two channels, one driver end closed and the other open, the wait answers ByADriver.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 65
+                    "line": 68
                   }
                 },
                 {
@@ -64351,7 +64351,7 @@
                   "value": "\"H.DEV.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 66
+                    "line": 69
                   }
                 },
                 {
@@ -64362,7 +64362,7 @@
                   "value": "(\"claim::Claims::wait_until_released\", \"claim::Claims::wait_within\", \"claim::Claims::is_held_by_a_driver\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 68
+                    "line": 71
                   }
                 }
               ]
@@ -64375,7 +64375,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 70
+                "line": 73
               },
               "children": [
                 {
@@ -64386,7 +64386,7 @@
                   "value": "\"A wait for a node whose drivers have gone shall answer Ok once no claim of it stands, whether its release came before the wait began or while the wait was parked.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 73
+                    "line": 76
                   }
                 },
                 {
@@ -64397,7 +64397,7 @@
                   "value": "\"A wait begun after the node's release ends Ok at once, and a wait parked on a node released by another task once the wait is blocked ends Ok.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 76
+                    "line": 79
                   }
                 },
                 {
@@ -64408,7 +64408,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 77
+                    "line": 80
                   }
                 },
                 {
@@ -64419,7 +64419,7 @@
                   "value": "(\"claim::Claims::wait_within\", \"claim::Claims::is_claimed\", \"claim::Claims::release\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 79
+                    "line": 82
                   }
                 }
               ]
@@ -64432,7 +64432,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 81
+                "line": 84
               },
               "children": [
                 {
@@ -64443,7 +64443,7 @@
                   "value": "\"A wait for a node still claimed shall answer Waiting when its caller is cancelled.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 83
+                    "line": 86
                   }
                 },
                 {
@@ -64454,7 +64454,7 @@
                   "value": "\"A wait on a node whose driver end has closed and whose claim stands, cancelled, answers Waiting; after the release, the same wait answers Ok.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 86
+                    "line": 89
                   }
                 },
                 {
@@ -64465,7 +64465,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 87
+                    "line": 90
                   }
                 },
                 {
@@ -64476,7 +64476,7 @@
                   "value": "\"claim::Claims::wait_within\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 88
+                    "line": 91
                   }
                 }
               ]
@@ -64489,7 +64489,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 90
+                "line": 93
               },
               "children": [
                 {
@@ -64500,7 +64500,7 @@
                   "value": "\"A wait for a node still claimed shall answer Waiting when its patience runs out.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 92
+                    "line": 95
                   }
                 },
                 {
@@ -64511,7 +64511,7 @@
                   "value": "\"A wait of 10 ms on a node whose driver end has closed and whose claim stands answers Waiting.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 94
+                    "line": 97
                   }
                 },
                 {
@@ -64522,7 +64522,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 95
+                    "line": 98
                   }
                 },
                 {
@@ -64533,7 +64533,7 @@
                   "value": "\"claim::Claims::wait_within\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 96
+                    "line": 99
                   }
                 }
               ]
@@ -64546,7 +64546,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 98
+                "line": 101
               },
               "children": [
                 {
@@ -64557,7 +64557,7 @@
                   "value": "\"Claims::release_one shall let go only the claim made through its channel, leaving the node's others standing.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 101
+                    "line": 104
                   }
                 },
                 {
@@ -64568,7 +64568,7 @@
                   "value": "\"Of a node's two claims, one let go leaves the node waited for under the other's driver; the other let go frees it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 104
+                    "line": 107
                   }
                 },
                 {
@@ -64579,7 +64579,7 @@
                   "value": "\"H.DEV.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 105
+                    "line": 108
                   }
                 },
                 {
@@ -64590,7 +64590,7 @@
                   "value": "\"claim::Claims::release_one\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 106
+                    "line": 109
                   }
                 }
               ]
@@ -64603,7 +64603,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 108
+                "line": 111
               },
               "children": [
                 {
@@ -64614,7 +64614,7 @@
                   "value": "\"A claim, or a node's number, with no memory to record it shall be refused and record nothing.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 110
+                    "line": 113
                   }
                 },
                 {
@@ -64625,7 +64625,7 @@
                   "value": "\"With the one allocation of a claim refused, the claim is refused and the next, with memory, is recorded; with the one allocation of a number refused, none is taken and the next is the first.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 114
+                    "line": 117
                   }
                 },
                 {
@@ -64636,7 +64636,7 @@
                   "value": "\"H.MEM.11\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 115
+                    "line": 118
                   }
                 },
                 {
@@ -64647,7 +64647,7 @@
                   "value": "(\"claim::Claims::claim_up_to\", \"claim::Numbers::take\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 116
+                    "line": 119
                   }
                 }
               ]
@@ -64660,7 +64660,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 118
+                "line": 121
               },
               "children": [
                 {
@@ -64671,7 +64671,7 @@
                   "value": "\"Numbers::take shall give the lowest number from the first nothing holds, and a number given back shall be the next taken.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 121
+                    "line": 124
                   }
                 },
                 {
@@ -64682,7 +64682,7 @@
                   "value": "\"From 7, two numbers taken are 7 and 8; 7 given back is the next taken.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 123
+                    "line": 126
                   }
                 },
                 {
@@ -64693,7 +64693,7 @@
                   "value": "\"H.DEV.3\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 124
+                    "line": 127
                   }
                 },
                 {
@@ -64704,7 +64704,7 @@
                   "value": "(\"claim::Numbers::take\", \"claim::Numbers::give_back\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 125
+                    "line": 128
                   }
                 }
               ]
@@ -64718,7 +64718,7 @@
           "doc": "src/kernel/src/device.rs: the apertures and vectors a node hands out, the nodes published, and the bus mastering a node's DMA is switched with.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 129
+            "line": 132
           },
           "children": [
             {
@@ -64729,7 +64729,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 134
+                "line": 137
               },
               "children": [
                 {
@@ -64740,7 +64740,7 @@
                   "value": "\"DeviceNode::mint shall withhold, and count, an aperture that overlaps memory the kernel uses, so that no published aperture does -- every aperture but the firmware framebuffer node's, whose one exemption, inside the boot framebuffer alone, is L.device.38. PCI enumeration shall turn on memory decoding that firmware left off only for an endpoint every memory BAR of which is assigned, clear of every reserved range (RAM among them) and of every other function's assigned memory BAR on its host bridge, and otherwise leave it off with a line naming why.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 144
+                    "line": 147
                   }
                 },
                 {
@@ -64751,7 +64751,7 @@
                   "value": "\"Every aperture of every published node is clear of every reserved range, the firmware framebuffer node's clear of every one but the framebuffer. On made-up BARs, decoding_refusal allows assigned BARs clear of everything and refuses a BAR unassigned, one over a reserved range and one over another function's BAR; with the reserved test removed, stage 10 fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 151
+                    "line": 154
                   }
                 },
                 {
@@ -64762,7 +64762,7 @@
                   "value": "(\"H.MEM.10\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 152
+                    "line": 155
                   }
                 },
                 {
@@ -64773,7 +64773,7 @@
                   "value": "(\"device::DeviceNode::mint\", \"device::Reserved::covers\", \"device::Aperture::overlaps\", \"discovery::pci::decoding_refusal\", \"discovery::pci::turn_decoding_on\", \"discovery::pci::decoding_after\", \"discovery::pci::memory_spans\", \"discovery::pci::examine_all\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 156
+                    "line": 159
                   }
                 }
               ]
@@ -64786,7 +64786,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 158
+                "line": 161
               },
               "children": [
                 {
@@ -64797,7 +64797,7 @@
                   "value": "\"DeviceNode::aperture shall grant a range only when it lies inside one of the node's apertures, and none of length 0 or past the address space's end.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 161
+                    "line": 164
                   }
                 },
                 {
@@ -64808,7 +64808,7 @@
                   "value": "\"For every published aperture: the whole is granted, and its last byte; a range one byte past its end, one ending before its start by a byte, one of length 0 and one wrapping the address space are refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 165
+                    "line": 168
                   }
                 },
                 {
@@ -64819,7 +64819,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 166
+                    "line": 169
                   }
                 },
                 {
@@ -64830,7 +64830,7 @@
                   "value": "(\"device::DeviceNode::aperture\", \"device::Aperture::end\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 167
+                    "line": 170
                   }
                 }
               ]
@@ -64843,7 +64843,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 169
+                "line": 172
               },
               "children": [
                 {
@@ -64854,7 +64854,7 @@
                   "value": "\"DeviceNode::pci shall keep a function's MSI-X table and pending-bit pages out of every aperture it grants, unless the function's MSI-X is held off (L.device.35).\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 172
+                    "line": 175
                   }
                 },
                 {
@@ -64865,7 +64865,7 @@
                   "value": "\"For every published PCI function whose MSI-X is not held off, the whole of each MSI-X table or pending-bit range, its first byte and its last byte are refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 175
+                    "line": 178
                   }
                 },
                 {
@@ -64876,7 +64876,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 176
+                    "line": 179
                   }
                 },
                 {
@@ -64887,7 +64887,7 @@
                   "value": "\"device::DeviceNode::pci\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 177
+                    "line": 180
                   }
                 }
               ]
@@ -64900,7 +64900,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 179
+                "line": 182
               },
               "children": [
                 {
@@ -64911,7 +64911,7 @@
                   "value": "\"DeviceNode::vector shall hand out a node's recorded vectors as recorded, and none past its count.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 181
+                    "line": 184
                   }
                 },
                 {
@@ -64922,7 +64922,7 @@
                   "value": "\"For every published node without MSI-X, each index below the count answers its recorded vector and the count itself answers none.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 184
+                    "line": 187
                   }
                 },
                 {
@@ -64933,7 +64933,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 185
+                    "line": 188
                   }
                 },
                 {
@@ -64944,7 +64944,7 @@
                   "value": "\"device::DeviceNode::vector\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 186
+                    "line": 189
                   }
                 }
               ]
@@ -64957,7 +64957,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 188
+                "line": 191
               },
               "children": [
                 {
@@ -64968,7 +64968,7 @@
                   "value": "\"publish shall take from a later node an aperture an earlier one holds, so that no two published nodes' apertures overlap; widen a PCI BAR aperture shorter than a page and starting on one to that page only when nothing else lies in the page -- no aperture of any node, published or dropped, no assigned memory BAR of any PCI function, decoded, undecoded or withheld, no withheld MSI-X table or pending-bit array span, and no reserved range; and publish no device tree vector that is not a shared peripheral interrupt or that two nodes hold.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 197
+                    "line": 200
                   }
                 },
                 {
@@ -64979,7 +64979,7 @@
                   "value": "\"Sorted by start, no two published apertures overlap; every device tree vector is 32 or above and held by one node. On made-up nodes a 2 KiB BAR alone in its page is widened to the page, and one whose page also holds another node's aperture, another function's withheld MSI-X span, an undecoded function's assigned BAR or a reserved range is not; with the interrupt tables left out of the page test, stage 10 fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 204
+                    "line": 207
                   }
                 },
                 {
@@ -64990,7 +64990,7 @@
                   "value": "(\"H.DMA.5\", \"H.IRQ.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 205
+                    "line": 208
                   }
                 },
                 {
@@ -65001,7 +65001,7 @@
                   "value": "(\"device::publish\", \"device::occupants\", \"device::page_neighbour\", \"device::widen_lone_partial_bars\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 207
+                    "line": 210
                   }
                 }
               ]
@@ -65014,7 +65014,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 209
+                "line": 212
               },
               "children": [
                 {
@@ -65025,7 +65025,7 @@
                   "value": "\"MsixTable::mint shall mint an entry once and answer the same vector when asked again, never on a number that has a handler, and none past the table.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 212
+                    "line": 215
                   }
                 },
                 {
@@ -65036,7 +65036,7 @@
                   "value": "\"On the first published MSI-X table, entry 0 minted twice is one vector, its number has no handler, and the entry at the table's size is refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 215
+                    "line": 218
                   }
                 },
                 {
@@ -65047,7 +65047,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 216
+                    "line": 219
                   }
                 },
                 {
@@ -65058,7 +65058,7 @@
                   "value": "(\"device::MsixTable::mint\", \"device::MsixTable::open\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 217
+                    "line": 220
                   }
                 }
               ]
@@ -65071,7 +65071,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 219
+                "line": 222
               },
               "children": [
                 {
@@ -65082,7 +65082,7 @@
                   "value": "\"A minted MSI-X entry shall be masked until unmasked, and shall read back masked or unmasked as it was last told.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 222
+                    "line": 225
                   }
                 },
                 {
@@ -65093,7 +65093,7 @@
                   "value": "\"The first published MSI-X table's minted entry 0 reads masked; unmasked it reads unmasked, masked again it reads masked.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 225
+                    "line": 228
                   }
                 },
                 {
@@ -65104,7 +65104,7 @@
                   "value": "(\"H.IRQ.2\", \"H.IRQ.3\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 226
+                    "line": 229
                   }
                 },
                 {
@@ -65115,7 +65115,7 @@
                   "value": "(\"device::MsixTable::set_masked\", \"device::MsixTable::is_masked\", \"device::Vector::set_masked\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 228
+                    "line": 231
                   }
                 }
               ]
@@ -65128,7 +65128,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 230
+                "line": 233
               },
               "children": [
                 {
@@ -65139,7 +65139,7 @@
                   "value": "\"DeviceNode::domain shall make a node's domain once and answer that one domain afterwards.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 232
+                    "line": 235
                   }
                 },
                 {
@@ -65150,7 +65150,7 @@
                   "value": "\"Every published node asked for its domain twice answers one domain.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 234
+                    "line": 237
                   }
                 },
                 {
@@ -65161,7 +65161,7 @@
                   "value": "\"H.DMA.3\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 235
+                    "line": 238
                   }
                 },
                 {
@@ -65172,7 +65172,7 @@
                   "value": "\"device::DeviceNode::domain\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 236
+                    "line": 239
                   }
                 }
               ]
@@ -65185,7 +65185,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 238
+                "line": 241
               },
               "children": [
                 {
@@ -65196,7 +65196,7 @@
                   "value": "\"enable_dma shall set a PCI function's bus mastering and memory decoding, and disable_dma shall clear its bus mastering and keep its memory decoding.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 241
+                    "line": 244
                   }
                 },
                 {
@@ -65207,7 +65207,7 @@
                   "value": "\"On the first published function with a configuration space that is not a bridge (class 06), its command register reads bus mastering and decoding on after enable_dma, and bus mastering off with decoding on after disable_dma.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 245
+                    "line": 248
                   }
                 },
                 {
@@ -65218,7 +65218,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 246
+                    "line": 249
                   }
                 },
                 {
@@ -65229,7 +65229,7 @@
                   "value": "(\"device::DeviceNode::enable_dma\", \"device::DeviceNode::disable_dma\", \"device::DeviceNode::set_bus_master\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 248
+                    "line": 251
                   }
                 }
               ]
@@ -65242,7 +65242,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 250
+                "line": 253
               },
               "children": [
                 {
@@ -65253,7 +65253,7 @@
                   "value": "\"DeviceNode::describe shall report a PCI function's location, identity, aperture and vector counts and virtio placement as the node holds them.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 253
+                    "line": 256
                   }
                 },
                 {
@@ -65264,7 +65264,7 @@
                   "value": "\"For the first published PCI function, device_info's location, vendor and device, counts and virtio blocks agree with the node and with enumeration.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 256
+                    "line": 259
                   }
                 },
                 {
@@ -65275,7 +65275,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 257
+                    "line": 260
                   }
                 },
                 {
@@ -65286,7 +65286,7 @@
                   "value": "(\"device::DeviceNode::describe\", \"device::VirtioBlocks::of\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 258
+                    "line": 261
                   }
                 }
               ]
@@ -65299,7 +65299,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 260
+                "line": 263
               },
               "children": [
                 {
@@ -65310,7 +65310,7 @@
                   "value": "\"A node's failure shall read as its location -- a PCI function's address, a device tree node's registers -- and what it did.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 263
+                    "line": 266
                   }
                 },
                 {
@@ -65321,7 +65321,7 @@
                   "value": "\"A failure of a PCI function, a virtio,mmio node and a device tree node reads as the address or registers and the sentence.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 266
+                    "line": 269
                   }
                 },
                 {
@@ -65332,7 +65332,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 267
+                    "line": 270
                   }
                 },
                 {
@@ -65343,7 +65343,7 @@
                   "value": "(\"device::Location::fmt\", \"device::Failure::fmt\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 268
+                    "line": 271
                   }
                 }
               ]
@@ -65356,7 +65356,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 270
+                "line": 273
               },
               "children": [
                 {
@@ -65367,7 +65367,7 @@
                   "value": "\"DeviceNode::reads_log shall allow the kernel log to no node but a GS201's DWC3.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 272
+                    "line": 275
                   }
                 },
                 {
@@ -65378,7 +65378,7 @@
                   "value": "\"A published node of another binding asking for the kernel log is refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 274
+                    "line": 277
                   }
                 },
                 {
@@ -65389,7 +65389,7 @@
                   "value": "\"H.OBJ.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 275
+                    "line": 278
                   }
                 },
                 {
@@ -65400,7 +65400,7 @@
                   "value": "\"device::DeviceNode::reads_log\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 276
+                    "line": 279
                   }
                 }
               ]
@@ -65413,7 +65413,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 278
+                "line": 281
               },
               "children": [
                 {
@@ -65424,7 +65424,7 @@
                   "value": "\"board_clock shall answer no clock for a node whose board keeps none for it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 280
+                    "line": 283
                   }
                 },
                 {
@@ -65435,7 +65435,7 @@
                   "value": "\"A clock asked of a published node whose board keeps none is refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 282
+                    "line": 285
                   }
                 },
                 {
@@ -65446,7 +65446,7 @@
                   "value": "\"H.OBJ.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 283
+                    "line": 286
                   }
                 },
                 {
@@ -65457,7 +65457,7 @@
                   "value": "(\"discovery::board::board_clock\", \"device::DeviceNode::tree_binding\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 284
+                    "line": 287
                   }
                 }
               ]
@@ -65470,7 +65470,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 286
+                "line": 289
               },
               "children": [
                 {
@@ -65481,7 +65481,7 @@
                   "value": "\"Reserved::of shall reserve the framebuffer, every memory-map region but MMIO, the ECAM windows, the kernel's device windows, every IOMMU unit's registers and, without ACPI, the device tree console.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 290
+                    "line": 293
                   }
                 },
                 {
@@ -65492,7 +65492,7 @@
                   "value": "\"Each of those ranges on the booted machine is covered by the reserved set.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 292
+                    "line": 295
                   }
                 },
                 {
@@ -65503,7 +65503,7 @@
                   "value": "(\"H.MEM.10\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 293
+                    "line": 296
                   }
                 },
                 {
@@ -65514,7 +65514,7 @@
                   "value": "(\"device::Reserved::of\", \"device::Reserved::add\", \"device::Reserved::overlaps\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 295
+                    "line": 298
                   }
                 }
               ]
@@ -65527,7 +65527,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 297
+                "line": 300
               },
               "children": [
                 {
@@ -65538,7 +65538,7 @@
                   "value": "\"A function's host-visible window shall be taken only from an assigned memory BAR it fits, in whole pages, clear of reserved memory.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 300
+                    "line": 303
                   }
                 },
                 {
@@ -65549,7 +65549,7 @@
                   "value": "\"A window from a BAR that is not assigned, does not fit, is not whole pages or overlaps reserved memory is refused, and one that is all four is taken.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 303
+                    "line": 306
                   }
                 },
                 {
@@ -65560,7 +65560,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 304
+                    "line": 307
                   }
                 },
                 {
@@ -65571,7 +65571,7 @@
                   "value": "(\"device::Window::of\", \"device::DeviceNode::host_visible\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 305
+                    "line": 308
                   }
                 }
               ]
@@ -65584,7 +65584,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 307
+                "line": 310
               },
               "children": [
                 {
@@ -65595,7 +65595,7 @@
                   "value": "\"MsixTable::of shall find a function's MSI-X table only inside an assigned memory BAR, clear of reserved memory.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 310
+                    "line": 313
                   }
                 },
                 {
@@ -65606,7 +65606,7 @@
                   "value": "\"A table in an unassigned BAR, past its BAR or overlapping reserved memory is not found.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 312
+                    "line": 315
                   }
                 },
                 {
@@ -65617,7 +65617,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 313
+                    "line": 316
                   }
                 },
                 {
@@ -65628,7 +65628,7 @@
                   "value": "\"device::MsixTable::of\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 314
+                    "line": 317
                   }
                 }
               ]
@@ -65641,7 +65641,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 316
+                "line": 319
               },
               "children": [
                 {
@@ -65652,7 +65652,7 @@
                   "value": "\"A PCI function's legacy interrupt shall be one controller vector with its firmware trigger, on a line of 32 or above that no kernel handler holds and no other function took.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 319
+                    "line": 322
                   }
                 },
                 {
@@ -65663,7 +65663,7 @@
                   "value": "\"Two functions offered one line give it to the first; a line below 32 or with a handler is given to neither.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 321
+                    "line": 324
                   }
                 },
                 {
@@ -65674,7 +65674,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 322
+                    "line": 325
                   }
                 },
                 {
@@ -65685,7 +65685,7 @@
                   "value": "(\"device::claim_line\", \"device::trigger_of\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 323
+                    "line": 326
                   }
                 }
               ]
@@ -65698,7 +65698,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 325
+                "line": 328
               },
               "children": [
                 {
@@ -65709,7 +65709,7 @@
                   "value": "\"The device tree's and the boards' finders shall publish a device tree node only with registers clear of reserved memory and an interrupt no other node or handler holds, and leave it alone, saying why, otherwise.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 329
+                    "line": 332
                   }
                 },
                 {
@@ -65720,7 +65720,7 @@
                   "value": "\"A board node whose registers overlap reserved memory, or whose interrupt is taken, is left alone and named on the console; one clear of both is published.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 332
+                    "line": 335
                   }
                 },
                 {
@@ -65731,7 +65731,7 @@
                   "value": "(\"H.DMA.5\", \"H.IRQ.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 333
+                    "line": 336
                   }
                 },
                 {
@@ -65742,7 +65742,7 @@
                   "value": "(\"discovery::tree::VirtioMmio::find\", \"discovery::tree::add_lines\", \"discovery::board::Boards::find\", \"discovery::board::board_node\", \"device::DeviceNode::add_line\", \"device::DeviceNode::bind_board\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 337
+                    "line": 340
                   }
                 }
               ]
@@ -65755,7 +65755,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 339
+                "line": 342
               },
               "children": [
                 {
@@ -65766,7 +65766,7 @@
                   "value": "\"DeviceNode::describe shall report a device tree node as not PCI, with its binding and its first two apertures.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 342
+                    "line": 345
                   }
                 },
                 {
@@ -65777,7 +65777,7 @@
                   "value": "\"A published virtio,mmio or board node's device_info names no PCI location, its binding, and its apertures 0 and 1.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 345
+                    "line": 348
                   }
                 },
                 {
@@ -65788,7 +65788,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 346
+                    "line": 349
                   }
                 },
                 {
@@ -65799,7 +65799,7 @@
                   "value": "\"device::DeviceNode::describe\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 347
+                    "line": 350
                   }
                 }
               ]
@@ -65812,7 +65812,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 349
+                "line": 352
               },
               "children": [
                 {
@@ -65823,7 +65823,7 @@
                   "value": "\"An MSI-X vector shall be minted, masked or unmasked only for a published node.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 351
+                    "line": 354
                   }
                 },
                 {
@@ -65834,7 +65834,7 @@
                   "value": "\"A node not in the published list asked for an MSI-X vector answers none, and a vector naming one refuses to mask.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 354
+                    "line": 357
                   }
                 },
                 {
@@ -65845,7 +65845,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 355
+                    "line": 358
                   }
                 },
                 {
@@ -65856,7 +65856,7 @@
                   "value": "(\"device::DeviceNode::vector\", \"device::Vector::set_masked\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 356
+                    "line": 359
                   }
                 }
               ]
@@ -65869,7 +65869,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 358
+                "line": 361
               },
               "children": [
                 {
@@ -65880,7 +65880,7 @@
                   "value": "\"DeviceNode::input_functions shall allow eight input claims of a USB host's node -- an STM32 USB host's, or a PCI function whose class code is exactly xHCI's, 0C:03:30 -- and one of every other.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 362
+                    "line": 365
                   }
                 },
                 {
@@ -65891,7 +65891,7 @@
                   "value": "\"An STM32 USB host's node and a PCI function of class 0C:03:30 answer 8; a PCI function of class 0C:03:20 and a virtio PCI function answer 1.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 365
+                    "line": 368
                   }
                 },
                 {
@@ -65902,7 +65902,7 @@
                   "value": "\"H.DEV.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 366
+                    "line": 369
                   }
                 },
                 {
@@ -65913,7 +65913,7 @@
                   "value": "\"device::DeviceNode::input_functions\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 367
+                    "line": 370
                   }
                 }
               ]
@@ -65926,7 +65926,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 369
+                "line": 372
               },
               "children": [
                 {
@@ -65937,7 +65937,7 @@
                   "value": "\"A PCI function with an MSI capability and no MSI-X table the kernel uses shall be offered one vector, minted once with INTx off -- written under the node's command-register lock, which bus mastering's writes take too (L.object.117) -- and the message masked, none past the one message, and no vector allocated for a 32-bit capability the architecture's message address is above.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 375
+                    "line": 378
                   }
                 },
                 {
@@ -65948,7 +65948,7 @@
                   "value": "\"On x86-64 test-boot requires the devices line's 1 vectors minted and 2 deliveries: QEMU's edu device's vector 0 minted twice is one vector with no handler on its number, vector 1 is refused, it reads masked as minted and as told, the command register reads INTx off, and edu's raised interrupt arrives twice unmasked and not while masked. Without edu on the machine, or with the INTx write skipped, the boot fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 382
+                    "line": 385
                   }
                 },
                 {
@@ -65959,7 +65959,7 @@
                   "value": "(\"H.IRQ.1\", \"H.IRQ.2\", \"H.IRQ.3\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 383
+                    "line": 386
                   }
                 },
                 {
@@ -65970,7 +65970,7 @@
                   "value": "(\"device::MsiFunction::mint\", \"device::MsiFunction::of\", \"device::DeviceNode::mapped_config\", \"device::MsiFunction::intx_off\", \"device::DeviceNode::vector\", \"device::DeviceNode::vector_count\", \"device::DeviceNode::set_bus_master\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 387
+                    "line": 390
                   }
                 }
               ]
@@ -65983,7 +65983,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 389
+                "line": 392
               },
               "children": [
                 {
@@ -65994,7 +65994,7 @@
                   "value": "\"An MSI message shall be programmed with MSI off while its registers are written, at the offsets its capability's address width puts them, and left masked: by its mask bit, with MSI on, where the function can mask its vector, and by MSI Enable otherwise; masking, unmasking and reading back use the same bit.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 395
+                    "line": 398
                   }
                 },
                 {
@@ -66005,7 +66005,7 @@
                   "value": "\"Host tests: a maskable 32-bit capability is programmed with its data at +8, its mask bit set and MSI on, and is masked and unmasked by the mask bit with Enable untouched; a non-maskable 64-bit one gets both address halves, its data at +0xC and MSI off, and is masked and unmasked by Enable; one message is enabled whatever the function could use. With the two paths swapped the tests fail.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 402
+                    "line": 405
                   }
                 },
                 {
@@ -66016,7 +66016,7 @@
                   "value": "(\"H.IRQ.2\", \"H.IRQ.3\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 403
+                    "line": 406
                   }
                 },
                 {
@@ -66027,7 +66027,7 @@
                   "value": "(\"device::MsiFunction::set_masked\", \"device::MsiFunction::is_masked\", \"device::MsiFunction::mint\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 405
+                    "line": 408
                   }
                 }
               ]
@@ -66040,7 +66040,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 407
+                "line": 410
               },
               "children": [
                 {
@@ -66051,7 +66051,7 @@
                   "value": "\"device_aperture shall report each of a device's apertures with the address, length, BAR, offset in that BAR and flags it was minted with, whole however far past 4 GiB, and refuse an index past them with INVALID_ARGS; DeviceInfo shall keep its 96 bytes.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 412
+                    "line": 415
                   }
                 },
                 {
@@ -66062,7 +66062,7 @@
                   "value": "\"Every aperture of every published node is answered as minted, the index past the last INVALID_ARGS, and on x86-64 pci-testdev's 8 GiB 64-bit BAR above 4 GiB is answered whole (the first config line's 1 above 4 GiB, which xtask requires). With the length cut to 32 bits the boot fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 417
+                    "line": 420
                   }
                 },
                 {
@@ -66073,7 +66073,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 418
+                    "line": 421
                   }
                 },
                 {
@@ -66084,7 +66084,7 @@
                   "value": "(\"syscall::native::device_aperture\", \"syscall::native::aperture_bytes\", \"device::Aperture::info\", \"device::Aperture::part\", \"device::DeviceNode::aperture_info\", \"device::DeviceNode::mint_from\", \"device::DeviceNode::mint\", \"device::DeviceNode::mint_bar\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 423
+                    "line": 426
                   }
                 }
               ]
@@ -66097,7 +66097,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 425
+                "line": 428
               },
               "children": [
                 {
@@ -66108,7 +66108,7 @@
                   "value": "\"A driver's configuration write touching any byte outside its function's writable ranges shall be refused whole with ACCESS_DENIED and change nothing, and a malformed access shall be INVALID_ARGS; reads of the function's configuration space shall be answered; and a node whose kernel-owned registers read back other than the kernel made them, at an accepted HELLO or a quiesce, shall have its bus mastering turned off and be refused in one hold of its configuration lock, every call needing MANAGE on it answering BAD_STATE, and its bus mastering never turned on again.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 434
+                    "line": 437
                   }
                 },
                 {
@@ -66119,7 +66119,7 @@
                   "value": "\"Header reads answer what enumeration read, and the MSI, MSI-X and extended reads are answered; writes to the command register, a BAR, the MSI and MSI-X capabilities, Device Control, an uncovered byte and ATS where present are refused and read back unchanged; a write spanning a kernel-owned and a writable byte is refused; malformed accesses are INVALID_ARGS; a command register rewritten behind the kernel is found, bus mastering reads off, the node answers BAD_STATE, the line names COMMAND, and an enable_dma after it is refused with bus mastering still off (the config lines). With the allowlist widened, the whole-range test reduced to one byte, verify_config not comparing, or the refused node's enable_dma let through, the boot fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 446
+                    "line": 449
                   }
                 },
                 {
@@ -66130,7 +66130,7 @@
                   "value": "(\"H.DMA.5\", \"H.DMA.3\", \"H.DEV.4\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 447
+                    "line": 450
                   }
                 },
                 {
@@ -66141,7 +66141,7 @@
                   "value": "(\"device::DeviceNode::config_read\", \"device::DeviceNode::config_write\", \"device::config_access\", \"device::ConfigState::first_refusal\", \"device::MappedConfig::read\", \"device::DeviceNode::verify_config\", \"device::DeviceNode::breach\", \"device::DeviceNode::hello_accepted\", \"device::DeviceNode::refuse\", \"device::config_breach\", \"device::command_breach\", \"device::bar_breach\", \"device::msi_breach\", \"device::msix_control_breach\", \"device::MsixTable::rewritten\", \"device::Register::fmt\", \"syscall::native::device_config_read\", \"syscall::native::device_config_write\", \"syscall::native::config_status\", \"syscall::native::device_in\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 458
+                    "line": 461
                   }
                 }
               ]
@@ -66154,7 +66154,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 460
+                "line": 463
               },
               "children": [
                 {
@@ -66165,7 +66165,7 @@
                   "value": "\"A function's driver-writable configuration bytes shall be the bodies of its vendor-specific capabilities, a standard one past its three-byte header and a VSEC past its eight, cut at the end of their space, less virtio's pci_cfg_data, computed at stage 10 from both capability lists; a list that loops, holds a capability starting inside a vendor body, or holds more capabilities or vendor bodies than the walk records, shall leave the function nothing writable.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 468
+                    "line": 471
                   }
                 },
                 {
@@ -66176,7 +66176,7 @@
                   "value": "\"ferrix_pci::window's host tests: the header, MSI, power management, PCI Express, MSI-X, ATS, AER and uncovered bytes are refused and vendor bodies writable; pci_cfg_data is refused and virtio's bar, offset and length writable; a body past its space is cut; overlapping and looping lists, 65 VSECs and an extended list past 304 capabilities leave nothing writable. With the extended list skipped the VSEC test fails. At boot virtio-rng's offset field is written and read back and its pci_cfg_data refused (the second config line).\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 476
+                    "line": 479
                   }
                 },
                 {
@@ -66187,7 +66187,7 @@
                   "value": "(\"H.DMA.5\", \"H.DMA.3\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 477
+                    "line": 480
                   }
                 },
                 {
@@ -66198,7 +66198,7 @@
                   "value": "(\"discovery::pci::check_host\", \"discovery::pci::for_the_window\", \"device::DeviceNode::pci\", \"device::DeviceNode::window\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 479
+                    "line": 482
                   }
                 }
               ]
@@ -66211,7 +66211,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 481
+                "line": 484
               },
               "children": [
                 {
@@ -66222,7 +66222,7 @@
                   "value": "\"description::of shall read a machine by its ACPI tables when they open, whether or not a device tree came too, by its device tree when the tables do not open and the tree parses, and by neither otherwise; and shall not parse the tree when the tables open.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 486
+                    "line": 489
                   }
                 },
                 {
@@ -66233,7 +66233,7 @@
                   "value": "\"For ACPI only, both, tables that fail to open beside a tree, a tree only, and neither, the description is ACPI, ACPI with the tree unopened, the tree, the tree and neither.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 489
+                    "line": 492
                   }
                 },
                 {
@@ -66244,7 +66244,7 @@
                   "value": "(\"H.DMA.1\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 490
+                    "line": 493
                   }
                 },
                 {
@@ -66255,7 +66255,7 @@
                   "value": "\"discovery::description::of\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 491
+                    "line": 494
                   }
                 }
               ]
@@ -66268,7 +66268,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 497
+                "line": 500
               },
               "children": [
                 {
@@ -66279,7 +66279,7 @@
                   "value": "\"EntryPoint::parse shall accept only a 3.x entry point (_SM3_, length 24 to 32) or a 2.x one (_SM_, length 30 to 32, with a _DMI_ header at byte 16) whose bytes sum to zero, the 2.x one's _DMI_ header too, whose table is 1 to 1 MiB long; it shall refuse a 2.x entry point whose own checksum fails even when its _DMI_ header checks; and it shall answer any bytes without a panic.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 503
+                    "line": 506
                   }
                 },
                 {
@@ -66290,7 +66290,7 @@
                   "value": "\"Host tests: good 3.x and 2.x entry points parse with Linux's version fixups; a bad checksum, a bad _DMI_ header, a bad _SM_ checksum beside a good _DMI_, lengths just outside both ranges, every truncation, no anchor, an empty table and one of 1 MiB and a byte are each refused with their error.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 508
+                    "line": 511
                   }
                 },
                 {
@@ -66301,7 +66301,7 @@
                   "value": "\"H.BOOT.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 509
+                    "line": 512
                   }
                 },
                 {
@@ -66312,7 +66312,7 @@
                   "value": "(\"ferrix_smbios::EntryPoint::parse\", \"ferrix_smbios::EntryPoint::v3\", \"ferrix_smbios::EntryPoint::v2\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 511
+                    "line": 514
                   }
                 }
               ]
@@ -66325,7 +66325,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 513
+                "line": 516
               },
               "children": [
                 {
@@ -66336,7 +66336,7 @@
                   "value": "\"walk shall read no byte outside the table it is given, shall hand on only a structure whose strings end inside it, and shall stop at the count when there is one, at type 127 when there is none, at a structure shorter than its header, and where a header would not fit.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 518
+                    "line": 521
                   }
                 },
                 {
@@ -66347,7 +66347,7 @@
                   "value": "\"Host tests: a length past the end, a structure shorter than its header, unterminated strings and a count larger than the table stop the walk inside the table; every truncation and every single-byte change of a good table walks within bounds; a 3.x table stops at type 127 and a 2.x one with a count does not.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 523
+                    "line": 526
                   }
                 },
                 {
@@ -66358,7 +66358,7 @@
                   "value": "\"H.BOOT.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 524
+                    "line": 527
                   }
                 },
                 {
@@ -66369,7 +66369,7 @@
                   "value": "(\"ferrix_smbios::walk\", \"ferrix_smbios::Smbios::new\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 525
+                    "line": 528
                   }
                 }
               ]
@@ -66382,7 +66382,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 527
+                "line": 530
               },
               "children": [
                 {
@@ -66393,7 +66393,7 @@
                   "value": "\"Smbios shall decode the identity fields of types 0 to 3 from the offsets Linux's dmi_decode reads, the first structure of a type winning, and render each as Linux's dmi-id shows it, the strings' bytes unaltered.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 531
+                    "line": 534
                   }
                 },
                 {
@@ -66404,7 +66404,7 @@
                   "value": "\"Host tests: QEMU's own 2.x and 3.x tables as OVMF installed them (src/lib/platform/smbios/src/fixtures.rs, captured with xtask's -smbios arguments) read as QEMU built them, and a table laid out as QEMU lays out types 0, 1, 3 and 127 reads as Linux shows it, including the release, the UUID in both byte orders, the chassis type, empty strings, absent fields, bytes passed through, the modalias and the cut to a page.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 538
+                    "line": 541
                   }
                 },
                 {
@@ -66415,7 +66415,7 @@
                   "value": "\"H.BOOT.16\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 539
+                    "line": 542
                   }
                 },
                 {
@@ -66426,7 +66426,7 @@
                   "value": "(\"ferrix_smbios::Smbios::field_text\", \"ferrix_smbios::Smbios::modalias\", \"ferrix_smbios::decode\", \"ferrix_smbios::string\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 542
+                    "line": 545
                   }
                 }
               ]
@@ -66439,7 +66439,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 544
+                "line": 547
               },
               "children": [
                 {
@@ -66450,7 +66450,7 @@
                   "value": "\"discovery::smbios shall read the loader's SMBIOS copy only when it is wholly inside one region the memory map reports as the SMBIOS copy and wholly inside the direct map, holds more than the 32 bytes of the entry point and at most 1 MiB of table, and re-parses with a table exactly as long as the entry point says; and shall otherwise keep nothing, say why, and let the boot go on.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 551
+                    "line": 554
                   }
                 },
                 {
@@ -66461,7 +66461,7 @@
                   "value": "\"At boot, forged copies -- none, outside the region, straddling its end, below the direct map, overflowing, holding no table, a byte longer than its table, a bad checksum -- are each refused by their name and a good one accepted; stage 1 requires the map to describe the real copy as the SMBIOS copy.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 556
+                    "line": 559
                   }
                 },
                 {
@@ -66472,7 +66472,7 @@
                   "value": "(\"H.BOOT.4\", \"H.BOOT.16\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 557
+                    "line": 560
                   }
                 },
                 {
@@ -66483,7 +66483,7 @@
                   "value": "(\"discovery::smbios::range\", \"discovery::smbios::decode\", \"discovery::smbios::open\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 559
+                    "line": 562
                   }
                 }
               ]
@@ -66497,7 +66497,7 @@
           "doc": "The quiesce in src/kernel/src/syscall/native.rs: every core that serves a device waited out, its DMA turned off, and the claims a core keeps past its driver let go, before the next driver is given it.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 563
+            "line": 566
           },
           "children": [
             {
@@ -66508,7 +66508,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 569
+                "line": 572
               },
               "children": [
                 {
@@ -66519,7 +66519,7 @@
                   "value": "\"device_quiesce shall be refused with ACCESS_DENIED through a device handle without MANAGE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 571
+                    "line": 574
                   }
                 },
                 {
@@ -66530,7 +66530,7 @@
                   "value": "\"A quiesce through a handle to the device without MANAGE answers ACCESS_DENIED.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 573
+                    "line": 576
                   }
                 },
                 {
@@ -66541,7 +66541,7 @@
                   "value": "\"H.OBJ.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 574
+                    "line": 577
                   }
                 },
                 {
@@ -66552,7 +66552,7 @@
                   "value": "\"syscall::native::device_quiesce\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 575
+                    "line": 578
                   }
                 }
               ]
@@ -66565,7 +66565,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 577
+                "line": 580
               },
               "children": [
                 {
@@ -66576,7 +66576,7 @@
                   "value": "\"A quiesce shall answer BAD_STATE, changing nothing, while a driver serves the device.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 579
+                    "line": 582
                   }
                 },
                 {
@@ -66587,7 +66587,7 @@
                   "value": "\"A quiesce of the device a running driver serves answers BAD_STATE, and the driver goes on serving it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 581
+                    "line": 584
                   }
                 },
                 {
@@ -66598,7 +66598,7 @@
                   "value": "\"H.DEV.2\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 582
+                    "line": 585
                   }
                 },
                 {
@@ -66609,7 +66609,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 583
+                    "line": 586
                   }
                 }
               ]
@@ -66622,7 +66622,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 585
+                "line": 588
               },
               "children": [
                 {
@@ -66633,7 +66633,7 @@
                   "value": "\"A quiesce made as a driver dies shall wait for every core serving the device to let go, turn the device's DMA off, let go the claims a core keeps past its driver, and answer success.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 589
+                    "line": 592
                   }
                 },
                 {
@@ -66644,7 +66644,7 @@
                   "value": "\"A quiesce the instant a block driver's handles close answers success, and the next driver is given a ring on the device.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 592
+                    "line": 595
                   }
                 },
                 {
@@ -66655,7 +66655,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 593
+                    "line": 596
                   }
                 },
                 {
@@ -66666,7 +66666,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 594
+                    "line": 597
                   }
                 }
               ]
@@ -66679,7 +66679,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 596
+                "line": 599
               },
               "children": [
                 {
@@ -66690,7 +66690,7 @@
                   "value": "\"The kernel shall quiesce every device a dead devmgr's drivers served before a devmgr started again is handed them.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 599
+                    "line": 602
                   }
                 },
                 {
@@ -66701,7 +66701,7 @@
                   "value": "\"Restarting devmgr.service starts a second devmgr, which is given the devices and starts their drivers.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 601
+                    "line": 604
                   }
                 },
                 {
@@ -66712,7 +66712,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 602
+                    "line": 605
                   }
                 },
                 {
@@ -66723,7 +66723,7 @@
                   "value": "\"syscall::native::quiesce\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 603
+                    "line": 606
                   }
                 }
               ]
@@ -66736,7 +66736,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 605
+                "line": 608
               },
               "children": [
                 {
@@ -66747,7 +66747,7 @@
                   "value": "\"A quiesce whose device a core has not let go within its patience shall answer TIMED_OUT, and one whose DMA cannot be turned off BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 608
+                    "line": 611
                   }
                 },
                 {
@@ -66758,7 +66758,7 @@
                   "value": "\"A quiesce with a core that never lets go answers TIMED_OUT; one on a function whose configuration space cannot be mapped answers BAD_STATE.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 611
+                    "line": 614
                   }
                 },
                 {
@@ -66769,7 +66769,7 @@
                   "value": "\"H.DEV.4\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 612
+                    "line": 615
                   }
                 },
                 {
@@ -66780,7 +66780,7 @@
                   "value": "\"syscall::native::quiesce_while\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 613
+                    "line": 616
                   }
                 }
               ]
@@ -66794,7 +66794,7 @@
           "doc": "NVIDIA's N0g (docs/NVIDIA.md section 12.3, condition G5): the isolated-interrupts mark, device_isolation, and no vector for a function whose messages arrive under another's source ID.",
           "source": {
             "file": "docs/sysml/20-device-requirements.sysml",
-            "line": 617
+            "line": 620
           },
           "children": [
             {
@@ -66805,7 +66805,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 622
+                "line": 625
               },
               "children": [
                 {
@@ -66816,7 +66816,7 @@
                   "value": "\"device_set_limit's DEVICE_LIMIT_ISOLATED_INTERRUPTS shall set a node's isolated-interrupts mark through a handle with SET_LIMIT, and a value that would clear a set mark shall be refused ACCESS_DENIED; nothing else shall clear it. While a node's mark is set and its interrupts are not isolated, interrupt_create and vmo_pin shall be refused ACCESS_DENIED. device_isolation shall answer bit 0 for a translated domain and bit 1 for isolated interrupts. devmgr shall start no driver of a device that runs firmware of its own whose mark the kernel refused.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 632
+                    "line": 635
                   }
                 },
                 {
@@ -66827,7 +66827,7 @@
                   "value": "\"On x86-64 check R10 sets edu's mark, reads device_isolation 0x3, is given a vector, is refused one ACCESS_DENIED while the machine's interrupts are forced not isolated, and is refused clearing the mark; with the refusal skipped R10 panics. devmgr-proto's host tests: a firmware device starts only once marked, with its line when refused; with the refusal ignored they fail.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 639
+                    "line": 642
                   }
                 },
                 {
@@ -66838,7 +66838,7 @@
                   "value": "(\"H.DMA.9\", \"H.DEV.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 640
+                    "line": 643
                   }
                 },
                 {
@@ -66849,7 +66849,7 @@
                   "value": "(\"syscall::native::set_isolated_mark\", \"syscall::native::set_limit_on\", \"syscall::native::device_set_limit\", \"syscall::native::device_get_limit\", \"syscall::native::device_isolation\", \"syscall::native::device_isolated_in\", \"syscall::native::interrupt_create\", \"syscall::native::vmo_pin\", \"device::DeviceNode::interrupts_isolated\", \"device::DeviceNode::may_take_vectors_and_pins\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 646
+                    "line": 649
                   }
                 }
               ]
@@ -66862,7 +66862,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 648
+                "line": 651
               },
               "children": [
                 {
@@ -66873,7 +66873,7 @@
                   "value": "\"While a unit remaps, a function the remapping units do not place as its own requester -- behind no unit, or under a bridge's alias -- shall be given no message route, and so no vector, and the boot shall name each such function.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 652
+                    "line": 655
                   }
                 },
                 {
@@ -66884,7 +66884,7 @@
                   "value": "\"On x86-64 a requester no unit places is refused a route (the remap line); with the refusal turned into a compatibility route the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 655
+                    "line": 658
                   }
                 },
                 {
@@ -66895,7 +66895,7 @@
                   "value": "\"H.DMA.9\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 656
+                    "line": 659
                   }
                 },
                 {
@@ -66906,7 +66906,7 @@
                   "value": "(\"iommu::remapping::route\", \"arch::x86_64::msi::msi_allocate\", \"iommu::name_functions_without_vectors\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 658
+                    "line": 661
                   }
                 }
               ]
@@ -66919,7 +66919,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 660
+                "line": 663
               },
               "children": [
                 {
@@ -66930,7 +66930,7 @@
                   "value": "\"A PCI function in the build's MSI-preferred list (ferrix_pci::msix::MSI_PREFERRED, exactly 1F0A:6801) with both an MSI-X table and an MSI capability, its configuration space placed, no INTx line and its memory decoded shall have its MSI-X held off at stage 10 before its node is built -- Enable written 0 and Function Mask 1, and read back so -- and only then be granted its table and pending-bit pages as aperture, offered no MSI-X table and its MSI capability's one vector; one that does not read back so keeps its table withheld and its MSI-X offered.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 669
+                    "line": 672
                   }
                 },
                 {
@@ -66941,7 +66941,7 @@
                   "value": "\"On x86-64 test-boot requires the msix-off line, from the check run on a scratch node enumeration builds for QEMU's e1000e with QEMU's subsystem as if it were listed, and never publishes: Enable reads 0 and Function Mask 1, the table's and the pending-bit array's whole ranges and their first and last bytes lie in its apertures, as do the table pages it records, it offers no MSI-X table and one vector, and its MSI mints once, masked, on a number with no handler. Host tests: the list is exactly 1F0A:6801, the check case refuses 8086:10D3 with any subsystem but QEMU's, and hold_off reads back Enable 0 and Function Mask 1. With the hold skipped, the table still withheld, or the MSI vector not offered, the boot fails. The 1F0A:6801 arm is reached only on the hardware.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 681
+                    "line": 684
                   }
                 },
                 {
@@ -66952,7 +66952,7 @@
                   "value": "(\"H.DMA.5\", \"H.IRQ.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 682
+                    "line": 685
                   }
                 },
                 {
@@ -66963,7 +66963,7 @@
                   "value": "(\"discovery::pci::held_off\", \"discovery::pci::hold_msix_off\", \"device::DeviceNode::pci\", \"device::MsiFunction::of\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 684
+                    "line": 687
                   }
                 }
               ]
@@ -66976,7 +66976,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 686
+                "line": 689
               },
               "children": [
                 {
@@ -66987,7 +66987,7 @@
                   "value": "\"DeviceNode::verify_config shall refuse a node whose MSI-X the kernel holds off when its MSI-X Enable reads 1, naming MSI-X control; the Function Mask the kernel wrote is not compared, since the chip's own reset may clear it while Enable stays 0.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 690
+                    "line": 693
                   }
                 },
                 {
@@ -66998,7 +66998,7 @@
                   "value": "\"On x86-64, with Enable written 1 on the scratch node of L.device.35 -- the mirror case -- verify_config reports MSI-X control and the node reads refused (the msix-off line); with the comparison removed the boot fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 694
+                    "line": 697
                   }
                 },
                 {
@@ -67009,7 +67009,7 @@
                   "value": "(\"H.DMA.5\", \"H.IRQ.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 695
+                    "line": 698
                   }
                 },
                 {
@@ -67020,7 +67020,7 @@
                   "value": "(\"device::DeviceNode::verify_config\", \"device::msix_off_breach\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 697
+                    "line": 700
                   }
                 }
               ]
@@ -67033,7 +67033,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 699
+                "line": 702
               },
               "children": [
                 {
@@ -67044,7 +67044,7 @@
                   "value": "\"MsiFunction::mint shall refuse a function whose MSI-X the kernel holds off when its MSI-X Enable, read under the node's configuration lock at the mint, reads 1.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 702
+                    "line": 705
                   }
                 },
                 {
@@ -67055,7 +67055,7 @@
                   "value": "\"On x86-64 the scratch node of L.device.35, with Enable written 1, is refused its MSI vector when asked again (the msix-off line); with the refusal removed the boot fails.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 705
+                    "line": 708
                   }
                 },
                 {
@@ -67066,7 +67066,7 @@
                   "value": "\"H.IRQ.1\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 706
+                    "line": 709
                   }
                 },
                 {
@@ -67077,7 +67077,7 @@
                   "value": "\"device::MsiFunction::mint\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 707
+                    "line": 710
                   }
                 }
               ]
@@ -67090,7 +67090,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 709
+                "line": 712
               },
               "children": [
                 {
@@ -67101,7 +67101,7 @@
                   "value": "\"The boot framebuffer shall stay in the ranges withheld from every aperture but one, withheld as its size in whole pages: on x86-64 under ferrix.efifb, and only there, at most one node, whose one aperture starts at the framebuffer's first byte and is its visible lines in whole pages, prefetchable, with no vector. None shall be made when the framebuffer is in memory the allocator owns, its size does not hold its lines, its layout is not four bytes a pixel, its first pixel is off a page, or another reserved range lies inside the lines' whole pages; and an aperture of the node's kind shall be withheld when it reaches past the framebuffer's size in whole pages or lies in a reserved range that is not the framebuffer.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 721
+                    "line": 724
                   }
                 },
                 {
@@ -67112,7 +67112,7 @@
                   "value": "\"Every boot lends a made-up 1024x768 framebuffer exactly its visible lines as one aperture of its own source, prefetchable; refuses one crossed by another reservation, one the allocator owns, one a page short, one of an unknown layout and one off a page; withholds a lent aperture reaching past the framebuffer and one inside another reserved range; and withholds an ordinary window at the framebuffer. It lends a made-up 800x600 framebuffer whose size is exactly its 1,920,000 visible bytes its lines in whole pages (469), refuses it one byte short, and withholds it when another range starts in its last page. A node without the option or off x86-64 fails the boot. Under ferrix.efifb the published node holds one prefetchable aperture equal to the framebuffer's lines and no vector (test-compositor --boot firmware-screen). With the exemption granted to any aperture, or either clause of Reserved::lends dropped, or a node made without the option, or the aperture minted not prefetchable, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 737
+                    "line": 740
                   }
                 },
                 {
@@ -67123,7 +67123,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 738
+                    "line": 741
                   }
                 },
                 {
@@ -67134,7 +67134,7 @@
                   "value": "(\"device::DeviceNode::firmware_framebuffer\", \"device::framebuffer_span\", \"device::Reserved::lends\", \"device::Reserved::covers\", \"device::Reserved::synthetic\", \"device::Reserved::framebuffer\", \"discovery::firmware::FirmwareFramebuffer::new\", \"discovery::firmware::FirmwareFramebuffer::lend\", \"discovery::firmware::FirmwareFramebuffer::find\", \"discovery::firmware::may_lend\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 746
+                    "line": 749
                   }
                 }
               ]
@@ -67147,7 +67147,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 748
+                "line": 751
               },
               "children": [
                 {
@@ -67158,7 +67158,7 @@
                   "value": "\"The firmware framebuffer's node shall reach no memory: it shall get no domain; vmo_pin, plain or contiguous, and device_set_limit on it shall answer WRONG_TYPE; and before the node is published the kernel shall take, and never give back, a hold of write-combining, its own window's memory type (L.device.43), over the aperture, so that every user mapping of it is held to that type (L.user.109) and only io_mapping_map_combining maps it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 756
+                    "line": 759
                   }
                 },
                 {
@@ -67169,7 +67169,7 @@
                   "value": "\"Under ferrix.efifb the node's domain is refused and none was made, its DMA is off, a hold of the aperture as device or cached memory is refused while one as write-combining is not, and vmo_pin (plain and PIN_CONTIGUOUS) and device_set_limit(PIN_PAGES) through the calls answer WRONG_TYPE; io_mapping_map of the window is refused and io_mapping_map_combining given, its user leaf write-combining and not device (W8; test-compositor --boot firmware-screen). With the node reaching memory, vmo_pin's refusal removed, the hold not taken or taken as device memory, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 766
+                    "line": 769
                   }
                 },
                 {
@@ -67180,7 +67180,7 @@
                   "value": "(\"H.DMA.3\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 767
+                    "line": 770
                   }
                 },
                 {
@@ -67191,7 +67191,7 @@
                   "value": "(\"device::DeviceNode::reaches_memory\", \"device::DeviceNode::domain\", \"discovery::firmware::refuses\", \"syscall::native::vmo_pin\", \"syscall::native::set_limit_on\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 770
+                    "line": 773
                   }
                 }
               ]
@@ -67204,7 +67204,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 772
+                "line": 775
               },
               "children": [
                 {
@@ -67215,7 +67215,7 @@
                   "value": "\"While the firmware framebuffer is lent to its own node, every PCI function one of whose BARs holds it shall be driven by nobody: every native call that needs MANAGE on a device reaches it through device_in, and on such a function each shall answer BAD_STATE, configuration reads and I/O mappings included.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 778
+                    "line": 781
                   }
                 },
                 {
@@ -67226,7 +67226,7 @@
                   "value": "\"Under ferrix.efifb every function whose BAR ranges, read again from the published nodes, overlap the framebuffer is marked; the VGA function that holds it answers a configuration read and an io_mapping_create BAD_STATE (W2 and W8, the config line: one function); and no other node's aperture overlaps the framebuffer (test-compositor --boot firmware-screen). With the function left driven, or the mark minting leaves never set, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 786
+                    "line": 789
                   }
                 },
                 {
@@ -67237,7 +67237,7 @@
                   "value": "(\"H.DMA.5\", \"H.DEV.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 787
+                    "line": 790
                   }
                 },
                 {
@@ -67248,7 +67248,7 @@
                   "value": "(\"device::yield_framebuffer_holder\", \"device::DeviceNode::yielded\", \"device::DeviceNode::mint_bar\", \"syscall::native::device_in\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 790
+                    "line": 793
                   }
                 }
               ]
@@ -67261,7 +67261,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 792
+                "line": 795
               },
               "children": [
                 {
@@ -67272,7 +67272,7 @@
                   "value": "\"The boot console shall stop drawing on the framebuffer, waiting out a draw in flight, before the firmware framebuffer's node exists, so that no kernel draw but a panic's meets a ring-3 driver's on its pages.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 796
+                    "line": 799
                   }
                 },
                 {
@@ -67283,7 +67283,7 @@
                   "value": "\"Under ferrix.efifb ferrix.fbcon the console draws the boot until the node is made, and stage 10's check of the published node finds it stopped; hyprix's picture on the framebuffer then holds no console pixel (test-compositor --boot firmware-screen). With the stop moved after the node is published, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 802
+                    "line": 805
                   }
                 },
                 {
@@ -67294,7 +67294,7 @@
                   "value": "(\"H.DMA.5\", \"H.FAIL.1\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 803
+                    "line": 806
                   }
                 },
                 {
@@ -67305,7 +67305,7 @@
                   "value": "(\"console::screen::stop\", \"discovery::firmware::FirmwareFramebuffer::lend\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 805
+                    "line": 808
                   }
                 }
               ]
@@ -67318,7 +67318,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 807
+                "line": 810
               },
               "children": [
                 {
@@ -67329,7 +67329,7 @@
                   "value": "\"DeviceNode::describe shall report the firmware framebuffer's node as TREE_FIRMWARE_FB with one aperture and no vector, and its width, height, stride and pixel layout, as it was minted, in the fields a tree node leaves zero.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 811
+                    "line": 814
                   }
                 },
                 {
@@ -67340,7 +67340,7 @@
                   "value": "\"Under ferrix.efifb the node's device_info, read back through the call, names TREE_FIRMWARE_FB, one aperture, no vector and the minted mode (W8, the config line; test-compositor --boot firmware-screen), and efifb starts at the firmware's mode. With the mode fields not written, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 817
+                    "line": 820
                   }
                 },
                 {
@@ -67351,7 +67351,7 @@
                   "value": "\"H.DMA.5\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 818
+                    "line": 821
                   }
                 },
                 {
@@ -67362,7 +67362,7 @@
                   "value": "\"device::DeviceNode::describe\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 819
+                    "line": 822
                   }
                 }
               ]
@@ -67375,7 +67375,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 821
+                "line": 824
               },
               "children": [
                 {
@@ -67386,7 +67386,7 @@
                   "value": "\"On x86-64 under ferrix.efifb the firmware framebuffer's node shall not be made unless every processor programmed its PAT (L.x86_64.127) and every page of the kernel's panic window over the framebuffer reads back write-combining, writable, not user's and none as device memory (L.x86_64.176), read before the boot console is stopped and the kernel's hold is taken.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 828
+                    "line": 831
                   }
                 },
                 {
@@ -67397,7 +67397,7 @@
                   "value": "\"Under ferrix.efifb stage 10's check of the published node reads every page of the kernel's window back write-combining, not device, writable and not user's, as the type the hold keeps; reads this processor's IA32_PAT back as X86_PAT and every processor counted as programmed; and efifb says it mapped the window write-combining (test-compositor --boot firmware-screen). The lend's read-back answers false on a device page (stage 9, L.x86_64.176); with it answering true for any page, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 837
+                    "line": 840
                   }
                 },
                 {
@@ -67408,7 +67408,7 @@
                   "value": "(\"H.MEM.15\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 838
+                    "line": 841
                   }
                 },
                 {
@@ -67419,7 +67419,7 @@
                   "value": "(\"discovery::firmware::FirmwareFramebuffer::lend\", \"discovery::firmware::window_combining\", \"panic::screen::window\", \"arch::x86_64::framebuffer::pat\", \"arch::x86_64::framebuffer::mtrr_type\", \"arch::x86_64::framebuffer::drain_write_combining\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 843
+                    "line": 846
                   }
                 }
               ]
@@ -82593,7 +82593,7 @@
       ],
       "origin": "FerrixDeviceRequirements",
       "file": "docs/sysml/20-device-requirements.sysml",
-      "line": 34
+      "line": 37
     },
     {
       "kind": "import",
