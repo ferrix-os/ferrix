@@ -332,11 +332,14 @@ enum Decision {
     Leave(i32),
 }
 
-/// How many threads hold seccomp state now: raised before a thread's flag
-/// ([`Thread::is_filtered`]) is raised or as a thread is made with it raised,
-/// lowered after the flag is lowered or as a thread is dropped with it raised.
-/// While it is zero, no thread is filtered, so no call of any program looks
-/// for its thread ([`any_filtered`]). A count rather than a flag set once, so
+/// How many watches threads hold now: one for each bit of a thread's
+/// `watched` mask ([`Thread::is_watched`]), raised before the bit is raised or
+/// as a thread is made with it raised, lowered after the bit is lowered or as
+/// a thread is dropped with it raised. A thread under seccomp holds one; the
+/// bits and the count are the thread's `set_watch`. While the count is zero,
+/// no thread is watched, so no call of any program looks for its thread
+/// ([`any_filtered`]). Each bit is ordered against the count on its own, as
+/// below, so a second bit of the same thread changes nothing in the argument. A count rather than a flag set once, so
 /// that a kernel in which every filtered thread has ended -- every boot's
 /// own checks filter threads -- pays no more at a call than one that never
 /// had one.
@@ -407,13 +410,13 @@ pub(crate) fn check(args: &SyscallArgs) -> Verdict {
     }
     // An unfiltered thread, nearly every one, is asked through a lent
     // reference; only a filtered one is cloned for the filter run below.
-    if !thread::with_current(Thread::is_filtered).unwrap_or(false) {
+    if !thread::with_current(Thread::is_watched).unwrap_or(false) {
         return Verdict::Continue;
     }
     let Some(thread) = thread::current() else {
         return Verdict::Continue;
     };
-    if !thread.is_filtered() {
+    if !thread.is_watched() {
         return Verdict::Continue;
     }
     // A filter chain can take tens of microseconds and a kill needs the locks
@@ -447,7 +450,7 @@ pub(crate) fn quiet() -> bool {
     if !any_filtered() {
         return true;
     }
-    sched::with_current(|task| thread::of_task(task).is_none_or(|thread| !thread.is_filtered()))
+    sched::with_current(|task| thread::of_task(task).is_none_or(|thread| !thread.is_watched()))
         .unwrap_or(true)
 }
 

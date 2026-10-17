@@ -28,7 +28,7 @@
 
 use alloc::sync::Arc;
 use core::any::Any;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use crate::fallible::AllocError;
 use crate::object::process::{self as pids, Host};
@@ -76,12 +76,18 @@ pub(crate) struct Thread {
     /// neither a filter nor the memory of a dropped chain is ever run or freed
     /// under it (`docs/SECCOMP.md` §7).
     seccomp: SpinLock<seccomp::State>,
-    /// Whether [`Thread::seccomp`] holds anything, for the system call entry's
-    /// fast path: written under that lock after the state it summarises, with
-    /// release, and read with acquire. A thread that has never been filtered
-    /// pays this load and nothing else.
-    filtered: AtomicBool,
+    /// What the system call entry must look at for it, one bit for each:
+    /// [`WATCH_SECCOMP`] while [`Thread::seccomp`] holds anything. Each bit is
+    /// changed only under the lock of the state it summarises, after that
+    /// state, with release, and the mask is read with acquire. Each bit set is
+    /// one count of `seccomp::FILTERED_THREADS`, raised before the bit and
+    /// given back after it. A thread with no bit set pays this load and
+    /// nothing else.
+    watched: AtomicU8,
 }
+
+/// [`Thread::watched`]'s bit for seccomp state.
+pub(crate) const WATCH_SECCOMP: u8 = 1 << 0;
 
 impl Thread {
     /// The first thread of `process`, numbered by its pid, blocking nothing.
@@ -169,10 +175,11 @@ impl Thread {
     /// `seccomp`.
     fn with(process: &Arc<Process>, signals: ThreadSignals, seccomp: seccomp::State) -> Thread {
         // Counted as it is made filtered, and given back by its drop.
+        let mut watched = 0;
         if seccomp.is_active() {
             seccomp::note_filtered();
+            watched |= WATCH_SECCOMP;
         }
-        let filtered = AtomicBool::new(seccomp.is_active());
         Thread {
             tid: AtomicU32::new(process.pid()),
             gone: AtomicBool::new(false),
@@ -184,14 +191,32 @@ impl Thread {
             signals: SpinLock::new(signals),
             resume: SpinLock::new(None),
             seccomp: SpinLock::new(seccomp),
-            filtered,
+            watched: AtomicU8::new(watched),
         }
     }
 
-    /// Whether it is under seccomp at all: the load the system call entry
-    /// makes on every call.
-    pub(crate) fn is_filtered(&self) -> bool {
-        self.filtered.load(Ordering::Acquire)
+    /// Whether the system call entry must look at its calls at all: the load
+    /// the entry makes on every call, while any thread is watched.
+    pub(crate) fn is_watched(&self) -> bool {
+        self.watched.load(Ordering::Acquire) != 0
+    }
+
+    /// Raise or lower one bit of [`Thread::watched`], counted: raised after
+    /// its count is taken, lowered before its count is given back, so that
+    /// the count is never below the bits set. Called under the lock of the
+    /// state the bit summarises, which is the only writer of that bit; other
+    /// bits may change beside it, which the read-modify-write keeps.
+    fn set_watch(&self, bit: u8, on: bool) {
+        if (self.watched.load(Ordering::Relaxed) & bit != 0) == on {
+            return;
+        }
+        if on {
+            seccomp::note_filtered();
+            let _ = self.watched.fetch_or(bit, Ordering::Release);
+        } else {
+            let _ = self.watched.fetch_and(!bit, Ordering::Release);
+            seccomp::note_unfiltered();
+        }
     }
 
     /// Read or change its seccomp state, under its leaf lock, and publish
@@ -203,20 +228,10 @@ impl Thread {
     pub(crate) fn with_seccomp<R>(&self, change: impl FnOnce(&mut seccomp::State) -> R) -> R {
         let mut held = self.seccomp.lock();
         let answer = change(&mut held);
-        let active = held.is_active();
-        // Written only on change: the flag is read on every call of a filtered
+        // Written only on change: the mask is read on every call of a watched
         // thread, and a store each time would bounce its cache line.
-        // Counted before the flag is raised and given back after it is
-        // lowered, so the count is never zero while a flag is up.
-        if active != self.filtered.load(Ordering::Relaxed) {
-            if active {
-                seccomp::note_filtered();
-            }
-            self.filtered.store(active, Ordering::Release);
-            if !active {
-                seccomp::note_unfiltered();
-            }
-        }
+        self.set_watch(WATCH_SECCOMP, held.is_active());
+        drop(held);
         answer
     }
 
@@ -387,7 +402,7 @@ impl Drop for Thread {
     /// Give its thread id back, unless it is its process's first, whose id is
     /// the pid and goes with the process.
     fn drop(&mut self) {
-        if *self.filtered.get_mut() {
+        for _ in 0..self.watched.get_mut().count_ones() {
             seccomp::note_unfiltered();
         }
         let tid = *self.tid.get_mut();
