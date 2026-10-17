@@ -119,7 +119,7 @@ const GRAB_STEP: u64 = 9;
 const GRAB_SENT: u64 = 120;
 
 /// The tablet's coordinate for pixel `at` of `across`.
-fn tablet(at: usize, across: usize) -> i32 {
+pub(super) fn tablet(at: usize, across: usize) -> i32 {
     let at = i64::try_from(at).unwrap_or(0);
     let across = i64::try_from(across.max(1)).unwrap_or(1);
     i32::try_from(at * 0x7FFF / across).unwrap_or(0)

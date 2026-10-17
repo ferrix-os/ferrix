@@ -10,6 +10,12 @@
 //! clock X's Present gives its completions in. `xlatency summarize` pairs
 //! those with the probe's frames. A rate that divides no refresh, such as 7,
 //! spreads the motions over the refresh's phase.
+//!
+//! `vptr click <x> <y> <width> <height>`: put the pointer at `(x, y)` of a
+//! `width` by `height` screen and click its left button, as a hand does --
+//! through the compositor's seat, so the window under the point gets the
+//! click where it is shown. xdotool's clicks go to X's positions, which are
+//! not where hyprix shows an X window (docs/WINE.md §10).
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -37,7 +43,11 @@ const GLOBAL: &[ArgType] = &[
     ArgType::Uint,
 ];
 
-const USAGE: &str = "usage: vptr <hz> <seconds> [<pixels>] [--log FILE]";
+const USAGE: &str =
+    "usage: vptr <hz> <seconds> [<pixels>] [--log FILE] | vptr click <x> <y> <width> <height>";
+
+/// Linux's `BTN_LEFT`, the button a click presses.
+const BTN_LEFT: u32 = 0x110;
 
 /// What the command line asked for.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,8 +92,80 @@ fn options(args: &[String]) -> Result<Options, String> {
     })
 }
 
+/// `click`'s point and the screen's size it is on.
+fn click_options(args: &[String]) -> Result<[u32; 4], String> {
+    let numbers: Vec<u32> = args
+        .iter()
+        .map(|arg| arg.parse().map_err(|_| USAGE.to_owned()))
+        .collect::<Result<_, _>>()?;
+    match numbers.as_slice() {
+        [x, y, width, height] if x < width && y < height => Ok([*x, *y, *width, *height]),
+        _ => Err(USAGE.to_owned()),
+    }
+}
+
+/// Move to the point, then press and release the left button, each with
+/// its frame.
+fn click(at: [u32; 4]) -> Result<(), String> {
+    let mut writer = Writer::new();
+    let mut connection = connect(&mut writer)?;
+    let pause = |millis| std::thread::sleep(Duration::from_millis(millis));
+    let began = Instant::now();
+    let time = || u32::try_from(began.elapsed().as_millis()).unwrap_or(0);
+    let [x, y, width, height] = at;
+    // Arrive a little above and to the left, then rest on the point: a
+    // toolkit reads its first motion as the pointer entering.
+    for (x, y) in [(x.saturating_sub(8), y.saturating_sub(8)), (x, y)] {
+        write(
+            &mut writer,
+            POINTER,
+            pointer::request::MOTION_ABSOLUTE,
+            &[ArgType::Uint; 5],
+            &[
+                Arg::Uint(time()),
+                Arg::Uint(x),
+                Arg::Uint(y),
+                Arg::Uint(width),
+                Arg::Uint(height),
+            ],
+        )?;
+        write(&mut writer, POINTER, pointer::request::FRAME, &[], &[])?;
+        send(&mut connection, &mut writer)?;
+        pause(200);
+    }
+    for state in [1, 0] {
+        write(
+            &mut writer,
+            POINTER,
+            pointer::request::BUTTON,
+            &[ArgType::Uint; 3],
+            &[Arg::Uint(time()), Arg::Uint(BTN_LEFT), Arg::Uint(state)],
+        )?;
+        write(&mut writer, POINTER, pointer::request::FRAME, &[], &[])?;
+        send(&mut connection, &mut writer)?;
+        pause(80);
+    }
+    // A round trip, so everything sent is read before the pointer goes.
+    pause(200);
+    let _ = connection.receive();
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("click") {
+        let rest = args.get(1..).unwrap_or_default();
+        return match click_options(rest).and_then(click) {
+            Ok(()) => {
+                say(&format!("vptr: clicked at {}", rest.join(" ")));
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                say(&format!("vptr: failed: {error}"));
+                ExitCode::FAILURE
+            }
+        };
+    }
     let result = options(&args).and_then(|options| {
         let sent = run(&options)?;
         if let Some(path) = &options.log {
@@ -348,6 +430,17 @@ mod tests {
         assert_eq!(options(&[]).map(|o| (o.hz, o.seconds)), Ok((500, 10)));
         assert!(options(&strings(&["--log"])).is_err());
         assert!(options(&strings(&["x"])).is_err());
+    }
+
+    #[test]
+    fn a_click_is_a_point_on_its_screen() {
+        assert_eq!(
+            click_options(&strings(&["10", "20", "1920", "1080"])),
+            Ok([10, 20, 1920, 1080])
+        );
+        assert!(click_options(&strings(&["1920", "20", "1920", "1080"])).is_err());
+        assert!(click_options(&strings(&["10", "20", "1920"])).is_err());
+        assert!(click_options(&strings(&["x", "20", "1920", "1080"])).is_err());
     }
 
     #[test]

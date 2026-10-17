@@ -717,6 +717,34 @@ server answers; a click on Download draws the install dialog whole, in Open
 Sans (the screens are in `~/.local/share/ferrix/endfield-proton/` on
 nazuna).
 
+**The click.** Since 2026-10-17 the gate also clicks the main button, once
+it is drawn, through QEMU's tablet -- hyprix's seat, then yserver, then
+Wine, the way a hand's click comes -- and requires the window it opens
+(`Dialog - GRYPHLINK` for Download) in hyprix's list at the end. A click
+that goes nowhere -- the bottom-left corner of the screen, as a control --
+leaves the list as it was and fails the gate.
+
+That day scripted clicks on the N150 box seemed not to reach the launcher
+under DW-Proton 11.0-14: the Events tab and the DX11 box did not react,
+and the game was started without the launcher. They did reach it. Wine's
+`+event` and `+message` traces show every `ButtonPress` turned into a
+`WM_LBUTTONDOWN` and `WM_LBUTTONUP` at the point clicked, a click on Play
+started `Endfield.exe`, and GE-Proton11-7 behaved the same. The clicks were
+in the wrong place. xdotool's clicks are X events (XTEST) at X's root
+positions, and an X top-level keeps the position its client gave it
+(Wine centres the launcher on its work area, at y 143), while hyprix shows
+the window where it places it (centred on the screen, at y 163). A point
+taken from a screenshot is therefore 20 pixels below the same point in X,
+and the clicks landed under the tabs and the box. A hand's click goes
+through hyprix's seat; yserver adds the position on the window to the
+window's X origin (`wayland/input.rs`), so it lands where the window is
+drawn. To click from a script, go through the seat too: `hyprctl dispatch
+movecursor` moves the pointer, and `vptr click <x> <y> <width> <height>`
+(`src/user/system/linux/compositor/vptr`) moves it and clicks through
+`zwlr_virtual_pointer_v1` in screen positions. With xdotool, subtract
+hyprix's `at:` for the window (`hyprctl clients`) from the screen point and
+add X's origin (`xwininfo`).
+
 **Still not as on Windows:** the launcher asks every five seconds for the
 image path of its `QtWebEngineProcess.exe` and gets none, because Wine
 reads another process's memory through `ptrace` and `/proc/<pid>/mem`,

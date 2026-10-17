@@ -17,13 +17,21 @@
 //! its query for the game's version with HTTP 200: its web view drew its
 //! first screen, and it reached its server over TLS through the gateway.
 //!
+//! Once the button is drawn, the gate clicks it through QEMU's tablet, the
+//! way a hand's click comes (hyprix's seat, then yserver), and requires the
+//! window that opens on it in hyprix's list at the end: on 2026-10-17
+//! scripted clicks on the N150 box seemed not to reach the launcher, and
+//! did -- xdotool's positions are X's, and hyprix shows the window
+//! elsewhere (docs/WINE.md §10).
+//!
 //! Nothing is logged into and nothing is downloaded: the gate stops at the
-//! launcher's first screen, whose buttons say "Log In" and "Download".
+//! launcher's first screen, whose buttons say "Log In" and "Download", and
+//! the dialog the click on "Download" opens.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::boot::{build_image, undithered, with_the_transcript};
+use super::boot::{absolute, build_image, button_event, undithered, with_the_transcript};
 use super::{Carried, EITHER, Programs, gates_busybox};
 use crate::args::Args;
 use crate::display::{DEVICE_ID, Image, Qmp, free_port, parse_ppm};
@@ -427,14 +435,89 @@ pub(crate) fn desktop_files(carried: &[File]) -> Vec<File> {
     files
 }
 
+/// Whether a pixel is the main button's yellow.
+fn is_yellow([r, g, b]: &[u8; 3]) -> bool {
+    *r > 230 && *g > 230 && *b < 60
+}
+
 /// The part of `screen`, in thousandths, that is the main button's yellow.
 fn yellow_permille(screen: &Image) -> usize {
     let (pixels, _) = screen.pixels.as_chunks::<3>();
-    let yellow = pixels
-        .iter()
-        .filter(|[r, g, b]| *r > 230 && *g > 230 && *b < 60)
-        .count();
+    let yellow = pixels.iter().filter(|pixel| is_yellow(pixel)).count();
     yellow * 1000 / pixels.len().max(1)
+}
+
+/// Where on `screen` to click the main button: the median of its yellow
+/// pixels across and down, which the button's area decides over the small
+/// yellow marks elsewhere on the page. `None` without yellow.
+fn button_at(screen: &Image) -> Option<(usize, usize)> {
+    let (pixels, _) = screen.pixels.as_chunks::<3>();
+    let width = screen.width.max(1);
+    let (mut xs, mut ys): (Vec<usize>, Vec<usize>) = pixels
+        .iter()
+        .enumerate()
+        .filter(|(_, pixel)| is_yellow(pixel))
+        .map(|(at, _)| (at % width, at / width))
+        .unzip();
+    xs.sort_unstable();
+    ys.sort_unstable();
+    Some((*xs.get(xs.len() / 2)?, *ys.get(ys.len() / 2)?))
+}
+
+/// Click `screen`'s point `at` through QEMU's tablet: the pointer moved
+/// there, pressed and released as a hand does.
+fn click_at(qmp: &mut Qmp, screen: &Image, (x, y): (usize, usize)) -> Result<()> {
+    use super::latency::tablet;
+    let pause = |millis| std::thread::sleep(Duration::from_millis(millis));
+    // Two moves, so the toolkit sees the pointer arrive and then rest.
+    for (dx, dy) in [(12, 12), (0, 0)] {
+        qmp.input_send_event(&[
+            absolute("x", tablet(x.saturating_sub(dx), screen.width)),
+            absolute("y", tablet(y.saturating_sub(dy), screen.height)),
+        ])?;
+        pause(300);
+    }
+    qmp.input_send_event(&[button_event("left", true)])?;
+    pause(80);
+    qmp.input_send_event(&[button_event("left", false)])
+}
+
+/// Once the page has settled, click its main button; where, or `None`
+/// when no yellow was left on the screen.
+fn click_the_button(qmp: &mut Qmp, dump: &Path, shown: Image) -> Result<Option<(usize, usize)>> {
+    std::thread::sleep(Duration::from_secs(10));
+    let shown = screen(qmp, dump).unwrap_or(shown);
+    let at = button_at(&shown);
+    if let Some(at) = at {
+        click_at(qmp, &shown, at)?;
+    }
+    Ok(at)
+}
+
+/// The titles of hyprix's list among `lines`.
+fn titles<'a>(lines: impl Iterator<Item = &'a String>) -> Vec<&'a str> {
+    lines
+        .filter_map(|line| {
+            line.split_once("endfield: clients:")
+                .and_then(|(_, rest)| rest.trim().split_once(" -> "))
+                .map(|(_, title)| title.trim_end_matches(':'))
+        })
+        .collect()
+}
+
+/// The windows hyprix lists at the end and did not list when the
+/// launcher's window came, other than the launcher's own window (which the
+/// first list can miss) and untitled ones: what the click opened.
+fn opened(lines: &[String]) -> Vec<&str> {
+    let at = lines
+        .iter()
+        .position(|line| line.contains(WINDOW))
+        .unwrap_or(lines.len());
+    let before = titles(lines.iter().take(at));
+    let mut after = titles(lines.iter().skip(at));
+    after.retain(|title| !title.is_empty() && *title != TITLE && !before.contains(title));
+    after.dedup();
+    after
 }
 
 /// Whether hyprix's list, among the script's lines, has the launcher's
@@ -548,6 +631,7 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
     );
     let mut said: Vec<String> = Vec::new();
     let mut yellow = 0;
+    let mut clicked = None;
     let hook = |watching: &mut Watching<'_>| -> Result<()> {
         let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
         let reached = |marker: &'static str| {
@@ -560,12 +644,16 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
         let window = watching.read_more(Instant::now() + PATIENCE, reached(WINDOW))?;
         if window {
             let deadline = Instant::now() + DRAWN;
-            loop {
-                yellow = yellow_permille(&screen(&mut qmp, &dump)?);
+            let shown = loop {
+                let shown = screen(&mut qmp, &dump)?;
+                yellow = yellow_permille(&shown);
                 if yellow >= YELLOW_PERMILLE || Instant::now() >= deadline {
-                    break;
+                    break shown;
                 }
                 std::thread::sleep(Duration::from_secs(5));
+            };
+            if yellow >= YELLOW_PERMILLE {
+                clicked = click_the_button(&mut qmp, &dump, shown)?;
             }
         }
         let ended = watching.read_more(
@@ -589,15 +677,51 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
         }
     };
     let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
-    report_cmd32(arch, &said);
-    report_cpu(arch, &said);
-    if wine == Wine::Proton && dispatch_refused(&said) {
+    report(arch, &said);
+    judge_dispatch(arch, wine, &said)?;
+    judge(arch, &said, yellow, &dump)?;
+    judge_click(arch, &said, clicked)
+}
+
+/// The run's 32-bit command and processor reports.
+fn report(arch: Arch, said: &[String]) {
+    report_cmd32(arch, said);
+    report_cpu(arch, said);
+}
+
+/// Whether GE-Proton's Wine was refused Syscall User Dispatch.
+fn judge_dispatch(arch: Arch, wine: Wine, said: &[String]) -> Result<()> {
+    if wine == Wine::Proton && dispatch_refused(said) {
         return Err(Error::new(format!(
             "{arch}: GE-Proton's Wine said `{NO_DISPATCH}`: Syscall User Dispatch was refused \
              (docs/SECCOMP.md §13)"
         )));
     }
-    judge(arch, &said, yellow, &dump)
+    Ok(())
+}
+
+/// Whether the click on the main button opened a window of the
+/// launcher's: a title hyprix lists at the end that it did not list when
+/// the launcher's window came.
+fn judge_click(arch: Arch, said: &[String], clicked: Option<(usize, usize)>) -> Result<()> {
+    let Some((x, y)) = clicked else {
+        return Err(Error::new(format!(
+            "{arch}: the main button was drawn, but no yellow was left to click"
+        )));
+    };
+    let opened = opened(said);
+    if opened.is_empty() {
+        return Err(Error::new(format!(
+            "{arch}: a click on the main button at ({x}, {y}) opened no window: hyprix lists \
+             the same windows at the end as when the launcher's came. Clicks are lost between \
+             hyprix, yserver and Wine (docs/WINE.md §10)"
+        )));
+    }
+    println!(
+        "  {arch}: a click on the main button at ({x}, {y}), through hyprix's seat, opened {}",
+        opened.join(", ")
+    );
+    Ok(())
 }
 
 /// What GE-Proton's ntdll logs on each thread when the kernel refuses
@@ -723,6 +847,64 @@ mod tests {
             pixels,
         };
         assert_eq!(yellow_permille(&screen), 1);
+    }
+
+    /// The click goes to the middle of the button's yellow, not to the
+    /// small yellow marks elsewhere.
+    #[test]
+    fn the_click_goes_to_the_buttons_middle() {
+        let (width, height) = (100, 50);
+        let mut pixels = vec![0_u8; 3 * width * height];
+        let mut paint = |x: usize, y: usize| {
+            pixels[3 * (y * width + x)..3 * (y * width + x) + 3].copy_from_slice(&[255, 250, 0]);
+        };
+        paint(2, 2);
+        paint(3, 2);
+        for y in 30..40 {
+            for x in 60..90 {
+                paint(x, y);
+            }
+        }
+        let screen = Image {
+            width,
+            height,
+            pixels,
+        };
+        let (x, y) = button_at(&screen).expect("yellow");
+        assert!((70..80).contains(&x) && (32..38).contains(&y), "({x}, {y})");
+        let blank = Image {
+            width,
+            height,
+            pixels: vec![0; 3 * width * height],
+        };
+        assert_eq!(button_at(&blank), None);
+    }
+
+    /// What the click opened is what hyprix lists at the end and did not
+    /// list when the launcher's window came.
+    #[test]
+    fn what_the_click_opened_is_read_from_the_lists() {
+        let lines: Vec<String> = [
+            "endfield: clients: Window 5a -> GRYPHLINK:",
+            "endfield: window",
+            "endfield: clients: Window 5a -> GRYPHLINK:",
+            "endfield: clients: Window 6b -> Form - GRYPHLINK:",
+            "endfield: clients: Window 7c -> :",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert_eq!(opened(&lines), vec!["Form - GRYPHLINK"]);
+        assert!(opened(&lines[..3]).is_empty());
+        // The launcher's window, listed only at the end, is not what the
+        // click opened.
+        let late: Vec<String> = [
+            "endfield: clients: Window 1 -> :",
+            "endfield: window",
+            "endfield: clients: Window 5a -> GRYPHLINK:",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert!(opened(&late).is_empty());
     }
 
     /// With `gryphlink`, the script's own start of the launcher -- wineboot
