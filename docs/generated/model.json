@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "351af076a6a8740b17413cc6387bfa84de68e9aac3a45c60203093a3b5e55279",
+  "digest": "37f8ce34e60229a420c6f0358a6ebc35e3e0bc286c296d495b2fa542d9a72386",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -32,7 +32,7 @@
     },
     {
       "path": "docs/sysml/07-isolation.sysml",
-      "synopsis": "Ferrix — SysML v2 model, part 7: isolation.\n\ndocs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries, its filters, SECCOMP_RET_TRAP and TSYNC are built (S1 to S5, docs/SECCOMP.md), and test-seccomp runs a guest program on four ABIs (S6)."
+      "synopsis": "Ferrix — SysML v2 model, part 7: isolation.\n\ndocs/ARCHITECTURE.md §6: namespaces, cgroups v2, seccomp, credentials. Stage 13, designed in from the start so that no global table has to be found later. The credentials exist since stage 7, and cgroup v2 since 2026-09-23 (docs/CGROUPS.md), over the job tree. Of the namespaces, mount, user, UTS, IPC, cgroup, pid and network namespaces are in (docs/NAMESPACES.md): unshare and clone copy one, and bubblewrap runs as root. Time namespaces answer as a Linux built without them does. Seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries, its filters, SECCOMP_RET_TRAP and TSYNC are built (S1 to S5, docs/SECCOMP.md), and test-seccomp runs a guest program on four ABIs (S6). Syscall User Dispatch (prctl 59, docs/SECCOMP.md section 13) is a second rule in the same look, judged before the chain, x86-64 only."
     },
     {
       "path": "docs/sysml/08-drivers.sysml",
@@ -14544,7 +14544,7 @@
       "kind": "package",
       "source": {
         "file": "docs/sysml/07-isolation.sysml",
-        "line": 15
+        "line": 17
       },
       "children": [
         {
@@ -14554,7 +14554,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 19
+            "line": 21
           },
           "children": [
             {
@@ -14563,7 +14563,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             },
             {
@@ -14572,7 +14572,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             },
             {
@@ -14581,7 +14581,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             },
             {
@@ -14590,7 +14590,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             },
             {
@@ -14599,7 +14599,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             },
             {
@@ -14608,7 +14608,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             },
             {
@@ -14617,7 +14617,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             },
             {
@@ -14626,7 +14626,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 20
+                "line": 22
               }
             }
           ]
@@ -14640,7 +14640,7 @@
           "stage": 13,
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 23
+            "line": 25
           },
           "children": [
             {
@@ -14650,7 +14650,7 @@
               "type": "NamespaceKind",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 25
+                "line": 27
               }
             },
             {
@@ -14661,7 +14661,7 @@
               "multiplicity": "0..1",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 26
+                "line": 28
               }
             }
           ]
@@ -14676,7 +14676,7 @@
           "doc": "One namespace of each kind, held by every task. Every table that would otherwise be global — pids, mounts, hostname, ... — is reached through this, from the first line.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 29
+            "line": 31
           },
           "children": [
             {
@@ -14690,7 +14690,7 @@
               "multiplicity": "8",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 34
+                "line": 36
               }
             }
           ]
@@ -14705,7 +14705,7 @@
           "doc": "Steam's user and mount namespaces first (docs/NAMESPACES.md, N1 to N6). N1 (2026-09-28): every mount's own flags enforced, MS_REMOUNT, and mountinfo. N2 (2026-09-30): binds of directories, files and sockets, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem. N3 (2026-09-30): mount namespaces, copied by unshare and clone, pivot_root, a native child kept in its creator's, and openat2's resolve flags. N4, user namespaces, is next. Network namespaces (docs/NETNS.md): a stack per namespace, a down loopback, veth pairs, devices that move with their ring, CAP_NET_ADMIN and CAP_NET_RAW over the owner.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 37
+            "line": 39
           },
           "children": [
             {
@@ -14716,7 +14716,7 @@
               "multiplicity": "8..*",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 50
+                "line": 52
               }
             },
             {
@@ -14725,7 +14725,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 51
+                "line": 53
               }
             },
             {
@@ -14734,7 +14734,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 52
+                "line": 54
               }
             }
           ]
@@ -14746,7 +14746,7 @@
           "definition": true,
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 55
+            "line": 57
           },
           "children": [
             {
@@ -14755,7 +14755,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 56
+                "line": 58
               }
             },
             {
@@ -14764,7 +14764,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 57
+                "line": 59
               }
             },
             {
@@ -14773,7 +14773,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 58
+                "line": 60
               }
             },
             {
@@ -14782,7 +14782,7 @@
               "kind": "enum-literal",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 59
+                "line": 61
               }
             }
           ]
@@ -14796,7 +14796,7 @@
           "stage": 13,
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 62
+            "line": 64
           },
           "children": [
             {
@@ -14807,7 +14807,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 64
+                "line": 66
               }
             },
             {
@@ -14818,7 +14818,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 65
+                "line": 67
               }
             },
             {
@@ -14829,7 +14829,7 @@
               "multiplicity": "0..1",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 66
+                "line": 68
               }
             },
             {
@@ -14840,7 +14840,7 @@
               "multiplicity": "0..1",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 67
+                "line": 69
               }
             },
             {
@@ -14851,7 +14851,7 @@
               "multiplicity": "0..1",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 68
+                "line": 70
               }
             }
           ]
@@ -14866,7 +14866,7 @@
           "doc": "One unified hierarchy (v2), exposed as cgroupfs. cpu is not a separate mechanism: it is bandwidth and weight handed to the scheduling classes. memory scopes reclaim and the OOM kill.\n\nBuilt (docs/CGROUPS.md): every cgroup a Job, cgroupfs mounted as cgroup2, cgroup.events, clone3 into a cgroup, delegation by chown; pids, memory's charging, its reclaim, memory.high and its scoped OOM kill, cgroup.freeze, cpu.weight and cpu.max, and io, over the certification's job quotas. Left: the rest of memory.stat, io.weight, io.latency, cpu.idle and cpu.max.burst.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 71
+            "line": 73
           },
           "children": [
             {
@@ -14876,7 +14876,7 @@
               "type": "Cgroup",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 84
+                "line": 86
               }
             }
           ]
@@ -14888,10 +14888,10 @@
           "definition": true,
           "maturity": "inProgress",
           "stage": 13,
-          "doc": "Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able. Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per thread, every action but TRACE and USER_NOTIF (ENOSYS), TSYNC under the thread-list lock, and the hook at all four entries; the fast path's quiet predicate reads a live count of filtered threads.",
+          "doc": "Classic BPF filters evaluated on syscall entry. The interpreter is a pure function over bytes in src/lib/, fuzzable and Miri-able. Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per thread, every action but TRACE and USER_NOTIF (ENOSYS), TSYNC under the thread-list lock, and the hook at all four entries; the fast path's quiet predicate reads a live count of watched threads. Syscall User Dispatch is judged first in the same look and answers Trap, so it too only takes calls away; its settings are per thread, never inherited, cleared by execve.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 87
+            "line": 89
           },
           "children": [
             {
@@ -14901,7 +14901,7 @@
               "type": "ClassicBpfInterpreter",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 96
+                "line": 100
               }
             },
             {
@@ -14910,7 +14910,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 97
+                "line": 101
               }
             },
             {
@@ -14919,7 +14919,7 @@
               "kind": "action",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 98
+                "line": 102
               }
             }
           ]
@@ -14934,7 +14934,7 @@
           "doc": "src/lib/kernel/seccomp: the checker and the interpreter.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 101
+            "line": 105
           }
         },
         {
@@ -14947,7 +14947,7 @@
           "doc": "Unix: uid, gid, supplementary groups, POSIX capability sets, no-new-privs. They sit on top of the handle system rather than beside it.\n\nsrc/kernel/src/syscall/credentials.rs: Linux's four user ids and four group ids and the supplementary groups on every Process, copied by fork, kept by execve with the saved and filesystem ids made the effective ones, and changed by the set*id calls under kernel/sys.c's rules. They are enforced: the VFS checks file permissions against the filesystem ids, and the calls only root may make, and those that reach another user's processes, refuse anyone else. A set-user-id program runs as its file's owner unless PR_SET_NO_NEW_PRIVS forbade it.",
           "source": {
             "file": "docs/sysml/07-isolation.sysml",
-            "line": 106
+            "line": 110
           },
           "children": [
             {
@@ -14957,7 +14957,7 @@
               "type": "Natural",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 121
+                "line": 125
               }
             },
             {
@@ -14967,7 +14967,7 @@
               "type": "Natural",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 122
+                "line": 126
               }
             },
             {
@@ -14978,7 +14978,7 @@
               "multiplicity": "0..*",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 123
+                "line": 127
               }
             },
             {
@@ -14990,7 +14990,7 @@
               "doc": "No capability sets are kept: an effective uid of 0 stands for every capability, capget reports every set empty for any other, and capset refuses a process whose real or saved uid is 0 and whose effective uid is not.",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 124
+                "line": 128
               }
             },
             {
@@ -15000,7 +15000,7 @@
               "type": "Boolean",
               "source": {
                 "file": "docs/sysml/07-isolation.sysml",
-                "line": 130
+                "line": 134
               }
             }
           ]
@@ -81264,7 +81264,7 @@
       ],
       "origin": "FerrixIsolation",
       "file": "docs/sysml/07-isolation.sysml",
-      "line": 16
+      "line": 18
     },
     {
       "kind": "import",
@@ -81274,7 +81274,7 @@
       ],
       "origin": "FerrixIsolation",
       "file": "docs/sysml/07-isolation.sysml",
-      "line": 17
+      "line": 19
     },
     {
       "kind": "import",
