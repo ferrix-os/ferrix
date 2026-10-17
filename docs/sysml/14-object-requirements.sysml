@@ -1538,8 +1538,11 @@ package FerrixObjectRequirements {
         // The write's reclaim and retry (at most eight reclaims, then
         // ENOSPC) are fs/pages.rs's write_reclaiming, load, whose evidence
         // is the stage 12 check write_reclaims_at_max and its control K3
-        // (ledger 2026-10-15); a fill's (allocate_reclaiming, the same bound,
-        // then ENOMEM) is load too, its evidence the stage 12 check
+        // (ledger 2026-10-15) and, at the machine's floor with three writers
+        // and two readers, test-btrfs-pressure (docs/BTRFS-PRESSURE.md: a
+        // machine-wide reclaim asks for the watermark's shortfall besides a
+        // run, since 2026-10-17); a fill's (allocate_reclaiming, the same
+        // bound, then ENOMEM) is load too, its evidence the stage 12 check
         // fill_reclaims_until_room and its control (ledger line 1637). This
         // states what the core does for it. That the commit and the copy are
         // made under one hold of the pages lock is verified by inspection

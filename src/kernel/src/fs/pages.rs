@@ -204,7 +204,7 @@ fn allocate_reclaiming() -> Option<Frame> {
         let group = crate::sched::running_group();
         let scope =
             quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE).unwrap_or(quota::NONE);
-        if crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen == 0 {
+        if crate::user::cache::reclaim(scope, reclaim_want(scope)).stolen == 0 {
             // Nothing to give back; another task may still have let a frame
             // go since the first try.
             return mm::allocate_user_frame();
@@ -234,7 +234,7 @@ fn write_reclaiming(vmo: &Vmo, index: u64, within: usize, bytes: &[u8]) -> Resul
                 let group = crate::sched::running_group();
                 let scope = quota::at_limit(group, quota::Resource::Memory, PAGE_SIZE)
                     .unwrap_or(quota::NONE);
-                if crate::user::cache::reclaim(scope, MAX_FILL_RUN as u64).stolen == 0 {
+                if crate::user::cache::reclaim(scope, reclaim_want(scope)).stolen == 0 {
                     return Err(Errno::ENOSPC);
                 }
             }
@@ -243,10 +243,36 @@ fn write_reclaiming(vmo: &Vmo, index: u64, within: usize, bytes: &[u8]) -> Resul
     }
 }
 
+/// How many pages one reclaim for a frame asks for: a fill's run, and, when
+/// the machine itself is out (`scope` is [`quota::NONE`]), the frames the
+/// free count lacks of the watermark besides.
+///
+/// A program's frame is refused while fewer than the watermark are free
+/// (`mm::watermark`), and the kernel's own allocations go on below it. At the
+/// machine's floor the free count sat under the watermark by more than a
+/// run, so each of the eight reclaims of a run gave pages back and each retry
+/// still found no frame: a write answered `ENOSPC` and a fill `ENOMEM` with
+/// hundreds of megabytes of clean cache left, and Endfield's 7-Zip was told
+/// "disk full" with 400 GB free on the N150 box (2026-10-17,
+/// `docs/BTRFS-PRESSURE.md`). Asking for the shortfall too lifts the free
+/// count over the watermark, so the retry has a frame unless another task
+/// took the run on top of it.
+fn reclaim_want(scope: u32) -> u64 {
+    let run = MAX_FILL_RUN as u64;
+    if scope != quota::NONE {
+        return run;
+    }
+    let short = mm::watermark()
+        .saturating_add(1)
+        .saturating_sub(mm::free_frames());
+    run.saturating_add(short)
+}
+
 /// How many reclaims one page of a write, or one frame of a fill, tries
 /// before it answers `ENOSPC` (a write) or `ENOMEM` (a fill): each gives back
-/// up to a fill's run, and another task may take the room between a reclaim
-/// and the retry.
+/// up to a fill's run, or, when the machine itself is out, a run and what the
+/// free count lacks of the watermark ([`reclaim_want`]); another task may
+/// take the room between a reclaim and the retry.
 const RECLAIMS: u32 = 8;
 
 /// Give back frames no page kept.

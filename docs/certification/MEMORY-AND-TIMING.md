@@ -236,7 +236,12 @@ frames always took: clean cache reclaimed first, then the fault fails
   machine-wide, and tries again, at most 8 times while a reclaim gives
   pages back (since 2026-10-15: one reclaim let another processor take what
   it gave back, and a read answered `ENOMEM` with clean cache to spare), and
-  its failure is the read's error. The fill runs from a read and from a
+  its failure is the read's error. A machine-wide reclaim asks for one run
+  and for what the free count lacks of the watermark (since 2026-10-17: at
+  the floor the kernel's own allocations held the free count under the
+  watermark by more than a run, so eight reclaims of a run each gave pages
+  back and no retry found a frame -- a write answered `ENOSPC` with
+  hundreds of megabytes of clean cache left, `docs/BTRFS-PRESSURE.md`). The fill runs from a read and from a
   fault through a mapping (`Filler::fill`) under that same bound: one
   fill takes at most 32 frames (128 KiB), charged to the reader's job,
   and the 8-reclaim bound applies per frame; since 2026-10-15 a read on a
