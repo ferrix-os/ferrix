@@ -97,6 +97,18 @@
       "made of it (ITEM.md 5, SAFETY-MANUAL AoU-31; the certification",
       "consultant's C7, 2026-10-15)."
     ],
+    "panic": "halt",
+    "panic_settings": [
+      "halt",
+      "reset"
+    ],
+    "panic_why": [
+      "`ferrix.panic=reset` (H.FAIL.5) resets the machine 10 s after a",
+      "panic's report: a stop-gap for the N150 box, set by no loader, outside",
+      "the claim. `halt`, the default and the reference, is the safe state",
+      "H.FAIL.1 and SAFETY-MANUAL 3 claim; any other value is said and taken",
+      "as halt (ITEM.md 5, AoU-32)."
+    ],
     "driver_updates": "absent",
     "driver_updates_settings": [
       "absent",

@@ -1223,6 +1223,8 @@ allocates nothing. Its time is bounded by the hardware:
   32-byte lines (the DK1), 16 448 at 64.
 
 The same write-back runs before a reset `ferrix.onexit=reset` asks for.
+Under `ferrix.panic=reset` (H.FAIL.5) the panic path's bound gains 10 s on
+the counter, then `arch::reset`'s bounded tries.
 The mirror itself (`L.console.42`) is the log's own lock-free record, once
 more per byte: a store and a compare-and-exchange on the region's count.
 

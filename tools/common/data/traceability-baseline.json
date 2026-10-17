@@ -210,6 +210,7 @@
     "L.object.101",
     "L.object.102",
     "L.object.104",
+    "L.panic.4",
     "L.quiesce.5",
     "L.sched.7",
     "L.smp.1",

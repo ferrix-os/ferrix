@@ -10,6 +10,16 @@
   ],
   "owed": [
     {
+      "landing": "panic-reboot, ferrix.panic=reset: the N150 stop-gap reset after a panic's report (src/kernel/src/panic/reset.rs; the consultant's OK IF (1)-(8), ledger line 2143)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet.",
+      "what": "panic/reset.rs read_option's Some(reset), Some(halt) and Some(other) arms, armed's true value, announce, resetting_here and wait_then_reset, panic.rs conclude's reset arms (the stopped line under reset, the announce, the wait and reset after the screen) and abridged's reset arm: reached by test-postmortem's reset and misspelt cases (x86_64 under KVM, aarch64), not by the test-boot rows the coverage harness counts, which give no ferrix.panic; abridged's reset arm only by the R5 control's forced screen fault (a sabotage ref), so it is argued, not measured. read_option's None arm is reached on every boot. ARMv7-A has no test-postmortem case: its rows are argued from the shared code."
+    },
+    {
       "landing": "os07-lazyvfp, ARMv7-A lazy VFP: FPEXC.EN clear for a task that has not used VFP, its first use, F-68's Thumb pc (docs/OPAQUE-KERNEL.md §9.15; branch os07/lazyvfp; os07-lazyvfp's consultant, design verdict 2026-10-08 ledger line 606, L1-L12)",
       "architectures": [
         "armv7a"

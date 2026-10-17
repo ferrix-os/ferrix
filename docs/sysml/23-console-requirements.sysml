@@ -627,4 +627,64 @@ package FerrixConsoleRequirements {
                 "power::finish");
         }
     }
+
+    package PanicReset {
+        doc /* `ferrix.panic=reset` (src/kernel/src/panic/reset.rs), the N150
+             * stop-gap of 2026-10-17 (consultant ledger line 2143): the reset a
+             * failure report ends in when asked. Its own family, L.panic, since
+             * panic.rs had no low-level ids; here beside the pstore it exists
+             * for. The device-tree read of the option gets an id when it is
+             * built. */
+
+        requirement <'L.panic.1'> theOptionArmsOnlyOnReset : ItemLowLevel {
+            attribute :>> statement = "read_option shall arm the reset once, for
+                exactly the value reset of ferrix.panic; no option or halt shall
+                leave it unarmed, and any other value shall be said as not
+                understood and leave it unarmed.";
+            attribute :>> criterion = "In test-postmortem, a boot with
+                ferrix.panic=reset says it resets after the report; one with
+                ferrix.panic=Reset says the value is not understood, its report
+                says it halts and holds no reset line; one with no option holds no
+                reset line.";
+            attribute :>> parent = "H.FAIL.5";
+            attribute :>> unit = ("panic::reset::read_option", "panic::reset::armed");
+        }
+        requirement <'L.panic.2'> theReportAnnouncesTheReset : ItemLowLevel {
+            attribute :>> statement = "When armed, conclude shall say in its stopped
+                line that the processor resets the machine, print and drain the reset
+                line before the pstore write-back and the screen, and after the
+                screen wait and reset instead of halting.";
+            attribute :>> criterion = "In test-postmortem's reset case boot 1's
+                report says the processor resets the machine after the report, holds
+                the reset line, and the machine starts again by itself.";
+            attribute :>> parent = "H.FAIL.5";
+            attribute :>> unit = ("panic::conclude", "panic::reset::announce");
+        }
+        requirement <'L.panic.3'> theWaitIsTheCounterOnly : ItemLowLevel {
+            attribute :>> statement = "wait_then_reset shall wait 10 seconds on the
+                free-running counter, reading nothing but counter_hz and counter_now,
+                taking no lock and allocating nothing, wait not at all when the rate
+                is 0, and then call arch::reset.";
+            attribute :>> criterion = "In test-postmortem's reset case the loader's
+                banner comes again at least 9.5 s and at most 60 s after the reset
+                line. By inspection: the function's body is the counter loop and
+                the reset.";
+            attribute :>> parent = "H.FAIL.5";
+            attribute :>> unit = "panic::reset::wait_then_reset";
+        }
+        requirement <'L.panic.4'> aFaultInTheScreenStillResets : ItemLowLevel {
+            attribute :>> statement = "When armed and the reset announced, abridged
+                on the processor that announced it shall go on to wait_then_reset;
+                on any other processor it shall halt. (On x86-64 a fault taken before
+                the kernel's GS base is installed reads another register value and
+                may halt: the fail-safe direction.)";
+            attribute :>> criterion = "A fault forced inside screen::draw under
+                ferrix.panic=reset still ends in the reset in test-postmortem's
+                reset case, and fails it with abridged's reset removed (gate.sh
+                control, the commit names both runs). By inspection: resetting_here
+                compares this processor's per-CPU register with the announcer's.";
+            attribute :>> parent = "H.FAIL.5";
+            attribute :>> unit = ("panic::abridged", "panic::reset::resetting_here");
+        }
+    }
 }

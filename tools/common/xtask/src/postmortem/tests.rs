@@ -151,3 +151,50 @@ fn a_region_without_the_log_so_far_fails() {
     let problem = region_problem(&serial(), &region(1, late)).unwrap();
     assert!(problem.contains("does not start with"), "{problem}");
 }
+
+#[test]
+fn a_reset_is_judged_by_its_wait_its_line_and_the_quote() {
+    let boot_1: Vec<String> = [
+        "FERRIX-PANIC init exited, and ferrix.onexit=panic asks for a panic",
+        STOPPED_RESETS,
+        RESET_LINE,
+    ]
+    .iter()
+    .map(|line| (*line).to_owned())
+    .collect();
+    let after = vec![
+        "  pstore   boot 1's last report: panicked: init exited, and ferrix.onexit=panic asks for a panic"
+            .to_owned(),
+    ];
+    let enough = Some(Duration::from_secs(11));
+    assert_eq!(reset_problem(&boot_1, &after, enough), None, "a good reset");
+    assert!(
+        reset_problem(&boot_1, &after, Some(Duration::from_secs(2)))
+            .is_some_and(|why| why.starts_with("reset sooner than 10 s")),
+        "too soon"
+    );
+    let halted: Vec<String> = boot_1
+        .iter()
+        .filter(|line| !line.contains(STOPPED_RESETS))
+        .cloned()
+        .collect();
+    assert!(
+        reset_problem(&halted, &after, enough).is_some(),
+        "no stopped line"
+    );
+    assert!(reset_problem(&boot_1, &[], enough).is_some(), "no quote");
+}
+
+#[test]
+fn a_misspelt_value_must_be_said_and_halt() {
+    let good = lines(&[MISSPELT, STOPPED_HALTS]);
+    assert_eq!(misspelt_problem(&good), None, "said and halted");
+    assert!(
+        misspelt_problem(&lines(&[STOPPED_HALTS])).is_some(),
+        "not said"
+    );
+    assert!(
+        misspelt_problem(&lines(&[MISSPELT, STOPPED_RESETS, RESET_LINE])).is_some(),
+        "reset"
+    );
+}

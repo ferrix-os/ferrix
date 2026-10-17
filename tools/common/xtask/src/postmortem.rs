@@ -21,6 +21,16 @@
 //! **The switch.** A second QEMU of an image whose command line says
 //! `ferrix.pstore=off`: the loader takes no region and says so, and the
 //! kernel has none.
+//!
+//! **The reset** (`ferrix.panic=reset`, the stop-gap of
+//! `src/kernel/src/panic/reset.rs`). A third QEMU, kept across a reset as the
+//! first, whose command line adds `ferrix.panic=reset` and which nobody
+//! resets: boot 1's report must say the reset is coming, the machine must
+//! reset by itself no sooner than the wait and not much later, and boot 2's
+//! loader must quote boot 1's panic. The first QEMU, without the option, is
+//! the default's evidence: its report says the processor halts, and no reset
+//! line. A fourth, with `ferrix.panic=Reset`, shows a misspelt value
+//! said as not understood and taken as halt.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -39,7 +49,7 @@ pub(crate) const TASKS: &[Task] = &[Task {
     name: "test-postmortem",
     help_at: 500,
     help: &[
-        "test-postmortem  the kernel's log across a warm reset: a panic, a QMP reset, the next loader quotes it; and ferrix.pstore=off (x86_64, aarch64)",
+        "test-postmortem  the kernel's log across a warm reset: a panic, a QMP reset, the next loader quotes it; ferrix.pstore=off; ferrix.panic=reset (x86_64, aarch64)",
     ],
     run: |_, args| test_postmortem(args, crate::build_image),
 }];
@@ -55,6 +65,16 @@ const NONE: &str = "no region this boot";
 const LAST_REPORT: &str = "'s last report: panicked: ";
 /// The loader's banner, which a reset brings back.
 const LOADER_BANNER: &str = "Ferrix loader ";
+/// The report's line under `ferrix.panic=reset`, before the wait.
+const RESET_LINE: &str = "  reset     in 10 s, as ferrix.panic=reset asks";
+/// The report's `stopped` line under `ferrix.panic=reset`, and without it.
+const STOPPED_RESETS: &str = "  stopped   this processor resets the machine after the report";
+const STOPPED_HALTS: &str = "  stopped   this processor halts here";
+/// The wait between the reset line and the reset, less the slack a host
+/// reading the serial port may add; and the longest a reset may take after
+/// the wait, firmware included.
+const RESET_WAIT_AT_LEAST: Duration = Duration::from_millis(9_500);
+const RESET_WAIT_AT_MOST: Duration = Duration::from_secs(60);
 /// How long each step waits.
 const PATIENCE: Duration = Duration::from_secs(120);
 /// The longest quotation of a previous kernel's line the loader prints.
@@ -96,6 +116,8 @@ pub(crate) fn test_postmortem(
         }
         across_a_reset(arch, args, &build)?;
         switched_off(arch, args, &build)?;
+        reset_by_itself(arch, args, &build)?;
+        misspelt(arch, args, &build)?;
         println!("  {arch}: test-postmortem passed");
     }
     Ok(())
@@ -192,6 +214,19 @@ fn judge(arch: Arch, boot_1: &[String], region: &[u8], after: &[String]) -> Resu
     let mirror = format!("{MIRRORING}{address:#x}, 1024 KiB, boot 1;");
     if !boot_1.iter().any(|line| line.contains(&mirror)) {
         return fail(format!("boot 1's kernel did not say `{mirror}`"));
+    }
+    // The default: the report halts, and says so.
+    if let Some(line) = boot_1.iter().find(|line| line.contains(RESET_LINE)) {
+        return fail(format!(
+            "a panic without ferrix.panic=reset announced a reset: `{}`",
+            line.trim()
+        ));
+    }
+    if !boot_1.iter().any(|line| line.contains(STOPPED_HALTS)) {
+        return fail(format!(
+            "boot 1's report, without ferrix.panic=reset, did not say `{}`",
+            STOPPED_HALTS.trim()
+        ));
     }
     // 2. The region as boot 1 left it, written back once the report was.
     if let Some(problem) = write_back_problem(boot_1).or_else(|| region_problem(boot_1, region)) {
@@ -385,6 +420,177 @@ fn matches_serial(recorded: &[&str], serial: &[String]) -> Option<String> {
                 sent.trim_end()
             ));
         }
+    }
+    None
+}
+
+/// `ferrix.panic=reset`: boot 1 panics and the machine resets itself after
+/// the wait; boot 2's loader quotes boot 1's panic.
+///
+/// Verifies: H.FAIL.5, `L.panic.2`, `L.panic.3`
+fn reset_by_itself(
+    arch: Arch,
+    args: &Args,
+    build: &impl Fn(Arch, &Args) -> Result<(PathBuf, PathBuf)>,
+) -> Result<()> {
+    let mut wanted = args.clone();
+    wanted.kernel_options.push("ferrix.onexit=panic".to_owned());
+    wanted.kernel_options.push("ferrix.panic=reset".to_owned());
+    wanted.keep_ram = true;
+    let (image, kernel) = build(arch, &wanted)?;
+    let mut boot_1 = Vec::new();
+    let mut after = Vec::new();
+    let mut waited = None;
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let deadline = Instant::now() + PATIENCE;
+        let announced = watching.read_more(deadline, |lines| {
+            lines.iter().any(|line| line.contains(RESET_LINE))
+        })?;
+        if !announced {
+            return Err(Error::new(format!(
+                "{arch}: boot 1's report under ferrix.panic=reset never said `{}`",
+                RESET_LINE.trim()
+            )));
+        }
+        let at = Instant::now();
+        let seen = watching.after().len();
+        let reset = watching.read_more(at + RESET_WAIT_AT_MOST, |lines| {
+            lines
+                .get(seen..)
+                .unwrap_or_default()
+                .iter()
+                .any(|line| line.contains(LOADER_BANNER))
+        })?;
+        if !reset {
+            return Err(Error::new(format!(
+                "{arch}: the machine did not reset by itself within {} s of `{}`",
+                RESET_WAIT_AT_MOST.as_secs(),
+                RESET_LINE.trim()
+            )));
+        }
+        waited = Some(at.elapsed());
+        let banner = watching
+            .after()
+            .iter()
+            .skip(seen)
+            .position(|line| line.contains(LOADER_BANNER))
+            .map_or(seen, |at| seen + at);
+        boot_1 = watching
+            .lines()
+            .iter()
+            .chain(watching.after().get(..banner).unwrap_or_default())
+            .cloned()
+            .collect();
+        let deadline = Instant::now() + PATIENCE;
+        let _ = watching.read_more(deadline, |lines| {
+            lines
+                .get(banner..)
+                .unwrap_or_default()
+                .iter()
+                .any(|line| line.contains(MIRRORING))
+        })?;
+        after = watching.after().get(banner..).unwrap_or_default().to_vec();
+        watching.stop_when_done();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, &image, &kernel, &wanted, qemu::PANIC_MARKER, hook)?;
+    reset_problem(&boot_1, &after, waited).map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch}: {problem}")))
+    })?;
+    println!(
+        "  {arch}: ferrix.panic=reset reset the machine by itself, and the next loader quoted the panic"
+    );
+    Ok(())
+}
+
+/// Why a `ferrix.panic=reset` boot did not reset as it should, if it did not:
+/// the report's `stopped` line says so, the reset came after the wait and
+/// not much later, and the next loader quotes boot 1's panic.
+fn reset_problem(boot_1: &[String], after: &[String], waited: Option<Duration>) -> Option<String> {
+    if !boot_1.iter().any(|line| line.contains(STOPPED_RESETS)) {
+        return Some(format!(
+            "boot 1's report did not say `{}`",
+            STOPPED_RESETS.trim()
+        ));
+    }
+    let waited = waited?;
+    if waited < RESET_WAIT_AT_LEAST {
+        return Some(format!(
+            "reset sooner than 10 s: the loader's banner came {} ms after `{}`",
+            waited.as_millis(),
+            RESET_LINE.trim()
+        ));
+    }
+    let panic = boot_1
+        .iter()
+        .find_map(|line| line.trim_end().strip_prefix("FERRIX-PANIC "));
+    let Some(panic) = panic else {
+        return Some("boot 1 printed no FERRIX-PANIC line".to_owned());
+    };
+    let quoted = format!("boot 1{LAST_REPORT}{}", rendered(panic));
+    if !after.iter().any(|line| line.trim_end().ends_with(&quoted)) {
+        return Some(format!(
+            "after the reset, the loader did not quote boot 1's panic: wanted a line ending `{quoted}`"
+        ));
+    }
+    None
+}
+
+/// What the kernel says of a value of `ferrix.panic` it does not take.
+const MISSPELT: &str = "  panic    ferrix.panic=Reset is not understood; a panic halts";
+
+/// `ferrix.panic=Reset`: said as not understood, and the panic halts.
+///
+/// Verifies: `L.panic.1`
+fn misspelt(
+    arch: Arch,
+    args: &Args,
+    build: &impl Fn(Arch, &Args) -> Result<(PathBuf, PathBuf)>,
+) -> Result<()> {
+    let mut wanted = args.clone();
+    wanted.kernel_options.push("ferrix.onexit=panic".to_owned());
+    wanted.kernel_options.push("ferrix.panic=Reset".to_owned());
+    let (image, kernel) = build(arch, &wanted)?;
+    let mut lines = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let deadline = Instant::now() + PATIENCE;
+        let _ = watching.read_more(deadline, |lines| {
+            lines.iter().any(|line| line.contains(WRITTEN_BACK))
+        })?;
+        lines = watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .cloned()
+            .collect();
+        watching.stop_when_done();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, &image, &kernel, &wanted, qemu::PANIC_MARKER, hook)?;
+    misspelt_problem(&lines).map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch}: {problem}")))
+    })?;
+    println!("  {arch}: ferrix.panic=Reset was not understood, and the panic halted");
+    Ok(())
+}
+
+/// Why a `ferrix.panic=Reset` boot did not take the value as halt, if it
+/// did not.
+fn misspelt_problem(lines: &[String]) -> Option<String> {
+    if !lines.iter().any(|line| line.contains(MISSPELT)) {
+        return Some(format!("the kernel did not say `{}`", MISSPELT.trim()));
+    }
+    if let Some(line) = lines.iter().find(|line| line.contains(RESET_LINE)) {
+        return Some(format!(
+            "a misspelt ferrix.panic=Reset announced a reset: `{}`",
+            line.trim()
+        ));
+    }
+    if !lines.iter().any(|line| line.contains(STOPPED_HALTS)) {
+        return Some(format!(
+            "the report under ferrix.panic=Reset did not say `{}`",
+            STOPPED_HALTS.trim()
+        ));
     }
     None
 }

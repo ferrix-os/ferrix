@@ -41,6 +41,7 @@
 //! its opening lines and nothing else.
 
 pub(crate) mod catalog;
+pub(crate) mod reset;
 pub(crate) mod screen;
 
 use core::panic::PanicInfo;
@@ -189,9 +190,17 @@ pub(crate) fn begin_report() -> bool {
 
 /// End a report that is not the first. Its opening lines are printed; the
 /// report already under way has everything else.
+///
+/// Under `ferrix.panic=reset`, a report inside the first one on the
+/// processor that announced the reset -- a fault while it drew the screen --
+/// still resets the machine ([`reset`]): the screen is the step likeliest to
+/// fault, on exactly the machine that has nobody at it.
 pub(crate) fn abridged() -> ! {
     println!("  stopped   during another report, so this one is abridged");
     console::drain();
+    if reset::resetting_here() {
+        reset::wait_then_reset()
+    }
     arch::halt()
 }
 
@@ -209,10 +218,16 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
         Err(which) => println!("  on        {which}"),
     }
     let others = smp::stop_others();
-    if others == 0 {
-        println!("  stopped   this processor halts here; nothing will recover it");
-    } else {
-        println!("  stopped   this processor halts here, and {others} more were asked to");
+    let resetting = reset::armed();
+    match (resetting, others) {
+        (false, 0) => println!("  stopped   this processor halts here; nothing will recover it"),
+        (false, _) => {
+            println!("  stopped   this processor halts here, and {others} more were asked to");
+        }
+        (true, 0) => println!("  stopped   this processor resets the machine after the report"),
+        (true, _) => println!(
+            "  stopped   this processor resets the machine after the report, and {others} more were asked to stop"
+        ),
     }
     report_backtrace();
     if let Some(entry) = entry {
@@ -221,6 +236,11 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
     // Every line written is not every line sent: let the port finish, so the
     // report is whole on the wire before anything else can go wrong.
     console::drain();
+    // Before the write-back and the screen, so the line is in the record and
+    // drawn with the rest.
+    if resetting {
+        reset::announce();
+    }
     // The log as the next boot's loader will find it, written back from the
     // caches a reset may discard: after the last line, before the step most
     // likely to fault.
@@ -234,6 +254,9 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
     // drawn from what the console printed, and drawing is the step most
     // likely to fault on a machine in this state.
     screen::draw();
+    if resetting {
+        reset::wait_then_reset()
+    }
     arch::halt()
 }
 

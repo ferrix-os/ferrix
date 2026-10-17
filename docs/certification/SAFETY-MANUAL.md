@@ -609,6 +609,22 @@ but for `test-compositor --boot firmware-screen`'s. The integrator shall not
 give `ferrix.efifb` on a configuration a claim is made of; the audit store's
 configuration record (`Config::Efifb`) says whether a boot did.
 
+### AoU-32 — a reset after a panic is the integrator's choice, with its limits
+`ferrix.panic=reset` (H.FAIL.5, `src/kernel/src/panic/reset.rs`) makes the
+first panic report end in a reset 10 seconds after its last line, instead of
+the halt of §3: a stop-gap for a machine with no console and nobody at it,
+so that a warm reset keeps the pstore record (AoU-30) for the next boot's
+loader. No loader writes the option and the reference configuration does not
+give it; an integrator who sets it on a command line accepts that a lasting
+fault then resets the machine in a loop, bounded only by whatever counts boots
+outside the element (on the N150 box, systemd-boot's boot counter); that on
+x86-64 a panic between stage 1's check and stage 3's counter calibration
+resets with no wait; that a fault inside the report on another processor, or
+before a processor's per-CPU register is installed, halts instead; and that
+whether the record survives depends on the platform's reset keeping DRAM (a
+FADT reset value of `0xCF9 = 0x0E` may be a full reset; the N150 box was
+measured warm). No claim is made of a boot that gives it.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

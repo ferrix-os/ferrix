@@ -1436,7 +1436,8 @@ package FerrixItemRequirements {
             attribute :>> statement = "On a failed internal consistency check the
                 kernel shall stop every other processor, print a diagnostic naming the
                 failure and its catalogued explanation, and halt without returning to
-                user mode.";
+                user mode, or, where H.FAIL.5 applies, reset the machine after the
+                report.";
             attribute :>> criterion = "A boot told to panic at its end
                 (`ferrix.onexit=panic`) ends with the FX-1501 report and no program
                 output after it; every panic site in the item has a catalogue entry
@@ -1470,6 +1471,23 @@ package FerrixItemRequirements {
             attribute :>> criterion = "A report begun while another context holds the
                 port's lock for good reaches the port whole, after at most 10,000,000
                 attempts at the lock, on each architecture, 3 of 3.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
+        // Added 2026-10-17 by panic-reboot (consultant ledger line 2143): the
+        // N150 stop-gap, outside the reference configuration (ITEM.md §5).
+        requirement <'H.FAIL.5'> resetAfterTheReportWhenAsked : ItemHighLevel {
+            attribute :>> statement = "With ferrix.panic=reset read after stage 1's
+                check, the first failure report shall, once its diagnostic and the
+                reset line are on the port, in the pstore record and on the screen,
+                wait 10 seconds on the free-running counter where its rate is known
+                and reset the machine; with no value, halt, any other value, or in a
+                report on another processor, it shall halt.";
+            attribute :>> criterion = "In cargo xtask test-postmortem (x86-64 under
+                KVM, AArch64): a boot with ferrix.onexit=panic ferrix.panic=reset
+                prints the reset line and the loader's banner comes again at least 9.5
+                s and at most 60 s later, quoting the panic; the same boot without the
+                option and with ferrix.panic=Reset says it halts and prints no reset
+                line.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
     }

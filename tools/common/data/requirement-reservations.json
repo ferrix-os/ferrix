@@ -12,13 +12,6 @@
   ],
   "reservations": [
     {
-      "ids": ["H.FAIL.5", "L.panic.1-4"],
-      "owner": "n150",
-      "branch": "panic-reboot",
-      "date": "2026-10-17",
-      "purpose": "ferrix.panic=reset, the N150 stop-gap (AB-BOOT 6.4 reduced; consultant OK IF (1)-(8), ledger line 2143): the reset after a report, read_option, conclude's reset branch and announce, the wait, abridged's reset on the announcing processor"
-    },
-    {
       "ids": ["L.trap.8"],
       "owner": "os-7c",
       "branch": "stage13-s4",
