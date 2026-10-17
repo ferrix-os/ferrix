@@ -1178,7 +1178,9 @@ const VTD_OFF_WHY: &str = "ferrix.vtd=off asked for every unit to be left alone"
 /// (`ferrix_paging::vtd::unit::switched_off`), for [`bring_up`] and the
 /// audit record's configuration.
 pub(crate) fn vtd_off_asked(view: &BootView<'_>) -> bool {
-    ferrix_paging::vtd::unit::switched_off(view.option(ferrix_paging::vtd::unit::OFF_OPTION))
+    // The literal, not `ferrix_paging::vtd::unit::OFF_OPTION`, which names
+    // the same word: the build-flags gate reads each option by its literal.
+    ferrix_paging::vtd::unit::switched_off(view.option("ferrix.vtd"))
 }
 
 /// Whether [`bring_up`] left every VT-d unit alone for `ferrix.vtd=off`.

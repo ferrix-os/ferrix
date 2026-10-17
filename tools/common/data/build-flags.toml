@@ -203,6 +203,10 @@ why = "x86-64: the local APICs' mode where firmware neither locked nor left x2AP
 values = ["halt", "reset"]
 why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the reference; reset, a stop-gap for the N150 box set by no loader, outside the reference configuration (SAFETY-MANUAL AoU-32, certification-item.json `panic`)"
 
+[boot_options."ferrix.vtd"]
+values = ["on", "off"]
+why = "whether the kernel drives the VT-d units it accepts (iommu.rs, L.iommu.71): on, the reference and the default; off leaves every unit alone, no DMA translated and no interrupt remapped, outside the reference configuration, for recovery only (SAFETY-MANUAL AoU-8, certification-item.json `vtd`)"
+
 [boot_options."ferrix.btrfs"]
 values = ["*"]
 test_only = true
