@@ -2115,8 +2115,17 @@ instruction is at `ip`:
    lacks.
 
 A thread a filter has marked `Dead` gets its end, never a dispatch
-(condition 7). No vDSO pad is exempt: Ferrix's x86-64 vDSO holds no way
-back from a handler, and its i386 frames return through `SA_RESTORER`.
+(condition 7). No vDSO pad is exempt, where Linux exempts its 32-bit vDSO's
+sigreturn pads (`arch_syscall_is_vdso_sigreturn`). Ferrix's x86-64 vDSO
+holds no way back from a handler, and it has no 32-bit vDSO: an i386
+handler installed without `SA_RESTORER` is refused
+(`arch/x86_64/signal/compat.rs`), so every i386 handler returns through the
+restorer its program gave, never through the frame's own `retcode`, which
+is written for debuggers only. A restorer outside the range, with BLOCK
+held, has its `sigreturn` dispatched, as on Linux for any restorer that is
+not the vDSO's. That is acceptable because glibc and musl always set
+`SA_RESTORER` with their own restorer in libc, and Wine returns through
+libc, inside its range (ledger line 2340, condition 4).
 
 **The selector read may wait** (condition 4). It may fault the page in,
 and so allocate or wait for I/O. It runs with interrupts open, no lock of
@@ -2189,3 +2198,50 @@ step (`G`, with its step).
   watch bit never raised; k11 `OFF` not lowering it; k12 a native-range
   number killed; k13 the i386 conversion taking code 1 only; k14 `quiet()`
   reading the seccomp state alone; k15 a `Dead` thread dispatched.
+
+### 13.6 Landing record
+
+**Reviewed 2026-10-18 under ledger line 2340 (OK IF (1) to (5)),** the
+change review the design review of line 2323 asked for in its (12).
+`sud` was gated on 1a3f7578d (INDEX lines 16238 to 16274, tags `sudE-`):
+the fifteen boot controls k1 to k15 each `control: FIRED`, k7 as a line
+of `test-sud` and the rest as panics on their own messages; `test-sud`,
+`test-wine-dispatch` and `test-endfield-proton --everything --accel kvm`
+`run: PASSED`, the last with no Wine thread saying it could not enable
+dispatch; and S4's batch rows (`test-shell` four ways, `test-seccomp
+--arch all`, `build --release`, `test-init`, `test-threads`, `test-vfs`
+two ways, `test-boot` on x86-64 under KVM and TCG, AArch64, ARMv7-A and
+ARMv7-A at `--smp 2`) `run: PASSED`, except `sudE-r4`, `check`, which
+failed on clippy's `too_many_lines` in `execve_at` and the boot check's
+`rows`. The tip fixed that by moving `execve`'s clear into
+`Thread::clear_dispatch` and splitting `rows` into `rows` and `edges`, a
+change that leaves behaviour as it was, and on the tip (INDEX 16275 to
+16291, `sudF-` and `sudG-`) `check`, `test-sud`, the five boots and the
+controls touching the moved code (k4, k5, k7) were run again and passed or
+fired. The consultant ruled that the other rows and controls carry from
+1a3f7578d. The landing hash's own `check` row is tag `sud-landing-check`.
+
+On the real workload, `sudE-wine-before` (Syscall User Dispatch switched
+off, `BUILT` false) is the before: the probe's direct call answered
+`-EINVAL`, run as an unrelated Linux call, and Wine logged that it could
+not enable dispatch, so the control fired. `sudE-wine` is the after:
+`DIRECT-SYSCALL PASS`. The same probe passes on nazuna's Linux under
+GE-Proton 11-7 first; the script, the program and its output are in
+`~/.local/share/ferrix/logs/sud-pe-linux/`.
+
+Condition (5): 4,656 against 4,657 instructions per IPC round trip
+before and after the watched mask, 4,112 against 4,107 cycles (logs in
+`~/.local/share/ferrix/logs/sud-ipc/`), so no timed bench was owed.
+
+The deviations from the design, each accepted at line 2340: the module
+is `syscall/seccomp/user_dispatch.rs`; `BUILT` is `arch::ARCH` matched
+against x86-64, since `check-crate-layering` refuses an architecture
+conditional outside `arch/` and `arch/` is core; the boot check judges
+dispatched calls through `seccomp::check` and not the entry, which would
+deliver the forced `SIGSYS` with no user stack for the frame; condition
+(4)'s fault-in is a never-touched anonymous page, the check processes
+mapping no files; k13 is a boot check panic, not a guest line; k15 was
+added for condition (7); and the i386 build of `test-sud` asks two other
+`EINVAL` rows, because an i386 caller's arguments are zero-extended and
+every 32-bit address is in the user half, as on Linux. This is an
+internal review, not independent verification (F-27).
