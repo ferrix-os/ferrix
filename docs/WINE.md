@@ -823,7 +823,8 @@ and any other difference still stops the merge. The volume's
 as the gate does (Proton's fonts before `wineboot`, Open Sans for Segoe
 UI), and starts the launcher on the desktop's X server; the desktop links
 it as `/bin/gryphlink`, with Wine's and Proton's links and the
-certificate bundle, and fuzzel lists it as GRYPHLINK.
+certificate bundle, and fuzzel lists it as GRYPHLINK. It starts the launcher with
+`WINEFSYNC=1` (§11) unless the environment says otherwise.
 `cargo xtask test-endfield-proton --everything --accel kvm` boots on the
 merged volume, starts the launcher with `gryphlink`, and requires the
 same window, button and server answer.

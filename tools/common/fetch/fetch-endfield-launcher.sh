@@ -151,6 +151,10 @@ export WINESERVER=/data/proton/files/bin/wineserver
 export LD_LIBRARY_PATH=/data/proton/files/lib/x86_64-linux-gnu:/data/proton/files/lib/i386-linux-gnu
 export WINEDLLPATH=/data/proton/files/lib/vkd3d:/data/proton/files/lib/wine
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
+# fsync (docs/WINE.md §11): every wait a futex word, not a request to
+# wineserver. Without it the launcher's waits kept wineserver busy on the
+# N150 box while it downloaded (2026-10-17).
+export WINEFSYNC="${WINEFSYNC:-1}"
 wine=/data/proton/files/bin/wine
 if [ ! -e "$WINEPREFIX/system.reg" ]; then
     mkdir -p "$WINEPREFIX/drive_c/windows/Fonts"
