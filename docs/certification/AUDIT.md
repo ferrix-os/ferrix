@@ -119,12 +119,14 @@ needs, its subject among it, is worked out before a ring's lock is taken --
 on the heap's path without a lock of its own: a refused charge names the job
 its quota slot keeps the id and budget of, and no process.
 
-**The boot's own records.** The first nine system records -- the start-up
+**The boot's own records.** The first ten system records -- the start-up
 record, the boot's configuration and the boot brought up -- are also pinned
 where nothing else reaches them (`Which::Boot`), numbered as the high-value
-ring numbered them. That array never wraps and holds at most nine (eight
+ring numbered them. That array never wraps and holds at most ten (eight
 until the build flags' record, `Config::Build`, made the configuration
-seven items); a system
+seven items, nine until `ferrix.vtd`'s, `Config::Vtd`, `L.iommu.71`, made
+it eight; `audit::BOOT_RECORDS` is held at two more than
+`audit::CONFIG_ITEMS` by a compile-time assertion); a system
 record after them is kept in the high-value ring alone. The boot's own
 checks make processes, kill jobs and set limits by the dozen, and a longer
 run could wrap the high-value ring past the records that say what the boot

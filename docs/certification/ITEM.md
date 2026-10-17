@@ -310,8 +310,18 @@ interrupt remapping entries, the remappable messages and I/O APIC entries
 that name them, the fault reasons and the isolation rule are
 `ferrix_paging::vtd::remap` (`L.iommu.50`, `L.iommu.53` to `L.iommu.55`,
 `L.x86_64.129`, `L.x86_64.130`, `L.x86_64.132`), with the I/O APIC's source
-ID matched by its identifier in `ferrix_acpi::dmar` (`L.x86_64.130`). Their host
-tests trace to those requirements, but the item-scoped gates do not read
+ID matched by its identifier in `ferrix_acpi::dmar` (`L.x86_64.130`). And
+since branch vtd-n150 (the consultant's OK IF, ledger 2026-10-17 line
+2122), which VT-d units are driven and how -- the version, the walk, the
+guest width, the window, the fault records' order, the drain bits, the
+protected regions -- is `ferrix_paging::vtd::unit` (`L.iommu.59`,
+`L.iommu.60`, `L.iommu.64` to `L.iommu.66`, `L.iommu.68`, `L.iommu.71`),
+the four-level walk is `ferrix_paging::vtd::VtdFourLevel` (`L.iommu.61`),
+the catch-all and the RMRR hold are `ferrix_acpi::dmar::Dmar::catch_all`
+and `rmrr_hold` (`L.iommu.62`, `L.iommu.67`), and the placement decision
+the report and the domains both ask is `ferrix_pci::topology::place`
+(`L.iommu.62`, `L.iommu.63`). Their host tests trace to those requirements,
+but the item-scoped gates do not read
 them; `docs/BACKLOG.md` has the row that classifies them.
 
 Two open points are for the assessor rather than settled here. The two

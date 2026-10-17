@@ -138,17 +138,22 @@ package FerrixIommuRequirements {
         }
         requirement <'L.iommu.8'> aUnitItCannotDriveIsLeftAlone : ItemLowLevel {
             attribute :>> statement = "bring_up shall leave alone, count and say why,
-                a unit that is not what the driver needs -- a VT-d unit not of
-                version 1, without three-level tables or needing its write buffer
-                flushed, an SMMUv3 without an AArch64 stage 2, 8 stream ID bits or
-                4 KiB tables with 40-bit output, either left translating by firmware
-                -- or for which there is no frame, and shall unmap its registers.";
+                a unit that is not what the driver needs -- a VT-d unit
+                ferrix_paging::vtd::unit::accept refuses (a major version other
+                than 1, 4 or 5, neither three- nor four-level tables, a guest
+                address width below 39 bits, a write buffer to flush, no
+                invalidation queue, fault records or IOTLB register past its first
+                page), an SMMUv3 without an AArch64 stage 2, 8 stream ID bits or 4
+                KiB tables with 40-bit output, either left translating by firmware
+                -- or for which there is no frame, and shall unmap its registers.
+                A refused VT-d unit's line shall print its VER, CAP and ECAP.";
             attribute :>> criterion = "Each of those units is counted 1 left alone
                 with its reason on the bring-up line, 0 translating, and its register
                 window is unmapped.";
             attribute :>> parent = "H.DMA.1";
             attribute :>> unit = ("iommu::bring_up_vtd", "iommu::bring_up_smmu",
-                "iommu::vtd::Unit::open", "iommu::smmuv3::Unit::open");
+                "iommu::vtd::Unit::open", "iommu::smmuv3::Unit::open",
+                "iommu::vtd::say_refused");
         }
         requirement <'L.iommu.9'> noDomainReachesNothing : ItemLowLevel {
             attribute :>> statement = "Once a unit translates, a function behind it
@@ -456,8 +461,9 @@ package FerrixIommuRequirements {
         }
         requirement <'L.iommu.35'> aVtdFaultIsReadWhole : ItemLowLevel {
             attribute :>> statement = "A VT-d unit's take_fault shall answer the
-                refused access its first record holds as the source ID, page and
-                direction the unit wrote.";
+                refused access the first full record holds, reading from the one
+                FSTS.FRI names round every record CAP.NFR counts, as the source ID,
+                page and direction the unit wrote.";
             attribute :>> criterion = "On x86-64 the probe reads its fault back as a
                 write by the entropy device's stream to the probe's page: 1 or more
                 out-of-domain writes faulted (the `pci` line).";
@@ -542,11 +548,16 @@ package FerrixIommuRequirements {
         }
         requirement <'L.iommu.43'> theAuditReadsEveryUnit : ItemLowLevel {
             attribute :>> statement = "audit_faults shall take the faults every
-                translating unit holds, up to 256 a unit, and report the faults no
+                unit that translates or remaps holds, up to 256 a unit, a VT-d unit
+                an RMRR holds to remapping only included, and report the faults no
                 check provoked since translation went on, the first it read itself,
-                and the provoked ones it found late.";
+                and the provoked ones it found late, and how many of the units read
+                translate.";
             attribute :>> criterion = "With 1 stray fault left in a unit's record,
                 the audit reports 1 unit read, 1 stray and that fault as the first.";
+            attribute :>> criterion = "ferrix_paging::vtd::unit::audited answers
+                true for a unit that translates, remaps or both, and false only for
+                one that does neither.";
             attribute :>> parent = "H.DMA.6";
             attribute :>> unit = ("iommu::audit_faults", "iommu::drain",
                 "iommu::recorded");
@@ -594,9 +605,11 @@ package FerrixIommuRequirements {
             attribute :>> statement = "place_dmar shall place a function that a
                 DRHD's endpoint or sub-hierarchy scope reaches, as its own requester,
                 behind that DRHD's unit, and domain_for shall attach a translated
-                domain for it on that unit; a function the scope reaches under an
-                alias, or by a path that is not whole, shall be unresolved and get
-                no domain.";
+                domain for it on that unit if the unit translates; a function the
+                scope reaches under an alias, or by a path that is not whole, shall
+                be unresolved and get no domain. A function no explicit scope
+                reaches is placed as L.iommu.62 says, through the same
+                ferrix_pci::topology::place for the report and the domains.";
             attribute :>> criterion = "On x86-64 under KVM and TCG every PCI
                 function, the virtio-rng and edu below PCIe root ports included, is
                 placed behind the unit with 0 bypassing and 0 unresolved, and the
@@ -606,7 +619,8 @@ package FerrixIommuRequirements {
                 ignoring sub-hierarchies test-boot fails on 2 bypassing.";
             attribute :>> parent = "H.DMA.1";
             attribute :>> unit = ("iommu::place_dmar", "iommu::Scope::places",
-                "iommu::vtd_unit_for", "iommu::learn_bridge", "iommu::bring_up_vtd");
+                "iommu::vtd_unit_for", "iommu::learn_bridge", "iommu::bring_up_vtd",
+                "iommu::explicit_dmar", "iommu::record_scopes");
         }
         requirement <'L.iommu.47'> onlyQueuedInvalidation : ItemLowLevel {
             attribute :>> statement = "A VT-d unit without ECAP.QI shall be left
@@ -761,6 +775,190 @@ package FerrixIommuRequirements {
             attribute :>> parent = ("H.DMA.2", "H.DMA.3");
             attribute :>> unit = ("iommu::smmuv3::Unit::open",
                 "iommu::smmuv3::Unit::program", "iommu::smmuv3::Unit::attach");
+        }
+        requirement <'L.iommu.59'> aUnitIsOfAVersionReadAgainst : ItemLowLevel {
+            attribute :>> statement = "ferrix_paging::vtd::unit::accept shall take a
+                VT-d unit whose VER major version is 1, 4 or 5 -- the revisions
+                whose legacy-mode register interface the driver was read against:
+                QEMU's unit and the N150's dmar0 and dmar1 -- and refuse any other
+                with the reason 'it is of a version this driver was not read against
+                (it reads 1, 4 and 5)'.";
+            attribute :>> criterion = "Host tests: the N150's dmar0 (VER 4.0) and
+                dmar1 (5.0) with their CAP and ECAP as the box's Linux read them,
+                and QEMU's unit at aw-bits 39 and 48 (VER 1.0), are accepted; VER
+                0.0, 2.0, 3.0, 6.0, 15.0 and 15.15 are refused with that reason. On
+                x86-64 under KVM and TCG QEMU's unit is brought up.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::vtd::Unit::open");
+        }
+        requirement <'L.iommu.60'> theWidestWalkOffered : ItemLowLevel {
+            attribute :>> statement = "accept shall give a unit four-level tables
+                when CAP.SAGAW bit 2 is set, three-level when only bit 1 is, and
+                refuse one with neither; it shall refuse a unit whose guest address
+                width, CAP.MGAW plus one, is below the 39 bits a domain reaches. A
+                context entry's address width shall be the walk's: 1 for three
+                levels, 2 for four.";
+            attribute :>> criterion = "Host tests: the N150's units (SAGAW 0x4)
+                walk four levels, QEMU's at aw-bits 39 three and at aw-bits 48
+                (SAGAW 0x6) four; SAGAW 0x8 is refused; an MGAW field of 38 (39
+                bits, the box's) is accepted and 37 refused. On x86-64 test-boot,
+                whose unit is QEMU's at aw-bits=39, says 'translating
+                (three-level)', and test-boot --vtd-aw48 says
+                'translating (four-level)' and passes every stage 10 DMA check on
+                those tables; with the context entry's width written as 1 under a
+                four-level walk the --vtd-aw48 boot fails.";
+            attribute :>> parent = ("H.DMA.2", "H.DMA.3");
+            attribute :>> unit = ("iommu::vtd::Unit::open",
+                "iommu::vtd::Unit::install", "iommu::vtd::Unit::map",
+                "iommu::vtd::Unit::unmap", "iommu::vtd::Unit::resolve");
+        }
+        requirement <'L.iommu.61'> fourLevelTablesWalkAsTheUnitWalks : ItemLowLevel {
+            attribute :>> statement = "ferrix_paging::vtd::VtdFourLevel shall walk
+                four levels from the 512 GiB level over 48 bits with the same
+                entries as VtdSecondLevel: table entries granting read and write,
+                leaves read and write as asked, the superpage bit only on 2 MiB and
+                1 GiB leaves, and never a 512 GiB leaf.";
+            attribute :>> criterion = "Host tests: the generic walk properties
+                hold through it; its leaves equal VtdSecondLevel's at each level; a
+                page at 0, 2 GiB and 2^39 - 4 KiB maps, resolves and sits at the
+                4 KiB level, under root index 0.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("iommu::vtd::Unit::map", "iommu::vtd::Unit::unmap",
+                "iommu::vtd::Unit::resolve");
+        }
+        requirement <'L.iommu.62'> aFunctionNoScopeNamesIsTheCatchAlls : ItemLowLevel {
+            attribute :>> statement = "A PCI function no DRHD's explicit scope
+                reaches shall be placed behind its segment's one INCLUDE_PCI_ALL
+                unit, wherever that DRHD stands in the table, when its own
+                requester ID reaches its root bus; one behind an aliasing bridge
+                shall be unresolved, and with two or more INCLUDE_PCI_ALL units on
+                a segment every such function shall be unresolved, which a line
+                says.";
+            attribute :>> criterion = "Host tests on the N150's DMAR bytes: one
+                catch-all, dmar1 at 0xFED91000, with I/O APIC 2 at 00:1e.7 and HPET
+                0 at 00:1e.6; with the box's 27 functions and two root ports, 26
+                are placed behind dmar1, the YT6801 at 01:00.0 among them, and the
+                iGPU behind dmar0; a function behind a PCIe-to-PCI bridge is
+                unresolved; two catch-alls give Several and every such function
+                unresolved; an unfollowed explicit scope is never the catch-all's.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::place_dmar", "iommu::vtd_unit_for",
+                "iommu::record_catch_alls");
+        }
+        requirement <'L.iommu.63'> anExplicitScopeOutranksTheCatchAll : ItemLowLevel {
+            attribute :>> statement = "A function an explicit scope of a VT-d unit
+                reaches as its own requester shall be that unit's, whether or not
+                the unit came up: a refused unit's function shall get no domain
+                from the catch-all.";
+            attribute :>> criterion = "Host test: place with an explicit scope of a
+                refused unit and a catch-all answers the refused unit.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::vtd_unit_for", "iommu::bring_up_vtd");
+        }
+        requirement <'L.iommu.64'> everyFaultRecordIsRead : ItemLowLevel {
+            attribute :>> statement = "ferrix_paging::vtd::unit::fault_records shall
+                give every one of a unit's CAP.NFR + 1 fault recording registers
+                once, from the one FSTS.FRI names round, at most 256, and take_fault
+                shall read them in that order.";
+            attribute :>> criterion = "Host tests: 33 records with FRI 5 are read
+                5, 6, 7 ... 32, 0 ... 4; one record is read alone; an FRI past NFR
+                wraps; 256 records give 256. The N150's units and QEMU's have one
+                record each, at 0x400 on the box.";
+            attribute :>> parent = "H.DMA.6";
+            attribute :>> unit = ("iommu::vtd::Unit::take_fault", "iommu::vtd::Unit::enable");
+        }
+        requirement <'L.iommu.65'> registersInsideTheWindow : ItemLowLevel {
+            attribute :>> statement = "accept shall refuse a unit whose fault
+                recording registers, CAP.NFR + 1 of 16 bytes from CAP.FRO * 16, or
+                whose IOTLB register, ending at ECAP.IRO * 16 + 16, reach past the
+                first 4 KiB page the kernel maps.";
+            attribute :>> criterion = "Host tests: FRO 0xC00 with 64 records (ending
+                at 0x1000) and IRO 0xFF are accepted; 65 records, FRO 0x1000 and IRO
+                0x100 are refused.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = "iommu::vtd::Unit::open";
+        }
+        requirement <'L.iommu.66'> invalidationsDrainWhenTheUnitCan : ItemLowLevel {
+            attribute :>> statement = "An IOTLB invalidation shall set DR when the
+                unit's CAP.DRD is set and DW when its CAP.DWD is, so that it
+                completes only once the reads and writes that used the old
+                translations have.";
+            attribute :>> criterion = "Host tests: the N150's units drain both
+                ways and a unit without the bits neither; DR is bit 7 and DW bit 6
+                of the descriptor, outside QEMU's reserved mask. On x86-64 QEMU's
+                unit, which reports both, takes every invalidation without IQE.";
+            attribute :>> parent = "H.DMA.8";
+            attribute :>> unit = ("iommu::vtd::Unit::open", "iommu::vtd::Unit::invalidate_iotlb");
+        }
+        requirement <'L.iommu.67'> aUnitAnRmrrNamesRemapsOnly : ItemLowLevel {
+            attribute :>> statement = "A VT-d unit an RMRR holds -- one naming, by a
+                single-hop endpoint scope, a function behind it, or one the table
+                alone cannot place, which holds every unit on its segment, a
+                malformed RMRR included -- shall be brought up with its queue and
+                interrupt remapping and its translation left off; its line shall say
+                that its functions' DMA is untranslated and reaches all of memory,
+                its functions shall get untranslated domains, and the discovery line
+                shall count them apart as untranslated, never as translated.";
+            attribute :>> criterion = "Host tests on the N150's DMAR bytes: the
+                RMRR 0x7C000000-0x803FFFFF names 00:02.0 and holds dmar0, not
+                dmar1; an RMRR for a function no scope names holds the catch-all;
+                one with a two-hop or odd path, or beside a sub-hierarchy scope,
+                and a short RMRR, hold every unit; 26 functions behind a unit that
+                translates and one behind dmar0 count 27 behind, 1 untranslated.
+                QEMU's DMAR has no RMRR, so the boot half rests on the N150's log.";
+            attribute :>> parent = ("H.DMA.1", "H.FAIL.1");
+            attribute :>> unit = ("iommu::bring_up_vtd",
+                "iommu::say_unit", "iommu::domain_for", "iommu::discover",
+                "iommu::translates");
+        }
+        requirement <'L.iommu.68'> protectedRegionsAreOnlyReadWhereTheyExist : ItemLowLevel {
+            attribute :>> statement = "accept shall report protected memory regions
+                exactly when CAP.PLMR or CAP.PHMR is set, and only then shall
+                translate read PMEN; finding PRS set it shall clear EPM after TE is
+                on and wait, bounded, for PRS clear, and on a timeout fail the unit
+                with translation left on. The unit's line says which.";
+            attribute :>> criterion = "Host tests: both N150 units report protected
+                regions and QEMU's does not. The clearing arm runs on hardware
+                only, argued from the specification and Linux's
+                iommu_disable_protect_mem_regions; the N150's log says which arm
+                its units took.";
+            attribute :>> parent = "H.DMA.3";
+            attribute :>> unit = ("iommu::vtd::Unit::open", "iommu::vtd::Unit::translate",
+                "iommu::vtd::Protected::says");
+        }
+        requirement <'L.iommu.70'> faultEventsMasked : ItemLowLevel {
+            attribute :>> statement = "open shall write FECTL.IM, masking the
+                unit's fault event, and bring-up shall read it back masked or stop
+                the boot.";
+            attribute :>> criterion = "On x86-64 every boot reads QEMU's unit's
+                FECTL back masked; with open writing FECTL 0, the boot stops at
+                stage 10 naming the unit.";
+            attribute :>> parent = "H.IRQ.3";
+            attribute :>> unit = ("iommu::vtd::Unit::open",
+                "iommu::vtd::Unit::fault_events_masked");
+        }
+        requirement <'L.iommu.71'> ferrixVtdOffLeavesEveryUnitAlone : ItemLowLevel {
+            attribute :>> statement = "ferrix_paging::vtd::unit::switched_off shall
+                answer true for the command-line value 'off' alone; with it,
+                bring_up shall leave every VT-d unit alone with one line calling it
+                a recovery configuration, not an evaluated one, and the audit
+                record's configuration shall hold Vtd 0, else 1.";
+            attribute :>> criterion = "Host test: 'off' switches off; no value, '',
+                'on', 'OFF', 'off ' and '0' do not. Every checked boot reads Vtd 1
+                back from the audit record.";
+            attribute :>> parent = ("H.DMA.1", "H.AUD.7");
+            attribute :>> unit = ("iommu::vtd_off_asked", "iommu::bring_up_vtd");
+        }
+        requirement <'L.iommu.72'> anUncheckedBootSaysItsFaults : ItemLowLevel {
+            attribute :>> statement = "A boot that skips its checks shall read
+                every unit's fault records last, as audit_faults does, and print
+                one line of how many it found, interrupt requests' faults among
+                them, and the first; never stopping the boot.";
+            attribute :>> criterion = "test-boot's second boot, with
+                ferrix.checks=skip, prints the 'faults recorded in an unchecked
+                boot' line.";
+            attribute :>> parent = ("H.DMA.6", "H.AUD.12");
+            attribute :>> unit = "iommu::report_unchecked_faults";
         }
     }
 

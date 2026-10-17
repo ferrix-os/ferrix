@@ -97,6 +97,9 @@ pub(crate) struct Expected {
     pub(crate) efifb: u32,
     /// The build flags, packed (`crate::build_flags::audit_words`).
     pub(crate) build: u32,
+    /// `ferrix.vtd`: 1 when the VT-d units are driven, 0 for
+    /// `ferrix.vtd=off`.
+    pub(crate) vtd: u32,
 }
 
 /// What the check established, for the boot log.
@@ -286,16 +289,16 @@ fn start_and_wrap() -> Result<(usize, u64), &'static str> {
     Ok((read_all.copied, read_all.lost))
 }
 
-/// Ten system records and a grant in a ring of four, on [`PINNED`]: the
-/// first nine system records stay readable as the boot records, numbered
-/// as the ring numbered them, the tenth and the grant do not join them, and
+/// Eleven system records and a grant in a ring of four, on [`PINNED`]: the
+/// first ten system records stay readable as the boot records, numbered
+/// as the ring numbered them, the eleventh and the grant do not join them, and
 /// the ring itself has moved on.
 ///
 /// Verifies: H.AUD.2
 fn pinned() -> Result<(), &'static str> {
     let _ = PINNED.start(0, CHECK_ID);
     let system = Event::new(Class::System, 7);
-    for at in 1..=10_u64 {
+    for at in 1..=11_u64 {
         let event = if at == 4 { GRANT } else { system };
         let _ = PINNED.record_at(
             at,
@@ -307,25 +310,25 @@ fn pinned() -> Result<(), &'static str> {
             [at as u32, 0, 0],
         );
     }
-    let (boot, out) = read(&PINNED, 11, Which::Boot, 0, 16);
+    let (boot, out) = read(&PINNED, 12, Which::Boot, 0, 16);
     let kept_in_order = out
         .iter()
         .map(|record| record.sequence)
-        .eq([0, 1, 2, 3, 5, 6, 7, 8, 9]);
+        .eq([0, 1, 2, 3, 5, 6, 7, 8, 9, 10]);
     let started = out
         .first()
         .is_some_and(|record| record.start_fields().is_some());
     if boot.copied != BOOT_RECORDS || !kept_in_order || !started {
         return Err(
-            "the first nine system records were not kept apart, numbered as the ring numbered them",
+            "the first ten system records were not kept apart, numbered as the ring numbered them",
         );
     }
-    let (ring, _) = read(&PINNED, 11, Which::High, 0, 8);
+    let (ring, _) = read(&PINNED, 12, Which::High, 0, 8);
     if ring.lost == 0 {
         return Err("the pinned check's ring did not wrap, so it proved nothing");
     }
-    let (later, _) = read(&PINNED, 11, Which::Boot, 6, 16);
-    if later.copied != 4 || later.next != 10 {
+    let (later, _) = read(&PINNED, 12, Which::Boot, 6, 16);
+    if later.copied != 5 || later.next != 11 {
         return Err("a read of the boot records from a number did not resume there");
     }
     Ok(())
@@ -568,7 +571,8 @@ fn kernel_store(expected: &Expected) -> Result<usize, &'static str> {
         out.iter()
             .find(|record| record.is(CONFIG) && record.detail[0] == key as u32)
     };
-    let wants = [
+    // One per item bring-up records, so a new item cannot be left unchecked.
+    let wants: [(Config, u32); super::CONFIG_ITEMS] = [
         (Config::Checks, expected.checks),
         (Config::Devmgr, expected.devmgr),
         (Config::Mitigations, expected.mitigations),
@@ -576,6 +580,7 @@ fn kernel_store(expected: &Expected) -> Result<usize, &'static str> {
         (Config::Pstore, expected.pstore),
         (Config::Efifb, expected.efifb),
         (Config::Build, expected.build),
+        (Config::Vtd, expected.vtd),
     ];
     for (key, value) in wants {
         match config(key) {

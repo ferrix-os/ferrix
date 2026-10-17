@@ -2294,6 +2294,249 @@ fn a_bad_structure_or_scope_length_ends_its_walk() {
     assert!(scopes[1].path_is_whole(), "two whole hops");
 }
 
+/// The N150 box's DMAR, as its Linux read it from
+/// `/sys/firmware/acpi/tables/DMAR` on 2026-10-17 (136 bytes, SHA-256
+/// da30501a7db1ca0cc2db5b66b75fa8176c65f646023359aeff152a7e1ff01eea; the
+/// dump is `~/.local/share/ferrix/n150-linux/box-2026-10-17/DMAR.bin`):
+/// `dmar0` at 0xFED90000 for the iGPU, `dmar1` at 0xFED91000 with
+/// `INCLUDE_PCI_ALL` and the I/O APIC and HPET, and the iGPU's RMRR.
+const BOX_DMAR: [u8; 136] = [
+    0x44, 0x4d, 0x41, 0x52, 0x88, 0x00, 0x00, 0x00, 0x02, 0xa6, 0x49, 0x4e, 0x54, 0x45, 0x4c, 0x20,
+    0x45, 0x44, 0x4b, 0x32, 0x20, 0x20, 0x20, 0x20, 0x02, 0x00, 0x00, 0x00, 0x20, 0x20, 0x20, 0x20,
+    0x13, 0x00, 0x00, 0x01, 0x26, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xd9, 0xfe, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x08, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x00, 0x10, 0xd9, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x02, 0x00, 0x1e, 0x07,
+    0x04, 0x08, 0x00, 0x00, 0x00, 0x00, 0x1e, 0x06, 0x01, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x7c, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x3f, 0x80, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x08, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00,
+];
+
+/// Verifies: `L.iommu.62`
+#[test]
+fn the_boxs_dmar_has_one_catch_all_and_it_is_dmar1() {
+    let table = parse_dmar(&BOX_DMAR);
+    assert_eq!(table.host_address_width(), 39);
+    assert_eq!(
+        table.flags(),
+        dmar::FLAG_INTR_REMAP | dmar::FLAG_DMA_CTRL_PLATFORM_OPT_IN,
+        "interrupt remapping, and the DMA-control opt-in"
+    );
+    let units: Vec<_> = table
+        .structures()
+        .filter_map(|s| match s {
+            dmar::Structure::Drhd(unit) => Some(unit),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(units.len(), 2);
+    assert_eq!(
+        (units[0].register_base, units[0].includes_all()),
+        (0xFED9_0000, false)
+    );
+    assert_eq!(
+        (units[1].register_base, units[1].includes_all()),
+        (0xFED9_1000, true)
+    );
+    assert_eq!(
+        units[0].device_scopes().next().and_then(|s| s.endpoint()),
+        Some((0, 2, 0)),
+        "dmar0 names the iGPU"
+    );
+    assert_eq!(
+        units[1].ioapic_source(2),
+        Some(0x00F7),
+        "I/O APIC 2 at 00:1e.7"
+    );
+    let hpet = units[1]
+        .device_scopes()
+        .find(|s| s.kind == dmar::SCOPE_HPET)
+        .unwrap();
+    assert_eq!(
+        (hpet.enumeration_id, hpet.endpoint()),
+        (0, Some((0, 0x1E, 6)))
+    );
+    match table.catch_all(0) {
+        dmar::CatchAll::One(unit) => assert_eq!(unit.register_base, 0xFED9_1000),
+        other => panic!("one catch-all: {other:?}"),
+    }
+    assert_eq!(table.catch_all(1), dmar::CatchAll::None, "no other segment");
+}
+
+/// Verifies: `L.iommu.62`
+#[test]
+fn two_catch_alls_on_one_segment_are_neither_believed() {
+    let unit = |base: u64| {
+        let mut body = vec![dmar::DRHD_INCLUDE_PCI_ALL, 0];
+        body.extend_from_slice(&le16(0));
+        body.extend_from_slice(&base.to_le_bytes());
+        structure(dmar::STRUCTURE_DRHD, &body)
+    };
+    let bytes = TableBuilder::new(dmar::DMAR_SIGNATURE)
+        .raw(&[38, 0])
+        .raw(&[0; 10])
+        .raw(&unit(0xFED9_0000))
+        .raw(&unit(0xFED9_1000))
+        .build();
+    assert_eq!(parse_dmar(&bytes).catch_all(0), dmar::CatchAll::Several);
+}
+
+/// Verifies: `L.iommu.67`
+#[test]
+fn the_boxs_rmrr_holds_dmar0_and_not_dmar1() {
+    let table = parse_dmar(&BOX_DMAR);
+    let units: Vec<_> = table
+        .structures()
+        .filter_map(|s| match s {
+            dmar::Structure::Drhd(unit) => Some(unit),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        table.rmrr_hold(&units[0]),
+        Some(dmar::RmrrHold::Named {
+            base: 0x7C00_0000,
+            limit: 0x803F_FFFF,
+            function: (0, 2, 0),
+        }),
+        "the iGPU's stolen memory, behind dmar0"
+    );
+    assert_eq!(table.rmrr_hold(&units[1]), None, "dmar1 translates");
+}
+
+/// A DMAR of one explicit unit, one catch-all and one RMRR whose scope is
+/// `rmrr_scope`, with `extra` added to the explicit unit's scopes.
+fn rmrr_machine(rmrr_scope: &[u8], extra: &[u8]) -> Vec<u8> {
+    let mut explicit = vec![0, 0];
+    explicit.extend_from_slice(&le16(0));
+    explicit.extend_from_slice(&0xFED9_0000_u64.to_le_bytes());
+    explicit.extend(scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[2, 0]));
+    explicit.extend_from_slice(extra);
+    let mut all = vec![dmar::DRHD_INCLUDE_PCI_ALL, 0];
+    all.extend_from_slice(&le16(0));
+    all.extend_from_slice(&0xFED9_1000_u64.to_le_bytes());
+    let mut region = vec![0, 0];
+    region.extend_from_slice(&le16(0));
+    region.extend_from_slice(&0x7C00_0000_u64.to_le_bytes());
+    region.extend_from_slice(&0x7C0F_FFFF_u64.to_le_bytes());
+    region.extend_from_slice(rmrr_scope);
+    TableBuilder::new(dmar::DMAR_SIGNATURE)
+        .raw(&[38, 0])
+        .raw(&[0; 10])
+        .raw(&structure(dmar::STRUCTURE_DRHD, &explicit))
+        .raw(&structure(dmar::STRUCTURE_DRHD, &all))
+        .raw(&structure(dmar::STRUCTURE_RMRR, &region))
+        .build()
+}
+
+/// The hold `table` puts on each of its two units.
+fn holds(table: &dmar::Dmar<'_>) -> Vec<Option<dmar::RmrrHold>> {
+    table
+        .structures()
+        .filter_map(|s| match s {
+            dmar::Structure::Drhd(unit) => Some(table.rmrr_hold(&unit)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Verifies: `L.iommu.67`
+#[test]
+fn an_rmrr_for_a_catch_all_function_holds_the_catch_all() {
+    let bytes = rmrr_machine(&scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[0x14, 0]), &[]);
+    let table = parse_dmar(&bytes);
+    assert_eq!(
+        holds(&table),
+        vec![
+            None,
+            Some(dmar::RmrrHold::Named {
+                base: 0x7C00_0000,
+                limit: 0x7C0F_FFFF,
+                function: (0, 0x14, 0)
+            })
+        ],
+        "a USB controller no scope names is the catch-all's"
+    );
+}
+
+/// Verifies: `L.iommu.67`
+#[test]
+fn an_rmrr_the_table_cannot_place_holds_every_unit() {
+    let unfollowed = Some(dmar::RmrrHold::Unfollowed {
+        base: 0x7C00_0000,
+        limit: 0x7C0F_FFFF,
+    });
+    // A two-hop scope: only enumeration could follow it.
+    let bytes = rmrr_machine(
+        &scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[0x1C, 0, 0, 0]),
+        &[],
+    );
+    assert_eq!(
+        holds(&parse_dmar(&bytes)),
+        vec![unfollowed, unfollowed],
+        "two hops"
+    );
+    // An odd byte: no hop at all.
+    let bytes = rmrr_machine(&scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[0x14, 0, 1]), &[]);
+    assert_eq!(
+        holds(&parse_dmar(&bytes)),
+        vec![unfollowed, unfollowed],
+        "odd byte"
+    );
+    // A single hop, but a sub-hierarchy scope elsewhere might reach it.
+    let bridge = scope(dmar::SCOPE_PCI_BRIDGE, 0, 0, &[0x1C, 0]);
+    let bytes = rmrr_machine(&scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[0x14, 0]), &bridge);
+    assert_eq!(
+        holds(&parse_dmar(&bytes)),
+        vec![unfollowed, unfollowed],
+        "a bridge scope"
+    );
+}
+
+/// Verifies: `L.iommu.67`
+#[test]
+fn a_malformed_or_cut_rmrr_is_never_read_as_no_rmrr() {
+    // Too short for its fields: every unit held.
+    let mut short = vec![0, 0];
+    short.extend_from_slice(&le16(0));
+    short.extend_from_slice(&[0; 8]);
+    let mut unit = vec![0, 0];
+    unit.extend_from_slice(&le16(0));
+    unit.extend_from_slice(&0xFED9_0000_u64.to_le_bytes());
+    let bytes = TableBuilder::new(dmar::DMAR_SIGNATURE)
+        .raw(&[38, 0])
+        .raw(&[0; 10])
+        .raw(&structure(dmar::STRUCTURE_DRHD, &unit))
+        .raw(&structure(dmar::STRUCTURE_RMRR, &short))
+        .build();
+    assert_eq!(
+        holds(&parse_dmar(&bytes)),
+        vec![Some(dmar::RmrrHold::Unfollowed { base: 0, limit: 0 })],
+        "a short RMRR"
+    );
+    // A scope cut short inside the RMRR (length 3): the region names no
+    // function, and holds nothing; its walk ends.
+    let bytes = rmrr_machine(&[dmar::SCOPE_PCI_ENDPOINT, 3, 0], &[]);
+    assert_eq!(
+        holds(&parse_dmar(&bytes)),
+        vec![None, None],
+        "no scope read"
+    );
+    // A record running past the table's end ends the walk: the box's table
+    // cut by its last eight bytes loses its RMRR's structure whole.
+    let mut cut = BOX_DMAR.to_vec();
+    cut.truncate(128);
+    cut[4] = 128;
+    let sum = cut.iter().fold(0_u8, |a, &b| a.wrapping_add(b));
+    cut[9] = cut[9].wrapping_sub(sum);
+    let table = parse_dmar(&cut);
+    assert_eq!(
+        table.structures().count(),
+        2,
+        "the RMRR, longer than what is left, is not read"
+    );
+}
+
 #[test]
 fn a_dmar_shorter_than_its_header_is_refused() {
     let bytes = TableBuilder::new(dmar::DMAR_SIGNATURE)
