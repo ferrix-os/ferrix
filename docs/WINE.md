@@ -824,7 +824,13 @@ as the gate does (Proton's fonts before `wineboot`, Open Sans for Segoe
 UI), and starts the launcher on the desktop's X server; the desktop links
 it as `/bin/gryphlink`, with Wine's and Proton's links and the
 certificate bundle, and fuzzel lists it as GRYPHLINK. It starts the launcher with
-`WINEFSYNC=1` (§11) unless the environment says otherwise.
+`WINEFSYNC=1` (§11), and with Qt's software scene graph
+(`QT_QUICK_BACKEND=software`) and its web view's Chromium without the GPU
+(`QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`), unless the environment says
+otherwise. Without a GPU driver its OpenGL is llvmpipe, and drawing every
+frame of the launcher's background video through it cost 0.8 of a core
+more; under KVM the download ran 25 MB/s with it and 30 MB/s without
+(2026-10-17).
 `cargo xtask test-endfield-proton --everything --accel kvm` boots on the
 merged volume, starts the launcher with `gryphlink`, and requires the
 same window, button and server answer.

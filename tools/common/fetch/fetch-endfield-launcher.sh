@@ -155,6 +155,13 @@ export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
 # wineserver. Without it the launcher's waits kept wineserver busy on the
 # N150 box while it downloaded (2026-10-17).
 export WINEFSYNC="${WINEFSYNC:-1}"
+# The launcher draws its Qt Quick pages and its web view with OpenGL, which
+# is llvmpipe on a desktop without a GPU driver: four rasteriser threads and
+# a frame for every frame of its background video. Qt's software scene graph
+# and Chromium without the GPU draw the same pages for 0.8 of a core less,
+# and the download ran 25 -> 30 MB/s under KVM (2026-10-17).
+export QT_QUICK_BACKEND="${QT_QUICK_BACKEND-software}"
+export QTWEBENGINE_CHROMIUM_FLAGS="${QTWEBENGINE_CHROMIUM_FLAGS---disable-gpu}"
 wine=/data/proton/files/bin/wine
 if [ ! -e "$WINEPREFIX/system.reg" ]; then
     mkdir -p "$WINEPREFIX/drive_c/windows/Fonts"
