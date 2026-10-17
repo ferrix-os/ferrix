@@ -80,6 +80,13 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
+    },
+    {
+      "ids": ["L.x86_64.177"],
+      "owner": "hwp-turbo",
+      "branch": "hwp-turbo",
+      "date": "2026-10-17",
+      "purpose": "Intel HWP on every x86-64 processor whose CPUID.06H:EAX[7] says so: IA32_PM_ENABLE set, IA32_HWP_REQUEST asking for the whole range from IA32_HWP_CAPABILITIES, autonomous, EPP 0x80; nothing written without the bit"
     }
   ]
 }
