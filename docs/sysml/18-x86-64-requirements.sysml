@@ -1659,6 +1659,35 @@ package FerrixX8664Requirements {
                 "arch::x86_64::trap::fault_signal",
                 "arch::x86_64::cpu::read_cr0");
         }
+        requirement <'L.x86_64.178'> x87ErrorsAreExceptionsOnEveryProcessor : ItemLowLevel {
+            doc /* With CR0.NE clear an unmasked x87 error is not #MF: the
+                processor signals it on the legacy FERR# line instead, and
+                L.x86_64.77's SIGFPE for it rests on a bit nothing set. The
+                Intel N150's AMI firmware hands over with it clear; QEMU's
+                firmware leaves it set, so no emulated boot saw it. The loader
+                keeps the firmware's CR0 and adds WP alone, so the kernel sets
+                the x87 controls itself. The criterion reads the processor's
+                state rather than trusting the firmware: a secondary starts
+                from the boot processor's CR0 with NE taken out, so one whose
+                bring-up did not set it reads clear whatever firmware did. */
+            attribute :>> statement = "take_x87_controls shall set CR0.NE and
+                CR0.MP and clear CR0.EM and CR0.TS on every processor, at its
+                bring-up, before that processor saves or restores a program's x87
+                or vector state and before any program runs there.";
+            attribute :>> criterion = "Every processor's bring-up sets the controls
+                and is counted, and in stage 4 every processor reads its own CR0
+                with NE and MP set and EM and TS clear, the count and the readings
+                equalling the processors (the `x87` line), before the first program
+                runs on any processor (stage 4's line at 1.44 s on the gates' KVM
+                boot, stage 3's programs at about 12 s); stage 3 reads CR0.NE set
+                on the boot processor before its x87 program. With CR0.NE cleared
+                before stage 3's look, stage 3 fails by name; with a secondary's
+                set removed, stage 4 fails by name.";
+            attribute :>> parent = "H.TRAP.4";
+            attribute :>> unit = ("arch::x86_64::cpu::take_x87_controls",
+                "arch::x86_64::cpu::x87_controls_held",
+                "arch::x86_64::cpu::write_cr0");
+        }
         requirement <'L.trap.1'> aUserFaultBecomesItsSignal : ItemLowLevel {
             attribute :>> statement = "dispatch shall answer a breakpoint, illegal
                 instruction or other fault taken from user mode by forcing the

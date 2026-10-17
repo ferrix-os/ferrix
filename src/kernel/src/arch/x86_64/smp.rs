@@ -339,7 +339,9 @@ impl CpuStarter {
             far_jump: [long as u16, (long >> 16) as u16, TRAMPOLINE_CODE, 0],
             cr3: root as u32,
             cr4: (boot_cr4 & !CR4_PCIDE) as u32,
-            cr0: cpu::read_cr0() as u32,
+            // Without `NE`: a secondary sets its own x87 controls in
+            // `secondary_start`, so its reading rests on its bring-up.
+            cr0: (cpu::read_cr0() & !cpu::CR0_NE) as u32,
             efer: (efer & !EFER_LMA) as u32,
             stack_top: 0,
             entry: secondary_start as extern "C" fn(u64) -> ! as usize as u64,
@@ -471,6 +473,11 @@ extern "C" fn secondary_start(record: u64) -> ! {
     // processor clears its own all the same, and is counted when it reads so.
     if cpu::forbid_user_base_writes() {
         let _ = super::BASE_WRITES_FORBIDDEN.fetch_add(1, Ordering::AcqRel);
+    }
+    // `CR0`'s x87 controls, before this processor saves or restores a
+    // program's state or runs one: the trampoline left `NE` clear.
+    if cpu::take_x87_controls() {
+        let _ = super::X87_CONTROLS_TAKEN.fetch_add(1, Ordering::AcqRel);
     }
     // `XCR0` is each processor's own; `CR4` just gave this one `OSXSAVE`.
     cpu::load_extended_state_on_this_cpu();

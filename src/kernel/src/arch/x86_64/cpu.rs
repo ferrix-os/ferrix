@@ -660,6 +660,74 @@ pub(crate) fn read_cr0() -> u64 {
     value
 }
 
+/// `CR0.MP` — `WAIT` and `FWAIT` honour `CR0.TS` as the x87 instructions
+/// do. Ferrix never sets `TS`, so it changes nothing here; set because the
+/// SDM asks it of every processor with an x87 (Vol. 3A §9.2.1), as Linux does.
+const CR0_MP: u64 = 1 << 1;
+
+/// `CR0.EM` — no x87 present: every x87 instruction is `#NM`, and `FXSAVE`,
+/// `XSAVE` and every SSE instruction `#UD`. The switch saves programs' state
+/// with them, so the kernel assumes it clear.
+const CR0_EM: u64 = 1 << 2;
+
+/// `CR0.TS` — the next x87 or vector instruction is `#NM`, for a lazy
+/// switch Ferrix does not do: it saves and restores eagerly, and assumes it
+/// clear.
+const CR0_TS: u64 = 1 << 3;
+
+/// `CR0.NE` — an unmasked x87 error is the `#MF` exception, vector 16. Clear,
+/// the processor signals it on the legacy `FERR#` line to an interrupt
+/// controller instead, and a program's x87 error is not the `SIGFPE` Linux
+/// gives it. The SDM leaves the clear setting to MS-DOS compatibility (Vol.
+/// 3A §2.5); at least one firmware, the Intel N150's AMI one, hands over
+/// with it clear.
+pub(crate) const CR0_NE: u64 = 1 << 5;
+
+/// Whether this processor's `CR0` holds the x87 controls
+/// [`take_x87_controls`] writes: `NE` and `MP` set, `EM` and `TS` clear.
+pub(crate) fn x87_controls_held() -> bool {
+    read_cr0() & (CR0_NE | CR0_MP | CR0_EM | CR0_TS) == CR0_NE | CR0_MP
+}
+
+/// Set `CR0.NE` and `CR0.MP` and clear `CR0.EM` and `CR0.TS` on this
+/// processor, whatever firmware left there, and say whether they read so.
+///
+/// The kernel's own decision on every processor, never the firmware's: the
+/// loader keeps the `CR0` boot services ran with and adds `WP` alone, and a
+/// secondary starts from a copy of the boot processor's with `NE` taken out
+/// (`smp::CpuStarter::new`), so its own bring-up is what sets it. The other
+/// bits stay as they are: `PE`, `PG` and `WP` the loader's, `ET` fixed at one
+/// on every x86-64 processor, `CD` and `NW` the caching firmware chose, and
+/// `AM` firmware's (it only lets a program's `EFLAGS.AC` raise `#AC`).
+///
+/// Called once per processor, at its bring-up, before it saves or restores
+/// a program's x87 or vector state and before any program runs there: the
+/// boot processor in `init_traps`, each secondary in `smp::secondary_start`.
+pub(crate) fn take_x87_controls() -> bool {
+    let cr0 = (read_cr0() | CR0_NE | CR0_MP) & !(CR0_EM | CR0_TS);
+    // SAFETY: (SYSREG) only the four x87 controls change, each defined on
+    // every x86-64 processor. `PE`, `PG`, `CD` and `NW` keep the values this
+    // processor runs with now, so no combination the SDM faults on arises;
+    // the kernel itself runs no x87 or vector instruction that `TS` or `EM`
+    // would have trapped.
+    unsafe { write_cr0(cr0) };
+    x87_controls_held()
+}
+
+/// Write control register 0.
+///
+/// # Safety
+///
+/// (SYSREG) The value must keep `PE` and `PG` set, as long mode requires, and
+/// must not set `NW` without `CD`; whatever else it changes, the caller must
+/// know the processor may run in that mode now.
+unsafe fn write_cr0(value: u64) {
+    // SAFETY: (SYSREG) the caller guarantees the value.
+    unsafe {
+        asm!("mov cr0, {}", in(reg) value, options(nostack, preserves_flags));
+    }
+}
+
 /// Control register 4: the paging and instruction-set extensions in force.
 pub(crate) fn read_cr4() -> u64 {
     let value: u64;

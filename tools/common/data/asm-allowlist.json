@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1658,
+  "max_total_lines": 1659,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -53,7 +53,8 @@
     "window: one sfence in the kernel's arch::x86_64::framebuffer::",
     "drain_write_combining, after the panic draw (1). The kernel target has SSE",
     "off, so _mm_sfence cannot be called; efifb uses the runtime's mfence.",
-    "1658 since 2026-10-17 (fbcon-wc-early, L.x86_64.127 and L.x86_64.176, consultant ledger line 1994) for the framebuffer window write-combining from its first map: x86-64 framebuffer.rs's clflush and mfence (+2) and smp.rs's trampoline writing IA32_PAT before paging is on (+7); the tree went from 1649 to 1658."
+    "1658 since 2026-10-17 (fbcon-wc-early, L.x86_64.127 and L.x86_64.176, consultant ledger line 1994) for the framebuffer window write-combining from its first map: x86-64 framebuffer.rs's clflush and mfence (+2) and smp.rs's trampoline writing IA32_PAT before paging is on (+7); the tree went from 1649 to 1658.",
+    "1659 since 2026-10-17 (cr0-ne, L.x86_64.178): x86-64 cpu.rs's `mov` to CR0 (+1), with which every processor sets CR0.NE and MP and clears EM and TS at its bring-up rather than keeping firmware's; a control register has no Rust spelling, as CR3's and CR4's writes beside it."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [

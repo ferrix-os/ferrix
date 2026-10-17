@@ -62,6 +62,7 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     grace(topology, &mut report)?;
     contended(topology, &mut report)?;
     arch::check_user_counter()?;
+    arch::check_x87_controls()?;
     Ok(report)
 }
 

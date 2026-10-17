@@ -600,10 +600,6 @@ const FORGE_FIELD_AT: usize = 102;
 /// Where it keeps the value it writes there, the `0x11223344` placeholder.
 const FORGE_VALUE_AT: usize = 103;
 
-/// `CR0.NE`: x87 exceptions are reported as `#MF`, not through the legacy
-/// `FERR#` line to an interrupt controller.
-const CR0_NE: u64 = 1 << 5;
-
 /// The status of a program a signal ended, as `wait4` reports it to a shell.
 const fn killed_by(signal: u32) -> i32 {
     128 + signal as i32
@@ -614,7 +610,7 @@ const fn killed_by(signal: u32) -> i32 {
 /// # Errors
 ///
 /// The first program that could not be run, or ended other than it had to.
-/// Verifies: `L.x86_64.77`, L.trap.1, `L.x86_64.78`, `L.x86_64.103`, H.TRAP.4
+/// Verifies: `L.x86_64.77`, L.trap.1, `L.x86_64.78`, `L.x86_64.103`, `L.x86_64.178`, H.TRAP.4
 pub(crate) fn run() -> Result<(), &'static str> {
     // What the trap path does after an `execve`: equal only to the same
     // entry, stack and mode. The entry and stack are every architecture's
@@ -637,7 +633,7 @@ pub(crate) fn run() -> Result<(), &'static str> {
         return Err("two entries into a program compared by something but their mode");
     }
 
-    if cpu::read_cr0() & CR0_NE == 0 {
+    if cpu::read_cr0() & cpu::CR0_NE == 0 {
         return Err("CR0.NE is clear, so an x87 exception is not an exception");
     }
     let cases: [(&[u8], &[u8], i32, &'static str); 6] = [
@@ -1391,4 +1387,62 @@ pub(crate) fn check_exception_entry() -> Result<(), &'static str> {
     super::super::syscall::check::run_decode()?;
     super::super::gdt::check::run()?;
     run()
+}
+
+/// Processors that looked at their own `CR0` for [`check_x87_controls`].
+static X87_LOOKED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// Of those, the ones whose `CR0` does not hold the x87 controls.
+static X87_WRONG: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// One processor's share: its own `CR0`, read on it.
+fn look_at_x87_controls(_me: &'static crate::smp::PerCpu) {
+    use core::sync::atomic::Ordering;
+
+    if !cpu::x87_controls_held() {
+        let _ = X87_WRONG.fetch_add(1, Ordering::Relaxed);
+    }
+    let _ = X87_LOOKED.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Every processor reports a program's x87 error as `#MF`: after every
+/// processor is online, each reads its own `CR0` with `NE` and `MP` set and
+/// `EM` and `TS` clear, and every bring-up was counted setting them.
+///
+/// Stage 3's look at `CR0.NE` and its x87 program run on the boot processor
+/// alone; this is the secondaries' share. The firmware's `CR0` says nothing
+/// here: a secondary starts from the boot processor's with `NE` taken out,
+/// so a bring-up that did not set its own reads clear.
+///
+/// # Errors
+///
+/// A processor that did not look, one whose `CR0` does not hold the
+/// controls, or a bring-up count short of the processors.
+///
+/// Verifies: `L.x86_64.178`
+pub(crate) fn check_x87_controls() -> Result<(), &'static str> {
+    use core::sync::atomic::Ordering;
+
+    X87_LOOKED.store(0, Ordering::Relaxed);
+    X87_WRONG.store(0, Ordering::Relaxed);
+    crate::smp::run_everywhere(look_at_x87_controls)?;
+    let processors = crate::smp::count();
+    if X87_LOOKED.load(Ordering::Relaxed) != processors {
+        return Err("a processor did not report its CR0's x87 controls");
+    }
+    if X87_WRONG.load(Ordering::Relaxed) != 0 {
+        return Err(
+            "a processor's CR0 does not hold NE and MP set and EM and TS clear: an x87 error \
+             there is not an exception",
+        );
+    }
+    let taken = super::super::X87_CONTROLS_TAKEN.load(Ordering::Acquire);
+    if taken != processors {
+        return Err("a processor's bring-up did not set CR0's x87 controls");
+    }
+    println!(
+        "  x87      CR0.NE and MP set, EM and TS clear at the bring-up of {taken} of \
+         {processors} processors and read so on each in stage 4"
+    );
+    Ok(())
 }

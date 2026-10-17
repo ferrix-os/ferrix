@@ -80,13 +80,6 @@
       "branch": "m0-f73",
       "date": "2026-10-14",
       "purpose": "F-73: the kernel sets CR4.MCE on every processor once its machine-check entry and stack are loaded, read set on every processor by stage 4 (consultant m0-b-cert, ledger 2026-10-14, F-73 reserved)"
-    },
-    {
-      "ids": ["L.x86_64.178"],
-      "owner": "cr0-ne",
-      "branch": "cr0-ne",
-      "date": "2026-10-17",
-      "purpose": "The kernel sets CR0.NE and CR0.MP and clears CR0.EM and CR0.TS on every x86-64 processor at its bring-up, whatever firmware left (the N150's AMI firmware leaves NE clear), read back on every processor by stage 4; L.x86_64.177 is hwp-turbo's"
     }
   ]
 }

@@ -15,14 +15,14 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 133 | 82 | 51 |
-| Low (`L.*`) | 922 | 659 | 263 |
+| Low (`L.*`) | 923 | 660 | 263 |
 
-1971 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+1974 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 1973 |
-| Accessors, covered by the requirement they serve | 951 |
+| Named by a low-level requirement | 1976 |
+| Accessors, covered by the requirement they serve | 953 |
 | Check code in a product file | 81 |
 | Named by none | 922 |
 
@@ -1142,6 +1142,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
 | `L.x86_64.77` | init_traps and trap::init shall install and load a gate for every exception vector, and classify and fault_signal shall name for an exception a user-mode instruction took the signal Linux sends: #DE SIGFPE, #UD SIGILL, #PF on an unmapped address SIGSEGV, #GP SIGSEGV, #MF SIGFPE. | Programs that divide by zero, run ud2, read an unmapped address, run hlt in ring 3 and take an unmasked x87 zero-divide end with SIGFPE, SIGILL, SIGSEGV, SIGSEGV and SIGFPE, 5 of 5, and the boot goes on (the `fault` line). | H.TRAP.4 | `arch::x86_64::init_traps`, `arch::x86_64::trap::init`, `arch::x86_64::trap::load_on_this_cpu`, `arch::x86_64::trap::ferrix_trap_entry`, `arch::x86_64::trap::classify`, `arch::x86_64::trap::fault_signal`, `arch::x86_64::cpu::read_cr0` | `src/kernel/src/arch/x86_64/trap/check.rs::run` | reached | not built | not built |
+| `L.x86_64.178` | take_x87_controls shall set CR0.NE and CR0.MP and clear CR0.EM and CR0.TS on every processor, at its bring-up, before that processor saves or restores a program's x87 or vector state and before any program runs there. | Every processor's bring-up sets the controls and is counted, and in stage 4 every processor reads its own CR0 with NE and MP set and EM and TS clear, the count and the readings equalling the processors (the `x87` line), before the first program runs on any processor (stage 4's line at 1.44 s on the gates' KVM boot, stage 3's programs at about 12 s); stage 3 reads CR0.NE set on the boot processor before its x87 program. With CR0.NE cleared before stage 3's look, stage 3 fails by name; with a secondary's set removed, stage 4 fails by name. | H.TRAP.4 | `arch::x86_64::cpu::take_x87_controls`, `arch::x86_64::cpu::x87_controls_held`, `arch::x86_64::cpu::write_cr0` | `src/kernel/src/arch/x86_64/trap/check.rs::run`, `src/kernel/src/arch/x86_64/trap/check.rs::check_x87_controls` | reached | not built | not built |
 | `L.trap.1` | dispatch shall answer a breakpoint, illegal instruction or other fault taken from user mode by forcing the architecture's signal on the program through the registered return path, and shall not stop the kernel. | The faulting programs of the `fault` line are ended by their signals and the check returns to the boot. | H.TRAP.4 | `trap::dispatch`, `trap::user_fault_as`, `trap::return_path` | `src/kernel/src/arch/x86_64/trap/check.rs::run` | reached | not built | not built |
 | `L.x86_64.78` | handle_page_fault shall answer with SIGBUS a user fault the address space reports as past the end of a mapped file. | A program that reads the second page of a two-page shared mapping of a one-page memfd ends with SIGBUS (the `fault` line). | H.TRAP.4 | `trap::handle_page_fault`, `trap::resolve_user_fault`, `trap::user_fault_as`, `arch::x86_64::cpu::read_cr2` | `src/kernel/src/arch/x86_64/trap/check.rs::run` | reached | not built | not built |
 | `L.trap.2` | handle_page_fault shall resolve a user-mode fault in a region the running program's space maps by making the mapping true, so that the instruction is retried. | The user test program runs with at least 1 page fault resolved and exits 42. | H.MEM.1 | `trap::handle_page_fault`, `trap::resolve_user_fault` | `src/kernel/src/syscall/check.rs::check_a_program_runs_in_user_mode` | reached | reached | reached |
@@ -1795,7 +1796,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/arch/x86_64/trap/check.rs::check_signals_and_fork` | kernel | L.x86_64.15, L.x86_64.47, L.x86_64.64, L.x86_64.73 |
 | `src/kernel/src/arch/x86_64/trap/check.rs::check_thread_areas` | kernel | L.x86_64.7, L.x86_64.8, H.SCHED.7 |
 | `src/kernel/src/arch/x86_64/trap/check.rs::check_wow64` | kernel | L.x86_64.42, L.x86_64.43, L.x86_64.61 |
-| `src/kernel/src/arch/x86_64/trap/check.rs::run` | kernel | L.x86_64.77, L.trap.1, L.x86_64.78, L.x86_64.103, H.TRAP.4 |
+| `src/kernel/src/arch/x86_64/trap/check.rs::check_x87_controls` | kernel | L.x86_64.178 |
+| `src/kernel/src/arch/x86_64/trap/check.rs::run` | kernel | L.x86_64.77, L.trap.1, L.x86_64.78, L.x86_64.103, L.x86_64.178, H.TRAP.4 |
 | `src/kernel/src/audit/check.rs::booted` | kernel | L.iommu.44, H.AUD.8 |
 | `src/kernel/src/audit/check.rs::budgets` | kernel | H.AUD.4 |
 | `src/kernel/src/audit/check.rs::crowded` | kernel | H.AUD.6 |

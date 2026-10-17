@@ -346,6 +346,28 @@ pub(crate) const fn check_user_counter() -> Result<(), &'static str> {
     Ok(())
 }
 
+// That every processor reports a program's x87 error as the exception,
+// checked once all are online: x86-64's `CR0.NE`, with `MP` set and `EM` and
+// `TS` clear (L.x86_64.178). The Arm architectures have no legacy route
+// for a floating-point error to choose against.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::check_x87_controls;
+
+/// That every processor reports a program's x87 error as the exception,
+/// checked: nothing to set here.
+///
+/// # Errors
+///
+/// None.
+#[cfg(not(target_arch = "x86_64"))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "x86-64's check returns what failed, and the caller is shared"
+)]
+pub(crate) const fn check_x87_controls() -> Result<(), &'static str> {
+    Ok(())
+}
+
 // Cache maintenance for a device that does not snoop the caches: the
 // DK board's display controller reads a framebuffer straight from memory, so
 // whatever a program drew has to be written back from the caches to the point

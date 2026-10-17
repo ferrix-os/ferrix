@@ -191,6 +191,22 @@ pub(crate) unsafe fn init_traps() {
     unsafe { gdt::init() };
     // SAFETY: (ENTRY) after `gdt::init`, whose kernel code selector every gate names.
     unsafe { trap::init() };
+    // The x87 controls, before the first program's state is saved or any
+    // program runs, whatever firmware left in `CR0`: the N150's AMI firmware
+    // leaves `NE` clear. Each secondary sets its own in
+    // `smp::secondary_start`.
+    let firmware_ne = cpu::read_cr0() & cpu::CR0_NE != 0;
+    let x87 = if cpu::take_x87_controls() {
+        let _ = X87_CONTROLS_TAKEN.fetch_add(1, core::sync::atomic::Ordering::AcqRel);
+        if firmware_ne {
+            "CR0.NE set, as firmware had left it"
+        } else {
+            "CR0.NE set, which firmware had left clear"
+        }
+    } else {
+        "CR0 did not take NE and MP set, EM and TS clear, so self-checks would stop the boot"
+    };
+    crate::console::println!("  cpu      x87 errors as #MF: {x87}");
     // After the IDT, so that a fault this turns on is *reported* rather than
     // becoming a triple fault, and before user mode so that it covers every
     // program. Secondary processors inherit it: `smp::secondary_start` copies
@@ -2027,3 +2043,18 @@ pub(crate) use framebuffer::check::check_framebuffer_window;
 pub(crate) use framebuffer::{
     drain_write_combining, flush_window, framebuffer_flags, mtrr_type, pat,
 };
+
+/// Processors on which [`cpu::take_x87_controls`] read `CR0`'s x87 controls
+/// as written at their bring-up.
+pub(crate) static X87_CONTROLS_TAKEN: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
+
+/// Stage 4's look at the x87 controls on every processor: see
+/// [`trap::check::check_x87_controls`].
+///
+/// # Errors
+///
+/// A processor whose `CR0` does not hold them.
+pub(crate) fn check_x87_controls() -> Result<(), &'static str> {
+    trap::check::check_x87_controls()
+}
