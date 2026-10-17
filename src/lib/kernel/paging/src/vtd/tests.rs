@@ -6,6 +6,10 @@
 
 use super::queue::{self, Completion, ContextScope, InterruptEntryScope, IotlbScope, QUEUE_LENGTH};
 use super::remap::{self, Remap, UnitState};
+use super::unit::{self, Drain, Walk};
+
+extern crate std;
+use std::vec::Vec;
 
 /// QEMU's `VTD_INV_DESC_CC_RSVD`.
 const CC_RESERVED: u64 = 0xfffc_0000_0000_f1c0;
@@ -51,11 +55,11 @@ fn a_context_cache_invalidation_is_laid_out_as_the_specification_says() {
 /// Verifies: `L.iommu.47`
 #[test]
 fn an_iotlb_invalidation_is_laid_out_as_the_specification_says() {
-    let global = queue::iotlb(IotlbScope::Global);
+    let global = queue::iotlb(IotlbScope::Global, Drain::default());
     assert_eq!(kind(global[0]), 2);
     assert_eq!((global[0] >> 4) & 0b11, 1, "global granularity");
 
-    let domain = queue::iotlb(IotlbScope::Domain(0xBEEF));
+    let domain = queue::iotlb(IotlbScope::Domain(0xBEEF), Drain::default());
     assert_eq!(kind(domain[0]), 2);
     assert_eq!((domain[0] >> 4) & 0b11, 2, "domain-selective granularity");
     assert_eq!(
@@ -321,4 +325,267 @@ fn interrupts_are_isolated_only_when_every_unit_blocks() {
         "a function bypassing"
     );
     assert!(!remap::interrupts_isolated(&[], 0), "no unit at all");
+}
+
+// ---------------------------------------------------------------------------
+// Which units are driven, and how (`vtd::unit`)
+// ---------------------------------------------------------------------------
+
+/// The N150 box's `dmar0` (the graphics unit): `VER`, `CAP` and `ECAP` as
+/// the box's Linux read them (`box-2026-10-16/dmesg.txt`, line 399).
+const BOX_DMAR0: (u32, u64, u64) = (0x40, 0x01c0_000c_4066_0462, 0x0000_029a_00f0_505e);
+/// The N150 box's `dmar1` (`INCLUDE_PCI_ALL`), the same way (line 401).
+const BOX_DMAR1: (u32, u64, u64) = (0x50, 0x00d2_008c_4066_0462, 0x0000_0000_00f0_50da);
+
+/// QEMU 10.2's unit as `vtd_cap_init` builds it with interrupt remapping:
+/// `VER` 1.0, FRO 0x220 (one record), ND 2^16, MAMV, PSI, 2M+1G, ESRTPS,
+/// drain, and `SAGAW` for `aw_bits`.
+fn qemu(aw_bits: u64) -> (u32, u64, u64) {
+    let sagaw = if aw_bits >= 48 { 0x6 } else { 0x2 };
+    let cap = (0x22_u64 << 24)
+        | 6
+        | ((aw_bits - 1) << 16)
+        | (sagaw << 8)
+        | (0x3F << 48)
+        | (1 << 39)
+        | (0b11 << 34)
+        | (1 << 63)
+        | (0b11 << 54);
+    // QI, IR, MHMV, IRO 0xF (IOTLB at 0xF8).
+    let ecap = (1 << 1) | (1 << 3) | (0xF << 20) | (0xF << 8);
+    (0x10, cap, ecap)
+}
+
+/// Verifies: `L.iommu.59`
+#[test]
+fn the_box_units_and_qemus_are_of_versions_read_against() {
+    for (ver, cap, ecap) in [BOX_DMAR0, BOX_DMAR1, qemu(39), qemu(48)] {
+        assert!(unit::accept(ver, cap, ecap).is_ok(), "VER {ver:#x}");
+    }
+    let (_, cap, ecap) = BOX_DMAR1;
+    for ver in [0x00, 0x20, 0x30, 0x60, 0xF0, 0xFF] {
+        assert_eq!(
+            unit::accept(ver, cap, ecap),
+            Err("it is of a version this driver was not read against (it reads 1, 4 and 5)"),
+            "VER {ver:#x}"
+        );
+    }
+}
+
+/// Verifies: `L.iommu.60`
+#[test]
+fn the_widest_walk_offered_is_taken() {
+    let walk = |(ver, cap, ecap): (u32, u64, u64)| unit::accept(ver, cap, ecap).map(|a| a.walk);
+    assert_eq!(walk(BOX_DMAR0), Ok(Walk::Four), "the box: four levels only");
+    assert_eq!(walk(BOX_DMAR1), Ok(Walk::Four));
+    assert_eq!(
+        walk(qemu(39)),
+        Ok(Walk::Three),
+        "aw-bits=39, as every row but --vtd-aw48 boots it"
+    );
+    assert_eq!(walk(qemu(48)), Ok(Walk::Four), "aw-bits=48 offers both");
+    assert_eq!((Walk::Three.aw(), Walk::Four.aw()), (1, 2), "context AW");
+    let (ver, cap, ecap) = BOX_DMAR1;
+    let neither = cap & !(0x1F << 8) | 0x8 << 8;
+    assert_eq!(
+        unit::accept(ver, neither, ecap),
+        Err("it walks neither three- nor four-level tables"),
+        "five levels only"
+    );
+}
+
+/// Verifies: `L.iommu.60`
+#[test]
+fn a_guest_width_of_39_bits_is_enough_and_38_is_not() {
+    let (ver, cap, ecap) = BOX_DMAR1;
+    let accepted = unit::accept(ver, cap, ecap).unwrap();
+    assert_eq!(accepted.guest_bits, 39, "MGAW field 38 is 39 bits");
+    let narrower = cap & !(0x3F << 16) | 37 << 16;
+    assert_eq!(
+        unit::accept(ver, narrower, ecap),
+        Err("its guest address width is below the 39 bits a domain reaches"),
+        "MGAW field 37 is 38 bits"
+    );
+    assert_eq!(unit::DOMAIN_BITS, 39);
+}
+
+/// Verifies: `L.iommu.64`
+#[test]
+fn records_are_read_from_fri_round() {
+    // Both of the box's units have one record, at 0x400 (CAP.FRO 0x40,
+    // CAP.NFR 0), as QEMU's has; the scan is for a unit with more.
+    for (name, (ver, cap, ecap)) in [("dmar0", BOX_DMAR0), ("dmar1", BOX_DMAR1)] {
+        let accepted = unit::accept(ver, cap, ecap).unwrap();
+        assert_eq!((accepted.faults, accepted.records), (0x400, 1), "{name}");
+    }
+    let (ver, cap, ecap) = BOX_DMAR1;
+    let more = cap | 32 << 40;
+    assert_eq!(unit::accept(ver, more, ecap).unwrap().records, 33, "NFR 32");
+
+    let order: Vec<u32> = unit::fault_records(5 << 8, 33).collect();
+    assert_eq!(order.len(), 33, "every record, once");
+    assert_eq!(&order[..3], &[5, 6, 7], "from FRI on");
+    assert_eq!(&order[27..], &[32, 0, 1, 2, 3, 4], "and round");
+    assert_eq!(
+        unit::fault_records(0x1F00, 1).collect::<Vec<_>>(),
+        [0],
+        "one record"
+    );
+    let order: Vec<u32> = unit::fault_records(40 << 8, 33).collect();
+    assert_eq!(order[0], 40 % 33, "an FRI past NFR wraps");
+    assert_eq!(unit::fault_records(0xFF00, 256).count(), 256, "at most 256");
+}
+
+/// Verifies: `L.iommu.65`
+#[test]
+fn registers_past_the_first_page_are_refused() {
+    let (ver, cap, ecap) = BOX_DMAR1;
+    let accepted = unit::accept(ver, cap, ecap).unwrap();
+    assert_eq!(accepted.iotlb, 0x508, "IRO 0x50");
+    let why = Err("its fault records or IOTLB register lie outside its first page");
+    let records = |fro: u64, nfr: u64| cap & !(0x3FF << 24) & !(0xFF << 40) | fro << 24 | nfr << 40;
+    // FRO 0xC00 with NFR 63: 64 records end at 0x1000, inside.
+    assert!(
+        unit::accept(ver, records(0xC0, 63), ecap).is_ok(),
+        "ending at 0x1000"
+    );
+    // One more is past it: the bound counts NFR + 1 records.
+    assert_eq!(
+        unit::accept(ver, records(0xC0, 64), ecap),
+        why,
+        "NFR + 1 records"
+    );
+    assert_eq!(
+        unit::accept(ver, records(0x100, 0), ecap),
+        why,
+        "FRO 0x1000"
+    );
+    // IRO 0xFF: the register at 0xFF8 ends at 0x1000, inside; 0x100 is not.
+    let iro = |value: u64| ecap & !(0x3FF << 8) | value << 8;
+    assert!(
+        unit::accept(ver, cap, iro(0xFF)).is_ok(),
+        "IOTLB ending at 0x1000"
+    );
+    assert_eq!(
+        unit::accept(ver, cap, iro(0x100)),
+        why,
+        "IOTLB past the page"
+    );
+}
+
+/// Verifies: `L.iommu.66`
+#[test]
+fn iotlb_invalidations_drain_when_the_unit_can() {
+    let (ver, cap, ecap) = BOX_DMAR1;
+    let drain = unit::accept(ver, cap, ecap).unwrap().drain;
+    assert_eq!(
+        drain,
+        Drain {
+            read: true,
+            write: true
+        },
+        "DRD and DWD on the box"
+    );
+    let none = cap & !(0b11 << 54);
+    assert_eq!(
+        unit::accept(ver, none, ecap).unwrap().drain,
+        Drain::default()
+    );
+    let descriptor = queue::iotlb(IotlbScope::Domain(7), drain);
+    assert_eq!(descriptor[0] & (1 << 7), 1 << 7, "DR is bit 7");
+    assert_eq!(descriptor[0] & (1 << 6), 1 << 6, "DW is bit 6");
+    assert_eq!(descriptor[0] & IOTLB_RESERVED[0], 0, "QEMU takes both");
+    let plain = queue::iotlb(IotlbScope::Domain(7), Drain::default());
+    assert_eq!(plain[0] & (0b11 << 6), 0, "neither when the unit cannot");
+}
+
+#[test]
+fn the_box_units_need_nothing_else_the_driver_lacks() {
+    for (ver, cap, ecap) in [BOX_DMAR0, BOX_DMAR1] {
+        let accepted = unit::accept(ver, cap, ecap).unwrap();
+        assert!(!accepted.coherent, "ECAP.C clear: every write is cleaned");
+        assert!(!accepted.caching);
+        assert!(accepted.remaps);
+        assert!(accepted.protected_regions, "PLMR and PHMR: PMEN is read");
+        assert_eq!(accepted.identifiers, 256);
+    }
+    let (ver, cap, ecap) = qemu(39);
+    assert!(
+        !unit::accept(ver, cap, ecap).unwrap().protected_regions,
+        "QEMU has no PMR"
+    );
+}
+
+/// Verifies: `L.iommu.67`
+#[test]
+fn a_function_behind_a_unit_that_only_remaps_is_counted_untranslated() {
+    // The box under slice 1: 26 functions behind dmar1, which translates,
+    // and the iGPU behind dmar0, which an RMRR holds to remapping only.
+    let mut tally = unit::Tally::default();
+    for _ in 0..26 {
+        tally.add(true);
+    }
+    tally.add(false);
+    assert_eq!(
+        tally,
+        unit::Tally {
+            behind: 27,
+            untranslated: 1
+        }
+    );
+}
+
+/// For `L.iommu.43`'s second criterion (the requirement stays in the
+/// baseline until its first is checked).
+#[test]
+fn the_audit_reads_every_unit_that_translates_or_remaps() {
+    assert!(unit::audited(true, true));
+    assert!(unit::audited(true, false));
+    assert!(
+        unit::audited(false, true),
+        "a unit an RMRR holds still records interrupt faults"
+    );
+    assert!(!unit::audited(false, false));
+}
+
+/// Verifies: `L.iommu.71`
+#[test]
+fn only_ferrix_vtd_off_leaves_the_units_alone() {
+    assert_eq!(unit::OFF_OPTION, "ferrix.vtd");
+    assert!(unit::switched_off(Some("off")));
+    for value in [
+        None,
+        Some(""),
+        Some("on"),
+        Some("OFF"),
+        Some("off "),
+        Some("0"),
+    ] {
+        assert!(!unit::switched_off(value), "{value:?}");
+    }
+}
+
+/// Verifies: `L.iommu.68`
+#[test]
+fn protected_regions_are_reported_exactly_where_plmr_or_phmr_is_set() {
+    let (ver, cap, ecap) = BOX_DMAR1;
+    assert!(
+        unit::accept(ver, cap, ecap).unwrap().protected_regions,
+        "the box: both"
+    );
+    let neither = cap & !(0b11 << 5);
+    assert!(!unit::accept(ver, neither, ecap).unwrap().protected_regions);
+    for bit in [5, 6] {
+        assert!(
+            unit::accept(ver, neither | 1 << bit, ecap)
+                .unwrap()
+                .protected_regions,
+            "bit {bit} alone"
+        );
+    }
+    let (ver, cap, ecap) = qemu(48);
+    assert!(
+        !unit::accept(ver, cap, ecap).unwrap().protected_regions,
+        "QEMU has no PMR"
+    );
 }

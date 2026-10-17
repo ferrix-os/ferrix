@@ -213,13 +213,39 @@ fn behind(units: &[Unit], phys: u64, stream: u32) -> Behind {
 /// arrives under a bridge's alias, and a path through something that is not
 /// a bridge, leave it unresolved rather than bypassing: it may be one of
 /// those.
+///
+/// A function no explicit scope reaches is the segment's catch-all unit's
+/// (`INCLUDE_PCI_ALL`), as its own requester ID: [`topology::place`]
+/// decides, as it does for [`vtd_unit_for`], so the report and the domains
+/// cannot disagree.
 fn place_dmar(
     table: &dmar::Dmar<'_>,
     units: &[Unit],
     bridges: &[Bridge],
     function: Address,
 ) -> Behind {
-    let mut unfollowed = false;
+    let explicit = explicit_dmar(table, bridges, function);
+    let catch_all = match table.catch_all(function.segment()) {
+        dmar::CatchAll::None => topology::CatchAll::None,
+        dmar::CatchAll::One(unit) => topology::CatchAll::One(unit.register_base),
+        dmar::CatchAll::Several => topology::CatchAll::Several,
+    };
+    match topology::place(explicit, catch_all, function, bridges) {
+        topology::Placed::Unit(base) => behind(units, base, u32::from(function.requester_id())),
+        topology::Placed::Nothing => Behind::Nothing,
+        topology::Placed::Unresolved => Behind::Unresolved,
+    }
+}
+
+/// What the DMAR's explicit scopes say of `function` (`place_dmar`): the
+/// first unit whose scope reaches it as its own requester, else whether one
+/// reaches it under an alias or a scope's path could not be followed.
+fn explicit_dmar(
+    table: &dmar::Dmar<'_>,
+    bridges: &[Bridge],
+    function: Address,
+) -> topology::Explicit<u64> {
+    let mut explicit = topology::Explicit::None;
     for structure in table.structures() {
         let Structure::Drhd(unit) = structure else {
             continue;
@@ -243,28 +269,24 @@ fn place_dmar(
                 })
                 .flatten();
             let Some(named) = named else {
-                unfollowed = true;
+                explicit = topology::Explicit::Unfollowed;
                 continue;
             };
             let hierarchy = scope.kind == SCOPE_PCI_SUB_HIERARCHY;
             match claims(hierarchy, named, function, bridges) {
                 topology::Behind::Own => {
-                    return behind(
-                        units,
-                        unit.register_base,
-                        u32::from(function.requester_id()),
-                    );
+                    explicit = topology::Explicit::Own(unit.register_base);
+                    break;
                 }
-                topology::Behind::Aliased => unfollowed = true,
+                topology::Behind::Aliased => explicit = topology::Explicit::Unfollowed,
                 topology::Behind::No => {}
             }
         }
+        if matches!(explicit, topology::Explicit::Own(_)) {
+            break;
+        }
     }
-    if unfollowed {
-        Behind::Unresolved
-    } else {
-        Behind::Nothing
-    }
+    explicit
 }
 
 /// Whether a scope naming `named` -- a sub-hierarchy if `hierarchy`, an
@@ -357,8 +379,11 @@ pub(crate) struct Report {
     pub(crate) vtd: usize,
     /// `SMMUv3`s.
     pub(crate) smmu_v3: usize,
-    /// PCI functions whose DMA a unit translates.
+    /// PCI functions firmware places behind a unit.
     pub(crate) behind: usize,
+    /// Of them, those whose unit does not translate: left alone, turned
+    /// off by `ferrix.vtd=off`, or held to remapping only by an RMRR.
+    pub(crate) untranslated: usize,
     /// PCI functions firmware puts behind no unit.
     pub(crate) bypassing: usize,
     /// PCI functions firmware describes in a way this cannot follow.
@@ -386,9 +411,10 @@ fn discover(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) -> (Report, Vec<Unit
         .collect();
 
     let mut placements = Vec::new();
+    let mut tally = ferrix_paging::vtd::unit::Tally::default();
     let mut record = |function: Address, found: Behind| match found {
         Behind::Unit { unit, stream } => {
-            report.behind += 1;
+            tally.add(units.get(unit).is_some_and(translates));
             // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
             placements.push(Placement {
                 function,
@@ -423,7 +449,21 @@ fn discover(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) -> (Report, Vec<Unit
             record(function, Behind::Nothing);
         }
     }
+    report.behind = tally.behind;
+    report.untranslated = tally.untranslated;
     (report, units, placements)
+}
+
+/// Whether the kernel turned translation on for `unit`: an `SMMUv3` it
+/// programmed, or a VT-d unit it programmed that translates.
+fn translates(unit: &Unit) -> bool {
+    PROGRAMMED.get().is_some_and(|programmed| match unit.kind {
+        Kind::VtD => programmed
+            .vtd
+            .iter()
+            .any(|programmed| programmed.phys() == unit.phys && programmed.translating()),
+        Kind::SmmuV3 => programmed.smmu_phys.contains(&unit.phys),
+    })
 }
 
 /// Stage 10: find every IOMMU, and which one each PCI function's DMA arrives
@@ -437,9 +477,14 @@ pub(crate) fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
     let (report, units, placements) = discover(view, nodes);
     remapping::note_bypassing(report.bypassing);
     println!(
-        "  iommu    {} VT-d units, {} SMMUv3s; {} PCI functions behind one, {} bypassing, \
-         {} unresolved",
-        report.vtd, report.smmu_v3, report.behind, report.bypassing, report.unresolved,
+        "  iommu    {} VT-d units, {} SMMUv3s; {} PCI functions behind one, {} of them \
+         untranslated, {} bypassing, {} unresolved",
+        report.vtd,
+        report.smmu_v3,
+        report.behind,
+        report.untranslated,
+        report.bypassing,
+        report.unresolved,
     );
     for placement in placements {
         if let Some(unit) = units.get(placement.unit) {
@@ -1053,17 +1098,24 @@ impl Drop for Domain {
 /// Every unit translation was turned on for, and the functions behind each.
 #[derive(Debug, Default)]
 struct Programmed {
-    /// VT-d units translating.
+    /// VT-d units brought up: translating, or held to remapping only by an
+    /// RMRR ([`vtd::Unit::translating`]).
     vtd: Vec<vtd::Unit>,
     /// The functions the DMAR's single-hop endpoint scopes name, with their
-    /// unit's index.
-    behind: Vec<(Address, usize)>,
+    /// unit's index, or `None` for a unit left alone: a function a refused
+    /// unit names is that unit's, never the catch-all's.
+    behind: Vec<(Address, Option<usize>)>,
     /// The DMAR's other PCI scopes -- longer paths, and sub-hierarchies --
-    /// with their unit's index: followed through the bridges enumeration
-    /// finds, once it has ([`learn_bridge`]).
-    scopes: Vec<(Scope, usize)>,
+    /// with their unit's index as `behind` has it: followed through the
+    /// bridges enumeration finds, once it has ([`learn_bridge`]).
+    scopes: Vec<(Scope, Option<usize>)>,
+    /// Each segment's catch-all unit (`INCLUDE_PCI_ALL`), by index as
+    /// `behind` has it.
+    catch_all: Vec<(u16, topology::CatchAll<Option<usize>>)>,
     /// `SMMUv3`s translating.
     smmu: Vec<smmuv3::Unit>,
+    /// Their registers' physical addresses, in the same order.
+    smmu_phys: Vec<u64>,
     /// The requester IDs IORT root complexes send to them.
     streams: Vec<StreamMap>,
 }
@@ -1080,21 +1132,23 @@ struct Scope {
     start_bus: u8,
     /// Its `(device, function)` hops.
     path: Vec<(u8, u8)>,
+    /// Whether its path was a whole number of hops: one that was not names
+    /// nothing, but may have meant a function the catch-all would take.
+    whole: bool,
 }
 
 impl Scope {
     /// Whether it puts `function` behind its unit as `function`'s own
-    /// requester ID.
-    fn places(&self, function: Address, bridges: &[Bridge]) -> bool {
-        let Some(named) = topology::follow_path(
+    /// requester ID, under an alias, or not at all; `None` for a path that
+    /// cannot be followed.
+    fn places(&self, function: Address, bridges: &[Bridge]) -> Option<topology::Behind> {
+        let named = topology::follow_path(
             self.segment,
             self.start_bus,
             self.path.iter().copied(),
             bridges,
-        ) else {
-            return false;
-        };
-        claims(self.hierarchy, named, function, bridges) == topology::Behind::Own
+        )?;
+        Some(claims(self.hierarchy, named, function, bridges))
     }
 }
 
@@ -1114,6 +1168,24 @@ struct StreamMap {
     unit: usize,
 }
 
+/// Whether `ferrix.vtd=off` was asked, as [`bring_up`] read it.
+static VTD_OFF: AtomicBool = AtomicBool::new(false);
+
+/// Why every VT-d unit was left alone under `ferrix.vtd=off`.
+const VTD_OFF_WHY: &str = "ferrix.vtd=off asked for every unit to be left alone";
+
+/// Whether the command line says `ferrix.vtd=off`
+/// (`ferrix_paging::vtd::unit::switched_off`), for [`bring_up`] and the
+/// audit record's configuration.
+pub(crate) fn vtd_off_asked(view: &BootView<'_>) -> bool {
+    ferrix_paging::vtd::unit::switched_off(view.option(ferrix_paging::vtd::unit::OFF_OPTION))
+}
+
+/// Whether [`bring_up`] left every VT-d unit alone for `ferrix.vtd=off`.
+fn vtd_switched_off() -> bool {
+    VTD_OFF.load(Ordering::Acquire)
+}
+
 /// What [`bring_up`] turned on.
 static PROGRAMMED: Once<Programmed> = Once::new();
 
@@ -1122,6 +1194,8 @@ static PROGRAMMED: Once<Programmed> = Once::new();
 pub(crate) struct BringUp {
     /// VT-d units now translating.
     pub(crate) vtd: usize,
+    /// VT-d units an RMRR holds to remapping only.
+    pub(crate) remapping_only: usize,
     /// `SMMUv3`s now translating.
     pub(crate) smmu_v3: usize,
     /// Units left alone.
@@ -1138,6 +1212,7 @@ pub(crate) struct BringUp {
 /// get untranslated domains. Only the first call does anything.
 pub(crate) fn bring_up(view: &BootView<'_>) -> BringUp {
     let mut report = BringUp::default();
+    VTD_OFF.store(vtd_off_asked(view), Ordering::Release);
     let mut programmed = Programmed::default();
     if let Description::Acpi(firmware) = description::of(view) {
         let tables = firmware.acpi();
@@ -1153,10 +1228,23 @@ pub(crate) fn bring_up(view: &BootView<'_>) -> BringUp {
 }
 
 /// Program every VT-d unit the DMAR describes, and record the functions its
-/// endpoint scopes name.
+/// endpoint scopes name, and each segment's catch-all.
+///
+/// A unit an RMRR holds (`ferrix_acpi::dmar::Dmar::rmrr_hold`) is brought
+/// up for interrupt remapping only, translation off: firmware keeps using
+/// the region for a function behind it -- the N150's iGPU scanning out its
+/// framebuffer from stolen memory -- and a unit that translated would cut it
+/// off. Its functions' DMA is untranslated and reaches all of memory, which
+/// its line says (`L.iommu.67`).
+///
+/// With `ferrix.vtd=off` every unit is left alone (`L.iommu.71`).
 fn bring_up_vtd(table: &dmar::Dmar<'_>, programmed: &mut Programmed, report: &mut BringUp) {
     let intr_remap = table.flags() & dmar::FLAG_INTR_REMAP != 0;
+    let switched_off = vtd_switched_off();
     let mut states = Vec::new();
+    // Each DRHD's register base and its index in `programmed.vtd`, or `None`
+    // for one left alone.
+    let mut indices: Vec<(u64, Option<usize>)> = Vec::new();
     for structure in table.structures() {
         let Structure::Drhd(unit) = structure else {
             continue;
@@ -1165,60 +1253,165 @@ fn bring_up_vtd(table: &dmar::Dmar<'_>, programmed: &mut Programmed, report: &mu
             remapping: false,
             compatibility_blocked: false,
         };
-        let opened = vtd::Unit::open(unit.register_base, intr_remap).and_then(|opened| {
-            check::check_firmware_left_on(&opened);
-            opened.enable()?;
-            state = remapping::bring_up(&opened, &unit, table);
-            opened.translate().map(|()| opened)
-        });
+        let hold = table.rmrr_hold(&unit);
+        let mut protected = vtd::Protected::None;
+        let opened = if switched_off {
+            Err(VTD_OFF_WHY)
+        } else {
+            vtd::Unit::open(unit.register_base, intr_remap).and_then(|opened| {
+                check::check_fault_events_masked(&opened);
+                check::check_firmware_left_on(&opened);
+                opened.enable()?;
+                state = remapping::bring_up(&opened, &unit, table);
+                if hold.is_none() {
+                    protected = opened.translate()?;
+                }
+                Ok(opened)
+            })
+        };
         // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
         states.push(state);
-        match opened {
+        let index = match opened {
             Ok(opened) => {
-                println!(
-                    "  iommu    vt-d unit {:#x}: translating, queue on, {}",
-                    unit.register_base,
-                    if state.remapping {
-                        "remapping on (256 entries, xAPIC format), CFIS=0 read back"
-                    } else {
-                        "remapping off"
-                    }
-                );
+                say_unit(&unit, &opened, hold, state, protected);
                 let index = programmed.vtd.len();
-                programmed
-                    .behind
-                    // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
-                    .extend(endpoints(&unit).map(|address| (address, index)));
-                for scope in unit.device_scopes() {
-                    let hierarchy = scope.kind == SCOPE_PCI_SUB_HIERARCHY;
-                    // Single-hop endpoints are in `behind` already.
-                    let longer_path =
-                        scope.kind == dmar::SCOPE_PCI_ENDPOINT && scope.endpoint().is_none();
-                    // A path with an odd byte names nothing (`place_dmar`).
-                    if !hierarchy && !longer_path || !scope.path_is_whole() {
-                        continue;
-                    }
-                    let kept = Scope {
-                        segment: unit.segment,
-                        hierarchy,
-                        start_bus: scope.start_bus,
-                        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
-                        path: scope.path().collect(),
-                    };
-                    // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
-                    programmed.scopes.push((kept, index));
-                }
                 // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
                 programmed.vtd.push(opened);
-                report.vtd += 1;
+                if hold.is_none() {
+                    report.vtd += 1;
+                } else {
+                    report.remapping_only += 1;
+                }
+                Some(index)
             }
             Err(why) => {
                 report.refused += 1;
                 report.why = Some(why);
+                None
             }
-        }
+        };
+        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+        indices.push((unit.register_base, index));
+        record_scopes(&unit, index, programmed);
+    }
+    record_catch_alls(table, &indices, programmed);
+    if switched_off {
+        crate::println!(
+            "  iommu    ferrix.vtd=off: every VT-d unit is left alone, so no DMA is translated \
+             and no interrupt remapped; this is a recovery configuration, not an evaluated one"
+        );
     }
     remapping::record(states);
+}
+
+/// Record the functions `unit`'s scopes name, against its index in
+/// `programmed.vtd`, or `None` for a unit left alone.
+fn record_scopes(unit: &dmar::Drhd<'_>, index: Option<usize>, programmed: &mut Programmed) {
+    programmed
+        .behind
+        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+        .extend(endpoints(unit).map(|address| (address, index)));
+    for scope in unit.device_scopes() {
+        let hierarchy = scope.kind == SCOPE_PCI_SUB_HIERARCHY;
+        // Single-hop endpoints are in `behind` already.
+        let longer_path = scope.kind == dmar::SCOPE_PCI_ENDPOINT && scope.endpoint().is_none();
+        // A path with an odd byte names nothing (`place_dmar`) but stops
+        // the catch-all taking what it might name.
+        if !hierarchy && !longer_path {
+            continue;
+        }
+        let kept = Scope {
+            segment: unit.segment,
+            hierarchy,
+            start_bus: scope.start_bus,
+            whole: scope.path_is_whole(),
+            // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+            path: scope.path().collect(),
+        };
+        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+        programmed.scopes.push((kept, index));
+    }
+}
+
+/// A VT-d unit's bring-up line: translating with its walk, or held to
+/// remapping only by an RMRR, with what that leaves its functions' DMA.
+fn say_unit(
+    unit: &dmar::Drhd<'_>,
+    opened: &vtd::Unit,
+    hold: Option<dmar::RmrrHold>,
+    state: ferrix_paging::vtd::remap::UnitState,
+    protected: vtd::Protected,
+) {
+    let remap_words = if state.remapping {
+        "remapping on (256 entries, xAPIC format), CFIS=0 read back"
+    } else {
+        "remapping off"
+    };
+    match hold {
+        None => println!(
+            "  iommu    vt-d unit {:#x}: translating ({}), queue on, {remap_words}, {}",
+            unit.register_base,
+            opened.walk().name(),
+            protected.says(),
+        ),
+        Some(dmar::RmrrHold::Named {
+            base,
+            limit,
+            function: (bus, device, function),
+        }) => println!(
+            "  iommu    vt-d unit {:#x}: queue on, {remap_words}, translation left off: RMRR \
+             {base:#x}-{limit:#x} names {:04x}:{bus:02x}:{device:02x}.{function}, which \
+             firmware keeps using; the DMA of every function behind this unit is \
+             untranslated and reaches all of memory",
+            unit.register_base, unit.segment,
+        ),
+        Some(dmar::RmrrHold::Unfollowed { base, limit }) => println!(
+            "  iommu    vt-d unit {:#x}: queue on, {remap_words}, translation left off: an RMRR \
+             at {base:#x}-{limit:#x} names a function this table cannot place, which holds \
+             every unit on segment {}; the DMA of every function behind this unit is \
+             untranslated and reaches all of memory",
+            unit.register_base, unit.segment,
+        ),
+    }
+}
+
+/// Record each segment's catch-all unit, by its index in `programmed.vtd`
+/// as `indices` gives it (`None` for one left alone).
+fn record_catch_alls(
+    table: &dmar::Dmar<'_>,
+    indices: &[(u64, Option<usize>)],
+    programmed: &mut Programmed,
+) {
+    let index_of = |base: u64| {
+        indices
+            .iter()
+            .find(|&&(at, _)| at == base)
+            .and_then(|&(_, index)| index)
+    };
+    for &(base, _) in indices {
+        let Some(segment) = table.structures().find_map(|structure| match structure {
+            Structure::Drhd(unit) if unit.register_base == base => Some(unit.segment),
+            _ => None,
+        }) else {
+            continue;
+        };
+        if programmed.catch_all.iter().any(|&(at, _)| at == segment) {
+            continue;
+        }
+        let catch_all = match table.catch_all(segment) {
+            dmar::CatchAll::None => topology::CatchAll::None,
+            dmar::CatchAll::One(unit) => topology::CatchAll::One(index_of(unit.register_base)),
+            dmar::CatchAll::Several => {
+                println!(
+                    "  iommu    two INCLUDE_PCI_ALL units on segment {segment}: neither is \
+                     believed, and every function no scope names is unresolved"
+                );
+                topology::CatchAll::Several
+            }
+        };
+        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+        programmed.catch_all.push((segment, catch_all));
+    }
 }
 
 /// Program every `SMMUv3` the IORT describes, and record which requester IDs
@@ -1243,6 +1436,8 @@ fn bring_up_smmu(table: &iort::Iort<'_>, programmed: &mut Programmed, report: &m
                 offsets.push((node.offset, programmed.smmu.len()));
                 // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
                 programmed.smmu.push(opened);
+                // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+                programmed.smmu_phys.push(smmu.base_address);
                 report.smmu_v3 += 1;
             }
             Err(why) => {
@@ -1295,6 +1490,11 @@ pub(crate) fn domain_for(function: Address) -> Domain {
         return Domain::untranslated();
     };
     let translation = if let Some(unit) = vtd_unit_for(programmed, function) {
+        // A unit an RMRR holds to remapping only: its functions' DMA is
+        // untranslated, and the first pin announces degraded trusted mode.
+        if !unit.translating() {
+            return Domain::untranslated();
+        }
         unit.attach(function).map(|attached| Translation::VtD {
             unit,
             attached,
@@ -1347,23 +1547,53 @@ fn programmed_unit_for(function: Address) -> Option<&'static vtd::Unit> {
 /// root port is examined after (`discovery::pci`).
 fn vtd_unit_for(programmed: &'static Programmed, function: Address) -> Option<&'static vtd::Unit> {
     let bridges = BRIDGES.lock();
+    let mut explicit = topology::Explicit::None;
     // A single-hop endpoint on a bus behind an aliasing bridge is refused
     // as a longer path through one is: the same `claims` decides.
-    let named = programmed
-        .behind
+    for &(address, index) in &programmed.behind {
+        if address != function {
+            continue;
+        }
+        if claims(false, function, function, &bridges) == topology::Behind::Own {
+            explicit = topology::Explicit::Own(index);
+            break;
+        }
+        explicit = topology::Explicit::Unfollowed;
+    }
+    if !matches!(explicit, topology::Explicit::Own(_)) {
+        for (scope, index) in &programmed.scopes {
+            if scope.segment != function.segment() {
+                continue;
+            }
+            match scope
+                .whole
+                .then(|| scope.places(function, &bridges))
+                .flatten()
+            {
+                Some(topology::Behind::Own) => {
+                    explicit = topology::Explicit::Own(*index);
+                    break;
+                }
+                Some(topology::Behind::No) => {}
+                Some(topology::Behind::Aliased) | None => {
+                    explicit = topology::Explicit::Unfollowed;
+                }
+            }
+        }
+    }
+    let catch_all = programmed
+        .catch_all
         .iter()
-        .find(|(address, _)| *address == function)
-        .filter(|_| claims(false, function, function, &bridges) == topology::Behind::Own)
-        .map(|&(_, index)| index);
-    let index = named.or_else(|| {
-        programmed
-            .scopes
-            .iter()
-            .find(|(scope, _)| scope.places(function, &bridges))
-            .map(|&(_, index)| index)
-    })?;
+        .find(|&&(segment, _)| segment == function.segment())
+        .map_or(topology::CatchAll::None, |&(_, catch_all)| catch_all);
+    let placed = topology::place(explicit, catch_all, function, &bridges);
     drop(bridges);
-    programmed.vtd.get(index)
+    match placed {
+        topology::Placed::Unit(Some(index)) => programmed.vtd.get(index),
+        topology::Placed::Unit(None) | topology::Placed::Nothing | topology::Placed::Unresolved => {
+            None
+        }
+    }
 }
 
 /// The translating `SMMUv3` an IORT root complex sends `function` to, and the
@@ -1499,8 +1729,10 @@ fn count_if_stray(fault: Fault) -> bool {
 /// What [`audit_faults`] found.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct FaultAudit {
-    /// Units translating, whose records were read.
+    /// Units that translate or remap, whose records were read.
     pub(crate) units: usize,
+    /// Of the VT-d ones, those that translate.
+    pub(crate) translating: usize,
     /// Faults a check provoked that were still recorded: the out-of-domain
     /// probe's, arriving after it had stopped looking.
     pub(crate) provoked: u64,
@@ -1529,15 +1761,38 @@ pub(crate) fn audit_faults() -> FaultAudit {
     let mut audit = FaultAudit::default();
     if let Some(programmed) = PROGRAMMED.get() {
         for unit in &programmed.vtd {
+            if !ferrix_paging::vtd::unit::audited(unit.translating(), unit.remapping()) {
+                continue;
+            }
+            if unit.translating() {
+                audit.translating += 1;
+            }
             drain(|| recorded(counted(unit.take_fault())), &mut audit);
         }
         for unit in &programmed.smmu {
+            audit.translating += 1;
             drain(|| recorded(counted(unit.take_fault())), &mut audit);
         }
     }
     audit.stray = STRAY.load(Ordering::Relaxed);
     audit.stray_events = STRAY_EVENTS.load(Ordering::Relaxed);
     audit
+}
+
+/// The same reading of every unit's faults at the end of a boot that skips
+/// its checks (`ferrix.checks=skip`, as the N150 box boots), which nothing
+/// else would read: one line, never fatal, interrupt requests' faults
+/// included, so a boot on hardware shows what its units refused.
+pub(crate) fn report_unchecked_faults() {
+    let audit = audit_faults();
+    println!(
+        "  iommu    {} faults recorded in an unchecked boot, {} of them not a refused DMA \
+         access (interrupt requests' included), across {} units that translate or remap",
+        audit.stray, audit.stray_events, audit.units,
+    );
+    if let Some(fault) = audit.first {
+        println!("  iommu    the first: {fault}");
+    }
 }
 
 /// Count `fault` in [`DMA_FAULTS_READ`] if it is one [`recorded`] writes as a

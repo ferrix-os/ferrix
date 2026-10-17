@@ -277,6 +277,8 @@ OPTIONS:
     --seeds <N>                          test-powerfail cuts   [default: 8]
     --accel <auto|tcg|whpx|kvm|hvf>      QEMU accelerator      [default: auto for run
                                          without --gdb, tcg otherwise]
+    --vtd-aw48                           x86-64: the VT-d unit with aw-bits=48, so the kernel walks
+                                         four-level tables (the N150's only walk)
     --gdb                                Wait for a debugger on :1234, with nokaslr in CMDLINE.TXT so the
                                          kernel runs where its ELF's symbols say, and a debug kernel
                                          built with the full DWARF rather than line tables

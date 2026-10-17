@@ -185,6 +185,10 @@ pub(crate) struct Args {
     /// remapping off, so no device's interrupts are isolated
     /// (`docs/NVIDIA.md` §12.3). Set by that gate, never by a flag.
     pub(crate) unisolated_interrupts: bool,
+    /// `--vtd-aw48`: the x86-64 machine's VT-d unit with a 48-bit guest
+    /// address width, so the kernel walks four-level tables
+    /// (`qemu::INTEL_IOMMU_AW48`).
+    pub(crate) vtd_aw48: bool,
     /// `--memory`, guest RAM in MiB.
     pub(crate) memory: u32,
     /// Whether `--memory` was given: `test-rustc` needs more than the
@@ -811,6 +815,7 @@ impl Args {
             "--slots" => self.slots = true,
             "--steam-preinstall" => self.steam_preinstall = true,
             "--wine" => self.wine = true,
+            "--vtd-aw48" => self.vtd_aw48 = true,
             "--nvidia" => {
                 self.nvidia = true;
                 self.chrome = true;
@@ -850,7 +855,7 @@ impl Args {
                 "--no-net" => args.no_net = true,
                 "--no-dotfiles" | "--session" => args.dotfiles(&item),
                 "--chrome" | "--login" | "--nvidia" | "--update" | "--nvme" | "--i686"
-                | "--slots" | "--steam-preinstall" | "--wine" => args.switch(&item),
+                | "--slots" | "--steam-preinstall" | "--wine" | "--vtd-aw48" => args.switch(&item),
                 "--everything" => args.everything(),
                 "--forward" => {
                     let raw = value(&mut items, "--forward")?;
