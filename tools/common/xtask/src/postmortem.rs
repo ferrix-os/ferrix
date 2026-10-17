@@ -31,6 +31,15 @@
 //! the default's evidence: its report says the processor halts, and no reset
 //! line. A fourth, with `ferrix.panic=Reset`, shows a misspelt value
 //! said as not understood and taken as halt.
+//!
+//! **The event log** (`docs/POSTMORTEM.md` §4, x86-64). The image's ESP in a
+//! GUID partition table laid out as the N150 box's disk is, with the event
+//! log's partition at LBA 40-2047 before it. Boot 1 panics and resets by
+//! itself; boot 2's loader keeps the record in the log before it lets the
+//! region go; then the power is cut (the QEMU process ends) and a second
+//! process boots the disk cold: boot 3's loader finds no pstore and quotes
+//! boot 1's panic from the log, and the host reads the same record back
+//! through `ferrix-eventlog`.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -118,6 +127,11 @@ pub(crate) fn test_postmortem(
         switched_off(arch, args, &build)?;
         reset_by_itself(arch, args, &build)?;
         misspelt(arch, args, &build)?;
+        if arch == Arch::X86_64 {
+            kept_across_power(arch, args, &build)?;
+        } else {
+            println!("  {arch}: the event log's power-cycle case runs on x86_64");
+        }
         println!("  {arch}: test-postmortem passed");
     }
     Ok(())
@@ -534,6 +548,223 @@ fn reset_problem(boot_1: &[String], after: &[String], waited: Option<Duration>) 
         ));
     }
     None
+}
+
+/// The loader's event-log lines.
+const KEPT: &str = "  events   boot 1's panic kept as record #0 (slot 0)";
+const EVENTS: &str = "  events   ";
+/// Where the log goes on the test disk: as on the N150 box.
+const EVENTS_RANGE: (u64, u64) = (40, 2047);
+/// Where the ESP starts.
+const ESP_FIRST: u64 = 2048;
+
+/// The event log across a power cycle (E12).
+fn kept_across_power(
+    arch: Arch,
+    args: &Args,
+    build: &impl Fn(Arch, &Args) -> Result<(PathBuf, PathBuf)>,
+) -> Result<()> {
+    let mut wanted = args.clone();
+    wanted.kernel_options.push("ferrix.onexit=panic".to_owned());
+    wanted.kernel_options.push("ferrix.panic=reset".to_owned());
+    wanted.keep_ram = true;
+    let (image, kernel) = build(arch, &wanted)?;
+    let disk = paths::build_dir(arch).join("eventlog-disk.img");
+    write_disk(&image, &disk)?;
+    let mut boot_1 = Vec::new();
+    let mut boot_2 = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let deadline = Instant::now() + PATIENCE + RESET_WAIT_AT_MOST;
+        let seen = watching.after().len();
+        let kept = watching.read_more(deadline, |lines| {
+            lines
+                .get(seen..)
+                .unwrap_or_default()
+                .iter()
+                .any(|line| line.contains(MIRRORING))
+                && lines.iter().any(|line| line.contains(LOADER_BANNER))
+        })?;
+        boot_1 = watching.lines().to_vec();
+        boot_2 = watching.after().to_vec();
+        if !kept {
+            return Err(Error::new(format!(
+                "{arch}: boot 2 never started after boot 1's panic reset the machine"
+            )));
+        }
+        // The power cut: the process ends, and RAM with it.
+        watching.cut_power();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, &disk, &kernel, &wanted, qemu::PANIC_MARKER, hook)?;
+    let panic = boot_1
+        .iter()
+        .find_map(|line| line.trim_end().strip_prefix("FERRIX-PANIC "))
+        .ok_or_else(|| Error::new(format!("{arch}: boot 1 printed no FERRIX-PANIC line")))?
+        .to_owned();
+    if !boot_2.iter().any(|line| line.contains(KEPT)) {
+        return Err(Error::new(format!(
+            "{arch}: boot 2's loader did not say `{}`",
+            KEPT.trim()
+        )));
+    }
+    let mut boot_3 = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let deadline = Instant::now() + PATIENCE;
+        let _ = watching.read_more(deadline, |lines| {
+            lines.iter().any(|line| line.contains(MIRRORING))
+        })?;
+        boot_3 = watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .cloned()
+            .collect();
+        watching.cut_power();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, &disk, &kernel, &wanted, LOADER_BANNER, hook)?;
+    let record = read_log(&disk)?;
+    kept_problem(&panic, &boot_3, &record).map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch}: {problem}")))
+    })?;
+    println!("  {arch}: boot 1's panic outlived a power cycle in the event log: {panic}");
+    Ok(())
+}
+
+/// The newest record on the disk's event log: its count, its first line
+/// and its text, or why there is none.
+fn read_log(disk: &std::path::Path) -> Result<Option<(u32, String)>> {
+    use ferrix_eventlog::{self as eventlog, Geometry, RECORD_LEN};
+    let file = std::fs::File::open(disk)?;
+    let mut device = LogDisk(&file);
+    let part = ferrix_slots::gpt::Part {
+        index: 0,
+        unique: [0; 16],
+        first_lba: EVENTS_RANGE.0,
+        last_lba: EVENTS_RANGE.1,
+    };
+    let geometry =
+        Geometry::of(&part, 512).map_err(|why| Error::new(format!("the log: {why:?}")))?;
+    let Some(header) = eventlog::read_header(&mut device, &geometry)
+        .map_err(|why| Error::new(format!("the log's header: {why:?}")))?
+    else {
+        return Ok(None);
+    };
+    let Some(slot) = header.newest_slot(geometry.records()) else {
+        return Ok(None);
+    };
+    let mut buffer = vec![0u8; RECORD_LEN];
+    let meta = eventlog::read_record(&mut device, &geometry, slot, &mut buffer)
+        .map_err(|why| Error::new(format!("the log's record: {why:?}")))?;
+    let Some(meta) = meta.filter(|meta| eventlog::counted(&header, meta)) else {
+        return Ok(None);
+    };
+    let text = eventlog::decode_record(&buffer)
+        .map(|(_, text)| String::from_utf8_lossy(text).into_owned())
+        .unwrap_or_default();
+    Ok(Some((meta.count, text)))
+}
+
+/// Why the record did not outlive the power cycle as it should, if it did
+/// not: on the disk, its text boot 1's report as the loader renders it, and
+/// boot 3's loader, which found no pstore, quoting it.
+fn kept_problem(panic: &str, boot_3: &[String], record: &Option<(u32, String)>) -> Option<String> {
+    let Some((_, text)) = record else {
+        return Some("the event log on the disk holds no record after the power cycle".to_owned());
+    };
+    let first = format!("FERRIX_PANIC {}", rendered(panic));
+    if !text.starts_with(&first) {
+        return Some(format!(
+            "the event log's record does not start with boot 1's panic: wanted `{first}`"
+        ));
+    }
+    if !boot_3
+        .iter()
+        .any(|line| line.contains("no previous kernel log (nothing there)"))
+    {
+        return Some("boot 3's loader found a pstore after the power cycle".to_owned());
+    }
+    let summary = format!("newest #0: boot 1 panicked, 1 time(s): {first}");
+    if !boot_3
+        .iter()
+        .any(|line| line.contains(EVENTS) && line.trim_end().ends_with(&summary))
+    {
+        return Some(format!(
+            "boot 3's loader did not quote the record: wanted a line ending `{summary}`"
+        ));
+    }
+    None
+}
+
+/// Write `disk`: a GUID partition table, the event log at
+/// [`EVENTS_RANGE`] (zeroed: no header yet), and `image`, the ESP, from
+/// [`ESP_FIRST`].
+fn write_disk(image: &std::path::Path, disk: &std::path::Path) -> Result<()> {
+    use ferrix_partition::{ESP, Guid, Partition, write_table};
+    let esp = std::fs::read(image)?;
+    let esp_sectors = (esp.len() as u64).div_ceil(512);
+    let sectors = ESP_FIRST + esp_sectors + 2048;
+    let partitions = [
+        Partition::new(
+            Guid(ferrix_eventlog::EVENTS_TYPE),
+            Guid::random([0x31; 16]),
+            EVENTS_RANGE.0,
+            EVENTS_RANGE.1,
+            "ferrix-events",
+        ),
+        Partition::new(
+            ESP,
+            Guid::random([0x32; 16]),
+            ESP_FIRST,
+            ESP_FIRST + esp_sectors - 1,
+            "ferrix-esp",
+        ),
+    ];
+    let table = write_table(sectors, 512, Guid::random([0x33; 16]), &partitions)
+        .map_err(|why| Error::new(format!("the event-log disk's table: {why:?}")))?;
+    let mut bytes = vec![0u8; usize::try_from(sectors * 512).unwrap_or(0)];
+    for (lba, block) in table {
+        let at = usize::try_from(lba * 512).unwrap_or(usize::MAX);
+        if let Some(place) = bytes.get_mut(at..at.saturating_add(block.len())) {
+            place.copy_from_slice(&block);
+        }
+    }
+    let at = usize::try_from(ESP_FIRST * 512).unwrap_or(usize::MAX);
+    if let Some(place) = bytes.get_mut(at..at.saturating_add(esp.len())) {
+        place.copy_from_slice(&esp);
+    }
+    std::fs::write(disk, bytes)?;
+    Ok(())
+}
+
+/// The disk file as the event log's device, for reading it back.
+struct LogDisk<'a>(&'a std::fs::File);
+
+impl ferrix_slots::record::ControlDisk for LogDisk<'_> {
+    fn block_size(&self) -> u32 {
+        512
+    }
+    fn write_block(
+        &mut self,
+        _: u64,
+        _: &[u8],
+    ) -> std::result::Result<(), ferrix_slots::record::DeviceError> {
+        Err(ferrix_slots::record::DeviceError)
+    }
+    fn flush(&mut self) -> std::result::Result<(), ferrix_slots::record::DeviceError> {
+        Ok(())
+    }
+    fn read_block(
+        &mut self,
+        lba: u64,
+        bytes: &mut [u8],
+    ) -> std::result::Result<(), ferrix_slots::record::DeviceError> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = self.0;
+        file.seek(SeekFrom::Start(lba * 512))
+            .and_then(|_| file.read_exact(bytes))
+            .map_err(|_| ferrix_slots::record::DeviceError)
+    }
 }
 
 /// What the kernel says of a value of `ferrix.panic` it does not take.
