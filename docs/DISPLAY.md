@@ -37,53 +37,65 @@ the same on a person's screen.
 
 ## 2. The four questions
 
-### 2.1 Who owns the scanout memory: the core, in one VMO per card
+### 2.1 Who owns the scanout memory: the core, in one VMO per buffer
 
-**The display core owns the pixels.** Each card has one kernel VMO, the *card
-VMO*: anonymous, sparse and committed on demand. It is sized to the card's
-buffer budget (iteration 1: 256 MiB), which is also the most memory an opener
-can make the card commit. A dumb buffer is a page-aligned range of it, the
-first free one that fits. `MODE_MAP_DUMB` returns the range's offset. A buffer
-is at most `MAX_BUFFER_PAGES` (8192 pages, 32 MiB: a 4K buffer), which the
-driver sizes its backing lists for.
+**The display core owns the pixels.** Each dumb buffer is a kernel VMO of
+its own, anonymous and committed on demand, made by the core when
+`CREATE_DUMB` asks for it (displayctl version 9, 2026-10-17). The card keeps
+a buffer budget (iteration 1: 256 MiB), counted in bytes over every buffer
+it holds, which is also the most memory an opener can make the card commit.
+A buffer is at most `MAX_BUFFER_PAGES` (8192 pages, 32 MiB: a 4K buffer),
+which the driver sizes its backing lists for.
 
-* **The compositor maps it with no new mapping code.** `card0`'s devfs inode
-  answers `Inode::mapping()` with the card VMO. `mmap(fd, len, PROT_READ |
-  PROT_WRITE, MAP_SHARED, offset)` then goes through the file-backed
-  `MAP_SHARED` path that already landed (`src/kernel/src/syscall/memory.rs`,
-  `map_file`). DRM's "fake offsets" become real offsets into one object.
-  mmap asks the *inode*, not the per-open object, so the buffers live in
-  the node's card state, not in the opener's `File`.
-* **The driver pins it read-only.** The core sends the driver a duplicate of
-  the card VMO handle once, with `READ | TRANSFER` rights only, never `WRITE`
-  or `MAP`. For each buffer the driver calls `VMO_PIN(device, card_vmo,
-  offset, length, PIN_READ_ONLY)` and `VMO_PIN_ADDRESSES`. It then gives the
-  device those pages as the resource's backing (`RESOURCE_ATTACH_BACKING`,
-  one entry per run of consecutive device addresses). The device only reads
-  guest backing, so the driver can neither write nor see the pixels.
-  `vmo_pin` already allows exactly this: `READ` on the VMO, `MANAGE` on the
-  device.
+Until version 9 every buffer was a page-aligned range of one *card VMO*, and
+the card's devfs node mapped the whole of it. Whoever held the card could
+then map past their buffer into another's, or an offset no buffer of theirs
+had, and a mapping kept after `DESTROY_DUMB` saw whichever buffer was given
+its range next: E-02 (`docs/AUTH.md` §8.3). A VMO a buffer closes all three.
+
+* **An open maps its own buffers, and nothing else.** `MODE_MAP_DUMB`
+  answers an offset that *names* the buffer, its handle shifted up 25 bits
+  (`drm::MAP_SHIFT`; 25, so that ARMv7's `mmap2` reaches handles up to 2^19),
+  as the render node's offsets do. `mmap` asks the open file first
+  (`Inode::mapping_at`), and the open answers the buffer's VMO only for a
+  handle it made and has not destroyed; the card's node maps nothing, so
+  any other offset is `ENODEV`. `map_file`'s bounds check against the
+  buffer's own VMO refuses a mapping past its end. A mapping holds its open,
+  as on Linux, and keeps only its own buffer's VMO alive.
+* **The driver pins it read-only.** Each `ATTACH` carries the buffer's VMO,
+  with `READ | TRANSFER` rights only, never `WRITE` or `MAP`. The driver
+  calls `VMO_PIN(device, vmo, offset, length, PIN_READ_ONLY)` and
+  `VMO_PIN_ADDRESSES`, closes the handle (the pin holds the pages), and
+  gives the device those pages as the resource's backing
+  (`RESOURCE_ATTACH_BACKING`, one entry per run of consecutive device
+  addresses). The device only reads guest backing, so the driver can
+  neither write nor see the pixels. `vmo_pin` already allows exactly this:
+  `READ` on the VMO, `MANAGE` on the device.
 * **One driver kind copies (displayctl v8).** A display engine that reads
   only its own memory -- NVIDIA's, whose scan-out is in the GPU's VRAM --
-  cannot be given the card's pages. Its driver, `nvrm` (`docs/NVIDIA.md`
+  cannot be given a buffer's pages. Its driver, `nvrm` (`docs/NVIDIA.md`
   §4.5), copies each flushed rectangle into VRAM with the processor, so it
-  must see the pixels. Its HELLO sets the `copies` flag, and the core then
-  hands it the card VMO with `READ | MAP | TRANSFER`, still never `WRITE`;
-  it maps the card read-only. A driver without the flag gets exactly the
-  rights above. The boot log says which: `display  card0 copies frames`.
-  The firmware framebuffer's driver, `efifb`, copies too, into a screen of
-  memory with no engine at all (§8).
+  must see the pixels. Its HELLO sets the `copies` flag, and each `ATTACH`
+  then hands it the buffer's VMO with `READ | MAP`, still never `WRITE`; it
+  maps the buffer read-only and unmaps it at `DETACH`. A driver without the
+  flag gets exactly the rights above. The boot log says which: `display
+  card0 copies frames`. The firmware framebuffer's driver, `efifb`, copies
+  too, into a screen of memory with no engine at all (§8).
 * **No copy in the guest.** The compositor writes pages that are the device's
   backing. virtio-gpu 2D does copy on the host side (`TRANSFER_TO_HOST_2D`),
   which is QEMU's business.
 * **Freeing.** `MODE_DESTROY_DUMB` sends `DETACH` without waiting, or, while
   a framebuffer still refers to the buffer, only takes the handle away and
   detaches with the last `RMFB`, as Linux keeps the object. Closing the card
-  turns the scanout off and detaches every buffer the open made. A range
-  comes back when `DETACHED` reports success, or when `ATTACHED` reports a
-  failure: the card's task decommits it, so the next buffer there starts
-  zeroed and shows nothing of the last one, then gives it back. A refused
-  `DETACHED` keeps the range, and the id, out of use for good.
+  turns the scanout off and detaches every buffer the open made. A
+  buffer's bytes come back to the budget when `DETACHED` reports success,
+  or when `ATTACHED` reports a failure: the card's task decommits its VMO,
+  so a mapping its program kept holds nothing of the budget and sees only
+  its own buffer, zeroed, and then gives the bytes back. Such a mapping can
+  fault zeroed pages back into its own VMO, up to the buffer's size; they
+  are charged to the faulting job's memory, not to the card's budget, which
+  bounds what the card commits and no longer what a kept mapping does. A refused
+  `DETACHED` keeps the VMO, its bytes and the id out of use for good.
 * **Buffer ids are the card's, not the open's.** The core numbers buffers on
   the card and never reuses an id, so no reply is taken for a later buffer's
   request and the driver never sees an id again that the device may still
@@ -98,18 +110,17 @@ driver sizes its backing lists for.
   request: a full channel answers `EBUSY` to the program, and a closed
   open's scanout-off and detaches wait for room instead of taking the card
   down.
-* **A range a driver still pins is never reused.** After the decommit the
-  core asks the card VMO whether any page of the range is still held for
-  the device; one that is means the driver replied before it unpinned, and
-  the range stays out of use for good, with a line on the console.
+* **A buffer a driver still pins is never freed.** After the decommit the
+  core asks the buffer's VMO whether any page is still held for the device;
+  one that is means the driver replied before it unpinned, and the VMO and
+  its bytes are kept for the card's life, with a line on the console.
 * **A driver refused before READY does not stop the boot.** devmgr waits for
   PUBLISHED or for the driver's exit, whichever comes first, and counts a
   driver that exits unpublished as failed.
 
 **The size `card0` reports.** `card0`'s inode reports `st_size` equal to the
-card VMO's size, `CARD_BUDGET`. `map_file`'s bounds check, which is what makes
-touching a `MAP_SHARED` mapping past the end raise `SIGBUS`, then holds with no
-devfs special case (os-f6's decision).
+budget, `CARD_BYTES`, as it did when that was the card VMO's size (os-f6's
+decision). A mapping's bounds are its buffer's VMO's now.
 
 The budget is one named constant with its arithmetic beside it: a 4K mode is
 3840 × 2160 × 4 bytes, about 33 MiB a buffer, so double-buffered 4K is 66 MiB.
@@ -135,9 +146,9 @@ others.
 | Type | Direction | Body | Handles |
 |---|---|---|---|
 | `HELLO` | driver → core | version; scanout count (1 in iteration 1); for each scanout the preferred mode `width, height` from `GET_DISPLAY_INFO` and whether it is enabled; what the card said about 3D; whether it has a cursor plane; each scanout's refresh in millihertz, 0 when unknown (protocol version 7, 2026-10-02) | driver port (`WRITE \| TRANSFER`) |
-| `READY` | core → driver | card id | card VMO (`READ \| TRANSFER`), core port (`WRITE`) |
+| `READY` | core → driver | card id, the budget | core port (`WRITE`); until version 9 the card VMO too |
 | `REFUSED` | core → driver | reason | — |
-| `ATTACH` | core → driver | buffer id, offset, length, width, height, stride, format (`XRGB8888` only) | — |
+| `ATTACH` | core → driver | buffer id, offset in its VMO (0 from the core), length, width, height, stride, format (`XRGB8888` only) | the buffer's VMO (`READ \| TRANSFER`, or `READ \| MAP` to a driver that copies; version 9) |
 | `ATTACHED` | driver → core | buffer id, status | — |
 | `SCANOUT` | core → driver | scanout, buffer id (0 turns the scanout off), source rectangle | — |
 | `FLUSH` | core → driver | buffer id, damage rectangle, sequence | — |
@@ -398,10 +409,9 @@ additive later landing. Stage 17's text names it and stays as written.
   refactor that I'd rather not smuggle in.
 * **An exclusive open.** A second `open` gets `EBUSY` until the first closes.
   That stands in for DRM master and keeps one opener's buffers from another
-  in iteration 1. It does not end a mapping: a program that mapped the card
-  and closed it can still read whatever the next opener draws. The node is
-  `0660` root's, as Linux's `video` group has it, until per-open windows onto
-  the card VMO (stage 19's render node) close that.
+  in iteration 1. A mapping holds its open, as on Linux, and since
+  version 9 it reaches only the buffer it was made of (E-02, §2.1). The node
+  is `0660` root's, as Linux's `video` group has it.
 * **`poll`/`epoll` readiness** on the node when os-26's epoll lands. The
   compositor already waits on its Wayland, input, control, event, and plugin
   descriptors, so an inactive desktop does not scan them on a fixed timer.

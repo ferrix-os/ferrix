@@ -95,8 +95,8 @@ pub enum Event {
 /// What the session remembers of a buffer, whichever way it was made.
 ///
 /// Its id and its shape, which is all the rules here are about: a rectangle
-/// shown or flushed has to be inside it. Where its pixels *are* -- a range
-/// of the card VMO, or a resource the device already holds -- is the
+/// shown or flushed has to be inside it. Where its pixels *are* -- a VMO of
+/// its own, or a resource the device already holds -- is the
 /// driver's business once the buffer is made.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Buffer {
@@ -156,7 +156,8 @@ pub struct Session {
 
 impl Session {
     /// Accept a driver's HELLO, with the rights of the handles it came with,
-    /// for a card VMO of `card_bytes`.
+    /// for a card whose buffers may each be up to `card_bytes` of their
+    /// VMOs.
     pub fn accept(
         hello: &Hello,
         handle_rights: &[Rights],

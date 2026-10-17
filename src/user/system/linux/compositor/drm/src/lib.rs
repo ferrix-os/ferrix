@@ -16,6 +16,8 @@ mod card;
 #[cfg(target_os = "linux")]
 mod device;
 mod edid;
+#[cfg(target_os = "linux")]
+mod isolation;
 pub mod modeset;
 #[cfg(target_os = "linux")]
 mod render;
@@ -27,6 +29,8 @@ pub use card::{
 #[cfg(target_os = "linux")]
 pub use device::RenderDevice;
 pub use edid::{Edid, registered};
+#[cfg(target_os = "linux")]
+pub use isolation::{PREFIX as ISOLATION, isolation};
 #[cfg(target_os = "linux")]
 pub use render::{Box3d, Mapping, Render, ResourceCreate, probe};
 

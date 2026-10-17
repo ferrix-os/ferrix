@@ -9,8 +9,8 @@
 //! 1. waits for HELLO and checks it through [`Session::accept`], the device's
 //!    location, and the firmware framebuffer's rule (§2.4), answering REFUSED
 //!    with the first failure;
-//! 2. makes the card VMO, whose ranges are the dumb buffers, publishes the
-//!    card, and answers READY with the VMO (`READ | TRANSFER`) and a port;
+//! 2. publishes the card and answers READY with a port; every buffer is a
+//!    VMO of its own, which its ATTACH hands the driver (`READ | TRANSFER`);
 //! 3. serves: every message the driver sends goes through the session, which
 //!    accepts only the replies it is waiting for; the replies it accepts are
 //!    queued as [`Event`]s for whoever made the request to collect;
@@ -19,8 +19,19 @@
 //!
 //! # The kernel never draws
 //!
-//! The card VMO's pages are filled by the program that maps them. The core
-//! only says which range is which buffer, which is shown, and what changed.
+//! A buffer's pages are filled by the program that maps them. The core only
+//! says which VMO is which buffer, which is shown, and what changed.
+//!
+//! # One VMO a buffer
+//!
+//! A buffer's VMO is the open's that made it and nobody else's: the open
+//! maps it by the offset `MODE_MAP_DUMB` names it by, and nothing else on
+//! the card. Before, every buffer was a range of one card VMO, and the card's
+//! node mapped the whole of it, so an open could map another open's pixels,
+//! and a mapping kept past its buffer saw whatever buffer was given its range
+//! next (E-02, `docs/DISPLAY.md` §2.1). Now a mapping that outlives its buffer
+//! sees only that buffer's own pages, given back, and the card's budget is
+//! counted in bytes rather than kept as a range of one object.
 
 use alloc::sync::Arc;
 use alloc::vec;
@@ -70,8 +81,15 @@ pub(crate) const DRM_MAJOR: u32 = 226;
 /// The most replies kept that no request is waiting for.
 const MAX_EVENTS: usize = 64;
 
-/// The most memory one card's buffers may take, which is the card VMO's size
-/// and so also the most an opener of the card can make it commit.
+/// The most memory one card's buffers may take together, and so also the
+/// most an opener of the card can make it commit through the card.
+///
+/// A mapping a program keeps past its buffer's `DESTROY_DUMB` can fault
+/// zeroed pages back into that buffer's VMO, up to the buffer's size, after
+/// the card has given its bytes back; those pages are charged to the
+/// faulting job's memory (`object::quota`), not to this budget. They are its
+/// own pages and nobody else's, so isolation holds; the budget bounds what
+/// the card commits, the job's limit what such a mapping does.
 ///
 /// A 4K mode is 3840 × 2160 × 4 bytes, about 33 MiB a buffer, so a
 /// double-buffered 4K screen is 66 MiB; 256 MiB leaves room for a cursor and
@@ -154,8 +172,9 @@ static NUMBERS: Numbers = Numbers::new(0);
 pub(crate) struct Card {
     /// `card<index>`.
     pub(crate) index: u32,
-    /// The pages the dumb buffers are ranges of.
-    pub(crate) vmo: Arc<Vmo>,
+    /// Whether the driver said it copies, and so maps each buffer's VMO
+    /// read-only rather than pinning it.
+    copies: bool,
     /// Each scanout's preferred mode: HELLO's, then each MODES's.
     modes: SpinLock<[ScanoutMode; MAX_SCANOUTS]>,
     /// How many times MODES changed `modes`, which an open card reads to
@@ -185,11 +204,11 @@ pub(crate) struct Card {
     edids: Vec<Option<Vec<u8>>>,
 }
 
-/// The range of the card VMO a buffer id was given.
-#[derive(Clone, Copy, Debug)]
+/// The VMO a buffer id was given, and how much of the card's budget it takes.
+#[derive(Clone, Debug)]
 struct Range {
     buffer: u32,
-    offset: u64,
+    vmo: Arc<Vmo>,
     bytes: u64,
     /// Bytes a row, for cleaning the rows a flush names.
     stride: u32,
@@ -211,12 +230,16 @@ struct State {
     /// be taken for a later buffer's, and the driver never sees an id again
     /// that the device may still hold pages under.
     next_buffer: u32,
-    /// Where never-used space in the card VMO starts.
-    next_offset: u64,
-    /// Ranges given back, decommitted, sorted by offset, neighbours merged.
-    free: Vec<(u64, u64)>,
-    /// The range of every buffer id the session may still track.
+    /// Bytes of [`CARD_BYTES`] the buffers take: every buffer the session
+    /// may still track, and every one whose pages its device kept.
+    taken: u64,
+    /// The VMO of every buffer id the session may still track.
     ranges: Vec<Range>,
+    /// Buffers whose pages the device may still hold: a refused detach's,
+    /// and one still pinned after its driver let go. Kept for the card's
+    /// life, counted in [`State::taken`], so its pages are never freed under
+    /// the device and never dropped with a spin lock held.
+    kept: Vec<Range>,
     /// Buffers nobody holds any more that are not detached yet: attaches
     /// that timed out, and buffers busy when they were let go. Each is
     /// detached as soon as the session allows it.
@@ -233,42 +256,24 @@ struct State {
 }
 
 impl State {
-    /// A page-aligned range of `bytes`, the first that fits.
-    fn allocate(&mut self, bytes: u64) -> Option<u64> {
-        if let Some(at) = self.free.iter().position(|&(_, len)| len >= bytes) {
-            let (offset, len) = self.free.remove(at);
-            if len > bytes {
-                self.free.insert(at, (offset + bytes, len - bytes));
-            }
-            return Some(offset);
-        }
-        let end = self
-            .next_offset
+    /// Take `bytes` of the card's budget, if they are left.
+    fn reserve(&mut self, bytes: u64) -> bool {
+        match self
+            .taken
             .checked_add(bytes)
-            .filter(|&end| end <= CARD_BYTES)?;
-        let offset = self.next_offset;
-        self.next_offset = end;
-        Some(offset)
+            .filter(|&end| end <= CARD_BYTES)
+        {
+            Some(end) => {
+                self.taken = end;
+                true
+            }
+            None => false,
+        }
     }
 
-    /// Give a decommitted range back.
-    fn give_back(&mut self, offset: u64, bytes: u64) {
-        let at = self.free.partition_point(|&(start, _)| start < offset);
-        self.free.insert(at, (offset, bytes));
-        let mut merged: Vec<(u64, u64)> = Vec::with_capacity(self.free.len());
-        for (start, len) in self.free.drain(..) {
-            match merged.last_mut() {
-                Some(last) if last.0 + last.1 == start => last.1 += len,
-                _ => merged.push((start, len)),
-            }
-        }
-        if let Some(&(start, len)) = merged.last()
-            && start + len == self.next_offset
-        {
-            self.next_offset = start;
-            let _ = merged.pop();
-        }
-        self.free = merged;
+    /// Give `bytes` of the budget back.
+    fn give_back(&mut self, bytes: u64) {
+        self.taken = self.taken.saturating_sub(bytes);
     }
 
     fn take_range(&mut self, buffer: u32) -> Option<Range> {
@@ -316,10 +321,12 @@ impl State {
             Event::Flipped { sequence, .. } => !self.forget(Unwanted::Flipped(sequence)),
             Event::Detached { buffer, status } => {
                 let range = self.take_range(buffer);
-                // A refused detach leaves the pages the device's: its range
-                // is never handed out again (`docs/DISPLAY.md` §2.2).
+                // A refused detach leaves the pages the device's: its VMO is
+                // kept, and its bytes stay taken (`docs/DISPLAY.md` §2.2).
                 if status == Status::Ok {
                     freed = range;
+                } else if let Some(range) = range {
+                    self.kept.push(range);
                 }
                 !self.forget(Unwanted::Detached(buffer))
             }
@@ -389,9 +396,20 @@ impl State {
 /// only writer, so the write fails only when the driver is gone, and the
 /// card goes with it.
 fn write(control: &Endpoint, state: &mut State, message: &Message) -> Result<(), CardError> {
+    write_handing(control, state, message, Vec::new())
+}
+
+/// [`write`], handing the driver `handed` with the message.
+fn write_handing(
+    control: &Endpoint,
+    state: &mut State,
+    message: &Message,
+    handed: Vec<Transfer>,
+) -> Result<(), CardError> {
     let bytes = message.encode().as_bytes().to_vec();
+    let count = handed.len();
     if control
-        .write(bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()))
+        .write(bytes, count, || Ok::<Vec<Transfer>, Infallible>(handed))
         .is_err()
     {
         state.gone = true;
@@ -468,14 +486,15 @@ impl Card {
     }
 
     /// What `stat` says of the card: a character device whose size is the
-    /// card VMO's, so a mapping's bounds check holds (§2.1).
+    /// most its buffers may take together (§2.1).
     pub(crate) fn metadata(&self) -> ferrix_vfs::Metadata {
         use ferrix_vfs::{FileType, Metadata, Timespec};
         Metadata {
             ino: (1u64 << 40) + u64::from(self.index),
             kind: FileType::CharDevice,
             // Owner and group only, as Linux's `video` group has it: whoever
-            // opens the card can map every range of it.
+            // opens the card holds the screen. An open maps only the buffers
+            // it made (E-02).
             permissions: 0o660,
             nlink: 1,
             uid: 0,
@@ -539,99 +558,115 @@ impl Card {
         Err(CardError::TimedOut)
     }
 
-    /// Give a new buffer of `width` × `height` rows of `stride` bytes a
-    /// range and an id, ATTACH it and wait for ATTACHED: the id, the range's
-    /// offset and how the attach went.
+    /// Give a new buffer of `width` × `height` rows of `stride` bytes a VMO
+    /// of its own and an id, ATTACH it with the VMO and wait for ATTACHED:
+    /// the id, the VMO, which the open that asked maps and nobody else, and
+    /// how the attach went.
     pub(crate) fn attach(
         &self,
         width: u32,
         height: u32,
         stride: u32,
-    ) -> Result<(u32, u64, Status), CardError> {
+    ) -> Result<(u32, Arc<Vmo>, Status), CardError> {
         let pixels = u64::from(stride) * u64::from(height);
         let bytes = pixels
             .checked_next_multiple_of(PAGE_SIZE)
             .filter(|&bytes| bytes > 0 && bytes <= MAX_BUFFER_PAGES * PAGE_SIZE)
             .ok_or(CardError::NoRoom)?;
-        // A device that reads one run of addresses gets its range filled
-        // with one block of frames before the driver hears of it, outside
-        // the state lock: zeroing megabytes is not something to do with
-        // preemption off.
-        let reserved = if self.dma.contiguous {
-            let offset = self.state.lock().allocate(bytes).ok_or(CardError::NoRoom)?;
-            if !commit_contiguous(&self.vmo, offset, bytes) {
-                self.forget_range(offset, bytes);
-                return Err(CardError::NoRoom);
-            }
-            Some(offset)
-        } else {
-            None
+        if !self.state.lock().reserve(bytes) {
+            return Err(CardError::NoRoom);
+        }
+        let Ok(vmo) = Vmo::new_anonymous(bytes / PAGE_SIZE) else {
+            self.state.lock().give_back(bytes);
+            return Err(CardError::NoRoom);
         };
-        let sent = self.send(|state| {
-            let buffer = state.next_buffer;
-            let next = buffer.checked_add(1).ok_or(CardError::NoRoom)?;
-            let offset = match reserved {
-                Some(offset) => offset,
-                None => state.allocate(bytes).ok_or(CardError::NoRoom)?,
-            };
-            let attach = Attach {
-                buffer,
-                format: FORMAT,
-                offset,
-                length: bytes,
-                width,
-                height,
-                stride,
-            };
-            match state.session.attach(attach) {
-                Ok(message) => {
-                    state.next_buffer = next;
-                    state.ranges.push(Range {
-                        buffer,
-                        offset,
-                        bytes,
-                        stride,
-                    });
-                    Ok((message, (buffer, offset)))
-                }
-                Err(error) => {
-                    // Never sent, so never pinned, and nothing wrote to it.
-                    // A reserved range holds frames, and goes back below.
-                    if reserved.is_none() {
-                        state.give_back(offset, bytes);
-                    }
-                    Err(CardError::Request(error))
-                }
-            }
-        });
-        let (buffer, offset) = match (sent, reserved) {
-            (Ok(sent), _) => sent,
-            (Err(error), Some(offset)) => {
+        // A device that reads one run of addresses gets its VMO filled with
+        // one block of frames before the driver hears of it, outside the
+        // state lock: zeroing megabytes is not something to do with
+        // preemption off.
+        if self.dma.contiguous && !commit_contiguous(&vmo, 0, bytes) {
+            self.state.lock().give_back(bytes);
+            return Err(CardError::NoRoom);
+        }
+        let sent = self.send_attach(&vmo, bytes, width, height, stride);
+        let buffer = match sent {
+            Ok(buffer) => buffer,
+            Err(error) => {
                 // Unless a buffer was made of it after all, which only a
-                // write to a driver that has just gone can leave behind.
-                let taken = self.state.lock().ranges.iter().any(|r| r.offset == offset);
-                if !taken {
-                    self.forget_range(offset, bytes);
+                // write to a driver that has just gone can leave behind:
+                // never sent, so never pinned, and its bytes go back.
+                let mut state = self.state.lock();
+                if !state
+                    .ranges
+                    .iter()
+                    .any(|range| Arc::ptr_eq(&range.vmo, &vmo))
+                {
+                    state.give_back(bytes);
                 }
                 return Err(error);
             }
-            (Err(error), None) => return Err(error),
         };
         let event = self.collect(
             |event| matches!(event, Event::Attached { buffer: b, .. } if *b == buffer),
             |state| state.orphans.push(buffer),
         )?;
         match event {
-            Event::Attached { status, .. } => Ok((buffer, offset, status)),
+            Event::Attached { status, .. } => Ok((buffer, vmo, status)),
             _ => Err(CardError::Gone),
         }
+    }
+
+    /// Give `vmo` a buffer id and send its ATTACH, handing the driver the VMO:
+    /// the id. With the state locked throughout, as [`Card::send`] has it.
+    fn send_attach(
+        &self,
+        vmo: &Arc<Vmo>,
+        bytes: u64,
+        width: u32,
+        height: u32,
+        stride: u32,
+    ) -> Result<u32, CardError> {
+        let mut state = self.state.lock();
+        if state.gone || self.control.peer_closed() {
+            return Err(CardError::Gone);
+        }
+        // Before the session commits to the request, as `send` has it: a
+        // driver that is behind makes the caller try again.
+        if !self.control.peer_has_room() {
+            return Err(CardError::Busy);
+        }
+        let buffer = state.next_buffer;
+        let next = buffer.checked_add(1).ok_or(CardError::NoRoom)?;
+        let attach = Attach {
+            buffer,
+            format: FORMAT,
+            offset: 0,
+            length: bytes,
+            width,
+            height,
+            stride,
+        };
+        let message = state.session.attach(attach).map_err(CardError::Request)?;
+        state.next_buffer = next;
+        state.ranges.push(Range {
+            buffer,
+            vmo: Arc::clone(vmo),
+            bytes,
+            stride,
+        });
+        let handed = vec![(
+            Object::Vmo(Arc::clone(vmo)),
+            Ready::card_rights(self.copies),
+        )];
+        write_handing(&self.control, &mut state, &message, handed)?;
+        Ok(buffer)
     }
 
     /// Give an object the render core made a buffer id, `ATTACH_OBJ` it and
     /// wait for ATTACHED: the id and how the attach went.
     ///
     /// The other way to make a buffer, and the difference is where the
-    /// pixels are. An ATTACH's are a range of the card VMO, which the driver
+    /// pixels are. An ATTACH's are a VMO of their own, which the driver
     /// pins for the device; these are the device's own already, so there is
     /// no range to allocate, nothing to pin, and nothing to send when the
     /// frame changes -- which is the whole of why it exists. What the driver
@@ -718,8 +753,7 @@ impl Card {
 
     /// Write `rows` rows of `buffer` from row `first` back from the caches
     /// to memory, for a device that reads memory rather than the caches.
-    /// Nothing to do for a coherent one, or for a buffer that is not a range
-    /// of the card VMO.
+    /// Nothing to do for a coherent one, or for a buffer with no VMO here.
     ///
     /// Runs without the state lock: the range's pages are pinned by the
     /// driver for as long as the buffer is attached, and a clean of a page
@@ -735,7 +769,7 @@ impl Card {
             .ranges
             .iter()
             .find(|range| range.buffer == buffer)
-            .copied()
+            .cloned()
         else {
             return;
         };
@@ -745,25 +779,17 @@ impl Card {
             .saturating_add(u64::from(rows))
             .saturating_mul(stride)
             .min(range.bytes);
-        let mut at = range.offset + start;
-        let stop = range.offset + end;
+        let mut at = start;
+        let stop = end;
         while at < stop {
             let page_end = (at / PAGE_SIZE + 1) * PAGE_SIZE;
             let len = page_end.min(stop) - at;
-            if let Some(frame) = self.vmo.page(at / PAGE_SIZE) {
+            if let Some(frame) = range.vmo.page(at / PAGE_SIZE) {
                 let virt = crate::mm::direct_map(frame * PAGE_SIZE) + at % PAGE_SIZE;
                 crate::arch::clean_for_device(virt, len);
             }
             at += len;
         }
-    }
-
-    /// Give back a range no buffer was made of, frames and all.
-    fn forget_range(&self, offset: u64, bytes: u64) {
-        let _ = self
-            .vmo
-            .decommit_range(offset / PAGE_SIZE, bytes / PAGE_SIZE);
-        self.state.lock().give_back(offset, bytes);
     }
 
     /// CURSOR: show `buffer` -- [`ferrix_displayctl::message::CURSOR_SIZE`]
@@ -952,8 +978,8 @@ pub(crate) fn install() -> Result<(), Full> {
     native::register_server(&SERVER)
 }
 
-/// Whether a driver of `device` may say it copies, and so be handed the card
-/// VMO it can map. A card the driver can map is the kernel's to give, not the
+/// Whether a driver of `device` may say it copies, and so be handed buffer
+/// VMOs it can map. A card the driver can map is the kernel's to give, not the
 /// driver's to claim: only one whose device files the chardev core already
 /// serves for this device, which is NVIDIA's (`docs/DISPLAY.md` §2.1), and
 /// the firmware framebuffer's node, which is a screen of memory a driver can
@@ -1108,7 +1134,6 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     // and the kernel's configuration is read back (`DeviceNode::verify_config`).
     start.device.hello_accepted();
 
-    let vmo = Vmo::new_anonymous(CARD_BYTES / PAGE_SIZE).map_err(|_| Refusal::Malformed)?;
     // The wire protocol has no refusal for memory; a malformed start is the
     // nearest it has.
     let core_port = Port::new().map_err(|_| Refusal::Malformed)?;
@@ -1126,7 +1151,7 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     let card = Arc::new(Card {
         index,
         node: start.device.index(),
-        vmo: Arc::clone(&vmo),
+        copies: hello.copies,
         modes: SpinLock::new(hello.modes),
         modes_changed: AtomicU64::new(0),
         scanouts: usize::from(hello.scanouts),
@@ -1136,9 +1161,9 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
             events: Vec::new(),
             gone: false,
             next_buffer: 1,
-            next_offset: 0,
-            free: Vec::new(),
+            taken: 0,
             ranges: Vec::new(),
+            kept: Vec::new(),
             orphans: Vec::new(),
             unwanted: Vec::new(),
             scanout_off: false,
@@ -1180,15 +1205,13 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     .encode()
     .as_bytes()
     .to_vec();
-    let handed = vec![
-        // A driver that copies with its processor maps the card read-only;
-        // every other only pins it (`docs/DISPLAY.md` §2.1). Never WRITE.
-        (Object::Vmo(vmo), Ready::card_rights(hello.copies)),
-        (Object::Port(core_port), Rights::WRITE),
-    ];
+    // No VMO: each buffer's comes with its ATTACH, which a driver that
+    // copies with its processor maps read-only and every other only pins
+    // (`docs/DISPLAY.md` §2.1). Never WRITE.
+    let handed = vec![(Object::Port(core_port), Rights::WRITE)];
     if start
         .control
-        .write(ready, 2, || Ok::<Vec<Transfer>, Infallible>(handed))
+        .write(ready, 1, || Ok::<Vec<Transfer>, Infallible>(handed))
         .is_err()
     {
         state.gone = true;
@@ -1268,15 +1291,18 @@ fn announce(card: &Card, hello: &Hello) {
     }
 }
 
-/// Take a range back from a buffer the driver let go of. Nothing the next
-/// buffer's program maps may show what the last one drew, so its pages are
-/// decommitted. A page still pinned is skipped by the decommit: the driver
-/// replied before it unpinned, which a correct one never does, and the range
-/// is kept out of use for good, as a refused detach's is (os-02's review).
+/// Take a buffer back that the driver let go of. Its pages are decommitted,
+/// so that a mapping its program kept past it -- which only ever reaches its
+/// own VMO -- holds nothing of the card's budget. A page still pinned is
+/// skipped by the decommit: the driver replied before it unpinned, which a
+/// correct one never does, and the buffer is kept and its bytes stay taken
+/// for good, as a refused detach's are (os-02's review).
+///
+/// Runs in the card's task with no lock held, which a decommit needs.
 fn reclaim(card: &Card, range: Range) {
-    let (first, pages) = (range.offset / PAGE_SIZE, range.bytes / PAGE_SIZE);
-    let _ = card.vmo.decommit_range(first, pages);
-    if card.vmo.holds_any(first, pages) {
+    let pages = range.bytes / PAGE_SIZE;
+    let _ = range.vmo.decommit_range(0, pages);
+    if range.vmo.holds_any(0, pages) {
         crate::console::println!(
             "  display  card{}: buffer {} is still pinned after its driver let go; \
              {} pages kept out of use",
@@ -1284,9 +1310,10 @@ fn reclaim(card: &Card, range: Range) {
             range.buffer,
             pages
         );
+        card.state.lock().kept.push(range);
         return;
     }
-    card.state.lock().give_back(range.offset, range.bytes);
+    card.state.lock().give_back(range.bytes);
 }
 
 /// Serve the card until its driver goes.

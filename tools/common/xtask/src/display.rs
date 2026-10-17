@@ -14,6 +14,12 @@
 //! property break fails here before a compositor panics on it
 //! (`docs/DISPLAY.md` §2.3, E4).
 //!
+//! Before it shows anything the program checks, on opens of the card it
+//! closes again, that an open maps its own buffers and nothing else
+//! (E-02, `docs/DISPLAY.md` §2.1), and prints [`ISOLATION`] with the
+//! answer; anything but `ok` fails the test. Its negative control is the
+//! kernel's fix reverted, run through `gate.sh control --expect`.
+//!
 //! A check that cannot fail proves nothing, so the test runs twice: once as
 //! above, and once with the program built with `negative-control`, which
 //! draws pixel (0, 0) in another colour. The second boot must fail the check
@@ -58,6 +64,10 @@ pub(crate) const FAILED: &str = "compositor: failed";
 /// What the marker line ends with when the card has a primary plane for the
 /// CRTC the program set: `plane <id> Primary`.
 const PRIMARY: &str = "Primary";
+
+/// What the program's isolation line starts with: the same string as
+/// `src/user/system/linux/compositor/drm/src/isolation.rs`'s `PREFIX`.
+const ISOLATION: &str = "card-isolation: ";
 
 /// What both of its lines start with, which is what the boot is watched for.
 const EITHER: &str = "compositor: ";
@@ -631,6 +641,16 @@ fn boot_and_dump(arch: Arch, program: &Path, args: &Args, name: &str) -> Result<
                 .unwrap_or_else(|error| format!("no screendump either: {error}"));
             return Err(Error::new(format!("{arch}: {} ({firmware})", line.trim())));
         }
+        let isolation = lines
+            .iter()
+            .find_map(|line| line.split_once(ISOLATION).map(|(_, said)| said.trim()))
+            .unwrap_or("not said");
+        if isolation != "ok" {
+            return Err(Error::new(format!(
+                "{arch}: an open of the card maps more than its own buffers: {isolation}"
+            )));
+        }
+        println!("  {arch}: an open of the card maps its own buffers and nothing else");
         let marker = lines
             .iter()
             .rev()

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "5498306d4f885959b91e2667a8323c46497e7facce936bc6ba504d4d5854e5bf",
+  "digest": "e94be30a85937ecf78596fbda63943de8a9069daaf45ec3b55eea12a953a0179",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -5045,7 +5045,7 @@
               "type": "LibraryCrate",
               "maturity": "implemented",
               "stage": 17,
-              "doc": "The control protocol between the kernel's display core and a ring-3 display driver, written ahead of both for the compositor's first iteration (docs/DISPLAY.md). Frames do not move -- the card VMO's ranges are the device's backing, or since stage 19 a GPU object ATTACH_OBJECT names -- so there is no ring, only thirteen fixed messages decoded strictly, and the core's side of the conversation as a state machine of fixed capacity that accepts only the reply it waits for and stays broken once a driver lies. The displayctl fuzz target requires decoding to be exact and the session never to accept a flip out of order.",
+              "doc": "The control protocol between the kernel's display core and a ring-3 display driver, written ahead of both for the compositor's first iteration (docs/DISPLAY.md). Frames do not move -- each buffer's VMO is the device's backing, or since stage 19 a GPU object ATTACH_OBJECT names -- so there is no ring, only thirteen fixed messages decoded strictly, and the core's side of the conversation as a state machine of fixed capacity that accepts only the reply it waits for and stays broken once a driver lies. The displayctl fuzz target requires decoding to be exact and the session never to accept a flip out of order.",
               "source": {
                 "file": "docs/sysml/02-structure.sysml",
                 "line": 1185

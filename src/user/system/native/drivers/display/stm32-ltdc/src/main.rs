@@ -18,9 +18,8 @@
 //!    kernel sets the pixel clock for it (`device_clock`), the LTDC starts
 //!    it with its layer off, the bridge is told the mode and its TMDS output
 //!    turned on. HELLO then offers the one scanout at that size with every
-//!    mode the board can run on the monitor listed, and READY brings the
-//!    card VMO back.
-//! 3. ATTACH pins a buffer's range read-only and requires it to be one run
+//!    mode the board can run on the monitor listed, and READY answers it.
+//! 3. ATTACH brings a buffer's own VMO and pins its range read-only and requires it to be one run
 //!    of addresses, which the kernel makes it for this device. SCANOUT points
 //!    the layer at it -- and when its rectangle is the size of another mode
 //!    listed, switches to that mode first: TMDS off, the LTDC stopped, the
@@ -403,7 +402,7 @@ fn refresh_mhz(mode: &Mode) -> u32 {
 }
 
 /// Say HELLO for the one scanout, running `mode`, with the modes the board
-/// can run listed (`mode` first), and take READY's card VMO.
+/// can run listed (`mode` first), and take READY.
 fn introduce(
     control: &Channel<Kernel>,
     port: &Port<Kernel>,
@@ -411,7 +410,7 @@ fn introduce(
     mode: &Mode,
     runnable: Option<&Runnable>,
     cursor: bool,
-) -> Result<Vmo<Kernel>, Step> {
+) -> Result<(), Step> {
     let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
     if let Some(first) = modes.first_mut() {
         *first = ScanoutMode {
@@ -465,16 +464,17 @@ fn introduce(
         .wait_one(Signals::READABLE, Deadline::Never)
         .map_err(|_| Step::Hello)?;
     let mut bytes = [0_u8; MAX_BYTES];
-    let mut handles = [Handle::INVALID; 2];
+    let mut handles = [Handle::INVALID; 1];
     let received = control
         .read(&mut bytes, &mut handles)
         .map_err(|_| Step::Hello)?;
-    let [card, core_port] = handles;
+    for handle in handles.iter().take(received.handles) {
+        // The core's port is for a driver that queues to it; this one does
+        // not.
+        drop(OwnedHandle::from_raw(Kernel, *handle));
+    }
     match Message::decode(bytes.get(..received.bytes).unwrap_or_default()) {
-        Ok(Message::Ready(_)) if received.handles == 2 => {
-            drop(OwnedHandle::from_raw(Kernel, core_port));
-            Ok(Vmo::from_owned(OwnedHandle::from_raw(Kernel, card)))
-        }
+        Ok(Message::Ready(_)) if received.handles == 1 => Ok(()),
         _ => Err(Step::Control),
     }
 }
@@ -517,7 +517,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
             "ltdc: a {CURSOR_SIZE}x{CURSOR_SIZE} cursor plane on the second layer"
         ));
     }
-    let card = match introduce(
+    match introduce(
         &control,
         &port,
         start.location,
@@ -525,13 +525,13 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         runnable.as_ref(),
         cursor,
     ) {
-        Ok(card) => card,
+        Ok(()) => {}
         Err(step) => {
             ltdc.stop();
             let _ = bridge.disable();
             return Err(step);
         }
-    };
+    }
     control
         .wait_async(&port, Signals::READABLE | Signals::PEER_CLOSED, KEY_CONTROL)
         .map_err(|_| Step::Events)?;
@@ -542,7 +542,6 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         hdmi,
         runnable,
         interrupt,
-        card,
         device,
         control,
         port,
@@ -598,7 +597,6 @@ struct Serving {
     /// another size; `None` runs only the mode it started with.
     runnable: Option<Runnable>,
     interrupt: Interrupt<Kernel>,
-    card: Vmo<Kernel>,
     device: Device<Kernel>,
     control: Channel<Kernel>,
     port: Port<Kernel>,
@@ -668,13 +666,30 @@ impl Serving {
     fn take_messages(&mut self) -> Result<Option<bool>, Step> {
         loop {
             let mut bytes = [0_u8; MAX_BYTES];
-            match self.control.read(&mut bytes, &mut []) {
+            let mut handles = [Handle::INVALID; Attach::HANDLES];
+            match self.control.read(&mut bytes, &mut handles) {
                 Ok(received) => {
+                    let vmo = handles
+                        .iter()
+                        .take(received.handles)
+                        .map(|handle| Vmo::from_owned(OwnedHandle::from_raw(Kernel, *handle)))
+                        .next();
                     let message = Message::decode(bytes.get(..received.bytes).unwrap_or_default())
                         .map_err(|_| Step::Control)?;
                     match message {
-                        Message::Stop => return Ok(Some(true)),
+                        Message::Stop if vmo.is_none() => return Ok(Some(true)),
+                        // An ATTACH carries its buffer's VMO, and nothing
+                        // else carries anything.
+                        Message::Attach(attach) => {
+                            let vmo = vmo.ok_or(Step::Control)?;
+                            let status = self.attach(&attach, &vmo);
+                            self.reply(Message::Attached {
+                                buffer: attach.buffer,
+                                status,
+                            })?;
+                        }
                         Message::Refused(_) => return Err(Step::Control),
+                        _ if vmo.is_some() => return Err(Step::Control),
                         other => self.act(other)?,
                     }
                 }
@@ -688,13 +703,6 @@ impl Serving {
     /// Do what one message asks, and answer it.
     fn act(&mut self, message: Message) -> Result<(), Step> {
         match message {
-            Message::Attach(attach) => {
-                let status = self.attach(&attach);
-                self.reply(Message::Attached {
-                    buffer: attach.buffer,
-                    status,
-                })
-            }
             // Pixels on a GPU this card does not have.
             Message::AttachObject(attach) => self.reply(Message::Attached {
                 buffer: attach.buffer,
@@ -726,10 +734,11 @@ impl Serving {
         }
     }
 
-    /// Pin a buffer's range and require it to be one run of addresses below
-    /// 4 GiB, which is all the LTDC reads.
-    fn attach(&mut self, attach: &Attach) -> Status {
-        if attach.validate(self.card_bytes()).is_err() {
+    /// Pin a buffer's range of its VMO and require it to be one run of
+    /// addresses below 4 GiB, which is all the LTDC reads. The handle closes
+    /// with `vmo`; the pin holds the pages.
+    fn attach(&mut self, attach: &Attach, vmo: &Vmo<Kernel>) -> Status {
+        if attach.validate(vmo.size().unwrap_or(0)).is_err() {
             return Status::Invalid;
         }
         let Some(slot) = self.buffers.iter().position(Option::is_none) else {
@@ -742,10 +751,7 @@ impl Serving {
             return Status::Invalid;
         };
         let pages = length / PAGE;
-        let Ok(pin) = self
-            .device
-            .pin(&self.card, offset, length, PinAccess::ReadOnly)
-        else {
+        let Ok(pin) = self.device.pin(vmo, offset, length, PinAccess::ReadOnly) else {
             return Status::PinFailed;
         };
         let raw = self.scratch.raw(pages);
@@ -774,10 +780,6 @@ impl Serving {
             });
         }
         Status::Ok
-    }
-
-    fn card_bytes(&self) -> u64 {
-        self.card.size().unwrap_or(0)
     }
 
     fn buffer(&self, id: u32) -> Option<&Buffer> {

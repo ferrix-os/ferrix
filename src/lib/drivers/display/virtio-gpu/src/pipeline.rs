@@ -149,7 +149,7 @@ impl Request {
               bytes; a step lives on the driver's stack until it is acted on"
 )]
 pub enum Step<'e> {
-    /// Pin `length` bytes of the card VMO from `offset`, read-only, turn the
+    /// Pin `length` bytes of the buffer's VMO from `offset`, read-only, turn the
     /// pages' device addresses into backing entries, and report with
     /// [`Pipeline::pinned`].
     Pin {

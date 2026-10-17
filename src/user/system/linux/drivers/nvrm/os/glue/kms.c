@@ -502,7 +502,7 @@ out:
 /* ------------------------------------------------------------------------
  * The card (N6): nvrm as the kernel display core's driver for the head lit
  * above. Each FLUSH copies the flushed rectangle of the buffer it names
- * from the card VMO, which nvos maps read-only, into the VRAM surface the
+ * from the buffer's mapping, which nvos makes read-only at ATTACH, into the VRAM surface the
  * head scans out, and is answered at once: the copy is the flip. Only the
  * running mode is offered, so the compositor never asks for another.
  * ---------------------------------------------------------------------- */
@@ -511,14 +511,12 @@ out:
 
 struct kms_buffer {
     NvU32 id;
-    NvU64 offset;
+    const NvU8 *pixels;
     NvU32 width, height, stride;
 };
 
 struct kms_card {
     struct kms_head *lit;
-    const NvU8 *card;
-    NvU64 card_bytes;
     struct kms_buffer buffers[KMS_BUFFERS];
     NvU32 shown;
     NvU64 flushes;
@@ -554,8 +552,8 @@ static void kms_copy_row(NvU8 *to, const NvU8 *from, size_t bytes)
 
 /*
  * Copy a rectangle of `buffer` to the same place on the surface, clipped
- * to both. The card side was checked against the mapping by nvos's ATTACH
- * validation: offset + stride x height lies inside it.
+ * to both. The buffer side was checked against its mapping by nvos's ATTACH
+ * validation: stride x height lies inside it.
  */
 static void kms_copy(struct kms_card *card, const struct kms_buffer *buffer, NvS32 x, NvS32 y,
                      NvU32 w, NvU32 h)
@@ -578,7 +576,7 @@ static void kms_copy(struct kms_card *card, const struct kms_buffer *buffer, NvS
 
     for (row = top; row < bottom; row++)
     {
-        const NvU8 *from = card->card + buffer->offset + (NvU64)row * buffer->stride + left * 4;
+        const NvU8 *from = buffer->pixels + (NvU64)row * buffer->stride + left * 4;
         NvU8 *to = (NvU8 *)lit->mapped + (NvU64)row * lit->pitch + left * 4;
         kms_copy_row(to, from, (size_t)(right - left) * 4);
     }
@@ -605,7 +603,7 @@ static void kms_serve(void *argument)
                 break;
             }
             card->buffers[i].id = event.buffer;
-            card->buffers[i].offset = event.offset;
+            card->buffers[i].pixels = (const NvU8 *)(NvUPtr)event.pixels;
             card->buffers[i].width = event.width;
             card->buffers[i].height = event.height;
             card->buffers[i].stride = event.stride;
@@ -695,7 +693,6 @@ static int kms_card_start(struct kms_head *lit)
         return -EIO;
     }
     kms_card.lit = lit;
-    kms_card.card = nvos_display_card(&kms_card.card_bytes);
     if (!nvos_thread_spawn(kms_serve, &kms_card))
     {
         kms_say("no thread to serve the card\n");

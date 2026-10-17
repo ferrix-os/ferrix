@@ -1959,8 +1959,8 @@ pub(crate) static STAGE10_CHARDEV: Explanation = Explanation {
 pub(crate) static STAGE10_DISPLAY_COPIES: Explanation = Explanation {
     code: "FX-1014",
     title: "the display core would let the wrong driver copy",
-    meaning: "A display driver whose HELLO says it copies is handed the card VMO with `MAP`, \
-              so it can read every frame. The core allows that only for a device the chardev \
+    meaning: "A display driver whose HELLO says it copies is handed each buffer's VMO with \
+              `MAP`, so it can read every frame. The core allows that only for a device the chardev \
               core serves (NVIDIA's) and for the firmware framebuffer's node under \
               `ferrix.efifb` (`docs/DISPLAY.md` section 8). `display::check::run` requires a \
               made-up device tree node and every other published node refused, the firmware \

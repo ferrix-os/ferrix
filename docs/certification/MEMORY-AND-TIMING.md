@@ -222,8 +222,10 @@ frames always took: clean cache reclaimed first, then the fault fails
 * **Routes left outside it**, each bounded otherwise: an address space's
   root table (one per space, spaces bounded by the job's task limit);
   kernel stacks (one per task, the same limit); a display client's
-  contiguous buffers (`interfaces/display`, at most the card VMO's size per
-  card); and every frame the kernel takes for itself, by `allocate_frames`.
+  contiguous buffers (`interfaces/display`, at most the card's budget,
+  `CARD_BYTES`, per card; a mapping kept past its buffer refaults zeroed
+  pages into that buffer's VMO alone, up to its size, charged to the
+  faulting job, not to the card); and every frame the kernel takes for itself, by `allocate_frames`.
 * `/proc/meminfo`'s `MemAvailable` still counts the watermark's frames as
   available, where Linux leaves out its reserve (`totalreserve_pages`).
 * **The kernel's own users of the program routes**, which the watermark

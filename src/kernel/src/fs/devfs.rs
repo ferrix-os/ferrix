@@ -1325,15 +1325,10 @@ impl Inode for Node {
         }
     }
 
-    /// A card's pages, which `MODE_MAP_DUMB`'s offsets are into.
-    fn mapping(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        let Place::Card(index) = self.place else {
-            return None;
-        };
-        let card = crate::interfaces::display::card(index)?;
-        let vmo: Arc<dyn Any + Send + Sync> = Arc::clone(&card.vmo) as Arc<dyn Any + Send + Sync>;
-        Some(vmo)
-    }
+    // No `mapping`: a card's node maps no pages of its own. Each open maps
+    // the buffers it made, through its own `mapping_at` (E-02,
+    // `interfaces::display::drm`), and an offset it does not name is
+    // `ENODEV` rather than some other open's pixels.
 }
 
 /// The number a slave's name is, with no leading zero: devpts names a slave

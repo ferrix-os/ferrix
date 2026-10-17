@@ -17,16 +17,15 @@
 //!    frames are copied and timed, and the median said: the figure a real
 //!    machine gives for a frame (`docs/DISPLAY.md` §8). HELLO offers one scanout
 //!    at the firmware's size with that one timing listed, says it copies,
-//!    and has no cursor plane. READY brings
-//!    the card VMO back with `READ | MAP` and never `WRITE`, and it is mapped
-//!    read-only, whole.
-//! 3. ATTACH records a buffer's range: there is nothing to pin, and the
-//!    kernel would refuse a pin of this node. SCANOUT shows a buffer, copying
+//!    and has no cursor plane. READY answers it.
+//! 3. ATTACH brings a buffer's own VMO with `READ | MAP` and never `WRITE`;
+//!    its range is mapped read-only and the handle closed. There is nothing
+//!    to pin, and the kernel would refuse a pin of this node. SCANOUT shows a buffer, copying
 //!    all of it that fits; FLUSH copies the rectangle that changed when it is
 //!    of the buffer on screen, and FLIPPED answers it at once, since there is
 //!    no blanking to wait for. Every copy ends with a store fence, after
 //!    which, and not before, the frame counts as shown. DETACH forgets a buffer, taking it off the
-//!    screen first if it is there.
+//!    screen first if it is there, and unmaps it.
 //! 4. STOP, or the core closing its end, ends the run. What was copied last
 //!    stays on the screen, and a panic is drawn over it by the kernel.
 //!
@@ -90,8 +89,8 @@ enum Step {
     Identity = 2,
     /// The framebuffer's window could not be mapped.
     Window = 3,
-    /// The card could not be mapped.
-    Memory = 4,
+    // 4 was the card VMO's mapping, which version 9 took away: each buffer
+    // maps at its ATTACH, and a failure there is that ATTACH's status.
     /// HELLO could not be sent, or READY did not come.
     Hello = 6,
     /// The port or the waits could not be arranged.
@@ -232,14 +231,13 @@ impl Screen {
     }
 }
 
-/// Say HELLO for the one scanout at the firmware's mode and take READY's
-/// card VMO.
+/// Say HELLO for the one scanout at the firmware's mode and take READY.
 fn introduce(
     control: &Channel<Kernel>,
     port: &Port<Kernel>,
     location: u32,
     screen: &Screen,
-) -> Result<Vmo<Kernel>, Step> {
+) -> Result<(), Step> {
     let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
     if let Some(first) = modes.first_mut() {
         *first = ScanoutMode {
@@ -280,16 +278,17 @@ fn introduce(
         .wait_one(Signals::READABLE, Deadline::Never)
         .map_err(|_| Step::Hello)?;
     let mut bytes = [0_u8; MAX_BYTES];
-    let mut handles = [Handle::INVALID; 2];
+    let mut handles = [Handle::INVALID; 1];
     let received = control
         .read(&mut bytes, &mut handles)
         .map_err(|_| Step::Hello)?;
-    let [card, core_port] = handles;
+    for handle in handles.iter().take(received.handles) {
+        // The core's port is for a driver that queues to it; this one does
+        // not.
+        drop(OwnedHandle::from_raw(Kernel, *handle));
+    }
     match Message::decode(bytes.get(..received.bytes).unwrap_or_default()) {
-        Ok(Message::Ready(_)) if received.handles == 2 => {
-            drop(OwnedHandle::from_raw(Kernel, core_port));
-            Ok(Vmo::from_owned(OwnedHandle::from_raw(Kernel, card)))
-        }
+        Ok(Message::Ready(_)) if received.handles == 1 => Ok(()),
         _ => Err(Step::Control),
     }
 }
@@ -310,22 +309,14 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     ));
     let port = port::create(Kernel).map_err(|_| Step::Events)?;
     say(format_args!("efifb: window mapped write-combining"));
-    let card = introduce(&control, &port, start.location, &screen)?;
-    let card_bytes = card.size().map_err(|_| Step::Memory)?;
-    let card_len = usize::try_from(card_bytes).map_err(|_| Step::Memory)?;
-    let card_base = card
-        .map(None, card_len, Protection::Read, 0)
-        .map_err(|_| Step::Memory)?;
-    time_frames(&screen, card_base, card_len);
+    introduce(&control, &port, start.location, &screen)?;
+    time_frames(&screen);
     control
         .wait_async(&port, Signals::READABLE | Signals::PEER_CLOSED, KEY_CONTROL)
         .map_err(|_| Step::Events)?;
 
     let mut serving = Serving {
         screen,
-        _card: card,
-        card_base,
-        card_bytes,
         control,
         port,
         _device: device,
@@ -339,11 +330,12 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     ended.map(drop)
 }
 
-/// A buffer the screen may show: its range of the card and its shape.
+/// A buffer the screen may show: where its VMO's range is mapped, read-only,
+/// and its shape.
 #[derive(Clone, Copy)]
 struct Buffer {
     id: u32,
-    offset: usize,
+    base: usize,
     length: usize,
     /// Bytes from one row's start to the next.
     stride: usize,
@@ -354,11 +346,6 @@ struct Buffer {
 /// The serve loop's state.
 struct Serving {
     screen: Screen,
-    /// The card VMO, held while its mapping is read.
-    _card: Vmo<Kernel>,
-    /// Where the card is mapped, read-only.
-    card_base: usize,
-    card_bytes: u64,
     control: Channel<Kernel>,
     port: Port<Kernel>,
     _device: Device<Kernel>,
@@ -398,13 +385,30 @@ impl Serving {
     fn take_messages(&mut self) -> Result<Option<bool>, Step> {
         loop {
             let mut bytes = [0_u8; MAX_BYTES];
-            match self.control.read(&mut bytes, &mut []) {
+            let mut handles = [Handle::INVALID; Attach::HANDLES];
+            match self.control.read(&mut bytes, &mut handles) {
                 Ok(received) => {
+                    let vmo = handles
+                        .iter()
+                        .take(received.handles)
+                        .map(|handle| Vmo::from_owned(OwnedHandle::from_raw(Kernel, *handle)))
+                        .next();
                     let message = Message::decode(bytes.get(..received.bytes).unwrap_or_default())
                         .map_err(|_| Step::Control)?;
                     match message {
-                        Message::Stop => return Ok(Some(true)),
+                        Message::Stop if vmo.is_none() => return Ok(Some(true)),
+                        // An ATTACH carries its buffer's VMO, and nothing
+                        // else carries anything.
+                        Message::Attach(attach) => {
+                            let vmo = vmo.ok_or(Step::Control)?;
+                            let status = self.attach(&attach, &vmo);
+                            self.reply(Message::Attached {
+                                buffer: attach.buffer,
+                                status,
+                            })?;
+                        }
                         Message::Refused(_) => return Err(Step::Control),
+                        _ if vmo.is_some() => return Err(Step::Control),
                         other => self.act(other)?,
                     }
                 }
@@ -418,13 +422,6 @@ impl Serving {
     /// Do what one message asks, and answer it.
     fn act(&mut self, message: Message) -> Result<(), Step> {
         match message {
-            Message::Attach(attach) => {
-                let status = self.attach(&attach);
-                self.reply(Message::Attached {
-                    buffer: attach.buffer,
-                    status,
-                })
-            }
             // Pixels on a GPU this card does not have.
             Message::AttachObject(attach) => self.reply(Message::Attached {
                 buffer: attach.buffer,
@@ -458,9 +455,13 @@ impl Serving {
         }
     }
 
-    /// Remember a buffer's range of the card; nothing is pinned.
-    fn attach(&mut self, attach: &Attach) -> Status {
-        if attach.validate(self.card_bytes).is_err() {
+    /// Map a buffer's range of its VMO read-only and remember it; nothing is
+    /// pinned. The handle closes with `vmo`; the mapping outlives it.
+    fn attach(&mut self, attach: &Attach, vmo: &Vmo<Kernel>) -> Status {
+        let Ok(vmo_bytes) = vmo.size() else {
+            return Status::Invalid;
+        };
+        if attach.validate(vmo_bytes).is_err() {
             return Status::Invalid;
         }
         if self.buffer(attach.buffer).is_some() {
@@ -469,15 +470,15 @@ impl Serving {
         let Some(slot) = self.buffers.iter_mut().find(|slot| slot.is_none()) else {
             return Status::OutOfMemory;
         };
-        let (Ok(offset), Ok(length)) = (
-            usize::try_from(attach.offset),
-            usize::try_from(attach.length),
-        ) else {
+        let Ok(length) = usize::try_from(attach.length) else {
             return Status::Invalid;
+        };
+        let Ok(base) = vmo.map(None, length, Protection::Read, attach.offset) else {
+            return Status::OutOfMemory;
         };
         *slot = Some(Buffer {
             id: attach.buffer,
-            offset,
+            base,
             length,
             stride: attach.stride as usize,
             width: attach.width as usize,
@@ -506,7 +507,8 @@ impl Serving {
         self.copy(id, rect);
     }
 
-    /// Forget a buffer, taking it off the screen first if it is there.
+    /// Forget a buffer, taking it off the screen first if it is there, and
+    /// unmap it.
     fn detach(&mut self, id: u32) -> Status {
         let Some(slot) = self
             .buffers
@@ -515,9 +517,16 @@ impl Serving {
         else {
             return Status::Invalid;
         };
-        *slot = None;
+        let Some(buffer) = slot.take() else {
+            return Status::Invalid;
+        };
         if self.shown.is_some_and(|(shown, _)| shown == id) {
             self.shown = None;
+        }
+        // Nothing reads the mapping after this: the buffer is gone from the
+        // table every copy looks it up in.
+        if ferrix_rt::linux::munmap(buffer.base, buffer.length).is_err() {
+            return Status::DeviceRefused;
         }
         Status::Ok
     }
@@ -539,31 +548,26 @@ impl Serving {
         let Some(area) = Area::of(&buffer, shown, changed, &self.screen) else {
             return;
         };
-        let card_end = self.card_bytes as usize;
         let screen = &self.screen;
         for row in 0..area.rows {
-            let from =
-                buffer.offset + (area.source_y + row) * buffer.stride + area.source_x * PIXEL;
+            let from = (area.source_y + row) * buffer.stride + area.source_x * PIXEL;
             let to = (area.screen_y + row) * screen.pitch + area.screen_x * PIXEL;
             let bytes = area.columns * PIXEL;
-            if from + bytes > buffer.offset + buffer.length
-                || from + bytes > card_end
-                || to + bytes > screen.len
-            {
+            if from + bytes > buffer.length || to + bytes > screen.len {
                 return;
             }
-            let source = (self.card_base + from) as *const u32;
+            let source = (buffer.base + from) as *const u32;
             let target = (screen.base + to) as *mut u32;
             for column in 0..area.columns {
-                // SAFETY: `source` is inside the buffer's range of the card
-                // mapping, which is read-only and lives as long as `self`;
+                // SAFETY: `source` is inside the buffer's mapping, which is
+                // read-only and lives until its DETACH takes it from `self`;
                 // `target` inside the framebuffer window mapped for this
                 // process. Both were bounds-checked for the whole row above,
-                // and both are four-byte aligned: the card's ranges are whole
+                // and both are four-byte aligned: a buffer's mapping is whole
                 // pages, a buffer's stride is a multiple of four (ATTACH's
                 // validation), and so is the screen's pitch.
                 let (from, to) = (source.wrapping_add(column), target.wrapping_add(column));
-                // SAFETY: as above, `from` is a readable pixel of the card.
+                // SAFETY: as above, `from` is a readable pixel of the buffer.
                 let pixel = unsafe { ptr::read_volatile(from) };
                 // SAFETY: as above, `to` is a pixel of the mapped window.
                 unsafe { ptr::write_volatile(to, turned(pixel, screen.rgbx)) };
@@ -580,20 +584,30 @@ fn shown() {
     ferrix_rt::device_barrier();
 }
 
-/// Copy the first full frame of the card to the screen [`TIMED_FRAMES`]
+/// Copy a black frame of this process's own to the screen [`TIMED_FRAMES`]
 /// times, each ended by the fence, and say the median: the frame-copy
-/// figure (`docs/DISPLAY.md` §8). What the card holds before any buffer is
-/// attached is shown for those few frames and overwritten by the first.
-/// In QEMU the number says nothing about write-combining; on a PC it is
-/// what a frame of the software renderer costs to show.
-fn time_frames(screen: &Screen, card_base: usize, card_len: usize) {
+/// figure (`docs/DISPLAY.md` §8). The black is shown for those few frames
+/// and overwritten by the first buffer. In QEMU the number says nothing
+/// about write-combining; on a PC it is what a frame of the software
+/// renderer costs to show.
+fn time_frames(screen: &Screen) {
     let row = screen.width * PIXEL;
-    if card_len < row * screen.height {
+    let frame_len = (row * screen.height).next_multiple_of(4096);
+    let mapped = ferrix_rt::native::vmo::create(Kernel, frame_len)
+        .and_then(|frame| frame.map(None, frame_len, Protection::Read, 0));
+    let Ok(card_base) = mapped else {
         say(format_args!(
-            "efifb: full-frame copy not timed: the card is smaller than a frame"
+            "efifb: full-frame copy not timed: no memory for a frame"
         ));
         return;
-    }
+    };
+    time_copies(screen, card_base);
+    let _ = ferrix_rt::linux::munmap(card_base, frame_len);
+}
+
+/// [`time_frames`]' copies from the frame mapped at `card_base`.
+fn time_copies(screen: &Screen, card_base: usize) {
+    let row = screen.width * PIXEL;
     let mut times = [0_u64; TIMED_FRAMES];
     for time in &mut times {
         let Ok(before) = ferrix_rt::linux::monotonic_nanos() else {
@@ -603,8 +617,8 @@ fn time_frames(screen: &Screen, card_base: usize, card_len: usize) {
             let source = (card_base + line * row) as *const u32;
             let target = (screen.base + line * screen.pitch) as *mut u32;
             for column in 0..screen.width {
-                // SAFETY: the card is mapped readable for `card_len` bytes,
-                // checked above to hold a frame of `width` pixels a row; the
+                // SAFETY: the frame is mapped readable for a whole frame of
+                // `width` pixels a row, by `time_frames`; the
                 // window holds `height` lines of `pitch` bytes (START's
                 // check in `Screen::map`); both are four-byte aligned.
                 let pixel = unsafe { ptr::read_volatile(source.wrapping_add(column)) };

@@ -4,7 +4,7 @@
 //! Iteration 1 of the display (`docs/DISPLAY.md`) runs this driver in a user
 //! process under devmgr, as virtio-blk's runs. The process holds an
 //! `IoMapping` of the device's register blocks, an `Interrupt`, pinned DMA
-//! memory, the card VMO it pins buffers from, and the control channel to the
+//! memory, each buffer's VMO, which it pins, and the control channel to the
 //! kernel's display core; none of those can be had in a unit test. So this
 //! crate is written against [`Transport`], [`DevicePages`] and [`CommandArea`],
 //! which the process implements over its handles, and holds everything else:

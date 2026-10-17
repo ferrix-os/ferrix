@@ -2995,10 +2995,11 @@ review of NVIDIA's N6a, ledger 310, on branch `nvidia-n2`; pre-existing since
 the display core landed, not introduced by N6a).
 
 **Moderate.** `docs/DISPLAY.md` §2.1 promised that a display driver "can
-neither write nor see the pixels": the core hands it the card VMO with
+neither write nor see the pixels": the core hands it each buffer's VMO with
+an ATTACH (displayctl v9, 2026-10-17; one card VMO at READY before) with
 `CARD_VMO_RIGHTS`, `READ | TRANSFER`, never `WRITE` or `MAP`, for it to pin
 read-only. But `vmo_read` (`vmo_copy` in `src/kernel/src/syscall/native.rs`)
-needs only `READ`, and refuses only a coherent VMO; the card VMO is made by
+needs only `READ`, and refuses only a coherent VMO; a buffer's VMO is made by
 `Vmo::new_anonymous` and becomes coherent only after a `PIN_COHERENT` pin,
 which no display driver makes on x86-64. So on x86-64 every display driver --
 virtio-gpu's, the STM32 LTDC's, and a compromised one -- can read every
@@ -3006,13 +3007,13 @@ client's buffers through `vmo_read`, the lock screen's among them. It writes
 none and reaches no other memory.
 
 N6a's copying driver (displayctl v8's `copies` flag, `Refusal::Copies`) maps
-the card read-only by design; that exposure is recorded in
+each buffer read-only by design; that exposure is recorded in
 VULNERABILITY-ANALYSIS V-10, not here. This finding is the one no driver was
 meant to have.
 
 *To close:* an authority to pin a VMO without reading it -- `READ` split, or
-the card VMO handed with a pin-only right `vmo_read` refuses -- with a
-self-check that a display driver's `vmo_read` of the card is refused and a
+each buffer's VMO handed with a pin-only right `vmo_read` refuses -- with a
+self-check that a display driver's `vmo_read` of a buffer is refused and a
 gate.sh control that removes the refusal; DISPLAY.md §2.1 then restated as
 "no driver writes the pixels; only a copying driver the kernel qualifies maps
 them" (ledger 310, C10).

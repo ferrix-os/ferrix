@@ -19,7 +19,8 @@ use crate::linux::CLOCK_MONOTONIC;
 /// and nowhere else; `crate::linux` spells every call the same on all three.
 pub(crate) mod nr {
     pub(crate) use ferrix_linux_abi::nr::x86_64::{
-        ACCEPT4, BIND, CLOSE, FCNTL, GETSOCKOPT, LISTEN, READ, REBOOT, SETSOCKOPT, SOCKET, WRITE,
+        ACCEPT4, BIND, CLOSE, FCNTL, GETSOCKOPT, LISTEN, MUNMAP, READ, REBOOT, SETSOCKOPT, SOCKET,
+        WRITE,
     };
 }
 

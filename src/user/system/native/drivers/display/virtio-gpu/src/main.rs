@@ -13,9 +13,10 @@
 //! 2. Each register block is an `IoMapping`; the rings and the command area
 //!    are VMOs this process creates, pins read-write and maps.
 //! 3. `GET_DISPLAY_INFO` gives each scanout's preferred mode, which HELLO
-//!    carries with a port. READY brings the card VMO back, `READ | TRANSFER`
-//!    only: this process pins its ranges read-only as buffers' backing and
-//!    can neither write nor map the pixels.
+//!    carries with a port, and READY answers it. Each ATTACH brings its
+//!    buffer's VMO, `READ | TRANSFER` only: this process pins it read-only as
+//!    the buffer's backing, closes the handle, and can neither write nor
+//!    map the pixels.
 //! 4. One port carries every event: the device's interrupt and the control
 //!    channel becoming readable. Requests queue in the pipeline, which says
 //!    what to do next: pin, submit a command, unpin, or reply.
@@ -33,7 +34,7 @@ use core::sync::atomic::{Ordering, fence};
 
 use ferrix_blkring::control::{Block as StartBlock, Message as StartMessage, START_BYTES, Start};
 use ferrix_displayctl::message::{
-    Hello, MAX_BUFFER_PAGES as MAX_PAGES, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message,
+    Attach, Hello, MAX_BUFFER_PAGES as MAX_PAGES, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message,
     PORT_RIGHTS, ScanoutMode, Timings, VERSION,
 };
 use ferrix_native_abi::handle::Handle;
@@ -1603,33 +1604,38 @@ fn hello(driver: &mut Gpu, port: &Port<Kernel>, location: u32) -> Result<Hello, 
     })
 }
 
-/// Wait for READY and take the card VMO from it.
-fn ready(control: &Channel<Kernel>) -> Result<Vmo<Kernel>, Step> {
+/// Wait for READY, which carries the core's port alone.
+fn ready(control: &Channel<Kernel>) -> Result<(), Step> {
     let _ = control
         .wait_one(Signals::READABLE, Deadline::Never)
         .map_err(|_| Step::Hello)?;
     let mut bytes = [0_u8; MAX_BYTES];
-    let mut handles = [Handle::INVALID; 2];
+    let mut handles = [Handle::INVALID; 1];
     let received = control
         .read(&mut bytes, &mut handles)
         .map_err(|_| Step::Hello)?;
     match Message::decode(bytes.get(..received.bytes).unwrap_or_default()) {
-        Ok(Message::Ready(_)) if received.handles == 2 => {
+        Ok(Message::Ready(_)) if received.handles == 1 => {
             // The core's port is for later; it is closed here.
-            drop(OwnedHandle::from_raw(Kernel, handles[1]));
-            Ok(Vmo::from_owned(OwnedHandle::from_raw(Kernel, handles[0])))
+            drop(OwnedHandle::from_raw(Kernel, handles[0]));
+            Ok(())
         }
-        _ => Err(Step::Control),
+        _ => {
+            for handle in handles.iter().take(received.handles) {
+                drop(OwnedHandle::from_raw(Kernel, *handle));
+            }
+            Err(Step::Control)
+        }
     }
 }
 
-/// Say HELLO, take READY's card VMO, and start listening to the core.
+/// Say HELLO, take READY, and start listening to the core.
 fn introduce(
     driver: &mut Gpu,
     port: &Port<Kernel>,
     control: &Channel<Kernel>,
     location: u32,
-) -> Result<(Scratch, Vmo<Kernel>), Step> {
+) -> Result<Scratch, Step> {
     let scratch = Scratch::new()?;
     let hello = hello(driver, port, location)?;
     let port_share = port
@@ -1639,13 +1645,13 @@ fn introduce(
     control
         .write_with(Message::Hello(hello).encode().as_bytes(), [port_share])
         .map_err(|_| Step::Hello)?;
-    let card = ready(control)?;
+    ready(control)?;
     // The wait is armed by `run`, once every conversation's blocking setup
     // commands are done. A command waiting on the device takes packets off
     // the port and drops the ones that are not its interrupt, and an armed
     // wait is delivered once: arming before then can lose the core's first
     // message and leave nothing listening for another.
-    Ok((scratch, card))
+    Ok(scratch)
 }
 
 /// Arm the waits for both of the card's conversations.
@@ -1725,7 +1731,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     };
 
     let introduced = introduce(&mut driver, &port, &control, start.location);
-    let (scratch, card) = match introduced {
+    let scratch = match introduced {
         Ok(introduced) => introduced,
         Err(step) => {
             // Nothing is pinned for a buffer yet; the device goes back to
@@ -1761,7 +1767,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
             start.pci_subsystem_vendor_id,
             start.pci_subsystem_id,
         )),
-        ..Serving::new(driver, scratch, card, device, control, port)
+        ..Serving::new(driver, scratch, device, control, port)
     };
     let ended = serving.serve();
     let Serving {
@@ -1795,8 +1801,10 @@ struct Serving {
     driver: Gpu,
     pipeline: Pipeline,
     pins: [Option<(u32, Pin<Kernel>)>; MAX_PINS],
+    /// Each ATTACH's buffer VMO, by the buffer's id, until the pipeline pins
+    /// it: then the pin holds the pages and the handle is closed.
+    attached: [Option<(u32, Vmo<Kernel>)>; MAX_PINS],
     scratch: Scratch,
-    card: Vmo<Kernel>,
     device: Device<Kernel>,
     control: Channel<Kernel>,
     port: Port<Kernel>,
@@ -1926,7 +1934,6 @@ impl Serving {
     fn new(
         driver: Gpu,
         scratch: Scratch,
-        card: Vmo<Kernel>,
         device: Device<Kernel>,
         control: Channel<Kernel>,
         port: Port<Kernel>,
@@ -1935,8 +1942,8 @@ impl Serving {
             driver,
             pipeline: Pipeline::new(),
             pins: [const { None }; MAX_PINS],
+            attached: [const { None }; MAX_PINS],
             scratch,
-            card,
             device,
             control,
             port,
@@ -2329,11 +2336,30 @@ impl Serving {
                 return Ok(None);
             }
             let mut bytes = [0_u8; MAX_BYTES];
-            let message = match self.control.read(&mut bytes, &mut []) {
+            let mut handles = [Handle::INVALID; Attach::HANDLES];
+            let message = match self.control.read(&mut bytes, &mut handles) {
                 Ok(received) => {
+                    let mut handed = handles
+                        .iter()
+                        .take(received.handles)
+                        .map(|handle| OwnedHandle::from_raw(Kernel, *handle));
+                    let vmo = handed.next().map(Vmo::from_owned);
                     match Message::decode(bytes.get(..received.bytes).unwrap_or_default()) {
-                        Ok(Message::Stop) => return Ok(Some(true)),
+                        Ok(Message::Stop) if vmo.is_none() => return Ok(Some(true)),
+                        // An ATTACH carries its buffer's VMO, and nothing
+                        // else carries anything.
+                        Ok(Message::Attach(attach)) => {
+                            let vmo = vmo.ok_or(Step::Control)?;
+                            let slot = self
+                                .attached
+                                .iter_mut()
+                                .find(|slot| slot.is_none())
+                                .ok_or(Step::Control)?;
+                            *slot = Some((attach.buffer, vmo));
+                            Message::Attach(attach)
+                        }
                         Ok(Message::Refused(_)) | Err(_) => return Err(Step::Control),
+                        Ok(_) if vmo.is_some() => return Err(Step::Control),
                         Ok(message) => message,
                     }
                 }
@@ -2440,9 +2466,21 @@ impl Serving {
         }
     }
 
-    /// Pin `length` bytes of the card from `offset` read-only and make the
-    /// backing entries: how many, or `Err` when it cannot be done.
+    /// Pin `length` bytes of `buffer`'s VMO from `offset` read-only and make
+    /// the backing entries: how many, or `Err` when it cannot be done. The
+    /// VMO's handle is closed either way; a pin holds the pages itself.
     fn pin(&mut self, buffer: u32, offset: u64, length: u64) -> Result<usize, ()> {
+        let vmo = self
+            .attached
+            .iter_mut()
+            .find(|slot| slot.as_ref().is_some_and(|(held, _)| *held == buffer))
+            .and_then(Option::take)
+            .map(|(_, vmo)| vmo)
+            .ok_or(())?;
+        let vmo_bytes = vmo.size().map_err(drop)?;
+        if offset.checked_add(length).is_none_or(|end| end > vmo_bytes) {
+            return Err(());
+        }
         let offset = usize::try_from(offset).map_err(drop)?;
         let length = usize::try_from(length).map_err(drop)?;
         // An id the device may still hold pages under is never pinned twice:
@@ -2454,7 +2492,7 @@ impl Serving {
         let (pin, count) = pin_entries(
             &self.device,
             &mut self.scratch,
-            &self.card,
+            &vmo,
             offset,
             length,
             PinAccess::ReadOnly,

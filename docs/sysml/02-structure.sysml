@@ -1190,7 +1190,7 @@ package FerrixStructure {
             doc /* The control protocol between the kernel's display core and
                  * a ring-3 display driver, written ahead of both for the
                  * compositor's first iteration (docs/DISPLAY.md). Frames do
-                 * not move -- the card VMO's ranges are the device's backing,
+                 * not move -- each buffer's VMO is the device's backing,
                  * or since stage 19 a GPU object ATTACH_OBJECT names -- so
                  * there is no ring, only thirteen fixed messages decoded
                  * strictly, and the core's side of the conversation as a

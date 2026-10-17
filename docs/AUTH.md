@@ -1213,6 +1213,24 @@ Listed here and in `docs/certification/VULNERABILITY-ANALYSIS.md`'s
   creation-time ids put back, names root and fails that line.
   ferrix-55 agreed the design (advisory: `fs/socket.rs` is in the load
   ring).
+* **E-02, an open of `card0` could map every buffer of the card.
+  Closed for one open by a VMO a buffer (displayctl version 9,
+  2026-10-17).** The half between two opens cannot be reached while
+  `card0` is an exclusive open, and is shown by the D1 test of the landing
+  that allows several (ledger 2290). Every dumb
+  buffer was a range of one card VMO, and the card's node mapped the whole
+  of it: an offset past one's own buffer reached another's, and a mapping
+  kept after `DESTROY_DUMB` saw whichever buffer was given that range next.
+  On a session's image the node is `root:root 0660` and the session ends
+  with hyprix (§6.4), which narrowed it; but a fork of hyprix without exec
+  that moved to a scope of its own (E6) kept a mapping past the session.
+  Each buffer is now a VMO of its own that only the open that made it maps
+  (`docs/DISPLAY.md` §2.1). `cargo xtask test-display` checks it before
+  the screen is set: a mapping past the buffer, an offset that names no
+  buffer of the open, a destroyed buffer's offset mapped again, and a
+  mapping kept past its buffer seeing the next buffers' pixels must each
+  fail. The certification consultant's design review, ledger line 2290
+  (advisory: `interfaces/display` and `fs/devfs.rs` are in the load ring).
 
 ---
 

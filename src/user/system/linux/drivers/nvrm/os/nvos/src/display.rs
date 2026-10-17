@@ -4,16 +4,19 @@
 //! nvrm is a display driver as virtio-gpu and the STM32 LTDC are, except
 //! that the 3060's display engine reads only its own video memory: a frame
 //! is shown by copying it there with the processor. So its HELLO says it
-//! copies, and READY hands it the card VMO with `MAP`, which
-//! [`nvos_display_start`] maps read-only. NVKMS, through `os/glue/kms.c`,
-//! does the rest: the C side takes each message from [`nvos_display_next`]
-//! and answers through [`nvos_display_attached`], [`nvos_display_flipped`]
-//! and [`nvos_display_detached`].
+//! copies, and each ATTACH hands it the buffer's own VMO with `MAP`, which
+//! [`nvos_display_next`] maps read-only before C hears of the buffer.
+//! NVKMS, through `os/glue/kms.c`, does the rest: the C side takes each
+//! message from [`nvos_display_next`] and answers through
+//! [`nvos_display_attached`], [`nvos_display_flipped`] and
+//! [`nvos_display_detached`]. The bridge keeps each buffer's mapping and
+//! takes it away itself, at a refused ATTACH or at DETACH, so C only reads
+//! the pixels it is pointed at.
 //!
-//! ATTACH is checked here against the card's size before C sees it, so a
-//! buffer C is told of lies inside the mapping.
+//! ATTACH is checked here against its VMO's size before C sees it, so a
+//! buffer C is told of lies inside its mapping.
 
-use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use ferrix_displayctl::message::{
     Hello, MAX_BYTES, MAX_SCANOUTS, MAX_TIMINGS, Message, PORT_RIGHTS, Rect, ScanoutMode, Status,
@@ -37,9 +40,64 @@ use crate::status::{self, NvStatus};
 static CONTROL: AtomicU32 = AtomicU32::new(0);
 /// The driver's port, which HELLO hands the core a share of; kept open.
 static PORT: AtomicU32 = AtomicU32::new(0);
-/// Where the card VMO is mapped, read-only, and its length.
-static CARD_AT: AtomicUsize = AtomicUsize::new(0);
-static CARD_BYTES: AtomicU64 = AtomicU64::new(0);
+
+/// How many buffers' mappings are kept: `kms.c`'s `KMS_BUFFERS`.
+const MAPPED: usize = 64;
+
+/// One buffer's read-only mapping: its id (0 for a free slot), where, and
+/// how long. Only C's one serving thread touches these, through the calls
+/// below; atomics only so that a static may hold them.
+struct Mapped {
+    buffer: AtomicU32,
+    at: AtomicUsize,
+    length: AtomicUsize,
+}
+
+static MAPPINGS: [Mapped; MAPPED] = [const {
+    Mapped {
+        buffer: AtomicU32::new(0),
+        at: AtomicUsize::new(0),
+        length: AtomicUsize::new(0),
+    }
+}; MAPPED];
+
+/// Remember `buffer`'s mapping. `false` when every slot is taken.
+fn remember(buffer: u32, at: usize, length: usize) -> bool {
+    let Some(slot) = MAPPINGS
+        .iter()
+        .find(|slot| slot.buffer.load(Ordering::Acquire) == 0)
+    else {
+        return false;
+    };
+    slot.at.store(at, Ordering::Relaxed);
+    slot.length.store(length, Ordering::Relaxed);
+    slot.buffer.store(buffer, Ordering::Release);
+    true
+}
+
+/// Take `buffer`'s mapping away, if there is one. C reads nothing of it
+/// after: it has refused the buffer or let go of it.
+fn unmap(buffer: u32) {
+    if buffer == 0 {
+        return;
+    }
+    let Some(slot) = MAPPINGS
+        .iter()
+        .find(|slot| slot.buffer.load(Ordering::Acquire) == buffer)
+    else {
+        return;
+    };
+    let (at, length) = (
+        slot.at.load(Ordering::Relaxed),
+        slot.length.load(Ordering::Relaxed),
+    );
+    slot.buffer.store(0, Ordering::Release);
+    // SAFETY: one buffer's whole mapping, made by `map_buffer`, which
+    // nothing reads after (above).
+    if unsafe { crate::libc::munmap(core::ptr::without_provenance_mut(at), length) } != 0 {
+        say!("display: buffer {buffer}'s mapping at {at:#x} was not taken away; it stays");
+    }
+}
 
 /// One timing as C hands it (`struct nvos_display_timing`).
 #[repr(C)]
@@ -92,8 +150,8 @@ pub struct Event {
     pub kind: u32,
     /// The buffer it names.
     pub buffer: u32,
-    /// ATTACH: its range in the card VMO.
-    pub offset: u64,
+    /// ATTACH: where the buffer is mapped, read-only, and its length.
+    pub pixels: u64,
     /// .
     pub length: u64,
     /// ATTACH: its size and stride.
@@ -195,7 +253,7 @@ fn hello(c: &CHello) -> Hello {
 }
 
 /// Make the display control channel, say HELLO for the scanout C runs,
-/// wait for READY and map the card VMO read-only. `NV_OK`, or why not,
+/// and wait for READY. `NV_OK`, or why not,
 /// said.
 ///
 /// # Safety
@@ -246,7 +304,7 @@ pub unsafe extern "C" fn nvos_display_start(described: *const CHello) -> NvStatu
         return status::INVALID_STATE;
     }
     let mut bytes = [0_u8; MAX_BYTES];
-    let mut handles = [Handle(0); 2];
+    let mut handles = [Handle(0); 1];
     let received = match channel.read(&mut bytes, &mut handles) {
         Ok(received) => received,
         Err(why) => {
@@ -254,9 +312,12 @@ pub unsafe extern "C" fn nvos_display_start(described: *const CHello) -> NvStatu
             return status::INVALID_STATE;
         }
     };
-    let [card, core_port] = handles;
+    // The core's port is for a driver that queues to it; this one does not.
+    for handle in handles.iter().take(received.handles) {
+        drop(OwnedHandle::from_raw(Kernel, *handle));
+    }
     let ready = match Message::decode(bytes.get(..received.bytes).unwrap_or(&[])) {
-        Ok(Message::Ready(ready)) if received.handles == 2 => ready,
+        Ok(Message::Ready(ready)) if received.handles == 1 => ready,
         Ok(Message::Refused(refusal)) => {
             say!("display: refused: {refusal}");
             return status::INVALID_STATE;
@@ -266,44 +327,12 @@ pub unsafe extern "C" fn nvos_display_start(described: *const CHello) -> NvStatu
             return status::INVALID_STATE;
         }
     };
-    // The core's port is for a driver that queues to it; this one does not.
-    drop(OwnedHandle::from_raw(Kernel, core_port));
-    let card = Vmo::from_owned(OwnedHandle::from_raw(Kernel, card));
-    let Ok(length) = usize::try_from(ready.card_bytes) else {
-        return status::INVALID_STATE;
-    };
-    let at = match card.map(None, length, Protection::Read, 0) {
-        Ok(at) => at,
-        Err(why) => {
-            say!("display: the card VMO did not map read-only: {why:?}");
-            return status::INVALID_STATE;
-        }
-    };
-    // The mapping holds the VMO; the handle is not needed after.
-    drop(card);
-    CARD_BYTES.store(ready.card_bytes, Ordering::Release);
-    CARD_AT.store(at, Ordering::Release);
     say!(
-        "display: card{} ready, {} MiB mapped read-only",
+        "display: card{} ready, its buffers up to {} MiB, each mapped read-only at ATTACH",
         ready.card,
         ready.card_bytes >> 20
     );
     status::OK
-}
-
-/// Where the card VMO is mapped, and its length through `bytes`; null before
-/// [`nvos_display_start`].
-///
-/// # Safety
-///
-/// `bytes` is null or writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn nvos_display_card(bytes: *mut u64) -> *const u8 {
-    if !bytes.is_null() {
-        // SAFETY: the caller vouches for it.
-        unsafe { bytes.write(CARD_BYTES.load(Ordering::Acquire)) };
-    }
-    CARD_AT.load(Ordering::Acquire) as *const u8
 }
 
 fn rect_into(event: &mut Event, rect: Rect) {
@@ -313,21 +342,55 @@ fn rect_into(event: &mut Event, rect: Rect) {
     event.h = rect.height;
 }
 
+/// Map an ATTACH's buffer VMO read-only: where, or `None` for a buffer that
+/// does not fit its VMO or will not map.
+fn map_buffer(attach: &ferrix_displayctl::message::Attach, vmo: &Vmo<Kernel>) -> Option<usize> {
+    let bytes = vmo.size().ok()?;
+    attach.validate(bytes).ok()?;
+    let length = usize::try_from(attach.length).ok()?;
+    match vmo.map(None, length, Protection::Read, attach.offset) {
+        Ok(at) if remember(attach.buffer, at, length) => Some(at),
+        Ok(at) => {
+            say!(
+                "display: no room to keep buffer {}'s mapping",
+                attach.buffer
+            );
+            // SAFETY: just made, and nothing has seen it.
+            let _ = unsafe { crate::libc::munmap(core::ptr::without_provenance_mut(at), length) };
+            None
+        }
+        Err(why) => {
+            say!(
+                "display: buffer {} did not map read-only: {why:?}",
+                attach.buffer
+            );
+            None
+        }
+    }
+}
+
 /// The event C acts on for one message, or `None` for one answered here.
-fn event_of(message: Message) -> Option<Event> {
+/// `vmo` is the handle the message came with: an ATTACH's buffer, and
+/// nothing for any other.
+fn event_of(message: Message, vmo: Option<Vmo<Kernel>>) -> Option<Event> {
     let mut event = Event::default();
+    if vmo.is_some() && !matches!(message, Message::Attach(_)) {
+        say!("display: a message that carries no handle came with one");
+        return None;
+    }
     match message {
         Message::Attach(attach) => {
-            if attach.validate(CARD_BYTES.load(Ordering::Acquire)).is_err() {
+            // The mapping outlives the handle, which closes here.
+            let Some(at) = vmo.and_then(|vmo| map_buffer(&attach, &vmo)) else {
                 reply(Message::Attached {
                     buffer: attach.buffer,
                     status: Status::Invalid,
                 });
                 return None;
-            }
+            };
             event.kind = EVENT_ATTACH;
             event.buffer = attach.buffer;
-            event.offset = attach.offset;
+            event.pixels = at as u64;
             event.length = attach.length;
             event.width = attach.width;
             event.height = attach.height;
@@ -400,10 +463,18 @@ pub unsafe extern "C" fn nvos_display_next(out: *mut Event) -> NvStatus {
     };
     let mut bytes = [0_u8; MAX_BYTES];
     loop {
-        let event = match channel.read(&mut bytes, &mut []) {
-            Ok(received) => match Message::decode(bytes.get(..received.bytes).unwrap_or(&[])) {
-                Ok(message) => event_of(message),
-                Err(why) => {
+        let mut handles = [Handle(0); ferrix_displayctl::message::Attach::HANDLES];
+        let event = match channel.read(&mut bytes, &mut handles) {
+            Ok(received) => match (
+                Message::decode(bytes.get(..received.bytes).unwrap_or(&[])),
+                handles
+                    .iter()
+                    .take(received.handles)
+                    .map(|handle| Vmo::from_owned(OwnedHandle::from_raw(Kernel, *handle)))
+                    .next(),
+            ) {
+                (Ok(message), vmo) => event_of(message, vmo),
+                (Err(why), _) => {
                     say!("display: a malformed message: {why:?}");
                     None
                 }
@@ -447,9 +518,13 @@ fn status_of(raw: u32) -> Status {
     Status::from_raw(raw).unwrap_or(Status::Invalid)
 }
 
-/// Answer ATTACH for `buffer`: `status` is a `Status` word.
+/// Answer ATTACH for `buffer`: `status` is a `Status` word. A buffer C
+/// refused is unmapped here.
 #[unsafe(no_mangle)]
 pub extern "C" fn nvos_display_attached(buffer: u32, status: u32) {
+    if status_of(status) != Status::Ok {
+        unmap(buffer);
+    }
     reply(Message::Attached {
         buffer,
         status: status_of(status),
@@ -465,9 +540,10 @@ pub extern "C" fn nvos_display_flipped(sequence: u64, status: u32) {
     });
 }
 
-/// Answer DETACH for `buffer`.
+/// Answer DETACH for `buffer`, whose mapping goes first: C has let go.
 #[unsafe(no_mangle)]
 pub extern "C" fn nvos_display_detached(buffer: u32, status: u32) {
+    unmap(buffer);
     reply(Message::Detached {
         buffer,
         status: status_of(status),
@@ -481,4 +557,4 @@ pub extern "C" fn nvos_display_stopped() {
 }
 
 // The protocol's version this bridge was written against.
-const _: () = assert!(VERSION == 8);
+const _: () = assert!(VERSION == 9);

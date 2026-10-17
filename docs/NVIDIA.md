@@ -768,7 +768,8 @@ virtio-gpu, seen over VNC or SPICE.
   display core (`docs/DISPLAY.md`), a third driver beside virtio-gpu and the
   STM32 LTDC, through ferrix-nvos's `display.rs`. Its HELLO offers the one
   running mode and sets displayctl v8's `copies` flag; each FLUSH copies
-  the flushed rectangle from the card VMO, mapped read-only, into the VRAM
+  the flushed rectangle from the buffer's own VMO, which ferrix-nvos maps
+  read-only at ATTACH and unmaps at DETACH (displayctl v9), into the VRAM
   surface, and is answered at once. No cursor plane yet: the compositor
   draws the pointer. Double buffering with a flip at vertical blanking, the
   mode list and a cursor are next.

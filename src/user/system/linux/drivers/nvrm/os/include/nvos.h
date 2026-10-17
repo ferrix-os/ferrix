@@ -162,7 +162,7 @@ struct nvos_display_hello {
 struct nvos_display_event {
     NvU32 kind;         /* NVOS_DISPLAY_* */
     NvU32 buffer;
-    NvU64 offset, length;   /* ATTACH: the range in the card VMO */
+    NvU64 pixels, length;   /* ATTACH: where the buffer is mapped, read-only, until DETACH */
     NvU32 width, height, stride, reserved;
     NvU64 sequence;     /* FLUSH and CURSOR */
     NvS32 x, y;         /* SCANOUT and FLUSH: the rectangle */
@@ -180,7 +180,6 @@ struct nvos_display_event {
 #define NVOS_DISPLAY_OK       0
 #define NVOS_DISPLAY_INVALID  4
 NV_STATUS nvos_display_start(const struct nvos_display_hello *hello);
-const NvU8 *nvos_display_card(NvU64 *bytes);
 NV_STATUS nvos_display_next(struct nvos_display_event *out);
 void nvos_display_attached(NvU32 buffer, NvU32 status);
 void nvos_display_flipped(NvU64 sequence, NvU32 status);

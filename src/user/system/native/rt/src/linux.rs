@@ -114,6 +114,18 @@ pub fn decode(value: usize) -> Result<usize, Errno> {
     }
 }
 
+/// `munmap(address, length)`: take a mapping away, such as one `vmo_map`
+/// made, which has no native call of its own to undo it.
+///
+/// # Errors
+///
+/// Whatever the kernel answers.
+pub fn munmap(address: usize, length: usize) -> Result<usize, Errno> {
+    // SAFETY: the kernel only removes the range from this process's own
+    // address space; the caller must hold no reference into it after.
+    decode(unsafe { arch::linux(nr::MUNMAP, [address, length, 0, 0, 0, 0]) })
+}
+
 /// `socket(family, kind, protocol)`.
 ///
 /// # Errors

@@ -17,10 +17,10 @@
 //!       hsync positive, bit 1 vsync positive)   ... 16 of them, 24 bytes each
 //!   612 scanout 0's refresh_mhz u32   ... 16 of them, 4 bytes each
 //!   676 flags u32: bit 0 the driver copies pixels with its processor
-//! READY     core -> driver, 24 bytes, handles [card VMO, core port]
+//! READY     core -> driver, 24 bytes, handles [core port]
 //!   8 card u32   12 reserved   16 card_bytes u64
 //! REFUSED   core -> driver, 12 bytes: 8 reason u32
-//! ATTACH    core -> driver, 48 bytes
+//! ATTACH    core -> driver, 48 bytes, handles [the buffer's VMO]
 //!   8 buffer u32   12 format u32   16 offset u64   24 length u64
 //!   32 width u32   36 height u32   40 stride u32   44 reserved
 //! ATTACH_OBJ core -> driver, 32 bytes
@@ -76,10 +76,18 @@
 //! is still where it was. Bit 0 says the driver shows a buffer by copying
 //! it with the processor into memory its device scans out from -- NVIDIA's
 //! driver, whose display engine reads its own video memory -- rather than
-//! by giving the device the pages. Such a driver is handed the card VMO
-//! with `MAP` in place of `TRANSFER` ([`CARD_VMO_COPY_RIGHTS`]), to map it
-//! read-only, and only when the kernel finds the device's driver is the
+//! by giving the device the pages. Such a driver is handed each buffer's
+//! VMO with `MAP` in place of `TRANSFER` ([`CARD_VMO_COPY_RIGHTS`]), to map
+//! it read-only, and only when the kernel finds the device's driver is the
 //! one kind that may: the others never are. Every other bit is reserved.
+//!
+//! Each ATTACH carries its buffer's own VMO (version 9), and its offset is
+//! where the range starts in that VMO -- 0 from this core, which makes one
+//! VMO a buffer. Before version 9 READY carried one card VMO that every
+//! buffer was a range of, and the program that drew a buffer could map the
+//! whole of it: another open's pixels, and a range given back and handed
+//! out again (E-02). READY's `card_bytes` is now only the most the card's
+//! buffers may take together.
 //!
 //! HELLO's timings are for a card that runs only the modes it can make a
 //! clock for -- a board's HDMI output, not a virtio-gpu, which shows any
@@ -94,8 +102,9 @@ use ferrix_linux_abi::drm::FORMAT_XRGB8888;
 use ferrix_native_abi::rights::Rights;
 
 /// The protocol version this crate speaks. 5 added HELLO's timings, 6 MODES,
-/// 7 each scanout's refresh, 8 HELLO's flags.
-pub const VERSION: u16 = 8;
+/// 7 each scanout's refresh, 8 HELLO's flags, 9 a VMO a buffer, carried by
+/// its ATTACH.
+pub const VERSION: u16 = 9;
 
 /// HELLO's type.
 pub const HELLO: u32 = 1;
@@ -188,15 +197,16 @@ pub const PAGE_SIZE: u64 = 4096;
 /// Exactly the rights each side holds the other's port with.
 pub const PORT_RIGHTS: Rights = Rights(Rights::WRITE.0 | Rights::TRANSFER.0);
 
-/// Exactly the rights the driver holds the card VMO with: it may read and pin
-/// it and was handed it, and may neither write, map nor copy it.
+/// Exactly the rights the driver holds a buffer's VMO with: it may read and
+/// pin it and was handed it, and may neither write, map nor copy it. Named
+/// for the one card VMO every buffer was a range of before version 9.
 pub const CARD_VMO_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::TRANSFER.0);
 
-/// Exactly the rights a driver whose HELLO says it copies holds the card VMO
-/// with: `READ` and `MAP`, so that it can map the buffers read-only and copy
-/// from them. Never `WRITE`: it still cannot change a pixel. Nor `TRANSFER`:
-/// it maps the card once and closes the handle, and has nobody to pass it
-/// to.
+/// Exactly the rights a driver whose HELLO says it copies holds a buffer's
+/// VMO with: `READ` and `MAP`, so that it can map the buffer read-only and
+/// copy from it. Never `WRITE`: it still cannot change a pixel. Nor
+/// `TRANSFER`: it maps the buffer at ATTACH and closes the handle, and has
+/// nobody to pass it to.
 pub const CARD_VMO_COPY_RIGHTS: Rights = Rights(Rights::READ.0 | Rights::MAP.0);
 
 /// One scanout as HELLO describes it: its preferred mode.
@@ -377,7 +387,7 @@ pub struct Hello {
     /// for a virtio-gpu, which shows any size.
     pub timings: Timings,
     /// Whether the driver shows a buffer by copying it with the processor,
-    /// and so is handed the card VMO it can map ([`HELLO_COPIES`]).
+    /// and so is handed buffer VMOs it can map ([`HELLO_COPIES`]).
     pub copies: bool,
 }
 
@@ -546,28 +556,17 @@ pub fn validate_modes(modes: &[ScanoutMode; MAX_SCANOUTS], scanouts: u16) -> Res
 pub struct Ready {
     /// The card's number, `card<N>`.
     pub card: u32,
-    /// Bytes of the card VMO, which every ATTACH's range lies inside.
+    /// The most bytes the card's buffers may take together.
     pub card_bytes: u64,
 }
 
 impl Ready {
-    /// READY's handles, in order: the card VMO and the core's port.
-    pub const HANDLE_RIGHTS: [Rights; 2] = [CARD_VMO_RIGHTS, Rights::WRITE];
-    /// READY's handles for a driver whose HELLO said it copies.
-    pub const COPY_HANDLE_RIGHTS: [Rights; 2] = [CARD_VMO_COPY_RIGHTS, Rights::WRITE];
+    /// READY's one handle: the core's port.
+    pub const HANDLE_RIGHTS: [Rights; 1] = [Rights::WRITE];
 
-    /// The handles' rights READY carries to a driver whose HELLO said
-    /// `copies`.
-    #[must_use]
-    pub const fn handle_rights(copies: bool) -> [Rights; 2] {
-        if copies {
-            Self::COPY_HANDLE_RIGHTS
-        } else {
-            Self::HANDLE_RIGHTS
-        }
-    }
-
-    /// The card VMO's rights alone, as [`Self::handle_rights`] has them.
+    /// The rights each ATTACH's buffer VMO carries to a driver whose HELLO
+    /// said `copies`, or did not. Named for the card VMO READY carried before
+    /// version 9.
     #[must_use]
     pub const fn card_rights(copies: bool) -> Rights {
         if copies {
@@ -578,14 +577,15 @@ impl Ready {
     }
 }
 
-/// ATTACH: make a range of the card VMO a buffer the device can show.
+/// ATTACH: make a range of the VMO the message carries a buffer the device
+/// can show.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Attach {
     /// The buffer's id, not 0.
     pub buffer: u32,
     /// Its fourcc, [`FORMAT`].
     pub format: u32,
-    /// Where its range starts in the card VMO, page-aligned.
+    /// Where its range starts in the buffer's VMO, page-aligned.
     pub offset: u64,
     /// Its range's length, whole pages.
     pub length: u64,
@@ -666,13 +666,21 @@ pub enum AttachError {
     /// A stride under `width` × 4, or rows that do not fit the range.
     Stride,
     /// A range that is not whole pages, is empty, is longer than
-    /// [`MAX_BUFFER_PAGES`], or runs past the card VMO.
+    /// [`MAX_BUFFER_PAGES`], or runs past the buffer's VMO.
     Range,
 }
 
 impl Attach {
-    /// Check the buffer against itself and a card VMO of `card_bytes`.
-    pub fn validate(&self, card_bytes: u64) -> Result<(), AttachError> {
+    /// ATTACH's one handle: the buffer's VMO.
+    pub const HANDLES: usize = 1;
+
+    /// Check the buffer against itself and the VMO it came with, of
+    /// `vmo_bytes`.
+    ///
+    /// # Errors
+    ///
+    /// Why it is not one a driver can act on.
+    pub fn validate(&self, vmo_bytes: u64) -> Result<(), AttachError> {
         if self.buffer == 0 {
             return Err(AttachError::Id);
         }
@@ -693,7 +701,7 @@ impl Attach {
             || self.length > MAX_BUFFER_PAGES * PAGE_SIZE
             || !self.offset.is_multiple_of(PAGE_SIZE)
             || !self.length.is_multiple_of(PAGE_SIZE)
-            || end.is_none_or(|end| end > card_bytes)
+            || end.is_none_or(|end| end > vmo_bytes)
         {
             return Err(AttachError::Range);
         }

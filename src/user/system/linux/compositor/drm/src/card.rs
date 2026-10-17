@@ -141,7 +141,7 @@ impl Card {
 }
 
 /// [`Card::ioctl`] on any descriptor of a card, a [`Flusher`]'s too.
-fn ioctl_on<L: Layout>(fd: libc::c_int, request: u32, value: &mut L) -> io::Result<()> {
+pub(crate) fn ioctl_on<L: Layout>(fd: libc::c_int, request: u32, value: &mut L) -> io::Result<()> {
     {
         let mut bytes = vec![0u8; L::SIZE];
         value

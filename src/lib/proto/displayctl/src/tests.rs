@@ -321,7 +321,7 @@ fn fields_lie_where_the_specification_puts_them() {
     // the timings a card that runs only some lists, 16 x 4 for each
     // scanout's refresh, and 4 for the flags.
     assert_eq!(bytes.len(), 680);
-    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 8, "VERSION");
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 9, "VERSION");
     assert_eq!(u32_at(bytes, 612), 74_998, "scanout 0's refresh");
     assert!(bytes[616..].iter().all(|&byte| byte == 0));
     assert_eq!(u16::from_le_bytes([bytes[10], bytes[11]]), 1);
@@ -1151,10 +1151,12 @@ fn a_reserved_hello_flag_is_malformed() {
 }
 
 #[test]
-fn only_a_copying_driver_is_handed_a_card_it_can_map() {
-    assert_eq!(Ready::handle_rights(false), Ready::HANDLE_RIGHTS);
+fn only_a_copying_driver_is_handed_buffers_it_can_map() {
+    // READY carries the port alone since version 9: no VMO a driver could
+    // map every buffer of the card through.
+    assert_eq!(Ready::HANDLE_RIGHTS, [Rights::WRITE]);
+    assert_eq!(Attach::HANDLES, 1);
     assert_eq!(Ready::card_rights(false), CARD_VMO_RIGHTS);
-    assert_eq!(Ready::handle_rights(true), Ready::COPY_HANDLE_RIGHTS);
     assert_eq!(Ready::card_rights(true), CARD_VMO_COPY_RIGHTS);
     for rights in [CARD_VMO_RIGHTS, CARD_VMO_COPY_RIGHTS] {
         assert_eq!(rights.0 & Rights::WRITE.0, 0, "never WRITE");

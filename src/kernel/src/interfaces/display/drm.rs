@@ -8,11 +8,13 @@
 //! `type` property *per scanout the driver reported*, each in a block of
 //! four ids of its own below the framebuffers'. A compositor with two
 //! monitors is two connectors here, each with a CRTC that shows a
-//! framebuffer of its own. Dumb buffers
-//! are ranges of the card VMO the core hands out, and takes back decommitted
-//! once the device has let go of them; a program maps them through the
-//! card's own inode, whose `mapping()` is that VMO, at the offset
-//! `MODE_MAP_DUMB` gives.
+//! framebuffer of its own. Each dumb buffer
+//! is a VMO of its own, which the core hands the driver with its ATTACH and
+//! takes back decommitted once the device has let go of it. A program maps
+//! one through the open that made it, at the offset `MODE_MAP_DUMB` gives,
+//! which names the buffer rather than a place: the open answers
+//! [`Inode::mapping_at`] for its own buffers and nothing else, and the card's
+//! node maps nothing (E-02, `docs/DISPLAY.md` §2.1).
 //!
 //! A handle is the open's name for a buffer; the core names it by an id no
 //! other buffer on the card ever has. `DESTROY_DUMB` of a buffer a
@@ -68,6 +70,8 @@ use ferrix_vfs::{Inode, Metadata, Readiness, Result as VfsResult};
 use super::{Card, CardError};
 use ferrix_sync::SleepLock;
 
+use crate::user::vmo::Vmo;
+
 use crate::sched::WaitQueue;
 use crate::sync::{SchedParker, SpinLock};
 use crate::syscall::process::{self, Process};
@@ -79,6 +83,19 @@ use crate::timer;
 // up with `DRM_MODE_OBJECT_ANY`. The card keeps that: the fixed objects take
 // ids below `FIRST_FRAMEBUFFER_ID`, and framebuffers are numbered from there
 // up, never reused within an open, as `add_framebuffer` counts.
+
+/// How far up a `MODE_MAP_DUMB` offset the handle is: the low bits are a
+/// place in the buffer, which no buffer is too big for, and the high bits
+/// are which buffer of the open. An offset is a name, as the render node's
+/// are (`interfaces::render::node`); 25 rather than its 32 so that an
+/// `ARMv7` `mmap2`, which counts the offset in pages in 32 bits, reaches handles up
+/// to 2^19.
+const MAP_SHIFT: u32 = 25;
+
+const _: () = assert!(
+    1u64 << MAP_SHIFT >= ferrix_displayctl::message::MAX_BUFFER_PAGES * PAGE_SIZE,
+    "a buffer is larger than a map offset's place bits reach"
+);
 
 /// How many objects one head has: a CRTC, an encoder, a connector and a
 /// primary plane, in a block of ids of its own.
@@ -174,13 +191,12 @@ struct Dumb {
     handle: u32,
     /// The core's id for it.
     buffer: u32,
-    /// Where its pixels are in the card VMO, for a dumb buffer.
+    /// Whether its pixels are a VMO of this open's, in
+    /// [`OpenState::pages`]: a dumb buffer's are.
     ///
-    /// `None` for an imported one, whose pixels are on the device and are
-    /// not in the card VMO at all: `MODE_MAP_DUMB` of such a handle answers
-    /// nothing rather than an offset, which would be some other buffer's
-    /// pixels.
-    offset: Option<u64>,
+    /// Not an imported one's, whose pixels are on the device: `MODE_MAP_DUMB`
+    /// of such a handle answers nothing.
+    mapped: bool,
     width: u32,
     height: u32,
     pitch: u32,
@@ -201,6 +217,10 @@ struct Framebuffer {
 #[derive(Debug, Default)]
 struct OpenState {
     dumbs: Vec<Dumb>,
+    /// The VMO of each dumb buffer this open made, by its handle: what a
+    /// mapping of the open reaches, and all it reaches. An entry goes with
+    /// its dumb buffer.
+    pages: Vec<(u32, Arc<Vmo>)>,
     /// The objects imported from the render node, by the handle each was
     /// given. Holding one keeps the renderer's object alive for as long as
     /// this open can show it, whatever the program does with the handle it
@@ -275,8 +295,8 @@ impl CardFile {
 impl Drop for CardFile {
     /// Take the screen off and let go of the buffers without waiting: the
     /// replies go to the card's task, which drops them. A buffer whose
-    /// detach the device refuses keeps its range, which the core never hands
-    /// out again.
+    /// detach the device refuses keeps its VMO and its share of the card's
+    /// budget for good.
     fn drop(&mut self) {
         let state = self.state.get_mut();
         let buffers: Vec<u32> = state.dumbs.iter().map(|dumb| dumb.buffer).collect();
@@ -292,6 +312,27 @@ impl Inode for CardFile {
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
         self
+    }
+
+    /// The VMO of the dumb buffer a `MODE_MAP_DUMB` offset names, if this
+    /// open made it and still holds its handle, and the byte of it the
+    /// offset is. Nothing else: no other open's buffer, no buffer given
+    /// back, and nothing past a buffer's end, which the mapping's bounds
+    /// check against this VMO refuses (E-02).
+    fn mapping_at(&self, offset: u64) -> Option<(Arc<dyn Any + Send + Sync>, u64)> {
+        let handle = u32::try_from(offset >> MAP_SHIFT).ok()?;
+        let within = offset & ((1 << MAP_SHIFT) - 1);
+        let state = self.state.lock();
+        if !state
+            .dumbs
+            .iter()
+            .any(|dumb| dumb.handle == handle && dumb.mapped && !dumb.destroyed)
+        {
+            return None;
+        }
+        let (_, vmo) = state.pages.iter().find(|(held, _)| *held == handle)?;
+        let vmo: Arc<dyn Any + Send + Sync> = Arc::clone(vmo) as Arc<dyn Any + Send + Sync>;
+        Some((vmo, within))
     }
 
     /// Linux's DRM files have no `splice_read`: `sendfile` and `splice`
@@ -1069,8 +1110,8 @@ fn map_dumb(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Errno
         .lock()
         .dumbs
         .iter()
-        .find(|dumb| dumb.handle == map.handle && !dumb.destroyed)
-        .and_then(|dumb| dumb.offset)
+        .find(|dumb| dumb.handle == map.handle && !dumb.destroyed && dumb.mapped)
+        .map(|dumb| u64::from(dumb.handle) << MAP_SHIFT)
         .ok_or(Errno::ENOENT)?;
     write_arg(process, arg, &map)
 }
@@ -1126,7 +1167,7 @@ fn prime_fd_to_handle(process: &Process, file: &CardFile, arg: u64) -> Result<us
                 state.dumbs.push(Dumb {
                     handle,
                     buffer,
-                    offset: None,
+                    mapped: false,
                     width,
                     height,
                     pitch: stride,
@@ -1433,7 +1474,7 @@ fn create_dumb(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Er
         return Err(Errno::EINVAL);
     }
     let pitch = create.width * 4;
-    let (buffer, offset, status) = file
+    let (buffer, pages, status) = file
         .card
         .attach(create.width, create.height, pitch)
         .map_err(card_error)?;
@@ -1445,10 +1486,11 @@ fn create_dumb(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Er
         match handle.checked_add(1) {
             Some(next) => {
                 state.next_handle = next;
+                state.pages.push((handle, pages));
                 state.dumbs.push(Dumb {
                     handle,
                     buffer,
-                    offset: Some(offset),
+                    mapped: true,
                     width: create.width,
                     height: create.height,
                     pitch,
@@ -1469,6 +1511,15 @@ fn create_dumb(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Er
     write_arg(process, arg, &create)
 }
 
+/// Take the dumb buffer at `at` of the open's list away, and its VMO with
+/// it: the core's id, for the caller to let go of. A mapping of it keeps the
+/// VMO, and only it, alive.
+fn forget(state: &mut OpenState, at: usize) -> u32 {
+    let dumb = state.dumbs.remove(at);
+    state.pages.retain(|(held, _)| *held != dumb.handle);
+    dumb.buffer
+}
+
 /// Take `handle` away. The buffer goes now, or with the last framebuffer
 /// that refers to it.
 fn destroy_dumb(file: &CardFile, handle: u32) -> Result<(), Errno> {
@@ -1486,7 +1537,7 @@ fn destroy_dumb(file: &CardFile, handle: u32) -> Result<(), Errno> {
             }
             None
         } else {
-            Some(state.dumbs.remove(at).buffer)
+            Some(forget(&mut state, at))
         }
     };
     if let Some(buffer) = gone {
@@ -1579,7 +1630,7 @@ fn remove_framebuffer(file: &CardFile, id: u32) -> Result<(), Errno> {
             .iter()
             .position(|dumb| dumb.handle == framebuffer.handle && dumb.destroyed)
             .filter(|_| !still);
-        at.map(|at| state.dumbs.remove(at).buffer)
+        at.map(|at| forget(&mut state, at))
     };
     if let Some(buffer) = orphaned {
         file.card.let_go(&[buffer]);
