@@ -328,13 +328,15 @@ pub fn enable_interrupts<R: Registers>(bar: &mut R) {
 /// driver sets them. The FIFO is believed up to 80 KiB and the receive
 /// FIFO split four ways, as the chip's four receive queues share it. One
 /// interrupt for everything ([`ferrix_dwmac::Options::interrupt_mode`] 0),
-/// because one MSI vector is all there is.
+/// because one MSI vector is all there is. Receive has the most descriptors
+/// a ring may have, 128: 5 ms of frames at 300 Mbit/s, for a driver that
+/// polls when its interrupt does not come.
 #[must_use]
 pub fn options(mac: [u8; 6]) -> Options {
     Options {
         mac,
         transmit_entries: 64,
-        receive_entries: 64,
+        receive_entries: 128,
         buffer_bytes: 2048,
         bus: Bus {
             clock_range: 2,

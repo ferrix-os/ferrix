@@ -22,7 +22,10 @@
 //! 4. The loop polls as well as waits: every millisecond until a first
 //!    interrupt is seen (on a chip whose interrupts never arrive the driver
 //!    still works, slowly), then every 250 ms, which is how often the PHY is
-//!    asked about the link. A change goes to the kernel as LINK.
+//!    asked about the link. A change goes to the kernel as LINK. A 250 ms
+//!    look that finds frames no interrupt announced goes back to every
+//!    millisecond: on the N150 box one packet arrived with no vector minted,
+//!    and the download then ran at what sends rang in.
 //! 5. STOP resets the core, and STOPPED goes back only if the reset was seen
 //!    to finish; otherwise the pins are kept and the process exits without
 //!    it.
@@ -925,6 +928,9 @@ fn serve(
     let mut serve = Serve::new();
     let now = || ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
     let mut interrupted = false;
+    // Whether this turn follows a wait that ended at its deadline.
+    let mut polled = false;
+    let mut said_unannounced = false;
     let mut next_link = 0;
     control
         .wait_async(
@@ -949,6 +955,22 @@ fn serve(
         let turn = serve
             .turn(&mut ring.ring, &mut ring.data, &mut ring.side, adapter)
             .map_err(|_| Step::Serve)?;
+        // Frames a deadline found that no interrupt announced: the
+        // interrupts are not arriving after all -- on the N150 box one
+        // packet came with no vector minted, and every frame after it then
+        // waited for the 250 ms look or for a send to ring the bell. Back to
+        // looking every millisecond, until an interrupt comes again.
+        if polled && interrupted && turn.received > 0 {
+            interrupted = false;
+            if !said_unannounced {
+                said_unannounced = true;
+                let _ = writeln!(
+                    Say,
+                    "yt6801   frames no interrupt announced: polling every millisecond again"
+                );
+            }
+        }
+        polled = false;
         if let Some(bell) = ring.side.publish(&mut ring.ring) {
             let _ = ring
                 .completion
@@ -992,7 +1014,10 @@ fn serve(
                     let _ = interrupt.ack();
                 }
             }
-            // The kernel's bell, or the deadline: the next turn looks.
+            // The deadline: the next turn looks, and says whether it found
+            // what an interrupt should have announced.
+            Err(_) => polled = true,
+            // The kernel's bell: the next turn looks.
             _ => {}
         }
     }
