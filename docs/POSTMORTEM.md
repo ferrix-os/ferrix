@@ -170,9 +170,16 @@ staged:
 3. Read the header. Valid -> the previous kernel's record is reported (§3.5);
    otherwise one line saying why (`nothing there` for a wrong magic, which is
    every cold boot; `damaged` for a right magic with a wrong CRC or bound).
-4. Write a fresh header: sequence = previous + 1 (or 1), `written` = 0. The
-   ring is not cleared (1 MiB of writes for nothing: only `written` decides
-   what is text).
+4. When the boot disk has an event log (§4) and the record holds a panic
+   report: append it there first, durably (§4.3). If that append fails, the
+   region is **not** renewed: it stays allocated (so the kernel never uses
+   its pages), is not handed over, and the boot goes without a pstore, said
+   on the console; the record waits in RAM for the next boot or the
+   inspection Linux (the consultant's E2). A disk with no event log
+   partition keeps PM3's behaviour: the record is reported, then renewed.
+   Then write a fresh header: sequence = previous + 1 (or 1), `written` = 0.
+   The ring is not cleared (1 MiB of writes for nothing: only `written`
+   decides what is text).
 5. Clean the header's cache lines on Arm (the switch turns caches off), and
    hand `pstore_phys`, `pstore_len` to the kernel in the boot info.
 
@@ -342,7 +349,142 @@ P4).
 * The test uses `ferrix.onexit=panic` (an existing deliberate panic) and a
   QMP reset, since no kernel resets on a panic yet.
 
-## 4. Where it stands
+## 4. PM4: the event log, across a power cycle
+
+Version 1, 2026-10-17 (n150), the design of
+`~/.local/share/ferrix/n150-linux/panic-log-design.md` option E; the
+consultant's verdict **OK IF (E1)-(E12)**, ledger line 2153. The customer
+chose the partition's place on the N150 box: the gap before its ESP.
+
+PM3's record lives in RAM and is lost to a power cycle. PM4 keeps a
+panicked boot's record on disk, written by **the next boot's loader**, on a
+machine that is not failing, through firmware's own Block I/O -- never by
+the panicked kernel, which writes nothing but RAM. With `ferrix.panic=reset`
+(H.FAIL.5) the machine resets itself, RAM survives the warm reset, and the
+loader that comes up 10 to 20 seconds later appends the record before it
+gives the region a fresh header. When the boot manager starts the
+inspection Linux instead, its init appends the same record with
+`ferrix-eventlog append`, from `/dev/mem`.
+
+### 4.1 The partition and its format
+
+A GPT partition of type **Ferrix event log**,
+`0a0323e0-d79d-498d-a4d6-dbea6af3bab0`, name `ferrix-events`. On the N150
+box: LBA 40-2047, 2008 sectors in the gap before the ESP (LBA 2048). The
+format is `ferrix-eventlog` (`src/lib/proto/eventlog`: `no_std`,
+`#![forbid(unsafe_code)]`, host-tested), which the loader, the Linux tool
+and xtask share:
+
+```
+  0       header copy A   (4 KiB; 64 bytes used)
+  4096    header copy B
+  8192    record 0        (32 KiB each)
+  ...     record n-1      n = (bytes - 8192) / 32 KiB, at most 4096: 31 on the box
+
+header:  0 "FXEVENTS"  8 version 1  12 record length  16 records  20 next slot
+         24 generation  32 appended (the next record's index)  40 CRC-32C of 0..40
+record:  0 "FXEVTREC"  8 version 1  12 kind (1 = panic)  13 flags (truncated, unchecked)
+         16 index  24 count  28 text length  32 first boot  40 last boot
+         48 identity  56 key (CRC-32C of the panic line)  64 first time  72 last time
+         92 CRC-32C of 0..92 and the text   96 the text
+```
+
+The header's current copy is the valid one, or of two the higher
+generation. A record belongs to the log when it is valid and its index is
+below the header's `appended`; records are ordered by index, the log's own
+count, not by the pstore's boot sequence (it starts again at 1 after every
+cold boot) nor by firmware's clock (informative only, Unix seconds) (E7).
+
+**The text** (E5, C2): the report first -- from the last `FERRIX-PANIC`
+line to the end of the kernel log -- then `-- the log before the report --`
+and as much of the log before it as fits, from a line's start; every byte
+as `pstore::shown` prints it and every `FERRIX-` made `FERRIX_`. A record
+holds at most 32 672 bytes of the 1 MiB ring: the report and the log's
+tail, never the whole ring (flag `truncated` says it was cut). Every record
+carries `unchecked`: the pstore ring has no checksum, so firmware may have
+written into it (§3.1). The pstore header and ring are parsed as untrusted:
+`pstore::validate` clamps the count to the ring and every place is bounded
+by the text's and the buffer's lengths; a host test feeds 300 hostile
+regions.
+
+**Kinds** (E6): this version logs one kind, a previous boot's record that
+holds a panic report. A record without one (a clean reboot, or a hang a
+warm reset ended) and no record at all (a cold boot, a power cut, the
+first boot after an install, after a Linux boot or after
+`ferrix.pstore=off`) log nothing: telling them apart needs the kernel's
+clean-shutdown mark, an item change with its own id and control, which is
+left for its own review. Nothing is ever logged as "power loss" or "hang".
+
+### 4.2 What writes it, and nothing else (E1)
+
+* **EL1** The loader writes only blocks of the boot disk's one partition of
+  the event log's type, through that disk's Block I/O; none, or more than
+  one (`gpt::find_one`'s `Missing` and `Many`), or a damaged table, or an
+  entry outside the usable blocks or overlapping another -> no write, said.
+* **EL2** Every block address it reads or writes comes from
+  `Geometry::lba`, which refuses an offset that is not a whole block or a
+  block not wholly inside the partition (host test
+  `no_address_outside_the_partition`, which also appends 40 records and
+  counts 0 writes outside LBA 40-2047).
+* **EL3** It writes only on a boot whose pstore region holds a valid record
+  with a panic report (and, on that boot, a fresh header if the partition
+  has none).
+* **EL4** The inspection Linux's `ferrix-eventlog append` writes by the same
+  functions to the partition device named `ferrix-events`, and never writes
+  the pstore region.
+
+### 4.3 The append (E2, E3, E4, E8)
+
+`ferrix_eventlog::append`, in this order: read the header (two copies; a
+fresh header, both copies, when neither is valid); read the newest record
+through it. If its identity is this pstore record's (the boot sequence and
+the CRC-32C of the whole pstore header, `written` among it), nothing is
+written (E3): a reset during the header writes, the loader after Linux or
+Linux after the loader never duplicate. If it is the same panic (kind and
+key), its count goes up by one and it is rewritten in place, then flushed:
+a reset loop is one record with a count, and the first record of the run
+is not pushed out by its copies (E8). Otherwise the record goes to the
+header's next slot, flushed, then header copy A, flushed, then copy B,
+flushed; the ring overwrites its oldest. `Ok` only when all of it is
+durable, and only then does the loader renew the pstore header (§3.3, 4).
+
+Torn writes (E4; the box's SATA disk has a write cache and no FUA): a new
+record is invisible until a header copy counts it, so a stop at any block
+leaves the previous newest; a torn header copy falls back to the other; a
+torn in-place collapse leaves a record that fails its CRC, and the log's
+newest valid record is the one before -- never a record that is not whole.
+Host test `a_torn_append_leaves_the_newest_or_the_previous_record` stops
+the device after every number of block writes of an append and of a
+collapse.
+
+### 4.4 Readers
+
+The loader says on every boot with a log: `events   N records; newest
+#I: boot B panicked, C time(s): FERRIX_PANIC ...`, and `events   boot B's
+panic kept as record #I (slot S)` when it appends. `ferrix-eventlog list
+DEVICE [--text]` (a static Linux binary, also in the inspection image)
+prints every record, oldest first, with the whole text on `--text`. Root
+only: it reads the raw partition (VULNERABILITY-ANALYSIS V-15).
+
+### 4.5 The gate and its controls (E12)
+
+`cargo xtask test-postmortem` (x86-64): the image's ESP in a GUID partition
+table with the log at LBA 40-2047, as on the box. Boot 1 panics and resets
+by itself (`ferrix.panic=reset`); boot 2's loader says it kept the record;
+the QEMU process is ended (the power cut); a second process boots the disk
+cold: boot 3's loader finds no pstore and quotes boot 1's panic from the
+log, and the host reads the record back with `ferrix-eventlog`, its text
+starting with boot 1's panic line. Host tests in `ferrix-eventlog`: the
+formats and every refused field, the CRC across head and text, the text's
+composition and truncation, 300 hostile regions, idempotence, the collapse,
+the ring's wrap, torn appends, torn header copies, and the range check.
+Controls (`fleet/gate.sh control`): the append moved after the pstore
+header's renewal (the gate: boot 2 keeps nothing); the record's CRC check
+removed (`a_record_round_trips_and_a_changed_byte_is_refused`); the range
+check removed (`no_address_outside_the_partition`); the identity check
+removed (`the_same_pstore_record_is_appended_once`).
+
+## 5. Where it stands
 
 2026-10-11:
 
