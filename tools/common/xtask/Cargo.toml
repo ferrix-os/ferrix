@@ -57,6 +57,10 @@ ferrix-eventlog.workspace = true
 # reads the region it saved from the guest with the code the loader and the
 # kernel compile, so the gate and the boot cannot disagree about a header.
 ferrix-bootinfo.workspace = true
+# devmgr's protocol, for the most drivers one DEVICES message names: an
+# image whose `/lib/drivers/MANIFEST` names more is refused when it is built,
+# not at boot with FX-1006.
+ferrix-devmgr-proto.workspace = true
 
 [dev-dependencies]
 # The native ABI's numbers, which a host test holds nvrm's C header to

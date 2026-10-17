@@ -76,7 +76,14 @@ handles: [job (first only), device 0, device 0 again, ..., image 0 ...
   the file into a VMO it creates for the purpose — anonymous memory, filled
   by the kernel from the initramfs — and hands the VMO with
   `READ | TRANSFER`. The name is the file's name. `process_create` (0x1030)
-  takes exactly this: a job, an image VMO with `READ`, a name.
+  takes exactly this: a job, an image VMO with `READ`, a name. There are at
+  most 32 (`MAX_DRIVERS` in `ferrix-devmgr-proto`), all in the first
+  message: with the job they leave room for 15 devices beside them in its 64
+  handles. The kernel's refusal is the enforcement: a directory with more
+  stops the boot at stage 10 with FX-1006 (`write_devices` cannot encode
+  the first message), or fails `devmgr_start` under `ferrix.devmgr=init`.
+  `xtask` refuses to build such an image too, but that is only an early,
+  build-time copy of the kernel's check, not the item's enforcement.
 * A channel message carries at most `CHANNEL_MAX_HANDLES` (64) handles, and
   a device takes two: ARMv7-A's machine publishes 36 nodes, its 32
   virtio-mmio transports among them. So the kernel sends as many DEVICES

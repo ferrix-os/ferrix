@@ -100,7 +100,12 @@ pub const NAME_BYTES: usize = 32;
 pub const SHORT_BYTES: usize = 16;
 /// The most drivers one DEVICES message names, and so the most a machine's
 /// driver directory may hold.
-pub const MAX_DRIVERS: usize = 16;
+///
+/// The first message carries the job and every image beside its devices, in
+/// a channel message's 64 handles (`CHANNEL_MAX_HANDLES`): 32 drivers leave
+/// room for 15 devices in it, and the rest come in later messages. Sixteen
+/// was full once the tree carried 15 drivers and `test-nvrm` added its two.
+pub const MAX_DRIVERS: usize = 32;
 /// Bytes of the longest DEVICES message.
 pub const DEVICES_MAX_BYTES: usize = DEVICES_HEADER_BYTES + MAX_DRIVERS * NAME_BYTES;
 /// `flags` bit: this is the first DEVICES message, carrying the job and the

@@ -982,6 +982,7 @@ dependencies = [
  "ferrix-argon2",
  "ferrix-bootinfo",
  "ferrix-cpio",
+ "ferrix-devmgr-proto",
  "ferrix-displayctl",
  "ferrix-elf",
  "ferrix-eventlog",

@@ -65,6 +65,20 @@ entries is a three-slot array on the stack and a pass over an iterator, so
 an archive with any number of entries under `.ferrix/` costs time in
 proportion to them and no memory; each refusal is one console line.
 
+**devmgr's DEVICES buffer is on the kernel stack (2026-10-17, F-82).**
+`discovery/devmgr.rs::write_devices` encodes each DEVICES message into one
+array on the calling task's kernel stack before copying it to the heap
+`Vec` the channel takes. It runs at bring-up (`start`) and, under
+`ferrix.devmgr=init`, from `devmgr_start`'s system call (`start_in`). Its
+size is `DEVICES_HEADER_BYTES + MAX_DRIVERS x NAME_BYTES`, 24 + 32 x 32 =
+1,048 bytes at `MAX_DRIVERS` 32 (536 at 16), on a 16 KiB kernel stack
+(`vmap::STACK_PAGES` 4). It is not nested or recursive, and
+`write_devices` holds no lock of its own while it is live. All three
+constants are `ferrix-devmgr-proto`'s, a crate the item does not classify
+(F-76's class), so a review of `MAX_DRIVERS` or `NAME_BYTES` is a review of
+this frame. A const assertion in `devmgr.rs` holds the buffer at 1,048
+bytes, so that growing it is a diff to the core file as well.
+
 ### 1.2 How failure is reported
 
 The obvious fix is unavailable. `#[alloc_error_handler]` is an unstable

@@ -505,42 +505,42 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "96-98",
+      "lines": "104-106",
       "category": "defensive",
       "match": "fn no_files(_path: &[u8]) -> Result<Vec<u8>, Errno> {",
       "why": "The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "372-374",
+      "lines": "380-382",
       "category": "defensive",
       "match": "for (_, answer) in PENDING.lock().iter_mut() {",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "377",
+      "lines": "385",
       "category": "defensive",
       "match": "ANSWERED.wake_all();",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "440",
+      "lines": "448",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "969",
+      "lines": "977",
       "category": "defensive",
       "match": ".or_else(|_| root.new_child())",
       "why": "A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1096",
+      "lines": "1104",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."

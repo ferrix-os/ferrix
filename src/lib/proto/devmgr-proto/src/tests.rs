@@ -77,6 +77,29 @@ fn a_continuation_carries_devices_only() {
     );
 }
 
+/// A directory of [`MAX_DRIVERS`] drivers goes in one first message, and
+/// its job and images leave room in a channel message's handles for a device
+/// beside them: the kernel's loop sends the rest in later messages, but one
+/// with no room for any would carry the images and never a device.
+#[test]
+fn devices_carries_max_drivers_with_room_for_a_device() {
+    let names = [name("x"); MAX_DRIVERS];
+    let message = Devices {
+        devices: 1,
+        more: 0,
+        first: true,
+        names: &names,
+    };
+    let mut bytes = [0_u8; DEVICES_MAX_BYTES];
+    let len = message.encode(&mut bytes).expect("MAX_DRIVERS names fit");
+    let view = DevicesView::decode(&bytes[..len]).expect("and decode");
+    assert_eq!(view.drivers as usize, MAX_DRIVERS);
+    assert!(
+        message.handles() <= ferrix_native_abi::types::CHANNEL_MAX_HANDLES,
+        "the job, one device and every image in one channel message"
+    );
+}
+
 #[test]
 fn devices_refuses_too_many_drivers_and_a_small_buffer() {
     let names = [name("x"); MAX_DRIVERS + 1];

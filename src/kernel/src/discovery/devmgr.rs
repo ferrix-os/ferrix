@@ -57,6 +57,14 @@ const MANIFEST: &[u8] = b"/lib/drivers/MANIFEST";
 /// What `devmgr` is listed as.
 const NAME: &[u8] = b"devmgr";
 
+// `write_devices` encodes DEVICES into a stack array of this size, set by
+// `ferrix-devmgr-proto`'s constants: a growth past it is a change here too
+// (docs/certification/MEMORY-AND-TIMING.md section 1.1, F-82).
+const _: () = assert!(
+    DEVICES_MAX_BYTES <= 1048,
+    "write_devices' stack buffer grew"
+);
+
 /// How long `devmgr` has to start every driver and report: a driver resets
 /// and negotiates with its device, and the kernel's ring task publishes on
 /// HELLO; generous under TCG.

@@ -670,6 +670,7 @@ fn build_with_shell(
     crate::auth::refuse_sabotaged(ports)?;
     // drvupdated goes into test-restart --update's images and no other.
     native::refuse_updater(natives)?;
+    refuse_too_many_drivers(natives)?;
     let mut archive = Newc::new();
     archive.directory(".", 0o755)?;
     for (name, permissions) in [
@@ -821,9 +822,49 @@ fn build_with_shell(
     archive.finish()
 }
 
+/// Refuse `natives` when they hold more drivers than one DEVICES message
+/// names (`ferrix_devmgr_proto::MAX_DRIVERS`): the kernel could not hand
+/// them to devmgr, and the boot would stop at stage 10 with FX-1006, "more
+/// drivers than one DEVICES message names". It counts the built programs in
+/// `lib/drivers`, where the kernel counts `MANIFEST`'s lines: the two agree
+/// because `build_with_shell` writes the manifest from this same list.
+fn refuse_too_many_drivers(natives: &[native::Built]) -> Result<()> {
+    let drivers = natives
+        .iter()
+        .filter(|built| built.directory == native::DRIVERS)
+        .count();
+    if drivers > ferrix_devmgr_proto::MAX_DRIVERS {
+        return Err(Error::new(format!(
+            "this image carries {drivers} drivers in {}, more than the {} one DEVICES message \
+             names (ferrix_devmgr_proto::MAX_DRIVERS): the kernel would stop at stage 10 with \
+             FX-1006",
+            native::DRIVERS,
+            ferrix_devmgr_proto::MAX_DRIVERS
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An image with more drivers than devmgr's protocol names is refused
+    /// when it is built, and one with exactly that many is not.
+    #[test]
+    fn an_image_with_more_drivers_than_devices_names_is_refused() {
+        let driver = |name| native::Built {
+            name,
+            directory: native::DRIVERS,
+            bytes: b"\x7fELF".to_vec(),
+        };
+        let full = vec![driver("x"); ferrix_devmgr_proto::MAX_DRIVERS];
+        assert!(build_with(None, &full).is_ok(), "MAX_DRIVERS drivers fit");
+        let mut over = full;
+        over.push(driver("y"));
+        let refused = build_with(None, &over).expect_err("one more is refused");
+        assert!(refused.to_string().contains("FX-1006"));
+    }
 
     /// `drvupdated` goes into `test-restart --update`'s images alone (the
     /// certification consultant's C1 and K3, 2026-10-07): an archive that
