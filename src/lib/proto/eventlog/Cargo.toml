@@ -1,0 +1,15 @@
+[package]
+name = "ferrix-eventlog"
+description = "The event log a panic's record is kept in across power cycles: its format, the append and the reader (docs/POSTMORTEM.md 4)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ferrix-bootinfo.workspace = true
+ferrix-slots.workspace = true
+
+[lints]
+workspace = true

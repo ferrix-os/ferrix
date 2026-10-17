@@ -101,6 +101,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-bootinfo",
  "ferrix-elf",
+ "ferrix-eventlog",
  "ferrix-paging",
  "ferrix-slots",
  "ferrix-smbios",
@@ -255,6 +256,14 @@ dependencies = [
 [[package]]
 name = "ferrix-elf"
 version = "0.1.0"
+
+[[package]]
+name = "ferrix-eventlog"
+version = "0.1.0"
+dependencies = [
+ "ferrix-bootinfo",
+ "ferrix-slots",
+]
 
 [[package]]
 name = "ferrix-fallible"
@@ -975,6 +984,7 @@ dependencies = [
  "ferrix-cpio",
  "ferrix-displayctl",
  "ferrix-elf",
+ "ferrix-eventlog",
  "ferrix-native-abi",
  "ferrix-netwire",
  "ferrix-partition",

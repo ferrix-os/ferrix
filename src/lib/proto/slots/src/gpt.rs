@@ -37,6 +37,10 @@ pub const SLOT_TYPE: Guid = guid(0x5475_b681, 0x82f5, 0x47da, 0xa5a1, 0x55db_0e7
 /// `c29aa8c5-c19c-4147-838f-01accca28be4`.
 pub const CONTROL_TYPE: Guid = guid(0xc29a_a8c5, 0xc19c, 0x4147, 0x838f, 0x01ac_cca2_8be4);
 
+/// The partition type of the Ferrix event log (`docs/POSTMORTEM.md` §4),
+/// `0a0323e0-d79d-498d-a4d6-dbea6af3bab0`.
+pub const EVENTS_TYPE: Guid = guid(0x0a03_23e0, 0xd79d, 0x498d, 0xa4d6, 0xdbea_6af3_bab0);
+
 /// The header's signature.
 const SIGNATURE: &[u8; 8] = b"EFI PART";
 /// The most entry-array bytes accepted: 128 entries of 128 bytes is what
@@ -269,6 +273,64 @@ pub fn find(
         b,
         disk: header.disk,
     })
+}
+
+/// Why [`find_one`] found no partition to use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lookup {
+    /// The entry array is damaged, or the partition's range is not inside
+    /// the usable blocks, or it overlaps another entry.
+    Table(GptError),
+    /// No partition of the type.
+    Missing,
+    /// More than one: which to write is not the loader's to guess.
+    Many,
+}
+
+/// The one partition of type `kind` in the entry array, checked as [`find`]
+/// checks a Ferrix partition: the array's CRC-32, a range inside the disk
+/// and the usable blocks, and no overlap with any other entry.
+pub fn find_one(header: &Header, array: &[u8], blocks: u64, kind: Guid) -> Result<Part, Lookup> {
+    let array = usize::try_from(header.array_bytes())
+        .ok()
+        .and_then(|len| array.get(..len))
+        .ok_or(Lookup::Table(GptError::Entries))?;
+    if crc32(array) != header.entries_crc {
+        return Err(Lookup::Table(GptError::Entries));
+    }
+    let entries = || array.chunks_exact(header.entry_size as usize).enumerate();
+    let mut found = None;
+    for (index, entry) in entries() {
+        let Some((this, part)) = entry_part(index, entry).map_err(Lookup::Table)? else {
+            continue;
+        };
+        if this != kind {
+            continue;
+        }
+        if part.first_lba == 0
+            || part.first_lba > part.last_lba
+            || part.last_lba >= blocks
+            || part.first_lba < header.first_usable
+            || part.last_lba > header.last_usable
+        {
+            return Err(Lookup::Table(GptError::Range));
+        }
+        for (other_index, other) in entries() {
+            if other_index == index {
+                continue;
+            }
+            if let Some((_, other)) = entry_part(other_index, other).map_err(Lookup::Table)?
+                && part.first_lba <= other.last_lba
+                && other.first_lba <= part.last_lba
+            {
+                return Err(Lookup::Table(GptError::Overlap));
+            }
+        }
+        if found.replace(part).is_some() {
+            return Err(Lookup::Many);
+        }
+    }
+    found.ok_or(Lookup::Missing)
 }
 
 /// An entry's type and partition, or `None` for an unused entry (type zero).

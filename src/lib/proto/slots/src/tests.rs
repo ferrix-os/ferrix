@@ -821,3 +821,53 @@ fn a_ferrix_partition_outside_the_usable_blocks_is_refused() {
         "12345678-9abc-def0-1122-334455667788"
     );
 }
+
+fn find_events(parts: &[(ferrix_partition::Guid, u64, u64)]) -> Result<gpt::Part, gpt::Lookup> {
+    let (header, array) = table(parts);
+    let header = gpt::parse_header(&header, DISK_BLOCKS, 512).map_err(gpt::Lookup::Table)?;
+    gpt::find_one(&header, &array, DISK_BLOCKS, gpt::EVENTS_TYPE)
+}
+
+#[test]
+fn the_event_log_is_found_alone_and_checked() {
+    let events = ferrix_partition::Guid(gpt::EVENTS_TYPE);
+    let esp = ferrix_partition::ESP;
+    // The N150's shape: the log in the gap before the ESP.
+    let found = find_events(&[(esp, 2048, 4095), (events, 40, 2047)]);
+    assert_eq!(
+        found.map(|part| (part.first_lba, part.last_lba)),
+        Ok((40, 2047))
+    );
+    assert_eq!(find_events(&[(esp, 2048, 4095)]), Err(gpt::Lookup::Missing));
+    assert_eq!(
+        find_events(&[(events, 40, 1000), (events, 1001, 2047)]),
+        Err(gpt::Lookup::Many)
+    );
+    // An entry edited to overlap the ESP by one block, both CRCs made good
+    // again: hostile, and refused.
+    let (mut header, mut array) = table(&[(esp, 2048, 4095), (events, 40, 2047)]);
+    array[128 + 40..128 + 48].copy_from_slice(&2048u64.to_le_bytes());
+    let entries = u32::from_le_bytes(header[80..84].try_into().unwrap_or_default()) as usize;
+    let crc = crc32(&array[..entries * 128]);
+    header[88..92].copy_from_slice(&crc.to_le_bytes());
+    header[16..20].fill(0);
+    let crc = crc32(&header[..92]);
+    header[16..20].copy_from_slice(&crc.to_le_bytes());
+    let header = gpt::parse_header(&header, DISK_BLOCKS, 512).unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(
+        gpt::find_one(&header, &array, DISK_BLOCKS, gpt::EVENTS_TYPE),
+        Err(gpt::Lookup::Table(GptError::Overlap))
+    );
+}
+
+#[test]
+fn the_event_log_lookup_refuses_a_damaged_array() {
+    let events = ferrix_partition::Guid(gpt::EVENTS_TYPE);
+    let (header, mut array) = table(&[(events, 40, 2047)]);
+    let header = gpt::parse_header(&header, DISK_BLOCKS, 512).unwrap_or_else(|e| panic!("{e:?}"));
+    array[40] ^= 1;
+    assert_eq!(
+        gpt::find_one(&header, &array, DISK_BLOCKS, gpt::EVENTS_TYPE),
+        Err(gpt::Lookup::Table(GptError::Entries))
+    );
+}

@@ -24,6 +24,7 @@ members = [
     "src/lib/proto/audit",
     "src/lib/proto/bootinfo",
     "src/lib/proto/slots",
+    "src/lib/proto/eventlog",
     "src/lib/platform/description",
     "src/lib/platform/elf",
     "src/lib/kernel/fbtext",
@@ -156,6 +157,7 @@ ferrix-logctl = { path = "src/lib/proto/logctl" }
 ferrix-audit = { path = "src/lib/proto/audit" }
 ferrix-bootinfo = { path = "src/lib/proto/bootinfo" }
 ferrix-slots = { path = "src/lib/proto/slots" }
+ferrix-eventlog = { path = "src/lib/proto/eventlog" }
 ferrix-description = { path = "src/lib/platform/description" }
 ferrix-elf = { path = "src/lib/platform/elf" }
 ferrix-fbtext = { path = "src/lib/kernel/fbtext" }
