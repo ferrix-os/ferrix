@@ -954,9 +954,9 @@ package FerrixIommuRequirements {
                 every unit's fault records last, as audit_faults does, and print
                 one line of how many it found, interrupt requests' faults among
                 them, and the first; never stopping the boot.";
-            attribute :>> criterion = "test-boot's second boot, with
-                ferrix.checks=skip, prints the 'faults recorded in an unchecked
-                boot' line.";
+            attribute :>> criterion = "test-init's boot with ferrix.checks=skip
+                (checks_skipped) prints the 'faults recorded in an unchecked boot'
+                line; with the line renamed that boot fails.";
             attribute :>> parent = ("H.DMA.6", "H.AUD.12");
             attribute :>> unit = "iommu::report_unchecked_faults";
         }

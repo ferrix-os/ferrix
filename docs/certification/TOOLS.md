@@ -151,7 +151,13 @@ the first release that carries it. It is test infrastructure of the reference
 configuration, T2 as QEMU is. The reference machine's x86-64 CPU model
 carries `+x2apic` under TCG as well as KVM (`qemu::x86_cpu`), so that check
 R8 can put a processor in x2APIC mode and see it switched back; the kernel
-runs xAPIC either way.
+runs xAPIC either way. The unit is `intel-iommu,intremap=on,eim=off,aw-bits=39`
+on every standing row: a 39-bit guest width offers three-level tables alone,
+which the kernel walks. QEMU 10.2's default is `aw-bits=48`, which offers four
+levels beside three, and the kernel takes the widest (`L.iommu.60`), so the
+rows name 39 to keep walking what their evidence was gathered on; the
+`--vtd-aw48` row boots `aw-bits=48`, where the kernel walks four levels, the
+N150's only walk (`qemu::INTEL_IOMMU`, `qemu::INTEL_IOMMU_AW48`).
 
 ---
 
