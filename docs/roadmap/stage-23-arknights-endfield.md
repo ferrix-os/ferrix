@@ -489,9 +489,13 @@ ends and the customer decides.
   one: it reaches the certified item's core (another process's memory and
   stopped state) and owes a design review before code. 13, if it is needed.
 * **E5.3** Windows system calls made directly by the game's or the
-  anti-cheat's code, which Wine catches with Syscall User Dispatch (not in
-  the kernel) or, in older builds, with a seccomp filter that returns
-  `SECCOMP_RET_TRAP` (not built: stage 13's S4). 8, if it is needed.
+  anti-cheat's code, which GE-Proton catches with Syscall User Dispatch
+  and DW-Proton with a seccomp filter that returns `SECCOMP_RET_TRAP`.
+  Both are built: S4's `SIGSYS` for `TRAP` (on `main` since 6c025174e, ledger line
+  2331) and Syscall User Dispatch (branch `sud`, `docs/SECCOMP.md` §13,
+  ledger line 2323), each landing on its own review. DW's filter also needs
+  Ferrix's mmap layout to match Linux's (`ENDFIELD-GAME.md` (b)), which is
+  not part of either. 8.
 * **E5.4** What Ferrix says of itself. `uname -s` says `Ferrix` (the
   customer's choice, 2026-09-13), Wine can show the host's `uname` to
   Windows code, and `/proc` has known gaps in format (`docs/STEAM.md` §3).

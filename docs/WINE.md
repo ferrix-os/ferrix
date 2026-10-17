@@ -691,9 +691,10 @@ faulted; and a write-only region refused a read, where Linux's
 `protection_map` makes it readable. A static probe of each step
 (`~/.local/share/ferrix/endfield/probe/usd2.c`) failed three of twelve
 variants on Ferrix and none on Linux before the fix, and none after
-(L.user.128, L.user.129). Proton's Wine also warns that it could not
-enable Syscall User Dispatch, which Ferrix does not have (stage 23's
-E5.3); nothing the launcher does needed it.
+(L.user.128, L.user.129). Proton's Wine also warned that it could not
+enable Syscall User Dispatch, which Ferrix did not have then (stage 23's
+E5.3, since built: `docs/SECCOMP.md` §13); nothing the launcher does
+needed it.
 
 **The font.** The launcher names Segoe UI (and Microsoft YaHei) for its
 interface, and no prefix has Segoe UI, Microsoft's own: Qt's web view

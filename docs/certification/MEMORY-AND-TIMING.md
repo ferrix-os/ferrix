@@ -759,6 +759,21 @@ emulated Arm boots, and for `PID_MAX` threads on both. That is **F-72**
 (open, `FINDINGS.md` §E), with a BACKLOG row: bound the hold by the
 process's thread count, or confirm in batches that drop the lock between
 them.
+**Syscall User Dispatch (`docs/SECCOMP.md` §13, ledger line 2323).** A
+thread that asks for dispatch is watched as a filtered one is, and a kernel
+where no thread is watched makes the same loads at a call as before (the
+mask and the count are shared, UD9). For a dispatching thread a call adds:
+one leaf lock, `Thread::dispatch` (a `crate::sync::SpinLock`, preemption
+off, nothing taken inside it, never held across a fault or a signal),
+held for a 32-byte copy; and, for a call from outside its range, a one-byte
+`copy_from_user` of the selector. That read is the look's new worst case:
+**one user page fault**, which may allocate a frame or wait for a file
+page's I/O, taken with interrupts open and no lock held, before
+`call_entered` (condition 4). It is on the path only of a thread that asked
+for dispatch, never on the path every call of every program takes, which
+`trap::SyscallFilter`'s contract binds. The `dispatch` boot line measures
+the in-range, ALLOW and dispatched costs in ns.
+
 ### 2.2c What the cgroup controllers add to the time claim (2026-10-01)
 
 Four costs the controllers put on paths the claim covers, stated with their

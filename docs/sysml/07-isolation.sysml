@@ -11,6 +11,8 @@
  * classic-BPF checker and interpreter, its hook at the four system-call
  * entries, its filters, SECCOMP_RET_TRAP and TSYNC are built (S1 to S5,
  * docs/SECCOMP.md), and test-seccomp runs a guest program on four ABIs (S6).
+ * Syscall User Dispatch (prctl 59, docs/SECCOMP.md section 13) is a second
+ * rule in the same look, judged before the chain, x86-64 only.
  */
 package FerrixIsolation {
     private import ScalarValues::*;
@@ -91,8 +93,10 @@ package FerrixIsolation {
              * Built: seccomp(2), prctl(PR_SET_SECCOMP), a chain of filters per
              * thread, every action but TRACE and USER_NOTIF (ENOSYS), TSYNC
              * under the thread-list lock, and the hook at all four entries;
-             * the fast path's quiet predicate reads a live count of filtered
-             * threads. */
+             * the fast path's quiet predicate reads a live count of watched
+             * threads. Syscall User Dispatch is judged first in the same look
+             * and answers Trap, so it too only takes calls away; its
+             * settings are per thread, never inherited, cleared by execve. */
         part interpreter : ClassicBpfInterpreter;
         action installFilter;
         action evaluate;

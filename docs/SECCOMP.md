@@ -2047,3 +2047,121 @@ Not in this part, and a BACKLOG row: Linux's own `seccomp_bpf` selftest with
 its expected-failure list (§8.2, §10 risk 5), which needs the C cross build
 and a list the consultant reviews; and R6's reading of libseccomp's and
 Firefox's start-up probes.
+
+## 13. Syscall User Dispatch
+
+Linux's `prctl(PR_SET_SYSCALL_USER_DISPATCH)`, for Proton's Wine
+(stage 23, E5.3). The design and its review are in the certification
+consultant's ledger, line 2323 (OK IF (1) to (12)); the design document
+is `~/.local/share/ferrix/n150-linux/sud-design.md` on the gate host.
+Code: `src/kernel/src/syscall/seccomp/user_dispatch.rs` (load ring), its
+boot check `user_dispatch_check.rs`, and the guest program `src/tests/sud`
+(`cargo xtask test-sud`).
+
+### 13.1 What it is
+
+Wine runs Windows programs as Linux processes, and some of them make
+Windows system calls directly, with a `syscall` instruction in their own
+code. GE-Proton asks the kernel to hand such calls back: it names its libc
+as a range whose calls always run, and keeps one byte in its memory, the
+selector, that says whether calls from anywhere else run (ALLOW, 0) or come
+back to it as a `SIGSYS` (BLOCK, 1). Its handler then performs the Windows
+call. Without it, a direct NT call reaches Ferrix as an unrelated Linux or
+native call.
+
+### 13.2 Where it sits
+
+It is a second rule inside the personality's look at every call,
+`seccomp::check`, judged before seccomp's chain as Linux judges it, and it
+answers S4's `Verdict::Trap`: the call does not run, the core gives its
+registers back (L.trap.8), and a forced `SIGSYS` with `si_code`
+`SYS_USER_DISPATCH` is delivered before the program runs on. No core file
+changes: H.TRAP.16, L.trap.7 and L.trap.8 cover the verdict as they stand.
+
+The thread's `watched` mask carries a bit for each reason the entry must
+look (`WATCH_SECCOMP`, `WATCH_DISPATCH`), and `FILTERED_THREADS` counts
+set bits. The entry and `quiet()` make the same loads in the same order as
+before, so a kernel where no thread is watched pays what it paid before,
+and the IPC fast path declines for a dispatching thread.
+
+The settings are per thread and never copied: every new thread, fork,
+vfork and native child starts with them off, and `execve` clears them for
+the calling thread. Only the thread writes its own (Ferrix has no ptrace).
+It is offered on x86-64 only, as Linux 6.18 and 7.0 offer it only with
+`GENERIC_ENTRY`; on AArch64 and ARMv7-A every mode is `EINVAL`.
+
+### 13.3 The rule
+
+For a watched thread with dispatch on, at a call whose following
+instruction is at `ip`:
+
+1. `ip - offset < len` (unsigned, wrapping): the call goes on to seccomp.
+   An inclusive range is stored inverted at `prctl`, so one test serves
+   both modes.
+2. With a selector, its byte is read through `uaccess::copy_from_user`
+   (bound-checked and clamped at every read): 0 goes on, 1 dispatches, any
+   other value ends the process with `SIGSYS`, and a byte that cannot be
+   read ends it with `SIGSEGV`. Both ends go through `mark_dead` and
+   `process::kill`, as seccomp's `kill_process`, and are reported once
+   through seccomp's rate-limited report.
+3. Otherwise the call is dispatched: `SIGSYS` is forced with `si_errno` 0,
+   `_call_addr` = `ip`, `_syscall` = the number's low 32 bits (the
+   dispatcher, which never sees the call, would use the whole register)
+   and `_arch` = the entry's `AUDIT_ARCH`. The number is not looked at: a
+   native-range number (0x1000 to 0x1FFF, win32k's range) is dispatched
+   like any other (the consultant's ruling on Q3). Without dispatch, a
+   Linux-personality process's 0x1000 to 0x1FFF calls reach the native ABI
+   by design; that is not a finding, since they need handles the process
+   lacks.
+
+A thread a filter has marked `Dead` gets its end, never a dispatch
+(condition 7). No vDSO pad is exempt: Ferrix's x86-64 vDSO holds no way
+back from a handler, and its i386 frames return through `SA_RESTORER`.
+
+**The selector read may wait** (condition 4). It may fault the page in,
+and so allocate or wait for I/O. It runs with interrupts open, no lock of
+any kind held (the settings' leaf lock is let go first), before
+`call_entered`. `trap::SyscallFilter`'s contract ("takes no sleeping lock
+and allocates nothing on the path every call of every program takes")
+binds the path every call takes. This read is on the path only of a
+thread that asked for dispatch, for a call from outside its range.
+
+### 13.4 Requirements, doc-local
+
+The behaviour is load ring, which takes no item id (the 2026-10-14 cpuio
+ruling), so these are stated here, each with exactly one check case: the
+boot check's `dispatch` line (`B`, with its case letter) or a `test-sud`
+step (`G`, with its step).
+
+| | requirement | check |
+|---|---|---|
+| UD1 | `prctl`'s acceptance and storage are Linux's: `OFF` with any non-zero argument, an unknown mode, an empty or wrapping range and an empty inclusive range are `EINVAL`, a kernel-half selector `EFAULT`, and a refused call changes nothing | B (a) and G prctl |
+| UD2 | every new thread, fork, vfork and native child starts with dispatch off | B (g) |
+| UD2b | `execve` clears it for the calling thread | G inherit (the exec) |
+| UD3 | a call whose following-instruction address is in the range goes on, its selector not read | B (b) |
+| UD4a | outside the range, no selector dispatches | B (c) |
+| UD4b | a byte of 1 dispatches, and 0 goes on | B (d) and G allow, block |
+| UD4c | any other value ends the process with `SIGSYS` | B BadValue and G kills |
+| UD4d | an unreadable byte ends it with `SIGSEGV` | B BadAddress and G kills |
+| UD5 | a dispatched call does not run and is answered `Verdict::Trap`, its registers as the program made it, a restart code included | B (e) and G special |
+| UD6 | the `SIGSYS` has `si_errno` 0, `si_code` 2, the following-instruction address, the number's low 32 bits and the entry's `AUDIT_ARCH`, at i386's offsets on a compat frame | B (e) and G block, compat |
+| UD7a | it is delivered before the program's next instruction, and the handler's register edits, `RCX` and `R11` included, are what the program resumes with | G context |
+| UD7b | it cannot be blocked or ignored away: either ends the process | B Blocked and G blocked |
+| UD7c | a thread a filter is ending gets its end, not a dispatch | B Dead |
+| UD8 | dispatch is judged before seccomp: a dispatched call meets no filter, and one that goes on is judged as without dispatch | B (f) and G seccomp |
+| UD9 | with no thread watched, the entry and `quiet()` make no load beyond today's; `quiet()` is false for a dispatching thread | B (k) |
+| UD10 | a native-range number is dispatched, and served natively when allowed | B (j) |
+| UD11 | the selector is read only through `uaccess::copy_from_user`, with interrupts open and no lock held, a page never touched included | B (the fresh page) |
+| UD12 | AArch64 and ARMv7-A answer `EINVAL` to every mode and set nothing | B (l) |
+
+### 13.5 Checks
+
+* **Boot**: `user_dispatch_check.rs`, the `dispatch` line, on every boot.
+  Dispatched calls are judged through `seccomp::check` itself and not the
+  entry, since the entry would deliver the forced `SIGSYS` on its way out
+  and a check task has no user stack for the handler's frame (seccomp's
+  filters check judges its traps the same way). Calls that run go through
+  the entry (`arch::drive_system_call`). The cases that end their process
+  run in processes of their own and are read by their exit status.
+* **Guest**: `cargo xtask test-sud`, x86-64 and i386 on the x86-64 kernel,
+  with two negative controls as Cargo features.
