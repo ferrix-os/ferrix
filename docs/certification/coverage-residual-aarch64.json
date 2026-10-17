@@ -822,9 +822,9 @@
     "console/screen.rs": {
       "ring": "core",
       "lines": [
-        290,
-        313,
-        315
+        299,
+        323,
+        325
       ]
     },
     "arch/aarch64/gic.rs": {
@@ -933,7 +933,7 @@
     "early.rs": {
       "ring": "core",
       "lines": [
-        181
+        183
       ]
     },
     "arch/aarch64/trng.rs": {

@@ -449,7 +449,7 @@
     },
     {
       "file": "early.rs",
-      "lines": "181",
+      "lines": "183",
       "category": "defensive",
       "match": "return Err(EarlyError::KernelImage(phys));",
       "why": "A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded."

@@ -17,10 +17,10 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`init`](#init) | 3 | 14 | 14 | 1 |
 | [`console`](#console) | 3 | 6 | 7 | 4 |
 | [`main`](#main) | 3 | 6 | 4 | 1 |
-| [`early`](#early) | - | - | 4 | 1 |
 | [`mm`](#mm) | 1 | 1 | 4 | 1 |
 | [`smp`](#smp) | - | 4 | 4 | 1 |
 | [`vmap`](#vmap) | 2 | 2 | 4 | 1 |
+| [`early`](#early) | - | - | 3 | 1 |
 | [`sched`](#sched) | 2 | 3 | 3 | 2 |
 | [`arch/armv7a`](#archarmv7a) | - | - | 2 | 2 |
 | [`irq`](#irq) | 2 | - | 1 | 1 |
@@ -31,7 +31,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
 | [`user`](#user) | - | - | 1 | 1 |
-| **Total** | **129** | **177** | **234** | 38 |
+| **Total** | **129** | **177** | **233** | 38 |
 
 ---
 
@@ -81,8 +81,9 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | endfield-wow64, Wine's 32-bit Windows programs in its 64-bit process (stage 23 E1.6; endfield-wow64's consultant, ledger line 762, W1-W7) | x86_64 | new and changed code; no coverage run has measured it yet. | arch/x86_64/signal.rs restored_code_selector and restore_signal_frame's 4 GiB refusal, setup_signal_frame's choice by the installer's ABI and its recorded cs; signal_frame.rs and syscall/signal.rs's Abi carried with a disposition; syscall.rs arch_prctl's null FS load; cpu.rs settle_kernel_ss and switch.rs restore_user_state's call of it; gdt.rs KERNEL_DATA_DESCRIPTOR; trap/check.rs check_wow64 and check_forged_64_bit_frames' new case; switch/check.rs run_sysret_ss and run_inherit: measure them on the x86-64 coverage run (stage 3's wow64 and signal lines and stage 9's sysret and inherit lines reach every one). settle_kernel_ss's load is reached only on AMD, where SYSRET leaves SS's attributes; on Intel its branch is argued, not measured. |
 | gap-kill-reaped, a reaped process found by no pid (BACKLOG P1 row, done 2026-10-12; L.object.181; consultant gkr-cert, ledger 2026-10-12 line 754) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | object/process.rs Entry::findable, unlist, listed and gather's listed branch, and find's unlisted answer: measure them on each architecture's coverage run (stage 7's pids line reaches every one through syscall/check.rs check_a_reaped_pid_finds_nothing, whose SIGCHLD-ignoring parent reaches unlist through disown). |
 | pm3, the kernel log kept across a reset (docs/POSTMORTEM.md section 3; L.console.42-44, L.mm.75; consultant pm3-cert, design ledger 2026-10-15 line 1238, Q15) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | console/pstore.rs record, write_back, attached, attach, check, placement and adopt; console/log.rs record_byte and slot (the shared ring code, moved out of Ring); panic.rs conclude's write-back branch; power.rs finish's write-back before a reset; arch x86_64 write_back_for_reset: measure them on each architecture's coverage run. Every boot through the UEFI loader attaches (attach, check, placement, adopt, record, and the placement and never-free checks in console/log_check.rs and mm/check.rs); the write-back runs only in a first panic report or ferrix.onexit=reset, which a coverage boot reaches only under test-postmortem or test-boot --reset; attach's refusal lines only with a loader that gives a bad region (argued: the placement check drives placement's refusals, not attach's line). |
-| bm-h6-gop, H6: the firmware (GOP) framebuffer lent to a node of its own under ferrix.efifb, served by efifb as a copying card (docs/DISPLAY.md section 8; the consultant's design verdict ledger line 772, review lines 1207 and 1260) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | device.rs DeviceNode::firmware_framebuffer, Reserved::lends, Reserved::synthetic, Reserved::framebuffer, reaches_memory, yield_framebuffer_holder and the framebuffer arms of covers, describe, domain and mint_bar; discovery/firmware.rs; syscall/native.rs device_in's yielded arm, vmo_pin's and set_limit_on's WRONG_TYPE arms: measure them on the x86-64 coverage run with the firmware-screen boot's command line (ferrix.efifb ferrix.fbcon), which reaches every one. Argued, not measured, on the reference configuration: everything past FirmwareFramebuffer::find's first return and the yielded, WRONG_TYPE and lent arms are reached only under ferrix.efifb, which the reference configuration leaves off -- other-configuration rows; check_lending and Reserved::lends' refusals run on every boot. On AArch64 and ARMv7-A, lend's refusal (`not honoured on this architecture`) is the only arm, reached only under the option -- other-configuration rows. n150-wc, H6's write-combining window (L.device.43; consultant ledger lines 1303 and 1842): FirmwareFramebuffer::lend's new refusals (combining_ready false, protect_kernel's Err, the Combining hold refused), mm::protect_kernel's walk under ferrix.efifb, arch/x86_64 mtrr_type and its unknown arm, and panic::screen's drain_write_combining are reached only under ferrix.efifb (the drain only on a panic) -- other-configuration rows, measured on the x86-64 coverage run with the firmware-screen boot's command line; their refusals' arms are argued, shown by the wc-ctl-* controls. |
+| bm-h6-gop, H6: the firmware (GOP) framebuffer lent to a node of its own under ferrix.efifb, served by efifb as a copying card (docs/DISPLAY.md section 8; the consultant's design verdict ledger line 772, review lines 1207 and 1260) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet. | device.rs DeviceNode::firmware_framebuffer, Reserved::lends, Reserved::synthetic, Reserved::framebuffer, reaches_memory, yield_framebuffer_holder and the framebuffer arms of covers, describe, domain and mint_bar; discovery/firmware.rs; syscall/native.rs device_in's yielded arm, vmo_pin's and set_limit_on's WRONG_TYPE arms: measure them on the x86-64 coverage run with the firmware-screen boot's command line (ferrix.efifb ferrix.fbcon), which reaches every one. Argued, not measured, on the reference configuration: everything past FirmwareFramebuffer::find's first return and the yielded, WRONG_TYPE and lent arms are reached only under ferrix.efifb, which the reference configuration leaves off -- other-configuration rows; check_lending and Reserved::lends' refusals run on every boot. On AArch64 and ARMv7-A, lend's refusal (`not honoured on this architecture`) is the only arm, reached only under the option -- other-configuration rows. n150-wc, H6's write-combining window (L.device.43; consultant ledger lines 1303 and 1842): FirmwareFramebuffer::lend's new refusals (combining_ready false, the window read-back's refusal -- protect_kernel's Err until fbcon-wc-early, consultant ledger line 1994 --, the Combining hold refused), arch/x86_64 mtrr_type and its unknown arm, and panic::screen's drain_write_combining are reached only under ferrix.efifb (the drain only on a panic) -- other-configuration rows, measured on the x86-64 coverage run with the firmware-screen boot's command line; their refusals' arms are argued, shown by the wc-ctl-* controls. |
 | serial-tx-fallback, the transmit check giving up on a silent transmit interrupt after 50 ms instead of two seconds (L.console.12; consultant ledger 1980, condition (4)) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet (carry-coverage.py dropped 0 anchors). | console/output.rs check's waiting closure (reached on every boot with an interrupt-driven console: measure it on each architecture's run), and its failure paths, argued rather than reached: the Failure::Silent return, Failure's Silent fmt arm, Failure::falls_back's true arms and the Failure::NeverCame return after the two-second cap are reached only when the port's transmit interrupt never comes, which no machine the suite boots does (absent-hardware, the N150 box's COM1, docs/backlog/flakes.md fl-033). Gate controls on ad3d115d6 (the change before its rebase, src/ equal to the landing's) reach them: stx-ctl-silent-kvm, stx-ctl-silent-tcg (x86_64, the 16550's transmit enable removed) and stx-ctl-silent-a64 (the PL011's) the Silent return, its fmt arm and falls_back, given up after 50.307, 52.295 and 51.154 ms; stx-ctl-cap-kvm (on control base 4c5a372e6, SILENT_NANOS taken away) the NeverCame return and its fmt arm. Argue each in coverage-argued-<arch>.json as absent-hardware, naming these controls, once the run puts them in the residual. |
+| fbcon-wc-early, the x86-64 framebuffer window write-combining from its first map (L.x86_64.176, L.x86_64.127, L.device.43, L.console.39; consultant ledger 1994, condition (11)) | x86_64, aarch64, armv7a | new code; no coverage run has measured it yet (carry-coverage.py dropped 1 anchor: armv7a's residual early.rs 163, the map_framebuffer line whose flags call changed). | x86-64: arch/x86_64/mod.rs program_memory_types, boot_pat_programmed, pat_at_entry; framebuffer.rs framebuffer_flags, window_pat, flush_window, window_flush; framebuffer/check.rs check_framebuffer_window; smp.rs secondary_start's PAT_AT_ENTRY count and CpuStarter::new's pat field; discovery/firmware.rs window_combining (reached on every boot by stage 9, twice); console/screen.rs's drains (every boot with ferrix.fbcon; the firmware-screen boot). Reached on every x86-64 test-boot with a framebuffer: measure them on the x86-64 run. Failure paths, argued rather than reached: framebuffer_flags' device-memory arm (no PAT read back or no CLFLUSH), flush_window's no-CLFLUSH return, the trampoline's skip of its wrmsr (the header's pat zero), program_memory_types' not-programmed arm, and check_framebuffer_window's no-window line and its device-page mapping errors -- every x86-64 processor has the PAT and CLFLUSH (absent-hardware); gate controls on the landing's change commit (the commit message names the hash) reach the check's refusals: fbwc4-ctl-a and fbwc4-ctl-a-tcg the trampoline's write skipped, fbwc4-ctl-b the device arm, fbwc4-ctl-c the table programmed after the map, fbwc4-ctl-d the read-back answering true, fbwc4-ctl-flush the flush not made. Lend's window read-back refusal is defensive and unreached on every configuration: the window is write-combining whenever the lend can run, and a window that is not stops the boot at stage 9 first; argued, not reached (fbwc-ctl-hold shows the stage 9 catch, not the lend's arm). Without CLFLUSH, framebuffer_flags records no PAT (window_pat None), so stage 9 fails on its PAT message: the case fails closed. AArch64 and ARMv7-A: the arch/mod.rs const shims framebuffer_flags, program_memory_types, flush_window and check_framebuffer_window, reached on every boot. Argue each unreached arm in coverage-argued-<arch>.json once the run puts it in the residual. |
 
 ---
 
@@ -116,7 +117,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 54-67, 70, 72, 77-81 |
 | `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 412, 759, 762, 765, 772 |
 | `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 346, 908, 917 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1465-1466 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1466-1467 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 339 |
 
 ---
@@ -157,14 +158,6 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 ---
 
-## `early`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `early.rs` | `core` | 0 | 0 | 4 | 0 | - |
-
----
-
 ## `mm`
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
@@ -186,6 +179,14 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `vmap.rs` | `core` | 2 | 2 | 4 | 2 | 417, 419 |
+
+---
+
+## `early`
+
+| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
+|---|---|---:|---:|---:|---:|---|
+| `early.rs` | `core` | 0 | 0 | 3 | 0 | - |
 
 ---
 
