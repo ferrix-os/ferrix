@@ -124,8 +124,12 @@ const VDSO_GAP: u64 = 128 * 1024 * 1024;
 /// Windows program's `clock_gettime` became a system call -- about 126
 /// thousand of them per sampler window on the N150 while the launcher
 /// downloaded. Here the vDSO is 96 MiB below that range. The 119 MiB
-/// between the vDSO and the stack's guard stay free; `mmap`'s search may use
-/// them, as `MAP_FIXED` and hints may on Linux.
+/// between the vDSO and the stack's guard stay free, and unlike Linux,
+/// whose search starts at `mmap_base` below its gap, `mmap`'s top-down
+/// search fills them first, before anything below the vDSO. That is
+/// harmless under Wine, whose preloader reserves its range before it maps
+/// anything, so its later mappings go below; hints and `MAP_FIXED` may use
+/// the gap as they may on Linux.
 pub(crate) const VDSO_END: u64 = stack_top(Abi::Native) - VDSO_GAP;
 
 /// The range Wine's x86-64 preloader reserves at the top of the user half.

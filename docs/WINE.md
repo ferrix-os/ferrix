@@ -180,6 +180,18 @@ tree). 100 different system calls; two have no number in
 | `fadvise64` | 52 | glibc and Wine ignore the failure |
 | `sendmmsg` | 8 | glibc's resolver falls back to `sendto` |
 
+**The vDSO's place** (vdso-wine, 2026-10-17). Wine's x86-64 preloader
+reserves `0x7ffffe000000..0x7fffffff0000` with `MAP_FIXED` and drops
+`AT_SYSINFO_EHDR` when it points there. The vDSO used to sit at
+`0x7fffff6fe000`, under the stack's guard, so no Windows program had one
+and every clock read was a system call (about 126 thousand per sampler
+window on the N150). It now ends 128 MiB below the stack's top
+(`exec::VDSO_END`, `0x7ffff7fff000`), where an unrandomised Linux puts it,
+and L.user.131's check holds it there. Unlike Linux, which starts its
+search below that gap, `mmap`'s top-down search fills the 119 MiB between
+the vDSO and the stack's guard first. Under Wine that is harmless: the
+preloader reserves its range before it maps anything.
+
 ## 5. Where it stands
 
 `wineboot`, `cmd /c ver`, notepad's window at its tile's size, and a line

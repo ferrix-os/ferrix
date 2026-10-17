@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "09f22b9f5a7a559981bce25b24df5930f289e11d1d82543b33b555ff49311da8",
+  "digest": "7e65d544a381131386beb803460da0dc8679f7048ddd08cced65c1580d07ac70",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -49380,7 +49380,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::AddressSpaces::theVdsoIsClearOfWinesRange",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Where the architecture has a vDSO with a clock, a space a program was loaded into as exec loads it maps the vDSO's image at exec::VDSO_END less a page, outside Wine's range, with the stack's guard the next region above it (the `vdso` line).\"",
+                  "value": "\"On x86-64 and AArch64, the architectures with a vDSO, a space a program was loaded into as exec loads it maps the vDSO's image at exec::VDSO_END less a page, outside Wine's range, with the stack's guard the next region above it (the `vdso` line).\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 1999

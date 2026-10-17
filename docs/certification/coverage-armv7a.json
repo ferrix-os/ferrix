@@ -1039,7 +1039,7 @@
     },
     "syscall/vdso_check.rs": {
       "ring": "load",
-      "reached": "56-58, 77"
+      "reached": "56-58, 78"
     },
     "trap/check.rs": {
       "ring": "core",

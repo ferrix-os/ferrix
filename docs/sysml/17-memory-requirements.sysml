@@ -1993,8 +1993,8 @@ package FerrixMemoryRequirements {
                 guard and outside 0x7ffffe000000..0x7fffffff0000, the range Wine's
                 x86-64 preloader reserves, so that a program it starts keeps
                 AT_SYSINFO_EHDR.";
-            attribute :>> criterion = "Where the architecture has a vDSO with a clock,
-                a space a program was loaded into as exec loads it maps the vDSO's
+            attribute :>> criterion = "On x86-64 and AArch64, the architectures with a
+                vDSO, a space a program was loaded into as exec loads it maps the vDSO's
                 image at exec::VDSO_END less a page, outside Wine's range, with the
                 stack's guard the next region above it (the `vdso` line).";
             attribute :>> parent = "H.SCHED.9";

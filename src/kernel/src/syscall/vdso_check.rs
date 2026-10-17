@@ -66,6 +66,7 @@ pub(crate) fn check_the_vdso() -> Result<Option<Answered>, &'static str> {
         check_the_trampoline(&image)?;
         let _ = check_the_data_page()?;
         check_the_mapping()?;
+        check_the_placement()?;
         return Ok(Some(SIGRETURN_ONLY));
     }
     check_the_image(&image)?;
@@ -195,7 +196,10 @@ fn check_the_mapping() -> Result<(), &'static str> {
 /// pages ending at [`exec::VDSO_END`], 128 MiB below the stack's top: below
 /// the stack's guard with nothing between them, and outside the range Wine's
 /// x86-64 preloader reserves, `0x7FFF_FE00_0000..0x7FFF_FFFF_0000`, which
-/// the vDSO sat in when the search placed it below the guard.
+/// the vDSO sat in when the search placed it below the guard. Run on every
+/// architecture with a vDSO, AArch64's trampoline-only one too: the place is
+/// common code. AArch64's user half is the same 47 bits, so its vDSO had
+/// the same place under the guard, and now ends at the same address.
 ///
 /// Verifies: L.user.131
 fn check_the_placement() -> Result<(), &'static str> {

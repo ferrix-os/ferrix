@@ -32,6 +32,7 @@ use alloc::sync::Arc;
 
 use ferrix_sync::Once;
 
+use crate::console::println;
 use crate::sync::SpinLock;
 use crate::user::space::AddressSpace;
 use crate::user::vmo::{Held, Vmo};
@@ -113,12 +114,22 @@ fn vdso() -> Option<&'static Vdso> {
 ///
 /// Its two pages end at [`exec::VDSO_END`](super::exec::VDSO_END), 128 MiB
 /// below the stack's top, which keeps them out of the range Wine's preloader
-/// reserves at the top of the user half.
+/// reserves at the top of the user half. Where a program's own image holds
+/// that place the search puts the vDSO elsewhere, perhaps back in Wine's
+/// range, and the console says so, so that a program losing its vDSO
+/// under Wine again is not a silent surprise.
 pub(crate) fn map_into(space: &AddressSpace) -> Option<u64> {
     let vdso = vdso()?;
-    space
+    let at = space
         .map_shared_code(Arc::clone(&vdso.vmo), super::exec::VDSO_END)
-        .ok()
+        .ok()?;
+    if at + ferrix_bootinfo::PAGE_SIZE != super::exec::VDSO_END {
+        println!(
+            "  vdso     the vDSO's place below {:#x} was taken; mapped at {at:#x} instead",
+            super::exec::VDSO_END
+        );
+    }
+    Some(at)
 }
 
 /// The name of the return trampoline a signal handler without
