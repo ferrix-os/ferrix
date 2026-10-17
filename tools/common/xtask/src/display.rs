@@ -69,12 +69,89 @@ const PRIMARY: &str = "Primary";
 /// `src/user/system/linux/compositor/drm/src/isolation.rs`'s `PREFIX`.
 const ISOLATION: &str = "card-isolation: ";
 
+/// What the program's master line starts with: `compositor_drm::master`'s
+/// `PREFIX`.
+const MASTER: &str = "card-master: ";
+
+/// What the program says once its first open has dropped master, with that
+/// open's colour as `RRGGBB` after it, before it waits for a line on its
+/// console: `compositor_drm::master`'s `BLANK`.
+const MASTER_BLANK: &str = "compositor: master-blank";
+
 /// What both of its lines start with, which is what the boot is watched for.
 const EITHER: &str = "compositor: ";
 
 /// The colour the program fills with, as red, green and blue: its
 /// `BACKGROUND`, `0x1E1E2E`.
 pub(crate) const BACKGROUND: [u8; 3] = [0x1E, 0x1E, 0x2E];
+
+/// The master probe stops with nobody master: the screen must show none of
+/// the colour its first open showed (the consultant's condition 7, ledger
+/// 2327). Then the program is let go on, and the rest of the boot is read up
+/// to its own line, into `lines`. Nothing to do for a boot whose program
+/// never said it.
+fn judge_master_blank(
+    watching: &mut crate::qemu::Watching<'_>,
+    qmp: &mut Qmp,
+    lines: &mut Vec<String>,
+    arch: Arch,
+    args: &Args,
+    name: &str,
+) -> Result<()> {
+    let Some(colour) = lines.iter().rev().find_map(|line| {
+        line.split_once(MASTER_BLANK)
+            .map(|(_, rest)| rest.trim().to_owned())
+    }) else {
+        return Ok(());
+    };
+    let rgb = u32::from_str_radix(&colour, 16)
+        .map_err(|_| {
+            Error::new(format!(
+                "{arch}: `{MASTER_BLANK}` named no colour: `{colour}`"
+            ))
+        })?
+        .to_be_bytes();
+    let rgb = [rgb[1], rgb[2], rgb[3]];
+    if !args.gl {
+        let blank = paths::build_dir(arch).join(format!("{name}-master-blank.ppm"));
+        std::thread::sleep(SETTLE_BLANK);
+        let screen = read_dump(qmp, Some(DEVICE_ID), &blank)?;
+        let shown = count_of(&screen, rgb);
+        if shown != 0 {
+            return Err(Error::new(format!(
+                "{arch}: with no master the screen still shows {shown} of {} pixels in \
+                 the dropped master's colour 0x{colour}",
+                screen.width * screen.height
+            )));
+        }
+        println!(
+            "  {arch}: with no master the screen shows 0 of {} pixels in 0x{colour}",
+            screen.width * screen.height
+        );
+    }
+    watching.type_in(b"\n")?;
+    let deadline = Instant::now() + Duration::from_secs(args.timeout);
+    let _ = watching.read_more(deadline, |after| {
+        after
+            .iter()
+            .any(|line| line.contains(MARKER) || line.contains(FAILED))
+    })?;
+    lines.extend(watching.after().iter().cloned());
+    Ok(())
+}
+
+/// How long the screen is given to go off after the master is dropped: the
+/// scanout's off is sent without waiting for the device.
+const SETTLE_BLANK: Duration = Duration::from_secs(1);
+
+/// How many pixels of `image` are `color` exactly.
+fn count_of(image: &Image, color: [u8; 3]) -> usize {
+    image
+        .pixels
+        .chunks_exact(3)
+        .filter(|pixel| *pixel == color)
+        .count()
+}
 
 /// The virtio-gpu device's QEMU id, which the screendump names.
 pub(crate) const DEVICE_ID: &str = "gpu0";
@@ -626,8 +703,10 @@ fn boot_and_dump(arch: Arch, program: &Path, args: &Args, name: &str) -> Result<
     let mut taken = None;
     let mut judged_without_a_dump = false;
     let hook = |watching: &mut crate::qemu::Watching<'_>| -> Result<()> {
-        let lines = watching.lines();
         let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
+        let mut lines: Vec<String> = watching.lines().to_vec();
+        judge_master_blank(watching, &mut qmp, &mut lines, arch, args, name)?;
+        let lines = lines.as_slice();
         if let Some(line) = lines.iter().rev().find(|line| line.contains(FAILED)) {
             // Say what QEMU's first console showed, which is also the proof
             // that the screendump path works while the card does not.
@@ -651,6 +730,16 @@ fn boot_and_dump(arch: Arch, program: &Path, args: &Args, name: &str) -> Result<
             )));
         }
         println!("  {arch}: an open of the card maps its own buffers and nothing else");
+        let master = lines
+            .iter()
+            .find_map(|line| line.split_once(MASTER).map(|(_, said)| said.trim()))
+            .unwrap_or("not said");
+        if master != "ok" {
+            return Err(Error::new(format!(
+                "{arch}: the card's master rules do not hold: {master}"
+            )));
+        }
+        println!("  {arch}: only the card's master shows things, and it can be dropped and taken");
         let marker = lines
             .iter()
             .rev()

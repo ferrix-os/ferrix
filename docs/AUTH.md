@@ -1038,7 +1038,7 @@ login.
 | Now (phase 2) | Later |
 |---|---|
 | console `login`, and a desktop started by `sessiond` for one account | a graphical greeter (hyprlock's widgets and layout, speaking the `greeter` service) |
-| one seat | several sessions, and switching between them, with device revocation (`EVIOCREVOKE`, dropping DRM master) in the kernel |
+| one seat | several sessions, and switching between them: the kernel's device revocation is there (`EVIOCREVOKE`; DRM master dropped and taken, `docs/DISPLAY.md` §2.5, 2026-10-18); `sessiond` keeping a descriptor per card and dropping one session's master before the next gets the card is the step left, and it closes the one budget case §2.5 leaves (a dropped master holding more than half) |
 | hyprix is the only client of the seat channel | a trusted path: a key combination only hyprix answers, which always shows the real lock or greeter |
 
 ---
@@ -1214,10 +1214,10 @@ Listed here and in `docs/certification/VULNERABILITY-ANALYSIS.md`'s
   ferrix-55 agreed the design (advisory: `fs/socket.rs` is in the load
   ring).
 * **E-02, an open of `card0` could map every buffer of the card.
-  Closed for one open by a VMO a buffer (displayctl version 9,
-  2026-10-17).** The half between two opens cannot be reached while
-  `card0` is an exclusive open, and is shown by the D1 test of the landing
-  that allows several (ledger 2290). Every dumb
+  Closed by a VMO a buffer (displayctl version 9, 2026-10-17), for one
+  open, and across opens since several are allowed (2026-10-18, ledger
+  2327): `test-display`'s `card-master` line maps the first open's buffer
+  through the second and requires the refusal. Every dumb
   buffer was a range of one card VMO, and the card's node mapped the whole
   of it: an offset past one's own buffer reached another's, and a mapping
   kept after `DESTROY_DUMB` saw whichever buffer was given that range next.

@@ -65,10 +65,13 @@ use crate::object::process::Host;
 use crate::object::{Object, Transfer};
 use crate::sched;
 use crate::sched::WaitQueue;
-use crate::sync::SpinLock;
+use crate::sync::{SchedParker, SpinLock};
 use crate::syscall::native;
 use crate::timer;
 use crate::user::vmo::Vmo;
+use ferrix_displayctl::card::{self as master, Became, OpenId, Taken};
+use ferrix_linux_abi::errno::Errno as CardErrno;
+use ferrix_sync::SleepLock;
 
 pub(crate) mod check;
 
@@ -184,8 +187,12 @@ pub(crate) struct Card {
     control: Arc<Endpoint>,
     state: SpinLock<State>,
     changed: Arc<WaitQueue>,
-    /// Whether an open holds the card: one at a time.
-    pub(crate) opened: AtomicBool,
+    /// Held across every call that changes what the card shows, and across
+    /// the master check that allows it: `SETCRTC`, `PAGE_FLIP`, `DIRTYFB`, `CURSOR`,
+    /// `RMFB` and `DROP_MASTER`, from check to the driver's reply. A sleep lock:
+    /// the changes wait for the driver. The lock order is this one, then
+    /// [`Card::state`] (`docs/DISPLAY.md` §2.3).
+    pub(crate) modeset: SleepLock<()>,
     /// How the device reads the buffers: one run each, and whether the
     /// caches have to be cleaned for it.
     dma: DmaShape,
@@ -216,6 +223,9 @@ struct Range {
     buffer: u32,
     vmo: Arc<Vmo>,
     bytes: u64,
+    /// The open that made it, which decides whose share of the budget it
+    /// is in: the master's, or the other opens' (`card::may_take`).
+    owner: OpenId,
     /// Bytes a row, for cleaning the rows a flush names.
     stride: u32,
 }
@@ -259,21 +269,74 @@ struct State {
     /// are not worth a wait, and a MOVE is the one request that must never
     /// make its caller wait.
     moves: [Option<(i32, i32)>; MAX_SCANOUTS],
+    /// The open that shows things, if any (`card::set_master`).
+    master: Option<OpenId>,
+    /// How many opens the card has, at most [`MAX_OPENS`].
+    opens: usize,
+    /// The number the next open is given.
+    next_open: OpenId,
 }
 
+/// The most opens one card may have at once.
+pub(crate) const MAX_OPENS: usize = 8;
+
 impl State {
-    /// Take `bytes` of the card's budget, if they are left.
-    fn reserve(&mut self, bytes: u64) -> bool {
-        match self
-            .taken
-            .checked_add(bytes)
-            .filter(|&end| end <= CARD_BYTES)
-        {
-            Some(end) => {
-                self.taken = end;
-                true
+    /// What the budget holds now, each buffer counted by whether its open
+    /// is master *now*: walked over at most the session's 64 buffers, under
+    /// the state lock (the consultant's condition 4, ledger 2327).
+    fn taken_now(&self) -> Taken {
+        let mut taken = Taken {
+            bytes: self.taken,
+            ..Taken::default()
+        };
+        for range in &self.ranges {
+            if Some(range.owner) != self.master {
+                taken.others = taken.others.saturating_add(range.bytes);
+                taken.others_buffers += 1;
             }
-            None => false,
+        }
+        taken
+    }
+
+    /// Take `bytes` of the card's budget for open `owner`, if its share has
+    /// them left (`card::may_take`).
+    fn reserve(&mut self, bytes: u64, owner: OpenId) -> bool {
+        let is_master = self.master == Some(owner);
+        if !master::may_take(self.taken_now(), bytes, is_master, CARD_BYTES) {
+            return false;
+        }
+        self.taken = self.taken.saturating_add(bytes);
+        true
+    }
+
+    /// Turn every scanout off, and hide the cursors, now if the channel has
+    /// room and as soon as it does otherwise: what losing the master does,
+    /// so that nothing of its frame stays on the screen. With the state
+    /// locked, before the master is cleared (the consultant's condition 2).
+    fn blank(&mut self, control: &Endpoint, scanouts: usize) {
+        for scanout in 0..scanouts {
+            if !control.peer_has_room() {
+                self.scanout_off = true;
+                return;
+            }
+            let Ok(message) = self.session.scanout(scanout as u32, 0, Rect::default()) else {
+                continue;
+            };
+            if write(control, self, &message).is_err() {
+                return;
+            }
+            // The cursor's image is a plane of its own and stays up through
+            // a scanout's off; none, unwaited for.
+            if self.session.has_cursor()
+                && control.peer_has_room()
+                && let Ok(message) = self.session.cursor(scanout as u32, 0, (0, 0), (0, 0))
+                && let Message::Cursor { sequence, .. } = message
+            {
+                self.unwanted.push(Unwanted::Flipped(sequence));
+                if write(control, self, &message).is_err() {
+                    return;
+                }
+            }
         }
     }
 
@@ -354,12 +417,11 @@ impl State {
     /// closed open's scanout-off, the cursors' newest places, then the
     /// orphans' detaches.
     fn retry(&mut self, control: &Endpoint) {
-        if self.scanout_off
-            && control.peer_has_room()
-            && let Ok(message) = self.session.scanout(0, 0, Rect::default())
-        {
+        if self.scanout_off {
+            let scanouts = self.session.modes().len();
             self.scanout_off = false;
-            if write(control, self, &message).is_err() {
+            self.blank(control, scanouts);
+            if self.scanout_off {
                 return;
             }
         }
@@ -601,6 +663,7 @@ impl Card {
     /// how the attach went.
     pub(crate) fn attach(
         &self,
+        owner: OpenId,
         width: u32,
         height: u32,
         stride: u32,
@@ -610,11 +673,17 @@ impl Card {
             .checked_next_multiple_of(PAGE_SIZE)
             .filter(|&bytes| bytes > 0 && bytes <= MAX_BUFFER_PAGES * PAGE_SIZE)
             .ok_or(CardError::NoRoom)?;
-        if !self.state.lock().reserve(bytes) {
-            return Err(CardError::NoRoom);
+        // A first look, so that no VMO is made for a buffer there is no room
+        // for; the bytes are taken with the buffer's listing, in
+        // `send_attach`, so two opens at once cannot both pass it.
+        {
+            let state = self.state.lock();
+            let is_master = state.master == Some(owner);
+            if !master::may_take(state.taken_now(), bytes, is_master, CARD_BYTES) {
+                return Err(CardError::NoRoom);
+            }
         }
         let Ok(vmo) = Vmo::new_anonymous(bytes / PAGE_SIZE) else {
-            self.state.lock().give_back(bytes);
             return Err(CardError::NoRoom);
         };
         // A device that reads one run of addresses gets its VMO filled with
@@ -622,27 +691,12 @@ impl Card {
         // state lock: zeroing megabytes is not something to do with
         // preemption off.
         if self.dma.contiguous && !commit_contiguous(&vmo, 0, bytes) {
-            self.state.lock().give_back(bytes);
             return Err(CardError::NoRoom);
         }
-        let sent = self.send_attach(&vmo, bytes, width, height, stride);
-        let buffer = match sent {
-            Ok(buffer) => buffer,
-            Err(error) => {
-                // Unless a buffer was made of it after all, which only a
-                // write to a driver that has just gone can leave behind:
-                // never sent, so never pinned, and its bytes go back.
-                let mut state = self.state.lock();
-                if !state
-                    .ranges
-                    .iter()
-                    .any(|range| Arc::ptr_eq(&range.vmo, &vmo))
-                {
-                    state.give_back(bytes);
-                }
-                return Err(error);
-            }
-        };
+        // An error leaves nothing taken unless the buffer was listed, which
+        // only a write to a driver that has just gone can leave behind; its
+        // bytes then come back with the card.
+        let buffer = self.send_attach(owner, &vmo, bytes, width, height, stride)?;
         let event = self.collect(
             |event| matches!(event, Event::Attached { buffer: b, .. } if *b == buffer),
             |state| state.orphans.push(buffer),
@@ -657,6 +711,7 @@ impl Card {
     /// the id. With the state locked throughout, as [`Card::send`] has it.
     fn send_attach(
         &self,
+        owner: OpenId,
         vmo: &Arc<Vmo>,
         bytes: u64,
         width: u32,
@@ -683,12 +738,24 @@ impl Card {
             height,
             stride,
         };
-        let message = state.session.attach(attach).map_err(CardError::Request)?;
+        // The bytes are taken here, with the listing below and under the
+        // same hold of the lock: the share is the open's as it is now.
+        if !state.reserve(bytes, owner) {
+            return Err(CardError::NoRoom);
+        }
+        let message = match state.session.attach(attach) {
+            Ok(message) => message,
+            Err(error) => {
+                state.give_back(bytes);
+                return Err(CardError::Request(error));
+            }
+        };
         state.next_buffer = next;
         state.ranges.push(Range {
             buffer,
             vmo: Arc::clone(vmo),
             bytes,
+            owner,
             stride,
         });
         let handed = vec![(
@@ -756,7 +823,16 @@ impl Card {
             self.clean_rows(buffer, 0, u32::MAX);
         }
         self.send(|state| {
-            state.scanout_off = false;
+            // A pending blank goes before any later scanout, so the order the
+            // driver hears them in is the order they were asked in (the
+            // consultant's condition 2); one still waiting for room makes
+            // the caller try again.
+            if state.scanout_off {
+                state.retry(&self.control);
+                if state.scanout_off || !self.control.peer_has_room() {
+                    return Err(CardError::Busy);
+                }
+            }
             let message = state
                 .session
                 .scanout(scanout, buffer, rect)
@@ -902,23 +978,86 @@ impl Card {
         }
     }
 
-    /// Take the screen off and let go of `buffers`: what closing an open
-    /// does.
-    pub(crate) fn release(&self, buffers: &[u32]) {
+    /// Close open `owner`: the screen goes off if it was the master, and
+    /// `buffers` are let go of, none waited for. Allocates nothing, so a
+    /// file's Drop may call it (the consultant's condition 1, ledger 2327).
+    pub(crate) fn release(&self, owner: OpenId, buffers: impl Iterator<Item = u32>) {
         let mut state = self.state.lock();
+        state.opens = state.opens.saturating_sub(1);
         if state.gone {
+            if state.master == Some(owner) {
+                state.master = None;
+            }
             return;
         }
-        if !self.control.peer_has_room() {
-            state.scanout_off = true;
-        } else if let Ok(message) = state.session.scanout(0, 0, Rect::default())
-            && write(&self.control, &mut state, &message).is_err()
-        {
-            return;
+        if state.master == Some(owner) {
+            state.blank(&self.control, self.scanouts);
+            state.master = None;
         }
-        for &buffer in buffers {
+        for buffer in buffers {
             state.let_go(&self.control, buffer);
         }
+    }
+
+    /// Count a new open: its number, and whether it is the master (the
+    /// first open while there is none, made by root).
+    ///
+    /// # Errors
+    ///
+    /// `EMFILE` past [`MAX_OPENS`].
+    pub(crate) fn open(&self, root: bool) -> Result<(OpenId, bool), CardErrno> {
+        let mut state = self.state.lock();
+        if state.opens >= MAX_OPENS {
+            return Err(CardErrno::EMFILE);
+        }
+        let id = state.next_open;
+        state.next_open = id.wrapping_add(1);
+        state.opens += 1;
+        let is_master = master::first_open_is_master(state.master, root);
+        if is_master {
+            state.master = Some(id);
+        }
+        Ok((id, is_master))
+    }
+
+    /// Whether open `id` is the master now.
+    pub(crate) fn is_master(&self, id: OpenId) -> bool {
+        self.state.lock().master == Some(id)
+    }
+
+    /// `SET_MASTER` from open `me` (`card::set_master`).
+    ///
+    /// # Errors
+    ///
+    /// `EBUSY`, `EACCES`.
+    pub(crate) fn set_master(
+        &self,
+        me: OpenId,
+        was_master: bool,
+        root: bool,
+    ) -> Result<Became, CardErrno> {
+        let mut state = self.state.lock();
+        let became = master::set_master(state.master, me, was_master, root)?;
+        state.master = Some(me);
+        Ok(became)
+    }
+
+    /// `DROP_MASTER` from open `me` (`card::drop_master`): the screen goes
+    /// off before the master is cleared, under one hold of the state lock,
+    /// so nothing of its frame is shown to whoever is master next. The caller
+    /// holds [`Card::modeset`].
+    ///
+    /// # Errors
+    ///
+    /// `EINVAL` for an open that is not master.
+    pub(crate) fn drop_master(&self, me: OpenId) -> Result<(), CardErrno> {
+        let mut state = self.state.lock();
+        master::drop_master(state.master, me)?;
+        if !state.gone {
+            state.blank(&self.control, self.scanouts);
+        }
+        state.master = None;
+        Ok(())
     }
 }
 
@@ -1214,9 +1353,12 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
             unwanted: Vec::new(),
             scanout_off: false,
             moves: [None; MAX_SCANOUTS],
+            master: None,
+            opens: 0,
+            next_open: 1,
         }),
         changed: Arc::new(WaitQueue::new()),
-        opened: AtomicBool::new(false),
+        modeset: SleepLock::new((), &SchedParker),
         dma: start.device.dma_shape(),
         hdmi,
         timings: hello.timings,

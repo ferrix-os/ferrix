@@ -246,7 +246,7 @@ source is committed this time.
 | `DRM_IOCTL_VERSION` | name `virtio_gpu`, so drm-rs and Smithay identify the card |
 | `DRM_IOCTL_GET_CAP` | `DRM_CAP_DUMB_BUFFER` = 1, `DUMB_PREFERRED_DEPTH` = 24, `DUMB_PREFER_SHADOW` = 0, `TIMESTAMP_MONOTONIC` = 1, `CRTC_IN_VBLANK_EVENT` = 1, and on a card with a cursor plane `CURSOR_WIDTH` and `CURSOR_HEIGHT` = 64; others `EINVAL` |
 | `DRM_IOCTL_SET_CLIENT_CAP` | `UNIVERSAL_PLANES` takes 0 or 1 (E4) and changes only what `GETPLANERESOURCES` lists; `ATOMIC` refused with `EOPNOTSUPP`, so clients fall back to legacy; the rest `EINVAL` |
-| `DRM_IOCTL_SET_MASTER`, `DROP_MASTER` | succeed; the exclusive open (below) is the master |
+| `DRM_IOCTL_SET_MASTER`, `DROP_MASTER` | as Linux's: the master asking again 0; another master `EBUSY`; with none, root or an open that was master before takes it, anyone else `EACCES`; `DROP_MASTER` by a non-master `EINVAL` (§2.5) |
 | `MODE_GETRESOURCES` | a CRTC, an encoder and a connector per scanout the driver reported, and the framebuffer ids |
 | `MODE_GETCONNECTOR` | `Virtual-<n>`, connected when the scanout is enabled, the preferred mode from `HELLO` at the refresh the driver reported (60 Hz when it reported none), the same size at 60, 120 and 144 Hz where not listed already, then the standard sizes at 60 Hz; each mode's `clock` is what its refresh takes over its totals and its `vrefresh` what that clock gives |
 | `MODE_GETENCODER`, `MODE_GETCRTC` | the head's own, each encoder driving the one CRTC of its head |
@@ -408,14 +408,68 @@ additive later landing. Stage 17's text names it and stays as written.
 * **An ioctl branch** in `sys_ioctl` for the card node, beside the console
   branch. A general `Inode::ioctl` hook is better, but it's a separate
   refactor that I'd rather not smuggle in.
-* **An exclusive open.** A second `open` gets `EBUSY` until the first closes.
-  That stands in for DRM master and keeps one opener's buffers from another
-  in iteration 1. A mapping holds its open, as on Linux, and since
-  version 9 it reaches only the buffer it was made of (E-02, §2.1). The node
-  is `0660` root's, as Linux's `video` group has it.
+* **Several opens and one master (2026-10-18, §2.5).** Until then a second
+  `open` got `EBUSY` while the first was open, standing in for DRM master.
+  A mapping holds its open, as on Linux, and reaches only the buffer it was
+  made of (E-02, §2.1). The node is `0660` root's, as Linux's `video` group
+  has it.
 * **`poll`/`epoll` readiness** on the node when os-26's epoll lands. The
   compositor already waits on its Wayland, input, control, event, and plugin
   descriptors, so an inactive desktop does not scan them on a fixed timer.
+
+### 2.5 Several opens and the DRM master (2026-10-18)
+
+Designed with the certification consultant (ledger 2290, 2327); the rules
+are `src/lib/proto/displayctl/src/card.rs`'s, pure and host-tested, and the
+open card calls them and keeps no copy.
+
+* **Opens.** Up to eight at once (`MAX_OPENS`; `EMFILE` past it). Each open
+  has a number of its own on the card, keeps its own buffers, framebuffers
+  and events, and maps only its own buffers.
+* **The master.** At most one open is master, the open that shows things.
+  The first open is master when there is none and its opener's effective
+  uid is 0, so that a program that is not root can never take the screen
+  between two sessions. `SET_MASTER` and `DROP_MASTER` answer as Linux's
+  `drm_setmaster_ioctl` and `drm_dropmaster_ioctl` (§2.3's table); an open
+  that was master once takes it back without root.
+* **What only the master may do.** One table (`card::class_of`) gives
+  every ioctl the card answers a class, and a number in no class is
+  refused: `SETCRTC`, `PAGE_FLIP`, `DIRTYFB`, `CURSOR` and `CURSOR2` are the
+  master's, `EACCES` for any other open, as Linux's `drm_ioctl_permit`
+  answers; reading the card and making one's own buffers and framebuffers
+  are anyone's. A call that would change what is shown, if it is ever added
+  (`OBJ_SETPROPERTY`, `SETPLANE`, gamma, leases), goes in the master's class.
+* **The lock order.** Every master call, and `DROP_MASTER` itself, holds
+  the card's sleeping modeset lock from the master check to the driver's
+  reply, so the master cannot be dropped between the check and the frame.
+  The order is: the card's modeset lock, then the card's state spin lock;
+  an open's own state lock is taken alone.
+* **Losing the master blanks the screen.** `DROP_MASTER`, and closing the
+  master's file, turn every scanout off and hide the cursors before the
+  master is cleared, under one hold of the state lock; an off that finds
+  the channel full is sent before any later scanout. The dropped open keeps
+  its buffers and framebuffers, as on Linux, but shows none of them. A
+  close of an open that is not master takes nothing off the screen. The
+  close path allocates nothing.
+* **The budget.** The master may use the whole budget; the opens that are
+  not master together at most half of it and half the session's 32 buffer
+  slots, each buffer counted by whether its open is master *now*, recounted
+  at each new buffer over at most the session's buffers under the state
+  lock. So the master always has at least 128 MiB, a double-buffered 4K
+  screen and a cursor. What remains: a master that dropped while it held
+  more than half keeps it, and the next master has what is left; `sessiond`,
+  which drops one session's master before handing the card to the next, is
+  where that is closed (`docs/AUTH.md` §6.5).
+* **Checked by** `test-display`'s `card-master` line, on two opens of the
+  card before anything is shown: the second open's master calls `EACCES`,
+  the first's buffer unmappable through it, `DROP_MASTER` `EINVAL` and
+  `SET_MASTER` `EBUSY`; the first shows a colour and drops, and the test
+  reads the screen and requires no pixel of it; root takes master on the
+  second, the first takes it back; the second's share of the slots runs
+  out while the master's does not; and a child that dropped to uid 65534
+  is refused master through an open that never had it. The program then
+  opens and closes the card as a bystander while its screen is up, and the
+  test's screendump shows the screen untouched.
 
 ### 2.4 A panic once the driver owns scanout
 
@@ -675,11 +729,9 @@ server), then input.
    constant with its arithmetic (§2.1). Ranges are decommitted and reused
    (added in os-02's review round, which found the budget could be spent for
    good).
-2. **The exclusive open stands in for DRM master**, as a written deviation
-   from Linux: a second `open` of `card0` answers `EBUSY`, and `SET_MASTER`
-   and `DROP_MASTER` answer for the one client. Linux's many opens with one
-   master come with the render node in stage 19, and `docs/BACKLOG.md` has a
-   row saying so.
+2. **The exclusive open stood in for DRM master** until 2026-10-18, as a
+   written deviation from Linux; §2.5 has several opens and a master that
+   can be dropped instead, and the deviation is gone.
 3. **Legacy-only DRM** in iteration 1: atomic is refused through
    `SET_CLIENT_CAP` so Smithay falls back, and Linux keeps legacy.
 4. **`card0` reports the card VMO's size** as `st_size` (§2.1).

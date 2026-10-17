@@ -1,9 +1,11 @@
 //! `/dev/dri/card<N>` as a program opens it: the DRM/KMS subset
 //! `docs/DISPLAY.md` §2.3 answers.
 //!
-//! One open at a time (§5, a written deviation from Linux's many opens with
-//! one master): the open holds the dumb buffers it created, the framebuffers
-//! it added and the page-flip events it has not read. The card has one
+//! Up to [`super::MAX_OPENS`] opens at once, and at most one of them the
+//! DRM master, the open that shows things (`ferrix_displayctl::card`'s rules,
+//! `docs/DISPLAY.md` §2.3): each open holds the dumb buffers it created, the
+//! framebuffers it added and the page-flip events it has not read, and only
+//! the master sets a mode, flips a page, reports damage or places a cursor. The card has one
 //! connector, one encoder, one CRTC and one primary plane with its immutable
 //! `type` property *per scanout the driver reported*, each in a block of
 //! four ids of its own below the framebuffers'. A compositor with two
@@ -68,12 +70,12 @@ use ferrix_linux_abi::socket::Width;
 use ferrix_vfs::{Inode, Metadata, Readiness, Result as VfsResult};
 
 use super::{Card, CardError};
-use ferrix_sync::SleepLock;
+use ferrix_displayctl::card::{self as rules, Became, Class, OpenId};
 
 use crate::user::vmo::Vmo;
 
 use crate::sched::WaitQueue;
-use crate::sync::{SchedParker, SpinLock};
+use crate::sync::SpinLock;
 use crate::syscall::process::{self, Process};
 use crate::syscall::uaccess;
 use crate::timer;
@@ -241,13 +243,13 @@ struct OpenState {
 /// One open of a card.
 pub(crate) struct CardFile {
     card: Arc<Card>,
+    /// This open's number on the card, which the master is named by.
+    id: OpenId,
+    /// Whether this open was ever master, which lets it take master back
+    /// without root after it dropped it (`card::set_master`).
+    was_master: AtomicBool,
     state: SpinLock<OpenState>,
     readable: Arc<WaitQueue>,
-    /// Held across a whole mode change (`SETCRTC`, `PAGE_FLIP`, `RMFB`), so
-    /// two threads' changes cannot leave `shown` disagreeing with the device.
-    /// A sleep lock: the changes wait for the driver, and no spin lock is
-    /// held while it is taken.
-    modeset: SleepLock<()>,
     /// Whether the open set `DRM_CLIENT_CAP_UNIVERSAL_PLANES`, without which
     /// `GETPLANERESOURCES` lists only overlay planes, and so none here.
     universal_planes: AtomicBool,
@@ -265,26 +267,22 @@ impl core::fmt::Debug for CardFile {
 }
 
 impl CardFile {
-    /// Open `card`, which only one open may hold at a time.
+    /// Open `card`: the master if there is none and the opener is root.
     pub(crate) fn open(card: Arc<Card>) -> Result<Arc<CardFile>, Errno> {
         if card.is_gone() {
             return Err(Errno::ENXIO);
         }
-        if card
-            .opened
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Err(Errno::EBUSY);
-        }
+        let root = process::current().is_some_and(|opener| is_root(&opener));
+        let (id, is_master) = card.open(root)?;
         Ok(Arc::new(CardFile {
+            id,
+            was_master: AtomicBool::new(is_master),
             state: SpinLock::new(OpenState {
                 next_handle: 1,
                 next_framebuffer: FIRST_FRAMEBUFFER_ID,
                 ..OpenState::default()
             }),
             readable: Arc::new(WaitQueue::new()),
-            modeset: SleepLock::new((), &SchedParker),
             universal_planes: AtomicBool::new(false),
             modes_told: AtomicU64::new(card.modes_changed.load(Ordering::Acquire)),
             card,
@@ -293,15 +291,15 @@ impl CardFile {
 }
 
 impl Drop for CardFile {
-    /// Take the screen off and let go of the buffers without waiting: the
+    /// Take the screen off if this was the master, and let go of the buffers
+    /// without waiting, allocating nothing (the consultant's condition 1): the
     /// replies go to the card's task, which drops them. A buffer whose
     /// detach the device refuses keeps its VMO and its share of the card's
     /// budget for good.
     fn drop(&mut self) {
         let state = self.state.get_mut();
-        let buffers: Vec<u32> = state.dumbs.iter().map(|dumb| dumb.buffer).collect();
-        self.card.release(&buffers);
-        self.card.opened.store(false, Ordering::Release);
+        self.card
+            .release(self.id, state.dumbs.iter().map(|dumb| dumb.buffer));
     }
 }
 
@@ -708,8 +706,17 @@ pub(crate) fn ioctl(
     request: u32,
     arg: u64,
 ) -> Result<usize, Errno> {
+    // One table decides, and a call in no class is refused
+    // (`card::class_of`, the consultant's condition 5).
+    let class = rules::class_of(request, drm::ioctl_version(NATIVE)).ok_or(Errno::ENOTTY)?;
+    // A call that changes what is shown, or who shows it, holds the card's
+    // modeset lock from the master check to the driver's reply, so a
+    // DROP_MASTER cannot pass between them (condition 3).
+    let _modeset = (class != Class::Any).then(|| file.card.modeset.lock());
+    rules::permit(class, file.card.is_master(file.id))?;
     match request {
-        drm::IOCTL_SET_MASTER | drm::IOCTL_DROP_MASTER => Ok(0),
+        drm::IOCTL_SET_MASTER => set_master(process, file),
+        drm::IOCTL_DROP_MASTER => drop_master(file),
         request if request == drm::ioctl_version(NATIVE) => version(process, arg),
         drm::IOCTL_GET_CAP => get_cap(process, &file.card, arg),
         drm::IOCTL_SET_CLIENT_CAP => set_client_cap(process, file, arg),
@@ -729,17 +736,13 @@ pub(crate) fn ioctl(
         drm::IOCTL_MODE_RMFB => {
             let mut bytes = [0u8; 4];
             uaccess::copy_from_user(process.space(), arg, &mut bytes).map_err(|_| Errno::EFAULT)?;
-            let _modeset = file.modeset.lock();
+            // An Any call, so the lock is taken here: a framebuffer this open
+            // shows goes off the screen with it.
+            let _modeset = file.card.modeset.lock();
             remove_framebuffer(file, u32::from_le_bytes(bytes)).map(|()| 0)
         }
-        drm::IOCTL_MODE_SETCRTC => {
-            let _modeset = file.modeset.lock();
-            set_crtc(process, file, arg)
-        }
-        drm::IOCTL_MODE_PAGE_FLIP => {
-            let _modeset = file.modeset.lock();
-            page_flip(process, file, arg)
-        }
+        drm::IOCTL_MODE_SETCRTC => set_crtc(process, file, arg),
+        drm::IOCTL_MODE_PAGE_FLIP => page_flip(process, file, arg),
         drm::IOCTL_MODE_DIRTYFB => dirty_fb(process, file, arg),
         drm::IOCTL_MODE_CURSOR => {
             let legacy: ModeCursor = read_arg(process, arg)?;
@@ -766,6 +769,34 @@ pub(crate) fn ioctl(
         drm::IOCTL_MODE_GETPROPBLOB => get_blob(process, &file.card, arg),
         _ => Err(Errno::ENOTTY),
     }
+}
+
+/// Whether `process` acts as root: its effective uid, the kernel's own id.
+fn is_root(process: &Process) -> bool {
+    process.with_credentials(|credentials| credentials.user.effective == 0)
+}
+
+/// `SET_MASTER`, as `card::set_master` decides: root, or an open that was
+/// master before, takes it while nobody has it.
+fn set_master(process: &Process, file: &CardFile) -> Result<usize, Errno> {
+    let became = file.card.set_master(
+        file.id,
+        file.was_master.load(Ordering::Acquire),
+        is_root(process),
+    )?;
+    if became == Became::Master {
+        file.was_master.store(true, Ordering::Release);
+    }
+    Ok(0)
+}
+
+/// `DROP_MASTER`: the screen goes off and nothing this open showed is shown
+/// any more, so its `GETCRTC` says so too. Its buffers and framebuffers stay
+/// its own, as on Linux, for when it takes master back.
+fn drop_master(file: &CardFile) -> Result<usize, Errno> {
+    file.card.drop_master(file.id)?;
+    file.state.lock().shown.clear();
+    Ok(0)
 }
 
 /// `SET_CLIENT_CAP` as Linux's `drm_setclientcap` answers a driver without
@@ -1476,7 +1507,7 @@ fn create_dumb(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Er
     let pitch = create.width * 4;
     let (buffer, pages, status) = file
         .card
-        .attach(create.width, create.height, pitch)
+        .attach(file.id, create.width, create.height, pitch)
         .map_err(card_error)?;
     status_error(status)?;
     let size = (u64::from(pitch) * u64::from(create.height)).div_ceil(PAGE_SIZE) * PAGE_SIZE;

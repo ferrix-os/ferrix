@@ -18,6 +18,8 @@ mod device;
 mod edid;
 #[cfg(target_os = "linux")]
 mod isolation;
+#[cfg(target_os = "linux")]
+mod master;
 pub mod modeset;
 #[cfg(target_os = "linux")]
 mod render;
@@ -31,6 +33,8 @@ pub use device::RenderDevice;
 pub use edid::{Edid, registered};
 #[cfg(target_os = "linux")]
 pub use isolation::{PREFIX as ISOLATION, isolation};
+#[cfg(target_os = "linux")]
+pub use master::{BLANK as MASTER_BLANK, PREFIX as MASTER, bystander, master};
 #[cfg(target_os = "linux")]
 pub use render::{Box3d, Mapping, Render, ResourceCreate, probe};
 

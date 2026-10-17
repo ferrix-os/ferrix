@@ -14,7 +14,7 @@
 fn main() {
     use std::io::Write;
 
-    use compositor_drm::{Card, isolation, probe, show};
+    use compositor_drm::{Card, bystander, isolation, master, probe, show};
 
     let mut out = std::io::stdout();
     // The render node first, and always: the display test watches the boot
@@ -26,10 +26,18 @@ fn main() {
     // an open maps its own buffers and nothing else (E-02). Its own prefix
     // too, for the same reason.
     let _ = writeln!(out, "{}", isolation());
+    // Then who shows things: two opens, the master's rules, and a screen
+    // the test reads while nobody is master (`compositor_drm::master`).
+    let _ = writeln!(out, "{}", master());
+    let _ = out.flush();
     let line = match Card::open().and_then(|card| show(&card)) {
         Ok(line) => line,
         Err(error) => format!("compositor: failed: {error}"),
     };
+    // A program that only reads the card opens and closes it while the
+    // screen is up: its close must not take the master's frame off, which
+    // the test's screendump after the line below shows.
+    bystander();
     let _ = writeln!(out, "{line}");
     let _ = out.flush();
     // As init, exiting would end the machine; as a program, the scanout lasts
