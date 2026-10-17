@@ -2200,6 +2200,7 @@ pub(crate) struct DeviceReport {
 pub(crate) fn run_devices() -> Result<DeviceReport, &'static str> {
     let mut counter = Counter::default();
     check_a_device_gives_exactly_its_own_memory(&mut counter)?;
+    arch::check_framebuffer_window()?;
     check_write_combining(&mut counter)?;
     check_an_interrupt_is_held_until_acknowledged(&mut counter)?;
     check_a_pin_gives_a_device_exactly_its_pages(&mut counter)?;

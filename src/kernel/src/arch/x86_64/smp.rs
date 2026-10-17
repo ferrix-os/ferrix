@@ -123,6 +123,18 @@ static BOOT_CR4: AtomicU64 = AtomicU64::new(0);
 // is what enters 64-bit code: until it, the processor runs the 16-bit segment
 // it woke up in, through the identity map.
 //
+// Before `CR0` turns paging on, it writes `IA32_PAT` with the header's
+// `pat` -- `ferrix_paging::X86_PAT`, put there only when the boot
+// processor's own table read back as that, zero otherwise, and then nothing
+// is written: a `wrmsr` that faulted here, with no IDT, would be a triple
+// fault. So this processor's first translation of anything, the kernel's
+// write-combining framebuffer window included (`framebuffer`), is by the
+// kernel's table, never by the power-on one, whose entry 1 is
+// write-through and would cache the window (L.x86_64.127). The write is
+// made with `CR0.CD` and `NW` as INIT left them and no translation held,
+// the order the SDM (Vol. 3A §11.12.4) gives for a change of the table: no
+// TLB to flush, and no line of the window in a cache it never mapped.
+//
 // Its `lgdtl` loads the start-up GDT before this processor has a per-CPU
 // record, so no `gdt::note_tables` is owed for it (Q4): `set_cpu_local` notes
 // it as zero, and `init_secondary`'s load replaces it and notes the real
@@ -146,6 +158,13 @@ ferrix_trampoline:
     movl ferrix_trampoline_header + 28 - ferrix_trampoline, %eax
     xorl %edx, %edx
     wrmsr
+    movl ferrix_trampoline_header + 88 - ferrix_trampoline, %eax
+    testl %eax, %eax
+    jz 1f
+    movl ferrix_trampoline_header + 92 - ferrix_trampoline, %edx
+    movl ${pat}, %ecx
+    wrmsr
+1:
     lgdtl ferrix_trampoline_header - ferrix_trampoline
     movl ferrix_trampoline_header + 24 - ferrix_trampoline, %eax
     movl %eax, %cr0
@@ -166,12 +185,13 @@ ferrix_trampoline_long:
 .balign 8
 .globl ferrix_trampoline_header
 ferrix_trampoline_header:
-    .fill 88, 1, 0
+    .fill 96, 1, 0
 .globl ferrix_trampoline_end
 ferrix_trampoline_end:
 .popsection
 "#,
     data = const super::gdt::KERNEL_DATA,
+    pat = const cpu::IA32_PAT,
     options(att_syntax)
 );
 
@@ -213,11 +233,34 @@ struct Header {
     /// The trampoline's GDT: null, empty, 64-bit code, data -- the kernel's
     /// selectors for both.
     gdt: [u64; 4],
+    /// The page attribute table the trampoline writes before paging is on:
+    /// [`ferrix_paging::X86_PAT`] when the boot processor's read back so,
+    /// zero for none written. The assembly tests the low half alone, which
+    /// is not zero in `X86_PAT` (a const assertion holds it).
+    pat: u64,
 }
 
 const _: () = assert!(
-    size_of::<Header>() == 88,
-    "the trampoline reserves eighty-eight bytes for its header"
+    size_of::<Header>() == 96,
+    "the trampoline reserves ninety-six bytes for its header"
+);
+const _: () = assert!(
+    ferrix_paging::X86_PAT & 0xFFFF_FFFF != 0,
+    "the trampoline tells a table to write from none by the low half of `pat`"
+);
+// The offsets the assembly reads each field at.
+const _: () = assert!(
+    core::mem::offset_of!(Header, far_jump) == 8
+        && core::mem::offset_of!(Header, cr3) == 16
+        && core::mem::offset_of!(Header, cr4) == 20
+        && core::mem::offset_of!(Header, cr0) == 24
+        && core::mem::offset_of!(Header, efer) == 28
+        && core::mem::offset_of!(Header, stack_top) == 32
+        && core::mem::offset_of!(Header, entry) == 40
+        && core::mem::offset_of!(Header, argument) == 48
+        && core::mem::offset_of!(Header, gdt) == HEADER_GDT as usize
+        && core::mem::offset_of!(Header, pat) == 88,
+    "the trampoline's assembly reads the header at these offsets"
 );
 const _: () = assert!(
     super::gdt::KERNEL_CODE == 0x10 && super::gdt::KERNEL_DATA == 0x18,
@@ -302,6 +345,11 @@ impl CpuStarter {
             entry: secondary_start as extern "C" fn(u64) -> ! as usize as u64,
             argument: 0,
             gdt: [0, 0, TRAMPOLINE_CODE64, TRAMPOLINE_DATA],
+            pat: if super::boot_pat_programmed() {
+                ferrix_paging::X86_PAT
+            } else {
+                0
+            },
         };
 
         Ok(CpuStarter {
@@ -384,6 +432,17 @@ fn spin_nanos(nanos: u64) {
 /// the upper half, on its own stack, with interrupts masked — and still on the
 /// trampoline's tree and GDT, both of which are about to be given back.
 extern "C" fn secondary_start(record: u64) -> ! {
+    // Whether the trampoline wrote this processor's PAT before paging was
+    // on: counted for stage 9, before `program_pat` writes it again below.
+    // Read only where the boot processor's was programmed, so the register
+    // exists.
+    if super::boot_pat_programmed()
+        // SAFETY: (SYSREG) the boot processor's PAT was programmed, so CPUID
+        // reports the register on processors of its kind.
+        && unsafe { cpu::read_msr(cpu::IA32_PAT) } == ferrix_paging::X86_PAT
+    {
+        let _ = super::PAT_AT_ENTRY.fetch_add(1, Ordering::AcqRel);
+    }
     // Before anything that may use the local APIC's MMIO window -- an IPI a
     // failed allocation's shootdown sends included: in x2APIC mode it does
     // not exist, and INIT does not take a processor out of it (G6).

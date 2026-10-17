@@ -161,9 +161,9 @@ pub(crate) fn draw() {
     let count = console::recent(&mut scratch.text);
     let text = scratch.text.get(..count).unwrap_or_default();
     paint(&mut surface, text, &mut scratch.modules, &mut scratch.work);
-    // Lent to `efifb` under `ferrix.efifb`, the window is write-combining on
-    // x86-64 (`discovery::firmware`): the picture's last stores leave the
-    // fill buffers before this processor halts.
+    // The window is write-combining on x86-64 from its first map
+    // (`arch::framebuffer_flags`), lent or not: the picture's last stores
+    // leave the fill buffers before this processor halts.
     arch::drain_write_combining();
 }
 
@@ -407,7 +407,8 @@ fn report_start(text: &[u8]) -> Option<usize> {
 
 /// The kernel's window on the framebuffer, as [`install`] recorded it: its
 /// address and the bytes mapped, or `None` when there is none. What
-/// `discovery::firmware` changes the type of when it lends the framebuffer.
+/// `discovery::firmware` reads back write-combining when it lends the
+/// framebuffer, and stage 9 on every x86-64 boot.
 pub(crate) fn window() -> Option<(u64, u64)> {
     let virt = VIRT.load(Ordering::Acquire);
     let len = LEN.load(Ordering::Acquire);

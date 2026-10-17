@@ -14,7 +14,7 @@
     "'Convenient in assembly' is not a reason. 'Faster in assembly' is not a",
     "reason either -- measure it, then argue it in the entry."
   ],
-  "max_total_lines": 1649,
+  "max_total_lines": 1658,
   "//max_total_lines": [
     "The cap that actually binds. Assembly is a fixed cost here: the list below",
     "is meant to be finished once every architecture boots, and a scheduler, a",
@@ -52,7 +52,8 @@
     "ledger 1303, condition 7) for the lent firmware framebuffer's write-combining",
     "window: one sfence in the kernel's arch::x86_64::framebuffer::",
     "drain_write_combining, after the panic draw (1). The kernel target has SSE",
-    "off, so _mm_sfence cannot be called; efifb uses the runtime's mfence."
+    "off, so _mm_sfence cannot be called; efifb uses the runtime's mfence.",
+    "1658 since 2026-10-17 (fbcon-wc-early, L.x86_64.127 and L.x86_64.176, consultant ledger line 1994) for the framebuffer window write-combining from its first map: x86-64 framebuffer.rs's clflush and mfence (+2) and smp.rs's trampoline writing IA32_PAT before paging is on (+7); the tree went from 1649 to 1658."
   ],
   "max_ratio": 0.06,
   "//max_ratio": [
@@ -71,8 +72,8 @@
   "files": [
     {
       "file": "src/kernel/src/arch/x86_64/framebuffer.rs",
-      "max_lines": 1,
-      "reason": "sfence after the panic screen's last store on a framebuffer mapped write-combining (ferrix.efifb, docs/DISPLAY.md section 8), so the picture leaves the fill buffers before the processor halts. The kernel target has SSE off, so core::arch's _mm_sfence cannot be called; a store fence has no other Rust spelling (atomic fences are mfence or nothing)."
+      "max_lines": 3,
+      "reason": "sfence after the panic screen's last store on a framebuffer mapped write-combining (ferrix.efifb, docs/DISPLAY.md section 8), so the picture leaves the fill buffers before the processor halts. The kernel target has SSE off, so core::arch's _mm_sfence cannot be called; a store fence has no other Rust spelling (atomic fences are mfence or nothing). 3 since 2026-10-17 (fbcon-wc-early, L.x86_64.176, consultant ledger line 1994): clflush over every line of the framebuffer window and the mfence after it, before the window's first store, so no line firmware's own mapping left lies beside the kernel's write-combining one; _mm_clflush and _mm_mfence need SSE2, which the kernel target has off."
     },
     {
       "file": "src/boot/common/uefi/src/arch/aarch64.rs",
@@ -161,8 +162,8 @@
     },
     {
       "file": "src/kernel/src/arch/x86_64/smp.rs",
-      "max_lines": 41,
-      "reason": "The AP trampoline, and the only 16-bit code in the project. INIT-SIPI-SIPI starts a processor in real mode at the start of a page below 1 MiB, with no stack and nothing but its reset state: there is no 16-bit Rust target, and the sequence that takes it to long mode -- control registers, EFER, a GDT, a far jump into a 64-bit segment -- is defined entirely by what the processor does to its registers along the way. 41 rather than 40 since 2026-09-27, when check-asm-budget.py began counting every line of a raw-string global_asm! instead of the 3 its quotes were on: the file had not grown, the count had been short."
+      "max_lines": 48,
+      "reason": "The AP trampoline, and the only 16-bit code in the project. INIT-SIPI-SIPI starts a processor in real mode at the start of a page below 1 MiB, with no stack and nothing but its reset state: there is no 16-bit Rust target, and the sequence that takes it to long mode -- control registers, EFER, a GDT, a far jump into a 64-bit segment -- is defined entirely by what the processor does to its registers along the way. 41 rather than 40 since 2026-09-27, when check-asm-budget.py began counting every line of a raw-string global_asm! instead of the 3 its quotes were on: the file had not grown, the count had been short. 48 since 2026-10-17 (fbcon-wc-early, L.x86_64.127, consultant ledger line 1994): seven lines that write IA32_PAT with X86_PAT before CR0 turns paging on, when the header says the boot processor's table read back so, so no processor translates the write-combining framebuffer window by the power-on table; a wrmsr in real mode has no Rust spelling."
     },
     {
       "file": "src/kernel/src/arch/x86_64/speculation.rs",

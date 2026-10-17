@@ -738,19 +738,56 @@ package FerrixX8664Requirements {
         requirement <'L.x86_64.127'> patEntryOneWriteCombining : ItemLowLevel {
             attribute :>> statement = "Every processor shall program IA32_PAT with
                 X86_PAT before anything maps write-combining, entry 1 write-combining
-                and entries 0 and 3 write-back and uncacheable as at power-on; and a
-                leaf the kernel maps write-combining shall select entry 1 by its
-                write-through bit alone, with device memory's uncacheable entry
-                winning where both are asked.";
+                and entries 0 and 3 write-back and uncacheable as at power-on: the
+                boot processor before the kernel maps its framebuffer window, and
+                every secondary in its trampoline before it turns paging on, when the
+                boot processor's table read back as X86_PAT; and a leaf the kernel
+                maps write-combining shall select entry 1 by its write-through bit
+                alone, with device memory's uncacheable entry winning where both are
+                asked.";
             attribute :>> criterion = "Host tests: a write-combining leaf has PWT
                 and not PCD, reads back as itself, and loses to device; X86_PAT's
                 entries 0, 1 and 3 are 0x06, 0x01 and 0x00. On x86-64 the boot's
-                cpu line says entry 1 is write-combining, and every processor read
-                its PAT back, or stage 9's check fails.";
+                cpu line says entry 1 is write-combining, every processor read its
+                PAT back, and every secondary read IA32_PAT as X86_PAT on arriving
+                in secondary_start, before programming it (counted equal to the
+                secondaries, the fbwindow line), or stage 9's check fails; with the
+                trampoline's write removed, it fails.";
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = ("arch::x86_64::cpu::program_pat",
+                "arch::x86_64::program_memory_types",
                 "arch::x86_64::write_combining_processors", "arch::x86_64::init_traps",
+                "arch::x86_64::smp::CpuStarter::new",
                 "arch::x86_64::smp::secondary_start");
+        }
+        requirement <'L.x86_64.176'> theFramebufferWindowCombinesFromItsFirstMap : ItemLowLevel {
+            attribute :>> statement = "On x86-64 the kernel shall map its framebuffer
+                window by leaves selecting PAT entry 1 only when the boot processor's
+                IA32_PAT reads back X86_PAT before the window is mapped and the
+                processor has CLFLUSH, and as device memory otherwise; and it shall
+                flush every cache line of the window before the window's first
+                store.";
+            attribute :>> criterion = "Host test: MapFlags::x86_framebuffer gives
+                KERNEL_COMBINING for X86_PAT and KERNEL_DEVICE for the power-on table,
+                0 and none read. On every x86-64 boot with a framebuffer, stage 9
+                reads every page of the window back write-combining, not device,
+                writable, not user's and global, the PAT recorded at the map as
+                X86_PAT, and the lend's read-back true on the window and false on a
+                device page (the fbwindow line, with the lines flushed); with the
+                window mapped as device memory, the table programmed after the map,
+                the read-back answering true for any page, or the flush not made
+                (the count of lines flushed, checked equal to the window's), the
+                boot panics. That the lines left the caches is build evidence: no
+                emulator keeps a line for it to find. Without CLFLUSH the window's
+                PAT is not recorded and the check fails on it: closed.";
+            attribute :>> parent = ("H.MEM.15", "H.MEM.1");
+            attribute :>> unit = ("arch::x86_64::framebuffer::framebuffer_flags",
+                "arch::x86_64::framebuffer::window_pat",
+                "arch::x86_64::framebuffer::flush_window",
+                "arch::x86_64::framebuffer::window_flush",
+                "arch::x86_64::framebuffer::window_lines",
+                "arch::x86_64::framebuffer::line_size",
+                "early::EarlyMemory::map_framebuffer");
         }
         requirement <'L.x86_64.32'> speculationPlanFollowsCpuid : ItemLowLevel {
             attribute :>> statement = "Plan::for_processor shall choose enhanced

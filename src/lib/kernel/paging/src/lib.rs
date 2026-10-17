@@ -221,6 +221,10 @@ pub struct MapFlags {
 /// reached through the PAT bit, are left as at power-on.
 pub const X86_PAT: u64 = 0x0007_0406_0007_0106;
 
+/// The x86-64 page attribute table at power-on (SDM Vol. 3A §11.12.4): entry
+/// 1 write-through (0x04), the one [`X86_PAT`] makes write-combining.
+pub const X86_PAT_POWER_ON: u64 = 0x0007_0406_0007_0406;
+
 // The entries a descriptor selects: 0 write-back (0x06), 1 write-combining
 // (0x01) and 3 uncacheable (0x00), as Linux's `uapi/asm/mtrr.h` encodes the
 // types. A table that moved one would change the type of every mapping.
@@ -309,8 +313,9 @@ impl MapFlags {
 
     /// A framebuffer the kernel maps write-combining: [`MapFlags::KERNEL_DEVICE`]
     /// with the device bit clear and `write_combining` set. On x86-64 it
-    /// selects PAT entry 1 ([`X86_PAT`]), so it may be used only once every
-    /// processor has programmed its table.
+    /// selects PAT entry 1 ([`X86_PAT`]), so it may be used only where every
+    /// processor that translates the leaf programmed its table before it
+    /// does ([`MapFlags::x86_framebuffer`]).
     pub const KERNEL_COMBINING: MapFlags = MapFlags {
         read: true,
         write: true,
@@ -321,6 +326,22 @@ impl MapFlags {
         uncached: false,
         write_combining: true,
     };
+
+    /// How the x86-64 kernel maps its framebuffer window, from the boot
+    /// processor's `IA32_PAT` as it read back before the map: write-combining
+    /// ([`MapFlags::KERNEL_COMBINING`]) only when that is [`X86_PAT`], whose
+    /// entry 1 a write-combining leaf selects; device memory
+    /// ([`MapFlags::KERNEL_DEVICE`], entry 3, uncacheable in every table)
+    /// for any other table, and for `None`, a table not read or a processor
+    /// that cannot flush the window's cache lines first. Under the power-on
+    /// table entry 1 is write-through, which caches reads: never chosen.
+    #[must_use]
+    pub const fn x86_framebuffer(pat: Option<u64>) -> MapFlags {
+        match pat {
+            Some(X86_PAT) => MapFlags::KERNEL_COMBINING,
+            _ => MapFlags::KERNEL_DEVICE,
+        }
+    }
 
     /// User text.
     pub const USER_CODE: MapFlags = MapFlags {

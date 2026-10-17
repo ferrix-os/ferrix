@@ -1,12 +1,21 @@
-//! The lent firmware framebuffer's write-combining, x86-64's side
-//! (`docs/DISPLAY.md` §8, under `ferrix.efifb`).
+//! The framebuffer window's write-combining, x86-64's side
+//! (`docs/DISPLAY.md` §8).
 //!
-//! Three things the rest of the kernel asks of the processor: one entry of
-//! its page attribute table read back, the memory type its MTRRs give a
-//! physical range, and a store fence that empties its write-combining
-//! buffers. Every register here is read, never written: the PAT is
+//! The kernel maps the boot framebuffer write-combining from its first map,
+//! on every boot that has one, lent under `ferrix.efifb` or not: the boot
+//! processor programs its PAT before the map ([`super::program_memory_types`]),
+//! and every secondary in its trampoline, before it turns paging on
+//! (`smp`), so no processor translates the window's leaves by any other
+//! table (`L.x86_64.127`, `L.x86_64.176`).
+//!
+//! What the rest of the kernel asks of the processor here: the flags the
+//! window is mapped with, chosen from the boot processor's table as it read
+//! back ([`framebuffer_flags`]); the window's cache lines flushed before
+//! its first store ([`flush_window`]); one entry of its page attribute
+//! table read back; the memory type its MTRRs give a physical range; and a
+//! store fence that empties its write-combining buffers. The PAT is
 //! programmed at each processor's bring-up (`cpu::program_pat`) and the
-//! MTRRs are firmware's.
+//! MTRRs are firmware's: nothing here writes either.
 //!
 //! The MSR numbers are Linux's (`arch/x86/include/asm/msr-index.h`:
 //! `MSR_MTRRcap` 0xFE, `MSR_MTRRdefType` 0x2FF, `MSR_IA32_CR_PAT` 0x277)
@@ -17,8 +26,107 @@
 
 use core::arch::asm;
 use core::arch::x86_64::__cpuid;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use ferrix_paging::MapFlags;
 
 use super::cpu;
+
+pub(crate) mod check;
+
+/// The boot processor's `IA32_PAT` as it read back when the window was
+/// mapped, or 0 when it was not read (no table programmed, no `CLFLUSH`):
+/// what [`framebuffer_flags`] chose by, kept for stage 9's check.
+static WINDOW_PAT: AtomicU64 = AtomicU64::new(0);
+/// The cache lines [`flush_window`] flushed.
+static FLUSHED_LINES: AtomicU64 = AtomicU64::new(0);
+/// And the time stamp counter's ticks it took, for the boot line.
+static FLUSH_TICKS: AtomicU64 = AtomicU64::new(0);
+
+/// Whether this processor has `CLFLUSH`: CPUID.(EAX=1):EDX.CLFSH, bit 19.
+fn has_clflush() -> bool {
+    __cpuid(1).edx & (1 << 19) != 0
+}
+
+/// The flags the kernel's framebuffer window is mapped with, first thing in
+/// `kmain` and after [`super::program_memory_types`]: write-combining when
+/// the boot processor's PAT read back [`ferrix_paging::X86_PAT`] and it can
+/// flush the window's cache lines first, device memory otherwise
+/// ([`MapFlags::x86_framebuffer`]). The table read is kept for stage 9.
+pub(crate) fn framebuffer_flags() -> MapFlags {
+    let pat = (super::boot_pat_programmed() && has_clflush()).then(|| {
+        // SAFETY: (SYSREG) the boot processor programmed and read back its
+        // PAT, so CPUID reported the register.
+        unsafe { cpu::read_msr(cpu::IA32_PAT) }
+    });
+    WINDOW_PAT.store(pat.unwrap_or(0), Ordering::Release);
+    MapFlags::x86_framebuffer(pat)
+}
+
+/// The table [`framebuffer_flags`] chose the window's type by, when it read
+/// one.
+pub(crate) fn window_pat() -> Option<u64> {
+    Some(WINDOW_PAT.load(Ordering::Acquire)).filter(|&pat| pat != 0)
+}
+
+/// Write back and invalidate every cache line of `virt..virt + len`, the
+/// framebuffer window just mapped, and fence: before the boot console's or
+/// the panic screen's first store. Firmware mapped the framebuffer before
+/// the kernel did, under its own tables, and where its MTRR type is
+/// write-back a line of it may still be in a cache: one beside the
+/// write-combining leaves is the alias the SDM (Vol. 3A §11.12.4) forbids.
+/// `CLFLUSH` reaches every cache of the coherence domain whatever the type
+/// of the address it is given. Nothing without `CLFLUSH`: the window is
+/// then device memory ([`framebuffer_flags`]), and an uncached store
+/// allocates no line.
+pub(crate) fn flush_window(virt: u64, len: u64) {
+    if !has_clflush() {
+        return;
+    }
+    let line = line_size();
+    let start = cpu::rdtsc();
+    let mut lines = 0_u64;
+    let mut at = virt - virt % line;
+    let end = virt.saturating_add(len);
+    while at < end {
+        // SAFETY: (SYSREG) `at` is inside the window `kmain` has just mapped,
+        // so the flush's linear address translates; `CLFLUSH` writes no byte
+        // of memory a reference reaches.
+        unsafe { asm!("clflush [{}]", in(reg) at, options(nostack, preserves_flags)) };
+        lines = lines.saturating_add(1);
+        at = at.saturating_add(line);
+    }
+    // SAFETY: (SYSREG) a fence: it changes no register or memory. `CLFLUSH`
+    // is ordered by `MFENCE`, so every line is gone before the first store.
+    unsafe { asm!("mfence", options(nostack, preserves_flags)) };
+    FLUSHED_LINES.store(lines, Ordering::Release);
+    FLUSH_TICKS.store(cpu::rdtsc().wrapping_sub(start), Ordering::Release);
+}
+
+/// This processor's cache line size: CPUID.(EAX=1):EBX[15:8], in
+/// eight-byte units, or 64 where it says none.
+fn line_size() -> u64 {
+    let line = u64::from((__cpuid(1).ebx >> 8) & 0xFF) * 8;
+    if line == 0 { 64 } else { line }
+}
+
+/// The cache lines `virt..virt + len` touches: what [`flush_window`] must
+/// have flushed, for stage 9's check.
+pub(crate) fn window_lines(virt: u64, len: u64) -> u64 {
+    let line = line_size();
+    virt.saturating_add(len)
+        .saturating_sub(virt - virt % line)
+        .div_ceil(line)
+}
+
+/// The lines [`flush_window`] flushed and the time stamp counter's ticks
+/// it took.
+pub(crate) fn window_flush() -> (u64, u64) {
+    (
+        FLUSHED_LINES.load(Ordering::Acquire),
+        FLUSH_TICKS.load(Ordering::Acquire),
+    )
+}
 
 /// `IA32_MTRRCAP`: the variable ranges' count in bits 7:0.
 const MTRR_CAP: u32 = 0xFE;

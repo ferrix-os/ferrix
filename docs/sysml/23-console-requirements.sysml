@@ -514,12 +514,20 @@ package FerrixConsoleRequirements {
         requirement <'L.console.39'> theScreenStopsForGood : ItemLowLevel {
             attribute :>> statement = "screen::stop shall stop the screen console for
                 good and wait a bounded time for a draw in flight to finish, and a byte
-                that finds the board taken shall not be drawn.";
+                that finds the board taken shall not be drawn; and every draw shall
+                make its stores globally visible before the board is released.";
             attribute :>> criterion = "After stop, 0 bytes are drawn; stop called by a
                 processor part way through a draw returns after at most 1,000,000
-                attempts at the board.";
+                attempts at the board. The drain is build evidence and an argument:
+                every draw of start, put and milestone ends with
+                arch::drain_write_combining (SFENCE on x86-64, nothing on the Arm
+                kernels) under the board, on every boot's path; no emulator models
+                write-combining fill buffers, so no control can show it fired, and
+                the photographed hardware evidence is owed by a docs/BACKLOG.md row.";
             attribute :>> parent = "H.FAIL.1";
-            attribute :>> unit = ("console::screen::stop", "console::screen::put");
+            attribute :>> unit = ("console::screen::stop", "console::screen::put",
+                "console::screen::start", "console::screen::milestone",
+                "arch::x86_64::framebuffer::drain_write_combining");
         }
     }
 

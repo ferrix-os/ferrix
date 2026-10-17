@@ -27,7 +27,7 @@
 //! holds a type here for good. Its direct map covers RAM runs only
 //! (`mm::direct_map_ram`), and no aperture or window is RAM. The boot
 //! framebuffer, which it maps itself for the boot console and the panic
-//! screen (`arch::FRAMEBUFFER_FLAGS`), is in `device::Reserved` with the
+//! screen (`arch::framebuffer_flags`), is in `device::Reserved` with the
 //! interrupt controllers, timers and firmware's own memory it maps, and an
 //! aperture overlapping anything reserved is withheld rather than minted
 //! (`device.rs`). A PCI function's MSI-X table and pending-bit pages, which
@@ -35,20 +35,24 @@
 //! (`msix::withheld`). Configuration space is not a BAR and is never an
 //! aperture.
 //!
+//! On x86-64 the kernel's window on the boot framebuffer is write-combining
+//! from its first map, on every boot that has one (`L.x86_64.176`): the boot
+//! processor programs its PAT before the map, every secondary in its
+//! trampoline before paging is on, so no processor translates the window by
+//! another table, and every cache line of the window is flushed before its
+//! first store, so no line firmware's own mapping left lies beside it. Its
+//! type never changes after.
+//!
 //! The exception: under `ferrix.efifb`, on x86-64, the boot framebuffer's
 //! visible lines are lent to a node of their own (`discovery::firmware`,
 //! `docs/DISPLAY.md` §8), so a user mapping can reach pages the kernel maps
-//! for its panic screen. Before the node is published the kernel changes
-//! its own window on them from uncacheable to write-combining (every
-//! processor's TLB flushed before that returns; no cache line to flush,
-//! since uncacheable allocates none), then takes a [`Hold`] of that type,
-//! [`MemoryType::Combining`], and never drops it: every user mapping of the
-//! window is then held to write-combining, and one of any other type is
-//! refused for the life of the machine (L.device.39 and L.device.43,
-//! checked by stage 10's `check_framebuffer` and W8). While the shootdown
-//! is in flight another processor may still hold the uncacheable
-//! translation: an uncacheable/write-combining pair over pages nothing
-//! writes then, and never a cacheable one.
+//! for its panic screen. Before the node is published the kernel reads its
+//! own window on them back write-combining, refusing the lend otherwise,
+//! then takes a [`Hold`] of that type, [`MemoryType::Combining`], and never
+//! drops it: every user mapping of the window is then held to
+//! write-combining, and one of any other type is refused for the life of
+//! the machine (L.device.39 and L.device.43, checked by stage 10's
+//! `check_framebuffer` and W8).
 //!
 //! # A residual: cache lines across a type change
 //!
@@ -63,7 +67,10 @@
 //! device's own memory, the memory of the device whose driver and clients
 //! made both mappings. It is recorded, not flushed (VULNERABILITY-ANALYSIS
 //! T.DMA, MEMORY-AND-TIMING 2.2f); flushing a cached range as its hold is
-//! released would close it.
+//! released would close it. The same residual for the boot framebuffer,
+//! lines firmware's own mapping left before the kernel's write-combining
+//! one, is closed: the window is flushed before its first store
+//! (`arch::flush_window`).
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;

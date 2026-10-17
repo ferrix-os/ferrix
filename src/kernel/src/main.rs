@@ -1769,6 +1769,9 @@ fn verify_hand_off(view: &BootView<'_>, memory: &mut EarlyMemory) {
 /// The panic still goes to serial. `docs/DISPLAY.md` §2.4. A failure is
 /// returned for stage 1's self-check to report, after the console is up.
 fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result<(), &'static str> {
+    // The boot processor's PAT before the window: on x86-64 the window is
+    // write-combining from its first map only under the kernel's table.
+    arch::program_memory_types();
     let framebuffer = view.raw().framebuffer;
     display::note_boot_framebuffer(framebuffer.is_present(), framebuffer.is_reclaimable());
     if !framebuffer.is_present() || framebuffer.is_reclaimable() {
@@ -1782,6 +1785,9 @@ fn map_boot_framebuffer(view: &BootView<'_>, memory: &mut EarlyMemory) -> Result
     if memory.translate(at) != Some(framebuffer.phys) {
         return Err("the framebuffer mapping does not resolve to the framebuffer");
     }
+    // No line firmware's mapping left in a cache beside the new type, before
+    // the first store (x86-64; nothing on Arm).
+    arch::flush_window(at, len);
     panic::screen::install(&framebuffer, at, len);
     console::screen::start(view);
     Ok(())

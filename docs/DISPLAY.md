@@ -1095,8 +1095,9 @@ vertical blanking, no GPU.
    another range starts in its last page (`check_lending_exact`).
 3. **Kernel, no DMA.** The node is memory, not a device that reaches memory:
    it gets no IOMMU domain, `vmo_pin` and `device_set_limit` on it answer
-   `WRONG_TYPE`. The kernel maps the same pages for its panic screen, and
-   on x86-64 changes that window to write-combining as it lends them, then
+   `WRONG_TYPE`. The kernel maps the same pages for its panic screen, on
+   x86-64 write-combining from that window's first map, reads the window
+   back write-combining as it lends them, then
    takes a hold of that type over them for the life of the machine
    (`user::memory_type`), so a driver's mapping of any other type is
    refused (the write-combining paragraph below). The boot console, which draws through a
@@ -1211,31 +1212,58 @@ processor in bursts instead of one uncached store a pixel.
 * *One type per page, the kernel holding it.* `discovery::firmware`'s
   lend, in this order, before the node is published and before any
   program runs: (1) refuses to lend unless every processor programmed
-  its PAT (`io_mapping::combining_ready`), publishing nothing and leaving
-  the window uncached; (2) mints the aperture
-  *prefetchable* -- a GOP framebuffer is linear memory, reads of it have
-  no side effect -- so `io_mapping_map_combining` may map it; (3) stops
-  the boot console (as now); (4) changes the kernel's whole panic window
-  from uncacheable (`KERNEL_DEVICE`) to WC (a new
-  `MapFlags::KERNEL_COMBINING`) with `mm::protect_kernel`, given the
-  window `panic::screen` installed, which rewrites
-  the leaves and flushes every processor's TLB, global entries included,
-  before it returns; (5) takes the kernel's hold as
+  its PAT (`io_mapping::combining_ready`), publishing nothing; (2) mints
+  the aperture *prefetchable* -- a GOP framebuffer is linear memory, reads
+  of it have no side effect -- so `io_mapping_map_combining` may map it;
+  (3) reads every page of the kernel's panic window back WC, writable and
+  not user's (`window_combining`; the window is WC from its first map,
+  below), and refuses otherwise with the console still drawing; (4) stops
+  the boot console; (5) takes the kernel's hold as
   `MemoryType::Combining`, never given back (`KERNEL_MAPPING`). An error
-  after the console's stop publishes no node, and the boot line says why.
-  From then
-  on `io_mapping_map` (uncacheable) of the window is refused by the hold
-  (`ALREADY_BOUND`)
-  and only `io_mapping_map_combining` maps it: no alias of two types
-  exists after (4), and no cacheable mapping of the pages exists ever.
-  No cache flush is needed at (4): the pages were only ever mapped
-  uncacheable, which allocates no cache line, so there is nothing to
-  write back (the SDM's flush on a type change is for a cacheable type
-  leaving). During (4) another processor may hold the old uncacheable
-  translation until it answers the shootdown: an uncacheable/WC pair
-  over pages nothing writes then (the console has stopped, no program
-  runs, the panic screen draws only with the others stopped), and no
-  cacheable type, which is what SDM 11.12.4 forbids beside WC.
+  publishes no node, and the boot line says why. From then on
+  `io_mapping_map` (uncacheable) of the window is refused by the hold
+  (`ALREADY_BOUND`) and only `io_mapping_map_combining` maps it: no alias
+  of two types exists, and no cacheable mapping of the pages exists ever.
+  (Until 2026-10-17 the window was uncached until the lend, which changed
+  it to WC with `mm::protect_kernel` and a shootdown; it changes type no
+  more.)
+* *From the first map (branch fbcon-wc-early, 2026-10-17; consultant
+  ledger line 1994).* With `ferrix.fbcon` the N150 spent 0.1 to 0.26 s a
+  kernel line, some 10 to 13 s of a 28 s boot, drawing on the window
+  uncached until the lend above made it WC; a line then cost about 1 ms.
+  So on every x86-64 boot with a framebuffer, lent or not, the window is
+  WC from its first map (L.x86_64.176): the boot processor programs its
+  PAT first thing in `kmain`, before the window is mapped and before the
+  first line (`arch::x86_64::program_memory_types`; the cpu line still
+  prints where it did); `MapFlags::x86_framebuffer` maps the window
+  `KERNEL_COMBINING` only when that table read back `X86_PAT` and the
+  processor has `CLFLUSH`, `KERNEL_DEVICE` otherwise; every cache line of
+  the window is flushed, then `mfence`, before the first store (firmware's
+  own mapping, under an MTRR that may be write-back on some machine, may
+  have left lines beside the new type); and every secondary writes
+  `X86_PAT` in its trampoline before `CR0` turns paging on, from a header
+  field the boot processor fills only when its own table read back so, so
+  no processor ever translates the window by the power-on table, whose
+  entry 1 is write-through and would cache it (L.x86_64.127). The lend
+  steps above change accordingly: (1) as before; (4) is no longer a
+  change of type but a read-back, `discovery::firmware::window_combining`,
+  made *before* (3), the console's stop: every page of the window must
+  read back WC, writable and not user's, or the lend is refused with the
+  console still drawing and nothing minted. With no type change there is
+  no shootdown, and no moment when two processors hold two types. Stage 9
+  reads it all back on every x86-64 boot (`check_framebuffer_window`, the
+  `fbwindow` line: the pages, the table at the map, the secondaries that
+  arrived programmed, the read-back false on a device page, the lines
+  flushed and what that took). The boot console ends each draw with
+  `arch::drain_write_combining` under its board (L.console.39), so its
+  stores are out of the fill buffers before another processor, the panic
+  screen or `efifb` draws; a processor stopped in the middle of a draw by
+  a panic can still leave a few of its pixels over the panic picture.
+  Controls `fbwc-ctl-*`: the trampoline's write removed, the window
+  mapped device, the table programmed after the map, the read-back
+  answering true. Still to show on the N150 (`docs/BACKLOG.md`): the line
+  times with `ferrix.fbcon`, the flush's cost, and photographs of efifb's
+  first frame and a forced panic with no console pixel on either.
 * *Flush ordering.* WC stores are weakly ordered and may sit in a
   processor's fill buffers. `efifb` ends every copy (SCANOUT, FLUSH) with
   a full fence (the runtime's `device_barrier`, `mfence` on x86-64, which
@@ -1266,7 +1294,8 @@ processor in bursts instead of one uncached store a pixel.
   prefetchable. The firmware-screen boot requires efifb's line `mapped
   write-combining` and the figure's line, and the picture as before.
 * *Negative controls* (tags `wc-ctl-*`, each through `gate.sh control`):
-  `remap`, the kernel's change of type skipped; `hold`, the hold left
+  `remap`, the kernel's change of type skipped (retired with the change
+  itself; `fbwc-ctl-*` above replace it); `hold`, the hold left
   `Device` with the change done; `prefetch`, the aperture minted not
   prefetchable; `plain`, efifb mapping with `io_mapping_map`, expecting
   efifb's line `the kernel refused the window's mapping`; `skip`,
@@ -1274,8 +1303,9 @@ processor in bursts instead of one uncached store a pixel.
   stage 9 check skips the node by its binding, and only under the option,
   since the kernel's hold would refuse its uncached step for that, not
   for the rule.
-* *Requirement.* L.device.43 (the window write-combining before the hold
-  and the node; parents H.MEM.15, H.DMA.5), with L.device.38 restated
+* *Requirement.* L.device.43 (the window read back write-combining before
+  the hold and the node; parents H.MEM.15, H.DMA.5), L.x86_64.176 (the
+  window write-combining from its first map), with L.device.38 restated
   (prefetchable) and L.device.39 (the hold is write-combining, and only
   `io_mapping_map_combining` maps the window). Certification consultant:
   ledger line 1303.

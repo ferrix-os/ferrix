@@ -1225,6 +1225,33 @@ mod x86_bits {
         assert!(!X86_64::leaf_flags(entry).write_combining);
     }
 
+    /// The framebuffer window is write-combining only under the table the
+    /// kernel programs; under the power-on table, a zeroed one, or none
+    /// read, it is device memory.
+    ///
+    /// Verifies: `L.x86_64.176`
+    #[test]
+    fn the_framebuffer_window_combines_only_under_the_programmed_table() {
+        assert_eq!(
+            MapFlags::x86_framebuffer(Some(X86_PAT)),
+            MapFlags::KERNEL_COMBINING
+        );
+        assert_eq!(
+            MapFlags::x86_framebuffer(Some(X86_PAT_POWER_ON)),
+            MapFlags::KERNEL_DEVICE
+        );
+        assert_eq!(MapFlags::x86_framebuffer(Some(0)), MapFlags::KERNEL_DEVICE);
+        assert_eq!(MapFlags::x86_framebuffer(None), MapFlags::KERNEL_DEVICE);
+        // The two tables differ in entry 1 alone.
+        assert_eq!(X86_PAT ^ X86_PAT_POWER_ON, 0x05 << 8);
+        let entry = X86_64::leaf_descriptor(
+            PhysAddr(0x8000_0000),
+            Level::PAGE,
+            MapFlags::x86_framebuffer(Some(X86_PAT)),
+        );
+        assert_eq!(entry & (WRITE_THROUGH | CACHE_DISABLE), WRITE_THROUGH);
+    }
+
     #[test]
     fn device_mappings_disable_caching() {
         let entry =
