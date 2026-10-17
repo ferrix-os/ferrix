@@ -2407,7 +2407,20 @@ pub(crate) fn arm_cpu(arch: Arch) -> String {
 /// QEMU's command, on the host processors `pin` names (`--pin`) unless it is
 /// `none`: by `taskset`, which then runs QEMU in its own place, so the child
 /// is still QEMU's own pid.
-fn pinned(binary: &Path, pin: Option<&str>) -> Command {
+fn pinned(binary: &Path, pin: Option<&str>, quota: Option<u32>) -> Command {
+    if let Some(percent) = quota {
+        // A transient user scope: no root, and the quota goes with QEMU when
+        // it exits. `systemd-run --scope` runs the command as itself, so the
+        // child stopped later is QEMU's own process.
+        let mut scoped = Command::new("systemd-run");
+        let _ = scoped.args(["--user", "--scope", "--quiet", "--collect"]);
+        let _ = scoped.arg(format!("--property=CPUQuota={percent}%"));
+        if let Some(cpus) = pin.filter(|&cpus| cpus != "none") {
+            let _ = scoped.args(["taskset", "-c", cpus]);
+        }
+        let _ = scoped.arg(binary);
+        return scoped;
+    }
     match pin.filter(|&cpus| cpus != "none") {
         Some(cpus) => {
             let mut taskset = Command::new("taskset");
@@ -2449,7 +2462,7 @@ fn qemu_command(
     // the guest was emulated without anybody having to guess.
     println!("  qemu: {arch} under {accelerator}, {processors} processors");
 
-    let mut command = pinned(&binary, args.pin.as_deref());
+    let mut command = pinned(&binary, args.pin.as_deref(), args.cpu_quota);
     let _ = command.current_dir(paths::workspace_root());
 
     let _ = command.args(accelerator_arguments(&accelerator, kernel)?);

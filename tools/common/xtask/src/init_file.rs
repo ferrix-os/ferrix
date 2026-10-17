@@ -307,7 +307,7 @@ impl Parts<'_> {
     }
 
     /// [`Parts::image`] with `applets`, each another name of `shell`.
-    fn image_with(
+    pub(crate) fn image_with(
         &self,
         shell: &[u8],
         path: &str,

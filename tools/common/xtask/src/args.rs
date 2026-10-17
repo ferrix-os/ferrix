@@ -254,6 +254,10 @@ pub(crate) struct Args {
     /// `--pin`, the host processors (`taskset -c`'s list) QEMU runs on.
     /// `bench-ipc` pins to 11 unless given another, or `none`.
     pub(crate) pin: Option<String>,
+    /// `--cpu-quota PCT`, the share of one host processor QEMU may use, by
+    /// a transient `systemd-run --user --scope -p CPUQuota=` around it: a
+    /// starved machine, as `test-btrfs-pressure` wants (`docs/BTRFS-PRESSURE.md`).
+    pub(crate) cpu_quota: Option<u32>,
     /// `--stage`, a directory `flash` writes the card's files into instead of
     /// a card: for a board on another machine than the build, whose card is
     /// then given the directory's contents by hand.
@@ -544,8 +548,9 @@ pub(crate) struct Args {
 const SCALE_FLAGS: [&str; 4] = ["--scale", "--bar-zoom", "--bar-drop", "--bar-margin-right"];
 
 /// The flags [`Args::named`] takes, `bench-ipc`'s among them.
-const NAMED_FLAGS: [&str; 13] = [
+const NAMED_FLAGS: [&str; 14] = [
     "--accel",
+    "--cpu-quota",
     "--since",
     "--moved",
     "--alternate",
@@ -677,6 +682,7 @@ impl Args {
             "--alternate"
                 | "--rounds"
                 | "--pin"
+                | "--cpu-quota"
                 | "--against-sel4"
                 | "--against-redox"
                 | "--record"
@@ -1056,6 +1062,7 @@ impl Args {
             "--record" => self.record = true,
             "--board" => self.board = Some(value(items, key)?),
             "--board-log" => self.board_logs.push(value(items, key)?),
+            "--cpu-quota" => self.cpu_quota = Some(count(items, key)?),
             _ => self.pin = Some(value(items, key)?),
         }
         Ok(())

@@ -76,6 +76,7 @@ mod auth;
 mod badapple;
 mod btrfs_check;
 mod btrfs_disk;
+mod btrfs_pressure;
 mod builds;
 mod busybox;
 mod bwrap;
@@ -515,6 +516,7 @@ const TASKS: &[&[Task]] = &[
     auth::TASKS,
     badapple::TASKS,
     btrfs_check::TASKS,
+    btrfs_pressure::TASKS,
     builds::TASKS,
     busybox::TASKS,
     bwrap::TASKS,
