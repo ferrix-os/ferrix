@@ -196,6 +196,72 @@ echo "pressure: done"
 $B poweroff -f
 "#;
 
+/// How many MiB of memory the eviction boot reads into the cache per 64 MiB
+/// file it writes first: one file per 64 MiB of the machine, as much as it
+/// has, so that it starts at its floor, as the N150 box did with 16 GB of
+/// game files cached (2026-10-18).
+const EVICT_FILE_MIB: u64 = 64;
+
+/// How many small files the eviction boot then makes, as `tar` unpacking
+/// GE-Proton makes them: twice the VFS's dentry cache (`DEFAULT_CACHE`).
+const EVICT_NEW_FILES: u64 = 8192;
+
+/// The eviction boot's script: the cache filled by reading, then a burst of
+/// small files made fast, with the probe running and `Cached` sampled. On the
+/// N150 box the same burst took `Cached` from 15.97 GB to 0.13 GB in 13 s.
+const EVICT_GUEST: &str = r#"#!/bin/sh
+B=/bin/busybox
+say() { echo "pressure: $*"; }
+cs() { read u r < /proc/uptime; echo $(( ${u%.*} * 100 + 1${u#*.} - 100 )); }
+cached() { while read k v u; do [ "$k" = Cached: ] && { echo $v; return; }; done < /proc/meminfo; }
+D=/data/e
+$B mkdir -p /tmp $D || { say "FAIL mkdir $D"; echo "pressure: done"; exit 1; }
+probe() {
+  max=0; last=$(cs)
+  while [ ! -e /tmp/stop.$1 ]; do
+    $B sleep 0.1; now=$(cs); late=$((now - last - 10)); last=$now
+    if [ $late -gt $max ]; then max=$late; echo $max > /tmp/probe.$1; fi
+  done
+}
+i=0; while [ $i -lt @FILES@ ]; do
+  $B dd if=/dev/zero of=$D/big$i bs=1048576 count=@FILE_MIB@ 2>/tmp/dd.err || say "FAIL fill big$i: $($B cat /tmp/dd.err)"
+  i=$((i + 1))
+done
+$B sync
+# Read them back, the newest last: what the machine holds is clean cache.
+i=0; while [ $i -lt @FILES@ ]; do $B cat $D/big$i > /dev/null; i=$((i + 1)); done
+before=$(cached)
+say "evict: cache filled: Cached $before kB, MemFree $($B grep MemFree /proc/meminfo | $B tr -s ' ' | $B cut -d' ' -f2) kB"
+echo $before > /tmp/least
+( while [ ! -e /tmp/stop.unpack ]; do
+    c=$(cached); read l < /tmp/least; [ $c -lt $l ] && echo $c > /tmp/least
+    $B sleep 0.2
+  done ) &
+probe unpack &
+# The unpack: small files in directories of 256, made as fast as the shell
+# can, each a page of text, as tar makes a tree of them.
+page=0123456789abcdef; k=0; while [ $k -lt 8 ]; do page=$page$page; k=$((k + 1)); done
+t0=$(cs); n=0
+while [ $n -lt @NEW@ ]; do
+  if [ $((n % 256)) -eq 0 ]; then $B mkdir -p $D/u/d$((n / 256)) || { say "FAIL mkdir d$((n / 256))"; break; }; fi
+  echo "$page" > $D/u/d$((n / 256))/f$n || { say "FAIL create f$n"; break; }
+  n=$((n + 1))
+done
+$B sync
+t1=$(cs)
+$B touch /tmp/stop.unpack
+wait
+after=$(cached); read least < /tmp/least; [ $after -lt $least ] && least=$after
+say "evict: made $n files in $(( (t1 - t0) / 100 )) s; Cached before $before kB, after $after kB, least $least kB; longest probe stall $($B cat /tmp/probe.unpack 2>/dev/null || echo 0) cs"
+echo "pressure: done"
+$B poweroff -f
+"#;
+
+/// The most of the cache the eviction boot may lose while it makes its small
+/// files, in percent of what was cached before: they take a few tens of
+/// megabytes, so losing half of a 600 MB cache is not reclaim's shortfall.
+const EVICT_LOSS_PERCENT: u64 = 50;
+
 /// Boot each architecture asked for and judge it.
 ///
 /// # Errors
@@ -234,17 +300,18 @@ fn run(arch: Arch, args: &Args) -> Result<()> {
         machine.timeout = 1800;
     }
     let mut failures = Vec::new();
-    // The machine's floor is the gate. The boot at `memory.max` is run when
-    // `FERRIX_PRESSURE_BOOTS` says `cgroup` or `all`: it fails on main and
-    // with this fix alike, on defects of the memory.max path of their own
-    // (docs/BTRFS-PRESSURE.md, "At memory.max").
-    let boots = std::env::var("FERRIX_PRESSURE_BOOTS").unwrap_or_else(|_| "floor".to_owned());
-    for cgroup in [false, true] {
-        let name = if cgroup { "cgroup" } else { "floor" };
-        if boots != "all" && boots != name {
+    // The machine's floor and the eviction under a burst of small files are
+    // the gate. The boot at `memory.max` is run when `FERRIX_PRESSURE_BOOTS`
+    // names `cgroup` (or says `all`): it fails on main and with this fix
+    // alike, on defects of the memory.max path of their own
+    // (docs/BTRFS-PRESSURE.md, "At memory.max"). The variable is a comma list
+    // of `floor`, `evict` and `cgroup`.
+    let boots = std::env::var("FERRIX_PRESSURE_BOOTS").unwrap_or_else(|_| "floor,evict".to_owned());
+    for kind in [Kind::Floor, Kind::Evict, Kind::Cgroup] {
+        if boots != "all" && !boots.split(',').any(|name| name.trim() == kind.name()) {
             continue;
         }
-        if let Err(error) = boot(&parts, &shell_bytes, &kernel, &machine, cgroup) {
+        if let Err(error) = boot(&parts, &shell_bytes, &kernel, &machine, kind) {
             println!("  {arch}: {error}");
             failures.push(error.to_string());
         }
@@ -256,23 +323,50 @@ fn run(arch: Arch, args: &Args) -> Result<()> {
     }
 }
 
-/// One boot: the machine's own floor, or with `cgroup` the writer's job at
-/// `memory.max`, half the machine.
+/// Which boot: the writers at the machine's own floor, the cache filled and
+/// then a burst of small files, or the writers in a job at `memory.max`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Floor,
+    Evict,
+    Cgroup,
+}
+
+impl Kind {
+    /// Its name in `FERRIX_PRESSURE_BOOTS`.
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Floor => "floor",
+            Kind::Evict => "evict",
+            Kind::Cgroup => "cgroup",
+        }
+    }
+}
+
+/// One boot of `kind`.
 fn boot(
     parts: &init_file::Parts<'_>,
     shell_bytes: &[u8],
     kernel: &cargo::Kernel,
     machine: &Args,
-    cgroup: bool,
+    kind: Kind,
 ) -> Result<()> {
     let arch = parts.arch;
+    let cgroup = kind == Kind::Cgroup;
     let memmax = u64::from(machine.memory) * 1024 * 1024 / 2;
-    let script = GUEST
-        .replace("@WRITE_MIB@", &WRITE_MIB.to_string())
-        .replace("@MEMMAX@", &memmax.to_string())
-        .replace("@CGROUP@", if cgroup { "1" } else { "0" })
-        .replace("@WRITERS@", &WRITERS.to_string())
-        .replace("@READERS@", &READERS.to_string());
+    let script = if kind == Kind::Evict {
+        EVICT_GUEST
+            .replace("@FILES@", &evict_files(&machine).to_string())
+            .replace("@NEW@", &EVICT_NEW_FILES.to_string())
+            .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
+    } else {
+        GUEST
+            .replace("@WRITE_MIB@", &WRITE_MIB.to_string())
+            .replace("@MEMMAX@", &memmax.to_string())
+            .replace("@CGROUP@", if cgroup { "1" } else { "0" })
+            .replace("@WRITERS@", &WRITERS.to_string())
+            .replace("@READERS@", &READERS.to_string())
+    };
     let image = parts.image_with(
         shell_bytes,
         SCRIPT,
@@ -283,19 +377,28 @@ fn boot(
     let mut machine = machine.clone();
     machine.data_image = Some(volume(arch)?);
     machine.data_image_kept = true;
-    println!(
-        "  {arch}: {} MiB of memory{}, {WRITE_MIB} MiB written as 7-Zip under Wine writes, \
-         then deleted{}",
-        machine.memory,
-        if cgroup {
-            format!(", the writer at memory.max {} MiB", memmax >> 20)
-        } else {
-            String::new()
-        },
-        machine.cpu_quota.map_or(String::new(), |q| format!(
-            ", QEMU held to {q}% of a processor"
-        ))
-    );
+    if kind == Kind::Evict {
+        println!(
+            "  {arch}: {} MiB of memory, the cache filled with {} files of {EVICT_FILE_MIB} MiB, \
+             then {EVICT_NEW_FILES} small files made",
+            machine.memory,
+            evict_files(&machine)
+        );
+    } else {
+        println!(
+            "  {arch}: {} MiB of memory{}, {WRITE_MIB} MiB written as 7-Zip under Wine writes, \
+             then deleted{}",
+            machine.memory,
+            if cgroup {
+                format!(", the writer at memory.max {} MiB", memmax >> 20)
+            } else {
+                String::new()
+            },
+            machine.cpu_quota.map_or(String::new(), |q| format!(
+                ", QEMU held to {q}% of a processor"
+            ))
+        );
+    }
     let started = Instant::now();
     let deadline = started + Duration::from_secs(machine.timeout);
     let lines = qemu::watch_then(arch, &image, kernel, &machine, SUCCESS_MARKER, |at| {
@@ -312,7 +415,12 @@ fn boot(
         println!("  {arch}: {line}");
     }
     println!("  {arch}: the boot took {took} s");
-    judge(&ours).map_err(|why| Error::new(format!("{arch}: {why}")))
+    let judged = if kind == Kind::Evict {
+        judge_evict(&ours)
+    } else {
+        judge(&ours)
+    };
+    judged.map_err(|why| Error::new(format!("{arch}: {why}")))
 }
 
 /// Whether the guest finished, nothing failed, and no probe stalled long.
@@ -338,6 +446,49 @@ fn judge(ours: &[&str]) -> std::result::Result<(), String> {
                 "a 100 ms sleep woke {stall} cs late ({line}); the limit is {STALL_LIMIT_CS}"
             ));
         }
+    }
+    Ok(())
+}
+
+/// How many files the eviction boot fills the cache with: one per
+/// [`EVICT_FILE_MIB`] of the machine's memory.
+fn evict_files(machine: &Args) -> u64 {
+    (u64::from(machine.memory) / EVICT_FILE_MIB).max(1)
+}
+
+/// Whether the eviction boot finished, nothing failed, the cache kept at
+/// least half of what it held at its least, and no probe stalled long.
+fn judge_evict(ours: &[&str]) -> std::result::Result<(), String> {
+    if !ours.contains(&DONE) {
+        return Err(format!("the guest never said `{DONE}`"));
+    }
+    if let Some(failed) = ours.iter().find(|l| l.starts_with("pressure: FAIL")) {
+        return Err(format!("a step failed: {failed}"));
+    }
+    let line = ours
+        .iter()
+        .find(|l| l.starts_with("pressure: evict: made "))
+        .ok_or("no `evict: made` line")?;
+    let figure = |after: &str, unit: &str| {
+        line.split(after)
+            .nth(1)
+            .and_then(|rest| rest.split(unit).next())
+            .and_then(|n| n.trim().parse::<u64>().ok())
+            .ok_or_else(|| format!("no `{after}` figure in `{line}`"))
+    };
+    let before = figure("Cached before ", " kB")?;
+    let least = figure("least ", " kB")?;
+    let stall = figure("longest probe stall ", " cs")?;
+    if least.saturating_mul(100) < before.saturating_mul(100 - EVICT_LOSS_PERCENT) {
+        return Err(format!(
+            "the page cache fell from {before} kB to {least} kB while small files were made \
+             ({line}); it may lose at most {EVICT_LOSS_PERCENT}%"
+        ));
+    }
+    if stall > STALL_LIMIT_CS {
+        return Err(format!(
+            "a 100 ms sleep woke {stall} cs late ({line}); the limit is {STALL_LIMIT_CS}"
+        ));
     }
     Ok(())
 }
@@ -397,5 +548,25 @@ mod tests {
             DONE,
         ];
         assert!(judge(&stalled).is_err());
+    }
+
+    #[test]
+    fn the_eviction_boot_fails_on_a_cache_dropped_whole_or_a_stall() {
+        let kept = [
+            "pressure: evict: made 8192 files in 20 s; Cached before 600000 kB, after 560000 kB, least 540000 kB; longest probe stall 20 cs",
+            DONE,
+        ];
+        assert_eq!(judge_evict(&kept), Ok(()));
+        let dropped = [
+            "pressure: evict: made 8192 files in 20 s; Cached before 600000 kB, after 40000 kB, least 30000 kB; longest probe stall 20 cs",
+            DONE,
+        ];
+        assert!(judge_evict(&dropped).is_err());
+        let stalled = [
+            "pressure: evict: made 8192 files in 20 s; Cached before 600000 kB, after 560000 kB, least 540000 kB; longest probe stall 900 cs",
+            DONE,
+        ];
+        assert!(judge_evict(&stalled).is_err());
+        assert!(judge_evict(&[DONE]).is_err());
     }
 }
