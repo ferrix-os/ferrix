@@ -460,6 +460,16 @@
       ],
       "dropped": "audit/check.rs pinned()'s lines 310, 314, 323, 327 and 328 left the verification map: carry-coverage.py dropped them from `reached` as edited (BOOT_RECORDS 8 -> 9); no residual or argued anchor was dropped.",
       "what": "audit/check.rs pinned(), H.AUD.2's verifier: the lines BOOT_RECORDS 9 changed (298's ten records, 310's read, 314's nine sequence numbers, 320's refusal, 323's ring read, 327-328's resumed read), reached on every boot by the stage's audit check: measure them on each architecture's run. With them the new item code no run has measured yet: build_flags.rs report and audit_words (the build line and Config::Build's words, reached on every boot), audit/check.rs kernel_store's Config::Build row, and boot_checks.rs's COMPILED_IN in run."
+    },
+    {
+      "landing": "vtd-n150, VT-d on the N150's units (consultant ledger 2122 (15), 2174, 2235 (C1))",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "13 anchors carry-coverage.py dropped as unmeasured: x86_64 residual iommu.rs 263 and iommu/vtd.rs 470, argument iommu.rs:263; aarch64 and armv7a each residual iommu/vtd.rs 396, 401, 404, 439-441, 443, 469-470, 485, 654-655, 657, 863 and iommu.rs 263, 1176, 1191, 1213, arguments iommu.rs:263, 1191, 1213 (other-architecture). audit/check.rs pinned()'s lines changed again (BOOT_RECORDS 9 -> 10) and kernel_store's Config::Vtd row is new.",
+      "what": "the new item code no run has measured: iommu/vtd.rs open's accept path, say_refused, translate's PMR arms, take_fault's record scan, install's Walk::aw, map/unmap/resolve's four-level arms; iommu.rs explicit_dmar, record_scopes, record_catch_alls, say_unit, translates, vtd_off_asked, report_unchecked_faults and vtd_unit_for's catch-all; audit/check.rs pinned() at eleven records and kernel_store's Config::Vtd row. QEMU reaches the four-level arms only on --vtd-aw48's row and none of the version-4/5, catch-all, RMRR-hold, PMR-clear or multi-record arms: those stay argued with the N150's log (BACKLOG fl-072)."
     }
   ]
 }
