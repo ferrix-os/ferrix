@@ -995,7 +995,9 @@ no route on the stable toolchain. **The rule `max` uses instead:**
   `SPECULATION.md` §3 and the ST record that argument. A check counts one
   IBPB per exit, with a negative control that removes it and fires.
 * **Skipping even the exit IBPB** is allowed only on a processor that reports
-  SRSO_NO, BTC_NO, not BHI-affected (or BHI_DIS_S set, with `linuxd`'s
+  SRSO_NO, BTC_NO, not BHI-affected (`arch/x86_64/speculation.rs`'s `bhi`
+  answering not affected, which `BHI_NO` alone never makes it, F-85; or
+  BHI_DIS_S set, with `linuxd`'s
   indirect branches retpolined and checked over the binary), not
   ITS-affected, and the return predictor cleared at the root switch; decided
   at boot, printed on the boot line, failing closed to the IBPB if any bit is

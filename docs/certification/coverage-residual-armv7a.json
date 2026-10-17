@@ -1255,7 +1255,7 @@
     "arch/speculation.rs": {
       "ring": "core",
       "lines": [
-        168
+        174
       ]
     },
     "object/job.rs": {

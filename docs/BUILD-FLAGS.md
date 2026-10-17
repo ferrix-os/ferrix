@@ -93,7 +93,7 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
 | `personality` | `user`, `kernel` | the Linux layer as `linuxd` in user space, or built into ring 0 | `user` | `user` | `kernel` | `kernel` (dated exception, ends at M5's flip) | `user`: all; `kernel`: `none` | in ring 0 only | M5 |
 | `fs` | `server`, `kernel` | btrfs as `btrfsd`, or the btrfs crates in ring 0 with today's glue. `kernel` requires `personality=kernel` | `server` | `server` | `kernel` | `kernel` (the same exception) | `server`: all; `kernel`: `none` | in ring 0 only | M5 |
 | `mitigations` | `on`, `off` | F-31's speculation defences (Zenbleed's and GDS's fixes are outside it, below) | `on` | `on` | `on` | `on` | `on`: all; `off`: `none` | `--cfg ferrix_mitigations_off`, renamed | M0 |
-| `partition_speculation` | `exit`, `partition` | `exit`: an IBPB (with IBPB_BRTYPE's semantics) on every restricted exit, none on entry, the full IBPB at every switch between programs and partitions; on a processor reporting SRSO_NO, BTC_NO, no BHI and no ITS, with the return predictor cleared at the root switch, the exit IBPB may be skipped, decided at boot, printed, failing closed (`MICROKERNEL.md` §7, ledger 941; nazuna does not qualify); on AArch64 the Spectre-BHB clearing sequence on every exit. `partition`: barriers only at partition switches. Requires `personality=user` | `exit` (the customer: 1.5x seL4 for `max`, 660 ns) | `partition` | not applicable | not applicable | `exit`: all; `partition`: `sc2`, `none` | — | M3 |
+| `partition_speculation` | `exit`, `partition` | `exit`: an IBPB (with IBPB_BRTYPE's semantics) on every restricted exit, none on entry, the full IBPB at every switch between programs and partitions; on a processor reporting SRSO_NO, BTC_NO, no BHI (`speculation::bhi` answering not affected, never `BHI_NO` alone; F-85) and no ITS, with the return predictor cleared at the root switch, the exit IBPB may be skipped, decided at boot, printed, failing closed (`MICROKERNEL.md` §7, ledger 941; nazuna does not qualify); on AArch64 the Spectre-BHB clearing sequence on every exit. `partition`: barriers only at partition switches. Requires `personality=user` | `exit` (the customer: 1.5x seL4 for `max`, 660 ns) | `partition` | not applicable | not applicable | `exit`: all; `partition`: `sc2`, `none` | — | M3 |
 | `ipc_fastpath` | `off`, `on` | the fast path for `channel_write_read` (0x1013) | `off` until the 2026-10-02 rule is met, then `on` | `on` (the rule binds `max` only) | `on` | `off` (today's certified default) | `off`: all; `on`: `sc2`, `none`, and `sc4` and `present` once the rule is met | boot option `ferrix.fastpath` (L.x86_64.159) | M0 |
 | `restricted_fastpath` | `off`, `on` | K1's fastpath for the restricted exit and re-entry. Requires `personality=user` | per K1's review | `on` | not applicable | not applicable | per K1's review | — | M3 |
 | `kernel_memory` | `retyped`, `heap` | K16's memory from the job's own reservation, or today's fallible, charged shared heap | `retyped` | `heap` | `heap` | `heap` | `retyped`: all; `heap`: `present` (AoU-5), `sc2` (under `fast`'s justification), `none` | `heap` only | M6 |
@@ -176,8 +176,11 @@ Not flags, and why:
   (ledger 926).
 * **What stays on in `desktop`'s default** (ledger 926): eIBRS or AutoIBRS,
   the Spectre v1 clamps, the SWAPGS fence and register clearing on entry,
-  the return-stack refill or ERAPS at switches, VERW on MDS-affected
-  processors, SMEP, SMAP, PAN, W^X and KASLR. **`desktop` is deactivatable**:
+  the return-stack refill or ERAPS at switches, VERW on MDS- and
+  RFDS-affected processors, BHI_DIS_S or the branch-history loop on
+  BHI-affected ones (F-84, F-85: under `mitigations=on`, no boot option, in
+  every profile; a desktop-only opt-out of the VERW would be a new flag
+  value through a design review, not a switch), SMEP, SMAP, PAN, W^X and KASLR. **`desktop` is deactivatable**:
   `--set mitigations=off` builds a desktop with none of the speed-trade
   defences and no claim, as today, and game mode's privileged run-time
   trades act when `runtime_trades=game_mode`.

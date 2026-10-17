@@ -122,10 +122,37 @@ processor, read back on each (`arch/x86_64/speculation.rs`).
 | Spectre v2, program → kernel | enhanced IBRS (Intel, `IBRS_ALL`), else AutoIBRS (AMD, `EFER.AIBRSE`), else IBRS on AMD parts that say it may be left on (`CPUID 0x8000_0008.EBX[16]`) | whichever the processor offers | Intel *Speculative Execution Side Channel Mitigations*; AMD *Software Techniques for Managing Speculation* |
 | Spectre v2, program → program | `IBPB` and a 32-entry return stack refill when a processor switches to another program's address space; between two programs of one speculation domain (a job marked at its creation, `docs/OPAQUE-KERNEL.md` §9) the refill alone, without `IBPB`; `STIBP` unless enhanced IBRS already covers the sibling thread; the program → kernel rows unchanged by the domain. The decision is made from per-processor words (the root, the outgoing and incoming domains, the counts) that each processor reads and writes by plain loads and stores with interrupts masked, with no locked operation (`docs/OPAQUE-KERNEL.md` §9.8, 2f) | `IBPB`/`STIBP` where offered; the refill always, or inside a domain ERAPS's own emptying where offered with `CR4.PCIDE` clear | as above; the refill also covers SpectreRSB |
 | Speculative store bypass | `SSBD`, through `IA32_SPEC_CTRL` or AMD's `VIRT_SPEC_CTRL` | unless `SSB_NO` | Intel SA-00115, AMD SSBD whitepaper |
-| MDS | `VERW` on every return to ring 3 | Intel, `MD_CLEAR`, no `MDS_NO` | Intel SA-00233 |
+| MDS | `VERW` on every return to ring 3 | Intel, `MD_CLEAR`, no `MDS_NO`; an affected part without `MD_CLEAR` is reported NOT covered | Intel SA-00233 |
+| RFDS (Register File Data Sampling): a program samples stale register-file values the kernel or another program left, on Intel Atom cores | the same `VERW` on every return to ring 3 -- `SYSRET`, `IRET` and the paranoid entries' restore -- which clears the register file too where microcode says `RFDS_CLEAR`; without it, reported NOT covered | Intel, no `RFDS_NO`, and any of: `RFDS_CLEAR`; a model Linux lists (Goldmont, Goldmont D and Plus, Tremont, D and L, Gracemont, and the Alder and Raptor Lakes that carry Gracemont cores, 0x97 and 0xb7 only where hybrid or on an Atom core); a family 6 model neither of Linux's tables names, or another family; a guest, whose model need not be the host's. Since 2026-10-17 (F-84, `L.x86_64.179`) | CVE-2023-28746, Intel SA-00898 |
+| BHI (Branch History Injection): a program's branch history steers the kernel's indirect branches past eIBRS | `BHI_DIS_S` (`IA32_SPEC_CTRL[10]`) where `BHI_CTRL` (`CPUID.(7,2):EDX[4]`) offers it, read back on every processor; else `ferrix_clear_bhb`, Linux's `clear_bhb_loop` (5 calls deep, 5 taken jumps each, an `lfence`), on every entry from ring 3 before any indirect branch: `SYSCALL` through an `LSTAR` that names the entry calling it, so no branch can be mispredicted past it; every trap and interrupt from ring 3 behind a test of the plan whose mispredicted way meets the SWAPGS fence; an NMI or machine check from ring 3 the same, with a fence of its own | every processor but AMD's and Hygon's that has eIBRS or runs under a hypervisor; `BHI_NO` decoded and not trusted alone, as Linux does not trust it (intra-mode BHI). Since 2026-10-17 (F-85, `L.x86_64.180`) | CVE-2024-2201, Intel *Branch History Injection and Intra-mode Branch Target Injection* |
 | Meltdown, L1TF | **none** — reported | — | §6 |
+| ITS, MMIO stale data, SRBDS, TAA, Retbleed, SRSO, TSA | **none**, but Intel's Retbleed is covered where eIBRS is planned, and SRSO between programs by `IBPB` with `IBPB_BRTYPE` on a part that says `SRSO_USER_KERNEL_NO`; every other affected part reported NOT covered on the second exposure line | decided as Linux's `cpu_set_bug_bits` and `vulnerable_to_its` do, every stepping of a listed model affected; since 2026-10-17 (`L.x86_64.181`) | Linux 6.18.54 |
+| VMSCAPE | **not applicable**, reported so | the item runs no guests: VMSCAPE is a guest steering its host's user space, and the item is no hypervisor | Linux 6.18.54's `VMSCAPE` |
 | Zenbleed (AMD Zen 2): a mispredicted `vzeroupper` leaves another program's `YMM` contents readable | `DE_CFG[9]` on every processor unless the microcode is at the fixed revision, as Linux does; in a guest, which can neither see the host's fix nor set the bit, programs do not get AVX | Zen 2 (family 0x17, Linux's `amd_zenbleed` models) with AVX; since 2026-09-30 (`speculation::vector_leak`) | CVE-2023-20593, AMD-SB-7008 |
 | Gather Data Sampling (Intel Skylake to Rocket Lake): `VPGATHER` samples stale vector data of another program | the microcode's mitigation, turned back on on every processor where `GDS_MITG_DIS` is set and not locked; without that microcode, or with it off and locked, programs do not get AVX -- Linux's `gds=force` | Linux's GDS models, without `GDS_NO`, which a hypervisor gives for a mitigated host; since 2026-09-30 | CVE-2022-40982, Intel SA-00828 |
+
+**Where the model tables come from.** The affected sets for RFDS, BHI and the
+rest are Linux 6.18.54's, read from that release's source on the gate host
+(`~/crp123i-port/clean/linux-6.18.54`; `arch/x86/kernel/cpu/common.c`
+sha256 `7eb0cd220375b3316e3316f41b10f06b54ed70ebac2903c25f558e3a826f3a72`,
+`bugs.c` `1f3174e309bd8b599183a6d56dff391d36a0d7ab6cda98cb056af9af632b890a`,
+`arch/x86/entry/entry_64.S`
+`8c90ad9fabd466923df2ddc94c77b60a30fc871c1f1a2472878a370ce247ebdb`). The N150
+runs Ubuntu's 7.0.12, whose `bugs` line (`rfds bhi`, no `mds`) and
+"Register File Data Sampling: Mitigation: Clear Register File" agree with
+these tables for its part. Where this deviates from Linux it is stricter:
+an Intel model the tables do not know, and any Intel guest, is RFDS-affected
+unless it says `RFDS_NO` (Linux gives an unknown model a pass; KVM sets
+`RFDS_NO` for a guest on an unaffected host, so a well-configured guest is
+not penalised); Centaur and Zhaoxin, which Linux whitelists for BHI, are
+taken as affected, since `offered` does not tell them apart; and every
+stepping of a model Linux lists from a stepping on is affected.
+
+**Every hazard is named.** Until 2026-10-17 the exposure line named only the
+hazards the plan modelled, so one it did not model read as covered by being
+left out (F-84, F-85, their root cause). Both exposure lines now name every
+x86 hazard on Linux 6.18.54's list, each covered, not affected, or NOT
+covered (§7).
 
 **Why these, and why always on.** Linux enables most of these conditionally —
 `SSBD` and `IBPB` only for programs that ask, by `prctl` or `seccomp`. The item
@@ -604,11 +631,27 @@ KASLR is checked first, at stage 1, and §6.1 says how. Then, once, on the boot
 processor, before the second processor starts:
 
 ```
-  cpu      speculation defences: clamped indices, SWAPGS fence, entry registers cleared, AutoIBRS, STIBP, SSBD, predictor barrier on switch, RSB fill on switch
-  cpu      speculation exposure: Spectre v2 into ring 0 covered; between programs covered; store bypass covered; Meltdown not affected (AMD)
+  cpu      speculation defences: clamped indices, SWAPGS fence, entry registers cleared, AutoIBRS, STIBP, SSBD, predictor barrier on switch, RSB fill on switch, ERAPS empties the RSB on switch
+  cpu      speculation exposure: Spectre v2 into ring 0 covered; between programs covered; store bypass covered; Meltdown not affected (AMD); MDS not affected (AMD); RFDS not affected (AMD); BHI not affected (AMD)
+  cpu      speculation exposure: ITS not affected (off Linux's list, or ITS_NO); MMIO stale data not affected (off Linux's list, or its three _NO bits); SRBDS not affected (off Linux's list, or no RDRAND); TAA not affected (no TSX, or TAA_NO); Retbleed not affected (off Linux's list, or BTC_NO); SRSO not affected (off Linux's list, or SRSO_NO); TSA not affected (off Linux's list, or TSA_SQ_NO and TSA_L1_NO); VMSCAPE not affected (no hypervisor in the item)
 ```
 
-(`x86_64 --accel kvm` on an AMD Ryzen 9 9900X host.) Every secondary applies
+(`x86_64 --accel kvm` on an AMD Ryzen 9 9900X host; the defences line is
+the one `main` printed before RFDS and BHI were modelled.) The guest's model
+is QEMU's `qemu64`, family 15, which none of Linux's lists names: the second
+line is the model's verdict, not the Zen 5 host's (§9). What the N150's
+Gracemont is to print, from its own `CPUID` and `IA32_ARCH_CAPABILITIES`:
+
+```
+  cpu      speculation defences: clamped indices, SWAPGS fence, entry registers cleared, eIBRS, SSBD, predictor barrier on switch, RSB fill on switch, VERW on exit, BHB loop on entry
+  cpu      speculation exposure: ...; MDS not affected (MDS_NO); RFDS covered (VERW on exit, RFDS_CLEAR); BHI covered (BHB loop on entry)
+```
+
+That boot is owed (`docs/BACKLOG.md`, F-84 and F-85's row). An Intel model
+under TCG (`FERRIX_X86_CPU=Snowridge-v4,...`, a Tremont without
+`IA32_ARCH_CAPABILITIES`, since TCG emulates none) prints "BHB loop on
+entry", "RFDS NOT covered: microcode without RFDS_CLEAR (AoU-11)" and, being a
+guest, "ITS NOT covered", and passes every stage with the loop on every entry. Every secondary applies
 the boot processor's plan as it starts and records what it applied. On
 AArch64 each core decides everything for itself instead (§4): a Pixel 7 boots
 on a Cortex-A55, which needs neither the loop nor a switch barrier, and starts
@@ -629,8 +672,14 @@ programs, `arch::check_speculation` (`arch/speculation_check.rs`) requires:
   none while others do;
 * no processor to have issued a switch barrier its own plan does not have
   (the count is kept per processor);
-* on x86-64, `VERW` to take its operand, on machines whose exit path never
-  runs it;
+* on x86-64, `VERW` to take its operand, and the branch-history loop to
+  return, on machines whose exit and entry paths never run them; `LSTAR` on
+  the checking processor to name the system call entry the BHI plan chose
+  (every processor whose plan has the loop reads its own back as it
+  applies it); and the RFDS, BHI and other-hazard decisions to give each of
+  their described processors its verdict and plan (`speculation/check.rs`:
+  `rfds_decisions`, `bhi_decisions`, `exposure_decisions`, `L.x86_64.179` to
+  `181`);
 * on AArch64, the entry loop's count to be non-zero exactly when some
   processor recorded that it needs the loop.
 
@@ -661,6 +710,25 @@ The boot's own cost lines, three boots each, did not move beyond their noise:
 stage 7's `handlers` 103 → 104 ms, `procs` 13 → 13, `fork` 177 → 178, `execve`
 37 → 38 (medians), and time to `FERRIX-BOOT-OK` varied more between boots of
 one setting than between settings.
+
+**RFDS's and BHI's cost** (2026-10-17, rfds-bhi). `bench-ipc --release
+--accel kvm --smp 1`, five alternating rounds each, on nazuna's Zen 5:
+
+| Kernel | against | native call floor, p50 | `domain-call` p50 ratio (spread) | host load |
+|---|---|---:|---:|---:|
+| this branch, AMD plan (no loop, no VERW) | `main` f16c98ae7 | 279 ns | 1.000 (1.000 to 1.007) | 4.5 to 5.7 |
+| both forced on, as on the N150: `VERW` on every exit, the loop on every entry (a measurement build, never landed) | this branch | 289 ns (279 to 289 in the quiet rounds, 399 in one round with a busy SMT sibling) | 1.007 (0.716 to 1.060) | 8.6 to 19 |
+
+On the reference configuration the change costs nothing the bench can see:
+its plan has neither. Forced on, the native call's round trip moved by
+about one step of the bench's 10 ns resolution, and the ratio of the noisy
+second run says no more than "within a few percent". Zen 5's `VERW` is the
+legacy instruction, which clears nothing, so this measures the loop and the
+instruction's issue, not Gracemont's register-file clear. **The N150's own
+figure is owed**: syscalls a second and stage 7's cost lines before and
+after, on the box (`docs/BACKLOG.md`, F-84 and F-85's row). The customer
+chose security over speed for the certified profiles, so the figure informs
+and does not decide.
 
 **KASLR's cost** (§6.1), measured on the same host on 2026-09-26, after main
 had given the KVM guest an invariant TSC, which lowered every figure below
@@ -790,4 +858,38 @@ instructions per clamp.
 * **The paranoid entry's registers.** An NMI or `#MC` taken in ring 3 on
   x86-64 does not clear the program's registers the way an ordinary trap does
   (a ring-3 `#DB` moves to the ordinary path and does); its return to ring 3
-  does run `VERW`, through the shared restore.
+  does run `VERW`, through the shared restore, and its entry the
+  branch-history loop where BHI's plan has it. The branch that decides it
+  came from ring 3, the saved `CS`'s ring test, is unfenced, as is the
+  `GS_BASE` sign test after it (F-71, as widened 2026-10-17, ledger line
+  2305): mispredicted to ring 0, the ring test runs `ferrix_paranoid_entry`
+  without the loop until the frame load resolves. F-71 closes only when
+  both are fenced.
+* **RFDS without `RFDS_CLEAR`, and MDS without `MD_CLEAR`.** `VERW` clears
+  only where microcode says so; an affected part on older microcode is
+  reported NOT covered and AoU-11 asks for the vendor's current microcode.
+  The N150's 0x1a is one Linux calls old (`old_microcode`) and still says
+  `RFDS_CLEAR`.
+* **The BHB loop's counts on parts newer than Alder Lake without
+  `BHI_CTRL`.** Linux 6.18.54 runs 5 by 5 on every part it runs the loop on,
+  and its own comment says the sequence is for parts before Alder Lake,
+  newer ones having `BHI_DIS_S`. The N150's Gracemont has no `BHI_CTRL` and
+  is where Linux runs it too; whether 5 by 5 overwrites all of Gracemont's
+  history rests on Linux and Intel's guidance, not on a check. A guest on a
+  newer host that hides `BHI_CTRL` gets the same loop; its host's own
+  `BHI_DIS_S` for the guest is the VMM's (AoU-11).
+* **The hazards the item reports and does not cover**: ITS, MMIO stale
+  data, SRBDS, TAA, Retbleed without eIBRS or on AMD, SRSO without
+  `SRSO_USER_KERNEL_NO`, TSA. Each is NOT covered on an affected part and
+  AoU-11 excludes it. None of them affects the reference configuration's
+  processors as their guests see them, nor the N150's Gracemont.
+* **Those decisions in a guest.** Like Zenbleed's and GDS's, they rest on
+  the model the hypervisor presents. The gates' `qemu64` is family 15, which
+  no list names, so under KVM on nazuna's Zen 5 the guest reports SRSO not
+  affected while the host has SRSO between user programs (`SRSO_NO` clear,
+  `SRSO_USER_KERNEL_NO` set; ledger 941): the host's own mitigation is what
+  protects there (AoU-11). RFDS and BHI fail closed in a guest where the
+  hypervisor does not say `RFDS_NO`, and BHI where it hides eIBRS.
+* **Model tables of a fixed release.** Linux 6.18.54's; a part added to
+  them later is not known here, beyond RFDS's fail-closed rule for an
+  unknown Intel model.
