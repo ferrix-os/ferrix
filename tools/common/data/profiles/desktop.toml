@@ -33,6 +33,7 @@ runtime_trades = "game_mode"
 "ferrix.init" = ["*"]
 "ferrix.onexit" = ["*"]
 "ferrix.panic" = ["halt", "reset"]
+"ferrix.vtd" = ["on", "off"]
 "ferrix.fbcon" = true
 "ferrix.fbcon.small" = true
 "ferrix.pstore" = ["on", "off"]

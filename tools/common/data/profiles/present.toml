@@ -44,6 +44,7 @@ runtime_trades = "none"
 "ferrix.init" = ["*"]
 "ferrix.onexit" = ["*"]
 "ferrix.panic" = ["halt"]
+"ferrix.vtd" = ["on"]
 "ferrix.fbcon" = true
 "ferrix.fbcon.small" = true
 "ferrix.pstore" = ["on"]
