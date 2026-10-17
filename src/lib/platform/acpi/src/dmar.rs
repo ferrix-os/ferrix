@@ -38,6 +38,11 @@ pub const FLAG_X2APIC_OPT_OUT: u8 = 1 << 1;
 /// Flags: firmware supports the OS taking DMA protection over from it.
 pub const FLAG_DMA_CTRL_PLATFORM_OPT_IN: u8 = 1 << 2;
 
+/// DRHD flags: the unit translates for every PCI function on its segment
+/// that no other DRHD's scope names (VT-d 8.3, `INCLUDE_PCI_ALL`). Its
+/// scopes then name only I/O APICs and HPETs, as the N150's `dmar1` does.
+pub const DRHD_INCLUDE_PCI_ALL: u8 = 1 << 0;
+
 /// Structure type: a DMA remapping hardware unit definition.
 pub const STRUCTURE_DRHD: u16 = 0;
 /// Structure type: a reserved memory region reporting structure.
@@ -90,6 +95,104 @@ impl<'a> Dmar<'a> {
         Ok(Dmar { table })
     }
 
+    /// The segment's catch-all unit: the DRHD with
+    /// [`DRHD_INCLUDE_PCI_ALL`] on `segment`, read wherever it stands in
+    /// the table. The specification asks firmware to list it last; nothing
+    /// here relies on that.
+    #[must_use]
+    pub fn catch_all(&self, segment: u16) -> CatchAll<'a> {
+        let mut found = self.structures().filter_map(|structure| match structure {
+            Structure::Drhd(unit) if unit.segment == segment && unit.includes_all() => Some(unit),
+            _ => None,
+        });
+        match (found.next(), found.next()) {
+            (None, _) => CatchAll::None,
+            (Some(unit), None) => CatchAll::One(unit),
+            (Some(_), Some(_)) => CatchAll::Several,
+        }
+    }
+
+    /// Why `unit`'s translation must stay off until RMRRs are honoured: an
+    /// RMRR on its segment names a function behind it, or names one this
+    /// table alone cannot place, in which case every unit on the segment
+    /// stays off. `None` when no RMRR reaches it.
+    ///
+    /// Decided before PCI enumeration, as translation goes on before any
+    /// device is given DMA, so from this table alone: an RMRR scope must be
+    /// a single-hop endpoint, and it is behind the unit whose single-hop
+    /// endpoint scope names the same function, or else -- when no DRHD on
+    /// the segment has a scope only enumeration can follow (a
+    /// sub-hierarchy, a longer path) -- behind the segment's one catch-all.
+    /// Anything else is [`RmrrHold::Unfollowed`].
+    #[must_use]
+    pub fn rmrr_hold(&self, unit: &Drhd<'a>) -> Option<RmrrHold> {
+        for structure in self.structures() {
+            let region = match structure {
+                Structure::Rmrr(region) => region,
+                // An RMRR too short for its fields names a region nobody
+                // can read: every unit is held, as for one not followed.
+                Structure::Malformed {
+                    kind: STRUCTURE_RMRR,
+                    ..
+                } => return Some(RmrrHold::Unfollowed { base: 0, limit: 0 }),
+                _ => continue,
+            };
+            if region.segment != unit.segment {
+                continue;
+            }
+            for scope in region.device_scopes() {
+                let held = match self.rmrr_owner(region.segment, &scope) {
+                    Owner::Unit(base) if base == unit.register_base => RmrrHold::Named {
+                        base: region.base,
+                        limit: region.limit,
+                        function: scope.endpoint().unwrap_or((0, 0, 0)),
+                    },
+                    Owner::Unit(_) => continue,
+                    Owner::Unfollowed => RmrrHold::Unfollowed {
+                        base: region.base,
+                        limit: region.limit,
+                    },
+                };
+                return Some(held);
+            }
+        }
+        None
+    }
+
+    /// The unit an RMRR scope's function is behind, as [`Dmar::rmrr_hold`]
+    /// decides it.
+    fn rmrr_owner(&self, segment: u16, scope: &DeviceScope<'_>) -> Owner {
+        let Some(named) = scope
+            .endpoint()
+            .filter(|_| scope.kind == SCOPE_PCI_ENDPOINT)
+        else {
+            return Owner::Unfollowed;
+        };
+        let mut open_scopes = false;
+        for structure in self.structures() {
+            let Structure::Drhd(unit) = structure else {
+                continue;
+            };
+            if unit.segment != segment {
+                continue;
+            }
+            for candidate in unit.device_scopes() {
+                match candidate.kind {
+                    SCOPE_PCI_ENDPOINT if candidate.endpoint() == Some(named) => {
+                        return Owner::Unit(unit.register_base);
+                    }
+                    SCOPE_PCI_ENDPOINT if candidate.endpoint().is_none() => open_scopes = true,
+                    SCOPE_PCI_BRIDGE => open_scopes = true,
+                    _ => {}
+                }
+            }
+        }
+        match self.catch_all(segment) {
+            CatchAll::One(unit) if !open_scopes => Owner::Unit(unit.register_base),
+            _ => Owner::Unfollowed,
+        }
+    }
+
     /// The underlying table, for its header and checksum.
     #[must_use]
     pub const fn table(&self) -> &Table<'a> {
@@ -116,6 +219,48 @@ impl<'a> Dmar<'a> {
             rest: self.table.bytes().get(DMAR_HEADER_LEN..).unwrap_or(&[]),
         }
     }
+}
+
+/// A segment's catch-all unit ([`Dmar::catch_all`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CatchAll<'a> {
+    /// No DRHD on the segment includes every function.
+    None,
+    /// Exactly one does.
+    One(Drhd<'a>),
+    /// Two or more do, which the specification does not allow: none of
+    /// them is believed.
+    Several,
+}
+
+/// Why an RMRR keeps a unit's translation off ([`Dmar::rmrr_hold`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RmrrHold {
+    /// The region is for a function behind this unit.
+    Named {
+        /// The region's first byte.
+        base: u64,
+        /// Its last byte.
+        limit: u64,
+        /// The function, as `(bus, device, function)`.
+        function: (u8, u8, u8),
+    },
+    /// The region's scope cannot be placed from the table alone, so every
+    /// unit on its segment is held.
+    Unfollowed {
+        /// The region's first byte.
+        base: u64,
+        /// Its last byte.
+        limit: u64,
+    },
+}
+
+/// Which unit an RMRR's function is behind.
+enum Owner {
+    /// The unit with these registers.
+    Unit(u64),
+    /// No unit this table alone can name.
+    Unfollowed,
 }
 
 /// One remapping structure.
@@ -211,6 +356,13 @@ impl<'a> Drhd<'a> {
     #[must_use]
     pub const fn device_scopes(&self) -> DeviceScopes<'a> {
         DeviceScopes { rest: self.scopes }
+    }
+
+    /// Whether the unit is its segment's catch-all
+    /// ([`DRHD_INCLUDE_PCI_ALL`]).
+    #[must_use]
+    pub const fn includes_all(&self) -> bool {
+        self.flags & DRHD_INCLUDE_PCI_ALL != 0
     }
 
     /// The source ID the I/O APIC whose MADT identifier is `id` sends its

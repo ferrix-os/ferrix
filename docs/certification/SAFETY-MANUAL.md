@@ -237,8 +237,13 @@ element. (Finding F-21b.)
 ### AoU-8 — the configuration is the one in §1
 The claims hold for the reference configuration and no other. Changing the
 toolchain, enabling a Cargo feature, building with `--mitigations off`,
-booting with `ferrix.devmgr=init` (AoU-13) or `ferrix.efifb` (AoU-31), or moving a file between rings
-changes what is claimed. The boundary gate makes
+booting with `ferrix.devmgr=init` (AoU-13), `ferrix.efifb` (AoU-31) or
+`ferrix.vtd=off`, or moving a file between rings
+changes what is claimed. `ferrix.vtd=off` leaves every VT-d unit alone, so
+no DMA is translated and no interrupt remapped and the isolated-interrupts
+mark is refused: it is for recovering a machine whose units break its boot,
+never an evaluated configuration; the boot line and the audit record's
+`Vtd` 0 say it was taken (`L.iommu.71`). The boundary gate makes
 the last of these visible, and the boot log says which build it is — *"speculation
 defences off: built with --mitigations off"* — so the third is visible on the
 running system; the first two are the integrator's to control.

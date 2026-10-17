@@ -7,8 +7,10 @@
 //!
 //! * a **root table**, one entry per bus, pointing at that bus's **context
 //!   table**, one entry per device and function, which names a domain and the
-//!   root of its second-level tables — `src/lib/kernel/paging`'s [`VtdSecondLevel`],
-//!   three levels over 39 bits;
+//!   root of its second-level tables — `src/lib/kernel/paging`'s
+//!   [`VtdSecondLevel`], three levels over 39 bits, or [`VtdFourLevel`],
+//!   four over 48, whichever is the widest the unit walks
+//!   (`ferrix_paging::vtd::unit::accept`);
 //! * **queued invalidation** of the context cache and the IOTLB, after
 //!   anything the unit may have cached changes (below);
 //! * **translation on**, after which a function with no context entry reaches
@@ -66,19 +68,37 @@
 //! counts the failure as a stray fault (FX-1007). There is no recovery: a
 //! wedged queue is a broken unit, and holding memory is the safe side.
 //!
-//! Interrupt remapping and fault events are not used.
+//! Fault events are masked (`FECTL.IM`), and never used.
+//!
+//! # Which units
+//!
+//! `ferrix_paging::vtd::unit::accept` decides from `VER`, `CAP` and
+//! `ECAP` alone: a major version of 1, 4 or 5 -- QEMU's unit and the
+//! N150's two, whose legacy-mode register interface (revisions 1 to 5 of
+//! the specification) is all this driver uses -- a three- or four-level
+//! walk, a guest address width of at least the 39 bits a domain reaches, no
+//! write buffer to flush, an invalidation queue, and its fault records and
+//! IOTLB register inside the first page. `DT`, `PT`, `SC`, `EIM` and
+//! `SMTS` stay unused: no device TLB, no pass-through, no snoop control, the
+//! xAPIC table format, legacy mode only.
+//!
+//! A unit with protected memory regions (`CAP.PLMR` or `PHMR`) has them
+//! turned off once it translates, if firmware left them on, as Linux's
+//! `iommu_disable_protect_mem_regions` does: otherwise DMA into them stays
+//! blocked whatever a domain maps.
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_paging::coherence::Unpublished;
-use ferrix_paging::vtd::VtdSecondLevel;
 use ferrix_paging::vtd::queue::{
     self, Completion, ContextScope, Descriptor, FSTS_ICE, FSTS_IQE, FSTS_QUEUE_ERRORS,
     InterruptEntryScope, IotlbScope, Outcome,
 };
 use ferrix_paging::vtd::remap::{self, Remap};
+use ferrix_paging::vtd::unit::{self as policy, Drain, Walk};
+use ferrix_paging::vtd::{VtdFourLevel, VtdSecondLevel};
 use ferrix_paging::{MapError, MapFlags, PhysAddr};
 use ferrix_pci::Address;
 use ferrix_sync::IrqSpinLock;
@@ -90,7 +110,7 @@ use crate::{arch, mm, timer, vmap};
 
 /// Bytes of registers mapped: every register legacy mode uses is in the first
 /// page.
-const WINDOW: u64 = 0x1000;
+const WINDOW: u64 = policy::WINDOW;
 
 /// Version register.
 const VER: u64 = 0x00;
@@ -109,6 +129,11 @@ const RTADDR: u64 = 0x20;
 const CCMD: u64 = 0x28;
 /// Fault status register.
 const FSTS: u64 = 0x34;
+/// Fault event control register: bit 31 masks the unit's fault event.
+const FECTL: u64 = 0x38;
+/// Protected memory enable register: `EPM` bit 31, `PRS` bit 0. Exists
+/// only on a unit with `CAP.PLMR` or `PHMR`.
+const PMEN: u64 = 0x64;
 /// Invalidation queue head: the next descriptor the unit fetches.
 const IQH: u64 = 0x80;
 /// Invalidation queue tail: the slot after the last descriptor written.
@@ -141,28 +166,19 @@ const IRTA: u64 = 0xB8;
 /// carried into every later one.
 const STANDING: u32 = TE | QIE | IRE;
 
+/// FECTL: the fault event is masked. Set in `open`: firmware may leave a
+/// fault event's message armed, and a unit's own messages are never
+/// remapped.
+const FECTL_MASKED: u32 = 1 << 31;
+/// PMEN: enable protected memory regions.
+const PMEN_EPM: u32 = 1 << 31;
+/// PMEN: protected region status, set while they are enforced.
+const PMEN_PRS: u32 = 1 << 0;
+
 /// IECTL: the invalidation completion event is masked. Set before the queue
 /// goes on: the event's message registers are never programmed, and the only
 /// wait that raises it is check R7's.
 const IECTL_MASKED: u32 = 1 << 31;
-
-/// ECAP: page-walk coherency, the unit's walk snoops the processors' caches.
-/// Clear, every table write is cleaned to memory before it is published.
-const ECAP_C: u64 = 1 << 0;
-/// ECAP: queued invalidation. Required: the queue is the kernel's only way to
-/// invalidate.
-const ECAP_QI: u64 = 1 << 1;
-/// ECAP: interrupt remapping.
-const ECAP_IR: u64 = 1 << 3;
-
-/// CAP: the unit needs its write buffer flushed after every change, which this
-/// driver does not do.
-const CAP_RWBF: u64 = 1 << 4;
-/// CAP: caching mode, in which even an entry that was not present is cached
-/// and must be invalidated once it is.
-const CAP_CM: u64 = 1 << 7;
-/// CAP: the `SAGAW` bit for three-level, 39-bit tables.
-const CAP_SAGAW_39: u64 = 1 << 9;
 
 /// CCMD: a register-based context-cache invalidation is in progress.
 const ICC: u64 = 1 << 63;
@@ -184,8 +200,6 @@ const FRCD_READ: u32 = 1 << 30;
 
 /// Root and context entries: present.
 const PRESENT: u64 = 1;
-/// Context entry, high half: the address width field for three levels.
-const AW_39: u64 = 1;
 
 /// How long a command may take before the unit is given up on.
 const PATIENCE_NANOS: u64 = 100_000_000;
@@ -324,6 +338,17 @@ pub(crate) struct Unit {
     remapping: AtomicBool,
     /// Offset of the first fault recording register.
     faults: u64,
+    /// How many fault recording registers it has.
+    records: u32,
+    /// The walk its domains get, and the context entries' address width.
+    walk: Walk,
+    /// The drain bits its IOTLB invalidations set.
+    drain: Drain,
+    /// Whether it has protected memory regions, so `PMEN` may be read.
+    protected_regions: bool,
+    /// Whether translation is on: false for a unit an RMRR holds, which
+    /// only remaps (`iommu::bring_up_vtd`).
+    translating: AtomicBool,
     /// Offset of the IOTLB invalidation register.
     iotlb: u64,
     /// Whether the unit is in caching mode.
@@ -353,6 +378,28 @@ struct Tables {
     identifiers: BTreeSet<u16>,
 }
 
+/// What became of a unit's protected memory regions once it translated.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Protected {
+    /// The unit has none (`CAP.PLMR` and `PHMR` clear): `PMEN` not read.
+    None,
+    /// Firmware left them off.
+    OffAsFound,
+    /// Firmware left them on, and the kernel turned them off.
+    TurnedOff,
+}
+
+impl Protected {
+    /// What the unit's line says.
+    pub(crate) const fn says(self) -> &'static str {
+        match self {
+            Protected::None => "no PMR",
+            Protected::OffAsFound => "PMR off as found",
+            Protected::TurnedOff => "PMR turned off",
+        }
+    }
+}
+
 /// A domain on one unit: the function whose context entry names it, the
 /// identifier it names, and the root of its second-level tables.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -374,14 +421,17 @@ impl Attached {
 
 impl Unit {
     /// Map the unit whose registers are at `phys`, and require it to be able to
-    /// do what this driver asks: a version 1 unit walking three-level tables,
-    /// with no write buffer to flush, with an invalidation queue, and not left
-    /// translating. A unit firmware left remapping interrupts, or with its
-    /// queue on, is turned off first and must read back off.
+    /// do what this driver asks (`ferrix_paging::vtd::unit::accept`): a
+    /// version read against, a three- or four-level walk, no write buffer
+    /// to flush, an invalidation queue, its records in its first page; and
+    /// not left translating. A unit firmware left remapping interrupts, or
+    /// with its queue on, is turned off first and must read back off. Its
+    /// fault event is masked.
     ///
     /// # Errors
     ///
-    /// Why the unit is left alone.
+    /// Why the unit is left alone; the unit's registers are printed beside
+    /// it.
     ///
     /// `intr_remap` is the DMAR's `INTR_REMAP` flag: with it and `ECAP.IR`
     /// the unit is given an interrupt remapping table, and may remap.
@@ -393,29 +443,23 @@ impl Unit {
             let _ = vmap::unmap_device(base);
             Err(why)
         };
-        if (registers.read32(VER) >> 4) & 0xF != 1 {
-            return refuse("it is not a version 1 unit");
-        }
+        let ver = registers.read32(VER);
         let cap = read64(registers, CAP);
         let ecap = read64(registers, ECAP);
-        if cap & CAP_SAGAW_39 == 0 {
-            return refuse("it cannot walk three-level tables");
-        }
-        if cap & CAP_RWBF != 0 {
-            return refuse("it needs its write buffer flushed");
-        }
-        if ecap & ECAP_QI == 0 {
-            return refuse("it has no invalidation queue");
-        }
+        let accepted = match policy::accept(ver, cap, ecap) {
+            Ok(accepted) => accepted,
+            Err(why) => return refuse(say_refused(phys, ver, cap, ecap, why)),
+        };
         if registers.read32(GSTS) & TE != 0 {
             return refuse("firmware left it translating");
         }
         if let Err(why) = stop_firmware(registers) {
             return refuse(why);
         }
-        let coherent = ecap & ECAP_C != 0;
+        registers.write32(FECTL, FECTL_MASKED);
+        let coherent = accepted.coherent;
         let mut writes = Unpublished::new(coherent);
-        let remaps = intr_remap && ecap & ECAP_IR != 0;
+        let remaps = intr_remap && accepted.remaps;
         let Some([root, queue, status, irt]) = unit_frames(&mut writes, remaps) else {
             return refuse("no frames for its tables");
         };
@@ -436,15 +480,41 @@ impl Unit {
             planted: AtomicU32::new(0),
             irt,
             remapping: AtomicBool::new(false),
-            faults: ((cap >> 24) & 0x3FF) * 16,
-            iotlb: ((ecap >> 8) & 0x3FF) * 16 + 8,
-            caching: cap & CAP_CM != 0,
+            faults: accepted.faults,
+            records: accepted.records,
+            walk: accepted.walk,
+            drain: accepted.drain,
+            protected_regions: accepted.protected_regions,
+            translating: AtomicBool::new(false),
+            iotlb: accepted.iotlb,
+            caching: accepted.caching,
             coherent,
-            identifiers: 1 << (4 + 2 * (cap & 0b111)),
+            identifiers: accepted.identifiers,
             tables: IrqSpinLock::new(Tables::default()),
             taken: IrqSpinLock::new(None),
             commands: Gate::new(),
         })
+    }
+
+    /// The offset of fault recording register `record`.
+    fn record(&self, record: u32) -> u64 {
+        self.faults + u64::from(record) * 16
+    }
+
+    /// The walk its domains get.
+    pub(crate) fn walk(&self) -> Walk {
+        self.walk
+    }
+
+    /// Whether translation is on.
+    pub(crate) fn translating(&self) -> bool {
+        self.translating.load(Ordering::Acquire)
+    }
+
+    /// Whether its fault event reads back masked, as `open` left it
+    /// (`L.iommu.70`).
+    pub(crate) fn fault_events_masked(&self) -> bool {
+        self.registers.read32(FECTL) & FECTL_MASKED != 0
     }
 
     /// Point the unit at its root table, turn its invalidation queue on, make
@@ -466,8 +536,11 @@ impl Unit {
             self.start_table()?;
         }
         // A fault firmware left recorded would otherwise be read as ours.
-        if self.registers.read32(self.faults + 12) & FRCD_F != 0 {
-            self.registers.write32(self.faults + 12, FRCD_F);
+        for record in 0..self.records {
+            let flags = self.record(record) + 12;
+            if self.registers.read32(flags) & FRCD_F != 0 {
+                self.registers.write32(flags, FRCD_F);
+            }
         }
         self.registers.write32(FSTS, PFO);
         *self.taken.lock() = None;
@@ -476,13 +549,45 @@ impl Unit {
 
     /// Turn translation on, after [`Unit::enable`] and, on a unit that
     /// remaps, after [`Unit::start_remapping`]. From here a function with
-    /// no context entry reaches nothing.
+    /// no context entry reaches nothing. Then, on a unit with protected
+    /// memory regions firmware left on, turn them off: what the answer says.
     ///
     /// # Errors
     ///
-    /// The unit never started translating.
-    pub(crate) fn translate(&self) -> Result<(), &'static str> {
-        self.command(TE, "it never started translating")
+    /// The unit never started translating, or its protected regions would
+    /// not turn off -- the unit is then failed, translating still, so DMA
+    /// stays confined and nothing it may reach is released.
+    pub(crate) fn translate(&self) -> Result<Protected, &'static str> {
+        self.command(TE, "it never started translating")?;
+        self.translating.store(true, Ordering::Release);
+        if !self.protected_regions {
+            return Ok(Protected::None);
+        }
+        if self.registers.read32(PMEN) & PMEN_PRS == 0 {
+            return Ok(Protected::OffAsFound);
+        }
+        // EPM cleared, as Linux's `iommu_disable_protect_mem_regions` does
+        // once translation is on: the domains decide from here.
+        self.registers
+            .write32(PMEN, self.registers.read32(PMEN) & !PMEN_EPM);
+        if wait_for(
+            || self.registers.read32(PMEN) & PMEN_PRS == 0,
+            "its protected memory regions would not turn off",
+        )
+        .is_err()
+        {
+            if !self.failed.swap(true, Ordering::AcqRel) {
+                let _ = UNITS_FAILED.fetch_add(1, Ordering::Relaxed);
+            }
+            crate::println!(
+                "  iommu    vt-d unit {:#x}: its protected memory regions would not turn \
+                 off: the unit is failed, still translating, and nothing it may reach is \
+                 released until reboot",
+                self.phys
+            );
+            return Err("its protected memory regions would not turn off");
+        }
+        Ok(Protected::TurnedOff)
     }
 
     /// Point the unit at its interrupt remapping table -- `EIME` = 0, 256
@@ -599,10 +704,12 @@ impl Unit {
         read64(self.registers, CCMD) & ICC != 0 || read64(self.registers, self.iotlb) & IVT != 0
     }
 
-    /// The fault the unit's first recording register holds, cleared so the unit
-    /// can record the next, or `None`.
+    /// The fault the first full recording register holds, cleared so the
+    /// unit can record the next, or `None`: the records are read from the
+    /// one `FSTS.FRI` names round all `CAP.NFR` + 1 of them
+    /// (`ferrix_paging::vtd::unit::fault_records`), as the unit fills them.
     ///
-    /// QEMU's unit has one record, and drops a second fault from the same
+    /// QEMU's unit has one record, as both of the N150's have, and drops a second fault from the same
     /// device while it is full, so a caller that wants a particular fault clears
     /// the record before provoking it.
     ///
@@ -651,12 +758,18 @@ impl Unit {
             });
         }
         let status = self.registers.read32(FSTS);
-        let flags = self.registers.read32(self.faults + 12);
-        if flags & FRCD_F != 0 {
+        // Every record, from the one `FSTS.FRI` names round: at most 256
+        // reads, as `CAP.NFR` is eight bits.
+        for record in policy::fault_records(status, self.records) {
+            let at = self.record(record);
+            let flags = self.registers.read32(at + 12);
+            if flags & FRCD_F == 0 {
+                continue;
+            }
             // F is set, so every other field was written before it and is whole.
-            let stream = self.registers.read32(self.faults + 8) & 0xFFFF;
-            let low = read64(self.registers, self.faults);
-            self.registers.write32(self.faults + 12, FRCD_F);
+            let stream = self.registers.read32(at + 8) & 0xFFFF;
+            let low = read64(self.registers, at);
+            self.registers.write32(at + 12, FRCD_F);
             let reason = remap::fault_reason(flags);
             // An interrupt request's fault names an entry index, not a page:
             // recorded apart (`L.iommu.54`), and never a page a DMA check
@@ -764,7 +877,11 @@ impl Unit {
         let _ = crate::fallible::insert_into_set_held(&held, &mut tables.identifiers, identifier);
         // The high half first, so the entry is never present with a stale
         // domain identifier or address width.
-        write_entry(entry + 8, AW_39 | u64::from(identifier) << 8, writes);
+        write_entry(
+            entry + 8,
+            self.walk.aw() | u64::from(identifier) << 8,
+            writes,
+        );
         write_entry(entry, root | PRESENT, writes);
         Ok(Attached {
             function,
@@ -824,7 +941,12 @@ impl Unit {
         flags: MapFlags,
     ) -> Result<(), MapError> {
         let mut writes = self.writes();
-        let mapped = mm::map_io::<VtdSecondLevel>(attached.root, iova, phys, flags, &mut writes);
+        let mapped = match self.walk {
+            Walk::Three => {
+                mm::map_io::<VtdSecondLevel>(attached.root, iova, phys, flags, &mut writes)
+            }
+            Walk::Four => mm::map_io::<VtdFourLevel>(attached.root, iova, phys, flags, &mut writes),
+        };
         // Published here: outside caching mode no invalidation follows a map,
         // and the device may use the address once this returns.
         self.publish(&mut writes);
@@ -847,7 +969,10 @@ impl Unit {
         tables: &mut mm::UnlinkedTables,
     ) -> Result<(), MapError> {
         let mut writes = self.writes();
-        let unmapped = mm::unmap_io::<VtdSecondLevel>(attached.root, iova, tables, &mut writes);
+        let unmapped = match self.walk {
+            Walk::Three => mm::unmap_io::<VtdSecondLevel>(attached.root, iova, tables, &mut writes),
+            Walk::Four => mm::unmap_io::<VtdFourLevel>(attached.root, iova, tables, &mut writes),
+        };
         // In memory before the caller's [`Unit::flush`] invalidates the IOTLB.
         self.publish(&mut writes);
         settle(&writes);
@@ -860,7 +985,10 @@ impl Unit {
     /// Where `attached`'s tables send an access to `iova`, walked as the unit
     /// walks them.
     pub(crate) fn resolve(&self, attached: &Attached, iova: u64) -> Option<u64> {
-        mm::translate_io::<VtdSecondLevel>(attached.root, iova)
+        match self.walk {
+            Walk::Three => mm::translate_io::<VtdSecondLevel>(attached.root, iova),
+            Walk::Four => mm::translate_io::<VtdFourLevel>(attached.root, iova),
+        }
     }
 
     /// Make the unit forget what it cached of `attached`'s tables: after an
@@ -947,7 +1075,7 @@ impl Unit {
         if let Some(writes) = writes {
             require_published(writes)?;
         }
-        self.submit(queue::iotlb(scope), wait)?;
+        self.submit(queue::iotlb(scope, self.drain), wait)?;
         let _ = QUEUED_IOTLB.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
@@ -1119,6 +1247,18 @@ impl Unit {
     fn wait(&self, ready: impl Fn() -> bool, why: &'static str) -> Result<(), &'static str> {
         wait_for(ready, why)
     }
+}
+
+/// Say why the unit at `phys`, whose registers read `ver`, `cap` and
+/// `ecap`, is left alone, and answer the reason.
+fn say_refused(phys: u64, ver: u32, cap: u64, ecap: u64, why: &'static str) -> &'static str {
+    crate::println!(
+        "  iommu    vt-d unit {phys:#x}: VER {}.{}, CAP {cap:#x}, ECAP {ecap:#x}: left alone: \
+         {why}",
+        policy::major(ver),
+        policy::minor(ver)
+    );
+    why
 }
 
 /// Bring `unit`'s registers into the state firmware that used the

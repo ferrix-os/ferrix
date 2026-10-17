@@ -1320,14 +1320,14 @@ package FerrixItemRequirements {
             attribute :>> parent = "O.AUDIT";
         }
         requirement <'H.AUD.2'> theBootsRecordsPinned : ItemHighLevel {
-            attribute :>> statement = "The first nine system records shall stay
+            attribute :>> statement = "The first ten system records shall stay
                 readable, numbered as the high-value ring numbered them, however
                 far that ring has wrapped, and no record after them shall join
                 them.";
-            attribute :>> criterion = "Ten system records and a grant in a ring
-                of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9, the
-                ring reports records lost, and a read of the boot records from 6
-                copies 4 and resumes at 10.";
+            attribute :>> criterion = "Eleven system records and a grant in a
+                ring of four: the boot records read back 0, 1, 2, 3, 5, 6, 7, 8, 9,
+                10, the ring reports records lost, and a read of the boot records
+                from 6 copies 5 and resumes at 11.";
             attribute :>> parent = "O.AUDIT";
         }
         requirement <'H.AUD.3'> refusalsKeptApart : ItemHighLevel {

@@ -1829,11 +1829,16 @@ fn judge_audit_power(after: &[String]) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// What the kernel prints of its units' faults at the end of a boot that
+/// skipped its checks (`iommu::report_unchecked_faults`).
+const UNCHECKED_FAULTS: &str = " faults recorded in an unchecked boot, ";
+
 /// A boot with `ferrix.checks=skip` records that its self-checks were
 /// skipped (AUDIT.md §6), which no check inside that boot can see: its own
 /// `svc audit` shows the checks' configuration record saying 0.
 ///
 /// Verifies: H.AUD.12
+/// Verifies: L.iommu.72
 fn checks_skipped(
     arch: Arch,
     args: &Args,
@@ -1867,6 +1872,14 @@ fn checks_skipped(
             if !at.wait_for_shell(Instant::now() + PATIENCE)? {
                 failures.push("the unchecked boot's shell never answered at the console".into());
                 return Ok(());
+            }
+            // L.iommu.72: the unchecked boot reads its units' faults in one
+            // line of its own.
+            if !has(&everything(at), UNCHECKED_FAULTS) {
+                failures.push(
+                    "a boot with ferrix.checks=skip did not say what faults its units recorded"
+                        .into(),
+                );
             }
             let lines = audit_lines(at)?;
             if !recorded(&lines, "CONFIG", "detail 1 0 0") {

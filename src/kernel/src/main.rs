@@ -273,8 +273,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // be given back first.
     let iommu = iommu::bring_up(view);
     println!(
-        "  iommu    {} VT-d units and {} SMMUv3s translating, {} left alone",
-        iommu.vtd, iommu.smmu_v3, iommu.refused
+        "  iommu    {} VT-d units and {} SMMUv3s translating, {} VT-d units remapping only, {} \
+         left alone",
+        iommu.vtd, iommu.smmu_v3, iommu.remapping_only, iommu.refused
     );
     if let Some(why) = iommu.why {
         println!("  iommu    a unit was left alone: {why}");
@@ -404,6 +405,9 @@ fn say_booted() {
         stages_check::check_audit_booted(dma_faults_read);
         println!("{SUCCESS_MARKER} stages 1-12");
     } else {
+        // The faults nothing else reads in a boot without checks: one line,
+        // never fatal (`L.iommu.72`).
+        iommu::report_unchecked_faults();
         println!(
             "{UNCHECKED_MARKER} stages 1-12 brought up, the self-checks of 2 to 12 skipped as \
              ferrix.checks=skip asks"
@@ -1302,6 +1306,7 @@ fn start_audit(view: &BootView<'_>) {
         pstore: u32::from(console::pstore::attached().is_some()),
         efifb: u32::from(firmware::asked(view)),
         build,
+        vtd: u32::from(!iommu::vtd_off_asked(view)),
     };
     audit::config(audit::Config::Checks, expected.checks, 0);
     audit::config(audit::Config::Devmgr, expected.devmgr, 0);
@@ -1314,10 +1319,13 @@ fn start_audit(view: &BootView<'_>) {
     audit::config(audit::Config::Pstore, expected.pstore, 0);
     audit::config(audit::Config::Efifb, expected.efifb, 0);
     audit::config(audit::Config::Build, build, profile_and_level);
+    audit::config(audit::Config::Vtd, expected.vtd, 0);
     println!(
-        "  audit    started: {} high-value and {} refusal records, 7 configuration items recorded",
+        "  audit    started: {} high-value and {} refusal records, {} configuration items \
+         recorded",
         audit::HIGH_RECORDS,
-        audit::REFUSAL_RECORDS
+        audit::REFUSAL_RECORDS,
+        audit::CONFIG_ITEMS
     );
     if !checks::run() {
         return;

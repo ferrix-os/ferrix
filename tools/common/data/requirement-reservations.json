@@ -108,13 +108,6 @@
       "branch": "thread-times",
       "date": "2026-10-18",
       "purpose": "Per-thread profile, first steps (docs/backlog/p2.md, 'A per-thread profile of a program cannot be taken on Ferrix'): a task's kernel time counted from each entry from user mode to the next return, user time not counted as kernel time, and voluntary and involuntary switches counted, for stime and the ctxt-switch lines of /proc (design to the session's own consultant)"
-    },
-    {
-      "ids": ["L.iommu.59-72"],
-      "owner": "vtd-n150",
-      "branch": "vtd-n150",
-      "date": "2026-10-17",
-      "purpose": "VT-d on the N150's units: version {1,4,5}, four-level walks, INCLUDE_PCI_ALL, every fault record, drain, window bounds, RMRR units remap only, PMR, x2APIC, FECTL, ferrix.vtd=off and the unchecked-boot fault line (consultant's OK IF, ledger 2026-10-17 line 2122)"
     }
   ]
 }
