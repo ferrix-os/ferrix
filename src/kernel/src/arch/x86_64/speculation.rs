@@ -1041,14 +1041,9 @@ pub(crate) fn init() {
         Ordering::Relaxed,
     );
     ERAPS_EMPTIES.store(plan.defences.contains(Defences::ERAPS), Ordering::Relaxed);
-    CLEAR_CPU_BUFFERS.store(
-        u8::from(plan.defences.contains(Defences::BUFFERS_CLEARED)),
-        Ordering::Relaxed,
-    );
-    CLEAR_BRANCH_HISTORY.store(
-        u8::from(plan.defences.contains(Defences::BHB_LOOP)),
-        Ordering::Relaxed,
-    );
+    // MEASUREMENT ONLY, never to land: both forced on, as on the N150.
+    CLEAR_CPU_BUFFERS.store(1, Ordering::Relaxed);
+    CLEAR_BRANCH_HISTORY.store(1, Ordering::Relaxed);
     PLAN_DEFENCES.store(plan.defences.bits(), Ordering::Release);
 
     let applied = apply(&plan);
@@ -1139,7 +1134,7 @@ fn apply(plan: &Plan) -> Defences {
         held &= unsafe { cpu::read_msr(AMD_VIRT_SPEC_CTRL) } & SPEC_CTRL_SSBD != 0;
     }
     held &= apply_vector_cover();
-    if plan.defences.contains(Defences::BHB_LOOP) {
+    if clears_branch_history() {
         // The system call entry that runs the loop; `syscall::init` may
         // have pointed `LSTAR` at the other before the plan was made.
         held &= super::syscall::point_entry();
