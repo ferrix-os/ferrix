@@ -185,6 +185,7 @@ mod start_page;
 mod steam;
 mod steamcmd;
 mod step_cache;
+mod sud;
 mod symbolize;
 mod sysfs;
 mod task;
