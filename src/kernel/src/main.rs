@@ -907,12 +907,18 @@ fn check_config_window() {
     if let Some(why) = report.race_skipped {
         println!("  config   the race not checked: {why}");
     }
-    match report.breach {
-        Some(register) => println!(
+    let passed = report.breach_passed_over;
+    match (report.breach, report.breach_at) {
+        (Some(register), Some(at)) => println!(
             "  config   a {register} rewritten behind the kernel was found and its node refused, \
-             then restored"
+             then restored: {at}, after {passed} function(s) whose command register would not \
+             take the rewrite"
         ),
-        None => println!("  config   the breach check not run: no PCI function"),
+        _ if passed != 0 => println!(
+            "  config   the breach check not run: {passed} function(s), none whose command \
+             register takes a rewrite of INTx Disable and Bus Master Enable"
+        ),
+        _ => println!("  config   the breach check not run: no PCI function"),
     }
 }
 

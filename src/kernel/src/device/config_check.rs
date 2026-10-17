@@ -25,7 +25,11 @@
 //!   through a configuration mirror in a BAR, is found by `verify_config`:
 //!   bus mastering goes off, the node answers `BAD_STATE`, the line names
 //!   `COMMAND`, and an `enable_dma` after it is refused and leaves bus
-//!   mastering off. And before it, every node reads back as minted.
+//!   mastering off. And before it, every node reads back as minted. Its
+//!   subject is edu, else virtio, else the first other function, no bridge
+//!   and no display, found mastering, whose command register takes the
+//!   rewrite (mass storage and serial bus last); one that holds `INTx`
+//!   Disable or Bus Master Enable fixed is passed over.
 //!
 //! W4 and W5 run before W3 so that a control loosening the allowlist is
 //! caught by the check it is the control of.
@@ -45,7 +49,7 @@ use ferrix_pci::header::{BAR0, COMMAND, COMMAND_BUS_MASTER, COMMAND_INTERRUPT_DI
 use ferrix_pci::virtio;
 use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
 
-use super::{ConfigWrites, DeviceNode, Register, devices};
+use super::{ConfigWrites, DeviceNode, Location, Register, devices};
 use crate::mmio::Mmio;
 use crate::object::Object;
 use crate::object::check::{SCRATCH, Side, reg};
@@ -135,6 +139,11 @@ pub(crate) struct Report {
     pub(crate) race_skipped: Option<&'static str>,
     /// W7: the register a provoked breach was found at.
     pub(crate) breach: Option<Register>,
+    /// W7: the function it was provoked on.
+    pub(crate) breach_at: Option<Location>,
+    /// W7: functions passed over because their command register does not
+    /// take the rewrite.
+    pub(crate) breach_passed_over: usize,
 }
 
 /// Run W1 to W7.
@@ -823,40 +832,127 @@ fn writes(_argument: usize) {
 
 /// W7, and before it every node read back as minted.
 ///
+/// The subject is edu where there is one, whose MSI mint turned `INTx` off;
+/// else virtio, as on the Arm machines; else, on a machine with neither,
+/// the first other function that is no bridge or display, lends no
+/// framebuffer and was found mastering, mass storage and serial bus last.
+/// Each must first show, through the check's own mapping, that its command
+/// register takes the rewrites the check needs: PCI lets a function that
+/// raises no `INTx` hard-wire `INTx` Disable, and a host bridge holds Bus
+/// Master Enable on (Alder Lake-N's 00:00.0 reads 0x0006 whatever is
+/// written). On such a function a rewrite cannot be provoked, nor bus
+/// mastering turned off, so it is passed over and counted, not failed.
+///
 /// Verifies: L.device.25
 fn breach(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     if let Some(node) = devices().iter().find(|node| node.breach().is_some()) {
         let _ = node.verify_config();
         return Err("a node's kernel-owned configuration read back other than minted at boot");
     }
-    // edu where there is one, whose MSI mint turned INTx off; else
-    // virtio-rng, as on the Arm machines; else the first function with
-    // configuration space.
     let pci = |node: &&Arc<DeviceNode>| {
         node.pci_function().is_some_and(|f| f.config_phys.is_some()) && !node.yielded()
     };
-    let is = |ids: fn(u16, u16) -> bool| {
-        move |node: &&Arc<DeviceNode>| {
-            node.pci_function()
-                .is_some_and(|function| ids(function.vendor, function.device))
-        }
+    let ids = |node: &Arc<DeviceNode>| node.pci_function().map(|f| (f.vendor, f.device));
+    let edu = |node: &&Arc<DeviceNode>| ids(node) == Some(super::check::EDU);
+    let virtio = |node: &&Arc<DeviceNode>| ids(node).is_some_and(|(v, _)| v == virtio::VENDOR);
+    // A bridge's command register is the chipset's, or forwards for a whole
+    // bus; a display function may be scanning out. Mass storage and serial
+    // bus controllers (xHCI under SMM's legacy USB) go last, since firmware
+    // may still drive them.
+    let class = |node: &&Arc<DeviceNode>| node.pci_function().map(|f| f.class >> 16);
+    let other = |node: &&Arc<DeviceNode>| {
+        !edu(node)
+            && !virtio(node)
+            && class(node).is_some_and(|c| !matches!(c, CLASS_BRIDGE | CLASS_DISPLAY))
     };
-    let Some(node) = devices()
+    let late = |node: &&Arc<DeviceNode>| {
+        class(node).is_some_and(|c| matches!(c, CLASS_STORAGE | CLASS_SERIAL_BUS))
+    };
+    // edu and virtio, whose command register the kernel minted, are probed
+    // both ways; any other function only if it was found mastering.
+    let candidates = devices()
         .iter()
         .filter(pci)
-        .find(is(|vendor, device| (vendor, device) == super::check::EDU))
-        .or_else(|| {
+        .filter(edu)
+        .chain(devices().iter().filter(pci).filter(virtio))
+        .map(|node| (node, true))
+        .chain(
             devices()
                 .iter()
                 .filter(pci)
-                .find(is(|vendor, _| vendor == virtio::VENDOR))
-        })
-        .or_else(|| devices().iter().find(pci))
-    else {
-        return Ok(());
+                .filter(other)
+                .filter(|node| !late(node))
+                .chain(devices().iter().filter(pci).filter(other).filter(late))
+                .map(|node| (node, false)),
+        );
+    for (node, minted) in candidates {
+        let config_phys = node.config_phys().ok_or(BREACH_MISSED)?;
+        // As firmware, or a driver through a mirror in a BAR, could: through
+        // a mapping of the kernel's own, outside the configuration lock.
+        let mapping = vmap::map_device(config_phys, 256)
+            .map_err(|_| "the breach check could not map configuration space")?;
+        let registers = Mmio::at(mapping);
+        let result = match takes_rewrites(registers, minted) {
+            Ok(true) => provoke(side, node, registers).map(Some),
+            Ok(false) => Ok(None),
+            Err(problem) => Err(problem),
+        };
+        let _ = vmap::unmap_device(mapping);
+        match result? {
+            Some(register) => {
+                report.breach = Some(register);
+                report.breach_at = Some(node.location());
+                return Ok(());
+            }
+            None => report.breach_passed_over += 1,
+        }
+    }
+    Ok(())
+}
+
+/// PCI base class: mass storage controller.
+const CLASS_STORAGE: u32 = 0x01;
+/// PCI base class: display controller.
+const CLASS_DISPLAY: u32 = 0x03;
+/// PCI base class: bridge.
+const CLASS_BRIDGE: u32 = 0x06;
+/// PCI base class: serial bus controller.
+const CLASS_SERIAL_BUS: u32 = 0x0C;
+
+/// Whether the command register in `registers` takes a rewrite of `INTx`
+/// Disable and Bus Master Enable both ways, put back as found after. Written
+/// through the check's own mapping, never the kernel's paths under test, so
+/// a defect in those cannot pass a subject over.
+///
+/// `INTx` Disable is tried first, and a function that does not take it is
+/// passed over before any write to Bus Master Enable. A function the kernel
+/// has not `minted` (neither edu nor virtio) is passed over too if it was
+/// found with bus mastering off: setting it there would let a DMA engine
+/// firmware left running master memory outside `enable_dma`'s path.
+fn takes_rewrites(registers: Mmio, minted: bool) -> Result<bool, &'static str> {
+    let at = u64::from(COMMAND);
+    let found = registers.read16(at);
+    let wrote = |value: u16| {
+        registers.write16(at, value);
+        registers.read16(at)
     };
+    let intx = wrote(found ^ COMMAND_INTERRUPT_DISABLE) & COMMAND_INTERRUPT_DISABLE
+        != found & COMMAND_INTERRUPT_DISABLE;
+    let fits = intx && (minted || found & COMMAND_BUS_MASTER != 0) && {
+        let off = wrote(found & !COMMAND_BUS_MASTER) & COMMAND_BUS_MASTER == 0;
+        let on = wrote(found | COMMAND_BUS_MASTER) & COMMAND_BUS_MASTER != 0;
+        off && on
+    };
+    if wrote(found) != found {
+        return Err("the breach check could not put back a command register it probed");
+    }
+    Ok(fits)
+}
+
+/// W7 on a subject whose command register takes the rewrite: the register
+/// [`DeviceNode::verify_config`] named.
+fn provoke(side: &Side, node: &Arc<DeviceNode>, registers: Mmio) -> Result<Register, &'static str> {
     let device = handle(side, node)?;
-    let config_phys = node.config_phys().ok_or(BREACH_MISSED)?;
     let (found, state) = {
         let config = node.config_writes()?;
         let found = config.read16(ConfigWrites::FUNCTION, COMMAND);
@@ -865,11 +961,6 @@ fn breach(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     let was_on = node.dma_on.load(Ordering::Acquire);
     node.enable_dma()?;
 
-    // As firmware, or a driver through a mirror in a BAR, could: through a
-    // mapping of the kernel's own, outside the configuration lock.
-    let mapping = vmap::map_device(config_phys, 256)
-        .map_err(|_| "the breach check could not map configuration space")?;
-    let registers = Mmio::at(mapping);
     let at = u64::from(COMMAND);
     let rewritten = registers.read16(at) ^ COMMAND_INTERRUPT_DISABLE;
     registers.write16(at, rewritten);
@@ -885,7 +976,6 @@ fn breach(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     // Put back what the check rewrote, and clear the refusal through this
     // path, which only the check has.
     registers.write16(at, found);
-    let _ = vmap::unmap_device(mapping);
     if let Ok(mut config) = node.config_writes() {
         config.write16(ConfigWrites::FUNCTION, COMMAND, found);
         (config.state.memory, config.state.bus_master) = state;
@@ -903,6 +993,5 @@ fn breach(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     if node.breach().is_some() {
         return Err("the breach check left its node other than minted");
     }
-    report.breach = named;
-    Ok(())
+    Ok(Register::Command)
 }
