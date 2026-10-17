@@ -373,11 +373,15 @@ impl<R, C, M, B> fmt::Debug for Driver<R, C, M, B> {
 fn reset<R: Registers, C: Clock>(regs: &mut R, clock: &mut C) -> Result<(), Error> {
     regs.write(regs::DMA_MODE, regs::DMA_SWR);
     let deadline = clock.now_nanos().saturating_add(RESET_PATIENCE_NANOS);
+    // The clock before the look, so a reset that finished while this
+    // process was off the processor is not a reset that never did
+    // (`mdio::settle`).
     loop {
+        let late = clock.now_nanos() >= deadline;
         if regs.read(regs::DMA_MODE) & regs::DMA_SWR == 0 {
             return Ok(());
         }
-        if clock.now_nanos() >= deadline {
+        if late {
             return Err(Error::ResetTimeout);
         }
         clock.pause(RESET_POLL_NANOS);

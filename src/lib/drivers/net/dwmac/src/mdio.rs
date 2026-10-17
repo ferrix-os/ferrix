@@ -70,13 +70,22 @@ const fn command(bus: Bus, register: u8, operation: u32) -> u32 {
 }
 
 /// Wait for the busy bit to clear.
+///
+/// The clock is read *before* the busy bit, so the bus is given up on only
+/// when a look taken after the deadline still finds it busy. A driver is a
+/// process like any other, and on a loaded machine a pause of 5 us can come
+/// back many milliseconds later: had the deadline been checked after the
+/// look, an operation that finished during that pause would count as one
+/// that never did. On the N150 box that was the link poll failing under a
+/// full-speed transfer onto btrfs, and the driver leaving (2026-10-18).
 fn settle<R: Registers, C: Clock>(registers: &R, clock: &mut C) -> Result<(), Error> {
     let deadline = clock.now_nanos().saturating_add(MDIO_PATIENCE_NANOS);
     loop {
+        let late = clock.now_nanos() >= deadline;
         if registers.read(regs::MDIO_ADDRESS) & regs::MDIO_GB == 0 {
             return Ok(());
         }
-        if clock.now_nanos() >= deadline {
+        if late {
             return Err(Error::MdioTimeout);
         }
         clock.pause(POLL_NANOS);
@@ -159,8 +168,13 @@ pub fn start<R: Registers, C: Clock>(
 ) -> Result<(), Error> {
     write(registers, clock, bus, phy::BMCR, phy::BMCR_RESET)?;
     let deadline = clock.now_nanos().saturating_add(PHY_RESET_PATIENCE_NANOS);
-    while read(registers, clock, bus, phy::BMCR)? & phy::BMCR_RESET != 0 {
-        if clock.now_nanos() >= deadline {
+    // The clock before the look, as in `settle`.
+    loop {
+        let late = clock.now_nanos() >= deadline;
+        if read(registers, clock, bus, phy::BMCR)? & phy::BMCR_RESET == 0 {
+            break;
+        }
+        if late {
             return Err(Error::PhyResetTimeout);
         }
         clock.pause(POLL_NANOS * 200);

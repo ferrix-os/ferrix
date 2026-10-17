@@ -173,6 +173,13 @@ pub(crate) struct Model {
     pub(crate) stuck_reset: bool,
     /// The MDIO busy bit never clears.
     pub(crate) mdio_stuck: bool,
+    /// How long each MDIO command keeps the bus busy, by `clock`: a real
+    /// frame takes tens of microseconds.
+    pub(crate) mdio_busy_nanos: u64,
+    /// When the command in flight leaves the bus.
+    mdio_free_at: u64,
+    /// The test's clock, which the busy time is measured on.
+    pub(crate) clock: Option<Rc<Cell<u64>>>,
     /// Every MDIO command the driver gave, as written.
     pub(crate) mdio_commands: Vec<u32>,
     pub(crate) version: u32,
@@ -212,6 +219,9 @@ impl Model {
             reset_reads: 0,
             stuck_reset: false,
             mdio_stuck: false,
+            mdio_busy_nanos: 0,
+            mdio_free_at: 0,
+            clock: None,
             mdio_commands: Vec::new(),
             version: 0x0000_1051,
             // RXFIFOSIZE 7 and TXFIFOSIZE 7 (16 KiB), ADDR64 40 bits.
@@ -298,7 +308,16 @@ impl Model {
             regs::MAC_HW_FEATURE1 => self.feature1,
             regs::MDIO_ADDRESS => {
                 let value = self.reg(regs::MDIO_ADDRESS);
-                if self.mdio_stuck {
+                if self
+                    .clock
+                    .as_ref()
+                    .is_some_and(|clock| clock.get() < self.mdio_free_at)
+                {
+                    // The process is taken off the processor right after
+                    // this look, in its next clock read.
+                    PREEMPT.with(|armed| armed.set(true));
+                    value | regs::MDIO_GB
+                } else if self.mdio_stuck {
                     value | regs::MDIO_GB
                 } else {
                     value
@@ -321,6 +340,8 @@ impl Model {
                 self.mdio_commands.push(value);
                 if value & regs::MDIO_GB != 0 {
                     self.mdio(value);
+                    let now = self.clock.as_ref().map_or(0, |clock| clock.get());
+                    self.mdio_free_at = now + self.mdio_busy_nanos;
                 }
                 self.set_reg(regs::MDIO_ADDRESS, value & !regs::MDIO_GB);
             }
@@ -597,10 +618,25 @@ pub(crate) struct FakeClock(pub(crate) Rc<Cell<u64>>);
 
 impl Clock for FakeClock {
     fn now_nanos(&self) -> u64 {
+        // A clock read is a call into the kernel, which may come back late:
+        // the first one after the model armed `PREEMPT` comes back `STALL`
+        // later.
+        if PREEMPT.with(|armed| armed.replace(false)) {
+            self.0.set(self.0.get() + STALL.with(Cell::get));
+        }
         self.0.get()
     }
 
     fn pause(&mut self, nanos: u64) {
         self.0.set(self.0.get() + nanos.max(1));
     }
+}
+
+std::thread_local! {
+    /// How late a clock read comes back when the process is taken off the
+    /// processor in it, as on a loaded machine. Per test, as
+    /// each test has a thread of its own.
+    pub(crate) static STALL: Cell<u64> = const { Cell::new(0) };
+    /// Whether the next clock read is the late one.
+    static PREEMPT: Cell<bool> = const { Cell::new(false) };
 }

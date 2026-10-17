@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::vec;
 use std::vec::Vec;
 
-use model::{FakeClock, Lie, Mem, Model, PHY_ID, Regs, Shared};
+use model::{FakeClock, Lie, Mem, Model, PHY_ID, Regs, STALL, Shared};
 
 use crate::desc::{self, Received};
 use crate::mdio::{self, Link, Speed};
@@ -333,6 +333,44 @@ fn a_bus_that_stays_busy_times_out() {
     let failed = rig.fail(yt6801());
     assert_eq!(failed.error, Error::MdioTimeout);
     assert!(failed.reset);
+}
+
+#[test]
+fn a_bus_that_finished_while_the_driver_was_off_the_processor_has_not_timed_out() {
+    // An MDIO operation keeps the bus busy for 40 us, and the clock read
+    // after a look that finds it busy comes back 20 ms late, twenty times
+    // the MDIO patience. A wait that looks at the bus and then at the clock
+    // finds the bus busy and the deadline gone, though the operation
+    // finished during the clock read.
+    // The N150 box under a full-speed transfer onto btrfs: the link poll
+    // failed and the driver left (2026-10-18).
+    let rig = Rig::new();
+    rig.model.borrow_mut().mdio_busy_nanos = 40_000;
+    rig.model.borrow_mut().clock = Some(Rc::clone(&rig.clock));
+    rig.model
+        .borrow_mut()
+        .phy
+        .plug(PARTNER_ALL.0, PARTNER_ALL.1);
+    STALL.with(|stall| stall.set(20_000_000));
+    let mut driver = rig.init(yt6801());
+    assert!(
+        matches!(driver.poll_link(), Ok(Some(Link::Up { .. }))),
+        "the link is read, however late the driver looks"
+    );
+    STALL.with(|stall| stall.set(0));
+}
+
+#[test]
+fn a_bus_still_busy_after_a_late_look_times_out() {
+    // The control: the same stall with the bus busy for good still ends.
+    let rig = Rig::new();
+    rig.model.borrow_mut().mdio_stuck = true;
+    rig.model.borrow_mut().mdio_busy_nanos = u64::MAX / 2;
+    rig.model.borrow_mut().clock = Some(Rc::clone(&rig.clock));
+    STALL.with(|stall| stall.set(20_000_000));
+    let failed = rig.fail(yt6801());
+    assert_eq!(failed.error, Error::MdioTimeout);
+    STALL.with(|stall| stall.set(0));
 }
 
 #[test]

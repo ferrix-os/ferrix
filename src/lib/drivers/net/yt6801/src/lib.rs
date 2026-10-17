@@ -253,12 +253,16 @@ fn efuse_byte<R: Registers, C: Clock>(bar: &mut R, clock: &mut C, address: u32) 
         glue::EFUSE_ROW_READ | glue::EFUSE_START | ((address & 0xFF) << glue::EFUSE_ADDRESS_SHIFT),
     );
     let deadline = clock.now_nanos().saturating_add(EFUSE_PATIENCE_NANOS);
+    // The clock before the look, so a byte that came in while this process
+    // was off the processor is not one that never did (`ferrix-dwmac`'s
+    // MDIO wait says more).
     loop {
+        let late = clock.now_nanos() >= deadline;
         let value = bar.read(glue::EFUSE_OP_CTRL_1);
         if value & glue::EFUSE_DONE != 0 {
             return Some((value >> glue::EFUSE_DATA_SHIFT) as u8);
         }
-        if clock.now_nanos() >= deadline {
+        if late {
             return None;
         }
         clock.pause(EFUSE_POLL_NANOS);

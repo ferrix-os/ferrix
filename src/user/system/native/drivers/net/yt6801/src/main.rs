@@ -950,6 +950,40 @@ fn say_link(control: &Channel<Kernel>, up: bool) {
     }
 }
 
+/// Ask the PHY about the link and tell the kernel of a change.
+///
+/// A bus that did not answer this time is asked again at the next poll; the
+/// link is as it was. The driver once left on one slow MDIO wait on a
+/// loaded box (2026-10-18), and a driver started again on such a box can
+/// fail its bring-up too, which leaves the machine off the network.
+fn poll_link(
+    adapter: &mut Adapter,
+    control: &Channel<Kernel>,
+    misses: &mut u64,
+) -> Result<(), Step> {
+    match adapter.card.poll_link() {
+        Ok(Some(link)) => {
+            let up = matches!(link, Link::Up { .. });
+            let _ = writeln!(Say, "yt6801   link {link:?}");
+            say_link(control, up);
+            Ok(())
+        }
+        Ok(None) => Ok(()),
+        Err(ferrix_dwmac::Error::MdioTimeout) => {
+            *misses += 1;
+            let _ = writeln!(
+                Say,
+                "yt6801   the PHY did not answer a link poll ({misses} so far); asking again"
+            );
+            Ok(())
+        }
+        Err(error) => {
+            let _ = writeln!(Say, "yt6801   the link poll failed: {error}");
+            Err(Step::Serve)
+        }
+    }
+}
+
 /// Carry frames until the ring ends.
 fn serve(
     ring: &mut RingSide,
@@ -970,6 +1004,8 @@ fn serve(
     let mut last_interrupt = 0;
     let mut stats = Stats::new(now(), adapter.latched);
     let mut next_link = 0;
+    // Link polls the PHY did not answer in time.
+    let mut link_misses: u64 = 0;
     control
         .wait_async(
             &ring.port,
@@ -980,19 +1016,14 @@ fn serve(
     loop {
         if now() >= next_link {
             next_link = now().saturating_add(LINK_POLL_NANOS);
-            match adapter.card.poll_link() {
-                Ok(Some(link)) => {
-                    let up = matches!(link, Link::Up { .. });
-                    let _ = writeln!(Say, "yt6801   link {link:?}");
-                    say_link(control, up);
-                }
-                Ok(None) => {}
-                Err(_) => return Err(Step::Serve),
-            }
+            poll_link(adapter, control, &mut link_misses)?;
         }
         let turn = serve
             .turn(&mut ring.ring, &mut ring.data, &mut ring.side, adapter)
-            .map_err(|_| Step::Serve)?;
+            .map_err(|fault| {
+                let _ = writeln!(Say, "yt6801   the serve loop stopped: {fault} ({fault:?})");
+                Step::Serve
+            })?;
         stats.turn(&turn, polled);
         // Frames a deadline found that no interrupt announced, with none
         // for long before: the interrupts are not arriving after all, and
@@ -1032,7 +1063,10 @@ fn serve(
         }
         let wait = serve
             .before_sleep(&mut ring.ring, &mut ring.side)
-            .map_err(|_| Step::Serve)?;
+            .map_err(|fault| {
+                let _ = writeln!(Say, "yt6801   the ring refused a sleep: {fault}");
+                Step::Serve
+            })?;
         if wait != Wait::Sleep {
             continue;
         }
