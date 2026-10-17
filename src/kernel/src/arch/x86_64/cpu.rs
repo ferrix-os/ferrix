@@ -8,6 +8,8 @@
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+pub(super) mod check;
+
 /// Write a byte to an I/O port.
 ///
 /// # Safety
@@ -626,6 +628,171 @@ pub(crate) fn program_pat() -> bool {
     flush_tlb_including_global();
     // SAFETY: (SYSREG) the register exists, as CPUID said.
     unsafe { read_msr(IA32_PAT) == ferrix_paging::X86_PAT }
+}
+
+/// `IA32_PM_ENABLE`: bit 0 turns hardware P-states on, and only a reset
+/// turns them off again (SDM Vol. 3B §15.4.2).
+const IA32_PM_ENABLE: u32 = 0x770;
+/// `IA32_HWP_CAPABILITIES`: the performance levels this processor offers
+/// (SDM Vol. 3B §15.4.3).
+const IA32_HWP_CAPABILITIES: u32 = 0x771;
+/// `IA32_HWP_REQUEST`: the range and preference this processor is asked to
+/// pick its own performance level in (SDM Vol. 3B §15.4.4).
+const IA32_HWP_REQUEST: u32 = 0x774;
+/// `CPUID.06H:EAX` bit 7: `IA32_PM_ENABLE`, `IA32_HWP_CAPABILITIES` and
+/// `IA32_HWP_REQUEST` exist.
+const CPUID6_HWP: u32 = 1 << 7;
+/// `CPUID.06H:EAX` bit 10: `IA32_HWP_REQUEST` bits 31:24 are an energy and
+/// performance preference.
+const CPUID6_HWP_EPP: u32 = 1 << 10;
+/// The preference asked for where the processor takes one: the middle of
+/// the scale, Linux's `balance_performance` (0 is all performance, 0xff all
+/// energy).
+pub(crate) const HWP_EPP: u8 = 0x80;
+
+/// What [`enable_hwp`] asked this processor for.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct HwpRequest {
+    /// The lowest performance level asked for, the processor's own lowest.
+    pub(crate) lowest: u8,
+    /// The highest, the processor's own highest: turbo included.
+    pub(crate) highest: u8,
+    /// The preference, where the processor takes one.
+    pub(crate) epp: Option<u8>,
+}
+
+/// The `IA32_HWP_REQUEST` that asks for the whole range
+/// `IA32_HWP_CAPABILITIES` reports, the level left to the processor.
+///
+/// The layouts, SDM Vol. 3B §15.4.3 and §15.4.4 (and Linux's
+/// `msr-index.h`, which spells them the same): the capabilities are
+/// `Highest_Performance` in bits 7:0, `Guaranteed_Performance` 15:8,
+/// `Most_Efficient_Performance` 23:16 and `Lowest_Performance` 31:24; the
+/// request is `Minimum_Performance` in bits 7:0, `Maximum_Performance`
+/// 15:8, `Desired_Performance` 23:16 (0: the processor chooses), the
+/// `Energy_Performance_Preference` 31:24, the `Activity_Window` 41:32 (0:
+/// the processor chooses), `Package_Control` bit 42 (0: this processor's
+/// own request) and nothing else. The preference is written only where
+/// `CPUID.06H:EAX[10]` says the field is one, and is 0 otherwise.
+pub(crate) const fn hwp_request(capabilities: u64, epp: Option<u8>) -> (u64, HwpRequest) {
+    let highest = (capabilities & 0xff) as u8;
+    let lowest = ((capabilities >> 24) & 0xff) as u8;
+    let preference = match epp {
+        Some(value) => value as u64,
+        None => 0,
+    };
+    let value = lowest as u64 | ((highest as u64) << 8) | (preference << 24);
+    (
+        value,
+        HwpRequest {
+            lowest,
+            highest,
+            epp,
+        },
+    )
+}
+
+/// What [`enable_hwp`] did on one processor, for its boot line.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Hwp {
+    /// `CPUID.06H:EAX[7]` is clear: nothing was read or written.
+    Absent,
+    /// The capabilities report no range (Highest 0, or Lowest above it):
+    /// hardware P-states are on, the request is not written.
+    NoRange(HwpRequest),
+    /// The request was written and did not read back as written, or
+    /// `IA32_PM_ENABLE` did not read on: the processor's firmware keeps it.
+    NotHeld(HwpRequest),
+    /// The request was written and read back as written.
+    Asked(HwpRequest),
+}
+
+/// Whether `CPUID.06H:EAX[7]` says this processor has hardware P-states.
+pub(crate) fn has_hwp() -> bool {
+    use core::arch::x86_64::__cpuid;
+
+    __cpuid(0).eax >= 6 && __cpuid(6).eax & CPUID6_HWP != 0
+}
+
+/// Turn on this processor's hardware P-states and ask for every
+/// performance level it has, turbo included, the level within them left to
+/// the processor (`Desired` 0), and the middle of the energy and
+/// performance scale where it takes a preference ([`HWP_EPP`]).
+///
+/// Ferrix manages no frequency itself: without this an Intel processor runs
+/// at whatever the firmware left, which on the N150 box was its base
+/// clock, 1.6 times slower than Linux on a one-thread hash. [`Hwp::Absent`]
+/// where `CPUID.06H:EAX[7]` is clear, and then none of the three registers
+/// is read or written: they exist only where the bit is set, so a `#GP`
+/// cannot arise. A processor without hardware P-states keeps the legacy
+/// ones the firmware chose: `IA32_PERF_CTL` is never written, here or
+/// anywhere in the kernel, since the ratios it takes are the model's and
+/// not architectural.
+///
+/// `IA32_PM_ENABLE` is written only when it reads 0. It is package-wide
+/// on some models and cannot be cleared before a reset, so a processor
+/// whose package (or firmware) already turned it on writes only its own
+/// request. A request is written only when the capabilities are a range
+/// (Highest above 0 and not below Lowest), so a broken report cannot clamp
+/// the core to its lowest level. The processor counts itself in
+/// [`hwp_processors`] only when `IA32_PM_ENABLE` bit 0 and the request read
+/// back as written; otherwise it counts itself in [`hwp_refused`], and the
+/// boot goes on: a performance feature never stops a boot. Called once per
+/// processor at its bring-up, after its IDT is loaded: on the boot
+/// processor in `init_traps`, on each secondary in `smp::secondary_start`.
+pub(crate) fn enable_hwp() -> Hwp {
+    use core::arch::x86_64::__cpuid;
+
+    if !has_hwp() {
+        return Hwp::Absent;
+    }
+    // SAFETY: (SYSREG) CPUID.06H:EAX[7] says IA32_PM_ENABLE exists.
+    let enabled = unsafe { read_msr(IA32_PM_ENABLE) } & 1 != 0;
+    if !enabled {
+        // SAFETY: (SYSREG) the same bit says the register exists, and bit 0
+        // is its one defined bit.
+        unsafe { write_msr(IA32_PM_ENABLE, 1) };
+    }
+    // SAFETY: (SYSREG) the same bit says IA32_HWP_CAPABILITIES exists.
+    let capabilities = unsafe { read_msr(IA32_HWP_CAPABILITIES) };
+    let epp = (__cpuid(6).eax & CPUID6_HWP_EPP != 0).then_some(HWP_EPP);
+    let (value, request) = hwp_request(capabilities, epp);
+    if request.highest == 0 || request.lowest > request.highest {
+        let _ = HWP_REFUSED.fetch_add(1, Ordering::AcqRel);
+        return Hwp::NoRange(request);
+    }
+    // SAFETY: (SYSREG) the same bit says IA32_HWP_REQUEST exists, HWP is on,
+    // and the value sets only fields the SDM defines: levels the
+    // capabilities reported and a preference only where CPUID says the
+    // field is one.
+    unsafe { write_msr(IA32_HWP_REQUEST, value) };
+    // SAFETY: (SYSREG) the same bit says IA32_PM_ENABLE exists.
+    let on = unsafe { read_msr(IA32_PM_ENABLE) } & 1 != 0;
+    // SAFETY: (SYSREG) the same bit says IA32_HWP_REQUEST exists.
+    let held = unsafe { read_msr(IA32_HWP_REQUEST) } == value;
+    if !on || !held {
+        let _ = HWP_REFUSED.fetch_add(1, Ordering::AcqRel);
+        return Hwp::NotHeld(request);
+    }
+    let _ = HWP_PROCESSORS.fetch_add(1, Ordering::AcqRel);
+    Hwp::Asked(request)
+}
+
+/// Processors whose request [`enable_hwp`] wrote and read back as written.
+static HWP_PROCESSORS: AtomicU64 = AtomicU64::new(0);
+
+/// Processors with hardware P-states that [`enable_hwp`] did not ask: no
+/// range reported, or the request not read back as written.
+static HWP_REFUSED: AtomicU64 = AtomicU64::new(0);
+
+/// How many processors [`enable_hwp`] has asked so far, read back.
+pub(crate) fn hwp_processors() -> u64 {
+    HWP_PROCESSORS.load(Ordering::Acquire)
+}
+
+/// How many processors with hardware P-states [`enable_hwp`] did not ask.
+pub(crate) fn hwp_refused() -> u64 {
+    HWP_REFUSED.load(Ordering::Acquire)
 }
 
 /// Read a model-specific register.

@@ -422,8 +422,16 @@ use aarch64::FRAMEBUFFER_FLAGS;
 use armv7a::FRAMEBUFFER_FLAGS;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{
-    check_framebuffer_window, flush_window, framebuffer_flags, program_memory_types,
+    check_framebuffer_window, check_hwp_processors, flush_window, framebuffer_flags,
+    program_memory_types,
 };
+
+/// Nothing to count: the Arm kernels ask no hardware P-states of anything
+/// (`L.x86_64.177` is x86-64's).
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn check_hwp_processors() -> Result<(), &'static str> {
+    Ok(())
+}
 
 /// Nothing to read back: the Arm kernels' framebuffer mapping is their
 /// constant, unchanged.

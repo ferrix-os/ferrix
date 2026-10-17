@@ -526,6 +526,12 @@ would be the kind of statement that gets believed."*
 That sentence is correct and this section exists to give it consequences rather
 than leave it as a remark in a design document.
 
+The time figures below make no claim about the processor clock. They were
+taken in QEMU, and on hardware with Intel hardware P-states, which the kernel
+turns on since 2026-10-17 (L.x86_64.177), a core's clock may lie anywhere
+between the Lowest and the Highest performance level it reports, below the
+base clock firmware left included.
+
 ### 2.2 What the item does promise
 
 Real, and narrower than a WCET:

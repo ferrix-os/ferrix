@@ -171,10 +171,13 @@ pub(crate) use trap::{
 ///
 /// # Errors
 ///
-/// The first decision that came out wrong, or the HPET in use on a machine
-/// that had a TSC to trust.
+/// The first decision that came out wrong, the HPET in use on a machine
+/// that had a TSC to trust, or a hardware P-state request that does not
+/// read as asked.
 pub(crate) fn check_machine() -> Result<(), &'static str> {
-    clock::check::run()
+    clock::check::run()?;
+    // And the hardware P-state request's composition (`L.x86_64.177`).
+    cpu::check::run()
 }
 
 /// Install the descriptor tables and the trap handlers.
@@ -261,6 +264,40 @@ pub(crate) unsafe fn init_traps() {
         "  cpu      program register state: {state}; vector registers: {}",
         leak.describe()
     );
+    // The whole performance range, turbo included, asked of the hardware
+    // (`L.x86_64.177`): Ferrix manages no frequency itself. Each secondary
+    // asks for its own in `smp::secondary_start`.
+    enable_hwp_and_say();
+}
+
+/// Ask this, the boot, processor's hardware P-states for their whole range
+/// (`cpu::enable_hwp`) and say on the cpu line what came of it.
+fn enable_hwp_and_say() {
+    let preference = |request: cpu::HwpRequest| match request.epp {
+        Some(_) => "EPP 0x80",
+        None => "no EPP",
+    };
+    match cpu::enable_hwp() {
+        cpu::Hwp::Asked(request) => crate::console::println!(
+            "  cpu      performance: HWP on, levels {}..{} chosen by the processor, {}",
+            request.lowest,
+            request.highest,
+            preference(request),
+        ),
+        cpu::Hwp::NoRange(request) => crate::console::println!(
+            "  cpu      performance: HWP on, but its levels {}..{} are no range: request not written",
+            request.lowest,
+            request.highest,
+        ),
+        cpu::Hwp::NotHeld(request) => crate::console::println!(
+            "  cpu      performance: HWP request for levels {}..{} did not read back as written: left to firmware",
+            request.lowest,
+            request.highest,
+        ),
+        cpu::Hwp::Absent => crate::console::println!(
+            "  cpu      performance: no HWP, P-states left as firmware set them"
+        ),
+    }
 }
 
 /// Decide which side-channel defences this machine gets, apply them on the
@@ -2039,6 +2076,7 @@ pub(crate) const USER_GETUID_PROGRAM: &[u8] = &[
 // The lent firmware framebuffer's write-combining (`docs/DISPLAY.md` §8),
 // last for the same reason.
 mod framebuffer;
+pub(crate) use cpu::check::check_hwp_processors;
 pub(crate) use framebuffer::check::check_framebuffer_window;
 pub(crate) use framebuffer::{
     drain_write_combining, flush_window, framebuffer_flags, mtrr_type, pat,

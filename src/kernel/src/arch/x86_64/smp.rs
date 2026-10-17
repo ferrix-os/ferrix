@@ -493,6 +493,11 @@ extern "C" fn secondary_start(record: u64) -> ! {
     //
     // SAFETY: (ENTRY) the boot processor filled the table in `init_traps`.
     unsafe { super::trap::load_on_this_cpu() };
+    // Hardware P-states and the whole range, as on the boot processor
+    // (`L.x86_64.177`); after the IDT, so a fault would be reported. What
+    // it did is counted, and stage 9 compares the count with the processors
+    // online (`cpu::check::check_hwp_processors`).
+    let _ = cpu::enable_hwp();
 
     // The per-CPU record before anything that allocates. `init_secondary`
     // takes a stack from the vmap arena, and an arena allocation that fails
