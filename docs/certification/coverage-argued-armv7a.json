@@ -330,175 +330,175 @@
     },
     {
       "file": "console/screen.rs",
-      "lines": "111, 115",
+      "lines": "118, 122",
       "category": "absent-hardware",
       "match": "let width = surface.width().saturating_sub(MARGIN.saturating",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "121-123",
+      "lines": "128-130",
       "category": "absent-hardware",
       "match": "let columns = width / GLYPH_WIDTH.saturating_mul(scale);",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "126",
+      "lines": "133",
       "category": "absent-hardware",
       "match": "Some(Board {",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "139-140",
+      "lines": "146-147",
       "category": "absent-hardware",
       "match": "fn put(&mut self, byte: u8) {",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "142",
+      "lines": "149",
       "category": "absent-hardware",
       "match": "b'\\n' => self.newline(),",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "144",
+      "lines": "151",
       "category": "absent-hardware",
       "match": "for _ in 0..(8 - self.column % 8) {",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "148",
+      "lines": "155",
       "category": "absent-hardware",
       "match": "0x20..=0x7E => self.glyph(char::from(byte)),",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "151",
+      "lines": "158",
       "category": "absent-hardware",
       "match": "}",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "155-156",
+      "lines": "162-163",
       "category": "absent-hardware",
       "match": "if self.column >= self.columns {",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "158",
+      "lines": "165",
       "category": "absent-hardware",
       "match": "let cell_width = GLYPH_WIDTH.saturating_mul(self.scale);",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "161",
+      "lines": "168",
       "category": "absent-hardware",
       "match": ".saturating_add(self.column.saturating_mul(cell_width));",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "163-165",
+      "lines": "170-172",
       "category": "absent-hardware",
       "match": "self.surface",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "170-172",
+      "lines": "177-179",
       "category": "absent-hardware",
       "match": "fn newline(&mut self) {",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "174-175",
+      "lines": "181-182",
       "category": "absent-hardware",
       "match": "self.clear_row((self.row + 1) % self.rows);",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "210-212",
+      "lines": "217-219",
       "category": "absent-hardware",
       "match": "let width = self.surface.width();",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "217-218",
+      "lines": "224-225",
       "category": "absent-hardware",
       "match": "self.top",
       "why": "Drawing the boot console needs a framebuffer: ARMv7-A's virt has no display device and U-Boot hands over none, so the options boot's ferrix.fbcon finds nothing to draw on there. x86-64 and AArch64 draw it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "244",
+      "lines": "251",
       "category": "absent-hardware",
       "match": "surface.fill(BACKGROUND);",
       "why": "The boot console started on a framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "console/screen.rs",
-      "lines": "248",
+      "lines": "255",
       "category": "absent-hardware",
       "match": "let mut earlier = [0_u8; 2048];",
       "why": "The boot console started on a framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "console/screen.rs",
-      "lines": "252",
+      "lines": "259",
       "category": "absent-hardware",
       "match": "let from = match kept.iter().position(|&byte| byte == b'\\n')",
       "why": "The boot console started on a framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "console/screen.rs",
-      "lines": "256-257",
+      "lines": "263-264",
       "category": "absent-hardware",
       "match": "for &byte in kept.get(from..).unwrap_or_default() {",
       "why": "The boot console started on a framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "console/screen.rs",
-      "lines": "259",
+      "lines": "267",
       "category": "absent-hardware",
       "match": "*BOARD.lock() = Some(board);",
       "why": "The boot console started on a framebuffer: ARMv7-A's virt has none."
     },
     {
       "file": "console/screen.rs",
-      "lines": "290-291",
+      "lines": "299-300",
       "category": "absent-hardware",
       "match": "if let Some(mut board) = BOARD.try_lock()",
       "why": "A byte drawn on the boot console: ARMv7-A's virt has no framebuffer for it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "293",
+      "lines": "302",
       "category": "absent-hardware",
       "match": "board.put(byte);",
       "why": "A byte drawn on the boot console: ARMv7-A's virt has no framebuffer for it."
     },
     {
       "file": "console/screen.rs",
-      "lines": "313",
+      "lines": "323",
       "category": "absent-hardware",
       "match": "for _ in 0..STOP_SPINS {",
       "why": "Stopping a boot console that is drawing: ARMv7-A's virt has no framebuffer for one to draw on."
     },
     {
       "file": "console/screen.rs",
-      "lines": "315",
+      "lines": "325",
       "category": "absent-hardware",
       "match": "*board = None;",
       "why": "Stopping a boot console that is drawing: ARMv7-A's virt has no framebuffer for one to draw on."
@@ -561,7 +561,7 @@
     },
     {
       "file": "early.rs",
-      "lines": "181",
+      "lines": "183",
       "category": "defensive",
       "match": "return Err(EarlyError::KernelImage(phys));",
       "why": "A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded."

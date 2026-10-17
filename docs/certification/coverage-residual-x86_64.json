@@ -686,11 +686,11 @@
     "arch/x86_64/mod.rs": {
       "ring": "core",
       "lines": [
-        1465,
         1466,
-        1605,
-        1607,
-        1668
+        1467,
+        1606,
+        1608,
+        1669
       ]
     },
     "smp.rs": {
@@ -815,9 +815,9 @@
     "console/screen.rs": {
       "ring": "core",
       "lines": [
-        313,
-        314,
-        315
+        323,
+        324,
+        325
       ]
     },
     "panic/screen.rs": {
@@ -831,8 +831,8 @@
     "arch/x86_64/cpu.rs": {
       "ring": "core",
       "lines": [
-        851,
-        857
+        856,
+        862
       ]
     },
     "sched/wait.rs": {
@@ -888,7 +888,7 @@
       "ring": "core",
       "lines": [
         56,
-        256
+        299
       ]
     },
     "user/vmo.rs": {
@@ -918,7 +918,7 @@
     "early.rs": {
       "ring": "core",
       "lines": [
-        181
+        183
       ]
     },
     "power.rs": {
