@@ -334,6 +334,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-intel-xelp"
+version = "0.1.0"
+
+[[package]]
 name = "ferrix-ipc-bench"
 version = "0.1.0"
 dependencies = [

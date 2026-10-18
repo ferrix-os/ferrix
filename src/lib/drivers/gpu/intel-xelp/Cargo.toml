@@ -1,0 +1,13 @@
+[package]
+name = "ferrix-intel-xelp"
+description = "Intel's Xe-LP (Gen12.0) GT as logic over registers and memory, translated from Linux's i915: forcewake, the GTT, the context image, execlists, the MOCS and PAT tables, and the i915 uAPI's layouts"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

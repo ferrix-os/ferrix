@@ -57,6 +57,7 @@ members = [
     "src/lib/drivers/usb/usb-device",
     "src/lib/drivers/usb/dwc3",
     "src/lib/drivers/gpu/gc400",
+    "src/lib/drivers/gpu/intel-xelp",
     "src/lib/kernel/sync",
     "src/lib/kernel/ustack",
     "src/lib/kernel/vdso",
@@ -186,6 +187,7 @@ ferrix-usb-host = { path = "src/lib/drivers/usb/usb-host" }
 ferrix-usb-device = { path = "src/lib/drivers/usb/usb-device" }
 ferrix-dwc3 = { path = "src/lib/drivers/usb/dwc3" }
 ferrix-gc400 = { path = "src/lib/drivers/gpu/gc400" }
+ferrix-intel-xelp = { path = "src/lib/drivers/gpu/intel-xelp" }
 ferrix-netwire = { path = "src/lib/network/netwire" }
 ferrix-nettcp = { path = "src/lib/network/nettcp" }
 ferrix-net = { path = "src/lib/network/net" }

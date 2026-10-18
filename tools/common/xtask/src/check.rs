@@ -350,6 +350,15 @@ const AUDITS: &[(&str, &[&[&str]])] = &[
         "wayland protocol tables",
         &[&["tools/common/gen/gen-wayland-protocol.py", "--check"]],
     ),
+    // The Intel GPU's forcewake, context-image and MOCS tables are generated
+    // from i915's own files vendored beside them (docs/INTEL-GPU.md §3.6).
+    // A table edited by hand is a register read without its power domain
+    // awake, or a context image the engine restores wrongly, which on the
+    // hardware is a hang with nothing in the log.
+    (
+        "intel gpu tables",
+        &[&["tools/common/gen/gen-intel-xelp.py", "--check"]],
+    ),
     // The keymap the compositor hands every client, and the modifier
     // bits that go with it, are libxkbcommon's own output through a
     // committed probe. A keymap edited by hand is a keyboard that types
