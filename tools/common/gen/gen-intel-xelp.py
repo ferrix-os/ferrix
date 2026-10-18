@@ -348,6 +348,7 @@ COMMAND_FUNCTIONS = {
     "BIT_ULL": lambda n: 1 << n,
     "REG_GENMASK": lambda high, low: ((1 << (high + 1)) - 1) & ~((1 << low) - 1),
     "GENMASK": lambda high, low: ((1 << (high + 1)) - 1) & ~((1 << low) - 1),
+    "REG_FIELD_PREP": lambda mask, value: (value << ((mask & -mask).bit_length() - 1)) & mask,
 }
 
 
@@ -455,6 +456,120 @@ def gen_commands():
     return "\n".join(lines) + "\n"
 
 
+# A register's definition: `_MMIO(x)` or `MCR_REG(x)` around an integer.
+REGISTER = re.compile(r"\s*\(?\s*(_MMIO|MCR_REG)\((.*)\)\s*\)?\s*")
+# `_MMIO((base) + 0x30)`: a register of an engine, by its base.
+BASED = re.compile(r"\s*(_MMIO|MCR_REG)\(\s*\(?\s*(\w+)\s*\)?\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)\s*")
+# `_MMIO(0x4000 + (i) * 4)`: the i-th of an array of registers.
+INDEXED = re.compile(r"\s*(_MMIO|MCR_REG)\(\s*\(?\s*(0x[0-9a-fA-F]+|\d+)\s*\+\s*\(\s*(\w+)\s*\)\s*\*\s*(0x[0-9a-fA-F]+|\d+)\s*\)?\s*\)\s*")
+# `_MMIO((base) + 0x4D0 + (i) * 4)` and the like, both at once.
+BASED_INDEXED = re.compile(r"\s*(_MMIO|MCR_REG)\(\s*\(\s*\(?\s*(\w+)\s*\)?\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)\s*\+\s*\(\s*(\w+)\s*\)\s*\*\s*(0x[0-9a-fA-F]+|\d+)\s*\)\s*")
+
+
+def gen_regs(rel, describe, minimum=100):
+    """A register header: every register as a `Reg` (MCR ones marked), every
+    other integer `#define` as a `u32`, and the two common function-like
+    shapes (a register by engine base, a register by index) as `const fn`s."""
+    path = I915 / rel
+    text = path.read_text()
+    defines = c_defines(text)
+    for name in ("_MMIO", "MCR_REG"):
+        defines[name] = (["r"], "r")
+    lines = header(path, rel, notice(text, path))
+    for line in describe:
+        lines.append(f"//! {line}")
+    lines.append("")
+    lines.append("#![allow(dead_code, reason = \"the whole header, so it reads against i915's\")]")
+    lines.append("")
+    use_at = len(lines)
+    emitted = 0
+    skipped = []
+    for name, (parameters, body) in defines.items():
+        if name in ("_MMIO", "MCR_REG") or name.startswith("_") and name.endswith("_H_"):
+            continue
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name):
+            skipped.append(name)
+            continue
+        flat = " ".join(body.split())
+        if parameters is None:
+            register = REGISTER.fullmatch(body)
+            if register:
+                value = c_eval(register.group(2), defines)
+                if value is None or value >= (1 << 32):
+                    skipped.append(name)
+                    continue
+                mcr = " (MCR)" if register.group(1) == "MCR_REG" else ""
+                lines.append(f"/// `{name}`{mcr}: `{flat}`.")
+                lines.append(f"pub const {name}: Reg = Reg({value:#x});")
+                emitted += 1
+                continue
+            value = c_eval(body, defines)
+            if value is None:
+                skipped.append(name)
+                continue
+            kind = "u32" if value < (1 << 32) else "u64"
+            lines.append(f"/// `{name}`: `{flat}`.")
+            lines.append(f"pub const {name}: {kind} = {value:#x};")
+            emitted += 1
+            continue
+        rust = name.lower()
+        both = BASED_INDEXED.fullmatch(body)
+        based = BASED.fullmatch(body)
+        indexed = INDEXED.fullmatch(body)
+        if both and parameters == [both.group(2), both.group(4)]:
+            mcr = " (MCR)" if both.group(1) == "MCR_REG" else ""
+            lines.append(f"/// `{name}({', '.join(parameters)})`{mcr}: `{flat}`.")
+            lines.append("#[must_use]")
+            lines.append(f"pub const fn {rust}(base: u32, i: u32) -> Reg {{")
+            lines.append(f"    Reg(base + {both.group(3)} + i * {both.group(5)})")
+            lines.append("}")
+            emitted += 1
+        elif based and parameters == [based.group(2)]:
+            mcr = " (MCR)" if based.group(1) == "MCR_REG" else ""
+            lines.append(f"/// `{name}({parameters[0]})`{mcr}: `{flat}`.")
+            lines.append("#[must_use]")
+            lines.append(f"pub const fn {rust}(base: u32) -> Reg {{")
+            lines.append(f"    Reg(base + {based.group(3)})")
+            lines.append("}")
+            emitted += 1
+        elif indexed and parameters == [indexed.group(3)]:
+            mcr = " (MCR)" if indexed.group(1) == "MCR_REG" else ""
+            lines.append(f"/// `{name}({parameters[0]})`{mcr}: `{flat}`.")
+            lines.append("#[must_use]")
+            lines.append(f"pub const fn {rust}(i: u32) -> Reg {{")
+            lines.append(f"    Reg({indexed.group(2)} + i * {indexed.group(4)})")
+            lines.append("}")
+            emitted += 1
+        else:
+            skipped.append(name)
+    if emitted < minimum:
+        fail(f"{rel}: only {emitted} definitions translated; the header changed shape")
+    if any("Reg(" in line for line in lines[use_at:]):
+        lines[use_at:use_at] = ["use crate::reg::Reg;", ""]
+    if skipped:
+        lines.append("")
+        lines.append("// Not translated (another shape; hand-written where used):")
+        for name in skipped:
+            lines.append(f"// {name}")
+    return "\n".join(lines) + "\n"
+
+
+def gen_gt_regs():
+    return gen_regs("gt/intel_gt_regs.h", ["`intel_gt_regs.h`: the GT's registers and fields, by i915's names."])
+
+
+def gen_engine_regs():
+    return gen_regs("gt/intel_engine_regs.h", ["`intel_engine_regs.h`: the per-engine `RING_*` registers, by i915's names."])
+
+
+def gen_lrc_regs():
+    return gen_regs("gt/intel_lrc_reg.h", ["`intel_lrc_reg.h`: the context image's indices and the status-buffer fields."], 20)
+
+
+def gen_i915_regs():
+    return gen_regs("i915_reg.h", ["`i915_reg.h`: the device-wide registers this header still holds, by i915's names."])
+
+
 def gen_pciids():
     rel = "include/pciids.h"
     path = I915 / rel
@@ -505,6 +620,10 @@ MODULES = {
     "intel_lrc.rs": gen_lrc,
     "intel_mocs.rs": gen_mocs,
     "intel_gpu_commands.rs": gen_commands,
+    "intel_gt_regs.rs": gen_gt_regs,
+    "intel_engine_regs.rs": gen_engine_regs,
+    "i915_reg.rs": gen_i915_regs,
+    "intel_lrc_reg.rs": gen_lrc_regs,
     "pciids.rs": gen_pciids,
 }
 

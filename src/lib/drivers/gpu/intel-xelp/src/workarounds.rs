@@ -248,12 +248,35 @@ impl WaList {
     }
 }
 
-/// The registers and fields the lists below name, by i915's names.
+/// The registers and fields the lists below name: i915's own definitions,
+/// generated from `intel_gt_regs.h`, `intel_engine_regs.h` and `i915_reg.h`,
+/// and the few function-like macros the generator does not translate.
 pub mod regs {
-    use crate::reg::{Reg, bit, genmask};
+    pub use crate::generated::i915_reg::{
+        GEN7_FF_THREAD_MODE, GEN12_FF_TESSELATION_DOP_GATE_DISABLE,
+    };
+    pub use crate::generated::intel_engine_regs::{
+        BLIT_CCTL_DST_MOCS_MASK, BLIT_CCTL_MASK, BLIT_CCTL_SRC_MOCS_MASK, CMD_CCTL_MOCS_MASK,
+        CMD_CCTL_READ_OVERRIDE_MASK, CMD_CCTL_WRITE_OVERRIDE_MASK, GEN8_RC_SEMA_IDLE_MSG_DISABLE,
+        GEN12_WAIT_FOR_EVENT_POWER_DOWN_DISABLE, IECPUNIT_CLKGATE_DIS, blit_cctl, ring_cmd_cctl,
+        ring_ctx_timestamp, ring_force_to_nonpriv, ring_nopid, ring_psmi_ctl, vdbox_cgctl3f10,
+    };
+    pub use crate::generated::intel_gt_regs::{
+        COMMON_SLICE_CHICKEN4, DFR_DISABLE, DISABLE_TDC_LOAD_BALANCING_CALC, ENABLE_SMALLPL,
+        FF_DOP_CLOCK_GATE_DISABLE, FF_MODE2_GS_TIMER_224, FF_MODE2_GS_TIMER_MASK,
+        FF_MODE2_TDS_TIMER_128, FF_MODE2_TDS_TIMER_MASK, GEN7_COMMON_SLICE_CHICKEN1,
+        GEN7_FF_SLICE_CS_CHICKEN1, GEN7_MISCCPCTL, GEN8_CS_CHICKEN1, GEN8_GARBCNTL,
+        GEN8_MCR_SELECTOR, GEN8_ROW_CHICKEN2, GEN8_WM_CHICKEN2, GEN9_CS_DEBUG_MODE1,
+        GEN9_FFSC_PERCTX_PREEMPT_CTRL, GEN9_PREEMPT_GPGPU_LEVEL_MASK,
+        GEN9_PREEMPT_GPGPU_THREAD_GROUP_LEVEL, GEN9_ROW_CHICKEN4, GEN10_DFR_RATIO_EN_AND_CHICKEN,
+        GEN10_SAMPLER_MODE, GEN11_COMMON_SLICE_CHICKEN3, GEN11_INDIRECT_STATE_BASE_ADDR_OVERRIDE,
+        GEN11_MCR_SLICE_MASK, GEN11_MCR_SUBSLICE_MASK, GEN12_BUS_HASH_CTL_BIT_EXC,
+        GEN12_DISABLE_CPS_AWARE_COLOR_PIPE, GEN12_DISABLE_EARLY_READ, GEN12_DISABLE_TDL_PUSH,
+        GEN12_DOP_CLOCK_GATE_RENDER_ENABLE, GEN12_FF_MODE2, GEN12_PUSH_CONST_DEREF_HOLD_DIS,
+        HIZ_CHICKEN, HZ_DEPTH_TEST_LE_GE_OPT_DISABLE, PS_INVOCATION_COUNT,
+        WAIT_ON_DEPTH_STALL_DONE_DISABLE,
+    };
 
-    /// `GEN8_MCR_SELECTOR`.
-    pub const GEN8_MCR_SELECTOR: Reg = Reg(0xfdc);
     /// `GEN11_MCR_SLICE(slice)`.
     #[must_use]
     pub const fn gen11_mcr_slice(slice: u32) -> u32 {
@@ -264,143 +287,10 @@ pub mod regs {
     pub const fn gen11_mcr_subslice(subslice: u32) -> u32 {
         (subslice & 0x7) << 24
     }
-    /// `GEN11_MCR_SLICE_MASK`.
-    pub const GEN11_MCR_SLICE_MASK: u32 = gen11_mcr_slice(0xf);
-    /// `GEN11_MCR_SUBSLICE_MASK`.
-    pub const GEN11_MCR_SUBSLICE_MASK: u32 = gen11_mcr_subslice(0x7);
-    /// `VDBOX_CGCTL3F10(base)`.
-    #[must_use]
-    pub const fn vdbox_cgctl3f10(base: u32) -> Reg {
-        Reg(base + 0x3f10)
-    }
-    /// `IECPUNIT_CLKGATE_DIS`.
-    pub const IECPUNIT_CLKGATE_DIS: u32 = bit(22);
-    /// `GEN10_DFR_RATIO_EN_AND_CHICKEN` (MCR).
-    pub const GEN10_DFR_RATIO_EN_AND_CHICKEN: Reg = Reg(0x9550);
-    /// `DFR_DISABLE`.
-    pub const DFR_DISABLE: u32 = 1 << 9;
-    /// `GEN7_MISCCPCTL`.
-    pub const GEN7_MISCCPCTL: Reg = Reg(0x9424);
-    /// `GEN12_DOP_CLOCK_GATE_RENDER_ENABLE`.
-    pub const GEN12_DOP_CLOCK_GATE_RENDER_ENABLE: u32 = bit(1);
-    /// `GEN11_COMMON_SLICE_CHICKEN3`.
-    pub const GEN11_COMMON_SLICE_CHICKEN3: Reg = Reg(0x7304);
-    /// `GEN12_DISABLE_CPS_AWARE_COLOR_PIPE`.
-    pub const GEN12_DISABLE_CPS_AWARE_COLOR_PIPE: u32 = bit(9);
-    /// `GEN8_CS_CHICKEN1`.
-    pub const GEN8_CS_CHICKEN1: Reg = Reg(0x2580);
     /// `GEN9_PREEMPT_GPGPU_LEVEL(hi, lo)`.
     #[must_use]
     pub const fn gen9_preempt_gpgpu_level(hi: u32, lo: u32) -> u32 {
         (hi << 2) | (lo << 1)
-    }
-    /// `GEN9_PREEMPT_GPGPU_LEVEL_MASK`.
-    pub const GEN9_PREEMPT_GPGPU_LEVEL_MASK: u32 = gen9_preempt_gpgpu_level(1, 1);
-    /// `GEN9_PREEMPT_GPGPU_THREAD_GROUP_LEVEL`.
-    pub const GEN9_PREEMPT_GPGPU_THREAD_GROUP_LEVEL: u32 = gen9_preempt_gpgpu_level(0, 1);
-    /// `GEN12_FF_MODE2`.
-    pub const GEN12_FF_MODE2: Reg = Reg(0x6604);
-    /// `FF_MODE2_TDS_TIMER_MASK`.
-    pub const FF_MODE2_TDS_TIMER_MASK: u32 = genmask(23, 16);
-    /// `FF_MODE2_GS_TIMER_MASK`.
-    pub const FF_MODE2_GS_TIMER_MASK: u32 = genmask(31, 24);
-    /// `FF_MODE2_TDS_TIMER_128`.
-    pub const FF_MODE2_TDS_TIMER_128: u32 = crate::reg::field_prep(FF_MODE2_TDS_TIMER_MASK, 4);
-    /// `FF_MODE2_GS_TIMER_224`.
-    pub const FF_MODE2_GS_TIMER_224: u32 = crate::reg::field_prep(FF_MODE2_GS_TIMER_MASK, 224);
-    /// `HIZ_CHICKEN`.
-    pub const HIZ_CHICKEN: Reg = Reg(0x7018);
-    /// `HZ_DEPTH_TEST_LE_GE_OPT_DISABLE`.
-    pub const HZ_DEPTH_TEST_LE_GE_OPT_DISABLE: u32 = bit(13);
-    /// `COMMON_SLICE_CHICKEN4`.
-    pub const COMMON_SLICE_CHICKEN4: Reg = Reg(0x7300);
-    /// `DISABLE_TDC_LOAD_BALANCING_CALC`.
-    pub const DISABLE_TDC_LOAD_BALANCING_CALC: u32 = bit(6);
-    /// `GEN8_WM_CHICKEN2` (MCR).
-    pub const GEN8_WM_CHICKEN2: Reg = Reg(0x5584);
-    /// `WAIT_ON_DEPTH_STALL_DONE_DISABLE`.
-    pub const WAIT_ON_DEPTH_STALL_DONE_DISABLE: u32 = bit(5);
-    /// `BLIT_CCTL(base)`.
-    #[must_use]
-    pub const fn blit_cctl(base: u32) -> Reg {
-        Reg(base + 0x204)
-    }
-    /// `BLIT_CCTL_SRC_MOCS_MASK`.
-    pub const BLIT_CCTL_SRC_MOCS_MASK: u32 = genmask(6, 0);
-    /// `BLIT_CCTL_DST_MOCS_MASK`.
-    pub const BLIT_CCTL_DST_MOCS_MASK: u32 = genmask(14, 8);
-    /// `BLIT_CCTL_MASK`.
-    pub const BLIT_CCTL_MASK: u32 = BLIT_CCTL_DST_MOCS_MASK | BLIT_CCTL_SRC_MOCS_MASK;
-    /// `RING_CMD_CCTL(base)`.
-    #[must_use]
-    pub const fn ring_cmd_cctl(base: u32) -> Reg {
-        Reg(base + 0xc4)
-    }
-    /// `CMD_CCTL_WRITE_OVERRIDE_MASK`.
-    pub const CMD_CCTL_WRITE_OVERRIDE_MASK: u32 = genmask(13, 7);
-    /// `CMD_CCTL_READ_OVERRIDE_MASK`.
-    pub const CMD_CCTL_READ_OVERRIDE_MASK: u32 = genmask(6, 0);
-    /// `CMD_CCTL_MOCS_MASK`.
-    pub const CMD_CCTL_MOCS_MASK: u32 = CMD_CCTL_WRITE_OVERRIDE_MASK | CMD_CCTL_READ_OVERRIDE_MASK;
-    /// `GEN8_GARBCNTL`.
-    pub const GEN8_GARBCNTL: Reg = Reg(0xb004);
-    /// `GEN12_BUS_HASH_CTL_BIT_EXC`.
-    pub const GEN12_BUS_HASH_CTL_BIT_EXC: u32 = bit(7);
-    /// `GEN10_SAMPLER_MODE` (MCR).
-    pub const GEN10_SAMPLER_MODE: Reg = Reg(0xe18c);
-    /// `GEN11_INDIRECT_STATE_BASE_ADDR_OVERRIDE`.
-    pub const GEN11_INDIRECT_STATE_BASE_ADDR_OVERRIDE: u32 = bit(0);
-    /// `ENABLE_SMALLPL`.
-    pub const ENABLE_SMALLPL: u32 = bit(15);
-    /// `GEN9_CS_DEBUG_MODE1`.
-    pub const GEN9_CS_DEBUG_MODE1: Reg = Reg(0x20ec);
-    /// `FF_DOP_CLOCK_GATE_DISABLE`.
-    pub const FF_DOP_CLOCK_GATE_DISABLE: u32 = bit(1);
-    /// `GEN8_ROW_CHICKEN2` (MCR).
-    pub const GEN8_ROW_CHICKEN2: Reg = Reg(0xe4f4);
-    /// `GEN12_DISABLE_EARLY_READ`.
-    pub const GEN12_DISABLE_EARLY_READ: u32 = bit(14);
-    /// `GEN12_PUSH_CONST_DEREF_HOLD_DIS`.
-    pub const GEN12_PUSH_CONST_DEREF_HOLD_DIS: u32 = bit(8);
-    /// `GEN7_FF_THREAD_MODE`.
-    pub const GEN7_FF_THREAD_MODE: Reg = Reg(0x20a0);
-    /// `GEN12_FF_TESSELATION_DOP_GATE_DISABLE`.
-    pub const GEN12_FF_TESSELATION_DOP_GATE_DISABLE: u32 = 1 << 19;
-    /// `GEN9_ROW_CHICKEN4` (MCR).
-    pub const GEN9_ROW_CHICKEN4: Reg = Reg(0xe48c);
-    /// `GEN12_DISABLE_TDL_PUSH`.
-    pub const GEN12_DISABLE_TDL_PUSH: u32 = bit(9);
-    /// `RING_PSMI_CTL(base)`.
-    #[must_use]
-    pub const fn ring_psmi_ctl(base: u32) -> Reg {
-        Reg(base + 0x50)
-    }
-    /// `GEN12_WAIT_FOR_EVENT_POWER_DOWN_DISABLE`.
-    pub const GEN12_WAIT_FOR_EVENT_POWER_DOWN_DISABLE: u32 = bit(7);
-    /// `GEN8_RC_SEMA_IDLE_MSG_DISABLE`.
-    pub const GEN8_RC_SEMA_IDLE_MSG_DISABLE: u32 = bit(12);
-    /// `GEN7_FF_SLICE_CS_CHICKEN1`.
-    pub const GEN7_FF_SLICE_CS_CHICKEN1: Reg = Reg(0x20e0);
-    /// `GEN9_FFSC_PERCTX_PREEMPT_CTRL`.
-    pub const GEN9_FFSC_PERCTX_PREEMPT_CTRL: u32 = 1 << 14;
-    /// `RING_CTX_TIMESTAMP(base)`.
-    #[must_use]
-    pub const fn ring_ctx_timestamp(base: u32) -> Reg {
-        Reg(base + 0x3a8)
-    }
-    /// `PS_INVOCATION_COUNT`.
-    pub const PS_INVOCATION_COUNT: Reg = Reg(0x2348);
-    /// `GEN7_COMMON_SLICE_CHICKEN1`.
-    pub const GEN7_COMMON_SLICE_CHICKEN1: Reg = Reg(0x7010);
-    /// `RING_FORCE_TO_NONPRIV(base, i)`.
-    #[must_use]
-    pub const fn ring_force_to_nonpriv(base: u32, i: u32) -> Reg {
-        Reg(base + 0x4d0 + i * 4)
-    }
-    /// `RING_NOPID(base)`: what i915 fills unused whitelist slots with.
-    #[must_use]
-    pub const fn ring_nopid(base: u32) -> Reg {
-        Reg(base + 0x94)
     }
 }
 

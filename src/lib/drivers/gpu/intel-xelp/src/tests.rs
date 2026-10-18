@@ -765,3 +765,126 @@ fn lrc_register_state() {
 
 /// `RING_MI_MODE` in a fresh image: `STOP_RING` masked off.
 const STOP_RING_MASKED_OFF: u32 = 1 << 24;
+
+/// The registers some modules spell out themselves, against i915's own
+/// headers as the generator read them: a typo in either fails here.
+#[test]
+fn hand_written_registers_match_i915_headers() {
+    use crate::generated::{i915_reg as i915, intel_engine_regs as er, intel_gt_regs as gr};
+    use crate::{engine, gtt, sseu};
+    assert_eq!(uncore::FORCEWAKE_RENDER_GEN9, gr::FORCEWAKE_RENDER_GEN9);
+    assert_eq!(
+        uncore::FORCEWAKE_ACK_RENDER_GEN9,
+        gr::FORCEWAKE_ACK_RENDER_GEN9
+    );
+    assert_eq!(uncore::FORCEWAKE_GT_GEN9, gr::FORCEWAKE_GT_GEN9);
+    assert_eq!(uncore::FORCEWAKE_ACK_GT_GEN9, gr::FORCEWAKE_ACK_GT_GEN9);
+    assert_eq!(uncore::FORCEWAKE_KERNEL, gr::FORCEWAKE_KERNEL);
+    assert_eq!(
+        uncore::FORCEWAKE_KERNEL_FALLBACK,
+        gr::FORCEWAKE_KERNEL_FALLBACK
+    );
+    for n in 0..4 {
+        assert_eq!(
+            uncore::forcewake_media_vdbox_gen11(n),
+            gr::forcewake_media_vdbox_gen11(n)
+        );
+        assert_eq!(
+            uncore::forcewake_ack_media_vdbox_gen11(n),
+            gr::forcewake_ack_media_vdbox_gen11(n)
+        );
+        assert_eq!(
+            uncore::forcewake_media_vebox_gen11(n),
+            gr::forcewake_media_vebox_gen11(n)
+        );
+        assert_eq!(
+            uncore::forcewake_ack_media_vebox_gen11(n),
+            gr::forcewake_ack_media_vebox_gen11(n)
+        );
+    }
+    for i in 0..8 {
+        assert_eq!(gtt::gen12_pat_index(i), gr::gen12_pat_index(i));
+    }
+    // GEN8_PPAT_* are intel_gtt.h's, which is not vendored.
+    for i in 0..64 {
+        assert_eq!(mocs::gen12_global_mocs(i), gr::gen12_global_mocs(i));
+        assert_eq!(mocs::gen9_lncfcmocs(i), gr::gen9_lncfcmocs(i));
+    }
+    assert_eq!(sseu::GEN11_EU_DISABLE, gr::GEN11_EU_DISABLE);
+    assert_eq!(sseu::GEN11_EU_DIS_MASK, gr::GEN11_EU_DIS_MASK);
+    assert_eq!(sseu::GEN11_GT_SLICE_ENABLE, gr::GEN11_GT_SLICE_ENABLE);
+    assert_eq!(sseu::GEN11_GT_S_ENA_MASK, gr::GEN11_GT_S_ENA_MASK);
+    assert_eq!(
+        sseu::GEN12_GT_GEOMETRY_DSS_ENABLE,
+        gr::GEN12_GT_GEOMETRY_DSS_ENABLE
+    );
+    assert_eq!(
+        sseu::GEN11_GT_VEBOX_VDBOX_DISABLE,
+        gr::GEN11_GT_VEBOX_VDBOX_DISABLE
+    );
+    assert_eq!(engine::RENDER_RING_BASE, i915::RENDER_RING_BASE);
+    assert_eq!(engine::BLT_RING_BASE, i915::BLT_RING_BASE);
+    assert_eq!(engine::GEN11_BSD_RING_BASE, i915::GEN11_BSD_RING_BASE);
+    assert_eq!(engine::GEN11_BSD3_RING_BASE, i915::GEN11_BSD3_RING_BASE);
+    assert_eq!(engine::GEN11_VEBOX_RING_BASE, i915::GEN11_VEBOX_RING_BASE);
+    assert_eq!(
+        engine::ring_execlist_status_hi(0x2000),
+        Reg(er::ring_execlist_status_lo(0x2000).offset() + 4)
+    );
+    assert_eq!(gtt::GEN12_GUC_TLB_INV_CR, Reg(0xcee8)); // in uc/intel_guc_reg.h, not vendored
+    assert_eq!(
+        lrc::CTX_CTRL_ENGINE_CTX_RESTORE_INHIBIT,
+        er::CTX_CTRL_ENGINE_CTX_RESTORE_INHIBIT
+    );
+    assert_eq!(
+        lrc::CTX_CTRL_INHIBIT_SYN_CTX_SWITCH,
+        er::CTX_CTRL_INHIBIT_SYN_CTX_SWITCH
+    );
+    assert_eq!(lrc::RING_VALID, er::RING_VALID);
+    assert_eq!(lrc::STOP_RING, er::STOP_RING);
+    for id in [0, 1, 10, 12, 18] {
+        let aux = crate::engine_cs::gen12_get_aux_inv_reg(id).expect("aux");
+        let named = match id {
+            0 => gr::GEN12_CCS_AUX_INV,
+            1 => gr::GEN12_BCS0_AUX_INV,
+            10 => gr::GEN12_VD0_AUX_INV,
+            12 => gr::GEN12_VD2_AUX_INV,
+            _ => gr::GEN12_VE0_AUX_INV,
+        };
+        assert_eq!(aux, named);
+    }
+    assert_eq!(crate::engine_cs::AUX_INV, gr::AUX_INV);
+}
+
+/// The context image's indices and the status buffer's fields, against
+/// `intel_lrc_reg.h`.
+#[test]
+fn context_indices_match_i915_headers() {
+    use crate::execlists;
+    use crate::generated::intel_lrc_reg as lr;
+    assert_eq!(execlists::GEN11_CSB_PTR_MASK, lr::GEN11_CSB_PTR_MASK);
+    assert_eq!(execlists::GEN11_CSB_ENTRIES, lr::GEN11_CSB_ENTRIES);
+    assert_eq!(
+        execlists::GEN12_MAX_CONTEXT_HW_ID,
+        lr::GEN12_MAX_CONTEXT_HW_ID
+    );
+    let indices = [
+        (lrc::ctx::CONTEXT_CONTROL, lr::CTX_CONTEXT_CONTROL),
+        (lrc::ctx::RING_HEAD, lr::CTX_RING_HEAD),
+        (lrc::ctx::RING_TAIL, lr::CTX_RING_TAIL),
+        (lrc::ctx::RING_START, lr::CTX_RING_START),
+        (lrc::ctx::RING_CTL, lr::CTX_RING_CTL),
+        (lrc::ctx::BB_STATE, lr::CTX_BB_STATE),
+        (lrc::ctx::TIMESTAMP, lr::CTX_TIMESTAMP),
+        (lrc::ctx::PDP3_UDW, lr::CTX_PDP3_UDW),
+        (lrc::ctx::PDP0_LDW, lr::CTX_PDP0_LDW),
+        (lrc::ctx::R_PWR_CLK_STATE, lr::CTX_R_PWR_CLK_STATE),
+    ];
+    for (ours, theirs) in indices {
+        assert_eq!(ours as u32, theirs);
+    }
+    assert_eq!(
+        lrc::GEN12_CTX_RCS_INDIRECT_CTX_OFFSET_DEFAULT,
+        lr::GEN12_CTX_RCS_INDIRECT_CTX_OFFSET_DEFAULT
+    );
+}

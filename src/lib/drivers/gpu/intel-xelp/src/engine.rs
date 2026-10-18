@@ -88,121 +88,19 @@ pub const ENGINES: [EngineInfo; 5] = [
     },
 ];
 
-/// `RING_TAIL(base)`.
-#[must_use]
-pub const fn ring_tail(base: u32) -> Reg {
-    Reg(base + 0x30)
-}
-/// `RING_HEAD(base)`.
-#[must_use]
-pub const fn ring_head(base: u32) -> Reg {
-    Reg(base + 0x34)
-}
-/// `RING_START(base)`.
-#[must_use]
-pub const fn ring_start(base: u32) -> Reg {
-    Reg(base + 0x38)
-}
-/// `RING_CTL(base)`.
-#[must_use]
-pub const fn ring_ctl(base: u32) -> Reg {
-    Reg(base + 0x3c)
-}
-/// `RING_IPEHR(base)`: the instruction the engine stopped on.
-#[must_use]
-pub const fn ring_ipehr(base: u32) -> Reg {
-    Reg(base + 0x68)
-}
-/// `RING_INSTDONE(base)`.
-#[must_use]
-pub const fn ring_instdone(base: u32) -> Reg {
-    Reg(base + 0x6c)
-}
-/// `RING_ACTHD(base)`: where the engine is reading.
-#[must_use]
-pub const fn ring_acthd(base: u32) -> Reg {
-    Reg(base + 0x74)
-}
-/// `RING_HWS_PGA(base)`: the hardware status page's GGTT address.
-#[must_use]
-pub const fn ring_hws_pga(base: u32) -> Reg {
-    Reg(base + 0x80)
-}
-/// `RING_HWSTAM(base)`: which status-page writes the engine makes.
-#[must_use]
-pub const fn ring_hwstam(base: u32) -> Reg {
-    Reg(base + 0x98)
-}
-/// `RING_MI_MODE(base)`.
-#[must_use]
-pub const fn ring_mi_mode(base: u32) -> Reg {
-    Reg(base + 0x9c)
-}
-/// `STOP_RING`, in `RING_MI_MODE`.
-pub const STOP_RING: u32 = 1 << 8;
-/// `RING_IMR(base)`: the engine's interrupt mask.
-#[must_use]
-pub const fn ring_imr(base: u32) -> Reg {
-    Reg(base + 0xa8)
-}
-/// `RING_EIR(base)`: the engine's error identity.
-#[must_use]
-pub const fn ring_eir(base: u32) -> Reg {
-    Reg(base + 0xb0)
-}
-/// `RING_ESR(base)`.
-#[must_use]
-pub const fn ring_esr(base: u32) -> Reg {
-    Reg(base + 0xb8)
-}
-/// `RING_BBADDR(base)`: the batch the engine is in.
-#[must_use]
-pub const fn ring_bbaddr(base: u32) -> Reg {
-    Reg(base + 0x140)
-}
-/// `RING_EXECLIST_STATUS_LO(base)`.
-#[must_use]
-pub const fn ring_execlist_status_lo(base: u32) -> Reg {
-    Reg(base + 0x234)
-}
-/// `RING_EXECLIST_STATUS_HI(base)`.
+/// The per-engine registers and fields: i915's own `intel_engine_regs.h`,
+/// generated ([`crate::generated::intel_engine_regs`]).
+pub use crate::generated::intel_engine_regs::{
+    EL_CTRL_LOAD, GEN11_GFX_DISABLE_LEGACY_MODE, GFX_RUN_LIST_ENABLE, STOP_RING, ring_acthd,
+    ring_bbaddr, ring_context_control, ring_context_status_ptr, ring_ctl, ring_eir, ring_esr,
+    ring_execlist_control, ring_execlist_sq_contents, ring_execlist_status_lo, ring_head,
+    ring_hws_pga, ring_hwstam, ring_imr, ring_instdone, ring_ipehr, ring_mi_mode, ring_mode_gen7,
+    ring_start, ring_tail, ring_timestamp,
+};
+
+/// `RING_EXECLIST_STATUS_HI(base)`: `_MMIO((base) + 0x234 + 4)`, a shape the
+/// generator leaves to hand.
 #[must_use]
 pub const fn ring_execlist_status_hi(base: u32) -> Reg {
     Reg(base + 0x234 + 4)
 }
-/// `RING_CONTEXT_CONTROL(base)`.
-#[must_use]
-pub const fn ring_context_control(base: u32) -> Reg {
-    Reg(base + 0x244)
-}
-/// `RING_MODE_GEN7(base)`.
-#[must_use]
-pub const fn ring_mode_gen7(base: u32) -> Reg {
-    Reg(base + 0x29c)
-}
-/// `GFX_RUN_LIST_ENABLE`, in `RING_MODE_GEN7`.
-pub const GFX_RUN_LIST_ENABLE: u32 = 1 << 15;
-/// `GEN11_GFX_DISABLE_LEGACY_MODE`, in `RING_MODE_GEN7`.
-pub const GEN11_GFX_DISABLE_LEGACY_MODE: u32 = 1 << 3;
-/// `RING_TIMESTAMP(base)`: the one register `I915_REG_READ` serves.
-#[must_use]
-pub const fn ring_timestamp(base: u32) -> Reg {
-    Reg(base + 0x358)
-}
-/// `RING_CONTEXT_STATUS_PTR(base)`.
-#[must_use]
-pub const fn ring_context_status_ptr(base: u32) -> Reg {
-    Reg(base + 0x3a0)
-}
-/// `RING_EXECLIST_SQ_CONTENTS(base)`: the submit queue, two dwords a port.
-#[must_use]
-pub const fn ring_execlist_sq_contents(base: u32) -> Reg {
-    Reg(base + 0x510)
-}
-/// `RING_EXECLIST_CONTROL(base)`.
-#[must_use]
-pub const fn ring_execlist_control(base: u32) -> Reg {
-    Reg(base + 0x550)
-}
-/// `EL_CTRL_LOAD`, in `RING_EXECLIST_CONTROL`.
-pub const EL_CTRL_LOAD: u32 = 1 << 0;

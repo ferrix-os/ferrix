@@ -13,6 +13,10 @@ file's header, and `NOTICE` here. Nothing builds them.
 | `gt/intel_lrc.c` | `drivers/gpu/drm/i915/gt/intel_lrc.c` | `gen12_xcs_offsets`, `gen12_rcs_offsets` |
 | `gt/intel_mocs.c` | `drivers/gpu/drm/i915/gt/intel_mocs.c` | `gen12_mocs_table`, `GEN11_MOCS_ENTRIES` |
 | `gt/intel_gpu_commands.h` | `drivers/gpu/drm/i915/gt/intel_gpu_commands.h` | every integer `#define` |
+| `gt/intel_gt_regs.h` | `drivers/gpu/drm/i915/gt/intel_gt_regs.h` | every register and integer field |
+| `gt/intel_engine_regs.h` | `drivers/gpu/drm/i915/gt/intel_engine_regs.h` | every register and integer field |
+| `gt/intel_lrc_reg.h` | `drivers/gpu/drm/i915/gt/intel_lrc_reg.h` | the context image's indices, the CSB fields |
+| `i915_reg.h` | `drivers/gpu/drm/i915/i915_reg.h` | every register and integer field |
 | `include/pciids.h` | `include/drm/intel/pciids.h` | `INTEL_ADLN_IDS` |
 
 To move to a later Linux, replace the files from that tag, run the generator,
