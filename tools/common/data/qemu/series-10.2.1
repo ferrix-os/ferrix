@@ -11,3 +11,7 @@
 # 0004: with gl=on the GL area has no window of its own, and the cursor QEMU
 # hides over the guest was set on the whole window, menu bar and tabs too.
 0004-ui-gtk-Set-the-guest-s-cursor-on-the-GL-area-s-own-window.patch
+# 0006: pci-testdev answers as another device's vendor, device and class
+# when asked (x-vendor-id, x-device-id, x-class-code), so test-intel-uapi
+# can boot a stand-in for Alder Lake-N's GPU, which QEMU does not emulate.
+0006-pci-testdev-stand-in-for-another-device-s-identity.patch

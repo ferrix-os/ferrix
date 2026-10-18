@@ -87,11 +87,12 @@ fi
 # bars with gl=on, which GTK gets wrong on Windows as on Linux. 0005 is
 # WHPX's: the emulator of a memory-mapped I/O exit translates the guest's
 # address with Hyper-V's walk instead of its own, which faulted ring-3
-# drivers with more than one vCPU.
+# drivers with more than one vCPU. 0006 lets pci-testdev stand in for
+# another device's identity, for test-intel-uapi.
 for patch in "$here"/tools/common/data/qemu/0001-*.patch \
     "$here"/tools/common/data/qemu/0002-*.patch \
     "$here"/tools/common/data/qemu/0004-*.patch \
-    "$here"/tools/common/data/qemu/0005-*.patch; do
+    "$here"/tools/common/data/qemu/0005-*.patch     "$here"/tools/common/data/qemu/0006-*.patch; do
     if git -C "$src" apply --reverse --check \
         --exclude=tests/qtest/intel-iommu-test.c "$patch" 2>/dev/null; then
         echo "qemu: $(basename "$patch") already applied"
