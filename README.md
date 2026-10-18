@@ -23,6 +23,12 @@ unfinished, so it is not ready to be your everyday OS.
 
 ![Ferrix's Wayland desktop with Chrome, btop and a terminal](docs/brand/screenshots/desktop-hero.png)
 
+[![On Ferrix's desktop, rustc compiles and runs a hello-world program in a terminal, then Chrome loads Wikipedia's article on Rust](docs/brand/screenshots/demo-loop.gif)](docs/brand/screenshots/demo.mp4)
+
+*15 seconds, in real time, of [a 70-second recording](docs/brand/screenshots/demo.mp4)
+that starts at the firmware: `rustc` compiling and running a program, then Chrome
+loading Wikipedia.*
+
 <table>
   <tr>
     <td width="33%"><img src="docs/brand/screenshots/terminal-omz.png" alt="zinc shell showing driver processes, service status and a curl request"></td>

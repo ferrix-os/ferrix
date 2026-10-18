@@ -15,6 +15,8 @@
 *.img binary
 *.bin binary
 *.png binary
+*.gif binary
+*.mp4 binary
 
 # Fuzz corpora: arbitrary bytes, chosen for the shape they have. `text=auto`
 # classifies the entries without a NUL byte as text and would rewrite their
