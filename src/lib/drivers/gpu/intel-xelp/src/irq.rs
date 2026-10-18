@@ -220,3 +220,18 @@ pub fn engine_of<'a>(engines: &'a [EngineInfo], irq: &EngineIrq) -> Option<&'a E
         .iter()
         .find(|e| e.class == irq.class && e.instance == irq.instance)
 }
+
+/// `logical_ring_default_irqs` for Gen11+ (no shift): the user interrupt
+/// the breadcrumbs arm, and what execlists always keep unmasked.
+pub const IRQ_ENABLE_MASK: u32 = GT_RENDER_USER_INTERRUPT;
+/// `engine->irq_keep_mask`.
+pub const IRQ_KEEP_MASK: u32 =
+    GT_CONTEXT_SWITCH_INTERRUPT | GT_CS_MASTER_ERROR_INTERRUPT | GT_WAIT_SEMAPHORE_INTERRUPT;
+
+/// `gen8_logical_ring_enable_irq`'s `RING_IMR`: the user interrupt and the
+/// kept ones unmasked. The driver keeps its breadcrumbs armed for the
+/// whole run, so it writes this once per engine after the resume.
+#[must_use]
+pub const fn gen8_logical_ring_imr_enabled() -> u32 {
+    !(IRQ_ENABLE_MASK | IRQ_KEEP_MASK)
+}

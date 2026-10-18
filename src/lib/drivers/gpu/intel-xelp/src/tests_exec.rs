@@ -358,3 +358,129 @@ fn a_status_buffer_that_makes_no_sense_is_an_error() {
     // A context of the RCS image layout is 14 pages and its object 16.
     assert_eq!(lrc::alloc_state_size(OffsetsTable::Rcs).0, 16 * 4096);
 }
+
+/// Map `pages` (device addresses the model holds) at `address` in the
+/// rig's VM.
+fn map(rig: &Rig, address: u64, pages: &[u64]) {
+    let mut gpu = rig.gpu.borrow_mut();
+    for &page in pages {
+        gpu.add_page(page);
+    }
+    let vm = rig.vm;
+    vm.alloc_va_range(&mut gpu.tables, address, pages.len() as u64 * 4096)
+        .expect("tables");
+    let _ = vm
+        .insert_entries(&mut gpu.tables, pages.iter().copied(), address, 0)
+        .expect("allocated");
+}
+
+#[test]
+fn a_batch_runs_from_the_ppgtt() {
+    use crate::commands::{Cs, emit_store_dword};
+    let rig = Rig::new(ENGINES[0]);
+    let mut state = rig.bring_up();
+    let default = rig.record_default(&mut state);
+    let mut context = rig.context(rig.place(IMAGE2, RING2, 1), Some(&default));
+    // A batch page and a target page, at addresses above 4 GiB.
+    let batch_va = 0x1_0000_0000_u64;
+    let target_va = 0x1_0000_1000_u64;
+    map(&rig, batch_va, &[0x800_0000, 0x800_1000]);
+    let mut batch = [0_u32; 6];
+    let mut cs = Cs::new(&mut batch);
+    emit_store_dword(&mut cs, target_va + 0x80, 0x5eed_0001);
+    cs.push(gpu::MI_BATCH_BUFFER_END);
+    {
+        let mut gpu = rig.gpu.borrow_mut();
+        let page = gpu.pages.get_mut(&0x800_0000).expect("page");
+        page[..6].copy_from_slice(&batch);
+    }
+    let (seqno, tail) = rig.emit(
+        &mut context,
+        Payload::Batch {
+            address: batch_va,
+            flags: 0,
+        },
+    );
+    let _ = rig.submit(&mut state, &mut context, tail);
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Idle);
+    let (report, _) = rig.process(&mut state);
+    assert_eq!((report.promoted, report.completed), (1, 1));
+    assert!(rig.complete(&context, seqno));
+    assert_eq!(rig.gpu.borrow().pages[&0x800_1000][0x20], 0x5eed_0001);
+    // Unmapped again, the batch's address reads the scratch page: a batch
+    // there would run zeros (MI_NOOPs) and never reach its end.
+    let mut gpu = rig.gpu.borrow_mut();
+    let vm = rig.vm;
+    vm.clear_range(&mut gpu.tables, batch_va, 2 * 4096)
+        .expect("range");
+    assert_eq!(gpu.ppgtt_read(vm.pml4, batch_va), 0);
+}
+
+#[test]
+fn a_fast_copy_runs_on_the_copy_engine() {
+    use crate::commands::{Cs, emit_fast_copy};
+    let rig = Rig::new(ENGINES[1]);
+    let mut state = rig.bring_up();
+    let default = rig.record_default(&mut state);
+    let mut context = rig.context(rig.place(IMAGE2, RING2, 1), Some(&default));
+    let src_va = 0x20_0000_u64;
+    let dst_va = 0x40_0000_u64;
+    map(&rig, src_va, &[0x900_0000, 0x900_1000]);
+    map(&rig, dst_va, &[0xa00_0000, 0xa00_1000]);
+    {
+        let mut gpu = rig.gpu.borrow_mut();
+        for (n, page) in [0x900_0000_u64, 0x900_1000].iter().enumerate() {
+            let words = gpu.pages.get_mut(page).expect("page");
+            for (i, word) in words.iter_mut().enumerate() {
+                *word = (n as u32) << 16 | i as u32;
+            }
+        }
+    }
+    let mut copy = [0_u32; 10];
+    emit_fast_copy(&mut Cs::new(&mut copy), dst_va, src_va, 2 * 4096);
+    let (seqno, tail) = rig.emit(&mut context, Payload::Commands(&copy));
+    let _ = rig.submit(&mut state, &mut context, tail);
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Idle);
+    let _ = rig.process(&mut state);
+    assert!(rig.complete(&context, seqno));
+    let gpu = rig.gpu.borrow();
+    assert_eq!(gpu.pages[&0xa00_0000], gpu.pages[&0x900_0000]);
+    assert_eq!(gpu.pages[&0xa00_1000], gpu.pages[&0x900_1000]);
+    assert_eq!(gpu.pages[&0xa00_1000][5], (1 << 16) | 5);
+}
+
+#[test]
+fn context_workarounds_are_read_back_from_a_request() {
+    let rig = Rig::new(ENGINES[0]);
+    let mut state = rig.bring_up();
+    let default = rig.record_default(&mut state);
+    let mut context = rig.context(rig.place(IMAGE2, RING2, 1), Some(&default));
+    let wal = workarounds::ctx_workarounds(&rig.engine, mocs::UC_INDEX);
+    let mut srm = [0_u32; 256];
+    let n = workarounds::wa_list_srm(&wal, PAGE, &mut srm).expect("room");
+    let skipped = wal
+        .iter()
+        .filter(|wa| workarounds::mcr_range(wa.reg.offset()))
+        .count();
+    assert_eq!(n, 4 * (wal.len() - skipped));
+    let (seqno, tail) = rig.emit(&mut context, Payload::Commands(&srm[..n]));
+    let _ = rig.submit(&mut state, &mut context, tail);
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Idle);
+    let _ = rig.process(&mut state);
+    assert!(rig.complete(&context, seqno));
+    let results = rig.gpu.borrow().objects[&PAGE].clone();
+    assert_eq!(
+        workarounds::wa_list_verify_results(&wal, &results).count(),
+        0
+    );
+    // One register that lost its bits is named.
+    let first = wal
+        .iter()
+        .position(|wa| !workarounds::mcr_range(wa.reg.offset()))
+        .expect("one");
+    let mut lost = results;
+    lost[first] = !lost[first];
+    let named: Vec<_> = workarounds::wa_list_verify_results(&wal, &lost).collect();
+    assert_eq!(named.len(), 1);
+    assert_eq!(named[0].0, wal.iter().nth(first).expect("entry").reg);
+}
