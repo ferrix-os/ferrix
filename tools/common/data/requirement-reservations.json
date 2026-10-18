@@ -80,6 +80,13 @@
       "branch": "syncwake",
       "date": "2026-10-17",
       "purpose": "Idle poll before a halt (os-35 part C, piece 1 of STALLS.md recommendation 2): a kick to a polling processor sends no interrupt and is never lost, a kick absorbed before a halt still lets a later kick run the task, and ferrix.haltpoll selects where the poll runs (consultant design verdict, ledger 2026-10-17 line 2301, piece 1 (1))"
+    },
+    {
+      "ids": ["L.iommu.59-64", "L.object.192-202", "L.device.44-49", "L.user.132-134", "H.DMA.10"],
+      "owner": "intel-gpu-kernel",
+      "branch": "intel-k3, then intel-k2, intel-k4, intel-k5, intel-k6",
+      "date": "2026-10-18",
+      "purpose": "The Intel GPU's kernel changes K2-K6 (docs/INTEL-GPU.md section 5; the consultant's design review, ledger 2026-10-18 line 2352, which asks for one reservation before any code). K2, core: L.iommu.59-64, dmar0's RMRR identity domain for 00:02.0 (exactly the RMRR's pages, refused over usable RAM or unaligned, its frames reserved for the boot, driver pins over it refused and never removing an RMRR entry, never detached across restarts). K3, load chardev and core pins: L.object.192-197, L.device.44-45 and H.DMA.10, the render-only HELLO (render minors from 128, no card0), the refusal of a client minor for a function behind a unit that does not translate (D4 (a)), the iGPU pin budget by the kernel-visible match (a stated fraction of usable RAM above the watermark, at most a half, with an absolute cap; charged to the driver's job; EDQUOT), ferrix.intelgpu off by default with 00:02.0 named untranslated. K4, the device yield: L.device.46-49 (the yield exception by option and identity, FLR and reset refused on the framebuffer's function, the copying-card rule for that node). K5, chardev dmabuf: L.object.198-202 (one fence slot per dmabuf set only by its serving driver, EXPORT_SYNC_FILE's snapshot, IMPORT as data, a dead driver's fences, the slot's leaf lock). K6, user memory types: L.user.132-134 (write-combining only for the serving driver's own VMO on x86-64, the aliasing argument and the drain before reuse). Each landing releases its own ids; none for K7"
     }
   ]
 }

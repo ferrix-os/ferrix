@@ -60,6 +60,17 @@ So this gate asserts five things.
      buildable, their component levels as what must hold once they build.
      reference_configuration is held to present.toml.
 
+  6. **No Intel GPU driver in ring 0** (docs/INTEL-GPU.md section 5; the
+     consultant's design review, ledger line 2352, K3 condition 4). The
+     Intel driver serves the i915 uAPI from ring 3, outside the item, as
+     every driver does. So no path under src/kernel names `i915`, `xe` or
+     `intel-xelp` as one of its words, no kernel crate's manifest depends on
+     a crate whose name does, and no kernel source names the `intel_xelp`,
+     `i915` or `xe` crate in a path. A word is what a path or package name
+     splits into at `/`, `.`, `_` and `-`, so `exec.rs` is not `xe`; text in
+     comments and strings is not read, since the chardev core talks about
+     the drivers it forwards to.
+
 Product code and in-kernel test code are counted apart. A standard asks
 different questions of each, and conflating them flatters the item's size
 while hiding how much verification exists.
@@ -663,7 +674,7 @@ def measure(manifest: dict, ring_of: dict[str, str]):
     modules, refs, problems = build(
         files, lambda rel: (KERNEL_SRC / rel).read_text(encoding="utf-8", errors="replace")
     )
-    return modules, find_edges(manifest, ring_of, modules, refs), problems
+    return modules, find_edges(manifest, ring_of, modules, refs), problems, refs
 
 
 def line_counts(manifest: dict, ring_of: dict[str, str]) -> dict[str, dict[str, int]]:
@@ -1380,6 +1391,67 @@ def kernel_members() -> dict[str, str]:
     return out
 
 
+# --- no Intel GPU driver in ring 0 ------------------------------------------
+
+# The words that name the Intel GPU driver or Linux's drivers it translates
+# (docs/INTEL-GPU.md section 5, ledger 2352 K3 (4)).
+GPU_DRIVER_WORDS = {"i915", "xe", "xelp"}
+GPU_DRIVER_CRATES = {"intel_xelp", "i915", "xe"}
+_WORD_SPLIT = re.compile(r"[/._-]+")
+
+
+def names_gpu_driver(name: str) -> bool:
+    """Whether a path or package name has one of GPU_DRIVER_WORDS as a word."""
+    return any(word.lower() in GPU_DRIVER_WORDS for word in _WORD_SPLIT.split(name))
+
+
+def gpu_driver_problems(paths: list[str], refs, dependencies: dict[str, list[str]]) -> list[str]:
+    """Every path under src/kernel, kernel crate dependency and kernel source
+    path that names the Intel GPU driver (rule 6)."""
+    problems = [f"src/kernel/{rel}: the path names an Intel GPU driver" for rel in paths if names_gpu_driver(rel)]
+    for package, deps in sorted(dependencies.items()):
+        problems += [f"{package} -> {dep}: a kernel crate depends on an Intel GPU driver's crate"
+                     for dep in deps if names_gpu_driver(dep)]
+    seen = set()
+    for ref in refs:
+        first = ref.segments[1] if ref.segments[0] == "::" and len(ref.segments) > 1 else ref.segments[0]
+        if first in GPU_DRIVER_CRATES and (ref.file, first) not in seen:
+            seen.add((ref.file, first))
+            problems.append(f"{ref.file}:{ref.line}: names the crate `{first}`, an Intel GPU driver's")
+    return problems
+
+
+def kernel_tree_paths() -> list[str]:
+    """Every file and directory under src/kernel, relative to it, `/`-separated."""
+    base = ROOT / "src" / "kernel"
+    return sorted(p.relative_to(base).as_posix() for p in base.rglob("*")
+                  if not any(part.startswith(".") or part == "target" for part in p.relative_to(base).parts))
+
+
+_GPU_REFS = {
+    "a.rs": "use intel_xelp::regs;\nfn f() { ::i915::go(); exec::run(); xe_ish::x(); }\n",
+    "b.rs": "// intel_xelp::regs in a comment\nfn g() { let s = \"i915::x\"; }\n",
+}
+_GPU_PATHS = ["src/exec.rs", "src/interfaces/chardev/mod.rs", "src/interfaces/xe/mod.rs",
+              "src/gpu/i915.rs", "src/intel-xelp", "src/Xelp_regs.rs", "src/flexed.rs"]
+
+
+def _gpu_self_test() -> list[str]:
+    """Rule 6 finds what it should and nothing else."""
+    _, refs, _ = build(sorted(_GPU_REFS), lambda rel: _GPU_REFS[rel])
+    found = gpu_driver_problems(_GPU_PATHS, refs, {"ferrix-kernel": ["ferrix-frame", "intel-xelp", "xenon"]})
+    want = [
+        "src/kernel/src/interfaces/xe/mod.rs: the path names an Intel GPU driver",
+        "src/kernel/src/gpu/i915.rs: the path names an Intel GPU driver",
+        "src/kernel/src/intel-xelp: the path names an Intel GPU driver",
+        "src/kernel/src/Xelp_regs.rs: the path names an Intel GPU driver",
+        "ferrix-kernel -> intel-xelp: a kernel crate depends on an Intel GPU driver's crate",
+        "a.rs:1: names the crate `intel_xelp`, an Intel GPU driver's",
+        "a.rs:2: names the crate `i915`, an Intel GPU driver's",
+    ]
+    return [] if found == want else [f"gpu-driver rule: got {found}, expected {want}"]
+
+
 # --- self-test ---------------------------------------------------------------
 
 _CRATE = {
@@ -1437,6 +1509,7 @@ def self_test() -> list[str]:
     failures += _crate_self_test()
     failures += _hook_self_test()
     failures += _kernel_self_test()
+    failures += _gpu_self_test()
     rings = {"rings": {"load": {"members": ["fs/**", "render/**", "net.rs"]}}}
     stale = stale_members(rings, ["fs/pipe.rs", "interfaces/render/mod.rs", "net.rs"])
     if stale != [("load", "render/**")]:
@@ -2125,7 +2198,7 @@ def main() -> int:
             print(f"    {problem}", file=sys.stderr)
         status = 1
 
-    modules, edges, problems = measure(manifest, ring_of)
+    modules, edges, problems, refs = measure(manifest, ring_of)
     crate_problems, crate_notes = check_crates(manifest, ring_of)
     if crate_problems:
         print(
@@ -2166,6 +2239,24 @@ def main() -> int:
             file=sys.stderr,
         )
         for problem in kernel_problems:
+            print(f"    {problem}", file=sys.stderr)
+        status = 1
+
+    gpu_found = gpu_driver_problems(
+        kernel_tree_paths(),
+        refs,
+        {package: _dependency_names(cargo, workspace_deps)
+         for package in kernel_entries if (cargo := kernel_cargo(package)) is not None},
+    )
+    if gpu_found:
+        print(
+            f"item-boundary: {len(gpu_found)} Intel GPU driver name(s) under src/kernel.\n"
+            f"  The driver serves the i915 uAPI from ring 3, outside the item\n"
+            f"  (docs/INTEL-GPU.md section 5, ledger 2352 K3 (4)); nothing in\n"
+            f"  the kernel may be it, hold it, or depend on it:",
+            file=sys.stderr,
+        )
+        for problem in gpu_found:
             print(f"    {problem}", file=sys.stderr)
         status = 1
 
