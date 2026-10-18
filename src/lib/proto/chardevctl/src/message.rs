@@ -50,7 +50,26 @@ pub enum Op {
     /// is the cookie the driver gave it; `id`, `file` and every other field
     /// are zero. One per dmabuf object, answered by nobody.
     DmabufRelease,
+    /// A program's `DMA_BUF_IOCTL_IMPORT_SYNC_FILE` on a dmabuf the driver
+    /// made (`docs/INTEL-GPU.md` §5, K5; ledger 2352 K5 (2)): passed to the
+    /// driver as data, never waited on by the kernel. `arg` is the dmabuf's
+    /// cookie, `cmd` the import's flags (`DMA_BUF_SYNC_READ` 1, `WRITE` 2),
+    /// `pages` what the fence is ([`IMPORT_OWN`], [`IMPORT_SIGNALLED`],
+    /// [`IMPORT_FOREIGN`]) and `file` its cookie for [`IMPORT_OWN`], its
+    /// status (0 or a negative errno, two's complement) for
+    /// [`IMPORT_SIGNALLED`], else zero. Answered as an ioctl: 0 or an errno.
+    DmabufImport,
 }
+
+/// An import's fence for [`Op::DmabufImport`]: one of this driver's own
+/// fences, unsignalled; `file` is its cookie.
+pub const IMPORT_OWN: u32 = 1;
+/// An import's fence that is signalled already, whoever made it; `file` is
+/// its status.
+pub const IMPORT_SIGNALLED: u32 = 2;
+/// An import's fence of another maker, unsignalled: nothing the driver can
+/// name or wait on.
+pub const IMPORT_FOREIGN: u32 = 3;
 
 /// A reply's kind for an [`Op::Mmap`]: the reply's value is a VMO handle in
 /// the driver's table and its fifth register the byte offset in it.
@@ -72,6 +91,7 @@ impl Op {
             Op::Release => 3,
             Op::Mmap => 4,
             Op::DmabufRelease => 5,
+            Op::DmabufImport => 6,
         }
     }
 
@@ -82,6 +102,7 @@ impl Op {
             3 => Some(Op::Release),
             4 => Some(Op::Mmap),
             5 => Some(Op::DmabufRelease),
+            6 => Some(Op::DmabufImport),
             _ => None,
         }
     }
@@ -316,7 +337,8 @@ impl Message {
                 let file = read.u64()?;
                 let cmd = read.u32()?;
                 let pages = read.u32()?;
-                if pages != 0 && op != Op::Mmap {
+                // An mmap's length, or an import's fence kind (K5).
+                if pages != 0 && op != Op::Mmap && op != Op::DmabufImport {
                     return Err(Malformed);
                 }
                 let arg = read.u64()?;

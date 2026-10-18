@@ -332,18 +332,71 @@ fn install_for(
     ms: u64,
     flags: u64,
 ) -> Result<i32, Errno> {
+    let fence = made_watched(control, cookie, ms)?;
+    descriptor(client, fence, flags & SYNC_CLOEXEC != 0).map_err(|why| {
+        if why == Errno::ENOMEM {
+            status::NO_MEMORY
+        } else {
+            status::LIMIT_REACHED
+        }
+    })
+}
+
+/// A new fence for `cookie` in the control's table, watched for its
+/// deadline before anything can hold it: one the deadline thread could not
+/// watch is refused, never left to its readers (C1, B3). What
+/// `chardev_sync_install` and `chardev_dmabuf_fence` make.
+///
+/// # Errors
+///
+/// As [`make`]; `LIMIT_REACHED` past the watched fences.
+pub(super) fn made_watched(
+    control: &Arc<Control>,
+    cookie: u64,
+    ms: u64,
+) -> Result<Arc<SyncFile>, Errno> {
     let fence = make(control, cookie, ms)?;
-    // Watched before the descriptor exists: an install the deadline thread
-    // could not watch is refused, never left to its readers (C1, B3).
     watch(&fence)?;
-    let inode: Arc<dyn Inode> = Arc::clone(&fence) as _;
-    let open = fs::anon::open_mode(inode, NAME, true, false).map_err(|_| status::NO_MEMORY)?;
-    let descriptor = client
+    Ok(fence)
+}
+
+/// `fence` as a new descriptor in `process`: what an install and a
+/// dmabuf's export give.
+///
+/// # Errors
+///
+/// `ENOMEM`, and `EMFILE` with no descriptor free.
+pub(super) fn descriptor(
+    process: &Process,
+    fence: Arc<SyncFile>,
+    cloexec: bool,
+) -> Result<i32, Errno> {
+    let inode: Arc<dyn Inode> = fence as _;
+    let open = fs::anon::open_mode(inode, NAME, true, false).map_err(|_| Errno::ENOMEM)?;
+    process
         .files()
         .lock()
-        .insert(open, flags & SYNC_CLOEXEC != 0)
-        .map_err(|_| status::LIMIT_REACHED)?;
-    Ok(descriptor)
+        .insert(open, cloexec)
+        .map_err(|_| Errno::EMFILE)
+}
+
+/// A fence signalled already, with 0, of no control and in no table: what
+/// a dmabuf's export gives when its slot holds nothing, as Linux gives its
+/// stub fence.
+///
+/// # Errors
+///
+/// `ENOMEM`.
+pub(super) fn signalled() -> Result<Arc<SyncFile>, Errno> {
+    let readable = crate::fallible::try_arc(WaitQueue::new()).map_err(|_| Errno::ENOMEM)?;
+    crate::fallible::try_arc(SyncFile {
+        cookie: 0,
+        control: Weak::new(),
+        deadline: 0,
+        signalled: SpinLock::new(Some((0, crate::timer::now_nanos()))),
+        readable,
+    })
+    .map_err(|_| Errno::ENOMEM)
 }
 
 /// A new fence for `cookie`, in the control's table.

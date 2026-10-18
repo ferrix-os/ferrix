@@ -234,3 +234,30 @@ pub fn sync_resolve<S: Syscall>(
         .make(control.syscall());
     decode(value).map(|signalled| (u64::from_ne_bytes(cookie), signalled != 0))
 }
+
+/// `chardev_dmabuf_fence`: a new unsignalled fence `cookie`, with a deadline
+/// of `deadline_ms` (0 for the default), in the fence slot of this
+/// control's dmabuf `dmabuf`, which a program's
+/// `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` snapshots. Signal it with
+/// [`sync_signal`].
+///
+/// # Errors
+///
+/// [`Error::BadState`] for a dmabuf cookie this control has no live dmabuf
+/// for, [`Error::AlreadyBound`] for a live fence cookie,
+/// [`Error::LimitReached`] past the control's fences.
+pub fn dmabuf_fence<S: Syscall>(
+    control: &Channel<S>,
+    dmabuf: u64,
+    cookie: u64,
+    deadline_ms: u64,
+) -> Result<(), Error> {
+    let value = Call::new(nr::CHARDEV_DMABUF_FENCE)
+        .value(register(control.handle()))
+        .value(dmabuf as usize)
+        .value(cookie as usize)
+        .value(deadline_ms as usize)
+        .value(0)
+        .make(control.syscall());
+    decode_unit(value)
+}

@@ -159,7 +159,7 @@ impl Served {
 /// of these calls makes a channel for a driver, not the path a driver's work
 /// takes. A `Once` per call, as [`crate::hooks`] keeps them: written at
 /// bring-up, read without a lock.
-static SERVED: [Served; 20] = [
+static SERVED: [Served; 21] = [
     Served::new(NativeCall::BlockRingCreate),
     Served::new(NativeCall::NetRingCreate),
     Served::new(NativeCall::DisplayControlCreate),
@@ -180,6 +180,7 @@ static SERVED: [Served; 20] = [
     Served::new(NativeCall::ChardevSyncInstall),
     Served::new(NativeCall::ChardevSyncSignal),
     Served::new(NativeCall::ChardevSyncResolve),
+    Served::new(NativeCall::ChardevDmabufFence),
 ];
 
 /// Answer `call` with `handler`. Called from `main.rs`'s `register_load`, by
@@ -471,7 +472,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::ChardevDmabufResolve
         | NativeCall::ChardevSyncInstall
         | NativeCall::ChardevSyncSignal
-        | NativeCall::ChardevSyncResolve => served(call, caller, &a),
+        | NativeCall::ChardevSyncResolve
+        | NativeCall::ChardevDmabufFence => served(call, caller, &a),
         NativeCall::DevmgrStart => crate::discovery::devmgr::devmgr_start(caller, &a),
         NativeCall::AuditRead => audit_read(process, handle(a[0]), a[1], a[2], a[3], a[4]),
         NativeCall::ProcessBootstrap => process_bootstrap(process),

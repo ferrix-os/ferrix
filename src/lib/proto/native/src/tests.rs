@@ -1134,6 +1134,7 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = chardev::sync_install(&channel, 1, 7, 0, 0);
     let _ = chardev::sync_signal(&channel, 7, 0);
     let _ = chardev::sync_resolve(&channel, 1, 3);
+    let _ = chardev::dmabuf_fence(&channel, 7, 8, 0);
     let _ = device.log_control();
     let _ = device.info();
     let _ = device.quiesce();

@@ -1191,8 +1191,8 @@ can run, and a start whose task cannot be listed fails before anything runs
 ### 2.2k The chardev core's tables (`interfaces::chardev`, load ring)
 
 NVIDIA's N1e forwarding core (`docs/NVIDIA.md` §4.4) is in the `load`
-ring, outside the item; the item gains only its five call numbers and their
-`SERVED` rows. Its bounds are written here because the consultant made them
+ring, outside the item; the item gains only its call numbers and their
+`SERVED` rows (eleven, the last K5's `chardev_dmabuf_fence`). Its bounds are written here because the consultant made them
 a condition of landing it (ledger 294, N10). They hold on every image, and
 the core does nothing on any image but `run-nvidia`'s: a control is made only
 for a device devmgr has handed over isolated.
@@ -1261,6 +1261,26 @@ drain follows an answer (L1). A release does not wait: it is
 queued and the client goes on. These are waits on a driver, not work of the
 item, and no bound is claimed for them. The driver's HELLO is waited for at
 most 10 s by the control's own task, never by a client or the boot.
+
+**A dmabuf's fence slot (K5, `docs/INTEL-GPU.md` §5; the consultant's K5
+(4), ledger 2352).** Each dmabuf has one slot, `Dmabuf::fence`: its
+serving driver's latest queued GPU access of any kind to the buffer, reads
+included, so the driver sets it for reads as well as writes (ledger 2360).
+It is an
+`Option<Arc<SyncFile>>` under a spin lock of its own. It is a leaf. It is
+held for one `replace` (`chardev_dmabuf_fence`) or one `clone` (an export),
+a few loads and stores, and no other lock is taken, nothing allocated and
+nothing waited for under it. The fence a `replace` gives up is dropped after
+the lock is released, because a fence's drop takes its control's `syncs`
+table. Its memory is one pointer a dmabuf. The fence it holds is one of the
+control's own, made by `sync::make` and counted against `MAX_SYNC_FILES` and
+`MAX_WATCHED` as any fence, and freed with the last of the slot and the
+descriptors that hold it. An export allocates one descriptor, and an empty
+slot's export also makes one signalled fence (two fallible allocations,
+`ENOMEM`). An import allocates a request as an ioctl does, and its client
+waits for the driver's answer as for an ioctl (above). No wait on the fence
+itself is made by the kernel, by the importing program's call, or by any
+other program.
 
 ### 2.2l A tmpfs inode's locks (`ferrix_vfs::tmpfs::Node`, load ring, F-70)
 

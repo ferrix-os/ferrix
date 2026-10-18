@@ -179,6 +179,15 @@ pub unsafe extern "C" fn nvos_chardev_next(out: *mut Request) -> NvStatus {
                     Op::Release => 3,
                     Op::Mmap => 4,
                     Op::DmabufRelease => 5,
+                    // A program's IMPORT_SYNC_FILE on one of RM's dmabufs:
+                    // RM keeps no fences on them, so the import is refused
+                    // as nvidia-drm's dmabufs did before Linux 6.0, and as
+                    // Ferrix's did before K5 (`docs/INTEL-GPU.md` §5).
+                    Op::DmabufImport => {
+                        const ENOTTY: i32 = 25;
+                        let _ = nvos_chardev_reply(request.id, -ENOTTY, 0);
+                        continue;
+                    }
                 };
                 // SAFETY: the caller vouches for `out`.
                 unsafe {

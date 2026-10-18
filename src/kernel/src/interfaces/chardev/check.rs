@@ -84,6 +84,21 @@
 //!   `Untranslated` with nothing published, while the same HELLO of a
 //!   function that is not the Intel GPU is taken as before (§4.4 (a),
 //!   `L.object.192`);
+//! * a dmabuf's fence slot (K5 of ledger 2352): an export with the slot
+//!   empty gives a fence signalled already, and `EINVAL` for flags 0 or
+//!   past read and write; `chardev_dmabuf_fence` with flags, for a cookie
+//!   no live dmabuf of the control has, and for a live fence cookie is
+//!   refused; an export gives the slot's own fence, unsignalled, and still
+//!   that one after the slot is set again (a snapshot), the next export the
+//!   new one, which the driver's signal signals; an import of the driver's
+//!   own unsignalled fence and of a signalled one each reach the driver as
+//!   an `Op::DmabufImport` naming the dmabuf, the flags and the fence, the
+//!   slot unchanged, and the program's call answers what the driver
+//!   answered; an import of a descriptor that is no fence is `EINVAL`, and
+//!   nothing reaches the driver; another driver's fence call for the
+//!   dmabuf is `BAD_STATE`, and its signal of the slot's fence too, the slot
+//!   unchanged; after the driver's death the exported and the slot's fences
+//!   read `ENODEV`, and an import is `ENODEV`;
 //! * replies out of order (C1 of ledger 2352): of two requests outstanding,
 //!   the later answered first and then the earlier, each program gets its
 //!   own answer, and a second reply to either is refused `BAD_STATE`.
@@ -181,6 +196,8 @@ pub(crate) struct Report {
     pub(crate) untranslated: u32,
     /// Requests answered out of the order they were made (C1).
     pub(crate) out_of_order: u32,
+    /// dmabuf fence-slot calls, exports and imports checked (K5).
+    pub(crate) slot_checks: u32,
     /// Why the cases needing a second driver were not checked.
     pub(crate) one_device: bool,
     /// Why nothing was checked.
@@ -193,6 +210,9 @@ enum Job {
     Await(Arc<Control>, Arc<Request>, Arc<Process>),
     /// Abandon the request, as a signal makes a program's call do.
     Abandon(Arc<Control>, Arc<Request>),
+    /// A program's `IMPORT_SYNC_FILE` on a dmabuf, its argument at the
+    /// address given (K5).
+    Import(Arc<Process>, Arc<super::dmabuf::Dmabuf>, u64),
 }
 
 /// The helper's job.
@@ -274,9 +294,11 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         [fence, kept.fd],
         &mut report,
     )?;
+    let fenced = dmabuf_fences(&driver, control, &core, &program, foreign, &mut report)?;
     let since = start_poll(&program, fence)?;
     death(&driver, control, &core, &program, &mut report)?;
     report.fence_death_wake_ms = poll_woke(since)?;
+    fenced_after_death(&program, &fenced, &mut report)?;
     after_death(&driver, first, &core, &program, &kept, &mut report)?;
     stale_fence_refused(&driver, first, &core, &program, fence, &mut report)?;
     fence_outlived(&program, fence)?;
@@ -308,6 +330,336 @@ fn refusals(side: &Side, node: &Arc<DeviceNode>, report: &mut Report) -> Result<
         settle()?;
         unclaimed(node)?;
     }
+    Ok(())
+}
+
+/// The dmabuf the fence-slot cases use, its cookie.
+const FENCED: u64 = 0x00D3_AB5F;
+/// The fences put in its slot, in order.
+const SLOT: [u64; 3] = [0x5107_0001, 0x5107_0002, 0x5107_0003];
+/// `DMA_BUF_SYNC_WRITE`, `DMA_BUF_SYNC_RW`.
+const SYNC_WRITE: u32 = 2;
+const SYNC_RW: u32 = 3;
+
+/// What the fence-slot cases keep for after the driver's death.
+struct Fenced {
+    dmabuf: Arc<super::dmabuf::Dmabuf>,
+    /// The program's descriptor of it.
+    fd: i32,
+    /// An exported descriptor of the slot's first fence, unsignalled.
+    exported: i32,
+}
+
+/// An export on `dmabuf` by `program` with `flags`: the descriptor, or the
+/// errno.
+fn export(
+    program: &Side,
+    dmabuf: &super::dmabuf::Dmabuf,
+    flags: u32,
+) -> Result<Result<i32, Errno>, &'static str> {
+    let mut argument = [0u8; 8];
+    argument[..4].copy_from_slice(&flags.to_ne_bytes());
+    argument[4..].copy_from_slice(&(-1_i32).to_ne_bytes());
+    program.put(BUFFER, &argument)?;
+    Ok(
+        match super::dmabuf::ioctl(
+            &program.process,
+            dmabuf,
+            super::dmabuf::DMA_BUF_IOCTL_EXPORT_SYNC_FILE,
+            BUFFER,
+        ) {
+            Ok(_) => Ok(program.get_u32(BUFFER + 4)? as i32),
+            Err(why) => Err(why),
+        },
+    )
+}
+
+/// The fence a program's descriptor `fd` is.
+fn fence_of(program: &Side, fd: i32) -> Option<Arc<super::sync::SyncFile>> {
+    crate::syscall::fd::file(&program.process, fd)
+        .ok()
+        .and_then(|file| super::sync::of(file.io()))
+}
+
+/// K5: a dmabuf's fence slot, its export, its import, another driver's
+/// attempt on it.
+///
+/// No item requirement names these: the chardev core is the load ring's,
+/// and K5's rules are held by this check and its controls (ledger 2352 K5
+/// (5)).
+fn dmabuf_fences(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    foreign: Option<(&Side, Handle, &Arc<Control>)>,
+    report: &mut Report,
+) -> Result<Fenced, &'static str> {
+    drain_channel(side, control);
+    let (fd, dmabuf) = fenced_dmabuf(side, control, core, program)?;
+    let set = |cookie: u64, fence: u64, flags: u64| {
+        side.call(
+            nr::CHARDEV_DMABUF_FENCE,
+            &[reg(control), cookie, fence, 0, flags],
+        )
+    };
+    // The slot empty: a fence signalled already; flags as Linux checks them.
+    let stub =
+        export(program, &dmabuf, SYNC_RW)?.map_err(|_| "an export of a dmabuf was refused")?;
+    if !fence_of(program, stub).is_some_and(|fence| {
+        fence
+            .status(timer::now_nanos())
+            .is_some_and(|(code, _)| code == 0)
+    }) {
+        return Err(
+            "an export of a dmabuf with nothing in its slot did not give a signalled fence",
+        );
+    }
+    for flags in [0, 4] {
+        if export(program, &dmabuf, flags)? != Err(Errno::EINVAL) {
+            return Err("an export with flags Linux refuses was not EINVAL");
+        }
+        report.slot_checks += 1;
+    }
+    for (refused, wanted, what) in [
+        (
+            set(FENCED, SLOT[0], 1),
+            status::INVALID_ARGS,
+            "a slot fence with flags was made",
+        ),
+        (
+            set(FENCED + 1, SLOT[0], 0),
+            status::BAD_STATE,
+            "a slot fence was made for a dmabuf the control has not",
+        ),
+    ] {
+        if refused != Err(wanted) {
+            return Err(what);
+        }
+        report.slot_checks += 1;
+    }
+    let _ = set(FENCED, SLOT[0], 0).map_err(|_| "a dmabuf's slot fence was refused")?;
+    if set(FENCED, SLOT[0], 0) != Err(status::ALREADY_BOUND) {
+        return Err("a slot fence was made with a live fence's cookie");
+    }
+    report.slot_checks += 1;
+    let first =
+        export(program, &dmabuf, SYNC_WRITE)?.map_err(|_| "an export of a dmabuf was refused")?;
+    let in_slot =
+        super::dmabuf::slot(&dmabuf).ok_or("a slot fence was not in its dmabuf's slot")?;
+    let exported = fence_of(program, first).ok_or("an export did not give a fence")?;
+    if !Arc::ptr_eq(&exported, &in_slot) || exported.status(timer::now_nanos()).is_some() {
+        return Err("an export did not give the slot's own unsignalled fence");
+    }
+    let _ = set(FENCED, SLOT[1], 0).map_err(|_| "a dmabuf's second slot fence was refused")?;
+    let second =
+        export(program, &dmabuf, SYNC_RW)?.map_err(|_| "an export of a dmabuf was refused")?;
+    let snapshot = fence_of(program, first).is_some_and(|fence| fence.cookie() == SLOT[0]);
+    let next = fence_of(program, second).is_some_and(|fence| fence.cookie() == SLOT[1]);
+    if !snapshot || !next {
+        return Err("an export was not a snapshot of the slot at its call");
+    }
+    let _ = side
+        .call(nr::CHARDEV_SYNC_SIGNAL, &[reg(control), SLOT[1], 0])
+        .map_err(|_| "the driver could not signal its slot fence")?;
+    if !fence_of(program, second).is_some_and(|fence| {
+        fence
+            .status(timer::now_nanos())
+            .is_some_and(|(code, _)| code == 0)
+    }) {
+        return Err("an exported slot fence did not read the driver's signal");
+    }
+    report.slot_checks += 3;
+    imports(
+        side,
+        control,
+        core,
+        program,
+        &dmabuf,
+        (first, second),
+        report,
+    )?;
+    foreign_set_refused(&dmabuf, foreign, report)?;
+    // Unsignalled in the slot when the driver dies.
+    let _ = set(FENCED, SLOT[2], 0).map_err(|_| "a dmabuf's third slot fence was refused")?;
+    for fd in [stub, second] {
+        close_fd(&program.process, fd)?;
+    }
+    Ok(Fenced {
+        dmabuf,
+        fd,
+        exported: first,
+    })
+}
+
+/// Another driver's fence call for the dmabuf, and its signal of the slot's
+/// fence, are each `BAD_STATE`, the slot unchanged (K5 (2), (5)).
+fn foreign_set_refused(
+    dmabuf: &Arc<super::dmabuf::Dmabuf>,
+    foreign: Option<(&Side, Handle, &Arc<Control>)>,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let dmabuf = &**dmabuf;
+    if let Some((other_side, other, _)) = foreign {
+        let before = super::dmabuf::slot(dmabuf);
+        let refused = other_side.call(
+            nr::CHARDEV_DMABUF_FENCE,
+            &[reg(other), FENCED, SLOT[2], 0, 0],
+        );
+        let signal = other_side.call(nr::CHARDEV_SYNC_SIGNAL, &[reg(other), SLOT[0], 0]);
+        let same = match (before, super::dmabuf::slot(dmabuf)) {
+            (Some(a), Some(b)) => Arc::ptr_eq(&a, &b),
+            _ => false,
+        };
+        if refused != Err(status::BAD_STATE) || signal != Err(status::BAD_STATE) || !same {
+            return Err("another driver set a dmabuf's slot or signalled its fence");
+        }
+        report.slot_checks += 2;
+    }
+    Ok(())
+}
+
+/// A dmabuf of a fresh VMO, cookie [`FENCED`], installed in `program`
+/// through a request answered after.
+fn fenced_dmabuf(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+) -> Result<(i32, Arc<super::dmabuf::Dmabuf>), &'static str> {
+    let vmo = side.handle(nr::VMO_CREATE, &[DMABUF_BYTES], "vmo_create failed")?;
+    let request = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    start(Job::Await(
+        Arc::clone(core),
+        Arc::clone(&request),
+        Arc::clone(&program.process),
+    ))?;
+    let Some(Message::Request(wire)) = receive(side, control)? else {
+        return Err("an ioctl did not reach its driver as a REQUEST");
+    };
+    let fd = side
+        .call(
+            nr::CHARDEV_DMABUF_INSTALL,
+            &[reg(control), wire.id, reg(vmo), FENCED, 0],
+        )
+        .map_err(|_| "a dmabuf for the slot cases was refused")? as i32;
+    reply(side, control, wire.id, VALUE)?;
+    let _ = finish()?;
+    let _ = side.call(nr::HANDLE_CLOSE, &[reg(vmo)]);
+    crate::syscall::fd::file(&program.process, fd)
+        .ok()
+        .and_then(|file| super::dmabuf::of(file.io()))
+        .map(|dmabuf| (fd, dmabuf))
+        .ok_or("an installed dmabuf is not a dmabuf")
+}
+
+/// The imports: of the driver's own unsignalled fence and of a signalled
+/// one, each reaching the driver as data with the slot unchanged and
+/// answered with the driver's answer; of a descriptor that is no fence,
+/// `EINVAL` with nothing sent.
+fn imports(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    dmabuf: &Arc<super::dmabuf::Dmabuf>,
+    (own, signalled): (i32, i32),
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use ferrix_chardevctl::message::{IMPORT_OWN, IMPORT_SIGNALLED};
+    let slot = super::dmabuf::slot(dmabuf).ok_or("the slot was empty")?;
+    for (fd, kind, file, answer) in [
+        (own, IMPORT_OWN, SLOT[0], 0_i64),
+        (signalled, IMPORT_SIGNALLED, 0, -i64::from(Errno::EINVAL.0)),
+    ] {
+        let mut argument = [0u8; 8];
+        argument[..4].copy_from_slice(&SYNC_WRITE.to_ne_bytes());
+        argument[4..].copy_from_slice(&fd.to_ne_bytes());
+        program.put(BUFFER + 0x100, &argument)?;
+        start(Job::Import(
+            Arc::clone(&program.process),
+            Arc::clone(dmabuf),
+            BUFFER + 0x100,
+        ))?;
+        let Some(Message::Request(wire)) = receive(side, control)? else {
+            return Err("an import did not reach its driver as a REQUEST");
+        };
+        if wire.op != Op::DmabufImport
+            || wire.arg != FENCED
+            || wire.cmd != SYNC_WRITE
+            || wire.pages != kind
+            || wire.file != file
+        {
+            return Err("an import reached its driver naming another dmabuf, flag or fence");
+        }
+        if !super::dmabuf::slot(dmabuf).is_some_and(|now| Arc::ptr_eq(&now, &slot)) {
+            return Err("an import changed the dmabuf's fence slot");
+        }
+        let _ = side
+            .call(
+                nr::CHARDEV_REPLY,
+                &[reg(control), wire.id, answer as u64, 0],
+            )
+            .map_err(|_| "the driver's answer to an import was refused")?;
+        let wanted = if answer == 0 {
+            Ok(0)
+        } else {
+            Err(Errno::EINVAL)
+        };
+        if finish()? != wanted {
+            return Err("an import did not answer what its driver answered");
+        }
+        report.slot_checks += 1;
+    }
+    let mut argument = [0u8; 8];
+    argument[..4].copy_from_slice(&SYNC_WRITE.to_ne_bytes());
+    argument[4..].copy_from_slice(&i32::MAX.to_ne_bytes());
+    program.put(BUFFER + 0x100, &argument)?;
+    let queued_before = queued(core);
+    if super::dmabuf::import_as(&program.process, dmabuf, BUFFER + 0x100) != Err(Errno::EINVAL)
+        || queued(core) != queued_before
+    {
+        return Err(
+            "an import of a descriptor that is no fence was not EINVAL, or reached the driver",
+        );
+    }
+    report.slot_checks += 1;
+    Ok(())
+}
+
+/// After the driver's death: the exported fence and the slot's read
+/// `ENODEV`, and an import is `ENODEV`.
+fn fenced_after_death(
+    program: &Side,
+    fenced: &Fenced,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let enodev = -(Errno::ENODEV.0 as i32);
+    let dead = |fd: i32| {
+        fence_of(program, fd).is_some_and(|fence| {
+            fence
+                .status(timer::now_nanos())
+                .is_some_and(|(code, _)| code == enodev)
+        })
+    };
+    let now = export(program, &fenced.dmabuf, SYNC_RW)?
+        .map_err(|_| "an export after its driver's death was refused")?;
+    if !dead(fenced.exported) || !dead(now) {
+        return Err("a dead driver's slot fences did not read ENODEV");
+    }
+    let mut argument = [0u8; 8];
+    argument[..4].copy_from_slice(&SYNC_WRITE.to_ne_bytes());
+    argument[4..].copy_from_slice(&now.to_ne_bytes());
+    program.put(BUFFER + 0x100, &argument)?;
+    if super::dmabuf::import_as(&program.process, &fenced.dmabuf, BUFFER + 0x100)
+        != Err(Errno::ENODEV)
+    {
+        return Err("an import into a dead driver's dmabuf was not ENODEV");
+    }
+    for fd in [now, fenced.exported, fenced.fd] {
+        close_fd(&program.process, fd)?;
+    }
+    report.slot_checks += 2;
     Ok(())
 }
 
@@ -2437,6 +2789,7 @@ fn helper(_: usize) {
             abandon(&control, &request);
             Ok(0)
         }
+        Some(Job::Import(client, dmabuf, arg)) => super::dmabuf::import_as(&client, &dmabuf, arg),
         None => Err(Errno::EINVAL),
     };
     *OUTCOME.lock() = Some(outcome);

@@ -695,7 +695,9 @@ inside `nvrm`. Such a dmabuf only has to *name* the buffer.
 * **What a program can do with one.** `mmap` is `ENODEV` (`mapping_at`
   answers nothing, which `memory.rs` already turns into `ENODEV`); `read`
   and `write` `EINVAL`; `fstat` and `lseek(SEEK_END)` give the size, as
-  Linux's dmabuf does; `DMA_BUF_IOCTL_SYNC` 0, other ioctls `ENOTTY`;
+  Linux's dmabuf does; `DMA_BUF_IOCTL_SYNC` 0, the sync-file export and
+  import as every dmabuf answers them since K5 (`docs/INTEL-GPU.md` §5;
+  `nvrm` answers an import `ENOTTY`), other ioctls `ENOTTY`;
   `poll` ready; passing it over a socket, `dup` and `fork` as for any file.
   A later mapping through BAR1 would be a design of its own (ledger 300's
   aperture rules), not a change to this one.

@@ -275,6 +275,7 @@ pub(crate) fn install() -> Result<(), Full> {
     native::serve(NativeCall::ChardevSyncInstall, sync::install)?;
     native::serve(NativeCall::ChardevSyncSignal, sync::signal)?;
     native::serve(NativeCall::ChardevSyncResolve, sync::resolve)?;
+    native::serve(NativeCall::ChardevDmabufFence, dmabuf::fence)?;
     native::register_server(&SERVER)
 }
 
@@ -994,6 +995,8 @@ fn reply(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
             Op::Mmap => map_reply(caller, &control, &request, value as u64, a4, a5)
                 .map(Answer::Map)
                 .ok_or(Errno::EIO),
+            // An import is answered with its status alone (K5).
+            Op::DmabufImport => Ok(Answer::Value(0)),
             // Never a request anyone waits in.
             Op::DmabufRelease => Err(Errno::EIO),
         }

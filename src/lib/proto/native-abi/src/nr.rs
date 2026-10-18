@@ -181,6 +181,8 @@ pub const CHARDEV_SYNC_INSTALL: usize = 0x1062;
 pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 /// [`NativeCall::ChardevSyncResolve`].
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
+/// [`NativeCall::ChardevDmabufFence`].
+pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -604,10 +606,22 @@ pub enum NativeCall {
     /// `BAD_HANDLE` for any other descriptor. Only while the request is
     /// outstanding. Answered by the load ring.
     ChardevSyncResolve,
+    /// `(control, dmabuf, cookie, deadline_ms, flags)`. Make a new fence
+    /// `cookie`, unsignalled, as [`NativeCall::ChardevSyncInstall`] makes one
+    /// but installed in no program, and put it in the fence slot of the
+    /// control's own live dmabuf `dmabuf`, in place of the one there: what a
+    /// program's `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` then snapshots
+    /// (`docs/INTEL-GPU.md` §5, K5). `flags` must be 0. Signalled with
+    /// [`NativeCall::ChardevSyncSignal`], by deadline and at the control's
+    /// end as every fence. `BAD_STATE` for a cookie no live dmabuf of this
+    /// control has, `ALREADY_BOUND` for a fence cookie that is live,
+    /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
+    /// Answered by the load ring.
+    ChardevDmabufFence,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 64] = [
+pub const ALL: [NativeCall; 65] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -672,6 +686,7 @@ pub const ALL: [NativeCall; 64] = [
     NativeCall::ChardevSyncInstall,
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
+    NativeCall::ChardevDmabufFence,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -751,6 +766,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_INSTALL => NativeCall::ChardevSyncInstall,
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
+        CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
         _ => return None,
     };
     Some(call)
@@ -824,5 +840,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncInstall => CHARDEV_SYNC_INSTALL,
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
+        NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
     }
 }

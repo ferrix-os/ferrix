@@ -692,9 +692,9 @@ pub(crate) fn sys_ioctl(
     if let Some(chardev) = crate::interfaces::chardev::file::of(file.io()) {
         return crate::interfaces::chardev::file::ioctl(&chardev, request, arg);
     }
-    // A dmabuf such a driver made: no sync to wait for (N3b, B9).
-    if crate::interfaces::chardev::dmabuf::of(file.io()).is_some() {
-        return crate::interfaces::chardev::dmabuf::ioctl(process, request, arg);
+    // A dmabuf such a driver made: its sync and its fence slot (N3b, B9; K5).
+    if let Some(dmabuf) = crate::interfaces::chardev::dmabuf::of(file.io()) {
+        return crate::interfaces::chardev::dmabuf::ioctl(process, &dmabuf, request, arg);
     }
     // A fence such a driver made (N3b sync, S6).
     if let Some(fence) = crate::interfaces::chardev::sync::of(file.io()) {

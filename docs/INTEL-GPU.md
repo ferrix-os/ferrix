@@ -708,6 +708,24 @@ Mesa 26.0.8; raw output in `~/.local/share/ferrix/n150-linux/intelgpu-m0/results
   applies `engine_mask_apply_media_fuses` and does not assume `adl_p_info`'s
   list.
 
+**The kernel items (intel-gpu-kernel).** K3 landed in caf25c0d5 (ledger
+2356): `ferrix.intelgpu`, the render-only HELLO, the refusal of every node
+while 00:02.0's DMA is untranslated, and the iGPU's own pin budget. Its box
+evidence is a `docs/BACKLOG.md` row, owed with M1. K5 is on branch
+`intel-k5` and awaits the consultant (its request is
+`~/.local/share/ferrix/n150-linux/intel-gpu-k5-review-request.md`). It adds
+one fence slot per dmabuf, set only by its own driver with
+`chardev_dmabuf_fence` (0x1065). `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`
+snapshots the slot. `IMPORT_SYNC_FILE` reaches the driver as
+`Op::DmabufImport` (dmabuf cookie in `arg`, flags in `cmd`, the fence's
+kind in `pages`, its cookie or status in `file`), and the driver answers it
+as an ioctl. **The driver's contract (ledger 2360).** The slot stands for
+the driver's latest queued GPU access of any kind to the buffer, reads
+included. So the driver sets it with `chardev_dmabuf_fence` for every
+execbuffer that reads a shared object, as well as for every one that writes
+it. A fence exported for READ or for WRITE then waits for both, which is at
+least what Linux's reservation object gives. K6, then K4, follow. K2 waits for vtd-n150.
+
 
 2026-10-18: this design, on branch `intel-gpu-design`, docs only. Nothing
 is built. Nothing has run on the box: it was held by `fxvalidate`, and the

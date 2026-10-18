@@ -200,3 +200,42 @@ fn a_render_only_hello_is_taken() {
         Ok((1, RENDER_MINOR))
     );
 }
+
+/// An import's REQUEST carries its fence's kind in `pages` and goes there
+/// and back; another operation's nonzero `pages` but an mmap's is refused.
+#[test]
+fn an_import_request_round_trips() {
+    use crate::message::{IMPORT_OWN, IMPORT_SIGNALLED};
+    for (kind, file) in [
+        (IMPORT_OWN, 0x5107_0001),
+        (IMPORT_SIGNALLED, (-22_i64) as u64),
+    ] {
+        let request = Request {
+            id: 9,
+            file,
+            op: Op::DmabufImport,
+            minor: 0,
+            pid: 7,
+            euid: 0,
+            egid: 0,
+            cmd: 2,
+            arg: 0x00D3_AB5F,
+            pages: kind,
+        };
+        let message = Message::Request(request);
+        assert_eq!(Message::decode(message.encode().as_bytes()), Ok(message));
+    }
+    let ioctl = Message::Request(Request {
+        id: 9,
+        file: 1,
+        op: Op::Ioctl,
+        minor: 0,
+        pid: 7,
+        euid: 0,
+        egid: 0,
+        cmd: 2,
+        arg: 0,
+        pages: 1,
+    });
+    assert_eq!(Message::decode(ioctl.encode().as_bytes()), Err(Malformed));
+}

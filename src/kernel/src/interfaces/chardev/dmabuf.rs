@@ -33,8 +33,41 @@
 //!   the call answers `ENODEV`: the same as a driver that installs and then
 //!   dies, a working dmabuf the program closes (B7), never a claim on the
 //!   device.
-//! * No sync: `DMA_BUF_IOCTL_SYNC` answers 0, every other ioctl `ENOTTY`,
-//!   and poll is always ready (B9).
+//! * `DMA_BUF_IOCTL_SYNC` answers 0, and poll is always ready (B9).
+//!
+//! # Its fence slot (K5)
+//!
+//! Mesa's anv refuses a device whose dmabufs do not answer
+//! `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` (`docs/INTEL-GPU.md` §2.1 and §5, K5;
+//! the consultant's K5 (1)-(5), ledger 2352). So each dmabuf has one fence
+//! slot, which stands for its driver's latest queued GPU access of any
+//! kind to it, reads included: the driver sets it for a GPU read of the
+//! buffer as well as for a write, so that a fence exported for either kind
+//! of access waits for both (the consultant's single-slot ruling, ledger
+//! 2360):
+//!
+//! * Only the dmabuf's own driver sets it: `chardev_dmabuf_fence` names the
+//!   dmabuf by cookie in the calling control's own table, so another
+//!   control finds nothing (`BAD_STATE`), and the fence it puts there is a
+//!   new one of the control's own, which only that control signals, which
+//!   its deadline bounds, and which the control's end signals `ENODEV`
+//!   (ledger 647's S-rules, unchanged: `sync.rs`).
+//! * `EXPORT_SYNC_FILE` installs, in the calling program, a `sync_file` of
+//!   the fence the slot holds at the call: a snapshot, as Linux's is, which
+//!   a later set does not change; with the slot empty, a fence signalled
+//!   already, as Linux's stub. Read or write asked, the one slot is what is
+//!   waited for.
+//! * `IMPORT_SYNC_FILE` changes nothing in the kernel: the import is passed
+//!   to the dmabuf's driver as data ([`Op::DmabufImport`]: the dmabuf's
+//!   cookie, the flags, and what the fence is), and the program's call
+//!   waits for the driver's answer as an ioctl does, never for the fence.
+//!   No other program and no kernel path waits on an imported fence.
+//!   A dmabuf whose driver is gone answers `ENODEV`.
+//! * The slot's lock is a leaf: it is held for a swap or a clone of one
+//!   `Arc`, nothing is taken under it, and a fence it gives up is dropped
+//!   after it is released, since a fence's drop takes its control's table.
+//!
+//! [`Op::DmabufImport`]: ferrix_chardevctl::message::Op::DmabufImport
 //!
 //! # Name-only dmabufs
 //!
@@ -68,11 +101,13 @@ use ferrix_vfs::{Inode, Metadata, Readiness, Result as VfsResult};
 
 use crate::object::Object;
 use crate::object::process::Host;
+use crate::sync::SpinLock;
 use crate::syscall::process::Process;
 use crate::syscall::uaccess;
 use crate::user::vmo::Vmo;
 
 use super::Control;
+use super::sync::SyncFile;
 
 /// The most dmabufs one control has alive; the next install is
 /// `LIMIT_REACHED` (B5).
@@ -87,6 +122,12 @@ const DMA_BUF_IOCTL_SYNC: u32 = 0x4008_6200;
 const SYNC_VALID: u64 = 0x7;
 /// `DMA_BUF_SYNC_RW`: a sync names reading, writing or both.
 const SYNC_RW: u64 = 0x3;
+/// `DMA_BUF_IOCTL_EXPORT_SYNC_FILE`:
+/// `_IOWR('b', 2, struct dma_buf_export_sync_file)`.
+pub(crate) const DMA_BUF_IOCTL_EXPORT_SYNC_FILE: u32 = 0xC008_6202;
+/// `DMA_BUF_IOCTL_IMPORT_SYNC_FILE`:
+/// `_IOW('b', 3, struct dma_buf_import_sync_file)`.
+pub(crate) const DMA_BUF_IOCTL_IMPORT_SYNC_FILE: u32 = 0x4008_6203;
 
 /// What a dmabuf is over: one of exactly two kinds (ledger 632's N2).
 pub(crate) enum Backing {
@@ -126,6 +167,9 @@ pub(crate) struct Dmabuf {
     /// driver hear of it, made and released, and only then was the
     /// release's slot in the control's queue not given back.
     announced: AtomicBool,
+    /// The fence its driver last put in its slot, if any: what an export
+    /// snapshots (K5). A leaf lock.
+    fence: SpinLock<Option<Arc<SyncFile>>>,
 }
 
 impl core::fmt::Debug for Dmabuf {
@@ -239,23 +283,150 @@ pub(crate) fn of(io: &Arc<dyn Inode>) -> Option<Arc<Dmabuf>> {
 }
 
 /// An ioctl on a dmabuf: `DMA_BUF_IOCTL_SYNC` checked as Linux checks it
-/// and answered 0, anything else `ENOTTY` (B9).
+/// and answered 0 (B9); `EXPORT_SYNC_FILE` and `IMPORT_SYNC_FILE` as the
+/// module says (K5); anything else `ENOTTY`.
 ///
 /// # Errors
 ///
-/// `ENOTTY`, `EFAULT` for an unreadable argument, and `EINVAL` for flags
-/// Linux refuses.
-pub(crate) fn ioctl(process: &Process, request: u32, arg: u64) -> Result<usize, Errno> {
-    if request != DMA_BUF_IOCTL_SYNC {
-        return Err(Errno::ENOTTY);
+/// `ENOTTY`, `EFAULT` for an unreadable argument, `EINVAL` for flags Linux
+/// refuses, and an export's or an import's own.
+pub(crate) fn ioctl(
+    process: &Process,
+    dmabuf: &Dmabuf,
+    request: u32,
+    arg: u64,
+) -> Result<usize, Errno> {
+    match request {
+        DMA_BUF_IOCTL_SYNC => {
+            let mut bytes = [0u8; 8];
+            uaccess::copy_from_user(process.space(), arg, &mut bytes).map_err(|_| Errno::EFAULT)?;
+            let flags = u64::from_ne_bytes(bytes);
+            if flags & !SYNC_VALID != 0 || flags & SYNC_RW == 0 {
+                return Err(Errno::EINVAL);
+            }
+            Ok(0)
+        }
+        DMA_BUF_IOCTL_EXPORT_SYNC_FILE => export(process, dmabuf, arg),
+        DMA_BUF_IOCTL_IMPORT_SYNC_FILE => import(process, dmabuf, arg),
+        _ => Err(Errno::ENOTTY),
     }
+}
+
+/// `struct dma_buf_export_sync_file` and `struct dma_buf_import_sync_file`
+/// at `arg`: the flags, which must be read, write or both, and the
+/// descriptor.
+fn sync_file_argument(process: &Process, arg: u64) -> Result<(u32, i32), Errno> {
     let mut bytes = [0u8; 8];
     uaccess::copy_from_user(process.space(), arg, &mut bytes).map_err(|_| Errno::EFAULT)?;
-    let flags = u64::from_ne_bytes(bytes);
-    if flags & !SYNC_VALID != 0 || flags & SYNC_RW == 0 {
+    let [a, b, c, d, e, f, g, h] = bytes;
+    let flags = u32::from_ne_bytes([a, b, c, d]);
+    if u64::from(flags) & !SYNC_RW != 0 || u64::from(flags) & SYNC_RW == 0 {
         return Err(Errno::EINVAL);
     }
+    Ok((flags, i32::from_ne_bytes([e, f, g, h])))
+}
+
+/// `EXPORT_SYNC_FILE`: a `sync_file` of what the slot holds now, or of a
+/// fence signalled already when it holds nothing, as a new close-on-exec
+/// descriptor written back into the argument.
+fn export(process: &Process, dmabuf: &Dmabuf, arg: u64) -> Result<usize, Errno> {
+    let (_flags, _) = sync_file_argument(process, arg)?;
+    // A clone under the leaf lock, and nothing more.
+    let held = dmabuf.fence.lock().clone();
+    let fence = match held {
+        Some(fence) => fence,
+        None => super::sync::signalled()?,
+    };
+    let fd = super::sync::descriptor(process, fence, true)?;
+    if uaccess::copy_to_user(process.space(), arg + 4, &fd.to_ne_bytes()).is_err() {
+        // Nobody was told of it: taken back, and closed unlocked.
+        let taken = process.files().lock().remove(fd);
+        drop(taken);
+        return Err(Errno::EFAULT);
+    }
     Ok(0)
+}
+
+/// `IMPORT_SYNC_FILE`, by the running program.
+fn import(process: &Process, dmabuf: &Dmabuf, arg: u64) -> Result<usize, Errno> {
+    let client = crate::syscall::process::current().ok_or(Errno::ENODEV)?;
+    if !core::ptr::eq(Arc::as_ptr(&client), process) {
+        return Err(Errno::ENODEV);
+    }
+    import_as(&client, dmabuf, arg)
+}
+
+/// `IMPORT_SYNC_FILE` by `client`: passed to the dmabuf's driver as data,
+/// and answered with the driver's answer; nothing in the kernel waits on
+/// the fence.
+pub(super) fn import_as(client: &Arc<Process>, dmabuf: &Dmabuf, arg: u64) -> Result<usize, Errno> {
+    use ferrix_chardevctl::message::{IMPORT_FOREIGN, IMPORT_OWN, IMPORT_SIGNALLED, Op};
+
+    let process: &Process = client;
+    let (flags, fd) = sync_file_argument(process, arg)?;
+    let fence = crate::syscall::fd::file(process, fd)
+        .ok()
+        .and_then(|file| super::sync::of(file.io()))
+        .ok_or(Errno::EINVAL)?;
+    let control = dmabuf.control.upgrade().ok_or(Errno::ENODEV)?;
+    if control.is_gone() {
+        return Err(Errno::ENODEV);
+    }
+    let (kind, file) = match fence.status(crate::timer::now_nanos()) {
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "the status travels as its two's complement"
+        )]
+        Some((code, _)) => (IMPORT_SIGNALLED, i64::from(code) as u64),
+        None if fence.made_by(&control) => (IMPORT_OWN, fence.cookie()),
+        None => (IMPORT_FOREIGN, 0),
+    };
+    drop(fence);
+    let ask = super::Ask {
+        op: Op::DmabufImport,
+        file,
+        minor: 0,
+        cmd: flags,
+        arg: dmabuf.cookie,
+        pages: kind,
+    };
+    super::call(&control, client, ask).map(|_| 0)
+}
+
+/// `chardev_dmabuf_fence(control, dmabuf, cookie, deadline_ms, flags)`: a
+/// new fence of the control's own in the slot of the control's own live
+/// dmabuf `dmabuf`, the one there before given up (K5).
+pub(crate) fn fence(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
+    let [handle, cookie, fence_cookie, asked, flags, unused] = *registers;
+    if flags != 0 || unused != 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let control = super::control_of(caller, handle)?;
+    let dmabuf = live(&control, cookie).ok_or(status::BAD_STATE)?;
+    let fence = super::sync::made_watched(&control, fence_cookie, super::sync::deadline_ms(asked))?;
+    let before = dmabuf.fence.lock().replace(fence);
+    // Unlocked: a fence's drop takes its control's table.
+    drop(before);
+    drop(dmabuf);
+    Ok(0)
+}
+
+/// `control`'s live dmabuf `cookie`, if it has one. Its table's lock is not
+/// held when the reference is handed back: were it the last, its drop takes
+/// that lock.
+fn live(control: &Control, cookie: u64) -> Option<Arc<Dmabuf>> {
+    let table = control.dmabufs.lock();
+    let found = table
+        .iter()
+        .filter(|(held, _)| *held == cookie)
+        .find_map(|(_, dmabuf)| dmabuf.upgrade());
+    drop(table);
+    found
+}
+
+/// The fence `dmabuf`'s slot holds now, for the self-check.
+pub(crate) fn slot(dmabuf: &Dmabuf) -> Option<Arc<SyncFile>> {
+    dmabuf.fence.lock().clone()
 }
 
 /// `chardev_dmabuf_install(control, request, vmo, cookie, flags, size)`: a
@@ -411,6 +582,7 @@ pub(super) fn find_or_make(
         cookie,
         control: Arc::downgrade(control),
         announced: AtomicBool::new(false),
+        fence: SpinLock::new(None),
     });
     let Ok(dmabuf) = made else {
         drop(dmabufs);

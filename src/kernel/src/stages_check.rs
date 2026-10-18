@@ -1457,6 +1457,17 @@ pub(super) fn check_chardev() {
         report.untranslated,
         report.out_of_order,
     );
+    println!(
+        "  chardev  {} dmabuf fence-slot calls, exports and imports as specified: an export a \
+         snapshot of the slot, an import passed to its driver as data, another driver's set \
+         refused{}, a dead driver's slot fences ENODEV",
+        report.slot_checks,
+        if report.one_device {
+            " (not checked: one PCI function)"
+        } else {
+            ""
+        },
+    );
 }
 
 /// The net ring, played from both ends with no network device: the whole
