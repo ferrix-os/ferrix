@@ -63,6 +63,10 @@ const KEPT: &[&str] = &[".local", "share", "ferrix", "wallpapers"];
 /// The screen a picture is cut for when `wallpapers` is not told another.
 pub(crate) const SCREEN: (u32, u32) = (1920, 1080);
 
+/// The name `--wallpaper` gives [`ember`], Ferrix's own, whatever is kept:
+/// what `release-image` shows, since a kept picture is somebody else's art.
+pub(crate) const EMBER: &str = "ember";
+
 /// What a picture's file begins with: `compositor_pattern::Picture::MAGIC`.
 const MAGIC: &[u8; 8] = b"FXWALL1\n";
 
@@ -174,6 +178,10 @@ fn pick(args: &Args, size: (u32, u32), stills_only: bool) -> Result<Option<Chose
     };
     if asked.is_some_and(|asked| asked.name == "none") {
         return Ok(None);
+    }
+    if asked.is_some_and(|asked| asked.name == EMBER) {
+        println!("  wallpaper ember, Ferrix's own, as asked");
+        return Ok(Some(Chosen::Still(ember(size))));
     }
     let Some(dir) = kept_dir() else {
         return refuse_or_none(asked, size, "there is nowhere wallpapers are kept");

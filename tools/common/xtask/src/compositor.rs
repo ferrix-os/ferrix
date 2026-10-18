@@ -100,6 +100,7 @@ pub(crate) use browser::{test_chrome_audio, test_chrome_window};
 pub(crate) use claude_desktop::test_claude_desktop;
 pub(crate) use drawing::test_video;
 pub(crate) use latency::test_xlatency;
+use run::release_image;
 pub(crate) use run::{board_files, run_compositor};
 pub(crate) use steam_store::test_steam_store;
 
@@ -129,6 +130,15 @@ pub(crate) const TASKS: &[Task] = &[
             "run-compositor  Boot src/user/system/linux/compositor/hyprix as init with a virtio-gpu, on a screen this host can show",
         ],
         run: |_, args| run_compositor(args),
+    },
+    Task {
+        name: "release-image",
+        help_at: 125,
+        help: &[
+            "release-image  run-compositor's desktop as one image for a release, written into --stage <DIR>",
+            "              (tools/common/release/package-desktop.py packs it with its run scripts)",
+        ],
+        run: |_, args| release_image(args),
     },
     Task {
         name: "test-compositor",

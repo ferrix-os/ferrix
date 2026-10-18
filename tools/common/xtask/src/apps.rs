@@ -665,6 +665,30 @@ pub(crate) fn build_apps(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// Every app an image a person runs carries for `arch` -- the ones
+/// [`installed`] selects and the script apps [`ported`] takes -- built where
+/// it has no package yet, as `--everything` builds them: for an image that
+/// leaves this machine (`release-image`), on which a missing app would be
+/// missing without anybody having read the line that said so.
+///
+/// # Errors
+///
+/// A build that fails.
+pub(crate) fn build_carried(arch: Arch, args: &Args) -> Result<()> {
+    let chosen: Vec<String> = selected(args, true)?
+        .iter()
+        .map(|app| app.name().to_owned())
+        .collect();
+    for app in discover()? {
+        let carried =
+            app.recipe.build == Build::Script || chosen.iter().any(|name| name == app.name());
+        if carried && app.builds_for(arch) {
+            let _ = package(&app, arch, args.release, Fresh::UnlessBuilt)?;
+        }
+    }
+    Ok(())
+}
+
 /// What a build put where its manifest says: files, links and a tree's
 /// directories, each at its path from the root.
 type Built = Vec<ports::File>;

@@ -195,7 +195,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 | `tools/common/steam/` | What `cargo xtask run-steam`, `test-steam-window` and `test-steam-store` carry into the guest: the scripts that start and watch Steam, its stand-ins, and in `workarounds/` the C shims for kernel gaps, each headed with its gap and the owner of the real fix (`docs/STEAM.md`). |
 | `tools/common/n150/` | The N150 box (`docs/N150.md`): `esp-files.sh` builds the box's ESP files from a commit; `intel-checkpoint.sh` runs Mesa's anv and iris on the running box and keeps their output (`docs/INTEL-GPU.md` §10); `card/` holds the bring-up's boot-card and live-session scripts (§13.1), machine-specific and headed so. |
 | `tools/common/data/` | The allow-lists, baselines and registers the checks read. |
-| `tools/common/release/` | One-off GitHub repository settings, run by the owner (`github-setup.sh`). |
+| `tools/common/release/` | One-off GitHub repository settings, run by the owner (`github-setup.sh`), and what a release carries: `package-desktop.py` packs `cargo xtask release-image`'s x86-64 desktop with `desktop/`'s run scripts and README into the zip the release workflow attaches. |
 | `tools/vendor/google/pixel7/` | The Pixel 7 launcher app (`android/`), its host helper and the desktop monitor (`monitor/`). Its own repository, ferrix-os/pixel7, checked out here at its pin (`components.toml`). |
 
 ## `docs/`

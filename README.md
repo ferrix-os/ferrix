@@ -18,7 +18,7 @@ Ferrix is still experimental. Logins, `su` and the lock screen check
 passwords, but parts of authentication and of process isolation are
 unfinished, so it is not ready to be your everyday OS.
 
-[Boot Ferrix](#boot-ferrix) · [See what works](#what-works) ·
+[Try it without building](#try-it-without-building) · [Boot Ferrix](#boot-ferrix) · [See what works](#what-works) ·
 [Read the technical guide](docs/GUIDE.md) · [Visit the website](https://ferrix-os.github.io/)
 
 ![Ferrix's Wayland desktop with Chrome, btop and a terminal](docs/brand/screenshots/desktop-hero.png)
@@ -140,6 +140,32 @@ this tree at the commits [`components.toml`](components.toml) names.
 
 [The roadmap](docs/roadmap/where-it-stands.md) tracks what is done and what is
 still being built. Ferrix is not ready as an everyday operating system.
+
+## Try it without building
+
+Each release carries the x86-64 desktop as one zip. You need QEMU and
+nothing else: no Rust, no build. On Linux or macOS:
+
+```sh
+curl -LO https://github.com/ferrix-os/ferrix/releases/latest/download/ferrix-x86_64-desktop.zip
+unzip ferrix-x86_64-desktop.zip && sh ferrix-x86_64-desktop/run.sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+Invoke-WebRequest https://github.com/ferrix-os/ferrix/releases/latest/download/ferrix-x86_64-desktop.zip -OutFile ferrix.zip
+Expand-Archive ferrix.zip .; powershell -ExecutionPolicy Bypass -File ferrix-x86_64-desktop\run.ps1
+```
+
+A QEMU window opens on the desktop with a terminal in it; try `btop`,
+`ferrofetch` or `curl https://example.com`. The scripts use KVM, WHPX or
+HVF when the machine has one and emulate otherwise, which is slower. The
+desktop is the one `cargo xtask run-compositor` boots, minus what needs a
+download of its own: no Chrome, no Steam and no `rustc`. `/` lives in
+memory, so nothing is kept after QEMU exits. With released QEMU on Windows
+the guest gets one processor. The zip's `README.txt` covers firmware,
+options and the rest.
 
 ## Boot Ferrix
 
