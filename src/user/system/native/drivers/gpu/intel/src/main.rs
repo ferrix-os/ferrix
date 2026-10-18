@@ -1,6 +1,7 @@
 //! The Intel Xe-LP GPU's driver process (the N150's Alder Lake-N): a ring-3
 //! program over `ferrix-intel-xelp`, which translates Linux's i915
-//! (`docs/INTEL-GPU.md` §3.6). This is M1, "the device answers":
+//! (`docs/INTEL-GPU.md` §3.6). M1, "the device answers", then M2, "a GPU
+//! command executes":
 //!
 //! 1. START, as an engine's: the device alone. devmgr does not wait for
 //!    it. It is started only under `ferrix.intelgpu`, without
@@ -22,7 +23,12 @@
 //!    only, and the GGTT entries the firmware left present, read within a
 //!    time budget.
 //!
-//! Nothing is written to the GPU but the forcewake requests. After the
+//! 8. M2 ([`m2`]), unless the `WOPCM` is locked: the PAT, the workarounds and
+//!    the MOCS, RCS0 and BCS0 under execlists, a PPGTT, the default context
+//!    images, and three commands run and checked. It writes the GPU's
+//!    registers and only the GGTT entries of its own window.
+//!
+//! M1 writes nothing to the GPU but the forcewake requests. After the
 //! lines it stays: a driver that exited would have devmgr quiesce the
 //! device. The exit status is the step that failed ([`Step`]).
 
@@ -47,6 +53,8 @@ use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::{Bootstrap, Kernel};
 
+mod m2;
+
 ferrix_rt::entry!(main);
 
 /// BAR 0's size on Gen8+ (`gen6_gttmmadr_size`).
@@ -55,7 +63,7 @@ const GTTMMADR_BYTES: u64 = 16 << 20;
 /// Where a run stopped, as the exit status.
 #[derive(Clone, Copy, Debug)]
 #[repr(i32)]
-enum Step {
+pub(crate) enum Step {
     /// No bootstrap channel, or the first message was not START.
     Start = 1,
     /// The device is not one this driver drives.
@@ -67,6 +75,15 @@ enum Step {
     Forcewake = 4,
     /// The idle port could not be made.
     Port = 5,
+    /// M2: pages could not be pinned, mapped or bound, or a table or ring
+    /// had no room.
+    Memory = 6,
+    /// M2: the submit queue refused a submission.
+    Submit = 7,
+    /// M2: a request did not complete in time.
+    Hung = 8,
+    /// M2: a command ran but its result was not what it wrote.
+    Wrong = 9,
 }
 
 fn main(bootstrap: Bootstrap) -> i32 {
@@ -88,7 +105,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
 
 /// A line on standard error, which a native process has open on the
 /// console.
-fn say(arguments: fmt::Arguments<'_>) {
+pub(crate) fn say(arguments: fmt::Arguments<'_>) {
     let mut line = Line::default();
     let _ = line.write_fmt(arguments);
     let _ = line.write_str("\n");
@@ -133,7 +150,7 @@ impl fmt::Write for Line {
 // ---------------------------------------------------------------------------
 
 /// BAR 0, mapped uncached.
-struct Bar0 {
+pub(crate) struct Bar0 {
     _mapping: IoMapping<Kernel>,
     base: usize,
 }
@@ -158,6 +175,31 @@ impl Bar0 {
         let high = unsafe { device_read(high as *const u32) };
         Some(u64::from(low) | u64::from(high) << 32)
     }
+
+    /// Write GGTT entry `index` as one 64-bit store, as `gen8_set_pte`'s
+    /// `writeq` does: the range is uncached, and the GPU must never see
+    /// half an entry.
+    fn set_ggtt_entry(&mut self, index: u64, pte: u64) {
+        let offset = gtt::GTTADR_OFFSET + index * 8;
+        if offset + 8 > GTTMMADR_BYTES {
+            return;
+        }
+        let address = self.base + offset as usize;
+        // SAFETY: inside BAR 0's GGTT half, which the kernel mapped for this
+        // process and `self` keeps, eight-byte aligned; device memory.
+        unsafe { device_write64(address as *mut u64, pte) }
+    }
+}
+
+/// Write a 64-bit GGTT entry as one plain store: see [`device_read`].
+///
+/// # Safety
+///
+/// `at` is mapped, writable device memory, eight-byte aligned.
+#[inline(never)]
+unsafe fn device_write64(at: *mut u64, value: u64) {
+    // SAFETY: as the caller promises.
+    unsafe { ptr::write_volatile(at, value) }
 }
 
 impl Mmio for Bar0 {
@@ -209,7 +251,7 @@ unsafe fn device_write(at: *mut u32, value: u32) {
 }
 
 /// Time: the monotonic clock, and sleeps on a port nothing is bound to.
-struct Time {
+pub(crate) struct Time {
     idle: Port<Kernel>,
 }
 
@@ -330,13 +372,28 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         time.now_us().saturating_sub(started)
     ));
 
-    say_gt(&mut bar, &platform);
-    say_plane_and_ggtt(&mut bar, &device, &mut time);
+    let (subslice_mask, engine_mask) = say_gt(&mut bar, &platform);
+    let (scanned, last_present, total) = say_plane_and_ggtt(&mut bar, &device, &mut time);
+    say(format_args!(
+        "intel: M1: the device answers ({} ms)",
+        time.now_us().saturating_sub(run_started) / 1_000
+    ));
 
+    if locked {
+        say(format_args!("intel: M2 not run: the WOPCM is locked"));
+    } else {
+        let firmware = m2::Firmware {
+            scanned,
+            last_present,
+            total,
+            subslice_mask,
+            engine_mask,
+        };
+        run_m2(&mut bar, &device, &mut time, firmware);
+    }
     uncore::fw_domains_put(&mut bar, &domains, wanted);
     say(format_args!(
-        "intel: M1: the device answers ({} ms); the driver now waits and touches nothing",
-        time.now_us().saturating_sub(run_started) / 1_000
+        "intel: the driver now waits and touches nothing"
     ));
     stay(&time)
 }
@@ -356,8 +413,9 @@ fn say_config(device: &Device<Kernel>) {
     ));
 }
 
-/// The GT's identity, under forcewake.
-fn say_gt(bar: &mut Bar0, platform: &Platform) {
+/// The GT's identity, under forcewake: the dual-subslices and the engines
+/// the media fuses leave, for M2.
+fn say_gt(bar: &mut Bar0, platform: &Platform) -> (u8, u32) {
     let fuses = sseu::Fuses::read(bar);
     let info = sseu::gen12_sseu_info_init(fuses);
     say(format_args!(
@@ -385,6 +443,7 @@ fn say_gt(bar: &mut Bar0, platform: &Platform) {
         rps::intel_gpu_freq(caps.rp1_freq),
         rps::intel_gpu_freq(caps.min_freq)
     ));
+    (info.subslice_mask, mask)
 }
 
 /// How long the read-only GGTT walk may take before it stops: it is
@@ -398,7 +457,13 @@ const GGTT_WALK_GAP: u64 = 4096;
 /// The lit plane on pipe A (the one the firmware lights; the other pipes'
 /// power wells may be off, and i915 reads a plane only with its well on),
 /// and the GGTT entries the firmware left present, read only and bounded.
-fn say_plane_and_ggtt(bar: &mut Bar0, device: &Device<Kernel>, time: &mut Time) {
+/// Returns how many entries were read, the last present one and the GGTT's
+/// size in bytes.
+fn say_plane_and_ggtt(
+    bar: &mut Bar0,
+    device: &Device<Kernel>,
+    time: &mut Time,
+) -> (u64, Option<u64>, u64) {
     let gmch = device
         .config_read(gtt::SNB_GMCH_CTRL, 2)
         .map_or(0, |value| value as u16);
@@ -449,6 +514,11 @@ fn say_plane_and_ggtt(bar: &mut Bar0, device: &Device<Kernel>, time: &mut Time) 
         time.now_us().saturating_sub(started),
         first_present.unwrap_or(0)
     ));
+    (
+        scanned,
+        first_present.map(|_| last_present),
+        entries * gtt::GTT_PAGE_SIZE,
+    )
 }
 
 /// Stay, for the life of the machine.
@@ -457,5 +527,27 @@ fn stay(time: &Time) -> Result<core::convert::Infallible, Step> {
         if time.idle.wait(Deadline::Never).is_err() {
             return Err(Step::Port);
         }
+    }
+}
+
+/// M2 under every domain's forcewake: `intel_gt_init_hw` runs under
+/// `FORCEWAKE_ALL`, every domain the fused engines have (a fused-off
+/// VCS2's would never acknowledge).
+fn run_m2(bar: &mut Bar0, device: &Device<Kernel>, time: &mut Time, firmware: m2::Firmware) {
+    let all = uncore::fw_domains_init(firmware.engine_mask);
+    let every = match uncore::fw_domains_get(bar, time, &all, !0) {
+        Ok(()) => true,
+        Err(error) => {
+            say(format_args!(
+                "intel: M2: forcewake of every domain failed ({error:?}); render and GT only"
+            ));
+            false
+        }
+    };
+    if let Err(step) = m2::run(bar, device, time, firmware) {
+        say(format_args!("intel: M2 stopped at {step:?}"));
+    }
+    if every {
+        uncore::fw_domains_put(bar, &all, !0);
     }
 }

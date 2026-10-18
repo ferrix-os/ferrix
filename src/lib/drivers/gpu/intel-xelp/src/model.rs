@@ -161,7 +161,6 @@ impl Gpu {
     }
 
     /// A page a PPGTT may map, zeroed.
-    #[expect(dead_code, reason = "M2's PPGTT batch and blit tests, the next slice")]
     pub(crate) fn add_page(&mut self, address: u64) {
         let _ = self.pages.insert(address, std::vec![0; 1024]);
     }
@@ -328,6 +327,11 @@ impl Gpu {
                         return None;
                     }
                 }
+            }
+            (0, 0x24) => {
+                // MI_STORE_REGISTER_MEM to the GGTT.
+                let value = self.regs.get(&cmd[1]).copied().unwrap_or(0);
+                self.ggtt_write(cmd[2], value);
             }
             (0, 0x26) if dw0 & gpu::MI_FLUSH_DW_OP_STOREDW != 0 => {
                 if dw0 & gpu::MI_FLUSH_DW_STORE_INDEX != 0 {

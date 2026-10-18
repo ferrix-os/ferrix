@@ -570,3 +570,60 @@ pub fn apply_whitelist(base: u32, w: &WaList) -> [(Reg, u32); RING_MAX_NONPRIV_S
     }
     writes
 }
+
+/// `mcr_ranges_gen12`: registers whose CPU access the MCR selector steers
+/// but a command streamer's does not, so a context's value cannot be read
+/// back from a request (`mcr_range`).
+pub const MCR_RANGES_GEN12: [(u32, u32); 5] = [
+    (0x8150, 0x815f),
+    (0x9520, 0x955f),
+    (0xb100, 0xb3ff),
+    (0xde80, 0xe8ff),
+    (0x24a00, 0x24a7f),
+];
+
+/// `mcr_range` for Gen12 below 12.55.
+#[must_use]
+pub fn mcr_range(offset: u32) -> bool {
+    MCR_RANGES_GEN12
+        .iter()
+        .any(|&(start, end)| (start..=end).contains(&offset))
+}
+
+/// `wa_list_srm`: one `MI_STORE_REGISTER_MEM` (GGTT) per entry outside the
+/// MCR ranges, entry `i`'s value to `results_ggtt + 4 * i`, into `out`.
+/// `engine_wa_list_verify` runs these in a request on the context whose
+/// workarounds are checked. Returns the dwords written, or `None` when
+/// `out` is short.
+pub fn wa_list_srm(wal: &WaList, results_ggtt: u32, out: &mut [u32]) -> Option<usize> {
+    use crate::commands::gpu::{MI_SRM_LRM_GLOBAL_GTT, MI_STORE_REGISTER_MEM};
+    // "if (GRAPHICS_VER(i915) >= 8) srm++": the 64-bit address's dword.
+    let srm = (MI_STORE_REGISTER_MEM | MI_SRM_LRM_GLOBAL_GTT) + 1;
+    let mut at = 0;
+    for (i, wa) in wal.iter().enumerate() {
+        let offset = wa.reg.offset();
+        if mcr_range(offset) {
+            continue;
+        }
+        let slot = out.get_mut(at..at + 4)?;
+        slot.copy_from_slice(&[srm, offset, results_ggtt + 4 * i as u32, 0]);
+        at += 4;
+    }
+    Some(at)
+}
+
+/// `engine_wa_list_verify`'s check of what [`wa_list_srm`] stored: the
+/// entries whose bits are not as set (`wa_verify`), as (register, value
+/// read). MCR entries were not read and are skipped.
+pub fn wa_list_verify_results<'a>(
+    wal: &'a WaList,
+    results: &'a [u32],
+) -> impl Iterator<Item = (Reg, u32)> + 'a {
+    wal.iter().enumerate().filter_map(move |(i, wa)| {
+        if mcr_range(wa.reg.offset()) {
+            return None;
+        }
+        let cur = results.get(i).copied().unwrap_or(!wa.set);
+        ((cur ^ wa.set) & wa.read != 0).then_some((wa.reg, cur))
+    })
+}
