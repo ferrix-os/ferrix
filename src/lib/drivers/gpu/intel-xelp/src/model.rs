@@ -114,6 +114,14 @@ pub(crate) struct Gpu {
     /// When set, CSB entries go only to the MMIO copy, never the status
     /// page (`HSDES#22011327657`).
     pub(crate) csb_to_mmio_only: bool,
+    /// Whether `STOP_RING` is set, a reset requested, and one never made
+    /// ready (an engine that does not answer `RING_RESET_CTL`).
+    pub(crate) stopped: bool,
+    pub(crate) reset_requested: bool,
+    pub(crate) never_ready: bool,
+    /// This engine's `GEN6_GDRST` domain, and how many resets it had.
+    pub(crate) reset_domain: u32,
+    pub(crate) resets: u32,
     /// Runs whose image was restore-inhibited.
     pub(crate) inhibited_runs: u32,
     /// Steps the command streamer may take in one run.
@@ -126,6 +134,7 @@ impl Gpu {
             base: engine.mmio_base,
             hwsp_ggtt,
             budget: 10_000,
+            reset_domain: crate::reset::reset_domain(engine).unwrap_or(0),
             ..Gpu::default()
         };
         gpu.add_object(hwsp_ggtt, 4096);
@@ -342,6 +351,10 @@ impl Gpu {
             }
             (0, 0x31) => {
                 let address = u64::from(cmd[1]) | (u64::from(cmd[2]) << 32);
+                if !matches!(space, Space::Ring { .. }) {
+                    // From a batch: a chain, not a call.
+                    return Some(address);
+                }
                 let batch_space = if dw0 & (1 << 8) != 0 {
                     Space::Ppgtt
                 } else {
@@ -392,11 +405,50 @@ enum Space {
 
 impl Mmio for Gpu {
     fn read32(&mut self, offset: u32) -> u32 {
-        self.regs.get(&offset).copied().unwrap_or(0)
+        let value = self.regs.get(&offset).copied().unwrap_or(0);
+        if offset == crate::engine::ring_mi_mode(self.base).offset() {
+            // MODE_IDLE once STOP_RING was asked for.
+            return if self.stopped {
+                value | crate::generated::intel_engine_regs::MODE_IDLE
+            } else {
+                value
+            };
+        }
+        if offset == crate::generated::intel_engine_regs::ring_reset_ctl(self.base).offset() {
+            return if self.reset_requested && !self.never_ready {
+                crate::generated::intel_engine_regs::RESET_CTL_READY_TO_RESET
+            } else {
+                0
+            };
+        }
+        if offset == crate::generated::intel_gt_regs::GEN6_GDRST.offset() {
+            return 0; // the reset is done at once
+        }
+        value
     }
 
     fn write32(&mut self, offset: u32, value: u32) {
         let _ = self.regs.insert(offset, value);
+        let masked = |bit: u32| (value >> 16) & bit != 0;
+        if offset == crate::engine::ring_mi_mode(self.base).offset()
+            && masked(crate::engine::STOP_RING)
+        {
+            self.stopped = value & crate::engine::STOP_RING != 0;
+        }
+        let reset_ctl = crate::generated::intel_engine_regs::ring_reset_ctl(self.base).offset();
+        let request = crate::generated::intel_engine_regs::RESET_CTL_REQUEST_RESET;
+        if offset == reset_ctl && masked(request) {
+            self.reset_requested = value & request != 0;
+        }
+        if offset == crate::generated::intel_gt_regs::GEN6_GDRST.offset()
+            && value & self.reset_domain != 0
+        {
+            // The engine's domain reset: whatever it ran is gone, and its
+            // status buffer starts again at entry 0.
+            self.loaded = None;
+            self.csb_write = 11;
+            self.resets += 1;
+        }
         if offset == ring_execlist_control(self.base).offset() && value == EL_CTRL_LOAD {
             let queue = ring_execlist_sq_contents(self.base).offset();
             let desc = |gpu: &Gpu, port: u32| {

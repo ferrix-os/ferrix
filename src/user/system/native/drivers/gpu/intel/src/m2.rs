@@ -33,7 +33,7 @@ use ferrix_intel_xelp::ppgtt::{Ppgtt, PtMemory};
 use ferrix_intel_xelp::request::{self, Payload};
 use ferrix_intel_xelp::submission::{self, ContextPlace, EngineState, HwContext};
 use ferrix_intel_xelp::workarounds;
-use ferrix_intel_xelp::{gt, irq, mocs};
+use ferrix_intel_xelp::{gt, irq, mocs, reset};
 use ferrix_native_abi::types::PACKET_INTERRUPT;
 use ferrix_rt::Kernel;
 use ferrix_rt::native::device::{Device, Interrupt};
@@ -62,8 +62,15 @@ const GGTT_WINDOW_FLOOR: u64 = 256 << 20;
 const POLL_US: u64 = 1_000;
 /// How long a request may take before it counts as hung.
 const REQUEST_PATIENCE_US: u64 = 500_000;
+/// How long the deliberately hung batch runs before it is reset.
+const HANG_PATIENCE_US: u64 = 100_000;
 /// The port key of the GPU's interrupt.
 const KEY_INTERRUPT: u64 = 1;
+/// How far M2 goes on the box (`intelgpu-m2.sh` builds each checkpoint by
+/// setting this): 1 the PAT, MOCS, workarounds, engines and a PPGTT read
+/// back, no command run; 2 the default images and `MI_STORE_DWORD_IMM`; 3
+/// the fast-copy blit and the PPGTT batch; 4 a hung batch reset and banned.
+pub(crate) const CHECKPOINT: u8 = 4;
 
 // ---------------------------------------------------------------------------
 // Memory
@@ -359,19 +366,23 @@ pub(crate) fn run(
     let mut rcs = m2.engine(ENGINES[0])?;
     let mut bcs = m2.engine(ENGINES[1])?;
     m2.irq_on();
-    say(format_args!(
-        "intel: M2: PPGTT PML4 at {:#x}, scratch page {:#x}",
-        m2.vm.pml4, m2.vm.scratch[0]
-    ));
-    for engine in [&mut rcs, &mut bcs] {
-        m2.record_default(engine)?;
+    m2.ppgtt_readback()?;
+    if CHECKPOINT >= 2 {
+        for engine in [&mut rcs, &mut bcs] {
+            m2.record_default(engine)?;
+        }
+        m2.verify_ctx_workarounds(&mut rcs)?;
+        m2.store_dword(&mut rcs, 2)?;
     }
-    m2.verify_ctx_workarounds(&mut rcs)?;
-    m2.store_dword(&mut rcs)?;
-    m2.fast_copy(&mut bcs)?;
-    m2.ppgtt_batch(&mut rcs)?;
+    if CHECKPOINT >= 3 {
+        m2.fast_copy(&mut bcs)?;
+        m2.ppgtt_batch(&mut rcs)?;
+    }
+    if CHECKPOINT >= 4 {
+        m2.hang(&mut rcs)?;
+    }
     say(format_args!(
-        "intel: M2: a GPU command executes: completions {} by interrupt, {} by the {} us poll; {} interrupt packets, {} with GT sources ({} ms)",
+        "intel: M2: checkpoint {CHECKPOINT} done: completions {} by interrupt, {} by the {} us poll; {} interrupt packets, {} with GT sources ({} ms)",
         m2.by_interrupt,
         m2.by_poll,
         POLL_US,
@@ -414,6 +425,73 @@ impl M2<'_> {
             "intel: M2: PAT written, {pat_lost} of 8 lost; GT workarounds {} applied, {lost} lost; MOCS and L3CC written, {mocs_lost} lost",
             wal.len()
         ));
+        // The values themselves, against i915's (tgl_setup_private_ppat,
+        // gen12_mocs_table): what the checkpoint script compares.
+        let mut pat = [0_u32; 8];
+        for (slot, (reg, _)) in pat
+            .iter_mut()
+            .zip(ferrix_intel_xelp::gtt::tgl_setup_private_ppat())
+        {
+            *slot = self.bar.read32(reg.offset());
+        }
+        say(format_args!("intel: M2: PAT read {pat:x?}"));
+        let mut global = [0_u32; 8];
+        for (i, slot) in global.iter_mut().enumerate() {
+            *slot = self.bar.read32(mocs::gen12_global_mocs(i as u32).offset());
+        }
+        let mut l3cc = [0_u32; 4];
+        for (i, slot) in l3cc.iter_mut().enumerate() {
+            *slot = self.bar.read32(mocs::gen9_lncfcmocs(i as u32).offset());
+        }
+        say(format_args!(
+            "intel: M2: MOCS read GLOBAL_MOCS[0..8] {global:x?} LNCFCMOCS[0..4] {l3cc:x?}"
+        ));
+    }
+
+    /// A PPGTT mapping made and walked back: two pool pages at 8 GiB, each
+    /// page's entry and translation said, then unmapped again.
+    fn ppgtt_readback(&mut self) -> Result<(), Step> {
+        const AT: u64 = 0x2_0000_0000;
+        let before = self.pool.used.iter().filter(|&&used| used).count();
+        let obj = self.ppgtt_object(2, AT)?;
+        let vm = self.vm;
+        let mut wrong = 0;
+        let mut pages = [0_u64; 2];
+        for (slot, &page) in pages.iter_mut().zip(self.pool.device_pages(obj)) {
+            *slot = page;
+        }
+        for (n, &page) in pages.iter().enumerate() {
+            let va = AT + (n * PAGE) as u64;
+            let translated = vm.translate(&mut self.pool, va + 0x123);
+            wrong += u32::from(translated != Some(page + 0x123));
+            say(format_args!(
+                "intel: M2: PPGTT {va:#x} -> {translated:x?} (page {page:#x})"
+            ));
+        }
+        vm.clear_range(&mut self.pool, AT, 2 * PAGE as u64)
+            .map_err(|_| Step::Memory)?;
+        self.pool.give(obj.first, obj.pages);
+        let after = self.pool.used.iter().filter(|&&used| used).count();
+        let scratch = vm.translate(&mut self.pool, AT);
+        say(format_args!(
+            "intel: M2: PPGTT PML4 {:#x}, scratch {:#x} (PTE {:#x}, PDEs {:#x} {:#x} {:#x}): 2 pages mapped and walked back, {wrong} wrong; unmapped, the address reads {}, pool pages {before} -> {after}",
+            vm.pml4,
+            vm.scratch[0],
+            vm.scratch_encode[0],
+            vm.scratch_encode[1],
+            vm.scratch_encode[2],
+            vm.scratch_encode[3],
+            if scratch.is_none() {
+                "scratch"
+            } else {
+                "STILL MAPPED"
+            }
+        ));
+        if wrong == 0 && scratch.is_none() && before == after {
+            Ok(())
+        } else {
+            Err(Step::Wrong)
+        }
     }
 
     /// The interrupt: claimed and bound to the port. Without it the driver
@@ -513,6 +591,30 @@ impl M2<'_> {
             .iter()
             .filter(|(reg, value)| self.bar.read32(reg.offset()) != *value)
             .count();
+        // The registers M0's i915_engine_info printed for the same engine
+        // after i915's resume (RING_MODE, EMR, EL_STAT, the CSB pointers),
+        // read before RING_IMR is opened.
+        {
+            use ferrix_intel_xelp::engine::{
+                ring_context_status_ptr, ring_execlist_status_hi, ring_execlist_status_lo,
+                ring_mode_gen7,
+            };
+            let base = info.mmio_base;
+            let mode = self.bar.read32(ring_mode_gen7(base).offset());
+            let emr = self
+                .bar
+                .read32(ferrix_intel_xelp::generated::intel_engine_regs::ring_emr(base).offset());
+            let el_lo = self.bar.read32(ring_execlist_status_lo(base).offset());
+            let el_hi = self.bar.read32(ring_execlist_status_hi(base).offset());
+            let csb = self.bar.read32(ring_context_status_ptr(base).offset());
+            let write = self
+                .pool
+                .read32(hwsp, ferrix_intel_xelp::execlists::ICL_HWS_CSB_WRITE_INDEX);
+            say(format_args!(
+                "intel: M2: {} RING_MODE {mode:#010x} RING_EMR {emr:#010x} EL_STAT_HI {el_hi:#010x} EL_STAT_LO {el_lo:#010x} CSB_PTR {csb:#010x} HWSP CSB write {write}",
+                info.name
+            ));
+        }
         self.bar.write32(
             ring_imr(info.mmio_base).offset(),
             irq::gen8_logical_ring_imr_enabled(),
@@ -575,6 +677,36 @@ impl M2<'_> {
         ring: Obj,
         payload: Payload<'_>,
     ) -> Result<(Seen, u64), Step> {
+        let (seqno, _, queued) = self.submit(engine, context, image, ring, payload)?;
+        let seen = self.wait(engine, context, seqno, queued, REQUEST_PATIENCE_US);
+        let took = self.time.now_us().saturating_sub(queued);
+        if seen == Seen::Hung {
+            say(format_args!(
+                "intel: M2: {} seqno {seqno} not complete after {} ms: {}",
+                engine.info.name,
+                took / 1_000,
+                Stuck::read(self.bar, engine.info.mmio_base)
+            ));
+            return Err(Step::Hung);
+        }
+        // i915_request_retire: the ring is free up to the saved head.
+        context.retire(self.pool.read32(image, PAGE_DWORDS + lrc::ctx::RING_HEAD));
+        Ok((seen, took))
+    }
+
+    /// Emit `payload` on `context` and submit it: its seqno, where it lies
+    /// in the ring, and when it was queued.
+    fn submit(
+        &mut self,
+        engine: &mut Engine,
+        context: &mut HwContext,
+        image: Obj,
+        ring: Obj,
+        payload: Payload<'_>,
+    ) -> Result<(u32, request::Built, u64), Step> {
+        if context.banned {
+            return Err(Step::Banned);
+        }
         let (seqno, built) = context.emit(self.pool.dwords(ring), payload).map_err(|_| {
             say(format_args!(
                 "intel: M2: {}: no room in the ring",
@@ -597,27 +729,21 @@ impl M2<'_> {
         if !engine.state.submit(self.bar, desc, context.place.tag) {
             return Err(Step::Submit);
         }
-        let seen = self.wait(engine, context, seqno, queued);
-        let took = self.time.now_us().saturating_sub(queued);
-        if seen == Seen::Hung {
-            say(format_args!(
-                "intel: M2: {} seqno {seqno} not complete after {} ms: {}",
-                engine.info.name,
-                took / 1_000,
-                Stuck::read(self.bar, engine.info.mmio_base)
-            ));
-            return Err(Step::Hung);
-        }
-        // i915_request_retire: the ring is free up to the saved head.
-        context.retire(self.pool.read32(image, PAGE_DWORDS + lrc::ctx::RING_HEAD));
-        Ok((seen, took))
+        Ok((seqno, built, queued))
     }
 
     /// Wait for `context`'s `seqno`: on the port until the next poll, an
     /// interrupt serviced (`gen11_irq_handler`) and acknowledged whenever
     /// one comes, the status buffer drained on every wake.
-    fn wait(&mut self, engine: &mut Engine, context: &HwContext, seqno: u32, queued: u64) -> Seen {
-        let end = queued.saturating_add(REQUEST_PATIENCE_US);
+    fn wait(
+        &mut self,
+        engine: &mut Engine,
+        context: &HwContext,
+        seqno: u32,
+        queued: u64,
+        patience_us: u64,
+    ) -> Seen {
+        let end = queued.saturating_add(patience_us);
         loop {
             let now = self.time.now_us();
             let until = now.saturating_add(POLL_US).min(end);
@@ -739,8 +865,8 @@ impl M2<'_> {
     }
 
     /// `MI_STORE_DWORD_IMM` into a pinned page, from the ring, by GGTT.
-    fn store_dword(&mut self, engine: &mut Engine) -> Result<(), Step> {
-        let (mut context, image, ring) = self.context(engine, 2)?;
+    fn store_dword(&mut self, engine: &mut Engine, slot: usize) -> Result<(), Step> {
+        let (mut context, image, ring) = self.context(engine, slot)?;
         const VALUE: u32 = 0xc0ff_ee02;
         let target = self.object(1)?;
         let commands = [
@@ -866,6 +992,143 @@ impl M2<'_> {
         } else {
             Err(Step::Wrong)
         }
+    }
+    /// `__intel_engine_reset_bh` under execlists: the engine reset alone,
+    /// its ports and status buffer reset, and the engine resumed.
+    fn reset_engine(&mut self, engine: &mut Engine) -> Result<(), Step> {
+        let started = self.time.now_us();
+        let report =
+            reset::intel_engine_reset(self.bar, self.time, &engine.info).ok_or(Step::Hung)?;
+        let mut cancelled = 0;
+        engine.state.execlists.reset(
+            self.bar,
+            &mut Hwsp {
+                pool: &mut self.pool,
+                page: engine.hwsp,
+            },
+            engine.info.mmio_base,
+            |_| cancelled += 1,
+        );
+        let wal = workarounds::engine_workarounds(&engine.info, mocs::UC_INDEX);
+        let whitelist = workarounds::whitelist(&engine.info);
+        let resumed = gt::intel_engine_resume(
+            self.bar,
+            engine.info.mmio_base,
+            &wal,
+            &whitelist,
+            engine.hwsp.ggtt,
+        );
+        self.bar.write32(
+            ring_imr(engine.info.mmio_base).offset(),
+            irq::gen8_logical_ring_imr_enabled(),
+        );
+        say(format_args!(
+            "intel: M2: {} reset in {} us: stop {:x?}, pending forcewakes {:#x}, ready {:x?}, GDRST {:x?}; {cancelled} port(s) cancelled; ESR after resume {:#x}",
+            engine.info.name,
+            self.time.now_us().saturating_sub(started),
+            report.stopped,
+            report.pending_fw,
+            report.ready,
+            report.reset,
+            resumed.still_in_error
+        ));
+        if !report.is_reset() {
+            return Err(Step::Hung);
+        }
+        Ok(())
+    }
+
+    /// A deliberately hung batch (`igt_spinner`: an arbitration point and a
+    /// jump back to itself, from the PPGTT) on `engine`: not complete in
+    /// [`HANG_PATIENCE_US`], the engine reset alone (`GEN11_GRDOM_*`, never
+    /// the GT or the function), the ports and status buffer reset, the
+    /// engine resumed, the batch skipped and its context banned and
+    /// replayed so its seqno is written; a later request on it refused;
+    /// then a store on another context, to show the engine runs again.
+    fn hang(&mut self, engine: &mut Engine) -> Result<(), Step> {
+        const SPINNER: u64 = 0x3_0000_0000;
+        let (mut context, image, ring) = self.context(engine, 4)?;
+        let batch = self.ppgtt_object(1, SPINNER)?;
+        {
+            let words = self.pool.dwords(batch);
+            let mut cs = Cs::new(words);
+            cs.push(gpu::MI_ARB_CHECK);
+            cs.push(gpu::MI_BATCH_BUFFER_START_GEN8 | (1 << 8));
+            cs.push(SPINNER as u32);
+            cs.push((SPINNER >> 32) as u32);
+        }
+        let (seqno, built, queued) = self.submit(
+            engine,
+            &mut context,
+            image,
+            ring,
+            Payload::Batch {
+                address: SPINNER,
+                flags: 0,
+            },
+        )?;
+        let seen = self.wait(engine, &context, seqno, queued, HANG_PATIENCE_US);
+        let stuck = Stuck::read(self.bar, engine.info.mmio_base);
+        if seen != Seen::Hung {
+            say(format_args!(
+                "intel: M2: the spinner on {} completed ({seen:?}): no hang to reset",
+                engine.info.name
+            ));
+            return Err(Step::Wrong);
+        }
+        say(format_args!(
+            "intel: M2: the spinner on {} hung as meant after {} ms: {stuck}",
+            engine.info.name,
+            HANG_PATIENCE_US / 1_000
+        ));
+
+        self.reset_engine(engine)?;
+
+        request::skip(self.pool.dwords(ring), context.place.ring_size, &built);
+        let desc = {
+            let regs = lrc::reg_state(self.pool.dwords(image)).ok_or(Step::Memory)?;
+            reset::rewind(&mut context, regs, &built, &[])
+        };
+        let queued = self.time.now_us();
+        if !engine.state.submit(self.bar, desc, context.place.tag) {
+            return Err(Step::Submit);
+        }
+        let replay = self.wait(engine, &context, seqno, queued, REQUEST_PATIENCE_US);
+        say(format_args!(
+            "intel: M2: the hung request replayed with its batch skipped: seqno {seqno} {} ({replay:?}); context banned {}",
+            if replay == Seen::Hung {
+                "NOT written"
+            } else {
+                "written"
+            },
+            context.banned
+        ));
+        if replay == Seen::Hung {
+            return Err(Step::Hung);
+        }
+        let refused = self.submit(
+            engine,
+            &mut context,
+            image,
+            ring,
+            Payload::Batch {
+                address: SPINNER,
+                flags: 0,
+            },
+        );
+        say(format_args!(
+            "intel: M2: a later request on the banned context: {}",
+            if matches!(refused, Err(Step::Banned)) {
+                "refused"
+            } else {
+                "NOT refused"
+            }
+        ));
+        if !matches!(refused, Err(Step::Banned)) {
+            return Err(Step::Wrong);
+        }
+        // The engine works again: a store on a fresh context.
+        self.store_dword(engine, 5)
     }
 }
 

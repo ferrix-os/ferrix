@@ -37,6 +37,11 @@ pub const fn fini_breadcrumb_dw(engine: &EngineInfo) -> u32 {
 pub struct Built {
     /// `rq->head`: its first byte.
     pub head: u32,
+    /// `rq->infix`: where its commands start, after the invalidation
+    /// `execlists_request_alloc` emits.
+    pub infix: u32,
+    /// `rq->postfix`: where its final breadcrumb starts.
+    pub postfix: u32,
     /// `rq->tail`: what `RING_TAIL` is set to in the context image.
     pub tail: u32,
     /// `rq->wa_tail`: past the `WaIdleLiteRestore` pair.
@@ -136,6 +141,8 @@ fn build_into(
     let _ = emit(ring, memory, round_even(invalidate), reserved, |cs| {
         engine_cs::gen12_emit_flush(engine, EMIT_INVALIDATE, cs);
     })?;
+    // "rq->infix = rq->ring->emit": the end of the request's preamble.
+    let infix = ring.tail();
     // eb_request_submit
     let _ = emit(ring, memory, 6, reserved, |cs| {
         engine_cs::gen8_emit_init_breadcrumb(cs, hwsp_offset, seqno);
@@ -157,6 +164,7 @@ fn build_into(
     }
     // i915_request_add -> __i915_request_add_to_timeline: the reserve is
     // released and the final breadcrumb takes its place.
+    let postfix = ring.tail();
     let mut tails = Tails {
         tail: 0,
         wa_tail: 0,
@@ -171,6 +179,8 @@ fn build_into(
     })?;
     Ok(Built {
         head,
+        infix,
+        postfix,
         tail: ring.wrap(start + tails.tail as u32 * 4),
         wa_tail: ring.wrap(start + tails.wa_tail as u32 * 4),
     })
@@ -230,4 +240,20 @@ fn barrier(engine: &EngineInfo, out: &mut [u32]) -> Option<usize> {
     let mut cs = Cs::new(out);
     engine_cs::gen12_emit_flush(engine, engine_cs::EMIT_BARRIER, &mut cs);
     (!cs.overflowed()).then_some(cs.len())
+}
+
+/// `__i915_request_skip`: the request's commands, from `infix` to
+/// `postfix`, overwritten with `MI_NOOP` (`__i915_request_fill(rq, 0)`), so
+/// that a replay after a reset runs only its breadcrumbs: "As this request
+/// likely depends on state from the lost context, clear out all the user
+/// operations leaving the breadcrumb at the end (so we get the fence
+/// notifications)." `memory` is the ring's buffer.
+pub fn skip(memory: &mut [u32], ring_size: u32, request: &Built) {
+    let mut at = request.infix;
+    while at != request.postfix {
+        if let Some(slot) = memory.get_mut((at / 4) as usize) {
+            *slot = 0;
+        }
+        at = (at + 4) & (ring_size - 1);
+    }
 }

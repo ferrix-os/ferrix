@@ -539,3 +539,12 @@ pub fn record_default_state(
         .copy_from_slice(from);
     Ok(())
 }
+
+/// The ring half of [`lrc_update_regs`], which `execlists_reset_active`
+/// needs to restart a context's ring at a request's head after a reset.
+pub fn lrc_update_regs_ring(regs: &mut [u32], ring: RingState) {
+    put(regs, ctx::RING_START, ring.start);
+    put(regs, ctx::RING_HEAD, ring.head);
+    put(regs, ctx::RING_TAIL, ring.tail);
+    put(regs, ctx::RING_CTL, ring_ctl_size(ring.size) | RING_VALID);
+}

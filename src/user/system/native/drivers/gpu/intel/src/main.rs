@@ -84,6 +84,9 @@ pub(crate) enum Step {
     Hung = 8,
     /// M2: a command ran but its result was not what it wrote.
     Wrong = 9,
+    /// M2: a request on a context banned after a hang (refused, as i915
+    /// refuses it with `EIO`).
+    Banned = 10,
 }
 
 fn main(bootstrap: Bootstrap) -> i32 {
