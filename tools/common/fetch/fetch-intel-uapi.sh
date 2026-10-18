@@ -146,7 +146,7 @@ rm -rf "$tree/usr/share/doc" "$tree/usr/share/man" "$tree/usr/share/locale" \
 
 lib=$tree/usr/lib/x86_64-linux-gnu
 for wanted in usr/bin/vulkaninfo usr/bin/eglinfo usr/lib/x86_64-linux-gnu/libvulkan_intel.so \
-    usr/share/vulkan/icd.d/intel_icd.x86_64.json usr/lib/x86_64-linux-gnu/libEGL_mesa.so.0 \
+    usr/share/vulkan/icd.d/intel_icd.json usr/lib/x86_64-linux-gnu/libEGL_mesa.so.0 \
     usr/lib/x86_64-linux-gnu/dri/iris_dri.so usr/share/glvnd/egl_vendor.d/50_mesa.json; do
     test -e "$tree/$wanted" || { echo "fetch-intel-uapi: no $wanted on the volume" >&2; exit 1; }
 done

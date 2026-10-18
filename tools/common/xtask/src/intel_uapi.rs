@@ -103,7 +103,7 @@ while [ -z "$node" ]; do
     fi
 done
 echo "intel-uapi-gate: $node is there after ${waited}s"
-VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json MESA_SHADER_CACHE_DISABLE=1 \
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABLE=1 \
     /data/usr/bin/vulkaninfo --summary 2>&1
 echo "intel-uapi-gate: vulkaninfo exited $?"
 MESA_SHADER_CACHE_DISABLE=1 /data/usr/bin/eglinfo -B 2>&1
