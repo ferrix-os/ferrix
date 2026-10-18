@@ -1236,3 +1236,31 @@ fn a_request_runs_on_a_model_engine() {
         assert_eq!(next.head, built.wa_tail);
     }
 }
+
+#[test]
+fn ggtt_space() {
+    use crate::ggtt_space::{GgttSpace, Range, SpaceError};
+    // Firmware entries up to 0x1d4 (a 1920000-byte framebuffer at 0).
+    let mut space = GgttSpace::above_firmware(Some(0x1d4), 4 << 30);
+    let ring = space.alloc(16 << 10, 4096).expect("ring");
+    assert_eq!(
+        ring,
+        Range {
+            start: 0x1d5 * 4096,
+            len: 16 << 10
+        }
+    );
+    let ctx = space.alloc(88 << 10, 64 << 10).expect("context");
+    assert_eq!(ctx.start % (64 << 10), 0);
+    assert!(ctx.start >= ring.start + ring.len);
+    assert!(space.free(ring));
+    assert!(!space.free(ring));
+    // The freed gap is reused first.
+    assert_eq!(space.alloc(4096, 4096).expect("page").start, 0x1d5 * 4096);
+    assert_eq!(space.alloc(0, 4096), Err(SpaceError::Invalid));
+    assert_eq!(space.alloc(4096, 3000), Err(SpaceError::Invalid));
+    let mut small = GgttSpace::new(0, 8192);
+    let _ = small.alloc(8192, 4096).expect("all");
+    assert_eq!(small.alloc(4096, 4096), Err(SpaceError::Full));
+    assert_eq!(small.used_bytes(), 8192);
+}

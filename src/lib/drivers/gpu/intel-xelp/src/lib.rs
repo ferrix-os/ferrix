@@ -28,6 +28,7 @@
 //! * [`uncore`]: `intel_uncore.c`'s forcewake, for Gen12;
 //! * [`mocs`]: `intel_mocs.c`'s Gen12 table and how it is written;
 //! * [`lrc`]: `intel_lrc.c`'s register-offset byte code;
+//! * [`ggtt_space`]: the driver's own window of the GGTT;
 //! * [`gt`]: the order i915 brings the GT and each engine up in;
 //! * [`gtt`]: the GGTT and PPGTT entry formats and the PAT;
 //! * [`engine`]: the engines and their `RING_*` registers;
@@ -55,6 +56,7 @@ pub mod engine;
 pub mod engine_cs;
 pub mod execlists;
 pub mod generated;
+pub mod ggtt_space;
 pub mod gt;
 pub mod gtt;
 pub mod io;
