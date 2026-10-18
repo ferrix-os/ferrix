@@ -1584,7 +1584,9 @@ package FerrixObjectRequirements {
                 `reclaim` line of stage 13 that names memory.max).";
             attribute :>> parent = ("H.QUOTA.12", "H.QUOTA.13");
             attribute :>> unit = ("user::cache::reclaim", "user::cache::take_from",
-                "user::cache::hand_in", "user::cache::set_hand");
+                "user::cache::hand_in", "user::cache::set_hand", "user::cache::object_at",
+                "user::cache::Walk::begin", "user::cache::Walk::drop",
+                "user::cache::List::close_up");
         }
     }
 

@@ -356,7 +356,7 @@ fn boot(
     let memmax = u64::from(machine.memory) * 1024 * 1024 / 2;
     let script = if kind == Kind::Evict {
         EVICT_GUEST
-            .replace("@FILES@", &evict_files(&machine).to_string())
+            .replace("@FILES@", &evict_files(machine).to_string())
             .replace("@NEW@", &EVICT_NEW_FILES.to_string())
             .replace("@FILE_MIB@", &EVICT_FILE_MIB.to_string())
     } else {

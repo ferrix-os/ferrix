@@ -1086,6 +1086,18 @@ impl<D: WriteHandle> FileSystem for RwBtrfs<D> {
 }
 
 impl<D: WriteHandle> Inode for Node<D> {
+    /// A regular file with a name whose page cache holds pages: the dentry
+    /// cache keeps its dentry until reclaim has taken them (`ferrix_vfs`'s
+    /// `DEFAULT_CACHE`). A file with no name left is never kept, so that its
+    /// last reference goes, and it is deleted, when its last user lets go.
+    fn holds_cached_pages(&self) -> bool {
+        if self.meta.lock().nlink == 0 {
+            return false;
+        }
+        let pages = self.pages.lock().as_ref().map(Arc::clone);
+        pages.is_some_and(|pages| pages.committed_bytes() > 0)
+    }
+
     fn metadata(&self) -> Metadata {
         *self.meta.lock()
     }

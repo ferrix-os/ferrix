@@ -1065,3 +1065,66 @@ fn a_commit_written_back_in_slices_reads_back_whole() {
     let meta = read_back_with_the_reader(&disk, &[b"big"]).unwrap();
     assert_eq!(meta.size, data.len() as u64);
 }
+
+/// A writable file's dentry kept for its cached pages goes out of the kept
+/// set when the file is unlinked, and the file -- inode and pages -- goes
+/// when its last user lets go, not when reclaim gets round to it: a file
+/// with no name is never kept (`holds_cached_pages`, nlink > 0; the
+/// consultant, ledger line 2336 (6)).
+#[test]
+fn an_unlinked_kept_file_goes_with_its_last_user() {
+    use ferrix_vfs::{Namespace, OpenFlags};
+    let disk = Disk::new(BLANK);
+    let fs = mount(&disk);
+    let ns = Namespace::with_cache(
+        Arc::clone(&fs) as Arc<dyn FileSystem>,
+        4,
+        Arc::new(SpinParker),
+    );
+    let ctx = ns.context();
+    let create = OpenFlags {
+        read: true,
+        write: true,
+        create: true,
+        ..OpenFlags::default()
+    };
+    let file = ns.open(&ctx, None, b"/kept", &create, 0o644).unwrap();
+    assert_eq!(file.write(&[5u8; 3 * 4096]).unwrap(), 3 * 4096);
+    drop(file);
+    // Written back: the mount holds a file with dirty pages until then.
+    fs.sync().unwrap();
+    for i in 0..16 {
+        let _ = ns.resolve(&ctx, None, std::format!("/miss-{i}").as_bytes(), true);
+    }
+    assert_eq!(
+        ns.kept_for_pages(),
+        1,
+        "the written file's dentry was not kept"
+    );
+    let reading = OpenFlags {
+        read: true,
+        ..OpenFlags::default()
+    };
+    let open = ns.open(&ctx, None, b"/kept", &reading, 0).unwrap();
+    let inode = Arc::downgrade(
+        &ns.resolve(&ctx, None, b"/kept", true)
+            .unwrap()
+            .inode()
+            .unwrap(),
+    );
+    ns.unlink(&ctx, None, b"/kept").unwrap();
+    assert_eq!(
+        ns.kept_for_pages(),
+        0,
+        "the unlinked file's dentry stayed kept"
+    );
+    assert!(
+        inode.upgrade().is_some(),
+        "the open file went before its user"
+    );
+    drop(open);
+    assert!(
+        inode.upgrade().is_none(),
+        "the unlinked file outlived its last user"
+    );
+}

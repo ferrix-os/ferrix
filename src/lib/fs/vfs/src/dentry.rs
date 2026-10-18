@@ -50,7 +50,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use core::fmt;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_kmem::{Charge, arc_footprint, footprint};
 
@@ -60,6 +60,9 @@ use crate::node::Inode;
 
 /// Source of dentry identifiers, which the mount table keys on.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// [`Dentry::kept_at`] of a dentry not in the kept set.
+pub(crate) const NOT_KEPT: usize = usize::MAX;
 
 /// One name in the tree.
 pub struct Dentry {
@@ -76,6 +79,10 @@ pub struct Dentry {
     /// How many mounts sit on this dentry. Checked on every step of every
     /// walk, so it is a counter rather than a question for the mount table.
     mounts: AtomicU32,
+    /// Its place in the namespace's set of dentries kept for their files'
+    /// cached pages, or [`NOT_KEPT`]: read and written only under that set's
+    /// lock (`namespace::Paged`), so that taking one out is one look.
+    pub(crate) kept_at: AtomicUsize,
     /// The kernel heap it holds, charged to the job whose walk made it, as
     /// Linux charges a dentry (`SLAB_ACCOUNT`): itself, its name, and its
     /// entry in its parent's children (F-37). A cached dentry nobody holds
@@ -117,6 +124,7 @@ impl Dentry {
             children: SpinLock::new(BTreeMap::new()),
             generation: AtomicU64::new(0),
             mounts: AtomicU32::new(0),
+            kept_at: AtomicUsize::new(NOT_KEPT),
             _charge: Charge::none(),
         })
     }
@@ -160,6 +168,7 @@ impl Dentry {
             children: SpinLock::new(BTreeMap::new()),
             generation: AtomicU64::new(0),
             mounts: AtomicU32::new(0),
+            kept_at: AtomicUsize::new(NOT_KEPT),
             _charge: charge,
         }))
     }

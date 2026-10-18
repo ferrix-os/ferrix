@@ -50,8 +50,8 @@
 //!
 //! # Where a reclaim starts
 //!
-//! Where the last one stopped ([`HAND`]): the object and the page it would
-//! have looked at next. A reclaim that always started at the first object's
+//! Where the last one stopped ([`HAND`]): the place in the list, the object
+//! and the page it would have looked at next. A reclaim that always started at the first object's
 //! first page took the oldest files' pages first -- the shell's, the loader's,
 //! the libraries every program runs -- and at the machine's floor each fault
 //! took back pages another processor was about to fault in again, and a
@@ -83,8 +83,32 @@ use crate::sync::SpinLock;
 /// reclaim builds.
 const BATCH: usize = 32;
 
-/// Every object made for a file, weakly.
-static CACHE: SpinLock<Vec<Weak<Vmo>>> = SpinLock::new(Vec::new());
+/// Every object made for a file, weakly, and the walks of it under way.
+static CACHE: SpinLock<List> = SpinLock::new(List {
+    entries: Vec::new(),
+    walkers: 0,
+    close_owed: false,
+});
+
+/// [`CACHE`]'s value.
+struct List {
+    /// The objects, in the order they were made.
+    entries: Vec<Weak<Vmo>>,
+    /// The [`reclaim`]s walking `entries` by place now ([`Walk`]). While one
+    /// is, the list is never closed up, so no entry moves under it and its
+    /// pass goes once round the objects the list held when it began.
+    walkers: usize,
+    /// A close-up [`register`] left for the last walker to make.
+    close_owed: bool,
+}
+
+impl List {
+    /// Drop the entries whose objects are gone: the list closed up.
+    fn close_up(&mut self) {
+        self.entries.retain(|entry| entry.strong_count() > 0);
+        self.close_owed = false;
+    }
+}
 
 /// The heap one registration holds at most: its entry, with the room a
 /// growing list keeps beside it. Counted in a file's charge (F-37).
@@ -97,21 +121,58 @@ pub(crate) const ENTRY_HEAP: usize = 2 * size_of::<Weak<Vmo>>();
 /// [`fallible::AllocError`] when the list cannot grow.
 pub(crate) fn register(vmo: &Arc<Vmo>) -> Result<(), fallible::AllocError> {
     let mut list = CACHE.lock();
-    if list.len() == list.capacity() {
+    if list.entries.len() == list.entries.capacity() {
         // About to grow: drop the ones that are gone first, so that files
-        // made and closed in a loop do not grow the list without end.
-        list.retain(|entry| entry.strong_count() > 0);
+        // made and closed in a loop do not grow the list without end. Not
+        // while a reclaim walks it by place: then the last walker closes it
+        // up as it leaves ([`Walk`]'s drop), and this one grows it.
+        if list.walkers == 0 {
+            list.close_up();
+        } else {
+            list.close_owed = true;
+        }
     }
-    fallible::try_push(&mut list, Arc::downgrade(vmo))
+    fallible::try_push(&mut list.entries, Arc::downgrade(vmo))
+}
+
+/// A [`reclaim`]'s walk of [`CACHE`] by place: while one is held the list
+/// is never closed up, only pushed to at its end, so a place names the same
+/// entry for the whole walk. Made under the list's lock with the count of
+/// entries the walk goes round.
+struct Walk {
+    /// The entries when the walk began; it looks at no others.
+    count: usize,
+}
+
+impl Walk {
+    /// Begin a walk.
+    fn begin() -> Walk {
+        let mut list = CACHE.lock();
+        list.walkers += 1;
+        Walk {
+            count: list.entries.len(),
+        }
+    }
+}
+
+impl Drop for Walk {
+    /// End the walk; the last one makes the close-up a registration left.
+    fn drop(&mut self) {
+        let mut list = CACHE.lock();
+        list.walkers -= 1;
+        if list.walkers == 0 && list.close_owed {
+            list.close_up();
+        }
+    }
 }
 
 /// The objects alive now, or none with no memory to list them.
 fn live() -> Vec<Arc<Vmo>> {
     let list = CACHE.lock();
-    let Ok(mut out) = fallible::try_with_capacity(list.len()) else {
+    let Ok(mut out) = fallible::try_with_capacity(list.entries.len()) else {
         return Vec::new();
     };
-    for entry in list.iter() {
+    for entry in list.entries.iter() {
         if let Some(vmo) = entry.upgrade() {
             // The room was had above.
             let _ = fallible::push_within(&mut out, vmo);
@@ -129,10 +190,32 @@ pub(crate) struct Reclaimed {
     pub(crate) stolen: u64,
 }
 
-/// Where the next [`reclaim`] starts looking: the object the last one
-/// stopped in, and the page it would have looked at next. See "Where a
-/// reclaim starts".
-static HAND: SpinLock<Option<(Weak<Vmo>, u64)>> = SpinLock::new(None);
+/// Where the next [`reclaim`] starts looking: the place in [`CACHE`] the last
+/// one stopped at, the object it found there, and the page it would have
+/// looked at next. See "Where a reclaim starts".
+static HAND: SpinLock<Hand> = SpinLock::new(Hand {
+    at: 0,
+    object: None,
+    page: 0,
+});
+
+/// [`HAND`]'s value.
+struct Hand {
+    /// The place in [`CACHE`].
+    at: usize,
+    /// The object that was there, to tell whether it still is: the list is
+    /// closed up between walks ([`register`]), and a place can then hold
+    /// another object, whose pages are looked at from its first.
+    object: Option<Weak<Vmo>>,
+    /// The page to go on from in that object.
+    page: u64,
+}
+
+/// The object at place `at` in [`CACHE`], if it is still alive: one entry
+/// upgraded under the list's lock, never the whole list.
+fn object_at(at: usize) -> Option<Arc<Vmo>> {
+    CACHE.lock().entries.get(at).and_then(Weak::upgrade)
+}
 
 /// Give back up to `want` clean cache pages charged to slot `scope` or
 /// beneath it, or, for [`quota::NONE`], to anyone (the machine out of
@@ -140,41 +223,56 @@ static HAND: SpinLock<Option<(Weak<Vmo>, u64)>> = SpinLock::new(None);
 ///
 /// It starts where the last reclaim stopped ([`HAND`]) and goes round the
 /// list from there, so that a page is not taken again before the rest of
-/// the cache has been looked at.
+/// the cache has been looked at. It takes the list's lock for one entry at a
+/// time, so that what one reclaim costs follows what it is asked for and
+/// not how many files are cached: a copy of the whole list each time, the
+/// way it was done before, cost a reclaim for every 32 pages an allocation
+/// and an upgrade per cached file, under the list's lock. Each pass still
+/// goes once round the objects the list held when the reclaim began, as the
+/// copy did: the reclaim holds a [`Walk`], under which the list is never
+/// closed up, only pushed to at its end, so no entry moves to another place
+/// and none is skipped or looked at twice (the consultant, ledger line 2336
+/// (a)). An object made meanwhile is past the walk's count, for the next.
 ///
 /// Must be called with no spin lock held, as [`Vmo::decommit_range`] must.
 pub(crate) fn reclaim(scope: u32, want: u64) -> Reclaimed {
     let mut done = Reclaimed::default();
-    let objects = live();
-    let (start, from) = hand_in(&objects);
+    let walk = Walk::begin();
+    let count = walk.count;
+    if count == 0 {
+        return done;
+    }
+    let (start, from) = hand_in(count);
     let mut stopped = None;
     // Once sparing what `memory.low` protects, then without; each pass once
     // round the list from the hand, the hand's own object last again from its
     // first page.
     'passes: for low in [true, false] {
-        for step in 0..=objects.len() {
+        for step in 0..=count {
             if done.stolen >= want {
                 break 'passes;
             }
-            let at = start.wrapping_add(step) % objects.len().max(1);
-            let Some(vmo) = objects.get(at) else {
-                break;
+            let at = start.wrapping_add(step) % count;
+            let Some(vmo) = object_at(at) else {
+                continue;
             };
             let first = if step == 0 { from } else { 0 };
-            let (more, next) = take_from(vmo, scope, want - done.stolen, low, first);
+            let (more, next) = take_from(&vmo, scope, want - done.stolen, low, first);
             done.scanned += more.scanned;
             done.stolen += more.stolen;
             stopped = Some(match next {
-                Some(page) => (at, page),
-                None => ((at + 1) % objects.len(), 0),
+                Some(page) => (at, Some(Arc::downgrade(&vmo)), page),
+                None => ((at + 1) % count, None, 0),
             });
+            // The last reference to an object that went meanwhile is let go
+            // of here, with no lock held, as its drop must be.
+            drop(vmo);
         }
     }
-    if let Some((at, page)) = stopped
-        && let Some(vmo) = objects.get(at)
-    {
-        set_hand(Arc::downgrade(vmo), page);
+    if let Some((at, object, page)) = stopped {
+        set_hand(Hand { at, object, page });
     }
+    drop(walk);
     if scope != quota::NONE {
         quota::count(scope, Counter::Scanned, done.scanned);
         quota::count(scope, Counter::Stolen, done.stolen);
@@ -190,26 +288,29 @@ fn takes(owner: u32, scope: u32, low: bool) -> bool {
     owner != quota::NONE && quota::within(owner, scope) && !quota::protected(owner, scope, low)
 }
 
-/// Where in `objects` the hand points, and the page to start at there: the
-/// start of the list when the hand's object is gone or there is none.
-fn hand_in(objects: &[Arc<Vmo>]) -> (usize, u64) {
-    let hand = HAND
-        .lock()
-        .as_ref()
-        .map(|(object, page)| (object.as_ptr(), *page));
-    hand.and_then(|(object, page)| {
-        objects
-            .iter()
-            .position(|vmo| core::ptr::eq(Arc::as_ptr(vmo), object))
-            .map(|at| (at, page))
-    })
-    .unwrap_or((0, 0))
+/// Where in a list of `count` the hand points, and the page to start at
+/// there: the hand's object's next page while it is still in its place, the
+/// first page of whatever is there otherwise.
+fn hand_in(count: usize) -> (usize, u64) {
+    let (at, object, page) = {
+        let hand = HAND.lock();
+        (hand.at, hand.object.as_ref().map(Weak::as_ptr), hand.page)
+    };
+    let at = at % count;
+    let same = object.is_some_and(|object| {
+        CACHE
+            .lock()
+            .entries
+            .get(at)
+            .is_some_and(|entry| core::ptr::eq(entry.as_ptr(), object))
+    });
+    (at, if same { page } else { 0 })
 }
 
 /// Move the hand. The one it replaces is dropped after the lock: a `Weak`
 /// that was the last reference to its allocation frees it.
-fn set_hand(object: Weak<Vmo>, page: u64) {
-    let old = HAND.lock().replace((object, page));
+fn set_hand(hand: Hand) {
+    let old = core::mem::replace(&mut *HAND.lock(), hand);
     drop(old);
 }
 

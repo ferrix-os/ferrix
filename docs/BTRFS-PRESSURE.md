@@ -1,6 +1,13 @@
 # btrfs under memory pressure (`test-btrfs-pressure`)
 
-**Where it stands (2026-10-17).** The certification consultant's review of
+**Where it stands (2026-10-18).** Branch `pagecache-evict` (not landed):
+the page cache dropped whole under a burst of new files, the dentry cache's
+doing (F-90), and the gate's `evict` boot that shows it ("The page cache
+dropped whole"); the certification consultant's review: OK IF (1)-(9),
+ledger line 2336. The box run and a reclaim-driven release of kept dentries
+are BACKLOG rows.
+
+**2026-10-17.** The certification consultant's review of
 branch `btrfs-pressure`: OK IF (1)-(8), ledger line 2314. The floor's
 `ENOSPC` is fixed on the branch (not landed); the gate is an owed row for
 the page cache, reclaim, the frame allocator, btrfs and the memory charge
@@ -53,6 +60,67 @@ list, not by what is asked for, and no lock is held across a reclaim. A
 job's reclaim at `memory.max` still asks for one run. Evidence: `gate.sh`
 logs `btp-pressure` and `btp-ctl` (below), ledger line 2314.
 
+## The page cache dropped whole (N150 box, 2026-10-18)
+
+With 16 GB of game files cached (MemFree at the floor), a full-speed `tar`
+unpack of GE-Proton onto `/data` took `Cached` from 15.97 GB to 0.13 GB in
+about 13 s, and the box answered slowly for 16-27 s: ssh logins failed, ping
+took 20-80 ms (`~/.local/share/ferrix/n150-linux/FINDINGS.md`, "Page cache
+evicted whole under a write at the floor").
+
+Reclaim was not the cause: a machine-wide reclaim asks for a run and the
+watermark's shortfall, at most 8224 pages, and on the box it gave back about
+60 MB at a time for a minute before the drop. The dentry cache was. It keeps
+at most 4096 dentries nobody holds (`ferrix_vfs::namespace::DEFAULT_CACHE`),
+oldest out first, and a btrfs file's page cache lives in its inode, which
+only its dentries and its open files hold (`ferrix_btrfs_vfs`, `Node`; the
+mount's map of inodes is weak). Every name `tar` made pushed one old dentry
+out, and once the game files' came to the front of the queue each one's
+whole cache went with its inode: a gigabyte at a time. The count of names
+looked up decided how much of the cache stayed, not memory.
+
+The fix keeps the dentry of a file that holds cached pages when the queue
+lets go of it, in a set beside the queue (`Paged`, by dentry id), until
+reclaim has taken the pages (`Inode::holds_cached_pages`, which btrfs's
+read-only and writable inodes answer; a writable file with no name left is
+never kept). Each lookup that misses looks at two of the kept dentries again
+and lets go of those whose pages are gone, a clock at a constant cost per
+lookup; an unlink, an `rmdir`, a rename over a name and an unmount take
+theirs out at once, as they do from the queue, so a deleted file's pages
+and blocks still go when its last user lets go. Linux keeps an inode with
+pages in its cache the same way: pruning dentries does not drop page cache.
+
+Since the dentry cache no longer bounds how many files are cached, reclaim
+stopped copying the list of every cached file and upgrading each entry on
+every call; it takes the list's lock for one entry at a time from where the
+last reclaim stopped (`user::cache::reclaim`).
+
+The stall did not show in QEMU (the probe at most 6 cs on main, at 768 MiB
+and at 4 GiB). On the box it followed the drop: with the root's and
+everything else's cache gone, each ssh login and each of the watcher's
+commands read its programs again from the disk, behind `tar`'s writeback.
+That it goes with the drop is the box run's to show (below).
+
+The `evict` boot of the gate (below) shows it, KVM, x86-64, debug kernel,
+logs in `~/.local/share/ferrix/n150-linux/pagecache-evict/`:
+
+| Kernel | Memory | Cached before | Cached at its least | Probe | Log |
+|---|---|---|---|---|---|
+| main a7605883a | 768 MiB | 695864 kB | 55524 kB (8 %) | 1 cs | `run1-main.log` |
+| the fix | 768 MiB | 695880 kB | 665292 kB (96 %) | 1 cs | `run2-fix.log` |
+| main a7605883a | 4 GiB | 4010940 kB | 55508 kB (1 %) | 6 cs | `run3-main-4g.log` |
+| the fix | 4 GiB | 4010920 kB | 3980204 kB (99 %) | 1 cs | `run4-fix-4g.log` |
+
+What the fix leaves (F-90's residual, ledger line 2336): a kept dentry stays
+charged to the job that looked it up until a lookup's clock finds its pages
+gone, so a quiet machine whose cache reclaim emptied, or one whose lookups
+only hit, keeps their heap; at `memory.max` that is memory reclaim cannot
+give back. A file kept this way costs its dentry, inode and object's heap
+besides its pages, as Linux's inode cache does. The set grows fallibly with
+no lock held and drops what it has no room for, as the queue did; unmount
+takes the mount's kept dentries out in one hold of the set's lock, after the
+queue's.
+
 ## The gate
 
 ```
@@ -77,6 +145,14 @@ A probe sleeps 100 ms at a time through both phases and records how late it
 woke. The gate fails on any failed step (with the step, its status, what it
 said, `df` and `/proc/meminfo` at the time), and on a probe more than 5 s
 late.
+
+A second boot, `evict` (since 2026-10-18), fills the cache to the floor with
+one 64 MiB file per 64 MiB of memory, written, synced and read back, then
+makes 8192 one-page files in directories of 256 as fast as the shell can --
+twice the dentry cache -- with the probe running and `Cached` sampled every
+200 ms. It fails if `Cached` falls below half of what it was, or on a probe
+more than 5 s late. `FERRIX_PRESSURE_BOOTS` is a comma list of `floor`,
+`evict` and `cgroup`; the first two are the gate.
 
 `--cpu-quota PCT` runs QEMU in a transient `systemd-run --user --scope`
 limited to that share of a processor (no root), and `--pin` adds `taskset`:

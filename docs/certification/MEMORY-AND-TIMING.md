@@ -245,9 +245,19 @@ frames always took: clean cache reclaimed first, then the fault fails
   The bound: the watermark is at most `WATERMARK_MOST` (8192 frames), so one
   machine-wide reclaim steals at most 8192 + `MAX_FILL_RUN` = 8224 pages,
   and a frame takes at most 8 reclaims; the scan stays bounded as before by
-  reclaim's two passes round the live list, not by what is asked for, and
-  no lock is held across a reclaim (`take_from` holds a pages lock per
-  batch only). A job's reclaim at its `memory.max` still asks for one run.
+  reclaim's two passes round the list of file objects, not by what is asked
+  for, and no lock is held across a reclaim (`take_from` holds a pages lock
+  per batch only). Since 2026-10-18 a reclaim takes the list's lock for one
+  entry at a time, from the hand's place in it (`user::cache::object_at`),
+  where it copied the whole list and upgraded every entry first: a reclaim
+  that is satisfied in the first objects it looks at costs what it took, not
+  one allocation and upgrade per cached file under the list's lock, which
+  mattered once the dentry cache stopped bounding how many files are cached
+  (below, the dentry cache). Each pass still goes once round the objects the
+  list held when the reclaim began, as the copy did: a reclaim holds a
+  `Walk`, and while any is held a registration never closes the list up (it
+  only pushes at the end, the last walker closing it up as it leaves), so no
+  entry changes place under a walk (ledger line 2336 (1)). A job's reclaim at its `memory.max` still asks for one run.
   Evidence: `gate.sh` logs `btp-pressure` (test-btrfs-pressure, x86_64
   KVM, passed) and `btp-ctl` (its control: the shortfall dropped,
   `No space left on device`, fired), ledger line 2314. The fill runs from a read and from a
@@ -402,7 +412,24 @@ even for an instant, and a refused charge takes nothing.
   bucket's lock at a time, never two, and only a requeue holds two; 256 pseudoterminals, the neighbour and IP reassembly caches, the
   routing tables, a btrfs transaction's changed nodes and the dentry cache's
   queue (made whole at boot and never grown) are the machine's, each with a
-  fixed bound; a VMO's page list is a few dozen bytes per
+  fixed bound; the dentries that queue lets go of while their files hold
+  cached pages are kept beside it, by id, until reclaim has taken the pages
+  or the name goes (since 2026-10-18, `ferrix_vfs::namespace`, `Paged`;
+  `docs/BTRFS-PRESSURE.md`, "The page cache dropped whole"): each such
+  dentry stays charged to the job that looked it up, as before, and its map
+  entry, a few dozen bytes of uncharged heap, is the machine's -- at most one
+  per cached file, and so at most one per cached page. The set's vector
+  grows only with its lock let go, fallibly; a dentry it has no room for is
+  dropped as the queue alone dropped it, and counted. Two of them are looked
+  at again on each lookup that misses, and those whose pages are gone are let
+  go: a set whose files' pages reclaim took stays charged until lookups go
+  round it, and a workload whose lookups only hit never trims it (F-90's
+  residual; a BACKLOG row owes a release driven by reclaim). No dentry is
+  dropped under the queue's or the set's lock, and the two are never held
+  together. An unmount holds the set's lock for one look at every kept
+  dentry, each with a walk up its parents (`is_ancestor_of`): the kept
+  dentries times their depth, with the room for what it takes out had before
+  the hold (in holds of 64 when there is no room for all); a VMO's page list is a few dozen bytes per
   charged frame. `memory.stat`'s `kernel` line reads the heap alone.
   System V shared memory's `shmget` scans every slot of its IPC namespace's
   table under the table's spin lock -- for a key, and to count the job's

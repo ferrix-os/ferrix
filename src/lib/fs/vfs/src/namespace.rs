@@ -15,18 +15,32 @@ use crate::Result;
 use crate::SpinLock;
 use crate::access::{Access, MAY_READ, MAY_WRITE};
 use crate::bottom::Bottom;
-use crate::dentry::Dentry;
+use crate::dentry::{Dentry, NOT_KEPT};
 use crate::file::{OpenFile, OpenFlags};
 use crate::node::{FileSystem, FileType, Inode, Metadata, NewNode, SetAttributes, StatFs};
 use crate::walk::{LastPart, Resolve, Walked, up};
 
 /// How many dentries the namespace keeps alive that nothing else refers to.
 ///
-/// The cache's whole eviction policy: a queue of this many strong references,
-/// oldest dropped first. Sized for a shell and a boot, not for a compiler;
+/// The cache's eviction policy: a queue of this many strong references,
+/// oldest out first. Sized for a shell and a boot, not for a compiler;
 /// stage 16 will want it scaled to memory, which is a change to this number's
 /// source and not to the structure.
+///
+/// A dentry the queue lets go of whose file still holds pages in the page
+/// cache is not dropped but kept beside it (`Shared::paged`), until reclaim
+/// has taken those pages: the count of names is no measure of memory, and
+/// dropping the dentry dropped the file's whole cache with it. On the N150
+/// box (2026-10-18) `tar` making a few thousand small files on `/data` so
+/// pushed out the dentries of 16 GB of cached game files, and `Cached` fell
+/// from 15.97 GB to 0.13 GB in 13 s.
 pub const DEFAULT_CACHE: usize = 4096;
+
+/// How many of the dentries kept for their pages each [`Namespace::remember`]
+/// looks at again, to let go of those whose pages reclaim has since taken:
+/// a clock over [`Shared::paged`], so that the set follows reclaim at a
+/// constant cost per lookup that misses.
+const PAGED_LOOKS: usize = 2;
 
 /// What one mount allows, apart from what its filesystem does: Linux's
 /// per-mount `MNT_*` flags, which `mount(2)` sets from its `MS_*` flags and
@@ -485,10 +499,143 @@ struct Shared {
     /// initramfs did inside the measured run.
     cache: SpinLock<VecDeque<Arc<Dentry>>>,
     cache_limit: usize,
+    /// The dentries `cache` let go of while their files held pages in the
+    /// page cache ([`Inode::holds_cached_pages`]), by id, and where the clock
+    /// that lets go of them again stands ([`DEFAULT_CACHE`]). Every path that
+    /// takes a dentry out of `cache` for leaving the tree takes it out of here
+    /// too, so an unlinked file's pages are not kept by it.
+    paged: SpinLock<Paged>,
     /// The next namespace's number, which `/proc/<pid>/ns/mnt` shows. From
     /// `0xF000_0000` up, the numbers Linux's `proc_alloc_inum` hands out, so
     /// that a program comparing two never meets one another inode claims.
     next_namespace: AtomicU64,
+}
+
+/// The dentries kept for their files' cached pages ([`Shared::paged`]).
+///
+/// A vector, each dentry knowing its place in it ([`Dentry::kept_at`]), so
+/// that taking one out is one look and a swap, and so that the room for one
+/// more is had fallibly with no lock held ([`Namespace::keep_for_pages`]):
+/// nothing here allocates under the set's lock, and no dentry is dropped
+/// under it.
+#[derive(Default)]
+struct Paged {
+    kept: Vec<Arc<Dentry>>,
+    /// The place the clock looks at next.
+    hand: usize,
+    /// Dentries that were to be kept and were dropped for want of room.
+    refused: u64,
+}
+
+impl Paged {
+    /// The kept dentry at the hand, going round, and the hand moved past it.
+    fn next(&mut self) -> Option<Arc<Dentry>> {
+        if self.hand >= self.kept.len() {
+            self.hand = 0;
+        }
+        let dentry = Arc::clone(self.kept.get(self.hand)?);
+        self.hand += 1;
+        Some(dentry)
+    }
+
+    /// Keep `dentry` if there is room for it without growing; hand it back
+    /// otherwise.
+    fn push_within(&mut self, dentry: Arc<Dentry>) -> core::result::Result<(), Arc<Dentry>> {
+        if self.kept.len() == self.kept.capacity() {
+            return Err(dentry);
+        }
+        dentry.kept_at.store(self.kept.len(), Ordering::Relaxed);
+        self.kept.push(dentry);
+        Ok(())
+    }
+
+    /// Take out the dentry at `at`; the last one takes its place.
+    fn take_at(&mut self, at: usize) -> Arc<Dentry> {
+        let taken = self.kept.swap_remove(at);
+        taken.kept_at.store(NOT_KEPT, Ordering::Relaxed);
+        if let Some(moved) = self.kept.get(at) {
+            moved.kept_at.store(at, Ordering::Relaxed);
+        }
+        taken
+    }
+
+    /// Take `dentry` out, if it is kept.
+    fn take(&mut self, dentry: &Arc<Dentry>) -> Option<Arc<Dentry>> {
+        let at = dentry.kept_at.load(Ordering::Relaxed);
+        self.kept
+            .get(at)
+            .is_some_and(|kept| Arc::ptr_eq(kept, dentry))
+            .then(|| self.take_at(at))
+    }
+
+    /// Keep `dentry`, still in the tree, if there is room: what came of it.
+    fn offer(&mut self, dentry: Arc<Dentry>) -> Offer {
+        if dentry.is_unhashed() {
+            return Offer::Gone(dentry);
+        }
+        match self.push_within(dentry) {
+            Ok(()) => Offer::Kept,
+            Err(back) => Offer::Full(back, self.kept.capacity().saturating_mul(2).max(16)),
+        }
+    }
+
+    /// Move the kept dentries into `bigger`, which has room for `room`,
+    /// unless another grew the set meanwhile: the buffer to free after the
+    /// lock, empty either way.
+    fn grow_into(&mut self, mut bigger: Vec<Arc<Dentry>>, room: usize) -> Vec<Arc<Dentry>> {
+        if self.kept.capacity() < room && self.kept.len() <= room {
+            // Moved, not copied, into room already had.
+            bigger.append(&mut self.kept);
+            core::mem::replace(&mut self.kept, bigger)
+        } else {
+            bigger
+        }
+    }
+
+    /// Take out, into `released` and within the room it has, the kept
+    /// dentries `root` is an ancestor of: whether the whole set was looked at.
+    fn take_under(&mut self, root: &Arc<Dentry>, released: &mut Vec<Arc<Dentry>>) -> bool {
+        let mut at = 0;
+        while released.len() < released.capacity() {
+            let Some(kept) = self.kept.get(at) else {
+                return true;
+            };
+            if root.is_ancestor_of(kept) {
+                released.push(self.take_at(at));
+            } else {
+                at += 1;
+            }
+        }
+        at >= self.kept.len()
+    }
+}
+
+/// What [`Paged::offer`] made of a dentry.
+enum Offer {
+    /// It is kept.
+    Kept,
+    /// It left the tree: to drop.
+    Gone(Arc<Dentry>),
+    /// No room: the dentry back, and the room to grow the set to.
+    Full(Arc<Dentry>, usize),
+}
+
+/// How many times [`Namespace::keep_for_pages`] grows the set for one dentry
+/// before it drops the dentry as the queue did: another eviction may take
+/// the room grown between the growth and the push.
+const KEEP_TRIES: usize = 3;
+
+/// The dentries [`Namespace::forget_tree`] takes out of the kept set in one
+/// hold of its lock when there is no room for all of them at once.
+const FORGET_CHUNK: usize = 64;
+
+/// Whether a dentry is one to keep for its file's cached pages: still in the
+/// tree, and naming a file that holds some.
+fn holds_pages(dentry: &Dentry) -> bool {
+    !dentry.is_unhashed()
+        && dentry
+            .inode()
+            .is_some_and(|inode| inode.holds_cached_pages())
 }
 
 /// The number the first namespace is given, and the next ones count up from:
@@ -609,6 +756,7 @@ impl Namespace {
             rename_lock: SleepLock::new((), parker.as_ref()),
             cache: SpinLock::new(VecDeque::with_capacity(cache_limit)),
             cache_limit,
+            paged: SpinLock::new(Paged::default()),
             next_namespace: AtomicU64::new(FIRST_NAMESPACE + 1),
         });
         Namespace {
@@ -720,9 +868,92 @@ impl Namespace {
             cache.push_back(Arc::clone(dentry));
             evicted
         };
-        // Dropped with the lock released: the last reference to a dentry
-        // releases its parent, and that chain is unbounded.
+        let evicted = evicted.and_then(|evicted| self.keep_for_pages(evicted));
+        let released = self.look_at_paged();
+        // Dropped with the locks released: the last reference to a dentry
+        // releases its parent, and that chain is unbounded; and its file's
+        // last reference releases the file's pages.
         drop(evicted);
+        drop(released);
+    }
+
+    /// Keep `evicted`, which the queue let go of, while its file holds cached
+    /// pages ([`DEFAULT_CACHE`]); hand it back to be dropped otherwise.
+    ///
+    /// Whether it holds pages is asked with no lock of the cache's held, and
+    /// whether it is still in the tree again under the set's lock: a removal
+    /// marks the dentry out of the tree before it takes the set's lock to
+    /// take it out ([`Namespace::forget`]), so it is either not kept or
+    /// taken out again.
+    ///
+    /// The set never grows under its lock. With no room, a vector twice the
+    /// size is made with the lock let go, fallibly, and the kept dentries are
+    /// moved into it under the lock, which allocates nothing; with no memory
+    /// for it the dentry is handed back to be dropped, as the queue alone
+    /// did, and counted ([`Namespace::kept_refused`]). The old, empty buffer
+    /// is freed after the lock.
+    fn keep_for_pages(&self, evicted: Arc<Dentry>) -> Option<Arc<Dentry>> {
+        if !holds_pages(&evicted) {
+            return Some(evicted);
+        }
+        let mut evicted = evicted;
+        for _ in 0..KEEP_TRIES {
+            let offer = self.shared.paged.lock().offer(evicted);
+            let room = match offer {
+                Offer::Kept => return None,
+                Offer::Gone(gone) => return Some(gone),
+                Offer::Full(back, room) => {
+                    evicted = back;
+                    room
+                }
+            };
+            let mut bigger: Vec<Arc<Dentry>> = Vec::new();
+            if bigger.try_reserve_exact(room).is_err() {
+                break;
+            }
+            let old = self.shared.paged.lock().grow_into(bigger, room);
+            drop(old);
+        }
+        self.shared.paged.lock().refused += 1;
+        Some(evicted)
+    }
+
+    /// Look at [`PAGED_LOOKS`] of the dentries kept for their pages, from the
+    /// clock's hand, and take out those whose files hold none now, or that
+    /// left the tree: what to drop, once no lock is held. The room for them
+    /// is had before any lock is taken; with none, nothing is looked at.
+    fn look_at_paged(&self) -> Vec<Arc<Dentry>> {
+        let mut released = Vec::new();
+        if released.try_reserve_exact(PAGED_LOOKS).is_err() {
+            return released;
+        }
+        for _ in 0..PAGED_LOOKS {
+            let Some(looked) = self.shared.paged.lock().next() else {
+                break;
+            };
+            if !holds_pages(&looked) {
+                let taken = self.shared.paged.lock().take(&looked);
+                if let Some(taken) = taken {
+                    // Within the room had above.
+                    released.push(taken);
+                }
+            }
+            drop(looked);
+        }
+        released
+    }
+
+    /// How many dentries are kept for their files' cached pages.
+    #[must_use]
+    pub fn kept_for_pages(&self) -> usize {
+        self.shared.paged.lock().kept.len()
+    }
+
+    /// How many dentries were to be kept for their pages and were dropped,
+    /// as the queue alone drops them, for want of memory to keep them.
+    #[must_use]
+    pub fn kept_refused(&self) -> u64 {
+        self.shared.paged.lock().refused
     }
 
     /// Drop the cache's references to a dentry that has left the tree.
@@ -738,6 +969,8 @@ impl Namespace {
             .cache
             .lock()
             .retain(|cached| !Arc::ptr_eq(cached, dentry));
+        let kept = self.shared.paged.lock().take(dentry);
+        drop(kept);
     }
 
     /// As [`Namespace::forget`], for a directory that has just been removed,
@@ -768,6 +1001,8 @@ impl Namespace {
             });
             released
         };
+        let kept = self.shared.paged.lock().take(directory);
+        drop(kept);
         drop(released);
     }
 
@@ -1829,6 +2064,33 @@ impl Namespace {
             released
         };
         drop(released);
+        self.forget_kept_tree(root);
+    }
+
+    /// [`Namespace::forget_tree`] for the dentries kept for their pages,
+    /// with the queue's lock let go first (no lock is held inside another).
+    ///
+    /// The room for every kept dentry is had before the set's lock, fallibly;
+    /// one hold then looks at each kept dentry once, with a walk up its
+    /// parents (`is_ancestor_of`): the unmount holds the set's lock for the
+    /// kept dentries times their depth, paid only by unmount. With no memory
+    /// for all of them it goes in holds of [`FORGET_CHUNK`], each dropping
+    /// what it took after the lock, until a hold looked at the whole set.
+    fn forget_kept_tree(&self, root: &Arc<Dentry>) {
+        loop {
+            let count = self.shared.paged.lock().kept.len();
+            let mut released: Vec<Arc<Dentry>> = Vec::new();
+            if released.try_reserve_exact(count).is_err()
+                && released.try_reserve_exact(FORGET_CHUNK).is_err()
+            {
+                return;
+            }
+            let whole = self.shared.paged.lock().take_under(root, &mut released);
+            drop(released);
+            if whole {
+                return;
+            }
+        }
     }
 
     // -- Namespaces ---------------------------------------------------------

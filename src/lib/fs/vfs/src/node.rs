@@ -624,6 +624,20 @@ pub trait Inode: Send + Sync + fmt::Debug {
         false
     }
 
+    /// Whether this file holds pages in a page cache that reclaim can give
+    /// back and read again, and still has a name: a disk filesystem's file
+    /// with pages read or written. The dentry cache keeps the dentry of such
+    /// a file past its bound until reclaim has taken the pages
+    /// ([`crate::namespace::DEFAULT_CACHE`]), so that the count of names
+    /// looked up never decides how much of the cache stays. False by default:
+    /// a memory filesystem's files are its tree's to keep, and their pages
+    /// are never reclaimed.
+    ///
+    /// Asked with no lock of the VFS's held; it takes only the file's own.
+    fn holds_cached_pages(&self) -> bool {
+        false
+    }
+
     /// The object called `name` in this directory, or `ENOENT`.
     fn lookup(&self, name: &[u8]) -> Result<Arc<dyn Inode>> {
         let _ = name;

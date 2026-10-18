@@ -3014,6 +3014,10 @@ type Hook = alloc::boxed::Box<dyn FnOnce() + Send>;
 #[derive(Default)]
 struct Hooks {
     armed: ferrix_sync::SpinLock<Option<(Moment, Vec<u8>, Hook)>>,
+    /// Whether every regular file says it holds cached pages
+    /// ([`crate::Inode::holds_cached_pages`]), as a disk file with pages
+    /// read does.
+    pages: AtomicBool,
 }
 
 impl core::fmt::Debug for Hooks {
@@ -3126,6 +3130,10 @@ impl crate::Inode for Meddling {
         emit: &mut dyn FnMut(crate::DirEntry<'_>) -> bool,
     ) -> Result<(), Errno> {
         self.inner.read_dir(cursor, emit)
+    }
+
+    fn holds_cached_pages(&self) -> bool {
+        self.hooks.pages.load(Ordering::Relaxed) && self.inner.metadata().kind == FileType::Regular
     }
 }
 
@@ -4915,4 +4923,41 @@ fn reads_writes_and_shrinks_of_one_file_from_many_threads_stay_whole() {
     for thread in threads {
         thread.join().unwrap();
     }
+}
+
+/// The dentry cache keeps, past its bound, the dentries of files that hold
+/// cached pages, and lets go of each again once its pages are gone or its
+/// name is: the count of names looked up no longer decides how much of the
+/// page cache stays (`DEFAULT_CACHE`; the N150 box, 2026-10-18).
+#[test]
+fn dentries_of_files_with_cached_pages_are_kept_until_the_pages_or_the_name_go() {
+    use core::sync::atomic::Ordering;
+    let (ns, hooks) = meddling(4);
+    let ctx = ns.context();
+    hooks.pages.store(true, Ordering::Relaxed);
+    for i in 0..40 {
+        let path = alloc::format!("/f{i}");
+        let file = ns
+            .open(&ctx, None, path.as_bytes(), &RW_CREATE, 0o644)
+            .unwrap();
+        drop(file);
+    }
+    // Misses push every file's dentry out of the queue.
+    for i in 0..40 {
+        let _ = ns.resolve(&ctx, None, alloc::format!("/miss-{i}").as_bytes(), true);
+    }
+    assert!(ns.cached() <= 4);
+    let kept = ns.kept_for_pages();
+    assert!(kept >= 36, "only {kept} dentries kept for their pages");
+    // The set grew twice, past 16 and 32, and refused none.
+    assert_eq!(ns.kept_refused(), 0);
+    // An unlinked file's dentry goes with its name at once.
+    ns.unlink(&ctx, None, b"/f3").unwrap();
+    assert_eq!(ns.kept_for_pages(), kept - 1);
+    // Once the pages are gone, the clock lets go of the rest as lookups miss.
+    hooks.pages.store(false, Ordering::Relaxed);
+    for i in 0..64 {
+        let _ = ns.resolve(&ctx, None, alloc::format!("/gone-{i}").as_bytes(), true);
+    }
+    assert_eq!(ns.kept_for_pages(), 0);
 }

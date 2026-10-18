@@ -284,3 +284,49 @@ fn an_open_file_outlives_the_unmount() {
         "and reads its own bytes"
     );
 }
+
+/// A file whose pages are cached keeps its inode, and with it those pages,
+/// after the dentry cache's queue has let go of its dentry, until the mount
+/// goes: the count of names looked up does not decide how much of the cache
+/// stays. On the N150 box (2026-10-18) `tar` making a few thousand files
+/// dropped 16 GB of cached game files this way, the dentries' inodes and their
+/// pages with them.
+#[test]
+fn a_cached_file_outlives_its_dentry_leaving_the_queue() {
+    let root = Tmpfs::for_kernel(
+        ROOT_DEV,
+        Arc::new(Ticking::default()),
+        Arc::new(HeapStorage::new(1 << 20)),
+        0o755,
+    );
+    let ns = Namespace::with_cache(root, 4, Arc::new(SpinParker));
+    let ctx = ns.context();
+    ns.mkdir(&ctx, None, b"/mnt", 0o755).unwrap();
+    mount_at_mnt(&ns, &ctx, "zlib");
+    let file = ns.open(&ctx, None, b"/mnt/big.txt", &reading(), 0).unwrap();
+    let mut piece = vec![0u8; 4096];
+    while file.read(&mut piece).unwrap() != 0 {}
+    drop(file);
+    let inode = Arc::downgrade(
+        &ns.resolve(&ctx, None, b"/mnt/big.txt", true)
+            .unwrap()
+            .inode()
+            .unwrap(),
+    );
+    // Misses enough to push every dentry looked up so far out of the queue.
+    for i in 0..64 {
+        let _ = ns.resolve(&ctx, None, std::format!("/mnt/miss-{i}").as_bytes(), true);
+    }
+    assert!(ns.cached() <= 4);
+    assert!(
+        inode.upgrade().is_some(),
+        "the cached file's inode went with its dentry"
+    );
+    assert!(ns.kept_for_pages() >= 1);
+    // Unmounting lets go of what was kept for the mount's files.
+    let mnt = ns.resolve(&ctx, None, b"/mnt", true).unwrap();
+    ns.unmount(&mnt).unwrap();
+    drop(mnt);
+    assert_eq!(ns.kept_for_pages(), 0);
+    assert!(inode.upgrade().is_none(), "the unmount kept the inode");
+}

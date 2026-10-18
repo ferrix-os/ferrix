@@ -528,6 +528,14 @@ impl<D: BlockHandle> PageSource for FileSource<D> {
 }
 
 impl<D: BlockHandle> Inode for Node<D> {
+    /// A regular file whose page cache holds pages: the dentry cache keeps
+    /// its dentry until reclaim has taken them (`ferrix_vfs`'s
+    /// `DEFAULT_CACHE`).
+    fn holds_cached_pages(&self) -> bool {
+        let pages = self.pages.lock().as_ref().map(Arc::clone);
+        pages.is_some_and(|pages| pages.committed_bytes() > 0)
+    }
+
     fn metadata(&self) -> Metadata {
         self.meta
     }
