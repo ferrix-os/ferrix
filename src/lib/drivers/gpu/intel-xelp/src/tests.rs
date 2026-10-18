@@ -717,3 +717,51 @@ fn request_emitters() {
     emit_store_dword(&mut cs, 0, 0);
     assert!(cs.overflowed());
 }
+
+#[test]
+fn lrc_register_state() {
+    use crate::engine::ENGINES;
+    use lrc::{OffsetsTable, RingState, ctx};
+    let mut regs = [0xdead_beef_u32; 1024];
+    let pml4 = 0x1_2345_6000;
+    lrc::lrc_init_regs(&mut regs, OffsetsTable::Rcs, 0x2000, true, pml4).expect("fits");
+    // Inhibited first image: synchronous switches and restore inhibited.
+    assert_eq!(regs[ctx::CONTEXT_CONTROL], 0x0009_0008 | 1);
+    assert_eq!((regs[ctx::PDP0_UDW], regs[ctx::PDP0_LDW]), (1, 0x2345_6000));
+    assert_eq!(regs[lrc::lrc_ring_mi_mode() + 1], STOP_RING_MASKED_OFF);
+    // The page was cleared, except what the image wrote.
+    assert_eq!(regs[600], 0);
+    lrc::lrc_update_regs(
+        &mut regs,
+        RingState {
+            start: 0x10_0000,
+            head: 0,
+            tail: 0x40,
+            size: 16 << 10,
+        },
+        true,
+        0x20_e000,
+        64,
+    );
+    assert_eq!(regs[ctx::RING_CTL], (12 << 10) | 1);
+    assert_eq!(regs[ctx::R_PWR_CLK_STATE], 0x8004_1000);
+    assert_eq!(regs[lrc::LRC_RING_INDIRECT_PTR + 1], 0x20_e000 | 1);
+    assert_eq!(regs[lrc::LRC_RING_INDIRECT_OFFSET + 1], 0xd << 6);
+    assert_eq!(lrc::alloc_state_size(OffsetsTable::Rcs), (16 * 4096, 14));
+
+    let mut page = [0_u32; 1024];
+    let size = lrc::setup_indirect_ctx_bb(&mut page, &ENGINES[0], 0x20_0000).expect("fits");
+    // timestamp (4 + 3 + 3), cmd buf (4 + 3), scratch (4), aux (8),
+    // state cache (3) = 32 dwords, already a whole number of cache lines.
+    assert_eq!(size, 32 * 4);
+    assert_eq!(page[2], 0x20_0000 + 4096 + (ctx::TIMESTAMP as u32) * 4);
+    assert_eq!(page[512 + 1], 0x20_0000 + 14 * 4096 + 4096 - 8);
+    let mut page = [0_u32; 1024];
+    let size = lrc::setup_indirect_ctx_bb(&mut page, &ENGINES[1], 0x30_0000).expect("fits");
+    // timestamp 10, scratch 4, aux 8 = 22, padded to 32.
+    assert_eq!(size, 32 * 4);
+    assert_eq!(page[22..32], [0; 10]);
+}
+
+/// `RING_MI_MODE` in a fresh image: `STOP_RING` masked off.
+const STOP_RING_MASKED_OFF: u32 = 1 << 24;

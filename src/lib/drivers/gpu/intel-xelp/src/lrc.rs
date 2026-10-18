@@ -157,3 +157,293 @@ pub fn set_offsets(
     }
     Ok(at)
 }
+
+/// `LRC_PPHWSP_PN`: the per-process status page is the image's first page.
+pub const LRC_PPHWSP_PN: u32 = 0;
+/// `LRC_STATE_PN`: the register state is the second.
+pub const LRC_STATE_PN: u32 = 1;
+/// `LRC_STATE_OFFSET`.
+pub const LRC_STATE_OFFSET: u32 = LRC_STATE_PN * 4096;
+/// `GEN11_LR_CONTEXT_RENDER_SIZE`, which Gen12 uses: 14 pages, the status
+/// page included.
+pub const GEN11_LR_CONTEXT_RENDER_SIZE: u32 = 14 * 4096;
+/// `GEN8_LR_CONTEXT_OTHER_SIZE`.
+pub const GEN8_LR_CONTEXT_OTHER_SIZE: u32 = 2 * 4096;
+/// `CACHELINE_BYTES`.
+pub const CACHELINE_BYTES: u32 = 64;
+
+/// `intel_engine_context_size` for Gen12.
+#[must_use]
+pub const fn context_size(table: OffsetsTable) -> u32 {
+    match table {
+        OffsetsTable::Rcs => GEN11_LR_CONTEXT_RENDER_SIZE,
+        OffsetsTable::Xcs => GEN8_LR_CONTEXT_OTHER_SIZE,
+    }
+}
+
+/// `__lrc_alloc_state` on Gen12: the context's size and the page its
+/// indirect-context batch starts on (`ce->wa_bb_page`); "`INDIRECT_CTX` and
+/// `PER_CTX_BB` need separate pages".
+#[must_use]
+pub const fn alloc_state_size(table: OffsetsTable) -> (u32, u32) {
+    let size = context_size(table);
+    (size + 2 * 4096, size / 4096)
+}
+
+/// `CTX_CTRL_ENGINE_CTX_RESTORE_INHIBIT`.
+pub const CTX_CTRL_ENGINE_CTX_RESTORE_INHIBIT: u32 = 1 << 0;
+/// `CTX_CTRL_INHIBIT_SYN_CTX_SWITCH`.
+pub const CTX_CTRL_INHIBIT_SYN_CTX_SWITCH: u32 = 1 << 3;
+/// `RING_VALID`.
+pub const RING_VALID: u32 = 1;
+/// `STOP_RING`, in `RING_MI_MODE`.
+pub const STOP_RING: u32 = 1 << 8;
+/// `GEN12_CTX_RCS_INDIRECT_CTX_OFFSET_DEFAULT`.
+pub const GEN12_CTX_RCS_INDIRECT_CTX_OFFSET_DEFAULT: u32 = 0xd;
+
+/// `RING_CTL_SIZE(size)`: bytes to the register's encoding.
+#[must_use]
+pub const fn ring_ctl_size(size: u32) -> u32 {
+    size - 4096
+}
+
+/// `lrc_ring_wa_bb_per_ctx` on Gen12.
+pub const LRC_RING_WA_BB_PER_CTX: usize = 0x12;
+/// `lrc_ring_indirect_ptr`.
+pub const LRC_RING_INDIRECT_PTR: usize = LRC_RING_WA_BB_PER_CTX + 2;
+/// `lrc_ring_indirect_offset`.
+pub const LRC_RING_INDIRECT_OFFSET: usize = LRC_RING_INDIRECT_PTR + 2;
+/// `lrc_ring_bb_offset` on Gen12.
+pub const LRC_RING_BB_OFFSET: usize = 0x70;
+/// `lrc_ring_gpr0` on Gen12.
+pub const LRC_RING_GPR0: usize = 0x74;
+/// `lrc_ring_cmd_buf_cctl` on Gen12, render only.
+pub const LRC_RING_CMD_BUF_CCTL: usize = 0xb6;
+
+/// `init_common_regs`: context control (synchronous switches inhibited;
+/// restore inhibited for a first image, as `inhibit` says), the timestamp,
+/// and the batch-buffer offset cleared. `last_runtime` is
+/// `ce->stats.runtime.last`, 0 for a new context.
+pub fn init_common_regs(regs: &mut [u32], inhibit: bool, last_runtime: u32) {
+    use crate::reg::{masked_bit_disable, masked_bit_enable};
+    let mut ctl = masked_bit_enable(CTX_CTRL_INHIBIT_SYN_CTX_SWITCH);
+    ctl |= masked_bit_disable(CTX_CTRL_ENGINE_CTX_RESTORE_INHIBIT);
+    if inhibit {
+        ctl |= CTX_CTRL_ENGINE_CTX_RESTORE_INHIBIT;
+    }
+    put(regs, ctx::CONTEXT_CONTROL, ctl);
+    put(regs, ctx::TIMESTAMP, last_runtime);
+    put(regs, LRC_RING_BB_OFFSET + 1, 0);
+}
+
+/// `init_ppgtt_regs` with `ASSIGN_CTX_PML4`: a 4-level VM's PML4 address in
+/// `PDP0`, the other descriptors ignored.
+pub fn init_ppgtt_regs(regs: &mut [u32], pml4: u64) {
+    put(regs, ctx::PDP0_UDW, (pml4 >> 32) as u32);
+    put(regs, ctx::PDP0_LDW, pml4 as u32);
+}
+
+/// `__reset_stop_ring`: the image's `RING_MI_MODE` with `STOP_RING` cleared.
+pub fn reset_stop_ring(regs: &mut [u32]) {
+    let at = lrc_ring_mi_mode() + 1;
+    if let Some(value) = regs.get_mut(at) {
+        *value &= !STOP_RING;
+        *value |= STOP_RING << 16;
+    }
+}
+
+/// `__lrc_init_regs` for a 4-level VM, without a global indirect batch
+/// (`init_wa_bb_regs` has nothing on Gen11+: `lrc_init_wa_ctx` returns).
+/// `regs` is the register-state page.
+pub fn lrc_init_regs(
+    regs: &mut [u32],
+    table: OffsetsTable,
+    base: u32,
+    inhibit: bool,
+    pml4: u64,
+) -> Result<(), OffsetsError> {
+    if inhibit {
+        regs.fill(0);
+    }
+    let _ = set_offsets(regs, reg_offsets(table), base, inhibit)?;
+    init_common_regs(regs, inhibit, 0);
+    init_ppgtt_regs(regs, pml4);
+    reset_stop_ring(regs);
+    Ok(())
+}
+
+/// `intel_sseu_make_rpcs` for Gen12 with every slice requested: only
+/// slice power gating (`has_slice_pg`); no subslice or EU gating.
+#[must_use]
+pub const fn make_rpcs(slices: u32) -> u32 {
+    const GEN8_RPCS_ENABLE: u32 = 1 << 31;
+    const GEN8_RPCS_S_CNT_ENABLE: u32 = 1 << 18;
+    const GEN11_RPCS_S_CNT_SHIFT: u32 = 12;
+    const GEN11_RPCS_S_CNT_MASK: u32 = 0x3f << GEN11_RPCS_S_CNT_SHIFT;
+    GEN8_RPCS_ENABLE
+        | GEN8_RPCS_S_CNT_ENABLE
+        | ((slices << GEN11_RPCS_S_CNT_SHIFT) & GEN11_RPCS_S_CNT_MASK)
+}
+
+/// A context's ring, as `lrc_update_regs` writes it into the image.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RingState {
+    /// `i915_ggtt_offset(ring->vma)`.
+    pub start: u32,
+    /// The head to resume at.
+    pub head: u32,
+    /// `ring->tail`.
+    pub tail: u32,
+    /// `ring->size` in bytes.
+    pub size: u32,
+}
+
+/// `lrc_update_regs`: the ring (GGTT address, head, tail, size) and, on the
+/// render engine, `R_PWR_CLK_STATE`; then `lrc_setup_indirect_ctx` for the
+/// Gen12 indirect batch at `indirect_bb` (GGTT) of `indirect_size` bytes.
+pub fn lrc_update_regs(
+    regs: &mut [u32],
+    ring: RingState,
+    render: bool,
+    indirect_bb: u32,
+    indirect_size: u32,
+) {
+    put(regs, ctx::RING_START, ring.start);
+    put(regs, ctx::RING_HEAD, ring.head);
+    put(regs, ctx::RING_TAIL, ring.tail);
+    put(regs, ctx::RING_CTL, ring_ctl_size(ring.size) | RING_VALID);
+    if render {
+        put(regs, ctx::R_PWR_CLK_STATE, make_rpcs(1));
+    }
+    // lrc_setup_indirect_ctx
+    put(
+        regs,
+        LRC_RING_INDIRECT_PTR + 1,
+        indirect_bb | (indirect_size / CACHELINE_BYTES),
+    );
+    put(
+        regs,
+        LRC_RING_INDIRECT_OFFSET + 1,
+        GEN12_CTX_RCS_INDIRECT_CTX_OFFSET_DEFAULT << 6,
+    );
+}
+
+fn put(regs: &mut [u32], at: usize, value: u32) {
+    if let Some(slot) = regs.get_mut(at) {
+        *slot = value;
+    }
+}
+
+/// `DG2_PREDICATE_RESULT_WA`: the dword the predicate workaround stores to,
+/// the indirect page's last qword.
+pub const DG2_PREDICATE_RESULT_WA: u32 = 4096 - 8;
+/// `DG2_PREDICATE_RESULT_BB`: where in the indirect page its batch starts.
+pub const DG2_PREDICATE_RESULT_BB: u32 = 2048;
+/// `RING_CTX_TIMESTAMP(0)`, relative (`MI_LRI_LRM_CS_MMIO`).
+const RING_CTX_TIMESTAMP_0: u32 = 0x3a8;
+/// `RING_CMD_BUF_CCTL(0)`.
+const RING_CMD_BUF_CCTL_0: u32 = 0x84;
+/// `GEN8_RING_CS_GPR(0, 0)`.
+const GEN8_RING_CS_GPR_0_0: u32 = 0x600;
+/// `GEN12_CS_DEBUG_MODE2`.
+const GEN12_CS_DEBUG_MODE2: u32 = 0x20d8;
+/// `INSTRUCTION_STATE_CACHE_INVALIDATE`.
+const INSTRUCTION_STATE_CACHE_INVALIDATE: u32 = 1 << 6;
+
+/// `setup_indirect_ctx_bb` with `gen12_emit_indirect_ctx_rcs` or `_xcs`, for
+/// a context whose image is at `ctx_ggtt` in the GGTT: the batch the engine
+/// runs on every restore of this context, written into `page` (the
+/// image's indirect page, `context_wabb(ce, false)`), padded to a cache line;
+/// and `setup_predicate_disable_wa` at its byte 2048, which i915 writes for
+/// every Gen12 context. Returns the batch's size in bytes, for
+/// [`lrc_update_regs`].
+pub fn setup_indirect_ctx_bb(
+    page: &mut [u32],
+    engine: &crate::engine::EngineInfo,
+    ctx_ggtt: u32,
+) -> Option<u32> {
+    use crate::commands::{Cs, gpu};
+    use crate::reg::masked_bit_enable;
+    let render = engine.class == crate::engine::RENDER_CLASS;
+    let state = ctx_ggtt + LRC_STATE_OFFSET;
+    let indirect_bb = ctx_ggtt
+        + (alloc_state_size(if render {
+            OffsetsTable::Rcs
+        } else {
+            OffsetsTable::Xcs
+        })
+        .1 * 4096);
+    let lrm = gpu::MI_LOAD_REGISTER_MEM_GEN8 | gpu::MI_SRM_LRM_GLOBAL_GTT | MI_LRI_LRM_CS_MMIO;
+    let lrr = gpu::MI_LOAD_REGISTER_REG | gpu::MI_LRR_SOURCE_CS_MMIO | MI_LRI_LRM_CS_MMIO;
+    let (head, tail) = page.split_at_mut((DG2_PREDICATE_RESULT_BB / 4) as usize);
+    let mut cs = Cs::new(head);
+    // gen12_emit_timestamp_wa
+    for dword in [
+        lrm,
+        GEN8_RING_CS_GPR_0_0,
+        state + (ctx::TIMESTAMP as u32) * 4,
+        0,
+    ] {
+        cs.push(dword);
+    }
+    for _ in 0..2 {
+        for dword in [lrr, GEN8_RING_CS_GPR_0_0, RING_CTX_TIMESTAMP_0] {
+            cs.push(dword);
+        }
+    }
+    if render {
+        // gen12_emit_cmd_buf_wa
+        for dword in [
+            lrm,
+            GEN8_RING_CS_GPR_0_0,
+            state + (LRC_RING_CMD_BUF_CCTL as u32 + 1) * 4,
+            0,
+        ] {
+            cs.push(dword);
+        }
+        for dword in [lrr, GEN8_RING_CS_GPR_0_0, RING_CMD_BUF_CCTL_0] {
+            cs.push(dword);
+        }
+    }
+    // gen12_emit_restore_scratch
+    for dword in [
+        lrm,
+        GEN8_RING_CS_GPR_0_0,
+        state + (LRC_RING_GPR0 as u32 + 1) * 4,
+        0,
+    ] {
+        cs.push(dword);
+    }
+    crate::engine_cs::gen12_emit_aux_table_inv(engine, &mut cs);
+    if render {
+        // Wa_18022495364: IP 12.0 to 12.10, gen12_invalidate_state_cache
+        cs.push(mi_load_register_imm(1));
+        cs.push(GEN12_CS_DEBUG_MODE2);
+        cs.push(masked_bit_enable(INSTRUCTION_STATE_CACHE_INVALIDATE));
+    }
+    while !(cs.len() * 4).is_multiple_of(CACHELINE_BYTES as usize) {
+        cs.push(gpu::MI_NOOP);
+    }
+    if cs.overflowed() {
+        return None;
+    }
+    let size = (cs.len() * 4) as u32;
+    // setup_predicate_disable_wa
+    let mut wa = Cs::new(tail);
+    for dword in [
+        gpu::MI_STORE_DWORD_IMM_GEN4 | gpu::MI_USE_GGTT | (4 - 2),
+        indirect_bb + DG2_PREDICATE_RESULT_WA,
+        0,
+        0, // "No predication"
+        gpu::MI_BATCH_BUFFER_END | (1 << 15),
+        gpu::MI_SET_PREDICATE | gpu::MI_SET_PREDICATE_DISABLE,
+        gpu::MI_STORE_DWORD_IMM_GEN4 | gpu::MI_USE_GGTT | (4 - 2),
+        indirect_bb + DG2_PREDICATE_RESULT_WA,
+        0,
+        1, // "enable predication before the next BB"
+        gpu::MI_BATCH_BUFFER_END,
+    ] {
+        wa.push(dword);
+    }
+    (!wa.overflowed()).then_some(size)
+}
