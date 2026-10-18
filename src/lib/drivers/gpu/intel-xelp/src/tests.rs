@@ -627,3 +627,93 @@ fn adl_whitelists() {
         [0x2_23a8 | RING_FORCE_TO_NONPRIV_ACCESS_RD]
     );
 }
+
+#[test]
+fn request_emitters() {
+    use crate::commands::{Cs, emit_fast_copy, emit_store_dword, gpu};
+    use crate::engine::ENGINES;
+    use crate::engine_cs::{self, EMIT_BARRIER, EMIT_FLUSH, EMIT_INVALIDATE};
+    let (rcs, bcs) = (&ENGINES[0], &ENGINES[1]);
+    let mut ring = [0_u32; 64];
+    // A render flush is one 6-dword PIPE_CONTROL; invalidation adds the
+    // preparser fence, a PIPE_CONTROL and the 8-dword AUX invalidation.
+    let mut cs = Cs::new(&mut ring);
+    engine_cs::gen12_emit_flush(rcs, EMIT_FLUSH, &mut cs);
+    assert_eq!(cs.len(), 6);
+    let mut cs = Cs::new(&mut ring);
+    engine_cs::gen12_emit_flush(rcs, EMIT_BARRIER, &mut cs);
+    assert_eq!(cs.len(), 6 + 1 + 6 + 8 + 1);
+    assert!(!cs.overflowed());
+    // PIPE_CONTROL(6) header, then the AUX register (GEN12_CCS_AUX_INV).
+    assert_eq!(
+        ring[0],
+        (3 << 29) | (3 << 27) | (2 << 24) | 4 | gpu::PIPE_CONTROL0_HDC_PIPELINE_FLUSH
+    );
+    assert_eq!(ring[6], engine_cs::preparser_disable(true));
+    assert_eq!(
+        ring[13],
+        lrc::mi_load_register_imm(1) | gpu::MI_LRI_MMIO_REMAP_EN
+    );
+    assert_eq!((ring[14], ring[15]), (0x4208, 1));
+    // The copy engine: MI_FLUSH_DW with TLB and CCS invalidation.
+    let mut cs = Cs::new(&mut ring);
+    engine_cs::gen12_emit_flush(bcs, EMIT_INVALIDATE, &mut cs);
+    assert_eq!(cs.len(), 1 + 4 + 8 + 1);
+    assert_eq!(
+        ring[1] & (gpu::MI_INVALIDATE_TLB | gpu::MI_FLUSH_DW_CCS),
+        gpu::MI_INVALIDATE_TLB | gpu::MI_FLUSH_DW_CCS
+    );
+    assert_eq!(ring[6], 0x4248); // GEN12_BCS0_AUX_INV
+
+    let mut cs = Cs::new(&mut ring);
+    engine_cs::gen8_emit_bb_start(&mut cs, 0x1_2345_6000, 0);
+    assert_eq!(
+        &ring[..6],
+        &[
+            gpu::MI_ARB_ON_OFF | 1,
+            0x1880_0101,
+            0x2345_6000,
+            1,
+            gpu::MI_ARB_ON_OFF,
+            0
+        ]
+    );
+
+    let mut cs = Cs::new(&mut ring);
+    let tails = engine_cs::gen12_emit_fini_breadcrumb_rcs(&mut cs, 7, 0x1000, 0x80c8);
+    // PIPE_CONTROL flush, PIPE_CONTROL seqno write, user interrupt, arb on,
+    // the 6-dword busy-wait: tail; then the WaIdleLiteRestore pair.
+    assert_eq!(
+        tails,
+        engine_cs::Tails {
+            tail: 6 + 6 + 2 + 6,
+            wa_tail: 22
+        }
+    );
+    assert_eq!((ring[8], ring[10]), (0x1000, 7));
+    assert_eq!(ring[12], gpu::MI_USER_INTERRUPT);
+    assert_eq!(ring[17], 0x80c8);
+
+    let mut cs = Cs::new(&mut ring);
+    let tails = engine_cs::gen12_emit_fini_breadcrumb_xcs(&mut cs, 9, 0x1040, 0x80c8);
+    assert_eq!(tails.wa_tail, 4 + 4 + 2 + 6 + 2);
+    assert_eq!(
+        (ring[4], ring[5], ring[7]),
+        (
+            (gpu::MI_FLUSH_DW + 1) | gpu::MI_FLUSH_DW_OP_STOREDW,
+            0x1040 | 4,
+            9
+        )
+    );
+
+    let mut cs = Cs::new(&mut ring);
+    emit_store_dword(&mut cs, 0x8000_1000, 0xc0ff_ee00);
+    emit_fast_copy(&mut cs, 0x20_0000, 0x10_0000, 8192);
+    assert_eq!(&ring[..4], &[0x1000_0002, 0x8000_1000, 0, 0xc0ff_ee00]);
+    assert_eq!(ring[4], (2 << 29) | (0x42 << 22) | 8);
+    assert_eq!(ring[7], (2 << 16) | 1024);
+    let mut short = [0_u32; 3];
+    let mut cs = Cs::new(&mut short);
+    emit_store_dword(&mut cs, 0, 0);
+    assert!(cs.overflowed());
+}

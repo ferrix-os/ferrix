@@ -3,6 +3,7 @@
 //! the file it came from. Never edited by hand: `--check` fails a module that
 //! no longer matches what the script makes of `i915/`.
 
+pub mod intel_gpu_commands;
 pub(crate) mod intel_lrc;
 pub(crate) mod intel_mocs;
 pub(crate) mod intel_uncore;

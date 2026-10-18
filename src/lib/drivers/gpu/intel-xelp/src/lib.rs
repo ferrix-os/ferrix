@@ -30,6 +30,8 @@
 //! * [`lrc`]: `intel_lrc.c`'s register-offset byte code;
 //! * [`gtt`]: the GGTT and PPGTT entry formats and the PAT;
 //! * [`engine`]: the engines and their `RING_*` registers;
+//! * [`commands`] and [`engine_cs`]: command streams, and what i915 writes
+//!   around each request;
 //! * [`execlists`]: descriptors, the submit queue and the status buffer;
 //! * [`sseu`]: the fuses, and the topology Mesa is told;
 //! * [`uapi`]: the i915 ioctl numbers and argument layouts;
@@ -38,8 +40,10 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod commands;
 pub mod device_info;
 pub mod engine;
+pub mod engine_cs;
 pub mod execlists;
 pub mod generated;
 pub mod gtt;

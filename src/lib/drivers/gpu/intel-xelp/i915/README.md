@@ -12,6 +12,7 @@ file's header, and `NOTICE` here. Nothing builds them.
 | `intel_uncore.c` | `drivers/gpu/drm/i915/intel_uncore.c` | `__gen12_fw_ranges`, `gen12_shadowed_regs` |
 | `gt/intel_lrc.c` | `drivers/gpu/drm/i915/gt/intel_lrc.c` | `gen12_xcs_offsets`, `gen12_rcs_offsets` |
 | `gt/intel_mocs.c` | `drivers/gpu/drm/i915/gt/intel_mocs.c` | `gen12_mocs_table`, `GEN11_MOCS_ENTRIES` |
+| `gt/intel_gpu_commands.h` | `drivers/gpu/drm/i915/gt/intel_gpu_commands.h` | every integer `#define` |
 | `include/pciids.h` | `include/drm/intel/pciids.h` | `INTEL_ADLN_IDS` |
 
 To move to a later Linux, replace the files from that tag, run the generator,

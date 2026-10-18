@@ -68,10 +68,11 @@ IN THE SOFTWARE.""".splitlines()
 def notice(text, path):
     """A C file's copyright and licence: its leading comment, verbatim, and
     the MIT notice written out when the file carries only the SPDX tag."""
-    spdx = re.match(r"\s*//\s*SPDX-License-Identifier:\s*(\S+)\s*\n", text)
+    spdx = re.match(r"\s*(?://\s*SPDX-License-Identifier:\s*(\S+?)\s*\n|/\*\s*SPDX-License-Identifier:\s*(\S+?)\s*\*/\s*\n)", text)
     if spdx:
-        if spdx.group(1) != "MIT":
-            fail(f"{path}: licence {spdx.group(1)}, not MIT")
+        licence = spdx.group(1) or spdx.group(2)
+        if licence != "MIT":
+            fail(f"{path}: licence {licence}, not MIT")
         text = text[spdx.end():]
     match = re.match(r"\s*/\*(.*?)\*/", text, re.S)
     if not match:
@@ -339,6 +340,121 @@ def gen_mocs():
     return "\n".join(lines) + "\n"
 
 
+# The function-like macros of intel_gpu_commands.h (and the kernel's bit
+# helpers it uses) that object-like macros expand through, as Python.
+COMMAND_FUNCTIONS = {
+    "BIT": lambda n: 1 << n,
+    "REG_BIT": lambda n: 1 << n,
+    "BIT_ULL": lambda n: 1 << n,
+    "REG_GENMASK": lambda high, low: ((1 << (high + 1)) - 1) & ~((1 << low) - 1),
+    "GENMASK": lambda high, low: ((1 << (high + 1)) - 1) & ~((1 << low) - 1),
+}
+
+
+def c_defines(text):
+    """Every `#define` of a header: name -> (parameters or None, body)."""
+    text = strip_comments(text).replace("\\\n", " ")
+    defines = {}
+    for match in re.finditer(r"^#define\s+(\w+)(\(([\w\s,]*)\))?[ \t]*(.*)$", text, re.M):
+        name, has_params, params, body = match.groups()
+        parameters = [p.strip() for p in params.split(",")] if has_params is not None else None
+        defines[name] = (parameters, body.strip())
+    return defines
+
+
+def c_eval(expression, defines, depth=0):
+    """An integer constant expression of the header, or None if it is not
+    one: names expand through `defines`, calls through function-like
+    defines or COMMAND_FUNCTIONS, and only integer arithmetic remains."""
+    if depth > 32:
+        return None
+    expression = expression.strip()
+    if not expression:
+        return None
+    # Expand calls innermost-first.
+    while True:
+        call = re.search(r"\b(\w+)\(([^()]*)\)", expression)
+        if not call:
+            break
+        name, args = call.group(1), [a.strip() for a in call.group(2).split(",")] if call.group(2).strip() else []
+        values = [c_eval(a, defines, depth + 1) for a in args]
+        if any(v is None for v in values):
+            return None
+        if name in COMMAND_FUNCTIONS:
+            value = COMMAND_FUNCTIONS[name](*values)
+        elif name in defines and defines[name][0] is not None and len(defines[name][0]) == len(values):
+            body = defines[name][1]
+            for parameter, v in zip(defines[name][0], values):
+                body = re.sub(r"\b" + re.escape(parameter) + r"\b", f"({v})", body)
+            value = c_eval(body, defines, depth + 1)
+            if value is None:
+                return None
+        else:
+            return None
+        expression = expression[: call.start()] + f"({value})" + expression[call.end():]
+    # Expand names.
+    def name_value(match):
+        name = match.group(0)
+        if name in defines and defines[name][0] is None:
+            value = c_eval(defines[name][1], defines, depth + 1)
+            if value is not None:
+                return f"({value})"
+        raise KeyError(name)
+    try:
+        expression = re.sub(r"\b[A-Za-z_]\w*\b", name_value, expression)
+    except KeyError:
+        return None
+    expression = re.sub(r"\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\b", r"\1", expression)
+    if not re.fullmatch(r"[0-9a-fA-FxX()\s|&^~<>+\-*]+", expression):
+        return None
+    try:
+        value = eval(expression, {"__builtins__": {}}, {})  # noqa: S307 -- digits and operators only, checked above
+    except Exception:
+        return None
+    if not isinstance(value, int):
+        return None
+    return value & ((1 << 64) - 1)
+
+
+def gen_commands():
+    rel = "gt/intel_gpu_commands.h"
+    path = I915 / rel
+    text = path.read_text()
+    defines = c_defines(text)
+    lines = header(path, rel, notice(text, path))
+    lines.append("//! `intel_gpu_commands.h`: every object-like `#define` that is an integer")
+    lines.append("//! constant, evaluated as the C preprocessor and compiler would (u32 where it")
+    lines.append("//! fits, u64 otherwise), under its i915 name. Function-like macros are")
+    lines.append("//! hand-translated where they are used ([`crate::commands`]).")
+    lines.append("")
+    lines.append("#![allow(dead_code, reason = \"the whole header, so it reads against i915's\")]")
+    lines.append("")
+    emitted = 0
+    skipped = []
+    for name, (parameters, body) in defines.items():
+        if parameters is not None or name.startswith("_INTEL_GPU_COMMANDS_H"):
+            continue
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name):
+            skipped.append(name)
+            continue
+        value = c_eval(body, defines)
+        if value is None:
+            skipped.append(name)
+            continue
+        kind = "u32" if value < (1 << 32) else "u64"
+        lines.append(f"/// `{name}`: `{' '.join(body.split())}`.")
+        lines.append(f"pub const {name}: {kind} = {value:#x};")
+        emitted += 1
+    if emitted < 200:
+        fail(f"{rel}: only {emitted} constants evaluated; the header changed shape")
+    if skipped:
+        lines.append("")
+        lines.append("// Not integer constants, so not here:")
+        for name in skipped:
+            lines.append(f"// {name}")
+    return "\n".join(lines) + "\n"
+
+
 def gen_pciids():
     rel = "include/pciids.h"
     path = I915 / rel
@@ -388,6 +504,7 @@ MODULES = {
     "intel_uncore.rs": gen_uncore,
     "intel_lrc.rs": gen_lrc,
     "intel_mocs.rs": gen_mocs,
+    "intel_gpu_commands.rs": gen_commands,
     "pciids.rs": gen_pciids,
 }
 
