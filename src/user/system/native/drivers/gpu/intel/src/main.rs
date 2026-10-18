@@ -376,7 +376,7 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     ));
 
     let (subslice_mask, engine_mask) = say_gt(&mut bar, &platform);
-    let (scanned, last_present, total) = say_plane_and_ggtt(&mut bar, &device, &mut time);
+    let (scanned, last_present, total, plane) = say_plane_and_ggtt(&mut bar, &device, &mut time);
     say(format_args!(
         "intel: M1: the device answers ({} ms)",
         time.now_us().saturating_sub(run_started) / 1_000
@@ -391,6 +391,7 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
             total,
             subslice_mask,
             engine_mask,
+            plane,
         };
         run_m2(&mut bar, &device, &mut time, firmware);
     }
@@ -460,13 +461,13 @@ const GGTT_WALK_GAP: u64 = 4096;
 /// The lit plane on pipe A (the one the firmware lights; the other pipes'
 /// power wells may be off, and i915 reads a plane only with its well on),
 /// and the GGTT entries the firmware left present, read only and bounded.
-/// Returns how many entries were read, the last present one and the GGTT's
-/// size in bytes.
+/// Returns how many entries were read, the last present one, the GGTT's
+/// size in bytes, and the lit plane for M2's screen blit.
 fn say_plane_and_ggtt(
     bar: &mut Bar0,
     device: &Device<Kernel>,
     time: &mut Time,
-) -> (u64, Option<u64>, u64) {
+) -> (u64, Option<u64>, u64, Option<m2::ScreenPlane>) {
     let gmch = device
         .config_read(gtt::SNB_GMCH_CTRL, 2)
         .map_or(0, |value| value as u16);
@@ -517,10 +518,21 @@ fn say_plane_and_ggtt(
         time.now_us().saturating_sub(started),
         first_present.unwrap_or(0)
     ));
+    let screen = lit.enabled().then(|| {
+        let (width, height) = lit.dimensions();
+        m2::ScreenPlane {
+            ggtt: lit.ggtt_offset(),
+            stride: lit.stride,
+            ctl: lit.ctl,
+            width,
+            height,
+        }
+    });
     (
         scanned,
         first_present.map(|_| last_present),
         entries * gtt::GTT_PAGE_SIZE,
+        screen,
     )
 }
 

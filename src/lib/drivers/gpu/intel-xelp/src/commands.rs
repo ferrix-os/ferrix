@@ -160,3 +160,28 @@ pub fn emit_fast_copy(cs: &mut Cs<'_>, dst: u64, src: u64, size: u32) {
     cs.push(src as u32);
     cs.push((src >> 32) as u32);
 }
+
+/// `XY_FAST_COPY_BLT` of a linear 32-bpp rectangle, `width` by `height`
+/// pixels, each surface addressed at the rectangle's first pixel with a
+/// pitch of its own in bytes: `emit_copy`'s layout, for a rectangle of a
+/// larger surface (a plane's).
+pub fn emit_rect_copy(
+    cs: &mut Cs<'_>,
+    dst: u64,
+    dst_pitch: u32,
+    src: u64,
+    src_pitch: u32,
+    width: u32,
+    height: u32,
+) {
+    cs.push(gpu::GEN9_XY_FAST_COPY_BLT_CMD | (10 - 2));
+    cs.push(gpu::BLT_DEPTH_32 | (dst_pitch & 0xffff));
+    cs.push(0);
+    cs.push((height << 16) | (width & 0xffff));
+    cs.push(dst as u32);
+    cs.push((dst >> 32) as u32);
+    cs.push(0);
+    cs.push(src_pitch & 0xffff);
+    cs.push(src as u32);
+    cs.push((src >> 32) as u32);
+}

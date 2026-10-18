@@ -23,7 +23,7 @@
 
 use core::ptr;
 
-use ferrix_intel_xelp::commands::{Cs, emit_fast_copy, emit_store_dword, gpu};
+use ferrix_intel_xelp::commands::{Cs, emit_fast_copy, emit_rect_copy, emit_store_dword, gpu};
 use ferrix_intel_xelp::engine::{ENGINES, EngineInfo, ring_imr};
 use ferrix_intel_xelp::generated::i915_reg::{GEN11_GFX_MSTR_IRQ, GEN11_MASTER_IRQ};
 use ferrix_intel_xelp::ggtt_space::{GgttSpace, Range};
@@ -48,7 +48,7 @@ use crate::{Bar0, Step, Time, say};
 
 /// Pages in the pool: four context images and their rings, two default
 /// images, two status pages, the test pages and the page tables, with room.
-const POOL_PAGES: usize = 256;
+const POOL_PAGES: usize = 384;
 /// Bytes in a page.
 const PAGE: usize = 4096;
 /// Dwords in a page.
@@ -320,6 +320,36 @@ pub(crate) struct Firmware {
     pub(crate) subslice_mask: u8,
     /// The engines the media fuses leave, as `engine::bit` flags.
     pub(crate) engine_mask: u32,
+    /// Pipe A's plane 1, when the firmware lit it.
+    pub(crate) plane: Option<ScreenPlane>,
+}
+
+/// The firmware's lit plane, as M1 read it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ScreenPlane {
+    /// `PLANE_SURF`'s GGTT offset.
+    pub(crate) ggtt: u32,
+    /// `PLANE_STRIDE`, in 64-byte units for a linear plane.
+    pub(crate) stride: u32,
+    /// `PLANE_CTL`.
+    pub(crate) ctl: u32,
+    /// Pixels.
+    pub(crate) width: u32,
+    /// Rows.
+    pub(crate) height: u32,
+}
+
+impl ScreenPlane {
+    /// `PLANE_CTL_TILED_LINEAR` and `PLANE_CTL_FORMAT_XRGB_8888` (bits 27:23
+    /// 4 << 1 on ICL+).
+    fn linear_xrgb8888(&self) -> bool {
+        (self.ctl >> 10) & 0x7 == 0 && (self.ctl >> 23) & 0x1f == 4 << 1
+    }
+
+    /// Bytes a row.
+    fn pitch_bytes(&self) -> u32 {
+        (self.stride & 0xfff) * 64
+    }
 }
 
 /// Run M2. Returns how far it got; each step says its line.
@@ -376,6 +406,7 @@ pub(crate) fn run(
     }
     if CHECKPOINT >= 3 {
         m2.fast_copy(&mut bcs)?;
+        m2.screen_blit(&mut bcs, firmware.plane)?;
         m2.ppgtt_batch(&mut rcs)?;
     }
     if CHECKPOINT >= 4 {
@@ -935,13 +966,16 @@ impl M2<'_> {
         emit_fast_copy(&mut Cs::new(&mut copy), DST, SRC, 2 * PAGE as u32);
         let (seen, took) = self.run(engine, &mut context, image, ring, Payload::Commands(&copy))?;
         let mut differ = 0;
+        // FNV-1a over each side's bytes, as the checkpoint compares them.
+        let (mut src_hash, mut dst_hash) = (FNV_OFFSET, FNV_OFFSET);
         for i in 0..2 * PAGE_DWORDS {
-            if self.pool.read32(dst, i) != self.pool.read32(src, i) {
-                differ += 1;
-            }
+            let (s, d) = (self.pool.read32(src, i), self.pool.read32(dst, i));
+            differ += u32::from(s != d);
+            src_hash = fnv1a(src_hash, s);
+            dst_hash = fnv1a(dst_hash, d);
         }
         say(format_args!(
-            "intel: M2: XY_FAST_COPY_BLT on {}: 8 KiB from PPGTT {SRC:#x} to {DST:#x}, {differ} of {} dwords differ ({took} us, {seen:?})",
+            "intel: M2: XY_FAST_COPY_BLT on {}: 8 KiB from PPGTT {SRC:#x} to {DST:#x}, {differ} of {} dwords differ, FNV-1a source {src_hash:#018x} copy {dst_hash:#018x} ({took} us, {seen:?})",
             engine.info.name,
             2 * PAGE_DWORDS
         ));
@@ -1130,6 +1164,114 @@ impl M2<'_> {
         // The engine works again: a store on a fresh context.
         self.store_dword(engine, 5)
     }
+    /// A fast-copy blit onto the screen, for the checkpoint's photograph: a
+    /// 256x128 pattern from the pool into the top-right corner of the
+    /// firmware's lit plane, then the same rectangle blitted back into the
+    /// pool and both hashed. The plane's pages are reached by mapping, in
+    /// the PPGTT, the pages its GGTT entries already point at (read, never
+    /// written), uncached (PAT index 3) since the display does not snoop.
+    /// Only linear XRGB8888 planes are drawn on.
+    fn screen_blit(&mut self, engine: &mut Engine, plane: Option<ScreenPlane>) -> Result<(), Step> {
+        const W: u32 = 256;
+        const H: u32 = 128;
+        const VA_FB: u64 = 0x40_0000_0000;
+        const VA_SRC: u64 = 0x50_0000_0000;
+        const VA_BACK: u64 = 0x60_0000_0000;
+        let Some(plane) = plane else {
+            say(format_args!("intel: M2: no lit plane to blit onto"));
+            return Ok(());
+        };
+        if !plane.linear_xrgb8888() || plane.width < W + 32 || plane.height < H + 32 {
+            say(format_args!(
+                "intel: M2: the lit plane is not linear XRGB8888 of at least {}x{} (ctl {:#010x}); no screen blit",
+                W + 32,
+                H + 32,
+                plane.ctl
+            ));
+            return Ok(());
+        }
+        let pitch = plane.pitch_bytes();
+        let (x, y) = ((plane.width - W - 16) & !15, 16_u32);
+        // The plane's pages from its first row to its last, mapped at VA_FB
+        // plus their GGTT offset.
+        let first = u64::from(plane.ggtt) + u64::from(y) * u64::from(pitch);
+        let last = first + u64::from(H) * u64::from(pitch);
+        let (page0, page1) = (first / PAGE as u64, last.div_ceil(PAGE as u64));
+        let vm = self.vm;
+        vm.alloc_va_range(
+            &mut self.pool,
+            VA_FB + page0 * PAGE as u64,
+            (page1 - page0) * PAGE as u64,
+        )
+        .map_err(|_| Step::Memory)?;
+        for page in page0..page1 {
+            let Some(device) =
+                ferrix_intel_xelp::gtt::gen8_ggtt_pte_decode(self.bar.read_pte(page))
+            else {
+                say(format_args!(
+                    "intel: M2: the plane's GGTT entry {page:#x} is not present; no screen blit"
+                ));
+                return Ok(());
+            };
+            vm.insert_entry(&mut self.pool, device, VA_FB + page * PAGE as u64, 3)
+                .map_err(|_| Step::Memory)?;
+        }
+        let pages = (W * H * 4) as usize / PAGE;
+        let src = self.ppgtt_object(pages, VA_SRC)?;
+        let back = self.ppgtt_object(pages, VA_BACK)?;
+        // Eight vertical bars, each a colour, the last row white.
+        for (i, word) in self.pool.dwords(src).iter_mut().enumerate() {
+            let (px, py) = (i as u32 % W, i as u32 / W);
+            const BARS: [u32; 8] = [
+                0x00ff_0000,
+                0x0000_ff00,
+                0x0000_00ff,
+                0x00ff_ff00,
+                0x00ff_00ff,
+                0x0000_ffff,
+                0x00ff_ffff,
+                0x0080_8080,
+            ];
+            *word = if py == H - 1 {
+                0x00ff_ffff
+            } else {
+                BARS.get((px / (W / 8)) as usize % 8).copied().unwrap_or(0)
+            };
+        }
+        let dst =
+            VA_FB + u64::from(plane.ggtt) + u64::from(y) * u64::from(pitch) + u64::from(x) * 4;
+        let mut copy = [0_u32; 24];
+        {
+            let mut cs = Cs::new(&mut copy);
+            emit_rect_copy(&mut cs, dst, pitch, VA_SRC, W * 4, W, H);
+            // The second blit reads what the first wrote.
+            ferrix_intel_xelp::commands::gen8_emit_flush_dw(&mut cs, 0, 0, 0);
+            emit_rect_copy(&mut cs, VA_BACK, W * 4, dst, pitch, W, H);
+        }
+        let (mut context, image, ring) = self.context(engine, 2)?;
+        let (seen, took) = self.run(engine, &mut context, image, ring, Payload::Commands(&copy))?;
+        let (mut src_hash, mut back_hash) = (FNV_OFFSET, FNV_OFFSET);
+        let mut differ = 0;
+        for i in 0..(W * H) as usize {
+            let (s, b) = (self.pool.read32(src, i), self.pool.read32(back, i));
+            differ += u32::from(s & 0x00ff_ffff != b & 0x00ff_ffff);
+            src_hash = fnv1a(src_hash, s & 0x00ff_ffff);
+            back_hash = fnv1a(back_hash, b & 0x00ff_ffff);
+        }
+        say(format_args!(
+            "intel: M2: screen blit on {}: {W}x{H} bars at ({x}, {y}) of the lit {}x{} plane (GGTT {:#x}, pitch {pitch}), read back by a second blit: {differ} of {} pixels differ, FNV-1a pattern {src_hash:#018x} screen {back_hash:#018x} ({took} us, {seen:?}); it stays on the screen",
+            engine.info.name,
+            plane.width,
+            plane.height,
+            plane.ggtt,
+            W * H
+        ));
+        if differ == 0 {
+            Ok(())
+        } else {
+            Err(Step::Wrong)
+        }
+    }
 }
 
 impl GgttPtes for Bar0 {
@@ -1194,4 +1336,16 @@ impl core::fmt::Display for Stuck {
             self.csb_ptr
         )
     }
+}
+
+/// FNV-1a's 64-bit offset basis.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a over one dword's bytes, little-endian.
+fn fnv1a(mut hash: u64, word: u32) -> u64 {
+    for byte in word.to_le_bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
