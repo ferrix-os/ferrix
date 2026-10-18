@@ -1,5 +1,6 @@
 # The N150's Intel GPU: a render driver so Mesa's anv and iris run on Ferrix
 
+Version 3, 2026-10-18: the consultant's design review folded in (§4.4, §5.1).
 Version 2, 2026-10-18: version 1 plus the customer's D1 and D2 and §3.6.
 Version 1, 2026-10-18, a design with no code. Asked for by the customer on
 2026-10-18. The N150 box (`docs/N150.md`) draws every frame with Mesa's
@@ -414,12 +415,27 @@ allocate, and the box is reached over ssh (`fx.sh`).
   `n150-linux/FINDINGS.md` item 3). `vtd-n150` (unlanded) brings `dmar0` up
   for interrupt remapping with translation **off**, because of the RMRR
   (`vtd-design.md` §3.9(a)). Its slice 2, an identity-mapped RMRR domain
-  for `00:02.0` with the driver's pins added to it, is this design's K2. So
-  the rule proposed for the consultant is this. **M1 and M2 may run on the
-  box untranslated**, with the driver's own command streams only and the
-  degraded mode announced as today. **No client's command buffer runs (M3
-  on) until `dmar0` translates.** The GPU executes what programs hand it,
-  and without translation one bad PPGTT entry is DMA anywhere.
+  for `00:02.0` with the driver's pins added to it, is this design's K2.
+  The rule, as the consultant approved it (ledger 2352, D4 OK IF (a) to
+  (d)): **M1 and M2 may run on the box untranslated; no client reaches the
+  GPU until `dmar0` translates.** The GPU executes what programs hand it,
+  and without translation one bad PPGTT entry is DMA anywhere. The rule is
+  the kernel's, not the driver's promise:
+  * (a) while the unit behind a function does not translate, the chardev
+    core **refuses a HELLO listing any client minor** (`RENDER_MINOR`
+    included) for that function, so no `renderD<N>` exists before K2. This
+    is a chardev check with a negative control (with the refusal removed,
+    the check fires);
+  * (b) M1 and M2 run only under `ferrix.intelgpu`, which is off by default
+    and refused in a release image's default command line. DEGRADED is
+    announced at boot as today, and the boot line names `00:02.0` as
+    untranslated DMA;
+  * (c) `VULNERABILITY-ANALYSIS.md` V-03 states that under
+    `ferrix.intelgpu` without K2, a ring-3 driver with `MANAGE` on
+    `00:02.0` can DMA anywhere. The driver is trusted like the kernel in
+    that mode, and no isolation claim covers the box;
+  * (d) "the driver's own command streams only" is a property of the
+    driver, recorded as such, and never cited as evidence.
 * **Client to client.** Each VM is its own PPGTT, and batches run
   non-privileged from it (`MI_BATCH_BUFFER_START` with the PPGTT address
   space). The hardware itself refuses privileged commands and register
@@ -451,10 +467,101 @@ allocate, and the box is reached over ssh (`fx.sh`).
 The driver itself, Mesa, and the uAPI front end are ring 3 and outside the
 item. `check-item-boundary.py` gains a line refusing any path under
 `src/kernel` that names `i915`/`xe`/`intel-xelp`, as it does for `nvidia`.
-New requirement ids for K2 to K6 are reserved at the design review
-(`tools/common/data/requirement-reservations.json`). Their review asks for
-what CONVENTIONS.md lists: negative controls that fire, traced `unsafe`,
-coverage carried.
+It lands with K3 or before. Their review asks for what CONVENTIONS.md
+lists: negative controls that fire, traced `unsafe`, coverage carried.
+
+### 5.1 The consultant's design review (2026-10-18, ledger line 2352)
+
+The certification consultant reviewed version 2's K2 to K7 and D4. The
+verdicts, with their conditions, are binding on the code that follows:
+
+* **D4, the isolation rule: OK IF (a) to (d)**, folded into §4.4. K2
+  before M2 is not required.
+* **K2 (core): OK IF (1) to (7), to be built only after K1 (`vtd-n150`)
+  lands.**
+  1. Its own design note in `vtd-design.md` §3.9(b), reviewed at code
+     review, with ids reserved first.
+  2. The identity domain maps exactly the RMRR's pages. It is refused
+     (function left untranslated, DEGRADED, said) when the RMRR overlaps
+     usable RAM by the memory map or is not page-aligned. Host-tested on
+     `box-2026-10-17/DMAR.bin` and on malformed tables.
+  3. The RMRR's frames are reserved from the frame allocator for the
+     boot's life.
+  4. A driver pin that overlaps the RMRR is refused, and an unpin can never
+     remove an RMRR entry. Each is a check with a control.
+  5. Never detached means across driver restarts too. The pin quarantine
+     (a3f23da4) applies to the driver's pins in this domain, and a restart
+     re-attaches nothing.
+  6. A boot check under QEMU's intel-iommu with an RMRR (by the patch route
+     if needed). If that cannot be built, host tests plus a BACKLOG row for
+     the box run.
+  7. Coverage carried, and `unsafe` traced.
+* **K3 (load: chardev; devmgr outside): OK IF**
+  1. A render-only HELLO is checked in the chardev core's code, with minor
+     numbering not keyed to NVIDIA's 195 layout (render minors as Linux's
+     128 and up), and a check that no `card0` is made.
+  2. The budget may vary with the GPU kind, provided the kind is decided
+     by the kernel-visible match (vendor and class of the published node),
+     never by what the driver says.
+  3. The bound is kernel-side and does not rely on devmgr: a stated
+     fraction of usable RAM with an absolute cap, at most one half of
+     usable RAM above the watermark. Pinned frames are charged to the
+     driver's job, refusal fails closed (`EDQUOT`), there is a check at
+     the cap with a control, and MEMORY-AND-TIMING states the formula.
+  4. The `check-item-boundary.py` line lands with K3 or before.
+* **K4 (load: display; item: the device yield): OK IF**
+  1. The yield exception is keyed to the kernel option and the node's
+     identity (Intel, class 03, the function holding the framebuffer),
+     never to a driver's request.
+  2. The kernel **refuses FLR and any device-reset call** on that function
+     while it holds the framebuffer: enforced, with a check and a control,
+     not only the driver's promise of engine resets.
+  3. `display::check`'s copying-card rule widens to that node alone, by
+     identity, with a control.
+  4. This document and `DISPLAY.md` state that the panic screen's
+     visibility under `ferrix.intelgpu` depends on the driver keeping the
+     lit plane's GGTT entries, so the kernel does not claim it. The
+     kernel's write-combining hold on the framebuffer pages is unchanged.
+  5. Under K2 the framebuffer's pages are inside the RMRR identity domain,
+     or the design says how the plane's scan-out is reached.
+* **K5 (load: chardev dmabuf and sync): OK IF**
+  1. Ledger 647's S-rules apply unchanged: only the serving driver
+     signals, a dead driver's fences signal with an error, and nothing
+     reaches a process that is not waiting.
+  2. Only the dmabuf's serving driver sets its fence slot. A client's
+     `IMPORT_SYNC_FILE` is passed to the serving driver as data, and never
+     makes the kernel or another client wait on it.
+  3. `EXPORT` installs a `sync_file` that snapshots the slot at the call,
+     as Linux does.
+  4. The slot's lock is a stated leaf, bounded, in MEMORY-AND-TIMING.
+  5. chardev checks for export, import, a dead driver, and a foreign
+     driver's attempt to set the slot, each with a control.
+* **K6 (item: user memory types): OK IF**
+  1. WC only for a VMO in the serving driver's own table, and only on
+     x86-64 at first. Other architectures refuse, as today, until each
+     one's attribute (Normal-NC) is argued.
+  2. The memory-type aliasing argument is written into the requirement's
+     rationale. The frames stay write-back in the direct map while a user
+     mapping is WC (the SDM's aliasing rules and i915's own practice on LLC
+     parts). The kernel never relies on a coherent read through the alias.
+     WC buffers are drained (an `sfence` or a named serialising step)
+     before frames of a WC-mapped VMO are unmapped and reused.
+  3. A check that a non-driver VMO, or a non-x86 boot, refuses
+     `MAP_WRITE_COMBINING`, with a control.
+* **K7: NOT YET, by design.** Deferred until a gate needs it, and then
+  reviewed on its own against `NVIDIA.md` §4.3.
+* **Ids.** Reserved per K item (K2 core `L.iommu`; K3 and K5 `L.object` or
+  chardev rows as each requirement lands; K4 item; K6 item) in **one
+  docs-only reservation landing before any code**. None for K7 now.
+* **C1.** Whether the chardev core takes out-of-order replies (§4.1) is a
+  property of the core. It is confirmed before M3, and the answer is
+  recorded here.
+* **C2.** The fake back end of `test-intel-uapi` exercises the core
+  changes but not the GPU's DMA, so no K2 claim may cite it.
+
+**The order of work** (the coordinator, 2026-10-18): the `intel-xelp` lib
+crate and its host tests now; then the reservation landing; then K3, which
+M1 needs under `ferrix.intelgpu`; then M0 and M1 on the box.
 
 ## 6. What can be tested without the hardware
 
@@ -560,9 +667,12 @@ M1 and M2, without the box.
 ## 10. Where it stands
 
 2026-10-18, later: the customer decided D1 and D2, and §3.6 was added (the
-i915 file to Rust module mapping and what is left out). The lib crate
-`intel-xelp` (tables, encoders, parsers and their host tests, no I/O, no
-item change) is started on branch `intel-xelp`. M0 waits for a box slot.
+i915 file to Rust module mapping and what is left out). The consultant's
+design review is in (§5.1, ledger 2352). The lib crate `intel-xelp`
+(tables, encoders, parsers and their host tests, no I/O, no item change) is
+started on branch `intel-xelp`. Its tables are generated from i915 files
+vendored under the crate's `i915/` by `tools/common/gen/gen-intel-xelp.py`.
+M0 waits for a box slot.
 
 
 2026-10-18: this design, on branch `intel-gpu-design`, docs only. Nothing
