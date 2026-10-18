@@ -67,3 +67,14 @@ pub trait GgttPtes {
     /// `gen8_set_pte`.
     fn write_pte(&mut self, index: u64, pte: u64);
 }
+
+/// A page the GPU writes and the driver reads, by dword: the hardware status
+/// page, where the engine leaves its context status buffer and the
+/// breadcrumbs' seqnos. A trait, not a slice, because the other writer is a
+/// device: the driver process reads it volatile.
+pub trait StatusPage {
+    /// Dword `index` of the page.
+    fn read32(&mut self, index: usize) -> u32;
+    /// Write dword `index` (`reset_csb_pointers`, `csb_read`'s `-1`).
+    fn write32(&mut self, index: usize, value: u32);
+}

@@ -43,6 +43,7 @@
 //! * [`rps`] and [`rc6`]: frequency requests and idle power, by the host;
 //! * [`clock`]: the command streamer's timestamp frequency;
 //! * [`sseu`]: the fuses, and the topology Mesa is told;
+//! * [`submission`]: a context on an engine, its requests and their seqnos;
 //! * [`uc`]: whether `GuC` locked the `WOPCM` since the last reset;
 //! * [`uapi`]: the i915 ioctl numbers and argument layouts;
 //! * [`workarounds`]: the GT, engine, context and whitelist lists.
@@ -72,12 +73,17 @@ pub mod request;
 pub mod ring;
 pub mod rps;
 pub mod sseu;
+pub mod submission;
 pub mod uapi;
 pub mod uc;
 pub mod uncore;
 pub mod workarounds;
 
 #[cfg(test)]
+mod model;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_exec;
 #[cfg(test)]
 mod tests_m2;

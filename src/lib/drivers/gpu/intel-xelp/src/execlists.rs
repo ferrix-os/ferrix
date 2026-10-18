@@ -194,3 +194,294 @@ pub fn csb_indices(head: u32, tail: u32) -> Option<impl Iterator<Item = u32>> {
     let count = (tail + GEN11_CSB_ENTRIES - head) % GEN11_CSB_ENTRIES;
     Some((1..=count).map(move |step| (head + step) % GEN11_CSB_ENTRIES))
 }
+
+/// `INTEL_HWS_CSB_WRITE_INDEX` reset value and `csb_head` after
+/// `reset_csb_pointers`: the last entry, so that the first one the engine
+/// writes after a reset, entry 0, is the first one read.
+pub const CSB_RESET_VALUE: u32 = GEN11_CSB_ENTRIES - 1;
+
+/// `reset_csb_pointers`: the engine's pointers set back to the last entry
+/// over MMIO (twice, "for luck and our trusty paranoia"), the status page's
+/// copy of the write pointer with them, and every entry poisoned with `-1`
+/// so that one the engine did not write is seen. Returns the read pointer
+/// to start from.
+pub fn reset_csb_pointers<M, P>(mmio: &mut M, hwsp: &mut P, base: u32) -> u32
+where
+    M: crate::io::Mmio + ?Sized,
+    P: crate::io::StatusPage + ?Sized,
+{
+    let ptr = crate::engine::ring_context_status_ptr(base).offset();
+    let value = (0xffff << 16) | (CSB_RESET_VALUE << 8) | CSB_RESET_VALUE;
+    mmio.write32(ptr, value);
+    let _posting = mmio.read32(ptr);
+    hwsp.write32(ICL_HWS_CSB_WRITE_INDEX, CSB_RESET_VALUE);
+    for dword in 0..2 * GEN11_CSB_ENTRIES as usize {
+        hwsp.write32(I915_HWS_CSB_BUF0_INDEX + dword, u32::MAX);
+    }
+    mmio.write32(ptr, value);
+    let _posting = mmio.read32(ptr);
+    CSB_RESET_VALUE
+}
+
+/// `GEN12_CSB_SW_CTX_ID_MASK`'s field in a CSB dword: the software context
+/// id of the context switched to (lower dword) or away from (upper).
+#[must_use]
+pub const fn gen12_csb_sw_ctx_id(dw: u32) -> u32 {
+    field_get(GEN12_CSB_SW_CTX_ID_MASK, dw)
+}
+
+/// The software context id a descriptor's `ccid` carries, as the CSB
+/// reports it: the bits above `GEN11_SW_CTX_ID_SHIFT`.
+#[must_use]
+pub const fn ccid_sw_ctx_id(ccid: u32) -> u32 {
+    (ccid >> (GEN11_SW_CTX_ID_SHIFT - 32)) & GEN12_IDLE_CTX_ID
+}
+
+/// How long `wa_csb_read` waits for an entry still reading `-1`
+/// (`tgl,dg1:HSDES#22011327657`) before it reads the MMIO copy.
+pub const CSB_READ_WAIT_US: u64 = 10;
+
+/// `csb_read` with `wa_csb_read`: entry `index` from the status page; if it
+/// still reads `-1`, waited for, then taken from the engine's MMIO copy
+/// (`GEN8_EXECLISTS_STATUS_BUF`, entries 6 and on at
+/// `GEN11_EXECLISTS_STATUS_BUF2`). The entry is then consumed: set to `-1`
+/// "so that we can spot its future reuse".
+pub fn csb_read<M, P, C>(mmio: &mut M, hwsp: &mut P, clock: &mut C, base: u32, index: u32) -> u64
+where
+    M: crate::io::Mmio + ?Sized,
+    P: crate::io::StatusPage + ?Sized,
+    C: crate::io::Clock + ?Sized,
+{
+    use crate::generated::intel_lrc_reg::{GEN8_EXECLISTS_STATUS_BUF, GEN11_EXECLISTS_STATUS_BUF2};
+    let at = I915_HWS_CSB_BUF0_INDEX + 2 * index as usize;
+    let read = |hwsp: &mut P| u64::from(hwsp.read32(at)) | (u64::from(hwsp.read32(at + 1)) << 32);
+    let mut entry = read(hwsp);
+    if entry == u64::MAX {
+        let start = clock.now_us();
+        while entry == u64::MAX && clock.now_us().saturating_sub(start) < CSB_READ_WAIT_US {
+            clock.delay_us(1);
+            entry = read(hwsp);
+        }
+        if entry == u64::MAX {
+            let (status, idx) = if index >= 6 {
+                (GEN11_EXECLISTS_STATUS_BUF2, index - 6)
+            } else {
+                (GEN8_EXECLISTS_STATUS_BUF, index)
+            };
+            let offset = base + status + 8 * idx;
+            entry = u64::from(mmio.read32(offset)) | (u64::from(mmio.read32(offset + 4)) << 32);
+        }
+    }
+    hwsp.write32(at, u32::MAX);
+    hwsp.write32(at + 1, u32::MAX);
+    entry
+}
+
+/// What a context in a port is to the caller: an id of its choosing, and
+/// the descriptor it was submitted with.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Port<T> {
+    /// The caller's context.
+    pub context: T,
+    /// The 64-bit descriptor written into the submit queue.
+    pub desc: u64,
+}
+
+/// What [`Execlists::process_csb`] saw.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct CsbReport {
+    /// Entries read.
+    pub entries: u32,
+    /// Of them, promotions of the pending ports.
+    pub promoted: u32,
+    /// Of them, completions of the active port.
+    pub completed: u32,
+    /// `execlists->error_interrupt |= ERROR_CSB`: an entry that made no
+    /// sense for the ports (a promotion with nothing pending, a completion
+    /// with nothing active, or one [`gen12_csb_parse`] calls unexpected), or
+    /// a write pointer out of range. i915 then resets the engine.
+    pub error: Option<u64>,
+}
+
+/// `struct intel_engine_execlists`' ports: what the driver submitted and the
+/// engine has not taken yet (`pending`), what the engine runs (`inflight`
+/// from `active`), and how far the status buffer has been read.
+#[derive(Clone, Copy, Debug)]
+pub struct Execlists<T: Copy> {
+    /// `csb_head`.
+    pub csb_head: u32,
+    pending: [Option<Port<T>>; NUM_PORTS as usize],
+    inflight: [Option<Port<T>>; NUM_PORTS as usize],
+    active: usize,
+}
+
+impl<T: Copy> Default for Execlists<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Copy> Execlists<T> {
+    /// Ports empty, the read pointer as [`reset_csb_pointers`] leaves it.
+    #[must_use]
+    pub const fn new() -> Self {
+        Execlists {
+            csb_head: CSB_RESET_VALUE,
+            pending: [None; NUM_PORTS as usize],
+            inflight: [None; NUM_PORTS as usize],
+            active: 0,
+        }
+    }
+
+    /// `execlists_active`: the port the engine runs, if any.
+    #[must_use]
+    pub fn active(&self) -> Option<Port<T>> {
+        self.inflight.get(self.active).copied().flatten()
+    }
+
+    /// Whether a submission is still waiting for the engine to take it
+    /// (`execlists->pending[0]`): i915 submits nothing more until it is.
+    #[must_use]
+    pub fn is_pending(&self) -> bool {
+        self.pending.iter().any(Option::is_some)
+    }
+
+    /// Whether nothing is pending or running, as far as the ports know.
+    #[must_use]
+    pub fn is_idle(&self) -> bool {
+        !self.is_pending() && self.active().is_none()
+    }
+
+    /// `execlists_submit_ports`: write `ports` into the submit queue and
+    /// load it. Returns `false`, writing nothing, while an earlier
+    /// submission is pending or when the first port is empty.
+    pub fn submit<M: crate::io::Mmio + ?Sized>(
+        &mut self,
+        mmio: &mut M,
+        base: u32,
+        ports: [Option<Port<T>>; NUM_PORTS as usize],
+    ) -> bool {
+        if self.is_pending() || ports[0].is_none() {
+            return false;
+        }
+        let descs = ports.map(|port| port.map_or(0, |p| p.desc));
+        for (reg, value) in submit_ports(base, descs) {
+            mmio.write32(reg.offset(), value);
+        }
+        self.pending = ports;
+        true
+    }
+
+    /// `process_csb`: every entry from the one after [`Self::csb_head`] to
+    /// the write pointer the engine left in the status page, each read by
+    /// [`csb_read`] and parsed by [`gen12_csb_parse`]. A promotion makes the
+    /// pending ports the running ones; every context that leaves the engine
+    /// (its port completed, or replaced by a promotion) is handed to
+    /// `out`, as i915 hands it to `post_process_csb`.
+    pub fn process_csb<M, P, C>(
+        &mut self,
+        mmio: &mut M,
+        hwsp: &mut P,
+        clock: &mut C,
+        base: u32,
+        mut out: impl FnMut(Port<T>),
+    ) -> CsbReport
+    where
+        M: crate::io::Mmio + ?Sized,
+        P: crate::io::StatusPage + ?Sized,
+        C: crate::io::Clock + ?Sized,
+    {
+        let mut report = CsbReport::default();
+        let tail = hwsp.read32(ICL_HWS_CSB_WRITE_INDEX);
+        let Some(indices) = csb_indices(self.csb_head, tail) else {
+            // i915 trusts the u8 it reads; a pointer out of range is as bad
+            // as an entry that makes no sense.
+            report.error = Some(u64::from(tail));
+            return report;
+        };
+        self.csb_head = tail;
+        for index in indices {
+            let csb = csb_read(mmio, hwsp, clock, base, index);
+            report.entries += 1;
+            match gen12_csb_parse(csb) {
+                CsbEvent::Promote => {
+                    if self.pending[0].is_none() {
+                        report.error = Some(csb);
+                        break;
+                    }
+                    for port in self.inflight.iter().skip(self.active).flatten() {
+                        out(*port);
+                    }
+                    self.inflight = self.pending;
+                    self.active = 0;
+                    self.pending = [None; NUM_PORTS as usize];
+                    report.promoted += 1;
+                }
+                CsbEvent::Complete => {
+                    let Some(port) = self.active() else {
+                        report.error = Some(csb);
+                        break;
+                    };
+                    out(port);
+                    self.active += 1;
+                    report.completed += 1;
+                }
+                CsbEvent::Unexpected { csb } => {
+                    report.error = Some(csb);
+                    break;
+                }
+            }
+        }
+        let _posting = mmio.read32(crate::engine::ring_context_status_ptr(base).offset());
+        report
+    }
+
+    /// The ports' part of an engine reset (`execlists_reset_rewind`'s
+    /// `reset_csb_pointers`, then `cancel_port_requests`): every context
+    /// still in a port is handed to `out`, and the ports and the read
+    /// pointer start over.
+    pub fn reset<M, P>(
+        &mut self,
+        mmio: &mut M,
+        hwsp: &mut P,
+        base: u32,
+        mut out: impl FnMut(Port<T>),
+    ) where
+        M: crate::io::Mmio + ?Sized,
+        P: crate::io::StatusPage + ?Sized,
+    {
+        for port in self
+            .pending
+            .iter()
+            .chain(self.inflight.iter().skip(self.active))
+            .flatten()
+        {
+            out(*port);
+        }
+        *self = Self::new();
+        self.csb_head = reset_csb_pointers(mmio, hwsp, base);
+    }
+}
+
+/// `intel_ring_direction(ring, next, prev)` for a ring of `size` bytes:
+/// positive when `next` is ahead of `prev`. `ring->wrap` is
+/// `BITS_PER_TYPE(ring->size) - ilog2(size)`: the offset's bits are shifted
+/// to the top, so the sign says which way is shorter.
+#[must_use]
+pub const fn intel_ring_direction(size: u32, next: u32, prev: u32) -> i32 {
+    (next.wrapping_sub(prev) << (u32::BITS - size.trailing_zeros())) as i32
+}
+
+/// `execlists_update_context`: the descriptor to submit for a context whose
+/// image says `CTX_RING_TAIL` is `prev`, now that its ring runs to `tail`,
+/// with `CTX_DESC_FORCE_RESTORE` when the tail does not advance
+/// (`WaIdleLiteRestore`: "We should never submit the context with the same
+/// `RING_TAIL` twice"). The caller writes `tail` into the image first.
+#[must_use]
+pub const fn update_context_desc(desc: u64, ring_size: u32, tail: u32, prev: u32) -> u64 {
+    if intel_ring_direction(ring_size, tail, prev) <= 0 {
+        desc | CTX_DESC_FORCE_RESTORE
+    } else {
+        desc
+    }
+}
