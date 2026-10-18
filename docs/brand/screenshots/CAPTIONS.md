@@ -1,4 +1,69 @@
-# Ferrix screenshots, 2026-10-03
+# Ferrix screenshots
+
+## The demo video, 2026-10-18
+
+`demo.mp4` (70 s, 1280x720, H.264, 20 fps, no sound) and `demo-loop.gif` (15 s of it,
+960x540, 12 fps) come from one boot of Ferrix at main 1838944ae: x86_64 under QEMU
+with KVM on a Linux host, 4 vCPUs, `run-compositor --everything` (the 3D card with
+virgl, Chrome, and `rustc` and `cargo` on the data disk), served over VNC at
+1920x1080. Every frame carries the label "FERRIX · x86-64 · QEMU/KVM on Linux".
+
+Nothing was cut and nothing was sped up: the video is the recording from the moment
+QEMU's screen answered to the end of the script, in real time. The recorder can cut
+long waits (the boot, rustc's run, the page's load) and then says so on screen; on this
+take none was long enough to cut. Two things were added to the frames: the label, and
+the pointer. The compositor puts the pointer on a cursor plane, which QEMU sends to a
+VNC client apart from the screen, so the recorder draws QEMU's cursor image where its
+own driver put the pointer.
+
+What it shows, by the video's clock:
+
+- 0-3 s: the firmware (TianoCore) and Ferrix's loader printing its command line, then
+  QEMU's "Display output is not active" while the kernel takes the display over.
+- About 6 s: hyprix, the compositor, with the terminal the desktop starts; about 12 s:
+  Chrome joins it with Ferrix's start page.
+- 19-41 s: in that terminal, `uname -sm` (`Ferrix x86_64`), `rustc --version`
+  (1.97.1), a three-line `hello.rs` typed into zinc as one quoted `echo`, then
+  `rustc hello.rs && ./hello`, which prints "Hello from rustc on Ferrix!" about a
+  second after Enter.
+- 45-53 s: a click on Chrome's tab strip, Ctrl+L, and
+  `https://en.wikipedia.org/wiki/Rust_(programming_language)`, fetched over the
+  guest's network and drawn in software.
+- 58-70 s: two scrolls down the article. A link under the pointer opens Wikipedia's
+  preview card for a moment.
+
+`--everything` also starts Valve's Steam client. The script stops it over ssh as soon
+as the guest's sshd answers, before its window opens, because its first-run update
+window and then its sign-in window, with a live sign-in QR code, would sit over the
+middle of the screen. The terminal is the one the desktop starts at login, not one
+opened on camera. Over ssh the script otherwise only asks when to go on (are the
+windows up, has rustc finished, has the page's title changed) and removes the last
+take's `hello.rs` and `hello` from the home disk, which `run-compositor` keeps between
+boots. Everything on screen was typed and clicked through VNC.
+
+On the host, from a worktree at that commit (`<empty>` is an empty directory, so the
+`ember` background shows; the recorder's `--vnc` and `--ssh` match xtask's):
+
+```
+FERRIX_WALLPAPERS=<empty> CARGO_TARGET_DIR=<target> \
+  tools/common/gen/record-demo.py record <out> --tree . --vnc 127.0.0.1:5991 --ssh 2391 -- \
+    run-compositor --arch x86_64 --everything --accel kvm \
+    --vnc 127.0.0.1:91 --ssh 2391 --layout us
+tools/common/gen/record-demo.py edit <out> --loop 38.8 15
+```
+
+`record` writes `raw.mkv`, `marks.json` (when each step happened) and `boot.log`;
+`edit` writes `demo.mp4`, `demo-loop.gif`, a `demo-loop.webp` and `cuts.json`.
+This take was the fourth. The first three found what the script now does: the earlier
+take's `hello` on the home disk, Steam's window, a click that landed on the start
+page's `/sys` tile, and `cat > hello.rs`, whose echo is below.
+
+Seen while making it, and not in the video: typed into `cat` in that terminal, each
+Enter moves down a line without returning to the left edge, so a multi-line file
+typed that way steps to the right. The script types the program into zinc's own line
+editor instead.
+
+## The screenshots, 2026-10-03
 
 The desktop images come from one boot of Ferrix at main 0345f6adf. The guest is
 x86_64 under QEMU with KVM, 4 vCPUs and 4 GiB of RAM, on a virtio-gpu 3D card (virgl,
@@ -13,7 +78,7 @@ guest, `/src/hello`, with one commit and a clean tree.
 
 Two images do not come from that boot: `website.png` and `steam-yserver.png`, below.
 
-## Captions
+### Captions
 
 - **desktop-hero.png**: The hyprix Wayland compositor on Ferrix (x86_64, KVM) with three
   tiled windows: btop after two minutes of Chrome loading pages, zinc with its oh-my-zsh
@@ -40,7 +105,7 @@ Two images do not come from that boot: `website.png` and `steam-yserver.png`, be
   (ferrix-os/yserver) and the rootless Wayland backend. Captured 2026-10-02 during the
   Steam performance work, on a test account, not from the boot above.
 
-## Commands
+### Commands
 
 On the host (`<empty>` is an empty directory, so no kept wallpaper is found and `ember`
 shows):
