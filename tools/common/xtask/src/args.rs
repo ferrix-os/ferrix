@@ -185,6 +185,10 @@ pub(crate) struct Args {
     /// remapping off, so no device's interrupts are isolated
     /// (`docs/NVIDIA.md` §12.3). Set by that gate, never by a flag.
     pub(crate) unisolated_interrupts: bool,
+    /// Whether the x86-64 machine carries `test-intel-uapi`'s stand-in for
+    /// ADL-N's GPU at 00:02.0 (`intel_uapi::STANDIN`). Set by that gate,
+    /// never by a flag.
+    pub(crate) intel_gpu_standin: bool,
     /// `--memory`, guest RAM in MiB.
     pub(crate) memory: u32,
     /// Whether `--memory` was given: `test-rustc` needs more than the

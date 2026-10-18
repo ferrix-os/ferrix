@@ -2581,6 +2581,7 @@ fn qemu_command(
                     INTEL_IOMMU
                 },
             ]);
+            attach_intel_gpu_standin(&mut command, args);
             x86_heads(&mut command, args);
             // The image on the first port of q35's AHCI controller, where a
             // bare `-drive` puts it, spelled out only to give it `bootindex`.
@@ -2698,6 +2699,15 @@ fn attach_firmware(command: &mut Command, arch: Arch, firmware: &Firmware) -> Re
         }
     }
     Ok(())
+}
+
+/// `test-intel-uapi`'s stand-in for ADL-N's GPU at 00:02.0
+/// (`intel_uapi::STANDIN`): named before any device QEMU places on the root
+/// bus itself, so the slot is still free.
+fn attach_intel_gpu_standin(command: &mut Command, args: &Args) {
+    if args.intel_gpu_standin {
+        let _ = command.args(["-device", crate::intel_uapi::STANDIN]);
+    }
 }
 
 /// What firmware hands the guest besides its memory: the SMBIOS identity a

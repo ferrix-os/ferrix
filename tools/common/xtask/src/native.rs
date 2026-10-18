@@ -213,6 +213,7 @@ pub(crate) fn build_one(
         ))
     })?;
     refuse_armed(program.binary, &bytes)?;
+    crate::intel_uapi::refuse_fake(program.binary, &bytes)?;
     Ok(Built {
         name: program.binary,
         directory: program.directory,

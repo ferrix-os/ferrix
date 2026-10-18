@@ -1833,6 +1833,6 @@ fn reg_read_reads_the_timestamp_alone() {
 /// there.
 #[test]
 fn the_tables_fit_a_native_stack() {
-    let bytes = core::mem::size_of::<Frontend<FakeBackend>>();
+    let bytes = size_of::<Frontend<FakeBackend>>();
     assert!(bytes < 3 << 20, "{bytes} bytes");
 }
