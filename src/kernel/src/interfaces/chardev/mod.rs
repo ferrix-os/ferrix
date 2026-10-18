@@ -1030,7 +1030,7 @@ fn map_reply(
         return None;
     }
     match a5 & MAP_KIND {
-        MAP_VMO if !combining => {
+        MAP_VMO => {
             if !a4.is_multiple_of(PAGE) {
                 return None;
             }
@@ -1046,7 +1046,16 @@ fn map_reply(
                 };
                 rights.contains(Rights(needed)).then(|| Arc::clone(vmo))
             })?;
-            (a4.checked_add(len)? <= vmo.len_bytes()).then_some(MapReply::Vmo { vmo, offset: a4 })
+            if a4.checked_add(len)? > vmo.len_bytes() {
+                return None;
+            }
+            // Write-combining only for a VMO of the driver's own table, as
+            // the one just found is, and only where the kernel makes it so
+            // for every user mapping of it (K6, `L.user.132`).
+            if combining && !(vmo.is_combining() || vmo.make_combining()) {
+                return None;
+            }
+            Some(MapReply::Vmo { vmo, offset: a4 })
         }
         MAP_APERTURE => {
             let end = value.checked_add(len)?;

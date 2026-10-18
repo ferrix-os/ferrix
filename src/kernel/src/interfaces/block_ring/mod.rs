@@ -740,6 +740,14 @@ fn take_up<'s>(
     storage: &'s mut [Slot],
 ) -> Result<Serving<'s>, Refusal> {
     let device = accepted.device;
+    // Read and written through the direct map for the ring's life: never
+    // write-combining (`L.user.133`).
+    if !accepted.ring.take_kernel_view() {
+        return Err(Refusal::Header);
+    }
+    if !accepted.data.take_kernel_view() {
+        return Err(Refusal::Device);
+    }
     let ring_held = accepted
         .ring
         .hold(0, accepted.ring.len_pages())

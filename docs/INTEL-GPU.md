@@ -724,7 +724,13 @@ the driver's latest queued GPU access of any kind to the buffer, reads
 included. So the driver sets it with `chardev_dmabuf_fence` for every
 execbuffer that reads a shared object, as well as for every one that writes
 it. A fence exported for READ or for WRITE then waits for both, which is at
-least what Linux's reservation object gives. K6, then K4, follow. K2 waits for vtd-n150.
+least what Linux's reservation object gives. K6 is on branch `intel-k6`: an
+mmap answer of `MAP_VMO | MAP_WRITE_COMBINING` makes the driver's own
+anonymous VMO write-combining for every user mapping of it from then on.
+This works only on x86-64, only before anything maps the VMO, and only for
+a VMO the driver never copies with `vmo_read`/`vmo_write` (both are
+`BAD_STATE` for it). Elsewhere the program's mmap is `EIO` (L.user.132-133).
+K4 follows. K2 waits for vtd-n150.
 
 
 2026-10-18: this design, on branch `intel-gpu-design`, docs only. Nothing

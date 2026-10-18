@@ -880,6 +880,11 @@ fn release(domain: &Arc<Domain>, refusing: usize) -> Released {
 /// `frame`'s contents folded into one word (FNV-1a over its words): enough to
 /// tell whether anything wrote the page between two looks.
 fn fold(frame: Frame) -> u64 {
+    // A frame a program may have written write-combining is read through
+    // the write-back view: its lines out of the caches first, whatever the
+    // object was (`L.user.133`); on a machine with no such object a flush
+    // costs a pass over the page and changes nothing read.
+    crate::arch::flush_cache_lines(mm::direct_map(frame * PAGE_SIZE), PAGE_SIZE);
     let at = mm::direct_map(frame * PAGE_SIZE) as *const u64;
     let mut sum = 0xcbf2_9ce4_8422_2325_u64;
     for word in 0..(PAGE_SIZE / 8) as usize {

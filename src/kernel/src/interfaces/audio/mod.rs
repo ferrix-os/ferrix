@@ -422,6 +422,9 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<(Arc<Card>, Session
     let config = publication.config;
     let pages = (config.buffer_bytes() as usize).div_ceil(PAGE_BYTES) as u64;
     let buffer = Vmo::new_anonymous(pages).map_err(|_| Refusal::Hello)?;
+    // Written through the direct map for its life: never write-combining
+    // (`L.user.133`). A new object is never refused.
+    let _ = buffer.take_kernel_view();
     let index = NUMBERS.take().ok_or(Refusal::Hello)?;
     let location = start.location.map_or(0, Location::raw);
     let card = Arc::new(Card {

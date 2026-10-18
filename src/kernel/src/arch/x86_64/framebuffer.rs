@@ -83,15 +83,44 @@ pub(crate) fn flush_window(virt: u64, len: u64) {
     if !has_clflush() {
         return;
     }
-    let line = line_size();
     let start = cpu::rdtsc();
+    let lines = flush_lines(virt, len);
+    FLUSHED_LINES.store(lines, Ordering::Release);
+    FLUSH_TICKS.store(cpu::rdtsc().wrapping_sub(start), Ordering::Release);
+}
+
+/// Whether a user mapping of memory may be write-combining while the
+/// direct map keeps it write-back: only where `CLFLUSH` can first take every
+/// write-back line of it out of the caches ([`flush_cache_lines`]; K6,
+/// `L.user.132`). That every processor programmed its PAT is the caller's
+/// to ask too (`object::io_mapping::combining_ready`).
+pub(crate) fn user_combining() -> bool {
+    has_clflush()
+}
+
+/// Write back and invalidate every cache line of `virt..virt + len`, a
+/// range of the direct map, and fence: what a page of a write-combining VMO
+/// gets once the kernel has written it through its write-back view
+/// (`L.user.133`). Nothing without `CLFLUSH`, where no VMO is made
+/// write-combining.
+pub(crate) fn flush_cache_lines(virt: u64, len: u64) {
+    if has_clflush() {
+        let _ = flush_lines(virt, len);
+    }
+}
+
+/// [`flush_window`]'s and [`flush_cache_lines`]' flush, on a processor with
+/// `CLFLUSH`: the lines it flushed.
+fn flush_lines(virt: u64, len: u64) -> u64 {
+    let line = line_size();
     let mut lines = 0_u64;
     let mut at = virt - virt % line;
     let end = virt.saturating_add(len);
     while at < end {
-        // SAFETY: (SYSREG) `at` is inside the window `kmain` has just mapped,
-        // so the flush's linear address translates; `CLFLUSH` writes no byte
-        // of memory a reference reaches.
+        // SAFETY: (SYSREG) `at` is inside the range the caller has mapped --
+        // the framebuffer window `kmain` has just mapped, or a frame in the
+        // direct map -- so the flush's linear address translates; `CLFLUSH`
+        // writes no byte of memory a reference reaches.
         unsafe { asm!("clflush [{}]", in(reg) at, options(nostack, preserves_flags)) };
         lines = lines.saturating_add(1);
         at = at.saturating_add(line);
@@ -99,8 +128,7 @@ pub(crate) fn flush_window(virt: u64, len: u64) {
     // SAFETY: (SYSREG) a fence: it changes no register or memory. `CLFLUSH`
     // is ordered by `MFENCE`, so every line is gone before the first store.
     unsafe { asm!("mfence", options(nostack, preserves_flags)) };
-    FLUSHED_LINES.store(lines, Ordering::Release);
-    FLUSH_TICKS.store(cpu::rdtsc().wrapping_sub(start), Ordering::Release);
+    lines
 }
 
 /// This processor's cache line size: CPUID.(EAX=1):EBX[15:8], in

@@ -1468,6 +1468,17 @@ pub(super) fn check_chardev() {
             ""
         },
     );
+    println!(
+        "  chardev  {} write-combining VMO answers as specified: {}; a memfd's VMO and a mapped \
+         one refused",
+        report.combining_checks,
+        if report.combining {
+            "the driver's own VMO made write-combining, a program's page of it read back \
+             write-combining, vmo_read of it BAD_STATE"
+        } else {
+            "refused on this machine, the program's mmap EIO"
+        },
+    );
 }
 
 /// The net ring, played from both ends with no network device: the whole

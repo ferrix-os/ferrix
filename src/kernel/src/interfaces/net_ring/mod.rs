@@ -419,6 +419,14 @@ fn take_up(start: &Start, message: &ChannelMessage) -> Result<Serving, Refusal> 
             .skip(usize::MAX),
     );
     let accepted = accepted?;
+    // Read and written through the direct map for the ring's life: never
+    // write-combining (`L.user.133`).
+    if !accepted.ring.take_kernel_view() {
+        return Err(Refusal::RingTooSmall);
+    }
+    if !accepted.data.take_kernel_view() {
+        return Err(Refusal::DataTooSmall);
+    }
     let ring_held = accepted
         .ring
         .hold(0, accepted.ring.len_pages())

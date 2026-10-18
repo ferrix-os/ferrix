@@ -1475,8 +1475,9 @@ fn vmo_copy(
     };
     let vmo = process.with_handles(|table| vmo_in(table, vmo, needed))?;
     // The copy goes through the kernel's cached view of the frames, which an
-    // object shared with a device past the caches must never have lines in.
-    if vmo.is_coherent() {
+    // object shared with a device past the caches, or mapped write-combining
+    // by programs (`L.user.133`), must never have lines in.
+    if vmo.is_coherent() || vmo.is_combining() {
         return Err(status::BAD_STATE);
     }
     let offset = read_u64(process, offset)?;

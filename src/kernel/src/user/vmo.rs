@@ -274,6 +274,15 @@ pub(crate) struct Vmo {
     /// bypasses them, and the kernel copies nothing in or out through its own
     /// cached view. Set once, by [`Vmo::make_coherent`], and never cleared.
     coherent: AtomicBool,
+    /// Mapped write-combining by every user mapping, while the direct map
+    /// keeps its frames write-back (K6, `L.user.132`, `L.user.133`). Set
+    /// once, by [`Vmo::make_combining`], and never cleared.
+    combining: AtomicBool,
+    /// Read or written by a kernel core through the direct map for as long
+    /// as it lives -- a block or net ring, an audio buffer, a display
+    /// card's buffer -- so never write-combining. Set once, by
+    /// [`Vmo::take_kernel_view`], and never cleared.
+    kernel_view: AtomicBool,
     /// The kernel object it is, charged to the job that made it for as long
     /// as it exists (`object::quota`). Nothing for a file's page cache, which
     /// is the file's; its pages are charged as memory all the same.
@@ -610,6 +619,8 @@ impl Vmo {
             mapped_written: AtomicBool::new(false),
             filler,
             coherent: AtomicBool::new(false),
+            combining: AtomicBool::new(false),
+            kernel_view: AtomicBool::new(false),
             charge,
         }
     }
@@ -660,6 +671,78 @@ impl Vmo {
         }
         self.coherent.store(true, Ordering::Release);
         true
+    }
+
+    /// Whether every user mapping of the object is write-combining.
+    pub(crate) fn is_combining(&self) -> bool {
+        self.combining.load(Ordering::Acquire)
+    }
+
+    /// Make every user mapping of this object from now on write-combining,
+    /// for a chardev driver's answer to a program's mmap (K6; the
+    /// consultant's K6 (1)-(2), ledger 2352). Answers whether it is so.
+    ///
+    /// Refused, answering `false`: on a machine where a user mapping of
+    /// memory may not be write-combining (`arch::user_combining`, x86-64 with
+    /// `CLFLUSH` alone, every processor's PAT programmed); for an object that
+    /// is not plain anonymous memory, or is coherent; and while any address
+    /// space maps it, since its translations would be write-back ones and a
+    /// page reached both ways is the alias the SDM forbids (Vol. 3A
+    /// §11.12.4). The frames stay write-back in the direct map, as i915 keeps
+    /// an LLC part's: the flag is set under the mappers' lock, and then every
+    /// page committed so far has its lines flushed under the pages' lock,
+    /// as every page committed after it is ([`Vmo::commit`],
+    /// [`Vmo::commit_run`]). So no write-back line of the object the kernel
+    /// wrote is left to be evicted over what a write-combining store put in
+    /// memory, and nothing reads the object through the direct map again
+    /// (`vmo_read` and `vmo_write` refuse it, as a coherent one).
+    pub(crate) fn make_combining(&self) -> bool {
+        if !crate::arch::user_combining()
+            || !crate::object::io_mapping::combining_ready()
+            || !self.is_anonymous()
+            || self.is_coherent()
+        {
+            return false;
+        }
+        {
+            let mappers = self.mappers.lock();
+            if !mappers.is_empty() || self.kernel_view.load(Ordering::Acquire) {
+                return false;
+            }
+            self.combining.store(true, Ordering::Release);
+        }
+        let pages = self.pages.lock();
+        for &frame in pages.frames.values() {
+            flush_frame(frame);
+        }
+        true
+    }
+
+    /// Mark the object as one a kernel core reads or writes through the direct
+    /// map for as long as it lives, so that it is never made write-combining:
+    /// what a block or net ring's take-up, an audio buffer and a display
+    /// card's buffer ask before they reach its frames (`L.user.133`).
+    /// Answers `false`, marking nothing, for an object already
+    /// write-combining, which the core then refuses. Under the mappers'
+    /// lock, as [`Vmo::make_combining`]'s test, so that one of the two wins.
+    pub(crate) fn take_kernel_view(&self) -> bool {
+        let _mappers = self.mappers.lock();
+        if self.is_combining() {
+            return false;
+        }
+        self.kernel_view.store(true, Ordering::Release);
+        true
+    }
+
+    /// Flush the `count` frames from `first` on, just zeroed, if the object
+    /// is write-combining: under the pages' lock, which `make_combining`
+    /// takes after setting the flag (`L.user.133`).
+    fn flush_if_combining(&self, first: Frame, count: u64) {
+        if self.is_combining() {
+            for frame in first..first + count {
+                flush_frame(frame);
+            }
+        }
     }
 
     /// The object's size in pages.
@@ -846,6 +929,10 @@ impl Vmo {
             // Forked for a private mapping, which a coherent object never
             // has: `vmo_map` maps it shared. The copy is the process's own.
             coherent: AtomicBool::new(false),
+            // Nor a write-combining one, which only a chardev driver's own
+            // shared mapping makes.
+            combining: AtomicBool::new(false),
+            kernel_view: AtomicBool::new(false),
             charge,
         })
         .map_err(|_| VmoError::OutOfMemory)
@@ -879,6 +966,10 @@ impl Vmo {
         let held = crate::fallible::reserve().map_err(|_| VmoError::OutOfMemory)?;
         let frame = mm::allocate_user_frame().ok_or(VmoError::OutOfMemory)?;
         mm::zero_frame(frame);
+        // The zeros out of the caches before a write-combining store can
+        // reach the frame (`L.user.133`); the flag is read under this lock,
+        // which `make_combining` takes after setting it.
+        self.flush_if_combining(frame, 1);
         let _ = crate::fallible::insert_held(&held, &mut pages.frames, index, frame);
         Ok(frame)
     }
@@ -1029,6 +1120,9 @@ impl Vmo {
         let Some(&frame) = pages.frames.get(&index) else {
             return Ok(false);
         };
+        // Read through the write-back view: a write-combining object's
+        // lines out of the caches first (`L.user.133`).
+        self.flush_if_combining(frame, 1);
         let at = mm::direct_map(frame * PAGE_SIZE) as usize + offset;
         // SAFETY: (FRAME) as in `read_page`: the object holds a reference on
         // `frame` while its lock is held, `check_span` kept the range inside
@@ -1060,6 +1154,8 @@ impl Vmo {
         match pages.frames.get(&index) {
             None => out.fill(0),
             Some(&frame) => {
+                // As `read_present` (`L.user.133`).
+                self.flush_if_combining(frame, 1);
                 let at = mm::direct_map(frame * PAGE_SIZE) as usize + offset;
                 // SAFETY: (FRAME) the object holds a reference on `frame` for as long
                 // as its lock is held, `check_span` kept `offset + out.len()`
@@ -1127,6 +1223,9 @@ impl Vmo {
             // not) and held under its lock; `check_span` kept the write inside
             // the page; the direct map is writable for all of RAM.
             unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), at as *mut u8, data.len()) };
+            // Written through the write-back view: a write-combining
+            // object's lines out of the caches after (`L.user.133`).
+            self.flush_if_combining(frame, 1);
             break retired;
         };
         if let Some(retired) = retired.filter(|retired| !retired.is_empty()) {
@@ -1180,6 +1279,8 @@ impl Vmo {
         // kept the write inside the page; the direct map is writable for all
         // of RAM, and `data` is kernel memory the page cannot overlap.
         unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), at as *mut u8, data.len()) };
+        // As `write_page` (`L.user.133`).
+        self.flush_if_combining(frame, 1);
         Ok(())
     }
 
@@ -1196,6 +1297,8 @@ impl Vmo {
             // object's while its lock is held, and `check_span` kept the
             // range inside the page.
             unsafe { core::ptr::write_bytes(at as *mut u8, 0, len) };
+            // As `write_page` (`L.user.133`).
+            self.flush_if_combining(frame, 1);
         }
         Ok(())
     }
@@ -1372,7 +1475,11 @@ impl Vmo {
         for frame in block..block + pages {
             mm::zero_frame(frame);
         }
-        let inserted = self.pages.lock().insert_run(first, block, pages);
+        let mut held = self.pages.lock();
+        // As `commit` does, under the same lock (`L.user.133`).
+        self.flush_if_combining(block, pages);
+        let inserted = held.insert_run(first, block, pages);
+        drop(held);
         if inserted.is_err() {
             for frame in block..block + pages {
                 let _ = mm::release_frame(frame);
@@ -2177,4 +2284,10 @@ fn run_reclaim_hook(vmo: &Vmo) {
     if let Some(hook) = hook {
         (hook.run)(vmo);
     }
+}
+
+/// Write back and invalidate `frame`'s cache lines through the direct map,
+/// for a write-combining object (`L.user.133`).
+fn flush_frame(frame: Frame) {
+    crate::arch::flush_cache_lines(mm::direct_map(frame * PAGE_SIZE), PAGE_SIZE);
 }

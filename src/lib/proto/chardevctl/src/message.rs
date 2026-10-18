@@ -78,7 +78,10 @@ pub const MAP_VMO: u64 = 1;
 /// address of a range wholly inside one of the device's memory apertures.
 pub const MAP_APERTURE: u64 = 2;
 /// With [`MAP_APERTURE`]: write-combining rather than uncached, which only a
-/// prefetchable aperture may be.
+/// prefetchable aperture may be. With [`MAP_VMO`] (K6): every user mapping
+/// of the VMO write-combining from then on, refused unless the VMO is plain
+/// anonymous memory no address space maps yet, and on any machine but an
+/// x86-64 one with `CLFLUSH` and every processor's PAT programmed.
 pub const MAP_WRITE_COMBINING: u64 = 1 << 8;
 /// The bits of a reply's sixth register that name the kind.
 pub const MAP_KIND: u64 = 0xff;

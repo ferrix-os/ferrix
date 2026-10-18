@@ -686,6 +686,9 @@ impl Card {
         let Ok(vmo) = Vmo::new_anonymous(bytes / PAGE_SIZE) else {
             return Err(CardError::NoRoom);
         };
+        // Cleaned through the direct map for its life: never
+        // write-combining (`L.user.133`). A new object is never refused.
+        let _ = vmo.take_kernel_view();
         // A device that reads one run of addresses gets its VMO filled with
         // one block of frames before the driver hears of it, outside the
         // state lock: zeroing megabytes is not something to do with

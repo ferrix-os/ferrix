@@ -511,6 +511,12 @@ const REFILLS: usize = 64;
 /// fill it again (`user::cache`).
 fn copy_or_zero(file: &Vmo, index: u64, frame: Frame) -> Result<(), SpaceError> {
     match file.page(index) {
+        // A write-combining object's page is read through the write-back
+        // direct map: its lines out of the caches first (`L.user.133`).
+        Some(original) if file.is_combining() => {
+            arch::flush_cache_lines(mm::direct_map(original * PAGE_SIZE), PAGE_SIZE);
+            mm::copy_frame(frame, original);
+        }
         Some(original) => mm::copy_frame(frame, original),
         None if file.sourced(index) => {
             let _ = mm::release_frame(frame);
@@ -1132,7 +1138,9 @@ impl AddressSpace {
             device: false,
             // Past the caches if a device shares it (`Vmo::make_coherent`).
             uncached: vmo.is_coherent(),
-            write_combining: false,
+            // Write-combining in every user mapping if a chardev driver made
+            // it so (`Vmo::make_combining`, `L.user.133`).
+            write_combining: vmo.is_combining(),
         };
 
         mm::map_in(
@@ -1274,7 +1282,8 @@ impl AddressSpace {
                     return Ok(());
                 }
                 let frame = commit_page(&file, index, true, address)?;
-                return self.install_page(inner, placed(frame), user_page(false, execute), false);
+                let flags = typed(user_page(false, execute), &file);
+                return self.install_page(inner, placed(frame), flags, false);
             }
             let frame = mm::allocate_user_frame().ok_or(SpaceError::OutOfMemory)?;
             // A snapshot. The file's page is read through the direct map
@@ -1461,7 +1470,7 @@ impl AddressSpace {
                         || writable_in_place(&inner, &region, address, physical / PAGE_SIZE))
                 {
                     let virt = mm::direct_map_ram(physical).ok_or(SpaceError::Refused(address))?;
-                    let answer = touch(virt);
+                    let answer = self.coherent_touch(address, virt, touch);
                     drop(inner);
                     return Ok(answer);
                 }
@@ -1510,9 +1519,31 @@ impl AddressSpace {
             return Ok(None);
         }
         let virt = mm::direct_map_ram(physical).ok_or(SpaceError::Refused(address))?;
-        let answer = touch(virt);
+        let answer = self.coherent_touch(address, virt, touch);
         drop(inner);
         Ok(Some(answer))
+    }
+
+    /// Run `touch` on `virt`, the direct-map address of the user byte at
+    /// `address`, coherently with a write-combining user mapping of its page
+    /// (`L.user.133`): where this space maps the page write-combining, its
+    /// lines are written back and invalidated (CLFLUSH, then MFENCE) before
+    /// `touch`, so that it reads no stale line, and again after, so that no
+    /// line it wrote is left to be evicted over a later write-combining
+    /// store. Every other page is touched as it was. Under the space's lock,
+    /// as `touch` is; the flush takes no lock and waits for nothing.
+    fn coherent_touch<R>(&self, address: u64, virt: u64, touch: impl FnOnce(u64) -> R) -> R {
+        let combining = mm::flags_in(self.root * PAGE_SIZE, address)
+            .is_some_and(|flags| flags.write_combining && !flags.device);
+        if !combining {
+            return touch(virt);
+        }
+        let page = virt & !(PAGE_SIZE - 1);
+        arch::flush_cache_lines(page, PAGE_SIZE);
+        let answer = touch(virt);
+        arch::flush_cache_lines(page, PAGE_SIZE);
+        let _ = COHERENT_TOUCHES.fetch_add(1, Ordering::Relaxed);
+        answer
     }
 
     /// Hold the layout: what `mmap`, `munmap`, `mprotect`, `mremap` and `brk`
@@ -1926,6 +1957,26 @@ struct Placement {
     index: u64,
     page: u64,
     frame: Frame,
+}
+
+/// Touches of a write-combining user page made coherent by
+/// [`AddressSpace::coherent_touch`], since boot: what stage 10's chardev
+/// check reads.
+static COHERENT_TOUCHES: AtomicU64 = AtomicU64::new(0);
+
+/// [`COHERENT_TOUCHES`] now.
+pub(crate) fn coherent_touches() -> u64 {
+    COHERENT_TOUCHES.load(Ordering::Relaxed)
+}
+
+/// `flags` with the memory type of `vmo`'s user mappings: a
+/// write-combining object's page is never mapped write-back beside its
+/// other mappings (`L.user.133`).
+fn typed(flags: MapFlags, vmo: &Vmo) -> MapFlags {
+    MapFlags {
+        write_combining: vmo.is_combining(),
+        ..flags
+    }
 }
 
 /// The translation flags of a user page.

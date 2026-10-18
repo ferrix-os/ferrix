@@ -1854,6 +1854,118 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.MEM.1";
             attribute :>> unit = "user::vmo::Vmo::is_anonymous";
         }
+        requirement <'L.user.132'> onlyTheDriversOwnVmoCombines : ItemLowLevel {
+            doc /* K6 of docs/INTEL-GPU.md section 5; the consultant's K6 (1),
+                 * ledger 2026-10-18 line 2352. A chardev driver answers a
+                 * program's mmap with MAP_VMO | MAP_WRITE_COMBINING, naming a
+                 * VMO of its own handle table (map_reply, load ring), and the
+                 * item decides whether that VMO may be write-combining at all.
+                 * x86-64 alone at first: each Arm architecture's attribute
+                 * (normal non-cacheable) is still to be argued, so there the
+                 * answer is refused as it was before K6. */
+            attribute :>> statement = "Vmo::make_combining shall make a VMO
+                write-combining for every user mapping from then on only on
+                x86-64, where the processor has CLFLUSH and every processor
+                programmed its PAT with the write-combining entry, and only for
+                plain anonymous memory that is not coherent and that no address
+                space maps; anywhere else, and for any other VMO, it shall
+                refuse and leave the VMO as it was.";
+            attribute :>> criterion = "Stage 10's chardev check: on x86-64 the
+                driver's own anonymous VMO answered MAP_VMO with
+                MAP_WRITE_COMBINING is made write-combining; on AArch64 and
+                ARMv7-A the same answer is refused, the program's mmap EIO and
+                the VMO unchanged; on every machine a memfd's VMO and a VMO an
+                address space already maps are refused the same way. With the
+                anonymous test or the mappers' test dropped, the boot panics.";
+            attribute :>> parent = ("H.MEM.1", "H.MEM.15");
+            attribute :>> unit = ("user::vmo::Vmo::make_combining",
+                "user::vmo::Vmo::is_combining", "arch::x86_64::framebuffer::user_combining");
+        }
+        requirement <'L.user.133'> aCombiningVmoIsOneTypeToPrograms : ItemLowLevel {
+            doc /* The memory-type aliasing argument (the consultant's K6 (2),
+                 * and ledger 2368 (1)-(3)). A write-combining VMO's frames
+                 * stay write-back in the kernel's direct map, as i915 keeps an
+                 * LLC part's objects while a program maps them
+                 * write-combining. The SDM (Vol. 3A 11.12.4) makes that safe
+                 * only if no write-back line of the page is left to be
+                 * evicted over what write-combining stores put in memory, and
+                 * no read through the write-back alias hits a stale line.
+                 *
+                 * (1) Every user mapping of the VMO, in every space, is
+                 * write-combining, never also write-back beside it:
+                 * AddressSpace::resolve, and typed() for a private mapping's
+                 * read of the page.
+                 * (2) Every path that reaches one of its frames through the
+                 * direct map is flushed, refused or unreachable:
+                 * - zeroing a new frame (Vmo::commit, Vmo::commit_run):
+                 *   flushed after, under the pages' lock; the frames there
+                 *   when make_combining sets the flag: flushed by it;
+                 * - uaccess, so every syscall buffer, futex word and
+                 *   put_user in such a page (AddressSpace::with_page,
+                 *   with_present_page): coherent_touch flushes the page's
+                 *   lines before the copy and after it, where this space maps
+                 *   the page write-combining;
+                 * - Vmo::read_present, read_page, write_page,
+                 *   commit_and_write and zero_from: flushed before a read
+                 *   and after a write;
+                 * - vmo_read and vmo_write: refused BAD_STATE;
+                 * - a private mapping's copy of the page (copy_or_zero):
+                 *   flushed before the copy;
+                 * - the quarantine's fold of a dead driver's pinned frame
+                 *   (object::pin::fold): flushed before;
+                 * - a block or net ring, an audio buffer, a display card's
+                 *   buffer, which a kernel core reads and writes for its life:
+                 *   marked by Vmo::take_kernel_view, which make_combining
+                 *   then refuses, and which refuses an object already
+                 *   write-combining, so the two never meet;
+                 * - copy-on-write copies of a shared frame (copy_on_write,
+                 *   Pages::exclusive, fork_private's copy of a held page):
+                 *   unreachable, since a write-combining VMO is mapped only
+                 *   shared and never forked into a private object;
+                 * - a core dump, /proc/<pid>/mem and process_vm_readv: not
+                 *   built.
+                 * Drain before reuse, by code: a frame of the VMO goes back
+                 * only after AddressSpace::begin_shootdown's set of
+                 * processors has answered smp::flush_tlb_pages (each one
+                 * interrupted and running INVLPG, waited for in
+                 * invalidate_pages); a processor leaves a space's set only
+                 * after AddressSpace::install or uninstall has loaded another
+                 * root into CR3. The interrupt, INVLPG and the CR3 load each
+                 * drain the write-combining buffers (SDM Vol. 3A 11.3.1), so
+                 * no buffered store reaches a frame after it is reused. */
+            attribute :>> statement = "Every user mapping of a page of a
+                write-combining VMO shall be write-combining; each of its frames
+                shall have its cache lines written back and invalidated after
+                the kernel zeroed it and before the VMO can be mapped
+                write-combining over it; every copy the kernel makes to or from
+                such a page through the direct map shall flush the page's lines
+                before it and after it; vmo_read and vmo_write of the VMO shall
+                be refused BAD_STATE; and no kernel core that reads a VMO
+                through the direct map for its life shall take one that is
+                write-combining, nor shall one it took become so.";
+            attribute :>> criterion = "Stage 10's chardev check on x86-64: a
+                program's mapping of the VMO, faulted in by a write, reads back
+                write-combining and not device; a write(2) from it and a
+                read(2) into it through a memfd round-trip its bytes and count
+                four coherent touches; vmo_read of the VMO is BAD_STATE. With
+                resolve's write-combining choice, the coherent touch or
+                vmo_copy's refusal dropped, the boot panics. The flush's effect
+                is argued, since QEMU models no cache.";
+            attribute :>> parent = ("H.MEM.1", "H.MEM.15");
+            attribute :>> unit = ("user::vmo::Vmo::commit", "user::vmo::Vmo::commit_run",
+                "user::vmo::flush_frame", "user::vmo::Vmo::flush_if_combining",
+                "user::vmo::Vmo::take_kernel_view", "user::vmo::Vmo::read_present",
+                "user::vmo::Vmo::read_page", "user::vmo::Vmo::write_page",
+                "user::vmo::Vmo::commit_and_write", "user::vmo::Vmo::zero_from",
+                "user::space::AddressSpace::resolve",
+                "user::space::AddressSpace::fault_private_file", "user::space::typed",
+                "user::space::AddressSpace::with_page",
+                "user::space::AddressSpace::with_present_page",
+                "user::space::AddressSpace::coherent_touch", "user::space::copy_or_zero",
+                "object::pin::fold", "syscall::native::vmo_copy",
+                "arch::x86_64::framebuffer::flush_cache_lines",
+                "arch::x86_64::framebuffer::flush_lines");
+        }
         requirement <'L.user.107'> aCopyThroughADevicePageIsRefused : ItemLowLevel {
             attribute :>> statement = "with_page and with_present_page shall refuse
                 a copy to or from a page of a device region with Refused, before the

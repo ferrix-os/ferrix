@@ -422,9 +422,21 @@ use aarch64::FRAMEBUFFER_FLAGS;
 use armv7a::FRAMEBUFFER_FLAGS;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{
-    check_framebuffer_window, check_hwp_processors, flush_window, framebuffer_flags,
-    program_memory_types,
+    check_framebuffer_window, check_hwp_processors, flush_cache_lines, flush_window,
+    framebuffer_flags, program_memory_types, user_combining,
 };
+
+/// No write-combining user mapping of memory yet on the Arm architectures:
+/// each one's attribute (normal non-cacheable) is still to be argued (K6,
+/// ledger 2352 K6 (1)).
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn user_combining() -> bool {
+    false
+}
+
+/// Nothing to flush: no VMO is made write-combining here ([`user_combining`]).
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn flush_cache_lines(_virt: u64, _len: u64) {}
 
 /// Nothing to count: the Arm kernels ask no hardware P-states of anything
 /// (`L.x86_64.177` is x86-64's).

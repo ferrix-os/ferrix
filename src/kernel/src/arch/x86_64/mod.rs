@@ -2079,7 +2079,8 @@ mod framebuffer;
 pub(crate) use cpu::check::check_hwp_processors;
 pub(crate) use framebuffer::check::check_framebuffer_window;
 pub(crate) use framebuffer::{
-    drain_write_combining, flush_window, framebuffer_flags, mtrr_type, pat,
+    drain_write_combining, flush_cache_lines, flush_window, framebuffer_flags, mtrr_type, pat,
+    user_combining,
 };
 
 /// Processors on which [`cpu::take_x87_controls`] read `CR0`'s x87 controls

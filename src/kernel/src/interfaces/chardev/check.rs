@@ -99,6 +99,13 @@
 //!   dmabuf is `BAD_STATE`, and its signal of the slot's fence too, the slot
 //!   unchanged; after the driver's death the exported and the slot's fences
 //!   read `ENODEV`, and an import is `ENODEV`;
+//! * a VMO answered write-combining (K6 of ledger 2352): on x86-64 with
+//!   `CLFLUSH` and every PAT programmed the driver's own anonymous VMO is
+//!   made write-combining and a program's mapping of it reads back
+//!   write-combining and not device, and `vmo_read` of it is `BAD_STATE`;
+//!   everywhere else the answer is refused and the program's mmap is `EIO`,
+//!   the VMO unchanged; a memfd's VMO and one an address space already
+//!   maps are refused on every machine;
 //! * replies out of order (C1 of ledger 2352): of two requests outstanding,
 //!   the later answered first and then the earlier, each program gets its
 //!   own answer, and a second reply to either is refused `BAD_STATE`.
@@ -120,8 +127,8 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
 
 use super::{
-    Answer, Ask, CONTROLS, Control, DRIVER_RIGHTS, MAX_OUTSTANDING, Request, STARTING, abandon,
-    admit, await_answer, copy_done, published,
+    Answer, Ask, CONTROLS, Control, DRIVER_RIGHTS, MAX_OUTSTANDING, MapReply, Request, STARTING,
+    abandon, admit, await_answer, copy_done, published,
 };
 use crate::device::{self, DeviceNode};
 use crate::object::check::{SCRATCH, Side, device_handle, reg};
@@ -198,6 +205,11 @@ pub(crate) struct Report {
     pub(crate) out_of_order: u32,
     /// dmabuf fence-slot calls, exports and imports checked (K5).
     pub(crate) slot_checks: u32,
+    /// Write-combining VMO answers checked (K6); whether this machine makes
+    /// one at all.
+    pub(crate) combining_checks: u32,
+    /// Whether a VMO was made write-combining here (x86-64 only).
+    pub(crate) combining: bool,
     /// Why the cases needing a second driver were not checked.
     pub(crate) one_device: bool,
     /// Why nothing was checked.
@@ -277,6 +289,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     abandoned(&driver, control, &core, &program, &mut report)?;
     answered_drains(&driver, control, &core, &program, &mut report)?;
     out_of_order(&driver, control, &core, &program, &mut report)?;
+    combining_maps(&driver, control, &core, &program, &mut report)?;
     bounded(&driver, control, &core, &program, &mut report)?;
     let kept = dmabufs(&driver, control, &core, &program, &mut report)?;
     let foreign = other
@@ -331,6 +344,173 @@ fn refusals(side: &Side, node: &Arc<DeviceNode>, report: &mut Report) -> Result<
         unclaimed(node)?;
     }
     Ok(())
+}
+
+/// K6: a driver's mmap answer of a VMO with `MAP_WRITE_COMBINING`.
+///
+/// Verifies: L.user.132, L.user.133
+fn combining_maps(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    use ferrix_chardevctl::message::{MAP_VMO, MAP_WRITE_COMBINING};
+    let wc = MAP_VMO | MAP_WRITE_COMBINING;
+    // By the architecture first, not by what the product's own tests say,
+    // so that a product test answering true off x86-64 is caught.
+    let made_here = matches!(crate::arch::ARCH, ferrix_bootinfo::Arch::X86_64)
+        && crate::arch::user_combining()
+        && crate::object::io_mapping::combining_ready();
+    report.combining = made_here;
+    // The driver's own anonymous VMO, a page of it written through the
+    // kernel's view first, so that `make_combining` has a frame to flush.
+    let own = side.handle(nr::VMO_CREATE, &[4096], "vmo_create failed")?;
+    side.put(BUFFER, &STAMP)?;
+    side.put(DEADLINE, &0_u64.to_ne_bytes())?;
+    let _ = side
+        .call(nr::VMO_WRITE, &[reg(own), BUFFER, 8, DEADLINE])
+        .map_err(|_| "vmo_write failed")?;
+    let vmo = vmo_object(side, own)?;
+    let answer = map_answer(side, control, core, program, own, wc)?;
+    if made_here {
+        let Some(Ok(Answer::Map(MapReply::Vmo { vmo: mapped, .. }))) = answer else {
+            return Err("a write-combining answer of the driver's own VMO was refused");
+        };
+        if !Arc::ptr_eq(&mapped, &vmo) || !vmo.is_combining() {
+            return Err("a write-combining answer did not make its VMO write-combining");
+        }
+        let at = combining_leaf(program, &vmo)?;
+        coherent_syscalls(side, program, at)?;
+        if side.call(nr::VMO_READ, &[reg(own), BUFFER, 8, DEADLINE]) != Err(status::BAD_STATE) {
+            return Err("vmo_read of a write-combining VMO was not BAD_STATE");
+        }
+        report.combining_checks += 3;
+    } else {
+        if !matches!(answer, Some(Err(Errno::EIO))) || vmo.is_combining() {
+            return Err("a write-combining VMO answer was taken where none may be made");
+        }
+        report.combining_checks += 1;
+    }
+    // Refused on every machine: a memfd's VMO, and one already mapped.
+    let (memfd, file_vmo) = memfd_vmo(side, program)?;
+    let mapped = side.handle(nr::VMO_CREATE, &[4096], "vmo_create failed")?;
+    let held = vmo_object(side, mapped)?;
+    let flags = ferrix_vma::VmaFlags {
+        read: true,
+        write: true,
+        shared: true,
+        ..ferrix_vma::VmaFlags::NONE
+    };
+    let _at = side
+        .process
+        .space()
+        .map_object(None, 4096, Arc::clone(&held), 0, flags)
+        .map_err(|_| "the driver could not map its own VMO")?;
+    for (handle, what) in [
+        (file_vmo, "a memfd's VMO was made write-combining"),
+        (
+            mapped,
+            "a VMO an address space maps was made write-combining",
+        ),
+    ] {
+        let answer = map_answer(side, control, core, program, handle, wc)?;
+        if !matches!(answer, Some(Err(Errno::EIO))) || vmo_object(side, handle)?.is_combining() {
+            return Err(what);
+        }
+        report.combining_checks += 1;
+    }
+    close_fd(&program.process, memfd)?;
+    Ok(())
+}
+
+/// A program's mmap of one page, answered by the driver with `handle` and
+/// the kind `a5`: what the program's call got.
+fn map_answer(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    handle: Handle,
+    a5: u64,
+) -> Result<Option<Result<Answer, Errno>>, &'static str> {
+    const PROT_RW: u32 = 3;
+    const MAP_SHARED: u32 = 1;
+    let request = admit(
+        core,
+        &program.process,
+        Ask {
+            op: Op::Mmap,
+            file: 1,
+            minor: 0,
+            cmd: PROT_RW | (MAP_SHARED << 8),
+            arg: 0,
+            pages: 1,
+        },
+    )
+    .map_err(|_| "an mmap was not taken in")?;
+    let _ = side.call(
+        nr::CHARDEV_REPLY,
+        &[reg(control), request.wire.id, 0, reg(handle), 0, a5],
+    );
+    drain_channel(side, control);
+    let answer = request.inner.lock().answer.clone();
+    Ok(answer)
+}
+
+/// A write(2) from and a read(2) into the program's write-combining page at
+/// `at`, through a memfd, each go through the coherent touch
+/// (`AddressSpace::coherent_touch`, ledger 2368 (1)): the bytes come back,
+/// and the touches counted grew by one for each of the four copies.
+///
+/// Verifies: L.user.133
+fn coherent_syscalls(side: &Side, program: &Side, at: u64) -> Result<(), &'static str> {
+    let before = crate::user::space::coherent_touches();
+    program.put(at, &STAMP)?;
+    let (memfd, file_vmo) = memfd_vmo(side, program)?;
+    let _ = side.call(nr::HANDLE_CLOSE, &[reg(file_vmo)]);
+    let wrote = crate::syscall::file::sys_write(&program.process, memfd, at, 8);
+    let read = crate::syscall::file::sys_pread64(&program.process, memfd, at + 8, 8, 0);
+    let back = program.get(at + 8, 8)?;
+    close_fd(&program.process, memfd)?;
+    if wrote != Ok(8) || read != Ok(8) || back != STAMP {
+        return Err("a write(2) from and a read(2) into a write-combining page did not round-trip");
+    }
+    if crate::user::space::coherent_touches() < before + 4 {
+        return Err("a copy to or from a write-combining page was not made coherent");
+    }
+    Ok(())
+}
+
+/// The program's mapping of `vmo`, faulted in by a write, reads back
+/// write-combining and not device; answers where.
+fn combining_leaf(program: &Side, vmo: &Arc<crate::user::vmo::Vmo>) -> Result<u64, &'static str> {
+    let space = program.process.space();
+    let flags = ferrix_vma::VmaFlags {
+        read: true,
+        write: true,
+        shared: true,
+        ..ferrix_vma::VmaFlags::NONE
+    };
+    let at = space
+        .map_object(None, 4096, Arc::clone(vmo), 0, flags)
+        .map_err(|_| "a program could not map a write-combining VMO")?;
+    space
+        .fault(
+            at,
+            crate::user::space::Access {
+                write: true,
+                execute: false,
+            },
+        )
+        .map_err(|_| "a write-combining VMO's page could not be faulted in")?;
+    let leaf =
+        crate::mm::flags_in(space.root_table(), at).ok_or("a write-combining page has no entry")?;
+    if !leaf.write_combining || leaf.device {
+        return Err("a program's mapping of a write-combining VMO was not write-combining");
+    }
+    Ok(at)
 }
 
 /// The dmabuf the fence-slot cases use, its cookie.
