@@ -44,6 +44,7 @@
 //! * [`sseu`]: the fuses, and the topology Mesa is told;
 //! * [`uc`]: whether `GuC` locked the `WOPCM` since the last reset;
 //! * [`uapi`]: the i915 ioctl numbers and argument layouts;
+//! * [`frontend`]: the i915 uAPI served on the render node, over a back end;
 //! * [`workarounds`]: the GT, engine, context and whitelist lists.
 
 #![no_std]
@@ -55,6 +56,7 @@ pub mod device_info;
 pub mod engine;
 pub mod engine_cs;
 pub mod execlists;
+pub mod frontend;
 pub mod generated;
 pub mod ggtt_space;
 pub mod gt;
