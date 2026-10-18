@@ -138,6 +138,9 @@ for entry in "${debs[@]}"; do
     read -r path sum <<< "$entry"
     dpkg-deb -x "$(fetch "$path" "$sum")" "$tree"
 done
+# mesa-utils-bin installs its programs by their multiarch names; mesa-utils,
+# not taken, adds the wrappers that pick one.
+ln -s eglinfo.x86_64-linux-gnu "$tree/usr/bin/eglinfo"
 rm -rf "$tree/usr/share/doc" "$tree/usr/share/man" "$tree/usr/share/locale" \
     "$tree/usr/share/lintian" "$tree/usr/share/bug"
 
