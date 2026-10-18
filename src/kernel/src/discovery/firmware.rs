@@ -121,17 +121,14 @@ impl FirmwareFramebuffer {
         holder: &mut DeviceNode,
     ) -> Result<(), &'static str> {
         Self::may_lend_here()?;
-        holder.lend_framebuffer_here(
+        // Refused at its hold, the lend takes its aperture back
+        // (`DeviceNode::lend_framebuffer_held`), as `lend` drops its node.
+        holder.lend_framebuffer_held(
             framebuffer,
             cx.reserved,
             crate::device::intel_gpu_allowed(),
-        )?;
-        let (phys, len) = (0..holder.apertures().len())
-            .filter_map(|index| holder.aperture_info(index))
-            .find(|info| info.phys == framebuffer.phys)
-            .map(|info| (info.phys, info.len))
-            .ok_or("the framebuffer has no aperture")?;
-        Self::hold(phys, len)
+            Self::hold,
+        )
     }
 
     /// Whether this machine may lend the framebuffer at all.
@@ -157,7 +154,9 @@ impl FirmwareFramebuffer {
         // The kernel's own window has been write-combining since its first
         // map (`arch::framebuffer_flags`); it is read back, not changed, and
         // a page of any other type refuses the lend before the console is
-        // stopped or anything is minted.
+        // stopped. A refusal here or below leaves nothing minted: `lend`
+        // drops its node, and the Intel GPU's lend takes its aperture back
+        // (`DeviceNode::lend_framebuffer_held`).
         if !window_combining(window, mapped) {
             return Err("the kernel's window on the framebuffer is not write-combining");
         }

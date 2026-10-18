@@ -1409,6 +1409,36 @@ impl DeviceNode {
         Ok(())
     }
 
+    /// [`DeviceNode::lend_framebuffer_here`], then `hold` over the aperture
+    /// it minted. When `hold` refuses, the aperture is taken back, so a node
+    /// whose lend failed holds none of it and is neither refused its
+    /// configuration writes nor handed a copying card for it (`L.device.46`;
+    /// the consultant's K4 change review, ledger 2026-10-18 line 2380 (1)).
+    ///
+    /// # Errors
+    ///
+    /// Why not, as for [`DeviceNode::lend_framebuffer_here`], or `hold`'s.
+    pub(crate) fn lend_framebuffer_held(
+        &mut self,
+        framebuffer: &ferrix_bootinfo::Framebuffer,
+        reserved: &Reserved,
+        allowed: bool,
+        hold: impl FnOnce(u64, u64) -> Result<(), &'static str>,
+    ) -> Result<(), &'static str> {
+        self.lend_framebuffer_here(framebuffer, reserved, allowed)?;
+        let held = (0..self.apertures.len())
+            .filter_map(|index| self.aperture_info(index))
+            .find(|info| info.phys == framebuffer.phys)
+            .map(|info| (info.phys, info.len))
+            .ok_or("the framebuffer has no aperture")
+            .and_then(|(phys, len)| hold(phys, len));
+        if held.is_err() {
+            self.apertures
+                .retain(|aperture| aperture.source != Source::Framebuffer);
+        }
+        held
+    }
+
     /// Whether the node is a PCI function lent the firmware framebuffer
     /// ([`DeviceNode::lend_framebuffer_here`]).
     pub(crate) fn holds_lent_framebuffer(&self) -> bool {

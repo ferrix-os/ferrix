@@ -1160,7 +1160,8 @@ fn check_lending() -> Result<(), &'static str> {
 /// does not -- and mints it the framebuffer's visible lines, exempt from
 /// the reservation; the Intel GPU lent it takes no configuration write and
 /// may be handed a copying card, which another vendor's function lent an
-/// aperture by any path may not.
+/// aperture by any path may not; and a lend whose hold is refused leaves
+/// the Intel GPU holding none of the aperture.
 ///
 /// Verifies: L.device.46, L.device.47, L.device.48
 fn check_lending_intel(
@@ -1227,6 +1228,15 @@ fn check_lending_intel(
     other.apertures = intel.apertures.clone();
     if other.may_copy_lent() {
         return Err("another vendor's function with the framebuffer's aperture may copy");
+    }
+    let mut refused = made(0x8086, true)?;
+    if refused
+        .lend_framebuffer_held(screen, reserved, true, |_, _| Err("a hold refused"))
+        .is_ok()
+        || refused.holds_lent_framebuffer()
+        || refused.may_copy_lent()
+    {
+        return Err("the Intel GPU kept the framebuffer's aperture after its hold was refused");
     }
     Ok(())
 }

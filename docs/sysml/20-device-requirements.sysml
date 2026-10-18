@@ -896,26 +896,34 @@ package FerrixDeviceRequirements {
                  * unchanged; whether a panic is seen then rests on the driver
                  * keeping the lit plane's GGTT entries, which the kernel does
                  * not claim (DISPLAY.md section 8). */
-            attribute :>> statement = "The firmware framebuffer shall be lent
-                to the Intel integrated GPU's own node, in place of a node of
-                its own, exactly when ferrix.intelgpu was said and the Intel
-                GPU, by what enumeration read, holds it in a BAR; it shall then
-                be minted the framebuffer's visible lines in whole pages, the
-                one exemption from the reserved ranges, and no other node shall
-                hold a lent aperture. Nothing a driver says shall decide it.";
+            attribute :>> statement = "Where the firmware framebuffer is lent
+                at all (under ferrix.efifb, on x86-64, with write-combining
+                ready on every processor; L.device.40, L.device.43), it shall
+                be lent to the Intel integrated GPU's own node, in place of a
+                node of its own, exactly when ferrix.intelgpu was said and the
+                Intel GPU, by what enumeration read, holds it in a BAR; it
+                shall then be minted the framebuffer's visible lines in whole
+                pages, the one exemption from the reserved ranges, and no
+                other node shall hold a lent aperture. A lend whose hold is
+                refused shall leave the Intel GPU holding none of it. Nothing
+                a driver says shall decide it.";
             attribute :>> criterion = "Stage 10's check, on made-up nodes at
                 00:02.0 and a made-up framebuffer: the lend goes to Intel's
                 display function holding it only with the option, not to
                 another vendor's function holding it nor to the Intel GPU not
                 holding it; the Intel GPU is lent exactly the visible lines,
-                exempt, and refused without the option. With the identity test
-                dropped, the boot panics. On the published nodes only the
+                exempt, and refused without the option; a lend whose hold is
+                refused leaves the Intel GPU holding no lent aperture and
+                refused a copying card. With the identity test, the option
+                test or that undo dropped, the boot panics. On the published
+                nodes only the
                 framebuffer's own node or, under the option, the Intel GPU
                 lent it holds a lent aperture. The lend on the N150 box is a
                 BACKLOG row.";
             attribute :>> parent = ("H.DMA.10", "H.DMA.5");
             attribute :>> unit = ("device::lend_target",
-                "device::DeviceNode::lend_framebuffer_here", "device::lendable",
+                "device::DeviceNode::lend_framebuffer_here",
+                "device::DeviceNode::lend_framebuffer_held", "device::lendable",
                 "device::DeviceNode::firmware_framebuffer",
                 "device::DeviceNode::holds_lent_framebuffer",
                 "discovery::firmware::FirmwareFramebuffer::lend_to",
@@ -937,12 +945,12 @@ package FerrixDeviceRequirements {
                  * the plane then stops scanning out until the next driver's
                  * first pin turns it on again. */
             attribute :>> statement = "While a PCI function holds the lent
-                firmware framebuffer, every device_config_write to it shall be
-                refused ACCESS_DENIED, whatever its offset and width.";
+                firmware framebuffer, every well-formed device_config_write to
+                it shall be refused ACCESS_DENIED, whatever register it names;
+                a malformed one shall be refused as for any other function.";
             attribute :>> criterion = "Stage 10's check: the made-up Intel GPU
-                lent the framebuffer refuses a configuration write as Denied
-                before anything else is asked of it. With the refusal dropped,
-                the boot panics.";
+                lent the framebuffer refuses a well-formed configuration write
+                as Denied. With the refusal dropped, the boot panics.";
             attribute :>> parent = ("H.DMA.10", "H.DEV.2");
             attribute :>> unit = ("device::DeviceNode::config_write",
                 "device::DeviceNode::holds_lent_framebuffer");

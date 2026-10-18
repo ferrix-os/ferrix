@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "a78f4ffb097ee94f3c555b8f571cf01e044b253dfce88bff6b678a94dc314a80",
+  "digest": "b4fa5457ff63698ff276f3c34510ff09dd9936a2ca72f7f43f19d1a97cd5b27e",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -68199,10 +68199,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"The firmware framebuffer shall be lent to the Intel integrated GPU's own node, in place of a node of its own, exactly when ferrix.intelgpu was said and the Intel GPU, by what enumeration read, holds it in a BAR; it shall then be minted the framebuffer's visible lines in whole pages, the one exemption from the reserved ranges, and no other node shall hold a lent aperture. Nothing a driver says shall decide it.\"",
+                  "value": "\"Where the firmware framebuffer is lent at all (under ferrix.efifb, on x86-64, with write-combining ready on every processor; L.device.40, L.device.43), it shall be lent to the Intel integrated GPU's own node, in place of a node of its own, exactly when ferrix.intelgpu was said and the Intel GPU, by what enumeration read, holds it in a BAR; it shall then be minted the framebuffer's visible lines in whole pages, the one exemption from the reserved ranges, and no other node shall hold a lent aperture. A lend whose hold is refused shall leave the Intel GPU holding none of it. Nothing a driver says shall decide it.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 905
+                    "line": 909
                   }
                 },
                 {
@@ -68210,10 +68210,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 10's check, on made-up nodes at 00:02.0 and a made-up framebuffer: the lend goes to Intel's display function holding it only with the option, not to another vendor's function holding it nor to the Intel GPU not holding it; the Intel GPU is lent exactly the visible lines, exempt, and refused without the option. With the identity test dropped, the boot panics. On the published nodes only the framebuffer's own node or, under the option, the Intel GPU lent it holds a lent aperture. The lend on the N150 box is a BACKLOG row.\"",
+                  "value": "\"Stage 10's check, on made-up nodes at 00:02.0 and a made-up framebuffer: the lend goes to Intel's display function holding it only with the option, not to another vendor's function holding it nor to the Intel GPU not holding it; the Intel GPU is lent exactly the visible lines, exempt, and refused without the option; a lend whose hold is refused leaves the Intel GPU holding no lent aperture and refused a copying card. With the identity test, the option test or that undo dropped, the boot panics. On the published nodes only the framebuffer's own node or, under the option, the Intel GPU lent it holds a lent aperture. The lend on the N150 box is a BACKLOG row.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 915
+                    "line": 922
                   }
                 },
                 {
@@ -68224,7 +68224,7 @@
                   "value": "(\"H.DMA.10\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 916
+                    "line": 923
                   }
                 },
                 {
@@ -68232,10 +68232,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"device::lend_target\", \"device::DeviceNode::lend_framebuffer_here\", \"device::lendable\", \"device::DeviceNode::firmware_framebuffer\", \"device::DeviceNode::holds_lent_framebuffer\", \"discovery::firmware::FirmwareFramebuffer::lend_to\", \"discovery::firmware::FirmwareFramebuffer::may_lend_here\", \"discovery::firmware::FirmwareFramebuffer::hold\")",
+                  "value": "(\"device::lend_target\", \"device::DeviceNode::lend_framebuffer_here\", \"device::DeviceNode::lend_framebuffer_held\", \"device::lendable\", \"device::DeviceNode::firmware_framebuffer\", \"device::DeviceNode::holds_lent_framebuffer\", \"discovery::firmware::FirmwareFramebuffer::lend_to\", \"discovery::firmware::FirmwareFramebuffer::may_lend_here\", \"discovery::firmware::FirmwareFramebuffer::hold\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 923
+                    "line": 931
                   }
                 }
               ]
@@ -68249,7 +68249,7 @@
               "doc": "The consultant's K4 (2). The kernel has no device-reset call: no FLR, no secondary bus reset, no power-state change is made by it or offered to a driver. A driver could reach one only through device_config_write, whose allowlist already leaves PCI Express, Advanced Features and power management to the kernel (L.device.25); for the function lent the framebuffer even the vendor capability's bytes are refused, so no write reaches its configuration space at all. A GPU engine reset through the registers stays the driver's; it does not reset the function or its display. Bus mastering is still turned off at a quiesce, as for every function: the plane then stops scanning out until the next driver's first pin turns it on again.",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 925
+                "line": 933
               },
               "children": [
                 {
@@ -68257,10 +68257,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theLentIntelGpuIsNeverReset",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"While a PCI function holds the lent firmware framebuffer, every device_config_write to it shall be refused ACCESS_DENIED, whatever its offset and width.\"",
+                  "value": "\"While a PCI function holds the lent firmware framebuffer, every well-formed device_config_write to it shall be refused ACCESS_DENIED, whatever register it names; a malformed one shall be refused as for any other function.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 941
+                    "line": 950
                   }
                 },
                 {
@@ -68268,10 +68268,10 @@
                   "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theLentIntelGpuIsNeverReset",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 10's check: the made-up Intel GPU lent the framebuffer refuses a configuration write as Denied before anything else is asked of it. With the refusal dropped, the boot panics.\"",
+                  "value": "\"Stage 10's check: the made-up Intel GPU lent the framebuffer refuses a well-formed configuration write as Denied. With the refusal dropped, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 945
+                    "line": 953
                   }
                 },
                 {
@@ -68282,7 +68282,7 @@
                   "value": "(\"H.DMA.10\", \"H.DEV.2\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 946
+                    "line": 954
                   }
                 },
                 {
@@ -68293,7 +68293,7 @@
                   "value": "(\"device::DeviceNode::config_write\", \"device::DeviceNode::holds_lent_framebuffer\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 948
+                    "line": 956
                   }
                 }
               ]
@@ -68307,7 +68307,7 @@
               "doc": "The consultant's K4 (3). The display core hands a copying card to the firmware framebuffer's own node and to a chardev driver's device; it adds the Intel GPU lent the framebuffer, by this predicate of the item alone.",
               "source": {
                 "file": "docs/sysml/20-device-requirements.sysml",
-                "line": 950
+                "line": 958
               },
               "children": [
                 {
@@ -68318,7 +68318,7 @@
                   "value": "\"DeviceNode::may_copy_lent shall answer true, so that the node's driver may be handed a copying card over the lent framebuffer, exactly when the node is the Intel integrated GPU and holds the lent framebuffer.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 958
+                    "line": 966
                   }
                 },
                 {
@@ -68329,7 +68329,7 @@
                   "value": "\"Stage 10's check: the made-up Intel GPU lent the framebuffer may copy; another vendor's display function at 00:02.0 may not, without the aperture or with it. With the identity test dropped, the boot panics.\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 962
+                    "line": 970
                   }
                 },
                 {
@@ -68340,7 +68340,7 @@
                   "value": "(\"H.DMA.10\", \"H.DMA.5\")",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 963
+                    "line": 971
                   }
                 },
                 {
@@ -68351,7 +68351,7 @@
                   "value": "\"device::DeviceNode::may_copy_lent\"",
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
-                    "line": 964
+                    "line": 972
                   }
                 }
               ]
