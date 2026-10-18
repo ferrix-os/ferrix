@@ -175,8 +175,19 @@ impl Gpu {
     }
 
     fn ppgtt_address(&mut self, pml4: u64, address: u64) -> Option<(u64, usize)> {
-        let vm = *self.vms.get(&pml4)?;
-        let device = vm.translate(&mut self.tables, address)?;
+        // The walk the GPU does: four levels of present entries, whatever
+        // they point at (an unmapped address reaches the scratch page,
+        // which no test page is).
+        let mut table = pml4;
+        for lvl in (0..=3_u32).rev() {
+            let index = crate::ppgtt::gen8_pd_index(address >> 12, lvl);
+            let entry = self.tables.read_entry(table, index);
+            if entry & crate::gtt::GEN8_PAGE_PRESENT == 0 {
+                return None;
+            }
+            table = entry & crate::ppgtt::PTE_ADDR_MASK;
+        }
+        let device = table | (address & 0xfff);
         Some((device & !0xfff, ((device & 0xfff) / 4) as usize))
     }
 
@@ -265,7 +276,8 @@ impl Gpu {
         // Context save: the ring's head, and on a first run the registers.
         self.ggtt_write(state + 4 * ctx::RING_HEAD as u32, head);
         if hung {
-            self.loaded = Some([desc, 0]);
+            // Hung: it holds the engine until a reset, and runs no further.
+            self.loaded = None;
             return Ran::Hung;
         }
         // A restore-inhibited image is saved whole by the hardware; what it

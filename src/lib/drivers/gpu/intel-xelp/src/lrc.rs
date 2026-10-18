@@ -471,9 +471,9 @@ pub fn lrc_init_state(
     base: u32,
     pml4: u64,
 ) -> Result<bool, OffsetsError> {
-    let (size, wa_bb_page) = alloc_state_size(table);
+    let (size, _) = alloc_state_size(table);
     let context_dwords = (context_size(table) / 4) as usize;
-    let image = image
+    let whole = image
         .get_mut(..(size / 4) as usize)
         .ok_or(OffsetsError::TooSmall)?;
     let inhibit = match default {
@@ -481,7 +481,7 @@ pub fn lrc_init_state(
             let from = default
                 .get(..context_dwords)
                 .ok_or(OffsetsError::TooSmall)?;
-            image
+            whole
                 .get_mut(..context_dwords)
                 .ok_or(OffsetsError::TooSmall)?
                 .copy_from_slice(from);
@@ -489,6 +489,30 @@ pub fn lrc_init_state(
         }
         None => true,
     };
+    lrc_init_state_after_copy(whole, inhibit, table, base, pml4)?;
+    Ok(inhibit)
+}
+
+/// [`lrc_init_state`] for an image the default state was already copied
+/// into (`inhibit` false), or that has none (`inhibit` true): the ppHWSP and
+/// indirect page cleared and the register state initialised. The driver
+/// uses it when the default lives in memory it cannot hold a slice of at
+/// the same time as the image.
+///
+/// # Errors
+///
+/// As [`lrc_init_state`].
+pub fn lrc_init_state_after_copy(
+    image: &mut [u32],
+    inhibit: bool,
+    table: OffsetsTable,
+    base: u32,
+    pml4: u64,
+) -> Result<(), OffsetsError> {
+    let (size, wa_bb_page) = alloc_state_size(table);
+    let image = image
+        .get_mut(..(size / 4) as usize)
+        .ok_or(OffsetsError::TooSmall)?;
     // "Clear the ppHWSP (inc. per-context counters)"
     image
         .get_mut(..PAGE_DWORDS)
@@ -505,7 +529,7 @@ pub fn lrc_init_state(
         .get_mut(state..state + PAGE_DWORDS)
         .ok_or(OffsetsError::TooSmall)?;
     lrc_init_regs(regs, table, base, inhibit, pml4)?;
-    Ok(inhibit)
+    Ok(())
 }
 
 /// The image's register-state page, as dwords: where [`lrc_update_regs`]
