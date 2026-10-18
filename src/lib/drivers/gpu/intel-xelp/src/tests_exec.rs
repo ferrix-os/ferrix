@@ -633,3 +633,59 @@ fn an_engine_that_never_gets_ready_is_not_reset() {
     // A video engine has no reset domain here.
     assert!(crate::reset::reset_domain(&ENGINES[2]).is_none());
 }
+
+#[test]
+fn a_rectangle_is_blitted_into_a_wider_surface_and_back() {
+    use crate::commands::{Cs, emit_rect_copy, gen8_emit_flush_dw};
+    let rig = Rig::new(ENGINES[1]);
+    let mut state = rig.bring_up();
+    let default = rig.record_default(&mut state);
+    let mut context = rig.context(rig.place(IMAGE2, RING2, 1), Some(&default));
+    // A "screen" two pages a row (8 KiB pitch), 4 rows; a 16x4 rectangle at
+    // pixel 100 of each row; the source and the read-back packed (64 bytes
+    // a row).
+    let (screen, src, back) = (0x70_0000_u64, 0x80_0000_u64, 0x90_0000_u64);
+    let screen_pages: Vec<u64> = (0..8).map(|n| 0xc00_0000 + n * 4096).collect();
+    map(&rig, screen, &screen_pages);
+    map(&rig, src, &[0xd00_0000]);
+    map(&rig, back, &[0xe00_0000]);
+    {
+        let mut gpu = rig.gpu.borrow_mut();
+        for (i, word) in gpu
+            .pages
+            .get_mut(&0xd00_0000)
+            .expect("page")
+            .iter_mut()
+            .enumerate()
+            .take(64)
+        {
+            *word = 0x0055_0000 | i as u32;
+        }
+    }
+    let dst = screen + 100 * 4;
+    let mut copy = [0_u32; 24];
+    {
+        let mut cs = Cs::new(&mut copy);
+        emit_rect_copy(&mut cs, dst, 8192, src, 64, 16, 4);
+        gen8_emit_flush_dw(&mut cs, 0, 0, 0);
+        emit_rect_copy(&mut cs, back, 64, dst, 8192, 16, 4);
+    }
+    let (seqno, tail) = rig.emit(&mut context, Payload::Commands(&copy));
+    let _ = rig.submit(&mut state, &mut context, tail);
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Idle);
+    let _ = rig.process(&mut state);
+    assert!(rig.complete(&context, seqno));
+    let mut gpu = rig.gpu.borrow_mut();
+    let vm = rig.vm;
+    // Row 2, pixel 103 of the screen holds source pixel 2 * 16 + 3.
+    assert_eq!(
+        gpu.ppgtt_read(vm.pml4, screen + 2 * 8192 + 103 * 4),
+        0x0055_0000 | 35
+    );
+    // Outside the rectangle nothing was written.
+    assert_eq!(gpu.ppgtt_read(vm.pml4, screen + 2 * 8192 + 116 * 4), 0);
+    // And it came back whole.
+    let back_page = gpu.pages[&0xe00_0000][..64].to_vec();
+    let src_page = gpu.pages[&0xd00_0000][..64].to_vec();
+    assert_eq!(back_page, src_page);
+}
