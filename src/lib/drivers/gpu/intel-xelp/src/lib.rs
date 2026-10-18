@@ -32,7 +32,8 @@
 //! * [`engine`]: the engines and their `RING_*` registers;
 //! * [`execlists`]: descriptors, the submit queue and the status buffer;
 //! * [`sseu`]: the fuses, and the topology Mesa is told;
-//! * [`uapi`]: the i915 ioctl numbers and argument layouts.
+//! * [`uapi`]: the i915 ioctl numbers and argument layouts;
+//! * [`workarounds`]: the GT, engine, context and whitelist lists.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -49,6 +50,7 @@ pub mod reg;
 pub mod sseu;
 pub mod uapi;
 pub mod uncore;
+pub mod workarounds;
 
 #[cfg(test)]
 mod tests;

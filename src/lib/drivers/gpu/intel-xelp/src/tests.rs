@@ -494,3 +494,136 @@ fn gen12_topology() {
     assert_eq!(&topo[18..24], &[0xff, 0, 0xff, 0, 0xff, 0]);
     assert_eq!(&topo[24..30], &[0; 6]);
 }
+
+/// A register file: reads give what was written (or a preset), writes are
+/// kept in order.
+#[derive(Default)]
+struct Regs {
+    values: BTreeMap<u32, u32>,
+    writes: Vec<(u32, u32)>,
+}
+
+impl Mmio for Regs {
+    fn read32(&mut self, offset: u32) -> u32 {
+        self.values.get(&offset).copied().unwrap_or(0)
+    }
+
+    fn write32(&mut self, offset: u32, value: u32) {
+        self.writes.push((offset, value));
+        let _ = self.values.insert(offset, value);
+    }
+}
+
+#[test]
+fn adl_workaround_lists() {
+    use crate::engine::ENGINES;
+    use crate::workarounds::{self, regs};
+    let gt = workarounds::gt_init_workarounds(0b110, &ENGINES);
+    let offsets: Vec<u32> = gt.iter().map(|wa| wa.reg.offset()).collect();
+    // Sorted by offset; MCR steering first; VCS0 and VCS2 (even instances).
+    assert_eq!(offsets, [0xfdc, 0x9424, 0x9550, 0x1c_3f10, 0x1d_3f10]);
+    let mcr = gt.iter().next().expect("steering");
+    // The lowest present subslice of 0b110 is 1.
+    assert_eq!(mcr.set, 1 << 24);
+    assert_eq!(mcr.clr, (0xf << 27) | (0x7 << 24));
+    assert!(!gt.overflowed() && gt.discarded == 0);
+
+    let rcs = &ENGINES[0];
+    let engine = workarounds::engine_workarounds(rcs, mocs::UC_INDEX);
+    // GEN8_ROW_CHICKEN2 is named twice and merged into one entry.
+    let row = engine
+        .iter()
+        .find(|wa| wa.reg == regs::GEN8_ROW_CHICKEN2)
+        .expect("row chicken");
+    assert_eq!(row.set, masked_bit_enable((1 << 14) | (1 << 8)));
+    assert_eq!(row.read, (1 << 14) | (1 << 8));
+    // GEN10_SAMPLER_MODE too: the indirect state override and ENABLE_SMALLPL.
+    let sampler = engine
+        .iter()
+        .find(|wa| wa.reg == regs::GEN10_SAMPLER_MODE)
+        .expect("sampler");
+    assert_eq!(sampler.set, masked_bit_enable(1 | (1 << 15)));
+    // RING_CMD_CCTL: uncached (index 3) both ways, << 1 as i915 encodes it.
+    let cctl = engine
+        .iter()
+        .find(|wa| wa.reg == Reg(0x20c4))
+        .expect("cmd cctl");
+    assert_eq!(cctl.set & 0xffff, (6 << 7) | 6);
+    // CMD_CCTL, GARBCNTL, SAMPLER_MODE (2), CS_DEBUG_MODE1, ROW_CHICKEN2 (2),
+    // FF_THREAD_MODE, ROW_CHICKEN4, PSMI_CTL, FF_SLICE_CS_CHICKEN1.
+    assert_eq!(engine.len(), 9);
+    assert_eq!(engine.wa_count, 11);
+    let offsets: Vec<u32> = engine.iter().map(|wa| wa.reg.offset()).collect();
+    assert!(offsets.windows(2).all(|w| w[0] < w[1]));
+
+    let ctx = workarounds::ctx_workarounds(rcs, mocs::UC_INDEX);
+    assert_eq!(ctx.len(), 6);
+    let bcs_ctx = workarounds::ctx_workarounds(&ENGINES[1], mocs::UC_INDEX);
+    assert_eq!(
+        bcs_ctx
+            .iter()
+            .map(|wa| (wa.reg, wa.set))
+            .collect::<Vec<_>>(),
+        [(Reg(0x2_2204), (6 << 8) | 6)]
+    );
+}
+
+#[test]
+fn workarounds_apply_verify_emit() {
+    use crate::engine::ENGINES;
+    use crate::workarounds::{self, regs};
+    let rcs = &ENGINES[0];
+    let wal = workarounds::engine_workarounds(rcs, mocs::UC_INDEX);
+    let mut mmio = Regs::default();
+    let _ = mmio.values.insert(regs::GEN8_GARBCNTL.offset(), 0xff);
+    workarounds::wa_list_apply(&mut mmio, &wal);
+    // GEN8_GARBCNTL: bit 7 cleared by read-modify-write.
+    assert_eq!(mmio.values[&regs::GEN8_GARBCNTL.offset()], 0x7f);
+    assert_eq!(workarounds::wa_list_verify(&mut mmio, &wal).count(), 0);
+    // A bit that did not stick is reported.
+    let _ = mmio.values.insert(regs::GEN7_FF_THREAD_MODE.offset(), 0);
+    let lost: Vec<_> = workarounds::wa_list_verify(&mut mmio, &wal).collect();
+    assert_eq!(lost, [(regs::GEN7_FF_THREAD_MODE, 0)]);
+
+    let ctx = workarounds::ctx_workarounds(rcs, mocs::UC_INDEX);
+    let mut out = [0_u32; 64];
+    let mut mmio = Regs::default();
+    let _ = mmio.values.insert(regs::GEN8_WM_CHICKEN2.offset(), 0x100);
+    let used = workarounds::emit_ctx_wa(&mut mmio, &ctx, &mut out).expect("fits");
+    assert_eq!(used, 6 * 2 + 2);
+    assert_eq!(out[0], lrc::mi_load_register_imm(6));
+    let pairs: Vec<(u32, u32)> = out[1..13].chunks(2).map(|p| (p[0], p[1])).collect();
+    // WM_CHICKEN2 is read and or-ed; FF_MODE2 written whole without a read.
+    assert!(pairs.contains(&(0x5584, 0x100 | (1 << 5))));
+    assert!(pairs.contains(&(0x6604, (4 << 16) | (224 << 24))));
+    assert_eq!(out[13], 0);
+    assert!(workarounds::emit_ctx_wa(&mut mmio, &ctx, &mut [0; 8]).is_none());
+}
+
+#[test]
+fn adl_whitelists() {
+    use crate::engine::ENGINES;
+    use crate::workarounds::{self, RING_FORCE_TO_NONPRIV_ACCESS_RD};
+    let rcs = workarounds::whitelist(&ENGINES[0]);
+    let regs: Vec<u32> = rcs.iter().map(|wa| wa.reg.offset()).collect();
+    // Sorted by offset with the flags: 0x7010, 0x7018, 0x7304, then the
+    // read-only range of four at 0x2348.
+    assert_eq!(
+        regs,
+        [
+            0x7010,
+            0x7018,
+            0x7304,
+            0x2348 | RING_FORCE_TO_NONPRIV_ACCESS_RD | 1
+        ]
+    );
+    let writes = workarounds::apply_whitelist(0x2000, &rcs);
+    assert_eq!(writes[0], (Reg(0x24d0), 0x7010));
+    assert_eq!(writes[4], (Reg(0x24e0), 0x2094)); // RING_NOPID
+    assert_eq!(writes[11].0, Reg(0x24fc));
+    let bcs = workarounds::whitelist(&ENGINES[1]);
+    assert_eq!(
+        bcs.iter().map(|wa| wa.reg.offset()).collect::<Vec<_>>(),
+        [0x2_23a8 | RING_FORCE_TO_NONPRIV_ACCESS_RD]
+    );
+}
