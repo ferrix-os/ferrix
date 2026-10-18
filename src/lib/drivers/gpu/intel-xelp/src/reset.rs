@@ -120,7 +120,7 @@ pub fn intel_engine_cancel_stop_cs<M: Mmio + ?Sized>(mmio: &mut M, base: u32) {
 }
 
 /// `__cs_pending_mi_force_wakes`: the forcewake domains the engine's CS
-/// asked for and GPM has not answered ("bits[29:25] & bits[13:9]").
+/// asked for and GPM has not answered (`bits[29:25] & bits[13:9]`).
 pub fn cs_pending_mi_force_wakes<M: Mmio + ?Sized>(mmio: &mut M, engine: &EngineInfo) -> u32 {
     let reg: Reg = match engine.id {
         id::RCS0 => MSG_IDLE_CS,
