@@ -806,7 +806,58 @@ pub(super) fn check_together(nodes: &[DeviceNode], reserved: &Reserved) -> Resul
             what,
         })?;
     check_input_functions()?;
+    check_intel_gpu_yield(nodes).map_err(|what| Failure {
+        location: Location::Tree(0),
+        what,
+    })?;
     check_lent_framebuffer(nodes, reserved)
+}
+
+/// The Intel integrated GPU is not driven without `ferrix.intelgpu`
+/// (`docs/INTEL-GPU.md` §4.4 (b)): on made-up nodes at `00:02.0`, Intel's
+/// display function is yielded when the option was not said and not when it
+/// was, while another vendor's display function and Intel's display
+/// function anywhere else are never yielded for it; and on the published
+/// nodes, every Intel GPU is yielded exactly when the option was not said.
+///
+/// Verifies: L.device.44
+fn check_intel_gpu_yield(nodes: &[DeviceNode]) -> Result<(), &'static str> {
+    let made = |bus, vendor| -> Result<DeviceNode, &'static str> {
+        let address = Address::new(0, bus, 2, 0).ok_or("a check's PCI address is out of range")?;
+        let mut node = DeviceNode::empty(Location::Pci(address));
+        node.pci = Some(PciFunction {
+            vendor,
+            device: 0x46d4,
+            class: 0x03_00_00,
+            revision: 0,
+            subsystem_vendor: 0,
+            subsystem: 0,
+            secondary_bus: None,
+            config_phys: None,
+            virtio: None,
+            msix_table_size: 0,
+            host_visible: None,
+        });
+        Ok(node)
+    };
+    for allowed in [false, true] {
+        let mut made = [made(0, 0x8086)?, made(0, 0x1234)?, made(1, 0x8086)?];
+        super::yield_intel_gpu(&mut made, allowed);
+        let yielded = made.each_ref().map(DeviceNode::yielded);
+        if yielded != [!allowed, false, false] {
+            return Err("the Intel GPU was yielded other than exactly without ferrix.intelgpu");
+        }
+    }
+    let allowed = super::intel_gpu_allowed();
+    if nodes.iter().any(|node| {
+        node.intel_gpu()
+            && node.yielded() == allowed
+            && node.framebuffer_mode().is_none()
+            && !node.holds_framebuffer
+    }) {
+        return Err("a published Intel GPU's yield does not follow ferrix.intelgpu");
+    }
+    Ok(())
 }
 
 /// `publish`'s widening of a BAR shorter than a page, on made-up nodes: a

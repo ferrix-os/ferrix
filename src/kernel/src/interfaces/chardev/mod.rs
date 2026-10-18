@@ -40,6 +40,17 @@
 //! * When the driver goes, its nodes go: every open file answers `ENODEV`
 //!   for good, and every waiter wakes with `ENODEV` (N9).
 //!
+//! A HELLO may list the render node alone, as the Intel GPU's driver does
+//! (`docs/INTEL-GPU.md` §4.2; the consultant's K3 (1), ledger 2352): then
+//! only `/dev/dri/renderD<N>` is published, numbered from 128 as Linux
+//! numbers render minors, no minor of major 195 and no card. And a device
+//! whose DMA must be translated before any program reaches it -- the Intel
+//! integrated GPU (`DeviceNode::intel_gpu`) -- gets no node at all while its
+//! unit does not translate: its HELLO is refused `Untranslated`, whatever it
+//! lists, since every node it could serve is one a program opens (§4.4 (a),
+//! `L.object.192`). Its driver may still bring the GPU up and run its own
+//! commands; no program's commands reach it.
+//!
 //! An mmap is forwarded as a request too (N2; the consultant's ledger 300):
 //! the driver answers with a VMO of its own or a range of its device's own
 //! memory apertures, and the kernel maps that into the program once the
@@ -470,7 +481,14 @@ fn take_up(control: &Arc<Control>) -> Option<Publication> {
     let judged = match Message::decode(&message.bytes) {
         Ok(Message::Hello(hello)) if !handed => session::judge(&hello, control.location),
         _ => Err(Refusal::Protocol),
-    };
+    }
+    .and_then(|publication| {
+        if !control.device.may_have_client_nodes() {
+            Err(Refusal::Untranslated)
+        } else {
+            Ok(publication)
+        }
+    });
     let published =
         judged.and_then(|publication| publish(control, &publication).map(|()| publication));
     match published {
@@ -481,9 +499,11 @@ fn take_up(control: &Arc<Control>) -> Option<Publication> {
                 return None;
             }
             control.device.hello_accepted();
+            let render = usize::from(publication.minors().contains(&RENDER_MINOR));
             crate::console::println!(
-                "  chardev  {} node(s) of major {MAJOR} published for its driver",
-                publication.count
+                "  chardev  {} node(s) of major {MAJOR} and {render} render node published for \
+                 its driver",
+                publication.count - render
             );
             Some(publication)
         }

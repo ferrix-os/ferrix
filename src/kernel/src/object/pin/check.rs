@@ -662,3 +662,192 @@ fn untranslated_domain(nodes: &[Arc<DeviceNode>]) -> Result<Option<Checked>, &'s
     }
     Ok(None)
 }
+
+/// What the Intel integrated GPU's budget check found, for the boot log.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct IntelGpu {
+    /// The budget on this machine, in pages.
+    pub(crate) budget: usize,
+    /// The frames the allocator manages.
+    pub(crate) usable: u64,
+    /// The frames no program may take.
+    pub(crate) watermark: u64,
+    /// Pins and raises refused at the budget's two rules and its bound.
+    pub(crate) refusals: u32,
+    /// Identities told apart by `device::is_intel_gpu`.
+    pub(crate) identities: u32,
+}
+
+/// The Intel integrated GPU's budget (`docs/INTEL-GPU.md` §5, K3; ledger
+/// 2352, K3 (2) and (3)), on every boot, with no Intel GPU needed:
+///
+/// * the identity is the kernel's: of `8086` display class at `00:02.0`,
+///   and not another vendor's, class's or place's;
+/// * this machine's budget is `min(cap, (usable - watermark) / 4)`, so that
+///   twice it is at most half the usable frames above the watermark, and it
+///   is at most the cap; the formula's three cases, a machine below the cap,
+///   one past it and one with nothing above its watermark, as stated;
+/// * a domain given the budget by `give_intel_gpu_budget` -- a fresh
+///   untranslated one, so no device's counts are touched -- holds it and is
+///   bounded by it; with `B - 1` pages live a one-page pin is taken and the
+///   next refused `LimitReached` (`ENOSPC`), and with `2B - 1` quarantined a
+///   one-page pin is taken and the next refused `QuarantineFull` (`EDQUOT`),
+///   nothing counted for either refusal;
+/// * `set_budget` past the bound is refused with nothing changed, and holds
+///   nothing of the ceiling; one under it is taken, and the room is twice
+///   the bound.
+///
+/// # Errors
+///
+/// The first thing that is not so.
+///
+/// Verifies: L.object.194, L.object.195, L.object.196
+/// Verifies: L.device.45
+pub(crate) fn check_intel_gpu_budget() -> Result<IntelGpu, &'static str> {
+    use super::{INTEL_GPU_CAP_PAGES, intel_gpu_budget, intel_gpu_budget_for};
+
+    let identities = intel_gpu_identities()?;
+    let usable = crate::mm::managed_frames();
+    let watermark = crate::mm::watermark();
+    let budget = intel_gpu_budget();
+    let above = usize::try_from(usable.saturating_sub(watermark)).unwrap_or(usize::MAX);
+    if budget != intel_gpu_budget_for(usable, watermark)
+        || budget.saturating_mul(2) > above / 2
+        || !(2..=INTEL_GPU_CAP_PAGES).contains(&budget)
+    {
+        return Err("the Intel GPU's pin budget is not this machine's by its formula");
+    }
+    // 16 GiB and 64 GiB of 4 KiB frames at the watermark's most, and a
+    // machine with nothing above its watermark.
+    if intel_gpu_budget_for(4 << 20, 8192) != ((4 << 20) - 8192) / 4
+        || intel_gpu_budget_for(16 << 20, 8192) != INTEL_GPU_CAP_PAGES
+        || intel_gpu_budget_for(200, 256) != 0
+    {
+        return Err("the Intel GPU's pin budget formula is not as stated");
+    }
+    let domain = crate::fallible::try_arc(Domain::untranslated())
+        .map_err(|_| "no memory for a check's domain")?;
+    super::give_intel_gpu_budget(&domain);
+    if counts(&domain) != idle(budget) || super::room(&domain) != budget.saturating_mul(2) {
+        return Err("a domain given the Intel GPU's budget does not hold it");
+    }
+    let owner = Exit::for_check(false).map_err(|_| "no memory for a check's end")?;
+    let mut report = IntelGpu {
+        budget,
+        usable,
+        watermark,
+        identities,
+        ..IntelGpu::default()
+    };
+    let outcome = intel_gpu_at_cap(&domain, &owner, budget, &mut report);
+    forge(&domain, idle(counts(&domain).budget));
+    outcome?;
+    intel_gpu_bound(&domain, budget, &mut report)?;
+    Ok(report)
+}
+
+/// The identities [`crate::device::is_intel_gpu`] tells apart: Intel's display
+/// function at `00:02.0` and nothing beside it.
+fn intel_gpu_identities() -> Result<u32, &'static str> {
+    use crate::device::is_intel_gpu;
+    use ferrix_pci::Address;
+
+    let at = |bus, device, function| Address::new(0, bus, device, function);
+    let cases = [
+        (at(0, 2, 0), 0x8086, 0x03_00_00, true),
+        (at(0, 2, 0), 0x8086, 0x03_80_00, true),
+        (at(0, 2, 0), 0x10de, 0x03_00_00, false),
+        (at(0, 2, 0), 0x8086, 0x04_03_00, false),
+        (at(0, 3, 0), 0x8086, 0x03_00_00, false),
+        (at(0, 2, 1), 0x8086, 0x03_00_00, false),
+        (at(1, 0, 0), 0x8086, 0x03_00_00, false),
+        (Address::new(1, 0, 2, 0), 0x8086, 0x03_00_00, false),
+    ];
+    let mut told = 0;
+    for (address, vendor, class, wanted) in cases {
+        let address = address.ok_or("a check's PCI address is out of range")?;
+        if is_intel_gpu(address, vendor, class) != wanted {
+            return Err("the Intel GPU was told apart from another function wrongly");
+        }
+        told += 1;
+    }
+    Ok(told)
+}
+
+/// Set `domain`'s counts to `counts`, as only a check does.
+fn forge(domain: &Domain, counts: Counts) {
+    let mut held = super::QUARANTINE.lock();
+    domain.pin_budget().write(&mut held, counts);
+}
+
+/// The budget's two rules at `budget` itself, on `domain`.
+fn intel_gpu_at_cap(
+    domain: &Arc<Domain>,
+    owner: &Arc<Exit>,
+    budget: usize,
+    report: &mut IntelGpu,
+) -> Result<(), &'static str> {
+    let at = |live, quarantined| Counts {
+        budget,
+        live,
+        quarantined,
+        kept: 0,
+    };
+    forge(domain, at(budget - 1, 0));
+    let last = check_pin_under(domain, owner, 1, None)
+        .map_err(|_| "the Intel GPU's last page within its budget was refused")?;
+    if !matches!(
+        check_pin_under(domain, owner, 1, None),
+        Err(PinError::LimitReached)
+    ) {
+        return Err("a pin past the Intel GPU's budget was not refused LimitReached");
+    }
+    report.refusals += 1;
+    if counts(domain) != at(budget, 0) {
+        return Err("a pin refused at the Intel GPU's budget changed its counts");
+    }
+    drop(last);
+    forge(domain, at(0, 2 * budget - 1));
+    let last = check_pin_under(domain, owner, 1, None)
+        .map_err(|_| "the Intel GPU's last page within twice its budget was refused")?;
+    if !matches!(
+        check_pin_under(domain, owner, 1, None),
+        Err(PinError::QuarantineFull)
+    ) {
+        return Err("a pin past twice the Intel GPU's budget was not refused QuarantineFull");
+    }
+    report.refusals += 1;
+    if counts(domain) != at(1, 2 * budget - 1) {
+        return Err("a pin refused at twice the Intel GPU's budget changed its counts");
+    }
+    drop(last);
+    if status::QUARANTINE_FULL != ferrix_linux_abi::errno::Errno::EDQUOT
+        || status::LIMIT_REACHED != ferrix_linux_abi::errno::Errno::ENOSPC
+    {
+        return Err("the budget's refusals do not travel as EDQUOT and ENOSPC");
+    }
+    Ok(())
+}
+
+/// The bound: past it a budget is refused with nothing changed and nothing
+/// of the ceiling held; under it, one is taken.
+fn intel_gpu_bound(
+    domain: &Arc<Domain>,
+    budget: usize,
+    report: &mut IntelGpu,
+) -> Result<(), &'static str> {
+    let room = super::ceiling_room();
+    if super::set_budget(domain, budget + 1) != Err(super::BudgetError::PastCeiling)
+        || counts(domain).budget != budget
+    {
+        return Err("a budget past the Intel GPU's bound was not refused, or changed it");
+    }
+    report.refusals += 1;
+    if super::set_budget(domain, budget - 1) != Ok(budget)
+        || counts(domain).budget != budget - 1
+        || super::ceiling_room() != room
+    {
+        return Err("a budget under the Intel GPU's bound was not taken apart from the ceiling");
+    }
+    Ok(())
+}

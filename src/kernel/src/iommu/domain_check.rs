@@ -116,6 +116,30 @@ pub(crate) fn check_iommu() {
             "stage 10 self-check failed: {problem}"
         ),
     }
+    report_intel_gpu_budget();
+}
+
+/// The Intel integrated GPU's pin budget, checked and said
+/// (`object::pin::check::check_intel_gpu_budget`).
+fn report_intel_gpu_budget() {
+    match object::pin::check::check_intel_gpu_budget() {
+        Ok(done) => println!(
+            "  iommu    Intel GPU pin budget: {} pages, a quarter of the {} usable frames above \
+             the watermark of {} and at most {} (4 GiB), its pins held to twice it; a pin past \
+             it refused ENOSPC and past twice it EDQUOT, a raise past it refused, {} refusals \
+             in all; {} identities told apart",
+            done.budget,
+            done.usable,
+            done.watermark,
+            object::pin::INTEL_GPU_CAP_PAGES,
+            done.refusals,
+            done.identities,
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE10_IOMMU,
+            "stage 10 self-check failed: {problem}"
+        ),
+    }
 }
 
 /// Every VT-d change on a unit whose walk does not snoop found its table

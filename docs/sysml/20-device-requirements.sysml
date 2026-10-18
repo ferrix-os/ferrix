@@ -846,4 +846,41 @@ package FerrixDeviceRequirements {
                 "arch::x86_64::framebuffer::drain_write_combining");
         }
     }
+
+    package IntelGpu {
+        doc /* docs/INTEL-GPU.md section 4.4 (b); the consultant's D4 (b) and
+             * K3 (2), ledger 2026-10-18 line 2352. */
+
+        requirement <'L.device.44'> theIntelGpuIsDrivenOnlyWhenAsked : ItemLowLevel {
+            attribute :>> statement = "Unless the command line says
+                ferrix.intelgpu, the Intel integrated GPU's function shall be
+                yielded: every native call that needs MANAGE on it answers
+                BAD_STATE. Under the option, stage 10 shall make its domain and
+                name it, and where its unit does not translate shall say DEGRADED,
+                its DMA untranslated and no client node published for it.";
+            attribute :>> criterion = "Stage 10's check, on made-up nodes at
+                00:02.0 and 01:02.0: Intel's display function at 00:02.0 is
+                yielded exactly when the option was not said, another vendor's
+                display function there and Intel's on bus 1 never; every
+                published Intel GPU not holding a framebuffer is yielded exactly
+                without the option. The DEGRADED line is read on the N150 box
+                (QEMU has no Intel GPU).";
+            attribute :>> parent = ("H.DMA.10", "H.DMA.3");
+            attribute :>> unit = ("device::yield_intel_gpu", "device::allow_intel_gpu",
+                "device::intel_gpu_allowed", "iommu::announce_intel_gpu");
+        }
+        requirement <'L.device.45'> theIntelGpuIsTheKernelsToName : ItemLowLevel {
+            attribute :>> statement = "A node shall be the Intel integrated GPU
+                exactly when it is the PCI function at segment 0, bus 0, device 2,
+                function 0 whose vendor enumeration read as 8086 and whose base
+                class as 03; nothing a driver says shall make it one.";
+            attribute :>> criterion = "Stage 10's check tells eight identities
+                apart: Intel's display function at 00:02.0, of sub-class 00 and
+                80, is the Intel GPU; another vendor's display function there,
+                Intel's multimedia function there, Intel's display function at
+                00:03.0, 00:02.1, 01:00.0 and on segment 1 are not.";
+            attribute :>> parent = ("H.DMA.10", "H.DMA.4");
+            attribute :>> unit = ("device::is_intel_gpu", "device::DeviceNode::intel_gpu");
+        }
+    }
 }

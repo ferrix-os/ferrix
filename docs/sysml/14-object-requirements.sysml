@@ -726,6 +726,90 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("object::pin::quarantine", "object::pin::quarantine_release",
                 "object::pin::release", "device::DeviceNode::hello_accepted");
         }
+        requirement <'L.object.194'> theIntelGpuBudgetIsTheKernels : ItemLowLevel {
+            doc /* docs/INTEL-GPU.md section 5, K3; the consultant's K3 (2) and
+                 * (3), ledger 2352. The kind is decided by what enumeration
+                 * read (L.device.45), never by the driver, and the bound by
+                 * the kernel, never by devmgr. */
+            attribute :>> statement = "When the Intel integrated GPU's domain is
+                made, before any pin is counted, its pin budget shall be set to
+                min(4 GiB, (U - W) / 4) pages, U the frames the allocator manages
+                and W the watermark, counted at stage 10; so the pages its pins
+                hold, live, quarantined and kept, are at most twice that: at most
+                half the usable RAM above the watermark, and at most 8 GiB.";
+            attribute :>> criterion = "Stage 10's check reads this machine's
+                budget as the formula gives it for its managed frames and
+                watermark, at least 2 pages and at most half the frames above the
+                watermark when doubled; the formula gives (4 Mi - 8192) / 4 pages
+                for 16 GiB, the cap for 64 GiB and 0 with nothing above the
+                watermark; a domain given it holds it with nothing counted, and
+                its room is twice it.";
+            attribute :>> parent = ("H.DMA.4", "H.OBJ.2");
+            attribute :>> unit = ("object::pin::intel_gpu_budget_for",
+                "object::pin::intel_gpu_budget", "object::pin::give_intel_gpu_budget",
+                "object::pin::count_ceiling", "device::DeviceNode::domain");
+        }
+        requirement <'L.object.195'> theIntelGpuBudgetIsItsOwnBound : ItemLowLevel {
+            attribute :>> statement = "A budget the kernel set for the Intel
+                integrated GPU shall also be the most device_set_limit may set
+                that device's budget to: past it the set shall be refused
+                NO_MEMORY with nothing changed, under it the set shall be taken,
+                and neither shall hold anything of the ceiling on raised budgets.";
+            attribute :>> criterion = "On a domain given the Intel GPU's budget B,
+                set_budget(B + 1) is refused PastCeiling with B kept, and
+                set_budget(B - 1) is taken, answering B, with the ceiling's room
+                unchanged.";
+            attribute :>> parent = ("H.DMA.4", "H.OBJ.2");
+            attribute :>> unit = ("object::pin::set_budget", "object::pin::bound_of",
+                "object::pin::room", "object::pin::bounded");
+        }
+        requirement <'L.object.196'> theIntelGpuIsRefusedAtItsCap : ItemLowLevel {
+            attribute :>> statement = "A pin of the Intel integrated GPU that would
+                take its live pages past its budget shall be refused
+                LIMIT_REACHED (ENOSPC), and one that would take its live,
+                quarantined and kept pages past twice its budget refused
+                QUARANTINE_FULL (EDQUOT), each with nothing pinned or counted;
+                the pages it pins are those of a VMO, charged to the job that
+                committed them.";
+            attribute :>> criterion = "On a domain given the Intel GPU's budget B,
+                with B - 1 pages live a one-page pin is taken and the next refused
+                LimitReached; with 2B - 1 quarantined a one-page pin is taken and
+                the next refused QuarantineFull; the counts after each refusal
+                are those before it; QUARANTINE_FULL travels as EDQUOT and
+                LIMIT_REACHED as ENOSPC.";
+            attribute :>> parent = ("H.DMA.4", "H.OBJ.2");
+            attribute :>> unit = ("object::pin::reserve", "object::pin::Pin::with_budget");
+        }
+    }
+
+    package ChardevNodes {
+        doc /* src/kernel/src/interfaces/chardev: the nodes a ring-3 driver
+             * serves through the chardev core (docs/NVIDIA.md section 4.4),
+             * and the Intel GPU's render-only node (docs/INTEL-GPU.md
+             * section 4.2 and 4.4). The core is in the load ring; what the
+             * item decides for it is DeviceNode::may_have_client_nodes. That a
+             * render-only HELLO publishes renderD<N> from 128 alone, with no
+             * minor of major 195 and no card (the consultant's K3 (1)), is the
+             * load ring's, held by the same check. */
+
+        requirement <'L.object.192'> noNodeForAnUntranslatedIntelGpu : ItemLowLevel {
+            attribute :>> statement = "The chardev core shall refuse, as
+                Untranslated and with nothing published, every HELLO for the
+                Intel integrated GPU's function while its domain does not
+                translate, or cannot be made, whatever minors it lists; a HELLO
+                for any other function shall be judged as before.";
+            attribute :>> criterion = "Stage 10's chardev check, the first PCI
+                function taken as the Intel GPU and every domain as untranslated:
+                HELLOs of the render node, and of nvidia0 and the render node,
+                are each refused Untranslated, the kernel's end closed and the
+                published minors and render nodes as before; the same function
+                not taken as the Intel GPU has its render-only HELLO taken; on a
+                machine whose PCI domains do not translate the Intel GPU's
+                render-only HELLO is refused Untranslated on its own domain. With
+                the refusal removed, the boot panics.";
+            attribute :>> parent = "H.DMA.10";
+            attribute :>> unit = "device::DeviceNode::may_have_client_nodes";
+        }
     }
 
     package QuotaSlots {

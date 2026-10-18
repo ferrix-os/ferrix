@@ -195,6 +195,10 @@ why = "whether the loader keeps the kernel log across a reset (docs/POSTMORTEM.m
 kind = "flag"
 why = "lend the firmware framebuffer to a ring-3 driver on x86-64 (discovery/firmware.rs, docs/DISPLAY.md §8); never in a configuration a claim is made of (SAFETY-MANUAL AoU-31)"
 
+[boot_options."ferrix.intelgpu"]
+kind = "flag"
+why = "let the Intel integrated GPU at 00:02.0 be driven (device.rs, L.device.44; docs/INTEL-GPU.md §4.4 (b)): off by default; without its unit translating no client node is published for it (L.object.192) and its driver is trusted with all of memory (VULNERABILITY-ANALYSIS V-03); never in a configuration a claim is made of"
+
 [boot_options."ferrix.apic"]
 values = ["x2apic", "xapic"]
 why = "x86-64: the local APICs' mode where firmware neither locked nor left x2APIC on (arch/x86_64/apic.rs, L.x86_64.131)"

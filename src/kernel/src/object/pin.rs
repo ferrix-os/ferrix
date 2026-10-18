@@ -76,6 +76,32 @@
 //! counted against the kernel's ceiling, a quarter of RAM ([`ceiling`]); the
 //! default is not, as it is the per-device bound AoU-12 accepts.
 //!
+//! # The Intel integrated GPU's budget
+//!
+//! An integrated GPU has no memory of its own: every buffer its programs
+//! make is pinned RAM (`docs/INTEL-GPU.md` §8 R5). So the node the kernel
+//! itself knows as the Intel integrated GPU (`DeviceNode::intel_gpu`, from
+//! what enumeration read, never from what a driver says) gets a budget the
+//! kernel sets when its domain is made, whatever `devmgr` does
+//! ([`give_intel_gpu_budget`]; the consultant's review, ledger 2352, K3 (2)
+//! and (3)):
+//!
+//! `B = min(INTEL_GPU_CAP_PAGES, (usable - watermark) / 4)`,
+//!
+//! where `usable` is the frames the allocator manages and `watermark` the
+//! frames no program may take ([`mm::watermark`]), counted at stage 10
+//! ([`intel_gpu_budget_for`]). The rules above hold it as any budget, so what
+//! the GPU's pins ever hold, live, quarantined and kept, is at most `2B`: at
+//! most half of the usable RAM above the watermark, and at most twice the
+//! absolute cap, 8 GiB. That is also its bound: `device_set_limit` may set
+//! it lower but never above `B`, and it is not counted against the ceiling,
+//! which bounds the budgets `devmgr` raises. A pin past it is refused with
+//! nothing pinned, `LIMIT_REACHED` (`ENOSPC`) past `B` and `QUARANTINE_FULL`
+//! (`EDQUOT`) past `2B`. A pin's frames are those of a VMO the driver
+//! committed, charged to the driver's job as every program frame is
+//! ([`mm::allocate_user_frame`]), until the driver dies and the quarantine
+//! holds them for nobody.
+//!
 //! Until the release, a quarantined page stays reachable by its device, and
 //! so by that device's next driver, which is the dead one's successor in the
 //! same trust domain; nothing else can reach it. Once released, a frame is
@@ -150,6 +176,32 @@ pub(crate) const DEFAULT_PIN_BUDGET_PAGES: usize = LARGEST_DRIVER_PIN_PAGES + 10
 /// The most pages one driver pins: the display card, 256 MiB.
 pub(crate) const LARGEST_DRIVER_PIN_PAGES: usize = 256 * 1024 * 1024 / PAGE_SIZE as usize;
 
+/// The Intel integrated GPU's budget's absolute cap: 4 GiB, so that its pins
+/// never hold more than 8 GiB whatever the machine's RAM.
+pub(crate) const INTEL_GPU_CAP_PAGES: usize = (4_u64 * 1024 * 1024 * 1024 / PAGE_SIZE) as usize;
+
+/// The Intel integrated GPU's budget on this machine, counted at stage 10
+/// ([`count_ceiling`]). Zero until then.
+static INTEL_GPU_BUDGET: AtomicUsize = AtomicUsize::new(0);
+
+/// The Intel integrated GPU's budget for a machine whose allocator manages
+/// `usable` frames and keeps `watermark` of them from programs: a quarter of
+/// the frames above the watermark, so that twice it is at most half of
+/// them, and at most [`INTEL_GPU_CAP_PAGES`].
+pub(crate) const fn intel_gpu_budget_for(usable: u64, watermark: u64) -> usize {
+    let quarter = usable.saturating_sub(watermark) / 4;
+    if quarter < INTEL_GPU_CAP_PAGES as u64 {
+        quarter as usize
+    } else {
+        INTEL_GPU_CAP_PAGES
+    }
+}
+
+/// The Intel integrated GPU's budget on this machine.
+pub(crate) fn intel_gpu_budget() -> usize {
+    INTEL_GPU_BUDGET.load(Ordering::Relaxed)
+}
+
 /// One pin closed by its process's death, until its device's next driver has
 /// reset the device.
 struct Quarantined {
@@ -178,6 +230,10 @@ struct Quarantined {
 pub(crate) struct PinBudget {
     /// `B`, in pages.
     budget: AtomicUsize,
+    /// The most `B` may be set to, for a budget the kernel set and bounds
+    /// itself rather than the ceiling ([`give_intel_gpu_budget`]); 0 for
+    /// every other device.
+    bound: AtomicUsize,
     /// Pages of pins still open, reserved before the domain maps them.
     live: AtomicUsize,
     /// Pages in the quarantine.
@@ -196,6 +252,7 @@ impl PinBudget {
     pub(crate) const fn new() -> Self {
         PinBudget {
             budget: AtomicUsize::new(DEFAULT_PIN_BUDGET_PAGES),
+            bound: AtomicUsize::new(0),
             live: AtomicUsize::new(0),
             quarantined: AtomicUsize::new(0),
             kept: AtomicUsize::new(0),
@@ -260,11 +317,49 @@ pub(crate) fn budget_of(node: &DeviceNode) -> usize {
         .map_or(DEFAULT_PIN_BUDGET_PAGES, |domain| counts(&domain).budget)
 }
 
-/// Count the kernel's ceiling: a quarter of the RAM the allocator manages.
-/// Stage 10 calls it once, before any budget can be set.
+/// Count the kernel's ceiling, a quarter of the RAM the allocator manages,
+/// and the Intel integrated GPU's budget ([`intel_gpu_budget_for`]). Stage
+/// 10 calls it once, before any budget can be set or domain made.
 pub(crate) fn count_ceiling() {
-    let quarter = usize::try_from(mm::managed_frames() / 4).unwrap_or(usize::MAX);
+    let managed = mm::managed_frames();
+    let quarter = usize::try_from(managed / 4).unwrap_or(usize::MAX);
     CEILING.store(quarter, Ordering::Relaxed);
+    INTEL_GPU_BUDGET.store(
+        intel_gpu_budget_for(managed, mm::watermark()),
+        Ordering::Relaxed,
+    );
+}
+
+/// Give `domain`, the Intel integrated GPU's, the kernel's budget for it,
+/// which also bounds what `device_set_limit` may set it to: what
+/// `DeviceNode::domain` does as it makes that node's domain, before any pin.
+/// Nothing changes while the domain has live pins.
+pub(crate) fn give_intel_gpu_budget(domain: &Domain) {
+    let mut held = QUARANTINE.lock();
+    let pins = domain.pin_budget();
+    let mut now = pins.read(&held);
+    if now.live != 0 {
+        return;
+    }
+    let budget = intel_gpu_budget();
+    now.budget = budget;
+    pins.write(&mut held, now);
+    pins.bound.store(budget, Ordering::Relaxed);
+}
+
+/// Whether the kernel bounds `domain`'s budget itself
+/// ([`give_intel_gpu_budget`]).
+pub(crate) fn bounded(domain: &Domain) -> bool {
+    domain.pin_budget().bound.load(Ordering::Relaxed) != 0
+}
+
+/// The most `domain`'s budget may be set to by its own bound, if the kernel
+/// set one ([`give_intel_gpu_budget`]).
+fn bound_of(domain: &Domain, _held: &Quarantine) -> Option<usize> {
+    match domain.pin_budget().bound.load(Ordering::Relaxed) {
+        0 => None,
+        bound => Some(bound),
+    }
 }
 
 /// The kernel's ceiling on twice every raised budget, in pages.
@@ -286,6 +381,9 @@ fn raise_of(budget: usize) -> usize {
 /// leave: the most twice `domain`'s budget may be.
 pub(crate) fn room(domain: &Domain) -> usize {
     let held = QUARANTINE.lock();
+    if let Some(bound) = bound_of(domain, &held) {
+        return bound.saturating_mul(2);
+    }
     let own = raise_of(domain.pin_budget().read(&held).budget);
     ceiling().saturating_sub(held.raised.saturating_sub(own))
 }
@@ -315,13 +413,26 @@ pub(crate) enum BudgetError {
 /// the lock a pin's reservation takes, so no pin is counted against one
 /// budget and held against another; [`BudgetError::PastCeiling`] when twice
 /// every raised budget, this one's new value counted and its old one not,
-/// would pass [`ceiling`]. Nothing changes on either.
+/// would pass [`ceiling`], or, for a budget the kernel bounds itself
+/// ([`give_intel_gpu_budget`]), when `pages` is past that bound. Nothing
+/// changes on either.
 pub(crate) fn set_budget(domain: &Domain, pages: usize) -> Result<usize, BudgetError> {
     let mut held = QUARANTINE.lock();
     let pins = domain.pin_budget();
     let mut now = pins.read(&held);
     if now.live != 0 {
         return Err(BudgetError::LivePins);
+    }
+    // A budget the kernel bounds itself is held to its own bound, and holds
+    // nothing of the ceiling.
+    if let Some(bound) = bound_of(domain, &held) {
+        if pages > bound {
+            return Err(BudgetError::PastCeiling);
+        }
+        let old = now.budget;
+        now.budget = pages;
+        pins.write(&mut held, now);
+        return Ok(old);
     }
     let raised = held
         .raised

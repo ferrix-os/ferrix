@@ -1043,6 +1043,46 @@ allocation; the unpins and the frames' release come after the lock is
 dropped. A quarantined pin's own record is allocated with the pin, outside
 the lock (finding F-23), so a death allocates nothing.
 
+**The Intel integrated GPU's budget** (`L.object.194`-`196`; the
+consultant's K3 (3), ledger 2352). Counted at stage 10 with the ceiling,
+from the frames the allocator manages, `U`, and the watermark, `W`
+(`mm::watermark`, `U / 128` held between 256 and 8192 frames):
+
+    B = min(INTEL_GPU_CAP_PAGES, (U - W) / 4),   INTEL_GPU_CAP_PAGES = 4 GiB / 4 KiB
+
+so the pages its pins hold -- live, quarantined and kept, at most `2B` by
+the rules above -- are at most `(U - W) / 2`, half the RAM above the
+watermark, and at most 8 GiB. On the N150 box's 16 GB (about 4 M frames
+managed, so `W` = 8192) `B` comes to about 3.8 GiB, just under the cap,
+by what firmware reserves; on the x86-64 test boot's QEMU guest, whose
+allocator manages 110,665 frames with `W` = 864, it is 27,450 pages.
+It is set on the GPU's domain under this lock as the domain is made, before
+any pin can be counted against another budget, and it also bounds what
+`device_set_limit` may set: nothing of the ceiling is held for it. A pin past
+`B` is `LIMIT_REACHED` (`ENOSPC`), one past `2B` `QUARANTINE_FULL`
+(`EDQUOT`), each with nothing pinned or counted: the same test and store
+under the lock as any device's, with no walk.
+
+**Lock order: a node's domain lock, then this one** (ledger 2356 (1)).
+`DeviceNode::domain` gives the Intel GPU its budget while it holds the
+node's `domain` lock, so that no pin can be counted against another budget
+before it: that takes this lock inside the node's. Nothing takes them the
+other way. None of the twelve `QUARANTINE.lock()` sites (eleven in
+`object/pin.rs`, one in its check) calls `DeviceNode::domain` or
+`domain_made`, or takes any lock, while it holds this one:
+`budget_of` and `quarantine_release` read `domain_made` before they lock,
+and `release` unpins and frees after it drops the lock. This lock stays a
+leaf below the node's.
+
+**What its pins are charged to** (ledger 2356, ruling 3). A pin holds a
+VMO's frames. Each frame is charged to the job that committed it, at first
+touch (`mm::allocate_user_frame`), and the pin does not move the charge. The
+driver's own GEM objects are therefore charged to the driver's job. A
+dmabuf the driver imports and pins, whose VMO another client or driver
+committed, stays charged to that job, and its pages still count against the
+GPU's `B` and `2B`. K7 (userptr, client pages pinned by the driver)
+reopens this.
+
 ### 2.2h A device's configuration lock (`DeviceNode::config`)
 
 One interrupt-masking spin lock per device node, held across every write of

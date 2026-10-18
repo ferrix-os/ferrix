@@ -760,6 +760,25 @@ package FerrixItemRequirements {
                 and is refused when it reads 1 (the `msix-off` line).";
             attribute :>> parent = ("O.DMA", "O.CAPABILITY", "ASR-4");
         }
+        requirement <'H.DMA.10'> noClientReachesAnUntranslatedGpu : ItemHighLevel {
+            doc /* docs/INTEL-GPU.md section 4.4, the isolation rule D4 as the
+                 * certification consultant approved it (ledger 2026-10-18
+                 * line 2352, (a) to (d)). The GPU executes what programs hand
+                 * it, so without translation one bad page-table entry is DMA
+                 * anywhere. Its driver, trusted like the kernel in that mode
+                 * (VULNERABILITY-ANALYSIS V-03), may still run its own
+                 * commands; that is the driver's property, not evidence. */
+            attribute :>> statement = "While the unit behind the Intel integrated
+                GPU does not translate its DMA, the TSF shall publish no node
+                through which a program can reach that GPU, and the GPU shall be
+                driven at all only where the command line says ferrix.intelgpu.";
+            attribute :>> criterion = "A HELLO for the Intel GPU's function is
+                refused Untranslated with nothing published while its domain does
+                not translate, whatever it lists, and taken where it does
+                (L.object.192); the GPU is yielded without
+                ferrix.intelgpu (L.device.44).";
+            attribute :>> parent = ("O.DMA", "ASR-4");
+        }
     }
 
     package Devices {

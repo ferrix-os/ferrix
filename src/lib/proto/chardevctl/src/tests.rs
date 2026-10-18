@@ -86,6 +86,7 @@ fn messages_round_trip() {
         Message::Hello(hello(&[255, 0, RENDER_MINOR])),
         Message::Ready(3),
         Message::Refused(Refusal::Taken),
+        Message::Refused(Refusal::Untranslated),
         Message::Request(request),
         Message::Request(release),
     ] {
@@ -162,4 +163,40 @@ fn the_judge_takes_nvidias_minors_and_refuses_the_rest() {
     let mut old = hello(&[255]);
     old.version = 0;
     assert_eq!(session::judge(&old, 0x0200), Err(Refusal::Version));
+}
+
+/// Every refusal's byte names it again, and no two share one.
+#[test]
+fn refusal_codes_round_trip() {
+    let all = [
+        Refusal::Protocol,
+        Refusal::Version,
+        Refusal::Location,
+        Refusal::Minor,
+        Refusal::Duplicate,
+        Refusal::Taken,
+        Refusal::NoMemory,
+        Refusal::Untranslated,
+    ];
+    for (index, refusal) in all.iter().enumerate() {
+        assert_eq!(Refusal::from_code(refusal.code()), Some(*refusal));
+        assert!(
+            all.iter()
+                .skip(index + 1)
+                .all(|other| other.code() != refusal.code())
+        );
+    }
+    assert_eq!(Refusal::from_code(9), None);
+}
+
+/// A HELLO listing the render node alone is judged as any other: what a
+/// render-only driver such as the Intel GPU's says (`docs/INTEL-GPU.md`
+/// §4.2).
+#[test]
+fn a_render_only_hello_is_taken() {
+    let judged = session::judge(&hello(&[RENDER_MINOR]), 0x0200);
+    assert_eq!(
+        judged.map(|p| (p.count, p.minors[0])),
+        Ok((1, RENDER_MINOR))
+    );
 }

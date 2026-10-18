@@ -20,6 +20,10 @@ pub enum Refusal {
     Taken,
     /// The kernel had no memory to publish the nodes.
     NoMemory,
+    /// The device is one whose DMA must be translated before any program
+    /// reaches it, and its unit does not translate: no node is published
+    /// for it (`docs/INTEL-GPU.md` §4.4 (a)).
+    Untranslated,
 }
 
 impl Refusal {
@@ -34,6 +38,7 @@ impl Refusal {
             Refusal::Duplicate => 5,
             Refusal::Taken => 6,
             Refusal::NoMemory => 7,
+            Refusal::Untranslated => 8,
         }
     }
 
@@ -48,6 +53,7 @@ impl Refusal {
             5 => Some(Refusal::Duplicate),
             6 => Some(Refusal::Taken),
             7 => Some(Refusal::NoMemory),
+            8 => Some(Refusal::Untranslated),
             _ => None,
         }
     }
@@ -63,6 +69,9 @@ impl core::fmt::Display for Refusal {
             Refusal::Duplicate => "its HELLO lists a minor twice",
             Refusal::Taken => "another driver already serves one of its minors",
             Refusal::NoMemory => "there was no memory to publish its nodes",
+            Refusal::Untranslated => {
+                "its device's DMA is not translated, so no program may reach it"
+            }
         })
     }
 }

@@ -72,12 +72,24 @@
 //! MSI vector a write to its capability's mask bit, or its enable bit where it
 //! has none. The interrupt controller can reach neither, so [`Vector::mask`]
 //! knows which kind it is. It takes no lock: an interrupt handler calls it.
+//!
+//! # The Intel integrated GPU
+//!
+//! The function at `00:02.0` of vendor `8086` and display class `03` is the
+//! Intel integrated GPU, which the kernel tells apart by what enumeration
+//! read, never by what a driver says ([`DeviceNode::intel_gpu`],
+//! `docs/INTEL-GPU.md` §4.4 and §5; the consultant's review, ledger 2352,
+//! K3 (2)). Its driver runs the GPU on commands its programs hand it, and
+//! until its unit translates (K2) the GPU then reaches all of memory. So it
+//! is not driven unless the command line says [`INTEL_GPU_OPTION`]: every
+//! call that needs `MANAGE` on it answers `BAD_STATE`, as for the function
+//! holding a lent framebuffer (`L.device.44`).
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::{BootView, MemKind, PAGE_SIZE};
 use ferrix_fdt::{GicInterrupt, Trigger as TreeTrigger};
@@ -1410,6 +1422,40 @@ impl DeviceNode {
         !(matches!(self.location, Location::Tree(_)) && self.binding == TREE_FIRMWARE_FB)
     }
 
+    /// Whether the node is the Intel integrated GPU: the PCI function at
+    /// bus 0, device 2, function 0 whose vendor is Intel (`8086`) and whose
+    /// base class is display (`03`), as enumeration read them
+    /// ([`is_intel_gpu`]). Or the node a boot check names in
+    /// [`FORCED_INTEL_GPU`], which no product path writes.
+    pub(crate) fn intel_gpu(&self) -> bool {
+        let forced = FORCED_INTEL_GPU.load(Ordering::Acquire);
+        if forced != 0 && forced == self.index.saturating_add(1) {
+            return true;
+        }
+        match (self.location, self.pci.as_ref()) {
+            (Location::Pci(address), Some(function)) => {
+                is_intel_gpu(address, function.vendor, function.class)
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether a driver of the node may publish nodes programs open (the
+    /// chardev core's HELLO, `L.object.192`): not for the Intel integrated
+    /// GPU while its domain does not translate, or cannot be made, since the
+    /// GPU executes what programs hand it (`docs/INTEL-GPU.md` §4.4 (a)).
+    /// Every other node may. Every domain counts as untranslated while a
+    /// boot check sets [`FORCED_UNTRANSLATED`].
+    pub(crate) fn may_have_client_nodes(&self) -> bool {
+        if !self.intel_gpu() {
+            return true;
+        }
+        if FORCED_UNTRANSLATED.load(Ordering::Acquire) {
+            return false;
+        }
+        self.domain().is_ok_and(|domain| domain.translated())
+    }
+
     /// The firmware framebuffer node's mode; `None` for any other node.
     pub(crate) const fn framebuffer_mode(&self) -> Option<FramebufferMode> {
         self.mode
@@ -1896,8 +1942,9 @@ impl DeviceNode {
         self.refused.load(Ordering::Acquire)
     }
 
-    /// Whether the node holds the firmware framebuffer lent to its own node,
-    /// and so is not driven while the machine runs.
+    /// Whether the node is not driven while the machine runs: it holds the
+    /// firmware framebuffer lent to its own node, or it is the Intel
+    /// integrated GPU and the command line did not say [`INTEL_GPU_OPTION`].
     pub(crate) const fn yielded(&self) -> bool {
         self.yielded
     }
@@ -2105,6 +2152,11 @@ impl DeviceNode {
             Location::Pci(address) => iommu::domain_for(address),
             Location::VirtioMmio(_) | Location::Tree(_) => iommu::Domain::untranslated(),
         })?;
+        // The Intel integrated GPU's budget is the kernel's, set before any
+        // pin can be counted against another (`object::pin`, ledger 2352 K3).
+        if self.intel_gpu() {
+            crate::object::pin::give_intel_gpu_budget(&domain);
+        }
         *held = Some(Arc::clone(&domain));
         Ok(domain)
     }
@@ -2683,6 +2735,61 @@ fn yield_framebuffer_holder(nodes: &mut [DeviceNode]) {
     }
 }
 
+/// The command-line word that lets the Intel integrated GPU be driven
+/// (`docs/INTEL-GPU.md` §4.4 (b)): off unless said, and no profile a claim
+/// is made of permits it.
+pub(crate) const INTEL_GPU_OPTION: &str = "ferrix.intelgpu";
+
+/// Whether the command line said [`INTEL_GPU_OPTION`], as stage 10 read it
+/// before publishing.
+static INTEL_GPU_ALLOWED: AtomicBool = AtomicBool::new(false);
+
+/// The node a boot check treats as the Intel integrated GPU, as its index
+/// in [`devices`] plus one; 0 for none. Written by the chardev core's check
+/// alone, around the cases it runs, as `remapping::FORCED_UNISOLATED` is by
+/// the IOMMU's: QEMU has no Intel GPU to show the rules on.
+pub(crate) static FORCED_INTEL_GPU: AtomicUsize = AtomicUsize::new(0);
+
+/// Set by the chardev core's check alone, around the cases it runs: every
+/// domain counts as untranslated for [`DeviceNode::may_have_client_nodes`].
+/// QEMU's machines translate every PCI function.
+pub(crate) static FORCED_UNTRANSLATED: AtomicBool = AtomicBool::new(false);
+
+/// Let the Intel integrated GPU be driven: stage 10 calls it before
+/// [`publish`] when the command line said [`INTEL_GPU_OPTION`].
+pub(crate) fn allow_intel_gpu() {
+    INTEL_GPU_ALLOWED.store(true, Ordering::Release);
+}
+
+/// Whether the command line said [`INTEL_GPU_OPTION`].
+pub(crate) fn intel_gpu_allowed() -> bool {
+    INTEL_GPU_ALLOWED.load(Ordering::Acquire)
+}
+
+/// Whether a PCI function at `address`, of `vendor` and `class` (base,
+/// sub-class and interface, as [`PciFunction::class`] holds them), is the
+/// Intel integrated GPU: Intel's, display class, at `00:02.0` on the first
+/// segment, where every Intel integrated GPU sits.
+pub(crate) const fn is_intel_gpu(address: Address, vendor: u16, class: u32) -> bool {
+    vendor == 0x8086
+        && class >> 16 == 0x03
+        && address.segment() == 0
+        && address.bus() == 0
+        && address.device() == 2
+        && address.function() == 0
+}
+
+/// The Intel integrated GPU is not driven unless `allowed`, which is
+/// whether the command line said [`INTEL_GPU_OPTION`] (`L.device.44`).
+fn yield_intel_gpu(nodes: &mut [DeviceNode], allowed: bool) {
+    if allowed {
+        return;
+    }
+    for node in nodes.iter_mut().filter(|node| node.intel_gpu()) {
+        node.yielded = true;
+    }
+}
+
 /// Run `finders` in order, printing each one's lines after it, then publish
 /// every node they found after requiring each to hand out exactly what it
 /// has, and no two to hand out the same memory or the same interrupt.
@@ -2757,6 +2864,7 @@ pub(crate) fn publish<'f>(
     widen_lone_partial_bars(&mut nodes, &occupied, reserved, true);
 
     yield_framebuffer_holder(&mut nodes);
+    yield_intel_gpu(&mut nodes, intel_gpu_allowed());
 
     for node in &nodes {
         check::check_node(node, reserved, &mut report)?;

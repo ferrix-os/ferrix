@@ -456,6 +456,45 @@ pub(crate) fn report(view: &BootView<'_>, nodes: &[Arc<DeviceNode>]) {
     // (`object::pin`). Counted in `check_iommu` until 2026-10-15, which ran
     // straight after this (`docs/KERNEL-CRATES.md` §3 (3)).
     crate::object::pin::count_ceiling();
+    announce_intel_gpu(nodes);
+}
+
+/// Say how the Intel integrated GPU stands (`docs/INTEL-GPU.md` §4.4 (b)):
+/// not driven without `ferrix.intelgpu`; driven under it, its domain made
+/// now, with the kernel's pin budget, and named as DMA nobody translates
+/// while its unit does not: degraded trusted mode, its driver trusted with
+/// all of memory (VULNERABILITY-ANALYSIS V-03), and no client may reach it
+/// (`L.object.192`).
+fn announce_intel_gpu(nodes: &[Arc<DeviceNode>]) {
+    for node in nodes.iter().filter(|node| node.intel_gpu()) {
+        let location = node.location();
+        if !crate::device::intel_gpu_allowed() {
+            println!(
+                "  iommu    {location}, the Intel integrated GPU, is not driven: no {}",
+                crate::device::INTEL_GPU_OPTION
+            );
+            continue;
+        }
+        let Ok(domain) = node.domain() else {
+            println!("  iommu    {location}, the Intel integrated GPU: no memory for its domain");
+            continue;
+        };
+        let budget = crate::object::pin::counts(&domain).budget;
+        if domain.translated() {
+            println!(
+                "  iommu    {location}, the Intel integrated GPU, driven under {} with its DMA \
+                 translated; pin budget {budget} pages",
+                crate::device::INTEL_GPU_OPTION
+            );
+        } else {
+            println!(
+                "  iommu    DEGRADED: {location}, the Intel integrated GPU, driven under {} with \
+                 its DMA untranslated: its driver is trusted with all of memory, and no client \
+                 node is published for it; pin budget {budget} pages",
+                crate::device::INTEL_GPU_OPTION
+            );
+        }
+    }
 }
 
 /// While a unit remaps interrupts, name every PCI function that gets no

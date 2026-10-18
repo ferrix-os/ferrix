@@ -787,6 +787,11 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
     // Last, so that the framebuffer it lends never takes an aperture from a
     // device: it adds a node only under `ferrix.efifb`.
     let mut framebuffer = firmware::FirmwareFramebuffer::new(view);
+    // Before publishing, which yields the Intel integrated GPU unless the
+    // command line lets it be driven (`L.device.44`).
+    if view.flag(device::INTEL_GPU_OPTION) {
+        device::allow_intel_gpu();
+    }
     let reserved = device::Reserved::of(view, &[pci.reads(), tree.reads(), boards.reads()]);
     let mut finders: [&mut dyn Finder; 4] = [&mut pci, &mut tree, &mut boards, &mut framebuffer];
     let report = match device::publish(&mut finders, &reserved) {

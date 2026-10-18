@@ -37,6 +37,7 @@ runtime_trades = "game_mode"
 "ferrix.fbcon.small" = true
 "ferrix.pstore" = ["on", "off"]
 "ferrix.efifb" = true
+"ferrix.intelgpu" = true
 "ferrix.apic" = ["x2apic", "xapic"]
 "ferrix.btrfs" = ["*"]
 "ferrix.btrfs.seed" = ["*"]

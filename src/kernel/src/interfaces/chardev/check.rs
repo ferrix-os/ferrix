@@ -72,16 +72,31 @@
 //!   fence wakes readable within a second of the driver's death, which
 //!   reads `ENODEV`;
 //! * when the driver goes, a waiting program wakes with `ENODEV` and the
-//!   node is unpublished (N9).
+//!   node is unpublished (N9);
+//! * a render-only HELLO (`docs/INTEL-GPU.md` §4.2; ledger 2352, K3 (1)),
+//!   the first function taken as the Intel integrated GPU
+//!   (`device::FORCED_INTEL_GPU`): where its domain translates it publishes
+//!   `renderD<N>` with N at least 128, served by its control and named for
+//!   its device, no minor of major 195 and no card, all gone after; where it
+//!   does not, it is refused `Untranslated`. With every domain taken as
+//!   untranslated (`FORCED_UNTRANSLATED`), the same function's HELLO of the
+//!   render node, and of `nvidia0` and the render node, are each refused
+//!   `Untranslated` with nothing published, while the same HELLO of a
+//!   function that is not the Intel GPU is taken as before (§4.4 (a),
+//!   `L.object.192`);
+//! * replies out of order (C1 of ledger 2352): of two requests outstanding,
+//!   the later answered first and then the earlier, each program gets its
+//!   own answer, and a second reply to either is refused `BAD_STATE`.
 //!
 //! A machine with one PCI function checks everything but the two cases that
 //! need a second driver, and says so.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::sync::atomic::Ordering;
 
 use ferrix_chardevctl::message::{Hello, MAX_NODES, Message, Op, VERSION};
-use ferrix_chardevctl::node::MODE;
+use ferrix_chardevctl::node::{MODE, RENDER_MINOR};
 use ferrix_chardevctl::session::Refusal;
 use ferrix_linux_abi::errno::Errno;
 use ferrix_native_abi::handle::Handle;
@@ -159,6 +174,13 @@ pub(crate) struct Report {
     /// How long after its driver's death a program blocked in `poll` on a
     /// fence woke, in milliseconds (S9; at most [`DEATH_WAKE_MS`]).
     pub(crate) fence_death_wake_ms: u64,
+    /// The render node a render-only HELLO published, if the function's
+    /// domain translates; `None` where it was refused `Untranslated`.
+    pub(crate) render_only: Option<u32>,
+    /// HELLOs refused `Untranslated` (`L.object.192`).
+    pub(crate) untranslated: u32,
+    /// Requests answered out of the order they were made (C1).
+    pub(crate) out_of_order: u32,
     /// Why the cases needing a second driver were not checked.
     pub(crate) one_device: bool,
     /// Why nothing was checked.
@@ -205,6 +227,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let driver = Side::new()?;
     let program = Side::new()?;
     refusals(&driver, first, &mut report)?;
+    render_only(&driver, first, &mut report)?;
     let control = accepted(&driver, first, &[0])?;
     let core = control_of(first)?;
     duplicate_refused(&driver, control, &mut report)?;
@@ -233,6 +256,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     )?;
     abandoned(&driver, control, &core, &program, &mut report)?;
     answered_drains(&driver, control, &core, &program, &mut report)?;
+    out_of_order(&driver, control, &core, &program, &mut report)?;
     bounded(&driver, control, &core, &program, &mut report)?;
     let kept = dmabufs(&driver, control, &core, &program, &mut report)?;
     let foreign = other
@@ -284,6 +308,208 @@ fn refusals(side: &Side, node: &Arc<DeviceNode>, report: &mut Report) -> Result<
         settle()?;
         unclaimed(node)?;
     }
+    Ok(())
+}
+
+/// What the render-only cases force, put back however they end.
+struct Forced;
+
+impl Forced {
+    /// Take `node` as the Intel integrated GPU, and every domain as
+    /// translating or not by `untranslated`.
+    fn set(node: &DeviceNode, untranslated: bool) -> Forced {
+        device::FORCED_INTEL_GPU.store(node.index().saturating_add(1), Ordering::Release);
+        device::FORCED_UNTRANSLATED.store(untranslated, Ordering::Release);
+        Forced
+    }
+}
+
+impl Drop for Forced {
+    fn drop(&mut self) {
+        device::FORCED_INTEL_GPU.store(0, Ordering::Release);
+        device::FORCED_UNTRANSLATED.store(false, Ordering::Release);
+    }
+}
+
+/// The render-only HELLO (K3 (1)) and the refusal of every node for an
+/// Intel GPU whose DMA nobody translates (`L.object.192`).
+///
+/// The window in which a node is taken as the Intel GPU ([`Forced`]) opens
+/// and closes here, at stage 10, before devmgr or any driver can start, so
+/// no driver's HELLO for the node can fall in it. The function's domain is
+/// made before the window opens, so that `DeviceNode::domain` never gives a
+/// product domain the Intel GPU's budget: after the window the node's budget
+/// is the one it had, and the kernel bounds it no more than before (ledger
+/// 2356 (2)).
+///
+/// Verifies: L.object.192, H.DMA.10
+fn render_only(
+    side: &Side,
+    node: &Arc<DeviceNode>,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let domain = node
+        .domain()
+        .map_err(|_| "no memory for a device's domain")?;
+    let translated = domain.translated();
+    let budget = crate::object::pin::counts(&domain).budget;
+    let outcome = render_only_cases(side, node, translated, report);
+    if crate::object::pin::bounded(&domain) || crate::object::pin::counts(&domain).budget != budget
+    {
+        return Err("taking a function as the Intel GPU gave its domain the Intel GPU's budget");
+    }
+    outcome
+}
+
+/// [`render_only`]'s cases, on `node`, whose domain translates or not by
+/// `translated`.
+fn render_only_cases(
+    side: &Side,
+    node: &Arc<DeviceNode>,
+    translated: bool,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let device = device_handle(side, node)?;
+    let at = location(node);
+    let before = (
+        super::published_minors(),
+        crate::interfaces::render::node_indices(),
+    );
+    // Every domain taken as untranslated: the Intel GPU's HELLO is refused
+    // whatever it lists, and nothing is published.
+    {
+        let _forced = Forced::set(node, true);
+        for minors in [&[RENDER_MINOR][..], &[0, RENDER_MINOR][..]] {
+            let control = create(side, device)?;
+            hello(side, control, at, minors)?;
+            expect_refused(side, control, Refusal::Untranslated, report)?;
+            settle()?;
+            unclaimed(node)?;
+            report.untranslated += 1;
+        }
+    }
+    if (
+        super::published_minors(),
+        crate::interfaces::render::node_indices(),
+    ) != before
+    {
+        return Err("a HELLO refused Untranslated left a node published");
+    }
+    // A function that is not the Intel GPU is not held to it.
+    {
+        device::FORCED_UNTRANSLATED.store(true, Ordering::Release);
+        let taken = accepted(side, node, &[RENDER_MINOR]);
+        device::FORCED_UNTRANSLATED.store(false, Ordering::Release);
+        close(
+            side,
+            taken.map_err(|_| "a render-only HELLO of a function not the Intel GPU was refused")?,
+        )?;
+        settle()?;
+        unclaimed(node)?;
+    }
+    // The Intel GPU on the function's own domain.
+    let _forced = Forced::set(node, false);
+    if !translated {
+        let control = create(side, device)?;
+        hello(side, control, at, &[RENDER_MINOR])?;
+        expect_refused(side, control, Refusal::Untranslated, report)?;
+        settle()?;
+        unclaimed(node)?;
+        report.untranslated += 1;
+        return Ok(());
+    }
+    let control = accepted(side, node, &[RENDER_MINOR])?;
+    let published = render_published(node, &before.1);
+    close(side, control)?;
+    settle()?;
+    unclaimed(node)?;
+    let index = published?;
+    if (
+        super::published_minors(),
+        crate::interfaces::render::node_indices(),
+    ) != before
+    {
+        return Err("a render-only driver's render node was not gone after it");
+    }
+    report.render_only = Some(index);
+    Ok(())
+}
+
+/// The one render node a render-only HELLO for `node` published, after
+/// `before`: numbered from 128, served by `node`'s control and named for
+/// `node`; no minor of major 195 and no card for it.
+fn render_published(node: &Arc<DeviceNode>, before: &[u32]) -> Result<u32, &'static str> {
+    let core = control_of(node)?;
+    let new: Vec<u32> = crate::interfaces::render::node_indices()
+        .into_iter()
+        .filter(|index| !before.contains(index))
+        .collect();
+    let [index] = new.as_slice() else {
+        return Err("a render-only HELLO did not publish exactly one render node");
+    };
+    if *index < 128 {
+        return Err("a render-only driver's render node is numbered below 128");
+    }
+    if !super::render_control(*index).is_some_and(|serving| Arc::ptr_eq(&serving, &core))
+        || crate::interfaces::render::node_device(*index) != Some(node.index())
+    {
+        return Err(
+            "a render-only driver's render node is not served by its control for its device",
+        );
+    }
+    if super::PUBLISHED
+        .lock()
+        .iter()
+        .any(|(_, held)| Arc::ptr_eq(held, &core))
+    {
+        return Err("a render-only HELLO published a minor of major 195");
+    }
+    let cards = crate::interfaces::display::card_indices();
+    if cards
+        .iter()
+        .filter_map(|card| crate::interfaces::display::card(*card))
+        .any(|card| card.node == node.index())
+    {
+        return Err("a render-only HELLO made a card for its device");
+    }
+    Ok(*index)
+}
+
+/// Two requests outstanding, the later answered first: each program's call
+/// gets its own answer, and a second reply to either is refused (C1 of
+/// ledger 2352, which the Intel GPU's driver relies on to answer a wait
+/// when its fence signals).
+fn out_of_order(
+    side: &Side,
+    control: Handle,
+    core: &Arc<Control>,
+    program: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let earlier = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    let later = admit(core, &program.process, IOCTL).map_err(|_| "an ioctl was not taken in")?;
+    reply(side, control, later.wire.id, VALUE + 1)?;
+    reply(side, control, earlier.wire.id, VALUE)?;
+    let answer = |request: &Request| match request.inner.lock().answer.clone() {
+        Some(Ok(Answer::Value(value))) => Some(value),
+        _ => None,
+    };
+    if answer(&later) != Some(VALUE as usize + 1) || answer(&earlier) != Some(VALUE as usize) {
+        return Err("of two requests answered out of order, one did not get its own answer");
+    }
+    for request in [&earlier, &later] {
+        if side.call(
+            nr::CHARDEV_REPLY,
+            &[reg(control), request.wire.id, 0, VALUE],
+        ) != Err(status::BAD_STATE)
+        {
+            return Err("a second reply to an answered request was not refused BAD_STATE");
+        }
+        report.refusals += 1;
+    }
+    report.out_of_order += 2;
+    report.answered += 2;
+    drain_channel(side, control);
     Ok(())
 }
 

@@ -1445,6 +1445,18 @@ pub(super) fn check_chardev() {
             ""
         },
     );
+    println!(
+        "  chardev  render-only HELLO {}; {} HELLOs of the Intel GPU refused while its DMA is \
+         untranslated, one of another function taken; {} requests answered out of order",
+        report.render_only.map_or_else(
+            || alloc::string::String::from("refused, its domain untranslated"),
+            |index| alloc::format!(
+                "published renderD{index} alone, no minor of major 195, no card"
+            ),
+        ),
+        report.untranslated,
+        report.out_of_order,
+    );
 }
 
 /// The net ring, played from both ends with no network device: the whole
