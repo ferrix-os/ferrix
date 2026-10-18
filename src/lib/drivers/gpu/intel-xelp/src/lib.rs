@@ -33,7 +33,10 @@
 //! * [`commands`] and [`engine_cs`]: command streams, and what i915 writes
 //!   around each request;
 //! * [`execlists`]: descriptors, the submit queue and the status buffer;
+//! * [`irq`]: the Gen11 interrupt banks and identities;
+//! * [`rps`] and [`rc6`]: frequency requests and idle power, by the host;
 //! * [`sseu`]: the fuses, and the topology Mesa is told;
+//! * [`uc`]: whether `GuC` locked the `WOPCM` since the last reset;
 //! * [`uapi`]: the i915 ioctl numbers and argument layouts;
 //! * [`workarounds`]: the GT, engine, context and whitelist lists.
 
@@ -48,11 +51,15 @@ pub mod execlists;
 pub mod generated;
 pub mod gtt;
 pub mod io;
+pub mod irq;
 pub mod lrc;
 pub mod mocs;
+pub mod rc6;
 pub mod reg;
+pub mod rps;
 pub mod sseu;
 pub mod uapi;
+pub mod uc;
 pub mod uncore;
 pub mod workarounds;
 

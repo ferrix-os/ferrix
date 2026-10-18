@@ -888,3 +888,145 @@ fn context_indices_match_i915_headers() {
         lr::GEN12_CTX_RCS_INDIRECT_CTX_OFFSET_DEFAULT
     );
 }
+
+/// The box's own fuses and frequencies, as i915 reported them on it under
+/// Linux 7.0 (M0, 2026-10-18: `gt0/sseu_topology`, `i915_frequency_info`).
+#[test]
+fn the_boxs_gt() {
+    use crate::{rps, sseu};
+    // 2 dual-subslices (0x3) of 12 EUs (0x3f3f: pairs 3 and 7 fused off).
+    let info = sseu::gen12_sseu_info_init(sseu::Fuses {
+        slice_enable: 1,
+        geometry_dss_enable: 0x3,
+        eu_disable: 0x88,
+    });
+    assert_eq!(
+        (
+            info.subslice_mask,
+            info.eu_mask,
+            info.eu_per_subslice,
+            info.eu_total
+        ),
+        (0x3, 0x3f3f, 12, 24)
+    );
+    // RP0 1000 MHz, RPn 200 MHz (50 MHz units in RP_STATE_CAP), RPe 300.
+    let caps = rps::gen6_rps_get_freq_caps((4 << 16) | 20, 6 << 8);
+    assert_eq!((caps.rp0_freq, caps.rp1_freq, caps.min_freq), (60, 18, 12));
+    assert_eq!(
+        [caps.rp0_freq, caps.rp1_freq, caps.min_freq].map(rps::intel_gpu_freq),
+        [1000, 300, 200]
+    );
+    assert_eq!(rps::gen6_rps_set(60), (Reg(0xa008), 60 << 23));
+}
+
+#[test]
+fn rc6_programming() {
+    use crate::engine::ENGINES;
+    use crate::rc6;
+    let (writes, ctl) = rc6::gen11_rc6_enable(&ENGINES);
+    let writes: Vec<(Reg, u32)> = writes.iter().flatten().copied().collect();
+    // 4 thresholds, 5 engines' RING_MAX_IDLE, GuC idle, sleep, threshold,
+    // 2 hystereses, PG enable.
+    assert_eq!(writes.len(), 4 + 5 + 3 + 2 + 1);
+    assert_eq!(writes[4], (Reg(0x2054), 10));
+    // Render, media, sampler; VCS0 and VCS2's HCP and MFX gates.
+    assert_eq!(
+        writes.last(),
+        Some(&(Reg(0xa210), 0x7 | (0x3 << 3) | (0x3 << 7)))
+    );
+    assert_eq!(ctl, (1 << 31) | (1 << 18) | (1 << 27));
+}
+
+/// An interrupt controller with one user interrupt pending on RCS0.
+struct IrqModel {
+    regs: Regs,
+    pending: bool,
+}
+
+impl Mmio for IrqModel {
+    fn read32(&mut self, offset: u32) -> u32 {
+        match offset {
+            0x19_0010 if self.pending => 1,             // GEN11_GT_DW_IRQ(0)
+            0x19_0018 if self.pending => 1,             // bank 0, bit 0
+            0x19_0060 if self.pending => (1 << 31) | 1, // valid, class 0, instance 0, USER
+            _ => self.regs.read32(offset),
+        }
+    }
+
+    fn write32(&mut self, offset: u32, value: u32) {
+        if offset == 0x19_0018 {
+            self.pending = false;
+        }
+        self.regs.write32(offset, value);
+    }
+}
+
+#[test]
+fn gen11_interrupts() {
+    use crate::engine::ENGINES;
+    use crate::irq;
+    let mut model = IrqModel {
+        regs: Regs::default(),
+        pending: true,
+    };
+    let mut clock = FwModel::new();
+    let sources = irq::gen11_irq_handler(&mut model, &mut clock).expect("handled");
+    let got: Vec<_> = sources.iter().copied().collect();
+    assert_eq!(
+        got,
+        [irq::EngineIrq {
+            class: 0,
+            instance: 0,
+            iir: 1
+        }]
+    );
+    assert_eq!(
+        irq::engine_of(&ENGINES, &got[0]).map(|e| e.name),
+        Some("rcs0")
+    );
+    // Master off, selector, identity acknowledged, bank cleared, master on.
+    assert_eq!(
+        model.regs.writes,
+        [
+            (0x19_0010, 0),
+            (0x19_0070, 1),
+            (0x19_0060, 1 << 31),
+            (0x19_0018, 1),
+            (0x19_0010, 1 << 31)
+        ]
+    );
+    // Nothing pending: IRQ_NONE, master back on.
+    assert!(irq::gen11_irq_handler(&mut model, &mut clock).is_none());
+    let enable = irq::gen11_gt_irq_postinstall();
+    assert_eq!(enable[0], (Reg(0x19_0030), 0x0909_0909));
+    assert_eq!(enable[2], (Reg(0x19_0090), !0x0909_0000));
+}
+
+#[test]
+fn media_fuses() {
+    use crate::device_info::{ADL_N_INFO, engine, engine_mask_apply_media_fuses};
+    // VDBOX 2 disabled (bit 2), VEBOX 0 present: the box's set.
+    let mask = engine_mask_apply_media_fuses(ADL_N_INFO.platform_engine_mask, 1 << 2);
+    assert_eq!(
+        mask,
+        engine::bit(engine::RCS0)
+            | engine::bit(engine::BCS0)
+            | engine::bit(engine::VCS0)
+            | engine::bit(engine::VECS0)
+    );
+    assert_eq!(
+        engine_mask_apply_media_fuses(ADL_N_INFO.platform_engine_mask, 0),
+        ADL_N_INFO.platform_engine_mask
+    );
+}
+
+#[test]
+fn wopcm_lock() {
+    let mut regs = Regs::default();
+    assert!(!crate::uc::uc_is_wopcm_locked(&mut regs));
+    let _ = regs.values.insert(0xc340, 1);
+    assert!(crate::uc::uc_is_wopcm_locked(&mut regs));
+    let mut regs = Regs::default();
+    let _ = regs.values.insert(0xc050, 0x3f_0001);
+    assert!(crate::uc::uc_is_wopcm_locked(&mut regs));
+}

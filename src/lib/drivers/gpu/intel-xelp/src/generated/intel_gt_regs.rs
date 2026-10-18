@@ -2390,6 +2390,11 @@ pub const GEN12_RPSTAT1: Reg = Reg(0x1381b4);
 pub const GEN12_VOLTAGE_MASK: u32 = 0x7ff;
 /// `GEN12_CAGF_MASK`: `REG_GENMASK(19, 11)`.
 pub const GEN12_CAGF_MASK: u32 = 0xff800;
+/// `GEN11_GT_INTR_DW(x)`: `_MMIO(0x190018 + ((x) * 4))`.
+#[must_use]
+pub const fn gen11_gt_intr_dw(i: u32) -> Reg {
+    Reg(0x190018 + i * 4)
+}
 /// `GEN11_CSME`: `(31)`.
 pub const GEN11_CSME: u32 = 0x1f;
 /// `GEN12_HECI_2`: `(30)`.
@@ -2452,6 +2457,11 @@ pub const GEN11_CRYPTO_RSVD_INTR_ENABLE: Reg = Reg(0x190040);
 pub const GEN11_GUNIT_CSME_INTR_ENABLE: Reg = Reg(0x190044);
 /// `GEN12_CCS_RSVD_INTR_ENABLE`: `_MMIO(0x190048)`.
 pub const GEN12_CCS_RSVD_INTR_ENABLE: Reg = Reg(0x190048);
+/// `GEN11_INTR_IDENTITY_REG(x)`: `_MMIO(0x190060 + ((x) * 4))`.
+#[must_use]
+pub const fn gen11_intr_identity_reg(i: u32) -> Reg {
+    Reg(0x190060 + i * 4)
+}
 /// `GEN11_INTR_DATA_VALID`: `(1 << 31)`.
 pub const GEN11_INTR_DATA_VALID: u32 = 0x80000000;
 /// `OTHER_GUC_INSTANCE`: `0`.
@@ -2468,6 +2478,11 @@ pub const OTHER_GSC_INSTANCE: u32 = 0x6;
 pub const OTHER_MEDIA_GUC_INSTANCE: u32 = 0x10;
 /// `OTHER_MEDIA_GTPM_INSTANCE`: `17`.
 pub const OTHER_MEDIA_GTPM_INSTANCE: u32 = 0x11;
+/// `GEN11_IIR_REG_SELECTOR(x)`: `_MMIO(0x190070 + ((x) * 4))`.
+#[must_use]
+pub const fn gen11_iir_reg_selector(i: u32) -> Reg {
+    Reg(0x190070 + i * 4)
+}
 /// `GEN11_RCS0_RSVD_INTR_MASK`: `_MMIO(0x190090)`.
 pub const GEN11_RCS0_RSVD_INTR_MASK: Reg = Reg(0x190090);
 /// `GEN11_BCS_RSVD_INTR_MASK`: `_MMIO(0x1900a0)`.
@@ -2596,11 +2611,8 @@ pub const MTL_MEDIA_GSI_BASE: u32 = 0x380000;
 // GEN6_RCn_MASK
 // GEN6_GT_GFX_RC6p
 // GEN6_GT_GFX_RC6pp
-// GEN11_GT_INTR_DW
 // GEN11_VECS
 // GEN11_VCS
-// GEN11_INTR_IDENTITY_REG
 // GEN11_INTR_ENGINE_CLASS
 // GEN11_INTR_ENGINE_INSTANCE
 // GEN11_INTR_ENGINE_INTR
-// GEN11_IIR_REG_SELECTOR

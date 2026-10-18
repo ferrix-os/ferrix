@@ -672,7 +672,33 @@ design review is in (§5.1, ledger 2352). The lib crate `intel-xelp`
 (tables, encoders, parsers and their host tests, no I/O, no item change) is
 started on branch `intel-xelp`. Its tables are generated from i915 files
 vendored under the crate's `i915/` by `tools/common/gen/gen-intel-xelp.py`.
-M0 waits for a box slot.
+
+**M0 is done (2026-10-18, on the box's inspection Linux, Linux 7.0.0-29 and
+Mesa 26.0.8; raw output in `~/.local/share/ferrix/n150-linux/intelgpu-m0/results/`).**
+
+* **Default i915 on ADL-N is GuC.** GuC 70.49.4 (`tgl_guc_70.bin`), HuC 7.9.3
+  authenticated, "GUC: submission enabled", SLPC and RC by GuC. Linux drives
+  the iGPU's VT-d unit ("VT-d active for gfx access").
+* **Execlists work.** After an FLR, i915 with `enable_guc=0` initialised with
+  "GuC disabled" and no hang. anv's `vulkaninfo` named "Intel(R) Graphics
+  (ADL-N)", and `vkcube --wsi display` drew 600 frames in 13.6 s, the same as
+  under GuC. Both are bound by the panel, not the GPU. D3 stands.
+* **The WOPCM lock.** Once GuC has run, the GuC WOPCM registers stay locked
+  until the device resets. i915 then refuses execlists (`__uc_check_hw`,
+  "Enabling uc failed (-5)", the GT wedged), and a PCI FLR clears it. So
+  the driver checks `uc_is_wopcm_locked` first ([`uc`](../src/lib/drivers/gpu/intel-xelp/src/uc.rs)).
+  On a warm boot after an OS that ran GuC (the inspection Linux does), it
+  needs an FLR. That is fine for M1 to M3, which run without `ferrix.efifb`.
+  Under K4, where the kernel refuses FLR while the plane is the screen, a
+  locked WOPCM means the driver must say so and stop, and the screen stays
+  the firmware's. The consultant's K4 (2) is to be read with this case in
+  mind.
+* **The GT.** 1 slice and 2 dual-subslices (mask 0x3), each with 12 EUs
+  (mask 0x3f3f, EU pairs 3 and 7 fused off), so 24 EUs. Slice power gating
+  only. RPn 200 MHz, RP1/RPe 300 MHz, RP0 1000 MHz. The engines are rcs0,
+  bcs0, vcs0 and vecs0: **vcs2 is fused off** on ADL-N, so the driver
+  applies `engine_mask_apply_media_fuses` and does not assume `adl_p_info`'s
+  list.
 
 
 2026-10-18: this design, on branch `intel-gpu-design`, docs only. Nothing

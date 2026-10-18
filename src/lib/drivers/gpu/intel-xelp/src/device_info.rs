@@ -83,3 +83,34 @@ pub const ADL_N_INFO: DeviceInfo = DeviceInfo {
 pub fn lookup(vendor: u16, device: u16) -> Option<DeviceInfo> {
     (vendor == VENDOR_INTEL && ADLN_IDS.contains(&device)).then_some(ADL_N_INFO)
 }
+
+/// `engine_mask_apply_media_fuses` (`gt/intel_engine_cs.c`, MIT, Copyright ©
+/// 2016 Intel Corporation) below 12.55: `GEN11_GT_VEBOX_VDBOX_DISABLE`
+/// has disable semantics there, so it is inverted; a VCS or VECS whose bit
+/// is clear is fused off. ADL-N fuses off VCS2 (M0 on the box: rcs0, bcs0,
+/// vcs0 and vecs0 only).
+#[must_use]
+pub const fn engine_mask_apply_media_fuses(engine_mask: u32, vebox_vdbox_disable: u32) -> u32 {
+    use crate::generated::intel_gt_regs::{
+        GEN11_GT_VDBOX_DISABLE_MASK, GEN11_GT_VEBOX_DISABLE_MASK,
+    };
+    let media_fuse = !vebox_vdbox_disable;
+    let vdbox_mask = crate::reg::field_get(GEN11_GT_VDBOX_DISABLE_MASK, media_fuse);
+    let vebox_mask = crate::reg::field_get(GEN11_GT_VEBOX_DISABLE_MASK, media_fuse);
+    let mut mask = engine_mask;
+    let mut i = 0;
+    while i < 8 {
+        if vdbox_mask & (1 << i) == 0 {
+            mask &= !engine::bit(engine::VCS0 + i);
+        }
+        i += 1;
+    }
+    let mut i = 0;
+    while i < 4 {
+        if vebox_mask & (1 << i) == 0 {
+            mask &= !engine::bit(engine::VECS0 + i);
+        }
+        i += 1;
+    }
+    mask
+}
