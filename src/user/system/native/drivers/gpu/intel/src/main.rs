@@ -18,8 +18,9 @@
 //!    the engines the media fuses leave, the command streamer's timestamp
 //!    frequency, and `RP0`, `RP1` and `RPn`. Each line can be compared with what
 //!    i915 printed on the same box (M0).
-//! 7. The firmware's lit plane and the GGTT entries behind it, read only,
-//!    and how many of the GGTT's entries the firmware left present.
+//! 7. The firmware's lit plane on pipe A and the GGTT entry behind it, read
+//!    only, and the GGTT entries the firmware left present, read within a
+//!    time budget.
 //!
 //! Nothing is written to the GPU but the forcewake requests. After the
 //! lines it stays: a driver that exited would have devmgr quiesce the
@@ -304,6 +305,7 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         idle: port::create(Kernel).map_err(|_| Step::Port)?,
     };
 
+    let run_started = time.now_us();
     say_config(&device);
 
     let locked = uc::uc_is_wopcm_locked(&mut bar);
@@ -329,10 +331,13 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     ));
 
     say_gt(&mut bar, &platform);
-    say_plane_and_ggtt(&mut bar, &device);
+    say_plane_and_ggtt(&mut bar, &device, &mut time);
 
     uncore::fw_domains_put(&mut bar, &domains, wanted);
-    say(format_args!("intel: M1: the device answers"));
+    say(format_args!(
+        "intel: M1: the device answers ({} ms); the driver now waits and touches nothing",
+        time.now_us().saturating_sub(run_started) / 1_000
+    ));
     stay(&time)
 }
 
@@ -382,43 +387,66 @@ fn say_gt(bar: &mut Bar0, platform: &Platform) {
     ));
 }
 
-/// The lit plane, and the GGTT behind it, read only.
-fn say_plane_and_ggtt(bar: &mut Bar0, device: &Device<Kernel>) {
+/// How long the read-only GGTT walk may take before it stops: it is
+/// diagnosis, not bring-up, and every entry is two uncached reads.
+const GGTT_WALK_BUDGET_US: u64 = 200_000;
+
+/// How many absent entries in a row, after a present one, end the walk:
+/// the firmware maps its framebuffer as one run at the GGTT's start.
+const GGTT_WALK_GAP: u64 = 4096;
+
+/// The lit plane on pipe A (the one the firmware lights; the other pipes'
+/// power wells may be off, and i915 reads a plane only with its well on),
+/// and the GGTT entries the firmware left present, read only and bounded.
+fn say_plane_and_ggtt(bar: &mut Bar0, device: &Device<Kernel>, time: &mut Time) {
     let gmch = device
         .config_read(gtt::SNB_GMCH_CTRL, 2)
         .map_or(0, |value| value as u16);
     let entries = gtt::ggtt_total(gmch) / gtt::GTT_PAGE_SIZE;
-    for pipe in 0..plane::PIPES {
-        let lit = plane::read_plane1(bar, pipe);
-        if !lit.enabled() {
-            continue;
-        }
+    let lit = plane::read_plane1(bar, 0);
+    if lit.enabled() {
         let (width, height) = lit.dimensions();
         let first = u64::from(lit.ggtt_offset()) / gtt::GTT_PAGE_SIZE;
         let pte = bar.ggtt_entry(first).unwrap_or(0);
         say(format_args!(
-            "intel: pipe {} plane 1 lit, {width}x{height}, stride {:#x}, at GGTT {:#x}: entry {pte:#018x} (page {:#x})",
-            pipe,
+            "intel: pipe A plane 1 lit, {width}x{height}, stride {:#x}, at GGTT {:#x}: entry {pte:#018x} (page {:#x})",
             lit.stride,
             lit.ggtt_offset(),
             gtt::gen8_ggtt_pte_decode(pte).unwrap_or(0),
         ));
+    } else {
+        say(format_args!(
+            "intel: pipe A plane 1 not lit (ctl {:#010x})",
+            lit.ctl
+        ));
     }
+    let started = time.now_us();
     let mut present = 0_u64;
     let mut first_present = None;
     let mut last_present = 0;
+    let mut scanned = 0_u64;
+    let mut why = "the end";
     for index in 0..entries {
+        if index % 4096 == 0 && time.now_us().saturating_sub(started) > GGTT_WALK_BUDGET_US {
+            why = "its time budget";
+            break;
+        }
         let Some(pte) = bar.ggtt_entry(index) else {
             break;
         };
+        scanned += 1;
         if gtt::gen8_ggtt_pte_decode(pte).is_some() {
             present += 1;
             let _ = first_present.get_or_insert(index);
             last_present = index;
+        } else if first_present.is_some() && index - last_present >= GGTT_WALK_GAP {
+            why = "a gap of 4096 absent entries";
+            break;
         }
     }
     say(format_args!(
-        "intel: GGTT {entries} entries, {present} present (first {:#x}, last {last_present:#x}); none written",
+        "intel: GGTT {entries} entries, {scanned} read in {} us to {why}: {present} present (first {:#x}, last {last_present:#x}); none written",
+        time.now_us().saturating_sub(started),
         first_present.unwrap_or(0)
     ));
 }
