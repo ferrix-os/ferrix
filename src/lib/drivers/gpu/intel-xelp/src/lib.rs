@@ -35,6 +35,7 @@
 //! * [`execlists`]: descriptors, the submit queue and the status buffer;
 //! * [`irq`]: the Gen11 interrupt banks and identities;
 //! * [`rps`] and [`rc6`]: frequency requests and idle power, by the host;
+//! * [`clock`]: the command streamer's timestamp frequency;
 //! * [`sseu`]: the fuses, and the topology Mesa is told;
 //! * [`uc`]: whether `GuC` locked the `WOPCM` since the last reset;
 //! * [`uapi`]: the i915 ioctl numbers and argument layouts;
@@ -43,6 +44,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod clock;
 pub mod commands;
 pub mod device_info;
 pub mod engine;

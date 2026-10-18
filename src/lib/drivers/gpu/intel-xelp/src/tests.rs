@@ -1030,3 +1030,17 @@ fn wopcm_lock() {
     let _ = regs.values.insert(0xc050, 0x3f_0001);
     assert!(crate::uc::uc_is_wopcm_locked(&mut regs));
 }
+
+#[test]
+fn cs_timestamp_frequency() {
+    use crate::clock::gen11_clock_frequency;
+    // Crystal 38.4 MHz, shift parameter 3: no division.
+    assert_eq!(gen11_clock_frequency(0, 0, 0x10 | (3 << 1)), 38_400_000);
+    // 19.2 MHz at shift 1: divided by 4.
+    assert_eq!(gen11_clock_frequency(0, 0, 0x08 | (1 << 1)), 4_800_000);
+    // Divide logic: override 0x00 base 1 MHz, denominator 0: + 1 MHz.
+    assert_eq!(
+        gen11_clock_frequency(1, 0x0000_0012, 0),
+        19_000_000 + 1_000_000
+    );
+}
