@@ -56,6 +56,74 @@ pub fn build(
     hwsp_offset: u32,
     preempt_address: u32,
 ) -> Result<Built, NoSpace> {
+    build_payload(
+        ring,
+        memory,
+        engine,
+        Payload::Batch {
+            address: batch,
+            flags: 0,
+        },
+        seqno,
+        hwsp_offset,
+        preempt_address,
+    )
+}
+
+/// What a request runs between its breadcrumbs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Payload<'a> {
+    /// `eb_request_submit`'s `emit_bb_start`: a batch at `address`, from the
+    /// PPGTT unless `flags` has [`engine_cs::I915_DISPATCH_SECURE`].
+    Batch {
+        /// The batch's first byte.
+        address: u64,
+        /// `I915_DISPATCH_*`.
+        flags: u32,
+    },
+    /// Commands written into the ring itself, as the driver's own requests
+    /// are (`intel_engine_emit_ctx_wa`, a selftest's `MI_STORE_DWORD_IMM`):
+    /// they run with the ring's privilege. Padded with `MI_NOOP` to an even
+    /// count.
+    Commands(&'a [u32]),
+}
+
+/// [`build`] for any [`Payload`]. On [`NoSpace`] the ring is left as it
+/// was, so the caller can retire requests and try again.
+pub fn build_payload(
+    ring: &mut Ring,
+    memory: &mut [u32],
+    engine: &EngineInfo,
+    payload: Payload<'_>,
+    seqno: u32,
+    hwsp_offset: u32,
+    preempt_address: u32,
+) -> Result<Built, NoSpace> {
+    let before = *ring;
+    let built = build_into(
+        ring,
+        memory,
+        engine,
+        payload,
+        seqno,
+        hwsp_offset,
+        preempt_address,
+    );
+    if built.is_err() {
+        *ring = before;
+    }
+    built
+}
+
+fn build_into(
+    ring: &mut Ring,
+    memory: &mut [u32],
+    engine: &EngineInfo,
+    payload: Payload<'_>,
+    seqno: u32,
+    hwsp_offset: u32,
+    preempt_address: u32,
+) -> Result<Built, NoSpace> {
     let fini = fini_breadcrumb_dw(engine);
     let reserved = 2 * fini * 4 + EXECLISTS_REQUEST_SIZE;
     let head = ring.tail();
@@ -65,24 +133,36 @@ pub fn build(
     } else {
         1 + 4 + 8 + 1
     };
-    emit(ring, memory, round_even(invalidate), reserved, |cs| {
+    let _ = emit(ring, memory, round_even(invalidate), reserved, |cs| {
         engine_cs::gen12_emit_flush(engine, EMIT_INVALIDATE, cs);
     })?;
     // eb_request_submit
-    emit(ring, memory, 6, reserved, |cs| {
+    let _ = emit(ring, memory, 6, reserved, |cs| {
         engine_cs::gen8_emit_init_breadcrumb(cs, hwsp_offset, seqno);
     })?;
-    emit(ring, memory, 6, reserved, |cs| {
-        engine_cs::gen8_emit_bb_start(cs, batch, 0);
-    })?;
+    match payload {
+        Payload::Batch { address, flags } => {
+            let _ = emit(ring, memory, 6, reserved, |cs| {
+                engine_cs::gen8_emit_bb_start(cs, address, flags);
+            })?;
+        }
+        Payload::Commands(commands) => {
+            let len = u32::try_from(commands.len()).map_err(|_| NoSpace)?;
+            let _ = emit(ring, memory, round_even(len), reserved, |cs| {
+                for &dword in commands {
+                    cs.push(dword);
+                }
+            })?;
+        }
+    }
     // i915_request_add -> __i915_request_add_to_timeline: the reserve is
     // released and the final breadcrumb takes its place.
-    let start = ring.tail();
     let mut tails = Tails {
         tail: 0,
         wa_tail: 0,
     };
-    emit(ring, memory, fini, 0, |cs| {
+    // Where it really starts: a wrap moves it to the ring's start.
+    let start = emit(ring, memory, fini, 0, |cs| {
         tails = if engine.class == RENDER_CLASS {
             engine_cs::gen12_emit_fini_breadcrumb_rcs(cs, seqno, hwsp_offset, preempt_address)
         } else {
@@ -102,13 +182,14 @@ const fn round_even(dwords: u32) -> u32 {
 
 /// `intel_ring_begin` for `dwords`, the emitter run into the reserved span,
 /// any wrap padded with `MI_NOOP` (0) and any unused tail of the span too.
+/// Returns the byte offset the commands start at.
 fn emit(
     ring: &mut Ring,
     memory: &mut [u32],
     dwords: u32,
     reserved: u32,
     body: impl FnOnce(&mut Cs<'_>),
-) -> Result<(), NoSpace> {
+) -> Result<u32, NoSpace> {
     let got = ring.begin(dwords, reserved)?;
     if let Some(from) = got.wrap_from {
         for slot in memory.iter_mut().skip((from / 4) as usize) {
@@ -123,6 +204,30 @@ fn emit(
     if cs.overflowed() {
         Err(NoSpace)
     } else {
-        Ok(())
+        Ok(got.at)
     }
+}
+
+/// `intel_engine_emit_ctx_wa`'s commands, into `out`: an `EMIT_BARRIER`
+/// flush, the context workarounds as one `MI_LOAD_REGISTER_IMM`
+/// ([`crate::workarounds::emit_ctx_wa`]), and another barrier. They go in
+/// the first request on a context whose image is restore-inhibited, so the
+/// image the engine saves, the default state, carries them. Returns the
+/// dwords used, or `None` if `out` is short.
+pub fn ctx_wa_payload<M: crate::io::Mmio + ?Sized>(
+    mmio: &mut M,
+    engine: &EngineInfo,
+    wal: &crate::workarounds::WaList,
+    out: &mut [u32],
+) -> Option<usize> {
+    let mut at = barrier(engine, out)?;
+    at += crate::workarounds::emit_ctx_wa(mmio, wal, out.get_mut(at..)?)?;
+    at += barrier(engine, out.get_mut(at..)?)?;
+    Some(at)
+}
+
+fn barrier(engine: &EngineInfo, out: &mut [u32]) -> Option<usize> {
+    let mut cs = Cs::new(out);
+    engine_cs::gen12_emit_flush(engine, engine_cs::EMIT_BARRIER, &mut cs);
+    (!cs.overflowed()).then_some(cs.len())
 }

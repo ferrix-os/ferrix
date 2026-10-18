@@ -9,45 +9,8 @@ use std::vec::Vec;
 
 use crate::gtt::{self, CacheLevel};
 use crate::io::{GgttPtes, Mmio};
+use crate::model::PtModel;
 use crate::ppgtt::{Ppgtt, PpgttError, PtMemory};
-
-/// Page-table memory: pages by device address, from 0x1000 up, at most
-/// `limit` live at once.
-#[derive(Default)]
-struct PtModel {
-    pages: BTreeMap<u64, Vec<u64>>,
-    next: u64,
-    limit: Option<usize>,
-    freed: Vec<u64>,
-}
-
-impl PtMemory for PtModel {
-    fn alloc_pt(&mut self) -> Option<u64> {
-        if self.limit.is_some_and(|limit| self.pages.len() >= limit) {
-            return None;
-        }
-        self.next += 0x1000;
-        // Not zeroed: a table must be filled by whoever takes it.
-        let _ = self.pages.insert(self.next, std::vec![0xdead_beef; 512]);
-        Some(self.next)
-    }
-
-    fn free_pt(&mut self, table: u64) {
-        assert!(
-            self.pages.remove(&table).is_some(),
-            "freed twice: {table:#x}"
-        );
-        self.freed.push(table);
-    }
-
-    fn read_entry(&mut self, table: u64, index: usize) -> u64 {
-        self.pages[&table][index]
-    }
-
-    fn write_entry(&mut self, table: u64, index: usize, value: u64) {
-        self.pages.get_mut(&table).expect("a live table")[index] = value;
-    }
-}
 
 #[test]
 fn ppgtt_scratch_chain() {

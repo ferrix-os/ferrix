@@ -447,3 +447,95 @@ pub fn setup_indirect_ctx_bb(
     }
     (!wa.overflowed()).then_some(size)
 }
+
+/// Dwords in a page.
+const PAGE_DWORDS: usize = 1024;
+
+/// `lrc_init_state` for a context object of [`alloc_state_size`] bytes,
+/// `image` as dwords: the recorded default image copied in when there is
+/// one (`ce->default_state`, `engine->context_size` bytes), the per-process
+/// status page and the indirect-context page cleared, then
+/// [`lrc_init_regs`] on the register-state page, restore inhibited only
+/// when there was no default ("The second page of the context object
+/// contains some registers which must be set up prior to the first
+/// execution"). Returns whether restore was inhibited.
+///
+/// # Errors
+///
+/// [`OffsetsError::TooSmall`] for an image or default shorter than the
+/// engine's; the table's own errors.
+pub fn lrc_init_state(
+    image: &mut [u32],
+    default: Option<&[u32]>,
+    table: OffsetsTable,
+    base: u32,
+    pml4: u64,
+) -> Result<bool, OffsetsError> {
+    let (size, wa_bb_page) = alloc_state_size(table);
+    let context_dwords = (context_size(table) / 4) as usize;
+    let image = image
+        .get_mut(..(size / 4) as usize)
+        .ok_or(OffsetsError::TooSmall)?;
+    let inhibit = match default {
+        Some(default) => {
+            let from = default
+                .get(..context_dwords)
+                .ok_or(OffsetsError::TooSmall)?;
+            image
+                .get_mut(..context_dwords)
+                .ok_or(OffsetsError::TooSmall)?
+                .copy_from_slice(from);
+            false
+        }
+        None => true,
+    };
+    // "Clear the ppHWSP (inc. per-context counters)"
+    image
+        .get_mut(..PAGE_DWORDS)
+        .ok_or(OffsetsError::TooSmall)?
+        .fill(0);
+    // "Clear the indirect wa and storage"
+    let wa = wa_bb_page as usize * PAGE_DWORDS;
+    image
+        .get_mut(wa..wa + PAGE_DWORDS)
+        .ok_or(OffsetsError::TooSmall)?
+        .fill(0);
+    let state = LRC_STATE_PN as usize * PAGE_DWORDS;
+    let regs = image
+        .get_mut(state..state + PAGE_DWORDS)
+        .ok_or(OffsetsError::TooSmall)?;
+    lrc_init_regs(regs, table, base, inhibit, pml4)?;
+    Ok(inhibit)
+}
+
+/// The image's register-state page, as dwords: where [`lrc_update_regs`]
+/// and the submission write `CTX_RING_TAIL` (`ce->lrc_reg_state`).
+#[must_use]
+pub fn reg_state(image: &mut [u32]) -> Option<&mut [u32]> {
+    let state = LRC_STATE_PN as usize * PAGE_DWORDS;
+    image.get_mut(state..state + PAGE_DWORDS)
+}
+
+/// `__engines_record_defaults`' copy: once the first context on an engine
+/// has run (its image restore-inhibited, its first request carrying the
+/// context workarounds) and the engine is idle, the context's saved image,
+/// `engine->context_size` bytes from its start, is the engine's default
+/// state, which every later context starts from.
+///
+/// # Errors
+///
+/// [`OffsetsError::TooSmall`] for an image or a destination shorter than
+/// the engine's context.
+pub fn record_default_state(
+    image: &[u32],
+    default: &mut [u32],
+    table: OffsetsTable,
+) -> Result<(), OffsetsError> {
+    let context_dwords = (context_size(table) / 4) as usize;
+    let from = image.get(..context_dwords).ok_or(OffsetsError::TooSmall)?;
+    default
+        .get_mut(..context_dwords)
+        .ok_or(OffsetsError::TooSmall)?
+        .copy_from_slice(from);
+    Ok(())
+}
