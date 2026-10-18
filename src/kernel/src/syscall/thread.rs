@@ -90,6 +90,12 @@ pub(crate) struct Thread {
     /// written only by the thread itself, never copied to a thread or
     /// process made of it, and cleared by `execve`.
     dispatch: SpinLock<Dispatch>,
+    /// Its name, as `PR_SET_NAME` or a write to `/proc/<pid>/task/<tid>/comm`
+    /// set it, NUL-padded; `None` reads as the program's file name. Linux
+    /// keeps it per thread (`task_struct.comm`): a thread made by `clone`
+    /// or `fork` starts with its creator's, and `execve` gives the thread
+    /// that runs the new program the new program's file name. A leaf lock.
+    name: SpinLock<Option<[u8; crate::syscall::attributes::TASK_COMM_LEN]>>,
 }
 
 /// [`Thread::watched`]'s bit for seccomp state.
@@ -127,11 +133,13 @@ impl Thread {
         let inherited = parent.with_own_signals(|signals| signals.inherited());
         // The parent's mode and chain, shared: a child never escapes a filter
         // by being forked.
-        Ok(Thread::with(
+        let mut thread = Thread::with(
             process,
             ThreadSignals::new(inherited)?,
             parent.seccomp_copy(),
-        ))
+        );
+        *thread.name.get_mut() = parent.name();
+        Ok(thread)
     }
 
     /// [`Thread::sibling_numbered`] for a process in the first namespace,
@@ -176,6 +184,7 @@ impl Thread {
         );
         *thread.tid.get_mut() = tid;
         *thread.numbers.get_mut() = numbers;
+        *thread.name.get_mut() = caller.name();
         Ok(thread)
     }
 
@@ -202,7 +211,18 @@ impl Thread {
             watched: AtomicU8::new(watched),
             // Off for every thread made, whatever its creator had.
             dispatch: SpinLock::new(Dispatch::OFF),
+            name: SpinLock::new(None),
         }
+    }
+
+    /// The name set for it, if one was: see [`Thread::name`]'s field.
+    pub(crate) fn name(&self) -> Option<[u8; crate::syscall::attributes::TASK_COMM_LEN]> {
+        *self.name.lock()
+    }
+
+    /// Set its name, or with `None` go back to the program's file name.
+    pub(crate) fn set_name(&self, name: Option<[u8; crate::syscall::attributes::TASK_COMM_LEN]>) {
+        *self.name.lock() = name;
     }
 
     /// Whether the system call entry must look at its calls at all: the load
@@ -259,6 +279,14 @@ impl Thread {
     /// clears as Linux's `begin_new_exec` does.
     pub(crate) fn clear_dispatch(&self) {
         self.with_dispatch(|dispatch| *dispatch = Dispatch::OFF);
+    }
+
+    /// What `execve` resets in the thread that runs the new program, as
+    /// Linux's `begin_new_exec` does: its Syscall User Dispatch, off, and
+    /// its name, the new program's file name (`__set_task_comm`).
+    pub(crate) fn reset_for_exec(&self) {
+        self.clear_dispatch();
+        self.set_name(None);
     }
 
     /// A copy of its Syscall User Dispatch settings, the lock let go before

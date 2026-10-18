@@ -460,7 +460,14 @@ pub(crate) static PER_PROCESS: [Entry<Process>; 19] = [
         content: Content::Threads,
     },
     file(b"status", render::status),
-    file(b"comm", render::comm),
+    Entry {
+        name: b"comm",
+        permissions: 0o644,
+        content: Content::File {
+            render: render::comm,
+            write: Some(render::set_comm),
+        },
+    },
     file(b"cmdline", render::cmdline),
     file(b"stat", render::stat),
     file(b"maps", render::maps),
@@ -518,7 +525,14 @@ pub(crate) static PER_PROCESS: [Entry<Process>; 19] = [
 pub(crate) static PER_THREAD: [Entry<ThreadOf>; 3] = [
     file(b"status", render::thread_status),
     file(b"stat", render::thread_stat),
-    file(b"comm", render::thread_comm),
+    Entry {
+        name: b"comm",
+        permissions: 0o644,
+        content: Content::File {
+            render: render::thread_comm,
+            write: Some(render::set_thread_comm),
+        },
+    },
 ];
 
 /// Levels of [`TOP`]'s tree a [`Tree`] can name: a byte of its `u32` each.

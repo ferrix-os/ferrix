@@ -834,7 +834,7 @@ fn execve_at(
     {
         let _ = thread.take_clear_child_tid();
         thread.with_own_signals(crate::syscall::signal::ThreadSignals::reset_for_exec);
-        thread.clear_dispatch();
+        thread.reset_for_exec();
     }
     // `PR_SET_NO_NEW_PRIVS` gives up set-id programs for good, as it does on
     // Linux: the file's bits are read and then dropped.

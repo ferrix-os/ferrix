@@ -1,4 +1,4 @@
-//! What a process has said about itself: its name, its nice value, its I/O
+//! What a process has said about itself: its nice value, its I/O
 //! priority, its personality, its robust futex list, and the switches `prctl`
 //! flips. The nice value is acted on; the rest are kept and read back.
 //!
@@ -53,8 +53,11 @@
 //! kept survives it, as `no_new_privs` does on Linux. Dumpability is decided
 //! again at each `execve` and at each change of the ids a process acts as, by
 //! [`exec_dumpable`] and [`credentials_changed`], as Linux's `begin_new_exec`
-//! and `commit_creds` decide it. The name `PR_SET_NAME` stores also survives
-//! `execve`, which on Linux resets it to the new program's file name.
+//! and `commit_creds` decide it.
+//!
+//! A name is a thread's, not the process's, as on Linux: `PR_SET_NAME` names
+//! the calling thread and is kept on it (`syscall::thread::Thread`), and
+//! [`name_of_thread`] and [`name_of`] read it back.
 
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -93,9 +96,6 @@ pub(crate) struct Limit {
 /// Everything this module keeps for one process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Attributes {
-    /// `PR_SET_NAME`'s name, NUL-padded. `None` until it is set, which reads
-    /// as the program's file name, as Linux's `comm` does.
-    pub(crate) name: Option<[u8; TASK_COMM_LEN]>,
     /// `PR_SET_PDEATHSIG`: the signal asked for when the parent dies.
     pub(crate) parent_death_signal: u32,
     /// `PR_SET_DUMPABLE`. On by default, as it is on Linux.
@@ -117,7 +117,6 @@ pub(crate) struct Attributes {
 impl Default for Attributes {
     fn default() -> Self {
         Attributes {
-            name: None,
             parent_death_signal: 0,
             dumpable: true,
             no_new_privs: false,
@@ -439,11 +438,14 @@ pub(crate) fn sys_prctl(process: &Process, option: i32, args: [u64; 4]) -> Resul
         }
         option::PR_SET_NAME => {
             let name = read_name(process, arg2)?;
-            update(process, |a| a.name = Some(name));
+            named_thread(process)
+                .ok_or(Errno::ESRCH)?
+                .set_name(Some(name));
             Ok(0)
         }
         option::PR_GET_NAME => {
-            let name = name_of(process);
+            let name =
+                named_thread(process).map_or_else(|| name_of(process), |t| name_of_thread(&t));
             uaccess::copy_to_user(space, arg2, &name).map_err(|_| Errno::EFAULT)?;
             Ok(0)
         }
@@ -511,16 +513,66 @@ fn read_name(process: &Process, at: u64) -> Result<[u8; TASK_COMM_LEN], Errno> {
     Ok(name)
 }
 
-/// The name `PR_GET_NAME` reports: the one set, or the program's file name.
+/// The thread `PR_SET_NAME` and `PR_GET_NAME` act on: the calling thread
+/// when it is one of `process`'s, as on Linux; otherwise (a kernel self-check
+/// asking for a process) the process's first thread, or any of its threads.
+fn named_thread(process: &Process) -> Option<Arc<crate::syscall::thread::Thread>> {
+    crate::syscall::thread::current_of(process)
+        .or_else(|| process.thread_by_tid(process.pid()))
+        .or_else(|| process.threads().into_iter().next())
+}
+
+/// A thread's name: the one set for it, or its program's file name, as
+/// Linux's `comm` reads before anything names the thread.
+pub(crate) fn name_of_thread(thread: &crate::syscall::thread::Thread) -> [u8; TASK_COMM_LEN] {
+    thread.name().unwrap_or_else(|| file_name(thread.process()))
+}
+
+/// A process's name, as `/proc/<pid>/comm` and the pid's `stat` and `status`
+/// show it: its first thread's, as Linux shows the thread-group leader's;
+/// the program's file name when it has no live thread.
 pub(crate) fn name_of(process: &Process) -> [u8; TASK_COMM_LEN] {
-    if let Some(name) = get(process).name {
-        return name;
-    }
+    process
+        .thread_by_tid(process.pid())
+        .map_or_else(|| file_name(process), |thread| name_of_thread(&thread))
+}
+
+/// The program's file name, cut to fifteen bytes and NUL-padded.
+fn file_name(process: &Process) -> [u8; TASK_COMM_LEN] {
     let mut name = [0_u8; TASK_COMM_LEN];
     for (slot, byte) in name.iter_mut().take(TASK_COMM_LEN - 1).zip(process.comm()) {
         *slot = byte;
     }
     name
+}
+
+/// The bytes of a name up to its first NUL, as `comm` prints them.
+pub(crate) fn name_bytes(name: &[u8; TASK_COMM_LEN]) -> Vec<u8> {
+    name.iter().copied().take_while(|&byte| byte != 0).collect()
+}
+
+/// A write of `data` to the `comm` file of `thread`, by a thread of
+/// `writer`: Linux's `comm_write`. Only a thread of the same process may
+/// name it, any other writer is `EINVAL`; at most fifteen bytes are kept,
+/// a newline included, and the whole write is taken.
+pub(crate) fn write_comm(
+    writer: Option<&Process>,
+    thread: &crate::syscall::thread::Thread,
+    data: &[u8],
+) -> Result<usize, Errno> {
+    let same = writer.is_some_and(|writer| core::ptr::eq(writer, thread.process().as_ref()));
+    if !same {
+        return Err(Errno::EINVAL);
+    }
+    let mut name = [0_u8; TASK_COMM_LEN];
+    for (slot, &byte) in name.iter_mut().take(TASK_COMM_LEN - 1).zip(data) {
+        if byte == 0 {
+            break;
+        }
+        *slot = byte;
+    }
+    thread.set_name(Some(name));
+    Ok(data.len())
 }
 
 /// `personality`: report the execution domain, and change it unless asked

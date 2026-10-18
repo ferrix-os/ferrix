@@ -123,6 +123,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     // In the boot task: `/proc/stat` describes the machine, not the reader.
     let (stat_cpus, stat_ticks) = check_stat(fs::namespace())?;
     check_thread_times()?;
+    check_thread_names()?;
 
     let process = process::new_for_check().map_err(|_| "no address space for the /proc check")?;
     if process.pid() == 0 || registry::find(process.pid()).is_none() {
@@ -688,6 +689,93 @@ fn check_thread_times() -> Result<(), &'static str> {
     if ended != Some(REPORTED) {
         return Err("the /proc times check's process never ended");
     }
+    Ok(())
+}
+
+/// A thread's name is its own, as on Linux (`task_struct.comm`).
+///
+/// A process of two listed threads, neither run. A name written for the
+/// second by its own process shows in its `comm`, newline kept as Linux
+/// keeps it, and in its `stat`, and not in the first thread's or the
+/// process's files; a thread the named one makes starts with its name;
+/// `/proc/<pid>/comm` is the first thread's. The boot task, which is no
+/// thread of the process, is refused a write with `EINVAL`, as Linux's
+/// `comm_write` refuses a writer outside the thread group. Before
+/// 2026-10-18 a thread had no name: `comm` read the program's file name and
+/// every write was `EINVAL`, so Wine's and Chromium's threads all read as
+/// the program and a per-thread profile could tell none apart.
+fn check_thread_names() -> Result<(), &'static str> {
+    use crate::syscall::attributes::{self, TASK_COMM_LEN};
+    use crate::syscall::thread::Thread;
+    const NO_MEMORY: &str = "no memory for a thread of the /proc names check";
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let process =
+        process::new_for_check().map_err(|_| "no address space for the /proc names check")?;
+    let first = Thread::leader(&process)
+        .and_then(crate::fallible::try_arc)
+        .map_err(|_| NO_MEMORY)?;
+    process.add_thread(&first);
+    let tid = registry::allocate_thread(&process)
+        .ok_or("no thread id for the /proc names check's second thread")?;
+    let second = Thread::sibling(&process, tid, &first)
+        .and_then(crate::fallible::try_arc)
+        .map_err(|_| NO_MEMORY)?;
+    process.add_thread(&second);
+    let pid = process.pid();
+    let read = |path: alloc::string::String| read_all(ns, &ctx, path.as_bytes(), 64);
+    let program = read(alloc::format!("/proc/{pid}/comm"))?;
+
+    let _ = attributes::write_comm(Some(&process), &second, b"VizCompositor\n")
+        .map_err(|_| "a thread's own process was refused a write to its comm")?;
+    if read(alloc::format!("/proc/{pid}/task/{tid}/comm"))? != b"VizCompositor\n\n" {
+        return Err(
+            "/proc/<pid>/task/<tid>/comm does not read back the name written for the thread",
+        );
+    }
+    let stat = read(alloc::format!("/proc/{pid}/task/{tid}/stat"))?;
+    if !stat
+        .windows(16)
+        .any(|window| window == b"(VizCompositor\n)")
+    {
+        return Err("a thread's stat does not carry its own name");
+    }
+    if read(alloc::format!("/proc/{pid}/task/{pid}/comm"))? != program
+        || read(alloc::format!("/proc/{pid}/comm"))? != program
+    {
+        return Err("naming one thread renamed another, or the process");
+    }
+    let third = registry::allocate_thread(&process)
+        .ok_or("no thread id for the /proc names check's third thread")?;
+    let made = Thread::sibling(&process, third, &second).map_err(|_| NO_MEMORY)?;
+    if made.name().map(|name| attributes::name_bytes(&name)) != Some(b"VizCompositor\n".to_vec()) {
+        return Err("a thread made by a named thread did not start with its name");
+    }
+    drop(made);
+
+    let mut leader = [0_u8; TASK_COMM_LEN];
+    leader
+        .get_mut(..4)
+        .ok_or(NO_MEMORY)?
+        .copy_from_slice(b"main");
+    first.set_name(Some(leader));
+    if read(alloc::format!("/proc/{pid}/comm"))? != b"main\n" {
+        return Err("/proc/<pid>/comm does not read the first thread's name");
+    }
+
+    let path = alloc::format!("/proc/{pid}/task/{tid}/comm");
+    let file = ns
+        .open(&ctx, None, path.as_bytes(), &read_write(), 0)
+        .map_err(|_| "a thread's comm did not open for writing")?;
+    if file.write(b"outsider") != Err(Errno::EINVAL) {
+        return Err("a writer outside the thread's process was not refused with EINVAL");
+    }
+    drop(file);
+    if read(path)? != b"VizCompositor\n\n" {
+        return Err("a refused write changed a thread's name");
+    }
+    drop((first, second));
+    drop(process);
     Ok(())
 }
 

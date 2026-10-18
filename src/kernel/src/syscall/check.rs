@@ -9272,6 +9272,20 @@ fn check_a_task_name_round_trips(process: &Process, page: u64) -> Result<(), &'s
     const PR_SET_NAME: i32 = 15;
     const PR_GET_NAME: i32 = 16;
 
+    // A name is a thread's: the check's process is given a first thread to
+    // carry one when it has none, as every process a program runs in has.
+    let _named = match process.thread_by_tid(process.pid()) {
+        Some(_) => None,
+        None => {
+            let found = crate::syscall::registry::find(process.pid())
+                .ok_or("the name check's process is not findable")?;
+            let thread = crate::syscall::thread::Thread::leader(&found)
+                .and_then(crate::fallible::try_arc)
+                .map_err(|_| "no memory for the name check's thread")?;
+            found.add_thread(&thread);
+            Some(thread)
+        }
+    };
     uaccess::copy_to_user(process.space(), page, b"a-name-longer-than-fifteen\0")
         .map_err(|_| "could not stage a task name")?;
     answers(

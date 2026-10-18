@@ -34,6 +34,7 @@ use crate::irq;
 use crate::mm;
 use crate::sched;
 use crate::smp;
+use crate::syscall::attributes;
 use crate::syscall::memfd;
 use crate::syscall::nsproxy;
 use crate::syscall::pidns::{self, PidNamespace};
@@ -758,7 +759,6 @@ pub(super) fn cmdline(process: &Process) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// `/proc/<pid>/comm`.
 /// `/proc/<pid>/cgroup`: the one line of the unified hierarchy, `0::/path`,
 /// naming the cgroup -- the job -- the process is in, as the reader's cgroup
 /// namespace sees it: relative to that namespace's root, and climbing out of
@@ -784,17 +784,46 @@ pub(super) fn cgroup_namespace(process: &Process) -> Result<Vec<u8>> {
     Ok(alloc::format!("cgroup:[{}]", process.nsproxy().cgroup.id()).into_bytes())
 }
 
-/// `/proc/<pid>/comm`.
+/// `/proc/<pid>/comm`: the name of its first thread, as Linux shows the
+/// thread-group leader's.
 pub(super) fn comm(process: &Process) -> Result<Vec<u8>> {
-    let mut out = process.comm();
+    let mut out = attributes::name_bytes(&attributes::name_of(process));
     out.push(b'\n');
     Ok(out)
 }
 
-/// `/proc/<pid>/task/<tid>/comm`: the process's name, since a thread has no
-/// name of its own until `PR_SET_NAME` keeps one per thread.
+/// A write to `/proc/<pid>/comm`: names the first thread, for a writer in
+/// the same process (`attributes::write_comm`).
+pub(super) fn set_comm(process: &Process, data: &[u8]) -> Result<usize> {
+    let leader = process.thread_by_tid(process.pid()).ok_or(Errno::ESRCH)?;
+    let writer = process::current();
+    attributes::write_comm(writer.as_deref(), &leader, data)
+}
+
+/// `/proc/<pid>/task/<tid>/comm`: the thread's own name.
 pub(super) fn thread_comm(of: &ThreadOf) -> Result<Vec<u8>> {
-    comm(&of.process)
+    let mut out = shown_name(&of.process, of.tid);
+    out.push(b'\n');
+    Ok(out)
+}
+
+/// A write to `/proc/<pid>/task/<tid>/comm`: names that thread, for a
+/// writer in the same process, as `pthread_setname_np` does for a thread
+/// other than its caller (`attributes::write_comm`).
+pub(super) fn set_thread_comm(of: &ThreadOf, data: &[u8]) -> Result<usize> {
+    let thread = of.process.thread_by_tid(of.tid).ok_or(Errno::ESRCH)?;
+    let writer = process::current();
+    attributes::write_comm(writer.as_deref(), &thread, data)
+}
+
+/// The name thread `tid` of `process` shows in its `comm`, `stat` and
+/// `status`: its own, or the process's when no live thread has that id.
+fn shown_name(process: &Process, tid: u32) -> Vec<u8> {
+    let name = process.thread_by_tid(tid).map_or_else(
+        || attributes::name_of(process),
+        |thread| attributes::name_of_thread(&thread),
+    );
+    attributes::name_bytes(&name)
 }
 
 /// `/proc/<pid>/exe`: the path of the file it was started from, from its own
@@ -1181,7 +1210,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
     });
     let memory = Memory::of(process);
     let seen = pids_shown(process, tid);
-    let name = process.comm();
+    let name = shown_name(process, tid);
     // The thread's own seccomp mode and filter count, as Linux keeps them per
     // thread: the thread numbered `tid`, or the process's first live one when
     // that has gone, or none for a process that has ended.
@@ -1215,7 +1244,7 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
         vm_data: memory.data / 1024,
         vm_stack: memory.stack / 1024,
         threads: thread_count(process),
-        no_new_privs: crate::syscall::attributes::get(process).no_new_privs,
+        no_new_privs: attributes::get(process).no_new_privs,
         seccomp: seccomp.0,
         seccomp_filters: seccomp.1,
         cpus: online_cpus(),
@@ -1314,7 +1343,7 @@ fn controlling_terminal(session: u32) -> (u32, i32) {
 /// `runtime` nanoseconds of processor time.
 fn stat_of(process: &Process, tid: u32, runtime: u64) -> Result<Vec<u8>> {
     let memory = Memory::of(process);
-    let comm = process.comm();
+    let comm = shown_name(process, tid);
     let seen = pids_shown(process, tid);
     let (tty_nr, tpgid) = controlling_terminal(process.sid());
     // The terminal keeps a kernel group number; the reader's namespace names it.
