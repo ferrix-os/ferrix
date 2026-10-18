@@ -412,6 +412,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 | `test-net --arch x86_64 --init <musl busybox>` stopped twice (2026-09-30) with a program that never exited (`git`, `wget -q`) while the host disk was at 98-100%; quiet runs passed. Look at what a networking program waits on when the host is slow. [more](backlog/flakes.md#fl-063) | open | 13 |
 | `test-net --arch x86_64` hung once (2026-10-01) at its first `wget` for 120 s on net-throughput 931e553; gateway saw one SYN-ACK retransmit, then nothing. Not root-caused: a frame or wake lost between driver and net core. Unowned. [more](backlog/flakes.md#fl-064) | unowned | 4 |
 | `test-auth --arch all` failed once on x86-64 (2026-10-03): init's journal line shared a console line with `passwd`'s output, so the check read neither. Match within a line rather than whole lines, or read the journal. [more](backlog/flakes.md#fl-067) | open | 15 |
+| Stage 10's chardev check failed twice (2026-10-18) on `main` ff18add48 in `bench-ipc --release --accel kvm` boots at host load 10 to 17: "after every request was abandoned a new one was refused" (`interfaces/chardev/check.rs`). A release-build timing window in the abandon path, or a wait the check does not make. [more](backlog/flakes.md#fl-071) | open | 10 |
 
 ### P2 — quality and performance, on the "fast" half of the goal
 

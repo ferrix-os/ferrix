@@ -66,6 +66,7 @@ pub(super) fn check_programs() {
     // Finding that under the first user process, in the same commit as the
     // ring-3 transition, is a debugging session nobody wants.
     check_syscalls();
+    check_thread_times();
 
     // A VMO taking a page away from two processes running on two processors,
     // seen from user mode. Stage 6's memory, but it needs programs that run,
@@ -2226,4 +2227,16 @@ fn wait_unless(done: impl Fn() -> bool) -> bool {
     }
     arch::wait_for_work();
     false
+}
+
+/// Stage 7's kernel-time and switch-count cases (`docs/THREAD-TIMES.md`
+/// §4), once stage 7 has shown programs run. Halts rather than returning, as
+/// every other stage's check does.
+fn check_thread_times() {
+    if let Err(problem) = syscall::check::run_thread_times() {
+        fatal!(
+            catalog::STAGE7_SYSCALLS,
+            "stage 7 self-check failed: {problem}"
+        );
+    }
 }

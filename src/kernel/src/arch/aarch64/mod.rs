@@ -1422,6 +1422,18 @@ pub(crate) fn ring3_reads_counter() -> bool {
     true
 }
 
+/// Whether [`counter_now`] is one register read: always, so the kernel-time
+/// stamps at every entry from user mode and every return (`sched::vtime`)
+/// take it.
+pub(crate) fn cheap_counter_is_clock() -> bool {
+    true
+}
+
+/// [`counter_now`], for the kernel-time stamps.
+pub(crate) fn cheap_counter() -> u64 {
+    timer::counter_now()
+}
+
 /// Fire the timer interrupt once, `nanos` from now.
 pub(crate) fn timer_arm(nanos: u64) {
     timer::arm(nanos);
@@ -1611,3 +1623,43 @@ pub(crate) fn vdso_can_read_counter() -> bool {
 
 /// No clock program to check the vDSO with: it has no clock.
 pub(crate) const USER_VDSO_PROGRAM: &[u8] = &[];
+
+/// A program for the kernel-time checks (`syscall::check`, `L.sched.80` to
+/// `L.sched.82`): `calls` `getppid` calls in a loop, then `pages` anonymous
+/// pages mapped and each touched once, a page fault each, then a spin of
+/// `spins` iterations in user mode, then `exit_group` with `status` -- 98
+/// if the `mmap` was refused. Any of the three counts may be zero.
+///
+/// The last sixteen bytes are the layout every architecture's copy shares,
+/// so the check patches them without knowing the instruction set: `calls`,
+/// `pages`, `spins` and `status`, little-endian words loaded PC-relative,
+/// `????` each as built. The counter of the first two loops lives in a
+/// register the kernel keeps across a call.
+///
+/// ```text
+///   ldr w19, calls ; cbz w19, 2f
+/// 1: mov x8, #173 ; svc #0 ; subs w19, w19, #1 ; b.ne 1b   ; getppid
+/// 2: ldr w19, pages ; cbz w19, 4f
+///   mmap(0, pages << 12, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+///   cmn x0, #4096 ; b.hs 6f
+/// 3: strb w10, [x0] ; add x0, x0, #4096 ; subs w19, w19, #1 ; b.ne 3b
+/// 4: ldr w9, spins ; cbz w9, 5f
+/// 7: subs w9, w9, #1 ; b.ne 7b
+/// 5: exit_group(status)
+/// 6: exit_group(98)
+/// calls: .word   pages: .word   spins: .word   status: .word
+/// ```
+///
+/// Assembled by the host's GNU cross assembler (`aarch64-linux-gnu-as`) and read back out of the object file.
+pub(crate) const USER_KERNEL_TIME_PROGRAM: &[u8] = &[
+    0x53, 0x04, 0x00, 0x18, 0xb3, 0x00, 0x00, 0x34, 0xa8, 0x15, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
+    0x73, 0x06, 0x00, 0x71, 0xa1, 0xff, 0xff, 0x54, 0xb3, 0x03, 0x00, 0x18, 0x13, 0x02, 0x00, 0x34,
+    0x00, 0x00, 0x80, 0xd2, 0x61, 0x7e, 0x74, 0xd3, 0x62, 0x00, 0x80, 0xd2, 0x43, 0x04, 0x80, 0xd2,
+    0x04, 0x00, 0x80, 0x92, 0x05, 0x00, 0x80, 0xd2, 0xc8, 0x1b, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4,
+    0x1f, 0x04, 0x40, 0xb1, 0xa2, 0x01, 0x00, 0x54, 0x2a, 0x00, 0x80, 0x52, 0x0a, 0x00, 0x00, 0x39,
+    0x00, 0x04, 0x40, 0x91, 0x73, 0x06, 0x00, 0x71, 0xa1, 0xff, 0xff, 0x54, 0xa9, 0x01, 0x00, 0x18,
+    0x69, 0x00, 0x00, 0x34, 0x29, 0x05, 0x00, 0x71, 0xe1, 0xff, 0xff, 0x54, 0xc8, 0x0b, 0x80, 0xd2,
+    0x20, 0x01, 0x00, 0x18, 0x01, 0x00, 0x00, 0xd4, 0xc8, 0x0b, 0x80, 0xd2, 0x40, 0x0c, 0x80, 0xd2,
+    0x01, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
+    0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
+];

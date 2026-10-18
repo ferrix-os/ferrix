@@ -580,16 +580,42 @@ extern "C" fn ferrix_syscall_entry(frame: &mut SyscallFrame) {
         let args = [
             frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9,
         ];
+        // No kernel-time reading on the way in, so none on the way out but
+        // the look `leaving` makes for a stint a general switch opened while
+        // the call waited (`sched::vtime`).
         match crate::trap::fast_write_read_now(&args) {
             crate::trap::Fast::Declined => mark_vectors_dead(false),
-            crate::trap::Fast::Tail(outcome) => return frame_tail(frame, outcome),
+            crate::trap::Fast::Tail(outcome) => {
+                frame_tail(frame, outcome);
+                crate::sched::vtime::leaving();
+                return;
+            }
             crate::trap::Fast::Done(outcome) => {
                 mark_vectors_dead(false);
-                return leave(frame, outcome);
+                leave(frame, outcome);
+                crate::sched::vtime::leaving();
+                return;
             }
         }
     }
 
+    // The call's time is kernel time from here to its way out, but for the
+    // three native calls that block, whose time up to their decision counts
+    // as user time (`sched::vtime`): the round trip's general path pays no
+    // reading.
+    if !vectors_die_in(frame.rax as usize) {
+        crate::sched::vtime::entered();
+    }
+    general_entry(frame);
+    crate::sched::vtime::leaving();
+}
+
+/// [`ferrix_syscall_entry`] for every call the fast path does not answer:
+/// the filter, the two calls answered here, and the dispatcher. Between the
+/// entry's kernel-time stamps (`sched::vtime`); the two ways out that never
+/// return here end the stint themselves.
+#[inline(always)]
+fn general_entry(frame: &mut SyscallFrame) {
     let args = crate::trap::SyscallArgs {
         abi: Abi::Native,
         number: frame.rax as usize,
@@ -794,6 +820,7 @@ fn answer_here(
         {
             (path.return_to_user)(&mut context);
         }
+        crate::sched::vtime::leaving();
         // SAFETY: (CONTEXT) this task's own system call, on its own kernel stack, with
         // nothing owned on it; `context` holds ring 3's selectors and user
         // instruction and stack pointers, which the frame restore checked, or
@@ -848,6 +875,7 @@ fn enter_compat_after_execve(entry: u64, stack: u64) -> ! {
     {
         (path.return_to_user)(&mut context);
     }
+    crate::sched::vtime::leaving();
     // SAFETY: (CONTEXT) the running task's own system call, on its own kernel stack,
     // where `ferrix_syscall_entry` owns nothing; `context` holds ring 3's
     // 32-bit selectors and the entry and stack `execve` placed in the new

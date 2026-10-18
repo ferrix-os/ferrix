@@ -1252,6 +1252,17 @@ fn status_of(process: &Process, tid: u32) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     status::render(&mut out, &status);
     out.extend_from_slice(caps.as_bytes());
+    // Last, as Linux prints them: the thread's own switches, the first
+    // thread's for `/proc/<pid>/status` as Linux gives the leader's.
+    let times = thread_times(process, tid);
+    out.extend_from_slice(
+        alloc::format!(
+            "voluntary_ctxt_switches:\t{}\nnonvoluntary_ctxt_switches:\t{}\n",
+            times.voluntary,
+            times.involuntary
+        )
+        .as_bytes(),
+    );
     Ok(out)
 }
 
@@ -1286,7 +1297,8 @@ fn capability_lines(
 /// `/proc/<pid>/stat` sums the thread group. Until they were counted here,
 /// `top` and `ps` said every process was idle.
 pub(super) fn stat(process: &Process) -> Result<Vec<u8>> {
-    stat_of(process, process.pid(), time::process_runtime(process))
+    let _ = sched::current_runtime();
+    stat_of(process, process.pid(), Times::of(process.tasks().iter()))
 }
 
 /// `/proc/<pid>/task/<tid>/stat`: the process's, with the thread's own id
@@ -1298,22 +1310,46 @@ pub(super) fn stat(process: &Process) -> Result<Vec<u8>> {
 /// time as the first thread's: `top -H` and a sampler reading a thread at a
 /// time charged a program's main thread with what its workers had used.
 pub(super) fn thread_stat(of: &ThreadOf) -> Result<Vec<u8>> {
-    stat_of(&of.process, of.tid, thread_runtime(&of.process, of.tid))
+    stat_of(&of.process, of.tid, thread_times(&of.process, of.tid))
 }
 
-/// Nanoseconds thread `tid` of `process` has run for: what its task was
-/// charged, up to now if it is the thread asking and up to its processor's
-/// last charge otherwise, as [`time::process_runtime`] counts each.
-fn thread_runtime(process: &Process, tid: u32) -> u64 {
+/// What thread `tid` of `process` has run for, and how often it was
+/// switched away from: what its task was charged, up to now if it is the
+/// thread asking and up to its processor's last charge otherwise, as
+/// [`time::process_runtime`] counts each.
+fn thread_times(process: &Process, tid: u32) -> Times {
     let _ = sched::current_runtime();
-    process
-        .tasks()
-        .iter()
-        .filter(|task| {
-            crate::syscall::thread::of_task(task).is_some_and(|thread| thread.tid() == tid)
+    let tasks = process.tasks();
+    Times::of(tasks.iter().filter(|task| {
+        crate::syscall::thread::of_task(task).is_some_and(|thread| thread.tid() == tid)
+    }))
+}
+
+/// Processor time and switches, summed over some tasks: `stat`'s `utime`
+/// and `stime` (the runtime less its kernel time, and the kernel time,
+/// `sched::vtime`), and `status`'s two switch counts.
+#[derive(Clone, Copy, Default)]
+struct Times {
+    /// Nanoseconds run.
+    runtime: u64,
+    /// Nanoseconds of `runtime` spent in the kernel.
+    kernel: u64,
+    /// Switches away while blocked, asleep or dead.
+    voluntary: u64,
+    /// Switches away while still runnable.
+    involuntary: u64,
+}
+
+impl Times {
+    /// The sums over `tasks`.
+    fn of<'a>(tasks: impl Iterator<Item = &'a Arc<sched::Task>>) -> Times {
+        tasks.fold(Times::default(), |sum, task| Times {
+            runtime: sum.runtime.saturating_add(task.runtime()),
+            kernel: sum.kernel.saturating_add(task.kernel_time()),
+            voluntary: sum.voluntary.saturating_add(task.voluntary_switches()),
+            involuntary: sum.involuntary.saturating_add(task.involuntary_switches()),
         })
-        .map(|task| task.runtime())
-        .fold(0, u64::saturating_add)
+    }
 }
 
 /// The console's device, 5:1, as `stat`'s `tty_nr` encodes a device:
@@ -1339,9 +1375,9 @@ fn controlling_terminal(session: u32) -> (u32, i32) {
     (CONSOLE_TTY_NR, tpgid)
 }
 
-/// A stat file, for the thread numbered `tid` of `process`, reporting
-/// `runtime` nanoseconds of processor time.
-fn stat_of(process: &Process, tid: u32, runtime: u64) -> Result<Vec<u8>> {
+/// A stat file, for the thread numbered `tid` of `process`, reporting the
+/// processor time of `times`.
+fn stat_of(process: &Process, tid: u32, times: Times) -> Result<Vec<u8>> {
     let memory = Memory::of(process);
     let comm = shown_name(process, tid);
     let seen = pids_shown(process, tid);
@@ -1365,11 +1401,14 @@ fn stat_of(process: &Process, tid: u32, runtime: u64) -> Result<Vec<u8>> {
         // No `PF_*` flag applies: in particular `PF_RANDOMIZE` is clear,
         // because nothing randomizes the layout.
         flags: 0,
-        // All of it as user time: the scheduler charges a task for its
-        // whole time on a processor and keeps no count of the part it spent
-        // in the kernel. Only a job's `cpu.stat` is split, by the tick.
-        utime: runtime / (NANOS / CLOCK_TICKS),
-        stime: 0,
+        // The kernel time counted from each entry from user mode to the next
+        // return (`sched::vtime`), and the rest of the runtime as user time,
+        // taken from the runtime in ticks so that the two add up to it, as
+        // Linux's `cputime_adjust` makes them. Where kernel time is not
+        // counted (an HPET clock), all of it is user time.
+        utime: (times.runtime / (NANOS / CLOCK_TICKS))
+            .saturating_sub(times.kernel / (NANOS / CLOCK_TICKS)),
+        stime: times.kernel / (NANOS / CLOCK_TICKS),
         priority: 20,
         nice: 0,
         threads: thread_count(process),

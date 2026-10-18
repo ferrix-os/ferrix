@@ -94,6 +94,11 @@ pub(crate) fn user_interrupt_count() -> u64 {
 
 /// Where every trap arrives, from any architecture's entry stub.
 pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
+    // From user mode, the task's time is kernel time from here to the way
+    // back below (`sched::vtime`): every interrupt and exception, and on both
+    // Arm architectures every system call. Interrupts are masked at both ends.
+    let from_user = frame.came_from_user();
+    crate::sched::vtime::trap_entered(from_user);
     let trap = arch::classify(frame);
     match trap {
         // A program's own breakpoint, undefined instruction or other fault is
@@ -147,27 +152,30 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
         }
     }
 
+    if !from_user {
+        return;
+    }
     // A process moved to another job runs and is charged there from its
     // next way back to user mode (`object::quota`): one word read when
     // nothing has moved.
-    if frame.came_from_user() {
-        crate::sched::regroup_current();
-        // And waits out the rest of a `cpu.max` period its job has used up,
-        // unless there is a kill or a signal to deal with first.
-        crate::sched::throttle_current(must_attend);
-    }
+    crate::sched::regroup_current();
+    // And waits out the rest of a `cpu.max` period its job has used up,
+    // unless there is a kill or a signal to deal with first.
+    crate::sched::throttle_current(must_attend);
 
     // On the way back to a program, which is where a program killed from
     // outside finds out and a signal is delivered: a task spinning in user
     // mode reaches here on its next tick, and one that was preempted reaches
     // here when it is resumed. See `crate::syscall::deliver`.
-    if let Some(path) = return_path().filter(|_| frame.came_from_user())
+    if let Some(path) = return_path()
         && attention_due(path)
     {
         let mut context = arch::UserContext::from_trap(frame);
         (path.return_to_user)(&mut context);
         context.store_trap(frame);
     }
+    // Last, masked, nothing after it can open interrupts (`sched::vtime`).
+    crate::sched::vtime::leaving();
 }
 
 /// A system call as it arrived, before anything has been decided about it.

@@ -613,6 +613,17 @@ package FerrixItemRequirements {
                 caller's (the `fastcase` line).";
             attribute :>> parent = ("G.1", "ASR-8");
         }
+        requirement <'H.SCHED.14'> processorTimeIsSplitAndSwitchesCounted : ItemHighLevel {
+            attribute :>> statement = "A task's processor time shall be reported split
+                into the time it spent in the kernel and the rest, and the switches
+                away from it shall be counted as voluntary or involuntary.";
+            attribute :>> criterion = "Programs spinning in user mode are charged
+                under a quarter of their runtime as kernel time, programs making
+                system calls or taking page faults over half; tasks yielding to each
+                other count involuntary switches, a task that sleeps voluntary ones
+                (the `vtime` lines).";
+            attribute :>> parent = "G.1";
+        }
     }
 
     package Interrupts {

@@ -737,5 +737,99 @@ package FerrixSchedRequirements {
                 "sched::wait::Mark::clear", "sched::wait::ReadyList::take",
                 "sched::wait::ReadyList::reserve");
         }
+        requirement <'L.sched.80'> aReturnToUserModeEndsKernelTime : ItemLowLevel {
+            attribute :>> statement = "On a boot that counts kernel time (its clock's
+                counter the invariant TSC or CNTVCT), a task's stint in the kernel
+                shall end at its return to user mode from a system call (SYSRET on
+                x86-64, the exception return on AArch64 and ARMv7-A) and from an
+                interrupt or an exception through the trap dispatcher; the time it
+                then runs in user mode shall not be counted as kernel time. Not
+                covered: a program's first entry, which its first page fault's
+                return follows within microseconds, so that no check can see the
+                first entry's own stamp; a fork child's first return; and
+                rt_sigreturn's and a 32-bit execve's way out on x86-64; all four take
+                the same stamp, unchecked. Kernel time read from another processor
+                counts up to the running task's last return to user mode or its
+                processor's last decision, which a task alone on a processor with
+                no tick may not make for as long as it runs.";
+            attribute :>> criterion = "Stage 7's user-time case, on every boot that
+                counts kernel time: programs spinning 60,000,000 times after their
+                start, after a getppid, after a page fault, and two taking turns on
+                one processor each cut by an interrupt in user mode, are each
+                charged under a quarter of their runtime as kernel time, read after
+                each has exited, in one of three runs (a host stall is charged to
+                what it stopped); with the system call return's or the dispatcher's
+                return stamp taken out, the case fails with its sentence for user
+                time charged as kernel time.";
+            attribute :>> parent = "H.SCHED.14";
+            attribute :>> unit = ("sched::vtime::leaving", "sched::vtime::settle",
+                "sched::vtime::init", "trap::dispatch",
+                "arch::x86_64::syscall::ferrix_syscall_entry");
+        }
+        requirement <'L.sched.81'> aSystemCallIsKernelTime : ItemLowLevel {
+            attribute :>> statement = "On a boot that counts kernel time, a task's
+                system call from user mode shall be counted as kernel time from its
+                entry (x86-64's SYSCALL entry after the channel_write_read fast
+                path's branch; on AArch64 and ARMv7-A the trap dispatcher's entry)
+                to its return to user mode, and the kernel time a task makes shall
+                be given to that task at its processor's next decision. Not
+                counted, as user time: the span from a call's or a trap's last
+                scheduling decision (any decision on its processor during it: a
+                switch back after it blocked or was preempted, a decision that kept
+                it running, its own read of its CPU time) to its return; on x86-64, the three native calls that block
+                (channel_write_read, object_wait_one, port_wait) up to their
+                decision; the fast path's own time in the kernel, with
+                ferrix.fastpath=on, outside the present configuration, which counts
+                as user time; the instructions of the entry and exit stubs before
+                the entry's stamp and after the return's; and the paranoid entries
+                (a non-maskable interrupt, a machine check, a debug exception from
+                user mode), the ARMv7-A VFP first-use return and the x86-64 CSTAR
+                refusal, which never reach a stamp.";
+            attribute :>> criterion = "Stage 7's system-call case, on every boot
+                that counts kernel time: a program making 50,000 getppid calls in a
+                loop is charged at least half its runtime as kernel time, in one of
+                three runs; with
+                x86-64's entry stamp taken out, or on AArch64 and ARMv7-A the
+                dispatcher's, the case fails with its sentence.";
+            attribute :>> parent = "H.SCHED.14";
+            attribute :>> unit = ("sched::vtime::entered", "sched::vtime::settle",
+                "sched::vtime::direct_switch",
+                "arch::x86_64::syscall::ferrix_syscall_entry",
+                "arch::x86_64::syscall::general_entry",
+                "arch::x86_64::syscall::frame_tail", "trap::dispatch");
+        }
+        requirement <'L.sched.82'> anExceptionIsKernelTime : ItemLowLevel {
+            attribute :>> statement = "On a boot that counts kernel time, an
+                exception taken in user mode shall be counted as kernel time from
+                the trap dispatcher's entry to its return to user mode, with the
+                exclusions of L.sched.81. An interrupt taken in user mode takes the
+                same dispatcher stamp, unchecked.";
+            attribute :>> criterion = "Stage 7's page-fault case, on every boot that
+                counts kernel time: a program that maps 2,048 pages and touches each
+                once is charged at least half its runtime as kernel time, in one of
+                three runs; with the
+                dispatcher's entry stamp taken out on x86-64, where system calls do
+                not pass through it, the case fails with its sentence.";
+            attribute :>> parent = "H.SCHED.14";
+            attribute :>> unit = ("sched::vtime::entered",
+                "sched::vtime::trap_entered", "trap::dispatch");
+        }
+        requirement <'L.sched.83'> switchesAreCountedByWhy : ItemLowLevel {
+            attribute :>> statement = "Every switch away from a task shall count one
+                involuntary switch for it when it is still runnable -- preempted,
+                yielding, or a sleep that could not be filed -- and one voluntary
+                switch otherwise; a decision that keeps the running task shall
+                count none.";
+            attribute :>> criterion = "Stage 7's switch case: two kernel tasks on one
+                processor yielding to each other 20 times each, never blocking,
+                count one voluntary switch, at their end, and every other switch
+                away from them as involuntary, at least one, the two adding to how
+                often each was switched to; a task that sleeps 10 times counts at
+                least 10 voluntary and fewer than 10 involuntary; with the
+                classification inverted, the case fails with its sentence.";
+            attribute :>> parent = "H.SCHED.14";
+            attribute :>> unit = ("sched::switch_chosen",
+                "sched::task::Task::note_switched_out");
+        }
     }
 }

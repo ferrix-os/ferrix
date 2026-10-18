@@ -303,6 +303,25 @@ pub(crate) fn now_nanos() -> u64 {
     ticks_to_nanos(arch::counter_now(), hz)
 }
 
+/// [`now_nanos`], and the counter reading it was made from while kernel time
+/// is counted (`sched::vtime::counting`, whose counter is then the clock's):
+/// one reading for a decision's charge, in nanoseconds, and its settle of
+/// kernel time, in ticks.
+pub(crate) fn now_with_ticks() -> (u64, Option<u64>) {
+    if !crate::sched::vtime::counting() {
+        return (now_nanos(), None);
+    }
+    let ticks = arch::cheap_counter();
+    (ticks_to_nanos(ticks, arch::counter_hz()), Some(ticks))
+}
+
+/// `ticks` of the free-running counter in nanoseconds, for a count kept in
+/// ticks (a task's kernel time, `sched::vtime`). Zero before the counter's
+/// rate is known.
+pub(crate) fn counter_ticks_to_nanos(ticks: u64) -> u64 {
+    ticks_to_nanos(ticks, arch::counter_hz())
+}
+
 /// `ticks` of a `hz` counter in nanoseconds: `ferrix_vdso::counter_nanos`,
 /// whose host tests hold it to the 128-bit formula.
 fn ticks_to_nanos(ticks: u64, hz: u64) -> u64 {

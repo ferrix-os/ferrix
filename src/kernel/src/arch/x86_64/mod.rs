@@ -1857,6 +1857,20 @@ pub(crate) fn ring3_reads_counter() -> bool {
     clock::counter_is_tsc()
 }
 
+/// Whether [`counter_now`] is read with one instruction, the TSC, and not
+/// the HPET, three device reads a reading: asked once, before the scheduler
+/// starts, by the kernel-time stamps at every entry from user mode and every
+/// return (`sched::vtime`), which count nothing rather than pay the HPET.
+pub(crate) fn cheap_counter_is_clock() -> bool {
+    clock::counter_is_tsc()
+}
+
+/// The TSC: [`counter_now`] wherever [`cheap_counter_is_clock`], read with
+/// no look at which counter is the clock.
+pub(crate) fn cheap_counter() -> u64 {
+    cpu::rdtsc()
+}
+
 /// Fire the timer interrupt once, `nanos` from now.
 pub(crate) fn timer_arm(nanos: u64) {
     apic::arm(nanos);
@@ -2118,3 +2132,43 @@ pub(crate) static X87_CONTROLS_TAKEN: core::sync::atomic::AtomicUsize =
 pub(crate) fn check_x87_controls() -> Result<(), &'static str> {
     trap::check::check_x87_controls()
 }
+
+/// A program for the kernel-time checks (`syscall::check`, `L.sched.80` to
+/// `L.sched.82`): `calls` `getppid` calls in a loop, then `pages` anonymous
+/// pages mapped and each touched once, a page fault each, then a spin of
+/// `spins` iterations in user mode, then `exit_group` with `status` -- 98
+/// if the `mmap` was refused. Any of the three counts may be zero.
+///
+/// The last sixteen bytes are the layout every architecture's copy shares,
+/// so the check patches them without knowing the instruction set: `calls`,
+/// `pages`, `spins` and `status`, little-endian words loaded PC-relative,
+/// `????` each as built. The counter of the first two loops lives in a
+/// register the kernel keeps across a call.
+///
+/// ```text
+///   movl calls(%rip), %r12d ; test ; jz 2f
+/// 1: movl $110, %eax ; syscall ; decl %r12d ; jnz 1b      ; getppid
+/// 2: movl pages(%rip), %r12d ; test ; jz 4f
+///   mmap(0, pages << 12, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+///   cmpq $-4096, %rax ; jae 6f
+/// 3: movb $1, (%rax) ; addq $4096, %rax ; decl %r12d ; jnz 3b
+/// 4: movl spins(%rip), %ecx ; test ; jz 5f
+/// 7: decl %ecx ; jnz 7b
+/// 5: exit_group(status)
+/// 6: exit_group(98)
+/// calls: .long   pages: .long   spins: .long   status: .long
+/// ```
+///
+/// Assembled by the host's GNU assembler (`as --64`) and read back out of the object file.
+pub(crate) const USER_KERNEL_TIME_PROGRAM: &[u8] = &[
+    0x44, 0x8b, 0x25, 0x81, 0x00, 0x00, 0x00, 0x45, 0x85, 0xe4, 0x74, 0x0c, 0xb8, 0x6e, 0x00, 0x00,
+    0x00, 0x0f, 0x05, 0x41, 0xff, 0xcc, 0x75, 0xf4, 0x44, 0x8b, 0x25, 0x6d, 0x00, 0x00, 0x00, 0x45,
+    0x85, 0xe4, 0x74, 0x3b, 0x31, 0xff, 0x4c, 0x89, 0xe6, 0x48, 0xc1, 0xe6, 0x0c, 0xba, 0x03, 0x00,
+    0x00, 0x00, 0x41, 0xba, 0x22, 0x00, 0x00, 0x00, 0x49, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff, 0x45,
+    0x31, 0xc9, 0xb8, 0x09, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x48, 0x3d, 0x00, 0xf0, 0xff, 0xff, 0x73,
+    0x29, 0xc6, 0x00, 0x01, 0x48, 0x05, 0x00, 0x10, 0x00, 0x00, 0x41, 0xff, 0xcc, 0x75, 0xf2, 0x8b,
+    0x0d, 0x2b, 0x00, 0x00, 0x00, 0x85, 0xc9, 0x74, 0x04, 0xff, 0xc9, 0x75, 0xfc, 0xb8, 0xe7, 0x00,
+    0x00, 0x00, 0x8b, 0x3d, 0x1c, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0xbf,
+    0x62, 0x00, 0x00, 0x00, 0x0f, 0x05, 0x0f, 0x0b, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
+    0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
+];

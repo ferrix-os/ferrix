@@ -12501,3 +12501,427 @@ fn reap_check_child(parent: &Arc<Process>) -> Result<Arc<Process>, &'static str>
     parent.adopt(Arc::clone(&child));
     Ok(child)
 }
+
+// ---------------------------------------------------------------------------
+// Kernel time and switch counts, task by task (`docs/THREAD-TIMES.md` §4):
+// what `stime`, `utime` and the two `ctxt_switches` lines of `/proc` read.
+// ---------------------------------------------------------------------------
+
+/// Loop iterations of [`arch::USER_KERNEL_TIME_PROGRAM`]'s spin: twice the
+/// turn-taking check's, so that a spin covers several slices under KVM and
+/// a second or two under `tcg`.
+const TIMES_SPINS: u32 = 60_000_000;
+
+/// `getppid` calls the system-call case makes.
+const TIMES_CALLS: u32 = 50_000;
+
+/// Pages the page-fault case maps and touches, one fault each.
+const TIMES_PAGES: u32 = 2_048;
+
+/// The status every kernel-time program exits with when nothing failed; 98
+/// is its `mmap` refused.
+const TIMES_STATUS: u32 = 57;
+
+/// Yields each task of the involuntary case makes.
+const TIMES_YIELDS: usize = 20;
+
+/// Sleeps the task of the voluntary case makes, and how long each is.
+const TIMES_SLEEPS: usize = 10;
+/// See [`TIMES_SLEEPS`].
+const TIMES_SLEEP_NANOS: u64 = 1_000_000;
+
+/// Runs of each kernel-time case, and pairs of spinning programs of the
+/// interrupt case, before the case decides it fails ([`attempted`]).
+const TIMES_ATTEMPTS: usize = 3;
+
+/// [`arch::USER_KERNEL_TIME_PROGRAM`] with its four words patched in --
+/// `calls` `getppid` calls, then `pages` pages mapped and touched, then a
+/// spin of `spins` -- loaded into a process of its own.
+fn kernel_time_program(calls: u32, pages: u32, spins: u32) -> Result<Arc<Process>, &'static str> {
+    const SHAPE: &str = "the kernel-time program's tail is not the layout it documents";
+    let mut program = arch::USER_KERNEL_TIME_PROGRAM.to_vec();
+    let at = program.len().checked_sub(16).ok_or(SHAPE)?;
+    let tail = program.get_mut(at..).ok_or(SHAPE)?;
+    if tail.iter().any(|&byte| byte != b'?') {
+        return Err(SHAPE);
+    }
+    let words = [calls, pages, spins, TIMES_STATUS];
+    for (slot, byte) in tail
+        .iter_mut()
+        .zip(words.iter().flat_map(|word| word.to_le_bytes()))
+    {
+        *slot = byte;
+    }
+    let file = image::build_with(
+        class_of_this_build(),
+        arch::ARCH.elf_machine(),
+        image::Shape::Good,
+        &program,
+    );
+    process::load(
+        &file,
+        &[b"/times"],
+        &[],
+        [0x5a; ferrix_ustack::RANDOM_BYTES],
+    )
+    .map_err(|_| "a kernel-time program could not be loaded")
+}
+
+/// What one run of a kernel-time program was charged: its runtime and the
+/// part of it counted as kernel time, in nanoseconds, and how often an
+/// interrupt in user mode switched it out.
+#[derive(Clone, Copy)]
+struct Charged {
+    /// Nanoseconds run.
+    runtime: u64,
+    /// Nanoseconds of `runtime` counted as kernel time.
+    kernel: u64,
+    /// Switches out by an interrupt that arrived in user mode.
+    preempted: u64,
+}
+
+impl Charged {
+    /// Its kernel time in percent of its runtime.
+    fn percent(self) -> u64 {
+        self.kernel.saturating_mul(100) / self.runtime.max(1)
+    }
+}
+
+/// Start each of `programs` on `cpu`, wait for all to exit with
+/// [`TIMES_STATUS`] and their tasks to be gone, and answer what each was
+/// charged.
+fn run_charged(programs: &[Arc<Process>], cpu: usize) -> Result<Vec<Charged>, &'static str> {
+    let mut tasks = Vec::new();
+    for program in programs {
+        tasks.push(
+            process::start_on(program, Some(cpu))
+                .map_err(|_| "a kernel-time program could not be started")?,
+        );
+    }
+    let deadline = crate::timer::now_nanos().saturating_add(PROGRAM_PATIENCE_NANOS);
+    for program in programs {
+        match program.wait_for_exit(deadline) {
+            Some(status) if status == TIMES_STATUS as i32 => {}
+            Some(98) => return Err("a kernel-time program's mmap was refused"),
+            _ => return Err("a kernel-time program did not exit with its own status"),
+        }
+    }
+    let mut charged = Vec::new();
+    for task in &tasks {
+        // Its last charge is its last switch away, after its exit.
+        crate::sched::wait_until_gone(task, PROGRAM_PATIENCE_NANOS)?;
+        charged.push(Charged {
+            runtime: task.runtime(),
+            kernel: task.kernel_time(),
+            preempted: task.preemptions(),
+        });
+    }
+    Ok(charged)
+}
+
+/// One kernel-time program alone on `cpu`: what it was charged.
+fn charged_alone(calls: u32, pages: u32, spins: u32, cpu: usize) -> Result<Charged, &'static str> {
+    let program = kernel_time_program(calls, pages, spins)?;
+    run_charged(core::slice::from_ref(&program), cpu)?
+        .first()
+        .copied()
+        .ok_or("a kernel-time program was charged nothing")
+}
+
+/// The sentence the user-time case fails with.
+const SPUN_AS_KERNEL: &str = "kernel time: a program spinning in user mode was charged its user \
+                              time as kernel time (the return to user mode left its stint open)";
+
+/// Whether a program that spun in user mode was charged under a quarter of
+/// its runtime as kernel time.
+fn spun_as_user(charged: Charged) -> bool {
+    charged.runtime != 0 && charged.kernel.saturating_mul(4) < charged.runtime
+}
+
+/// Whether a program that made system calls or took faults and did nothing
+/// else was charged at least half its runtime as kernel time.
+fn mostly_kernel(charged: Charged) -> bool {
+    charged.kernel.saturating_mul(2) >= charged.runtime
+}
+
+/// Run one kernel-time case up to [`TIMES_ATTEMPTS`] times: `run` makes one
+/// run, `holds` says whether what it was charged shows the case's property.
+/// A host that stalls this virtual processor charges the stall to whatever
+/// it stopped -- a timer interrupt's handler, which is kernel time, or the
+/// spin, which is user time -- and one gate saw a spin after a `getppid`
+/// charged 11 of 31 ms as kernel time at a host load of 21, where it reads
+/// 0 % on a quiet one. So a failed run is printed and run again, and the
+/// case fails, with `failure`, only when every attempt failed: a kernel
+/// that never ends a stint, or never opens one, fails all three.
+fn attempted(
+    case: &'static str,
+    mut run: impl FnMut() -> Result<Charged, &'static str>,
+    holds: fn(Charged) -> bool,
+    failure: &'static str,
+) -> Result<Charged, &'static str> {
+    for attempt in 1..=TIMES_ATTEMPTS {
+        let charged = run()?;
+        if holds(charged) {
+            return Ok(charged);
+        }
+        crate::console::println!(
+            "  vtime    attempt {attempt}, {case}: {} of {} us counted as kernel time",
+            charged.kernel / 1000,
+            charged.runtime / 1000,
+        );
+    }
+    Err(failure)
+}
+
+/// A program's time in user mode is not kernel time, whichever way it last
+/// came back to user mode: a system call's return, an interrupt's (two
+/// programs taking turns on one processor, each cut in user mode) and a page
+/// fault's, and after its start. Each spins `TIMES_SPINS` after that way
+/// back and must be charged under a quarter of its runtime as kernel time,
+/// in one of [`TIMES_ATTEMPTS`] runs ([`attempted`]).
+/// Verifies: L.sched.80
+fn check_user_time_is_not_kernel_time(cpu: usize) -> Result<[u64; 4], &'static str> {
+    let first = attempted(
+        "a program spinning after its start",
+        || charged_alone(0, 0, TIMES_SPINS, cpu),
+        spun_as_user,
+        SPUN_AS_KERNEL,
+    )?;
+    let call = attempted(
+        "a program spinning after a system call",
+        || charged_alone(1, 0, TIMES_SPINS, cpu),
+        spun_as_user,
+        SPUN_AS_KERNEL,
+    )?;
+    let mut interrupt = None;
+    let mut cut = false;
+    for attempt in 1..=TIMES_ATTEMPTS {
+        let pair = [
+            kernel_time_program(0, 0, TIMES_SPINS)?,
+            kernel_time_program(0, 0, TIMES_SPINS)?,
+        ];
+        let charged = run_charged(&pair, cpu)?;
+        if !charged.iter().all(|one| one.preempted >= 1) {
+            continue;
+        }
+        cut = true;
+        if charged.iter().all(|one| spun_as_user(*one)) {
+            interrupt = charged.first().copied();
+            break;
+        }
+        for one in &charged {
+            crate::console::println!(
+                "  vtime    attempt {attempt}, two programs taking turns: {} of {} us counted as \
+                 kernel time",
+                one.kernel / 1000,
+                one.runtime / 1000,
+            );
+        }
+    }
+    let interrupt = interrupt.ok_or(if cut {
+        SPUN_AS_KERNEL
+    } else {
+        "kernel time: two programs spinning on one processor were never both cut by an \
+         interrupt in user mode, in every attempt"
+    })?;
+    let fault = attempted(
+        "a program spinning after a page fault",
+        || charged_alone(0, 1, TIMES_SPINS, cpu),
+        spun_as_user,
+        SPUN_AS_KERNEL,
+    )?;
+    Ok([
+        first.percent(),
+        call.percent(),
+        interrupt.percent(),
+        fault.percent(),
+    ])
+}
+
+/// A program's system calls are kernel time: one that makes `TIMES_CALLS`
+/// `getppid` calls in a loop and nothing else is charged at least half its
+/// runtime as kernel time, in one of [`TIMES_ATTEMPTS`] runs.
+/// Verifies: L.sched.81
+fn check_system_calls_are_kernel_time(cpu: usize) -> Result<u64, &'static str> {
+    let charged = attempted(
+        "a program making system calls",
+        || charged_alone(TIMES_CALLS, 0, 0, cpu),
+        mostly_kernel,
+        "kernel time: a program making system calls in a loop was charged them as user time \
+         (a system call's entry opened no stint)",
+    )?;
+    Ok(charged.percent())
+}
+
+/// A program's exceptions are kernel time: one that maps `TIMES_PAGES`
+/// pages and touches each once, a page fault each, is charged at least half
+/// its runtime as kernel time, in one of [`TIMES_ATTEMPTS`] runs.
+/// Verifies: L.sched.82
+fn check_exceptions_are_kernel_time(cpu: usize) -> Result<u64, &'static str> {
+    let charged = attempted(
+        "a program taking page faults",
+        || charged_alone(0, TIMES_PAGES, 0, cpu),
+        mostly_kernel,
+        "kernel time: a program taking page faults was charged them as user time (an \
+         exception's entry opened no stint)",
+    )?;
+    Ok(charged.percent())
+}
+
+/// What the yielding tasks of [`check_switches_are_counted`] have done.
+static TIMES_YIELDED: AtomicU32 = AtomicU32::new(0);
+
+/// The yielding tasks of [`check_switches_are_counted`] that have started.
+static TIMES_ARRIVED: AtomicU32 = AtomicU32::new(0);
+
+/// A task of the involuntary case: once both have started, yield
+/// [`TIMES_YIELDS`] times to the other, which runs on the same processor.
+fn times_yielder(_argument: usize) {
+    let _ = TIMES_ARRIVED.fetch_add(1, Ordering::AcqRel);
+    while TIMES_ARRIVED.load(Ordering::Acquire) < 2 {
+        crate::sched::yield_now();
+    }
+    for _ in 0..TIMES_YIELDS {
+        crate::sched::yield_now();
+    }
+    let _ = TIMES_YIELDED.fetch_add(1, Ordering::AcqRel);
+}
+
+/// The task of the voluntary case: sleep [`TIMES_SLEEPS`] times.
+fn times_sleeper(_argument: usize) {
+    for _ in 0..TIMES_SLEEPS {
+        crate::sched::sleep_for(TIMES_SLEEP_NANOS);
+    }
+}
+
+/// A switch away from a task still runnable is involuntary, any other
+/// voluntary: two tasks on one processor that yield to each other
+/// `TIMES_YIELDS` times each, and never block, count every switch away from
+/// them as involuntary but the one at their end -- voluntary plus
+/// involuntary is how often each was switched to, the voluntary one is 1,
+/// and the two count at least one involuntary between them, the first's at
+/// the second's start -- and a task that sleeps `TIMES_SLEEPS` times
+/// counts at least as many voluntary ones and fewer involuntary than that.
+/// How many of the yields switch is the scheduler's (a yield that finds the
+/// other not yet eligible keeps the processor), so the count is checked
+/// against the switches made, not against the yields.
+/// Verifies: L.sched.83
+fn check_switches_are_counted(cpu: usize) -> Result<[u64; 4], &'static str> {
+    use ferrix_sched::{CpuSet, NICE_0_WEIGHT};
+
+    TIMES_YIELDED.store(0, Ordering::Release);
+    TIMES_ARRIVED.store(0, Ordering::Release);
+    let pair = [
+        crate::sched::spawn_on(
+            "times-yield-1",
+            times_yielder,
+            0,
+            NICE_0_WEIGHT,
+            cpu,
+            CpuSet::of(cpu),
+        )?,
+        crate::sched::spawn_on(
+            "times-yield-2",
+            times_yielder,
+            0,
+            NICE_0_WEIGHT,
+            cpu,
+            CpuSet::of(cpu),
+        )?,
+    ];
+    for task in &pair {
+        crate::sched::wait_until_gone(task, PROGRAM_PATIENCE_NANOS)?;
+    }
+    if TIMES_YIELDED.load(Ordering::Acquire) != 2 {
+        return Err("switch counts: a yielding task never finished");
+    }
+    let miscounted = |task: &Arc<crate::sched::Task>| {
+        let (voluntary, involuntary) = (task.voluntary_switches(), task.involuntary_switches());
+        voluntary != 1 || voluntary + involuntary != task.switches()
+    };
+    let involuntary: u64 = pair.iter().map(|task| task.involuntary_switches()).sum();
+    if involuntary == 0 || pair.iter().any(miscounted) {
+        crate::console::println!(
+            "  vtime    two yielding tasks: involuntary {} and {}, voluntary {} and {}, switched \
+             to {} and {} times",
+            pair[0].involuntary_switches(),
+            pair[1].involuntary_switches(),
+            pair[0].voluntary_switches(),
+            pair[1].voluntary_switches(),
+            pair[0].switches(),
+            pair[1].switches(),
+        );
+        return Err(
+            "switch counts: a task that yielded to another, still runnable, was not counted an \
+             involuntary switch",
+        );
+    }
+    let sleeper = crate::sched::spawn_on(
+        "times-sleep",
+        times_sleeper,
+        0,
+        NICE_0_WEIGHT,
+        cpu,
+        CpuSet::of(cpu),
+    )?;
+    crate::sched::wait_until_gone(&sleeper, PROGRAM_PATIENCE_NANOS)?;
+    let sleeps = TIMES_SLEEPS as u64;
+    if sleeper.voluntary_switches() < sleeps || sleeper.involuntary_switches() >= sleeps {
+        crate::console::println!(
+            "  vtime    a sleeping task: voluntary {}, involuntary {}",
+            sleeper.voluntary_switches(),
+            sleeper.involuntary_switches(),
+        );
+        return Err(
+            "switch counts: a task that slept was not counted a voluntary switch for each sleep",
+        );
+    }
+    Ok([
+        pair[0].involuntary_switches(),
+        pair[1].involuntary_switches(),
+        sleeper.voluntary_switches(),
+        sleeper.involuntary_switches(),
+    ])
+}
+
+/// Stage 7's kernel-time and switch-count cases (`docs/THREAD-TIMES.md`
+/// §4), on a processor other than this one where there is one, so that each
+/// program runs there alone. The kernel-time cases are skipped, and say so,
+/// where kernel time is not counted.
+/// Verifies: H.SCHED.14
+pub(crate) fn run_thread_times() -> Result<(), &'static str> {
+    let here = crate::smp::this_cpu()
+        .ok_or("no processor to run the kernel-time checks on")?
+        .logical;
+    let count = crate::smp::count();
+    let cpu = if count > 1 { (here + 1) % count } else { here };
+    let switches = check_switches_are_counted(cpu)?;
+    crate::console::println!(
+        "  vtime    switches: two yielding tasks {} and {} involuntary, a task that slept {} \
+         times {} voluntary and {} involuntary",
+        switches[0],
+        switches[1],
+        TIMES_SLEEPS,
+        switches[2],
+        switches[3],
+    );
+    if !crate::sched::vtime::counting() {
+        crate::console::println!(
+            "  vtime    kernel time not counted on this boot: its cases skipped"
+        );
+        return Ok(());
+    }
+    let user = check_user_time_is_not_kernel_time(cpu)?;
+    let calls = check_system_calls_are_kernel_time(cpu)?;
+    let faults = check_exceptions_are_kernel_time(cpu)?;
+    crate::console::println!(
+        "  vtime    kernel time: programs spinning after their first entry, a system call, an \
+         interrupt and a page fault {}%, {}%, {}%, {}%; {TIMES_CALLS} system calls {calls}%, \
+         {TIMES_PAGES} page faults {faults}%",
+        user[0],
+        user[1],
+        user[2],
+        user[3],
+    );
+    Ok(())
+}

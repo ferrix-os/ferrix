@@ -312,6 +312,9 @@ impl Direct {
                 "the direct switch had no task to switch from or to"
             );
         };
+        // The caller's kernel time: none of its own, since the fast path
+        // took no reading, but what an earlier general call left (`vtime`).
+        super::vtime::direct_switch(cpu, &previous);
         let Some((save, resume)) = switch_chosen(lock, cpu, previous, next, now) else {
             crate::panic::fatal!(
                 crate::panic::catalog::FAST_PATH_NOT_ASLEEP,

@@ -79,10 +79,10 @@ pub(crate) use aarch64::{
     ARCH, COMPAT_USER_END, CpuStarter, EPOLL_EVENT_BYTES, FAST_WRITE_READ, Irq, NAME, OPEN_FLAGS,
     PageEncoding, STAT_LAYOUT, TLB_FLUSH_IS_BROADCAST, TrapFrame, USER_ARGUMENT_PROGRAM,
     USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM,
-    USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM,
-    USER_SPIN_PROGRAM, USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM, USER_TEST_STATUS,
-    UserRegs, UserState, advance_past_breakpoint, audit_arch, breakpoint, classify, console,
-    console_receive_irq, counter_hz, counter_now, cpu_local, cpu_local_register,
+    USER_KERNEL_TIME_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM,
+    USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM,
+    USER_TEST_STATUS, UserRegs, UserState, advance_past_breakpoint, audit_arch, breakpoint,
+    classify, console, console_receive_irq, counter_hz, counter_now, cpu_local, cpu_local_register,
     decode_compat_syscall, decode_syscall, describe_cpus, disable_interrupts, drain_console,
     drop_identity_map, enable_console_receive, enable_interrupts, enter_user, flush_tlb,
     forbid_user_access, frame_pointer, halt, hardware_id, hardware_random, identity_map_live,
@@ -100,10 +100,10 @@ pub(crate) use armv7a::{
     ARCH, COMPAT_USER_END, CpuStarter, EPOLL_EVENT_BYTES, FAST_WRITE_READ, Irq, NAME, OPEN_FLAGS,
     PageEncoding, STAT_LAYOUT, TLB_FLUSH_IS_BROADCAST, TrapFrame, USER_ARGUMENT_PROGRAM,
     USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM,
-    USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM,
-    USER_SPIN_PROGRAM, USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM, USER_TEST_STATUS,
-    UserRegs, UserState, advance_past_breakpoint, audit_arch, breakpoint, classify, console,
-    console_receive_irq, counter_hz, counter_now, cpu_local, cpu_local_register,
+    USER_KERNEL_TIME_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM,
+    USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM,
+    USER_TEST_STATUS, UserRegs, UserState, advance_past_breakpoint, audit_arch, breakpoint,
+    classify, console, console_receive_irq, counter_hz, counter_now, cpu_local, cpu_local_register,
     decode_compat_syscall, decode_syscall, describe_cpus, disable_interrupts, drain_console,
     drop_identity_map, enable_console_receive, enable_interrupts, enter_user, flush_tlb,
     forbid_user_access, frame_pointer, halt, hardware_id, hardware_random, identity_map_live,
@@ -263,10 +263,10 @@ pub(crate) use x86_64::{
     ARCH, COMPAT_USER_END, CpuStarter, EPOLL_EVENT_BYTES, FAST_WRITE_READ, Irq, NAME, OPEN_FLAGS,
     PageEncoding, STAT_LAYOUT, TLB_FLUSH_IS_BROADCAST, TrapFrame, USER_ARGUMENT_PROGRAM,
     USER_COW_PROGRAM, USER_EXEC_PROGRAM, USER_FAULT_PROGRAM, USER_FORK_PROGRAM,
-    USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM, USER_SHARED_PROGRAM,
-    USER_SPIN_PROGRAM, USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM, USER_TEST_STATUS,
-    UserRegs, UserState, advance_past_breakpoint, audit_arch, breakpoint, classify, console,
-    console_receive_irq, counter_hz, counter_now, cpu_local, cpu_local_register,
+    USER_KERNEL_TIME_PROGRAM, USER_MPROTECT_PROGRAM, USER_NAMESPACE_PROGRAM, USER_NATIVE_PROGRAM,
+    USER_SHARED_PROGRAM, USER_SPIN_PROGRAM, USER_STEP_PROGRAM, USER_STEP_STATUS, USER_TEST_PROGRAM,
+    USER_TEST_STATUS, UserRegs, UserState, advance_past_breakpoint, audit_arch, breakpoint,
+    classify, console, console_receive_irq, counter_hz, counter_now, cpu_local, cpu_local_register,
     decode_compat_syscall, decode_syscall, describe_cpus, disable_interrupts, drain_console,
     drop_identity_map, enable_console_receive, enable_interrupts, enter_user, flush_tlb,
     forbid_user_access, frame_pointer, halt, hardware_id, hardware_random, identity_map_live,
@@ -343,6 +343,15 @@ pub(crate) use aarch64::ring3_reads_counter;
 pub(crate) use armv7a::ring3_reads_counter;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::ring3_reads_counter;
+
+// The counter the kernel-time stamps read at every entry from user mode and
+// every return (`sched::vtime`), and whether it is the clock's and cheap.
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::{cheap_counter, cheap_counter_is_clock};
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::{cheap_counter, cheap_counter_is_clock};
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{cheap_counter, cheap_counter_is_clock};
 
 // What user mode may read of the timer, checked on every processor once all
 // are online: ARMv7-A's `CNTKCTL` (L.armv7a.4). AArch64's check is a

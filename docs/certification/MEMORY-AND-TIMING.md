@@ -1475,6 +1475,28 @@ before its list's lock (taking), never after either; `NESTING`, a sleeping
 lock, before a set's state lock. Nothing takes a hook lock under a waiter
 lock or a run queue's lock.
 
+### 2.2r Kernel time and switch counts (`sched::vtime`, 2026-10-18)
+
+A task's kernel time is counted at every entry from user mode and every
+return (`L.sched.80`-`82`, `docs/THREAD-TIMES.md`).
+
+* **Memory.** One static array, `vtime::SLOTS`: 256 processors (the bound
+  `IN_CALL` has) of one 64-byte line each, 16 KiB, never allocated. Each
+  task grows by 24 bytes: its kernel ticks and its voluntary and
+  involuntary switch counts. Nothing allocates on any path below.
+* **Time.** On every system call entry and every trap taken from user
+  mode, with interrupts masked: one counter read (`RDTSC`, `CNTVCT`) and a
+  few loads and stores of the processor's own line, no lock, no walk; the
+  same at a return that closes a stint an entry opened, and none at one a
+  decision opened; none at the entry of x86-64's three blocking native
+  calls; at every decision, loads and stores with the decision's own
+  reading. A return with no stint open (the fast path's quiet exit) is a
+  load and a branch. Under a hypervisor that traps `RDTSC`, each read is a
+  VM exit; KVM on nazuna does not trap it. Measured cost on the round
+  trip: `docs/THREAD-TIMES.md` §5.
+* **Where the counter is the HPET**, nothing is read: every stamp is a
+  load of the boot's one flag and a branch.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

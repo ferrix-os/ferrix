@@ -49,6 +49,7 @@ mod preempt_check;
 mod queue;
 mod task;
 pub(crate) mod trip;
+pub(crate) mod vtime;
 mod wait;
 pub(crate) mod work;
 
@@ -851,6 +852,8 @@ pub(crate) fn init(topology: &'static Topology) -> Result<(), &'static str> {
     // it is kept, as the arrays it replaced were made here.
     preempt::start_counting();
     per_cpu_words(online);
+    // Before any task runs, with the clock chosen (stage 3).
+    vtime::init();
 
     adopt_boot_task()?;
     audit_here(borrow::Site::Boot);
@@ -937,6 +940,9 @@ fn adopt_boot_task() -> Result<(), &'static str> {
         let _ = queue.fair.pick_next();
         queue.exec_start = crate::timer::now_nanos();
         note_running(0, boot.id, quota::NONE, 0);
+        // Whatever kernel time is pending goes to what ran before, and the
+        // boot task starts in the kernel (`vtime`).
+        vtime::settle(queue.current.as_deref(), None);
         set_current(&mut queue, 0, boot);
     }
     <arch::Irq as IrqControl>::restore(saved);
@@ -994,6 +1000,9 @@ pub(crate) fn enter_idle() -> ! {
             let mut queue = lock.lock();
             queue.idle = Some(Arc::clone(&idle));
             note_running(cpu, idle.id, quota::NONE, 0);
+            // As the boot task's adoption: pending kernel time to what ran
+            // before, and the idle task starts in the kernel (`vtime`).
+            vtime::settle(queue.current.as_deref(), None);
             set_current(&mut queue, cpu, idle);
             queue.exec_start = crate::timer::now_nanos();
         }
@@ -1678,7 +1687,11 @@ pub(crate) fn current_runtime() -> u64 {
     let saved = <arch::Irq as IrqControl>::disable();
     let task = this_cpu().and_then(queue_of).and_then(|lock| {
         let mut queue = lock.lock();
-        queue.account(crate::timer::now_nanos());
+        let (now, ticks) = crate::timer::now_with_ticks();
+        queue.account(now);
+        // Its kernel time up to now too, the stint it is reading in
+        // included: this processor's own decision (`vtime`).
+        vtime::settle(queue.current.as_deref(), ticks);
         queue.current.clone()
     });
     <arch::Irq as IrqControl>::restore(saved);
@@ -2316,8 +2329,11 @@ fn choose_next(
     // context this switches to, in `finish_switch`.
     let queue = unsafe { lock.lock_manually() };
 
-    let now = crate::timer::now_nanos();
+    let (now, ticks) = crate::timer::now_with_ticks();
     queue.account_in(now, interrupted_user);
+    // The running task's kernel time up to this decision, from the same
+    // reading; from here the processor is in the kernel whichever task runs.
+    vtime::settle_on(cpu, queue.current.as_deref(), ticks);
     queue.wake_sleepers(now);
 
     let previous = queue.current.clone();
@@ -2395,6 +2411,10 @@ fn switch_chosen(
     // is the only reference into it until the switch hands it over.
     let queue = unsafe { lock.locked_data() };
     queue.stats.switches += 1;
+    // `voluntary_ctxt_switches` or `nonvoluntary_ctxt_switches`: still
+    // runnable is preempted or yielding, anything else blocked, asleep or
+    // dead, as Linux tells `nivcsw` from `nvcsw`.
+    previous.note_switched_out(previous.state() == RUNNABLE);
     carry_in_call(cpu, &previous, &next);
     note_running(cpu, next.id, next.group(), next.moves_seen());
     quota::switched(&mut queue.pending, next.group());

@@ -646,6 +646,26 @@ preference. The integrator shall not rely on the element to hold a power or
 thermal budget, and shall rely on no time figure that assumes a processor
 clock (MEMORY-AND-TIMING).
 
+### AoU-34 — a task's user and kernel time are accounting, not enforcement
+`/proc/<pid>/stat`'s `utime` and `stime` and `status`'s two switch counts
+(H.SCHED.14, L.sched.80-83, `docs/THREAD-TIMES.md`) are for profiling and
+accounting. No budget, quota or timing guarantee of the element rests on
+the split, and the integrator shall build none on it: `cpu.max` and the
+fair class charge the whole runtime. The split is counted only where the
+clock's counter is one register read (the invariant TSC, `CNTVCT`); with the
+HPET as the clock `stime` is 0. With `ferrix.fastpath=on`, outside the
+reference configuration, a `channel_write_read` answered by the fast path
+counts its time in the kernel as user time, so `stime` under-counts; so do,
+in every configuration, the span from a call's or a trap's last scheduling
+decision (any decision on its processor during it, one that kept the task
+running and the task's own read of its CPU time included) to its return, and on x86-64 the native calls that block
+(`channel_write_read`, `object_wait_one`, `port_wait`) up to their decision.
+`stime` is therefore a lower bound of a task's time in the kernel, and
+`utime` an upper bound of its time in user mode. A
+reading taken from another processor counts kernel time up to the task's
+last return to user mode or its processor's last decision, which a task
+alone on a processor with no tick may not make for as long as it runs.
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

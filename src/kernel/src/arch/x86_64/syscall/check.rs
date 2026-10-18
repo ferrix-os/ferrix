@@ -120,6 +120,9 @@ pub(crate) fn drive_system_call(
                 user_rsp: 0x7fff_e000,
             };
             super::ferrix_syscall_entry(&mut frame);
+            // The checking task never left the kernel, whatever the entry's
+            // way out said (`sched::vtime`).
+            crate::sched::vtime::entered();
             Some(frame.rax as i64 as isize)
         }
         crate::trap::Abi::Compat => {
@@ -188,6 +191,9 @@ pub(crate) fn drive_native_words(number: usize, args: [u64; 6]) -> (isize, [u64;
     };
     let saved = <super::super::Irq as IrqControl>::disable();
     super::ferrix_syscall_entry(&mut frame);
+    // The checking task never left the kernel, whatever the entry's way out
+    // said (`sched::vtime`).
+    crate::sched::vtime::entered();
     <super::super::Irq as IrqControl>::restore(saved);
     (frame.rax as i64 as isize, [frame.rsi, frame.rdx, frame.r10])
 }

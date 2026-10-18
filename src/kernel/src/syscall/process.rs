@@ -2588,6 +2588,9 @@ pub(crate) fn run_program(_argument: usize) {
     let resume = thread::current().and_then(|thread| thread.take_resume());
     if let Some(regs) = resume {
         drop(process);
+        // Its time in user mode starts here, masked since the test above
+        // (`sched::vtime`).
+        sched::vtime::leaving();
         // SAFETY: this task was spawned in the child's address space with its
         // parent's user state, both installed by the switch that got here, and
         // `regs` is a copy of the frame the parent's system call saved in that
@@ -2607,6 +2610,9 @@ pub(crate) fn run_program(_argument: usize) {
     else {
         leave_current();
     };
+    // Its time in user mode starts here, masked since the test above
+    // (`sched::vtime`).
+    sched::vtime::leaving();
     // SAFETY: this task was spawned in the process's address space, which the
     // scheduler installed when it switched here, along with the task's user
     // state and entry stack; `entry` and `stack` came from the loader and the

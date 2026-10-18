@@ -70,6 +70,17 @@ The four levels:
 Every run records what `.claude/skills/optimize-ipc-round-trip/SKILL.md` §7
 lists. The records go through `bench-ipc --board-log ... --record`.
 
+**2026-10-19, thread times (`docs/THREAD-TIMES.md`).** Since that
+landing the kernel counts each task's kernel time. On AArch64 and ARMv7-A
+every entry from user mode through the trap dispatcher -- every `svc`, so
+every native call -- reads `CNTVCT` once, and a return reads it again only
+when no scheduling decision came between: so a blocking `channel_write_read`
+round trip on the DK1 pays one `CNTVCT` read a direction it did not before,
+a call that does not block two. x86-64's blocking native calls and its fast
+path read nothing. A DK1 figure taken before that commit and one after are
+not the same configuration; say which. (os-07, the DK1 matrix's owner, had
+no live session to tell on 2026-10-19; this note stands for it.)
+
 ## Work items
 
 | Item | Who | Points (estimate) |

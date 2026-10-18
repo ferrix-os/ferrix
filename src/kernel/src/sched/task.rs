@@ -150,6 +150,14 @@ pub(crate) struct Task {
     preemptions: AtomicU64,
     /// Which CPUs it has run on, one bit each.
     cpus_run_on: AtomicU64,
+    /// The part of its runtime spent in the kernel, in counter ticks
+    /// (`sched::vtime`): added to only by the processor running it, at its
+    /// own decisions, under its queue's lock.
+    kernel_ticks: AtomicU64,
+    /// Switches away from it while it was blocked, asleep or dead, and while
+    /// it was still runnable: Linux's `nvcsw` and `nivcsw`. Written only by
+    /// the processor switching away from it, under its queue's lock.
+    switched_out: [AtomicU64; 2],
     /// Its pending work, one bit for each thing the way back to user mode
     /// would have to act on (`sched::work`): written only through that
     /// module, set by a poster after the state it stands for and cleared by
@@ -413,6 +421,8 @@ impl Task {
             switches: AtomicU64::new(0),
             preemptions: AtomicU64::new(0),
             cpus_run_on: AtomicU64::new(0),
+            kernel_ticks: AtomicU64::new(0),
+            switched_out: [const { AtomicU64::new(0) }; 2],
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
@@ -468,6 +478,8 @@ impl Task {
             switches: AtomicU64::new(0),
             preemptions: AtomicU64::new(0),
             cpus_run_on: AtomicU64::new(0),
+            kernel_ticks: AtomicU64::new(0),
+            switched_out: [const { AtomicU64::new(0) }; 2],
             work: AtomicU32::new(0),
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
@@ -855,6 +867,52 @@ impl Task {
     /// CPU-time clocks' reading.
     pub(crate) fn runtime(&self) -> u64 {
         self.sum_exec.load(Ordering::Relaxed)
+    }
+
+    /// Give it `ticks` of the counter as time spent in the kernel
+    /// (`sched::vtime`). A load and a store: only the processor running it
+    /// adds, at its own decisions, under its queue's lock.
+    pub(crate) fn add_kernel_ticks(&self, ticks: u64) {
+        let total = self
+            .kernel_ticks
+            .load(Ordering::Relaxed)
+            .wrapping_add(ticks);
+        self.kernel_ticks.store(total, Ordering::Relaxed);
+    }
+
+    /// Nanoseconds of [`Task::runtime`] it spent in the kernel, up to its
+    /// processor's last decision or its own last return to user mode:
+    /// `stime`. No more than its runtime, which is charged at other moments.
+    pub(crate) fn kernel_time(&self) -> u64 {
+        let ticks = self.kernel_ticks.load(Ordering::Relaxed);
+        crate::timer::counter_ticks_to_nanos(ticks).min(self.runtime())
+    }
+
+    /// Count a switch away from it: involuntary when it was `still_runnable`
+    /// -- preempted, or yielding -- and voluntary otherwise, as Linux counts
+    /// `nivcsw` and `nvcsw`. A load and a store: only the processor
+    /// switching away from it counts, under its queue's lock.
+    pub(crate) fn note_switched_out(&self, still_runnable: bool) {
+        if let Some(count) = self.switched_out.get(usize::from(still_runnable)) {
+            count.store(
+                count.load(Ordering::Relaxed).wrapping_add(1),
+                Ordering::Relaxed,
+            );
+        }
+    }
+
+    /// Switches away from it while it was blocked, asleep or dead:
+    /// `voluntary_ctxt_switches`.
+    pub(crate) fn voluntary_switches(&self) -> u64 {
+        let [voluntary, _] = &self.switched_out;
+        voluntary.load(Ordering::Relaxed)
+    }
+
+    /// Switches away from it while it was still runnable:
+    /// `nonvoluntary_ctxt_switches`.
+    pub(crate) fn involuntary_switches(&self) -> u64 {
+        let [_, involuntary] = &self.switched_out;
+        involuntary.load(Ordering::Relaxed)
     }
 
     /// Start a measurement window here, and count this task in it.
