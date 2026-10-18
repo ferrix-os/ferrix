@@ -101,6 +101,13 @@
       "branch": "hwp-epp",
       "date": "2026-10-18",
       "purpose": "ferrix.epp: the energy and performance preference every processor's IA32_HWP_REQUEST asks for, performance (0) by default, chosen from four names or a decimal 0 to 255 (the consultant's design review, ledger 2026-10-18 line 2396, (4))"
+    },
+    {
+      "ids": ["L.sched.80-83"],
+      "owner": "thread-times",
+      "branch": "thread-times",
+      "date": "2026-10-18",
+      "purpose": "Per-thread profile, first steps (docs/backlog/p2.md, 'A per-thread profile of a program cannot be taken on Ferrix'): a task's kernel time counted from each entry from user mode to the next return, user time not counted as kernel time, and voluntary and involuntary switches counted, for stime and the ctxt-switch lines of /proc (design to the session's own consultant)"
     }
   ]
 }
