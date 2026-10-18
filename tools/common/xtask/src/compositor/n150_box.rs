@@ -8,9 +8,15 @@
 //! the self-checks skipped, as on every desktop a person switches on.
 //! yserver for X11, Wine's and Proton's links into the program tree at
 //! `/data`, and `gryphlink`, which starts GRYPHLINK, in fuzzel's list and
-//! a terminal away. A script the compositor starts as root brings the wired
+//! a terminal away.
+//!
+//! The desktop is a session of the user `ferrix`, started by `sessiond`
+//! (`crate::session`), not root's: the compositor and everything it starts,
+//! GRYPHLINK and Wine's prefix in `/home/ferrix` among them, run as that
+//! user. What has to stay root is init's: a script, a unit of
+//! `multi-user.target` and so not the compositor's, brings the wired
 //! interface up -- the YT6801's on the box, QEMU's under the test -- and
-//! says what it found.
+//! says what it found, whether hyprix runs or not.
 //!
 //! The launcher's background video is blocked, as
 //! `FERRIX_ENDFIELD_NO_VIDEO=1` blocks it for `test-endfield-proton`
@@ -42,13 +48,12 @@ const SCRIPT_PATH: &str = "etc/n150-desktop.sh";
 /// The line [`SCRIPT`] ends with, whatever it found.
 pub(crate) const READY: &str = "n150-desktop: ready";
 
-/// The script the compositor starts as root: the wired interface's lease
-/// (tried for a minute: on the box the YT6801's driver may come up after
-/// the compositor), the video host's block read back, the launcher's start
-/// looked for, and the X server waited for. Every line starts
+/// The script [`UNIT`] runs as root: the wired interface's lease (tried for
+/// a minute: on the box the YT6801's driver may come up after the
+/// compositor), the video host's block read back, the launcher's start
+/// looked for, and the session's X server waited for. Every line starts
 /// `n150-desktop:`, and it ends with [`READY`].
 const SCRIPT: &str = r#"echo "n150-desktop: start"
-mkdir -p /root
 if grep -q '@HOST@' /etc/hosts; then
     echo "n150-desktop: the launcher's video host @HOST@ resolves nowhere"
 else
@@ -77,6 +82,27 @@ fi
 echo "n150-desktop: ready"
 "#;
 
+/// Where [`UNIT`] is in the image, and the link that makes
+/// `multi-user.target` want it.
+const UNIT_PATH: &str = "etc/ferrix/units/n150-desktop.service";
+const UNIT_WANTED: &str = "etc/ferrix/units/multi-user.target.wants/n150-desktop.service";
+
+/// [`SCRIPT`]'s unit: root's, of `multi-user.target`, so the lease does not
+/// wait on the compositor's card (`docs/BACKLOG.md`: the box was
+/// unreachable whenever hyprix did not run). `simple`, not `oneshot`:
+/// `graphical.target` comes after `multi-user.target`, and a oneshot would
+/// hold the compositor back while the script waits for its X server.
+const UNIT: &str = "# The N150 box's root part of its desktop, which runs as ferrix \
+                    (tools/common/xtask/src/compositor/n150_box.rs).\n\
+                    [Unit]\n\
+                    Description=The N150 box's network and launcher checks\n\
+                    \n\
+                    [Service]\n\
+                    Type=simple\n\
+                    ExecStart=/bin/busybox sh /etc/n150-desktop.sh\n\
+                    StandardOutput=console\n\
+                    StandardError=console\n";
+
 /// `/bin/gryphlink`: the video host blocked in the prefix's hosts file,
 /// which Chromium reads on Windows, then the volume's own start. On the
 /// first start the prefix does not exist yet; the file is written ahead of
@@ -101,14 +127,13 @@ const HOSTS: &str = "127.0.0.1 localhost\n::1 localhost\n0.0.0.0 @HOST@\n";
 
 /// The compositor's configuration ahead of what [`desktop`] adds: a
 /// terminal to start with and one a key away, fuzzel a key away, the
-/// layout's keys, X11's display for every program, and [`SCRIPT`].
+/// layout's keys, and X11's display for every program. `HOME` is the
+/// session's own, which `sessiond` sets.
 fn config(layout: &str) -> String {
     format!(
         "# Written into the initramfs by `cargo xtask n150-install` (docs/N150.md).\n\
          input:kb_layout = {layout}\n\
-         env = HOME,/root\n\
          {}\
-         exec-once = /bin/busybox sh /{SCRIPT_PATH}\n\
          exec-once = /bin/term /bin/zinc\n\
          bind = SUPER, RETURN, exec, /bin/term /bin/zinc\n\
          bind = SUPER, D, exec, /bin/fuzzel\n\
@@ -131,7 +156,8 @@ const LAYOUT: &str = "de";
 /// The files the box's desktop carries beyond [`desktop`]'s: yserver's,
 /// Wine's and Proton's links into `/data` and fuzzel's GRYPHLINK entry
 /// (`endfield::desktop_files`), with `/bin/gryphlink` the start of
-/// [`GRYPHLINK`] rather than a link; [`HOSTS`]; and [`SCRIPT`].
+/// [`GRYPHLINK`] rather than a link; [`HOSTS`]; and [`SCRIPT`] with its
+/// [`UNIT`].
 fn files(carried: &[File]) -> Vec<File> {
     let text = |path: &str, mode: u32, body: &str| File {
         path: path.to_owned(),
@@ -145,6 +171,12 @@ fn files(carried: &[File]) -> Vec<File> {
     out.push(text("bin/gryphlink", 0o755, GRYPHLINK));
     out.push(text("etc/hosts", 0o644, HOSTS));
     out.push(text(SCRIPT_PATH, 0o644, SCRIPT));
+    out.push(text(UNIT_PATH, 0o644, UNIT));
+    out.push(File {
+        path: UNIT_WANTED.to_owned(),
+        mode: 0o777,
+        content: Content::Link(format!("/{UNIT_PATH}")),
+    });
     out
 }
 
@@ -164,21 +196,29 @@ pub(crate) fn image(args: &Args) -> Result<(PathBuf, PathBuf)> {
              `cargo xtask busybox`",
         )
     })?;
-    // `net` off for `desktop`: the script, not an `exec-once` of its own,
-    // asks for the lease. No wallpaper unless one is named: each frame is
-    // drawn in software on four small cores.
+    // `net` off for `desktop`: the script's unit, not an `exec-once`, asks
+    // for the lease. No wallpaper unless one is named: each frame is drawn
+    // in software on four small cores. The desktop is `ferrix`'s session,
+    // never root's.
     let args = &Args {
         release: true,
         net: false,
         init: Some(busybox),
         wallpaper: args.wallpaper.clone().or_else(|| Some("none".to_owned())),
-        session_user: None,
+        session_user: Some(crate::session::USER.to_owned()),
         ..args.clone()
     };
     let programs = Programs::build(arch)?;
     let layout = args.layout.clone().unwrap_or_else(|| LAYOUT.to_owned());
     let size = args.size.unwrap_or(crate::wallpaper::SCREEN);
     let (config, mut carried) = desktop(arch, config(&layout), size, true, Backdrop::Any, args)?;
+    // What `desktop` started as root becomes init's, and the dotfiles seed
+    // the user's home, as `run-compositor --everything`'s session does.
+    println!(
+        "  n150: the desktop runs as {}, started by sessiond",
+        crate::session::USER
+    );
+    let config = crate::session::for_session(&config, &mut carried.ports, None);
     let more = files(&carried.ports);
     carried.ports.extend(more);
     let mut options = BOX_OPTIONS.to_owned();
@@ -199,7 +239,9 @@ pub(crate) fn image(args: &Args) -> Result<(PathBuf, PathBuf)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GRYPHLINK, HOSTS, SCRIPT, SCRIPT_PATH, VIDEO_HOST, config, files};
+    use super::{
+        GRYPHLINK, HOSTS, SCRIPT, SCRIPT_PATH, UNIT_PATH, UNIT_WANTED, VIDEO_HOST, config, files,
+    };
 
     /// The video host is blocked in both hosts files, and `/bin/gryphlink`
     /// is the start that blocks it, not a link past it.
@@ -239,12 +281,27 @@ mod tests {
         assert!(HOSTS.contains("localhost") && GRYPHLINK.starts_with("#!/bin/busybox sh"));
     }
 
-    /// The configuration starts the script and yserver, and the script
-    /// ends with its ready line whatever it found.
+    /// The configuration starts yserver and leaves the script to init, as
+    /// root's unit of `multi-user.target`; nothing in it is root's, and the
+    /// script ends with its ready line whatever it found.
     #[test]
-    fn the_desktop_starts_the_script_and_the_x_server() {
+    fn the_desktop_starts_the_x_server_and_init_starts_the_script() {
         let text = config("de");
-        assert!(text.contains(&format!("exec-once = /bin/busybox sh /{SCRIPT_PATH}")));
+        assert!(!text.contains(SCRIPT_PATH));
+        assert!(!text.contains("/root"));
+        let carried = files(&[]);
+        let unit = carried
+            .iter()
+            .find(|file| file.path == UNIT_PATH)
+            .expect("the script's unit");
+        let crate::ports::Content::Bytes(unit) = &unit.content else {
+            panic!("the unit is a file");
+        };
+        let unit = String::from_utf8_lossy(unit);
+        assert!(unit.contains(&format!("ExecStart=/bin/busybox sh /{SCRIPT_PATH}\n")));
+        assert!(unit.contains("Type=simple\n") && !unit.contains("User="));
+        assert!(carried.iter().any(|file| file.path == UNIT_WANTED
+            && matches!(&file.content, crate::ports::Content::Link(to) if *to == format!("/{UNIT_PATH}"))));
         assert!(text.contains("env = DISPLAY,:0"));
         assert!(text.contains("input:kb_layout = de"));
         assert!(

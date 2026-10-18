@@ -629,7 +629,8 @@ const DESKTOP_COLOURS: usize = 8;
 /// the box will have), a network, and a USB keyboard and mouse on an xHCI
 /// controller. Required: `/` on the root partition
 /// with the system installed, the firmware framebuffer lent to efifb,
-/// hyprix on it with a keyboard in its seat, [`crate::compositor::n150_box`]'s script reporting the
+/// hyprix on it with a keyboard in its seat, as the user `ferrix`'s session
+/// (`sessiond`), [`crate::compositor::n150_box`]'s script reporting the
 /// video host blocked, the launcher on `/data`, a lease and yserver up; and
 /// a screendump of the VGA that is a desktop, kept at
 /// `build/x86_64/n150-desktop.ppm`.
@@ -739,6 +740,10 @@ pub(crate) fn check_desktop(lines: &[String]) -> Result<()> {
             ),
             ("efifb: ", "efifb did not start on the firmware framebuffer"),
             ("hyprix: card0", "hyprix found no card to draw on"),
+            (
+                "sessiond: seat0's session for ferrix (uid 1000)",
+                "the desktop is not the user ferrix's session",
+            ),
             (
                 "n150-desktop: the launcher's video host",
                 "the launcher's video host is not blocked in /etc/hosts",
