@@ -15,13 +15,21 @@
 //! it (the consultant's C2, ledger 2352).
 //!
 //! The init waits for `/dev/dri/renderD<N>`, then runs Debian 13's
-//! `vulkaninfo --summary` with anv's ICD alone and `eglinfo -B`, from the
-//! volume `tools/common/fetch/fetch-intel-uapi.sh` makes. The judge wants:
+//! `vulkaninfo --summary` with anv's ICD alone, `vk-offscreen`
+//! (`nvrm/test/vk-offscreen.c`: a device, an image, a buffer mapped, a clear
+//! submitted and its fence waited for, the pixels read back) and
+//! `eglinfo -B -p surfaceless`, from the volume
+//! `tools/common/fetch/fetch-intel-uapi.sh` makes. The judge wants:
 //!
 //! 1. the fake's facts line and the render node published;
 //! 2. anv's device, named as Mesa names ADL-N, with Mesa's Intel driver id,
 //!    and `vulkaninfo` exiting 0;
-//! 3. iris as an EGL renderer on the same device, and `eglinfo` exiting 0.
+//! 3. `vk-offscreen` reaching its read-back: the fake runs nothing, so the
+//!    pixels are wrong, and what counts is that every call before them
+//!    (objects, mmaps, a context, execbuffer and its fence) answered;
+//! 4. iris as the surfaceless EGL renderer on the same device, and `eglinfo`
+//!    exiting 0. GBM's platform needs a card node, which a render-only driver
+//!    has not, so it is not asked for.
 //!
 //! Every `intel: unserved …` line is printed: what Mesa asked that the front
 //! end does not serve, to be added as M3 to M5 find them (§8, risk 4).
@@ -106,7 +114,9 @@ echo "intel-uapi-gate: $node is there after ${waited}s"
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABLE=1 \
     /data/usr/bin/vulkaninfo --summary 2>&1
 echo "intel-uapi-gate: vulkaninfo exited $?"
-MESA_SHADER_CACHE_DISABLE=1 /data/usr/bin/eglinfo -B 2>&1
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABLE=1     /bin/vk-offscreen 2>&1
+echo "intel-uapi-gate: vk-offscreen exited $?"
+MESA_SHADER_CACHE_DISABLE=1 /data/usr/bin/eglinfo -B -p surfaceless 2>&1
 echo "intel-uapi-gate: eglinfo exited $?"
 exit 0
 "#;
@@ -134,6 +144,10 @@ const UNSERVED: &str = "intel: unserved ";
 const DEVICE: &str = "Intel(R) Graphics (ADL-N)";
 /// `vulkaninfo --summary`'s driver line for anv.
 const ANV: &str = "DRIVER_ID_INTEL_OPEN_SOURCE_MESA";
+/// `vk-offscreen`'s line once it read the pixels back, right or wrong.
+const READ_BACK: &[&str] = &["pixels wrong on", "pixels cleared to"];
+/// Where `vk-offscreen` is in the image.
+const OFFSCREEN_PATH: &str = "bin/vk-offscreen";
 /// `eglinfo -B`'s renderer line, whose value names the device iris drives.
 const RENDERER: &str = "OpenGL core profile renderer: ";
 
@@ -248,6 +262,14 @@ pub(crate) fn test_intel_uapi(args: &Args) -> Result<()> {
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
     let busybox = busybox::program(arch)?;
     let mut files = rustc::files(LINKS);
+    let dir = paths::build_dir(arch).join("intel-uapi");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| Error::new(format!("making {}: {error}", dir.display())))?;
+    files.push(crate::ports::File {
+        path: OFFSCREEN_PATH.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-offscreen")?),
+    });
     files.push(crate::ports::File {
         path: RUN_PATH.to_owned(),
         mode: 0o755,
@@ -296,7 +318,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
             line.trim()
         ));
     }
-    let wants: [Want<'_>; 7] = [
+    let wants: [Want<'_>; 8] = [
         ("the fake back end's facts", &|line| {
             line.contains(FACTS) && line.contains("24 EUs")
         }),
@@ -314,6 +336,9 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
         }),
         ("vulkaninfo exiting 0", &|line| {
             line.contains("intel-uapi-gate: vulkaninfo exited 0")
+        }),
+        ("vk-offscreen reading its pixels back", &|line| {
+            line.contains("vk-offscreen: ") && READ_BACK.iter().any(|said| line.contains(said))
         }),
         ("iris's renderer", &|line| {
             line.contains(RENDERER) && line.contains(DEVICE)
@@ -349,6 +374,8 @@ mod tests {
   3.0 |     deviceName         = Intel(R) Graphics (ADL-N)
   3.1 |     driverID           = DRIVER_ID_INTEL_OPEN_SOURCE_MESA
   3.2 | intel-uapi-gate: vulkaninfo exited 0
+  3.5 | vk-offscreen: 4096 of 4096 pixels wrong on Intel(R) Graphics (ADL-N); first is (0,0,0,0)
+  3.6 | intel-uapi-gate: vk-offscreen exited 1
   4.0 | OpenGL core profile renderer: Mesa Intel(R) Graphics (ADL-N)
   4.1 | intel-uapi-gate: eglinfo exited 0
   5.0 | init     the shell exited with 17";
@@ -366,6 +393,7 @@ mod tests {
             ("deviceName", "anv's device"),
             ("driverID", "driver id"),
             ("vulkaninfo exited 0", "vulkaninfo exiting 0"),
+            ("pixels wrong", "vk-offscreen"),
             ("OpenGL core profile renderer", "iris's renderer"),
         ] {
             let text: Vec<String> = lines(GOOD)

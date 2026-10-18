@@ -475,7 +475,7 @@ fn vk_offscreen(dir: &Path) -> Result<Vec<u8>> {
 /// `nvrm/test/<name>.c`, built as [`vk_offscreen`] is: `vk-offscreen`, and
 /// `vk-dmabuf`, a block-linear image in video memory shared between two
 /// processes as a name-only dmabuf and its pixels compared (N3b).
-fn vk_test(dir: &Path, name: &str) -> Result<Vec<u8>> {
+pub(crate) fn vk_test(dir: &Path, name: &str) -> Result<Vec<u8>> {
     let source = crate::paths::workspace_root()
         .join(format!("src/user/system/linux/drivers/nvrm/test/{name}.c"));
     let out = dir.join(name);
