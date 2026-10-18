@@ -136,6 +136,34 @@ impl HwContext {
         image: &mut [u32],
         default: Option<&[u32]>,
     ) -> Result<Self, ContextError> {
+        Self::build(
+            engine,
+            place,
+            image,
+            default.map_or(Init::Inhibited, Init::Copy),
+        )
+    }
+
+    /// [`HwContext::new`] for an image the engine's default state was
+    /// already copied into ([`lrc::lrc_init_state_after_copy`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ContextError`].
+    pub fn new_from_copied_default(
+        engine: EngineInfo,
+        place: ContextPlace,
+        image: &mut [u32],
+    ) -> Result<Self, ContextError> {
+        Self::build(engine, place, image, Init::Copied)
+    }
+
+    fn build(
+        engine: EngineInfo,
+        place: ContextPlace,
+        image: &mut [u32],
+        default: Init<'_>,
+    ) -> Result<Self, ContextError> {
         let aligned = |x: u32| x.is_multiple_of(4096);
         if !place.ring_size.is_power_of_two()
             || place.ring_size < 4096
@@ -148,8 +176,19 @@ impl HwContext {
             return Err(ContextError::Place);
         }
         let table = offsets_table(&engine);
-        let inhibited = lrc::lrc_init_state(image, default, table, engine.mmio_base, place.pml4)
-            .map_err(ContextError::Image)?;
+        let inhibited = match default {
+            Init::Copy(default) => {
+                lrc::lrc_init_state(image, Some(default), table, engine.mmio_base, place.pml4)
+            }
+            Init::Inhibited => {
+                lrc::lrc_init_state(image, None, table, engine.mmio_base, place.pml4)
+            }
+            Init::Copied => {
+                lrc::lrc_init_state_after_copy(image, false, table, engine.mmio_base, place.pml4)
+                    .map(|()| false)
+            }
+        }
+        .map_err(ContextError::Image)?;
         let (_, wa_page) = lrc::alloc_state_size(table);
         let indirect_ggtt = place.image_ggtt + wa_page * 4096;
         let wa = wa_page as usize * 1024;
@@ -342,4 +381,15 @@ impl<T: Copy> EngineState<T> {
         self.execlists
             .process_csb(mmio, hwsp, clock, self.engine.mmio_base, out)
     }
+}
+
+/// How a context's image starts.
+#[derive(Clone, Copy, Debug)]
+enum Init<'a> {
+    /// Restore-inhibited: no default yet.
+    Inhibited,
+    /// From this default state.
+    Copy(&'a [u32]),
+    /// The default state is already in the image.
+    Copied,
 }

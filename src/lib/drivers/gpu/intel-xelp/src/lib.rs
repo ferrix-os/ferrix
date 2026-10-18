@@ -23,6 +23,7 @@
 //! process replaces.
 //!
 //! * [`reg`]: `i915_reg_defs.h`'s helpers: bits, masks, masked writes;
+//! * [`backend`]: the GPU as the i915 front end's back end, over a [`backend::Platform`];
 //! * [`io`]: what the process supplies: register access and time;
 //! * [`device_info`]: `i915_pci.c`'s `adl_p_info` and the ADL-N ids;
 //! * [`uncore`]: `intel_uncore.c`'s forcewake, for Gen12;
@@ -53,6 +54,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod backend;
 pub mod clock;
 pub mod commands;
 pub mod device_info;
@@ -87,6 +89,8 @@ pub mod workarounds;
 mod model;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_backend;
 #[cfg(test)]
 mod tests_exec;
 #[cfg(test)]
