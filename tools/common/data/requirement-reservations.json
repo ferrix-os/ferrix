@@ -96,11 +96,11 @@
       "purpose": "The Intel GPU's kernel changes K2-K6 (docs/INTEL-GPU.md section 5; the consultant's design review, ledger 2026-10-18 line 2352, which asks for one reservation before any code). K2, core: L.iommu.73-78, dmar0's RMRR identity domain for 00:02.0 (exactly the RMRR's pages, refused over usable RAM or unaligned, its frames reserved for the boot, driver pins over it refused and never removing an RMRR entry, never detached across restarts). K3's L.object.192 and 194-196, L.device.44-45 and H.DMA.10 were written by intel-k3, which released L.object.193 and 197 unwritten. K4's L.device.46-48 were written by intel-k4, which released L.device.49 unwritten. K5's L.object.198-202 were released unwritten by intel-k5: its rules are the chardev core's, in the load ring, held by the chardev check and its controls. K6's L.user.132-133 were written by intel-k6, which released L.user.134 unwritten. Each landing releases its own ids; none for K7"
     },
     {
-      "ids": ["L.sched.80-83"],
+      "ids": ["L.sched.80-83", "H.SCHED.14"],
       "owner": "thread-times",
       "branch": "thread-times",
       "date": "2026-10-18",
-      "purpose": "Per-thread profile, first steps (docs/backlog/p2.md, 'A per-thread profile of a program cannot be taken on Ferrix'): a task's kernel time counted from each entry from user mode to the next return, user time not counted as kernel time, and voluntary and involuntary switches counted, for stime and the ctxt-switch lines of /proc (design to the session's own consultant)"
+      "purpose": "Per-thread profile, first steps (docs/backlog/p2.md, 'A per-thread profile of a program cannot be taken on Ferrix'): a task's kernel time counted from each entry from user mode to the next return, user time not counted as kernel time, and voluntary and involuntary switches counted, for stime and the ctxt-switch lines of /proc (design to the session's own consultant); H.SCHED.14, their parent: a task's processor time reported split into kernel time and the rest, and its switches counted as voluntary or involuntary (consultant, ledger 2026-10-18 line 2419)"
     },
     {
       "ids": ["L.iommu.59-72"],
