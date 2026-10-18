@@ -138,6 +138,7 @@ mod init_file;
 mod initramfs;
 mod input;
 mod installer;
+mod intel_uapi;
 mod ipc;
 mod jobs;
 mod kaslr;
@@ -541,6 +542,7 @@ const TASKS: &[&[Task]] = &[
     hotpath::TASKS,
     init::TASKS,
     input::TASKS,
+    intel_uapi::TASKS,
     installer::TASKS,
     ipc::TASKS,
     jobs::TASKS,

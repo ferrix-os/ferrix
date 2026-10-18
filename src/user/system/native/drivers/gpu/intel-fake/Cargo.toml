@@ -1,0 +1,25 @@
+[package]
+name = "ferrix-intel-fake"
+description = "The Intel driver's render node over a fake back end that completes every batch at once: for cargo xtask test-intel-uapi alone, never a product image (docs/INTEL-GPU.md section 6; the consultant's C2)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "intel-fake"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-chardevctl.workspace = true
+ferrix-intel-xelp.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true

@@ -120,6 +120,7 @@ members = [
     "src/user/system/native/drivers/usb/usbdev",
     "src/user/system/native/drivers/gpu/gc400",
     "src/user/system/native/drivers/gpu/intel",
+    "src/user/system/native/drivers/gpu/intel-fake",
     "src/user/system/native/drivers/console/vport",
     "src/user/system/native/devmgr",
     "src/user/system/native/drvupdated",

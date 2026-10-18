@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: SetZero <info@magical.rocks>
+Date: Sun, 18 Oct 2026 21:40:00 +0200
+Subject: [PATCH] hw/misc/pci-testdev: Stand in for another device's identity
+
+Add x-vendor-id, x-device-id and x-class-code properties. Zero, the
+default, keeps the test device's own Red Hat 1b36:0005, class "other".
+Set, they make the function answer as a device QEMU does not emulate,
+so a guest's driver for that device can be started against it and a
+guest's user space that finds devices by their PCI identity in sysfs
+(libdrm's drmGetDevices2, which Mesa's anv filters by vendor 0x8086)
+sees that device.
+
+Ferrix's test-intel-uapi boots one at 00:02.0 as 8086:46d4, class
+030000, Alder Lake-N's integrated GPU, and serves it with the Intel
+driver's fake back end (docs/INTEL-GPU.md section 6). The device does
+nothing more than the test device does.
+---
+ hw/misc/pci-testdev.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+--- a/hw/misc/pci-testdev.c
++++ b/hw/misc/pci-testdev.c
+@@ -92,6 +92,10 @@
+     uint64_t membar_size;
+     bool membar_backed;
+     MemoryRegion membar;
++
++    uint16_t x_vendor_id;
++    uint16_t x_device_id;
++    uint32_t x_class_code;
+ };
+ 
+ #define TYPE_PCI_TEST_DEV "pci-testdev"
+@@ -251,6 +255,22 @@
+ 
+     pci_conf[PCI_INTERRUPT_PIN] = 0; /* no interrupt pin */
+ 
++    /*
++     * Stand in for a device QEMU does not emulate: its vendor, device and
++     * class code as given, so a guest's driver for that device can be
++     * started against this one. Zero keeps the test device's own.
++     */
++    if (d->x_vendor_id) {
++        pci_config_set_vendor_id(pci_conf, d->x_vendor_id);
++    }
++    if (d->x_device_id) {
++        pci_config_set_device_id(pci_conf, d->x_device_id);
++    }
++    if (d->x_class_code) {
++        pci_config_set_class(pci_conf, d->x_class_code >> 8);
++        pci_config_set_prog_interface(pci_conf, d->x_class_code & 0xff);
++    }
++
+     memory_region_init_io(&d->mmio, OBJECT(d), &pci_testdev_mmio_ops, d,
+                           "pci-testdev-mmio", IOTEST_MEMSIZE * 2);
+     memory_region_init_io(&d->portio, OBJECT(d), &pci_testdev_pio_ops, d,
+@@ -329,6 +349,9 @@
+ static const Property pci_testdev_properties[] = {
+     DEFINE_PROP_SIZE("membar", PCITestDevState, membar_size, 0),
+     DEFINE_PROP_BOOL("membar-backed", PCITestDevState, membar_backed, false),
++    DEFINE_PROP_UINT16("x-vendor-id", PCITestDevState, x_vendor_id, 0),
++    DEFINE_PROP_UINT16("x-device-id", PCITestDevState, x_device_id, 0),
++    DEFINE_PROP_UINT32("x-class-code", PCITestDevState, x_class_code, 0),
+ };
+ 
+ static void pci_testdev_class_init(ObjectClass *klass, const void *data)

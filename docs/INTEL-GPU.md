@@ -674,6 +674,58 @@ M1 and M2, without the box.
 
 ## 10. Where it stands
 
+**M3's hardware-independent part (branch `intel-uapi`, 2026-10-18).**
+
+* **The front end** is `intel-xelp`'s `frontend` module: every ioctl of
+  §2.1, the opens, mmaps and releases, and the chardev core's dmabuf events,
+  answered as Linux v7.0's DRM core and i915 answer them on Gen12 (each
+  function names the one it follows). Waits are deferred replies, at most 64
+  at once (C1). An execbuffer that reads or writes a shared object sets its
+  dmabuf's slot (ledger 2360). No memory is allocated, so every table has a
+  fixed size (`frontend::limits`). The uAPI's numbers and layouts are now
+  printed by `probe/i915.c` from the v7.0 headers, and two tests hold
+  `uapi.rs` to every line, both ways.
+* **The back end interface** (`frontend::Backend`) was agreed with M2
+  through main on 2026-10-18: Ok, Hung and Cancelled completions;
+  `service`, `next_deadline` and `completed`; `ContextParams`; `bind`
+  refusing a PAT index past 3. The front end submits a request only once its
+  fences have signalled, in order per hardware context, and unbinds only
+  after completion. The serving loop is
+  `src/user/system/native/drivers/gpu/intel/src/serve.rs`, which M2's
+  `intel` adds to its module tree. Its interrupt goes to the loop's port
+  under `KEY_INTERRUPT`.
+* **Departures from i915**, each said where it is made: relocations and
+  unpinned objects are refused (i915 refuses relocations on Gen12 past TGL
+  too). A syncobj cannot be exported as an opaque descriptor, because the
+  chardev core has no object for one; that would be a kernel interface, so
+  it answers `EOPNOTSUPP` and says so once. A binding over one still in use
+  answers `EAGAIN` instead of sleeping. Userptr (K7), the legacy mmap,
+  pread, pwrite and perf answer `ENODEV`. Every unserved call is said once a
+  boot, by name.
+* **`cargo xtask test-intel-uapi`** boots `intel-fake`
+  (`drivers/gpu/intel-fake`) as `intel`, on a QEMU `pci-testdev` that answers
+  as 8086:46d4, class 030000, at 00:02.0 (QEMU patch 0006), under
+  `ferrix.intelgpu` with VT-d translating. The volume is
+  `fetch-intel-uapi.sh`'s: Debian 13's Mesa 25.0.7 with anv and iris kept.
+  In its first passing run the kernel published `renderD128` (K3).
+  `vulkaninfo --summary` named "Intel(R) Graphics (ADL-N)" with
+  `DRIVER_ID_INTEL_OPEN_SOURCE_MESA` and exited 0, after anv's
+  dmabuf-sync-file probe (K5). `vk-offscreen` made a device, an image and a
+  mapped buffer, submitted a clear, waited on its fence and read back. Its
+  pixels were wrong, as they must be on a back end that runs nothing.
+  `eglinfo -B -p surfaceless` named "Mesa Intel(R) Graphics (ADL-N)" for GL
+  core, compatibility and ES, and exited 0. The run said no `unserved`
+  line. Only that gate's image may carry the fake: xtask refuses an `intel`
+  that is `intel-fake` in every other image. It is never cited for K2 (C2).
+* **GBM** on the render node fails, because GBM wants a card node. That is
+  M4's business, through the WSI.
+* **The box checkpoint** is `tools/common/n150/intel-checkpoint.sh
+  [BOX]`. It runs anv's `vulkaninfo` and iris's `eglinfo` on the box's
+  running Ferrix, from the same Mesa copied to `/tmp`, and keeps the output in
+  `~/.local/share/ferrix/n150-linux/evidence/`. Until K2 translates 00:02.0
+  and M2's `intel` serves the node, it records the kernel's refusal.
+* **Left for M3's exit**: M2's back end behind `serve.rs`, K2, and a box run.
+
 2026-10-18, later: the customer decided D1 and D2, and §3.6 was added (the
 i915 file to Rust module mapping and what is left out). The consultant's
 design review is in (§5.1, ledger 2352). The lib crate `intel-xelp`
