@@ -708,6 +708,23 @@ Mesa 26.0.8; raw output in `~/.local/share/ferrix/n150-linux/intelgpu-m0/results
   applies `engine_mask_apply_media_fuses` and does not assume `adl_p_info`'s
   list.
 
+**M2's code is built, not yet run on the box (2026-10-18, branch `xelp-m2`).**
+`intel-xelp` holds the 4-level PPGTT (`ppgtt`, `gen8_ppgtt.c`), binds into
+the driver's own GGTT window with each entry read back, the PAT and MOCS
+read back, execlists' ports and CSB (`process_csb`, `wa_csb_read`), contexts
+from a recorded default image (`submission`, `lrc_init_state`), the context
+workarounds read back by SRM, and one engine's reset with the hung context
+skipped, banned and replayed (`reset`, `intel_reset.c`). They run on a model
+of the engine's execlist port in host tests (51). The driver goes on from
+M1's lines to M2 under `ferrix.intelgpu`, in four checkpoints the box runs
+one at a time (`m2::CHECKPOINT`, built by
+`~/.local/share/ferrix/n150-linux/intelgpu-m2-build.sh` and run by
+`intelgpu-m2.sh BOX_ADDR cpN`, which prints what each proves): 1 the PAT,
+MOCS, workarounds, engines and a PPGTT read back; 2 the default images and
+`MI_STORE_DWORD_IMM`; 3 the blits (one onto the lit plane, hashed, left on
+the screen for a photograph) and a PPGTT batch; 4 a hung batch reset and
+banned. Every completion is counted as seen by interrupt or by the 1 ms poll.
+
 **The kernel items (intel-gpu-kernel).** K3 landed in caf25c0d5 (ledger
 2356): `ferrix.intelgpu`, the render-only HELLO, the refusal of every node
 while 00:02.0's DMA is untranslated, and the iGPU's own pin budget. Its box
