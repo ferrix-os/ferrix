@@ -1044,3 +1044,55 @@ fn cs_timestamp_frequency() {
         19_000_000 + 1_000_000
     );
 }
+
+#[test]
+fn gt_and_engine_bring_up() {
+    use crate::engine::ENGINES;
+    use crate::{gt, workarounds};
+    let mut regs = Regs::default();
+    gt::setup_private_pat(&mut regs);
+    let wal = workarounds::gt_init_workarounds(0b11, &ENGINES[..4]);
+    let report = gt::intel_gt_init_hw(&mut regs, &wal).expect("unlocked");
+    assert_eq!(report.lost_workarounds, 0);
+    // The PAT, then the GT list, then 64 + 32 MOCS writes. On registers that
+    // read 0 the steering to subslice 0 and MISCCPCTL's clear change
+    // nothing, so wa_list_apply's read-modify-write skips them, as i915's
+    // does: DFR_DISABLE and the two VDBOX clock gates remain.
+    assert_eq!(regs.writes[0], (0x4800, 3));
+    assert_eq!(
+        regs.writes[8..11],
+        [(0x9550, 1 << 9), (0x1c_3f10, 1 << 22), (0x1d_3f10, 1 << 22)]
+    );
+    assert_eq!(regs.writes.len(), 8 + 3 + 96);
+    // A locked WOPCM stops it before the MOCS.
+    let mut locked = Regs::default();
+    let _ = locked.values.insert(0xc050, 1);
+    assert_eq!(
+        gt::intel_gt_init_hw(&mut locked, &wal),
+        Err(gt::InitError::WopcmLocked)
+    );
+
+    let rcs = &ENGINES[0];
+    let mut regs = Regs::default();
+    let report = gt::intel_engine_resume(
+        &mut regs,
+        rcs.mmio_base,
+        &workarounds::engine_workarounds(rcs, mocs::UC_INDEX),
+        &workarounds::whitelist(rcs),
+        0x1000,
+    );
+    assert_eq!(report.still_in_error, 0);
+    let tail: Vec<(u32, u32)> = regs.writes.iter().rev().take(7).rev().copied().collect();
+    assert_eq!(
+        tail,
+        [
+            (0x2098, !0),
+            (0x229c, masked_bit_enable(1 << 3)),
+            (0x209c, masked_bit_disable(1 << 8)),
+            (0x2080, 0x1000),
+            (0x20b4, !0),
+            (0x20b0, !0),
+            (0x20b4, !1),
+        ]
+    );
+}
