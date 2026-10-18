@@ -12,11 +12,16 @@
 
 extern crate alloc;
 
+mod acpi;
 mod arch;
 mod console;
 mod early;
+mod irq;
 mod mm;
+mod mmio;
+mod timer;
 mod trap;
+mod vmap;
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -24,6 +29,7 @@ use alloc::vec::Vec;
 use core::panic::PanicInfo;
 
 use ferrix_bootinfo::{BootInfo, BootView, KERNEL_VMAP_BASE, MemKind, PAGE_SIZE};
+use ferrix_paging::MapFlags;
 
 use console::println;
 use early::EarlyMemory;
@@ -95,24 +101,142 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     };
     report_memory(&stats);
 
-    if let Err(problem) = memory_check(&stats) {
+    if let Err(problem) = vmap::init() {
+        println!("FERRIX-PANIC could not bring up the kernel address arena: {problem}");
+        arch::halt()
+    }
+
+    if let Err(problem) = memory_check(&stats, view.raw().kernel_phys) {
         println!("FERRIX-PANIC stage 2 self-check failed: {problem}");
         arch::halt()
     }
-    println!("  stage 2  frame allocator and heap verified");
+    println!("  stage 2  frame allocator, heap and vmap arena verified");
 
     if let Err(problem) = trap_check() {
         println!("FERRIX-PANIC stage 3 self-check failed: {problem}");
         arch::halt()
     }
+
+    // Everything above is synchronous: traps the kernel caused deliberately.
+    // From here something arrives that the kernel did not ask for at the
+    // moment it arrives, which is the whole difference between a program and
+    // an operating system.
+    //
+    // SAFETY: called once, on the boot CPU, after `init_traps` filled the
+    // vector table and while interrupts are still masked.
+    let clocks = match unsafe { arch::init_interrupts(view) } {
+        Ok(report) => report,
+        Err(problem) => {
+            println!("FERRIX-PANIC could not bring up interrupts: {problem}");
+            arch::halt()
+        }
+    };
+    report_clocks(&clocks);
+
+    if let Err(problem) = timer::init() {
+        println!("FERRIX-PANIC could not register the timer interrupt: {problem}");
+        arch::halt()
+    }
+    arch::enable_interrupts();
+
+    let measured = match timer_check() {
+        Ok(hertz) => hertz,
+        Err(problem) => {
+            println!("FERRIX-PANIC stage 3 self-check failed: {problem}");
+            arch::halt()
+        }
+    };
     println!(
-        "  stage 3  {} breakpoints and {} page faults handled",
+        "  stage 3  {} breakpoints, {} page faults, {} ticks at {} Hz",
         trap::breakpoint_count(),
-        trap::handled_fault_count()
+        trap::handled_fault_count(),
+        timer::ticks(),
+        measured,
     );
+
+    // The rest of stage 2, deliberately last. Each of these needs something a
+    // later part of boot brought up — the arena needs the heap, the sweep
+    // needs every mapping the kernel is ever going to make, and reclaiming
+    // ACPI memory needs the tables to have been read, which happened in
+    // `init_interrupts` above.
+    if let Err(problem) = finish_memory(view) {
+        println!("FERRIX-PANIC stage 2 self-check failed: {problem}");
+        arch::halt()
+    }
 
     println!("{SUCCESS_MARKER} stages 1-3");
     arch::shutdown()
+}
+
+/// The half of stage 2 that cannot run until the rest of boot has.
+///
+/// Three things, in an order that is forced rather than chosen:
+///
+/// 1. the loader's identity map goes, which is what proves the kernel is
+///    genuinely higher-half rather than accidentally depending on a low
+///    address somewhere;
+/// 2. the W^X sweep runs, which can only pass *after* step 1 — the identity
+///    map has to be writable and executable, because the instruction after the
+///    page table switch is fetched through it;
+/// 3. the memory early boot has finished with goes back to the allocator.
+fn finish_memory(view: &BootView<'_>) -> Result<(), &'static str> {
+    // Before: the sweep must be able to *see* a violation, or its passing
+    // afterwards means nothing. The loader's identity map is one, by
+    // construction, so this is a test of the test.
+    if mm::check_w_xor_x(view).is_ok() {
+        return Err("the W^X sweep cannot see the loader's identity map");
+    }
+
+    // SAFETY: the kernel executes, and reaches its stack and the hand-off,
+    // entirely through the upper half. Nothing has held a lower-half address
+    // since `_start`.
+    unsafe { arch::drop_identity_map(view) };
+
+    // And nothing in the lower half resolves any more, which is the claim
+    // "higher-half" actually makes. Address zero specifically: a null
+    // dereference in kernel code must fault rather than find the first page of
+    // physical memory, which under the identity map it would have.
+    if mm::translate(0).is_some() {
+        return Err("the identity map outlived the call that dropped it");
+    }
+
+    let wx = match mm::check_w_xor_x(view) {
+        Ok(report) => report,
+        Err(found) => {
+            // Printed rather than counted: one offending mapping is enough,
+            // and an address is what makes it findable. A count would say
+            // there is a problem without saying where.
+            println!(
+                "  w^x      {:#x} is writable and executable, {} bytes of it",
+                found.virt, found.len
+            );
+            return Err("a mapping is both writable and executable");
+        }
+    };
+    if wx.executable == 0 {
+        return Err("the sweep found no executable mapping at all, so it swept nothing");
+    }
+    println!(
+        "  w^x      {} mappings swept, {} executable, none writable",
+        wx.leaves, wx.executable
+    );
+
+    // SAFETY: called once, after the last use of `crate::acpi::Firmware` —
+    // interrupt bring-up above is the only reader — and the loader's code has
+    // not run since the jump into `_start`.
+    let reclaimed = unsafe { mm::reclaim_boot_memory(view) };
+    let usage = vmap::usage();
+    println!(
+        "  reclaim  {} MiB from the loader and ACPI, {} free; arena {} live, {} KiB",
+        reclaimed.total() * 4 / 1024,
+        mm::free_frames() * 4 / 1024,
+        usage.allocations,
+        usage.bytes / 1024,
+    );
+    if reclaimed.total() == 0 {
+        return Err("nothing was reclaimed, so the memory map describes no early boot");
+    }
+    Ok(())
 }
 
 /// Stage 3's exit criterion: the kernel can take a trap and carry on.
@@ -225,6 +349,146 @@ fn check_demand_paging() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// A one-shot must fire exactly once.
+///
+/// **This is the check that catches the bug worth catching here.** AArch64's
+/// timer interrupt is level triggered: the line stays asserted while the
+/// comparator is in the past, so a handler that acknowledges the controller
+/// without disarming the timer is re-entered immediately, forever. That does
+/// not show up as a wrong number — it shows up as a machine that stops, with
+/// the last thing in the log being whatever it printed before arming.
+///
+/// So: arm once, wait for the tick, then wait several further intervals and
+/// require the count not to have moved.
+fn check_one_shot(interval_nanos: u64) -> Result<(), &'static str> {
+    let before = timer::ticks();
+    timer::after(interval_nanos);
+
+    let mut spins: u64 = 0;
+    while timer::ticks() == before {
+        arch::wait_for_interrupt();
+        spins = spins.saturating_add(1);
+        if spins > 10_000_000 {
+            timer::stop();
+            return Err("a one-shot timer never fired");
+        }
+    }
+
+    let settled = timer::ticks();
+    spin_nanos(interval_nanos.saturating_mul(10));
+    if timer::ticks() != settled {
+        timer::stop();
+        return Err("a one-shot timer fired more than once");
+    }
+    Ok(())
+}
+
+/// Spin on the counter for `nanos`.
+///
+/// Deliberately not `wait_for_interrupt`: the point is to let real time pass
+/// while *not* waiting for a timer, so that a timer which fires anyway is
+/// noticed.
+fn spin_nanos(nanos: u64) {
+    let until = timer::now_nanos().saturating_add(nanos);
+    while timer::now_nanos() < until {}
+}
+
+/// Print what interrupt and time bring-up found.
+fn report_clocks(report: &irq::Report) {
+    let (counter_mhz, counter_thousandths) = megahertz(report.counter_hz);
+    let (timer_mhz, timer_thousandths) = megahertz(report.timer_hz);
+    println!(
+        "  clock    {} at {}.{:03} MHz",
+        report.counter, counter_mhz, counter_thousandths
+    );
+    println!(
+        "  irqs     {}, {} at {}.{:03} MHz",
+        report.controller, report.timer, timer_mhz, timer_thousandths
+    );
+}
+
+/// A frequency split into megahertz and thousandths of one.
+///
+/// There is no floating point in this kernel and there is not going to be:
+/// the state a kernel has to save and restore on every trap is large enough
+/// without it. Two integers and a `{:03}` say the same thing.
+const fn megahertz(hz: u64) -> (u64, u64) {
+    (hz / 1_000_000, (hz % 1_000_000) / 1000)
+}
+
+/// The rest of stage 3's exit criterion: arm a timer, count a thousand ticks,
+/// and require the rate to be the one that was asked for.
+///
+/// The measurement is what makes this a test rather than a demonstration. A
+/// timer that fires is easy; a timer that fires at the frequency it was
+/// programmed to is the thing every later stage depends on, because a
+/// scheduler quantum, a `TCP` retransmit and a `futex` timeout are all this
+/// number multiplied by something.
+///
+/// Ticks are counted with the *interrupt* and elapsed time is measured with
+/// the *counter* — two independent pieces of hardware on x86-64. Counting
+/// ticks and then converting them to seconds by the rate they were programmed
+/// at would be arithmetic, not a measurement: it could not fail.
+fn timer_check() -> Result<u64, &'static str> {
+    /// Ticks to count.
+    const TICKS: u64 = 1000;
+    /// The interval to ask for, so a thousand ticks is about a second.
+    const INTERVAL_NANOS: u64 = 1_000_000;
+    /// How far the measured rate may sit from the requested one.
+    ///
+    /// Generous, and it has to be: the handler re-arms the timer, so every
+    /// period carries one interrupt entry and exit, and under an emulator
+    /// that is not a rounding error. What this is testing is that the clock
+    /// and the timer agree about how long a second is -- not the interrupt
+    /// latency, which is stage 14's subject and needs a different test.
+    const TOLERANCE_PERCENT: u64 = 25;
+
+    if timer::counter_hz() == 0 {
+        return Err("the counter reports no frequency");
+    }
+
+    check_one_shot(INTERVAL_NANOS)?;
+
+    let before = timer::ticks();
+    let started = timer::now_nanos();
+    timer::every(INTERVAL_NANOS);
+
+    let mut spins: u64 = 0;
+    while timer::ticks().wrapping_sub(before) < TICKS {
+        arch::wait_for_interrupt();
+        spins = spins.saturating_add(1);
+        // `wait_for_interrupt` can return without one having arrived, so this
+        // counts iterations rather than trusting it. Far more than a thousand
+        // ticks could need, and far less than the boot test's timeout.
+        if spins > 10_000_000 {
+            timer::stop();
+            return Err("the timer stopped arriving before a thousand ticks");
+        }
+    }
+
+    let elapsed = timer::now_nanos().saturating_sub(started);
+    timer::stop();
+
+    if elapsed == 0 {
+        return Err("a thousand ticks took no measurable time");
+    }
+    if irq::unclaimed() != 0 {
+        return Err("an interrupt arrived that nothing had registered for");
+    }
+    if irq::delivered() < TICKS {
+        return Err("fewer interrupts reached a handler than ticks were counted");
+    }
+
+    let measured = TICKS * 1_000_000_000 / elapsed;
+    let requested = 1_000_000_000 / INTERVAL_NANOS;
+    let lowest = requested * (100 - TOLERANCE_PERCENT) / 100;
+    let highest = requested * (100 + TOLERANCE_PERCENT) / 100;
+    if measured < lowest || measured > highest {
+        return Err("the timer and the counter disagree about how long a second is");
+    }
+    Ok(measured)
+}
+
 /// Print what the allocators came up with.
 fn report_memory(stats: &mm::Stats) {
     println!(
@@ -242,16 +506,258 @@ fn report_memory(stats: &mm::Stats) {
 /// Every one of these is an invariant a later subsystem will assume without
 /// checking, because by then there will be no way to check it: a scheduler that
 /// gets a `Vec` back with the wrong contents has no idea the heap is at fault.
-fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
+fn memory_check(stats: &mm::Stats, kernel_phys: u64) -> Result<(), &'static str> {
     if stats.managed_frames == 0 {
         return Err("the frame allocator was given nothing");
     }
 
     check_frames()?;
-    check_heap()?;
 
-    if mm::heap_allocated() != 0 {
+    // The heap must come back to where it started, and "where it started" is
+    // not zero: the vmap arena below is a live `Vec` and a live `BTreeMap`,
+    // and requiring zero afterwards would be requiring the arena not to exist.
+    // So the balance is checked around the allocations that are supposed to be
+    // transient, before anything permanent is built on top of them.
+    let heap_before = mm::heap_allocated();
+    let pages_before = mm::heap_pages();
+    check_heap()?;
+    if mm::heap_allocated() != heap_before {
         return Err("the heap did not give everything back");
+    }
+
+    // And gave the *pages* back too, not only the objects. `check_heap` grows
+    // a `Vec` to 32 KiB and a `BTreeMap` to two thousand nodes, which is tens
+    // of slab pages across several classes; a heap that kept them would pass
+    // every other check here and grow monotonically for the life of the
+    // system. What it is allowed to keep is one page per size class, which is
+    // the rule `ferrix_heap` states.
+    let kept = mm::heap_pages().saturating_sub(pages_before);
+    if kept > ferrix_heap::CLASSES {
+        return Err("the heap kept more slab pages than one per size class");
+    }
+
+    check_vmap(kernel_phys)?;
+    check_stacks()?;
+    Ok(())
+}
+
+/// The vmap arena hands out address space, maps it, and takes it back.
+///
+/// The frame count is what makes this a measurement: an arena that mapped the
+/// pages and never unmapped them would pass every read-back check here and
+/// leak a frame per page. Requiring the free count to return to exactly where
+/// it started is the only assertion that notices.
+fn check_vmap(kernel_phys: u64) -> Result<(), &'static str> {
+    const PAGES: u64 = 8;
+
+    let free_before = mm::free_frames();
+
+    let first = vmap::allocate(PAGES, MapFlags::KERNEL_DATA).map_err(|_| "vmap refused a range")?;
+    let second =
+        vmap::allocate(PAGES, MapFlags::KERNEL_DATA).map_err(|_| "vmap refused a second range")?;
+
+    if first.base == second.base {
+        return Err("vmap handed out the same address twice");
+    }
+    if first.base < vmap::ARENA_BASE || second.end() > vmap::ARENA_END {
+        return Err("vmap handed out an address outside its own arena");
+    }
+
+    // Two allocations may not touch: there is a guard page on each side of
+    // each, so even adjacent ones are two pages apart.
+    let (low, high) = if first.base < second.base {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    if high.base < low.end() + 2 * PAGE_SIZE {
+        return Err("two vmap allocations are not separated by their guard pages");
+    }
+
+    check_vmap_contents(first)?;
+    check_vmap_guards(first)?;
+    check_vmap_protection(first)?;
+    check_device_windows(kernel_phys)?;
+    vmap::check_invariants()?;
+
+    vmap::free(first.base).map_err(|_| "vmap refused to free its own allocation")?;
+    vmap::free(second.base).map_err(|_| "vmap refused to free its own allocation")?;
+
+    if vmap::free(first.base).is_ok() {
+        return Err("vmap freed the same allocation twice");
+    }
+    if mm::translate(first.base).is_some() {
+        return Err("freeing a vmap allocation left the mapping behind");
+    }
+    if mm::free_frames() != free_before {
+        return Err("a vmap allocation leaked frames: the free count moved");
+    }
+    Ok(())
+}
+
+/// Every page of an allocation is mapped, distinct and zeroed.
+fn check_vmap_contents(mapping: vmap::Mapping) -> Result<(), &'static str> {
+    let pages = mapping.len / PAGE_SIZE;
+    let mut previous = None;
+
+    for page in 0..pages {
+        let at = mapping.base + page * PAGE_SIZE;
+        let phys = mm::translate(at).ok_or("a vmap page is not mapped")?;
+        if Some(phys) == previous {
+            return Err("two vmap pages resolve to the same frame");
+        }
+        previous = Some(phys);
+
+        // SAFETY: `at` is inside an allocation this function was handed, so it
+        // is mapped writable and nothing else refers to it.
+        let existing = unsafe { core::ptr::read_volatile(at as *const u64) };
+        if existing != 0 {
+            return Err("a vmap page was not zeroed before it was handed out");
+        }
+        // SAFETY: as above.
+        unsafe { core::ptr::write_volatile(at as *mut u64, 0xA11C_0000 + page) };
+    }
+
+    for page in 0..pages {
+        let at = mapping.base + page * PAGE_SIZE;
+        // SAFETY: as above; written a moment ago.
+        if unsafe { core::ptr::read_volatile(at as *const u64) } != 0xA11C_0000 + page {
+            return Err("a vmap page did not hold what was written to it");
+        }
+    }
+    Ok(())
+}
+
+/// Permissions can be changed on a live mapping, and the change is in the
+/// tables rather than only in the caller's head.
+///
+/// Read back by walking the page tables, not by remembering what was asked
+/// for: what matters is what the hardware will do, and the whole reason the
+/// W^X sweep reads descriptors is that those are two different things.
+fn check_vmap_protection(mapping: vmap::Mapping) -> Result<(), &'static str> {
+    let before = mm::permissions_of(mapping.base).ok_or("a vmap page has no permissions at all")?;
+    if !before.write {
+        return Err("a fresh vmap allocation is not writable");
+    }
+
+    mm::protect_kernel(mapping.base, PAGE_SIZE, MapFlags::KERNEL_RODATA)
+        .map_err(|_| "protecting a vmap page was refused")?;
+    let after = mm::permissions_of(mapping.base).ok_or("protecting a page unmapped it")?;
+    if after.write {
+        return Err("protecting a page read-only left it writable");
+    }
+    if mm::translate(mapping.base).is_none() {
+        return Err("protecting a page moved what it translates to");
+    }
+
+    // And back, so the caller's own read-back check below still holds.
+    mm::protect_kernel(mapping.base, PAGE_SIZE, MapFlags::KERNEL_DATA)
+        .map_err(|_| "restoring a vmap page's permissions was refused")?;
+    Ok(())
+}
+
+/// A kernel stack is guard-paged at both ends and usable in between.
+///
+/// Not run *on* — switching stacks is stage 5's context switch, and doing it
+/// here would need the assembly that stage owns. What is checked is everything
+/// that has to be true before a stack can be switched to: it is mapped, it is
+/// writable to its last byte, the page below it is not, and freeing it gives
+/// the frames back.
+fn check_stacks() -> Result<(), &'static str> {
+    let free_before = mm::free_frames();
+    let stack = vmap::allocate_stack().map_err(|_| "no kernel stack could be allocated")?;
+
+    if stack.len() != vmap::STACK_PAGES * PAGE_SIZE {
+        return Err("a kernel stack is not the size it was asked for");
+    }
+    if !stack.top.is_multiple_of(16) {
+        // Both architectures require a 16-byte aligned stack pointer at a
+        // function call boundary, and neither faults on it — the symptom is a
+        // misaligned spill somewhere deep in the callee.
+        return Err("a kernel stack top is not sixteen-byte aligned");
+    }
+
+    // The last usable word, which is where the first push lands, and the first,
+    // which is the byte an overflow reaches last before the guard.
+    for at in [stack.top - 8, stack.base] {
+        // SAFETY: inside the stack's own mapping, which is writable and which
+        // nothing else refers to — no CPU is running on this stack.
+        unsafe { core::ptr::write_volatile(at as *mut u64, 0x57AC_0000_0000_0000) };
+        // SAFETY: as above.
+        if unsafe { core::ptr::read_volatile(at as *const u64) } != 0x57AC_0000_0000_0000 {
+            return Err("a kernel stack did not hold what was written to it");
+        }
+    }
+
+    if mm::translate(stack.base - PAGE_SIZE).is_some() {
+        return Err("a kernel stack has no guard page below it, so an overflow would be silent");
+    }
+    if mm::translate(stack.top).is_some() {
+        return Err("a kernel stack has no guard page above it");
+    }
+
+    // SAFETY: nothing is running on it; it was allocated a few lines above and
+    // never installed anywhere.
+    unsafe { vmap::free_stack(stack) }.map_err(|_| "a kernel stack could not be freed")?;
+    if mm::free_frames() != free_before {
+        return Err("a kernel stack leaked frames");
+    }
+    Ok(())
+}
+
+/// A device window lands where it was asked to, offset and all, and can be
+/// taken back.
+///
+/// The aperture used is the kernel's own image, which is real RAM rather than
+/// registers — nothing is read or written through the window, only translated,
+/// because reading RAM through an uncached device mapping while the same bytes
+/// sit in a cache is exactly the aliasing the architecture does not define.
+/// What is under test is the *address arithmetic*, which is where the bugs
+/// are: an I/O APIC's registers start at an offset within their page, and a
+/// window that rounded that away would work perfectly for the GIC and silently
+/// address the wrong register here.
+fn check_device_windows(kernel_phys: u64) -> Result<(), &'static str> {
+    const OFFSET: u64 = 0x40;
+
+    let free_before = mm::free_frames();
+    let at = vmap::map_device(kernel_phys + OFFSET, 0x100)
+        .map_err(|_| "a device window could not be mapped")?;
+
+    if at % PAGE_SIZE != OFFSET {
+        return Err("a device window did not preserve its offset within the page");
+    }
+    if mm::translate(at) != Some(kernel_phys + OFFSET) {
+        return Err("a device window does not resolve to the registers it was asked for");
+    }
+    match mm::permissions_of(at) {
+        Some(flags) if flags.device && !flags.execute => {}
+        Some(_) => return Err("a device window is not mapped as device memory"),
+        None => return Err("a device window is not mapped at all"),
+    }
+
+    vmap::unmap_device(at).map_err(|_| "a device window could not be unmapped")?;
+    if mm::translate(at).is_some() {
+        return Err("unmapping a device window left the mapping behind");
+    }
+    if mm::free_frames() != free_before {
+        return Err("a device window gave the aperture's frames to the buddy allocator");
+    }
+    Ok(())
+}
+
+/// The guard pages either side of an allocation are not mapped.
+///
+/// Not read or written, only translated. A guard page whose absence is proved
+/// by touching it proves it once and takes the machine down with it — the
+/// whole point is that there is no handler for a fault there, and stage 3's
+/// on-demand window is the only place a kernel fault is resolved rather than
+/// reported.
+fn check_vmap_guards(mapping: vmap::Mapping) -> Result<(), &'static str> {
+    if mm::translate(mapping.base - PAGE_SIZE).is_some() {
+        return Err("the guard page below a vmap allocation is mapped");
+    }
+    if mm::translate(mapping.end()).is_some() {
+        return Err("the guard page above a vmap allocation is mapped");
     }
     Ok(())
 }

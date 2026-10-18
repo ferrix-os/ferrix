@@ -23,6 +23,8 @@ struct Pages {
     live: BTreeMap<u64, u8>,
     budget: usize,
     handed_out: usize,
+    /// Stands in for the frame allocator's per-frame record.
+    slab_free: BTreeMap<u64, u16>,
 }
 
 impl Pages {
@@ -33,7 +35,13 @@ impl Pages {
             live: BTreeMap::new(),
             budget: pages,
             handed_out: 0,
+            slab_free: BTreeMap::new(),
         }
+    }
+
+    /// Pages this supply has handed out and not had back.
+    fn outstanding(&self) -> usize {
+        self.handed_out
     }
 }
 
@@ -71,6 +79,19 @@ unsafe impl Backing for Pages {
     fn write_link(&mut self, at: u64, value: u64) {
         assert_eq!(at % 8, 0, "links must be eight-byte aligned");
         let _ = self.links.insert(at, value);
+    }
+
+    fn slab_free(&self, page: u64) -> u16 {
+        self.slab_free.get(&page).copied().unwrap_or(0)
+    }
+
+    fn set_slab_free(&mut self, page: u64, objects: u16) {
+        assert_eq!(
+            page % PAGE_SIZE as u64,
+            0,
+            "a slab page must be page aligned"
+        );
+        let _ = self.slab_free.insert(page, objects);
     }
 }
 
@@ -367,4 +388,174 @@ fn a_new_heap_holds_nothing() {
     assert_eq!(heap.slab_pages(), 0);
     assert_eq!(heap.large_pages(), 0);
     assert_eq!(heap.free_objects(&pages), [0; CLASSES]);
+}
+
+// ---------------------------------------------------------------------------
+// Returning slab pages
+// ---------------------------------------------------------------------------
+
+/// A class that empties gives its pages back, keeping one.
+///
+/// The count is the whole point: before the per-page free count existed, this
+/// heap grew monotonically and a burst of small allocations was memory the
+/// system never saw again.
+#[test]
+fn an_emptied_class_returns_its_pages_but_keeps_one() {
+    let mut pages = Pages::with_budget(64);
+    let mut heap = Heap::new();
+    let request = Request::new(64, 8);
+    let per_page = PAGE_SIZE / 64;
+
+    // Four pages' worth, so there is something to give back.
+    let mut live = Vec::new();
+    for _ in 0..per_page * 4 {
+        live.push(heap.allocate(&mut pages, request).unwrap());
+    }
+    assert_eq!(heap.slab_pages(), 4);
+    assert_eq!(pages.outstanding(), 4);
+
+    for address in live.drain(..) {
+        heap.deallocate(&mut pages, address, request);
+    }
+
+    assert_eq!(
+        heap.slab_pages(),
+        1,
+        "an emptied class should keep exactly one page"
+    );
+    assert_eq!(heap.slab_pages_returned(), 3);
+    assert_eq!(pages.outstanding(), 1, "the pages did not reach the supply");
+    assert_eq!(heap.allocated_bytes(), 0);
+}
+
+/// The page that is kept still serves allocations.
+///
+/// A page returned to the supply while its objects were still linked would
+/// leave the class's free list pointing into memory the supply has given to
+/// somebody else — which is not a leak but a corruption, and the reason
+/// `unlink_page` exists.
+#[test]
+fn the_kept_page_still_works_after_the_others_go_back() {
+    let mut pages = Pages::with_budget(64);
+    let mut heap = Heap::new();
+    let request = Request::new(32, 8);
+    let per_page = PAGE_SIZE / 32;
+
+    let mut live: Vec<u64> = (0..per_page * 3)
+        .map(|_| heap.allocate(&mut pages, request).unwrap())
+        .collect();
+    for address in live.drain(..) {
+        heap.deallocate(&mut pages, address, request);
+    }
+    assert_eq!(heap.slab_pages(), 1);
+
+    // Exactly one page's worth must come out of the kept page, with no new
+    // page taken and no two allocations overlapping.
+    let taken = pages.outstanding();
+    let refilled: Vec<(u64, Request)> = (0..per_page)
+        .map(|_| (heap.allocate(&mut pages, request).unwrap(), request))
+        .collect();
+    assert_eq!(
+        pages.outstanding(),
+        taken,
+        "the kept page did not serve the allocations"
+    );
+    assert_disjoint(&refilled);
+
+    for (address, request) in refilled {
+        heap.deallocate(&mut pages, address, request);
+    }
+    assert_eq!(heap.slab_pages(), 1);
+}
+
+/// Churning a class does not grow it.
+///
+/// The shape of a real workload: allocate a burst, free it, repeat. Before
+/// pages were returned this rose without bound.
+#[test]
+fn churn_does_not_grow_the_heap() {
+    let mut pages = Pages::with_budget(256);
+    let mut heap = Heap::new();
+    let request = Request::new(128, 8);
+    let burst = PAGE_SIZE / 128 * 5;
+
+    let mut high_water = 0;
+    for _ in 0..8 {
+        let live: Vec<u64> = (0..burst)
+            .map(|_| heap.allocate(&mut pages, request).unwrap())
+            .collect();
+        high_water = high_water.max(pages.outstanding());
+        for address in live {
+            heap.deallocate(&mut pages, address, request);
+        }
+        assert_eq!(heap.slab_pages(), 1, "the class kept more than one page");
+    }
+    assert_eq!(high_water, 5, "the burst should need exactly five pages");
+    assert_eq!(pages.outstanding(), 1);
+}
+
+/// A supply with nowhere to keep the count still works.
+///
+/// [`Backing::slab_free`] documents that returning zero is allowed, and what
+/// it costs: pages are never returned. A heap that corrupted itself instead
+/// would make that documented option a trap.
+#[test]
+fn a_backing_that_cannot_count_is_merely_wasteful() {
+    #[derive(Debug, Default)]
+    struct Forgetful {
+        links: BTreeMap<u64, u64>,
+        next: u64,
+        outstanding: usize,
+    }
+
+    // SAFETY: a map, as `Pages`; no address here is real memory.
+    unsafe impl Backing for Forgetful {
+        fn allocate_pages(&mut self, order: u8) -> Option<u64> {
+            if self.next == 0 {
+                self.next = 0xFFFF_8000_0010_0000;
+            }
+            let address = self.next;
+            self.next += ((1usize << order) * PAGE_SIZE) as u64;
+            self.outstanding += 1 << order;
+            Some(address)
+        }
+        fn deallocate_pages(&mut self, _address: u64, order: u8) {
+            self.outstanding -= 1 << order;
+        }
+        fn read_link(&self, at: u64) -> u64 {
+            self.links.get(&at).copied().unwrap_or(0)
+        }
+        fn write_link(&mut self, at: u64, value: u64) {
+            let _ = self.links.insert(at, value);
+        }
+        fn slab_free(&self, _page: u64) -> u16 {
+            0
+        }
+        fn set_slab_free(&mut self, _page: u64, _objects: u16) {}
+    }
+
+    let mut pages = Forgetful::default();
+    let mut heap = Heap::new();
+    let request = Request::new(16, 8);
+    let live: Vec<u64> = (0..PAGE_SIZE / 16 * 3)
+        .map(|_| heap.allocate(&mut pages, request).unwrap())
+        .collect();
+    for address in live {
+        heap.deallocate(&mut pages, address, request);
+    }
+
+    assert_eq!(
+        heap.slab_pages(),
+        3,
+        "nothing can be returned without a count"
+    );
+    assert_eq!(heap.slab_pages_returned(), 0);
+    assert_eq!(
+        heap.allocated_bytes(),
+        0,
+        "the objects are still accounted for"
+    );
+    // And the heap is still usable, which is the part that matters.
+    let address = heap.allocate(&mut pages, request).unwrap();
+    heap.deallocate(&mut pages, address, request);
 }

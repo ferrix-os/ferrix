@@ -402,6 +402,311 @@ fn walk_properties<E: Encoding>() {
     refuses_to_split_a_block::<E>();
     validates_arguments::<E>();
     empty_range_is_a_noop::<E>();
+    unmapping_reports_what_it_removed::<E>();
+    unmapping_walks_through_a_hole::<E>();
+    unmapping_refuses_to_cut_a_block::<E>();
+    protecting_keeps_the_frame_and_changes_the_permissions::<E>();
+    protecting_a_hole_is_an_error::<E>();
+    every_flag_survives_a_descriptor::<E>();
+    the_walk_finds_every_leaf::<E>();
+    the_walk_reports_canonical_addresses::<E>();
+    the_walk_can_stop_early::<E>();
+}
+
+/// `unmap_range` clears descriptors and says which frames came out.
+fn unmapping_reports_what_it_removed<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = VirtAddr(0xFFFF_FF00_0000_0000);
+
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            PhysAddr(0x20_0000),
+            3 * PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+
+    let mut pages = Vec::new();
+    let mut tables = Vec::new();
+    let removed = mapper
+        .unmap_range(&mut memory, at, 3 * PAGE_SIZE, |freed| match freed {
+            Released::Page { phys, level } => pages.push((phys, level)),
+            Released::Table { phys } => tables.push(phys),
+        })
+        .unwrap();
+
+    assert_eq!(removed, 3);
+    assert_eq!(
+        pages,
+        [
+            (PhysAddr(0x20_0000), Level::PAGE),
+            (PhysAddr(0x20_1000), Level::PAGE),
+            (PhysAddr(0x20_2000), Level::PAGE),
+        ]
+    );
+    // The three tables between the root and the leaves emptied out with the
+    // last page and were unlinked. Without this the arena leaks a table per
+    // region it ever touches, and the leak is invisible because the page count
+    // balances perfectly.
+    assert_eq!(tables.len(), 3, "emptied tables were not reclaimed");
+    for page in 0..3 {
+        assert_eq!(
+            mapper.translate(&memory, VirtAddr(at.0 + page * PAGE_SIZE)),
+            None,
+            "the descriptor was not cleared"
+        );
+    }
+
+    // And the range can be mapped again, which is the whole point: a `vmap`
+    // arena that could not reuse an address would not be an allocator.
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            PhysAddr(0x30_0000),
+            PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    assert_eq!(mapper.translate(&memory, at), Some(PhysAddr(0x30_0000)));
+}
+
+/// Unmapping a range containing a hole is not an error.
+///
+/// A guard page is a hole by construction, and `vunmap` of a guarded
+/// allocation walks straight across it.
+fn unmapping_walks_through_a_hole<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = VirtAddr(0xFFFF_FF00_0010_0000);
+
+    mapper
+        .map_range(
+            &mut memory,
+            VirtAddr(at.0 + PAGE_SIZE),
+            PhysAddr(0x20_0000),
+            PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+
+    let mut pages = 0;
+    let removed = mapper
+        .unmap_range(&mut memory, at, 3 * PAGE_SIZE, |freed| {
+            if matches!(freed, Released::Page { .. }) {
+                pages += 1;
+            }
+        })
+        .unwrap();
+    assert_eq!(removed, 1);
+    assert_eq!(pages, 1);
+}
+
+/// Unmapping half a block is refused rather than rounded.
+fn unmapping_refuses_to_cut_a_block<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = VirtAddr(0xFFFF_FF00_4000_0000);
+
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            PhysAddr(0x40_0000),
+            2 * 1024 * 1024,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    assert_eq!(mapper.mapping_level(&memory, at), Some(Level::MEGABYTE));
+
+    assert_eq!(
+        mapper
+            .unmap_range(&mut memory, at, PAGE_SIZE, |_| {})
+            .unwrap_err(),
+        MapError::BlockInTheWay(at)
+    );
+    // And the block is still there: a refused call changes nothing.
+    assert_eq!(mapper.translate(&memory, at), Some(PhysAddr(0x40_0000)));
+}
+
+/// `protect_range` rewrites permissions and leaves the translation alone.
+fn protecting_keeps_the_frame_and_changes_the_permissions<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = VirtAddr(0xFFFF_FF00_0020_0000);
+
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            PhysAddr(0x50_0000),
+            2 * PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+    mapper
+        .protect_range(&mut memory, at, 2 * PAGE_SIZE, MapFlags::KERNEL_RODATA)
+        .unwrap();
+
+    assert_eq!(mapper.translate(&memory, at), Some(PhysAddr(0x50_0000)));
+
+    let mut seen = Vec::new();
+    let _ = mapper.for_each_leaf(&memory, |leaf| {
+        if leaf.virt.0 >= at.0 && leaf.virt.0 < at.0 + 2 * PAGE_SIZE {
+            seen.push(leaf.flags);
+        }
+        true
+    });
+    assert_eq!(seen.len(), 2);
+    for flags in seen {
+        assert!(!flags.write, "protect left the mapping writable");
+        assert!(!flags.execute, "read-only data must not be executable");
+    }
+}
+
+/// Protecting a range with nothing in it is an error rather than a no-op.
+fn protecting_a_hole_is_an_error<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = VirtAddr(0xFFFF_FF00_0030_0000);
+    assert_eq!(
+        mapper
+            .protect_range(&mut memory, at, PAGE_SIZE, MapFlags::KERNEL_RODATA)
+            .unwrap_err(),
+        MapError::AlreadyMapped(at)
+    );
+}
+
+/// Every flag the encoder writes, the decoder reads back.
+///
+/// This is what makes the W^X sweep a measurement: the sweep decides whether a
+/// mapping is writable *and* executable by reading a descriptor the loader may
+/// have written, so a decoder that disagreed with the encoder would make the
+/// sweep pass by being blind.
+fn every_flag_survives_a_descriptor<E: Encoding>() {
+    let cases = [
+        MapFlags::KERNEL_CODE,
+        MapFlags::KERNEL_RODATA,
+        MapFlags::KERNEL_DATA,
+        MapFlags::KERNEL_DEVICE,
+        MapFlags::USER_CODE,
+        MapFlags::USER_DATA,
+    ];
+
+    for flags in cases {
+        for level in [Level::PAGE, Level::MEGABYTE, Level::GIGABYTE] {
+            if level != Level::PAGE && !E::supports_block(level) {
+                continue;
+            }
+            let entry = E::leaf_descriptor(PhysAddr(0x20_0000), level, flags);
+            assert_eq!(
+                E::leaf_flags(entry),
+                flags,
+                "{} lost a flag at level {}",
+                E::NAME,
+                level.depth()
+            );
+        }
+    }
+}
+
+/// A walk visits every leaf that was mapped, and nothing else.
+fn the_walk_finds_every_leaf<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+
+    // Three regions far enough apart to land in different top-level entries,
+    // so the walk has to descend more than one branch.
+    let regions = [
+        (VirtAddr(0xFFFF_FF00_0000_0000), PhysAddr(0x10_0000), 2u64),
+        (VirtAddr(0xFFFF_FF80_0000_0000), PhysAddr(0x20_0000), 1),
+        (VirtAddr(0xFFFF_FFFF_8000_0000), PhysAddr(0x30_0000), 3),
+    ];
+    for (virt, phys, pages) in regions {
+        mapper
+            .map_range(
+                &mut memory,
+                virt,
+                phys,
+                pages * PAGE_SIZE,
+                MapFlags::KERNEL_DATA,
+            )
+            .unwrap();
+    }
+
+    let mut found = Vec::new();
+    let outcome = mapper.for_each_leaf(&memory, |leaf| {
+        found.push((leaf.virt, leaf.phys));
+        true
+    });
+
+    assert!(!outcome.stopped);
+    assert_eq!(outcome.leaves, 6);
+    assert_eq!(found.len(), 6);
+    for (virt, phys, pages) in regions {
+        for page in 0..pages {
+            let offset = page * PAGE_SIZE;
+            assert!(
+                found.contains(&(VirtAddr(virt.0 + offset), PhysAddr(phys.0 + offset))),
+                "the walk missed {:#x}",
+                virt.0 + offset
+            );
+        }
+    }
+
+    // Addresses come out in order, which is what makes a sweep's report
+    // readable and what lets a caller merge adjacent leaves.
+    let mut sorted = found.clone();
+    sorted.sort_by_key(|(virt, _)| virt.0);
+    assert_eq!(found, sorted);
+}
+
+/// The walk rebuilds the sign extension a virtual address carries.
+///
+/// The address is assembled from table indices, which produces the 48-bit
+/// form. Reporting a kernel mapping as `0x0000_FF00_...` would be a correct
+/// walk of an address no caller can compare against a constant.
+fn the_walk_reports_canonical_addresses<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    let at = VirtAddr(0xFFFF_FFFF_8000_0000);
+
+    mapper
+        .map_range(
+            &mut memory,
+            at,
+            PhysAddr(0x10_0000),
+            PAGE_SIZE,
+            MapFlags::KERNEL_CODE,
+        )
+        .unwrap();
+
+    let mut seen = None;
+    let _ = mapper.for_each_leaf(&memory, |leaf| {
+        seen = Some(leaf.virt);
+        true
+    });
+    assert_eq!(seen, Some(at));
+    assert!(seen.unwrap().is_canonical());
+}
+
+/// A visitor that returns `false` stops the whole recursion, not one table.
+fn the_walk_can_stop_early<E: Encoding>() {
+    let (mut memory, mapper) = Memory::with_root::<E>();
+    mapper
+        .map_range(
+            &mut memory,
+            VirtAddr(0xFFFF_FF00_0000_0000),
+            PhysAddr(0x10_0000),
+            8 * PAGE_SIZE,
+            MapFlags::KERNEL_DATA,
+        )
+        .unwrap();
+
+    let mut count = 0;
+    let outcome = mapper.for_each_leaf(&memory, |_| {
+        count += 1;
+        count < 3
+    });
+    assert!(outcome.stopped);
+    assert_eq!(outcome.leaves, 3);
+    assert_eq!(count, 3);
 }
 
 #[test]

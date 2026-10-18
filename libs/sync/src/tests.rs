@@ -172,17 +172,13 @@ fn the_ticket_lock_starves_nobody() {
     // so acquisitions by different threads must interleave heavily rather than
     // run in long unbroken stretches.
     //
-    // That only shows if the threads are actually queued on the lock. Released
-    // from a barrier, they are not: two hundred acquisitions take microseconds,
-    // waking a thread on a CI VM takes longer, and a correct ticket lock scored
-    // one handover in four hundred because one thread had finished before the
-    // other woke. So the lock is held here until every worker has taken a
-    // ticket. From then on a thread that finishes an acquisition re-queues
-    // behind the others already waiting, and a lock that serves in arrival
-    // order has to rotate between them -- whatever the scheduler does.
-    //
-    // The cap is for speed, not correctness: past one thread per core the
-    // rotation still holds, but each handover can wait out a timeslice.
+    // That only holds while every thread is spinning at once, which needs a
+    // core each. Past that the test measures the OS scheduler instead of the
+    // lock: a thread handed a timeslice finishes all of its acquisitions before
+    // the others have taken a ticket, and a perfectly fair lock scores a handful
+    // of handovers. A CI runner with two vCPUs produced exactly that -- seven in
+    // sixteen hundred -- so the thread count is capped at the parallelism the
+    // process actually has.
     const PER_THREAD: usize = 200;
 
     let threads = thread::available_parallelism()
@@ -195,34 +191,20 @@ fn the_ticket_lock_starves_nobody() {
     }
 
     let order = Arc::new(SpinLock::new(Vec::new()));
-    let held = order.lock();
+    let start = Arc::new(Barrier::new(threads));
 
     let workers: Vec<_> = (0..threads)
         .map(|id| {
             let order = Arc::clone(&order);
+            let start = Arc::clone(&start);
             thread::spawn(move || {
+                let _ = start.wait();
                 for _ in 0..PER_THREAD {
                     order.lock().push(id);
                 }
             })
         })
         .collect();
-
-    // Tickets outstanding: this thread's, plus one per worker waiting behind it.
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while order
-        .next_ticket
-        .load(Ordering::Relaxed)
-        .wrapping_sub(order.now_serving.load(Ordering::Relaxed))
-        != threads + 1
-    {
-        assert!(
-            Instant::now() < deadline,
-            "the workers never all queued for the lock"
-        );
-        thread::yield_now();
-    }
-    drop(held);
 
     for worker in workers {
         worker.join().unwrap();

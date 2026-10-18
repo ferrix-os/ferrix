@@ -310,6 +310,7 @@ const XSDT_ADDR: u64 = 0x7FFF_0000;
 const MADT_ADDR: u64 = 0x7FFF_1000;
 const FADT_ADDR: u64 = 0x7FFF_2000;
 const GTDT_ADDR: u64 = 0x7FFF_3000;
+const HPET_ADDR: u64 = 0x7FFF_6000;
 
 /// The x86-64 machine: revision-2 RSDP, XSDT, a four-processor MADT with one
 /// I/O APIC and the two overrides QEMU emits.
@@ -1485,7 +1486,18 @@ fn exercise(memory: &Memory) {
         let _ = gtdt.virtual_el2_timer();
         let _ = gtdt.platform_timer_count();
     }
-    let _ = acpi.find(HPET_SIGNATURE);
+    if let Ok(hpet) = acpi.hpet() {
+        let _ = hpet.revision();
+        let _ = hpet.comparators();
+        let _ = hpet.counter_is_64_bit();
+        let _ = hpet.supports_legacy_replacement();
+        let _ = hpet.vendor();
+        let _ = hpet.base_address();
+        let _ = hpet.block_number();
+        let _ = hpet.minimum_tick();
+        let _ = hpet.page_protection();
+        let _ = hpet.table();
+    }
 }
 
 /// Corrupt one byte of one table at a time and read the whole set again.
@@ -1583,4 +1595,167 @@ fn errors_all_have_a_message() {
             .contains("\\x00"),
         "an unprintable byte in a signature must show as hex, not vanish"
     );
+}
+
+// ---------------------------------------------------------------------------
+// HPET
+// ---------------------------------------------------------------------------
+
+/// The hardware id QEMU's q35 reports: revision 1, three comparators, a 64-bit
+/// main counter, legacy replacement available, Intel's vendor id.
+const HPET_ID: u32 = 0x8086_0000 | (1 << 15) | (1 << 13) | (2 << 8) | 1;
+
+/// Where QEMU puts the timer block.
+const HPET_BLOCK: u64 = 0xFED0_0000;
+
+/// A q35-shaped HPET description table.
+fn hpet() -> Vec<u8> {
+    let mut body = vec![0u8; HPET_MIN_LEN - SDT_HEADER_LEN];
+    put_u32(&mut body, 36, HPET_ID);
+    put_u8(&mut body, 40, GenericAddress::SYSTEM_MEMORY);
+    put_u8(&mut body, 41, 64); // register_bit_width
+    put_u8(&mut body, 43, 4); // access_size: a 64-bit access
+    put_u64(&mut body, 44, HPET_BLOCK);
+    put_u8(&mut body, 52, 0); // block number
+    put_u16(&mut body, 53, 0x0080); // minimum tick
+    put_u8(&mut body, 55, 0); // page protection
+    TableBuilder::new(HPET_SIGNATURE).raw(&body).build()
+}
+
+#[test]
+fn an_hpet_describes_its_timer_block() {
+    let bytes = hpet();
+    let table = Table::parse(&bytes).unwrap();
+    let hpet = Hpet::parse(table).unwrap();
+
+    assert_eq!(hpet.revision(), 1, "the revision is the low byte");
+    assert_eq!(
+        hpet.comparators(),
+        3,
+        "the count is stored less one, so 2 encodes three comparators"
+    );
+    assert!(
+        hpet.counter_is_64_bit(),
+        "bit 13 says the main counter is 64 bits wide"
+    );
+    assert!(
+        hpet.supports_legacy_replacement(),
+        "bit 15 says the block can take over the PIT and RTC interrupts"
+    );
+    assert_eq!(hpet.vendor(), 0x8086, "the vendor is the top sixteen bits");
+
+    let base = hpet.base_address().unwrap();
+    assert_eq!(
+        base.address, HPET_BLOCK,
+        "the registers are where firmware said"
+    );
+    assert_eq!(
+        base.address_space_id,
+        GenericAddress::SYSTEM_MEMORY,
+        "an MMIO block, so a caller must map it rather than use `in`/`out`"
+    );
+
+    assert_eq!(hpet.block_number(), Some(0));
+    assert_eq!(hpet.minimum_tick(), Some(0x80));
+    assert_eq!(hpet.page_protection(), Some(0));
+}
+
+#[test]
+fn an_hpet_with_one_comparator_reports_one() {
+    // The count is stored less one, so zero is the smallest encodable value
+    // and it means *one* comparator, not none. Getting this backwards would
+    // have the kernel conclude a working block has nothing to program.
+    let mut body = vec![0u8; HPET_MIN_LEN - SDT_HEADER_LEN];
+    put_u32(&mut body, 36, 0);
+    let bytes = TableBuilder::new(HPET_SIGNATURE).raw(&body).build();
+    let hpet = Hpet::parse(Table::parse(&bytes).unwrap()).unwrap();
+
+    assert_eq!(hpet.comparators(), 1, "zero encodes one comparator");
+    assert!(
+        !hpet.counter_is_64_bit(),
+        "a 32-bit counter wraps and must be noticed"
+    );
+}
+
+#[test]
+fn a_short_hpet_is_rejected() {
+    // One byte short of the fixed fields. Accepting it would make every
+    // accessor read off the end of the table.
+    let mut bytes = hpet();
+    let _ = bytes.pop();
+    let length = bytes.len() as u32;
+    bytes[4..8].copy_from_slice(&length.to_le_bytes());
+
+    assert_eq!(
+        Hpet::parse(Table::parse(&bytes).unwrap()).err(),
+        Some(AcpiError::TooShort {
+            got: HPET_MIN_LEN - 1,
+            need: HPET_MIN_LEN,
+        }),
+        "a table too short to hold the fields it promises is not an HPET"
+    );
+}
+
+#[test]
+fn a_table_that_is_not_an_hpet_is_rejected() {
+    let bytes = gtdt();
+    assert_eq!(
+        Hpet::parse(Table::parse(&bytes).unwrap()).err(),
+        Some(AcpiError::BadSignature(GTDT_SIGNATURE)),
+        "the signature is the only thing distinguishing one table from another"
+    );
+}
+
+#[test]
+fn an_hpet_is_found_through_the_root_table() {
+    let mut memory = Memory::new();
+    memory.put(RSDP_ADDR, build_rsdp(2, 0, XSDT_ADDR));
+    memory.put(XSDT_ADDR, xsdt(&[HPET_ADDR]));
+    memory.put(HPET_ADDR, hpet());
+
+    let rsdp = Rsdp::read(&memory, RSDP_ADDR).unwrap();
+    let acpi = Acpi::from_rsdp(&memory, &rsdp).unwrap();
+
+    assert_eq!(
+        acpi.hpet().unwrap().base_address().unwrap().address,
+        HPET_BLOCK,
+        "the timer block is reached by signature like any other table"
+    );
+}
+
+#[test]
+fn a_machine_with_no_hpet_says_so() {
+    // AArch64 has an architected timer in the CPU and no HPET at all, so
+    // "not found" is an ordinary answer rather than a broken machine.
+    let mut memory = Memory::new();
+    memory.put(RSDP_ADDR, build_rsdp(2, 0, XSDT_ADDR));
+    memory.put(XSDT_ADDR, xsdt(&[GTDT_ADDR]));
+    memory.put(GTDT_ADDR, gtdt());
+
+    let rsdp = Rsdp::read(&memory, RSDP_ADDR).unwrap();
+    let acpi = Acpi::from_rsdp(&memory, &rsdp).unwrap();
+
+    assert_eq!(
+        acpi.hpet().err(),
+        Some(AcpiError::NotFound(HPET_SIGNATURE)),
+        "a missing HPET is reported, not invented"
+    );
+}
+
+/// A q35 that also lists an HPET, for the paths that need one. Separate from
+/// [`q35`] on purpose: the tests built on that fixture assert on exactly what
+/// it lists, and a shared fixture that grows under them stops being one.
+fn q35_with_hpet() -> Memory {
+    let mut memory = q35();
+    memory.put(XSDT_ADDR, xsdt(&[MADT_ADDR, FADT_ADDR, HPET_ADDR]));
+    memory.put(HPET_ADDR, hpet());
+    memory
+}
+
+#[test]
+fn never_panics_on_a_corrupted_hpet() {
+    // Same argument as the other corruption sweeps: the timer block's address
+    // comes from firmware, and a kernel that maps whatever a flipped bit says
+    // has written to an arbitrary physical page.
+    corrupt_every_byte(&q35_with_hpet(), &[HPET_ADDR]);
 }

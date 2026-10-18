@@ -83,6 +83,23 @@ pub(crate) fn reload_cr3() {
     }
 }
 
+/// The flags register.
+///
+/// Read for one bit: `IF`, which says whether interrupts are unmasked. A lock
+/// that masks interrupts has to restore the state it found rather than
+/// unconditionally unmasking, or taking one inside another silently enables
+/// interrupts halfway out of the outer critical section.
+pub(crate) fn read_rflags() -> u64 {
+    let flags: u64;
+    // SAFETY: `pushfq` and `pop` read the flags register through the stack and
+    // leave it as they found it. `nostack` is deliberately *not* claimed: this
+    // is the one primitive here that uses the stack.
+    unsafe {
+        asm!("pushfq", "pop {}", out(reg) flags, options(preserves_flags));
+    }
+    flags
+}
+
 /// QEMU's `isa-debug-exit` device.
 ///
 /// Writing to it ends the emulator with `(value << 1) | 1`, which is how the
@@ -201,4 +218,36 @@ pub(crate) fn read_stack_pointer() -> u64 {
         asm!("mov {}, rsp", out(reg) stack, options(nomem, nostack, preserves_flags));
     }
     stack
+}
+
+/// Unmask interrupts on this CPU.
+///
+/// The counterpart to [`disable_interrupts`], and the moment the kernel stops
+/// being the only thing that decides when it runs.
+pub(crate) fn enable_interrupts() {
+    // SAFETY: `sti` only sets the interrupt flag. Every vector has a gate by
+    // the time anything calls this — `init_traps` runs long before.
+    unsafe {
+        asm!("sti", options(nomem, nostack));
+    }
+}
+
+/// The time-stamp counter.
+///
+/// Counts core clock cycles on every CPU since the Pentium, and at a constant
+/// rate independent of frequency scaling on anything since Nehalem. Nothing
+/// reports that rate, which is why [`super::clock`] measures it.
+pub(crate) fn rdtsc() -> u64 {
+    let low: u32;
+    let high: u32;
+    // SAFETY: `rdtsc` reads a counter into edx:eax and has no other effect.
+    unsafe {
+        asm!(
+            "rdtsc",
+            out("eax") low,
+            out("edx") high,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
+    (u64::from(high) << 32) | u64::from(low)
 }

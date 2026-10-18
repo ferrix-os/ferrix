@@ -303,6 +303,24 @@ pub trait Encoding {
 
     /// True if a block mapping is architecturally allowed at `level`.
     fn supports_block(level: Level) -> bool;
+
+    /// What a leaf descriptor permits.
+    ///
+    /// The inverse of [`Encoding::leaf_descriptor`], and it exists for one
+    /// reason: a sweep that walks the live tables and asserts no mapping is
+    /// both writable and executable has to read permissions back out of
+    /// descriptors that were written by the loader, not by this crate. A
+    /// round-trip test for every flag combination is in `tests`, because a
+    /// decoder that disagrees with the encoder would make the sweep pass by
+    /// being wrong.
+    fn leaf_flags(entry: u64) -> MapFlags;
+
+    /// The descriptor value that means "nothing is mapped here".
+    ///
+    /// Zero on both architectures, and named rather than written as a literal
+    /// so that an architecture whose absent encoding is not zero has somewhere
+    /// to say so.
+    const ABSENT: u64 = 0;
 }
 
 /// Access to physical memory, and a source of zeroed page table frames.
@@ -512,6 +530,190 @@ impl<E: Encoding> Mapper<E> {
         }
     }
 
+    /// Remove `len` bytes of mapping at `virt`, reporting what came out.
+    ///
+    /// `released` is called once per frame the tree stopped referring to,
+    /// which is not only the leaves: an intermediate table whose last
+    /// descriptor has just been cleared is reported too, and the levels above
+    /// it in turn if they empty out as well. Without that a long-lived arena
+    /// leaks a table per region it ever touched — the pages come back and the
+    /// tables that described them do not — and the leak is invisible, because
+    /// the free-page count balances perfectly.
+    ///
+    /// The mapper frees nothing itself. It has no idea whether the frame
+    /// behind a mapping is anonymous memory to give back, a device aperture
+    /// that was never allocated, or a page shared with another address space.
+    /// That decision belongs to the caller, and this is how it learns what to
+    /// decide about.
+    ///
+    /// # Errors
+    ///
+    /// [`MapError::Misaligned`] for an address or length that is not page
+    /// aligned, and [`MapError::BlockInTheWay`] if the range would have to cut
+    /// a block mapping in half — unmapping half a 2 MiB page means splitting
+    /// it, and silently unmapping the whole thing instead would hand back
+    /// memory the caller still believes it owns.
+    pub fn unmap_range(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        len: u64,
+        mut released: impl FnMut(Released),
+    ) -> Result<u64, MapError> {
+        if !virt.is_aligned_to(PAGE_SIZE) || !len.is_multiple_of(PAGE_SIZE) {
+            return Err(MapError::Misaligned);
+        }
+
+        let mut done = 0u64;
+        let mut removed = 0u64;
+        while done < len {
+            let at = virt.checked_add(done).ok_or(MapError::RangeOverflow)?;
+            let mut path = Path::default();
+            match self.find_leaf(memory, at, Some(&mut path))? {
+                // Nothing mapped: step a page and carry on. Unmapping a hole
+                // is not an error — freeing a `vmap` allocation walks straight
+                // across the guard page inside its own span.
+                None => done += PAGE_SIZE,
+                Some((slot, entry, level)) => {
+                    let span = level.span();
+                    if !at.is_aligned_to(span) || len - done < span {
+                        return Err(MapError::BlockInTheWay(at));
+                    }
+                    memory.write(slot, E::ABSENT);
+                    released(Released::Page {
+                        phys: E::address(entry),
+                        level,
+                    });
+                    self.prune(memory, &path, &mut released);
+                    removed += 1;
+                    done += span;
+                }
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Free every table on `path` that the leaf's removal has just emptied.
+    ///
+    /// Walks from the leaf's own table upwards and stops at the first table
+    /// with anything left in it — there is no point looking higher, since a
+    /// parent still holds the descriptor for the table that is not empty. The
+    /// root is never freed: it is not ours, it belongs to whoever installed
+    /// `CR3` or `TTBR1`.
+    fn prune(&self, memory: &mut impl PhysMem, path: &Path, released: &mut impl FnMut(Released)) {
+        for step in path.steps().rev() {
+            if !is_empty::<E>(memory, step.table) {
+                return;
+            }
+            memory.write(descriptor_address(step.parent, step.slot), E::ABSENT);
+            released(Released::Table { phys: step.table });
+        }
+    }
+
+    /// Change the permissions of an existing mapping, leaving it in place.
+    ///
+    /// What `mprotect` needs, and what the loader's identity map would need if
+    /// it were being narrowed rather than dropped. Every page in the range has
+    /// to be mapped already: a hole means the caller's idea of the range and
+    /// the tables' disagree, and guessing which is right is how a W^X sweep
+    /// ends up protecting an address nobody mapped.
+    ///
+    /// # Errors
+    ///
+    /// [`MapError::Misaligned`], [`MapError::BlockInTheWay`] if the range cuts
+    /// a block, and [`MapError::AlreadyMapped`] — reused to mean its opposite,
+    /// "expected a mapping and found none", which is the one place in this
+    /// crate the name reads badly and is not worth a variant of its own.
+    pub fn protect_range(
+        &self,
+        memory: &mut impl PhysMem,
+        virt: VirtAddr,
+        len: u64,
+        flags: MapFlags,
+    ) -> Result<(), MapError> {
+        if !virt.is_aligned_to(PAGE_SIZE) || !len.is_multiple_of(PAGE_SIZE) {
+            return Err(MapError::Misaligned);
+        }
+
+        let mut done = 0u64;
+        while done < len {
+            let at = virt.checked_add(done).ok_or(MapError::RangeOverflow)?;
+            let (slot, entry, level) = self
+                .find_leaf(memory, at, None)?
+                .ok_or(MapError::AlreadyMapped(at))?;
+            let span = level.span();
+            if !at.is_aligned_to(span) || len - done < span {
+                return Err(MapError::BlockInTheWay(at));
+            }
+            memory.write(slot, E::leaf_descriptor(E::address(entry), level, flags));
+            done += span;
+        }
+        Ok(())
+    }
+
+    /// Visit every leaf in the tree, in address order.
+    ///
+    /// The W^X sweep is the caller this was written for: it needs every
+    /// mapping the hardware can see, including the ones the loader installed,
+    /// and there is no list of those anywhere but the tables themselves.
+    ///
+    /// `visit` returns `true` to carry on and `false` to stop, so a sweep that
+    /// has found what it was looking for does not have to walk the direct map
+    /// to the end.
+    pub fn for_each_leaf(
+        &self,
+        memory: &impl PhysMem,
+        mut visit: impl FnMut(Leaf) -> bool,
+    ) -> WalkOutcome {
+        let mut state = Walk {
+            memory,
+            visit: &mut visit,
+            leaves: 0,
+        };
+        let stopped = !state.descend::<E>(self.root, Level::ROOT, 0);
+        WalkOutcome {
+            leaves: state.leaves,
+            stopped,
+        }
+    }
+
+    /// The descriptor slot, value and level of whatever maps `virt`.
+    ///
+    /// When `path` is given it is filled with the intermediate tables the walk
+    /// descended through, which is what [`Mapper::prune`] needs: a table knows
+    /// nothing about its own parent, so the only way to clear the descriptor
+    /// pointing at an emptied table is to have remembered where it was.
+    fn find_leaf(
+        &self,
+        memory: &impl PhysMem,
+        virt: VirtAddr,
+        mut path: Option<&mut Path>,
+    ) -> Result<Option<(PhysAddr, u64, Level)>, MapError> {
+        let mut table = self.root;
+        let mut level = Level::ROOT;
+
+        loop {
+            let index = level.index(virt);
+            let slot = descriptor_address(table, index);
+            let entry = memory.read(slot);
+            if !E::is_present(entry) {
+                return Ok(None);
+            }
+            if E::is_leaf(entry, level) {
+                return Ok(Some((slot, entry, level)));
+            }
+            if let Some(path) = path.as_deref_mut() {
+                path.push(Step {
+                    parent: table,
+                    slot: index,
+                    table: E::address(entry),
+                });
+            }
+            table = E::address(entry);
+            level = level.next().ok_or(MapError::BlockInTheWay(virt))?;
+        }
+    }
+
     /// The level at which `virt` is mapped, for tests and diagnostics.
     pub fn mapping_level(&self, memory: &impl PhysMem, virt: VirtAddr) -> Option<Level> {
         let mut table = self.root;
@@ -528,6 +730,180 @@ impl<E: Encoding> Mapper<E> {
             table = E::address(entry);
             level = level.next()?;
         }
+    }
+}
+
+/// A frame the tree has stopped referring to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Released {
+    /// A mapping was removed. The frame behind it may be anonymous memory, a
+    /// device aperture or a page shared with another address space, and only
+    /// the caller knows which.
+    Page {
+        /// What it mapped to.
+        phys: PhysAddr,
+        /// The level it was mapped at, and so how big it was.
+        level: Level,
+    },
+    /// An intermediate table emptied out and was unlinked from its parent.
+    /// Always one 4 KiB frame, and always one the mapper itself allocated
+    /// through [`PhysMem::allocate_table`].
+    Table {
+        /// The frame the table occupied.
+        phys: PhysAddr,
+    },
+}
+
+/// One level of a walk from the root to a leaf.
+#[derive(Clone, Copy, Default, Debug)]
+struct Step {
+    /// The table holding the descriptor that points at `table`.
+    parent: PhysAddr,
+    /// Which of the parent's 512 descriptors that is.
+    slot: usize,
+    /// The table it points at.
+    table: PhysAddr,
+}
+
+/// The intermediate tables a walk descended through, root first.
+///
+/// A fixed array rather than a `Vec`: this crate allocates nothing, and a
+/// 48-bit address space has exactly four levels, so the bound is
+/// architectural rather than a guess. The root is not a step — nothing points
+/// at it — which is why there are at most three.
+#[derive(Clone, Copy, Default, Debug)]
+struct Path {
+    steps: [Step; 3],
+    depth: usize,
+}
+
+impl Path {
+    /// Record one level of descent. Silently ignores anything past the fourth
+    /// level, which cannot happen with [`VIRT_BITS`] at 48 and would mean a
+    /// walk that had lost its way if it did.
+    fn push(&mut self, step: Step) {
+        if let Some(slot) = self.steps.get_mut(self.depth) {
+            *slot = step;
+            self.depth += 1;
+        }
+    }
+
+    /// The steps actually taken, root first.
+    fn steps(&self) -> impl DoubleEndedIterator<Item = &Step> {
+        self.steps.get(..self.depth).unwrap_or(&[]).iter()
+    }
+}
+
+/// True if every descriptor in `table` is absent.
+fn is_empty<E: Encoding>(memory: &impl PhysMem, table: PhysAddr) -> bool {
+    (0..ENTRIES).all(|index| !E::is_present(memory.read(descriptor_address(table, index))))
+}
+
+/// One mapping found by [`Mapper::for_each_leaf`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Leaf {
+    /// Where it starts in the virtual address space.
+    pub virt: VirtAddr,
+    /// What it maps to.
+    pub phys: PhysAddr,
+    /// The level it is mapped at, and so how big it is.
+    pub level: Level,
+    /// What it permits, decoded from the descriptor.
+    pub flags: MapFlags,
+}
+
+impl Leaf {
+    /// How many bytes this mapping covers.
+    ///
+    /// Named `bytes` rather than `len` because a leaf always covers at least a
+    /// page: there is no empty mapping for the `is_empty` that `len` would owe.
+    #[must_use]
+    pub const fn bytes(&self) -> u64 {
+        self.level.span()
+    }
+
+    /// True if this mapping is both writable and executable.
+    ///
+    /// The thing a W^X sweep is looking for, spelled once here so that the
+    /// kernel's sweep and this crate's tests cannot drift apart about what the
+    /// rule is.
+    #[must_use]
+    pub const fn is_write_execute(&self) -> bool {
+        self.flags.write && self.flags.execute
+    }
+}
+
+/// What a walk found.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WalkOutcome {
+    /// Leaves visited.
+    pub leaves: u64,
+    /// True if the visitor asked to stop before the end.
+    pub stopped: bool,
+}
+
+/// The recursion state of [`Mapper::for_each_leaf`].
+///
+/// A struct rather than four arguments threaded through a free function,
+/// because the visitor has to be borrowed mutably across the recursion and a
+/// closure cannot be passed by value into itself.
+struct Walk<'a, M: PhysMem + ?Sized, F: FnMut(Leaf) -> bool> {
+    memory: &'a M,
+    visit: &'a mut F,
+    leaves: u64,
+}
+
+impl<M: PhysMem + ?Sized, F: FnMut(Leaf) -> bool> Walk<'_, M, F> {
+    /// Walk the table at `table`, whose entries cover addresses from `base`.
+    ///
+    /// Returns `false` as soon as the visitor asks to stop, which unwinds the
+    /// whole recursion rather than only the current table.
+    fn descend<E: Encoding>(&mut self, table: PhysAddr, level: Level, base: u64) -> bool {
+        for index in 0..ENTRIES {
+            let entry = self.memory.read(descriptor_address(table, index));
+            if !E::is_present(entry) {
+                continue;
+            }
+
+            // Sign-extend at the top of the address space. The walk builds an
+            // address from table indices, which yields the 48-bit form; a
+            // kernel mapping reported as `0x0000_FF00_...` rather than
+            // `0xFFFF_FF00_...` would be a correct walk of the wrong-looking
+            // address, and every caller compares it against a constant.
+            let virt = VirtAddr(canonical(base | ((index as u64) << level.shift())));
+
+            if E::is_leaf(entry, level) {
+                self.leaves += 1;
+                let leaf = Leaf {
+                    virt,
+                    phys: E::address(entry),
+                    level,
+                    flags: E::leaf_flags(entry),
+                };
+                if !(self.visit)(leaf) {
+                    return false;
+                }
+                continue;
+            }
+
+            let Some(below) = level.next() else {
+                continue;
+            };
+            if !self.descend::<E>(E::address(entry), below, virt.0 & !(level.span() - 1)) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Sign-extend a 48-bit virtual address into its canonical 64-bit form.
+const fn canonical(address: u64) -> u64 {
+    let sign = 1u64 << (VIRT_BITS - 1);
+    if address & sign == 0 {
+        address
+    } else {
+        address | !((1u64 << VIRT_BITS) - 1)
     }
 }
 

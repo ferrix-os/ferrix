@@ -42,7 +42,7 @@ Each entry names why Rust cannot express it. Entries are added to
 | Site | Why |
 |---|---|
 | Context switch | Saves and restores the callee-saved set and the stack pointer *between two different stacks*. The function returns onto a stack that belongs to another task; Rust has no way to say that. |
-| CPU primitives | Single instructions with no Rust spelling: reading a control or system register, invalidating a TLB entry, memory barriers, `wfi`/`hlt`, `cpuid`. Each is one instruction wrapped in one `#[inline]` function. |
+| CPU primitives | Single instructions with no Rust spelling: reading a control or system register, invalidating a TLB entry, memory barriers, `wfi`/`hlt`, `sti`/`msr daifclr`, `rdtsc` and the generic timer's comparator, `cpuid`. Each is one instruction wrapped in one `#[inline]` function. |
 
 ### x86-64
 

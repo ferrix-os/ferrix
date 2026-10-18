@@ -96,4 +96,18 @@ impl Encoding for X86_64 {
         // 1 GiB at level 1 and 2 MiB at level 2. There is no 512 GiB page.
         level == Level::GIGABYTE || level == Level::MEGABYTE
     }
+
+    fn leaf_flags(entry: u64) -> MapFlags {
+        MapFlags {
+            // A present descriptor is readable; there is no read bit to
+            // consult, which is why `MapFlags::read` documents itself as
+            // intent rather than a switch.
+            read: true,
+            write: entry & WRITABLE != 0,
+            execute: entry & NO_EXECUTE == 0,
+            user: entry & USER != 0,
+            global: entry & GLOBAL != 0,
+            device: entry & CACHE_DISABLE != 0,
+        }
+    }
 }

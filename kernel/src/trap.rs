@@ -84,10 +84,11 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
             let _ = BREAKPOINTS.fetch_add(1, Ordering::Relaxed);
         }
         Trap::PageFault(fault) => handle_page_fault(frame, fault),
-        // Interrupts are masked on both architectures until stage 3 finishes
-        // bringing up a controller, so this cannot happen. If it somehow
-        // does, saying so beats dispatching to a table that does not exist.
-        Trap::Interrupt(_) => fatal(frame, "interrupt with no controller"),
+        // The controller, not the CPU, knows which interrupt arrived and how
+        // it is acknowledged, and the two architectures disagree about both.
+        // So the architecture claims, dispatches and retires; what crosses
+        // back into generic code is a number.
+        Trap::Interrupt(_) => arch::service_interrupts(frame, crate::irq::dispatch),
         Trap::SystemCall => fatal(frame, "system call before stage 7"),
         Trap::IllegalInstruction => fatal(frame, "illegal instruction"),
         Trap::Fault { name, .. } => fatal(frame, name),

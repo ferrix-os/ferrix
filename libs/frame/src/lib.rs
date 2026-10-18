@@ -110,6 +110,17 @@ pub struct PageEntry {
     order: u8,
     /// What the frame is doing.
     state: State,
+    /// Objects still free in this frame, when the kernel heap is using it as a
+    /// slab page.
+    ///
+    /// Meaningless to this allocator, which never reads it — the same
+    /// arrangement as `refcount`, and for the same reason. It lives here
+    /// because the alternative is a header stolen from the first object of
+    /// every slab page, which costs a whole object of the smallest class and
+    /// puts allocator metadata inside memory the allocator hands out. Two
+    /// bytes that were padding anyway is a better trade: `PageEntry` is
+    /// sixteen bytes with or without it.
+    slab_free: u16,
 }
 
 impl PageEntry {
@@ -121,6 +132,7 @@ impl PageEntry {
         refcount: 0,
         order: 0,
         state: State::Reserved,
+        slab_free: 0,
     };
 
     /// What this frame is doing.
@@ -133,6 +145,12 @@ impl PageEntry {
     #[must_use]
     pub const fn refcount(&self) -> u32 {
         self.refcount
+    }
+
+    /// Objects still free in this frame, if it is a slab page.
+    #[must_use]
+    pub const fn slab_free(&self) -> u16 {
+        self.slab_free
     }
 }
 
@@ -234,6 +252,24 @@ impl<'a> Frames<'a> {
     #[must_use]
     pub fn state(&self, frame: Frame) -> Option<State> {
         Some(self.entry(frame)?.state)
+    }
+
+    /// Record how many objects are still free in a slab page.
+    ///
+    /// The kernel heap's bookkeeping, kept here rather than in the heap for
+    /// the reason [`PageEntry::slab_free`] gives. Ignored for a frame outside
+    /// this allocator's range, which is how a heap built on a different page
+    /// supply — a test's, for instance — costs nothing.
+    pub fn set_slab_free(&mut self, frame: Frame, objects: u16) {
+        if let Some(entry) = self.entry_mut(frame) {
+            entry.slab_free = objects;
+        }
+    }
+
+    /// Objects still free in a slab page, or zero if the frame is unknown.
+    #[must_use]
+    pub fn slab_free(&self, frame: Frame) -> u16 {
+        self.entry(frame).map_or(0, PageEntry::slab_free)
     }
 
     /// The record for `frame`, if it is covered.

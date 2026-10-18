@@ -31,10 +31,10 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_bootinfo::{BootView, MemRegion, PAGE_SIZE};
+use ferrix_bootinfo::{BootView, MemKind, MemRegion, PAGE_SIZE};
 use ferrix_frame::{Frame, Frames, PageEntry};
 use ferrix_heap::{Backing, Heap, Request};
-use ferrix_paging::{MapFlags, Mapper, PhysAddr, PhysMem, VirtAddr};
+use ferrix_paging::{Leaf, MapFlags, Mapper, PhysAddr, PhysMem, Released, VirtAddr, WalkOutcome};
 
 /// Why memory could not be brought up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -316,6 +316,14 @@ unsafe impl Backing for KernelPages {
         // SAFETY: as `read_link`.
         unsafe { core::ptr::write_volatile(at as *mut u64, value) };
     }
+
+    fn slab_free(&self, page: u64) -> u16 {
+        with_frames(|frames| frames.slab_free(unmap(page) / PAGE_SIZE)).unwrap_or(0)
+    }
+
+    fn set_slab_free(&mut self, page: u64, objects: u16) {
+        let _ = with_frames(|frames| frames.set_slab_free(unmap(page) / PAGE_SIZE, objects));
+    }
 }
 
 /// The kernel's `alloc` implementation.
@@ -448,9 +456,280 @@ pub(crate) fn map_demand_page(address: u64) -> Result<(), MemoryError> {
 
 /// Translate a kernel virtual address the way the hardware would.
 pub(crate) fn translate(virt: u64) -> Option<u64> {
-    let root = PhysAddr(ROOT_TABLE.load(Ordering::Relaxed));
-    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(root);
-    mapper
+    kernel_mapper()
         .translate(&KernelPhysMem, VirtAddr(virt))
         .map(|at| at.0)
+}
+
+/// The mapper over the live kernel page tables.
+fn kernel_mapper() -> Mapper<crate::arch::PageEncoding> {
+    Mapper::new(PhysAddr(ROOT_TABLE.load(Ordering::Relaxed)))
+}
+
+/// Remove `len` bytes of kernel mapping at `virt`.
+///
+/// `released` is called once per leaf with the frame number and the order of
+/// the block it was mapped at, and is where the caller decides whether the
+/// memory behind the mapping goes back to the buddy allocator. A `vmap` of
+/// anonymous pages frees them; a device window never allocated them.
+pub(crate) fn unmap_kernel(
+    virt: u64,
+    len: u64,
+    mut released: impl FnMut(Frame, u8),
+) -> Result<u64, ferrix_paging::MapError> {
+    let removed = kernel_mapper().unmap_range(
+        &mut KernelPhysMem,
+        VirtAddr(virt),
+        len.next_multiple_of(PAGE_SIZE),
+        |freed| match freed {
+            Released::Page { phys, level } => {
+                // Levels run root-to-leaf and orders run small-to-large, so
+                // the conversion is a subtraction rather than a table: a
+                // level-3 leaf is order 0 and a 2 MiB block is order 9.
+                let order = (ferrix_paging::Level::PAGE.depth() - level.depth()) * 9;
+                released(phys.0 / PAGE_SIZE, order);
+            }
+            // A page table the mapper allocated through `KernelPhysMem`, which
+            // took it from the buddy allocator. It goes straight back there
+            // rather than to the caller: the caller asked to unmap a range and
+            // has no idea a table existed, and telling it about one would make
+            // every `released` closure in the tree have to know.
+            Released::Table { phys } => deallocate_frames(phys.0 / PAGE_SIZE, 0),
+        },
+    )?;
+
+    // Until this runs the old translation is still in the TLB, and a read
+    // through it succeeds against a frame that now belongs to somebody else.
+    // Unmapping without invalidating is worse than not unmapping at all: it
+    // looks like it worked.
+    crate::arch::flush_tlb();
+    Ok(removed)
+}
+
+/// Change what an existing kernel mapping permits.
+pub(crate) fn protect_kernel(
+    virt: u64,
+    len: u64,
+    flags: MapFlags,
+) -> Result<(), ferrix_paging::MapError> {
+    kernel_mapper().protect_range(
+        &mut KernelPhysMem,
+        VirtAddr(virt),
+        len.next_multiple_of(PAGE_SIZE),
+        flags,
+    )?;
+    crate::arch::flush_tlb();
+    Ok(())
+}
+
+/// Visit every leaf in the tree rooted at `root`, in address order.
+fn sweep(root: u64, visit: impl FnMut(Leaf) -> bool) -> WalkOutcome {
+    let mapper: Mapper<crate::arch::PageEncoding> = Mapper::new(PhysAddr(root));
+    mapper.for_each_leaf(&KernelPhysMem, visit)
+}
+
+/// What `virt` is mapped as, or `None` if it is not mapped.
+pub(crate) fn permissions_of(virt: u64) -> Option<MapFlags> {
+    let mut found = None;
+    let _ = sweep(ROOT_TABLE.load(Ordering::Relaxed), |leaf| {
+        if virt >= leaf.virt.0 && virt < leaf.virt.0 + leaf.bytes() {
+            found = Some(leaf.flags);
+            return false;
+        }
+        true
+    });
+    found
+}
+
+// ---------------------------------------------------------------------------
+// W^X
+// ---------------------------------------------------------------------------
+
+/// A mapping that is both writable and executable.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WriteExecute {
+    /// Where it starts.
+    pub(crate) virt: u64,
+    /// How much of the address space it covers.
+    pub(crate) len: u64,
+}
+
+/// What the W^X sweep found.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WxReport {
+    /// Mappings the hardware can see.
+    pub(crate) leaves: u64,
+    /// Of those, how many are executable at all.
+    pub(crate) executable: u64,
+}
+
+/// Walk the live page tables and require that nothing is writable *and*
+/// executable.
+///
+/// **A measurement of the machine, not of the kernel's intentions.** Every
+/// other check of this kind in the tree asserts that a function was called
+/// with the right flags; this one reads the descriptors the hardware is going
+/// to walk, including the ones the loader wrote and the ones an earlier stage
+/// installed and forgot about. The loader's identity map is exactly such a
+/// mapping — it has to be writable and executable, because the instruction
+/// after the page table switch is fetched through it — so this sweep only
+/// passes once that map has been dropped, which is why the two land in the
+/// same stage.
+///
+/// # Errors
+///
+/// The first offending mapping, which is enough: the fix for one is the fix
+/// for all of them, and reporting the address of the first is what makes it
+/// findable.
+pub(crate) fn check_w_xor_x(view: &BootView<'_>) -> Result<WxReport, WriteExecute> {
+    let mut report = WxReport {
+        leaves: 0,
+        executable: 0,
+    };
+    let mut offender = None;
+
+    // Every root the hardware can translate through, not only the kernel's.
+    // On `AArch64` the identity map is a second regime with its own base
+    // register, so a sweep of the kernel's tables alone would report a clean
+    // machine while the CPU could still fetch from a writable page.
+    let roots = [
+        Some(ROOT_TABLE.load(Ordering::Relaxed)),
+        crate::arch::identity_root(view),
+    ];
+
+    for root in roots.into_iter().flatten() {
+        let outcome = sweep(root, |leaf| {
+            if leaf.flags.execute {
+                report.executable += 1;
+            }
+            if leaf.is_write_execute() {
+                offender = Some(WriteExecute {
+                    virt: leaf.virt.0,
+                    len: leaf.bytes(),
+                });
+                return false;
+            }
+            true
+        });
+        report.leaves += outcome.leaves;
+        if offender.is_some() {
+            break;
+        }
+    }
+
+    match offender {
+        Some(found) => Err(found),
+        None => Ok(report),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reclaiming early boot
+// ---------------------------------------------------------------------------
+
+/// What reclaiming early-boot memory recovered.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Reclaimed {
+    /// Frames the loader's own code and data occupied.
+    pub(crate) loader_frames: u64,
+    /// Frames the ACPI tables occupied.
+    pub(crate) acpi_frames: u64,
+}
+
+impl Reclaimed {
+    /// Frames recovered in total.
+    pub(crate) const fn total(&self) -> u64 {
+        self.loader_frames + self.acpi_frames
+    }
+}
+
+/// Give the frame allocator the memory early boot has finished with.
+///
+/// Two kinds, and the ordering constraint on each is the whole of the risk.
+///
+/// * [`MemKind::Loader`] is the loader's own code and data. The kernel stopped
+///   executing it at the jump, and nothing in the hand-off points into it —
+///   the memory map and the command line were copied into the `BootInfo`
+///   region, which is a different kind and is **not** reclaimed.
+/// * [`MemKind::AcpiReclaim`] holds the firmware tables. Those are read
+///   through the direct map by `crate::acpi`, so this must not run until the
+///   last parse has finished; it is called from `kmain` after interrupt
+///   bring-up for exactly that reason.
+///
+/// Deliberately *not* reclaimed: [`MemKind::PageTables`], which the kernel is
+/// running on; [`MemKind::BootStack`], which it is running on too; and
+/// [`MemKind::BootInfo`], which `BootView` borrows for the life of the system.
+///
+/// # Safety
+///
+/// Every reference into loader or ACPI-reclaim memory must be dead. In this
+/// kernel that means being called from `kmain` after the last use of
+/// `crate::acpi::Firmware`, and it is called exactly once.
+pub(crate) unsafe fn reclaim_boot_memory(view: &BootView<'_>) -> Reclaimed {
+    let mut reclaimed = Reclaimed::default();
+
+    let _ = with_frames(|frames| {
+        for region in view.regions() {
+            if !region.kind.is_reclaimable() {
+                continue;
+            }
+            // A region that ends below where the per-frame array starts, or
+            // begins above where it ends, has no entry to mark — and handing
+            // the allocator a frame it has no record of would be a write past
+            // the end of that array. `Frames::insert_free` clamps, but saying
+            // so here is what makes the clamp a decision rather than luck.
+            let first = region.base / PAGE_SIZE;
+            let count = region.len / PAGE_SIZE;
+            if count == 0 || first < frames.base() || first >= frames.end() {
+                continue;
+            }
+            let count = count.min(frames.end() - first);
+
+            frames.insert_free(first, count);
+            match region.kind {
+                MemKind::Loader => reclaimed.loader_frames += count,
+                _ => reclaimed.acpi_frames += count,
+            }
+        }
+    });
+
+    reclaimed
+}
+
+/// Clear a span of slots in the root page table.
+///
+/// Dead on `AArch64`, and deliberately not behind a conditional: the identity
+/// map there is a whole second translation regime that is switched off at
+/// `TCR_EL1`, so there is nothing to clear. A `cfg` here would be the first
+/// crack in the rule that says architecture differences live under
+/// `kernel/src/arch/`.
+///
+/// The one operation that cannot be expressed as unmapping a range: dropping
+/// the loader's identity map on x86-64 means removing *everything* below the
+/// upper half, and walking it page by page would be half a million
+/// descriptors to discover what one store per top-level slot achieves.
+#[allow(
+    dead_code,
+    reason = "only x86-64 drops its identity map this way; see the doc comment"
+)]
+pub(crate) fn clear_root_slots(slots: core::ops::Range<usize>) {
+    let root = ROOT_TABLE.load(Ordering::Relaxed);
+    for slot in slots {
+        KernelPhysMem.write(PhysAddr(root + (slot as u64) * 8), 0);
+    }
+    crate::arch::flush_tlb();
+}
+
+/// Zero a frame through the direct map.
+///
+/// Every path that hands memory to somebody — a fresh page table, an anonymous
+/// page, a kernel stack — goes through this rather than repeating the
+/// `write_bytes`, because a page handed out still holding the last owner's
+/// data is an information leak and from stage 6 the last owner is another
+/// process.
+pub(crate) fn zero_frame(frame: Frame) {
+    // SAFETY: the caller has just taken `frame` from the buddy allocator, so
+    // nothing else refers to it, and the direct map covers every frame of RAM
+    // and is writable.
+    unsafe { core::ptr::write_bytes(physmap(frame * PAGE_SIZE) as *mut u8, 0, PAGE_SIZE as usize) };
 }
