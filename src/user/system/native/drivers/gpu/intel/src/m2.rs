@@ -70,7 +70,7 @@ const KEY_INTERRUPT: u64 = 1;
 /// setting this): 1 the PAT, MOCS, workarounds, engines and a PPGTT read
 /// back, no command run; 2 the default images and `MI_STORE_DWORD_IMM`; 3
 /// the fast-copy blit and the PPGTT batch; 4 a hung batch reset and banned.
-pub(crate) const CHECKPOINT: u8 = 4;
+pub(crate) const CHECKPOINT: u8 = 2;
 
 // ---------------------------------------------------------------------------
 // Memory
