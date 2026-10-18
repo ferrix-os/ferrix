@@ -89,3 +89,16 @@ pub fn intel_mocs_init_writes() -> impl Iterator<Item = (Reg, u32)> {
     });
     control.chain(l3cc)
 }
+
+/// The MOCS registers that do not hold what [`intel_mocs_init_writes`]
+/// wrote, read back over MMIO: `selftest_mocs.c`'s `check_mocs_table` and
+/// `check_l3cc_table`, which i915 runs from a request, read here from the
+/// registers themselves. Each is `(register, expected, read)`.
+pub fn intel_mocs_verify<M: crate::io::Mmio + ?Sized>(
+    mmio: &mut M,
+) -> impl Iterator<Item = (Reg, u32, u32)> + '_ {
+    intel_mocs_init_writes().filter_map(move |(reg, value)| {
+        let read = mmio.read32(reg.offset());
+        (read != value).then_some((reg, value, read))
+    })
+}
