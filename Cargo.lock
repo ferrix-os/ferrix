@@ -346,6 +346,9 @@ dependencies = [
 [[package]]
 name = "ferrix-intel-xelp"
 version = "0.1.0"
+dependencies = [
+ "ferrix-linux-abi",
+]
 
 [[package]]
 name = "ferrix-ipc-bench"
