@@ -82,6 +82,13 @@
       "purpose": "Idle poll before a halt (os-35 part C, piece 1 of STALLS.md recommendation 2): a kick to a polling processor sends no interrupt and is never lost, a kick absorbed before a halt still lets a later kick run the task, and ferrix.haltpoll selects where the poll runs (consultant design verdict, ledger 2026-10-17 line 2301, piece 1 (1))"
     },
     {
+      "ids": ["L.console.45"],
+      "owner": "boot-time",
+      "branch": "boot-time",
+      "date": "2026-10-18",
+      "purpose": "The kernel's lines start with their time as Linux's do, [    1.234567] , on the port, in dmesg and in the pstore copy (the customer's request of 2026-10-18, with the boot-time analysis)"
+    },
+    {
       "ids": ["L.iommu.59-64", "L.device.46-49"],
       "owner": "intel-gpu-kernel",
       "branch": "intel-k2, intel-k4",
