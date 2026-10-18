@@ -553,9 +553,17 @@ verdicts, with their conditions, are binding on the code that follows:
 * **Ids.** Reserved per K item (K2 core `L.iommu`; K3 and K5 `L.object` or
   chardev rows as each requirement lands; K4 item; K6 item) in **one
   docs-only reservation landing before any code**. None for K7 now.
-* **C1.** Whether the chardev core takes out-of-order replies (§4.1) is a
-  property of the core. It is confirmed before M3, and the answer is
-  recorded here.
+* **C1, answered (the kernel side, K3, landed caf25c0d5).** The chardev
+  core takes replies in any order: `chardev_reply` looks a request up by
+  its id, so any outstanding request may be answered at any time, once.
+  A second reply to an id, or a reply to an abandoned request, is
+  `BAD_STATE`. A signal abandons the client's request without telling the
+  driver: the client sees `EINTR`, not a restart, and the driver's later
+  reply is `BAD_STATE`, which the driver must tolerate. At most 256
+  requests are outstanding per control, deferred `GEM_WAIT` and
+  `SYNCOBJ_WAIT` replies included, and the 257th is `EBUSY` to the client.
+  So the driver's waits are deferred replies within that bound (§4.1), and
+  a long wait on a busy node costs other clients room.
 * **C2.** The fake back end of `test-intel-uapi` exercises the core
   changes but not the GPU's DMA, so no K2 claim may cite it.
 
