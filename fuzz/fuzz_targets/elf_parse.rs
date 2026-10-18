@@ -26,7 +26,7 @@ fuzz_target!(|data: &[u8]| {
     // validated something it had not read.
     let _ = elf.entry();
     let _ = elf.machine();
-    let _ = elf.header().elf_type;
+    let _ = elf.elf_type();
     let _ = elf.is_pie();
     let _ = elf.check_machine(EM_X86_64);
     let _ = elf.check_machine(EM_AARCH64);

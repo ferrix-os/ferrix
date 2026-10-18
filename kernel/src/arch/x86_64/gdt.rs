@@ -17,6 +17,7 @@
 use core::cell::UnsafeCell;
 
 use super::cpu;
+use crate::percpu::MAX_CPUS;
 
 /// Kernel code. `SYSCALL` loads this from `STAR[47:32]`.
 pub(crate) const KERNEL_CODE: u16 = 0x08;
@@ -150,7 +151,14 @@ impl TaskStateSegment {
     }
 }
 
-/// Everything the CPU needs, in one place so it can be one static.
+/// Everything one CPU needs, in one place so a CPU's tables are one object.
+///
+/// **One of these per CPU, not one per machine.** The GDT could in principle be
+/// shared — every descriptor in it is the same on every core — but the TSS
+/// cannot: it holds *this* core's `RSP0` and *this* core's interrupt stack
+/// table, and two cores sharing one would take a double fault onto the same
+/// stack. Since the TSS descriptor lives in the GDT, a per-CPU TSS means a
+/// per-CPU GDT, and the two travel together.
 #[repr(C, align(16))]
 struct Tables {
     /// Seven eight-byte slots: the six selectors above plus the second half of
@@ -161,19 +169,27 @@ struct Tables {
     double_fault_stack: [u8; IST_STACK_SIZE],
 }
 
-/// The tables themselves.
-struct Global(UnsafeCell<Tables>);
+impl Tables {
+    const fn new() -> Tables {
+        Tables {
+            gdt: [0; 8],
+            tss: TaskStateSegment::new(),
+            double_fault_stack: [0; IST_STACK_SIZE],
+        }
+    }
+}
 
-// SAFETY: written once by `init` on the boot CPU before interrupts are enabled,
-// and read-only thereafter. Stage 4 gives every CPU its own copy, because a TSS
-// holds *this* CPU's stack pointers and cannot be shared.
+/// The tables themselves, one set per CPU.
+struct Global(UnsafeCell<[Tables; MAX_CPUS]>);
+
+// SAFETY: each CPU writes only its own element, once, from `init`, before it
+// enables interrupts and before any other CPU could look at it; and nothing
+// reads another CPU's element at all. The `UnsafeCell` is what makes that
+// disjointness expressible — a `static mut` array would be the same accesses
+// with no way to say so.
 unsafe impl Sync for Global {}
 
-static TABLES: Global = Global(UnsafeCell::new(Tables {
-    gdt: [0; 8],
-    tss: TaskStateSegment::new(),
-    double_fault_stack: [0; IST_STACK_SIZE],
-}));
+static TABLES: Global = Global(UnsafeCell::new([const { Tables::new() }; MAX_CPUS]));
 
 /// The operand `lgdt` takes: a limit and a base.
 #[repr(C, packed)]
@@ -182,15 +198,24 @@ struct DescriptorTablePointer {
     base: u64,
 }
 
-/// Build the GDT and TSS and load them.
+/// Build this CPU's GDT and TSS and load them.
 ///
 /// # Safety
 ///
-/// Must be called exactly once, on the boot CPU, before any user mode entry and
-/// before interrupts are enabled.
-pub(crate) unsafe fn init() {
-    // SAFETY: single-threaded early boot, and this is the only writer.
-    let tables = unsafe { &mut *TABLES.0.get() };
+/// Must be called exactly once per CPU, by that CPU, with a `cpu` number no
+/// other CPU is using, before any user mode entry and before interrupts are
+/// enabled.
+pub(crate) unsafe fn init(cpu: usize) {
+    // SAFETY: the caller guarantees this CPU owns `cpu`, and nothing reads
+    // another CPU's element, so this reference aliases nothing.
+    let Some(tables) = (unsafe { &mut *TABLES.0.get() }).get_mut(cpu) else {
+        // Unreachable: `percpu::assign` hands out no number at or above
+        // `MAX_CPUS`, which is what sizes the array. Halting rather than
+        // returning because a CPU that carries on here is running on the
+        // trampoline's GDT, which has no task state segment — the next fault
+        // would be a triple fault with nothing on the wire to explain it.
+        super::halt()
+    };
 
     let stack_top = tables.double_fault_stack.as_ptr() as u64 + IST_STACK_SIZE as u64;
     // The x86 stack grows down and `push` decrements first, so the top is one

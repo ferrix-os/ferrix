@@ -110,6 +110,17 @@ pub struct PageEntry {
     order: u8,
     /// What the frame is doing.
     state: State,
+    /// Objects still free in this frame, when the kernel heap is using it as a
+    /// slab page.
+    ///
+    /// Meaningless to this allocator, which never reads it — the same
+    /// arrangement as `refcount`, and for the same reason. It lives here
+    /// because the alternative is a header stolen from the first object of
+    /// every slab page, which costs a whole object of the smallest class and
+    /// puts allocator metadata inside memory the allocator hands out. Two
+    /// bytes that were padding anyway is a better trade: `PageEntry` is
+    /// sixteen bytes with or without it.
+    slab_free: u16,
 }
 
 impl PageEntry {
@@ -121,6 +132,7 @@ impl PageEntry {
         refcount: 0,
         order: 0,
         state: State::Reserved,
+        slab_free: 0,
     };
 
     /// What this frame is doing.
@@ -133,6 +145,12 @@ impl PageEntry {
     #[must_use]
     pub const fn refcount(&self) -> u32 {
         self.refcount
+    }
+
+    /// Objects still free in this frame, if it is a slab page.
+    #[must_use]
+    pub const fn slab_free(&self) -> u16 {
+        self.slab_free
     }
 }
 
@@ -236,6 +254,24 @@ impl<'a> Frames<'a> {
         Some(self.entry(frame)?.state)
     }
 
+    /// Record how many objects are still free in a slab page.
+    ///
+    /// The kernel heap's bookkeeping, kept here rather than in the heap for
+    /// the reason [`PageEntry::slab_free`] gives. Ignored for a frame outside
+    /// this allocator's range, which is how a heap built on a different page
+    /// supply — a test's, for instance — costs nothing.
+    pub fn set_slab_free(&mut self, frame: Frame, objects: u16) {
+        if let Some(entry) = self.entry_mut(frame) {
+            entry.slab_free = objects;
+        }
+    }
+
+    /// Objects still free in a slab page, or zero if the frame is unknown.
+    #[must_use]
+    pub fn slab_free(&self, frame: Frame) -> u16 {
+        self.entry(frame).map_or(0, PageEntry::slab_free)
+    }
+
     /// The record for `frame`, if it is covered.
     #[must_use]
     pub fn entry(&self, frame: Frame) -> Option<&PageEntry> {
@@ -336,6 +372,73 @@ impl<'a> Frames<'a> {
     /// Take a single frame.
     pub fn allocate_frame(&mut self) -> Option<Frame> {
         self.allocate(0)
+    }
+
+    /// Take a block of `2^order` frames that lies entirely below `limit`.
+    ///
+    /// The buddy allocator has no notion of where memory is, and for almost
+    /// everything that is the right answer. Three things care:
+    ///
+    /// * an x86-64 application processor starts in real mode at a physical
+    ///   address the `SIPI` encodes in one byte, so the page it starts on has
+    ///   to be below 1 MiB;
+    /// * a 32-bit `DMA` engine can only address the first 4 GiB;
+    /// * `CR3` is loaded with a 32-bit `mov` in the middle of that same
+    ///   trampoline, before long mode exists to load it with a 64-bit one.
+    ///
+    /// The search is a linear walk of one free list per order, which is as
+    /// unsuited to a hot path as it sounds. It is not one: every caller above
+    /// asks for a handful of frames once, during bring-up.
+    ///
+    /// Returns `None` if no block low enough exists, which the caller must
+    /// treat as a real answer rather than as memory pressure — no amount of
+    /// freeing will produce low memory that the machine does not have.
+    pub fn allocate_below(&mut self, order: u8, limit: Frame) -> Option<Frame> {
+        if order > MAX_ORDER {
+            return None;
+        }
+
+        // Smallest first, as `allocate` does: taking a big block to satisfy a
+        // small request is what fragments a buddy allocator, and doing it with
+        // the scarce low memory would be worse than elsewhere.
+        let (frame, available) = (order..=MAX_ORDER)
+            .find_map(|candidate| Some((self.first_below(candidate, limit)?, candidate)))?;
+
+        self.unlink(frame, available);
+
+        // Split down keeping the low half, so what comes back is not just
+        // below the limit but as low as the block it came from allows.
+        let mut current = available;
+        while current > order {
+            current -= 1;
+            let buddy = frame + (1u64 << current);
+            self.set_state_range(buddy, 1u64 << current, State::FreeTail);
+            self.push(buddy, current);
+        }
+
+        let frames = 1u64 << order;
+        self.set_state_range(frame, frames, State::Allocated);
+        if let Some(entry) = self.entry_mut(frame) {
+            entry.refcount = 1;
+        }
+        self.free -= frames;
+        Some(frame)
+    }
+
+    /// The first block on `order`'s free list that ends at or below `limit`.
+    fn first_below(&self, order: u8, limit: Frame) -> Option<Frame> {
+        let mut cursor = self.head(order);
+        // Bounded by the list length, so a corrupted link cannot hang boot.
+        let mut budget = self.entries.len();
+        while cursor != NONE && budget > 0 {
+            budget -= 1;
+            let frame = self.base + u64::from(cursor);
+            if frame.saturating_add(1u64 << order) <= limit {
+                return Some(frame);
+            }
+            cursor = self.entries.get(cursor as usize)?.next;
+        }
+        None
     }
 
     /// Give back a block taken with [`Frames::allocate`].

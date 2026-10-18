@@ -763,6 +763,12 @@ impl<'t, T: Tables> Acpi<'t, T> {
     pub fn gtdt(&self) -> Result<Gtdt<'t>, AcpiError> {
         Gtdt::parse(self.find(GTDT_SIGNATURE)?)
     }
+
+    /// The HPET description table, decoded. Present on PCs and nowhere else:
+    /// AArch64 counts time with a register in the CPU.
+    pub fn hpet(&self) -> Result<Hpet<'t>, AcpiError> {
+        Hpet::parse(self.find(HPET_SIGNATURE)?)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1609,6 +1615,146 @@ impl<'a> Gtdt<'a> {
             gsiv: u32_at(self.table.bytes(), offset).unwrap_or(0),
             flags: u32_at(self.table.bytes(), offset.saturating_add(4)).unwrap_or(0),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HPET
+// ---------------------------------------------------------------------------
+
+/// Bytes the fixed part of an HPET description table occupies.
+///
+/// The table has no variable part, so a shorter one has not described a timer
+/// block at all and every accessor below would be reading off the end.
+pub const HPET_MIN_LEN: usize = 56;
+
+/// Hardware id: the comparator count, less one, lives in bits 8..13.
+const HPET_COMPARATORS_SHIFT: u32 = 8;
+
+/// Hardware id: five bits of comparator count.
+const HPET_COMPARATORS_MASK: u32 = 0b1_1111;
+
+/// Hardware id: the main counter is 64 bits wide rather than 32.
+const HPET_COUNTER_64BIT: u32 = 1 << 13;
+
+/// Hardware id: the block can take over the PIT and RTC interrupts.
+const HPET_LEGACY_CAPABLE: u32 = 1 << 15;
+
+/// Hardware id: the PCI vendor identifier occupies the top sixteen bits.
+const HPET_VENDOR_SHIFT: u32 = 16;
+
+/// The HPET description table: where the timer block's registers are.
+///
+/// Deliberately thin. This table says *where* to look and what the block
+/// claims about itself; the authoritative width, period and comparator count
+/// are in the block's own capability register, which is `MMIO` and therefore
+/// not this crate's business. Firmware has been known to disagree with the
+/// hardware here, and when it does the hardware is right — so a caller should
+/// treat [`Hpet::comparators`] and [`Hpet::counter_is_64_bit`] as a hint and
+/// the register as the answer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Hpet<'a> {
+    /// The table these fields are read out of.
+    table: Table<'a>,
+}
+
+impl<'a> Hpet<'a> {
+    /// Interpret `table` as an HPET description table.
+    ///
+    /// # Errors
+    ///
+    /// [`AcpiError::WrongSignature`] if it is not an HPET, and
+    /// [`AcpiError::TooShort`] if it does not reach the end of the fixed
+    /// fields.
+    pub fn parse(table: Table<'a>) -> Result<Self, AcpiError> {
+        table.expect_signature(HPET_SIGNATURE)?;
+        if table.bytes().len() < HPET_MIN_LEN {
+            return Err(AcpiError::TooShort {
+                got: table.bytes().len(),
+                need: HPET_MIN_LEN,
+            });
+        }
+        Ok(Hpet { table })
+    }
+
+    /// The underlying table, for its header and checksum.
+    #[must_use]
+    pub const fn table(&self) -> &Table<'a> {
+        &self.table
+    }
+
+    /// The hardware id word. `parse` established the length, so the zero
+    /// default is unreachable.
+    fn hardware_id(&self) -> u32 {
+        u32_at(self.table.bytes(), 36).unwrap_or(0)
+    }
+
+    /// The block's revision, as firmware reports it.
+    #[must_use]
+    pub fn revision(&self) -> u8 {
+        self.hardware_id() as u8
+    }
+
+    /// How many comparators the block claims, counting from one.
+    ///
+    /// Stored less one, so the encoding cannot express a block with none —
+    /// which is correct, because a timer block with no comparators would have
+    /// nothing to describe.
+    #[must_use]
+    pub fn comparators(&self) -> u8 {
+        let encoded = (self.hardware_id() >> HPET_COMPARATORS_SHIFT) & HPET_COMPARATORS_MASK;
+        (encoded as u8).saturating_add(1)
+    }
+
+    /// Whether the main counter is 64 bits wide.
+    ///
+    /// A 32-bit counter wraps every few minutes at typical frequencies, so a
+    /// caller using it as a time base has to handle the wrap rather than
+    /// subtracting two reads and believing the answer.
+    #[must_use]
+    pub fn counter_is_64_bit(&self) -> bool {
+        self.hardware_id() & HPET_COUNTER_64BIT != 0
+    }
+
+    /// Whether the block can replace the PIT and RTC periodic interrupts.
+    #[must_use]
+    pub fn supports_legacy_replacement(&self) -> bool {
+        self.hardware_id() & HPET_LEGACY_CAPABLE != 0
+    }
+
+    /// The PCI vendor identifier of whoever implemented the block.
+    #[must_use]
+    pub fn vendor(&self) -> u16 {
+        (self.hardware_id() >> HPET_VENDOR_SHIFT) as u16
+    }
+
+    /// Where the block's registers are.
+    ///
+    /// A generic address rather than a bare number because the specification
+    /// permits an I/O-space block, and a caller that assumed memory would map
+    /// a window over whatever happens to be at that physical address.
+    #[must_use]
+    pub fn base_address(&self) -> Option<GenericAddress> {
+        GenericAddress::parse(self.table.bytes(), 40)
+    }
+
+    /// Which timer block this is, on a machine with more than one.
+    #[must_use]
+    pub fn block_number(&self) -> Option<u8> {
+        u8_at(self.table.bytes(), 52)
+    }
+
+    /// The smallest period, in main counter ticks, that the block can be
+    /// programmed to in periodic mode without losing interrupts.
+    #[must_use]
+    pub fn minimum_tick(&self) -> Option<u16> {
+        u16_at(self.table.bytes(), 53)
+    }
+
+    /// Page protection and OEM attributes, as firmware reports them.
+    #[must_use]
+    pub fn page_protection(&self) -> Option<u8> {
+        u8_at(self.table.bytes(), 55)
     }
 }
 

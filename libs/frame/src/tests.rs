@@ -467,3 +467,72 @@ fn zero_is_a_valid_state() {
     }
     assert_eq!(frames.free_frames(), 0);
 }
+
+#[test]
+fn a_low_allocation_comes_from_below_the_limit() {
+    let (mut entries, base, count) = arena(0, 1024);
+    let mut frames = frames!(entries, base, count);
+
+    // Drain everything below frame 16, then ask for a page below it anyway.
+    let low: Vec<Frame> = (0..16).map(|_| frames.allocate_below(0, 16).unwrap()).collect();
+    for frame in &low {
+        assert!(*frame < 16, "{frame} is not below the limit it was asked for");
+    }
+    assert_eq!(
+        frames.allocate_below(0, 16),
+        None,
+        "low memory runs out, and that is an answer rather than a shortage"
+    );
+
+    // The rest of the arena is untouched: a failed low allocation must not have
+    // eaten high memory looking for it.
+    assert_eq!(frames.free_frames(), 1024 - 16);
+    assert!(frames.allocate_frame().unwrap() >= 16);
+}
+
+#[test]
+fn a_low_allocation_prefers_the_lowest_block_it_splits() {
+    let (mut entries, base, count) = arena(0, 1024);
+    let mut frames = frames!(entries, base, count);
+
+    // Nothing is on a small list yet, so this splits an order-10 block. The
+    // half that is kept must be the low one, or the split has moved the
+    // allocation *up* while claiming to look down.
+    assert_eq!(frames.allocate_below(0, 1024), Some(0));
+}
+
+#[test]
+fn a_low_allocation_refuses_a_block_that_straddles_the_limit() {
+    let (mut entries, base, count) = arena(0, 16);
+    let mut frames = frames!(entries, base, count);
+
+    // One order-4 block covering 0..16. A limit of 8 cannot be satisfied out of
+    // it as an order-4 allocation, but can as an order-0 one, because the split
+    // keeps the low half.
+    assert_eq!(frames.allocate_below(4, 8), None, "the whole block is too high");
+    assert_eq!(frames.allocate_below(0, 8), Some(0));
+}
+
+#[test]
+fn a_low_allocation_is_a_normal_allocation_to_free() {
+    let (mut entries, base, count) = arena(0, 64);
+    let mut frames = frames!(entries, base, count);
+    let before = frames.free_blocks();
+
+    let frame = frames.allocate_below(2, 64).unwrap();
+    frames.deallocate(frame, 2).unwrap();
+
+    assert_eq!(
+        frames.free_blocks(),
+        before,
+        "a low allocation and its free must coalesce back to where they started"
+    );
+    assert_eq!(frames.free_frames(), 64);
+}
+
+#[test]
+fn a_low_allocation_beyond_the_largest_order_is_refused() {
+    let (mut entries, base, count) = arena(0, 64);
+    let mut frames = frames!(entries, base, count);
+    assert_eq!(frames.allocate_below(MAX_ORDER + 1, 64), None);
+}

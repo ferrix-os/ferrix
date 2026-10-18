@@ -152,4 +152,28 @@ impl Encoding for AArch64 {
         // needs FEAT_LPA2, which we do not require.
         level == Level::GIGABYTE || level == Level::MEGABYTE
     }
+
+    fn leaf_flags(entry: u64) -> MapFlags {
+        let access = entry & (0b11 << 6);
+        let user = access == AP_EL0_RW || access == AP_EL0_RO;
+        let write = access == AP_EL1_RW || access == AP_EL0_RW;
+
+        // Execute permission is asked of the privilege level the mapping is
+        // for, which is the same asymmetry the encoder writes: a user mapping
+        // is executable when UXN is clear, a kernel one when PXN is.
+        let execute = if user {
+            entry & UXN == 0
+        } else {
+            entry & PXN == 0
+        };
+
+        MapFlags {
+            read: true,
+            write,
+            execute,
+            user,
+            global: entry & NOT_GLOBAL == 0,
+            device: (entry >> 2) & 0b111 == MAIR_DEVICE,
+        }
+    }
 }

@@ -31,12 +31,20 @@
 //! eight-byte aligned because it sits at a multiple of eight from a 4 KiB
 //! boundary.
 //!
-//! **Slab pages are never returned to the page supply.** A class that grew to
-//! meet a burst keeps its pages for the life of the system. That is a real
-//! limitation and it is written down rather than hidden: fixing it needs a
-//! free-object count per slab page, which belongs in the frame allocator's
-//! per-frame record rather than in a header stolen from the first object.
-//! Nothing in the interface below has to change when it arrives.
+//! **A slab page goes back when its last object is freed**, provided the class
+//! still has another page to serve from. The bookkeeping that makes that
+//! possible is a count of free objects per page, and it lives in the frame
+//! allocator's per-frame record — [`Backing::slab_free`] and
+//! [`Backing::set_slab_free`] are how this crate reaches it. The alternative,
+//! a header stolen from the first object of each page, costs a whole object of
+//! the smallest class and puts allocator metadata inside memory the allocator
+//! hands out; the per-frame record had two bytes of padding going spare.
+//!
+//! The "provided the class still has another page" clause is not timidity. A
+//! class oscillating around a single object would otherwise return its only
+//! page and immediately ask for it back on the next allocation, which turns a
+//! free-list pop into a buddy allocation and a page of writes. Keeping one
+//! page per class costs at most 36 KiB across all nine classes.
 
 #![no_std]
 
@@ -58,6 +66,14 @@ pub const LARGEST_CLASS: usize = 2048;
 
 /// The smallest object, which must be large enough to hold a free-list link.
 pub const SMALLEST_CLASS: usize = 8;
+
+/// The page an object lives in.
+///
+/// Slab pages are page aligned and an object never straddles one, because
+/// every class size divides [`PAGE_SIZE`].
+const fn page_of(address: u64) -> u64 {
+    address & !(PAGE_SIZE as u64 - 1)
+}
 
 /// Marks the end of a free list. Zero is not a valid heap address in any
 /// address space the kernel runs in — the kernel half starts at
@@ -117,6 +133,19 @@ pub unsafe trait Backing {
 
     /// Write the free-list link stored in a free object.
     fn write_link(&mut self, at: u64, value: u64);
+
+    /// How many objects are free in the slab page at `page`.
+    ///
+    /// `page` is always an address [`Backing::allocate_pages`] returned with
+    /// an order of zero and that has not been given back. An implementation
+    /// with nowhere to keep the number may return zero from this and ignore
+    /// [`Backing::set_slab_free`]; the only consequence is that slab pages are
+    /// never returned, which is what this allocator did before the count
+    /// existed.
+    fn slab_free(&self, page: u64) -> u16;
+
+    /// Record how many objects are free in the slab page at `page`.
+    fn set_slab_free(&mut self, page: u64, objects: u16);
 }
 
 /// Why an allocation failed.
@@ -155,10 +184,18 @@ pub struct Heap {
     /// Bytes currently handed out, counted at class granularity so it reflects
     /// what the heap actually reserved rather than what was asked for.
     allocated: usize,
-    /// Pages taken from the page supply and never returned.
+    /// Pages currently held for the size classes.
     slab_pages: usize,
+    /// Of those, how many belong to each class. Consulted for one decision:
+    /// whether a page that has just emptied is the class's last one, in which
+    /// case it is kept rather than returned.
+    pages_per_class: [usize; CLASSES],
     /// Pages currently out as large allocations.
     large_pages: usize,
+    /// Slab pages handed back to the page supply since boot, for diagnostics:
+    /// a heap whose classes churn should show this rising, and one that only
+    /// ever grows should show it at zero.
+    slab_pages_returned: usize,
 }
 
 impl Default for Heap {
@@ -175,7 +212,9 @@ impl Heap {
             free: [END; CLASSES],
             allocated: 0,
             slab_pages: 0,
+            pages_per_class: [0; CLASSES],
             large_pages: 0,
+            slab_pages_returned: 0,
         }
     }
 
@@ -189,6 +228,12 @@ impl Heap {
     #[must_use]
     pub const fn slab_pages(&self) -> usize {
         self.slab_pages
+    }
+
+    /// Slab pages this heap has given back to its page supply.
+    #[must_use]
+    pub const fn slab_pages_returned(&self) -> usize {
+        self.slab_pages_returned
     }
 
     /// Pages currently out as large allocations.
@@ -248,6 +293,7 @@ impl Heap {
         }
 
         let address = self.pop(backing, class).ok_or(HeapError::OutOfMemory)?;
+        self.take_from_page(backing, address);
         self.allocated += Heap::class_size(class);
         Ok(address)
     }
@@ -270,6 +316,90 @@ impl Heap {
 
         self.push(backing, class, address);
         self.allocated = self.allocated.saturating_sub(Heap::class_size(class));
+        self.give_back_if_empty(backing, class, address);
+    }
+
+    /// One object of the page holding `address` has been handed out.
+    fn take_from_page(&mut self, backing: &mut impl Backing, address: u64) {
+        let page = page_of(address);
+        let free = backing.slab_free(page);
+        backing.set_slab_free(page, free.saturating_sub(1));
+    }
+
+    /// Return the slab page holding `address` if that free emptied it.
+    ///
+    /// The list walk is what this costs, and it is paid only on the free that
+    /// empties a page rather than on every free: a page with objects still out
+    /// cannot be returned, so there is nothing to look for. What the walk does
+    /// is unlink the page's objects from the class's free list, which a singly
+    /// linked list gives no cheaper way to do.
+    fn give_back_if_empty(&mut self, backing: &mut impl Backing, class: usize, address: u64) {
+        let page = page_of(address);
+        let objects = Heap::objects_per_page(class);
+        let free = backing.slab_free(page).saturating_add(1);
+        backing.set_slab_free(page, free);
+
+        if usize::from(free) != objects {
+            return;
+        }
+        // The last page of a class stays. See the note at the top of the file:
+        // returning it means the next allocation pays for a buddy block and a
+        // page of writes to get it straight back.
+        if self.pages_per_class.get(class).copied().unwrap_or(0) <= 1 {
+            return;
+        }
+
+        self.unlink_page(backing, class, page);
+        backing.set_slab_free(page, 0);
+        backing.deallocate_pages(page, 0);
+        self.slab_pages = self.slab_pages.saturating_sub(1);
+        self.slab_pages_returned += 1;
+        if let Some(count) = self.pages_per_class.get_mut(class) {
+            *count = count.saturating_sub(1);
+        }
+    }
+
+    /// Take every object belonging to `page` off `class`'s free list.
+    ///
+    /// Every object *is* on the list — the caller has just established that
+    /// the page is entirely free — so this removes exactly
+    /// [`Heap::objects_per_page`] of them.
+    fn unlink_page(&mut self, backing: &mut impl Backing, class: usize, page: u64) {
+        let mut cursor = self.head(class);
+        let mut previous = END;
+
+        // Bounded by the objects that can exist on any list, so a corrupted
+        // link that forms a cycle cannot hang the free path.
+        let mut budget = self.slab_pages.saturating_add(1) * (PAGE_SIZE / SMALLEST_CLASS);
+        while cursor != END && budget > 0 {
+            budget -= 1;
+            let next = backing.read_link(cursor);
+            if page_of(cursor) == page {
+                self.unlink_one(backing, class, previous, next);
+            } else {
+                previous = cursor;
+            }
+            cursor = next;
+        }
+    }
+
+    /// Drop one object out of a free list, given the object before it.
+    ///
+    /// `previous` is [`END`] when the object is the list head, which is the
+    /// only case that touches `self.free` rather than a link in the page.
+    fn unlink_one(&mut self, backing: &mut impl Backing, class: usize, previous: u64, next: u64) {
+        if previous == END {
+            if let Some(slot) = self.free.get_mut(class) {
+                *slot = next;
+            }
+        } else {
+            backing.write_link(previous, next);
+        }
+    }
+
+    /// Objects of `class` that fit in one page.
+    fn objects_per_page(class: usize) -> usize {
+        PAGE_SIZE / Heap::class_size(class)
     }
 
     /// Carve one fresh page into objects and put them all on a class's list.
@@ -277,6 +407,9 @@ impl Heap {
         let size = Heap::class_size(class);
         let page = backing.allocate_pages(0).ok_or(HeapError::OutOfMemory)?;
         self.slab_pages += 1;
+        if let Some(count) = self.pages_per_class.get_mut(class) {
+            *count += 1;
+        }
 
         // Backwards, so the list comes out in ascending address order. It costs
         // nothing and makes a heap dump readable, which matters the first time
@@ -286,6 +419,11 @@ impl Heap {
             let object = page + (index * size) as u64;
             self.push_raw(backing, class, object);
         }
+        // Every object is free, which is what makes the count a count rather
+        // than a guess: it is set here, decremented on each `allocate` and
+        // incremented on each `deallocate`, and only ever reaches `objects`
+        // again when all of them have come back.
+        backing.set_slab_free(page, u16::try_from(objects).unwrap_or(u16::MAX));
         Ok(())
     }
 
