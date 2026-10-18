@@ -10,6 +10,16 @@
   ],
   "owed": [
     {
+      "landing": "intel-k2, K2: an RMRR honoured with a kernel-held identity domain, so the N150's dmar0 translates (docs/INTEL-GPU.md section 5, vtd-design.md 3.9(b); the consultant's OK IF at ledger lines 2388 and 2392, and 2423 B1)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet.",
+      "what": "Reached by stage 10's check_rmrr_identity and check_rmrr_frames on every x86-64 test-boot: vtd::Unit::attach_identity's success path, IdentityDomain::new/claim/release/claimed, Translation::held and detach's refusal, Domain::pin's and unpin_waiting's Reserved refusals, Drop's identity arm at 0 pins, frames_outside_allocator's both answers, identity_regions. Argued, not reachable by any QEMU boot, since QEMU's DMAR has no RMRR (the O2 patch is a BACKLOG row): (1) bring_up_vtd's Honour plan, honour_and_translate's attach-then-translate arm, attach_identities and say_identity on a real table -- held by the host tests the_boxs_dmar0_has_one_rmrr_to_honour_and_dmar1_none and the_boxs_rmrr_is_honoured_page_for_page (the N150's DMAR and memory map), and by the N150 P1 box row (BACKLOG, intel-k2); (2) plan_rmrrs' Hold arms and say_unit's not-honoured line with its reason (Unhonoured::Refused) -- each refusal held by the ferrix_paging::vtd::rmrr host tests and a_units_later_rmrrs_are_read_too, the line by code review and the box row; (3) Unhonoured::Attach, attach_identities' Err arm, and attach_identity's take-down and 'tables are kept' paths -- reached only when a unit refuses an attach, a map or its flush, which QEMU's never does (the defensive category of the pin unwind beside them); attach_identity's refusal on a translating unit outside checks is reached only by a boot that skips its checks and has an identity plan, the box; (4) domain_for's identity arm for a bring-up identity domain: the misplaced and second-claim lines and their once-only guard (first_refusal) -- the placement decision held by the host test an_identity_domain_is_its_functions_only_where_enumeration_agrees, the claim by the boot check's second claim and the NC5 control, the lines by the box row; Drop's identity arm with pages still pinned -- by code review (2392 (2)); (5) on aarch64 and armv7a no VT-d unit translates, so check_rmrr_identity returns at its first test and the rest is other-architecture. The next coverage run measures (1)-(5) and argues each unreached line in coverage-argued-<arch>.json as named here, then deletes this entry."
+    },
+    {
       "landing": "panic-reboot, ferrix.panic=reset: the N150 stop-gap reset after a panic's report (src/kernel/src/panic/reset.rs; the consultant's OK IF (1)-(8), ledger line 2143)",
       "architectures": [
         "x86_64",
