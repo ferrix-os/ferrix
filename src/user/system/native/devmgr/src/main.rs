@@ -119,6 +119,15 @@ const AHCI_INTERFACE: PciMatch = PciMatch::Interface(0x01, 0x06, 0x01);
 /// Motorcomm's YT6801 PCIe gigabit adapter, driven by `yt6801` over a net
 /// ring as virtio-net is (`docs/roadmap/networking.md`). The kernel holds
 /// its MSI-X off and offers its one MSI vector (`docs/DEVMGR.md` §3).
+/// Intel's PCI vendor id.
+const INTEL_VENDOR: u16 = 0x8086;
+/// The Alder Lake-N GPUs (`INTEL_ADLN_IDS`, Linux's `pciids.h`): the N150
+/// box's is 0x46D4. Driven by `intel` as an engine while it serves no
+/// subsystem (`docs/INTEL-GPU.md` §7, M1 and M2): the kernel lends the
+/// function only under `ferrix.intelgpu` without `ferrix.efifb`, and its
+/// isolated-interrupts mark is not set until the box's VT-d remaps
+/// (intel-gpu-split.md, Q2).
+const ADLN_IDS: [u16; 5] = [0x46D0, 0x46D1, 0x46D2, 0x46D3, 0x46D4];
 const MOTORCOMM_VENDOR: u16 = 0x1F0A;
 const YT6801_IDS: [u16; 1] = [0x6801];
 
@@ -139,7 +148,7 @@ enum PciMatch {
 ///
 /// An xHCI USB host controller, class 0C:03:30 whoever made it, is a bus
 /// host driven by `usbhid`, as the STM32MP15's EHCI is (`docs/XHCI.md`).
-const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 6] = [
+const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 7] = [
     (ANY_VENDOR, NVME_INTERFACE, b"nvme", Kind::Block),
     (ANY_VENDOR, AHCI_INTERFACE, b"ahci", Kind::Block),
     (
@@ -159,6 +168,12 @@ const PCI_DRIVERS: [(u16, PciMatch, &[u8], Kind); 6] = [
         PciMatch::Devices(&TEST_GPU_IDS),
         b"nvrm-test",
         Kind::Gpu,
+    ),
+    (
+        INTEL_VENDOR,
+        PciMatch::Devices(&ADLN_IDS),
+        b"intel",
+        Kind::Engine,
     ),
     (
         ANY_VENDOR,
@@ -236,8 +251,9 @@ enum Plan {
     Port,
     /// A bus host, which publishes nothing itself.
     Host,
-    /// A rendering engine, which publishes nowhere yet.
-    Engine,
+    /// A rendering engine, which publishes nowhere yet, driven by the
+    /// program named.
+    Engine(&'static str),
     /// A USB device controller's function.
     Gadget,
     /// A GPU, driven by the program named.
@@ -733,7 +749,7 @@ fn plan_for(kind: Kind, info: &DeviceInfo, disks: &mut u32) -> Option<Plan> {
         Kind::Sound => Plan::Sound,
         Kind::Port => Plan::Port,
         Kind::Host => Plan::Host,
-        Kind::Engine => Plan::Engine,
+        Kind::Engine => Plan::Engine(engine_program(info)),
         Kind::Gadget => Plan::Gadget,
         Kind::Gpu => Plan::Gpu(gpu_program(info)),
     })
@@ -1691,7 +1707,7 @@ fn start(
         Plan::Sound => start_sound(job, device, image, info, port, key),
         Plan::Port => start_plain(job, device, image, info, port, key, "vport"),
         Plan::Host => start_plain(job, device, image, info, port, key, "usbhid"),
-        Plan::Engine => start_plain(job, device, image, info, port, key, "gc400"),
+        Plan::Engine(program) => start_plain(job, device, image, info, port, key, program),
         Plan::Gadget => start_plain(job, device, image, info, port, key, "usbdev"),
         Plan::Gpu(program) => start_plain(job, device, image, info, port, key, program),
     }
@@ -1706,6 +1722,16 @@ fn pci_matches(matched: PciMatch, info: &DeviceInfo) -> bool {
                 == (u32::from(base) << 16) | (u32::from(sub) << 8) | u32::from(interface)
         }
         PciMatch::Devices(ids) => ids.contains(&info.device_id),
+    }
+}
+
+/// The program an engine's table entry named: `intel` for Intel's GPUs,
+/// `gc400` for the STM32MP157's.
+fn engine_program(info: &DeviceInfo) -> &'static str {
+    if info.vendor_id == INTEL_VENDOR {
+        "intel"
+    } else {
+        "gc400"
     }
 }
 

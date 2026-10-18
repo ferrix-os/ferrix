@@ -34,6 +34,7 @@
 //!   around each request;
 //! * [`execlists`]: descriptors, the submit queue and the status buffer;
 //! * [`irq`]: the Gen11 interrupt banks and identities;
+//! * [`plane`]: the firmware's lit plane, read so its GGTT entries are kept;
 //! * [`rps`] and [`rc6`]: frequency requests and idle power, by the host;
 //! * [`clock`]: the command streamer's timestamp frequency;
 //! * [`sseu`]: the fuses, and the topology Mesa is told;
@@ -56,6 +57,7 @@ pub mod io;
 pub mod irq;
 pub mod lrc;
 pub mod mocs;
+pub mod plane;
 pub mod rc6;
 pub mod reg;
 pub mod rps;

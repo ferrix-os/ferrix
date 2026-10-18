@@ -1,0 +1,23 @@
+[package]
+name = "ferrix-intel-driver"
+description = "The Intel Xe-LP GPU's driver process (the N150's ADL-N): forcewake, the GT's identity and the GGTT read, then (M2 on) execlist submission, on ferrix-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "intel"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-intel-xelp.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+
+[lints]
+workspace = true
