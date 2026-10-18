@@ -484,3 +484,152 @@ fn context_workarounds_are_read_back_from_a_request() {
     assert_eq!(named.len(), 1);
     assert_eq!(named[0].0, wal.iter().nth(first).expect("entry").reg);
 }
+
+/// `igt_spinner`'s batch: an arbitration point, then a jump back to its own
+/// start, from the PPGTT.
+fn spinner(at: u64) -> [u32; 4] {
+    [
+        gpu::MI_ARB_CHECK,
+        gpu::MI_BATCH_BUFFER_START_GEN8 | (1 << 8),
+        at as u32,
+        (at >> 32) as u32,
+    ]
+}
+
+/// The rig's engine resumed again after a reset (`intel_engine_resume`).
+fn resume(rig: &Rig) {
+    let report = gt::intel_engine_resume(
+        &mut Regs(&rig.gpu),
+        rig.engine.mmio_base,
+        &workarounds::engine_workarounds(&rig.engine, mocs::UC_INDEX),
+        &workarounds::whitelist(&rig.engine),
+        HWSP,
+    );
+    assert_eq!(report.still_in_error, 0);
+}
+
+#[test]
+fn a_hung_batch_is_reset_skipped_and_banned() {
+    use crate::reset;
+    let rig = Rig::new(ENGINES[0]);
+    let mut state = rig.bring_up();
+    let default = rig.record_default(&mut state);
+    let mut hung = rig.context(rig.place(IMAGE2, RING2, 1), Some(&default));
+    let at = 0x3_0000_0000_u64;
+    map(&rig, at, &[0xb00_0000]);
+    rig.gpu
+        .borrow_mut()
+        .pages
+        .get_mut(&0xb00_0000)
+        .expect("page")[..4]
+        .copy_from_slice(&spinner(at));
+    let (seqno, built) = {
+        let mut gpu = rig.gpu.borrow_mut();
+        hung.emit(
+            gpu.object(RING2),
+            Payload::Batch {
+                address: at,
+                flags: 0,
+            },
+        )
+        .expect("room")
+    };
+    let _ = rig.submit(&mut state, &mut hung, built.tail);
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Hung);
+    let (report, _) = rig.process(&mut state);
+    assert_eq!((report.promoted, report.completed), (1, 0));
+    assert!(!rig.complete(&hung, seqno));
+
+    // The engine reset alone: stopped, made ready, its domain reset.
+    let mut clock = Ticks::default();
+    let reset =
+        reset::intel_engine_reset(&mut Regs(&rig.gpu), &mut clock, &rig.engine).expect("a domain");
+    assert!(reset.is_reset(), "{reset:?}");
+    assert!(reset.stopped.is_ok());
+    {
+        let gpu = rig.gpu.borrow();
+        // gen6_hw_domain_reset writes the domain twice below 12.70.
+        assert_eq!(gpu.resets, 2);
+        assert_eq!(
+            gpu.regs[&crate::generated::intel_gt_regs::GEN6_GDRST.offset()],
+            0x2
+        );
+        // Cancelled again: the ring is not left stopped.
+        assert!(!gpu.stopped && !gpu.reset_requested);
+    }
+    // The ports: the hung context was active and is handed back.
+    let mut cancelled = Vec::new();
+    state.execlists.reset(
+        &mut Regs(&rig.gpu),
+        &mut Status(&rig.gpu),
+        rig.engine.mmio_base,
+        |p| {
+            cancelled.push(p);
+        },
+    );
+    assert_eq!(cancelled.len(), 1);
+    assert_eq!(cancelled[0].context, 1);
+    resume(&rig);
+
+    // Rewound: the batch skipped, the context banned, its ring replayed
+    // from the request's head so the breadcrumbs write its seqno.
+    {
+        let mut gpu = rig.gpu.borrow_mut();
+        request::skip(gpu.object(RING2), RING_SIZE, &built);
+        assert!(
+            gpu.objects[&RING2][(built.infix / 4) as usize..(built.postfix / 4) as usize]
+                .iter()
+                .all(|&dw| dw == 0)
+        );
+    }
+    let desc = {
+        let mut gpu = rig.gpu.borrow_mut();
+        let regs = lrc::reg_state(gpu.object(IMAGE2)).expect("page");
+        let desc = reset::rewind(&mut hung, regs, &built, &[]);
+        assert_eq!(regs[ctx::RING_HEAD], built.head);
+        assert_eq!(regs[ctx::RING_TAIL], built.tail);
+        assert_eq!(regs[lrc::lrc_ring_mi_mode() + 1] & lrc::STOP_RING, 0);
+        desc
+    };
+    assert!(hung.banned);
+    assert_ne!(desc & CTX_DESC_FORCE_RESTORE, 0);
+    assert!(state.submit(&mut Regs(&rig.gpu), desc, 1));
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Idle);
+    let (report, out) = rig.process(&mut state);
+    assert_eq!(
+        (report.promoted, report.completed, report.error),
+        (1, 1, None)
+    );
+    assert_eq!(out.len(), 1);
+    assert!(
+        rig.complete(&hung, seqno),
+        "the replayed breadcrumb wrote the seqno"
+    );
+
+    // The engine runs other contexts again.
+    let mut other = rig.context(rig.place(IMAGE, RING, 2), Some(&default));
+    let (seqno, tail) = rig.emit(&mut other, Payload::Commands(&store(0x20, 0xa11e_0004)));
+    let _ = rig.submit(&mut state, &mut other, tail);
+    assert_eq!(rig.gpu.borrow_mut().run(), Ran::Idle);
+    let _ = rig.process(&mut state);
+    assert!(rig.complete(&other, seqno));
+    assert_eq!(rig.gpu.borrow().objects[&PAGE][8], 0xa11e_0004);
+}
+
+#[test]
+fn an_engine_that_never_gets_ready_is_not_reset() {
+    let rig = Rig::new(ENGINES[1]);
+    let _state = rig.bring_up();
+    rig.gpu.borrow_mut().never_ready = true;
+    let mut clock = Ticks::default();
+    let report = crate::reset::intel_engine_reset(&mut Regs(&rig.gpu), &mut clock, &rig.engine)
+        .expect("a domain");
+    assert!(report.ready.is_err());
+    assert!(!report.is_reset());
+    let gpu = rig.gpu.borrow();
+    assert_eq!(gpu.resets, 0, "GEN6_GDRST was not written");
+    // The request was still cancelled, as gen8_reset_engines' skip_reset does.
+    assert!(!gpu.reset_requested);
+    // A video engine has no reset domain here.
+    assert!(crate::reset::reset_domain(&ENGINES[2]).is_none());
+}

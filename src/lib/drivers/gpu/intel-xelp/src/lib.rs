@@ -39,6 +39,7 @@
 //! * [`plane`]: the firmware's lit plane, read so its GGTT entries are kept;
 //! * [`ppgtt`]: `gen8_ppgtt.c`'s 4-level per-process GTT and its scratch;
 //! * [`request`]: a request's commands, in i915's order;
+//! * [`reset`]: one engine reset, and the hung context rewound and banned;
 //! * [`ring`]: a context's ring buffer and its space;
 //! * [`rps`] and [`rc6`]: frequency requests and idle power, by the host;
 //! * [`clock`]: the command streamer's timestamp frequency;
@@ -70,6 +71,7 @@ pub mod ppgtt;
 pub mod rc6;
 pub mod reg;
 pub mod request;
+pub mod reset;
 pub mod ring;
 pub mod rps;
 pub mod sseu;
