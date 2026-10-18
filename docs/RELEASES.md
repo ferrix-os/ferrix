@@ -7,8 +7,74 @@ read [the roadmap](roadmap/where-it-stands.md).
 Milestone tags are annotated and checked by the project owner before they are
 published. The release workflow uses the matching section from this file as
 its notes, and attaches the Pixel 7 app's desktop in its two editions, which
-the app updates the phone from ([tools/vendor/google/pixel7/README.md](../tools/vendor/google/pixel7/README.md#updates)). See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
+the app updates the phone from ([tools/vendor/google/pixel7/README.md](../tools/vendor/google/pixel7/README.md#updates)),
+and the x86-64 desktop for plain QEMU, `ferrix-x86_64-desktop.zip`, which
+[`tools/common/release/package-desktop.py`](../tools/common/release/package-desktop.py)
+builds. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
+
+## v0.1.0 — 2026-10-18, draft
+
+<!-- Draft for the owner: set the date and the commit when tagging, and
+     check the list against main as it is then. -->
+
+The first numbered release, and the first one anybody can boot without
+building it: the x86-64 desktop as one zip, booted by a script with plain
+QEMU. Download `ferrix-x86_64-desktop.zip` below, unpack it, and run
+
+```
+sh ferrix-x86_64-desktop/run.sh                                                  # Linux, macOS
+powershell -ExecutionPolicy Bypass -File ferrix-x86_64-desktop\run.ps1           # Windows
+```
+
+The script uses KVM, WHPX or HVF where it can and QEMU's emulator
+otherwise, and finds the UEFI firmware QEMU or the distribution installed.
+Checked before the tag on Ubuntu with its own QEMU 10.2.1 and OVMF, under
+KVM and emulated, and on Windows 11 with QEMU 11.1.0 under WHPX: the
+compositor's `hyprix: card0` line came within seconds of the loader in
+each.
+
+- **In the zip:** the hyprix Wayland compositor with a terminal running
+  zinc, the zsh-compatible shell; ferrousli's busybox; and the apps an
+  image carries by default, among them `btop`, `curl`, `git`, `foot`,
+  `fuzzel`, `waybar` and `ferrofetch`. The network is QEMU's own, so
+  `curl https://example.com` works from the first prompt.
+- **Linux programs:** Chrome, `rustc`, `git`, `curl` and Valve's
+  `steamcmd` run unpatched on Ferrix's own Rust kernel, 32-bit x86 programs
+  included; Steam signs in and starts a native game; Claude Code runs a
+  session on the desktop. Those that need a volume of their own are in a
+  build from source (`cargo xtask run-compositor --everything`), not in the
+  zip.
+- **Drivers outside the kernel:** disk, network, graphics, input, sound and
+  console drivers run as processes, behind the IOMMU on x86-64 and AArch64,
+  and are restarted when they crash.
+- **Users and storage:** passwords checked by `authd` as Argon2id hashes; a
+  btrfs root that keeps what is written to it, an installer, and A/B system
+  slots with a way back.
+- **Three architectures** in the boot tests, and Ferrix has booted on an
+  STM32MP157D-DK1 and a Pixel 7.
+
+Known limits:
+
+- The zip leaves out Chrome, Steam and the Rust toolchain, which run from
+  volumes of several gigabytes that a build fetches; `/` is in memory, so
+  nothing survives QEMU exiting; the screen is drawn in software, with no
+  host GPU; the keyboard layout is US; there is no sound card.
+- With released QEMU under WHPX the guest gets one processor: QEMU 11.1's
+  WHPX faults Ferrix's ring-3 drivers with more.
+  `tools/common/fetch/fetch-qemu-windows.sh` builds one that does not.
+- On an Apple Silicon Mac the x86-64 guest is emulated and slow.
+- The zip's desktop runs as root with no login. Ferrix is not ready to be
+  anybody's everyday OS: parts of authentication and process isolation are
+  unfinished.
+
+What to test:
+
+```
+sh ferrix-x86_64-desktop/run.sh --vnc 5        # no window: VNC on 127.0.0.1:5905
+cargo xtask run-compositor --arch x86_64        # the same desktop from source
+cargo xtask test-boot --arch all
+```
 
 ## stage-11.1-network-display-and-threads — 2026-09-16, features at a89aeb25
 

@@ -391,6 +391,90 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
     crate::qemu::run(arch, &image, &args)
 }
 
+/// The file `release-image` writes into `--stage`, and the name the
+/// release's run scripts boot (`tools/common/release/desktop/`).
+pub(crate) const RELEASE_IMAGE: &str = "ferrix-x86_64.img";
+
+/// `cargo xtask release-image --stage <DIR>`: the desktop `run-compositor`
+/// boots, as the one disk image a release carries for somebody who has QEMU
+/// and nothing else. `tools/common/release/package-desktop.py` puts it in
+/// the release's archive beside the scripts that boot it.
+///
+/// The configuration, the programs and the apps are `run-compositor`'s with
+/// nothing asked, less everything that would make the image this machine's
+/// rather than anybody's: the keyboard is `us` rather than this host's, the
+/// screen carries no EDID of this host's monitor, and the wallpaper is
+/// `ember`, Ferrix's own, never one of the pictures kept here, which are
+/// somebody else's art (`crate::wallpaper`). The release profile, with the
+/// kernel stripped, as `flash` writes one.
+///
+/// What a watched boot attaches beside its image is not in it, and the
+/// archive's README says so: the rustc volume, a download of its own; the
+/// btrfs root and home disks, so `/` is in memory, as `--tmpfs-root` boots;
+/// and the disks only the self-checks read, which this image skips as every
+/// desktop does. The network is in it: the image runs `udhcpc`, and the run
+/// scripts give QEMU's own user-mode network, which answers it as xtask's
+/// gateway does.
+///
+/// Every app the image carries by default is built where it has no package
+/// yet, as `--everything` builds them, and a build that fails stops this:
+/// an app left out of a release would be left out without anybody seeing
+/// the line that said so.
+///
+/// # Errors
+///
+/// An architecture other than x86-64, no `--stage`, or a build that failed.
+pub(crate) fn release_image(args: &Args) -> Result<()> {
+    let arch = args.single_arch()?;
+    if arch != Arch::X86_64 {
+        return Err(Error::new(
+            "release-image is x86_64's: the release's run scripts boot QEMU's q35",
+        ));
+    }
+    let Some(stage) = args.stage.clone() else {
+        return Err(Error::new(format!(
+            "release-image needs --stage <DIR>, where it writes {RELEASE_IMAGE}"
+        )));
+    };
+    if args.config.is_some() || args.everything || args.chrome || args.wine {
+        return Err(Error::new(
+            "release-image builds run-compositor's own desktop; --config, --everything, \
+             --chrome and --wine are not in it",
+        ));
+    }
+    let args = &Args {
+        release: true,
+        layout: Some("us".to_owned()),
+        variant: None,
+        edid: Some("none".to_owned()),
+        wallpaper: Some(crate::wallpaper::EMBER.to_owned()),
+        net: true,
+        ..args.clone()
+    };
+    crate::fat::set_strip_kernel(true);
+    crate::apps::build_carried(arch, args)?;
+    let programs = Programs::build(arch)?;
+    let size = args.size.unwrap_or(crate::wallpaper::SCREEN);
+    // The screen follows the window it is shown in, as `run-compositor`'s
+    // does: the run scripts' `xres` and `yres` are only where it starts.
+    let (config, carried) = desktop(arch, RUN_CONFIG.to_owned(), size, true, Backdrop::Any, args)?;
+    let (image, _) =
+        build_desktop_image(arch, &programs, &config, carried, args, DESKTOP_DEFAULTS)?;
+    let stage = std::path::Path::new(&stage);
+    std::fs::create_dir_all(stage)
+        .map_err(|error| Error::new(format!("making {}: {error}", stage.display())))?;
+    let target = stage.join(RELEASE_IMAGE);
+    let _ = std::fs::copy(&image, &target).map_err(|error| {
+        Error::new(format!(
+            "copying {} to {}: {error}",
+            image.display(),
+            target.display()
+        ))
+    })?;
+    println!("  release image {}", target.display());
+    Ok(())
+}
+
 /// The serial port's shell on a board's desktop: busybox's, in a session of
 /// its own with the console as its terminal.
 const SERIAL_SHELL: &str = "/bin/busybox setsid -c /bin/busybox sh -i";
