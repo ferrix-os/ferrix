@@ -209,8 +209,10 @@ pub const fn ggtt_total(gmch_ctl: u16) -> u64 {
 /// `GFX_FLSH_CNTL_GEN6` flush.
 pub const GTTADR_OFFSET: u64 = 8 << 20;
 
-/// `GEN12_GUC_TLB_INV_CR`, which `ggtt_invalidate` writes on Gen12 when
-/// `GuC`'s TLB invalidation is not in use (execlists).
+/// `GEN12_GUC_TLB_INV_CR`, which `guc_ggtt_invalidate` writes on Gen12 when
+/// `GuC` submission is on but its TLB invalidation is not. Under execlists
+/// `ggtt->invalidate` is `gen8_ggtt_invalidate`, which writes nothing on
+/// Gen11+ (`gen8_gmch_probe`); this driver does not write it either.
 pub const GEN12_GUC_TLB_INV_CR: Reg = Reg(0xcee8);
 /// `GEN12_GUC_TLB_INV_CR_INVALIDATE`.
 pub const GEN12_GUC_TLB_INV_CR_INVALIDATE: u32 = 1 << 0;

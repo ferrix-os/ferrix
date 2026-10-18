@@ -125,3 +125,84 @@ impl GgttSpace {
         self.used.iter().flatten().map(|r| r.len).sum()
     }
 }
+
+/// What binding pages into the window found.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BindError {
+    /// The range is not one this space allocated, or the pages do not fit
+    /// it.
+    NotOurs,
+    /// An entry read back different from what was written ("The WC issue is
+    /// easily caught by the readback check when writing GTT PTE entries",
+    /// `needs_wc_ggtt_mapping`): its index and what came back.
+    Readback {
+        /// The entry's index in the GGTT.
+        index: u64,
+        /// What it read back as.
+        read: u64,
+    },
+}
+
+impl GgttSpace {
+    /// Whether `range` lies in this window and is allocated.
+    #[must_use]
+    pub fn owns(&self, range: Range) -> bool {
+        self.used.iter().take(self.count).any(|r| *r == Some(range))
+    }
+
+    /// `gen8_ggtt_insert_page` for each of `pages` (device addresses, in
+    /// order) from the start of `range`, then `ggtt->invalidate`, which for
+    /// execlists on Gen11+ is `gen8_ggtt_invalidate` and writes nothing
+    /// (`needs_wc_ggtt_mapping` is false: the entries are written uncached).
+    /// Every entry is read back after it is written. Only ranges this space
+    /// handed out are ever written, so no firmware entry (the lit plane's)
+    /// is touched. Returns the number of entries written.
+    ///
+    /// # Errors
+    ///
+    /// [`BindError::NotOurs`] before anything is written;
+    /// [`BindError::Readback`] at the first entry that did not stick.
+    pub fn bind<P: crate::io::GgttPtes + ?Sized>(
+        &self,
+        ptes: &mut P,
+        range: Range,
+        pages: &[u64],
+    ) -> Result<usize, BindError> {
+        if !self.owns(range) || pages.len() as u64 * 4096 > range.len {
+            return Err(BindError::NotOurs);
+        }
+        let first = range.start / 4096;
+        for (n, &addr) in pages.iter().enumerate() {
+            let index = first + n as u64;
+            let pte = crate::gtt::gen8_ggtt_pte_encode(addr & crate::gtt::GEN12_GGTT_PTE_ADDR_MASK);
+            ptes.write_pte(index, pte);
+            let read = ptes.read_pte(index);
+            if read != pte {
+                return Err(BindError::Readback { index, read });
+            }
+        }
+        Ok(pages.len())
+    }
+
+    /// `gen8_ggtt_clear_range` over `range`: every entry back to
+    /// `scratch_pte` (the GGTT's scratch page, `vm->scratch[0]->encode`).
+    ///
+    /// # Errors
+    ///
+    /// [`BindError::NotOurs`].
+    pub fn clear<P: crate::io::GgttPtes + ?Sized>(
+        &self,
+        ptes: &mut P,
+        range: Range,
+        scratch_pte: u64,
+    ) -> Result<(), BindError> {
+        if !self.owns(range) {
+            return Err(BindError::NotOurs);
+        }
+        let first = range.start / 4096;
+        for index in first..first + range.len / 4096 {
+            ptes.write_pte(index, scratch_pte);
+        }
+        Ok(())
+    }
+}

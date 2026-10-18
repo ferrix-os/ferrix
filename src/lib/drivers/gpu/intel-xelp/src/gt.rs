@@ -113,3 +113,18 @@ pub fn intel_engine_resume<M: Mmio + ?Sized>(
     mmio.write32(ring_emr(base).offset(), !I915_ERROR_INSTRUCTION);
     ResumeReport { still_in_error }
 }
+
+/// The PAT registers that do not hold what [`setup_private_pat`] wrote:
+/// `(register, expected, read)`. i915 does not read them back; a PAT that
+/// did not stick turns every client's caching wrong, so the driver does
+/// (M2, "PAT and MOCS").
+pub fn verify_private_pat<M: Mmio + ?Sized>(
+    mmio: &mut M,
+) -> impl Iterator<Item = (crate::reg::Reg, u32, u32)> + '_ {
+    gtt::tgl_setup_private_ppat()
+        .into_iter()
+        .filter_map(move |(reg, value)| {
+            let read = mmio.read32(reg.offset());
+            (read != value).then_some((reg, value, read))
+        })
+}

@@ -54,3 +54,16 @@ pub fn wait_for_register<M: Mmio + ?Sized, C: Clock + ?Sized>(
         clock.delay_us(1);
     }
 }
+
+/// The GGTT's entries, BAR0's upper half (`GTTADR`), by entry index.
+///
+/// Each entry is written as one 64-bit store, as `gen8_set_pte` does with
+/// `writeq`: on Gen11+ the range is mapped uncached ("writes larger than 64
+/// bit to the GTT pagetable range will be dropped", `needs_wc_ggtt_mapping`),
+/// and two 32-bit halves would let the GPU see half an entry.
+pub trait GgttPtes {
+    /// `gen8_get_pte`.
+    fn read_pte(&mut self, index: u64) -> u64;
+    /// `gen8_set_pte`.
+    fn write_pte(&mut self, index: u64, pte: u64);
+}
