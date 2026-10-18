@@ -1,5 +1,6 @@
 # The N150's Intel GPU: a render driver so Mesa's anv and iris run on Ferrix
 
+Version 2, 2026-10-18: version 1 plus the customer's D1 and D2 and §3.6.
 Version 1, 2026-10-18, a design with no code. Asked for by the customer on
 2026-10-18. The N150 box (`docs/N150.md`) draws every frame with Mesa's
 lavapipe today. That keeps its four cores busy (load about 10) and may be
@@ -246,24 +247,107 @@ driver's.
 
 **A new driver** does the twelve pieces of §3.4 and the front end of §2.1.
 Genode shows the GT part at about 7,500 lines of C++. Fuchsia shows a new
-driver carrying anv on Gen12. The register sequences are learned by reading
-i915. i915 is MIT-licensed in its source files, but, as with etnaviv for the
-GC400 (`docs/GPU.md` §6.3), its code is read and not copied, and every step
-names the Linux function it follows. Intel's public PRMs for Tiger Lake and
-Alder Lake (volumes 2 and 8) are the second source. **About 82 points**
-(§7). This is the recommendation.
+driver carrying anv on Gen12. The new driver follows i915 file by file
+(§3.6). Intel's public PRMs for Tiger Lake and Alder Lake (volumes 2 and 8)
+are the second source. **About 82 points** (§7). This is the
+recommendation.
+
+### 3.6 Following i915 file by file (the customer, 2026-10-18)
+
+The customer decided on 2026-10-18 to write the new Rust driver with the
+i915 uAPI, staying as close to Linux's i915 as possible to save time. That
+means mirroring its structure, its init sequence, its register definitions,
+its workaround lists, its PAT and MOCS tables, its LRC layout and its
+execlist submission. Each is translated file by file, with the source cited
+for every function. Nothing that i915 already gets right is redesigned.
+What Ferrix changes is only the layer underneath i915: how memory, MMIO,
+interrupts and requests reach the driver.
+
+**The license.** Every i915 file this driver translates is MIT, by SPDX tag
+(`gt/*`, `gem/*`, `i915_query.c`) or by the full MIT text (`intel_uncore.c`,
+`i915_reg.h`, `uapi/drm/i915_drm.h`). This was checked file by file in the
+v7.0 tree, and the only GPL headers are in selftests. Ferrix is MIT too.
+The terms are the MIT notice's:
+
+* each translated Rust file starts with the i915 file's copyright lines
+  (`Copyright © 2014 Intel Corporation`, and so on) and the MIT permission
+  notice as that file carries it, then `Translated from Linux v7.0,
+  drivers/gpu/drm/i915/<path>`;
+* each function, table and register block names its origin
+  (`/// i915: gt/intel_workarounds.c, gen12_ctx_workarounds_init`);
+* tables are carried as data with i915's names and order, so a diff
+  against a later Linux release is readable;
+* the crate's README lists every file translated, and `cargo deny`'s and
+  the tree's licence checks count Intel's MIT as a permitted licence.
+
+The mapping. Here `xelp` is `src/lib/drivers/gpu/intel-xelp/src` (pure,
+host-tested, no I/O) and `drv` is `src/user/system/native/drivers/gpu/intel/src`
+(the process):
+
+| i915 (v7.0) | Rust module | What is kept |
+|---|---|---|
+| `include/drm/intel/pciids.h` | `xelp::pciids` | `INTEL_ADLN_IDS`, and the ADL-P/RPL ids for later |
+| `i915_pci.c`, `intel_device_info.c` | `xelp::device_info` | `adl_p_info` and the N subplatform as data |
+| `i915_reg.h` (subset), `gt/intel_gt_regs.h`, `gt/intel_engine_regs.h`, `gt/intel_lrc_reg.h` | `xelp::regs::{i915_reg, gt, engine, lrc}` | names, offsets and bitfields as i915 spells them (`_MMIO`, `REG_BIT`, `REG_GENMASK`, masked-bit helpers) |
+| `gt/intel_gpu_commands.h` | `xelp::commands` | the `MI_*`, `PIPE_CONTROL` and `XY_*` encoders |
+| `intel_uncore.c` | `xelp::uncore` (tables) + `drv::uncore` (MMIO) | Gen12's forcewake domain ranges and shadowed list, `fw_domain_get`/`put` with acks, unclaimed-access checks |
+| `gt/intel_sseu.c`, `gt/intel_gt_clock_utils.c` | `xelp::sseu`, `xelp::clock` | `gen12_sseu_info_init`, the topology query encoding, `RPM_CONFIG0` decoding |
+| `gt/intel_ggtt.c`, `gt/intel_gtt.c` | `xelp::ggtt`, `xelp::gtt` | `gen8_ggtt_pte_encode`, the GGMS and stolen-memory probe, `tgl_setup_private_ppat` and the PAT table |
+| `gt/gen8_ppgtt.c` | `xelp::ppgtt` | `gen8_pte_encode`, the 4-level walk, the scratch page |
+| `gt/intel_mocs.c` | `xelp::mocs` | `tgl_mocs_table`, `init_global_mocs`, the per-context MOCS |
+| `gt/intel_workarounds.c` | `xelp::workarounds` | the `i915_wa_list` builder, `wa_masked_en`/`wa_write_clr_set` and the rest, the Gen12 and ADL-P lists (GT, context, engine, whitelist), and the verify pass |
+| `gt/intel_lrc.c` | `xelp::lrc` | `gen12_rcs_offsets`/`gen12_xcs_offsets`, `set_offsets`, `init_common_regs`, the PPGTT and ring state in the image |
+| `gt/gen8_engine_cs.c` | `xelp::engine_cs` | `gen12_emit_flush_rcs`/`xcs` with the AUX invalidation, `gen8_emit_bb_start`, the fini breadcrumbs |
+| `gt/intel_engine_cs.c`, `gt/intel_ring.c` | `xelp::engine` + `drv::engine` | engine table, `RING_MODE`, the status page, the ring |
+| `gt/intel_execlists_submission.c` | `xelp::execlists` (descriptor, CSB parse) + `drv::execlists` | `lrc_descriptor`, `execlists_submit_ports` for the Gen12 ELSQ, `process_csb` and its Gen12 decoding. Its virtual engines and preemption come later |
+| `gt/intel_timeline.c`, `gt/intel_breadcrumbs.c` | `drv::timeline` | per-context seqno in the status page, completion by the user interrupt |
+| `gt/intel_gt_irq.c`, `i915_irq.c` (Gen11 part) | `xelp::irq` + `drv::irq` | `gen11_gt_irq_handler`, the identity-register dance, the master control |
+| `gt/intel_reset.c`, `gt/intel_engine_heartbeat.c` | `drv::reset` | engine reset by `GEN11_GRDOM` domains, the heartbeat |
+| `gt/intel_rps.c`, `gt/intel_rc6.c` | `drv::rps`, `drv::rc6` | host RPS (`gen6_rps_set`), RC6 enable for Gen11+ |
+| `include/uapi/drm/i915_drm.h` | `xelp::uapi` | every struct of §2.1 with its layout pinned by the probe |
+| `i915_getparam.c`, `i915_query.c` | `xelp::getparam`, `xelp::query` | the answers, in i915's order and with its errors |
+| `gem/i915_gem_create.c`, `gem/i915_gem_mman.c`, `gem/i915_gem_context.c`, `gem/i915_gem_execbuffer.c`, `gem/i915_gem_wait.c`, `gem/i915_gem_tiling.c` | `xelp::gem::*` (parsing, checking) + `drv::gem` | argument checks and errors as i915 gives them. execbuffer is the softpin path of `eb_lookup_vmas`/`eb_validate_vma` with relocations refused |
+| `drm_syncobj.c`, `drm_prime.c`, `drm_ioctl.c` (in `drivers/gpu/drm`, MIT) | `xelp::drm` + `drv::syncobj` | the common ioctls' checks and errors |
+
+**Left out**, each by name:
+
+* `display/` (199k lines), the DMC, the power wells;
+* `gt/uc/` (GuC, HuC, GSC, SLPC) until §8 R1 needs it;
+* `gvt/`, `pxp/`, `i915_perf.c` and OA, `i915_pmu.c`, `i915_hwmon.c`;
+* `i915_cmd_parser.c` (Gen12 has none);
+* the GEM backing stores (`i915_gem_shmem.c`, `_userptr.c`, `_ttm*.c`,
+  `_lmem.c`, `_stolen.c`, `_region.c`) and the shrinker. A GEM object is a
+  pinned VMO;
+* relocations, the GTT mmap and its fence registers (`i915_gem_fence_reg.c`);
+* `i915_request.c`, `i915_scheduler.c`, `i915_active.c` and `i915_sw_fence.c`,
+  the dma-fence machinery. Their semantics (in-order per timeline,
+  completion by seqno, a hang that marks the guilty request) are kept in
+  `drv::timeline`, which is smaller and has no Linux fence callbacks;
+* runtime PM, suspend and resume, sysfs, debugfs, the error-capture dumps
+  (`i915_gpu_error.c`; a hang prints the ring and engine registers
+  instead);
+* every platform but ADL-P/N. The tables are translated with their other
+  platforms' branches dropped and the condition named, so that adding TGL
+  or RPL later is a lookup.
+
+Kept differences, the only redesigns: memory is VMOs and pins rather than
+`sg_table`; MMIO is an `IoMapping`; the interrupt is a port packet;
+requests come from the chardev core; and waits are deferred replies rather
+than sleeping threads (§4.1).
 
 ## 4. Where it lives in Ferrix
 
 ### 4.1 The driver
 
-* `src/lib/drivers/gpu/intel-xelp`: the host-tested logic. Register maps
-  and masked-write helpers; GGTT and PPGTT entry encoders; the LRC image
-  builder from the Gen12 offset table; the ELSQ and CSB state machine; the
-  workaround table with its read-back; the PAT and MOCS tables; the uAPI
-  front end (one parser per ioctl, the layouts pinned against a probe's
-  output). A model of the submission port, like the GC400's front-end
-  model (`docs/GPU.md` §6.3), runs execlist traces through it.
+* `src/lib/drivers/gpu/intel-xelp`: the host-tested logic, its modules
+  named after the i915 files they translate (§3.6). It holds the register
+  maps and masked-write helpers, the GGTT and PPGTT entry encoders, the LRC
+  image builder from the Gen12 offset table, the ELSQ and CSB state
+  machine, the workaround lists with their verify pass, the PAT and MOCS
+  tables, and the uAPI front end (one parser per ioctl, its layouts pinned
+  against a probe's output). A model of the submission port, like the
+  GC400's front-end model (`docs/GPU.md` §6.3), runs execlist traces
+  through it.
 * `src/user/system/native/drivers/gpu/intel`: the process. It is a
   **native** program on `ferrix-rt` with one event loop on a port:
   chardev requests, the interrupt packet, and deadlines through
@@ -463,14 +547,22 @@ M1 and M2, without the box.
 
 ## 9. Decisions for the customer
 
-* **D1**: a new Rust driver, not a port of i915 (§3.5).
-* **D2**: the i915 uAPI, not xe (§2).
+* **D1**: a new Rust driver, not a port of i915 (§3.5). **Decided** by the
+  customer on 2026-10-18, with the i915 uAPI (D2), following i915 file by
+  file (§3.6).
+* **D2**: the i915 uAPI, not xe (§2). **Decided** 2026-10-18.
 * **D3**: execlists, no GuC, decided again after M0 (§3.2).
 * **D4**: the order M0, then M1 and M2 on the box untranslated, with M3
   waiting on `dmar0` translating (§4.4). This is subject to the
   consultant's verdict.
 
 ## 10. Where it stands
+
+2026-10-18, later: the customer decided D1 and D2, and §3.6 was added (the
+i915 file to Rust module mapping and what is left out). The lib crate
+`intel-xelp` (tables, encoders, parsers and their host tests, no I/O, no
+item change) is started on branch `intel-xelp`. M0 waits for a box slot.
+
 
 2026-10-18: this design, on branch `intel-gpu-design`, docs only. Nothing
 is built. Nothing has run on the box: it was held by `fxvalidate`, and the
