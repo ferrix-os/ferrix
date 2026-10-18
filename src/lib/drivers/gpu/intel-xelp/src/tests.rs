@@ -1096,3 +1096,33 @@ fn gt_and_engine_bring_up() {
         ]
     );
 }
+
+#[test]
+fn ring_space_and_wrap() {
+    use crate::ring::{NoSpace, Reserved, Ring};
+    let mut ring = Ring::new(4096);
+    assert_eq!(ring.space, 4096 - 64);
+    assert_eq!(
+        ring.begin(6, 0),
+        Ok(Reserved {
+            at: 0,
+            wrap_from: None
+        })
+    );
+    assert_eq!(ring.begin(3, 0), Err(NoSpace)); // odd
+    // Fill to near the end, the engine reading behind.
+    let mut ring = Ring::new(4096);
+    ring.emit = 4096 - 16;
+    ring.update_head(4096 - 16);
+    // 8 dwords do not fit in the last 16 bytes: they wrap, with padding.
+    assert_eq!(
+        ring.begin(8, 0),
+        Ok(Reserved {
+            at: 0,
+            wrap_from: Some(4096 - 16)
+        })
+    );
+    assert_eq!(ring.tail(), 32);
+    // The engine at 0 has read nothing new: no room for a page more.
+    assert_eq!(ring.begin(1024, 0), Err(NoSpace));
+}
