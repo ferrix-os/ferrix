@@ -277,8 +277,9 @@ The terms are the MIT notice's:
   (`/// i915: gt/intel_workarounds.c, gen12_ctx_workarounds_init`);
 * tables are carried as data with i915's names and order, so a diff
   against a later Linux release is readable;
-* the crate's README lists every file translated, and `cargo deny`'s and
-  the tree's licence checks count Intel's MIT as a permitted licence.
+* the crate's README lists every file translated with its copyright
+  holders. The crate is `license = "MIT"`, which `deny.toml` already
+  permits.
 
 The mapping. Here `xelp` is `src/lib/drivers/gpu/intel-xelp/src` (pure,
 host-tested, no I/O) and `drv` is `src/user/system/native/drivers/gpu/intel/src`
