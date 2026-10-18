@@ -3,9 +3,9 @@
 //! `src/intel/vulkan/i915`, `src/intel/dev/i915`), against a fake back end
 //! and a fake chardev core holding a program's memory and descriptors.
 
-#![allow(
+#![expect(
     clippy::panic_in_result_fn,
-    reason = "the fake back end asserts the promises the front end makes it"
+    reason = "AUDIT: test code; the fake back end asserts the promises the front end makes it"
 )]
 
 extern crate std;
