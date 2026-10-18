@@ -8,7 +8,8 @@ extern crate std;
 use std::vec::Vec;
 
 use crate::backend::{
-    Completion, Error, HANG_NS, KernelObject, Platform, SubmitError, UapiEngine, XelpBackend,
+    Completion, Error, HANG_NS, Identity, KernelObject, Platform, SubmitError, UapiEngine,
+    XelpBackend,
 };
 use crate::commands::{Cs, emit_store_dword, gpu};
 use crate::engine::ENGINES;
@@ -140,7 +141,19 @@ const RENDER: UapiEngine = UapiEngine {
 };
 
 fn backend() -> XelpBackend<Model> {
-    XelpBackend::new(Model::new(), 0b11, &ENGINES[..4], 1).expect("the GT comes up")
+    XelpBackend::new(
+        Model::new(),
+        0b11,
+        &ENGINES[..4],
+        1,
+        Identity {
+            device_id: 0x46d4,
+            revision: 0,
+            ggtt_bytes: 4 << 30,
+            system_memory_bytes: 16 << 30,
+        },
+    )
+    .expect("the GT comes up")
 }
 
 /// A batch page at `at` in `vm` storing `value` at `target`, bound; the
@@ -324,4 +337,50 @@ fn the_timestamp_is_read_whole() {
     be.platform().gpu.write32(0x2358, 0x1234_5678);
     be.platform().gpu.write32(0x235c, 0x9);
     assert_eq!(be.timestamp(), 0x9_1234_5678);
+}
+
+#[test]
+fn the_front_ends_backend_trait_reaches_it() {
+    use crate::frontend::{self, Backend};
+    let mut be = backend();
+    let facts = *Backend::facts(&be);
+    assert_eq!(
+        (facts.device_id, facts.ppgtt_bits, facts.max_pat_index),
+        (0x46d4, 48, 3)
+    );
+    assert_eq!(
+        facts.engines,
+        [frontend::Engine {
+            class: 0,
+            instance: 0
+        }]
+    );
+    let vm = Backend::vm_create(&mut be).expect("vm");
+    let _ = store_batch(&mut be, vm.0 as usize, 0x1_0000_0000, 0x1_0000_1000, 5);
+    let ctx = Backend::context_create(
+        &mut be,
+        vm,
+        frontend::Engine {
+            class: 0,
+            instance: 0,
+        },
+        frontend::ContextParams::DEFAULT,
+    )
+    .expect("context");
+    let copy = frontend::Engine {
+        class: 1,
+        instance: 0,
+    };
+    assert_eq!(
+        Backend::context_create(&mut be, vm, copy, frontend::ContextParams::DEFAULT),
+        Err(ferrix_linux_abi::errno::Errno::EINVAL)
+    );
+    Backend::submit(&mut be, ctx, 0x1_0000_0000, 64, 41).expect("taken");
+    let _ = be.platform().gpu.run();
+    Backend::service(&mut be, 1_000, false);
+    let mut done = Vec::new();
+    Backend::completed(&mut be, &mut |id, how| done.push((id, how)));
+    assert_eq!(done, [(41, frontend::Completion::Ok)]);
+    Backend::context_destroy(&mut be, ctx);
+    Backend::vm_destroy(&mut be, vm);
 }

@@ -222,18 +222,32 @@ struct Engine {
     resets: u32,
 }
 
-/// The facts the uAPI answers from.
+/// What the process knows of the device and the machine that the GT does
+/// not say: the uAPI's `CHIPSET_ID`, `REVISION`, `GET_APERTURE` and
+/// `MEMORY_REGIONS` answers.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Facts {
-    /// The GT's slices, dual-subslices and EUs.
-    pub sseu: crate::sseu::SseuInfo,
-    /// The command streamer's timestamp frequency.
-    pub cs_timestamp_hz: u32,
-    /// The bits of a PPGTT address.
-    pub ppgtt_bits: u8,
-    /// The largest PAT index a binding may name.
-    pub max_pat_index: u8,
+pub struct Identity {
+    /// The PCI device id.
+    pub device_id: u16,
+    /// The PCI revision.
+    pub revision: u8,
+    /// The GGTT's size in bytes.
+    pub ggtt_bytes: u64,
+    /// System memory in bytes.
+    pub system_memory_bytes: u64,
 }
+
+/// The engines the front end is told of, in uAPI order.
+static FRONTEND_ENGINES: [crate::frontend::Engine; MAX_ENGINES] = [
+    crate::frontend::Engine {
+        class: 0,
+        instance: 0,
+    },
+    crate::frontend::Engine {
+        class: 1,
+        instance: 0,
+    },
+];
 
 /// The back end.
 pub struct XelpBackend<P: Platform> {
@@ -241,7 +255,7 @@ pub struct XelpBackend<P: Platform> {
     engines: [Option<Engine>; MAX_ENGINES],
     vms: [Option<Ppgtt>; MAX_VMS],
     done: [Option<(u64, Completion)>; MAX_COMPLETIONS],
-    facts: Facts,
+    facts: crate::frontend::Facts,
     last_service_ns: u64,
 }
 
@@ -316,6 +330,7 @@ impl<P: Platform> XelpBackend<P> {
         subslice_mask: u8,
         fused_engines: &[EngineInfo],
         engines: usize,
+        identity: Identity,
     ) -> Result<Self, Error> {
         let platform = RefCell::new(platform);
         {
@@ -338,10 +353,17 @@ impl<P: Platform> XelpBackend<P> {
             engines: [None, None],
             vms: [None; MAX_VMS],
             done: [None; MAX_COMPLETIONS],
-            facts: Facts {
+            facts: crate::frontend::Facts {
+                device_id: identity.device_id,
+                revision: identity.revision,
                 sseu,
                 cs_timestamp_hz,
+                engines: FRONTEND_ENGINES
+                    .get(..engines.min(MAX_ENGINES))
+                    .unwrap_or_default(),
+                ggtt_bytes: identity.ggtt_bytes,
                 ppgtt_bits: 48,
+                system_memory_bytes: identity.system_memory_bytes,
                 max_pat_index: crate::gtt::MAX_PAT_INDEX as u8,
             },
             last_service_ns: 0,
@@ -361,7 +383,7 @@ impl<P: Platform> XelpBackend<P> {
 
     /// The facts the uAPI answers from.
     #[must_use]
-    pub const fn facts(&self) -> &Facts {
+    pub const fn facts(&self) -> &crate::frontend::Facts {
         &self.facts
     }
 
@@ -1080,5 +1102,128 @@ fn push_done(
             true
         }
         None => false,
+    }
+}
+
+/// The errno the uAPI gives for each refusal.
+#[must_use]
+pub const fn errno(error: Error) -> ferrix_linux_abi::errno::Errno {
+    use ferrix_linux_abi::errno::Errno;
+    match error {
+        Error::NoMemory => Errno::ENOMEM,
+        Error::Quota => Errno::EDQUOT,
+        Error::Invalid => Errno::EINVAL,
+        Error::Banned | Error::Init(_) => Errno::EIO,
+    }
+}
+
+/// A hardware context's name to the front end: its engine and its slot.
+const fn hw_context(slot: usize, context: usize) -> crate::frontend::HwContext {
+    crate::frontend::HwContext((slot * MAX_CONTEXTS_PER_ENGINE + context) as u32)
+}
+
+const fn split(context: crate::frontend::HwContext) -> (usize, usize) {
+    let n = context.0 as usize;
+    (n / MAX_CONTEXTS_PER_ENGINE, n % MAX_CONTEXTS_PER_ENGINE)
+}
+
+/// The front end's back end, as agreed (`frontend::Backend`): this module's
+/// calls under the front end's names and errnos.
+impl<P: Platform> crate::frontend::Backend for XelpBackend<P> {
+    type Memory = P::Memory;
+
+    fn facts(&self) -> &crate::frontend::Facts {
+        XelpBackend::facts(self)
+    }
+
+    fn create_memory(&mut self, bytes: u64) -> Result<P::Memory, ferrix_linux_abi::errno::Errno> {
+        self.platform.get_mut().create_memory(bytes).map_err(errno)
+    }
+
+    fn vm_create(&mut self) -> Result<crate::frontend::VmId, ferrix_linux_abi::errno::Errno> {
+        XelpBackend::vm_create(self)
+            .map(|vm| crate::frontend::VmId(vm as u32))
+            .map_err(errno)
+    }
+
+    fn vm_destroy(&mut self, vm: crate::frontend::VmId) {
+        XelpBackend::vm_destroy(self, vm.0 as usize);
+    }
+
+    fn bind(
+        &mut self,
+        vm: crate::frontend::VmId,
+        address: u64,
+        memory: &P::Memory,
+        bytes: u64,
+        pat_index: u8,
+    ) -> Result<(), ferrix_linux_abi::errno::Errno> {
+        XelpBackend::bind(self, vm.0 as usize, address, memory, bytes, pat_index).map_err(errno)
+    }
+
+    fn unbind(&mut self, vm: crate::frontend::VmId, address: u64, bytes: u64) {
+        XelpBackend::unbind(self, vm.0 as usize, address, bytes);
+    }
+
+    fn context_create(
+        &mut self,
+        vm: crate::frontend::VmId,
+        engine: crate::frontend::Engine,
+        params: crate::frontend::ContextParams,
+    ) -> Result<crate::frontend::HwContext, ferrix_linux_abi::errno::Errno> {
+        let engine = UapiEngine {
+            class: engine.class,
+            instance: engine.instance,
+        };
+        XelpBackend::context_create(self, vm.0 as usize, engine, params.ring_bytes)
+            .map(|(slot, context)| hw_context(slot, context))
+            .map_err(errno)
+    }
+
+    fn context_destroy(&mut self, context: crate::frontend::HwContext) {
+        let (slot, context) = split(context);
+        XelpBackend::context_destroy(self, slot, context);
+    }
+
+    fn submit(
+        &mut self,
+        context: crate::frontend::HwContext,
+        batch: u64,
+        _length: u32,
+        request: crate::frontend::RequestId,
+    ) -> Result<(), crate::frontend::SubmitError> {
+        let (slot, context) = split(context);
+        XelpBackend::submit(self, slot, context, batch, request).map_err(|error| match error {
+            SubmitError::Full => crate::frontend::SubmitError::Full,
+            SubmitError::Failed(error) => crate::frontend::SubmitError::Failed(errno(error)),
+        })
+    }
+
+    fn service(&mut self, now_ns: u64, interrupt: bool) {
+        XelpBackend::service(self, now_ns, interrupt);
+    }
+
+    fn next_deadline(&self) -> Option<u64> {
+        XelpBackend::next_deadline(self)
+    }
+
+    fn completed(
+        &mut self,
+        sink: &mut dyn FnMut(crate::frontend::RequestId, crate::frontend::Completion),
+    ) {
+        XelpBackend::completed(self, &mut |id, how| {
+            sink(
+                id,
+                match how {
+                    Completion::Ok => crate::frontend::Completion::Ok,
+                    Completion::Hung => crate::frontend::Completion::Hung,
+                    Completion::Cancelled => crate::frontend::Completion::Cancelled,
+                },
+            );
+        });
+    }
+
+    fn timestamp(&mut self) -> u64 {
+        XelpBackend::timestamp(self)
     }
 }
