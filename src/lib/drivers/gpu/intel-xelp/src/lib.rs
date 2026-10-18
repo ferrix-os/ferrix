@@ -36,6 +36,7 @@
 //! * [`execlists`]: descriptors, the submit queue and the status buffer;
 //! * [`irq`]: the Gen11 interrupt banks and identities;
 //! * [`plane`]: the firmware's lit plane, read so its GGTT entries are kept;
+//! * [`request`]: a request's commands, in i915's order;
 //! * [`ring`]: a context's ring buffer and its space;
 //! * [`rps`] and [`rc6`]: frequency requests and idle power, by the host;
 //! * [`clock`]: the command streamer's timestamp frequency;
@@ -63,6 +64,7 @@ pub mod mocs;
 pub mod plane;
 pub mod rc6;
 pub mod reg;
+pub mod request;
 pub mod ring;
 pub mod rps;
 pub mod sseu;

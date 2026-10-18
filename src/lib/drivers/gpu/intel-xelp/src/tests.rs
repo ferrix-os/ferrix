@@ -1126,3 +1126,113 @@ fn ring_space_and_wrap() {
     // The engine at 0 has read nothing new: no room for a page more.
     assert_eq!(ring.begin(1024, 0), Err(NoSpace));
 }
+
+/// A command streamer good enough to run what the driver emits: it walks a
+/// ring from head to tail, follows `MI_BATCH_BUFFER_START` into a batch, and
+/// performs the stores (`MI_STORE_DWORD_IMM`, a `PIPE_CONTROL` with a
+/// post-sync write, `MI_FLUSH_DW` with a store), counting user interrupts.
+/// Anything else is skipped by its length.
+struct ModelCs {
+    ggtt: BTreeMap<u32, u32>,
+    ppgtt: BTreeMap<u64, u32>,
+    interrupts: u32,
+}
+
+impl ModelCs {
+    fn run(
+        &mut self,
+        dwords: &[u32],
+        mut at: usize,
+        end: usize,
+        batches: &BTreeMap<u64, Vec<u32>>,
+    ) {
+        use crate::commands::gpu;
+        while at < end {
+            let dw0 = dwords[at];
+            let client = dw0 >> 29;
+            let opcode = (dw0 >> 23) & 0x3f;
+            let len = match (client, opcode) {
+                (0, 0x00 | 0x02 | 0x05 | 0x08 | 0x0a) => 1, // NOOP, USER_INTERRUPT, ARB_CHECK, ARB_ON_OFF, BB_END
+                (0, _) => (dw0 & 0xff) as usize + 2,
+                (3, _) => (dw0 & 0xff) as usize + 2, // PIPE_CONTROL
+                _ => panic!("unknown command {dw0:#x} at {at}"),
+            };
+            let cmd = &dwords[at..at + len];
+            match (client, opcode) {
+                (0, 0x02) => self.interrupts += 1,
+                (0, 0x0a) => return,
+                (0, 0x20) if dw0 & gpu::MI_USE_GGTT != 0 => {
+                    let _ = self.ggtt.insert(cmd[1], cmd[3]);
+                }
+                (0, 0x20) => {
+                    let _ = self
+                        .ppgtt
+                        .insert(u64::from(cmd[1]) | u64::from(cmd[2]) << 32, cmd[3]);
+                }
+                (0, 0x26)
+                    if dw0 & gpu::MI_FLUSH_DW_OP_STOREDW != 0
+                        && cmd[1] & gpu::MI_FLUSH_DW_USE_GTT != 0 =>
+                {
+                    let _ = self.ggtt.insert(cmd[1] & !7, cmd[3]);
+                }
+                (0, 0x31) => {
+                    let address = u64::from(cmd[1]) | u64::from(cmd[2]) << 32;
+                    let batch = &batches[&address];
+                    self.run(batch, 0, batch.len(), batches);
+                }
+                (3, _)
+                    if cmd[1] & gpu::PIPE_CONTROL_QW_WRITE != 0
+                        && cmd[1] & gpu::PIPE_CONTROL_GLOBAL_GTT_IVB != 0 =>
+                {
+                    let _ = self.ggtt.insert(cmd[2], cmd[4]);
+                }
+                _ => {}
+            }
+            at += len;
+        }
+    }
+}
+
+#[test]
+fn a_request_runs_on_a_model_engine() {
+    use crate::commands::{Cs, emit_store_dword};
+    use crate::engine::ENGINES;
+    use crate::{request, ring::Ring};
+    let mut batches = BTreeMap::new();
+    let mut batch = std::vec![0_u32; 6];
+    let mut cs = Cs::new(&mut batch);
+    emit_store_dword(&mut cs, 0x1_0000_1000, 0xc0ff_ee00);
+    batch[4] = lrc::MI_BATCH_BUFFER_END;
+    let _ = batches.insert(0x1_0000_0000, batch);
+    for engine in &ENGINES[..2] {
+        let mut ring = Ring::new(16 << 10);
+        let mut memory = std::vec![0_u32; 4096];
+        let built = request::build(&mut ring, &mut memory, engine, 0x1_0000_0000, 5, 0x40, 0xc8)
+            .expect("room");
+        let mut model = ModelCs {
+            ggtt: BTreeMap::new(),
+            ppgtt: BTreeMap::new(),
+            interrupts: 0,
+        };
+        model.run(
+            &memory,
+            (built.head / 4) as usize,
+            (built.wa_tail / 4) as usize,
+            &batches,
+        );
+        // The batch's store, the seqno (4 then 5), one interrupt.
+        assert_eq!(
+            model.ppgtt.get(&0x1_0000_1000),
+            Some(&0xc0ff_ee00),
+            "{}",
+            engine.name
+        );
+        assert_eq!(model.ggtt.get(&0x40), Some(&5), "{}", engine.name);
+        assert_eq!(model.interrupts, 1, "{}", engine.name);
+        assert_eq!(built.wa_tail - built.tail, 8);
+        // A second request follows the first.
+        let next = request::build(&mut ring, &mut memory, engine, 0x1_0000_0000, 6, 0x40, 0xc8)
+            .expect("room");
+        assert_eq!(next.head, built.wa_tail);
+    }
+}
