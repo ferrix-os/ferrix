@@ -27,17 +27,27 @@
 //! * [`device_info`]: `i915_pci.c`'s `adl_p_info` and the ADL-N ids;
 //! * [`uncore`]: `intel_uncore.c`'s forcewake, for Gen12;
 //! * [`mocs`]: `intel_mocs.c`'s Gen12 table and how it is written;
-//! * [`lrc`]: `intel_lrc.c`'s register-offset byte code.
+//! * [`lrc`]: `intel_lrc.c`'s register-offset byte code;
+//! * [`gtt`]: the GGTT and PPGTT entry formats and the PAT;
+//! * [`engine`]: the engines and their `RING_*` registers;
+//! * [`execlists`]: descriptors, the submit queue and the status buffer;
+//! * [`sseu`]: the fuses, and the topology Mesa is told;
+//! * [`uapi`]: the i915 ioctl numbers and argument layouts.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 pub mod device_info;
+pub mod engine;
+pub mod execlists;
 pub mod generated;
+pub mod gtt;
 pub mod io;
 pub mod lrc;
 pub mod mocs;
 pub mod reg;
+pub mod sseu;
+pub mod uapi;
 pub mod uncore;
 
 #[cfg(test)]

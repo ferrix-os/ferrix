@@ -289,3 +289,208 @@ fn lrc_offsets_decode() {
         Err(lrc::OffsetsError::Truncated)
     );
 }
+
+#[test]
+fn ppgtt_and_ggtt_entries() {
+    use crate::gtt;
+    // WB (PAT index 0) and UC (3), as TGL_CACHELEVEL maps them.
+    assert_eq!(gtt::cachelevel_to_pat(gtt::CacheLevel::Llc), 0);
+    assert_eq!(gtt::cachelevel_to_pat(gtt::CacheLevel::None), 3);
+    assert_eq!(gtt::gen12_pte_encode(0x1234_5000, 0, 0), 0x1234_5003);
+    assert_eq!(
+        gtt::gen12_pte_encode(0x1234_5000, 3, 0),
+        0x1234_5003 | (1 << 3) | (1 << 4)
+    );
+    assert_eq!(
+        gtt::gen12_pte_encode(0x1234_5000, 4, gtt::PTE_READ_ONLY),
+        0x1234_5001 | (1 << 7)
+    );
+    assert_eq!(gtt::gen8_pde_encode(0x8000, gtt::CacheLevel::Llc), 0x8003);
+    assert_eq!(
+        gtt::gen8_pde_encode(0x8000, gtt::CacheLevel::None),
+        0x8003 | 0x18
+    );
+    assert_eq!(gtt::gen8_ggtt_pte_encode(0x7c00_0000), 0x7c00_0001);
+    assert_eq!(gtt::gen8_ggtt_pte_decode(0x7c00_0001), Some(0x7c00_0000));
+    assert_eq!(gtt::gen8_ggtt_pte_decode(0x7c00_0000), None);
+    // GGMS 3 is 8 MiB of entries: 1 Mi entries, 4 GiB of GGTT.
+    let gmch = 3 << gtt::BDW_GMCH_GGMS_SHIFT;
+    assert_eq!(gtt::gen8_get_total_gtt_size(gmch), 8 << 20);
+    assert_eq!(gtt::ggtt_total(gmch), 4 << 30);
+    assert_eq!(gtt::ggtt_total(0), 0);
+    // A 48-bit address splits 9 bits a level above the 12-bit page.
+    let addr: u64 = (5 << 39) | (6 << 30) | (7 << 21) | (8 << 12) | 0x123;
+    assert_eq!(
+        [0, 1, 2, 3].map(|l| gtt::gen8_pte_index(addr, l)),
+        [8, 7, 6, 5]
+    );
+    let pat = gtt::tgl_setup_private_ppat();
+    assert_eq!(pat[1], (Reg(0x4804), gtt::GEN8_PPAT_WC));
+    assert_eq!(pat[3], (Reg(0x480c), gtt::GEN8_PPAT_UC));
+}
+
+#[test]
+fn execlist_descriptors_and_ports() {
+    use crate::{engine, execlists};
+    let lrca = execlists::lrc_descriptor(0x0010_2000, true);
+    // 4-level (3 << 3), valid, privileged.
+    assert_eq!(lrca, 0x0010_2000 | 0x18 | 0x1 | 0x100);
+    let rcs = engine::ENGINES[0];
+    let ccid = execlists::context_ccid(0, execlists::engine_ccid(rcs.class, rcs.instance));
+    // Tag 0 is software context id 1, at bit 37 of the descriptor.
+    assert_eq!(execlists::descriptor(lrca, ccid) >> 37 & 0x7ff, 1);
+    let bcs = engine::ENGINES[1];
+    let bccid = execlists::engine_ccid(bcs.class, bcs.instance);
+    assert_eq!(u64::from(bccid) << 32 >> 61, 3);
+    let desc = execlists::descriptor(lrca, ccid);
+    let writes = execlists::submit_ports(rcs.mmio_base, [desc, 0]);
+    assert_eq!(
+        writes,
+        [
+            (Reg(0x2518), 0),
+            (Reg(0x251c), 0),
+            (Reg(0x2510), desc as u32),
+            (Reg(0x2514), (desc >> 32) as u32),
+            (Reg(0x2550), 1),
+        ]
+    );
+    // All of the submit queue is shadowed, so these writes need no forcewake;
+    // the control register is too.
+    assert!(
+        writes
+            .iter()
+            .all(|(reg, _)| uncore::write_fw_domains(*reg) == 0)
+    );
+}
+
+#[test]
+fn gen12_csb() {
+    use crate::execlists::{CsbEvent, csb_indices, gen12_csb_parse};
+    let idle = 0x7ff << 15;
+    let ctx = |id: u64| id << 15;
+    // From idle to a context: promote.
+    assert_eq!(gen12_csb_parse(ctx(1) | (idle << 32)), CsbEvent::Promote);
+    // A context completes to idle: away valid, to idle.
+    assert_eq!(gen12_csb_parse(idle | (ctx(1) << 32)), CsbEvent::Complete);
+    // A new queue taking over a running context: promote.
+    assert_eq!(
+        gen12_csb_parse(ctx(2) | 1 | (ctx(1) << 32)),
+        CsbEvent::Promote
+    );
+    // Away with a switch detail, or a promotion to nothing, are reported.
+    assert!(matches!(
+        gen12_csb_parse(idle | ((ctx(1) | 5) << 32)),
+        CsbEvent::Unexpected { .. }
+    ));
+    assert!(matches!(
+        gen12_csb_parse(idle | (idle << 32)),
+        CsbEvent::Unexpected { .. }
+    ));
+    let walked: Vec<u32> = csb_indices(10, 1).expect("in range").collect();
+    assert_eq!(walked, [11, 0, 1]);
+    assert_eq!(csb_indices(4, 4).expect("in range").count(), 0);
+    assert!(csb_indices(0, 12).is_none());
+}
+
+/// Every ioctl number against what the probe printed from Linux 7.0's
+/// `i915_drm.h` (`docs/INTEL-GPU.md` Appendix A).
+#[test]
+fn ioctl_numbers_match_linux() {
+    use crate::uapi::ioctl;
+    let pinned = [
+        (ioctl::GETPARAM, 0xc010_6446),
+        (ioctl::QUERY, 0xc010_6479),
+        (ioctl::GEM_CREATE, 0xc010_645b),
+        (ioctl::GEM_CREATE_EXT, 0xc018_647c),
+        (ioctl::GEM_MMAP_OFFSET, 0xc020_6464),
+        (ioctl::GEM_EXECBUFFER2_WR, 0xc040_6469),
+        (ioctl::GEM_EXECBUFFER2, 0x4040_6469),
+        (ioctl::GEM_WAIT, 0xc010_646c),
+        (ioctl::GEM_BUSY, 0xc008_6457),
+        (ioctl::GEM_SET_TILING, 0xc010_6461),
+        (ioctl::GEM_GET_TILING, 0xc010_6462),
+        (ioctl::GEM_SET_DOMAIN, 0x400c_645f),
+        (ioctl::GEM_SET_CACHING, 0x4008_646f),
+        (ioctl::GEM_MADVISE, 0xc00c_6466),
+        (ioctl::GEM_USERPTR, 0xc018_6473),
+        (ioctl::GEM_GET_APERTURE, 0x8010_6463),
+        (ioctl::GEM_CONTEXT_CREATE_EXT, 0xc010_646d),
+        (ioctl::GEM_CONTEXT_DESTROY, 0x4008_646e),
+        (ioctl::GEM_CONTEXT_GETPARAM, 0xc018_6474),
+        (ioctl::GEM_CONTEXT_SETPARAM, 0xc018_6475),
+        (ioctl::GEM_VM_CREATE, 0xc010_647a),
+        (ioctl::GEM_VM_DESTROY, 0x4010_647b),
+        (ioctl::GET_RESET_STATS, 0xc018_6472),
+        (ioctl::REG_READ, 0xc010_6471),
+    ];
+    for (ours, linux) in pinned {
+        assert_eq!(ours, linux, "{ours:#x} vs {linux:#x}");
+    }
+}
+
+#[test]
+fn uapi_layouts_round_trip() {
+    use crate::uapi::{ExecObject2, Execbuffer2, QueryItem};
+    // The probe's sizes: execbuffer2 64, exec_object2 56.
+    assert_eq!(Execbuffer2::SIZE, 64);
+    assert_eq!(ExecObject2::SIZE, 56);
+    let object = ExecObject2 {
+        handle: 7,
+        offset: 0x1_0000_0000,
+        flags: 1 << 4,
+        ..Default::default()
+    };
+    let bytes = object.to_bytes();
+    assert_eq!(&bytes[0..4], &7_u32.to_le_bytes());
+    assert_eq!(&bytes[24..32], &0x1_0000_0000_u64.to_le_bytes());
+    assert_eq!(ExecObject2::from_bytes(&bytes), Some(object));
+    assert_eq!(ExecObject2::from_bytes(&bytes[..55]), None);
+    let item = QueryItem {
+        query_id: 1,
+        length: -22,
+        flags: 0,
+        data_ptr: 0xdead_0000,
+    };
+    assert_eq!(QueryItem::from_bytes(&item.to_bytes()), Some(item));
+    assert_eq!(&item.to_bytes()[8..12], &(-22_i32).to_le_bytes());
+}
+
+#[test]
+fn gen12_topology() {
+    use crate::sseu::{Fuses, TOPOLOGY_LEN, fill_topology_info, gen12_sseu_info_init};
+    // Three dual-subslices of eight EUs (four pairs fused on), as a 24-EU
+    // part might be; the box's own fuses are M1's to read.
+    let info = gen12_sseu_info_init(Fuses {
+        slice_enable: 1,
+        geometry_dss_enable: 0b111,
+        eu_disable: 0xf0,
+    });
+    assert_eq!(
+        (
+            info.subslice_mask,
+            info.eu_mask,
+            info.eu_per_subslice,
+            info.eu_total
+        ),
+        (0b111, 0xff, 8, 24)
+    );
+    // Bits above the six dual-subslices are not subslices.
+    let wide = gen12_sseu_info_init(Fuses {
+        slice_enable: 1,
+        geometry_dss_enable: 0xffff_ffc3,
+        eu_disable: 0,
+    });
+    assert_eq!((wide.subslice_mask, wide.eu_total), (0b11, 32));
+    let topo = fill_topology_info(&info);
+    assert_eq!(TOPOLOGY_LEN, 16 + 1 + 1 + 12);
+    // max_slices 1, max_subslices 6, max_eus 16, subslice_offset 1,
+    // subslice_stride 1, eu_offset 2, eu_stride 2.
+    assert_eq!(
+        &topo[0..16],
+        &[0, 0, 1, 0, 6, 0, 16, 0, 1, 0, 1, 0, 2, 0, 2, 0]
+    );
+    assert_eq!(topo[16], 1);
+    assert_eq!(topo[17], 0b111);
+    assert_eq!(&topo[18..24], &[0xff, 0, 0xff, 0, 0xff, 0]);
+    assert_eq!(&topo[24..30], &[0; 6]);
+}
