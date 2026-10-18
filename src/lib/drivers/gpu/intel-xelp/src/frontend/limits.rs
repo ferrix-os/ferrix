@@ -20,7 +20,7 @@ pub const CONTEXTS: usize = 512;
 /// in i915; anv asks for at most one per queue it creates).
 pub const CONTEXT_ENGINES: usize = 8;
 /// Syncobjs at once.
-pub const SYNCOBJS: usize = 8192;
+pub const SYNCOBJS: usize = 4096;
 /// The timeline points one syncobj keeps apart; older ones are merged.
 pub const POINTS: usize = 4;
 /// Requests in flight or queued at once.

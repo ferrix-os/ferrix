@@ -344,6 +344,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-intel-fake"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-chardevctl",
+ "ferrix-intel-xelp",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-rt",
+]
+
+[[package]]
 name = "ferrix-intel-xelp"
 version = "0.1.0"
 dependencies = [

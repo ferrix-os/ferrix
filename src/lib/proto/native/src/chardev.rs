@@ -37,6 +37,33 @@ pub fn reply<S: Syscall>(
     decode_unit(value)
 }
 
+/// `chardev_reply` for an mmap request: map `offset` bytes into `vmo`, which
+/// the driver holds, as `kind` says (`ferrix_chardevctl::message`'s
+/// `MAP_VMO`, with `MAP_WRITE_COMBINING` for K6's write-combining). The
+/// kernel maps the program's range once this answer is in.
+///
+/// # Errors
+///
+/// As [`reply`], and the kernel's refusal of the mapping (a VMO that is not
+/// plain anonymous memory, or write-combining where it may not be).
+pub fn reply_map<S: Syscall>(
+    control: &Channel<S>,
+    request: u64,
+    vmo: &crate::vmo::Vmo<S>,
+    offset: u64,
+    kind: u64,
+) -> Result<(), Error> {
+    let value = Call::new(nr::CHARDEV_REPLY)
+        .value(register(control.handle()))
+        .value(request as usize)
+        .value(0)
+        .value(register(vmo.handle()))
+        .value(offset as usize)
+        .value(kind as usize)
+        .make(control.syscall());
+    decode_unit(value)
+}
+
 /// `chardev_copy_in`: fill `buffer` from the waiting program's memory at
 /// `client`.
 ///

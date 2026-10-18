@@ -1827,3 +1827,12 @@ fn reg_read_reads_the_timestamp_alone() {
         assert_eq!(rig.ioctl(ioctl::REG_READ, &mut other), EINVAL);
     });
 }
+
+/// The tables fit the 8 MiB stack a native process starts on with room to
+/// spare (`syscall/exec.rs`, `STACK_SIZE`): the driver builds its front end
+/// there.
+#[test]
+fn the_tables_fit_a_native_stack() {
+    let bytes = core::mem::size_of::<Frontend<FakeBackend>>();
+    assert!(bytes < 3 << 20, "{bytes} bytes");
+}
