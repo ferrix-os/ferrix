@@ -797,8 +797,9 @@ package FerrixX8664Requirements {
                 below Lowest_Performance, write IA32_HWP_REQUEST with
                 Minimum_Performance the Lowest and Maximum_Performance the Highest,
                 Desired_Performance and the Activity_Window 0, Package_Control
-                clear, and an Energy_Performance_Preference of 0x80 where
-                CPUID.06H:EAX bit 10 is set and 0 otherwise. It shall count itself
+                clear, and an Energy_Performance_Preference of the preference
+                L.x86_64.182 chose where CPUID.06H:EAX bit 10 is set and 0
+                otherwise. It shall count itself
                 as asked only when IA32_PM_ENABLE bit 0 and IA32_HWP_REQUEST read
                 back as written, and as left to firmware otherwise, which the boot
                 processor's cpu line says and which does not stop the boot. Once
@@ -825,6 +826,36 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::hwp_refused",
                 "arch::x86_64::enable_hwp_and_say",
                 "arch::x86_64::smp::secondary_start");
+        }
+        requirement <'L.x86_64.182'> hardwarePStatePreferenceChosenByOption : ItemLowLevel {
+            attribute :>> statement = "The x86-64 kernel shall read the boot option
+                ferrix.epp, on the boot processor, from the loader's command
+                line, with option_in's grammar (the first ferrix.epp= word; a bare
+                ferrix.epp is no option), and choose the energy and performance
+                preference: 0 where there is no option and for performance, 0x80
+                for balance_performance, 0xc0 for balance_power, 0xff for power,
+                the number for one to three ASCII decimal digits whose value is 0
+                to 255, and 0 for any other value, which the boot processor's cpu
+                line says is not understood. The preference so chosen shall be the
+                one every processor's IA32_HWP_REQUEST uses (L.x86_64.177).";
+            attribute :>> criterion = "Stage 3 runs the chooser over a table: no
+                option, the four names, 0, 00, 007, 128 and 255 choose their
+                values; 256, 999, 1000, 0255, -1, +1, 0x80, the empty value,
+                Performance, a trailing or leading space and default are refused
+                and give 0. It then reads ferrix.epp from the command line again
+                and requires the preference in force to be the chooser's answer
+                for it. Any other answer panics the boot. Negative controls: the
+                default made 0x80, the number arm wrapping 256 to a byte, and the
+                read in kmain removed on a boot with ferrix.epp=power, each panic
+                in stage 3. Boots with ferrix.epp=power and ferrix.epp=bogus print
+                the cpu line for each.";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::cpu::choose_preference",
+                "arch::x86_64::cpu::decimal_preference",
+                "arch::x86_64::cpu::read_preference",
+                "arch::x86_64::cpu::preference",
+                "arch::x86_64::cpu::Preference::epp",
+                "arch::x86_64::read_boot_options");
         }
         requirement <'L.x86_64.32'> speculationPlanFollowsCpuid : ItemLowLevel {
             attribute :>> statement = "Plan::for_processor shall choose enhanced

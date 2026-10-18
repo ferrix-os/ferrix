@@ -160,6 +160,10 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // Whether the rest of the stages check what they bring up. Read here,
     // after the one check that always runs and before the first that may not.
     checks::init(view);
+    // The options the architecture's bring-up takes before its traps: on
+    // x86-64 the preference every processor's HWP request asks for
+    // (`ferrix.epp`), chosen before the first processor asks.
+    arch::read_boot_options(view);
 
     // Before anything else, and before anything can fault: until this runs the
     // CPU is still pointing at firmware's handlers, which stopped existing at
@@ -196,7 +200,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // are all check are gated here, in the order they run; the steps that do
     // both gate their own checks inside.
     if checks::run() {
-        stages_check::check_allocators_and_traps(&stats);
+        stages_check::check_allocators_and_traps(&stats, view);
     }
 
     // Everything above is synchronous: traps the kernel caused deliberately.

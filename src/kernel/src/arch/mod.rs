@@ -128,6 +128,24 @@ pub(crate) const fn write_combining_processors() -> Option<usize> {
     None
 }
 
+// The boot options an architecture's bring-up reads before its traps are
+// installed, and stage 3's check of what it chose: x86-64's `ferrix.epp`
+// (`L.x86_64.182`); none on Arm.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{check_boot_options, read_boot_options};
+
+/// Nothing to read: the Arm kernels take no boot option before their traps.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn read_boot_options(_view: &ferrix_bootinfo::BootView<'_>) {}
+
+/// Nothing to check: [`read_boot_options`] chose nothing here.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn check_boot_options(
+    _view: &ferrix_bootinfo::BootView<'_>,
+) -> Result<(), &'static str> {
+    Ok(())
+}
+
 // The switches that left DS and ES unloaded, 0 over 0, for the fast path's
 // counts (OPAQUE-KERNEL.md §9.8, 3b, the DS/ES skip); none on Arm.
 #[cfg(target_arch = "aarch64")]

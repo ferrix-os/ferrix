@@ -48,6 +48,7 @@ runtime_trades = "none"
 "ferrix.fbcon.small" = true
 "ferrix.pstore" = ["on"]
 "ferrix.apic" = ["x2apic", "xapic"]
+"ferrix.epp" = ["performance", "balance_performance", "balance_power", "power"]
 console = ["*"]
 "drm.edid_firmware" = ["*"]
 "ferrix.devmgr" = ["kernel"]

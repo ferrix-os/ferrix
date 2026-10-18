@@ -270,20 +270,41 @@ pub(crate) unsafe fn init_traps() {
     enable_hwp_and_say();
 }
 
+/// Read the boot options x86-64's bring-up takes before its IDT is loaded:
+/// `ferrix.epp` (`L.x86_64.182`), and nothing else. Called once from
+/// `kmain`, on the boot processor, after `checks::init` and before
+/// `init_traps`, so the preference is chosen before any processor asks for
+/// it in `cpu::enable_hwp`. It writes no register and allocates nothing.
+pub(crate) fn read_boot_options(view: &BootView<'_>) {
+    cpu::read_preference(view.option(cpu::EPP_OPTION));
+}
+
+/// Stage 3's check of what [`read_boot_options`] chose, against the
+/// command line read again here (`cpu::check::check_preference_read`).
+///
+/// # Errors
+///
+/// The preference in force is not the one the command line chooses.
+pub(crate) fn check_boot_options(view: &BootView<'_>) -> Result<(), &'static str> {
+    cpu::check::check_preference_read(view.option(cpu::EPP_OPTION))
+}
+
 /// Ask this, the boot, processor's hardware P-states for their whole range
 /// (`cpu::enable_hwp`) and say on the cpu line what came of it.
 fn enable_hwp_and_say() {
-    let preference = |request: cpu::HwpRequest| match request.epp {
-        Some(_) => "EPP 0x80",
-        None => "no EPP",
-    };
     match cpu::enable_hwp() {
-        cpu::Hwp::Asked(request) => crate::console::println!(
-            "  cpu      performance: HWP on, levels {}..{} chosen by the processor, {}",
-            request.lowest,
-            request.highest,
-            preference(request),
-        ),
+        cpu::Hwp::Asked(request) => match request.epp {
+            Some(epp) => crate::console::println!(
+                "  cpu      performance: HWP on, levels {}..{} chosen by the processor, EPP {epp:#04x}",
+                request.lowest,
+                request.highest,
+            ),
+            None => crate::console::println!(
+                "  cpu      performance: HWP on, levels {}..{} chosen by the processor, no EPP",
+                request.lowest,
+                request.highest,
+            ),
+        },
         cpu::Hwp::NoRange(request) => crate::console::println!(
             "  cpu      performance: HWP on, but its levels {}..{} are no range: request not written",
             request.lowest,

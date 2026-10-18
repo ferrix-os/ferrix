@@ -39,6 +39,7 @@ runtime_trades = "game_mode"
 "ferrix.efifb" = true
 "ferrix.intelgpu" = true
 "ferrix.apic" = ["x2apic", "xapic"]
+"ferrix.epp" = ["*"]
 "ferrix.btrfs" = ["*"]
 "ferrix.btrfs.seed" = ["*"]
 console = ["*"]

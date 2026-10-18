@@ -210,7 +210,8 @@ Not flags, and why:
   until M5; and, read since the design, `ferrix.fbcon.small`,
   `ferrix.pstore` (read by the loader, through
   `ferrix_bootinfo::pstore::switch`), `ferrix.efifb`, `ferrix.apic`
-  (x86-64) and `ferrix.panic` (`halt` in every certified profile; `reset`,
+  (x86-64), `ferrix.epp` (x86-64, the four names in `present`, any value
+  in `desktop`; L.x86_64.182) and `ferrix.panic` (`halt` in every certified profile; `reset`,
   SAFETY-MANUAL AoU-32's stop-gap, in `desktop` alone). Beside the scan of
   reads, `check-build-flags.py` scans every `"ferrix.` string literal in
   `src/lib` and `src/boot` outside their tests: each is a declared option,

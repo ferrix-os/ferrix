@@ -6,7 +6,7 @@
 //! not because assembly is convenient.
 
 use core::arch::asm;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 pub(super) mod check;
 
@@ -645,10 +645,102 @@ const CPUID6_HWP: u32 = 1 << 7;
 /// `CPUID.06H:EAX` bit 10: `IA32_HWP_REQUEST` bits 31:24 are an energy and
 /// performance preference.
 const CPUID6_HWP_EPP: u32 = 1 << 10;
-/// The preference asked for where the processor takes one: the middle of
-/// the scale, Linux's `balance_performance` (0 is all performance, 0xff all
-/// energy).
-pub(crate) const HWP_EPP: u8 = 0x80;
+/// The boot option that chooses the energy and performance preference every
+/// processor's request asks for (`L.x86_64.182`).
+pub(crate) const EPP_OPTION: &str = "ferrix.epp";
+/// The preference asked for where `ferrix.epp` names none, or names one
+/// that is not understood: 0, all performance, which is what Linux's
+/// `performance` governor writes. With `Desired_Performance` 0 the
+/// processor still chooses its own level within the range, and an idle
+/// processor still halts; 0 asks it to climb to the top whenever it is
+/// busy rather than to weigh energy against speed. The power and thermal
+/// limits stay the firmware's: nothing in the kernel writes them.
+pub(crate) const EPP_DEFAULT: u8 = 0x00;
+
+/// What [`choose_preference`] made of `ferrix.epp`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Preference {
+    /// No `ferrix.epp=` word: [`EPP_DEFAULT`].
+    Default,
+    /// A name or a number understood, and the preference it stands for.
+    Asked(u8),
+    /// A value that is neither: said, and [`EPP_DEFAULT`] taken.
+    NotUnderstood,
+}
+
+impl Preference {
+    /// The preference a processor's request carries for this choice.
+    pub(crate) const fn epp(self) -> u8 {
+        match self {
+            Self::Asked(value) => value,
+            Self::Default | Self::NotUnderstood => EPP_DEFAULT,
+        }
+    }
+}
+
+/// Choose the preference from `ferrix.epp`'s value, as the loader's command
+/// line gave it (`ferrix_bootinfo::option_in`: the first `ferrix.epp=` word,
+/// and a bare `ferrix.epp` is no option).
+///
+/// Linux's `intel_pstate` names and values: `performance` 0x00,
+/// `balance_performance` 0x80, `balance_power` 0xc0, `power` 0xff; or a
+/// decimal number 0 to 255 of one to three ASCII digits (`00` is 0), no
+/// sign, no `0x`. Anything else is [`Preference::NotUnderstood`]: a
+/// misspelt option costs a preference, never a boot.
+pub(crate) fn choose_preference(value: Option<&str>) -> Preference {
+    let Some(value) = value else {
+        return Preference::Default;
+    };
+    let named = match value {
+        "performance" => Some(0x00),
+        "balance_performance" => Some(0x80),
+        "balance_power" => Some(0xc0),
+        "power" => Some(0xff),
+        _ => decimal_preference(value),
+    };
+    named.map_or(Preference::NotUnderstood, Preference::Asked)
+}
+
+/// One to three ASCII digits whose value is 0 to 255.
+fn decimal_preference(value: &str) -> Option<u8> {
+    let digits = value.as_bytes();
+    if digits.is_empty() || digits.len() > 3 || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let number = digits
+        .iter()
+        .fold(0u16, |number, digit| number * 10 + u16::from(digit - b'0'));
+    u8::try_from(number).ok()
+}
+
+/// The preference every processor's request carries, chosen once on the
+/// boot processor by [`read_preference`] before any processor asks.
+static PREFERENCE: AtomicU8 = AtomicU8::new(EPP_DEFAULT);
+
+/// Read `ferrix.epp` and choose the preference every processor asks for;
+/// say it when the option was given. Called once, on the boot processor,
+/// by `arch::read_boot_options` before its IDT is loaded and so before any
+/// processor's [`enable_hwp`] (the secondaries start long after). It reads
+/// `ferrix.epp` and nothing else, writes no register and allocates nothing;
+/// without it [`PREFERENCE`] keeps [`EPP_DEFAULT`].
+pub(crate) fn read_preference(value: Option<&str>) {
+    let choice = choose_preference(value);
+    PREFERENCE.store(choice.epp(), Ordering::Release);
+    match (choice, value) {
+        (Preference::Asked(epp), Some(value)) => crate::console::println!(
+            "  cpu      {EPP_OPTION}={value}: processors with HWP ask for EPP {epp:#04x}"
+        ),
+        (Preference::NotUnderstood, Some(value)) => crate::console::println!(
+            "  cpu      {EPP_OPTION}={value} is not understood; processors with HWP ask for EPP {EPP_DEFAULT:#04x}, performance, the default"
+        ),
+        _ => {}
+    }
+}
+
+/// The preference [`read_preference`] chose, or [`EPP_DEFAULT`] before it.
+pub(crate) fn preference() -> u8 {
+    PREFERENCE.load(Ordering::Acquire)
+}
 
 /// What [`enable_hwp`] asked this processor for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -716,8 +808,10 @@ pub(crate) fn has_hwp() -> bool {
 
 /// Turn on this processor's hardware P-states and ask for every
 /// performance level it has, turbo included, the level within them left to
-/// the processor (`Desired` 0), and the middle of the energy and
-/// performance scale where it takes a preference ([`HWP_EPP`]).
+/// the processor (`Desired` 0), and the energy and performance preference
+/// `ferrix.epp` chose ([`preference`], performance by default) where it
+/// takes one. `IA32_HWP_REQUEST_PKG` is never written: `Package_Control`
+/// stays clear, so each processor's own request is the one it follows.
 ///
 /// Ferrix manages no frequency itself: without this an Intel processor runs
 /// at whatever the firmware left, which on the N150 box was its base
@@ -755,7 +849,7 @@ pub(crate) fn enable_hwp() -> Hwp {
     }
     // SAFETY: (SYSREG) the same bit says IA32_HWP_CAPABILITIES exists.
     let capabilities = unsafe { read_msr(IA32_HWP_CAPABILITIES) };
-    let epp = (__cpuid(6).eax & CPUID6_HWP_EPP != 0).then_some(HWP_EPP);
+    let epp = (__cpuid(6).eax & CPUID6_HWP_EPP != 0).then(preference);
     let (value, request) = hwp_request(capabilities, epp);
     if request.highest == 0 || request.lowest > request.highest {
         let _ = HWP_REFUSED.fetch_add(1, Ordering::AcqRel);

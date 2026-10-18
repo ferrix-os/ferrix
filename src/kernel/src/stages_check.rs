@@ -14,8 +14,10 @@
 
 use super::*;
 
-/// Stage 2's allocators and stage 3's synchronous traps: all check.
-pub(super) fn check_allocators_and_traps(stats: &mm::Stats) {
+/// Stage 2's allocators and stage 3's synchronous traps: all check. With
+/// them, what `arch::read_boot_options` chose against the command line
+/// (`arch::check_boot_options`).
+pub(super) fn check_allocators_and_traps(stats: &mm::Stats, view: &BootView<'_>) {
     if let Err(problem) = mm::check::memory_check(stats) {
         fatal!(
             catalog::STAGE2_ALLOCATORS,
@@ -25,6 +27,12 @@ pub(super) fn check_allocators_and_traps(stats: &mm::Stats) {
     println!("  stage 2  frame allocator, heap and vmap arena verified");
 
     if let Err(problem) = trap_check() {
+        fatal!(
+            catalog::STAGE3_TRAPS,
+            "stage 3 self-check failed: {problem}"
+        );
+    }
+    if let Err(problem) = arch::check_boot_options(view) {
         fatal!(
             catalog::STAGE3_TRAPS,
             "stage 3 self-check failed: {problem}"
