@@ -461,7 +461,7 @@ REGISTER = re.compile(r"\s*\(?\s*(_MMIO|MCR_REG)\((.*)\)\s*\)?\s*")
 # `_MMIO((base) + 0x30)`: a register of an engine, by its base.
 BASED = re.compile(r"\s*(_MMIO|MCR_REG)\(\s*\(?\s*(\w+)\s*\)?\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)\s*")
 # `_MMIO(0x4000 + (i) * 4)`: the i-th of an array of registers.
-INDEXED = re.compile(r"\s*(_MMIO|MCR_REG)\(\s*\(?\s*(0x[0-9a-fA-F]+|\d+)\s*\+\s*\(\s*(\w+)\s*\)\s*\*\s*(0x[0-9a-fA-F]+|\d+)\s*\)?\s*\)\s*")
+INDEXED = re.compile(r"\s*(_MMIO|MCR_REG)\(\s*\(?\s*(0x[0-9a-fA-F]+|\d+)\s*\+\s*\(?\s*\(\s*(\w+)\s*\)\s*\*\s*(0x[0-9a-fA-F]+|\d+)\s*\)?\s*\)?\s*\)\s*")
 # `_MMIO((base) + 0x4D0 + (i) * 4)` and the like, both at once.
 BASED_INDEXED = re.compile(r"\s*(_MMIO|MCR_REG)\(\s*\(\s*\(?\s*(\w+)\s*\)?\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\)\s*\+\s*\(\s*(\w+)\s*\)\s*\*\s*(0x[0-9a-fA-F]+|\d+)\s*\)\s*")
 
