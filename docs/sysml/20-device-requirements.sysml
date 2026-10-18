@@ -882,5 +882,86 @@ package FerrixDeviceRequirements {
             attribute :>> parent = ("H.DMA.10", "H.DMA.4");
             attribute :>> unit = ("device::is_intel_gpu", "device::DeviceNode::intel_gpu");
         }
+        requirement <'L.device.46'> theScreenGoesToTheIntelGpuByIdentity : ItemLowLevel {
+            doc /* K4 of docs/INTEL-GPU.md section 5; the consultant's K4 (1),
+                 * ledger 2026-10-18 line 2352. Under ferrix.efifb the firmware
+                 * framebuffer is lent to a node of its own and the function
+                 * holding it is yielded (L.device.40). Under ferrix.intelgpu
+                 * as well, when that function is the Intel integrated GPU,
+                 * the lend goes to it instead: the same aperture, the same
+                 * exemption from the reserved ranges, the same kernel hold of
+                 * write-combining (L.device.43), and no node of its own, so
+                 * nothing yields the function and the Intel driver drives
+                 * it. The panic screen's kernel window and hold are
+                 * unchanged; whether a panic is seen then rests on the driver
+                 * keeping the lit plane's GGTT entries, which the kernel does
+                 * not claim (DISPLAY.md section 8). */
+            attribute :>> statement = "The firmware framebuffer shall be lent
+                to the Intel integrated GPU's own node, in place of a node of
+                its own, exactly when ferrix.intelgpu was said and the Intel
+                GPU, by what enumeration read, holds it in a BAR; it shall then
+                be minted the framebuffer's visible lines in whole pages, the
+                one exemption from the reserved ranges, and no other node shall
+                hold a lent aperture. Nothing a driver says shall decide it.";
+            attribute :>> criterion = "Stage 10's check, on made-up nodes at
+                00:02.0 and a made-up framebuffer: the lend goes to Intel's
+                display function holding it only with the option, not to
+                another vendor's function holding it nor to the Intel GPU not
+                holding it; the Intel GPU is lent exactly the visible lines,
+                exempt, and refused without the option. With the identity test
+                dropped, the boot panics. On the published nodes only the
+                framebuffer's own node or, under the option, the Intel GPU
+                lent it holds a lent aperture. The lend on the N150 box is a
+                BACKLOG row.";
+            attribute :>> parent = ("H.DMA.10", "H.DMA.5");
+            attribute :>> unit = ("device::lend_target",
+                "device::DeviceNode::lend_framebuffer_here", "device::lendable",
+                "device::DeviceNode::firmware_framebuffer",
+                "device::DeviceNode::holds_lent_framebuffer",
+                "discovery::firmware::FirmwareFramebuffer::lend_to",
+                "discovery::firmware::FirmwareFramebuffer::may_lend_here",
+                "discovery::firmware::FirmwareFramebuffer::hold");
+        }
+        requirement <'L.device.47'> theLentIntelGpuIsNeverReset : ItemLowLevel {
+            doc /* The consultant's K4 (2). The kernel has no device-reset call:
+                 * no FLR, no secondary bus reset, no power-state change is
+                 * made by it or offered to a driver. A driver could reach one
+                 * only through device_config_write, whose allowlist already
+                 * leaves PCI Express, Advanced Features and power management
+                 * to the kernel (L.device.25); for the function lent the
+                 * framebuffer even the vendor capability's bytes are refused,
+                 * so no write reaches its configuration space at all. A GPU
+                 * engine reset through the registers stays the driver's; it
+                 * does not reset the function or its display. Bus mastering
+                 * is still turned off at a quiesce, as for every function:
+                 * the plane then stops scanning out until the next driver's
+                 * first pin turns it on again. */
+            attribute :>> statement = "While a PCI function holds the lent
+                firmware framebuffer, every device_config_write to it shall be
+                refused ACCESS_DENIED, whatever its offset and width.";
+            attribute :>> criterion = "Stage 10's check: the made-up Intel GPU
+                lent the framebuffer refuses a configuration write as Denied
+                before anything else is asked of it. With the refusal dropped,
+                the boot panics.";
+            attribute :>> parent = ("H.DMA.10", "H.DEV.2");
+            attribute :>> unit = ("device::DeviceNode::config_write",
+                "device::DeviceNode::holds_lent_framebuffer");
+        }
+        requirement <'L.device.48'> onlyTheLentIntelGpuCopies : ItemLowLevel {
+            doc /* The consultant's K4 (3). The display core hands a copying
+                 * card to the firmware framebuffer's own node and to a
+                 * chardev driver's device; it adds the Intel GPU lent the
+                 * framebuffer, by this predicate of the item alone. */
+            attribute :>> statement = "DeviceNode::may_copy_lent shall answer
+                true, so that the node's driver may be handed a copying card
+                over the lent framebuffer, exactly when the node is the Intel
+                integrated GPU and holds the lent framebuffer.";
+            attribute :>> criterion = "Stage 10's check: the made-up Intel GPU
+                lent the framebuffer may copy; another vendor's display
+                function at 00:02.0 may not, without the aperture or with it.
+                With the identity test dropped, the boot panics.";
+            attribute :>> parent = ("H.DMA.10", "H.DMA.5");
+            attribute :>> unit = "device::DeviceNode::may_copy_lent";
+        }
     }
 }

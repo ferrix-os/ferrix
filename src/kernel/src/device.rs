@@ -1358,6 +1358,83 @@ impl DeviceNode {
         framebuffer: &ferrix_bootinfo::Framebuffer,
         reserved: &Reserved,
     ) -> Result<Self, &'static str> {
+        let (len, mode) = lendable(framebuffer)?;
+        let mut node = DeviceNode::empty(Location::Tree(framebuffer.phys));
+        node.binding = TREE_FIRMWARE_FB;
+        node.mode = Some(mode);
+        // Prefetchable: a GOP framebuffer is linear memory, which a read
+        // changes nothing in, so `io_mapping_map_combining` may map it --
+        // and only it, since write-combining is the type the kernel's own
+        // window takes when the node is lent on x86-64, the one architecture
+        // it is lent on, and the hold it takes there keeps every user mapping
+        // to (`discovery::firmware`).
+        node.mint_from(framebuffer.phys, len, true, Source::Framebuffer, reserved);
+        if node.apertures.len() != 1 {
+            return Err("the framebuffer overlaps memory the kernel uses");
+        }
+        Ok(node)
+    }
+
+    /// Lend the firmware's framebuffer to this node, the Intel integrated GPU
+    /// whose memory holds it, rather than to a node of its own (K4 of
+    /// `docs/INTEL-GPU.md` §5; the consultant's K4 (1), ledger 2352): the same
+    /// one aperture, the framebuffer's visible lines in whole pages, the one
+    /// exemption [`Reserved`] makes, minted beside the function's own. Keyed
+    /// to the command line and to what enumeration read, never to a driver:
+    /// refused unless the node is the Intel GPU ([`DeviceNode::intel_gpu`]),
+    /// `allowed` -- whether [`INTEL_GPU_OPTION`] was said -- and one of its
+    /// BARs holds the framebuffer (`L.device.46`).
+    ///
+    /// # Errors
+    ///
+    /// Why not, as for [`DeviceNode::firmware_framebuffer`], and for a node
+    /// that may not be lent it.
+    pub(crate) fn lend_framebuffer_here(
+        &mut self,
+        framebuffer: &ferrix_bootinfo::Framebuffer,
+        reserved: &Reserved,
+        allowed: bool,
+    ) -> Result<(), &'static str> {
+        if !self.intel_gpu() || !allowed || !self.holds_framebuffer {
+            return Err(
+                "only the Intel GPU holding it is lent the framebuffer, under ferrix.intelgpu",
+            );
+        }
+        let (len, _) = lendable(framebuffer)?;
+        let before = self.apertures.len();
+        self.mint_from(framebuffer.phys, len, true, Source::Framebuffer, reserved);
+        if self.apertures.len() != before + 1 {
+            return Err("the framebuffer overlaps memory the kernel uses");
+        }
+        Ok(())
+    }
+
+    /// Whether the node is a PCI function lent the firmware framebuffer
+    /// ([`DeviceNode::lend_framebuffer_here`]).
+    pub(crate) fn holds_lent_framebuffer(&self) -> bool {
+        matches!(self.location, Location::Pci(_))
+            && self
+                .apertures
+                .iter()
+                .any(|aperture| aperture.source == Source::Framebuffer)
+    }
+
+    /// Whether the node's driver may be handed a copying card over the lent
+    /// framebuffer, by the node's identity alone: the Intel GPU lent it
+    /// (`L.device.48`; the consultant's K4 (3)). What the display core ORs
+    /// into its rule beside the firmware framebuffer's own node.
+    pub(crate) fn may_copy_lent(&self) -> bool {
+        self.intel_gpu() && self.holds_lent_framebuffer()
+    }
+}
+
+/// The framebuffer's visible lines in whole pages, and its mode, if it may
+/// be lent at all: what [`DeviceNode::firmware_framebuffer`] and
+/// [`DeviceNode::lend_framebuffer_here`] lend.
+fn lendable(
+    framebuffer: &ferrix_bootinfo::Framebuffer,
+) -> Result<(u64, FramebufferMode), &'static str> {
+    {
         use ferrix_bootinfo::PixelFormat;
         use ferrix_native_abi::types::{FRAMEBUFFER_BGRX, FRAMEBUFFER_RGBX};
         if !framebuffer.is_present() {
@@ -1394,27 +1471,19 @@ impl DeviceNode {
             return Err("the framebuffer's size does not hold its lines");
         }
         let len = visible.div_ceil(PAGE_SIZE).saturating_mul(PAGE_SIZE);
-        let mut node = DeviceNode::empty(Location::Tree(framebuffer.phys));
-        node.binding = TREE_FIRMWARE_FB;
-        node.mode = Some(FramebufferMode {
-            width,
-            height,
-            stride: framebuffer.stride,
-            layout,
-        });
-        // Prefetchable: a GOP framebuffer is linear memory, which a read
-        // changes nothing in, so `io_mapping_map_combining` may map it --
-        // and only it, since write-combining is the type the kernel's own
-        // window takes when the node is lent on x86-64, the one architecture
-        // it is lent on, and the hold it takes there keeps every user mapping
-        // to (`discovery::firmware`).
-        node.mint_from(framebuffer.phys, len, true, Source::Framebuffer, reserved);
-        if node.apertures.len() != 1 {
-            return Err("the framebuffer overlaps memory the kernel uses");
-        }
-        Ok(node)
+        Ok((
+            len,
+            FramebufferMode {
+                width,
+                height,
+                stride: framebuffer.stride,
+                layout,
+            },
+        ))
     }
+}
 
+impl DeviceNode {
     /// Whether anything behind the node reaches memory, so that pinning
     /// pages for it means anything: every device but the firmware
     /// framebuffer's node, which is memory itself, and whose driver copies.
@@ -1987,6 +2056,14 @@ impl DeviceNode {
         value: u64,
     ) -> Result<(), ConfigRefusal> {
         let (offset, width) = config_access(offset, width)?;
+        // The function lent the framebuffer its screen scans out of takes no
+        // configuration write at all while it holds it: no byte of a vendor
+        // capability either, so no reset, function-level or other, is
+        // reached through it; the kernel has no reset call of its own
+        // (`L.device.47`; the consultant's K4 (2)).
+        if self.holds_lent_framebuffer() {
+            return Err(ConfigRefusal::Denied);
+        }
         if self.config_phys().is_none() {
             return Err(ConfigRefusal::NotPci);
         }
@@ -2777,6 +2854,19 @@ pub(crate) const fn is_intel_gpu(address: Address, vendor: u16, class: u32) -> b
         && address.bus() == 0
         && address.device() == 2
         && address.function() == 0
+}
+
+/// The node the firmware's framebuffer is lent to in place of a node of its
+/// own: the Intel integrated GPU holding it, when `allowed`, which is whether
+/// the command line said [`INTEL_GPU_OPTION`] (`L.device.46`). `None` for any
+/// other machine, which lends it to a node of its own as before.
+pub(crate) fn lend_target(nodes: &[DeviceNode], allowed: bool) -> Option<usize> {
+    if !allowed {
+        return None;
+    }
+    nodes
+        .iter()
+        .position(|node| node.intel_gpu() && node.holds_framebuffer)
 }
 
 /// The Intel integrated GPU is not driven unless `allowed`, which is

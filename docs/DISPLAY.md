@@ -1401,3 +1401,28 @@ processor in bursts instead of one uncached store a pixel.
   pages, over the last frame efifb copied; nothing restores it.
 * **Real hardware.** Not yet run on the N150; netbooting it with
   `--kernel-option ferrix.efifb` is the first try (`docs/NETBOOT.md` §6).
+
+### 8.1 The Intel GPU lent the screen (K4, `docs/INTEL-GPU.md` §4.3)
+
+Under `ferrix.efifb` and `ferrix.intelgpu` together, when the function
+holding the framebuffer is the Intel integrated GPU, the framebuffer is
+lent to that function's own node instead of a node of its own. The rule is
+keyed to the command line and to what enumeration read: vendor 8086,
+display class, 00:02.0 (`L.device.46`). The aperture is the same one as
+above: the visible lines in whole pages, with the one exemption from the
+reserved ranges. The kernel's write-combining hold and its panic window
+over those pages are unchanged. Because no node of its own exists, nothing
+yields the function, and the Intel driver drives it. Its display card is a
+copying card, which the display core hands it by that identity alone
+(`DeviceNode::may_copy_lent`, `L.device.48`). While the function holds the
+lent framebuffer it takes no configuration write at all, and the kernel has
+no reset call, so nothing resets the function under the screen
+(`L.device.47`).
+
+**What the kernel does not claim.** Under `ferrix.intelgpu`, the panic
+screen still writes the framebuffer's pages through the kernel's window.
+Whether those pixels are seen depends on the Intel driver keeping the lit
+plane, and the GGTT entries behind it, as firmware set them. The kernel
+cannot check that, so it does not claim it. A quiesce still turns the
+function's bus mastering off, as for every function. The plane then stops
+scanning out until the next driver's first pin turns it back on.

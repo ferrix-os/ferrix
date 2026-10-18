@@ -89,11 +89,11 @@
       "purpose": "The kernel's lines start with their time as Linux's do, [    1.234567] , on the port, in dmesg and in the pstore copy (the customer's request of 2026-10-18, with the boot-time analysis)"
     },
     {
-      "ids": ["L.iommu.59-64", "L.device.46-49"],
+      "ids": ["L.iommu.59-64"],
       "owner": "intel-gpu-kernel",
-      "branch": "intel-k2, intel-k4",
+      "branch": "intel-k2",
       "date": "2026-10-18",
-      "purpose": "The Intel GPU's kernel changes K2-K6 (docs/INTEL-GPU.md section 5; the consultant's design review, ledger 2026-10-18 line 2352, which asks for one reservation before any code). K2, core: L.iommu.59-64, dmar0's RMRR identity domain for 00:02.0 (exactly the RMRR's pages, refused over usable RAM or unaligned, its frames reserved for the boot, driver pins over it refused and never removing an RMRR entry, never detached across restarts). K3's L.object.192 and 194-196, L.device.44-45 and H.DMA.10 were written by intel-k3, which released L.object.193 and 197 unwritten. K4, the device yield: L.device.46-49 (the yield exception by option and identity, FLR and reset refused on the framebuffer's function, the copying-card rule for that node). K5's L.object.198-202 were released unwritten by intel-k5: its rules are the chardev core's, in the load ring, held by the chardev check and its controls. K6's L.user.132-133 were written by intel-k6, which released L.user.134 unwritten. Each landing releases its own ids; none for K7"
+      "purpose": "The Intel GPU's kernel changes K2-K6 (docs/INTEL-GPU.md section 5; the consultant's design review, ledger 2026-10-18 line 2352, which asks for one reservation before any code). K2, core: L.iommu.59-64, dmar0's RMRR identity domain for 00:02.0 (exactly the RMRR's pages, refused over usable RAM or unaligned, its frames reserved for the boot, driver pins over it refused and never removing an RMRR entry, never detached across restarts). K3's L.object.192 and 194-196, L.device.44-45 and H.DMA.10 were written by intel-k3, which released L.object.193 and 197 unwritten. K4's L.device.46-48 were written by intel-k4, which released L.device.49 unwritten. K5's L.object.198-202 were released unwritten by intel-k5: its rules are the chardev core's, in the load ring, held by the chardev check and its controls. K6's L.user.132-133 were written by intel-k6, which released L.user.134 unwritten. Each landing releases its own ids; none for K7"
     }
   ]
 }

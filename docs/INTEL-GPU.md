@@ -730,7 +730,20 @@ anonymous VMO write-combining for every user mapping of it from then on.
 This works only on x86-64, only before anything maps the VMO, and only for
 a VMO the driver never copies with `vmo_read`/`vmo_write` (both are
 `BAD_STATE` for it). Elsewhere the program's mmap is `EIO` (L.user.132-133).
-K4 follows. K2 waits for vtd-n150.
+K4 is on branch `intel-k4`. Under `ferrix.efifb ferrix.intelgpu` the
+framebuffer is lent to 00:02.0's own node: an aperture of the visible
+lines, which the driver maps with `io_mapping_map_combining`. The function
+is not yielded, the driver may be given a copying card, and every
+configuration write to the function is refused while it holds the
+framebuffer (`DISPLAY.md` §8.1, L.device.46-48). Since the kernel refuses
+the FLR that M0 found the WOPCM lock needs after a warm boot from a
+GuC-running OS, a driver finding the WOPCM locked under K4 must say so and
+stop, and the screen stays the firmware's. **Under K2** the lit plane
+scans out of stolen memory, `0x7c000000`-`0x803fffff` on the box, which is
+the RMRR. The aperture the kernel lends is a GGTT window onto it. So K2's
+identity domain covers the plane's own reads, and the lent aperture is a
+CPU mapping that no domain needs to cover (the consultant's K4 (5)). K2
+waits for vtd-n150.
 
 
 2026-10-18: this design, on branch `intel-gpu-design`, docs only. Nothing

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "0ca18059be49ee78c9892d82e00b8afac0c7289f0d76dd13e80a790f3f42c11a",
+  "digest": "a78f4ffb097ee94f3c555b8f571cf01e044b253dfce88bff6b678a94dc314a80",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 141,
-    "elements": 7056,
+    "elements": 7071,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -68178,6 +68178,180 @@
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 883
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theScreenGoesToTheIntelGpuByIdentity",
+              "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
+              "kind": "requirement",
+              "shortName": "L.device.46",
+              "type": "ItemLowLevel",
+              "doc": "K4 of docs/INTEL-GPU.md section 5; the consultant's K4 (1), ledger 2026-10-18 line 2352. Under ferrix.efifb the firmware framebuffer is lent to a node of its own and the function holding it is yielded (L.device.40). Under ferrix.intelgpu as well, when that function is the Intel integrated GPU, the lend goes to it instead: the same aperture, the same exemption from the reserved ranges, the same kernel hold of write-combining (L.device.43), and no node of its own, so nothing yields the function and the Intel driver drives it. The panic screen's kernel window and hold are unchanged; whether a panic is seen then rests on the driver keeping the lit plane's GGTT entries, which the kernel does not claim (DISPLAY.md section 8).",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 885
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The firmware framebuffer shall be lent to the Intel integrated GPU's own node, in place of a node of its own, exactly when ferrix.intelgpu was said and the Intel GPU, by what enumeration read, holds it in a BAR; it shall then be minted the framebuffer's visible lines in whole pages, the one exemption from the reserved ranges, and no other node shall hold a lent aperture. Nothing a driver says shall decide it.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 905
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check, on made-up nodes at 00:02.0 and a made-up framebuffer: the lend goes to Intel's display function holding it only with the option, not to another vendor's function holding it nor to the Intel GPU not holding it; the Intel GPU is lent exactly the visible lines, exempt, and refused without the option. With the identity test dropped, the boot panics. On the published nodes only the framebuffer's own node or, under the option, the Intel GPU lent it holds a lent aperture. The lend on the N150 box is a BACKLOG row.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 915
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.10\", \"H.DMA.5\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 916
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theScreenGoesToTheIntelGpuByIdentity",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"device::lend_target\", \"device::DeviceNode::lend_framebuffer_here\", \"device::lendable\", \"device::DeviceNode::firmware_framebuffer\", \"device::DeviceNode::holds_lent_framebuffer\", \"discovery::firmware::FirmwareFramebuffer::lend_to\", \"discovery::firmware::FirmwareFramebuffer::may_lend_here\", \"discovery::firmware::FirmwareFramebuffer::hold\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 923
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theLentIntelGpuIsNeverReset",
+              "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theLentIntelGpuIsNeverReset",
+              "kind": "requirement",
+              "shortName": "L.device.47",
+              "type": "ItemLowLevel",
+              "doc": "The consultant's K4 (2). The kernel has no device-reset call: no FLR, no secondary bus reset, no power-state change is made by it or offered to a driver. A driver could reach one only through device_config_write, whose allowlist already leaves PCI Express, Advanced Features and power management to the kernel (L.device.25); for the function lent the framebuffer even the vendor capability's bytes are refused, so no write reaches its configuration space at all. A GPU engine reset through the registers stays the driver's; it does not reset the function or its display. Bus mastering is still turned off at a quiesce, as for every function: the plane then stops scanning out until the next driver's first pin turns it on again.",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 925
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theLentIntelGpuIsNeverReset",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"While a PCI function holds the lent firmware framebuffer, every device_config_write to it shall be refused ACCESS_DENIED, whatever its offset and width.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 941
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theLentIntelGpuIsNeverReset",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: the made-up Intel GPU lent the framebuffer refuses a configuration write as Denied before anything else is asked of it. With the refusal dropped, the boot panics.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 945
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theLentIntelGpuIsNeverReset",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.10\", \"H.DEV.2\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 946
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::theLentIntelGpuIsNeverReset",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"device::DeviceNode::config_write\", \"device::DeviceNode::holds_lent_framebuffer\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 948
+                  }
+                }
+              ]
+            },
+            {
+              "name": "onlyTheLentIntelGpuCopies",
+              "qualifiedName": "FerrixDeviceRequirements::IntelGpu::onlyTheLentIntelGpuCopies",
+              "kind": "requirement",
+              "shortName": "L.device.48",
+              "type": "ItemLowLevel",
+              "doc": "The consultant's K4 (3). The display core hands a copying card to the firmware framebuffer's own node and to a chardev driver's device; it adds the Intel GPU lent the framebuffer, by this predicate of the item alone.",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 950
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::onlyTheLentIntelGpuCopies",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"DeviceNode::may_copy_lent shall answer true, so that the node's driver may be handed a copying card over the lent framebuffer, exactly when the node is the Intel integrated GPU and holds the lent framebuffer.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 958
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::onlyTheLentIntelGpuCopies",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 10's check: the made-up Intel GPU lent the framebuffer may copy; another vendor's display function at 00:02.0 may not, without the aperture or with it. With the identity test dropped, the boot panics.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 962
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::onlyTheLentIntelGpuCopies",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "(\"H.DMA.10\", \"H.DMA.5\")",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 963
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::IntelGpu::onlyTheLentIntelGpuCopies",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"device::DeviceNode::may_copy_lent\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 964
                   }
                 }
               ]

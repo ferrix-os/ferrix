@@ -41,8 +41,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     }
     report.refused += 1;
     for node in device::devices() {
-        let allowed =
-            node.framebuffer_mode().is_some() || crate::interfaces::chardev::publishes_for(node);
+        let allowed = node.framebuffer_mode().is_some()
+            || crate::interfaces::chardev::publishes_for(node)
+            || node.may_copy_lent();
         if may_copy(node) != allowed {
             return Err("a published node's driver may copy other than the rule says");
         }

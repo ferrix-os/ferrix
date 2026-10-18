@@ -979,16 +979,22 @@ fn check_lent_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(
 /// Verifies: L.device.1, L.device.38, L.device.39, L.device.40, L.device.41, L.device.43
 fn check_framebuffer(nodes: &[DeviceNode], reserved: &Reserved) -> Result<(), Failure> {
     let mut seen = 0;
-    // Only the framebuffer's own node holds a lent aperture.
+    // Only the framebuffer's own node holds a lent aperture, or, under
+    // `ferrix.intelgpu`, the Intel GPU holding it, in place of that node
+    // (K4, `L.device.46`).
     for node in nodes
         .iter()
         .filter(|node| node.framebuffer_mode().is_none())
     {
-        if node
+        let lent = node
             .apertures
             .iter()
-            .any(|aperture| aperture.source == super::Source::Framebuffer)
-        {
+            .any(|aperture| aperture.source == super::Source::Framebuffer);
+        let to_intel = super::lend_target(nodes, super::intel_gpu_allowed())
+            .and_then(|index| nodes.get(index))
+            .is_some_and(|target| core::ptr::eq(target, node))
+            && nodes.iter().all(|other| other.framebuffer_mode().is_none());
+        if lent && !to_intel {
             return Err(Failure {
                 location: node.location,
                 what: "a node other than the framebuffer's holds the framebuffer",
@@ -1143,7 +1149,86 @@ fn check_lending() -> Result<(), &'static str> {
         return Err("an ordinary window over the framebuffer was minted");
     }
     check_lending_exact(AT)?;
+    check_lending_intel(&screen, &lone, AT)?;
     check_lending_refusals(&screen, &lone, AT, SIZE)
+}
+
+/// K4 (`docs/INTEL-GPU.md` §5; ledger 2352 K4 (1)-(3)), on made-up nodes at
+/// `00:02.0` whose BAR holds the framebuffer at `at`: the lend goes to the
+/// Intel GPU only when the option was said and only to it -- not to
+/// another vendor's display function holding it, nor to the Intel GPU that
+/// does not -- and mints it the framebuffer's visible lines, exempt from
+/// the reservation; the Intel GPU lent it takes no configuration write and
+/// may be handed a copying card, which another vendor's function lent an
+/// aperture by any path may not.
+///
+/// Verifies: L.device.46, L.device.47, L.device.48
+fn check_lending_intel(
+    screen: &ferrix_bootinfo::Framebuffer,
+    reserved: &Reserved,
+    at: u64,
+) -> Result<(), &'static str> {
+    let made = |vendor, holds| -> Result<DeviceNode, &'static str> {
+        let address = Address::new(0, 0, 2, 0).ok_or("a check's PCI address is out of range")?;
+        let mut node = DeviceNode::empty(Location::Pci(address));
+        node.holds_framebuffer = holds;
+        node.pci = Some(PciFunction {
+            vendor,
+            device: 0x46d4,
+            class: 0x03_00_00,
+            revision: 0,
+            subsystem_vendor: 0,
+            subsystem: 0,
+            secondary_bus: None,
+            config_phys: None,
+            virtio: None,
+            msix_table_size: 0,
+            host_visible: None,
+        });
+        Ok(node)
+    };
+    let nodes = [made(0x8086, true)?];
+    if super::lend_target(&nodes, false).is_some() || super::lend_target(&nodes, true) != Some(0) {
+        return Err(
+            "the framebuffer was lent to the Intel GPU other than exactly under ferrix.intelgpu",
+        );
+    }
+    let others = [made(0x1234, true)?, made(0x8086, false)?];
+    if super::lend_target(&others, true).is_some() {
+        return Err("the framebuffer was lent to a function that is not the Intel GPU holding it");
+    }
+    let [mut other, mut idle] = others;
+    if other.lend_framebuffer_here(screen, reserved, true).is_ok()
+        || idle.lend_framebuffer_here(screen, reserved, true).is_ok()
+    {
+        return Err("a function that is not the Intel GPU holding the framebuffer was lent it");
+    }
+    let [mut intel] = nodes;
+    if intel.lend_framebuffer_here(screen, reserved, false).is_ok() {
+        return Err("the Intel GPU was lent the framebuffer without ferrix.intelgpu");
+    }
+    intel
+        .lend_framebuffer_here(screen, reserved, true)
+        .map_err(|_| "the Intel GPU holding the framebuffer was not lent it")?;
+    let visible = u64::from(screen.stride) * u64::from(screen.height) * 4;
+    match intel.apertures.as_slice() {
+        [aperture]
+            if aperture.phys == at
+                && aperture.len == visible
+                && aperture.source == super::Source::Framebuffer => {}
+        _ => return Err("the Intel GPU was not lent exactly the framebuffer's visible lines"),
+    }
+    if intel.config_write(0x04, 2, 0) != Err(super::ConfigRefusal::Denied) {
+        return Err("the Intel GPU lent the framebuffer took a configuration write");
+    }
+    if !intel.may_copy_lent() || other.may_copy_lent() {
+        return Err("a copying card over the lent framebuffer follows another rule than identity");
+    }
+    other.apertures = intel.apertures.clone();
+    if other.may_copy_lent() {
+        return Err("another vendor's function with the framebuffer's aperture may copy");
+    }
+    Ok(())
 }
 
 /// [`check_lending`]'s framebuffer that ends inside a page: 800 x 600 with

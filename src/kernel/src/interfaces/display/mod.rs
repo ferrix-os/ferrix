@@ -1164,7 +1164,11 @@ pub(crate) fn install() -> Result<(), Full> {
 /// the firmware framebuffer's node, which is a screen of memory a driver can
 /// only copy into (§8). `check::run` holds it.
 pub(crate) fn may_copy(device: &Arc<DeviceNode>) -> bool {
-    device.framebuffer_mode().is_some() || crate::interfaces::chardev::publishes_for(device)
+    device.framebuffer_mode().is_some()
+        || crate::interfaces::chardev::publishes_for(device)
+        // The Intel GPU lent the framebuffer under `ferrix.intelgpu`, by its
+        // identity alone (K4, `L.device.48`).
+        || device.may_copy_lent()
 }
 
 /// `display_control_create`.

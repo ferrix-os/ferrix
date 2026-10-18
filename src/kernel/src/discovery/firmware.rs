@@ -101,6 +101,41 @@ impl FirmwareFramebuffer {
 
     /// The node, its type held, or why there is none.
     fn lend(framebuffer: &Framebuffer, cx: &Context<'_>) -> Result<DeviceNode, &'static str> {
+        Self::may_lend_here()?;
+        let node = DeviceNode::firmware_framebuffer(framebuffer, cx.reserved)?;
+        let (phys, len) = node
+            .aperture_info(0)
+            .map(|info| (info.phys, info.len))
+            .ok_or("the framebuffer has no aperture")?;
+        Self::hold(phys, len)?;
+        Ok(node)
+    }
+
+    /// Lend the framebuffer to `holder`, the Intel integrated GPU whose
+    /// memory holds it, under `ferrix.intelgpu` (K4, `L.device.46`): its type
+    /// held as for a node of its own, the function then driven by the Intel
+    /// driver, which serves the screen as a copying card.
+    fn lend_to(
+        framebuffer: &Framebuffer,
+        cx: &Context<'_>,
+        holder: &mut DeviceNode,
+    ) -> Result<(), &'static str> {
+        Self::may_lend_here()?;
+        holder.lend_framebuffer_here(
+            framebuffer,
+            cx.reserved,
+            crate::device::intel_gpu_allowed(),
+        )?;
+        let (phys, len) = (0..holder.apertures().len())
+            .filter_map(|index| holder.aperture_info(index))
+            .find(|info| info.phys == framebuffer.phys)
+            .map(|info| (info.phys, info.len))
+            .ok_or("the framebuffer has no aperture")?;
+        Self::hold(phys, len)
+    }
+
+    /// Whether this machine may lend the framebuffer at all.
+    fn may_lend_here() -> Result<(), &'static str> {
         if !crate::arch::LENDS_FRAMEBUFFER {
             return Err("not honoured on this architecture");
         }
@@ -110,11 +145,13 @@ impl FirmwareFramebuffer {
         if !crate::object::io_mapping::combining_ready() {
             return Err("a processor's PAT has no write-combining entry");
         }
-        let node = DeviceNode::firmware_framebuffer(framebuffer, cx.reserved)?;
-        let (phys, len) = node
-            .aperture_info(0)
-            .map(|info| (info.phys, info.len))
-            .ok_or("the framebuffer has no aperture")?;
+        Ok(())
+    }
+
+    /// The kernel's window read back write-combining, the boot console
+    /// stopped and the kernel's hold of `phys..phys + len` taken for good:
+    /// the lend's last steps, for either node.
+    fn hold(phys: u64, len: u64) -> Result<(), &'static str> {
         let (window, mapped) =
             crate::panic::screen::window().ok_or("the kernel has no window on the framebuffer")?;
         // The kernel's own window has been write-combining since its first
@@ -130,7 +167,7 @@ impl FirmwareFramebuffer {
         let hold = memory_type::hold(phys, len, KERNEL_MAPPING)
             .map_err(|_| "the framebuffer's memory type could not be held")?;
         let _ = KERNEL_TYPE.call_once(|| hold);
-        Ok(node)
+        Ok(())
     }
 }
 
@@ -173,6 +210,18 @@ impl Finder for FirmwareFramebuffer {
         let Some(framebuffer) = self.framebuffer else {
             return Ok(());
         };
+        // Under `ferrix.intelgpu`, to the Intel GPU holding it, if it does
+        // (K4, `L.device.46`): no node of its own, so nothing yields it.
+        if let Some(index) = crate::device::lend_target(nodes, crate::device::intel_gpu_allowed())
+            && let Some(holder) = nodes.get_mut(index)
+        {
+            self.outcome = Some(Self::lend_to(&framebuffer, cx, holder).map(|()| Lent {
+                width: framebuffer.width,
+                height: framebuffer.height,
+                mtrr: crate::arch::mtrr_type(framebuffer.phys, framebuffer.size),
+            }));
+            return Ok(());
+        }
         match Self::lend(&framebuffer, cx) {
             Ok(node) => {
                 fallible::try_push(nodes, node).map_err(|_| {
