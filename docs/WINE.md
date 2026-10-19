@@ -1107,8 +1107,29 @@ judge asks for DXVK's line, the game's window in hyprix's list, and at
 least 30% of the window lit -- not for motion, since a loading or error
 screen is still and L0 has not said which one a lone start reaches.
 
+**L0's result** (session oc, 2026-10-19, WSL, no network; script and logs
+in `~/oc-scratch/l0/` there). The executable starts on its own, with no
+client, under both Debian's Wine 10.0 and GE-Proton11-7. Under Proton it
+loads 250 DLLs (d3d11, dxgi, dinput8, xinput1_4, winex11 among them) and
+reaches window creation; then, in every run, with no arguments or with
+the old client's: `Call from ... to unimplemented function
+KERNEL32.dll.SetTimerQueueTimer, aborting`, so no window maps. Nothing of
+Vanguard's is loaded on the way. Its system calls (90, `strace -f -c`)
+are all in `nr.rs` but `fadvise64`, which Ferrix may ignore: no kernel
+gap. It opens only the executable and `rpatch.dll` of `Game/` before it
+dies, so the volume's size is still unknown.
+
+**The wall is Wine's.** `SetTimerQueueTimer` is `@ stub` in
+`kernel32.spec` in Wine 10.0 and on Wine's `master` (checked 2026-10-19),
+so no Wine to pin gets past it. It is the older form of
+`CreateTimerQueueTimer` that returns the timer's handle, so the fix is a
+few lines in `dlls/kernel32/sync.c` (customer, 2026-10-19: a patched
+`kernel32.dll`, built from Debian's `10.0~repack-6` source and patches,
+carried on the volume; Debian's Wine otherwise unchanged).
+
 **Where it stands.** The gate is written and its host tests pass; it has
-not booted, because no volume exists yet: L0's file list decides its size.
-L0 runs in session oc. Next: L0's result; then the volume, the first boot,
-the judge narrowed to the screen L0 found, and a negative control (Wine's
-own d3d11, as §9's second control).
+not booted, because no volume exists yet. Next: the patched
+`kernel32.dll`, L0 again with it to find the next wall or the files the
+game loads, then the volume, the first boot, the judge narrowed to the
+screen it reaches, and a negative control (Wine's own d3d11, as §9's
+second control).
