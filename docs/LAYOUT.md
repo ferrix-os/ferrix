@@ -186,7 +186,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 |---|---|
 | `tools/common/xtask/` | The host build driver (`cargo xtask …`); `src/netboot.rs` is the network boot of a bare-metal machine (`docs/NETBOOT.md`); `src/n150.rs` writes the N150 box's whole disk and boots it under QEMU (`docs/N150.md`). |
 | `tools/common/check/` | The quality gates `cargo xtask check` and CI run: layering, assembly budget, unsafe and panic audits, the certification item boundary, complexity, commit authors. `rustlex.py` is their shared Rust lexer. |
-| `tools/common/gen/` | Generators and their `--check` modes: brand images and release notes, the architecture document (with its `sysml/` reader), the panic catalogue, fonts, Wayland protocol tables, XKB tables, SOUP, coverage justification, fuzz corpus seeds; `record-demo.py` records and cuts the demo video (`docs/brand/screenshots/CAPTIONS.md`). |
+| `tools/common/gen/` | Generators and their `--check` modes: brand images and release notes, the architecture document (with its `sysml/` reader), the panic catalogue, fonts, Wayland protocol tables, XKB tables, SOUP, coverage justification, fuzz corpus seeds; `record-demo.py` records and cuts the demo video, and `install-shots.py` labels the install guide's captures (`docs/brand/screenshots/CAPTIONS.md`). |
 | `tools/common/fetch/` | Fetch pinned downloads: the rustc sysroot, busybox, Chrome, Bad Apple!!, Steam's volumes, NVIDIA's driver, iPXE for the netboot stick (`docs/NETBOOT.md`), the shell trees a release image carries (`fetch-shell-trees.sh`). |
 | `tools/common/debug/` | Post-mortem tools run on the host after a failed boot: `ferrix-postmortem.sh` reads a Ferrix disk read-only and prints the loader's and the kernel's logs, the A/B record and `/var/log` (`docs/POSTMORTEM.md`). |
 | `tools/common/test/` | Test drivers run by hand: the self-host matrix, the host `btrfs check` oracle. |
@@ -202,7 +202,7 @@ Everything that runs on the host. A script is a tool; there is no separate
 
 | Path | What |
 |---|---|
-| `docs/*.md` | Design documents, one per subsystem, and `GUIDE.md`, the technical guide. |
+| `docs/*.md` | Design documents, one per subsystem, `GUIDE.md`, the technical guide, and `INSTALL.md`, the pictured guide to trying Ferrix from a release (its pictures in `docs/brand/screenshots/install/`). |
 | `docs/roadmap/`, `docs/sysml/`, `docs/certification/`, `docs/generated/` | The roadmap, the SysML model, the certification evidence, and what is generated from them. |
 | `docs/vendor/<vendor>/<device>/` | Notes on one board or phone. |
 | `docs/brand/`, `docs/marketing/` | The brand kit and the press copy. |
