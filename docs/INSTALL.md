@@ -111,7 +111,7 @@ prints what it loads:
 
 ![QEMU's window on Windows: TianoCore's logo under the Ferrix loader's lines, boot esp, cmdline, kaslr](brand/screenshots/install/ferrix-windows-booting.png)
 
-**4. The desktop.** On the PC in the pictures it was up 6 seconds after the
+**4. The desktop.** On the PC in the pictures it was up 4 seconds after the
 window opened, on its one processor:
 hyprix, Ferrix's Wayland compositor, with one terminal running zinc,
 Ferrix's zsh-compatible shell.
