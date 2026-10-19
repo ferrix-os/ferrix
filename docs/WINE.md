@@ -1127,9 +1127,29 @@ few lines in `dlls/kernel32/sync.c` (customer, 2026-10-19: a patched
 `kernel32.dll`, built from Debian's `10.0~repack-6` source and patches,
 carried on the volume; Debian's Wine otherwise unchanged).
 
-**Where it stands.** The gate is written and its host tests pass; it has
-not booted, because no volume exists yet. Next: the patched
-`kernel32.dll`, L0 again with it to find the next wall or the files the
-game loads, then the volume, the first boot, the judge narrowed to the
-screen it reaches, and a negative control (Wine's own d3d11, as §9's
-second control).
+**L0 again, with the fix** (session oc, 2026-10-19; `kernel32.dll` built
+on nazuna from the `wine-10.0` tag -- Debian's repack less 771 generated
+and binary files, nothing else differing -- with Debian's 39 patches and
+`SetTimerQueueTimer` on `CreateTimerQueueTimer`; SHA-256
+`4641d94d…2e44`, 64-bit only). The stub's abort is gone: Wine's relay
+shows the call reaching `RtlCreateTimer` and succeeding. Behind it is the
+executable's own check, not Wine's: in a TLS callback, before its `main`,
+it installs a vectored exception handler, arms a 30-second timer, raises
+its own exception `0xE056474e`, and ends itself with a fast-fail
+(`c0000409`) at the address round 1 died at -- the timer call was inside
+this same routine all along. No API call fails before it, no write is
+refused, no data file is opened and nothing of Vanguard's is touched, and
+the old client's arguments change nothing.
+
+**So L0's answer is no:** the 2026 executable does not start without
+Riot's client; its own protection refuses a start it did not get from the
+client. Going past that would mean defeating the game's anti-tamper,
+which this work does not do. L1 cannot pass with this executable, and
+L2's routes are the customer's call (an archived 2014 client with
+LeagueSandbox, or parking League with rung A).
+
+**Where it stands.** `test-lol` and `fetch-lol.sh` are written and their
+host tests pass, on branch `cc-lol-l1`, unlanded; nothing has booted. The
+`SetTimerQueueTimer` fix is a real Wine gap that stands without League
+(any program calling it is aborted); it is kept on nazuna in
+`~/cc-lol-wine` (the build script, `fix.py`, the sources' hashes).
