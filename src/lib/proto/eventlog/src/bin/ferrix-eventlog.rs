@@ -18,8 +18,7 @@
 //! the region from a file instead (a saved copy, `test-postmortem`'s).
 
 use std::fs::{File, OpenOptions};
-use std::io::Read;
-use std::os::unix::fs::FileExt;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::process::ExitCode;
 
 use ferrix_bootinfo::pstore::{self, HEADER_BYTES};
@@ -56,7 +55,13 @@ impl ControlDisk for Device {
 
     fn write_block(&mut self, lba: u64, bytes: &[u8]) -> Result<(), DeviceError> {
         let at = lba.checked_mul(u64::from(self.block)).ok_or(DeviceError)?;
-        self.file.write_all_at(bytes, at).map_err(|_| DeviceError)
+        // Seek and write rather than `FileExt::write_all_at`, which is
+        // Unix's only: the tool builds and is tested on Windows too.
+        let _ = self
+            .file
+            .seek(SeekFrom::Start(at))
+            .map_err(|_| DeviceError)?;
+        self.file.write_all(bytes).map_err(|_| DeviceError)
     }
 
     fn flush(&mut self) -> Result<(), DeviceError> {
@@ -65,7 +70,11 @@ impl ControlDisk for Device {
 
     fn read_block(&mut self, lba: u64, bytes: &mut [u8]) -> Result<(), DeviceError> {
         let at = lba.checked_mul(u64::from(self.block)).ok_or(DeviceError)?;
-        self.file.read_exact_at(bytes, at).map_err(|_| DeviceError)
+        let _ = self
+            .file
+            .seek(SeekFrom::Start(at))
+            .map_err(|_| DeviceError)?;
+        self.file.read_exact(bytes).map_err(|_| DeviceError)
     }
 }
 
@@ -150,7 +159,6 @@ fn open(path: &str, block: u32, write: bool) -> Result<(Device, Geometry), Strin
 
 /// A file's or a block device's length.
 fn device_bytes(file: &File) -> std::io::Result<u64> {
-    use std::io::{Seek, SeekFrom};
     let mut file = file;
     let end = file.seek(SeekFrom::End(0))?;
     let _ = file.seek(SeekFrom::Start(0))?;
@@ -223,7 +231,6 @@ enum Source<'a> {
 
 /// The region's bytes.
 fn read_region(source: &Source<'_>) -> Result<Vec<u8>, String> {
-    use std::io::{Seek, SeekFrom};
     let mut region = vec![0u8; usize::try_from(pstore::LEN).map_err(|why| why.to_string())?];
     let (path, at) = match *source {
         Source::Memory(address) => ("/dev/mem", address),
