@@ -395,6 +395,10 @@ pub(crate) fn run_compositor(args: &Args) -> Result<()> {
 /// release's run scripts boot (`tools/common/release/desktop/`).
 pub(crate) const RELEASE_IMAGE: &str = "ferrix-x86_64.img";
 
+/// The file `release-image` writes beside [`RELEASE_IMAGE`]: the image's
+/// initramfs, for the licence inventory to read.
+const RELEASE_INITRAMFS: &str = "ferrix-x86_64.initrd";
+
 /// `cargo xtask release-image --stage <DIR>`: the desktop `run-compositor`
 /// boots, as the one disk image a release carries for somebody who has QEMU
 /// and nothing else. `tools/common/release/package-desktop.py` puts it in
@@ -452,14 +456,24 @@ pub(crate) fn release_image(args: &Args) -> Result<()> {
         ..args.clone()
     };
     crate::fat::set_strip_kernel(true);
+    crate::omz::require_installed()?;
     crate::apps::build_carried(arch, args)?;
     let programs = Programs::build(arch)?;
     let size = args.size.unwrap_or(crate::wallpaper::SCREEN);
     // The screen follows the window it is shown in, as `run-compositor`'s
     // does: the run scripts' `xres` and `yres` are only where it starts.
     let (config, carried) = desktop(arch, RUN_CONFIG.to_owned(), size, true, Backdrop::Any, args)?;
-    let (image, _) =
-        build_desktop_image(arch, &programs, &config, carried, args, DESKTOP_DEFAULTS)?;
+    // `build_desktop_image`'s two steps, apart, so the initramfs the image
+    // carries can be kept beside it.
+    let (loader, kernel, initramfs) = build_parts(arch, &programs, &config, carried, args)?;
+    let image = crate::fat::write_image_carrying(
+        arch,
+        &loader,
+        &kernel,
+        &initramfs,
+        Some(&crate::init::command_line()),
+        Some(DESKTOP_DEFAULTS),
+    )?;
     let stage = std::path::Path::new(&stage);
     std::fs::create_dir_all(stage)
         .map_err(|error| Error::new(format!("making {}: {error}", stage.display())))?;
@@ -472,6 +486,13 @@ pub(crate) fn release_image(args: &Args) -> Result<()> {
         ))
     })?;
     println!("  release image {}", target.display());
+    // The image's initramfs, byte for byte as `FERRIX/INITRD.IMG` holds it:
+    // `tools/common/release/licences.py` reads every file in it and refuses
+    // one it cannot name the licence of. Not part of the release's zip.
+    let carried = stage.join(RELEASE_INITRAMFS);
+    std::fs::write(&carried, kernel.initramfs(&initramfs)?)
+        .map_err(|error| Error::new(format!("writing {}: {error}", carried.display())))?;
+    println!("  its initramfs {}", carried.display());
     Ok(())
 }
 

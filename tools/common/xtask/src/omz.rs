@@ -198,6 +198,33 @@ pub(crate) fn beside(zinc: Option<&[u8]>) -> Result<Vec<File>> {
     installed()
 }
 
+/// Both trees installed, or why not: for `release-image`, whose image must
+/// carry them rather than say it does not -- a release that left them out
+/// would boot a bare shell with a line nobody read. A release installs them
+/// at their pins with `tools/common/fetch/fetch-shell-trees.sh`.
+///
+/// # Errors
+///
+/// Either tree missing where `FERRIX_OMZ` or `FERRIX_ZSH_FUNCTIONS` (or
+/// their defaults) say.
+pub(crate) fn require_installed() -> Result<()> {
+    let root = root()?;
+    let functions = functions_root()?;
+    if !root.join("oh-my-zsh.sh").is_file() {
+        return Err(Error::new(format!(
+            "no oh-my-zsh under {}: tools/common/fetch/fetch-shell-trees.sh installs the pinned one",
+            root.display()
+        )));
+    }
+    if !functions.join("Misc").join("is-at-least").is_file() {
+        return Err(Error::new(format!(
+            "no zsh functions under {}: tools/common/fetch/fetch-shell-trees.sh installs the pinned ones",
+            functions.display()
+        )));
+    }
+    Ok(())
+}
+
 /// The checkout for an image to carry, with the `/etc/zshrc` that sources it,
 /// or nothing at all when it is not installed on this machine.
 fn installed() -> Result<Vec<File>> {

@@ -209,8 +209,12 @@ for entry in "${debs[@]}"; do
     dpkg-deb -x "$(fetch "$path" "$base" "$sum")" "$tree"
 done
 
-# Documentation and manuals, which nothing runs.
-rm -rf "$tree/usr/share/doc" "$tree/usr/share/man" "$tree/usr/share/lintian"
+# Documentation and manuals, which nothing runs -- but each package's
+# copyright file, its licence as Debian states it, which a volume a release
+# ships must carry (docs/LICENSES.md).
+find "$tree/usr/share/doc" -mindepth 1 \( -type f -o -type l \) ! -name copyright -delete
+find "$tree/usr/share/doc" -mindepth 1 -type d -empty -delete
+rm -rf "$tree/usr/share/man" "$tree/usr/share/lintian"
 
 lib="$tree/usr/lib/aarch64-linux-gnu"
 test -x "$tree/usr/lib/chromium/chromium" \

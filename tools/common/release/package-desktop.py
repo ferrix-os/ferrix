@@ -3,12 +3,16 @@
 
     tools/common/release/package-desktop.py <out-dir> [--tag TAG] [--image ferrix-x86_64.img]
 
-Builds the image with `cargo xtask release-image` (run-compositor's desktop,
-anybody's rather than this machine's: tools/common/xtask/src/compositor/run.rs),
-unless `--image` names one already built, and writes into `out-dir`:
+Fetches the pinned shell trees (tools/common/fetch/fetch-shell-trees.sh),
+builds the image with `cargo xtask release-image` (run-compositor's desktop,
+anybody's rather than this machine's: tools/common/xtask/src/compositor/run.rs)
+unless `--image` names one already built beside its `.initrd`, writes its
+licence inventory with licences.py -- which stops the packing if any part
+of the image has no licence it can name -- and writes into `out-dir`:
 
     ferrix-x86_64-desktop.zip           the folder below, for every host
     ferrix-x86_64-desktop.zip.sha256    its SHA-256, as sha256sum prints it
+    ferrix-<tag>-THIRD-PARTY-LICENSES.md    the inventory, as an asset of its own
 
     ferrix-x86_64-desktop/
         ferrix-x86_64.img   the UEFI disk: loader, kernel, initramfs
@@ -16,6 +20,7 @@ unless `--image` names one already built, and writes into `out-dir`:
         run.ps1             the same on Windows
         README.txt          what it is, what is left out, and why
         LICENSE             Ferrix's
+        THIRD-PARTY-LICENSES.md   every part of the image, its licence and its text
         VERSION             the tag and the commit it was built from
 
 A zip rather than a tarball because every host unpacks one with what it
@@ -42,6 +47,21 @@ IMAGE = "ferrix-x86_64.img"
 EPOCH = (1980, 1, 1, 0, 0, 0)
 
 
+def shell_trees(directory: pathlib.Path) -> None:
+    """oh-my-zsh and zsh's functions at their pins, for release-image to
+    carry, named to it and to pinned.py by the variables they read."""
+    printed = subprocess.run(
+        ["bash", str(ROOT / "tools" / "common" / "fetch" / "fetch-shell-trees.sh"), str(directory)],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    os.environ["FERRIX_OMZ"] = str(directory.resolve() / "oh-my-zsh")
+    os.environ["FERRIX_ZSH_FUNCTIONS"] = str(directory.resolve() / "zsh-functions")
+    os.environ["FERRIX_SHELL_TREES"] = str(directory.resolve())
+    print(printed.strip())
+
+
 def build_image(stage: pathlib.Path) -> pathlib.Path:
     """`cargo xtask release-image`, into `stage`."""
     subprocess.run(
@@ -50,6 +70,16 @@ def build_image(stage: pathlib.Path) -> pathlib.Path:
         check=True,
     )
     return stage / IMAGE
+
+
+def inventory(initrd: pathlib.Path, out: pathlib.Path, tag: str) -> pathlib.Path:
+    """licences.py over the image's initramfs; its refusal stops the packing."""
+    subprocess.run(
+        [sys.executable, str(pathlib.Path(__file__).resolve().parent / "licences.py"),
+         "--initrd", str(initrd), "--out", str(out), "--tag", tag],
+        check=True,
+    )
+    return out / "THIRD-PARTY-LICENSES.md"
 
 
 def commit() -> str:
@@ -85,7 +115,7 @@ def text(path: pathlib.Path) -> bytes:
     return data
 
 
-def pack(image: pathlib.Path, out: pathlib.Path, tag: str) -> pathlib.Path:
+def pack(image: pathlib.Path, licences: pathlib.Path, out: pathlib.Path, tag: str) -> pathlib.Path:
     archive = out / f"{NAME}.zip"
     version = f"tag {tag}\ncommit {commit()}\n"
     with zipfile.ZipFile(archive, "w", compresslevel=9) as zip_file:
@@ -96,6 +126,7 @@ def pack(image: pathlib.Path, out: pathlib.Path, tag: str) -> pathlib.Path:
         zip_file.writestr(entry("run.ps1", 0o644), text(HERE / "run.ps1"))
         zip_file.writestr(entry("README.txt", 0o644), text(HERE / "README.txt"))
         zip_file.writestr(entry("LICENSE", 0o644), (ROOT / "LICENSE").read_bytes())
+        zip_file.writestr(entry("THIRD-PARTY-LICENSES.md", 0o644), licences.read_bytes())
         zip_file.writestr(entry("VERSION", 0o644), version.encode())
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     (out / f"{archive.name}.sha256").write_text(f"{digest}  {archive.name}\n")
@@ -110,10 +141,16 @@ def main() -> None:
     parser.add_argument("--image", type=pathlib.Path, help="an image release-image already wrote")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    shell_trees(args.out / "shell")
     image = args.image or build_image(args.out / "stage")
-    if not image.is_file():
-        sys.exit(f"package-desktop: no image at {image}")
-    pack(image, args.out, args.tag)
+    initrd = image.with_suffix(".initrd")
+    if not image.is_file() or not initrd.is_file():
+        sys.exit(f"package-desktop: no image and initramfs at {image} and {initrd}")
+    licences = inventory(initrd, args.out / "licences", args.tag)
+    pack(image, licences, args.out, args.tag)
+    asset = args.out / f"ferrix-{args.tag}-THIRD-PARTY-LICENSES.md"
+    asset.write_bytes(licences.read_bytes())
+    print(f"{asset}: {asset.stat().st_size} bytes")
 
 
 if __name__ == "__main__":
