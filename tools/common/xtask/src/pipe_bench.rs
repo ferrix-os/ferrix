@@ -145,7 +145,7 @@ fn boot_once(arch: Arch, program: &Path, args: &Args) -> Result<Vec<String>> {
 }
 
 /// The p50 in ns of `test`'s `LB summary` line.
-fn summary(lines: &[String], test: &str) -> Option<u64> {
+pub(crate) fn summary(lines: &[String], test: &str) -> Option<u64> {
     let key = format!("LB summary name={test} ");
     lines.iter().find_map(|line| {
         let at = line.find(&key)?;

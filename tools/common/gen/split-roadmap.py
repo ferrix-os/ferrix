@@ -72,6 +72,7 @@ SUFFIX_PAGES = [
     ("Where it stands, in full", "where-it-stands.md"),
     ("Status, estimates and forecast", "status.md"),
     ("The native channel round trip", "ipc-round-trip.md"),
+    ("Microkernel M0's performance baselines", "microkernel-m0-baselines.md"),
     ("Open branches: where to pick up", "open-branches.md"),
     ("Stage 13 handover", "stage-13-handover.md"),
     ("How this roadmap works", "about.md"),

@@ -113,6 +113,9 @@ SRSO_USER_KERNEL_NO and BTC_NO:
   self-host build;
 * Chrome's network bench, the compositor's frame time, `test-unity`.
 
+Each row's method, command, baseline, control and what is still owed:
+[Microkernel M0's performance baselines](microkernel-m0-baselines.md).
+
 ### D. The load ratchet
 
 A check in `xtask check` that reports the `load` ring's size per landing,

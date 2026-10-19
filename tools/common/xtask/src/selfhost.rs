@@ -162,6 +162,7 @@ pub(crate) fn test_selfhost(args: &Args) -> Result<()> {
              it back with btrfs restore",
         ));
     }
+    crate::rows_bench::check_wall_limits(&args.fail_above, ROWS, "test-selfhost")?;
     let checker = btrfs_check::Checker::required()?;
     let tree = rustc::tree()?;
     let plan = args.plan.as_deref().map(Path::new);
@@ -215,7 +216,9 @@ pub(crate) fn test_selfhost(args: &Args) -> Result<()> {
     let log = paths::build_dir(arch).join("serial.log");
     let kept = work.join("build-serial.log");
     let _ = std::fs::copy(&log, &kept);
-    judge(arch, &lines?, plan.is_some())?;
+    let lines = lines?;
+    judge(arch, &lines, plan.is_some())?;
+    crate::rows_bench::wall_rows(arch, &lines, ROWS, &args.fail_above, "test-selfhost")?;
     println!(
         "  {arch}: the build boot's serial output is in {}",
         kept.display()
@@ -252,10 +255,21 @@ fn script(release: bool, plan: bool) -> String {
          export HOME=/data/home CARGO_HOME={CARGO_HOME} CARGO_TARGET_DIR={TARGET}\n\
          cd {SOURCE}\n\
          cargo -V || exit 3\n\
+         read -r t idle < /proc/uptime; echo \"rows-time build $t\"\n\
          {work} || exit 4\n\
+         read -r t idle < /proc/uptime; echo \"rows-time built $t\"\n\
          exit {STATUS}\n"
     )
 }
+
+/// Microkernel M0's self-host row (`docs/roadmap/microkernel-m0-baselines.md`):
+/// the build alone, from [`script`]'s stamps of `/proc/uptime` around it.
+const ROWS: &[crate::rows_bench::Span] = &[crate::rows_bench::Span {
+    row: "selfhost-build",
+    from: "build",
+    to: "built",
+    runs: 1,
+}];
 
 /// Whether the transcript is a build that wrote its image and a script that
 /// got to its end.

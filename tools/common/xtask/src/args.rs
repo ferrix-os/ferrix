@@ -259,6 +259,10 @@ pub(crate) struct Args {
     /// `--board`, the board those logs are from (`stm32mp157d-dk1`): what
     /// `--record` files them under in place of this host.
     pub(crate) board: Option<String>,
+    /// `--fail-above <row>=<n>`, once a row: `bench-rows` fails when that
+    /// row's median p50 is above `n` ns, `test-rustc` and `test-selfhost`
+    /// when their wall-clock row is above `n` ms: the row's fail rule.
+    pub(crate) fail_above: Vec<String>,
     /// `--pin`, the host processors (`taskset -c`'s list) QEMU runs on.
     /// `bench-ipc` pins to 11 unless given another, or `none`.
     pub(crate) pin: Option<String>,
@@ -556,9 +560,10 @@ pub(crate) struct Args {
 const SCALE_FLAGS: [&str; 4] = ["--scale", "--bar-zoom", "--bar-drop", "--bar-margin-right"];
 
 /// The flags [`Args::named`] takes, `bench-ipc`'s among them.
-const NAMED_FLAGS: [&str; 14] = [
+const NAMED_FLAGS: [&str; 15] = [
     "--accel",
     "--cpu-quota",
+    "--fail-above",
     "--since",
     "--moved",
     "--alternate",
@@ -689,6 +694,7 @@ impl Args {
             flag,
             "--alternate"
                 | "--rounds"
+                | "--fail-above"
                 | "--pin"
                 | "--cpu-quota"
                 | "--against-sel4"
@@ -1072,6 +1078,7 @@ impl Args {
             "--board" => self.board = Some(value(items, key)?),
             "--board-log" => self.board_logs.push(value(items, key)?),
             "--cpu-quota" => self.cpu_quota = Some(count(items, key)?),
+            "--fail-above" => self.fail_above.push(value(items, key)?),
             _ => self.pin = Some(value(items, key)?),
         }
         Ok(())

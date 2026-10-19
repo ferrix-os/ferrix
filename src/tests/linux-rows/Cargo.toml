@@ -1,0 +1,59 @@
+[package]
+name = "linux-rows-test"
+description = "Microkernel M0's Linux rows timed: getppid, fork+exec+wait, mmap churn, a page-cache miss, a signal, a futex wake"
+version = "0.1.0"
+edition = "2024"
+# Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
+rust-version = "1.97"
+license = "MIT"
+publish = false
+
+# A workspace of its own, as pipe-bench's: a Linux user program built with
+# std, outside the kernel's dependency policy.
+[workspace]
+
+[[bin]]
+name = "linux-rows-test"
+path = "src/main.rs"
+
+# The static program the fork+exec+wait row runs: it returns at once.
+[[bin]]
+name = "rows-true"
+path = "src/bin/rows-true.rs"
+
+[dependencies]
+libc = "0.2"
+
+# ---------------------------------------------------------------------------
+# Lints: pipe-bench's. Every failure is a line and a status, never a panic.
+# ---------------------------------------------------------------------------
+[lints.rust]
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unused_results = "deny"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+allow_attributes_without_reason = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+overflow-checks = true
+panic = "abort"
+strip = true

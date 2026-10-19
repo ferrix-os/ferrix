@@ -70,22 +70,63 @@ pub(crate) const TASKS: &[Task] = &[
 
 /// The script the shell runs. Version checks first, so a failure says whether
 /// the toolchain ran at all or only its link failed.
+///
+/// The `rows-time` stamps are `/proc/uptime` read by the shell's builtin, so
+/// no program starts to take them: [`ROWS`] are Microkernel M0's wall-clock
+/// rows (`docs/roadmap/microkernel-m0-baselines.md`). The warm compile is
+/// timed five times over, after the one the seam's counters are taken for,
+/// so the stamps' 10 ms step is 2 ms of the row.
 const SCRIPT: &str = r#"export PATH=/data/rust/bin:/data/usr/bin:/bin
 cd /tmp
+read -r t idle < /proc/uptime; echo "rows-time start $t"
 rustc -vV || exit 3
 cargo -V || exit 6
 echo 'fn main() { println!("rustc-gate: hello from rustc on Ferrix"); }' > hello.rs
+read -r t idle < /proc/uptime; echo "rows-time compile $t"
 rustc hello.rs || exit 4
+read -r t idle < /proc/uptime; echo "rows-time compiled $t"
 ./hello || exit 5
 echo '#include <stdio.h>' > hello.c
 echo 'int main(void) { puts("rustc-gate: hello from gcc on Ferrix"); return 0; }' >> hello.c
 cc hello.c -o hello-c || exit 7
 ./hello-c || exit 8
+read -r t idle < /proc/uptime; echo "rows-time cold $t"
 while read -r l; do echo "cold $l"; done < /proc/ferrix-seam
 rustc hello.rs -o hello-again || exit 4
 while read -r l; do echo "warm $l"; done < /proc/ferrix-seam
+read -r t idle < /proc/uptime; echo "rows-time warm $t"
+rustc hello.rs -o hello-again || exit 4
+rustc hello.rs -o hello-again || exit 4
+rustc hello.rs -o hello-again || exit 4
+rustc hello.rs -o hello-again || exit 4
+rustc hello.rs -o hello-again || exit 4
+read -r t idle < /proc/uptime; echo "rows-time warmed $t"
 exit 16
 "#;
+
+/// Microkernel M0's wall-clock rows from [`SCRIPT`]'s stamps: the whole
+/// cold run to its seam counters (both versions, both compiles and both
+/// programs run), the cold `rustc hello.rs` alone, and a warm one.
+const ROWS: &[crate::rows_bench::Span] = &[
+    crate::rows_bench::Span {
+        row: "cold-test-rustc",
+        from: "start",
+        to: "cold",
+        runs: 1,
+    },
+    crate::rows_bench::Span {
+        row: "cold-rustc-hello",
+        from: "compile",
+        to: "compiled",
+        runs: 1,
+    },
+    crate::rows_bench::Span {
+        row: "warm-rustc-hello",
+        from: "warm",
+        to: "warmed",
+        runs: 5,
+    },
+];
 
 /// The search path that finds ferrousli's `libc.so.6` in `/lib` before the
 /// volume's libraries.
@@ -297,6 +338,7 @@ pub(crate) fn test_rustc(args: &Args) -> Result<()> {
             "test-rustc runs on x86-64 only: the volume holds x86-64 binaries",
         ));
     }
+    crate::rows_bench::check_wall_limits(&args.fail_above, ROWS, "test-rustc")?;
     let mut args = args.clone();
     args.data_image = Some(volume()?);
     if !args.memory_given {
@@ -347,7 +389,8 @@ pub(crate) fn test_rustc(args: &Args) -> Result<()> {
         args.memory, args.timeout
     );
     let lines = qemu::watch_then(arch, &image, &kernel, &args, shell::EXITED, |_| Ok(()))?;
-    judge(arch, &lines)
+    judge(arch, &lines)?;
+    crate::rows_bench::wall_rows(arch, &lines, ROWS, &args.fail_above, "test-rustc")
 }
 
 /// Whether the transcript is a compiler and Cargo that ran, a program rustc
