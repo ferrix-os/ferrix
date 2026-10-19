@@ -1066,3 +1066,49 @@ too (`ef-night2`).
 **The debug kernel costs half.** Every `test-endfield-proton` boot so far ran
 the debug kernel (`opt-level = 1`); with `--release` the same disk requests
 take 328 us rather than 925 us and the extraction 42 s rather than 88.
+
+## 13. League of Legends' game, on its own and offline (`test-lol`; started 2026-10-19)
+
+The question: how far League of Legends gets on Ferrix with no Riot server
+and no anti-cheat -- its game executable drawing locally, not a match. The
+research (session oc, 2026-10-19) found the rails in place: Wine 10.0 (§1),
+DXVK on lavapipe (§6) and a real Direct3D 11 game (§9) already pass. The
+2026 executable (`League of Legends.exe`, patch 16.20.8248524, 46.6 MB)
+imports only d3d11, dxgi, dinput8, xinput1_4, winmm, ws2_32, dnsapi,
+crypt32/winstrust and its own `rpatch.dll`; no Vanguard DLL is linked into
+it. No private server speaks the current game's protocol (the LeagueSandbox
+line speaks 2014's v4.20), so a match is out of reach; whether the
+executable starts at all without Riot's client is the open question.
+
+**The ladder** (customer, 2026-10-19: L0 and L1 at once):
+
+| | What | Exit |
+|---|---|---|
+| L0 | On a Linux host (WSL, bubblewrap with no network, the install bound read-only): start the executable on its own, offline; `strace -f -c` against `nr.rs`; list the files it opens | what it draws or says, the syscalls Ferrix lacks, the files a volume needs |
+| L1 | `test-lol`: the same on Ferrix | DXVK made its device, its window drawn |
+| L2 | Only if L0 shows it needs Riot's client: a 2014 client with LeagueSandbox 4.20 (sourcing it is the customer's call), or park it | |
+
+Sound (E3.2) and the mouse (E3.3) ride stage 23; they gate "playable",
+not "runs".
+
+**The volume.** Riot does not publish the game on its own, so
+`fetch-lol.sh` copies it from an installation the customer owns
+(`LOL_GAME_DIR`, the install's `Game` folder), read only, and pins the
+executable by SHA-256. 30 GB of the folder is `DATA/FINAL`; `LOL_FILES`
+names the subset L0 finds the executable opens, so the volume does not have
+to carry all of it. `LOL_ARGS` is the command line L0 settles on, written
+to the volume as `ferrix-args.txt`. The volume holds Riot's files and never
+leaves the machines that made it.
+
+**The boot** (`tools/common/xtask/src/compositor/lol.rs`) is `test-unity`'s
+desktop and script with three differences: it refuses `--net`, so nothing
+the game does reaches Riot; the command line comes from the volume; and the
+judge asks for DXVK's line, the game's window in hyprix's list, and at
+least 30% of the window lit -- not for motion, since a loading or error
+screen is still and L0 has not said which one a lone start reaches.
+
+**Where it stands.** The gate is written and its host tests pass; it has
+not booted, because no volume exists yet: L0's file list decides its size.
+L0 runs in session oc. Next: L0's result; then the volume, the first boot,
+the judge narrowed to the screen L0 found, and a negative control (Wine's
+own d3d11, as §9's second control).

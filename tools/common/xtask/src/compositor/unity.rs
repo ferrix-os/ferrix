@@ -216,19 +216,26 @@ fn config() -> String {
 
 /// A rectangle on the screen: left, top, width, height.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Rect {
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
+pub(super) struct Rect {
+    pub(super) x: usize,
+    pub(super) y: usize,
+    pub(super) width: usize,
+    pub(super) height: usize,
 }
 
 /// Where hyprix put the game's window, from the `at:` and `size:` of the
 /// entry in its list whose class is [`CLASS`].
 fn window(lines: &[String]) -> Option<Rect> {
+    window_of(lines, "unity: clients:", CLASS)
+}
+
+/// Where hyprix put the window of class `class`, from the `at:` and `size:`
+/// of its entry in the `hyprctl clients` lines a script printed after
+/// `prefix` (`test-lol` shares it).
+pub(super) fn window_of(lines: &[String], prefix: &str, class: &str) -> Option<Rect> {
     let entries: Vec<&str> = lines
         .iter()
-        .filter_map(|line| line.split_once("unity: clients:"))
+        .filter_map(|line| line.split_once(prefix))
         .map(|(_, rest)| rest.trim())
         .collect();
     let blocks = entries.split(|entry| entry.contains(" -> "));
@@ -237,11 +244,11 @@ fn window(lines: &[String]) -> Option<Rect> {
         Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
     };
     for block in blocks {
-        let class = block
+        let listed = block
             .iter()
             .find_map(|entry| entry.strip_prefix("class:"))
             .map(str::trim);
-        if !class.is_some_and(|class| class.eq_ignore_ascii_case(CLASS)) {
+        if !listed.is_some_and(|listed| listed.eq_ignore_ascii_case(class)) {
             continue;
         }
         let at = block
@@ -273,7 +280,7 @@ fn pixel(image: &Image, x: usize, y: usize) -> Option<[u8; 3]> {
 /// Of the pixels inside `within`: how many there are, how many differ
 /// between `first` and `second` by more than a little, and how many are
 /// not near black in `second`.
-fn compare(first: &Image, second: &Image, within: Rect) -> (usize, usize, usize) {
+pub(super) fn compare(first: &Image, second: &Image, within: Rect) -> (usize, usize, usize) {
     let (mut all, mut changed, mut lit) = (0, 0, 0);
     for y in within.y..within.y + within.height {
         for x in within.x..within.x + within.width {
@@ -294,7 +301,7 @@ fn compare(first: &Image, second: &Image, within: Rect) -> (usize, usize, usize)
 }
 
 /// A screendump, read.
-fn screen(qmp: &mut Qmp, dump: &Path) -> Result<Image> {
+pub(super) fn screen(qmp: &mut Qmp, dump: &Path) -> Result<Image> {
     qmp.screendump(Some(DEVICE_ID), dump)?;
     let bytes = std::fs::read(dump)
         .map_err(|error| Error::new(format!("reading {}: {error}", dump.display())))?;

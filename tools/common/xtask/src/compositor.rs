@@ -53,7 +53,7 @@
 //! configuration and the verdict it needs. `run` and `desktop` are the
 //! desktops a person watches; `browser`, `apps`, `bench`, `steam_window` and
 //! `steam_store` are the other commands that boot the compositor, as are
-//! `endfield`, `frames`, `unity`, `wine`, `dxvk` and `claude_desktop`.
+//! `endfield`, `frames`, `unity`, `lol`, `wine`, `dxvk` and `claude_desktop`.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -77,6 +77,7 @@ mod lane;
 mod latency;
 mod layout;
 mod locked;
+mod lol;
 mod machine;
 mod monitors;
 pub(crate) mod n150_box;
@@ -245,6 +246,16 @@ pub(crate) const TASKS: &[Task] = &[
             "              (docs/WINE.md §9)",
         ],
         run: |_, args| unity::test_unity(args),
+    },
+    Task {
+        name: "test-lol",
+        help_at: 795,
+        help: &[
+            "test-lol      Attach the volume tools/common/fetch/fetch-lol.sh makes from an installation, and require",
+            "              League of Legends' game executable, started on its own with no network, to reach DXVK on",
+            "              lavapipe in Wine and draw in its window on hyprix (docs/WINE.md §13)",
+        ],
+        run: |_, args| lol::test_lol(args),
     },
     Task {
         name: "test-endfield-launcher",
