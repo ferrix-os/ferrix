@@ -11,10 +11,12 @@
 //!    the GGTT's entries in its upper 8 MiB (`gen6_gttadr_offset`).
 //! 3. The configuration space read, never written: the GGTT's size
 //!    (`GMCH_CTRL`) and stolen memory's base (`BSM`).
-//! 4. Whether `GuC` has locked the `WOPCM` since the last reset
+//! 4. Forcewake of the render and GT domains, as i915 takes it.
+//! 5. Whether `GuC` has locked the `WOPCM` since the last reset
 //!    (`uc_is_wopcm_locked`): an execlists driver cannot start then, and
 //!    says so (M0 found it on every warm boot from the inspection Linux).
-//! 5. Forcewake of the render and GT domains, as i915 takes it.
+//!    Read under forcewake: the registers are the GT domain's, and i915
+//!    reads them in `intel_gt_init_hw`, under every domain's.
 //! 6. The GT's identity: the slices, dual-subslices and EUs from the fuses,
 //!    the engines the media fuses leave, the command streamer's timestamp
 //!    frequency, and `RP0`, `RP1` and `RPn`. Each line can be compared with what
@@ -29,8 +31,16 @@
 //!    registers and only the GGTT entries of its own window.
 //!
 //! M1 writes nothing to the GPU but the forcewake requests. After the
-//! lines it stays: a driver that exited would have devmgr quiesce the
-//! device. The exit status is the step that failed ([`Step`]).
+//! lines it stays, and once it has the device it stays after a failure too,
+//! saying the step that failed ([`Step`]): a driver that exited would have
+//! devmgr quiesce the device, which turns its bus mastering off under the
+//! plane the firmware lit. Only a failure before it has the device is an
+//! exit status.
+//!
+//! Every step is said before it is taken, and the kernel command line can
+//! stop the driver before any of them or have it say every register access
+//! first ([`steps`]): booting under `ferrix.intelgpu` hung the N150 box with
+//! nothing kept, and these find where.
 
 #![no_std]
 #![no_main]
@@ -54,13 +64,17 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::{Bootstrap, Kernel};
 
 mod m2;
+mod steps;
+
+use steps::{At, Steps};
 
 ferrix_rt::entry!(main);
 
 /// BAR 0's size on Gen8+ (`gen6_gttmmadr_size`).
 const GTTMMADR_BYTES: u64 = 16 << 20;
 
-/// Where a run stopped, as the exit status.
+/// Where a run stopped: said, and the exit status only before the driver
+/// has the device.
 #[derive(Clone, Copy, Debug)]
 #[repr(i32)]
 pub(crate) enum Step {
@@ -87,6 +101,15 @@ pub(crate) enum Step {
     /// M2: a request on a context banned after a hang (refused, as i915
     /// refuses it with `EIO`).
     Banned = 10,
+    /// Stopped before a step, as `ferrix.intelgpu.stop` asked. Never an
+    /// exit status: the driver stays.
+    Stopped = 11,
+}
+
+impl From<steps::Stopped> for Step {
+    fn from(_: steps::Stopped) -> Self {
+        Step::Stopped
+    }
 }
 
 fn main(bootstrap: Bootstrap) -> i32 {
@@ -156,6 +179,10 @@ impl fmt::Write for Line {
 pub(crate) struct Bar0 {
     _mapping: IoMapping<Kernel>,
     base: usize,
+    /// Say every register access, and every GGTT entry written, before it
+    /// is made (`ferrix.intelgpu.trace`). The GGTT walk's reads are not
+    /// said one by one: its step is.
+    trace: bool,
 }
 
 impl Bar0 {
@@ -188,6 +215,11 @@ impl Bar0 {
             return;
         }
         let address = self.base + offset as usize;
+        if self.trace {
+            say(format_args!(
+                "intel: about to write GGTT entry {index:#x} <- {pte:#018x}"
+            ));
+        }
         // SAFETY: inside BAR 0's GGTT half, which the kernel mapped for this
         // process and `self` keeps, eight-byte aligned; device memory.
         unsafe { device_write64(address as *mut u64, pte) }
@@ -213,6 +245,9 @@ impl Mmio for Bar0 {
         else {
             return 0;
         };
+        if self.trace {
+            say(format_args!("intel: about to read {offset:#x}"));
+        }
         // SAFETY: inside BAR 0's register half, mapped for this process and
         // kept by `self`, aligned.
         unsafe { device_read(address as *const u32) }
@@ -225,6 +260,11 @@ impl Mmio for Bar0 {
         else {
             return;
         };
+        if self.trace {
+            say(format_args!(
+                "intel: about to write {offset:#x} <- {value:#010x}"
+            ));
+        }
         // SAFETY: as for `read32`, and the mapping is writable.
         unsafe { device_write(address as *mut u32, value) }
     }
@@ -325,8 +365,45 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
             ));
         }
     }
+    let steps = Steps::from_command_line();
+    let mut time = Time {
+        idle: port::create(Kernel).map_err(|_| Step::Port)?,
+    };
+    match m1(&device, info.apertures, &platform, &steps, &mut time) {
+        Err(Step::Stopped) => stay(&time),
+        Err(step) => {
+            // Exiting would have devmgr quiesce the function, and a quiesce
+            // turns its bus mastering off (`device_quiesce`), under the
+            // plane the firmware lit and the display engine still scans
+            // out of memory. i915 never does that with a lit plane: it
+            // turns the display off before `pci_disable_device`.
+            say(format_args!(
+                "intel: stopped at {step:?}; the driver stays, so 00:02.0's bus mastering stays on under the lit screen"
+            ));
+            stay(&time)
+        }
+        Ok(()) => {
+            say(format_args!(
+                "intel: the driver now waits and touches nothing"
+            ));
+            stay(&time)
+        }
+    }
+}
 
-    let Some(aperture) = bar0(&device, info.apertures) else {
+/// M1, then M2 unless the `WOPCM` is locked; each step said first.
+fn m1(
+    device: &Device<Kernel>,
+    apertures: u32,
+    platform: &Platform,
+    steps: &Steps,
+    time: &mut Time,
+) -> Result<(), Step> {
+    steps.before(
+        At::MapBar0,
+        format_args!("map BAR 0, 16 MiB uncached (the kernel's io_mapping; no device access)"),
+    )?;
+    let Some(aperture) = bar0(device, apertures) else {
         say(format_args!("intel: no whole 16 MiB BAR 0 to map"));
         return Err(Step::Registers);
     };
@@ -345,14 +422,38 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     let mut bar = Bar0 {
         _mapping: mapping,
         base,
-    };
-    let mut time = Time {
-        idle: port::create(Kernel).map_err(|_| Step::Port)?,
+        trace: steps.trace,
     };
 
     let run_started = time.now_us();
-    say_config(&device);
+    steps.before(
+        At::Config,
+        format_args!("read configuration space GMCH_CTRL 0x50, BSM 0x5c (through the kernel)"),
+    )?;
+    say_config(device);
 
+    steps.before(
+        At::Forcewake,
+        format_args!(
+            "forcewake render and GT: acks 0xd84 0x130044 clear, write 0xa278 0xa188, acks set"
+        ),
+    )?;
+    let domains = uncore::fw_domains_init(platform.platform_engine_mask);
+    let wanted = uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT;
+    let started = time.now_us();
+    if let Err(error) = uncore::fw_domains_get(&mut bar, time, &domains, wanted) {
+        say(format_args!("intel: forcewake failed: {error:?}"));
+        return Err(Step::Forcewake);
+    }
+    say(format_args!(
+        "intel: forcewake render and GT acknowledged in {} us",
+        time.now_us().saturating_sub(started)
+    ));
+
+    steps.before(
+        At::Wopcm,
+        format_args!("read GUC_WOPCM_SIZE 0xc050, DMA_GUC_WOPCM_OFFSET 0xc340 (GT domain)"),
+    )?;
     let locked = uc::uc_is_wopcm_locked(&mut bar);
     say(format_args!(
         "intel: WOPCM {}",
@@ -363,20 +464,8 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         }
     ));
 
-    let domains = uncore::fw_domains_init(platform.platform_engine_mask);
-    let wanted = uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT;
-    let started = time.now_us();
-    if let Err(error) = uncore::fw_domains_get(&mut bar, &mut time, &domains, wanted) {
-        say(format_args!("intel: forcewake failed: {error:?}"));
-        return Err(Step::Forcewake);
-    }
-    say(format_args!(
-        "intel: forcewake render and GT acknowledged in {} us",
-        time.now_us().saturating_sub(started)
-    ));
-
-    let (subslice_mask, engine_mask) = say_gt(&mut bar, &platform);
-    let (scanned, last_present, total, plane) = say_plane_and_ggtt(&mut bar, &device, &mut time);
+    let (subslice_mask, engine_mask) = say_gt(&mut bar, platform, steps)?;
+    let (scanned, last_present, total, plane) = say_plane_and_ggtt(&mut bar, device, time, steps)?;
     say(format_args!(
         "intel: M1: the device answers ({} ms)",
         time.now_us().saturating_sub(run_started) / 1_000
@@ -393,13 +482,10 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
             engine_mask,
             plane,
         };
-        run_m2(&mut bar, &device, &mut time, firmware);
+        run_m2(&mut bar, device, time, firmware, steps)?;
     }
     uncore::fw_domains_put(&mut bar, &domains, wanted);
-    say(format_args!(
-        "intel: the driver now waits and touches nothing"
-    ));
-    stay(&time)
+    Ok(())
 }
 
 /// The configuration-space words M1 needs, read only.
@@ -419,7 +505,13 @@ fn say_config(device: &Device<Kernel>) {
 
 /// The GT's identity, under forcewake: the dual-subslices and the engines
 /// the media fuses leave, for M2.
-fn say_gt(bar: &mut Bar0, platform: &Platform) -> (u8, u32) {
+fn say_gt(bar: &mut Bar0, platform: &Platform, steps: &Steps) -> Result<(u8, u32), Step> {
+    steps.before(
+        At::Fuses,
+        format_args!(
+            "read GT_SLICE_ENABLE 0x9138, GEOMETRY_DSS_ENABLE 0x913c, EU_DISABLE 0x9134, VEBOX_VDBOX_DISABLE 0x9140"
+        ),
+    )?;
     let fuses = sseu::Fuses::read(bar);
     let info = sseu::gen12_sseu_info_init(fuses);
     say(format_args!(
@@ -436,7 +528,17 @@ fn say_gt(bar: &mut Bar0, platform: &Platform) -> (u8, u32) {
         "intel: engines (media fuse {media:#010x}):{}",
         core::str::from_utf8(line.as_bytes()).unwrap_or("?")
     ));
+    steps.before(
+        At::Clock,
+        format_args!(
+            "read CTC_MODE 0xa26c, then RPM_CONFIG0 0xd00 or TIMESTAMP_OVERRIDE 0x44074 as it says"
+        ),
+    )?;
     let cs = clock::gen11_read_clock_frequency(bar);
+    steps.before(
+        At::RpCaps,
+        format_args!("read RP_STATE_CAP 0x145998, FREQ_INFO_REC 0x145ef0 (MCHBAR mirror)"),
+    )?;
     let caps = rps::gen6_rps_get_freq_caps(
         bar.read32(rps::GEN6_RP_STATE_CAP.offset()),
         bar.read32(rps::GEN10_FREQ_INFO_REC.offset()),
@@ -447,7 +549,7 @@ fn say_gt(bar: &mut Bar0, platform: &Platform) -> (u8, u32) {
         rps::intel_gpu_freq(caps.rp1_freq),
         rps::intel_gpu_freq(caps.min_freq)
     ));
-    (info.subslice_mask, mask)
+    Ok((info.subslice_mask, mask))
 }
 
 /// How long the read-only GGTT walk may take before it stops: it is
@@ -463,15 +565,26 @@ const GGTT_WALK_GAP: u64 = 4096;
 /// and the GGTT entries the firmware left present, read only and bounded.
 /// Returns how many entries were read, the last present one, the GGTT's
 /// size in bytes, and the lit plane for M2's screen blit.
+/// What M1's GGTT walk leaves M2: the entries read, the last present one,
+/// the GGTT's size in bytes, and the lit plane.
+type Walked = (u64, Option<u64>, u64, Option<m2::ScreenPlane>);
+
 fn say_plane_and_ggtt(
     bar: &mut Bar0,
     device: &Device<Kernel>,
     time: &mut Time,
-) -> (u64, Option<u64>, u64, Option<m2::ScreenPlane>) {
+    steps: &Steps,
+) -> Result<Walked, Step> {
     let gmch = device
         .config_read(gtt::SNB_GMCH_CTRL, 2)
         .map_or(0, |value| value as u16);
     let entries = gtt::ggtt_total(gmch) / gtt::GTT_PAGE_SIZE;
+    steps.before(
+        At::Plane,
+        format_args!(
+            "read pipe A plane 1 PLANE_CTL 0x70180, STRIDE 0x70188, SIZE 0x70190, SURF 0x7019c (display)"
+        ),
+    )?;
     let lit = plane::read_plane1(bar, 0);
     if lit.enabled() {
         let (width, height) = lit.dimensions();
@@ -489,6 +602,10 @@ fn say_plane_and_ggtt(
             lit.ctl
         ));
     }
+    steps.before(
+        At::GgttWalk,
+        format_args!("read GGTT entries from BAR 0 + 8 MiB, {entries} at most, for at most 200 ms"),
+    )?;
     let started = time.now_us();
     let mut present = 0_u64;
     let mut first_present = None;
@@ -528,12 +645,12 @@ fn say_plane_and_ggtt(
             height,
         }
     });
-    (
+    Ok((
         scanned,
         first_present.map(|_| last_present),
         entries * gtt::GTT_PAGE_SIZE,
         screen,
-    )
+    ))
 }
 
 /// Stay, for the life of the machine.
@@ -548,8 +665,21 @@ fn stay(time: &Time) -> Result<core::convert::Infallible, Step> {
 /// M2 under every domain's forcewake: `intel_gt_init_hw` runs under
 /// `FORCEWAKE_ALL`, every domain the fused engines have (a fused-off
 /// VCS2's would never acknowledge).
-fn run_m2(bar: &mut Bar0, device: &Device<Kernel>, time: &mut Time, firmware: m2::Firmware) {
+fn run_m2(
+    bar: &mut Bar0,
+    device: &Device<Kernel>,
+    time: &mut Time,
+    firmware: m2::Firmware,
+    steps: &Steps,
+) -> Result<(), Step> {
     let all = uncore::fw_domains_init(firmware.engine_mask);
+    steps.before(
+        At::ForcewakeAll,
+        format_args!(
+            "forcewake every domain the fuses leave (engines {:#x}): media 0xa540.. and 0xa560.. too",
+            firmware.engine_mask
+        ),
+    )?;
     let every = match uncore::fw_domains_get(bar, time, &all, !0) {
         Ok(()) => true,
         Err(error) => {
@@ -559,10 +689,13 @@ fn run_m2(bar: &mut Bar0, device: &Device<Kernel>, time: &mut Time, firmware: m2
             false
         }
     };
-    if let Err(step) = m2::run(bar, device, time, firmware) {
-        say(format_args!("intel: M2 stopped at {step:?}"));
+    match m2::run(bar, device, time, firmware, steps) {
+        Err(Step::Stopped) => return Err(Step::Stopped),
+        Err(step) => say(format_args!("intel: M2 stopped at {step:?}")),
+        Ok(()) => {}
     }
     if every {
         uncore::fw_domains_put(bar, &all, !0);
     }
+    Ok(())
 }

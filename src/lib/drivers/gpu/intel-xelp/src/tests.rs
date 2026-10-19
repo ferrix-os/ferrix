@@ -1045,6 +1045,48 @@ fn cs_timestamp_frequency() {
     );
 }
 
+/// `gen11_read_clock_frequency` reads only what i915 reads: never
+/// `TIMESTAMP_OVERRIDE` unless `CTC_MODE` names the divide logic, never
+/// `RPM_CONFIG0` when it does.
+#[test]
+fn cs_timestamp_frequency_reads_only_what_i915_reads() {
+    use crate::clock::gen11_read_clock_frequency;
+    use crate::generated::i915_reg::GEN9_TIMESTAMP_OVERRIDE;
+    use crate::generated::intel_gt_regs::{CTC_MODE, CTC_SOURCE_DIVIDE_LOGIC, RPM_CONFIG0};
+    struct Reads {
+        values: BTreeMap<u32, u32>,
+        read: Vec<u32>,
+    }
+    impl Mmio for Reads {
+        fn read32(&mut self, offset: u32) -> u32 {
+            self.read.push(offset);
+            self.values.get(&offset).copied().unwrap_or(0)
+        }
+        fn write32(&mut self, _: u32, _: u32) {}
+    }
+    let mut crystal = Reads {
+        values: BTreeMap::from([(RPM_CONFIG0.offset(), 0x10 | (3 << 1))]),
+        read: Vec::new(),
+    };
+    assert_eq!(gen11_read_clock_frequency(&mut crystal), 38_400_000);
+    assert_eq!(crystal.read, [CTC_MODE.offset(), RPM_CONFIG0.offset()]);
+    let mut divide = Reads {
+        values: BTreeMap::from([
+            (CTC_MODE.offset(), CTC_SOURCE_DIVIDE_LOGIC),
+            (GEN9_TIMESTAMP_OVERRIDE.offset(), 0x0000_0012),
+        ]),
+        read: Vec::new(),
+    };
+    assert_eq!(
+        gen11_read_clock_frequency(&mut divide),
+        19_000_000 + 1_000_000
+    );
+    assert_eq!(
+        divide.read,
+        [CTC_MODE.offset(), GEN9_TIMESTAMP_OVERRIDE.offset()]
+    );
+}
+
 #[test]
 fn gt_and_engine_bring_up() {
     use crate::engine::ENGINES;

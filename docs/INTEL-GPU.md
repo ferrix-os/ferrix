@@ -674,6 +674,35 @@ M1 and M2, without the box.
 
 ## 10. Where it stands
 
+**The box hangs under `ferrix.intelgpu` (2026-10-19, branch `igpu-hang`).**
+Booting the box with `ferrix.intelgpu` hard-hung it twice, with no panic and
+no timed reset, and the RAM log was lost to the power cycle: on 2026-10-18 on
+the box's own older M1, and on 2026-10-19 on checkpoint 1 of `ef8325d2f`. The
+driver now says each step before it takes it (`intel: step N (Name): what`,
+numbered in `drivers/gpu/intel/src/steps.rs`, 1 to 9 M1 and 10 to 22 M2), and
+two command-line words, read from `/proc/cmdline`, find the step on the box:
+`ferrix.intelgpu.stop=N` stops before step N and stays (`stop=1` starts the
+driver and touches nothing, which splits the kernel's part from the
+driver's), and `ferrix.intelgpu.trace` says every register access and every
+GGTT entry written before it is made. The kernel draws a program's console
+lines under `ferrix.fbcon` before the write returns, with the
+write-combining buffers drained, so a photograph of a hung box shows the last
+access asked for. Three changes found by reading, each to do as i915 does:
+the `WOPCM` registers (GT domain) are read under forcewake, not before it;
+`TIMESTAMP_OVERRIDE` (0x44074) is read only when `CTC_MODE` names the divide
+logic; and the driver no longer exits after a failure once it has the device,
+since devmgr's quiesce would then turn 00:02.0's bus mastering off under the
+plane the firmware lit (i915 turns the display off before
+`pci_disable_device`). Whether a hang can starve the timed reset: it can.
+The reset is `/etc/reset-after.sh` exiting, so it needs the scheduler, the
+root's disk driver for the commit before the reset (`power::finish`), and
+init itself. One processor stalled on an unanswered read stops only itself
+until another waits on it; a TLB shootdown then panics with FX-0001 within
+ten seconds, and `ferrix.panic=reset` resets ten seconds later, with no lock
+taken (`panic/reset.rs`). That no reset came at all means more than one
+processor stopped, no shootdown came, or the reset's own port writes could
+not leave the processor. The box runs are a `docs/BACKLOG.md` row.
+
 **M3's hardware-independent part (branch `intel-uapi`, 2026-10-18).**
 
 * **The front end** is `intel-xelp`'s `frontend` module: every ioctl of

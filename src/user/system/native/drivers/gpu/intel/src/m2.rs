@@ -44,6 +44,7 @@ use ferrix_rt::native::pin::{Pin, PinAccess, device_address};
 use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 
+use crate::steps::{At, Steps};
 use crate::{Bar0, Step, Time, say};
 
 /// Pages in the pool: four context images and their rings, two default
@@ -358,8 +359,15 @@ pub(crate) fn run(
     device: &Device<Kernel>,
     time: &mut Time,
     firmware: Firmware,
+    steps: &Steps,
 ) -> Result<(), Step> {
     let started = time.now_us();
+    steps.before(
+        At::Pin,
+        format_args!(
+            "pin {POOL_PAGES} pages into 00:02.0's domain (the kernel turns bus mastering on), map them, make a PPGTT in memory"
+        ),
+    )?;
     let pool = Pool::new(device).inspect_err(|_| {
         say(format_args!(
             "intel: M2: {POOL_PAGES} pages could not be pinned and mapped"
@@ -391,27 +399,28 @@ pub(crate) fn run(
         packets: 0,
         gt_sources: 0,
     };
-    m2.gt_init(firmware);
-    m2.interrupts(device);
+    m2.gt_init(firmware, steps)?;
+    m2.interrupts(device, steps)?;
+    steps.before(
+        At::Rcs0,
+        format_args!(
+            "RCS0 at 0x2000: status page bound in the GGTT, sanitized, workarounds, whitelist, RING_MODE, HWS_PGA, EMR, IMR"
+        ),
+    )?;
     let mut rcs = m2.engine(ENGINES[0])?;
+    steps.before(At::Bcs0, format_args!("BCS0 at 0x22000: the same"))?;
     let mut bcs = m2.engine(ENGINES[1])?;
+    steps.before(
+        At::IrqOn,
+        format_args!("GT interrupts enabled, then the master GFX_MSTR_IRQ 0x190010"),
+    )?;
     m2.irq_on();
+    steps.before(
+        At::Ppgtt,
+        format_args!("a PPGTT mapping made and walked back (memory only)"),
+    )?;
     m2.ppgtt_readback()?;
-    if CHECKPOINT >= 2 {
-        for engine in [&mut rcs, &mut bcs] {
-            m2.record_default(engine)?;
-        }
-        m2.verify_ctx_workarounds(&mut rcs)?;
-        m2.store_dword(&mut rcs, 2)?;
-    }
-    if CHECKPOINT >= 3 {
-        m2.fast_copy(&mut bcs)?;
-        m2.screen_blit(&mut bcs, firmware.plane)?;
-        m2.ppgtt_batch(&mut rcs)?;
-    }
-    if CHECKPOINT >= 4 {
-        m2.hang(&mut rcs)?;
-    }
+    m2.checkpoints(&mut rcs, &mut bcs, firmware.plane, steps)?;
     say(format_args!(
         "intel: M2: checkpoint {CHECKPOINT} done: completions {} by interrupt, {} by the {} us poll; {} interrupt packets, {} with GT sources ({} ms)",
         m2.by_interrupt,
@@ -425,9 +434,54 @@ pub(crate) fn run(
 }
 
 impl M2<'_> {
+    /// Checkpoints 2 to 4, as far as [`CHECKPOINT`] says: what the GPU runs.
+    fn checkpoints(
+        &mut self,
+        rcs: &mut Engine,
+        bcs: &mut Engine,
+        plane: Option<ScreenPlane>,
+        steps: &Steps,
+    ) -> Result<(), Step> {
+        let m2 = self;
+        if CHECKPOINT >= 2 {
+            steps.before(
+            At::Commands,
+            format_args!(
+                "checkpoint 2: the default images and MI_STORE_DWORD_IMM, the first commands the GPU runs"
+            ),
+        )?;
+            for engine in [&mut *rcs, &mut *bcs] {
+                m2.record_default(engine)?;
+            }
+            m2.verify_ctx_workarounds(rcs)?;
+            m2.store_dword(rcs, 2)?;
+        }
+        if CHECKPOINT >= 3 {
+            steps.before(
+                At::Blits,
+                format_args!("checkpoint 3: XY_FAST_COPY_BLT, the screen blit, a PPGTT batch"),
+            )?;
+            m2.fast_copy(bcs)?;
+            m2.screen_blit(bcs, plane)?;
+            m2.ppgtt_batch(rcs)?;
+        }
+        if CHECKPOINT >= 4 {
+            steps.before(
+                At::Hang,
+                format_args!("checkpoint 4: a hung batch on RCS0, reset and banned"),
+            )?;
+            m2.hang(rcs)?;
+        }
+        Ok(())
+    }
+
     /// `i915_gem_init`'s PAT, then `intel_gt_init_hw`: the GT workarounds
     /// and the MOCS, each read back.
-    fn gt_init(&mut self, firmware: Firmware) {
+    fn gt_init(&mut self, firmware: Firmware, steps: &Steps) -> Result<(), Step> {
+        steps.before(
+            At::Pat,
+            format_args!("write the PAT 0x4800..0x481c and read it back"),
+        )?;
         gt::setup_private_pat(self.bar);
         let pat_lost = gt::verify_private_pat(self.bar).count();
         let mut engines = [ENGINES[0]; 5];
@@ -444,6 +498,13 @@ impl M2<'_> {
             firmware.subslice_mask,
             engines.get(..count).unwrap_or_default(),
         );
+        steps.before(
+            At::GtInit,
+            format_args!(
+                "intel_gt_init_hw: {} GT workarounds written and read back (MCR steering 0xfdc first), the WOPCM, MOCS and L3CC",
+                wal.len()
+            ),
+        )?;
         let lost = match gt::intel_gt_init_hw(self.bar, &wal) {
             Ok(report) => report.lost_workarounds,
             Err(error) => {
@@ -477,6 +538,7 @@ impl M2<'_> {
         say(format_args!(
             "intel: M2: MOCS read GLOBAL_MOCS[0..8] {global:x?} LNCFCMOCS[0..4] {l3cc:x?}"
         ));
+        Ok(())
     }
 
     /// A PPGTT mapping made and walked back: two pool pages at 8 GiB, each
@@ -527,10 +589,18 @@ impl M2<'_> {
 
     /// The interrupt: claimed and bound to the port. Without it the driver
     /// polls, which it does anyway until each completion.
-    fn interrupts(&mut self, device: &Device<Kernel>) {
+    fn interrupts(&mut self, device: &Device<Kernel>, steps: &Steps) -> Result<(), Step> {
+        steps.before(
+            At::IrqReset,
+            format_args!("gen11_gt_irq_reset: the GT's interrupt enables off and masks set"),
+        )?;
         for (reg, value) in irq::gen11_gt_irq_reset() {
             self.bar.write32(reg.offset(), value);
         }
+        steps.before(
+            At::Msi,
+            format_args!("claim the MSI and bind it to the port (the kernel programs 00:02.0's MSI capability)"),
+        )?;
         match device.interrupt(0) {
             Ok(interrupt) => match interrupt.bind(&self.port, KEY_INTERRUPT) {
                 Ok(()) => self.interrupt = Some(interrupt),
@@ -542,6 +612,7 @@ impl M2<'_> {
                 "intel: M2: no interrupt ({error:?}); polling only"
             )),
         }
+        Ok(())
     }
 
     /// `gen11_gt_irq_postinstall` and the master enable.

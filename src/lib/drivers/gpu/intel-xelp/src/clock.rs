@@ -53,10 +53,18 @@ pub const fn gen11_clock_frequency(ctc_mode: u32, ts_override: u32, rpm_config0:
 }
 
 /// `gen11_read_clock_frequency`, reading the registers (`CTC_MODE` is in
-/// the render domain, the other two always on).
+/// the render domain, the other two always on). As i915 does, it reads only
+/// the register `CTC_MODE` names: `TIMESTAMP_OVERRIDE` (0x44074, in the
+/// display engine's range) for the divide logic, else `RPM_CONFIG0`. The
+/// N150 box hung twice before this driver's M1 ended, so the driver reads
+/// no register i915 would not.
 pub fn gen11_read_clock_frequency<M: Mmio + ?Sized>(mmio: &mut M) -> u32 {
     let ctc = mmio.read32(gr::CTC_MODE.offset());
-    let ts = mmio.read32(ir::GEN9_TIMESTAMP_OVERRIDE.offset());
-    let rpm = mmio.read32(gr::RPM_CONFIG0.offset());
-    gen11_clock_frequency(ctc, ts, rpm)
+    if ctc & gr::CTC_SOURCE_PARAMETER_MASK == gr::CTC_SOURCE_DIVIDE_LOGIC {
+        let ts = mmio.read32(ir::GEN9_TIMESTAMP_OVERRIDE.offset());
+        gen11_clock_frequency(ctc, ts, 0)
+    } else {
+        let rpm = mmio.read32(gr::RPM_CONFIG0.offset());
+        gen11_clock_frequency(ctc, 0, rpm)
+    }
 }
