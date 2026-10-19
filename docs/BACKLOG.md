@@ -592,6 +592,44 @@ built when stale) and
 `worktree-agent-a33c10946b6721065` (the panic QR code). Those wind-down
 records are in this file's history.
 
+The microkernel program's wind-down on 2026-10-19 (PO os-e1; `docs/MICROKERNEL.md`
+M1 and M0's leftovers, so the `max` and `fast` profiles can build). Every
+branch is on origin and on nazuna. The ids, call numbers, panic codes and
+audit numbers are reserved on main (f5c048964, its message lists them). The
+five M1 designs and smt=off's are on main with the consultant's OK IF; each
+row's code still owes its gates, controls and the consultant's diff check.
+Spent about 33 points of about 70 estimated.
+- `mk/k5` (56f1ddbac, WIP, partly built): wait on a user address, K5.md,
+  OK IF ledger 2498. Next: build the native calls, sysml ids, FX-0911's check,
+  controls C1-C7, the futex ABAB. About 12 points left.
+- `mk/k6` (5dc0dc337, WIP, `cargo check` on three architectures, host tests
+  pass, never booted): attested sender, K6.md, OK IF 2485 and 2524. Next: sysml
+  ids, five boots, controls C1-C6, the round-trip ABAB with the fast path off
+  and on. About 6 points left. K7 lands on it.
+- `mk/k7` (no code yet): charging that follows the client, K7.md, OK IF 2525.
+  About 9 points left; it lands on K6, and whichever of K7 and K12 lands second
+  wires K12's lookup to `charge_target`.
+- `mk/k10` (5509676d1, WIP, unbuilt): timer objects, K10.md, OK IF 2538.
+  Next: the native handlers, `timer_check.rs`, sysml, boots, controls N1-N8,
+  the ABAB. About 5 points left.
+- `mk/k12` (8af71f23d, WIP, never compiled, most of K12a): kernel-memory
+  reservation, K12.md, OK IF 2550, split into K12a (frames) and K12b (heap).
+  About 9 points left.
+- `mk/f73` (6b1be87bd): F-73 rebased, with `init_traps` split to stay under the
+  complexity floor; every gate is owed again on this hash (queue script in the
+  agent's report: check, release, x86_64 boots default and `--smp 2`, test-mce
+  kvm and tcg, aarch64, armv7a and `--smp 2`, three controls), then the
+  diff check (ledger 1057, 2103 (5)).
+- `mk/f64` (2ed846793, on `mk/f73`): F-64 rebased with conflicts, so its
+  controls fire again; no gates yet (ledger 1065). Restores F-65's heading in
+  FINDINGS that the old commit overwrote.
+- `mk/baselines` (984885f42): `bench-rows` tooling only; its gates were
+  queued under `mkbl-*`. The baselines themselves are owed on an idle host.
+- smt=off: design on main (M0-B-PROPOSALS §3.1, OK IF 2563, parent H.TRAP.19);
+  no code. Lands after F-73. `mk/smt-off` (407b616c6) is superseded.
+- The gate pool ran on 2 of 5 slots all afternoon: nazuna had 51 GB free,
+  under `gate.sh`'s 65 GB open line. Freeing about 15 GB brings slot 3 back.
+
 os-35's wind-down on 2026-10-01, cutting the ring-3 trip
 (`docs/OPAQUE-KERNEL.md` § 8). Each branch is local on the Windows checkout
 and pushed to nazuna as a side ref of the same name. Each goes to the
