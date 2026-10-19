@@ -50,6 +50,31 @@ pub const MAP_READ: u32 = 1 << 0;
 /// `vmo_map`'s protection: the mapping may also be written.
 pub const MAP_WRITE: u32 = 1 << 1;
 
+/// The address waits' flag for a shared key: a word in a shared mapping is
+/// keyed by its VMO and offset, the same word in every process mapping it.
+pub const ADDRESS_SHARED: u64 = 1 << 0;
+/// The address waits' flag for a word named by a VMO handle and a byte
+/// offset rather than a user address; implies [`ADDRESS_SHARED`].
+pub const ADDRESS_BY_VMO: u64 = 1 << 1;
+/// `address_requeue`'s flag: requeue only if the source word still holds
+/// the expected value.
+pub const ADDRESS_COMPARE: u64 = 1 << 2;
+/// The most words one `address_wait_any` sleeps on.
+pub const ADDRESS_WAIT_ANY_MAX: usize = 128;
+
+/// One word of `address_wait_any`'s vector: 16 bytes, the same on every
+/// target.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AddressWord {
+    /// The word's user address, 4-aligned.
+    pub address: u64,
+    /// What it must hold for the wait to sleep.
+    pub expected: u32,
+    /// [`ADDRESS_SHARED`] or nothing.
+    pub flags: u32,
+}
+
 /// What a `channel_read` found.
 ///
 /// Written on success, and on `BUFFER_TOO_SMALL` too, when it is how the

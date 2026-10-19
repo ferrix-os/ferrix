@@ -183,6 +183,15 @@ pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// [`NativeCall::ChardevDmabufFence`].
 pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
+
+/// [`NativeCall::AddressWait`]. `0x106C..=0x106F` are left for the family.
+pub const ADDRESS_WAIT: usize = 0x1068;
+/// [`NativeCall::AddressWake`].
+pub const ADDRESS_WAKE: usize = 0x1069;
+/// [`NativeCall::AddressRequeue`].
+pub const ADDRESS_REQUEUE: usize = 0x106A;
+/// [`NativeCall::AddressWaitAny`].
+pub const ADDRESS_WAIT_ANY: usize = 0x106B;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -618,10 +627,44 @@ pub enum NativeCall {
     /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
     /// Answered by the load ring.
     ChardevDmabufFence,
+    /// `(address, expected: u32, bitset: u32, flags, deadline: *u64, vmo)`.
+    /// Sleep while the 32-bit word at `address` holds `expected`, until a
+    /// wake of the same word whose bitset shares a bit with `bitset`, or the
+    /// deadline passes. The word is at a user address, or with
+    /// `ADDRESS_BY_VMO` `address` bytes into the VMO `vmo` names. With
+    /// `ADDRESS_SHARED`, a word in a shared mapping is the same word in every
+    /// process that maps its VMO, and the same as the word named by handle
+    /// and offset; without it, a word is this process's alone. The deadline
+    /// is absolute, in `CLOCK_MONOTONIC` nanoseconds; a null pointer waits
+    /// forever. A wake can come from any process that can read the word, so
+    /// a woken caller reads its word again. `SHOULD_WAIT` if the word does
+    /// not hold `expected`; `TIMED_OUT`; `EINTR` when the caller is to leave;
+    /// `NO_MEMORY` when its job's memory refuses the waiter; `FAULT` for a
+    /// word that cannot be read; `INVALID_ARGS` for a misaligned word, a
+    /// zero bitset, a flag not defined or an offset past the VMO. By handle,
+    /// needs `READ`. Keeps the caller's whole vector state.
+    AddressWait,
+    /// `(address, count: u32, bitset: u32, flags, vmo)` → woken. Wake up to
+    /// `count` waits on the word, oldest first, whose bitset shares a bit
+    /// with `bitset`; zero wakes none. Flags and refusals as
+    /// [`NativeCall::AddressWait`]'s.
+    AddressWake,
+    /// `(from, to, wake: u32, move: u32, flags, expected: u32)` → woken or
+    /// moved. Wake up to `wake` waits on the word at `from` and move up to
+    /// `move` more onto the word at `to`, both user addresses. With
+    /// `ADDRESS_COMPARE`, `SHOULD_WAIT` unless `from` still holds `expected`.
+    /// `ADDRESS_BY_VMO` is refused with `INVALID_ARGS`.
+    AddressRequeue,
+    /// `(words: *AddressWord, count, flags, deadline: *u64)` → index. Sleep
+    /// on up to `ADDRESS_WAIT_ANY_MAX` words, each while it holds its
+    /// expected value, until a wake of any one; answer its index. `flags` is
+    /// zero; each word's own flags may say `ADDRESS_SHARED` and nothing
+    /// else. Answers and refusals as [`NativeCall::AddressWait`]'s.
+    AddressWaitAny,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 65] = [
+pub const ALL: [NativeCall; 69] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -687,6 +730,10 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
     NativeCall::ChardevDmabufFence,
+    NativeCall::AddressWait,
+    NativeCall::AddressWake,
+    NativeCall::AddressRequeue,
+    NativeCall::AddressWaitAny,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -767,6 +814,10 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
+        ADDRESS_WAIT => NativeCall::AddressWait,
+        ADDRESS_WAKE => NativeCall::AddressWake,
+        ADDRESS_REQUEUE => NativeCall::AddressRequeue,
+        ADDRESS_WAIT_ANY => NativeCall::AddressWaitAny,
         _ => return None,
     };
     Some(call)
@@ -841,5 +892,9 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
         NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
+        NativeCall::AddressWait => ADDRESS_WAIT,
+        NativeCall::AddressWake => ADDRESS_WAKE,
+        NativeCall::AddressRequeue => ADDRESS_REQUEUE,
+        NativeCall::AddressWaitAny => ADDRESS_WAIT_ANY,
     }
 }

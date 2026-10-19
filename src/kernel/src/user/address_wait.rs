@@ -761,7 +761,7 @@ pub(crate) fn requeue(
         let (source_table, target_table) = match second.as_mut() {
             None => (&mut *first, None),
             Some(higher) if from_bucket < to_bucket => (&mut *first, Some(&mut **higher)),
-            Some(higher) => (&mut **higher, Some(&mut **first)),
+            Some(higher) => (&mut **higher, Some(&mut *first)),
         };
         let movable = source_table
             .iter()
