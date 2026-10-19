@@ -14,10 +14,7 @@ builds, with each image's licence inventory and the corresponding sources of
 every GPL and LGPL program in them ([LICENSES.md](LICENSES.md)). See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
-## v0.1.0 — 2026-10-18, draft
-
-<!-- Draft for the owner: set the date and the commit when tagging, and
-     check the list against main as it is then. -->
+## v0.1.0 — 2026-10-20, features at fb56e0cd5
 
 The first numbered release, and the first one anybody can boot without
 building it: the x86-64 desktop as one zip, booted by a script with plain
@@ -50,7 +47,9 @@ each.
   console drivers run as processes, behind the IOMMU on x86-64 and AArch64,
   and are restarted when they crash.
 - **Users and storage:** passwords checked by `authd` as Argon2id hashes; a
-  btrfs root that keeps what is written to it, an installer, and A/B system
+  btrfs root that keeps what is written to it, a command-line installer
+  (`ferrix-install`, to virtual disks so far: no graphical installer and no
+  live medium yet), and A/B system
   slots with a way back.
 - **Three architectures** in the boot tests, and Ferrix has booted on an
   STM32MP157D-DK1 and a Pixel 7.
@@ -62,7 +61,7 @@ each.
   every GPL and LGPL program in these images -- busybox, git, alsa-utils,
   alsa-lib -- and of what is linked into one, and the Debian package list
   of the Pixel 7 Chromium volume with where each package's source is
-  ([docs/LICENSES.md](LICENSES.md)).
+  ([docs/LICENSES.md](https://github.com/ferrix-os/ferrix/blob/main/docs/LICENSES.md)).
 
 Known limits:
 
