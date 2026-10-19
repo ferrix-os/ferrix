@@ -989,6 +989,11 @@
         "crate": "ferrix-kernel-load"
       },
       {
+        "file": "user/address_wait_check.rs",
+        "file_ring": "core",
+        "crate": "ferrix-kernel-load"
+      },
+      {
         "file": "user/alloc_check.rs",
         "file_ring": "core",
         "crate": "ferrix-kernel-load"
