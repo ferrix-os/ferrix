@@ -116,6 +116,7 @@ mod console;
 mod container;
 mod coverage;
 mod devloop;
+mod dhcp;
 mod display;
 mod dma_faults;
 mod dotfiles;
@@ -869,7 +870,9 @@ fn test_net(args: &Args) -> Result<()> {
         let program = program_for(init, arch)?;
         // The ported programs ride along where they are built, and the
         // programs that exercise them are added when they do.
-        let ports = apps::ported(arch, &args)?;
+        let mut ports = apps::ported(arch, &args)?;
+        // The DHCP client the first programs take the lease with.
+        ports.extend(dhcp::carried(arch)?);
         let curl = ports.iter().any(|file| file.path == "bin/curl");
         let git = ports.iter().any(|file| file.path == "usr/bin/git");
         let programs = net::commands(&servers, curl, git);
@@ -966,6 +969,8 @@ pub(crate) fn build_image(arch: Arch, args: &Args) -> Result<(PathBuf, PathBuf)>
     let mut ports = apps::ported(arch, args)?;
     ports.extend(rustc::default_links(args));
     ports.extend(service);
+    // The DHCP client `/etc/profile` takes the shell's lease with.
+    ports.extend(dhcp::carried(arch)?);
     let initramfs = initramfs::build_with_utilities(
         Some(&program),
         &natives,

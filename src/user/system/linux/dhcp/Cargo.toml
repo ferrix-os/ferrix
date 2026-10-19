@@ -1,0 +1,79 @@
+# The DHCP client: `/bin/dhcpc`, which takes an IPv4 lease for an interface
+# and applies it itself, over rtnetlink (src/lib.rs says how).
+#
+# A workspace of its own, as init's and pkg's are: a Linux user program built
+# with std against the target's own musl, speaking only the Linux ABI. The
+# IPv4 and UDP headers are the kernel's own `src/lib/network/netwire`, and the
+# rtnetlink messages are built and walked by `src/lib/network/netlink`, so the
+# client and the stack that answers it cannot disagree about either.
+[package]
+name = "dhcp"
+description = "Ferrix's DHCPv4 client: a lease over a packet socket, applied over rtnetlink"
+version = "0.1.0"
+edition = "2024"
+# Matches Ferrix's rust-toolchain.toml, which rustup finds from here.
+rust-version = "1.97"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dhcpc"
+path = "src/main.rs"
+
+[dependencies]
+ferrix-linux-abi = { path = "../../../../lib/proto/linux-abi" }
+ferrix-netlink = { path = "../../../../lib/network/netlink" }
+ferrix-netwire = { path = "../../../../lib/network/netwire" }
+# The packet and netlink sockets and poll, none of which std offers; the
+# version adbd and zinc already build with.
+libc = "0.2.189"
+
+# The Ferrix discipline, as pkg's: every failing call is a line saying so,
+# never an abort. `unsafe` is only the socket calls in `src/sys.rs`, each
+# with its SAFETY comment.
+[lints.rust]
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unused_results = "deny"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+allow_attributes_without_reason = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+uninlined_format_args = "warn"
+semicolon_if_nothing_returned = "warn"
+doc_markdown = "warn"
+
+[profile.dev]
+overflow-checks = true
+panic = "abort"
+
+# Stripped: the release build is what goes into the initramfs.
+[profile.release]
+overflow-checks = true
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

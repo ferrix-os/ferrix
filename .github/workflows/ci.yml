@@ -226,6 +226,7 @@ jobs:
             src/user/system/linux/media -> target
             src/user/system/linux/adbd -> target
             src/user/system/linux/pkg -> target
+            src/user/system/linux/dhcp -> target
 
       # `cargo xtask check` first asks whether the commit hooks are armed,
       # which is local configuration a fresh checkout does not have.

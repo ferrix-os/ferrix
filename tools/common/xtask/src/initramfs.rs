@@ -562,17 +562,23 @@ btrfs /data btrfs rw 0 0
 
 /// `/etc/profile`, which the kernel's interactive shell reads through `ENV`.
 ///
-/// Configures `eth0` by DHCP, as a distribution's network setup would: busybox's
-/// `udhcpc` asks, and [`UDHCPC_SCRIPT`] applies the address, the route and the
-/// resolvers the lease names. Only when there is an `eth0` and it has no IPv4
-/// address, so a boot without `--net` is quiet, a nested `sh -i` changes
-/// nothing, and neither does an interface somebody configured by hand first.
-/// `udhcpc`'s own progress lines go to its standard error and are dropped; the
-/// script's one line says what was configured, and a failure says so too.
+/// Configures `eth0` by DHCP, as a distribution's network setup would:
+/// Ferrix's own `dhcpc` (`crate::dhcp`) where the image carries it, which
+/// applies the address, the route and the resolvers itself; busybox's
+/// `udhcpc` and [`UDHCPC_SCRIPT`] where it does not. Only when there is an
+/// `eth0` and it has no IPv4 address, so a boot without `--net` is quiet, a
+/// nested `sh -i` changes nothing, and neither does an interface somebody
+/// configured by hand first. The client's progress lines go to its standard
+/// error and are dropped; its one line says what was configured, and a
+/// failure says so too.
 const PROFILE: &[u8] = b"\
 # Written by cargo xtask: configure eth0 by DHCP, once.
 if ip link show eth0 >/dev/null 2>&1 && ! ip -o addr show eth0 | grep -q ' inet '; then
-\tudhcpc -i eth0 -n -q -t 5 -T 2 2>/dev/null || echo 'eth0: no DHCP lease'
+\tif [ -x /bin/dhcpc ]; then
+\t\tdhcpc -i eth0 -n -q -t 5 -T 2 2>/dev/null || echo 'eth0: no DHCP lease'
+\telse
+\t\tudhcpc -i eth0 -n -q -t 5 -T 2 2>/dev/null || echo 'eth0: no DHCP lease'
+\tfi
 fi
 ";
 

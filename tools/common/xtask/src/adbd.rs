@@ -11,7 +11,7 @@
 //! # `test-adb`
 //!
 //! The kernel runs three programs, as `test-net` runs its own: `ip` brings
-//! `eth0` up, `udhcpc` configures it, and `adbd --test` listens on 5555,
+//! `eth0` up, `dhcpc` configures it, and `adbd --test` listens on 5555,
 //! which a `--forward` on the host's loopback reaches. Once adbd says it is
 //! listening, this machine's `adb` connects and runs what a person would:
 //! a command in the shell, a push and a pull of the same bytes compared
@@ -99,7 +99,7 @@ fn commands() -> Vec<vfs::Command> {
             expect: Expect::Nothing,
         },
         vfs::Command {
-            argv: &["udhcpc", "-i", "eth0", "-n", "-q", "-t", "5", "-T", "2"],
+            argv: &["dhcpc", "-i", "eth0", "-n", "-q", "-t", "5", "-T", "2"],
             status: 0,
             expect: Expect::Shaped(&["eth0: 10.0.2.15/24 by DHCP*"]),
         },
@@ -128,7 +128,7 @@ pub(crate) fn test_adb(
     let init = args.init.as_deref().ok_or_else(|| {
         Error::new(
             "test-adb needs --init PATH, a static busybox for each architecture, for the \
-             network's `ip` and `udhcpc` and the shell adbd runs",
+             network's `ip` and the shell adbd runs",
         )
     })?;
     let mut failed = Vec::new();
@@ -150,7 +150,9 @@ pub(crate) fn test_adb(
         let loader = cargo::build_loader(arch, run.release)?;
         let kernel = cargo::build_kernel_with_commands(arch, run.release, &list)?;
         let natives = native::build(arch, run.release)?;
-        let initramfs = initramfs::build(Some(&program), &natives, None, &[adbd])?;
+        let mut carried = vec![adbd];
+        carried.extend(crate::dhcp::carried(arch)?);
+        let initramfs = initramfs::build(Some(&program), &natives, None, &carried)?;
         let image = fat::write_image_with(arch, &loader, &kernel, &initramfs, None)?;
         if let Err(error) = run_one(arch, &image, &kernel, &run, port) {
             eprintln!("\n  {error}");

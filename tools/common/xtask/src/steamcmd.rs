@@ -85,7 +85,7 @@ const LINKS: &[(&str, &str)] = &[
 /// one, then steamcmd as `steamcmd.sh` runs it, started again while it exits
 /// 42 after installing an update, at most five times.
 const SCRIPT: &str = r#"export PATH=/bin HOME=/tmp
-udhcpc -i eth0 -n -q -t 5 -T 2 || exit 5
+dhcpc -i eth0 -n -q -t 5 -T 2 || exit 5
 cd /data/steamcmd || exit 3
 export LD_LIBRARY_PATH=/data/steamcmd/linux32
 status=42
@@ -234,10 +234,12 @@ pub(crate) fn test_steamcmd(args: &Args) -> Result<()> {
     let natives = native::build(arch, args.release)?;
     let bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
-    // The project's busybox for `udhcpc` and the `ip` its lease script runs;
-    // zinc stays the shell.
+    // The project's busybox for the script's tools, and the DHCP client
+    // (`crate::dhcp`); zinc stays the shell.
     let busybox = busybox::program(arch)?;
-    let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &rustc::files(LINKS))?;
+    let mut files = rustc::files(LINKS);
+    files.extend(crate::dhcp::carried(arch)?);
+    let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &files)?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
 
     println!(
@@ -274,7 +276,7 @@ fn judge(arch: Arch, lines: &[String]) -> Result<()> {
             "{arch}: /data/steamcmd is not there: is the volume attached?"
         ))),
         Some("5") => Err(Error::new(format!(
-            "{arch}: udhcpc got no lease for eth0 from the gateway"
+            "{arch}: dhcpc got no lease for eth0 from the gateway"
         ))),
         Some("4") => Err(Error::new(format!(
             "{arch}: steamcmd did not exit 0; its `steamcmd-gate: run` lines say how it ended"

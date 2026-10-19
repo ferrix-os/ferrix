@@ -168,7 +168,7 @@ while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do
     waited=$((waited + 1))
 done
 echo "endfield: the X socket was there after ${waited}s, DISPLAY is $DISPLAY"
-if udhcpc -i eth0 -n -q -t 5 -T 2 > /dev/null 2>&1; then
+if dhcpc -i eth0 -n -q -t 5 -T 2 > /dev/null 2>&1; then
     echo "endfield: a lease for eth0"
 else
     echo "endfield: no lease for eth0"
@@ -573,6 +573,24 @@ fn boot_args(args: &Args, wine: Wine) -> Result<(Args, bool)> {
     Ok((args, gryphlink))
 }
 
+/// What `test-endfield-launcher`'s image carries beside the compositor:
+/// the DHCP client the script takes its lease with, yserver, Wine's links
+/// (and Proton's), and [`SCRIPT`].
+fn launcher_ports(arch: Arch, wine: Wine, gryphlink: bool) -> Result<Vec<File>> {
+    let mut ports = crate::dhcp::carried(arch)?;
+    ports.extend(crate::yserver::desktop_files(&[]));
+    ports.extend(crate::rustc::files(crate::wine::LINKS));
+    if wine == Wine::Proton {
+        ports.extend(crate::rustc::files(PROTON_LINKS));
+    }
+    ports.push(File {
+        path: SCRIPT_PATH.to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(script(wine, gryphlink).into_bytes()),
+    });
+    Ok(ports)
+}
+
 /// Boot hyprix with yserver, the network and [`SCRIPT`], and require the
 /// launcher's window, its main button and its server's answer.
 ///
@@ -590,19 +608,9 @@ pub(crate) fn test_endfield_launcher(args: &Args, wine: Wine) -> Result<()> {
         Error::new("test-endfield-launcher needs a static busybox: Alpine's busybox-static at ~/.local/share/ferrix/busybox/x86_64/bin/busybox.static, or ferrousli's from `cargo xtask busybox`")
     })?;
     let programs = Programs::build(arch)?;
-    let mut ports = crate::yserver::desktop_files(&[]);
-    ports.extend(crate::rustc::files(crate::wine::LINKS));
-    if wine == Wine::Proton {
-        ports.extend(crate::rustc::files(PROTON_LINKS));
-    }
-    ports.push(File {
-        path: SCRIPT_PATH.to_owned(),
-        mode: 0o644,
-        content: Content::Bytes(script(wine, gryphlink).into_bytes()),
-    });
     let carried = Carried {
         busybox: Some(PathBuf::from(busybox)),
-        ports,
+        ports: launcher_ports(arch, wine, gryphlink)?,
         ..Carried::none()
     };
     let config = format!(
