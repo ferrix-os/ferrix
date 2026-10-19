@@ -7902,6 +7902,46 @@ static FUTEX_ANSWERED: WaitQueue = WaitQueue::new();
 /// One wake, as the check applies it to the word its waiter sleeps on.
 type FutexWake = fn(&Process, u64) -> Result<usize, Errno>;
 
+/// The futex table's sabotage hooks, which exist only in a kernel built with
+/// its self-checks (K5's review, condition 4).
+#[cfg(ferrix_checks = "on")]
+use futex::sabotage as futex_hooks;
+
+/// What stands for the futex table's sabotage hooks in a kernel built
+/// `checks=off`, where no check runs: nothing here is ever called, and the
+/// product has no hook to call.
+#[cfg(not(ferrix_checks = "on"))]
+mod futex_hooks {
+    use crate::object::process::Process;
+    use ferrix_linux_abi::errno::Errno;
+
+    /// No stale entry: none can be listed.
+    #[derive(Debug)]
+    pub(super) struct StaleEntry;
+
+    impl StaleEntry {
+        /// Never listed.
+        pub(super) fn remove(self) -> bool {
+            false
+        }
+    }
+
+    /// Takes nothing off.
+    pub(super) fn forget_waiters(_: &Process, _: u64, _: i32) -> usize {
+        0
+    }
+
+    /// Lists nothing.
+    pub(super) fn list_stale_entry(_: &Process, _: u64) -> Result<StaleEntry, Errno> {
+        Err(Errno::ENOSYS)
+    }
+
+    /// Re-keys nothing.
+    pub(super) fn requeue_without_moving(_: &Process, _: u64, _: u64) -> usize {
+        0
+    }
+}
+
 /// `futex` with six arguments and a native timespec.
 fn futex_call(process: &Process, a: [u64; 6]) -> Result<usize, Errno> {
     futex::sys_futex(process, &a, time::TimeWidth::Native)
@@ -8257,7 +8297,7 @@ fn check_futex_waitv() -> Result<usize, &'static str> {
         &process,
         &words,
         (0, FUTEX_FORGOTTEN_NANOS),
-        |waking, word| Ok(futex::forget_waiters(waking, word, 1)),
+        |waking, word| Ok(futex_hooks::forget_waiters(waking, word, 1)),
     ) {
         Err(problem) if problem == SLEPT_THROUGH_WAKE => {}
         Err(_) => {
@@ -8316,7 +8356,7 @@ fn a_stale_entry_does_not_swallow_a_wake() -> Result<usize, &'static str> {
     let (word, timeout) = (page, page + 16);
     uaccess::copy_to_user(process.space(), word, &FUTEX_WORD.to_le_bytes())
         .map_err(|_| "could not stage the stale entry check's word")?;
-    let stale = futex::list_stale_entry(&process, word)
+    let stale = futex_hooks::list_stale_entry(&process, word)
         .map_err(|_| "could not list a stale futex_waitv entry")?;
     let woken = wait_then_wake_behind(
         (&process, &process),
@@ -8599,7 +8639,7 @@ fn a_requeue_crosses_buckets() -> Result<(), &'static str> {
             let Some(target) = a_word_in_another_bucket(process, word) else {
                 return Ok(0);
             };
-            if futex::requeue_without_moving(process, word, target) != 1 {
+            if futex_hooks::requeue_without_moving(process, word, target) != 1 {
                 return Ok(0);
             }
             wake_one(process, target)
@@ -8709,7 +8749,7 @@ fn a_forgotten_waiter_is_caught(
         word,
         timeout,
         (0, FUTEX_FORGOTTEN_NANOS),
-        |process, word| Ok(futex::forget_waiters(process, word, 1)),
+        |process, word| Ok(futex_hooks::forget_waiters(process, word, 1)),
     ) {
         Err(problem) if problem == SLEPT_THROUGH_WAKE => Ok(()),
         Err(_) => Err("the futex check failed a wake that roused nobody, for another reason"),

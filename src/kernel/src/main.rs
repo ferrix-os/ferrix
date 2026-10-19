@@ -1290,6 +1290,17 @@ fn report_clock_and_random(view: &BootView<'_>) {
             "random generator check failed: {problem}"
         );
     }
+    // The address-wait table's hash key (K5's condition 3), before any
+    // program or self-check can list a wait.
+    let mut hash_key = [0_u8; 16];
+    random::fill(&mut hash_key);
+    let (low, high) = hash_key.split_at(8);
+    let word = |half: &[u8]| {
+        let mut bytes = [0_u8; 8];
+        bytes.copy_from_slice(half);
+        u64::from_le_bytes(bytes)
+    };
+    user::address_wait::seed([word(low), word(high)]);
     start_audit(view);
 }
 
