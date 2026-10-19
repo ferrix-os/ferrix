@@ -21,8 +21,8 @@
 //! Without `--from` the live system is found by itself: the partition named
 //! `FERRIX-LIVE` that `xtask live` writes (`docs/INSTALLER.md` §3.1), or a
 //! whole disk whose first sector is the FAT32 boot sector `xtask` writes
-//! (OEM name `FERRIX`), the image of `build --installer`. Either way it must
-//! be the only one. A target that is the live disk, or holds the live
+//! (OEM name `FERRIX`), the image of `build --installer`, taken only when no
+//! disk has a live partition. Either way it must be the only one. A target that is the live disk, or holds the live
 //! partition, is refused. Without `--yes` it asks before it erases anything.
 
 use std::fs::{File, OpenOptions};
@@ -238,21 +238,39 @@ fn step(what: &str, work: impl FnOnce() -> io::Result<()>) -> Result<(), String>
 }
 
 /// The live system's FAT volume: on each `vd` disk, the partition named
-/// [`LIVE_NAME`] that holds `xtask`'s boot sector, or the whole disk when it
-/// starts with that boot sector itself. Exactly one must be found.
+/// [`LIVE_NAME`] that holds `xtask`'s boot sector; or, when no disk has
+/// one, a whole disk that starts with that boot sector itself (the MVP's
+/// image). Exactly one must be found.
+///
+/// A live medium's partition comes first because a bare image is also what
+/// a machine may have booted from without being a medium to install: since
+/// the AHCI driver serves q35's SATA disk, `test-install`'s scripted boot
+/// image is one beside the medium it installs from.
 fn find_live() -> Result<String, String> {
-    let mut found = Vec::new();
+    let mut partitions = Vec::new();
+    let mut whole = Vec::new();
     for letter in b'a'..=b'z' {
         let path = format!("/dev/vd{}", letter as char);
         let Ok(mut disk) = File::open(&path) else {
             continue;
         };
         if is_xtask_volume(&mut disk, 0) {
-            found.push(path);
+            whole.push(path);
         } else if let Some(number) = live_partition(&mut disk) {
-            found.push(format!("{path}{number}"));
+            partitions.push(format!("{path}{number}"));
         }
     }
+    let found = if partitions.is_empty() {
+        whole
+    } else {
+        if !whole.is_empty() {
+            println!(
+                "ferrix-install: {} not taken for the live system: a live medium's partition is",
+                whole.join(", ")
+            );
+        }
+        partitions
+    };
     match found.as_slice() {
         [one] => Ok(one.clone()),
         [] => Err("no live disk found; name it with --from".into()),
