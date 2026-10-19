@@ -170,6 +170,7 @@ mod pty;
 mod qemu;
 mod remote;
 mod restart;
+mod rows_bench;
 mod rustc;
 mod seam;
 mod seat;
@@ -460,6 +461,8 @@ OPTIONS:
     --board-log <FILE>                   bench-ipc: read a board's serial log of one boot that ran
                                          /sbin/ipc-bench instead of booting QEMU; once per boot
     --board <NAME>                       bench-ipc --board-log: the board, which --record files under
+    --fail-above <ROW>=<N>               bench-rows: fail when ROW's median p50 is above N ns; test-rustc,
+                                         test-selfhost: when ROW is above N ms (once a row)
     --pin <CPUS>                         QEMU on these host processors (taskset -c); bench-ipc
                                          pins to 11 by default, `none` for no pin
     --stage <DIR>                        flash: write the card's files into DIR instead, to copy by hand
@@ -565,6 +568,7 @@ const TASKS: &[&[Task]] = &[
     pty::TASKS,
     remote::TASKS,
     restart::TASKS,
+    rows_bench::TASKS,
     rustc::TASKS,
     seam::TASKS,
     seat::TASKS,
