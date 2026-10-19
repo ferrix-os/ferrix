@@ -23,7 +23,7 @@ use ferrix_native_abi::types::CHANNEL_MAX_HANDLES;
 use super::CreateError;
 use crate::console::log;
 use crate::object::Transfer;
-use crate::object::channel::{Endpoint, ReadError};
+use crate::object::channel::{Endpoint, ReadError, Sender};
 use crate::timer;
 
 /// How much each of the check's READs asks for.
@@ -138,7 +138,7 @@ fn write(driver: &Endpoint, message: &Message<'_>) -> Result<(), &'static str> {
         .map_err(|_| "the log check could not encode its message")?;
     bytes.truncate(len);
     driver
-        .write(bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()))
+        .write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()))
         .map_err(|_| "the log core's end of the channel would not take a message")
 }
 

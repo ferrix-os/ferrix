@@ -45,7 +45,7 @@ use ferrix_sndctl::session::{self, Publication, Received, Session};
 use crate::claim::{Claims, Numbers, StillServed};
 use crate::device::DeviceNode;
 use crate::hooks::Full;
-use crate::object::channel::{ChannelMessage, Endpoint, ReadError};
+use crate::object::channel::{ChannelMessage, Endpoint, ReadError, Sender};
 use crate::object::port::Port;
 use crate::object::process::Host;
 use crate::object::{Object, Transfer};
@@ -211,7 +211,7 @@ impl Card {
             let bytes = message.encode().as_bytes().to_vec();
             let _ = self
                 .control
-                .write(bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+                .write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
         }
     }
 
@@ -377,7 +377,7 @@ fn receive(control: &Endpoint, deadline: u64) -> Option<ChannelMessage> {
 #[inline(never)]
 fn refuse(control: &Endpoint, refusal: Refusal) {
     let bytes = Message::Refused(refusal).encode().as_bytes().to_vec();
-    let _ = control.write(bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+    let _ = control.write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
 }
 
 /// Wait for HELLO and publish the card, or refuse it.
@@ -483,7 +483,7 @@ fn send_ready(
         (Object::Vmo(buffer), BUFFER_RIGHTS),
     ];
     control
-        .write(ready, 2, || Ok::<Vec<Transfer>, Infallible>(handed))
+        .write(Sender::KERNEL, ready, 2, || Ok::<Vec<Transfer>, Infallible>(handed))
         .map_err(|_| Refusal::Hello)
 }
 

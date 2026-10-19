@@ -35,7 +35,7 @@ use ferrix_vma::VmaFlags;
 use crate::arch;
 use crate::device::{self, DeviceNode};
 use crate::mm;
-use crate::object::channel::{Endpoint, ReadError};
+use crate::object::channel::{Endpoint, ReadError, Sender};
 use crate::object::interrupt;
 use crate::object::job::{self, Job, KILLED_STATUS};
 use crate::object::process::ProcessRef;
@@ -229,6 +229,17 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             "  sync     not checked: one processor, nowhere to move a reader to"
         );
     }
+    let sender = object::sender_check::run()?;
+    crate::console::println!(
+        "  sender   {} messages read with their writer's process and job, stamped by the kernel \
+         at the write: the writer not the body, the slot, a transfer either way, an ended \
+         writer, a move between jobs, the kernel's own; channel_write_read answered none; {} \
+         processes given fresh ids, plain, forked and made (a pid given again: {}); {} refusals",
+        sender.read,
+        sender.fresh,
+        if sender.pid_reused { "yes" } else { "no" },
+        sender.refusals
+    );
     object::fast_path_check::run_and_report()?;
     check_a_job_kill_takes_down_a_process_tree(&mut after)?;
     check_a_long_chain_of_jobs_is_freed_without_recursion()?;
@@ -354,11 +365,11 @@ fn check_a_process_starts_another(counter: &mut Counter) -> Result<(), &'static 
 
 /// A check process set up to make children: a job, a VMO holding the child's
 /// image, its name staged, and a port to hear them end on.
-struct Spawner<'a> {
+pub(crate) struct Spawner<'a> {
     /// The process making the calls.
     side: &'a Side,
     /// A root job, with every right a job carries.
-    root: Handle,
+    pub(crate) root: Handle,
     /// The VMO holding a child's ELF image.
     image: Handle,
     /// Where watches on children fire.
@@ -368,7 +379,7 @@ struct Spawner<'a> {
 impl<'a> Spawner<'a> {
     /// Build the image of `arch::USER_ARGUMENT_PROGRAM`, write it into a VMO
     /// through `vmo_write`, and give `side` a job and a port.
-    fn new(side: &'a Side) -> Result<Spawner<'a>, &'static str> {
+    pub(crate) fn new(side: &'a Side) -> Result<Spawner<'a>, &'static str> {
         let job = Job::new_root().map_err(|_| "no memory for the starter's job")?;
         let root = side
             .process
@@ -422,7 +433,7 @@ impl<'a> Spawner<'a> {
     }
 
     /// A child made in `job` from the real image.
-    fn made(&self, job: Handle, what: &'static str) -> Result<Handle, &'static str> {
+    pub(crate) fn made(&self, job: Handle, what: &'static str) -> Result<Handle, &'static str> {
         let value = self
             .create(job, self.image, len(SPAWN_NAME))
             .map_err(|_| what)?;
@@ -1806,7 +1817,7 @@ fn check_messages_before_the_close_are_read_first() -> Result<(), &'static str> 
         Endpoint::pair().map_err(|_| "no memory for the last-message check's channel")?;
     for bytes in SENT {
         writer
-            .write(bytes.to_vec(), 0, || {
+            .write(Sender::KERNEL, bytes.to_vec(), 0, || {
                 Ok::<Vec<object::Transfer>, core::convert::Infallible>(Vec::new())
             })
             .map_err(|_| "the last-message check's peer could not write")?;

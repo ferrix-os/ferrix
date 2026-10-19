@@ -14,6 +14,8 @@
 //!
 //! - the [`AddressSpace`], which is the isolation;
 //! - the pid, which is how anything outside the process names it;
+//! - its id, which names it for the kernel's life and is never given again
+//!   (`docs/microkernel/K6.md`): what a channel message's sender says;
 //! - when it was made;
 //! - the native ABI's [`HandleTable`], which is its capabilities;
 //! - its [`Job`], which is where kill authority over it lives, and the
@@ -80,6 +82,13 @@ pub(crate) struct Process {
     pid: u32,
     /// When it was made, in nanoseconds on the counter.
     started: u64,
+    /// Its id (`docs/microkernel/K6.md`): its [`Exit`]'s, copied here so a
+    /// channel write reads it beside the job mirror below.
+    id: u64,
+    /// Its job's id, read without the membership lock: what a channel
+    /// message it writes is stamped with (`docs/microkernel/K6.md`).
+    /// Written only under `membership`, as `slot` is.
+    job_id: AtomicU64,
     /// The handles it holds, for the native ABI.
     ///
     /// A lock of its own: a channel write looks handles up and takes them
@@ -273,6 +282,8 @@ impl Process {
         job: Arc<Job>,
     ) -> Result<Process, AllocError> {
         let exit = fallible::try_arc(Exit::new())?;
+        let id = exit.id;
+        let job_id = job.id();
         let slot = job.quota_index();
         // Charged before it is counted, and never started if refused: the
         // limit is on tasks that exist, not on tasks that run.
@@ -289,6 +300,8 @@ impl Process {
             space,
             pid,
             started: crate::timer::now_nanos(),
+            id,
+            job_id: AtomicU64::new(job_id),
             handles: SpinLock::new(HandleTable::new(objects::HANDLE_LIMIT)),
             membership: SpinLock::new(job),
             counted: AtomicBool::new(true),
@@ -451,6 +464,20 @@ impl Process {
         self.pid
     }
 
+    /// Its id: given once, as it was made, and never to another process
+    /// while the kernel runs; kept across `execve`, a set-id one included
+    /// (`docs/microkernel/K6.md` §2). Never zero.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// The id of the job it is in now, read without the membership lock:
+    /// the job before or after a move that races the read, each of which it
+    /// was in during the read.
+    pub(crate) fn job_id(&self) -> u64 {
+        self.job_id.load(Ordering::Acquire)
+    }
+
     /// When it was made, in nanoseconds on the counter.
     pub(crate) fn started(&self) -> u64 {
         self.started
@@ -551,6 +578,7 @@ impl Process {
             }
             quota::uncharge(membership.quota_index(), Resource::Tasks, tasks);
             self.slot.store(to.quota_index(), Ordering::Release);
+            self.job_id.store(to.id(), Ordering::Release);
             // Frozen with the cgroup it goes into, thawed with the one it
             // leaves; the personality kicks its threads, having moved it.
             self.frozen.store(to.freezing(), Ordering::SeqCst);
@@ -820,6 +848,9 @@ pub(crate) fn downcast<T: Host>(host: Arc<dyn Host>) -> Option<Arc<T>> {
 /// let go of what it held ([`Exit::close`]); nothing else writes it.
 #[derive(Debug)]
 pub(crate) struct Exit {
+    /// The process's id ([`next_id`]), which outlives the process here, so a
+    /// handle to an ended process still names it.
+    id: u64,
     /// Its exit status, valid once `terminated` is.
     status: AtomicI32,
     /// The signal that ended it, or zero.
@@ -839,10 +870,23 @@ pub(crate) struct Exit {
     closed: AtomicBool,
 }
 
+/// The next process's id (`docs/microkernel/K6.md` §2): from 1, so zero
+/// is never one and stays the kernel's sender. Only ever grows; at a
+/// billion processes a second it would take 584 years to wrap, the argument
+/// `object::job`'s own counter rests on. A process's pid, by contrast, is
+/// given again once freed.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// A fresh process id: above every one given before it (L.object.198).
+fn next_id() -> u64 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
 impl Exit {
     /// Not ended, and watched by nobody.
     fn new() -> Exit {
         Exit {
+            id: next_id(),
             status: AtomicI32::new(0),
             ended_by: AtomicU32::new(0),
             terminated: AtomicBool::new(false),
@@ -871,6 +915,11 @@ impl Exit {
     /// moment it starts to end, before it has let go of anything.
     pub(crate) fn is_terminated(&self) -> bool {
         self.terminated.load(Ordering::Acquire)
+    }
+
+    /// The process's id, before and after it ends (`object_id`'s answer).
+    pub(crate) fn id(&self) -> u64 {
+        self.id
     }
 
     /// Whether it has ended and closed its handles and descriptors: what a

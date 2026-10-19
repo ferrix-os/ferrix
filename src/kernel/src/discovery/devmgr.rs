@@ -39,7 +39,7 @@ use ferrix_native_abi::types::{CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES};
 use ferrix_sync::Once;
 
 use crate::fallible::{self, AllocError};
-use crate::object::channel::{Endpoint, ReadError};
+use crate::object::channel::{Endpoint, ReadError, Sender};
 use crate::object::job::{self, Job};
 use crate::object::process::{Exit, Host, Process, ProcessRef};
 use crate::object::{Object, Transfer};
@@ -256,7 +256,7 @@ pub(crate) fn request(kind: Request, device: usize, driver: u16) -> Result<(), E
     };
     let bytes = fallible::try_to_vec(&message.encode()).map_err(|_| Errno::ENOMEM)?;
     fallible::try_push(&mut PENDING.lock(), (token, None)).map_err(|_| Errno::ENOMEM)?;
-    let sent = channel.write(bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+    let sent = channel.write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
     let answered = sent.is_ok()
         && ANSWERED.wait_until_deadline(
             || {
@@ -539,7 +539,7 @@ fn write_devices(
         let body = fallible::try_to_vec(bytes.get(..len).unwrap_or(&[]))
             .map_err(|_| "no memory for a DEVICES message")?;
         kernel_end
-            .write(body, handles, || Ok::<Vec<Transfer>, Infallible>(transfers))
+            .write(Sender::KERNEL, body, handles, || Ok::<Vec<Transfer>, Infallible>(transfers))
             .map_err(|_| "DEVICES could not be written to devmgr's channel")?;
         index += take;
         first = false;
@@ -955,7 +955,7 @@ pub(crate) fn published(location: Location) {
     let Ok(bytes) = fallible::try_to_vec(&message) else {
         return;
     };
-    let _ = channel.write(bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+    let _ = channel.write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
 }
 
 /// The name of the job `devmgr` is given, beneath the root job:

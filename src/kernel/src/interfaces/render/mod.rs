@@ -67,7 +67,7 @@ use crate::claim::StillServed;
 use crate::claim::{Claims, Numbers};
 use crate::device::DeviceNode;
 use crate::hooks::Full;
-use crate::object::channel::{ChannelMessage, Endpoint, ReadError};
+use crate::object::channel::{ChannelMessage, Endpoint, ReadError, Sender};
 use crate::object::port::Port;
 use crate::object::process::Host;
 use crate::object::{Object, Transfer};
@@ -701,7 +701,7 @@ fn send(control: &Endpoint, message: &Message) -> bool {
 fn send_with(control: &Endpoint, message: &Message, handed: Vec<Transfer>) -> bool {
     let bytes = message.encode().as_bytes().to_vec();
     control
-        .write(bytes, handed.len(), || {
+        .write(Sender::KERNEL, bytes, handed.len(), || {
             Ok::<Vec<Transfer>, Infallible>(handed)
         })
         .is_ok()
@@ -794,7 +794,7 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Renderer>, Refu
     ];
     if start
         .control
-        .write(ready, 2, || Ok::<Vec<Transfer>, Infallible>(handed))
+        .write(Sender::KERNEL, ready, 2, || Ok::<Vec<Transfer>, Infallible>(handed))
         .is_err()
     {
         NUMBERS.give_back(index);

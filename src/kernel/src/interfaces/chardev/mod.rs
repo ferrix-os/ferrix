@@ -80,7 +80,7 @@ use crate::claim::{Claims, StillServed};
 use crate::device::DeviceNode;
 use crate::hooks::Full;
 use crate::object::Object;
-use crate::object::channel::{ChannelMessage, Endpoint, ReadError};
+use crate::object::channel::{ChannelMessage, Endpoint, ReadError, Sender};
 use crate::object::process::Host;
 use crate::sched;
 use crate::sched::WaitQueue;
@@ -469,7 +469,7 @@ fn receive(control: &Endpoint, deadline: u64) -> Option<ChannelMessage> {
 fn send(control: &Endpoint, message: &Message) -> bool {
     let bytes = message.encode().as_bytes().to_vec();
     control
-        .write(bytes, 0, || Ok::<Vec<_>, Infallible>(Vec::new()))
+        .write(Sender::KERNEL, bytes, 0, || Ok::<Vec<_>, Infallible>(Vec::new()))
         .is_ok()
 }
 

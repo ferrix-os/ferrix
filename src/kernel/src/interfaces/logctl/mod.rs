@@ -48,7 +48,7 @@ use ferrix_native_abi::types::CHANNEL_MAX_HANDLES;
 use crate::console::log;
 use crate::hooks::Full;
 use crate::object::Transfer;
-use crate::object::channel::{ChannelMessage, Endpoint, ReadError};
+use crate::object::channel::{ChannelMessage, Endpoint, ReadError, Sender};
 use crate::object::process::Host;
 use crate::sched;
 use crate::sync::SpinLock;
@@ -257,7 +257,7 @@ impl Reader {
         if ferrix_logctl::message::data_header(&mut data, lost, read.copied).is_err() {
             return Answer::Failed;
         }
-        match control.write(data, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new())) {
+        match control.write(Sender::KERNEL, data, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new())) {
             Ok(()) => {
                 self.carried = self.carried.saturating_add(read.copied as u64);
                 Answer::Sent
@@ -271,7 +271,7 @@ impl Reader {
 fn refuse(control: &Endpoint, refusal: Refusal) {
     let mut bytes = [0u8; REFUSED_BYTES];
     if Message::Refused(refusal).encode_into(&mut bytes).is_ok() {
-        let _ = control.write(bytes.to_vec(), 0, || {
+        let _ = control.write(Sender::KERNEL, bytes.to_vec(), 0, || {
             Ok::<Vec<Transfer>, Infallible>(Vec::new())
         });
     }

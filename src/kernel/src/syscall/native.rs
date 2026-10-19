@@ -62,7 +62,7 @@ use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     self, APERTURE_INFO_BYTES, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
     DEVICE_INFO_BYTES, DeviceInfo, JOB_SPECULATION_DOMAIN, MAP_READ, MAP_WRITE, PortPacket,
-    ProcessStatus, ReadActual,
+    ProcessStatus, ReadActual, ReadAttested,
 };
 use ferrix_objects::message::Message;
 use ferrix_objects::reach::Reach;
@@ -76,7 +76,7 @@ use crate::claim::StillServed;
 use crate::device::{ConfigRefusal, DeviceNode};
 use crate::fallible;
 use crate::hooks::{Full, Hooks};
-use crate::object::channel::{self, ChannelMessage, Endpoint, ReadError, WriteFailure};
+use crate::object::channel::{self, ChannelMessage, Endpoint, ReadError, Sender, WriteFailure};
 use crate::object::interrupt::{Interrupt, InterruptError};
 use crate::object::io_mapping::{IoMapping, IoMappingError};
 use crate::object::job::{self, Job};
@@ -434,8 +434,16 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
             handle(a[0]),
             buffer(a[1], a[2]),
             buffer(a[3], a[4]),
-            a[5],
+            Actual::plain(a[5]),
         ),
+        NativeCall::ChannelReadAttested => channel_read(
+            process,
+            handle(a[0]),
+            buffer(a[1], a[2]),
+            buffer(a[3], a[4]),
+            Actual::attested(a[5]),
+        ),
+        NativeCall::ObjectId => object_id(process, handle(a[0]), a[1]),
         NativeCall::VmoCreate => vmo_create(process, a[0]),
         NativeCall::VmoRead => vmo_read(process, handle(a[0]), buffer(a[1], a[2]), a[3]),
         NativeCall::VmoWrite => vmo_write(process, handle(a[0]), buffer(a[1], a[2]), a[3]),
@@ -661,7 +669,7 @@ fn channel_write(
         }
         refuse_the_writing_end(&endpoint, channel, &values, &carried_now)?;
         endpoint
-            .write(data, values.len(), || {
+            .write(Sender::of(process), data, values.len(), || {
                 table.take_many(&values, Rights::TRANSFER)
             })
             .map_err(write_status)
@@ -722,13 +730,49 @@ fn carried_endpoints(table: &HandleTable, values: &[Handle]) -> Result<Vec<Arc<E
     .map_err(|_| status::NO_MEMORY)
 }
 
-/// `channel_read`.
+/// Where a read's record goes, and which record it is: `channel_read`'s
+/// [`ReadActual`], or `channel_read_attested`'s [`ReadAttested`], whose first
+/// eight bytes are the same sizes.
+#[derive(Debug, Clone, Copy)]
+struct Actual {
+    /// Its address in the reader's memory, which needs no alignment.
+    at: u64,
+    /// Whether it is a [`ReadAttested`] and so carries the writer.
+    attested: bool,
+}
+
+impl Actual {
+    /// `channel_read`'s.
+    const fn plain(at: u64) -> Actual {
+        Actual {
+            at,
+            attested: false,
+        }
+    }
+
+    /// `channel_read_attested`'s.
+    const fn attested(at: u64) -> Actual {
+        Actual { at, attested: true }
+    }
+
+    /// How many bytes of the reader's memory a delivery writes.
+    const fn size(self) -> usize {
+        if self.attested {
+            size_of::<ReadAttested>()
+        } else {
+            size_of::<ReadActual>()
+        }
+    }
+}
+
+/// `channel_read`, and `channel_read_attested` (`docs/microkernel/K6.md`
+/// §4), which differ only in the record a delivery writes.
 fn channel_read(
     process: &Process,
     channel: Handle,
     bytes: Buffer,
     handles: Buffer,
-    actual: u64,
+    actual: Actual,
 ) -> Result<usize, Errno> {
     let byte_capacity = capacity(bytes.count, CHANNEL_MAX_BYTES);
     let handle_capacity = capacity(handles.count, CHANNEL_MAX_HANDLES);
@@ -768,14 +812,16 @@ fn channel_read(
                     handles.at,
                     handle_capacity.saturating_mul(size_of::<u32>()),
                 );
-                let _ = uaccess::fault_in_for_write(space, actual, size_of::<ReadActual>());
+                let _ = uaccess::fault_in_for_write(space, actual.at, actual.size());
                 topology = Some(object::TOPOLOGY.lock());
                 continue;
             }
             Err(ReadError::TooSmall { bytes, handles }) => {
                 // Nothing was taken, so nothing needs the lock to go back.
                 drop(topology);
-                report_actual(process, actual, bytes, handles)?;
+                // The sizes only, whichever record: nothing about a message
+                // not taken is told but what it needs.
+                report_actual(process, actual.at, bytes, handles)?;
                 return Err(status::BUFFER_TOO_SMALL);
             }
             Err(refused) => return Err(read_refusal(refused)),
@@ -806,8 +852,7 @@ fn channel_read(
                     handle_count.saturating_mul(size_of::<u32>()),
                 )
                 .map_err(fault)?;
-                uaccess::fault_in_for_write(space, actual, size_of::<ReadActual>())
-                    .map_err(fault)?;
+                uaccess::fault_in_for_write(space, actual.at, actual.size()).map_err(fault)?;
             }
         }
     }
@@ -861,7 +906,7 @@ fn channel_write_read(caller: &dyn Host, a: &[u64; 6]) -> Result<(usize, [u64; 3
     };
     let endpoint = process.with_handles(|table| channel_in(table, handle(a[0]), needed))?;
     if sending {
-        send_words(&endpoint, count, a)?;
+        send_words(process, &endpoint, count, a)?;
     }
     receive_words(&endpoint)
 }
@@ -929,14 +974,20 @@ const _: () = assert!(
 );
 
 /// `channel_write_read`'s write: `count` bytes of the words in the third to
-/// fifth argument registers, as they would lie in memory.
-fn send_words(endpoint: &Endpoint, count: usize, a: &[u64; 6]) -> Result<(), Errno> {
+/// fifth argument registers, as they would lie in memory, stamped as
+/// `process`'s (`docs/microkernel/K6.md` §3).
+fn send_words(
+    process: &Process,
+    endpoint: &Endpoint,
+    count: usize,
+    a: &[u64; 6],
+) -> Result<(), Errno> {
     if count > nr::CHANNEL_WRITE_READ_BYTES {
         return Err(status::TOO_BIG);
     }
     let bytes = sent_bytes(a);
     endpoint
-        .write_small(bytes.get(..count).unwrap_or_default())
+        .write_small(Sender::of(process), bytes.get(..count).unwrap_or_default())
         .map_err(|failure| match failure {
             WriteFailure::PeerClosed => status::PEER_CLOSED,
             WriteFailure::TooBig => status::TOO_BIG,
@@ -1211,8 +1262,9 @@ struct Destination {
     bytes: u64,
     /// The new handles' values.
     handles: u64,
-    /// The [`ReadActual`] saying how much of each arrived.
-    actual: u64,
+    /// The record saying how much of each arrived, and, attested, who
+    /// wrote it.
+    actual: Actual,
 }
 
 /// How a delivery may reach the reader's memory.
@@ -1252,6 +1304,7 @@ fn deliver(
     let Message {
         bytes: data,
         handles: transfers,
+        sender,
     } = message;
     // FALLIBLE: the handle table's reserve refuses with `TableError::NoMemory`.
     let placed = process.with_handles(|table| match table.reserve(transfers.len()) {
@@ -1268,6 +1321,7 @@ fn deliver(
                 Message {
                     bytes: data,
                     handles: transfers,
+                    sender,
                 },
             );
             return Err(Undelivered::Refused(why));
@@ -1280,10 +1334,11 @@ fn deliver(
             put_user(process, at.handles, &bytes, through)
         })
         .and_then(|()| {
+            let record = record_bytes(at.actual, data.len(), values.len(), sender);
             put_user(
                 process,
-                at.actual,
-                &actual_bytes(data.len(), values.len()),
+                at.actual.at,
+                record.get(..at.actual.size()).unwrap_or_default(),
                 through,
             )
         });
@@ -1300,6 +1355,7 @@ fn deliver(
                 Message {
                     bytes: data,
                     handles: transfers,
+                    sender,
                 },
             );
         }
@@ -1339,6 +1395,27 @@ fn actual_bytes(bytes: usize, handles: usize) -> [u8; 8] {
     let [b0, b1, b2, b3] = actual.bytes.to_ne_bytes();
     let [h0, h1, h2, h3] = actual.handles.to_ne_bytes();
     [b0, b1, b2, b3, h0, h1, h2, h3]
+}
+
+/// The record a delivery writes, as the bytes a program reads: the
+/// [`ReadActual`]'s sizes, then, for `channel_read_attested`, the writer's
+/// process and job ids from the message's stamp ([`ReadAttested`]). The
+/// caller writes the first [`Actual::size`] bytes.
+fn record_bytes(
+    actual: Actual,
+    bytes: usize,
+    handles: usize,
+    sender: Sender,
+) -> [u8; size_of::<ReadAttested>()] {
+    let mut record = [0_u8; size_of::<ReadAttested>()];
+    let (sizes, writer) = record.split_at_mut(size_of::<ReadActual>());
+    sizes.copy_from_slice(&actual_bytes(bytes, handles));
+    if actual.attested {
+        let (process, job) = writer.split_at_mut(size_of::<u64>());
+        process.copy_from_slice(&sender.process().to_ne_bytes());
+        job.copy_from_slice(&sender.job().to_ne_bytes());
+    }
+    record
 }
 
 /// Write a [`ReadActual`] to `at`.
@@ -2139,6 +2216,22 @@ fn process_bootstrap(process: &Process) -> Result<usize, Errno> {
             Err(why)
         }
     }
+}
+
+/// `object_id` (`docs/microkernel/K6.md` §4): the id of the process or job
+/// `target` names, a process's from its [`Exit`](object::process::Exit), so
+/// an ended process still answers. Any rights: an id grants nothing.
+fn object_id(process: &Process, target: Handle, out: u64) -> Result<usize, Errno> {
+    let id = process.with_handles(|table| {
+        let (object, _) = table.get(target).map_err(table_error)?;
+        match object {
+            Object::Process(named) => Ok(named.exit().id()),
+            Object::Job(job) => Ok(job.id()),
+            _ => Err(status::WRONG_TYPE),
+        }
+    })?;
+    uaccess::copy_to_user(process.space(), out, &id.to_ne_bytes()).map_err(fault)?;
+    Ok(0)
 }
 
 /// `process_status`: how the process a handle names ended, or that it has

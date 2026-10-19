@@ -49,7 +49,7 @@ use ferrix_netwire::ethernet::{self, ethertype};
 use super::Pages;
 use crate::device::{self, DeviceNode};
 use crate::net;
-use crate::object::channel::{Endpoint, ReadError};
+use crate::object::channel::{Endpoint, ReadError, Sender};
 use crate::object::port::Port;
 use crate::object::{Object, Transfer};
 use crate::sched;
@@ -479,7 +479,7 @@ impl Driver {
             ),
         ];
         control
-            .write(body, 3, || Ok::<Vec<Transfer>, Infallible>(handles))
+            .write(Sender::KERNEL, body, 3, || Ok::<Vec<Transfer>, Infallible>(handles))
             .map_err(|_| "a HELLO could not be sent")?;
         Ok(())
     }
