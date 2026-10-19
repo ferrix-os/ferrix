@@ -562,41 +562,137 @@ pub(crate) fn sys_clock_nanosleep(
 /// `USER_HZ`: the clock ticks per second `times` counts in, 100 on all three.
 const USER_HZ: u64 = 100;
 
-/// `times`: the process's CPU times, which are zero because nothing accounts
-/// for them, and the clock ticks since boot as the return value.
+/// `times`: the process's processor time, user and kernel, in clock ticks,
+/// and the clock ticks since boot as the return value.
 ///
 /// `struct tms` is four `clock_t`s, which are `long`s: 32 bytes on the 64-bit
 /// pair and 16 on ARMv7-A, by `sizeof` against `linux/times.h` compiled for
 /// x86-64 and `arm-linux-gnueabihf`. A null buffer is legal and asks only for
 /// the ticks. The ticks are what a shell's `time` subtracts, so they are real.
+/// The children's two are zero: nothing keeps the time of a child once it has
+/// been waited for.
 pub(crate) fn sys_times(process: &Process, at: u64, word: usize) -> Result<usize, Errno> {
     if at != 0 {
-        let zeros = [0_u8; 32];
-        let tms = zeros.get(..word * 4).ok_or(Errno::EFAULT)?;
+        let usage = Usage::of_process(process);
+        let tick = NANOS / USER_HZ;
+        let mut tms = [0_u8; 32];
+        put_words(
+            &mut tms,
+            word,
+            &[usage.user() / tick, usage.kernel / tick, 0, 0],
+        );
+        let tms = tms.get(..word * 4).ok_or(Errno::EFAULT)?;
         uaccess::copy_to_user(process.space(), at, tms).map_err(|_| Errno::EFAULT)?;
     }
     Ok((now_nanos() / (NANOS / USER_HZ)) as usize)
 }
 
-/// `getrusage`: zero usage, for a `who` Linux knows.
+/// Processor time and switches of one thread or of a process's threads
+/// together, as `getrusage` and `times` report them.
+#[derive(Clone, Copy, Default)]
+struct Usage {
+    /// Nanoseconds run.
+    runtime: u64,
+    /// Nanoseconds of `runtime` spent in the kernel (`sched::vtime`).
+    kernel: u64,
+    /// Switches away while blocked, asleep or dead.
+    voluntary: u64,
+    /// Switches away while still runnable.
+    involuntary: u64,
+}
+
+impl Usage {
+    /// The calling thread's, charged up to now.
+    fn of_caller() -> Usage {
+        let _ = sched::current_runtime();
+        sched::current().map_or_else(Usage::default, |task| Usage::of_task(&task))
+    }
+
+    /// `process`'s threads', the caller's charged up to now: as
+    /// [`process_runtime`] counts, so a thread that has ended takes its time
+    /// with it.
+    fn of_process(process: &Process) -> Usage {
+        let _ = sched::current_runtime();
+        process
+            .tasks()
+            .iter()
+            .map(|task| Usage::of_task(task))
+            .fold(Usage::default(), |sum, one| Usage {
+                runtime: sum.runtime.saturating_add(one.runtime),
+                kernel: sum.kernel.saturating_add(one.kernel),
+                voluntary: sum.voluntary.saturating_add(one.voluntary),
+                involuntary: sum.involuntary.saturating_add(one.involuntary),
+            })
+    }
+
+    /// One task's.
+    fn of_task(task: &sched::Task) -> Usage {
+        Usage {
+            runtime: task.runtime(),
+            kernel: task.kernel_time(),
+            voluntary: task.voluntary_switches(),
+            involuntary: task.involuntary_switches(),
+        }
+    }
+
+    /// The user part: the runtime less its kernel time.
+    fn user(&self) -> u64 {
+        self.runtime.saturating_sub(self.kernel)
+    }
+}
+
+/// Write `values` into `out` as consecutive `word`-byte little-endian
+/// `long`s, each cut to the word as a 32-bit program's `long` is.
+fn put_words(out: &mut [u8], word: usize, values: &[u64]) {
+    for (slot, value) in out.chunks_exact_mut(word).zip(values) {
+        let bytes = value.to_le_bytes();
+        if let Some(low) = bytes.get(..word) {
+            slot.copy_from_slice(low);
+        }
+    }
+}
+
+/// `getrusage`: the processor time and the switches of the calling thread
+/// (`RUSAGE_THREAD`, 1) or of its process's threads (`RUSAGE_SELF`, 0).
 ///
 /// `struct rusage` is two `timeval`s and fourteen `long`s, eighteen native
 /// words: 144 bytes on the 64-bit pair and 72 on ARMv7-A, by `sizeof` against
 /// `linux/resource.h` for x86-64 and `arm-linux-gnueabihf`, and 72 for an
-/// i386 program, whose words are `word` bytes. `RUSAGE_SELF` (0),
-/// `RUSAGE_CHILDREN` (-1) and `RUSAGE_THREAD` (1) are accepted; anything else
-/// is `EINVAL` before the buffer is touched.
+/// i386 program, whose words are `word` bytes. `ru_utime` and `ru_stime` are
+/// the user and kernel time, `ru_nvcsw` and `ru_nivcsw` (words 16 and 17) the
+/// voluntary and involuntary switches; every other field is zero, as nothing
+/// counts it. `RUSAGE_CHILDREN` (-1) is zero throughout: nothing keeps the
+/// usage of a child once it has been waited for. Anything else is `EINVAL`
+/// before the buffer is touched.
+///
+/// Wine reads a thread's times through it (`GetThreadTimes`), and a program
+/// that waits for its own processor time to move saw it stand still for ever
+/// while it was all zeros: GRYPHLINK's launcher spun in `sched_yield` and
+/// `getrusage`, two and a half million calls a second, on an idle page.
 pub(crate) fn sys_getrusage(
     process: &Process,
     who: i32,
     at: u64,
     word: usize,
 ) -> Result<usize, Errno> {
-    if !matches!(who, -1..=1) {
-        return Err(Errno::EINVAL);
-    }
-    let zeros = [0_u8; 144];
-    let usage = zeros.get(..word * 18).ok_or(Errno::EFAULT)?;
+    let usage = match who {
+        1 => Usage::of_caller(),
+        0 => Usage::of_process(process),
+        -1 => Usage::default(),
+        _ => return Err(Errno::EINVAL),
+    };
+    let (user, kernel) = (usage.user(), usage.kernel);
+    let micros = 1_000;
+    let mut fields = [0_u64; 18];
+    fields[0] = user / NANOS;
+    fields[1] = (user % NANOS) / micros;
+    fields[2] = kernel / NANOS;
+    fields[3] = (kernel % NANOS) / micros;
+    fields[16] = usage.voluntary;
+    fields[17] = usage.involuntary;
+    let mut bytes = [0_u8; 144];
+    put_words(&mut bytes, word, &fields);
+    let usage = bytes.get(..word * 18).ok_or(Errno::EFAULT)?;
     uaccess::copy_to_user(process.space(), at, usage).map_err(|_| Errno::EFAULT)?;
     Ok(0)
 }

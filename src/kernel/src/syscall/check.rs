@@ -1016,7 +1016,7 @@ fn check_memory_and_time_answer_as_linux_does(process: &Process) -> Result<(), &
     if told.is_err() {
         return Err("clock_gettime refused CLOCK_TAI");
     }
-    check_the_cpu_time_clocks(process)
+    check_the_cpu_time_clocks(process).and_then(|()| check_getrusage_counts(process))
 }
 
 /// `CLOCK_THREAD_CPUTIME_ID` counts the time this thread runs, charged up to
@@ -12924,4 +12924,81 @@ pub(crate) fn run_thread_times() -> Result<(), &'static str> {
         user[3],
     );
     Ok(())
+}
+
+/// `getrusage` reports processor time: `RUSAGE_THREAD`'s user and kernel
+/// times together move by the time the thread has run, by its own clock,
+/// and by no more than the wall's; `RUSAGE_SELF` answers;
+/// `RUSAGE_CHILDREN` is zero, nothing keeping a waited child's; and any
+/// other `who` is `EINVAL`. Wine reads a thread's times through it, and a
+/// launcher waiting for them to move spun for ever while they read zero.
+fn check_getrusage_counts(process: &Process) -> Result<(), &'static str> {
+    use ferrix_linux_abi::types::CLOCK_THREAD_CPUTIME_ID;
+    const MILLI: u64 = 1_000_000;
+    let word = size_of::<usize>();
+    let page = map_rw(process, PAGE_SIZE)?;
+    let usage = |who: i32| -> Result<[u64; 18], &'static str> {
+        let _ = time::sys_getrusage(process, who, page, word)
+            .map_err(|_| "getrusage refused RUSAGE_SELF, RUSAGE_THREAD or RUSAGE_CHILDREN")?;
+        let bytes = read_user::<144>(process, page)?;
+        let mut fields = [0_u64; 18];
+        for (index, field) in fields.iter_mut().enumerate() {
+            *field = le_at(&bytes, index * word, word);
+        }
+        Ok(fields)
+    };
+    let micros = |fields: &[u64; 18]| -> u64 {
+        fields[0]
+            .saturating_mul(1_000_000)
+            .saturating_add(fields[1])
+            .saturating_add(fields[2].saturating_mul(1_000_000))
+            .saturating_add(fields[3])
+    };
+    let thread_clock = || -> Result<u64, &'static str> {
+        let _ = time::sys_clock_gettime(
+            process,
+            u64::from(CLOCK_THREAD_CPUTIME_ID),
+            page,
+            time::TimeWidth::Native,
+        )
+        .map_err(|_| "clock_gettime refused CLOCK_THREAD_CPUTIME_ID")?;
+        let pair = read_user::<16>(process, page)?;
+        Ok(le_at(&pair, 0, word)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(le_at(&pair, word, word)))
+    };
+    let outcome = (|| {
+        let wall_start = crate::timer::now_nanos();
+        let before = micros(&usage(1)?);
+        // Two milliseconds by the thread's own clock, or a second by the
+        // wall's: a clock that never moves fails there rather than hanging.
+        let start = thread_clock()?;
+        while thread_clock()?.saturating_sub(start) < 2 * MILLI {
+            if crate::timer::now_nanos().saturating_sub(wall_start) > 1_000 * MILLI {
+                return Err("getrusage's check: the thread's clock did not move");
+            }
+            core::hint::spin_loop();
+        }
+        let after = micros(&usage(1)?);
+        let wall_micros = crate::timer::now_nanos().saturating_sub(wall_start) / 1_000;
+        let moved = after.saturating_sub(before);
+        if moved < 1_000 {
+            return Err("getrusage(RUSAGE_THREAD) did not count the time the thread ran");
+        }
+        if moved > wall_micros {
+            return Err("getrusage(RUSAGE_THREAD) counted more time than passed on the wall clock");
+        }
+        // The check runs in a task of the kernel's, not one of the process's
+        // threads, so RUSAGE_SELF is only asked to answer here.
+        let _ = usage(0)?;
+        if usage(-1)? != [0; 18] {
+            return Err("getrusage(RUSAGE_CHILDREN) counted a child nothing keeps");
+        }
+        if time::sys_getrusage(process, 2, page, word) != Err(Errno::EINVAL) {
+            return Err("getrusage did not refuse an unknown who with EINVAL");
+        }
+        Ok(())
+    })();
+    let _ = memory::sys_munmap(process, page, PAGE_SIZE);
+    outcome
 }
