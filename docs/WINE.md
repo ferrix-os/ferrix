@@ -1066,3 +1066,89 @@ too (`ef-night2`).
 **The debug kernel costs half.** Every `test-endfield-proton` boot so far ran
 the debug kernel (`opt-level = 1`); with `--release` the same disk requests
 take 328 us rather than 925 us and the extraction 42 s rather than 88.
+
+## 13. League of Legends' game, on its own and offline (parked 2026-10-19)
+
+The question: how far League of Legends gets on Ferrix with no Riot server
+and no anti-cheat -- its game executable drawing locally, not a match. The
+research (session oc, 2026-10-19) found the rails in place: Wine 10.0 (§1),
+DXVK on lavapipe (§6) and a real Direct3D 11 game (§9) already pass. The
+2026 executable (`League of Legends.exe`, patch 16.20.8248524, 46.6 MB)
+imports only d3d11, dxgi, dinput8, xinput1_4, winmm, ws2_32, dnsapi,
+crypt32/winstrust and its own `rpatch.dll`; no Vanguard DLL is linked into
+it. No private server speaks the current game's protocol (the LeagueSandbox
+line speaks 2014's v4.20), so a match is out of reach; whether the
+executable starts at all without Riot's client is the open question.
+
+**The ladder** (customer, 2026-10-19: L0 and L1 at once):
+
+| | What | Exit |
+|---|---|---|
+| L0 | On a Linux host (WSL, bubblewrap with no network, the install bound read-only): start the executable on its own, offline; `strace -f -c` against `nr.rs`; list the files it opens | what it draws or says, the syscalls Ferrix lacks, the files a volume needs |
+| L1 | `test-lol`: the same on Ferrix | DXVK made its device, its window drawn |
+| L2 | Only if L0 shows it needs Riot's client: a 2014 client with LeagueSandbox 4.20 (sourcing it is the customer's call), or park it | |
+
+Sound (E3.2) and the mouse (E3.3) ride stage 23; they gate "playable",
+not "runs".
+
+**L1's gate, written and not landed** (branch `cc-lol-l1`, f10dc3dfe;
+its host tests pass, it has never booted). `fetch-lol.sh` copies the game
+from an installation the customer owns (`LOL_GAME_DIR`), read only, pins
+the executable by SHA-256, and takes a subset of the 30 GB (`LOL_FILES`;
+nearly all of it is `DATA/FINAL`) and a command line (`LOL_ARGS`) onto
+the volume; the volume holds Riot's files and never leaves the machine
+that made it. `test-lol` is `test-unity`'s boot with three differences:
+it refuses `--net`, the command line comes from the volume, and the judge
+asks for DXVK's line, the game's window and at least 30% of it lit, not
+motion. It stays on its branch because no executable at hand can pass it.
+
+**L0's result** (session oc, 2026-10-19, WSL, no network; script and logs
+in `~/oc-scratch/l0/` there). The executable starts on its own, with no
+client, under both Debian's Wine 10.0 and GE-Proton11-7. Under Proton it
+loads 250 DLLs (d3d11, dxgi, dinput8, xinput1_4, winex11 among them) and
+reaches window creation; then, in every run, with no arguments or with
+the old client's: `Call from ... to unimplemented function
+KERNEL32.dll.SetTimerQueueTimer, aborting`, so no window maps. Nothing of
+Vanguard's is loaded on the way. Its system calls (90, `strace -f -c`)
+are all in `nr.rs` but `fadvise64`, which Ferrix may ignore: no kernel
+gap. It opens only the executable and `rpatch.dll` of `Game/` before it
+dies, so the volume's size is still unknown.
+
+**The wall is Wine's.** `SetTimerQueueTimer` is `@ stub` in
+`kernel32.spec` in Wine 10.0 and on Wine's `master` (checked 2026-10-19),
+so no Wine to pin gets past it. It is the older form of
+`CreateTimerQueueTimer` that returns the timer's handle, so the fix is a
+few lines in `dlls/kernel32/sync.c` (customer, 2026-10-19: a patched
+`kernel32.dll`, built from Debian's `10.0~repack-6` source and patches,
+carried on the volume; Debian's Wine otherwise unchanged).
+
+**L0 again, with the fix** (session oc, 2026-10-19; `kernel32.dll` built
+on nazuna from the `wine-10.0` tag -- Debian's repack less 771 generated
+and binary files, nothing else differing -- with Debian's 39 patches and
+`SetTimerQueueTimer` on `CreateTimerQueueTimer`; SHA-256
+`4641d94d…2e44`, 64-bit only). The stub's abort is gone: Wine's relay
+shows the call reaching `RtlCreateTimer` and succeeding. Behind it is the
+executable's own check, not Wine's: in a TLS callback, before its `main`,
+it installs a vectored exception handler, arms a 30-second timer, raises
+its own exception `0xE056474e`, and ends itself with a fast-fail
+(`c0000409`) at the address round 1 died at -- the timer call was inside
+this same routine all along. No API call fails before it, no write is
+refused, no data file is opened and nothing of Vanguard's is touched, and
+the old client's arguments change nothing.
+
+**So L0's answer is no:** the 2026 executable does not start without
+Riot's client; its own protection refuses a start it did not get from the
+client. Going past that would mean defeating the game's anti-tamper,
+which this work does not do. L1 cannot pass with this executable, and
+L2's routes are the customer's call (an archived 2014 client with
+LeagueSandbox, or parking League with rung A).
+
+**Where it stands: parked** (customer, 2026-10-19). Riot's servers stay
+behind Vanguard, and the game alone refuses to start, so League waits:
+L2a (an archived 2014 client with LeagueSandbox 4.20) is the customer's
+call and was not chosen. To pick it up again: branch `cc-lol-l1` for the
+gate, `~/oc-scratch/l0/` in WSL on the customer's PC for L0's script and
+logs. The `SetTimerQueueTimer` fix is a real Wine gap that stands without
+League -- any program calling it is aborted, on Wine's `master` too -- and
+is kept on nazuna in `~/cc-lol-wine` (the build script, `fix.py`, the
+sources' hashes); upstreaming it was not chosen for now.
