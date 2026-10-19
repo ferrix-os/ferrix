@@ -109,6 +109,50 @@ fn init_skips_empty_and_atapi_ports() {
     );
 }
 
+/// What QEMU's q35 has with no disk attached: a CD-ROM alone, on port 2.
+fn atapi_only() -> Model {
+    let mut m = Model::new(100, 512);
+    m.pi = 0b11_1111;
+    m.ports[0].ssts = 0;
+    m.ports[2] = model::Port {
+        sig: 0xEB14_0101,
+        ssts: 0x113,
+        tfd: 0x50,
+        ..Default::default()
+    };
+    m
+}
+
+/// `NoDrive` is a clean stop's grounds (the process's `Step::Idle`), so it
+/// must leave no engine of a port it tried running into the driver's memory.
+#[test]
+fn a_controller_with_only_an_atapi_device_has_no_drive_and_every_engine_stopped() {
+    let (model, _, ahci) = start(atapi_only());
+    assert_eq!(ahci.err(), Some(Error::NoDrive));
+    let m = model.borrow();
+    for (index, port) in m.ports.iter().enumerate() {
+        assert_eq!(
+            port.cmd & (regs::CMD_ST | regs::CMD_FRE | regs::CMD_CR | regs::CMD_FR),
+            0,
+            "port {index}"
+        );
+    }
+}
+
+/// An ATAPI port whose receive engine will not stop is a failure, not a
+/// controller with nothing on it: its engine still writes into our memory.
+#[test]
+fn an_atapi_port_that_will_not_stop_is_a_failure_not_no_drive() {
+    let mut m = atapi_only();
+    m.ports[2].stuck_fr = true;
+    let (_, _, ahci) = start(m);
+    let error = ahci.err();
+    assert!(
+        error.is_some() && error != Some(Error::NoDrive),
+        "{error:?}"
+    );
+}
+
 #[test]
 fn no_drive() {
     let mut m = Model::new(100, 512);

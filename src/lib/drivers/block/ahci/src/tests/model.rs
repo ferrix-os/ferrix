@@ -33,6 +33,8 @@ pub(crate) struct Port {
     /// COMRESETs seen, and what the link and device are after one.
     pub(crate) comresets: u32,
     pub(crate) after_reset: Option<(u32, u32, u32)>,
+    /// Once on, the FIS receive engine never stops: FR stays set.
+    pub(crate) stuck_fr: bool,
 }
 
 /// A command the model saw.
@@ -224,7 +226,11 @@ impl Model {
             }
             regs::PX_CMD => {
                 let kept = regs::CMD_ST | regs::CMD_SUD | regs::CMD_POD | regs::CMD_FRE;
+                let stuck = port.stuck_fr && port.cmd & regs::CMD_FR != 0;
                 port.cmd = value & kept;
+                if stuck {
+                    port.cmd |= regs::CMD_FR;
+                }
                 if value & regs::CMD_ST != 0 {
                     port.cmd |= regs::CMD_CR;
                 } else {

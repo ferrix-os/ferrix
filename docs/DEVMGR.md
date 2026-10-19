@@ -194,7 +194,12 @@ PUBLISHED  kernel -> devmgr, 16 bytes
    then it sends REPORT. A native program has no clock, so the deadline is
    the kernel's patience for REPORT: a driver that never publishes holds
    `devmgr` there, and the boot fails saying so. A driver whose start fails
-   outright counts as failed.
+   outright counts as failed, and so does one that ends before it
+   publishes -- unless it ends with status 0, `ferrix_driver::Step::Idle`:
+   its device has nothing for it to serve (an AHCI controller with no ATA
+   disk, as q35's built-in one is when only QEMU's CD-ROM is on it). That
+   one is said as `nothing to serve; stopped` and counts neither started
+   nor failed (2026-10-19).
 
 ### 3.1 Pin budgets
 

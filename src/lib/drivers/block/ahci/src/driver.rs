@@ -340,8 +340,13 @@ impl<R: Registers, C: Clock, M: Memory> Ahci<R, C, M> {
             return Err(PortError::Failed(error));
         }
         if self.regs.read(port(index, regs::PX_SIG)) != regs::SIG_ATA {
-            let _stopped = self.stop(index);
-            return Err(PortError::NotAta);
+            // Not ours to serve, but its receive engine points at our
+            // memory: only a port that stopped is passed over, so that
+            // `NoDrive` means nothing of the controller still writes there.
+            return Err(match self.stop(index) {
+                Ok(()) => PortError::NotAta,
+                Err(error) => PortError::Failed(error),
+            });
         }
         self.start();
         let data = self.control_addr(IDENTIFY_PAGE);
