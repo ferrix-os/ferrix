@@ -1,5 +1,81 @@
 # Ferrix screenshots
 
+## The install guide, 2026-10-19
+
+The pictures in `install/` are [INSTALL.md](../../INSTALL.md)'s. All of them come
+from one zip, `ferrix-x86_64-desktop.zip` (51,740,712 bytes, SHA-256
+`8b67191e7e2593515d56dbb8c3d8ccd2aa16f8c99b6fde1940cff4f09fdf03ae`), built on nazuna
+with `tools/common/release/package-desktop.py /tmp/ig/out` from `main` 8cb1dc24a plus
+the release-image commit, rebased onto it. No release was published yet, so nothing was
+downloaded from GitHub: the zip was copied to each host and unpacked there. Each image
+carries a band naming its system, written by `tools/common/gen/install-shots.py`: green
+FERRIX for the guest's screen, red LINUX HOST and blue WINDOWS HOST for the hosts' own
+windows. Apart from that band and the one crop named below, nothing was edited.
+
+**Windows 11** (this PC, Ryzen 9 5900X): QEMU 11.1.0 as winget installs it, in
+`C:\Program Files\qemu`, under WHPX, so `run.ps1` gave the guest one processor. The zip
+was in `C:\Users\Sebastian\Downloads\ferrix-guide`. A classic console window
+(`conhost.exe`) was opened there running `powershell.exe -NoExit -Command
+"Expand-Archive ferrix-x86_64-desktop.zip .; powershell -ExecutionPolicy Bypass -File
+ferrix-x86_64-desktop\run.ps1"`, so the commands themselves are not on screen, only what
+they printed. Every window was captured by its handle with `PrintWindow` (DPI-aware),
+not from the screen. Keys reached QEMU's window as posted `WM_KEYDOWN`/`WM_KEYUP`
+messages, and the window was made bigger with `SetWindowPos`, as a reader drags it.
+
+- **windows-unzipped.png**: File Explorer on the unpacked folder. Cropped to the
+  folder's pane and its address bar (`--crop 596,60,1632,921`); the navigation pane,
+  which lists the host's own folders, is cut away.
+- **windows-run-ps1.png**: the console as QEMU's window opened, 10 s after the console
+  started (`Expand-Archive` took most of that): `run.ps1`'s two lines, then QEMU's
+  CPUID warnings and "Ignoring request for interrupt vector 0", none of which stopped
+  the boot.
+- **ferrix-windows-booting.png**: QEMU's window 2 s after it opened: TianoCore and the
+  Ferrix loader's lines. The menu is German because the host's language is.
+- **ferrix-windows-desktop-640.png**: the same window at 6 s, with the desktop. QEMU's
+  GTK window opens at 640x480 and the guest's screen takes that size
+  (`docs/backlog/p2.md` has the row).
+- **ferrix-windows-ferrofetch.png**: after the window was set to 1296x908; the console
+  logged `hyprix: Virtual-1 is 1274x819 now, as its monitor prefers (was 640x480)`.
+  Then `ferrofetch` and Enter, posted to the window. `CPU: x86_64 (1)` is WHPX's one
+  processor.
+
+**Linux** (nazuna, Ubuntu 26.04, KVM): Ubuntu's QEMU 10.2.1 from `qemu-system-x86`. The
+steps ran in a detached tmux pane of 100x30 cells, started as `env -i HOME=$HOME
+TERM=xterm-256color PATH=/usr/bin:/bin PS1='$ ' bash --norc --noprofile` in a fresh
+directory holding the zip, and typed with `tmux send-keys`: `unzip
+ferrix-x86_64-desktop.zip`, then `sh ferrix-x86_64-desktop/run.sh`, and at the end
+`C-a x`. The host has no display server (and none may be started on it), so `run.sh`
+put the screen on VNC at 127.0.0.1:5905 by itself. The guest's screen was grabbed over
+VNC by a small RFB client, a copy of nazuna's `~/.local/share/ferrix/cs-grab.py` that
+holds Shift for shifted characters, which also typed into it.
+
+- **linux-host-run-sh.png**: `tmux capture-pane -p` half a second after `run.sh`
+  started, before the firmware clears the terminal, drawn by `install-shots.py
+  terminal` in Liberation Mono. The lines are the pane's, wrapped where the pane
+  wrapped them.
+- **ferrix-linux-desktop.png**: the desktop 6 s after the serial log's `hyprix: card0`
+  line, which came 3.6 s after QEMU started.
+- **ferrix-linux-curl.png**: `clear`, then `curl -sI https://example.com`, over QEMU's
+  user-mode network.
+- **linux-host-quit.png**: the pane 3 s after `C-a x`, ending in `QEMU: Terminated`.
+
+Failures met while taking them, kept in the guide:
+
+- The first Linux run used the QEMU first on nazuna's `PATH`, 9.2.4 built from source in
+  `/usr/local`, which stopped at once with "network backend 'user' is not compiled into
+  this binary". The pictures use Ubuntu's QEMU, as a reader's `apt install` gives; the
+  guide's troubleshooting table has the message.
+- The first `curl` was typed by a VNC client that sent `:` without Shift, and zinc got
+  `https;//example.com`. The client was fixed and the boot retaken.
+- A boot taken only to check the guide's other suggestions (`svc status`, `git
+  --version`, which printed 2.55.0, and `btop`) was not kept.
+- `cargo xtask test-install --release`, run for the guide's second part, failed in the
+  live medium's boot: the AHCI driver exits on a controller that holds only QEMU's
+  CD-ROM (`docs/BACKLOG.md`, the row of 2026-10-19).
+
+Logs, timelines and the unlabelled captures are on nazuna under
+`~/.local/share/ferrix/logs/install-guide/`.
+
 ## The demo video, 2026-10-18
 
 `demo.mp4` (70 s, 1280x720, H.264, 20 fps, no sound) and `demo-loop.gif` (15 s of it,

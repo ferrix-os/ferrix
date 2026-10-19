@@ -165,7 +165,9 @@ desktop is the one `cargo xtask run-compositor` boots, minus what needs a
 download of its own: no Chrome, no Steam and no `rustc`. `/` lives in
 memory, so nothing is kept after QEMU exits. With released QEMU on Windows
 the guest gets one processor. The zip's `README.txt` covers firmware,
-options and the rest.
+options and the rest. The [install guide](docs/INSTALL.md) walks through
+it with pictures of each step on Windows and Linux, says what to do when
+a step fails, and where installing Ferrix on a disk stands.
 
 ## Boot Ferrix
 
