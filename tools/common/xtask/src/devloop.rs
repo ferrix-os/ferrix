@@ -150,7 +150,7 @@ answer() {
 main_pid() { svc status greeter.service | sed -n 's/^ *Main PID: *//p'; }
 
 mkdir -p "$HOME" /usr/local/bin || fail "the home directory"
-udhcpc -i eth0 -n -q -t 5 -T 2 || fail "the DHCP lease"
+dhcpc -i eth0 -n -q -t 5 -T 2 || fail "the DHCP lease"
 cd "$HOME" || fail "the home directory"
 say "cargo is $(cargo -V)"
 
@@ -405,6 +405,7 @@ fn test_devloop(args: &Args) -> Result<()> {
         return Err(Error::new(format!("init is not built for {arch}")));
     }
     files.extend(ports);
+    files.extend(crate::dhcp::carried(arch)?);
     files.extend(toolchain_files(arch, &args, ferrousli)?);
     let (lint, edit) = volume_steps();
     files.extend(walk_files(&script(

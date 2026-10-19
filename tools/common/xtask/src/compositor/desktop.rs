@@ -158,6 +158,9 @@ pub(super) fn desktop(
     let programs = desktop_programs(arch, &carried.ports)?;
     carried.ports.extend(programs);
     carried.ports.extend(desktop_auth(arch, args)?);
+    // The DHCP client, which `--net`'s `exec-once` and the N150 box's
+    // script run (`crate::dhcp`).
+    carried.ports.extend(crate::dhcp::carried(arch)?);
     // The user's dotfiles and the fonts they name, from beside a real
     // `hyprland.conf`: `crate::dotfiles` says which and where.
     if let Some(path) = &args.config

@@ -351,7 +351,7 @@ something answers the fourteen names in §5. This is what that means.
 |---|---|---|---|
 | Interfaces and routes | `ip`, `route`, `netstat` | A native Rust program over **netlink, which Ferrix already implements and gates**. `ip` is the only one the image really needs: `route` and `netstat` are `ip route` and `ss` in other clothes, and `test-net` could ask `ip` for what it asks them for | 8 |
 | Reachability | `ping`, `ping6` | Raw `AF_INET`/`AF_INET6` sockets, which the kernel has and `test-net` already exercises directly | 3 |
-| Address assignment | `udhcpc` | A DHCP client. The lease script `tools/common/xtask/src/initramfs.rs` writes is busybox's shape and would go with it | 5 |
+| Address assignment | `udhcpc` | Done (branch `dhcp-client`, 2026-10-19): `dhcpc`, `src/user/system/linux/dhcp`, applies its lease over rtnetlink with no lease script, and every caller runs it. `udhcpc` and `default.script` stay only as `/etc/profile`'s fallback on an image without `dhcpc`, until busybox leaves the image | 5 |
 | Name lookup | `nslookup` | A front end to ferrousli's resolver, which is complete | 2 |
 | `/proc` readers | `sysctl`, `top`, `mpstat`, `iostat`, `pwdx` | procps' job. It does not build (§6a); writing them here instead is five small programs over `/proc`, which the kernel serves | 5 |
 | Partitions | `fdisk` | `test-vfs` only asks it to read `/proc/partitions` and exit 0 without dying. A reader is small; a partition *editor* is not, and is not wanted | 2 |

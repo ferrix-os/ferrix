@@ -129,11 +129,10 @@ pub(super) fn everything_config(args: &mut Args) -> Result<Option<String>> {
 /// it, and that is all it does: the guest has a device and no address, so a
 /// name does not resolve and `ping` answers `bad address` for want of a
 /// route rather than for want of a resolver. Every boot check that uses the
-/// network runs `udhcpc` first, from its init script; a watched boot has no
-/// init script, so the same command goes in as an `exec-once`. It is the
-/// busybox applet, so it needs the busybox this boot carries: without one
-/// there is nothing to run and the line would be a diagnostic at boot rather
-/// than an address.
+/// network takes a lease first, from its init script; a watched boot has no
+/// init script, so the client goes in as an `exec-once`. It is Ferrix's own,
+/// `dhcpc` (`crate::dhcp`), which every desktop image carries, and it applies
+/// the lease itself, over rtnetlink: no lease script, `ip` or `sed`.
 ///
 /// The address, the route and `/etc/resolv.conf` all come from the lease.
 /// What answers the names is the gateway's own resolver at `10.0.2.3`, which
@@ -152,10 +151,10 @@ pub(super) fn with_network(config: String, args: &Args) -> String {
     config
 }
 
-/// What brings the interface up, which is what every boot check that uses
-/// the network runs before it: busybox's client, the tries and the timeout
-/// `initramfs`'s own profile gives it.
-const DHCP: &str = "udhcpc -i eth0 -n -q -t 5 -T 2";
+/// What brings the interface up: the tries and the timeout every boot check
+/// gives the client (`dhcpc -i eth0 -n -q -t 5 -T 2`), without `-q`, so that
+/// the client stays for the desktop's life and renews the lease at T1.
+const DHCP: &str = "dhcpc -i eth0 -n -t 5 -T 2";
 
 /// `config` with the layouts `--layout` and `--variant` asked for.
 ///

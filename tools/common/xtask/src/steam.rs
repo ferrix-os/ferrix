@@ -103,7 +103,7 @@ const PRELOAD_PATH: &str = "usr/local/lib/steam-preload.so";
 /// few seconds for the line that asks for a display and the one that says
 /// the semaphores failed. Then the client's logs.
 const SCRIPT: &str = r#"export PATH=/usr/local/bin:/data/usr/bin:/bin HOME=/data/home USER=root
-udhcpc -i eth0 -n -q -t 5 -T 2 || exit 5
+dhcpc -i eth0 -n -q -t 5 -T 2 || exit 5
 [ -x /data/steam/steam.sh ] || exit 3
 cd /data/steam || exit 3
 preload=/usr/local/lib/steam-preload.so
@@ -254,7 +254,9 @@ pub(crate) fn test_steam_bootstrap(args: &Args) -> Result<()> {
     let busybox = busybox::program(arch)?;
     let preload = preload()?;
     let stand_in = preload.as_ref().map(|(path, _)| path.clone());
-    let carried = files(preload.map(|(_, bytes)| bytes));
+    let mut carried = files(preload.map(|(_, bytes)| bytes));
+    // The DHCP client the script takes its lease with (`crate::dhcp`).
+    carried.extend(crate::dhcp::carried(arch)?);
     let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &carried)?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
 
@@ -300,7 +302,7 @@ fn judge(arch: Arch, lines: &[String], stand_in: Option<&str>) -> Result<()> {
             "{arch}: /data/steam/steam.sh is not there: is the volume attached?"
         ))),
         (Some("5"), _) => Err(Error::new(format!(
-            "{arch}: udhcpc got no lease for eth0 from the gateway"
+            "{arch}: dhcpc got no lease for eth0 from the gateway"
         ))),
         (Some("7"), _) => Err(Error::new(format!(
             "{arch}: the Steam client stopped at its System V semaphores, which Ferrix answers \

@@ -9,7 +9,7 @@
 //! What the desktop's configuration started as root and has to stay root
 //! becomes a unit of `graphical.target` here instead of an `exec-once`:
 //! `sshdt`, which listens on port 22 with a host key only root reads, and
-//! `udhcpc`, which configures the interface. `data-home.service` gives
+//! `dhcpc`, which configures the interface and stays to renew its lease. `data-home.service` gives
 //! `/data/home` and `/data/steam` to the user, as Steam's desktop script did
 //! as root.
 //!
@@ -50,9 +50,9 @@ pub(crate) const HOME_COPY: &str = "usr/share/ferrix/home";
 const ROOT_PROGRAMS: [(&str, &str, &str, &str); 2] = [
     ("/bin/sshdt", "sshd", "simple", "The ssh server"),
     (
-        "/bin/udhcpc",
+        "/bin/dhcpc",
         "net",
-        "oneshot",
+        "simple",
         "The interface's address, by DHCP",
     ),
 ];
@@ -400,7 +400,7 @@ mod tests {
                       env = FONTCONFIG_FILE,/usr/share/ferrix/fonts/fonts.conf\n\
                       exec-once = /bin/term /bin/zinc\n\
                       exec-once = /bin/sshdt -b 0.0.0.0 -p 22\n\
-                      exec-once = /bin/udhcpc -i eth0 -n -q\n\
+                      exec-once = /bin/dhcpc -i eth0 -n\n\
                       exec-once = /bin/vdagent\n";
         let mut ports = vec![
             File {
@@ -431,7 +431,7 @@ mod tests {
         assert!(
             !kept
                 .lines()
-                .any(|line| line.starts_with("exec-once = /bin/udhcpc"))
+                .any(|line| line.starts_with("exec-once = /bin/dhcpc"))
         );
         let sshd = ports
             .iter()
@@ -442,7 +442,7 @@ mod tests {
             .iter()
             .find(|file| file.path == "etc/ferrix/units/net.service")
             .expect("net.service");
-        assert!(bytes(net).contains("Type=oneshot\n"));
+        assert!(bytes(net).contains("Type=simple\n"));
         assert!(
             ports
                 .iter()

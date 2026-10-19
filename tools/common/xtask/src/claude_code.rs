@@ -33,7 +33,7 @@
 //! As Chrome's does: the volume carries no `ferrix-root` label, so the kernel
 //! mounts it at `/data`, under QEMU's `snapshot=on`, and the initramfs links
 //! the paths glibc names into it ([`LINKS`]). busybox is on the image for
-//! `udhcpc`; zinc runs the script; bash is the volume's, and `SHELL` names it,
+//! `dhcpc`; zinc runs the script; bash is the volume's, and `SHELL` names it,
 //! since Claude Code's Bash tool will run commands in bash or zsh and in
 //! nothing else.
 //!
@@ -99,7 +99,7 @@ pub(crate) const ARM64_LINKS: &[(&str, &str)] = &[
 /// input, whenever that input is not a terminal: the console is not one to
 /// it, so its input is `/dev/null`.
 const SCRIPT: &str = r#"export PATH=/bin:/data/usr/bin HOME=/tmp
-udhcpc -i eth0 -n -q -t 5 -T 2 || exit 5
+dhcpc -i eth0 -n -q -t 5 -T 2 || exit 5
 claude --version || exit 3
 export ANTHROPIC_BASE_URL=http://10.0.2.2:@PORT@ ANTHROPIC_API_KEY=@KEY@
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
@@ -495,8 +495,8 @@ pub(crate) fn test_claude_code(args: &Args) -> Result<()> {
     let natives = native::build(arch, args.release)?;
     let bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
-    // The project's busybox for `udhcpc` and the `ip` its lease script runs;
-    // zinc stays the shell.
+    // The project's busybox for the script's tools, and the DHCP client
+    // (`crate::dhcp`); zinc stays the shell.
     let busybox = busybox::program(arch)?;
     let mut files = if arm64 {
         arm64_files()
@@ -504,6 +504,7 @@ pub(crate) fn test_claude_code(args: &Args) -> Result<()> {
         desktop_files(&carried)
     };
     files.extend(carried);
+    files.extend(crate::dhcp::carried(arch)?);
     let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &files)?;
     let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
 

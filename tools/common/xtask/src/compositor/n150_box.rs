@@ -64,10 +64,10 @@ if [ -x /data/usr/bin/gryphlink ]; then
 else
     echo "n150-desktop: no gryphlink on /data"
 fi
-if udhcpc -i eth0 -n -q -t 30 -T 2 > /dev/null 2>&1; then
+if dhcpc -i eth0 -n -q -t 30 -T 2 > /dev/null 2>&1; then
     echo "n150-desktop: a lease for eth0"
 else
-    echo "n150-desktop: no lease for eth0 (udhcpc -i eth0 from a terminal tries again)"
+    echo "n150-desktop: no lease for eth0 (dhcpc -i eth0 -q from a terminal tries again)"
 fi
 waited=0
 while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do

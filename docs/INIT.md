@@ -287,7 +287,7 @@ The targets shipped with the image:
 ```
 sysinit.target     /run and /sys/fs/cgroup mounted, generators run, hostname set
 basic.target       sysinit + the builtins (§7.2)
-network.target     after net.builtin; udhcpc's unit is WantedBy it
+network.target     after net.builtin; dhcpc's unit is WantedBy it
 multi-user.target  gettys, sshd
 graphical.target   multi-user + hyprix
 rescue.target      one shell on the console, nothing else

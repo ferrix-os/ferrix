@@ -9,7 +9,10 @@ YSERVER_BACKEND=wayland YSERVER_ALLOW_SOFTWARE_VULKAN=1 RUST_LOG=${YRUST_LOG:-in
 waited=0
 while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do sleep 1; waited=$((waited + 1)); done
 echo "steam-window: yserver's socket after ${waited}s"
-if ! udhcpc -i eth0 -n -q -t 5 -T 2 > /dev/null 2>&1; then
+# Ferrix's own DHCP client where the image carries it, busybox's where not.
+dhcp=udhcpc
+[ -x /bin/dhcpc ] && dhcp=dhcpc
+if ! $dhcp -i eth0 -n -q -t 5 -T 2 > /dev/null 2>&1; then
     echo "steam-window: no lease for eth0"
     echo "steam-window: end"
     exit 1

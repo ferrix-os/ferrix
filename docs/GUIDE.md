@@ -283,8 +283,8 @@ gateway on a loopback UDP socket: the guest is `10.0.2.15`, `10.0.2.2` is the
 host, `10.0.2.3` forwards DNS to the host's resolver, and TCP and UDP to
 anywhere else are relayed through ordinary host sockets. It needs no
 privilege, and works the same on Linux and on Windows. With `--init`, the
-shell configures `eth0` by DHCP before its first prompt, with busybox's
-`udhcpc`, so `wget http://example.com` and `ping 10.0.2.2` work at once.
+shell configures `eth0` by DHCP before its first prompt, with Ferrix's
+`dhcpc`, so `wget http://example.com` and `ping 10.0.2.2` work at once.
 
 `--forward <host>:<guest>` goes the other way: the gateway listens on the
 host's `127.0.0.1:<host>` and opens each connection to the guest's `<guest>`,
@@ -482,7 +482,7 @@ starts is yours. `--layout de,us` is `input:kb_layout`, and without it the
 layout is this machine's own, read from `/etc/default/keyboard` or
 `/etc/vconsole.conf` (`--layout us` for the old default); `--size <W>x<H>` is
 the screen, 1920x1080 when not given. The boot has a network unless
-`--no-net` -- `udhcpc` runs as an `exec-once`, so `curl` in the terminal
+`--no-net` -- `dhcpc` runs as an `exec-once` and stays to renew the lease, so `curl` in the terminal
 reaches the host's own resolver -- and `--vnc <DISPLAY>` serves the screen at
 e.g. `:0` rather than opening a window, which is what a machine reached over
 `ssh` wants. `--gl` asks QEMU for `virtio-gpu-gl-pci`, the 3D card, with this

@@ -151,7 +151,8 @@ fn the_command_list_is_well_formed() {
         .join(" ");
     assert!(joined.contains(NAME));
     // The address is the gateway's to give, by DHCP, not the list's to name.
-    assert!(joined.contains("udhcpc -i eth0"));
+    // Ferrix's own client, not busybox's (`src/user/system/linux/dhcp`).
+    assert!(joined.contains("dhcpc -i eth0") && !joined.contains("udhcpc"));
     assert!(joined.contains(&format!("curl -sS http://{NAME}:")));
     // The clone over the network names the gateway and the port this
     // process is listening on, not a server in the guest.

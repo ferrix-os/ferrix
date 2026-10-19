@@ -677,18 +677,22 @@ pub(crate) fn commands(servers: &Servers, curl: bool, git: bool) -> Vec<Command>
 
     let mut commands = vec![
         // The interface the ring-3 driver brought up, configured by DHCP as a
-        // distribution configures one: `udhcpc` asks over packet sockets, and
-        // the image's `default.script` applies the lease over rtnetlink with
-        // `ip`. Its line names what the gateway offered.
+        // distribution configures one: `dhcpc` (`src/user/system/linux/dhcp`)
+        // asks over a packet socket and applies the lease itself over
+        // rtnetlink -- address, default route, `/etc/resolv.conf` -- with no
+        // lease script, `ip` or `sed`. Its line names what the gateway
+        // offered, and everything after it runs on what it applied.
         Command {
             argv: &["ip", "link", "set", "eth0", "up"],
             status: 0,
             expect: Expect::Nothing,
         },
         Command {
-            argv: &["udhcpc", "-i", "eth0", "-n", "-q", "-t", "5", "-T", "2"],
+            argv: &["dhcpc", "-i", "eth0", "-n", "-q", "-t", "5", "-T", "2"],
             status: 0,
-            expect: Expect::Shaped(&["eth0: 10.0.2.15/24 by DHCP, router 10.0.2.2, DNS 10.0.2.3"]),
+            expect: Expect::Lines(&[
+                "eth0: 10.0.2.15/24 by DHCP, router 10.0.2.2, DNS 10.0.2.3, lease 86400 s",
+            ]),
         },
         // Read back, by the three programs that read three different files.
         Command {
