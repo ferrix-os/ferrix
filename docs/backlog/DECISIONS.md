@@ -364,7 +364,7 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   Linux surface is still being filled in, that turns a compositor bug into a
   hunt through someone else's crate. Writing the wire protocol is about 20
   points more before the first client, and buys a `no_std`-shaped,
-  host-tested, fuzzed crate in the same shape as `src/lib/network/netwire`, `src/lib/fs/cpio`
+  host-tested, fuzzed crate in the same shape as `src/lib/network/netwire`, `src/lib/fs/common/cpio`
   and `src/lib/proto/inputctl`. The protocol XML this is written from is on this
   machine (`/usr/share/wayland/wayland.xml`,
   `/usr/share/wayland-protocols/`), and so is Hyprland 0.56.2's own source,
@@ -430,7 +430,7 @@ otherwise; one a later decision replaced is deleted, and the history keeps it.
   clear message; log replay is stage 12's. The default subvolume, data
   checksums and a node cache are required before stage 11 is done.
 * **2026-09-13** The page-cache interface, agreed between stages 8 and 11: a
-  `PageSource` in `src/lib/fs/vfs` with `fill_range(first, pages)` filling at least
+  `PageSource` in `src/lib/fs/common/vfs` with `fill_range(first, pages)` filling at least
   one page, stopping at an extent boundary, zeros past the file's size, called
   under no lock and allowed to block; a checksum failure is `EIO`, never a
   zeroed page; the kernel VMO allocates first, fills with no lock held and

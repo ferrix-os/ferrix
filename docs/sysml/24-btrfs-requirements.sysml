@@ -3,8 +3,8 @@
  *
  * What each unit of the two btrfs crates in the item does, as `ItemLowLevel`
  * requirements (part 13 defines the format, part 14 is the pilot this
- * copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and
- * `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They
+ * copies): `ferrix-btrfs` (src/lib/fs/btrfs/format), the reader, and
+ * `ferrix-btrfs-write` (src/lib/fs/btrfs/write), the write path. They
  * joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their
  * interface below is the `Device` and `WriteDevice` traits, which the
  * kernel's block layer answers; above, `Volume` and `WriteVolume`, which the
@@ -26,7 +26,7 @@
  * own log replay aborts (docs/BACKLOG.md).
  *
  * What proves what. Every check here is a host test of the crates
- * themselves, against images `mkfs.btrfs` made (src/lib/fs/btrfs/testdata)
+ * themselves, against images `mkfs.btrfs` made (src/lib/fs/btrfs/format/testdata)
  * and against a device in memory that records every write and flush, so
  * that a crash can be rebuilt from the record; except L.btrfs.21, 105, 106
  * and 107, whose tests drive the write path through the load's

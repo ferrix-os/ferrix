@@ -15,7 +15,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 ferrix-acpi = { path = "../../lib/platform/acpi" }
-ferrix-cpio = { path = "../../lib/fs/cpio" }
+ferrix-cpio = { path = "../../lib/fs/common/cpio" }
 ferrix-argon2 = { path = "../../lib/crypto/argon2" }
 ferrix-auth-proto = { path = "../../lib/proto/auth-proto" }
 ferrix-elf = { path = "../../lib/platform/elf" }
@@ -26,10 +26,10 @@ ferrix-linux-abi = { path = "../../lib/proto/linux-abi" }
 ferrix-native-abi = { path = "../../lib/proto/native-abi" }
 ferrix-objects = { path = "../../lib/kernel/objects" }
 ferrix-sync = { path = "../../lib/kernel/sync" }
-ferrix-vfs = { path = "../../lib/fs/vfs" }
+ferrix-vfs = { path = "../../lib/fs/common/vfs" }
 ferrix-pci = { path = "../../lib/platform/pci" }
-ferrix-btrfs = { path = "../../lib/fs/btrfs" }
-ferrix-block = { path = "../../lib/fs/block", features = ["model"] }
+ferrix-btrfs = { path = "../../lib/fs/btrfs/format" }
+ferrix-block = { path = "../../lib/fs/common/block", features = ["model"] }
 ferrix-blkring = { path = "../../lib/proto/blkring" }
 ferrix-virtio = { path = "../../lib/drivers/virtio" }
 ferrix-displayctl = { path = "../../lib/proto/displayctl" }
@@ -44,9 +44,9 @@ ferrix-netwire = { path = "../../lib/network/netwire" }
 ferrix-nettcp = { path = "../../lib/network/nettcp" }
 ferrix-net = { path = "../../lib/network/net" }
 ferrix-netlink = { path = "../../lib/network/netlink" }
-ferrix-cgroupfs = { path = "../../lib/fs/cgroupfs" }
+ferrix-cgroupfs = { path = "../../lib/fs/common/cgroupfs" }
 ferrix-seccomp = { path = "../../lib/kernel/seccomp" }
-ferrix-sysfs = { path = "../../lib/fs/sysfs" }
+ferrix-sysfs = { path = "../../lib/fs/common/sysfs" }
 ferrix-svc = { path = "../../lib/init/svc" }
 ferrix-svc-proto = { path = "../../lib/init/svc-proto" }
 compositor-config = { path = "../../user/system/linux/compositor/config" }

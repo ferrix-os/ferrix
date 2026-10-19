@@ -103,7 +103,7 @@ after the pivot, as it does `/proc` and `/dev`.
 
 `src/kernel/src/fs/sysfs.rs` is the view: a directory is a `Dir`, its names are
 computed by `entries`, a file is rendered at open by `render`, and a link's
-target is `path_of` the directory it names. `src/lib/fs/sysfs` holds every format
+target is `path_of` the directory it names. `src/lib/fs/common/sysfs` holds every format
 and every parse, pure, host-tested and fuzzed: the identifiers, the processor
 lists, the uevent lines, the input bitmaps in words of the kernel's `long`
 (64 bits on the 64-bit pair, 32 on ARMv7-A), the connector names, the relative
@@ -193,7 +193,7 @@ the net, input and serial cores do not yet, so a bind there may answer `EIO`.
 
 ## 7. How it is checked
 
-* **`src/lib/fs/sysfs`'s host tests** pin each format against what a Linux printed:
+* **`src/lib/fs/common/sysfs`'s host tests** pin each format against what a Linux printed:
   a virtio-gpu's `uevent` and `modalias`, a keyboard's `capabilities/ev` in
   64- and 32-bit words, `DEVMODE`'s octal, kernfs's link spelling to an
   ancestor.
@@ -222,7 +222,7 @@ One landing, 26 points, measured in the points ledger:
 
 | part | points |
 |---|---|
-| `src/lib/fs/sysfs`, its tests and fuzzer | 5 |
+| `src/lib/fs/common/sysfs`, its tests and fuzzer | 5 |
 | The view and its boot check | 8 |
 | The cores' tie to their device nodes; enumeration's revision, subsystem ids and bridges | 3 |
 | `devmgr`: DRIVER, BOUND, UNBOUND, BIND, UNBIND, DONE, both ends | 5 |

@@ -960,17 +960,17 @@ package FerrixStructure {
                  * what the fuzz target does. */
         }
         #implemented part cpio : LibraryCrate {
-            attribute :>> path = "src/lib/fs/cpio";
+            attribute :>> path = "src/lib/fs/common/cpio";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 45;
             @stage { number = 8; }
             doc /* The newc reader the initramfs is unpacked with, reached
-                 * through src/lib/fs/vfs. The cpio_parse fuzz target writes every
+                 * through src/lib/fs/common/vfs. The cpio_parse fuzz target writes every
                  * archive it walks to a trailer back out and requires it to
                  * read back identical. */
         }
         #implemented part vfs : LibraryCrate {
-            attribute :>> path = "src/lib/fs/vfs";
+            attribute :>> path = "src/lib/fs/common/vfs";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 128;
             @stage { number = 8; }
@@ -982,7 +982,7 @@ package FerrixStructure {
                  * it (src/kernel/src/fs). */
         }
         #implemented part procfs : LibraryCrate {
-            attribute :>> path = "src/lib/fs/procfs";
+            attribute :>> path = "src/lib/fs/common/procfs";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 36;
             @stage { number = 8; }
@@ -993,7 +993,7 @@ package FerrixStructure {
                  * reads its own output back with. */
         }
         #implemented part sysfs : LibraryCrate {
-            attribute :>> path = "src/lib/fs/sysfs";
+            attribute :>> path = "src/lib/fs/common/sysfs";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 15;
             doc /* The text of /sys as pure functions (docs/SYSFS.md): PCI
@@ -1300,7 +1300,7 @@ package FerrixStructure {
                  * target checks against a model. */
         }
         #implemented part btrfs : LibraryCrate {
-            attribute :>> path = "src/lib/fs/btrfs";
+            attribute :>> path = "src/lib/fs/btrfs/format";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 167;
             @stage { number = 11; }
@@ -1312,7 +1312,7 @@ package FerrixStructure {
                  * stage 11. */
         }
         #implemented part btrfsWrite : LibraryCrate {
-            attribute :>> path = "src/lib/fs/btrfs-write";
+            attribute :>> path = "src/lib/fs/btrfs/write";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 32;
             @stage { number = 12; }
@@ -1326,17 +1326,17 @@ package FerrixStructure {
                  * on the host and hundreds of QEMU kills. */
         }
         #implemented part btrfsVfs : LibraryCrate {
-            attribute :>> path = "src/lib/fs/btrfs-vfs";
+            attribute :>> path = "src/lib/fs/btrfs/vfs";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 35;
             @stage { number = 11; }
             doc /* btrfs mounted into the VFS: FileSystem and Inode over the
                  * read path, read-only and holding no lock across I/O, and a
-                 * writable mount over src/lib/fs/btrfs-write behind one sleeping
+                 * writable mount over src/lib/fs/btrfs/write behind one sleeping
                  * lock, whose writes become extents at the commit. */
         }
         #implemented part blockQueue : LibraryCrate {
-            attribute :>> path = "src/lib/fs/block";
+            attribute :>> path = "src/lib/fs/common/block";
             attribute :>> forbidsUnsafe = true;
             attribute :>> hostTests = 37;
             @stage { number = 11; }

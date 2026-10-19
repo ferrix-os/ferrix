@@ -85,8 +85,8 @@ because the user granted the authority. §4's undo is the answer there.
 
 | What | Where | What it means here |
 |---|---|---|
-| The only file check is the uid/gid check | `src/lib/fs/vfs/src/namespace.rs:1006-1017` (Linux's `may_open`), `access.rs:98-114` | No check by program |
-| uid 0 passes every read and write check | `src/lib/fs/vfs/src/access.rs:110-113` | Any check this design adds must not be the uid/gid check |
+| The only file check is the uid/gid check | `src/lib/fs/common/vfs/src/namespace.rs:1006-1017` (Linux's `may_open`), `access.rs:98-114` | No check by program |
+| uid 0 passes every read and write check | `src/lib/fs/common/vfs/src/access.rs:110-113` | Any check this design adds must not be the uid/gid check |
 | The identity a check is made as | `Context { root, cwd, who, ns }`, `namespace.rs:419-431`; built in `src/kernel/src/syscall/path.rs:185-193` | The domain goes in the same place as `who` |
 | The desktop and every program it starts run as root | `docs/AUTH.md` §6.1; `hyprix.service` has no `User=` (`tools/common/xtask/src/init.rs:487-497`) | Today every GUI app can rewrite every file |
 | Landlock | `ENOSYS` (`docs/CHROME.md:638`) | No program can restrict itself |
@@ -94,7 +94,7 @@ because the user granted the authority. §4's undo is the answer there.
 | init's sandboxing keys | `NoNewPrivileges=`, `PrivateTmp=` and `ProtectSystem=` carried out since L13a (`docs/INIT.md` §4.5); the rest warned about and ignored (`src/lib/init/svc/src/kind/sandbox.rs`, `NOT_BUILT`) | `ProtectHome=`, `ReadOnlyPaths=` and `ReadWritePaths=` do nothing yet |
 | `app.toml` | Declares files, not permissions (`docs/APPS.md` §3) | No place to say what an app may write |
 | Extended attributes | No filesystem keeps them: get is `ENODATA`, set is `EOPNOTSUPP` (`src/kernel/src/syscall/fsctl.rs:101-106`) | Nowhere to store a per-file tag (§10, Q3) |
-| btrfs snapshots | The writer refuses a volume with any (`src/lib/fs/btrfs-write/src/lib.rs:42-51`); planned as Stage C (`docs/ARCHITECTURE.md`, `BtrfsSubvolumes` in `docs/sysml/09-storage.sysml`) | No undo |
+| btrfs snapshots | The writer refuses a volume with any (`src/lib/fs/btrfs/write/src/lib.rs:42-51`); planned as Stage C (`docs/ARCHITECTURE.md`, `BtrfsSubvolumes` in `docs/sysml/09-storage.sysml`) | No undo |
 | Virtual keyboard and pointer | hyprix serves `zwp_virtual_keyboard_v1` and `zwlr_virtual_pointer_v1` to any client (`src/user/system/linux/compositor/hyprix/src/state.rs:353`, `:5514`) | Any client can type and click into another client's window (§3.4) |
 
 What already helps:
@@ -349,7 +349,7 @@ snapshots, which are what make a miss recoverable.
 * FDP_ACC.1's objects are VMOs, channels, ports, jobs, interrupts and I/O
   mappings (`:174-178`).
 
-**This design adds no item code.** W1 is in `src/lib/fs/vfs`, and W2 is in
+**This design adds no item code.** W1 is in `src/lib/fs/common/vfs`, and W2 is in
 the Linux personality. A claim about it is a decision, with two ways to make
 it:
 

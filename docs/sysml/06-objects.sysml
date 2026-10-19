@@ -181,7 +181,7 @@ package FerrixObjects {
     }
 
     part def FdTable {
-        doc /* File descriptors and their sharing rules, stage 8: src/lib/fs/vfs's
+        doc /* File descriptors and their sharing rules, stage 8: src/lib/fs/common/vfs's
              * descriptor table behind an Arc, shared where CLONE_FILES asks,
              * with close-on-exec belonging to the number. */
     }

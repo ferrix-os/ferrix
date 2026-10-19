@@ -2,7 +2,7 @@
 //! ring-3 driver serves, mounted through the kernel's own mount path and
 //! read back against what the host wrote.
 //!
-//! `xtask` attaches the `none` fixture from `src/lib/fs/btrfs/testdata` as the
+//! `xtask` attaches the `none` fixture from `src/lib/fs/btrfs/format/testdata` as the
 //! second virtio-blk disk, and the driver check starts a driver for every
 //! virtio-blk function, so by the time this runs the fixture is `vdb` in the
 //! registry. The check mounts it read-only at `/mnt` exactly as `mount -t
@@ -37,7 +37,7 @@ use crate::syscall::memory::{self, MmapRequest, OffsetUnit};
 use crate::syscall::{fd, process, uaccess};
 
 /// The fixture's manifest: `kind hex(path) size crc32c` per line.
-const MANIFEST: &str = include_str!("../../../lib/fs/btrfs/testdata/manifest.txt");
+const MANIFEST: &str = include_str!("../../../lib/fs/btrfs/format/testdata/manifest.txt");
 
 /// Where the disk is mounted.
 const MOUNT_POINT: &[u8] = b"/mnt";

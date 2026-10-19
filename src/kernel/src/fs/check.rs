@@ -1,6 +1,6 @@
 //! Stage 8's self-checks for the root the kernel built.
 //!
-//! Two properties the host tests of `src/lib/fs/vfs` cannot establish, because both
+//! Two properties the host tests of `src/lib/fs/common/vfs` cannot establish, because both
 //! are about this machine rather than the logic. That the archive the loader
 //! handed over is the one the build wrote, unpacked intact through the direct
 //! map — hard link and symbolic link included. And that tmpfs over VMO pages

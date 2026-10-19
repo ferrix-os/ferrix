@@ -291,7 +291,7 @@ package FerrixAssurance {
         doc /* Kill QEMU at a random point inside a transaction, remount,
              * replay, btrfs check again, over hundreds of seeds: cargo xtask
              * test-powerfail. Its adversarial half, every unflushed write
-             * kept or dropped at random, is src/lib/fs/btrfs-write's powerfail
+             * kept or dropped at random, is src/lib/fs/btrfs/write's powerfail
              * tests. The test a CoW filesystem actually has to pass. */
         subject os : Ferrix;
         attribute seeds : Natural;

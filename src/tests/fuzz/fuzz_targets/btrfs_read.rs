@@ -3,7 +3,7 @@
 //! From stage 11 a disk image is parsed in ring 0, and a disk is whatever was
 //! plugged in. Starting from nothing, a fuzzer would spend its whole budget
 //! failing the superblock magic. So each run starts from one of the real
-//! images in `src/lib/fs/btrfs/testdata/` and applies a short list of edits the input
+//! images in `src/lib/fs/btrfs/format/testdata/` and applies a short list of edits the input
 //! describes, which puts every run a few bytes away from a filesystem that
 //! mounts.
 //!
@@ -48,10 +48,10 @@ use ferrix_btrfs::{BtrfsError, BtrfsKey, ChunkMapEntry, crc32c};
 use libfuzzer_sys::fuzz_target;
 
 const PACKED: [&[u8]; 4] = [
-    include_bytes!("../../../lib/fs/btrfs/testdata/none.img.packed"),
-    include_bytes!("../../../lib/fs/btrfs/testdata/zlib.img.packed"),
-    include_bytes!("../../../lib/fs/btrfs/testdata/lzo.img.packed"),
-    include_bytes!("../../../lib/fs/btrfs/testdata/zstd.img.packed"),
+    include_bytes!("../../../lib/fs/btrfs/format/testdata/none.img.packed"),
+    include_bytes!("../../../lib/fs/btrfs/format/testdata/zlib.img.packed"),
+    include_bytes!("../../../lib/fs/btrfs/format/testdata/lzo.img.packed"),
+    include_bytes!("../../../lib/fs/btrfs/format/testdata/zstd.img.packed"),
 ];
 const BLOCK: usize = 4096;
 const IMAGE_SIZE: u64 = 128 * 1024 * 1024;

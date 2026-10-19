@@ -4,7 +4,7 @@
 # zinc's are: a Linux user program built with std, speaking only the Linux
 # ABI. What a package is -- the manifest, the record, the plan -- is
 # `src/lib/proto/pkg`, the crate xtask builds images with, and the archive
-# reader is the kernel's own `src/lib/fs/cpio`, so the program and the image
+# reader is the kernel's own `src/lib/fs/common/cpio`, so the program and the image
 # build cannot disagree about either.
 [package]
 name = "pkg"
@@ -26,7 +26,7 @@ name = "pkg"
 path = "src/main.rs"
 
 [dependencies]
-ferrix-cpio = { path = "../../../../lib/fs/cpio" }
+ferrix-cpio = { path = "../../../../lib/fs/common/cpio" }
 ferrix-pkg = { path = "../../../../lib/proto/pkg" }
 
 # The Ferrix discipline, as init's: every failing call is a line saying so,

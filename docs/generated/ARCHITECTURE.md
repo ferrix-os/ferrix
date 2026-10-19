@@ -118,10 +118,10 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixArmv7aRequirements` | `21-armv7a-requirements.sysml` | ARMv7-A, the Cortex-A7 of the STM32MP157, has no requirements of its own beyond these: what the system call path does for the filter the core asks about every call (seccomp, `docs/SECCOMP.md` §3.3), what its switch barrier does inside a speculation domain (`docs/OPAQUE-KERNEL.md` §9), and what of the generic timer user mode may read (`CNTKCTL`), and what the switch does with the two thread ID registers (`docs/OPAQUE-KERNEL.md` §9.14, 3b and F-66), and how it leaves VFP off for a program that never uses it (§9.15). The rest of the architecture waits in the baseline with the other architectures' unwritten rows. Ids are `L.armv7a.<n>`, flat through the architecture; the rules of part 19 hold. |
 | `FerrixSmpRequirements` | `22-smp-requirements.sysml` | What each unit of src/kernel/src/smp.rs does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): finding the processors and giving each a record it finds itself by, starting the secondaries, the inter-processor interrupt, the TLB shootdown -- whole and scoped, and the bound on how long it waits -- grace periods, stopping the other processors for a panic, and the scheduler's kick. The start sequences themselves, the per-processor register and the interrupt controller are each architecture's (src/kernel/src/arch/\<isa>/smp.rs), and belong to the arch slices; this is the architecture-independent half above them. |
 | `FerrixConsoleRequirements` | `23-console-requirements.sysml` | What each unit of src/kernel/src/console.rs and src/kernel/src/console/ does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): the kernel's lines to the port, whole and in order; the way a failure report gets past a lock nobody will release; the recent-output ring a panic screen draws; the transmit ring and the writers who queue into it, wait for room or poll; the receive ring the port's interrupt fills; the kernel log every byte is recorded in, what it promises a reader and what it keeps out; and the boot console drawn on the framebuffer. The ports themselves are each architecture's (src/kernel/src/arch/\<isa>/console.rs) and belong to the arch slices; the two of their functions that decide \*which\* console the kernel writes to, and whose checks test that, are here too (`Ports`), at the coordinator's asking. |
-| `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
+| `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs/format), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs/write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 141 packages, 7240 elements, 217 relations. Model digest `3257440060e7c223`.
+26 files, 141 packages, 7240 elements, 217 relations. Model digest `0ffa0fa0aee42a45`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -2055,7 +2055,7 @@ What a job and every job beneath it may hold at once, and hold now: the Security
 
 —
 
-File descriptors and their sharing rules, stage 8: src/lib/fs/vfs's descriptor table behind an Arc, shared where CLONE_FILES asks, with close-on-exec belonging to the number.
+File descriptors and their sharing rules, stage 8: src/lib/fs/common/vfs's descriptor table behind an Arc, shared where CLONE_FILES asks, with close-on-exec belonging to the number.
 
 #### FsContext
 
@@ -2544,7 +2544,7 @@ flowchart TB
 
 `#implemented`  ·  stage 11
 
-Request queues, merging, an I/O scheduler with per-cgroup bandwidth, and the ring protocol to userspace block drivers. A read into a page-cache page fills the VMO the cache already holds. The queue itself (merging, flush and FUA barriers, deadline scheduling) is src/lib/fs/block, in front of every block ring (src/kernel/src/interfaces/block_ring, src/lib/proto/blkring): one kernel task per ring moves requests onto it and copies payloads through the ring's data VMO, and publishes the disk in devfs's registry as a BlockDevice (src/kernel/src/fs/block.rs) that reads, writes and flushes whole sectors. No per-cgroup bandwidth: cgroups are stage 13's.
+Request queues, merging, an I/O scheduler with per-cgroup bandwidth, and the ring protocol to userspace block drivers. A read into a page-cache page fills the VMO the cache already holds. The queue itself (merging, flush and FUA barriers, deadline scheduling) is src/lib/fs/common/block, in front of every block ring (src/kernel/src/interfaces/block_ring, src/lib/proto/blkring): one kernel task per ring moves requests onto it and copies payloads through the ring's data VMO, and publishes the disk in devfs's registry as a BlockDevice (src/kernel/src/fs/block.rs) that reads, writes and flushes whole sectors. No per-cgroup bandwidth: cgroups are stage 13's.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2572,7 +2572,7 @@ The networking stage (docs/ROADMAP.md, Networking), which is not on the path to 
 
 `#implemented`  ·  stage 8
 
-src/lib/fs/vfs's Inode trait, which tmpfs, devfs, procfs, pipes, sockets and btrfs implement; Inode::mapping offers what mmap maps.
+src/lib/fs/common/vfs's Inode trait, which tmpfs, devfs, procfs, pipes, sockets and btrfs implement; Inode::mapping offers what mmap maps.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2602,7 +2602,7 @@ src/lib/fs/vfs's Inode trait, which tmpfs, devfs, procfs, pipes, sockets and btr
 
 rustc opens tens of thousands of files during a build; this is a performance requirement. Inode cache, dentry cache with negative entries, mount table per mount namespace, fd tables with their sharing rules.
 
-src/lib/fs/vfs, host-tested and fuzzed by vfs_ops: dentries with negative entries kept alive by a bounded queue of recent ones, mounts and one path walk for every call that takes a path, open file descriptions apart from descriptor tables, and the permission checks where Linux makes them. src/kernel/src/fs builds the one namespace every process resolves paths in; mount namespaces are stage 13's.
+src/lib/fs/common/vfs, host-tested and fuzzed by vfs_ops: dentries with negative entries kept alive by a bounded queue of recent ones, mounts and one path walk for every call that takes a path, open file descriptions apart from descriptor tables, and the permission checks where Linux makes them. src/kernel/src/fs builds the one namespace every process resolves paths in; mount namespaces are stage 13's.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2629,7 +2629,7 @@ Unified with VMOs: not a separate cache but the set of file VMOs, subject to rec
 
 `#implemented`
 
-src/lib/fs/vfs's FileSystem trait.
+src/lib/fs/common/vfs's FileSystem trait.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2642,7 +2642,7 @@ src/lib/fs/vfs's FileSystem trait.
 
 `#implemented`  ·  stage 8  ·  specialises `Filesystem`
 
-src/lib/fs/vfs/src/tmpfs.rs, whose file contents are a page store the kernel supplies as a VMO, so a shared mmap of a tmpfs file maps the file's own pages. The root and /tmp are tmpfs, and mount -t tmpfs makes a fresh one.
+src/lib/fs/common/vfs/src/tmpfs.rs, whose file contents are a page store the kernel supplies as a VMO, so a shared mmap of a tmpfs file maps the file's own pages. The root and /tmp are tmpfs, and mount -t tmpfs makes a fresh one.
 
 #### Devfs
 
@@ -2654,37 +2654,37 @@ src/kernel/src/fs/devfs.rs: null, zero, full, random, urandom, tty and console, 
 
 `#implemented`  ·  stage 8  ·  specialises `Filesystem`
 
-self/maps, self/exe, self/fd backed by the real VM and fd table; cpuinfo, meminfo. src/kernel/src/fs/procfs.rs over src/lib/fs/procfs's text, rendered at open: each /proc/\<pid> with its fd, status, comm, cmdline, stat, maps, exe, cwd, root, task and mounts, and /proc's mounts, stat, partitions, filesystems, uptime, version, sys, sysrq-trigger and net beside them.
+self/maps, self/exe, self/fd backed by the real VM and fd table; cpuinfo, meminfo. src/kernel/src/fs/procfs.rs over src/lib/fs/common/procfs's text, rendered at open: each /proc/\<pid> with its fd, status, comm, cmdline, stat, maps, exe, cwd, root, task and mounts, and /proc's mounts, stat, partitions, filesystems, uptime, version, sys, sysrq-trigger and net beside them.
 
 #### Sysfs
 
 `#implemented`  ·  specialises `Filesystem`
 
-src/kernel/src/fs/sysfs.rs over src/lib/fs/sysfs's text, a view that stores nothing, fed by the services that own each fact (docs/SYSFS.md): enumeration's device nodes under devices/pci and platform, the disks, interfaces, cards, render nodes and input devices the ring-3 drivers published, each inside the node its driver serves, and devmgr's word on which driver drives which device. A write to a driver's bind or unbind is sent to devmgr to decide. Mounted on /sys at boot; cgroup2 mounts on its fs/cgroup.
+src/kernel/src/fs/sysfs.rs over src/lib/fs/common/sysfs's text, a view that stores nothing, fed by the services that own each fact (docs/SYSFS.md): enumeration's device nodes under devices/pci and platform, the disks, interfaces, cards, render nodes and input devices the ring-3 drivers published, each inside the node its driver serves, and devmgr's word on which driver drives which device. A write to a driver's bind or unbind is sent to devmgr to decide. Mounted on /sys at boot; cgroup2 mounts on its fs/cgroup.
 
 #### Cgroupfs
 
 `#implemented`  ·  stage 13  ·  specialises `Filesystem`
 
-src/lib/fs/cgroupfs, mounted as cgroup2 since 2026-09-23: a view of the job tree that stores nothing, with cgroup.events, delegation by chown, and the pids, memory and cpu files over each job's quota slot (docs/CGROUPS.md).
+src/lib/fs/common/cgroupfs, mounted as cgroup2 since 2026-09-23: a view of the job tree that stores nothing, with cgroup.events, delegation by chown, and the pids, memory and cpu files over each job's quota slot (docs/CGROUPS.md).
 
 #### InitramfsUnpack
 
 `#implemented`  ·  stage 8
 
-src/lib/fs/cpio: the "newc" reader. Borrows, copies nothing, allocates nothing, rejects unsafe paths. Unpacked into tmpfs by src/lib/fs/vfs's initramfs module through the same calls a program makes, hard links and device nodes included.
+src/lib/fs/common/cpio: the "newc" reader. Borrows, copies nothing, allocates nothing, rejects unsafe paths. Unpacked into tmpfs by src/lib/fs/common/vfs's initramfs module through the same calls a program makes, hard links and device nodes included.
 
 #### BtrfsParsing
 
 `#implemented`  ·  stage 11
 
-src/lib/fs/btrfs: superblock, sys chunk array and chunk map (logical to physical), B-tree nodes and leaves, item payloads (inode, inode ref, dir, extent data), crc32c. Pure functions over bytes, forbid(unsafe_code); no cache, no transactions. Fuzzed from images mkfs.btrfs produced.
+src/lib/fs/btrfs/format: superblock, sys chunk array and chunk map (logical to physical), B-tree nodes and leaves, item payloads (inode, inode ref, dir, extent data), crc32c. Pure functions over bytes, forbid(unsafe_code); no cache, no transactions. Fuzzed from images mkfs.btrfs produced.
 
 #### Btrfs
 
 `#implemented`  ·  stage 11  ·  specialises `Filesystem`
 
-The real filesystem, read and write, single device, no RAID 5/6. The largest single piece of work in the project. src/kernel/src/fs/btrfs.rs mounts it from a block node, read-only over src/lib/fs/btrfs-vfs or writable over src/lib/fs/btrfs-write, one inode object per inode so two names share one page cache. `/` is a btrfs volume under cargo xtask run, and test-rustc's sysroot is one at /data.
+The real filesystem, read and write, single device, no RAID 5/6. The largest single piece of work in the project. src/kernel/src/fs/btrfs.rs mounts it from a block node, read-only over src/lib/fs/btrfs/vfs or writable over src/lib/fs/btrfs/write, one inode object per inode so two names share one page cache. `/` is a btrfs volume under cargo xtask run, and test-rustc's sysroot is one at /data.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2699,7 +2699,7 @@ The real filesystem, read and write, single device, no RAID 5/6. The largest sin
 
 Stage A: superblock, chunk tree, root tree, fs trees, extent data inline and regular, directory and inode items, crc32c verification, zstd/zlib/lzo. Enough to mount what mkfs.btrfs produced and read a sysroot out of it.
 
-src/lib/fs/btrfs and src/lib/fs/btrfs-vfs, host-tested against real images, with every data sector checked against the checksum tree before its bytes are used and a bounded cache of metadata reads. Exit met on all three architectures: a mkfs.btrfs fixture on a second virtio-blk disk, served by the ring-3 driver, mounted at /mnt and read back against its manifest. A file on the read-only mount cannot be mapped yet (ENODEV); one on the writable mount can.
+src/lib/fs/btrfs/format and src/lib/fs/btrfs/vfs, host-tested against real images, with every data sector checked against the checksum tree before its bytes are used and a bounded cache of metadata reads. Exit met on all three architectures: a mkfs.btrfs fixture on a second virtio-blk disk, served by the ring-3 driver, mounted at /mnt and read back against its manifest. A file on the read-only mount cannot be mapped yet (ENODEV); one on the writable mount can.
 
 #### BtrfsWrite
 
@@ -2707,7 +2707,7 @@ src/lib/fs/btrfs and src/lib/fs/btrfs-vfs, host-tested against real images, with
 
 Stage B: copy-on-write allocation through the extent tree, delayed refs, transaction commit against both superblock copies with the right flush/FUA ordering, the free-space tree, the log tree and its replay.
 
-All three are in src/lib/fs/btrfs-write, mounted writable by the kernel through src/lib/fs/btrfs-vfs, and clean under host btrfs check: over what every boot writes (cargo xtask test-btrfs), and before and after the log is replayed when QEMU is killed inside a transaction (cargo xtask test-powerfail). Owed beside the stage: writeback of pages written through MAP_SHARED.
+All three are in src/lib/fs/btrfs/write, mounted writable by the kernel through src/lib/fs/btrfs/vfs, and clean under host btrfs check: over what every boot writes (cargo xtask test-btrfs), and before and after the log is replayed when QEMU is killed inside a transaction (cargo xtask test-powerfail). Owed beside the stage: writeback of pages written through MAP_SHARED.
 
 | Feature | Kind | Type | Maturity | Note |
 | --- | --- | --- | --- | --- |
@@ -2754,10 +2754,10 @@ docs/ARCHITECTURE.md §9. src/lib/ is host-testable by design and is the only co
 | `src/lib/kernel/vma` | `#implemented` | — | `forbid` | 72 | Written for stage 6; reached at stage 2 as the vmap arena's range map, and since stage 6 every process's address space. |
 | `src/lib/proto/linux-abi` | `#implemented` | 7 | `forbid` | 146 | Three system call number tables, not two: x86-64's own, AArch64's generic one, and ARMv7-A's EABI one. |
 | `src/lib/kernel/ustack` | `#implemented` | 7 | `forbid` | 22 | The initial process stack image: argc, argv, envp and the auxiliary vector, laid out as a program's \_start reads them, at both pointer widths. |
-| `src/lib/fs/cpio` | `#implemented` | 8 | `forbid` | 45 | The newc reader the initramfs is unpacked with, reached through src/lib/fs/vfs. |
-| `src/lib/fs/vfs` | `#implemented` | 8 | `forbid` | 128 | Dentries with negative entries, mounts, the path walk, open file descriptions, descriptor tables, tmpfs over a page store the kernel supplies, pipes and socket buffers, the permission rules as pure functions, initramfs unpacking and the getdents64 packer. |
-| `src/lib/fs/procfs` | `#implemented` | 8 | `forbid` | 36 | The text of /proc as pure functions: maps lines padded to their name column at both pointer widths, meminfo, status, stat and mounts, pinned byte for byte against lines a real Linux printed, and the maps parser the kernel's boot check reads its own output… |
-| `src/lib/fs/sysfs` | `#implemented` | — | `forbid` | 15 | The text of /sys as pure functions (docs/SYSFS.md): PCI identifiers, modalias and uevent, processor lists, input capability bitmaps in words of the kernel's long, connector names, kernfs's relative link targets, and the name a write to bind or unbind gives;… |
+| `src/lib/fs/common/cpio` | `#implemented` | 8 | `forbid` | 45 | The newc reader the initramfs is unpacked with, reached through src/lib/fs/common/vfs. |
+| `src/lib/fs/common/vfs` | `#implemented` | 8 | `forbid` | 128 | Dentries with negative entries, mounts, the path walk, open file descriptions, descriptor tables, tmpfs over a page store the kernel supplies, pipes and socket buffers, the permission rules as pure functions, initramfs unpacking and the getdents64 packer. |
+| `src/lib/fs/common/procfs` | `#implemented` | 8 | `forbid` | 36 | The text of /proc as pure functions: maps lines padded to their name column at both pointer widths, meminfo, status, stat and mounts, pinned byte for byte against lines a real Linux printed, and the maps parser the kernel's boot check reads its own output… |
+| `src/lib/fs/common/sysfs` | `#implemented` | — | `forbid` | 15 | The text of /sys as pure functions (docs/SYSFS.md): PCI identifiers, modalias and uevent, processor lists, input capability bitmaps in words of the kernel's long, connector names, kernfs's relative link targets, and the name a write to bind or unbind gives;… |
 | `src/lib/drivers/virtio` | `#implemented` | 10 | allowed | 180 | The split virtqueue as logic over an abstract shared memory, the PCI transport's status protocol, and each device class's own protocol: blk, net, gpu, input and console. |
 | `src/lib/network/netwire` | `#implemented` | — | `forbid` | 54 | The byte-level half of the net core, written ahead of the networking stage: Ethernet with one 802.1Q tag, ARP, IPv4 with its options, IPv6 with the extension-header walk, ICMPv4, ICMPv6 and Neighbor Discovery, UDP, and TCP headers with their negotiated… |
 | `src/lib/network/nettcp` | `#implemented` | — | `forbid` | 31 | The TCP state machine, written ahead of the networking stage and above netwire: the eleven states of RFC 9293 in the standard's order, reassembly of what arrives out of order, window scaling, selective acknowledgment blocks, Nagle, delayed acknowledgments,… |
@@ -2777,10 +2777,10 @@ docs/ARCHITECTURE.md §9. src/lib/ is host-testable by design and is the only co
 | `src/lib/platform/pci` | `#implemented` | 10 | `forbid` | 51 | PCI configuration space over a ConfigSpace the caller implements: ECAM geometry, headers, BAR decoding and sizing, both capability lists with a visited set, MSI-X, the bus walk without recursion or allocation, and virtio's PCI transport. |
 | `src/lib/proto/native-abi` | `#implemented` | 9 | `forbid` | 23 | The native ABI's numbers, handle values, rights, signals, errno names and repr(C) layouts. |
 | `src/lib/kernel/objects` | `#implemented` | 9 | `forbid` | 29 | The handle table and the channel message queue, generic over what a handle names. |
-| `src/lib/fs/btrfs` | `#implemented` | 11 | `forbid` | 167 | The btrfs read path, allocating nothing: parsing, mount bootstrap, lookup, readdir and read with every data sector checked against the checksum tree, and zlib, LZO and zstd decoders. |
-| `src/lib/fs/btrfs-write` | `#implemented` | 12 | `forbid` | 32 | The btrfs write path: copy-on-write trees, delayed refs, extent and free-space-tree bookkeeping, chunk allocation, the commit with its flush before the superblock, file operations, and the log tree fsync writes and the mount replays. |
-| `src/lib/fs/btrfs-vfs` | `#implemented` | 11 | `forbid` | 35 | btrfs mounted into the VFS: FileSystem and Inode over the read path, read-only and holding no lock across I/O, and a writable mount over src/lib/fs/btrfs-write behind one sleeping lock, whose writes become extents at the commit. |
-| `src/lib/fs/block` | `#implemented` | 11 | `forbid` | 37 | The block core's request queue: merging, flush and FUA barriers no request crosses, deadline scheduling. |
+| `src/lib/fs/btrfs/format` | `#implemented` | 11 | `forbid` | 167 | The btrfs read path, allocating nothing: parsing, mount bootstrap, lookup, readdir and read with every data sector checked against the checksum tree, and zlib, LZO and zstd decoders. |
+| `src/lib/fs/btrfs/write` | `#implemented` | 12 | `forbid` | 32 | The btrfs write path: copy-on-write trees, delayed refs, extent and free-space-tree bookkeeping, chunk allocation, the commit with its flush before the superblock, file operations, and the log tree fsync writes and the mount replays. |
+| `src/lib/fs/btrfs/vfs` | `#implemented` | 11 | `forbid` | 35 | btrfs mounted into the VFS: FileSystem and Inode over the read path, read-only and holding no lock across I/O, and a writable mount over src/lib/fs/btrfs/write behind one sleeping lock, whose writes become extents at the commit. |
+| `src/lib/fs/common/block` | `#implemented` | 11 | `forbid` | 37 | The block core's request queue: merging, flush and FUA barriers no request crosses, deadline scheduling. |
 | `src/lib/proto/blkring` | `#implemented` | 10 | `forbid` | 66 | The block ring, docs/BLOCK-RING.md in code: the memory the kernel shares with a ring-3 block driver, every index and entry the other side writes checked before it is used, doorbells over ports, and the HELLO, READY and START messages, linked by both the… |
 | `src/lib/drivers/block/blkserve` | `#implemented` | 10 | `forbid` | 8 | A ring-3 block driver's serve loop between the block ring and a virtio-blk device, written against a trait so it runs on the host with a fake device; src/user/system/native/drivers/block/virtio-blk adds only the handles. |
 | `src/lib/drivers/block/virtio-blk` | `#implemented` | 10 |  | 39 | The virtio-blk driver logic over a transport and DMA memory it is handed: bring-up to DRIVER_OK, read, write and flush, each completion counted once even from a hostile device, and memory handed back only after the device's reset. |
@@ -2815,10 +2815,10 @@ flowchart LR
   n10_FerrixStructure_Workspace_vma["vma<br>src/lib/kernel/vma"]
   n11_FerrixStructure_Workspace_linuxAbi["linuxAbi<br>src/lib/proto/linux-abi"]
   n12_FerrixStructure_Workspace_ustack["ustack<br>src/lib/kernel/ustack"]
-  n13_FerrixStructure_Workspace_cpio["cpio<br>src/lib/fs/cpio"]
-  n14_FerrixStructure_Workspace_vfs["vfs<br>src/lib/fs/vfs"]
-  n15_FerrixStructure_Workspace_procfs["procfs<br>src/lib/fs/procfs"]
-  n16_FerrixStructure_Workspace_sysfs["sysfs<br>src/lib/fs/sysfs"]
+  n13_FerrixStructure_Workspace_cpio["cpio<br>src/lib/fs/common/cpio"]
+  n14_FerrixStructure_Workspace_vfs["vfs<br>src/lib/fs/common/vfs"]
+  n15_FerrixStructure_Workspace_procfs["procfs<br>src/lib/fs/common/procfs"]
+  n16_FerrixStructure_Workspace_sysfs["sysfs<br>src/lib/fs/common/sysfs"]
   n17_FerrixStructure_Workspace_virtio["virtio<br>src/lib/drivers/virtio"]
   n18_FerrixStructure_Workspace_netwire["netwire<br>src/lib/network/netwire"]
   n19_FerrixStructure_Workspace_nettcp["nettcp<br>src/lib/network/nettcp"]
@@ -2838,10 +2838,10 @@ flowchart LR
   n33_FerrixStructure_Workspace_pci["pci<br>src/lib/platform/pci"]
   n34_FerrixStructure_Workspace_nativeAbi["nativeAbi<br>src/lib/proto/native-abi"]
   n35_FerrixStructure_Workspace_objects["objects<br>src/lib/kernel/objects"]
-  n36_FerrixStructure_Workspace_btrfs["btrfs<br>src/lib/fs/btrfs"]
-  n37_FerrixStructure_Workspace_btrfsWrite["btrfsWrite<br>src/lib/fs/btrfs-write"]
-  n38_FerrixStructure_Workspace_btrfsVfs["btrfsVfs<br>src/lib/fs/btrfs-vfs"]
-  n39_FerrixStructure_Workspace_blockQueue["blockQueue<br>src/lib/fs/block"]
+  n36_FerrixStructure_Workspace_btrfs["btrfs<br>src/lib/fs/btrfs/format"]
+  n37_FerrixStructure_Workspace_btrfsWrite["btrfsWrite<br>src/lib/fs/btrfs/write"]
+  n38_FerrixStructure_Workspace_btrfsVfs["btrfsVfs<br>src/lib/fs/btrfs/vfs"]
+  n39_FerrixStructure_Workspace_blockQueue["blockQueue<br>src/lib/fs/common/block"]
   n40_FerrixStructure_Workspace_blkRing["blkRing<br>src/lib/proto/blkring"]
   n41_FerrixStructure_Workspace_blkServe["blkServe<br>src/lib/drivers/block/blkserve"]
   n42_FerrixStructure_Workspace_virtioBlk["virtioBlk<br>src/lib/drivers/block/virtio-blk"]
@@ -3274,7 +3274,7 @@ Built: PCI configuration space in src/lib/platform/pci, host-tested, fuzzed and 
 
 Block core, then btrfs stage A. Exit: an image made by real mkfs.btrfs is mounted and a file tree read out byte-for-byte matching what the host wrote.
 
-Built, host-side: the btrfs read path in src/lib/fs/btrfs (mount bootstrap, lookup, readdir, read, zlib/LZO/zstd), reading four real mkfs.btrfs images back exactly; the mount over stage 8's traits in src/lib/fs/btrfs-vfs; the block queue in src/lib/fs/block. In the kernel: mount -t btrfs on a registered block device, read-only, file data in the inode's VMO pages. Exit met: the mkfs.btrfs fixture on a second virtio-blk disk, served by the ring-3 driver, mounted at /mnt and read back against its manifest on all three architectures.
+Built, host-side: the btrfs read path in src/lib/fs/btrfs/format (mount bootstrap, lookup, readdir, read, zlib/LZO/zstd), reading four real mkfs.btrfs images back exactly; the mount over stage 8's traits in src/lib/fs/btrfs/vfs; the block queue in src/lib/fs/common/block. In the kernel: mount -t btrfs on a registered block device, read-only, file data in the inode's VMO pages. Exit met: the mkfs.btrfs fixture on a second virtio-blk disk, served by the ring-3 driver, mounted at /mnt and read back against its manifest on all three architectures.
 
 **Allocated to: **`ferrix.kernel.blockCore`
 
@@ -3324,7 +3324,7 @@ btrfs stage B. Exit, strict: Ferrix writes a tree and host btrfs check finds not
 
 All eight namespaces, the unified cgroup hierarchy with cpu, memory, io and pids, cgroupfs, classic-BPF seccomp with the interpreter in src/lib/. Exit: an unprivileged user namespace runs pid 1 under a memory limit that triggers scoped reclaim and a scoped OOM kill, with a seccomp filter blocking a syscall.
 
-Cgroups first (customer, 2026-09-23): stage 15's init is planned as if they exist, so the cgroup half is built before namespaces and seccomp. docs/INIT.md section 0.1 lists what init needs, C1-C5 before its first boot. C8, accepted the same day: every cgroup is backed by a Job. docs/CGROUPS.md is the design: landings G1-G5 (27 points) for init, then the controllers (58), 85 for the cgroup half. G1 done on 2026-09-23: every process in exactly one job, fork inheriting it, populated counted exactly, the two kills apart. G2 done the same day: cgroupfs mounts as cgroup2, over src/lib/fs/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events wakes poll, select and epoll with POLLPRI; clone3 starts a child in a cgroup; chown delegates a subtree under cgroup v2's common-ancestor rule. C1-C5 and C7 are met. G5 done on 2026-09-24. P1, M1's charging and S1 done on 2026-09-26, as the certification's job quotas (F-35): a quota slot per job, charged for tasks, memory and native objects, a weight per job scaling its tasks', and cgroupfs's cpu, memory and pids files over the same slot. M1's scoped OOM kill done on 2026-09-26: a fault past a cgroup's memory.max kills the process with the most resident pages in that cgroup, counted in memory.events with POLLPRI. M2's reclaim of a read-only mount's clean pages, memory.high, cgroup.freeze, cpu.max with cpu.stat and the io controller with io.max landed on 2026-10-07; on 2026-10-08 cpu.stat's charge is kept back in a run queue's own record and moved into the jobs' slots once, and cpu.max's walk is made only while one is set (L.object.180).
+Cgroups first (customer, 2026-09-23): stage 15's init is planned as if they exist, so the cgroup half is built before namespaces and seccomp. docs/INIT.md section 0.1 lists what init needs, C1-C5 before its first boot. C8, accepted the same day: every cgroup is backed by a Job. docs/CGROUPS.md is the design: landings G1-G5 (27 points) for init, then the controllers (58), 85 for the cgroup half. G1 done on 2026-09-23: every process in exactly one job, fork inheriting it, populated counted exactly, the two kills apart. G2 done the same day: cgroupfs mounts as cgroup2, over src/lib/fs/common/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events wakes poll, select and epoll with POLLPRI; clone3 starts a child in a cgroup; chown delegates a subtree under cgroup v2's common-ancestor rule. C1-C5 and C7 are met. G5 done on 2026-09-24. P1, M1's charging and S1 done on 2026-09-26, as the certification's job quotas (F-35): a quota slot per job, charged for tasks, memory and native objects, a weight per job scaling its tasks', and cgroupfs's cpu, memory and pids files over the same slot. M1's scoped OOM kill done on 2026-09-26: a fault past a cgroup's memory.max kills the process with the most resident pages in that cgroup, counted in memory.events with POLLPRI. M2's reclaim of a read-only mount's clean pages, memory.high, cgroup.freeze, cpu.max with cpu.stat and the io controller with io.max landed on 2026-10-07; on 2026-10-08 cpu.stat's charge is kept back in a run queue's own record and moved into the jobs' slots once, and cpu.max's walk is made only while one is set (L.object.180).
 
 Namespaces, for Steam's container, designed in docs/NAMESPACES.md (39 points, N1 to N6) and reviewed by the certification consultant on 2026-09-28. N1 done on 2026-09-28: per-mount flags enforced, MS_REMOUNT and mountinfo. N2 done on 2026-09-30: binds, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem so a plain remount reaches every bind of it. N3, mount namespaces with pivot_root and openat2, on 2026-09-30. The user, UTS, IPC, cgroup, pid and network namespaces are in too, and so are seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters (S1 to S3, the last on 2026-10-04). Left: time namespaces, SECCOMP_RET_TRAP and TSYNC (S4 to S6), and test-container, the exit criterion as a program.
 

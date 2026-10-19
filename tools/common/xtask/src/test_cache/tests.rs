@@ -83,14 +83,17 @@ fn the_item_and_everything_it_links_are_never_cached() {
         member("ferrix-heap", "src/lib/heap", &["ferrix-frame"], &[]),
         member("ferrix-frame", "src/lib/frame", &[], &[]),
         member("ferrix-sync", "src/lib/sync", &[], &[]),
-        member("ferrix-btrfs", "src/lib/fs/btrfs", &[], &[]),
+        member("ferrix-btrfs", "src/lib/fs/btrfs/format", &[], &[]),
         // Only a dev-dependency on the item: its own code is not linked.
         member("ferrix-driver", "src/lib/driver", &[], &["ferrix-heap"]),
         member("xtask", "tools/common/xtask", &["ferrix-elf"], &[]),
         member("ferrix-elf", "src/lib/elf", &[], &[]),
         member("ferrix-fuzzed", "src/lib/fuzzed", &[], &["proptest"]),
     ];
-    let item = ["src/kernel/".to_owned(), "src/lib/fs/btrfs/".to_owned()];
+    let item = [
+        "src/kernel/".to_owned(),
+        "src/lib/fs/btrfs/format/".to_owned(),
+    ];
     let verdicts = verdicts(&members, &item);
     let never = |name: &str| verdicts.get(name).cloned().flatten();
     assert!(
@@ -121,15 +124,15 @@ fn an_item_crate_another_links_says_it_is_the_item_s_own() {
     let members = [
         member(
             "ferrix-btrfs-write",
-            "src/lib/fs/btrfs-write",
+            "src/lib/fs/btrfs/write",
             &["ferrix-btrfs"],
             &[],
         ),
-        member("ferrix-btrfs", "src/lib/fs/btrfs", &[], &[]),
+        member("ferrix-btrfs", "src/lib/fs/btrfs/format", &[], &[]),
     ];
     let item = [
-        "src/lib/fs/btrfs/".to_owned(),
-        "src/lib/fs/btrfs-write/".to_owned(),
+        "src/lib/fs/btrfs/format/".to_owned(),
+        "src/lib/fs/btrfs/write/".to_owned(),
     ];
     for (name, verdict) in verdicts(&members, &item) {
         assert!(verdict.unwrap().starts_with("the item's ("), "{name}");

@@ -17,7 +17,7 @@ back.
 
 **Done (2026-09-24, 26 points).** In one landing:
 
-* `src/lib/fs/sysfs`, every format and parse, pure, host-tested against Linux's
+* `src/lib/fs/common/sysfs`, every format and parse, pure, host-tested against Linux's
   and fuzzed (`sysfs_names`): PCI identifiers, `modalias` and `uevent`,
   processor lists, input bitmaps in words of the kernel's `long`, connector
   names, kernfs's relative links, and the name a `bind` write gives.

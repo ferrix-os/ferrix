@@ -40,9 +40,9 @@ const BLOCK: usize = 4096;
 /// Every fixture is 128 MiB.
 pub(crate) const IMAGE_SIZE: u64 = 128 * 1024 * 1024;
 /// An empty volume with `mkfs.btrfs`'s default profiles and features.
-pub(crate) const BLANK: &[u8] = include_bytes!("../../btrfs/testdata/blank.img.packed");
+pub(crate) const BLANK: &[u8] = include_bytes!("../../format/testdata/blank.img.packed");
 /// A populated volume with SINGLE metadata.
-pub(crate) const POPULATED: &[u8] = include_bytes!("../../btrfs/testdata/none.img.packed");
+pub(crate) const POPULATED: &[u8] = include_bytes!("../../format/testdata/none.img.packed");
 
 /// One thing a device was asked to do, for replaying a crash.
 #[derive(Debug, Clone)]

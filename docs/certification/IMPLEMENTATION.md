@@ -1774,15 +1774,15 @@ are not listed. Grouped by what is held:
 
 | Kind | Where | Bound before this |
 |---|---|---|
-| Open file descriptions | `src/lib/fs/vfs` `OpenFile::new`, `with_io` | descriptors per process -- and none in flight, in a mapping, or behind an epoll registration |
-| Dentries, anonymous-file locations, mounts | `src/lib/fs/vfs` `Dentry::new`, `Location::detached`, `Namespace::mount` | a 4,096-entry cache, plus whatever an open file or a working directory pins |
-| tmpfs inodes, names, symbolic links, instances; a file's VMO | `src/lib/fs/vfs/src/tmpfs.rs`, `fs/pages.rs` | none: `/tmp` and `/dev/shm` are mode 1777 |
-| Pipes and their buffers | `fs/pipe.rs`, `src/lib/fs/vfs/src/pipe.rs` | 64 KiB a pipe |
-| `AF_UNIX` sockets, their queues, descriptors in flight | `fs/socket.rs`, `src/lib/fs/vfs/src/socket.rs` | 212,992 bytes of payload a direction, but an empty record counts one byte and holds a hundred, and a message carrying 253 descriptors counts one |
+| Open file descriptions | `src/lib/fs/common/vfs` `OpenFile::new`, `with_io` | descriptors per process -- and none in flight, in a mapping, or behind an epoll registration |
+| Dentries, anonymous-file locations, mounts | `src/lib/fs/common/vfs` `Dentry::new`, `Location::detached`, `Namespace::mount` | a 4,096-entry cache, plus whatever an open file or a working directory pins |
+| tmpfs inodes, names, symbolic links, instances; a file's VMO | `src/lib/fs/common/vfs/src/tmpfs.rs`, `fs/pages.rs` | none: `/tmp` and `/dev/shm` are mode 1777 |
+| Pipes and their buffers | `fs/pipe.rs`, `src/lib/fs/common/vfs/src/pipe.rs` | 64 KiB a pipe |
+| `AF_UNIX` sockets, their queues, descriptors in flight | `fs/socket.rs`, `src/lib/fs/common/vfs/src/socket.rs` | 212,992 bytes of payload a direction, but an empty record counts one byte and holds a hundred, and a message carrying 253 descriptors counts one |
 | epoll sets and registrations; eventfd, timerfd, signalfd | `fs/epoll.rs`, `fs/eventfd.rs`, `fs/timerfd.rs`, `fs/signalfd.rs` | descriptors -- but a closed file's registration stays until the next wait |
 | Regions of an address space; a shared file mapping's records | `src/lib/kernel/vma`, `user/space.rs` | the address space: 2^35 pages. No `max_map_count`, and a shared file mapping makes no VMO for the object limit to see |
 | Record and whole-file locks | `syscall/flock.rs` | none: one owner may lock any number of disjoint ranges |
-| Descriptor tables | `src/lib/fs/vfs/src/fd.rs` | `RLIMIT_NOFILE` a process |
+| Descriptor tables | `src/lib/fs/common/vfs/src/fd.rs` | `RLIMIT_NOFILE` a process |
 | A process's recorded program and arguments | `syscall/process.rs` `record_exec` | 256 KiB a process |
 | `/proc` and cgroupfs snapshots | `fs/procfs.rs` | one a descriptor, sized by what it shows |
 | Internet sockets and their queues | `net/socket.rs`, `src/lib/network/net`, `src/lib/network/nettcp` | 64 KiB each way a connection, 212,992 bytes of payload a datagram socket -- but an empty datagram counts nothing |

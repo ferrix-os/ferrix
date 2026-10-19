@@ -359,10 +359,10 @@ package FerrixRoadmap {
              * mkfs.btrfs is mounted and a file tree read out byte-for-byte
              * matching what the host wrote.
              *
-             * Built, host-side: the btrfs read path in src/lib/fs/btrfs (mount
+             * Built, host-side: the btrfs read path in src/lib/fs/btrfs/format (mount
              * bootstrap, lookup, readdir, read, zlib/LZO/zstd), reading four
              * real mkfs.btrfs images back exactly; the mount over stage 8's
-             * traits in src/lib/fs/btrfs-vfs; the block queue in src/lib/fs/block. In the
+             * traits in src/lib/fs/btrfs/vfs; the block queue in src/lib/fs/common/block. In the
              * kernel: mount -t btrfs on a registered block device, read-only,
              * file data in the inode's VMO pages. Exit met: the mkfs.btrfs
              * fixture on a second virtio-blk disk, served by the ring-3
@@ -497,7 +497,7 @@ package FerrixRoadmap {
              * 2026-09-23: every process in exactly one job, fork inheriting
              * it, populated counted exactly, the two kills apart. G2
              * done the same day: cgroupfs mounts as cgroup2, over
-             * src/lib/fs/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events
+             * src/lib/fs/common/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events
              * wakes poll, select and epoll with POLLPRI; clone3 starts a
              * child in a cgroup; chown delegates a subtree under cgroup v2's
              * common-ancestor rule. C1-C5 and C7 are met. G5 done on

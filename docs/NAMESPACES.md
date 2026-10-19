@@ -518,7 +518,7 @@ reads a process's ids or its fs context.
 `tools/common/data/certification-item.json`: `syscall/namespace.rs`,
 `credentials.rs`, `family.rs`, `fsctl.rs`, `path.rs`, `fd.rs`, `exec.rs`,
 `memory.rs`, `attributes.rs`, `process.rs`, `fs/**` (procfs, sockname,
-root_disk), and the `src/lib/fs/vfs` library outside the kernel crate. The one
+root_disk), and the `src/lib/fs/common/vfs` library outside the kernel crate. The one
 new kernel file, `syscall/userns.rs`, and the new boot check,
 `syscall/namespace_check.rs`, go into the `load` ring's list, and the check
 into `composition_root.load_modules`, where `main.rs` names it (39 then).
@@ -842,7 +842,7 @@ before the unprivileged half lands.
 ## 10. Risks
 
 1. **The walk is on every path.** N2 and N3 change the VFS every program
-   walks through. `src/lib/fs/vfs`'s host tests (3,770 lines) and the
+   walks through. `src/lib/fs/common/vfs`'s host tests (3,770 lines) and the
    `vfs_ops` fuzzer (`src/tests/fuzz`) run on every slice, and the fuzzer gains
    bind, remount, detach, copy and `pivot_root` operations with one more
    property: every mount's parent chain ends.

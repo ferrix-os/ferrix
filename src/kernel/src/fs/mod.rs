@@ -1,8 +1,8 @@
-//! The kernel's filesystem: one namespace, and what `src/lib/fs/vfs` needs from a
+//! The kernel's filesystem: one namespace, and what `src/lib/fs/common/vfs` needs from a
 //! machine.
 //!
 //! Stage 8 of `docs/ROADMAP.md`. The VFS itself — dentries, mounts, the path
-//! walk, tmpfs — is `src/lib/fs/vfs`, host-tested and fuzzed. What only the kernel
+//! walk, tmpfs — is `src/lib/fs/common/vfs`, host-tested and fuzzed. What only the kernel
 //! can supply is here: memory for file contents, a clock, device numbers, the
 //! archive the loader handed over, and the one namespace every process
 //! resolves paths in until stage 13 gives them namespaces of their own.

@@ -390,8 +390,8 @@ fn the_item_paths_come_from_the_classification() {
     for expected in [
         "src/kernel/",
         "src/boot/",
-        "src/lib/fs/btrfs/",
-        "src/lib/fs/btrfs-write/",
+        "src/lib/fs/btrfs/format/",
+        "src/lib/fs/btrfs/write/",
         "src/lib/kernel/fallible/",
         "src/lib/kernel/sync/",
     ] {
@@ -402,7 +402,7 @@ fn the_item_paths_come_from_the_classification() {
     }
     // btrfs's VFS glue is load, not item.
     assert!(
-        !item.iter().any(|path| path == "src/lib/fs/btrfs-vfs/"),
+        !item.iter().any(|path| path == "src/lib/fs/btrfs/vfs/"),
         "{item:?}"
     );
 }
@@ -677,13 +677,20 @@ fn only_a_unit_keyed_on_the_item_may_read_it() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// An item crate's file, and the classification, as the digest test edits them.
+const ITEM_CRATE_FILE: &str = "src/lib/fs/btrfs/format/lib.rs";
+const CLASSIFICATION: &str = "tools/common/data/certification-item.json";
+
 #[test]
 fn the_item_digest_changes_with_every_file_of_the_item_and_its_tools() {
     let root = scratch("item-digest");
-    let item = vec!["src/kernel/".to_owned(), "src/lib/fs/btrfs/".to_owned()];
+    let item = vec![
+        "src/kernel/".to_owned(),
+        "src/lib/fs/btrfs/format/".to_owned(),
+    ];
     for directory in [
         "src/kernel/src",
-        "src/lib/fs/btrfs",
+        "src/lib/fs/btrfs/format",
         "src/user",
         "docs/sysml",
     ] {
@@ -693,12 +700,8 @@ fn the_item_digest_changes_with_every_file_of_the_item_and_its_tools() {
         std::fs::create_dir_all(root.join(directory)).unwrap();
     }
     std::fs::write(root.join("src/kernel/src/main.rs"), "fn main() {}\n").unwrap();
-    std::fs::write(root.join("src/lib/fs/btrfs/lib.rs"), "pub fn a() {}\n").unwrap();
-    std::fs::write(
-        root.join("tools/common/data/certification-item.json"),
-        "{}\n",
-    )
-    .unwrap();
+    std::fs::write(root.join(ITEM_CRATE_FILE), "pub fn a() {}\n").unwrap();
+    std::fs::write(root.join(CLASSIFICATION), "{}\n").unwrap();
     std::fs::write(root.join("docs/sysml/a.sysml"), "package a;\n").unwrap();
     std::fs::write(root.join("tools/common/check/check-a.py"), "print()\n").unwrap();
     std::fs::write(root.join("tools/common/gen/gen-a.py"), "print()\n").unwrap();
@@ -710,7 +713,7 @@ fn the_item_digest_changes_with_every_file_of_the_item_and_its_tools() {
             std::fs::write(root.join("src/kernel/src/main.rs"), "fn main() { }\n").unwrap();
         }),
         ("an item crate's file", |root| {
-            std::fs::write(root.join("src/lib/fs/btrfs/lib.rs"), "pub fn b() {}\n").unwrap();
+            std::fs::write(root.join(ITEM_CRATE_FILE), "pub fn b() {}\n").unwrap();
         }),
         ("a new file in the item", |root| {
             std::fs::write(root.join("src/kernel/src/new.rs"), "").unwrap();
@@ -723,11 +726,7 @@ fn the_item_digest_changes_with_every_file_of_the_item_and_its_tools() {
             .unwrap();
         }),
         ("the classification", |root| {
-            std::fs::write(
-                root.join("tools/common/data/certification-item.json"),
-                "{ }\n",
-            )
-            .unwrap();
+            std::fs::write(root.join(CLASSIFICATION), "{ }\n").unwrap();
         }),
         ("the model", |root| {
             std::fs::write(root.join("docs/sysml/a.sysml"), "package b;\n").unwrap();

@@ -1,7 +1,7 @@
 //! What each file under `/proc` says.
 //!
 //! The kernel's half of every file: gathering the numbers. The arranging of
-//! them is `src/lib/fs/procfs`'s. Wherever a field has nothing true to put in it,
+//! them is `src/lib/fs/common/procfs`'s. Wherever a field has nothing true to put in it,
 //! the comment at the place it is filled says so and says why, because a
 //! plausible number with no source is the one kind of wrong answer nobody
 //! goes looking for.
@@ -1459,7 +1459,7 @@ fn stat_of(process: &Process, tid: u32, times: Times) -> Result<Vec<u8>> {
 // /proc/net
 //
 // Every one of these asks the net core for what it knows and hands it to
-// `src/lib/fs/procfs`, which is where the formats are pinned. Nothing here decides a
+// `src/lib/fs/common/procfs`, which is where the formats are pinned. Nothing here decides a
 // column.
 // ---------------------------------------------------------------------------
 

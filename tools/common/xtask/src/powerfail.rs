@@ -23,7 +23,7 @@
 //! path's ordering, cut at a real moment, but it is gentler than a power
 //! failure, which may lose any write not yet flushed. The adversarial version
 //! of the same test — every write after the last flush kept or dropped at
-//! random, thousands of cuts — is `src/lib/fs/btrfs-write`'s `powerfail` tests.
+//! random, thousands of cuts — is `src/lib/fs/btrfs/write`'s `powerfail` tests.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
