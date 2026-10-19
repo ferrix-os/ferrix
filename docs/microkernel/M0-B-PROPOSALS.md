@@ -675,6 +675,118 @@ line 1.5; Arm checks and their control 1.5; xtask 0.5; requirements and
 docs 1 to 1.5; gating and controls 1.5. **10 to 13** (F-73's fix on
 `m0-f73` not included).
 
+### 3.1 The plan restated for code (2026-10-19, branch `mk/smt-off`)
+
+Written on F-73's rebased fix (`mk/f73`, `1a2cb3485`, on `main`
+`8cb1dc24a`), which `smt=off` lands after; asked for the code review the
+consultant's pre-read of 2026-10-19 (ledger 2458, M7) owes before code.
+What changed since line 1020, and what the code will do where the plan
+above left a choice:
+
+* **The secondary path a parked thread runs is F-73's and cr0-ne's.**
+  `secondary_start` now sets `CR0`'s x87 controls, loads its GDT and TSS,
+  sets `CR4.MCE` (`cpu::enable_machine_check`, counted in
+  `MACHINE_CHECK_ENABLED`) and only then reaches `apic::init_this_cpu`. A
+  parked thread takes that path unchanged up to the `CR4.MCE` set and
+  leaves it there: it never runs `apic::init_this_cpu`, the timer, the
+  scheduler or `smp::secondary_main`. Stage 4's `mce` count then equals
+  online plus parked threads, and the `mce` line says both.
+* **Where a parked thread's record lives.** `Topology` gains a second
+  leaked slice, `parked: &'static [PerCpu]`, the same record type, so the
+  thread's `GS` base (the per-CPU register) names a real record and an NMI
+  or `#MC` on it finds one. `Topology::cpus()`, `count()` and `online()`
+  stay over the online slice alone, so every user of them (logical
+  numbers, per-CPU arrays, `run_everywhere`'s wait, `stop_others`' count,
+  shootdowns, the scheduler's queues, MSI targets) never sees a parked
+  thread without a change at its site. `record_at` (the start's record
+  check) and `this_cpu_for_report` search both slices, and a report from a
+  parked thread names it as "parked thread n of core c".
+* **The sites a parked thread could be counted in**, each read for this
+  plan: `run_everywhere` (waits on `cpus` filtered by `is_online`),
+  `stop_others` (`online() - 1`), the shootdown's acknowledgement wait
+  (over `cpus`), the stage-4 checks that `run_everywhere` (`check_this_cpu`,
+  x87, `mce`), and the panic report's stopped count. None changes. The
+  broadcast fixed IPI (`ICR_ALL_BUT_SELF`, `apic.rs:659`) does reach a
+  parked thread; it has `IF=0` for good and no local APIC set up, so the
+  interrupt stays pending, as line 1020 (a) accepted. An NMI returns
+  through the paranoid entry to the `cli; hlt` loop, which re-halts.
+* **The park loop** is a plain Rust function in
+  `arch/x86_64/smp.rs`, `park(record) -> !`: it writes its `CR4` and its
+  x2APIC id into its record, sets `parked` with Release, and loops
+  `cli; hlt` (the existing `halt` helper). It allocates nothing and takes no
+  lock, so nothing it could hold is ever waited on.
+* **Topology** as planned (leaf 0x1F, else 0xB, else `HTT` clear means one
+  thread a core, else a catalogued stop), read on the boot processor
+  before `start_secondaries`; each started thread compares its own leaf's
+  x2APIC id with the MADT's (P3), on a mismatch the stage-4 check fails by
+  name. AMD's leaf 0xB is used where 0x1F is absent (Zen 5 has both).
+* **The boot check, DF4 (c)**, in stage 4 beside `check_this_cpu`: from
+  each online processor's own leaf, the number of online processors per
+  core id (`x2apic_id >> shift`) must be 1 under `smt=off`; every thread
+  with a thread number above 0 must be in `parked` and have reported in,
+  with `CR4.MCE` set in what it wrote. Line: `smt      off: 2 cores, 2
+  siblings parked by the kernel (CR4.MCE set)`, or `off: firmware runs one
+  thread per core`; under `stibp`, `stibp: 2 cores, 2 threads a core`.
+* **Arm, DF4 (b), check only.** AArch64's reference boot (UEFI, QEMU
+  `virt`) describes processors in ACPI, so its topology comes from the
+  PPTT (a processor node whose flags say "is a thread", and its parent
+  core); a device-tree boot uses `/cpus/cpu-map`'s `thread` nodes. ARMv7-A
+  reads `cpu-map` (its boots are device-tree only). A PPTT reader is new
+  (`discovery::acpi`, bounded walk, no allocation beyond one entry per
+  processor) and `ferrix-fdt` gains a `cpu-map` walk with host tests.
+  Under `smt=off`, two threads of one core stop the boot at stage 4 by
+  name; with no topology table the check passes as one thread a core and
+  says "no topology table". `MPIDR.MT` is never read.
+* **The controls.** S1 (x86-64, KVM and TCG): `smt=off`'s thread test made
+  to start the first sibling for work; stage 4 must fire on "two online
+  processors share core c". S2 (x86-64): the parked path's
+  `enable_machine_check` call skipped; stage 4 must fire on "parked thread
+  n reads CR4.MCE clear". S3 (AArch64, QEMU `virt` with `-smp
+  4,cores=2,threads=2`, so the PPTT has two threads a core): stage 4 must
+  fire on two threads of one core. S4 (ARMv7-A, the same through
+  `cpu-map`). Positives: a `--set smt=off --no-claim --smp 4
+  --smp-threads 2` boot under KVM and TCG with two online and two parked;
+  the same build with `--smp-threads 1` ("firmware runs one thread per
+  core"); `stibp` with `--smp-threads 2` showing four online; every
+  existing row unchanged (no `--smp-threads`, one thread a core).
+* **Ids**, to be reserved by the product owner before code:
+  `L.x86_64.183` (topology from the CPUID leaves, and the fail-closed
+  stop), `L.x86_64.184` (parking: started, set up to `CR4.MCE`, never
+  counted online), `L.x86_64.185` (the stage-4 check: one thread a core
+  online, every sibling parked with `CR4.MCE` set), `L.aarch64.65` (PPTT
+  or `cpu-map`: no two threads of one core online under `smt=off`),
+  `L.armv7a.27` (the same through `cpu-map`), reserved on `main` at
+  f5c048964 with their parent `H.TRAP.19` under O.ISOLATE (ledger 2563
+  (4): not `H.TRAP.3`).
+* **`build-flags.toml`**: `smt.off` goes to `built = "yes"`; `max` and
+  `fast` already name it, so `test-flags` builds and boots the
+  `--set smt=off --no-claim` variant on x86-64 from `xtask check`, as
+  `checks=off` is.
+
+**Reviewed, ledger 2563: OK IF (1)-(8)**, owed with the code: (1) list
+everything a parked thread can run (park, NMI, `#MC`/FX-9005, the panic
+report) and show none indexes a per-CPU array sized for the online
+processors, takes a lock, allocates or touches the local APIC; (2) a
+machine check on a parked thread: say who reports it, and show FX-9005 by
+`test-mce` under `--set smt=off --no-claim --smp 4 --smp-threads 2` (KVM)
+injected into a parked thread, and that the panic stop's NMI leaves a
+parked thread parked and counted nowhere; (3) Arm fails closed: "no
+topology table" passes only where `MPIDR.MT` reads 0, a malformed PPTT or
+`cpu-map` stops the boot, both walks bounded with host tests on malformed
+fixtures, under F-23 and F-26; (4) parent `H.TRAP.19`; (5) the parked
+thread's local APIC mode: cite the SDM on mixed xAPIC/x2APIC for the
+broadcast IPI and NMIs, or put it in the boot processor's mode with every
+LVT masked before parking; (6) controls S1-S4 and an AArch64 no-table
+control (table withheld, `MT` forced to 1), positives, and the four
+test-boot rows plus armv7a `--smp 2` on the landing hash; (7) lands after
+F-73 closes on `main`; (8) SPECULATION.md §3 and AoU-11, build-flags.toml
+`built = "yes"` with `test-flags`, MEMORY-AND-TIMING, coverage of the park
+path and readers, carry and justification after the final rebase.
+
+**Size, restated**: the plan's 10 to 13, plus the PPTT reader and its
+tests (1.5): **11.5 to 14.5** points, about 5 to 7 hours of work and the
+gate time on top.
+
 ---
 
 ## 4. Plan: `ssbd=on_request` (DF3)
