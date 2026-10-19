@@ -2,11 +2,15 @@
 
 ## The install guide, 2026-10-19
 
-The pictures in `install/` are [INSTALL.md](../../INSTALL.md)'s. All of them come
+The pictures in `install/` are [INSTALL.md](../../INSTALL.md)'s. Six of them come
 from one zip, `ferrix-x86_64-desktop.zip` (51,740,712 bytes, SHA-256
 `8b67191e7e2593515d56dbb8c3d8ccd2aa16f8c99b6fde1940cff4f09fdf03ae`), built on nazuna
 with `tools/common/release/package-desktop.py /tmp/ig/out` from `main` 8cb1dc24a plus
-the release-image commit, rebased onto it. No release was published yet, so nothing was
+the release-image commit, rebased onto it. The three `ferrix-windows-*.png` were
+retaken the same evening from the zip the same script built at f8cf097ac, once the
+release-image branch carried its licence commit (52,035,922 bytes, SHA-256
+`683a314f27b6903140a99c67bdbccabc92c7bbe6af3e1aaab5ede0d9fb31336f`): the first take's QEMU
+menus were German, the host's language. No release was published yet, so nothing was
 downloaded from GitHub: the zip was copied to each host and unpacked there. Each image
 carries a band naming its system, written by `tools/common/gen/install-shots.py`: green
 FERRIX for the guest's screen, red LINUX HOST and blue WINDOWS HOST for the hosts' own
@@ -21,6 +25,11 @@ ferrix-x86_64-desktop\run.ps1"`, so the commands themselves are not on screen, o
 they printed. Every window was captured by its handle with `PrintWindow` (DPI-aware),
 not from the screen. Keys reached QEMU's window as posted `WM_KEYDOWN`/`WM_KEYUP`
 messages, and the window was made bigger with `SetWindowPos`, as a reader drags it.
+QEMU's GTK menus follow gettext's language, so for the retaken `ferrix-windows-*.png`
+the capture script set `LANGUAGE=en`, `LANG=en_US.UTF-8` and `LC_ALL=en_US.UTF-8` in
+its own environment before starting the console, which the console, `run.ps1` and QEMU
+inherited; the menu then read "Machine" and "View". `run.ps1` is unchanged: a reader's
+QEMU shows its menus in the reader's language.
 
 - **windows-unzipped.png**: File Explorer on the unpacked folder. Cropped to the
   folder's pane and its address bar (`--crop 596,60,1632,921`); the navigation pane,
@@ -30,8 +39,8 @@ messages, and the window was made bigger with `SetWindowPos`, as a reader drags 
   CPUID warnings and "Ignoring request for interrupt vector 0", none of which stopped
   the boot.
 - **ferrix-windows-booting.png**: QEMU's window 2 s after it opened: TianoCore and the
-  Ferrix loader's lines. The menu is German because the host's language is.
-- **ferrix-windows-desktop-640.png**: the same window at 6 s, with the desktop. QEMU's
+  Ferrix loader's lines.
+- **ferrix-windows-desktop-640.png**: the same window at 4 s, with the desktop. QEMU's
   GTK window opens at 640x480 and the guest's screen takes that size
   (`docs/backlog/p2.md` has the row).
 - **ferrix-windows-ferrofetch.png**: after the window was set to 1296x908; the console
