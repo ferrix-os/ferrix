@@ -60,7 +60,8 @@ use ferrix_native_abi::rights::{Requested, Rights};
 use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
-    self, APERTURE_INFO_BYTES, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
+    self, ADDRESS_BY_VMO, ADDRESS_COMPARE, ADDRESS_SHARED, ADDRESS_WAIT_ANY_MAX,
+    APERTURE_INFO_BYTES, AddressWord, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
     DEVICE_INFO_BYTES, DeviceInfo, JOB_SPECULATION_DOMAIN, MAP_READ, MAP_WRITE, PortPacket,
     ProcessStatus, ReadActual,
 };
@@ -86,6 +87,7 @@ use crate::object::quota::{self, Resource, Usage};
 use crate::object::{self, HandleTable, Object};
 use crate::syscall::uaccess::{self, UserError};
 use crate::trap::SyscallArgs;
+use crate::user::address_wait::{self as waits, Key, Place, WaitError, Word};
 use crate::user::space::SpaceError;
 use crate::user::vmo::{Vmo, VmoError};
 
@@ -499,6 +501,10 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
             object_wait_async(process, handle(a[0]), handle(a[1]), a[2], a[3])
         }
         NativeCall::VmoMap => vmo_map(process, handle(a[0]), a[1], a[2], a[3], a[4]),
+        NativeCall::AddressWait => address_wait(caller, &a),
+        NativeCall::AddressWake => address_wake(process, &a),
+        NativeCall::AddressRequeue => address_requeue(process, &a),
+        NativeCall::AddressWaitAny => address_wait_any(caller, &a),
     }
 }
 
@@ -3146,4 +3152,169 @@ fn interrupt_bind(
     });
     object::dispose([Object::Interrupt(interrupt)]);
     bound.map(|()| 0)
+}
+
+/// The status a native caller sees for what the address-wait table answered:
+/// `EINTR` for a caller that is to leave, as `object_wait_one` answers.
+fn address_status(error: WaitError) -> Errno {
+    match error {
+        WaitError::Changed => status::SHOULD_WAIT,
+        WaitError::Fault => status::FAULT,
+        WaitError::NoMemory => status::NO_MEMORY,
+        WaitError::Interrupted => Errno::EINTR,
+        WaitError::TimedOut => status::TIMED_OUT,
+    }
+}
+
+/// A 32-bit argument from a register: a register with any upper bit set is
+/// refused rather than cut.
+fn word_argument(register: u64) -> Result<u32, Errno> {
+    u32::try_from(register).map_err(|_| status::INVALID_ARGS)
+}
+
+/// The word an address call names, keyed: `address` in the caller's space,
+/// shared by its mapping's VMO with `ADDRESS_SHARED`, or with
+/// `ADDRESS_BY_VMO` `address` bytes into the VMO the handle `vmo` names,
+/// which needs `READ`. `allowed` is the flags this call takes; any other bit
+/// is refused, K11's bit 3 among them.
+fn address_word(
+    process: &Process,
+    (address, flags, vmo): (u64, u64, u64),
+    allowed: u64,
+    (expected, bitset): (u32, u32),
+) -> Result<Word, Errno> {
+    if flags & !allowed != 0 || bitset == 0 || !address.is_multiple_of(4) {
+        return Err(status::INVALID_ARGS);
+    }
+    if flags & ADDRESS_BY_VMO != 0 {
+        let object = process.with_handles(|table| vmo_in(table, handle(vmo), Rights::READ))?;
+        if address
+            .checked_add(4)
+            .is_none_or(|end| end > object.len_bytes())
+        {
+            return Err(status::INVALID_ARGS);
+        }
+        return Ok(Word {
+            place: Place::Object,
+            expected,
+            key: Key::in_object(object, address),
+            bitset,
+        });
+    }
+    Ok(Word {
+        place: Place::User(address),
+        expected,
+        key: Key::new(process.space(), address, flags & ADDRESS_SHARED != 0),
+        bitset,
+    })
+}
+
+/// A deadline from its pointer: none for a null pointer.
+fn address_deadline(process: &Process, at: u64) -> Result<Option<u64>, Errno> {
+    if at == 0 {
+        return Ok(None);
+    }
+    read_u64(process, at).map(Some)
+}
+
+/// `address_wait`: sleep while a word holds `expected` (K5).
+fn address_wait(caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
+    let [address, expected, bitset, flags, deadline_at, vmo] = *a;
+    let process = caller.core();
+    let word = address_word(
+        process,
+        (address, flags, vmo),
+        ADDRESS_SHARED | ADDRESS_BY_VMO,
+        (word_argument(expected)?, word_argument(bitset)?),
+    )?;
+    let deadline = address_deadline(process, deadline_at)?;
+    waits::wait_on(
+        process.space(),
+        core::slice::from_ref(&word),
+        deadline,
+        &|| must_leave(caller),
+        process.quota_slot(),
+    )
+    .map(|_| 0)
+    .map_err(address_status)
+}
+
+/// `address_wake`: wake up to `count` waits on a word, oldest first (K5).
+fn address_wake(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    let [address, count, bitset, flags, vmo, _] = *a;
+    let count = word_argument(count)?;
+    let word = address_word(
+        process,
+        (address, flags, vmo),
+        ADDRESS_SHARED | ADDRESS_BY_VMO,
+        (0, word_argument(bitset)?),
+    )?;
+    let limit = usize::try_from(count).unwrap_or(usize::MAX);
+    Ok(waits::wake(&word.key, limit, word.bitset))
+}
+
+/// `address_requeue`: wake some waits on one word and move others onto
+/// another, both at user addresses in the caller's space (K5).
+fn address_requeue(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    let [from, to, wake, moved, flags, expected] = *a;
+    let (wake, moved, expected) = (
+        word_argument(wake)?,
+        word_argument(moved)?,
+        word_argument(expected)?,
+    );
+    let allowed = ADDRESS_SHARED | ADDRESS_COMPARE;
+    let source = address_word(process, (from, flags, 0), allowed, (expected, waits::MATCH_ANY))?;
+    let target = address_word(process, (to, flags, 0), allowed, (0, waits::MATCH_ANY))?;
+    let counts = (
+        usize::try_from(wake).unwrap_or(usize::MAX),
+        usize::try_from(moved).unwrap_or(usize::MAX),
+    );
+    let compare = (flags & ADDRESS_COMPARE != 0).then_some(&source);
+    waits::requeue(process.space(), &source.key, &target.key, counts, compare)
+        .map_err(address_status)
+}
+
+/// `address_wait_any`: sleep on up to `ADDRESS_WAIT_ANY_MAX` words until a
+/// wake of any one, and answer its index (K5).
+fn address_wait_any(caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
+    let [words_at, count, flags, deadline_at, ..] = *a;
+    let process = caller.core();
+    let count = usize::try_from(count).map_err(|_| status::INVALID_ARGS)?;
+    if flags != 0 || count == 0 || count > ADDRESS_WAIT_ANY_MAX || words_at == 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let size = core::mem::size_of::<AddressWord>();
+    let mut vector: Vec<u8> =
+        fallible::try_filled(0, count * size).map_err(|_| status::NO_MEMORY)?;
+    uaccess::copy_from_user(process.space(), words_at, &mut vector).map_err(fault)?;
+    let mut words: Vec<Word> = fallible::try_with_capacity(count).map_err(|_| status::NO_MEMORY)?;
+    for element in vector.chunks_exact(size) {
+        let field = |at: usize, bytes: &mut [u8]| {
+            if let Some(source) = element.get(at..at + bytes.len()) {
+                bytes.copy_from_slice(source);
+            }
+        };
+        let (mut address, mut expected, mut word_flags) = ([0_u8; 8], [0_u8; 4], [0_u8; 4]);
+        field(0, &mut address);
+        field(8, &mut expected);
+        field(12, &mut word_flags);
+        let word = address_word(
+            process,
+            (u64::from_ne_bytes(address), u64::from(u32::from_ne_bytes(word_flags)), 0),
+            ADDRESS_SHARED,
+            (u32::from_ne_bytes(expected), waits::MATCH_ANY),
+        )?;
+        // NOALLOC: room for `count` words was reserved above.
+        let _ = fallible::push_within(&mut words, word);
+    }
+    drop(vector);
+    let deadline = address_deadline(process, deadline_at)?;
+    waits::wait_on(
+        process.space(),
+        &words,
+        deadline,
+        &|| must_leave(caller),
+        process.quota_slot(),
+    )
+    .map_err(address_status)
 }
