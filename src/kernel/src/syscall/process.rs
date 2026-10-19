@@ -2434,6 +2434,7 @@ pub(crate) fn start_thread(
         return Err("the process is ending, or another thread is replacing its program");
     }
     process.add_thread_from(&thread, creator);
+    let made = Arc::clone(&thread);
     let prepared = sched::prepare_user("thread", run_program, thread, None, Some(state))?;
     // Listed before it can run, as a process's first task is.
     process
@@ -2442,11 +2443,13 @@ pub(crate) fn start_thread(
         .map_err(|_| "no memory to list the thread's task")?;
     let posting = sched::work::posting();
     let task = prepared.launch();
-    // At the weight the rest of the process runs at, not at nice 0: a program
-    // that was reniced and then started a thread would otherwise take back
-    // with every thread what the renice gave away. Linux copies the nice
-    // value into the new thread; this reads the same one from the same place.
-    attributes::apply_nice(&process, &task);
+    // At the weight of its creator's nice value, which the thread was made
+    // with, not at nice 0: a program that was reniced and then started a
+    // thread would otherwise take back with every thread what the renice gave
+    // away. Linux copies the creating thread's nice value into the new one.
+    // Read now, after the task is listed: a `setpriority` that came since
+    // stored a value this applies, and one that comes later finds the task.
+    attributes::apply_nice(made.nice(), &task);
     tell_a_new_task(&process, &task);
     drop(posting);
     Ok(task)

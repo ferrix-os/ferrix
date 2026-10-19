@@ -28,7 +28,7 @@
 
 use alloc::sync::Arc;
 use core::any::Any;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use crate::fallible::AllocError;
 use crate::object::process::{self as pids, Host};
@@ -96,6 +96,14 @@ pub(crate) struct Thread {
     /// or `fork` starts with its creator's, and `execve` gives the thread
     /// that runs the new program the new program's file name. A leaf lock.
     name: SpinLock<Option<[u8; crate::syscall::attributes::TASK_COMM_LEN]>>,
+    /// Its nice value, -20 to 19, which its task's scheduling weight follows
+    /// (`syscall::attributes::sys_setpriority`). Linux keeps it per thread
+    /// (`task_struct.static_prio`): `setpriority(PRIO_PROCESS, tid, ..)`
+    /// changes that thread alone, and a thread made by `clone` starts with its
+    /// creator's. Mesa lowers its own disk-cache threads to 19 that way; kept
+    /// per process, every thread of a game went to 19 with them. A fork
+    /// child's first thread starts at 0, as `syscall::attributes` says.
+    nice: AtomicI32,
 }
 
 /// [`Thread::watched`]'s bit for seccomp state.
@@ -185,6 +193,7 @@ impl Thread {
         *thread.tid.get_mut() = tid;
         *thread.numbers.get_mut() = numbers;
         *thread.name.get_mut() = caller.name();
+        *thread.nice.get_mut() = caller.nice();
         Ok(thread)
     }
 
@@ -212,7 +221,19 @@ impl Thread {
             // Off for every thread made, whatever its creator had.
             dispatch: SpinLock::new(Dispatch::OFF),
             name: SpinLock::new(None),
+            nice: AtomicI32::new(0),
         }
+    }
+
+    /// Its nice value: see [`Thread::nice`]'s field.
+    pub(crate) fn nice(&self) -> i32 {
+        self.nice.load(Ordering::Relaxed)
+    }
+
+    /// Set its nice value. The caller has clamped it to -20..=19, and gives
+    /// its task the weight it means.
+    pub(crate) fn set_nice(&self, nice: i32) {
+        self.nice.store(nice, Ordering::Relaxed);
     }
 
     /// The name set for it, if one was: see [`Thread::name`]'s field.

@@ -1,6 +1,7 @@
-//! What a process has said about itself: its nice value, its I/O
-//! priority, its personality, its robust futex list, and the switches `prctl`
-//! flips. The nice value is acted on; the rest are kept and read back.
+//! What a process and its threads have said about themselves: a thread's
+//! nice value, the process's I/O priority, its personality, its robust futex
+//! list, and the switches `prctl` flips. The nice value is acted on; the rest
+//! are kept and read back.
 //!
 //! # Why the ones that are not acted on are kept
 //!
@@ -33,7 +34,7 @@
 //!
 //! * **An entry is keyed by pid *and* start time.** Pids are reused, and a new
 //!   process that happened to get a dead one's number must not inherit its
-//!   nice value. A lookup whose start time does not match is a fresh process.
+//!   limits or switches. A lookup whose start time does not match is a fresh process.
 //!   Entries for processes that have gone are pruned when a new one is added,
 //!   so the table is as long as the number of processes that have changed
 //!   something, not the number that ever lived.
@@ -58,6 +59,16 @@
 //! A name is a thread's, not the process's, as on Linux: `PR_SET_NAME` names
 //! the calling thread and is kept on it (`syscall::thread::Thread`), and
 //! [`name_of_thread`] and [`name_of`] read it back.
+//!
+//! So is a nice value. `setpriority(PRIO_PROCESS, who, ..)` names one
+//! thread: the caller for zero, otherwise the thread whose id `who` is, a
+//! process's first thread for its pid. `PRIO_PGRP` and `PRIO_USER` name every
+//! thread of the processes they match, as Linux's `do_each_pid_thread` and
+//! `for_each_process_thread` walk them. A thread made by `clone` starts with
+//! its creator's value (`Thread::sibling_numbered`). Mesa's disk-cache
+//! threads lower themselves to 19 by their thread id; while the value was the
+//! process's, that put every thread of the program at 19 beside programs at
+//! 0 -- a game's renderer included.
 
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -104,8 +115,6 @@ pub(crate) struct Attributes {
     pub(crate) no_new_privs: bool,
     /// `PR_SET_CHILD_SUBREAPER`.
     pub(crate) child_subreaper: bool,
-    /// The nice value, -20 to 19.
-    pub(crate) nice: i32,
     /// `ioprio_set`'s value, if one was set.
     pub(crate) io_priority: Option<u32>,
     /// The execution domain `personality` reports.
@@ -121,7 +130,6 @@ impl Default for Attributes {
             dumpable: true,
             no_new_privs: false,
             child_subreaper: false,
-            nice: 0,
             io_priority: None,
             personality: 0,
             limits: [None; RLIM_NLIMITS],
@@ -738,7 +746,35 @@ fn named_by(process: &Process, which: i32, who: i32) -> Result<Vec<Subject<'_>>,
     }
 }
 
-/// `getpriority`: the best nice value among the processes named, encoded as
+/// The threads `getpriority` and `setpriority` act on, as Linux's
+/// `kernel/sys.c` finds them: for `PRIO_PROCESS` one thread -- the caller
+/// for 0, else the thread whose id `who` is, which for a pid is that
+/// process's first thread -- and for `PRIO_PGRP` and `PRIO_USER` every thread
+/// of every process [`named_by`] names.
+///
+/// # Errors
+///
+/// As [`named_by`]. An empty answer is the caller's to turn into `ESRCH`.
+fn threads_named_by(
+    process: &Process,
+    which: i32,
+    who: i32,
+) -> Result<Vec<Arc<crate::syscall::thread::Thread>>, Errno> {
+    if which == PRIO_PROCESS {
+        let thread = if who == 0 {
+            named_thread(process)
+        } else {
+            robust_list_subject(process, who).ok()
+        };
+        return Ok(thread.into_iter().collect());
+    }
+    Ok(named_by(process, which, who)?
+        .iter()
+        .flat_map(|subject| subject.threads())
+        .collect())
+}
+
+/// `getpriority`: the best nice value among the threads named, encoded as
 /// the system call encodes it.
 ///
 /// **Not the nice value.** The system call returns `20 - nice`, from 1 to 40,
@@ -746,19 +782,19 @@ fn named_by(process: &Process, which: i32, who: i32) -> Result<Vec<Subject<'_>>,
 /// the libc wrapper turns it back. A handler returning the nice value would
 /// make every process look like it was running at nice 20.
 pub(crate) fn sys_getpriority(process: &Process, which: i32, who: i32) -> Result<usize, Errno> {
-    named_by(process, which, who)?
+    threads_named_by(process, which, who)?
         .iter()
-        .map(|subject| 20 - get(subject).nice)
+        .map(|thread| 20 - thread.nice())
         .max()
         .and_then(|best| usize::try_from(best).ok())
         .ok_or(Errno::ESRCH)
 }
 
 /// `setpriority`: store a nice value, clamped to -20..=19 as Linux clamps it,
-/// on every process named, and give every task of each the weight it means.
+/// on every thread named, and give each thread's task the weight it means.
 ///
-/// Linux's `set_one_prio` for each: a process the caller does not own is
-/// `EPERM`, and lowering one's nice value without privilege `EACCES`. The
+/// Linux's `set_one_prio` for each: a thread of a process the caller does not
+/// own is `EPERM`, and lowering a nice value without privilege `EACCES`. The
 /// call succeeds if any was set and no later one refused, which is the answer
 /// Linux's loop leaves behind.
 pub(crate) fn sys_setpriority(
@@ -767,21 +803,24 @@ pub(crate) fn sys_setpriority(
     who: i32,
     nice: i32,
 ) -> Result<usize, Errno> {
-    let named = named_by(process, which, who)?;
+    let named = threads_named_by(process, which, who)?;
     let nice = nice.clamp(-20, 19);
     let mut answer = Err(Errno::ESRCH);
-    for subject in &named {
-        if !credentials::same_owner(process, subject) {
+    for thread in &named {
+        if !credentials::same_owner(process, thread.process()) {
             answer = Err(Errno::EPERM);
             continue;
         }
-        if nice < get(subject).nice && credentials::require_privilege(process).is_err() {
+        if nice < thread.nice() && credentials::require_privilege(process).is_err() {
             answer = Err(Errno::EACCES);
             continue;
         }
-        update(subject, |a| a.nice = nice);
-        for task in subject.tasks() {
-            apply_nice(subject, &task);
+        thread.set_nice(nice);
+        // The value read back after the store, not this call's: of two
+        // calls racing on one thread, the weight applied last is then the
+        // value stored last.
+        if let Some(task) = task_of(thread) {
+            apply_nice(thread.nice(), &task);
         }
         if answer == Err(Errno::ESRCH) {
             answer = Ok(0);
@@ -790,17 +829,20 @@ pub(crate) fn sys_setpriority(
     answer
 }
 
-/// Give `task` the scheduling weight `process`'s nice value means.
-///
-/// One task and not all of them, because the two callers have different ones
-/// in hand: `setpriority` has every task the process has now, and a thread
-/// starting has only itself, before anything else can see it.
+/// The task that runs `thread`, if it is still alive.
+fn task_of(thread: &crate::syscall::thread::Thread) -> Option<Arc<Task>> {
+    thread.process().tasks().into_iter().find(|task| {
+        crate::syscall::thread::of_task(task).is_some_and(|runs| core::ptr::eq(runs, thread))
+    })
+}
+
+/// Give `task` the scheduling weight nice value `nice` means.
 ///
 /// A nice value outside Linux's table has no weight and is left alone, which
-/// cannot happen from here -- both callers read a value already clamped to
+/// cannot happen from here -- both callers pass a value already clamped to
 /// -20..=19 -- and is not worth a panic if it ever does.
-pub(crate) fn apply_nice(process: &Process, task: &Arc<Task>) {
-    if let Some(weight) = weight_of_nice(get(process).nice) {
+pub(crate) fn apply_nice(nice: i32, task: &Arc<Task>) {
+    if let Some(weight) = weight_of_nice(nice) {
         crate::sched::set_weight(task, weight);
     }
 }
@@ -823,13 +865,15 @@ fn io_class(ioprio: u32) -> u32 {
 
 /// A process's I/O priority as Linux's `__get_task_ioprio` computes it: the
 /// one set, unless it is class `NONE`, in which case best-effort at a level
-/// derived from the nice value.
+/// derived from the nice value: its first thread's, the task a pid names.
 fn io_priority_of(process: &Process) -> u32 {
-    let attributes = get(process);
-    match attributes.io_priority {
+    match get(process).io_priority {
         Some(ioprio) if io_class(ioprio) != IOPRIO_CLASS_NONE => ioprio,
         _ => {
-            let level = u32::try_from((attributes.nice + 20) / 5).unwrap_or(0);
+            let nice = process
+                .thread_by_tid(process.pid())
+                .map_or(0, |thread| thread.nice());
+            let level = u32::try_from((nice + 20) / 5).unwrap_or(0);
             (IOPRIO_CLASS_BE << IOPRIO_CLASS_SHIFT) | level
         }
     }

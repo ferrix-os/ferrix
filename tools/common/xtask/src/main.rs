@@ -177,6 +177,7 @@ mod sem;
 mod serial;
 mod session;
 mod sha256;
+mod shader_cache;
 mod shell;
 mod shm;
 mod slot_image;
@@ -564,6 +565,7 @@ const TASKS: &[&[Task]] = &[
     seat::TASKS,
     sem::TASKS,
     serial::TASKS,
+    shader_cache::TASKS,
     slot_image::TASKS,
     steamcmd::TASKS,
     sysfs::TASKS,

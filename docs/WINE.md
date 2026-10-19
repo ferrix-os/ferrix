@@ -77,6 +77,7 @@ gives it.
 | The desktop boot | `tools/common/xtask/src/compositor/wine.rs` | hyprix, yserver started as the `--everything` desktop starts it, the script, and the input the gate types; also `run-compositor --wine`'s scripts |
 | yserver | the fork `ferrix-os/yserver`, pinned in `tools/common/fetch/fetch-yserver.sh` | the X server; §5 says what Wine needed of it |
 | DXVK | `tools/common/fetch/fetch-dxvk.sh`, `tools/common/xtask/src/dxvk.rs` | DXVK's release and `test-dxvk` (§6) |
+| The shader caches | `tools/common/xtask/src/shader_cache.rs`, `tools/common/test/d3d11-shaders.c`, `tools/common/test/thread-nice.c` | `test-shader-cache` (§6a) |
 | The Unity game | `tools/common/fetch/fetch-unity.sh`, `tools/common/xtask/src/compositor/unity.rs` | Spaceship Demo on its own volume and `test-unity` (§9) |
 
 Wine is fetched, never vendored. The loader is started directly
@@ -347,6 +348,67 @@ The fix is E1.5's (stage 23), with notepad's.
 
 **Where it runs.** On demand, as `test-wine` does, and for the same
 reasons: it attaches a volume, and it never downloads.
+
+## 6a. The shader caches, kept between starts (`test-shader-cache`)
+
+Endfield on the N150 box sat at "Shaders are being compiled" for over an
+hour on 2026-10-18. What a start compiles is worth keeping, and two caches
+keep it, both on by default with no setting in Proton's script:
+
+* **DXVK's** (3.x): the IR it makes of each Direct3D shader, in
+  `<exe hash>.dxvk.bin` and `.dxvk.lut` under `%LOCALAPPDATA%\dxvk`, which in
+  Wine is the prefix's `drive_c/users/steamuser/AppData/Local/dxvk`
+  (`DXVK_SHADER_CACHE_PATH` moves it, `DXVK_SHADER_CACHE=0` turns it off).
+  DXVK 3 has no state cache any more; `DXVK_STATE_CACHE_PATH` does nothing.
+* **Mesa's**, for lavapipe: llvmpipe's compiled LLVM code for each shader
+  variant, in the database `$HOME/.cache/mesa_shader_cache_db` (Mesa 25.0's
+  default; `MESA_SHADER_CACHE_DIR` moves it, `MESA_SHADER_CACHE_MAX_SIZE`
+  caps it at 1 GiB by default). Lavapipe's own NIR work and its
+  `VkPipelineCache` are not kept on disk. The database's `index` file is
+  1,310,728 bytes from the start, so a database of 1.3 MB holds nothing yet.
+
+**The program** (`tools/common/test/d3d11-shaders.c`, built by xtask with
+mingw-w64) compiles 100 pixel shaders that differ in a constant, draws one
+triangle with each, reads a pixel back, and releases everything so that DXVK
+and Mesa close their caches. `MESA_SHADER_CACHE_SHOW_STATS=1` makes Mesa
+print its hits and misses at the end.
+
+**On Linux, for comparison** (nazuna, bubblewrap, the box's DW-Proton
+11.0-14 and the Proton volume's Mesa 25.0.7, 200 shaders): the first run
+drew in 8,317 ms with 214 misses, the second and third in 142 ms with none,
+both caches found. Mesa's database held 3.5 MB.
+
+**The gate** attaches Proton's volume (GE-Proton 11-7, DXVK 3.1, the same
+lavapipe), puts the home and the prefix on it -- btrfs, as the box's home
+is -- and runs the program twice. The first run must miss in Mesa's cache
+and create DXVK's file; the second must find DXVK's file, miss nothing and
+draw the same pixel. On 2026-10-19 under KVM: 6,057 ms cold, 645 ms warm,
+106 misses and then 216 hits and none missed. Ferrix's btrfs, `flock`,
+`ftruncate` and Wine's file sharing answered as Linux does; so did two
+programs filling one cache at once, in a trial boot.
+
+**What Ferrix answered wrongly: a thread's nice value.** Mesa lowers its
+disk-cache threads with `setpriority(PRIO_PROCESS, tid, 19)`, which on Linux
+changes that thread alone. Ferrix kept the value per process, so the call
+put every thread of the program at 19, and every thread it started later:
+a game's renderer and DXVK's compilers ran at Linux's lowest weight (15
+against 1,024) beside yserver, the compositor and wineserver. The value is
+now the thread's (`syscall::thread::Thread`, `syscall::attributes`): `who`
+names a thread, `PRIO_PGRP` and `PRIO_USER` every thread of their
+processes, and a `clone` thread starts with its creator's. Before the
+program, the gate runs `tools/common/test/thread-nice.c`, which must print
+Linux's `worker=19 main=0 later=0`; Ferrix before the fix printed
+`worker=19 main=19 later=19`.
+
+**Negative controls**, through `gate.sh control`, each FIRED under KVM on
+2026-10-19 (each a judge's line, not a panic): the kernel's `setpriority`
+made to set every thread of the named thread's process
+(`efc-ctl-nice`: "thread-nice said `worker=19 main=19 later=19`"); Mesa's
+database removed between the runs (`efc-ctl-mesa`: "the second run compiled
+its shaders again", 102 hits and 114 misses); and DXVK's directory removed
+between the runs (`efc-ctl-dxvk`: "did not find DXVK's shader cache").
+
+**Where it runs.** On demand, as `test-dxvk`: it attaches Proton's volume.
 
 ## 7. 32-bit Windows programs (WoW64)
 
