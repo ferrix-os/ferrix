@@ -85,6 +85,16 @@ jobs:
           cargo xtask busybox --arch aarch64
           cargo xtask ports --arch aarch64
 
+      # oh-my-zsh and zsh's functions at their pins, which the desktop
+      # carries beside zinc, so the edition's licence inventory names the
+      # trees it ships (docs/LICENSES.md).
+      - name: Fetch the shell trees
+        run: |
+          eval "$(tools/common/fetch/fetch-shell-trees.sh "$RUNNER_TEMP/shell")"
+          echo "FERRIX_OMZ=$FERRIX_OMZ" >> "$GITHUB_ENV"
+          echo "FERRIX_ZSH_FUNCTIONS=$FERRIX_ZSH_FUNCTIONS" >> "$GITHUB_ENV"
+          echo "FERRIX_SHELL_TREES=$RUNNER_TEMP/shell" >> "$GITHUB_ENV"
+
       - name: Fetch Chromium's volume
         if: matrix.edition == 'full'
         env:
@@ -107,6 +117,13 @@ jobs:
           [ "$EDITION" = minimal ] || volume="--volume $RUNNER_TEMP/chromium/chromium.img"
           python3 tools/vendor/google/pixel7/package-release.py "$EDITION" "$RUNNER_TEMP/desktop" \
             "$RUNNER_TEMP/assets" "$TAG" "$(git rev-parse HEAD)" $volume
+          # The edition's licence inventory, read off its own initramfs; it
+          # fails the job as the desktop's does. Its busybox's source, and the
+          # Chromium volume's package list, are in the sources asset.
+          python3 tools/common/release/licences.py --initrd "$RUNNER_TEMP/desktop/stage/FERRIX/INITRD.IMG" \
+            --out "$RUNNER_TEMP/licences" --tag "$TAG" --title "Pixel 7 desktop, $EDITION edition"
+          cp "$RUNNER_TEMP/licences/THIRD-PARTY-LICENSES.md" \
+            "$RUNNER_TEMP/assets/ferrix-pixel7-$EDITION-THIRD-PARTY-LICENSES.md"
           gh release upload "$TAG" "$RUNNER_TEMP"/assets/* --clobber
 
   # The x86-64 desktop for somebody with QEMU and nothing else: one zip, the
@@ -154,11 +171,24 @@ jobs:
           cargo xtask busybox --arch x86_64
           cargo xtask ports --arch x86_64
 
+      # Fetches the pinned shell trees, builds the image, and writes its
+      # licence inventory, which fails the job when any part of the image has
+      # no licence release-licences.toml allows (docs/LICENSES.md).
       - name: Build and pack the desktop
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
           TAG: ${{ inputs.tag || github.ref_name }}
         run: python3 tools/common/release/package-desktop.py "$RUNNER_TEMP/desktop" --tag "$TAG"
+
+      # The source of every GPL and LGPL program in this release's assets,
+      # the Pixel 7 editions' busybox and Chromium volume included, from the
+      # downloads the build above just checked against their pins.
+      - name: Pack the corresponding sources
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 tools/common/release/package-sources.py "$RUNNER_TEMP/sources" --tag "$TAG" \
+            --fetch --inventory "$RUNNER_TEMP/desktop/licences/licences.json"
 
       - name: Attach it to the release
         env:
@@ -167,4 +197,6 @@ jobs:
         run: |
           gh release upload "$TAG" --clobber \
             "$RUNNER_TEMP/desktop/ferrix-x86_64-desktop.zip" \
-            "$RUNNER_TEMP/desktop/ferrix-x86_64-desktop.zip.sha256"
+            "$RUNNER_TEMP/desktop/ferrix-x86_64-desktop.zip.sha256" \
+            "$RUNNER_TEMP/desktop/ferrix-$TAG-THIRD-PARTY-LICENSES.md" \
+            "$RUNNER_TEMP/sources/ferrix-$TAG-sources.tar.gz"

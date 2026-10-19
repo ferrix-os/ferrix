@@ -10,7 +10,8 @@ its notes, and attaches the Pixel 7 app's desktop in its two editions, which
 the app updates the phone from ([tools/vendor/google/pixel7/README.md](../tools/vendor/google/pixel7/README.md#updates)),
 and the x86-64 desktop for plain QEMU, `ferrix-x86_64-desktop.zip`, which
 [`tools/common/release/package-desktop.py`](../tools/common/release/package-desktop.py)
-builds. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
+builds, with each image's licence inventory and the corresponding sources of
+every GPL and LGPL program in them ([LICENSES.md](LICENSES.md)). See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
 ## v0.1.0 — 2026-10-18, draft
@@ -53,6 +54,15 @@ each.
   slots with a way back.
 - **Three architectures** in the boot tests, and Ferrix has booted on an
   STM32MP157D-DK1 and a Pixel 7.
+- **Licences and sources:** `ferrix-v0.1.0-THIRD-PARTY-LICENSES.md` (also
+  in the zip) lists every part of the x86-64 image, the licence it is
+  shipped under and every licence text, and each Pixel 7 edition has its own
+  (`ferrix-pixel7-<edition>-THIRD-PARTY-LICENSES.md`). `ferrix-v0.1.0-sources.tar.gz`
+  holds the exact upstream source, build script, patches and config of
+  every GPL and LGPL program in these images -- busybox, git, alsa-utils,
+  alsa-lib -- and of what is linked into one, and the Debian package list
+  of the Pixel 7 Chromium volume with where each package's source is
+  ([docs/LICENSES.md](LICENSES.md)).
 
 Known limits:
 
