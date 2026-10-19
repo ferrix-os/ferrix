@@ -1,6 +1,6 @@
 //! Unix-domain sockets, as the inodes an open file reads and writes through.
 //!
-//! `src/lib/fs/vfs`'s [`SocketBuffer`] is one direction of a socket as values: the
+//! `src/lib/fs/common/vfs`'s [`SocketBuffer`] is one direction of a socket as values: the
 //! queue, the record boundaries, and a write that would wait saying so. This is
 //! the half that waits, in the shape `fs::pipe` gives a pipe. Each direction is
 //! a [`Channel`] -- that buffer behind a lock, with a wait queue for readers and

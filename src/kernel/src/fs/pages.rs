@@ -8,7 +8,7 @@
 //!
 //! The same store is the page cache of a filesystem on a disk. Made over a
 //! [`PageSource`] by [`Storage::allocate_with`], it fills a page from the file
-//! the first time a read reaches it, as `src/lib/fs/vfs`'s `HeapPages` does and its
+//! the first time a read reaches it, as `src/lib/fs/common/vfs`'s `HeapPages` does and its
 //! host tests pin: runs of at most [`MAX_FILL_RUN`] missing pages, frames
 //! allocated and zeroed before the source is called with no lock held, only
 //! the pages still absent kept, and a fill that fails or claims more than it
@@ -68,7 +68,7 @@ use crate::user::vmo::{Filler, Vmo, VmoError};
 /// architectures.
 pub(crate) const MAX_FILE_SIZE: u64 = 1 << 40;
 
-/// The most pages a store asks its source for in one call: the run `src/lib/fs/vfs`'s
+/// The most pages a store asks its source for in one call: the run `src/lib/fs/common/vfs`'s
 /// `HeapPages` asks for, so that a read and a fault ask a filesystem the same
 /// way. A compressed btrfs extent is at most 128 KiB, which is 32 pages.
 pub(crate) const MAX_FILL_RUN: usize = 32;

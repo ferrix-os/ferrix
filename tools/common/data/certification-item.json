@@ -421,7 +421,7 @@
     "members": {
       "ferrix-btrfs": {
         "ring": "item",
-        "path": "src/lib/fs/btrfs",
+        "path": "src/lib/fs/btrfs/format",
         "in_ring0_when": [
           "fs=kernel"
         ],
@@ -430,7 +430,7 @@
       },
       "ferrix-btrfs-write": {
         "ring": "item",
-        "path": "src/lib/fs/btrfs-write",
+        "path": "src/lib/fs/btrfs/write",
         "in_ring0_when": [
           "fs=kernel"
         ],
@@ -445,7 +445,7 @@
       },
       "ferrix-btrfs-vfs": {
         "ring": "load",
-        "path": "src/lib/fs/btrfs-vfs",
+        "path": "src/lib/fs/btrfs/vfs",
         "in_ring0_when": [
           "fs=kernel"
         ],

@@ -28,15 +28,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::paths::{self, Arch};
 use crate::{Error, Result};
 
-/// The packed fixture, as `src/lib/fs/btrfs`'s tests read it.
-const PACKED: &[u8] = include_bytes!("../../../../src/lib/fs/btrfs/testdata/none.img.packed");
+/// The packed fixture, as `src/lib/fs/btrfs/format`'s tests read it.
+const PACKED: &[u8] =
+    include_bytes!("../../../../src/lib/fs/btrfs/format/testdata/none.img.packed");
 
 /// The blank fixture: an empty volume with `mkfs.btrfs`'s default profiles
 /// and features, which stage 12's check writes on.
-const BLANK: &[u8] = include_bytes!("../../../../src/lib/fs/btrfs/testdata/blank.img.packed");
+const BLANK: &[u8] =
+    include_bytes!("../../../../src/lib/fs/btrfs/format/testdata/blank.img.packed");
 
 /// The same empty volume at [`ROOT_SIZE`]: the root disk starts from it.
-const ROOT: &[u8] = include_bytes!("../../../../src/lib/fs/btrfs/testdata/root.img.packed");
+const ROOT: &[u8] = include_bytes!("../../../../src/lib/fs/btrfs/format/testdata/root.img.packed");
 
 /// How big the root disk is: the system is tens of megabytes, and btrfs
 /// keeps two copies of its metadata.
@@ -142,7 +144,7 @@ pub(crate) fn home_copy(arch: Arch, name: &str) -> Result<PathBuf> {
 
 /// The packed home fixture: an empty volume labelled `ferrix-home`, which
 /// the kernel mounts at `/home`.
-const HOME: &[u8] = include_bytes!("../../../../src/lib/fs/btrfs/testdata/home.img.packed");
+const HOME: &[u8] = include_bytes!("../../../../src/lib/fs/btrfs/format/testdata/home.img.packed");
 
 /// The home image's size: what `mkfs.btrfs` made the fixture at.
 const HOME_SIZE: u64 = 8 * 1024 * 1024 * 1024;
@@ -253,7 +255,7 @@ pub(crate) fn blank_path(arch: Arch) -> PathBuf {
 /// The writable image, in one line, for a command that attaches it.
 pub(crate) fn describe_blank() -> String {
     format!(
-        "a fresh empty volume from src/lib/fs/btrfs/testdata/blank.img.packed, {} non-zero blocks of \
+        "a fresh empty volume from src/lib/fs/btrfs/format/testdata/blank.img.packed, {} non-zero blocks of \
          {BLOCK} bytes in a {} MiB image made by mkfs.btrfs with its default profiles",
         BLANK.len() / RECORD,
         IMAGE_SIZE / (1024 * 1024),
@@ -264,7 +266,7 @@ pub(crate) fn describe_blank() -> String {
 /// disk.
 pub(crate) fn describe() -> String {
     format!(
-        "the none fixture from src/lib/fs/btrfs/testdata, {} non-zero blocks of {BLOCK} bytes in a \
+        "the none fixture from src/lib/fs/btrfs/format/testdata, {} non-zero blocks of {BLOCK} bytes in a \
          {} MiB image made by mkfs.btrfs",
         PACKED.len() / RECORD,
         IMAGE_SIZE / (1024 * 1024),

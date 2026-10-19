@@ -1444,9 +1444,9 @@ pub(crate) static STAGE11_MOUNT: Explanation = Explanation {
          driver's request layout and the pin's device addresses through the ring's data copy \
          to the volume reader and the page source, or the fixture and the manifest disagree.",
         "A directory or a link is missing or of the wrong kind: lookup, readdir or readlink \
-         in src/lib/fs/btrfs-vfs changed what it answers.",
+         in src/lib/fs/btrfs/vfs changed what it answers.",
     ],
-    see: "src/kernel/src/fs/btrfs_check.rs; src/kernel/src/fs/btrfs.rs; src/lib/fs/btrfs-vfs; \
+    see: "src/kernel/src/fs/btrfs_check.rs; src/kernel/src/fs/btrfs.rs; src/lib/fs/btrfs/vfs; \
           tools/common/xtask/src/btrfs_disk.rs; docs/ROADMAP.md stage 11",
 };
 
@@ -1526,10 +1526,10 @@ pub(crate) static STAGE13_CGROUPFS: Explanation = Explanation {
          did not fire one on an empty job at once, or `Job::signals` does not report EMPTY; or \
          `job_for_cgroup` in src/kernel/src/syscall/native.rs judged the rights by someone other \
          than the caller, or `cgroupfs::directory_job` did not recognise a cgroup directory.",
-        "A write's text is parsed differently from Linux's: src/lib/fs/cgroupfs, whose host tests \
+        "A write's text is parsed differently from Linux's: src/lib/fs/common/cgroupfs, whose host tests \
          pin each parse.",
     ],
-    see: "src/kernel/src/fs/cgroupfs.rs; src/kernel/src/object/job.rs; src/lib/fs/cgroupfs; \
+    see: "src/kernel/src/fs/cgroupfs.rs; src/kernel/src/object/job.rs; src/lib/fs/common/cgroupfs; \
           docs/CGROUPS.md",
 };
 
@@ -1690,12 +1690,12 @@ pub(crate) static SYSFS: Explanation = Explanation {
         "A directory lists a name its lookup does not find, or the other way round: \
          `entries` in src/kernel/src/fs/sysfs.rs and a core's list disagree.",
         "A link's target is spelt wrongly: `path_of` and the directories disagree about where \
-         something is, or src/lib/fs/sysfs's `path::relative` climbs to the wrong ancestor.",
+         something is, or src/lib/fs/common/sysfs's `path::relative` climbs to the wrong ancestor.",
         "A core stopped recording the device node its driver serves (`Origin` in devfs, \
          `net_ring::node_of`, `Card::node`), so a device is shown in the wrong directory.",
-        "A format in src/lib/fs/sysfs changed; its host tests pin each against Linux's.",
+        "A format in src/lib/fs/common/sysfs changed; its host tests pin each against Linux's.",
     ],
-    see: "src/kernel/src/fs/sysfs.rs; src/kernel/src/fs/sysfs/check.rs; src/lib/fs/sysfs; docs/SYSFS.md",
+    see: "src/kernel/src/fs/sysfs.rs; src/kernel/src/fs/sysfs/check.rs; src/lib/fs/common/sysfs; docs/SYSFS.md",
 };
 
 /// For `check_btrfs_write` in `main.rs`, when `fs::btrfs_write_check::run`
@@ -1715,7 +1715,7 @@ pub(crate) static STAGE12_WRITE: Explanation = Explanation {
               again — replaying any log the kill left — and every file whose trailer says its \
               body was made durable is checked against that trailer.",
     causes: &[
-        "The mount failed: the disk takes no writes, or the volume is one src/lib/fs/btrfs-write will \
+        "The mount failed: the disk takes no writes, or the volume is one src/lib/fs/btrfs/write will \
          not maintain (a subvolume, quotas), which is EROFS, or a log left by a crash would not \
          replay.",
         "A file read back short or with the wrong CRC-32C: the write path put an extent, a \
@@ -1726,15 +1726,15 @@ pub(crate) static STAGE12_WRITE: Explanation = Explanation {
         "Something removed is still there, or something renamed is not: the directory items, \
          the back-references or the orphan bookkeeping disagree.",
         "Filling the volume ended in something other than ENOSPC, or left it unable to sync \
-         or take a new file: src/lib/fs/btrfs-vfs's reservation (rw.rs, \"Room is taken at the \
+         or take a new file: src/lib/fs/btrfs/vfs's reservation (rw.rs, \"Room is taken at the \
          write\") promised room the writeback did not find, or an allocation that ran out \
          aborted the transaction instead of answering ENOSPC before it changed anything.",
         "After a power failure, a file's bytes are not the ones its trailer promised: a log \
          or a commit that completed was rolled back, or replay put older extents under newer \
-         stat data. src/lib/fs/btrfs-write's powerfail tests reproduce this on the host, faster.",
+         stat data. src/lib/fs/btrfs/write's powerfail tests reproduce this on the host, faster.",
     ],
     see: "src/kernel/src/fs/btrfs_write_check.rs; src/kernel/src/fs/btrfs_powerfail.rs; \
-          src/kernel/src/fs/btrfs.rs; src/lib/fs/btrfs-vfs rw; src/lib/fs/btrfs-write; tools/common/xtask/src/btrfs_disk.rs; \
+          src/kernel/src/fs/btrfs.rs; src/lib/fs/btrfs/vfs rw; src/lib/fs/btrfs/write; tools/common/xtask/src/btrfs_disk.rs; \
           tools/common/xtask/src/powerfail.rs; docs/ROADMAP.md stage 12",
 };
 
@@ -2285,14 +2285,14 @@ pub(crate) static STAGE8_PATH_CALLS: Explanation = Explanation {
          `src/lib/proto/linux-abi` moved a field.",
         "An arm of `syscall::path::dispatch` reads its arguments in the wrong order or at the \
          wrong width.",
-        "The namespace in `src/lib/fs/vfs` changed what a walk, a rename or a directory cursor does.",
+        "The namespace in `src/lib/fs/common/vfs` changed what a walk, a rename or a directory cursor does.",
         "/tmp is not mounted, or a previous run left /tmp/pathcheck behind.",
         "`fs::devfs::attach_device` is not called from `openat`, or `devfs::open_char_device` \
          matches numbers in a different encoding from the one `mknodat` stores.",
     ],
     see: "src/kernel/src/syscall/check.rs run_paths; src/kernel/src/syscall/path.rs; \
           src/kernel/src/fs/devfs.rs; \
-          src/kernel/src/syscall/stat.rs; src/lib/fs/vfs; docs/ROADMAP.md stage 8",
+          src/kernel/src/syscall/stat.rs; src/lib/fs/common/vfs; docs/ROADMAP.md stage 8",
 };
 
 /// For `check_native_objects` in `stages_check.rs`, when `object::check::run` fails.
@@ -2398,14 +2398,14 @@ pub(crate) static STAGE8_ROOT: Explanation = Explanation {
               reserved as `Initrd`.",
     causes: &[
         "The archive is malformed or truncated: `tools/common/xtask/src/initramfs.rs` wrote something the \
-         newc reader in `src/lib/fs/cpio` refuses, or the loader read less of FERRIX/INITRD.IMG \
+         newc reader in `src/lib/fs/common/cpio` refuses, or the loader read less of FERRIX/INITRD.IMG \
          than it reported.",
         "The loader placed the archive outside the direct map, which it is meant to refuse \
          before the hand-off.",
         "An entry could not be created: tmpfs refused it, or memory for file contents ran \
          out.",
     ],
-    see: "src/kernel/src/fs/mod.rs init; src/lib/fs/vfs/src/initramfs.rs; tools/common/xtask/src/initramfs.rs; \
+    see: "src/kernel/src/fs/mod.rs init; src/lib/fs/common/vfs/src/initramfs.rs; tools/common/xtask/src/initramfs.rs; \
           src/boot/common/uefi/src/main.rs load_initrd; docs/ROADMAP.md stage 8",
 };
 
@@ -2428,7 +2428,7 @@ pub(crate) static STAGE8_FILESYSTEM: Explanation = Explanation {
          show up as leaked frames.",
     ],
     see: "src/kernel/src/fs/check.rs run; src/kernel/src/fs/pages.rs; src/kernel/src/user/vmo.rs \
-          decommit_from; src/lib/fs/vfs/src/namespace.rs; docs/ROADMAP.md stage 8",
+          decommit_from; src/lib/fs/common/vfs/src/namespace.rs; docs/ROADMAP.md stage 8",
 };
 
 /// For `standard_streams` in `syscall/fd.rs`, when a new process cannot be
@@ -2451,7 +2451,7 @@ pub(crate) static CONSOLE_DESCRIPTORS: Explanation = Explanation {
          so installing them failed with EMFILE.",
     ],
     see: "src/kernel/src/syscall/fd.rs standard_streams; src/kernel/src/fs/console.rs open_console; \
-          src/lib/fs/vfs/src/fd.rs; docs/ROADMAP.md stage 8",
+          src/lib/fs/common/vfs/src/fd.rs; docs/ROADMAP.md stage 8",
 };
 
 /// For `check_filesystems` in `main.rs`, when `/dev` or `/proc` fails its check.
@@ -2501,7 +2501,7 @@ pub(crate) static STAGE8_PSEUDO_FILESYSTEMS: Explanation = Explanation {
          running.",
     ],
     see: "src/kernel/src/fs/procfs/check.rs run; src/kernel/src/fs/procfs.rs; src/kernel/src/fs/devfs.rs; \
-          src/kernel/src/fs/devfs/check.rs; src/kernel/src/fs/block.rs; src/lib/fs/procfs/src/maps.rs; src/lib/fs/procfs/src/kstat.rs; src/kernel/src/fs/procfs/render.rs state_of; \
+          src/kernel/src/fs/devfs/check.rs; src/kernel/src/fs/block.rs; src/lib/fs/common/procfs/src/maps.rs; src/lib/fs/common/procfs/src/kstat.rs; src/kernel/src/fs/procfs/render.rs state_of; \
           src/kernel/src/sched/queue.rs time_spent; docs/ROADMAP.md stage 8",
 };
 
@@ -2557,7 +2557,7 @@ pub(crate) static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
          of file and the pipe outlives its descriptors as leaked frames.",
         "`attach_fifo` is not called from `openat`, or keys its table by something two opens \
          of one FIFO do not share, so each opener gets a pipe of its own.",
-        "A `statfs` layout in `src/lib/proto/linux-abi` or its encoder in `src/lib/fs/vfs/src/statfs.rs` \
+        "A `statfs` layout in `src/lib/proto/linux-abi` or its encoder in `src/lib/fs/common/vfs/src/statfs.rs` \
          moved a field, so the magic number is not where a program reads it.",
         "tmpfs's `grow_to` shrinks a file, or `sendfile` stopped putting its offset back.",
         "`splice` or `copy_file_range` in `src/kernel/src/syscall/pipe.rs` moved the wrong bytes \
@@ -2568,7 +2568,7 @@ pub(crate) static STAGE8_PIPES_AND_FILESYSTEM_CALLS: Explanation = Explanation {
          it.",
     ],
     see: "src/kernel/src/fs/check.rs run_calls; src/kernel/src/fs/pipe.rs; src/kernel/src/syscall/pipe.rs; \
-          src/kernel/src/syscall/fsctl.rs; src/lib/fs/vfs/src/pipe.rs; src/lib/fs/vfs/src/statfs.rs; \
+          src/kernel/src/syscall/fsctl.rs; src/lib/fs/common/vfs/src/pipe.rs; src/lib/fs/common/vfs/src/statfs.rs; \
           docs/ROADMAP.md stage 8",
 };
 
@@ -2607,7 +2607,7 @@ pub(crate) static STAGE8_MEMFD: Explanation = Explanation {
     ],
     see: "src/kernel/src/fs/memfd_check.rs; src/kernel/src/syscall/memfd.rs; src/kernel/src/syscall/fd.rs \
           sys_fcntl; src/kernel/src/syscall/memory.rs map_file; src/kernel/src/user/space.rs map_file, \
-          protect; src/lib/fs/vfs/src/tmpfs.rs add_seals, set_attributes; \
+          protect; src/lib/fs/common/vfs/src/tmpfs.rs add_seals, set_attributes; \
           src/kernel/src/syscall/pidns.rs memfd_noexec",
 };
 
@@ -2649,7 +2649,7 @@ pub(crate) static STAGE8_EPOLL: Explanation = Explanation {
         "`sys_epoll_ctl` or the wait checks in a different order from Linux's.",
     ],
     see: "src/kernel/src/fs/epoll_check.rs; src/kernel/src/fs/epoll.rs; src/kernel/src/fs/anon.rs; \
-          src/kernel/src/syscall/epoll.rs; src/kernel/src/sched/wait.rs; src/lib/fs/vfs/src/node.rs \
+          src/kernel/src/syscall/epoll.rs; src/kernel/src/sched/wait.rs; src/lib/fs/common/vfs/src/node.rs \
           poll_changes",
 };
 
@@ -2683,7 +2683,7 @@ pub(crate) static STAGE8_MOUNT_FLAGS: Explanation = Explanation {
          `/proc/<pid>/fd` does, or `MountFlags::options` misorders the options.",
     ],
     see: "src/kernel/src/fs/mount_check.rs; src/kernel/src/syscall/fsctl.rs; \
-          src/lib/fs/vfs/src/namespace.rs; src/kernel/src/fs/procfs/render.rs",
+          src/lib/fs/common/vfs/src/namespace.rs; src/kernel/src/fs/procfs/render.rs",
 };
 
 /// For `check_binds` in `stages_check.rs`, when `fs::bind_check::run` fails.
@@ -2716,7 +2716,7 @@ pub(crate) static STAGE8_BINDS: Explanation = Explanation {
          Linux's `path_mount`.",
     ],
     see: "src/kernel/src/fs/bind_check.rs; src/kernel/src/syscall/fsctl.rs; \
-          src/lib/fs/vfs/src/namespace.rs",
+          src/lib/fs/common/vfs/src/namespace.rs",
 };
 
 /// For `check_namespaces` in `stages_check.rs`, when
@@ -2757,7 +2757,7 @@ pub(crate) static STAGE13_MOUNT_NAMESPACES: Explanation = Explanation {
     ],
     see: "src/kernel/src/fs/namespace_check.rs; src/kernel/src/syscall/namespace.rs; \
           src/kernel/src/syscall/fsctl.rs; src/kernel/src/syscall/launch.rs; \
-          src/lib/fs/vfs/src/namespace.rs",
+          src/lib/fs/common/vfs/src/namespace.rs",
 };
 
 /// For `check_user_namespaces` in `stages_check.rs`, when
@@ -3116,7 +3116,7 @@ pub(crate) static STAGE8_PROGRAM_FILES: Explanation = Explanation {
          is followed as text to a name that is gone.",
     ],
     see: "src/kernel/src/fs/exec_check.rs; src/kernel/src/syscall/load.rs; src/kernel/src/syscall/program.rs; \
-          src/kernel/src/syscall/exec.rs; src/kernel/src/fs/procfs.rs; src/lib/fs/vfs/src/walk.rs; \
+          src/kernel/src/syscall/exec.rs; src/kernel/src/fs/procfs.rs; src/lib/fs/common/vfs/src/walk.rs; \
           docs/CHROME.md",
 };
 

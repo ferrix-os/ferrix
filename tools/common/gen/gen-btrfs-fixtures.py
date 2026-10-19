@@ -73,7 +73,7 @@ import subprocess
 import sys
 import tempfile
 
-OUTPUT = pathlib.Path("src/lib/fs/btrfs/testdata")
+OUTPUT = pathlib.Path("src/lib/fs/btrfs/format/testdata")
 VARIANTS = ("none", "zlib", "lzo", "zstd")
 DEFAULT_SUBVOL = "default-subvol"
 BLANK = "blank"

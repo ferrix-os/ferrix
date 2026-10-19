@@ -20,7 +20,7 @@ use super::{BLANK, MemDevice, POPULATED, Rng, check};
 use crate::{NewInode, WriteVolume};
 
 /// The zstd fixture: the populated tree with compressed extents.
-const ZSTD: &[u8] = include_bytes!("../../../btrfs/testdata/zstd.img.packed");
+const ZSTD: &[u8] = include_bytes!("../../../format/testdata/zstd.img.packed");
 
 const ROOT: u64 = 256;
 const NOW: Timespec = Timespec {

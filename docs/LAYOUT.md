@@ -81,7 +81,7 @@ kernel or a loader. Each crate sits in exactly one group:
 | `src/lib/proto/` | The interfaces between components: the ABIs the kernel offers, the rings and control protocols it shares with ring-3 drivers, the loader hand-off | `linux-abi` `native-abi` `native` `bootinfo` `devmgr-proto` `drvupdate-proto` `blkring` `netring` `displayctl` `renderctl` `inputctl` `sndctl` `logctl` `auth-proto` `pkg` |
 | `src/lib/kernel/` | Kernel-internal cores: memory, scheduling, synchronisation, objects, randomness, the process stack image, the vDSO, the panic screen | `frame` `heap` `kmem` `paging` `vma` `sched` `sync` `objects` `fallible` `crng` `seccomp` `ustack` `vdso` `qr` `fbtext` |
 | `src/lib/platform/` | Parsers for what firmware and the boot medium hand over, and which of the two descriptions a machine is read by | `acpi` `fdt` `description` `pci` `elf` |
-| `src/lib/fs/` | Storage and filesystems, including the text of the pseudo-filesystems | `vfs` `block` `btrfs` `btrfs-vfs` `btrfs-write` `cpio` `procfs` `sysfs` `cgroupfs` |
+| `src/lib/fs/` | Storage and filesystems, including the text of the pseudo-filesystems, grouped: one directory per on-disk filesystem, and `common/` for what serves them all (see below) | `btrfs/` `common/` |
 | `src/lib/network/` | The network stack | `net` `netwire` `nettcp` `netlink` |
 | `src/lib/drivers/` | Device logic over an abstract transport, and the serve loops ring-3 drivers run, grouped by function (see below) | `virtio` and one directory per function |
 | `src/lib/init/` | The service manager's pure core, the restart policy it shares with `devmgr`, and its wire formats | `svc` `restart` `svc-proto` |
@@ -106,6 +106,17 @@ every virtio driver shares.
 
 `display/` puts pixels on a screen (`displayctl`), `gpu/` renders
 (`renderctl`), as the protocols split them.
+
+**Filesystems by format.** Each on-disk filesystem has a directory of its
+own under `src/lib/fs/`, holding one crate per part, so a filesystem added
+later (ext4, NTFS) sits beside btrfs with the same parts. What is not one
+format's is in `common/`. The crates keep their names (`ferrix-btrfs`,
+`ferrix-vfs`, ...); only the directories group them.
+
+| Directory | Crates |
+|---|---|
+| `btrfs/` | `format` (the on-disk format and the read path, `ferrix-btrfs`, and the test images in its `testdata/`), `write` (`ferrix-btrfs-write`), `vfs` (`ferrix-btrfs-vfs`, mounted into the VFS), `mkfs` (`ferrix-btrfs-mkfs`) |
+| `common/` | `vfs`, `block` (the block core), `partition`, `cpio`, and the text of the pseudo-filesystems: `procfs`, `sysfs`, `cgroupfs` |
 
 **Choosing a group for a new lib.** Ask what the crate *is*, not who uses it
 first. A format two components agree on is `proto`, even if only the kernel
@@ -167,7 +178,7 @@ app: `cargo xtask apps` lists them. `docs/APPS.md` is the design.
 | `src/tests/threads/` | Stage 7's threads exit test: a static musl program using `std::thread`. |
 | `src/tests/sem/`, `src/tests/shm/`, `src/tests/procfs/`, `src/tests/container/` | Static programs `test-sem`, `test-shm`, `test-procfs` and `test-container` run inside Ferrix. |
 
-A crate's own tests and test data stay beside it (`src/lib/fs/btrfs/testdata/`,
+A crate's own tests and test data stay beside it (`src/lib/fs/btrfs/format/testdata/`,
 `src/user/system/linux/compositor/render/tests/data/`). `src/tests/` is for programs
 that exercise the system from outside any one crate.
 

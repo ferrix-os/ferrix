@@ -32,16 +32,19 @@ const IMAGE_SIZE: u64 = 128 * 1024 * 1024;
 const IMAGES: [(&str, &[u8]); 4] = [
     (
         "none",
-        include_bytes!("../../btrfs/testdata/none.img.packed"),
+        include_bytes!("../../format/testdata/none.img.packed"),
     ),
     (
         "zlib",
-        include_bytes!("../../btrfs/testdata/zlib.img.packed"),
+        include_bytes!("../../format/testdata/zlib.img.packed"),
     ),
-    ("lzo", include_bytes!("../../btrfs/testdata/lzo.img.packed")),
+    (
+        "lzo",
+        include_bytes!("../../format/testdata/lzo.img.packed"),
+    ),
     (
         "zstd",
-        include_bytes!("../../btrfs/testdata/zstd.img.packed"),
+        include_bytes!("../../format/testdata/zstd.img.packed"),
     ),
 ];
 
@@ -99,7 +102,7 @@ struct Expected {
 }
 
 fn manifest() -> BTreeMap<Vec<u8>, Expected> {
-    include_str!("../../btrfs/testdata/manifest.txt")
+    include_str!("../../format/testdata/manifest.txt")
         .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
         .map(|line| {
@@ -382,7 +385,7 @@ fn statfs_reports_btrfs_and_the_volume_size() {
 
 #[test]
 fn the_mount_shows_the_default_subvolume_not_the_top_level_tree() {
-    let packed = include_bytes!("../../btrfs/testdata/default-subvol.img.packed");
+    let packed = include_bytes!("../../format/testdata/default-subvol.img.packed");
     let fs = Btrfs::mount(Image::new(packed), 42, heap()).unwrap();
     assert_eq!(
         read_all(&resolve(&fs, b"marker")),

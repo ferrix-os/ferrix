@@ -2,7 +2,7 @@
 //! driver could produce between them.
 //!
 //! From stage 11 every read a filesystem makes and every write it commits
-//! passes through `src/lib/fs/block` in ring 0, and the order of submissions,
+//! passes through `src/lib/fs/common/block` in ring 0, and the order of submissions,
 //! completions, failures and plugs is decided by everything running at once.
 //! The queue's bugs are not crashes. They are a request answered twice or
 //! never, a merged command whose range is not its parts', or a superblock

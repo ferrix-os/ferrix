@@ -29,9 +29,9 @@ use crate::rw::RwBtrfs;
 
 /// An empty volume with `mkfs.btrfs`'s defaults, which the write path starts
 /// from.
-const BLANK: &[u8] = include_bytes!("../../../btrfs/testdata/blank.img.packed");
+const BLANK: &[u8] = include_bytes!("../../../format/testdata/blank.img.packed");
 /// A volume whose default subvolume is not the top-level tree: not writable.
-const SUBVOL: &[u8] = include_bytes!("../../../btrfs/testdata/default-subvol.img.packed");
+const SUBVOL: &[u8] = include_bytes!("../../../format/testdata/default-subvol.img.packed");
 
 /// A packed image in memory that can be written to, shared by every clone,
 /// as one disk is.

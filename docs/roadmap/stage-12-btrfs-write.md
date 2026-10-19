@@ -8,7 +8,7 @@ tree, and log-tree replay.
 finds nothing. Then the power-fail test — kill QEMU at a random point inside a
 transaction, remount, replay, `btrfs check` again — over hundreds of seeds.
 
-**Done — the write path, host-side (21 points, 2026-09-21).** `src/lib/fs/btrfs-write`
+**Done — the write path, host-side (21 points, 2026-09-21).** `src/lib/fs/btrfs/write`
 changes a volume `mkfs.btrfs` made, allocating but forbidding `unsafe`, and is
 checked by host `btrfs check`. What it writes:
 
@@ -84,9 +84,9 @@ write path is under the VFS and in the boot test, on all three architectures.
 * **Writes reach the disk.** `BlockDevice` gained `write` and `flush`, and the
   block ring's kernel side dispatches them: a write's bytes are copied into
   the region it is sent through before the driver is told, and a flush is the
-  barrier `src/lib/fs/block`'s queue already knew how to keep. The ring protocol and
+  barrier `src/lib/fs/common/block`'s queue already knew how to keep. The ring protocol and
   the ring-3 driver needed no change — they had both since stage 10.
-* **`src/lib/fs/btrfs-vfs`'s writable mount.** The whole volume behind one sleeping
+* **`src/lib/fs/btrfs/vfs`'s writable mount.** The whole volume behind one sleeping
   lock, because every read must see the running transaction; writes into the
   page cache, remembered as dirty pages and turned into extents a mebibyte at
   a time when something commits; `fsync` writing one file back and committing;
@@ -112,7 +112,7 @@ write path is under the VFS and in the boot test, on all three architectures.
   path is sabotaged.
 
 **Done — the log tree (13 points, 2026-09-21).** `fsync` no longer commits
-everything. `src/lib/fs/btrfs-write/src/log.rs` keeps a tree outside the root tree
+everything. `src/lib/fs/btrfs/write/src/log.rs` keeps a tree outside the root tree
 whose address the superblock names in `log_root`: a log commit writes the
 log's blocks, flushes, and writes a superblock that is the last committed one
 *plus* that address, so it still names the old, whole trees. Nothing else
@@ -176,7 +176,7 @@ with `btrfs check`'s `root 5 inode 257 errors 400, nbytes wrong`.
 
 A QEMU kill is gentler than a power failure, because QEMU has already handed
 what the guest wrote to the host's page cache. The adversarial half is
-host-side, in `src/lib/fs/btrfs-write/src/tests/powerfail.rs`: the device records
+host-side, in `src/lib/fs/btrfs/write/src/tests/powerfail.rs`: the device records
 every write and flush, and a crash is rebuilt as everything before the last
 flush plus a random subset of what came after; two hundred scenarios cut at
 twenty-five points each are opened, replayed, checked for consistency and

@@ -51,9 +51,9 @@ that its module tree does not reach.
 
 | Library crate | Ring | Product lines | Host-test lines |
 |---|---|---:|---:|
-| `ferrix-btrfs` (`src/lib/fs/btrfs`), the reader | `item` | 8,272 | 6,031 |
-| `ferrix-btrfs-write` (`src/lib/fs/btrfs-write`), the write path | `item` | 6,019 | 2,247 |
-| `ferrix-btrfs-vfs` (`src/lib/fs/btrfs-vfs`), the VFS glue | `load` | 2,185 | 1,822 |
+| `ferrix-btrfs` (`src/lib/fs/btrfs/format`), the reader | `item` | 8,272 | 6,031 |
+| `ferrix-btrfs-write` (`src/lib/fs/btrfs/write`), the write path | `item` | 6,019 | 2,247 |
+| `ferrix-btrfs-vfs` (`src/lib/fs/btrfs/vfs`), the VFS glue | `load` | 2,185 | 1,822 |
 
 **The certified item is `core` + `item` and the item's crates: 79,079 lines of
 product code** -- 64,788 in the kernel and 14,291 in the two btrfs crates --

@@ -72,7 +72,7 @@ Ferrix has half an installer already, and none of the other half.
   and `FERRIX/CMDLINE.TXT` from the FAT volume it was loaded from, and hands
   the kernel the firmware's GOP framebuffer.
 * `tools/common/xtask/src/fat.rs` writes FAT32 in plain Rust, with no mtools.
-* `src/lib/fs/btrfs-write` writes btrfs that `btrfs check` accepts, including
+* `src/lib/fs/btrfs/write` writes btrfs that `btrfs check` accepts, including
   allocating new chunks (`grow.rs`) -- what a fresh mkfs'd volume needs to
   grow into its device.
 * ACPI, PCI with MSI, and an IOMMU are in the kernel; ring-3 drivers sit
@@ -178,7 +178,7 @@ An answer file is the plan in TOML; the GUI builds the same struct.
 ### 4.2 The steps
 
 1. **Partition.** Write the new GPT entries (both headers, both entry
-   arrays, the protective MBR) with `src/lib/fs/partition`. On *Erase*: ESP
+   arrays, the protective MBR) with `src/lib/fs/common/partition`. On *Erase*: ESP
    512 MiB, root the rest. On *Beside*: root in the chosen free range, and a
    new ESP only if the disk has none. Then `BLKRRPART` and wait for the
    kernel to list the new partitions.
@@ -302,7 +302,7 @@ Linux kernel's `Documentation/filesystems/ext4` are the specifications.
 
 1. **Check before.** A full read-only consistency pass (every MFT record,
    every run list against `$Bitmap`; every inode's extents against the block
-   bitmaps; `btrfs check`'s tree walk, which `src/lib/fs/btrfs` has). Anything
+   bitmaps; `btrfs check`'s tree walk, which `src/lib/fs/btrfs/format` has). Anything
    it cannot account for is a refusal.
 2. **Plan, then write.** The moves are computed in memory first, and the
    plan is refused if any destination is not free or overlaps a source not
@@ -343,9 +343,9 @@ I2. Held by devfs's boot check on all three architectures (FX-0830).
 
 ### 5.2 Partitions
 
-`src/lib/fs/partition`: GPT read and write (CRC-32 of headers and entry
+`src/lib/fs/common/partition`: GPT read and write (CRC-32 of headers and entry
 arrays, the backup at the end of the disk, the protective MBR), MBR read.
-Pure Rust, `no_std`, fuzzed like `src/lib/fs/btrfs`. The kernel's block core
+Pure Rust, `no_std`, fuzzed like `src/lib/fs/btrfs/format`. The kernel's block core
 reads each disk's table when the driver announces it and on `BLKRRPART`,
 and makes `/dev/vda1`, `/dev/nvme0n1p1`, `/dev/sda1` with Linux's minor
 numbers, plus `/sys/class/block/<name>/{partition,start,size}` and
@@ -358,7 +358,7 @@ the same way by its ESP label, so the loader need not say which disk it was.
 
 ### 5.3 mkfs.btrfs
 
-`src/lib/fs/btrfs-mkfs` and `/sbin/mkfs.btrfs`: what `mkfs.btrfs` makes by
+`src/lib/fs/btrfs/mkfs` and `/sbin/mkfs.btrfs`: what `mkfs.btrfs` makes by
 default for one device -- `SINGLE` data, `DUP` metadata, skinny metadata,
 `NO_HOLES`, the free-space tree, CRC-32C -- built as trees in memory and
 written in one pass, then grown by `btrfs-write`'s existing chunk
@@ -525,8 +525,8 @@ reference machine boots.
 | # | Slice | Points |
 |---|---|---|
 | I1 | Block devices from userland (§5.1) | 5 |
-| I2 | `src/lib/fs/partition`, partitions in the block core, root by `PARTUUID`/`LABEL` on any disk (§5.2) | 8 |
-| I3 | `src/lib/fs/btrfs-mkfs`, `/sbin/mkfs.btrfs` (§5.3) | 8 |
+| I2 | `src/lib/fs/common/partition`, partitions in the block core, root by `PARTUUID`/`LABEL` on any disk (§5.2) | 8 |
+| I3 | `src/lib/fs/btrfs/mkfs`, `/sbin/mkfs.btrfs` (§5.3) | 8 |
 | I4 | `src/lib/fs/fat` with read-and-add, `mkfs.fat` (§5.4) | 5 |
 | I5 | The engine and `/bin/ferrix-install`, answer files; `root_disk::install` shared (§4.1, §4.2) | 8 |
 | I6 | `xtask live`: GPT `.img`, hybrid `.iso` (§3.1) | 8 |
@@ -592,7 +592,7 @@ tokens").** What installs Ferrix in a VM today, built from what exists:
   and the packed empty root volume. The live image is the usual FAT image,
   attached as a virtio disk.
 * `ferrix-install [--yes] [--from /dev/vdX] /dev/vdY` wipes the target and
-  writes a GPT (`src/lib/fs/partition`): an ESP that is a byte copy of the live
+  writes a GPT (`src/lib/fs/common/partition`): an ESP that is a byte copy of the live
   FAT volume, and a root partition holding the 1 GiB `ferrix-root` volume.
   No mkfs.btrfs (I3) and no FAT writer (I4) were needed.
 * The kernel publishes GPT partitions as disks (`fs/partitions.rs`, once,
@@ -667,7 +667,7 @@ by `cargo xtask test-install --slots` (x86-64, KVM), not in `check` yet;
 the host tests of the installer's workspace are.
 
 **I3, mkfs.btrfs (2026-10-19, branch i3-mkfs, 8 points estimated).**
-`src/lib/fs/btrfs-mkfs` makes an empty volume the size of its device, and
+`src/lib/fs/btrfs/mkfs` makes an empty volume the size of its device, and
 `ferrix-install` formats the root partition with it, whole-disk and
 `--slots` alike, labelled `ferrix-root` with new UUIDs, where it used to
 copy the 1 GiB fixture (which the initramfs no longer carries). It departs

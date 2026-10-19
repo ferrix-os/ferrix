@@ -17,7 +17,7 @@ Since 2026-10-02 that includes the item's library crates, `ferrix-btrfs` and
 `ferrix-btrfs-write` (`crates` in the manifest): every product file their module
 trees reach, with any inline `#[cfg(test)] mod` blanked, since tests are
 verification. Their functions are keyed by the path from the repository root
-(`src/lib/fs/btrfs/src/tree.rs::search`), the kernel's by the path under
+(`src/lib/fs/btrfs/format/src/tree.rs::search`), the kernel's by the path under
 `src/kernel/src`, so the two cannot collide. Recursion matters more there, not
 less: a B-tree walk is the natural place to write it, and on a kernel stack
 with no guard page it has to be bounded by the tree's level, not by the data.

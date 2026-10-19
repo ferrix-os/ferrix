@@ -77,7 +77,7 @@ mispredicted path reads slot zero.
 | `arch/*/mod.rs` `decode_syscall` | Linux system call number, into a `match` the compiler makes a jump table of | `arch::nospec_index`, to the table's end (`ferrix_linux_abi::nr::X86_64_END` and kin; a host test holds each end to its table) |
 | `syscall/native.rs` `decode` | native call number | the same, to the native range |
 | `src/lib/kernel/objects/src/table.rs` | handle slot, in `get`, `remove`, `replace` | `ferrix_sync::nospec::bounded` |
-| `src/lib/fs/vfs/src/fd.rs` | descriptor slot | the same |
+| `src/lib/fs/common/vfs/src/fd.rs` | descriptor slot | the same |
 | `syscall/uaccess.rs` `user_address` | a user address, before the software table walk that follows it into the direct map | `arch::nospec_below`, to the top of the user half |
 
 Where each table is asked: a native number goes to the native table alone,

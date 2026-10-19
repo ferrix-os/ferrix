@@ -186,7 +186,7 @@ target at all; and the link was followed as its text, so a program whose file
 had been renamed or deleted could not be run again through it. A fork now
 takes its parent's identity (`Process::forked`), and `/proc/<pid>/exe` is a
 magic link, as on Linux: followed, it leads to the file the program was
-loaded from, by `Inode::link_location` (`src/lib/fs/vfs/src/walk.rs`), whatever its
+loaded from, by `Inode::link_location` (`src/lib/fs/common/vfs/src/walk.rs`), whatever its
 name is now; read, it is that file's path with ` (deleted)` after a file since
 removed. The boot check forks the sparse 72 MiB program, removes its name,
 and has the fork `execve("/proc/self/exe")`, which must run it to its status.
@@ -441,8 +441,8 @@ roadmap has how it stands. What follows is 2026-09-18.)*
 
 **btrfs write: no code, on any ref.** Searches across every commit for
 `delayed_ref`, a transaction commit and the free-space tree return nothing.
-`src/lib/fs/btrfs` says in its own header that it "knows nothing about transactions
-or allocation", and `src/lib/fs/btrfs-vfs` answers `EROFS` from `write_at`,
+`src/lib/fs/btrfs/format` says in its own header that it "knows nothing about transactions
+or allocation", and `src/lib/fs/btrfs/vfs` answers `EROFS` from `write_at`,
 `set_len` and `create`.
 
 What is there, and it is the expensive half, landed with stage 11: the page
@@ -551,7 +551,7 @@ telling a caller something untrue.
 ## 7. What was checked, and what was not
 
 Read for this: `src/kernel/src/syscall/` against the `Syscall` enum, `src/lib/platform/elf`,
-`src/lib/fs/btrfs` and `src/lib/fs/btrfs-vfs`, `src/lib/drivers/block/virtio-blk` and `src/lib/proto/blkring`,
+`src/lib/fs/btrfs/format` and `src/lib/fs/btrfs/vfs`, `src/lib/drivers/block/virtio-blk` and `src/lib/proto/blkring`,
 `src/user/system/linux/ferrousli/src` and `src/user/system/linux/ferrousli/tools`, `src/user/system/linux/compositor/server` and
 `src/user/system/linux/compositor/hyprix`, `tools/common/xtask/src/initramfs.rs`, and the history of every ref for
 the two prerequisites in §4. Chromium's own requirements were taken from
@@ -559,10 +559,10 @@ Alpine's `community/chromium` APKBUILD and its musl patch set, which is the
 only evidence that a Chromium against a musl-shaped C library builds at all.
 
 Read again on 2026-09-19, for the re-check at the top: `src/kernel/src/fs/devfs.rs`
-and `src/lib/fs/vfs`'s dentry cache, for what `/dev/shm` actually costs;
+and `src/lib/fs/common/vfs`'s dentry cache, for what `/dev/shm` actually costs;
 `src/kernel/src/syscall/family.rs` again; and, for §4, that no loader has appeared
 (`DT_NEEDED` and `JUMP_SLOT` are still in no Rust in the tree), that
-`src/lib/fs/btrfs-vfs` still answers `EROFS`, and that `madvise`, `AT_SYSINFO_EHDR`,
+`src/lib/fs/btrfs/vfs` still answers `EROFS`, and that `madvise`, `AT_SYSINFO_EHDR`,
 `timerfd` and `signalfd` are all still where §3 left them.
 
 Not checked, and each could move the numbers: whether Chromium's build system

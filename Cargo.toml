@@ -7,7 +7,7 @@ members = [
     # function of bytes lives here rather than in the kernel, because this is
     # the code `cargo test`, Miri and the fuzzers can actually reach.
     "src/lib/platform/acpi",
-    "src/lib/fs/block",
+    "src/lib/fs/common/block",
     "src/lib/proto/blkring",
     "src/lib/drivers/block/blkserve",
     "src/lib/proto/devmgr-proto",
@@ -34,12 +34,12 @@ members = [
     "src/lib/kernel/frame",
     "src/lib/kernel/heap",
     "src/lib/kernel/kmem",
-    "src/lib/fs/btrfs",
-    "src/lib/fs/btrfs-mkfs",
-    "src/lib/fs/btrfs-vfs",
-    "src/lib/fs/btrfs-write",
-    "src/lib/fs/cpio",
-    "src/lib/fs/partition",
+    "src/lib/fs/btrfs/format",
+    "src/lib/fs/btrfs/mkfs",
+    "src/lib/fs/btrfs/vfs",
+    "src/lib/fs/btrfs/write",
+    "src/lib/fs/common/cpio",
+    "src/lib/fs/common/partition",
     "src/lib/kernel/crng",
     "src/lib/kernel/seccomp",
     "src/lib/crypto/argon2",
@@ -77,15 +77,15 @@ members = [
     "src/lib/drivers/net/yt6801",
     "src/lib/kernel/vma",
     "src/lib/kernel/paging",
-    "src/lib/fs/procfs",
-    "src/lib/fs/cgroupfs",
-    "src/lib/fs/sysfs",
+    "src/lib/fs/common/procfs",
+    "src/lib/fs/common/cgroupfs",
+    "src/lib/fs/common/sysfs",
     "src/lib/init/restart",
     "src/lib/init/svc",
     "src/lib/platform/pci",
     "src/lib/kernel/qr",
     "src/lib/kernel/sched",
-    "src/lib/fs/vfs",
+    "src/lib/fs/common/vfs",
     "src/lib/proto/pkg",
 
     # The UEFI loader. Firmware calls into it with a stack and the MMU on, so
@@ -143,7 +143,7 @@ publish = false
 
 [workspace.dependencies]
 ferrix-acpi = { path = "src/lib/platform/acpi" }
-ferrix-block = { path = "src/lib/fs/block" }
+ferrix-block = { path = "src/lib/fs/common/block" }
 ferrix-blkring = { path = "src/lib/proto/blkring" }
 ferrix-blkserve = { path = "src/lib/drivers/block/blkserve" }
 ferrix-devmgr-proto = { path = "src/lib/proto/devmgr-proto" }
@@ -171,12 +171,12 @@ ferrix-frame = { path = "src/lib/kernel/frame" }
 ferrix-fallible = { path = "src/lib/kernel/fallible" }
 ferrix-heap = { path = "src/lib/kernel/heap" }
 ferrix-kmem = { path = "src/lib/kernel/kmem" }
-ferrix-btrfs = { path = "src/lib/fs/btrfs" }
-ferrix-btrfs-mkfs = { path = "src/lib/fs/btrfs-mkfs" }
-ferrix-btrfs-vfs = { path = "src/lib/fs/btrfs-vfs" }
-ferrix-btrfs-write = { path = "src/lib/fs/btrfs-write" }
-ferrix-cpio = { path = "src/lib/fs/cpio" }
-ferrix-partition = { path = "src/lib/fs/partition" }
+ferrix-btrfs = { path = "src/lib/fs/btrfs/format" }
+ferrix-btrfs-mkfs = { path = "src/lib/fs/btrfs/mkfs" }
+ferrix-btrfs-vfs = { path = "src/lib/fs/btrfs/vfs" }
+ferrix-btrfs-write = { path = "src/lib/fs/btrfs/write" }
+ferrix-cpio = { path = "src/lib/fs/common/cpio" }
+ferrix-partition = { path = "src/lib/fs/common/partition" }
 ferrix-crng = { path = "src/lib/kernel/crng" }
 ferrix-seccomp = { path = "src/lib/kernel/seccomp" }
 ferrix-argon2 = { path = "src/lib/crypto/argon2" }
@@ -218,11 +218,11 @@ ferrix-dwmac = { path = "src/lib/drivers/net/dwmac" }
 ferrix-yt6801 = { path = "src/lib/drivers/net/yt6801" }
 ferrix-vma = { path = "src/lib/kernel/vma" }
 ferrix-qr = { path = "src/lib/kernel/qr" }
-ferrix-vfs = { path = "src/lib/fs/vfs" }
+ferrix-vfs = { path = "src/lib/fs/common/vfs" }
 ferrix-paging = { path = "src/lib/kernel/paging" }
-ferrix-procfs = { path = "src/lib/fs/procfs" }
-ferrix-cgroupfs = { path = "src/lib/fs/cgroupfs" }
-ferrix-sysfs = { path = "src/lib/fs/sysfs" }
+ferrix-procfs = { path = "src/lib/fs/common/procfs" }
+ferrix-cgroupfs = { path = "src/lib/fs/common/cgroupfs" }
+ferrix-sysfs = { path = "src/lib/fs/common/sysfs" }
 ferrix-svc = { path = "src/lib/init/svc" }
 ferrix-restart = { path = "src/lib/init/restart" }
 ferrix-pci = { path = "src/lib/platform/pci" }

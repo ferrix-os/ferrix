@@ -14,7 +14,7 @@ tree out of it that byte-for-byte matches what the host wrote.
 stages 8 to 10 are under way, because everything short of the kernel mount is
 logic `cargo test`, Miri and a fuzzer can reach.
 
-* `src/lib/fs/btrfs` — the read path, allocating nothing and forbidding `unsafe`.
+* `src/lib/fs/btrfs/format` — the read path, allocating nothing and forbidding `unsafe`.
   `volume.rs` mounts: superblock, system chunk array, chunk tree, root tree, and
   the default subvolume's fs tree — the one the root tree's `default` entry
   names, as Linux's `get_default_subvol_objectid` finds it, or the top-level
@@ -49,18 +49,18 @@ logic `cargo test`, Miri and a fuzzer can reach.
   root, and each descent used to read every node on the way from the device
   again. `ferrix-btrfs`'s `Device` now says what each read is for —
   `ReadKind::Metadata` for the superblock and tree nodes, `ReadKind::Data` for
-  an extent's bytes — and `src/lib/fs/btrfs-vfs` keeps metadata reads in a CLOCK cache
+  an extent's bytes — and `src/lib/fs/btrfs/vfs` keeps metadata reads in a CLOCK cache
   of 1024 entries every handle of a mount shares: a hit hands out a shared
   reference and copies with no lock held, and a miss reads with no lock held. A
   cached node is trusted no more than a read one, since every node is still
   checked against its parent pointer and its checksum. File data is never kept
   there; it belongs in the page cache. A second walk to a file reads no metadata
   from the device, and a cache of two entries still reads every file back.
-* `src/lib/fs/btrfs-vfs` — the mount: stage 8's `FileSystem` and `Inode` over the
+* `src/lib/fs/btrfs/vfs` — the mount: stage 8's `FileSystem` and `Inode` over the
   read path, read-only, holding no lock across I/O. Tested through the trait,
   and through `Namespace` at `/mnt` on a tmpfs root. Since stage 12 it holds
-  the read-write mount as well, `rw::RwBtrfs`, over `src/lib/fs/btrfs-write`.
-* `src/lib/fs/block` — the block core's queue: merging, flush and FUA barriers that
+  the read-write mount as well, `rw::RwBtrfs`, over `src/lib/fs/btrfs/write`.
+* `src/lib/fs/common/block` — the block core's queue: merging, flush and FUA barriers that
   no request crosses, and deadline scheduling, checked against a model by the
   tests and the `block_queue` fuzz target.
 * The `btrfs_read` fuzz target starts each run from a real image and applies

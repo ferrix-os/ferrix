@@ -293,7 +293,7 @@ follow `kernel/sys.c` and `kernel/groups.c`, an effective uid of 0 standing in
 for the capabilities, so busybox's `su` reaches a user.
 
 **The ids are enforced**, which is what makes Ferrix multi-user rather than a
-machine with ids written on it. `src/lib/fs/vfs`'s `access` holds the rules as pure
+machine with ids written on it. `src/lib/fs/common/vfs`'s `access` holds the rules as pure
 functions -- `generic_permission`, `may_create`, `may_delete` with the sticky
 bit, `setattr_prepare`'s chown and chmod rules, `inode_init_owner` -- and the
 namespace calls them where Linux does: search on every directory of a walk,
@@ -384,7 +384,7 @@ Ctrl-C with status 130 and the prompt back at once.
 
 **Unix-domain sockets, connected.** `fs/socket.rs` is a socket inode on a
 sockfs of its own, built the way pipes are: each direction is
-`src/lib/fs/vfs`'s `SocketBuffer` -- one queue as values, telling a stream from
+`src/lib/fs/common/vfs`'s `SocketBuffer` -- one queue as values, telling a stream from
 records -- behind a lock, with a wait queue each way, and no wait ever happens
 with the buffer locked. `socket` and `socketpair` make stream,
 sequenced-packet and datagram sockets; `read`, `write`, `send`, `recv`,

@@ -1,6 +1,6 @@
 //! Pipes, and the named pipes that are pipes found by a path.
 //!
-//! `src/lib/fs/vfs`'s [`PipeBuffer`] is the queue and the rules at its edges, as
+//! `src/lib/fs/common/vfs`'s [`PipeBuffer`] is the queue and the rules at its edges, as
 //! values: a read that would wait says so rather than waiting. This is the
 //! half that waits. A [`Pipe`] is that buffer behind a lock with a wait queue
 //! for each direction, and each end is an [`Inode`] an open file can hold.
@@ -32,7 +32,7 @@
 //!
 //! A FIFO is a node in a filesystem, and opening it gives an end of the pipe
 //! every other opener of that node shares. The node cannot hold the pipe --
-//! tmpfs is `src/lib/fs/vfs`, which has no wait queues -- so the pipe is found in a
+//! tmpfs is `src/lib/fs/common/vfs`, which has no wait queues -- so the pipe is found in a
 //! table here, keyed by the node's device and inode number and held weakly,
 //! and [`attach_fifo`] swaps an end of it into the open file `openat` made.
 //!

@@ -11,7 +11,7 @@
 //! 2. holds the ring and data VMOs, attaches [`KernelSide`] over the ring, and
 //!    publishes the disk as a block device before answering READY with its
 //!    completion port;
-//! 3. serves the disk's requests: it moves them from `src/lib/fs/block`'s queue onto
+//! 3. serves the disk's requests: it moves them from `src/lib/fs/common/block`'s queue onto
 //!    the ring, copying a write's bytes into the data VMO, rings the driver
 //!    when the driver asked to be rung, takes completions off the ring and
 //!    wakes each finished request's caller, who copies a read's bytes out of
@@ -127,7 +127,7 @@ const CONTROL_KEY: u64 = 3;
 /// The completion port's key for a reader's nudge that a read was queued.
 const SUBMIT_KEY: u64 = 4;
 
-/// The most reads `src/lib/fs/block` merges into one ring submission.
+/// The most reads `src/lib/fs/common/block` merges into one ring submission.
 const MAX_PARTS: u32 = 16;
 
 /// The most submissions a ring holds outstanding, whatever its data VMO.
@@ -1730,7 +1730,7 @@ impl BlockDevice for RingDisk {
     }
 }
 
-/// The time `src/lib/fs/block`'s queue reckons in: milliseconds.
+/// The time `src/lib/fs/common/block`'s queue reckons in: milliseconds.
 fn ticks() -> u64 {
     timer::now_nanos() / 1_000_000
 }

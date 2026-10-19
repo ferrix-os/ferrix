@@ -524,7 +524,7 @@ is left, each with how to know it is done:
 6. **The two refusals no test opens** (`L.btrfs.9`, `L.btrfs.12`, in the
    baseline): images with each feature the reader or the writer refuses,
    opened, and the refusal named.
-7. **Miri over `src/lib/fs/btrfs`** in CI (`docs/BACKLOG.md`), with the
+7. **Miri over `src/lib/fs/btrfs/format`** in CI (`docs/BACKLOG.md`), with the
    whole-image tests ignored under it.
 8. **Arithmetic that cannot overflow** (`L.btrfs.23`, the certification
    consultant's advice). The release kernel builds without overflow checks,

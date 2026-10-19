@@ -6,7 +6,7 @@
 //! collector read `/proc/self/maps` to find their own stack, and a program
 //! that wants its own path reads `/proc/self/exe`. None of these is optional
 //! for the software the exit criterion runs, and the byte formats are pinned
-//! in `src/lib/fs/procfs`, where the host tests hold them against lines a real
+//! in `src/lib/fs/common/procfs`, where the host tests hold them against lines a real
 //! Linux printed.
 //!
 //! # Rendered at open
