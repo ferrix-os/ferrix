@@ -28,7 +28,8 @@
 //! when the drive is up, naming its model, serial and size; one line for
 //! each failed request, up to a limit; one line when it is shut down.
 //!
-//! The exit status is a `ferrix_driver::Step`, 0 a clean STOP.
+//! The exit status is a `ferrix_driver::Step`, 0 a clean STOP, or a clean
+//! stop before HELLO when the controller has no ATA disk (`Step::Idle`).
 
 #![no_std]
 #![no_main]
@@ -207,6 +208,17 @@ impl Driver for Sata {
         let port = port::create(Kernel).map_err(|_| Step::Events)?;
         let logic = match Logic::init(Regs(registers), Monotonic { port }, Pages(control)) {
             Ok(logic) => logic,
+            // A controller with no ATA disk behind it -- q35's built-in one
+            // with only a CD-ROM, or none -- is not a failure: there is
+            // nothing to serve, and every port it tried was stopped
+            // (`ferrix-ahci`'s `NoDrive`).
+            Err(ferrix_ahci::Error::NoDrive) => {
+                say(format_args!(
+                    "ahci     {} has no ATA disk: nothing to serve",
+                    Place(info.location)
+                ));
+                return Err(Step::Idle);
+            }
             Err(error) => {
                 say(format_args!(
                     "ahci     {} did not come up: {error:?}",

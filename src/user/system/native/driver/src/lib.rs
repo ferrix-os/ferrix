@@ -80,6 +80,10 @@ pub struct Stuck;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(i32)]
 pub enum Step {
+    /// The device has nothing for this driver to serve -- a controller with
+    /// no drive behind it -- and the driver stopped cleanly before HELLO.
+    /// devmgr counts it neither started nor failed.
+    Idle = 0,
     /// No bootstrap channel, or the first message was not START.
     Start = 1,
     /// START named a device this driver does not drive.

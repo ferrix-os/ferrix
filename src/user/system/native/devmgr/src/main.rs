@@ -554,7 +554,13 @@ fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
                     u64::from(count),
                     &mut inbox,
                 );
-                say_started(name, &info, published, &process);
+                let idle = !published && stopped_idle(&process);
+                say_started(name, &info, published, idle, &process);
+                if idle {
+                    // Nothing to serve: neither started nor failed, and the
+                    // slot stays free, as for a device nobody drives.
+                    continue;
+                }
                 if published {
                     bound(channel, index, driver);
                 }
@@ -619,9 +625,33 @@ fn settle(
     ) || await_boot(channel, port, location, key, inbox)
 }
 
+/// How long a driver that ended before it published is given to be
+/// recorded as exited: its bootstrap channel closes as it ends, a moment
+/// before its status can be read.
+const ENDED_PATIENCE_NANOS: u64 = 1_000_000_000;
+
+/// Whether a driver that ended before it published stopped cleanly with
+/// nothing to serve: exited with status 0, `ferrix_driver::Step::Idle` (a
+/// controller with no disk behind it). One whose exit cannot be seen in
+/// time, or with no clock to bound the wait, did not.
+fn stopped_idle(process: &Process<Kernel>) -> bool {
+    let Ok(now) = ferrix_rt::linux::monotonic_nanos() else {
+        return false;
+    };
+    let deadline = Deadline::At(now.saturating_add(ENDED_PATIENCE_NANOS));
+    process.wait_one(Signals::TERMINATED, deadline).is_ok()
+        && matches!(exit_of(process), Exit::Code(0))
+}
+
 /// The console line for a driver started at boot, and its exit status when
-/// it ended before it published.
-fn say_started(name: &str, info: &DeviceInfo, published: bool, process: &Process<Kernel>) {
+/// it ended before it published and was not idle.
+fn say_started(
+    name: &str,
+    info: &DeviceInfo,
+    published: bool,
+    idle: bool,
+    process: &Process<Kernel>,
+) {
     say(format_args!(
         "devmgr   {name} {:#010x} {:04x}:{:04x}: {}",
         info.location,
@@ -629,11 +659,13 @@ fn say_started(name: &str, info: &DeviceInfo, published: bool, process: &Process
         info.device_id,
         if published {
             "started"
+        } else if idle {
+            "nothing to serve; stopped"
         } else {
             "ended before it published"
         }
     ));
-    if !published {
+    if !published && !idle {
         say(format_args!(
             "devmgr   {name} {:#010x}: exit status {}",
             info.location,
