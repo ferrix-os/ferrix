@@ -53,6 +53,13 @@ in it.
 
 Source, documentation and building it yourself:
 https://github.com/ferrix-os/ferrix
-Ferrix is MIT licensed (LICENSE in this archive). The archive also carries
-programs under their own licences, ported onto Ferrix: see
-https://github.com/ferrix-os/apps for each one's.
+Licences
+  Ferrix is MIT licensed (LICENSE in this archive). The image also carries
+  other people's programs under their own licences, among them busybox and
+  git (GPL-2.0), alsa-utils (GPL-2.0+) and alsa-lib (LGPL-2.1+), and many
+  permissive C libraries and Rust crates. THIRD-PARTY-LICENSES.md in this
+  archive lists every part of the image with its licence and the licence's
+  text. The source of every GPL and LGPL program in it, exactly as it was
+  built, is the release's ferrix-<tag>-sources.tar.gz asset, beside this
+  zip on the same release page. Firmware is not in the archive: the scripts
+  use the OVMF your QEMU or distribution installed.

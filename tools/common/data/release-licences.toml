@@ -1,0 +1,155 @@
+# What a release may ship under which licence, and what each file of the
+# release image that no package record owns is: read by
+# tools/common/release/licences.py, which writes the release's licence
+# inventory and refuses a release that ships something this does not name
+# (docs/LICENSES.md).
+#
+# The licences themselves are never written here for a package that says
+# its own: an app's is its app.toml `license`, a crate's its Cargo.toml's.
+# This file holds only what has no such field -- busybox, ferrousli's ports,
+# the shell trees, the data files Ferrix writes into its image -- and the
+# lists a licence is checked against.
+
+# Licences a shipped component may carry with no source owed beyond what the
+# licence text asks: the main workspace's list in deny.toml, and the ones
+# the ported C programs, their data and their fonts add. MPL-2.0 is file
+# by file: the one MPL file shipped is curl's CA bundle, cacert.pem, which is
+# its own source form.
+permissive = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+    "curl",
+    "MPL-2.0",
+    "FTL",
+    "HPND-sell-variant",
+    "Bitstream-Vera",
+    "OFL-1.1",
+    "LicenseRef-Zsh",
+]
+
+# Licences that oblige the release to offer the corresponding source. A
+# component under one of these must be one `package-sources.py` carries the
+# source of (its `[sources]` below); any other is refused.
+copyleft = [
+    "GPL-2.0-only",
+    "GPL-2.0-or-later",
+    "LGPL-2.1-or-later",
+]
+
+# The components of the image whose source the sources asset carries, and
+# why each is there: copyleft itself, or linked statically into a copyleft
+# program, whose corresponding source then includes it.
+[sources]
+busybox = "GPL-2.0-only"
+git = "GPL-2.0-only"
+alsa-utils = "GPL-2.0-or-later"
+alsa-lib = "LGPL-2.1-or-later; linked statically into alsa-utils' aplay and speaker-test only"
+curl = "libcurl and Mbed TLS are linked statically into git"
+zlib = "linked statically into git"
+ferrousli = "the C library every one of these is linked statically against"
+
+# Components with no app.toml or Cargo.toml to say their licence.
+[components.busybox]
+licence = "GPL-2.0-only"
+upstream = "https://busybox.net/"
+pinned = "src/user/system/linux/ferrousli/tools/busybox/sources.sh"
+recipe = "src/user/system/linux/ferrousli/tools/busybox"
+paths = ["bin/busybox"]
+
+[components.zlib]
+licence = "Zlib"
+upstream = "https://zlib.net/"
+pinned = "src/user/system/linux/ferrousli/tools/ports/zlib/build.sh"
+recipe = "src/user/system/linux/ferrousli/tools/ports/zlib"
+paths = []
+
+[components.libcxx]
+licence = "Apache-2.0 WITH LLVM-exception"
+upstream = "https://libcxx.llvm.org/"
+pinned = "src/user/system/linux/ferrousli/tools/ports/libcxx/build.sh"
+recipe = "src/user/system/linux/ferrousli/tools/ports/libcxx"
+paths = []
+
+[components.oh-my-zsh]
+licence = "MIT"
+upstream = "https://github.com/ohmyzsh/ohmyzsh"
+pinned = "tools/common/fetch/fetch-shell-trees.sh"
+paths = ["usr/share/oh-my-zsh/**"]
+
+[components.zsh]
+licence = "LicenseRef-Zsh"
+note = "zsh's function and completion tree, autoloaded by zinc; zsh's LICENCE, a permissive licence SPDX has no identifier for"
+upstream = "https://www.zsh.org/"
+pinned = "tools/common/fetch/fetch-shell-trees.sh"
+paths = ["usr/share/zsh/functions/**"]
+
+[components.zinc]
+licence = "MIT"
+upstream = "https://github.com/ferrix-os/zinc"
+paths = ["bin/zinc"]
+
+# Ferrix's own files in the image: its programs, drivers and services, and
+# what xtask writes into the image (configuration, units, accounts, the
+# desktop's entries and icons, Ferrix's own wallpaper `ember`, the zshrc
+# that sources oh-my-zsh). MIT, as the repository is.
+[components.ferrix]
+licence = "MIT"
+upstream = "https://github.com/ferrix-os/ferrix"
+paths = [
+    "sbin/*",
+    "lib/drivers/*",
+    "lib/ferrix/**",
+    "etc/**",
+    "usr/share/udhcpc/default.script",
+    "usr/share/applications/*",
+    "usr/share/icons/hicolor/index.theme",
+    "usr/share/icons/hicolor/scalable/apps/ferrix-*.svg",
+    ".ferrix/**",
+    "bin/hyprix",
+    "bin/hyprctl",
+    "bin/pattern",
+    "bin/plug",
+    "bin/clip",
+    "bin/lswt",
+    "bin/shot",
+    "bin/lock",
+    "bin/vkbd",
+    "bin/loginctl",
+    "bin/reboot",
+    "bin/vdagent",
+    "bin/sessiond",
+    "bin/pkg",
+    "bin/svc",
+    "bin/passwd",
+    "bin/authctl",
+    "bin/login",
+    "bin/su",
+]
+
+# Third-party material inside Ferrix's own sources, built into its programs.
+[[embedded]]
+what = "Spleen 8x16, the kernel's panic-screen font"
+licence = "BSD-2-Clause"
+file = "src/lib/kernel/fbtext/LICENSE-spleen"
+
+[[embedded]]
+what = "the QR code encoder's original, in the kernel's panic screen"
+licence = "MIT"
+file = "src/lib/kernel/qr/LICENSE-MIT"
+
+[[embedded]]
+what = "code translated from Linux's i915 driver into the Intel GPU driver"
+licence = "MIT"
+file = "src/lib/drivers/gpu/intel-xelp/i915/NOTICE"
