@@ -112,7 +112,7 @@ impl Device for MemDevice {
             let take = (BLOCK - within).min(buf.len() - done);
             match self.blocks.get(&base) {
                 Some(block) => {
-                    buf[done..done + take].copy_from_slice(&block[within..within + take])
+                    buf[done..done + take].copy_from_slice(&block[within..within + take]);
                 }
                 None => buf[done..done + take].fill(0),
             }
