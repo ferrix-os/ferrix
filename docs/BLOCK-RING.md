@@ -40,12 +40,12 @@ are deliberately similar so one request here becomes one virtio request.
 
 ### Consumer side, for orientation
 
-In the kernel, `src/lib/fs/block::Queue` sits in front of the ring:
+In the kernel, `src/lib/fs/common/block::Queue` sits in front of the ring:
 `Queue::dispatch(now)` yields a merged command → the kernel copies write data
 into the data VMO and publishes one submission entry → the driver completes it →
 the kernel copies read data out and calls `Queue::complete(token, status)`,
 which fans the result back to every request merged into it. The ring's `id` is
-the queue's dispatch `Token` value. `src/lib/fs/block` holds no buffers, so the data
+the queue's dispatch `Token` value. `src/lib/fs/common/block` holds no buffers, so the data
 VMO allocation (§3.3) belongs to the ring glue, not the queue.
 
 ## 2. Objects and handles
@@ -464,13 +464,13 @@ rights shown, checked as HELLO's are (`Start::validate`). The driver carries
 
 ## 7. Mapping to what exists
 
-* `src/lib/fs/block` → one submission per `Dispatch`; `Token::raw()` is the `id`;
+* `src/lib/fs/common/block` → one submission per `Dispatch`; `Token::raw()` is the `id`;
   the queue's `Completion` is built from the ring's status.
 * `src/lib/drivers/virtio::blk` and `src/lib/drivers/block/virtio-blk` (in progress) → the driver turns one
   submission into one virtio-blk request chain whose data descriptors are the
   region's pages, split at page boundaries, by device address from the pin
   query.
-* `src/lib/fs/btrfs-vfs` → reads through a `Device` handle over `src/lib/fs/block`.
+* `src/lib/fs/btrfs/vfs` → reads through a `Device` handle over `src/lib/fs/common/block`.
 
 ## 8. Implementation: `ferrix-blkring`
 

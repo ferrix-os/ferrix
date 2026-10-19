@@ -4,7 +4,7 @@ Inode and dentry caches, the mount table, file descriptors and their sharing
 rules, tmpfs, devfs, procfs (`self/maps`, `self/exe`, `self/fd`, `cpuinfo`,
 `meminfo`), and cpio initramfs unpacking.
 
-**Done — the VFS, host-tested before the kernel calls it.** `src/lib/fs/vfs` is
+**Done — the VFS, host-tested before the kernel calls it.** `src/lib/fs/common/vfs` is
 the half of the stage that needs no machine, written first for the reason the
 continuous rule gives: path resolution over names a program chose is exactly
 the code that should meet a fuzzer before it meets ring 0.
@@ -140,7 +140,7 @@ the caller's pid; each `/proc/<pid>` has `fd`, `status`, `comm`, `cmdline`,
 `stat`, `maps`, `exe`, `cwd` and `root`, and later `task` and `mounts`; and
 `/proc` has `cpuinfo`, `meminfo`, `mounts`, `stat`, `partitions`,
 `filesystems`, `uptime`, `version` and `sys`, and later `sysrq-trigger` and
-`net`. The text is `src/lib/fs/procfs`, pinned
+`net`. The text is `src/lib/fs/common/procfs`, pinned
 byte for byte against lines taken from a real Linux `/proc`. `/proc/stat`'s
 processor lines are each run queue's busy and idle time, read without charging
 anything, so a line never goes backwards between reads; all busy time is
@@ -163,7 +163,7 @@ process now has a pid from a registry that finds a live process by it.
 ```
 
 **Done — pipes, FIFOs, and the calls about filesystems.** `pipe` and `pipe2`
-over `src/lib/fs/vfs`'s pipe buffer, with a wait queue for each direction and each
+over `src/lib/fs/common/vfs`'s pipe buffer, with a wait queue for each direction and each
 end counted by its inode, so that a reader sees end of file and a writer
 `EPIPE` exactly when the last descriptor that could feed or drain the pipe
 closes. `O_NONBLOCK` reaches a stream with every read and write, because

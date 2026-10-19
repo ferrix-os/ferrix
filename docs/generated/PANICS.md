@@ -1405,14 +1405,14 @@ The archive is read through the direct map from memory the loader reserved as
 `Initrd`.
 
 1. The archive is malformed or truncated: `tools/common/xtask/src/initramfs.rs`
-   wrote something the newc reader in `src/lib/fs/cpio` refuses, or the loader
-   read less of FERRIX/INITRD.IMG than it reported.
+   wrote something the newc reader in `src/lib/fs/common/cpio` refuses, or the
+   loader read less of FERRIX/INITRD.IMG than it reported.
 2. The loader placed the archive outside the direct map, which it is meant to
    refuse before the hand-off.
 3. An entry could not be created: tmpfs refused it, or memory for file contents
    ran out.
 
-See: src/kernel/src/fs/mod.rs init; src/lib/fs/vfs/src/initramfs.rs;
+See: src/kernel/src/fs/mod.rs init; src/lib/fs/common/vfs/src/initramfs.rs;
 tools/common/xtask/src/initramfs.rs; src/boot/common/uefi/src/main.rs
 load_initrd; docs/ROADMAP.md stage 8.
 
@@ -1435,8 +1435,8 @@ every frame back once it is gone.
    it and show up as leaked frames.
 
 See: src/kernel/src/fs/check.rs run; src/kernel/src/fs/pages.rs;
-src/kernel/src/user/vmo.rs decommit_from; src/lib/fs/vfs/src/namespace.rs;
-docs/ROADMAP.md stage 8.
+src/kernel/src/user/vmo.rs decommit_from;
+src/lib/fs/common/vfs/src/namespace.rs; docs/ROADMAP.md stage 8.
 
 <a id="fx-0810"></a>
 
@@ -1457,7 +1457,7 @@ NO_MEMORY.
    descriptors, so installing them failed with EMFILE.
 
 See: src/kernel/src/syscall/fd.rs standard_streams; src/kernel/src/fs/console.rs
-open_console; src/lib/fs/vfs/src/fd.rs; docs/ROADMAP.md stage 8.
+open_console; src/lib/fs/common/vfs/src/fd.rs; docs/ROADMAP.md stage 8.
 
 <a id="fx-0820"></a>
 
@@ -1487,7 +1487,7 @@ record, must rise by exactly that many times the processors.
    layout in `src/lib/proto/linux-abi` moved a field.
 3. An arm of `syscall::path::dispatch` reads its arguments in the wrong order or
    at the wrong width.
-4. The namespace in `src/lib/fs/vfs` changed what a walk, a rename or a
+4. The namespace in `src/lib/fs/common/vfs` changed what a walk, a rename or a
    directory cursor does.
 5. /tmp is not mounted, or a previous run left /tmp/pathcheck behind.
 6. `fs::devfs::attach_device` is not called from `openat`, or
@@ -1495,8 +1495,8 @@ record, must rise by exactly that many times the processors.
    one `mknodat` stores.
 
 See: src/kernel/src/syscall/check.rs run_paths; src/kernel/src/syscall/path.rs;
-src/kernel/src/fs/devfs.rs; src/kernel/src/syscall/stat.rs; src/lib/fs/vfs;
-docs/ROADMAP.md stage 8.
+src/kernel/src/fs/devfs.rs; src/kernel/src/syscall/stat.rs;
+src/lib/fs/common/vfs; docs/ROADMAP.md stage 8.
 
 <a id="fx-0830"></a>
 
@@ -1551,9 +1551,9 @@ fails here hands them wrong numbers without an error.
 
 See: src/kernel/src/fs/procfs/check.rs run; src/kernel/src/fs/procfs.rs;
 src/kernel/src/fs/devfs.rs; src/kernel/src/fs/devfs/check.rs;
-src/kernel/src/fs/block.rs; src/lib/fs/procfs/src/maps.rs;
-src/lib/fs/procfs/src/kstat.rs; src/kernel/src/fs/procfs/render.rs state_of;
-src/kernel/src/sched/queue.rs time_spent; docs/ROADMAP.md stage 8.
+src/kernel/src/fs/block.rs; src/lib/fs/common/procfs/src/maps.rs;
+src/lib/fs/common/procfs/src/kstat.rs; src/kernel/src/fs/procfs/render.rs
+state_of; src/kernel/src/sched/queue.rs time_spent; docs/ROADMAP.md stage 8.
 
 <a id="fx-0850"></a>
 
@@ -1604,8 +1604,8 @@ waits trust their queues, and have no recheck to end a wait a waker forgot.
 2. `attach_fifo` is not called from `openat`, or keys its table by something two
    opens of one FIFO do not share, so each opener gets a pipe of its own.
 3. A `statfs` layout in `src/lib/proto/linux-abi` or its encoder in
-   `src/lib/fs/vfs/src/statfs.rs` moved a field, so the magic number is not
-   where a program reads it.
+   `src/lib/fs/common/vfs/src/statfs.rs` moved a field, so the magic number is
+   not where a program reads it.
 4. tmpfs's `grow_to` shrinks a file, or `sendfile` stopped putting its offset
    back.
 5. `splice` or `copy_file_range` in `src/kernel/src/syscall/pipe.rs` moved the
@@ -1618,8 +1618,8 @@ waits trust their queues, and have no recheck to end a wait a waker forgot.
 
 See: src/kernel/src/fs/check.rs run_calls; src/kernel/src/fs/pipe.rs;
 src/kernel/src/syscall/pipe.rs; src/kernel/src/syscall/fsctl.rs;
-src/lib/fs/vfs/src/pipe.rs; src/lib/fs/vfs/src/statfs.rs; docs/ROADMAP.md stage
-8.
+src/lib/fs/common/vfs/src/pipe.rs; src/lib/fs/common/vfs/src/statfs.rs;
+docs/ROADMAP.md stage 8.
 
 <a id="fx-0870"></a>
 
@@ -1681,7 +1681,7 @@ it to its status; /proc/<pid>/exe must read as the path with (deleted) after it.
 
 See: src/kernel/src/fs/exec_check.rs; src/kernel/src/syscall/load.rs;
 src/kernel/src/syscall/program.rs; src/kernel/src/syscall/exec.rs;
-src/kernel/src/fs/procfs.rs; src/lib/fs/vfs/src/walk.rs; docs/CHROME.md.
+src/kernel/src/fs/procfs.rs; src/lib/fs/common/vfs/src/walk.rs; docs/CHROME.md.
 
 <a id="fx-0872"></a>
 
@@ -1755,7 +1755,7 @@ was made under. The whole run is done twice and must leave no frame behind.
 See: src/kernel/src/fs/memfd_check.rs; src/kernel/src/syscall/memfd.rs;
 src/kernel/src/syscall/fd.rs sys_fcntl; src/kernel/src/syscall/memory.rs
 map_file; src/kernel/src/user/space.rs map_file, protect;
-src/lib/fs/vfs/src/tmpfs.rs add_seals, set_attributes;
+src/lib/fs/common/vfs/src/tmpfs.rs add_seals, set_attributes;
 src/kernel/src/syscall/pidns.rs memfd_noexec.
 
 <a id="fx-0881"></a>
@@ -1799,7 +1799,7 @@ found its ready list full still wakes a wait afterwards.
 
 See: src/kernel/src/fs/epoll_check.rs; src/kernel/src/fs/epoll.rs;
 src/kernel/src/fs/anon.rs; src/kernel/src/syscall/epoll.rs;
-src/kernel/src/sched/wait.rs; src/lib/fs/vfs/src/node.rs poll_changes.
+src/kernel/src/sched/wait.rs; src/lib/fs/common/vfs/src/node.rs poll_changes.
 
 <a id="fx-0882"></a>
 
@@ -1950,7 +1950,7 @@ does.
    `/proc/<pid>/fd` does, or `MountFlags::options` misorders the options.
 
 See: src/kernel/src/fs/mount_check.rs; src/kernel/src/syscall/fsctl.rs;
-src/lib/fs/vfs/src/namespace.rs; src/kernel/src/fs/procfs/render.rs.
+src/lib/fs/common/vfs/src/namespace.rs; src/kernel/src/fs/procfs/render.rs.
 
 <a id="fx-0886"></a>
 
@@ -1982,7 +1982,7 @@ a bind from it EINVAL.
    Linux's `path_mount`.
 
 See: src/kernel/src/fs/bind_check.rs; src/kernel/src/syscall/fsctl.rs;
-src/lib/fs/vfs/src/namespace.rs.
+src/lib/fs/common/vfs/src/namespace.rs.
 
 <a id="fx-0887"></a>
 
@@ -2022,7 +2022,7 @@ A native child the second process makes must be in its namespace and root
 
 See: src/kernel/src/fs/namespace_check.rs; src/kernel/src/syscall/namespace.rs;
 src/kernel/src/syscall/fsctl.rs; src/kernel/src/syscall/launch.rs;
-src/lib/fs/vfs/src/namespace.rs.
+src/lib/fs/common/vfs/src/namespace.rs.
 
 <a id="fx-0888"></a>
 
@@ -2078,16 +2078,16 @@ says SYSFS_MAGIC, and cgroup2 mounts on fs/cgroup.
 1. A directory lists a name its lookup does not find, or the other way round:
    `entries` in src/kernel/src/fs/sysfs.rs and a core's list disagree.
 2. A link's target is spelt wrongly: `path_of` and the directories disagree
-   about where something is, or src/lib/fs/sysfs's `path::relative` climbs to
-   the wrong ancestor.
+   about where something is, or src/lib/fs/common/sysfs's `path::relative`
+   climbs to the wrong ancestor.
 3. A core stopped recording the device node its driver serves (`Origin` in
    devfs, `net_ring::node_of`, `Card::node`), so a device is shown in the wrong
    directory.
-4. A format in src/lib/fs/sysfs changed; its host tests pin each against
+4. A format in src/lib/fs/common/sysfs changed; its host tests pin each against
    Linux's.
 
 See: src/kernel/src/fs/sysfs.rs; src/kernel/src/fs/sysfs/check.rs;
-src/lib/fs/sysfs; docs/SYSFS.md.
+src/lib/fs/common/sysfs; docs/SYSFS.md.
 
 <a id="fx-0891"></a>
 
@@ -2963,10 +2963,10 @@ printed before the report.
    ring's data copy to the volume reader and the page source, or the fixture and
    the manifest disagree.
 3. A directory or a link is missing or of the wrong kind: lookup, readdir or
-   readlink in src/lib/fs/btrfs-vfs changed what it answers.
+   readlink in src/lib/fs/btrfs/vfs changed what it answers.
 
 See: src/kernel/src/fs/btrfs_check.rs; src/kernel/src/fs/btrfs.rs;
-src/lib/fs/btrfs-vfs; tools/common/xtask/src/btrfs_disk.rs; docs/ROADMAP.md
+src/lib/fs/btrfs/vfs; tools/common/xtask/src/btrfs_disk.rs; docs/ROADMAP.md
 stage 11.
 
 <a id="fx-1150"></a>
@@ -3090,7 +3090,7 @@ the same disk is instead rewritten until QEMU is killed, and then mounted again
 was made durable is checked against that trailer.
 
 1. The mount failed: the disk takes no writes, or the volume is one
-   src/lib/fs/btrfs-write will not maintain (a subvolume, quotas), which is
+   src/lib/fs/btrfs/write will not maintain (a subvolume, quotas), which is
    EROFS, or a log left by a crash would not replay.
 2. A file read back short or with the wrong CRC-32C: the write path put an
    extent, a checksum or an inode's size somewhere the read path does not look,
@@ -3101,18 +3101,18 @@ was made durable is checked against that trailer.
 4. Something removed is still there, or something renamed is not: the directory
    items, the back-references or the orphan bookkeeping disagree.
 5. Filling the volume ended in something other than ENOSPC, or left it unable to
-   sync or take a new file: src/lib/fs/btrfs-vfs's reservation (rw.rs, "Room is
+   sync or take a new file: src/lib/fs/btrfs/vfs's reservation (rw.rs, "Room is
    taken at the write") promised room the writeback did not find, or an
    allocation that ran out aborted the transaction instead of answering ENOSPC
    before it changed anything.
 6. After a power failure, a file's bytes are not the ones its trailer promised:
    a log or a commit that completed was rolled back, or replay put older extents
-   under newer stat data. src/lib/fs/btrfs-write's powerfail tests reproduce
+   under newer stat data. src/lib/fs/btrfs/write's powerfail tests reproduce
    this on the host, faster.
 
 See: src/kernel/src/fs/btrfs_write_check.rs;
 src/kernel/src/fs/btrfs_powerfail.rs; src/kernel/src/fs/btrfs.rs;
-src/lib/fs/btrfs-vfs rw; src/lib/fs/btrfs-write;
+src/lib/fs/btrfs/vfs rw; src/lib/fs/btrfs/write;
 tools/common/xtask/src/btrfs_disk.rs; tools/common/xtask/src/powerfail.rs;
 docs/ROADMAP.md stage 12.
 
@@ -3218,11 +3218,11 @@ accept a limit on a job the delegatee made with job_create.
     does not report EMPTY; or `job_for_cgroup` in
     src/kernel/src/syscall/native.rs judged the rights by someone other than the
     caller, or `cgroupfs::directory_job` did not recognise a cgroup directory.
-12. A write's text is parsed differently from Linux's: src/lib/fs/cgroupfs,
-    whose host tests pin each parse.
+12. A write's text is parsed differently from Linux's:
+    src/lib/fs/common/cgroupfs, whose host tests pin each parse.
 
 See: src/kernel/src/fs/cgroupfs.rs; src/kernel/src/object/job.rs;
-src/lib/fs/cgroupfs; docs/CGROUPS.md.
+src/lib/fs/common/cgroupfs; docs/CGROUPS.md.
 
 <a id="fx-1302"></a>
 

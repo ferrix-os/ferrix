@@ -255,7 +255,7 @@ pub(crate) fn package(entries: &[ports::File]) -> Result<Vec<u8>> {
 
 /// Where an image carries pid 1's inputs: the kernel reads them from the
 /// archive and nothing unpacks them (`src/kernel/src/init.rs`,
-/// `src/lib/fs/vfs/src/initramfs.rs`).
+/// `src/lib/fs/common/vfs/src/initramfs.rs`).
 pub(crate) const INIT_DIRECTORY: &str = ".ferrix/init";
 
 /// `archive` with pid 1's inputs added under [`INIT_DIRECTORY`]: each of

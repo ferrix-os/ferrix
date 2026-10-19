@@ -3729,7 +3729,7 @@ fn write_word(process: &Process, at: u64, value: u64) -> Result<(), &'static str
 //
 // A file under `/tmp`, through the handlers: created, written, sought, read
 // back through a second descriptor that shares its offset, changed with
-// `fcntl`, truncated and closed. `src/lib/fs/vfs` tests the same rules on the host;
+// `fcntl`, truncated and closed. `src/lib/fs/common/vfs` tests the same rules on the host;
 // what only this can test is the layer between -- arguments narrowed as the
 // ABI narrows them, this architecture's `open` flag bits, the table lock let
 // go before the file is touched, and every description closed and every page

@@ -21,7 +21,7 @@
 //! with no trailer was being written when the power went, and POSIX promises
 //! nothing about it, so nothing is asked of it.
 //!
-//! That is the same rule the host-side crash tests in `src/lib/fs/btrfs-write`
+//! That is the same rule the host-side crash tests in `src/lib/fs/btrfs/write`
 //! apply, at a thousand cuts a second rather than one a boot; this half is
 //! what puts a real driver, a real block ring and a real host filesystem's
 //! flushes under it.

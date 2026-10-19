@@ -418,7 +418,7 @@ Read on 813d1ea8. Paths are under `src/kernel/src/` unless given.
 
 **Absent.**
 * ptrace: no number, no stops. `TracerPid:` is always 0
-  (`src/lib/fs/procfs/src/status.rs:132`).
+  (`src/lib/fs/common/procfs/src/status.rs:132`).
 * Any BPF, classic or extended.
 * A per-call audit hook. `audit.rs` records the item's own decisions.
 * `NoNewPrivs`, `Seccomp` and `Seccomp_filters` in `/proc/<pid>/status`
@@ -1041,7 +1041,7 @@ They come from `ferrix_procfs::status::render` with fields filled by
 | `syscall/seccomp_check.rs` (new) | load (a test pattern) | the boot checks, §8 |
 | `syscall/attributes.rs`, `thread.rs`, `process.rs`, `family.rs`, `exec.rs`, `launch.rs`, `signal.rs`, `deliver.rs`, `linux.rs` | load | `prctl` options, the per-thread state, inheritance, no-new-privs moved to `Process`, `Origin::Sys` |
 | `src/lib/proto/linux-abi` (`nr.rs`, `sigframe32.rs`) | outside | the four numbers, `_sigsys` |
-| `fs/procfs`, `src/lib/fs/procfs` | load / outside | the status lines |
+| `fs/procfs`, `src/lib/fs/common/procfs` | load / outside | the status lines |
 | **`trap.rs`** | **core** | the `SyscallFilter` registration and `filter_system_call` (§3.3) |
 | **`arch/x86_64/syscall.rs`, `arch/x86_64/mod.rs`, `arch/aarch64/trap.rs`, `arch/armv7a/trap.rs`** | **core** | one call each at the top of the system call path; the instruction pointer passed; `syscall_rollback_value` in each facade |
 | `main.rs` | item (composition root) | registering `syscall::seccomp::check`; the check's call |

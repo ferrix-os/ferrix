@@ -37,7 +37,7 @@ const NEW: NewInode = NewInode {
 };
 /// `mkfs.btrfs -L ferrix-root` of 1 GiB with 4 KiB nodes: the volume the
 /// installer used to copy.
-const ROOT_FIXTURE: &[u8] = include_bytes!("../../btrfs/testdata/root.img.packed");
+const ROOT_FIXTURE: &[u8] = include_bytes!("../../format/testdata/root.img.packed");
 
 /// What a device was asked to do, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]

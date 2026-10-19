@@ -63,7 +63,7 @@
 //!   behind the VFS's back, so the directory answers
 //!   [`Inode::caches_lookups`] with `false`, as procfs does, and every walk
 //!   asks the table. Invalidating instead would need the registry to reach
-//!   every devtmpfs mount's dentries, which `src/lib/fs/vfs` offers no way to do; and
+//!   every devtmpfs mount's dentries, which `src/lib/fs/common/vfs` offers no way to do; and
 //!   what not caching costs here is small: a scan of seven names and a short
 //!   locked list. The one thing it would have cost is a mount point inside
 //!   `/dev`, which `/dev/shm` needs; `Inode::caches_lookup_of` buys that one

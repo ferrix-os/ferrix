@@ -500,7 +500,7 @@ the ring up: it holds the ring and data VMOs, attaches the crate's
 registry under HELLO's name with the virtio-blk major and `index × 16`, and
 answers READY with its completion port. From then on it serves reads (and,
 since stage 12, writes and flushes):
-`src/lib/fs/block`'s queue in front of the ring, one submission per dispatch into a
+`src/lib/fs/common/block`'s queue in front of the ring, one submission per dispatch into a
 region of the data VMO the kernel allocates, the driver rung when it asked to
 be, completions taken off the ring and copied out once, readers woken. A read
 on a ring whose driver has gone answers `EIO` at once; the ring ends on

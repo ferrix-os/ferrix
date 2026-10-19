@@ -1,7 +1,7 @@
 //! Fuzz the VFS with sequences of operations a program could make.
 //!
 //! From stage 8 every path a program passes to `open`, `mkdir`, `rename` or
-//! `symlink` reaches `src/lib/fs/vfs` in ring 0, and the order of those calls is the
+//! `symlink` reaches `src/lib/fs/common/vfs` in ring 0, and the order of those calls is the
 //! program's to choose. The path walk follows symbolic links a program wrote,
 //! crosses mounts, and caches both hits and misses; tmpfs takes up to four
 //! inode locks for one `rename`. Neither kind of bug shows as a crash on the

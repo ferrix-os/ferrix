@@ -18,7 +18,7 @@ There is no database: the records are what is installed. What a package is
 -- the manifest, the record, the plan that orders a set and refuses a missing
 dependency or a path owned twice -- is `src/lib/proto/pkg`, which xtask
 builds images with, and the archive reader is the kernel's
-`src/lib/fs/cpio`, so the image build and `pkg` agree on both.
+`src/lib/fs/common/cpio`, so the image build and `pkg` agree on both.
 
 `cargo test` here runs it against a directory as the root;
 `cargo xtask test-pkg` boots it, installs, runs and removes the stat

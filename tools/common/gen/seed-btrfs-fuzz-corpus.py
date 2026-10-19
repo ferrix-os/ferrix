@@ -2,7 +2,7 @@
 """Write the seed corpus for the `btrfs_read` fuzz target.
 
 Each input is a selector byte and a list of edits to one of the real images in
-`src/lib/fs/btrfs/testdata/` (see `src/tests/fuzz/fuzz_targets/btrfs_read.rs` for the layout).
+`src/lib/fs/btrfs/format/testdata/` (see `src/tests/fuzz/fuzz_targets/btrfs_read.rs` for the layout).
 The seeds are the untouched images, so the first run already mounts all four,
 plus two resealed edits so a mutated-but-checksummed image is in the corpus
 from the start rather than something the fuzzer has to stumble on.

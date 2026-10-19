@@ -448,7 +448,7 @@ class Units:
     crates, product code of the item only.
 
     A kernel file is keyed by its path under src/kernel/src (`mm.rs`), a
-    crate's by its path from the repository's root (`src/lib/fs/btrfs/src/
+    crate's by its path from the repository's root (`src/lib/fs/btrfs/format/src/
     volume.rs`), which no kernel path can be."""
 
     def __init__(

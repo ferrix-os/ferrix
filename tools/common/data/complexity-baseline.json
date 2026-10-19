@@ -94,217 +94,217 @@
       "lines": 82,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/chunks.rs::encode_item": {
+    "src/lib/fs/btrfs/write/src/chunks.rs::encode_item": {
       "complexity": 19,
       "lines": 16,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/commit.rs::build_superblock": {
+    "src/lib/fs/btrfs/write/src/commit.rs::build_superblock": {
       "complexity": 23,
       "lines": 27,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/commit.rs::run_head": {
+    "src/lib/fs/btrfs/write/src/commit.rs::run_head": {
       "complexity": 31,
       "lines": 50,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/commit.rs::write_group_free_space": {
+    "src/lib/fs/btrfs/write/src/commit.rs::write_group_free_space": {
       "complexity": 15,
       "lines": 31,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/csum.rs::delete_range": {
+    "src/lib/fs/btrfs/write/src/csum.rs::delete_range": {
       "complexity": 19,
       "lines": 38,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/extent.rs::parse_inline": {
+    "src/lib/fs/btrfs/write/src/extent.rs::parse_inline": {
       "complexity": 15,
       "lines": 27,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/fs.rs::drop_extents_inner": {
+    "src/lib/fs/btrfs/write/src/fs.rs::drop_extents_inner": {
       "complexity": 21,
       "lines": 40,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/fs.rs::encode_inode": {
+    "src/lib/fs/btrfs/write/src/fs.rs::encode_inode": {
       "complexity": 18,
       "lines": 26,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/fs.rs::remove_ref": {
+    "src/lib/fs/btrfs/write/src/fs.rs::remove_ref": {
       "complexity": 29,
       "lines": 43,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/fs.rs::truncate_inner": {
+    "src/lib/fs/btrfs/write/src/fs.rs::truncate_inner": {
       "complexity": 17,
       "lines": 21,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/fs.rs::write_file_inner": {
+    "src/lib/fs/btrfs/write/src/fs.rs::write_file_inner": {
       "complexity": 17,
       "lines": 23,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/fs.rs::write_regular": {
+    "src/lib/fs/btrfs/write/src/fs.rs::write_regular": {
       "complexity": 19,
       "lines": 46,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/grow.rs::record_chunk": {
+    "src/lib/fs/btrfs/write/src/grow.rs::record_chunk": {
       "complexity": 23,
       "lines": 41,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/lib.rs::fmt": {
+    "src/lib/fs/btrfs/write/src/lib.rs::fmt": {
       "complexity": 19,
       "lines": 19,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/log.rs::replay_log": {
+    "src/lib/fs/btrfs/write/src/log.rs::replay_log": {
       "complexity": 31,
       "lines": 50,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/node.rs::write": {
+    "src/lib/fs/btrfs/write/src/node.rs::write": {
       "complexity": 22,
       "lines": 21,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/node.rs::write_leaf": {
+    "src/lib/fs/btrfs/write/src/node.rs::write_leaf": {
       "complexity": 19,
       "lines": 13,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/open.rs::load_free_space": {
+    "src/lib/fs/btrfs/write/src/open.rs::load_free_space": {
       "complexity": 21,
       "lines": 31,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/open.rs::load_roots": {
+    "src/lib/fs/btrfs/write/src/open.rs::load_roots": {
       "complexity": 19,
       "lines": 33,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/open.rs::open_committed": {
+    "src/lib/fs/btrfs/write/src/open.rs::open_committed": {
       "complexity": 20,
       "lines": 67,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/tree.rs::fixup": {
+    "src/lib/fs/btrfs/write/src/tree.rs::fixup": {
       "complexity": 15,
       "lines": 19,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/tree.rs::prev_item": {
+    "src/lib/fs/btrfs/write/src/tree.rs::prev_item": {
       "complexity": 16,
       "lines": 27,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/tree.rs::search": {
+    "src/lib/fs/btrfs/write/src/tree.rs::search": {
       "complexity": 20,
       "lines": 34,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/tree.rs::shrink_root": {
+    "src/lib/fs/btrfs/write/src/tree.rs::shrink_root": {
       "complexity": 16,
       "lines": 33,
       "recursive": false
     },
-    "src/lib/fs/btrfs-write/src/tree.rs::split": {
+    "src/lib/fs/btrfs/write/src/tree.rs::split": {
       "complexity": 32,
       "lines": 64,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/chunk.rs::check_geometry": {
+    "src/lib/fs/btrfs/format/src/chunk.rs::check_geometry": {
       "complexity": 16,
       "lines": 22,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zlib/block.rs::dynamic": {
+    "src/lib/fs/btrfs/format/src/compress/zlib/block.rs::dynamic": {
       "complexity": 18,
       "lines": 15,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd.rs::decode_blocks": {
+    "src/lib/fs/btrfs/format/src/compress/zstd.rs::decode_blocks": {
       "complexity": 19,
       "lines": 23,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd.rs::decode_frame": {
+    "src/lib/fs/btrfs/format/src/compress/zstd.rs::decode_frame": {
       "complexity": 16,
       "lines": 15,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd.rs::parse": {
+    "src/lib/fs/btrfs/format/src/compress/zstd.rs::parse": {
       "complexity": 24,
       "lines": 30,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd/fse.rs::next": {
+    "src/lib/fs/btrfs/format/src/compress/zstd/fse.rs::next": {
       "complexity": 19,
       "lines": 24,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd/huffman.rs::build_table": {
+    "src/lib/fs/btrfs/format/src/compress/zstd/huffman.rs::build_table": {
       "complexity": 25,
       "lines": 22,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd/huffman.rs::fill_cells": {
+    "src/lib/fs/btrfs/format/src/compress/zstd/huffman.rs::fill_cells": {
       "complexity": 20,
       "lines": 22,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd/huffman.rs::fse_weights": {
+    "src/lib/fs/btrfs/format/src/compress/zstd/huffman.rs::fse_weights": {
       "complexity": 20,
       "lines": 22,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd/huffman.rs::read_tree": {
+    "src/lib/fs/btrfs/format/src/compress/zstd/huffman.rs::read_tree": {
       "complexity": 15,
       "lines": 15,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/compress/zstd/sequences.rs::execute": {
+    "src/lib/fs/btrfs/format/src/compress/zstd/sequences.rs::execute": {
       "complexity": 18,
       "lines": 31,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/fs.rs::copy_extent": {
+    "src/lib/fs/btrfs/format/src/fs.rs::copy_extent": {
       "complexity": 15,
       "lines": 35,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/fs.rs::read": {
+    "src/lib/fs/btrfs/format/src/fs.rs::read": {
       "complexity": 15,
       "lines": 38,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/fs.rs::verify_sectors": {
+    "src/lib/fs/btrfs/format/src/fs.rs::verify_sectors": {
       "complexity": 26,
       "lines": 61,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/items.rs::parse": {
+    "src/lib/fs/btrfs/format/src/items.rs::parse": {
       "complexity": 17,
       "lines": 19,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/items.rs::record": {
+    "src/lib/fs/btrfs/format/src/items.rs::record": {
       "complexity": 16,
       "lines": 21,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/lib.rs::fmt": {
+    "src/lib/fs/btrfs/format/src/lib.rs::fmt": {
       "complexity": 28,
       "lines": 60,
       "recursive": false
     },
-    "src/lib/fs/btrfs/src/volume.rs::open": {
+    "src/lib/fs/btrfs/format/src/volume.rs::open": {
       "complexity": 12,
       "lines": 61,
       "recursive": false

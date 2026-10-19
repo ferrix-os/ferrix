@@ -1,6 +1,6 @@
 """The entries of a `newc` cpio archive, as Ferrix's initramfs is written.
 
-The kernel reads it with `src/lib/fs/cpio`; this is the release tools'
+The kernel reads it with `src/lib/fs/common/cpio`; this is the release tools'
 reading of the same format (`070701` headers, eight hex digits a field,
 names and data padded to four bytes), enough to list what an image
 carries and read a file out of it.

@@ -583,7 +583,7 @@ Gate pool notes, for whoever runs it:
   join ... --gate ~/.local/share/ferrix/selfhost-matrix/batch-gate.txt`,
   then the one-line report to the PO (all controls FIRED, the four boots'
   transcripts equal main's apart from the `inputs` line and sizes). Traps:
-  5e2eca4b2 failed `cargo fmt --check` in src/lib/fs/vfs/src/tests.rs (fixed
+  5e2eca4b2 failed `cargo fmt --check` in src/lib/fs/common/vfs/src/tests.rs (fixed
   0eda22d00), which is why e-host and g did not fire; `test-init` in a gate
   slot needs `build-apps --arch x86_64 --app sshdt` there first (pin with
   GATE_SLOT); the generated architecture files conflict on every rebase

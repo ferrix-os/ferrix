@@ -5,7 +5,7 @@
 //! path to them *"is not per-request IPC. Driver and kernel share a descriptor
 //! ring in a VMO and ring a doorbell; requests batch."* This crate is that ring
 //! for block devices. It is written ahead of both of its users — the kernel's
-//! ring glue in front of `src/lib/fs/block`'s queue, and the virtio-blk driver
+//! ring glue in front of `src/lib/fs/common/block`'s queue, and the virtio-blk driver
 //! process — so that both link one implementation of the layout and of the
 //! validation, and so that `cargo test`, Miri and a fuzzer can reach it.
 //!

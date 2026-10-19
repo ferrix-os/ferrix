@@ -185,7 +185,7 @@ impl Status {
 /// [`crate::Device::payload_len`] computes it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Submission {
-    /// The kernel's name for it: `src/lib/fs/block`'s dispatch token, raw.
+    /// The kernel's name for it: `src/lib/fs/common/block`'s dispatch token, raw.
     pub id: u64,
     /// What to do.
     pub op: Op,

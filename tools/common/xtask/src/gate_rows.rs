@@ -80,7 +80,7 @@ const PRESSURED: &[&str] = &[
     "src/kernel/src/mm.rs",
     "src/kernel/src/mm/",
     "src/kernel/src/fs/btrfs",
-    "src/lib/fs/btrfs",
+    "src/lib/fs/btrfs/",
     "src/kernel/src/object/quota.rs",
 ];
 
@@ -561,7 +561,7 @@ mod tests {
             "src/kernel/src/user/cache.rs",
             "src/kernel/src/mm.rs",
             "src/kernel/src/fs/btrfs_write_check.rs",
-            "src/lib/fs/btrfs-vfs/src/rw.rs",
+            "src/lib/fs/btrfs/vfs/src/rw.rs",
             "src/kernel/src/object/quota.rs",
         ] {
             let rows = rows_of(&[path]);
@@ -651,10 +651,10 @@ mod tests {
     #[test]
     fn review_is_asked_for_the_rings_the_evidence_and_new_unsafe() {
         let members = vec!["audit.rs".to_owned(), "arch/**".to_owned()];
-        let crates = vec!["src/lib/fs/btrfs".to_owned()];
+        let crates = vec!["src/lib/fs/btrfs/format".to_owned()];
         let changed: Vec<String> = [
-            "src/lib/fs/btrfs/Cargo.toml",
-            "src/lib/fs/btrfs-vfs/src/lib.rs",
+            "src/lib/fs/btrfs/format/Cargo.toml",
+            "src/lib/fs/btrfs/vfs/src/lib.rs",
             "src/kernel/src/audit.rs",
             "src/kernel/src/arch/x86_64/cpu.rs",
             "src/kernel/src/fs/tmpfs.rs",
@@ -671,7 +671,7 @@ mod tests {
         assert_eq!(
             needs_review(&changed, &members, &crates, &unsafe_added),
             [
-                "src/lib/fs/btrfs/Cargo.toml",
+                "src/lib/fs/btrfs/format/Cargo.toml",
                 "src/kernel/src/audit.rs",
                 "src/kernel/src/arch/x86_64/cpu.rs",
                 "src/kernel/src/net/tcp.rs",

@@ -17,7 +17,7 @@ interfaces through. Those run over interfaces, routes and a loopback device.
 virtio-net is the first driver. It runs in user mode on stage 10's device
 objects and speaks to the core over a channel, with its buffers in VMOs, as
 virtio-blk speaks to the block core. `/proc/net` (`arp`, `dev`, `route`,
-`tcp`, `tcp6`, `udp`, `udp6`) comes with it, rendered in `src/lib/fs/procfs` like
+`tcp`, `tcp6`, `udp`, `udp6`) comes with it, rendered in `src/lib/fs/common/procfs` like
 the rest of `/proc`; `unix` is not there yet.
 
 The byte-level halves are `src/lib/` code, host-tested and fuzzed before the
@@ -263,7 +263,7 @@ and a frame out through the whole stack. It reads:
   netring  1 HELLOs refused as specified, 4 slots posted for a driver to fill, 1 frames taken up the stack and 1 answered back down it
 ```
 
-**Done — `/proc/net`.** `src/lib/fs/procfs` gains `dev`, `route`, `tcp`, `tcp6`,
+**Done — `/proc/net`.** `src/lib/fs/common/procfs` gains `dev`, `route`, `tcp`, `tcp6`,
 `udp`, `udp6` and `arp`, each pinned in its tests against a line copied from a
 running Linux, because `route`, `netstat`, `arp` and `ifconfig` read these
 files with `sscanf` and fixed columns and a field one column off is a program
