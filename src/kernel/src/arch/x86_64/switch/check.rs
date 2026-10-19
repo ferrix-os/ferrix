@@ -83,7 +83,7 @@ const PATIENCE_NANOS: u64 = 60_000_000_000;
 
 /// Wakes beside a program that left the x87 initial, at most, for the fast
 /// reset's x87-left branch to be seen taken once: see [`run`].
-const QUIET_TRIES: usize = 4;
+const QUIET_TRIES: usize = 16;
 
 /// The handle a fixture finds its channel under: the first a fresh process
 /// is given.
@@ -626,12 +626,18 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         // the x87 initial at all, and the left branch is demanded only then,
         // within [`QUIET_TRIES`] wakes, since a hypervisor's restore can
         // raise the bit on any one of them.
+        //
+        // One probe saying "initial" is not enough: a runner's KVM said so
+        // once and then raised the bit on all four wakes after it (runs
+        // 39162329764 and 39274053774, 2026-10-18 and 19). So the probe is
+        // asked again, [`PROBE_TRIES`] times, and the branch is demanded
+        // only where every answer is "initial".
         let fast = cpu::reset_components() == cpu::XSTATE_X87_SSE | cpu::XSTATE_AVX;
         report.xinuse = check_xinuse_tells_nothing()?;
         let reports_initial = matches!(
             report.xinuse,
             Some((_, quiet)) if u64::try_from(quiet).is_ok_and(|bits| bits & cpu::XSTATE_X87 == 0)
-        );
+        ) && x87_reported_initial_every_time()?;
         let before = super::x87_resets();
         run_vector_case(Wake::Message)?;
         let after = super::x87_resets();
@@ -1087,8 +1093,36 @@ fn check_xinuse_tells_nothing() -> Result<Option<(i32, i32)>, &'static str> {
 }
 
 /// Pairs of probes at most that [`check_xinuse_tells_nothing`] makes while
-/// each shows a bit set after the busy program alone.
+/// each shows a bit set after the busy program alone; and the probes after
+/// a quiet program that [`x87_reported_initial_every_time`] makes.
 const PROBE_TRIES: usize = 3;
+
+/// Whether the probe, woken after a quiet program [`PROBE_TRIES`] times,
+/// read the x87 initial in `XINUSE` every time: where it did not, the
+/// processor or its hypervisor raises the bit on its own, and the fast
+/// reset's x87-left branch cannot be demanded (see [`run`]).
+///
+/// # Errors
+///
+/// A probe that did not read `XINUSE` after its wake.
+fn x87_reported_initial_every_time() -> Result<bool, &'static str> {
+    for _ in 0..PROBE_TRIES {
+        let after_quiet = run_probe(false)?;
+        if !(40..48).contains(&after_quiet) {
+            println!("  vectors  the XINUSE probe ended with {after_quiet}");
+            return Err("the XINUSE probe did not read XINUSE after its wake");
+        }
+        let bits = u64::try_from(after_quiet - 40).unwrap_or(u64::MAX);
+        if bits & cpu::XSTATE_X87 != 0 {
+            println!(
+                "  vectors  XINUSE after a quiet program {bits:#x} once: the x87-left branch \
+                 is not demanded"
+            );
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
 
 /// One run of the probe, woken by a message after the other program -- the
 /// vector program in mode `b` when `busy`, [`QUIET_PROGRAM`] otherwise --
