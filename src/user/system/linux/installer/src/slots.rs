@@ -243,8 +243,8 @@ pub fn install(
         "ferrix-install: the control record says slot a is good (record {})",
         first.sequence
     );
-    step("writing the root volume", || {
-        write_root(&mut whole, root.entry.first * SECTOR)
+    step("making the root volume", || {
+        write_root(&mut whole, root.entry.first * SECTOR, root.bytes())
     })?;
     if let Some(table) = table {
         step("writing the partition table", || {

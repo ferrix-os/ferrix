@@ -3,9 +3,37 @@
 version = 4
 
 [[package]]
+name = "ferrix-btrfs"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-btrfs-mkfs"
+version = "0.1.0"
+dependencies = [
+ "ferrix-btrfs",
+ "ferrix-btrfs-write",
+]
+
+[[package]]
+name = "ferrix-btrfs-write"
+version = "0.1.0"
+dependencies = [
+ "ferrix-btrfs",
+ "ferrix-fallible",
+]
+
+[[package]]
+name = "ferrix-fallible"
+version = "0.1.0"
+dependencies = [
+ "ferrix-sync",
+]
+
+[[package]]
 name = "ferrix-install"
 version = "0.1.0"
 dependencies = [
+ "ferrix-btrfs-mkfs",
  "ferrix-partition",
  "ferrix-slots",
 ]
@@ -16,4 +44,8 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-slots"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-sync"
 version = "0.1.0"

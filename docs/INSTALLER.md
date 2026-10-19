@@ -666,7 +666,26 @@ the image; `bootctl try` also takes an image's FAT volume as it is. Proved
 by `cargo xtask test-install --slots` (x86-64, KVM), not in `check` yet;
 the host tests of the installer's workspace are.
 
-Left for later, in §9's order: a root file system the size of its partition
-(I3), `BLKRRPART`, the ISO (I6b), `test-install` on AArch64, the boot menu (I8),
+**I3, mkfs.btrfs (2026-10-19, branch i3-mkfs, 8 points estimated).**
+`src/lib/fs/btrfs-mkfs` makes an empty volume the size of its device, and
+`ferrix-install` formats the root partition with it, whole-disk and
+`--slots` alike, labelled `ferrix-root` with new UUIDs, where it used to
+copy the 1 GiB fixture (which the initramfs no longer carries). It departs
+from §5.3 in one place: it makes one first chunk of each kind (`DUP`
+system and metadata, `SINGLE` data, sized as Linux sizes a first chunk) and
+leaves the rest of the device unallocated for `ferrix-btrfs-write` to make
+chunks in as the volume fills, so there is no separate grow step. Its nodes
+are 16 KiB, as `mkfs.btrfs`'s. Host tests: the reader and the writer open
+it at 128 MiB to 1 TiB with 4, 16 and 64 KiB nodes; the writer fills one to
+the room it promised and reads it back after a reopen; its trees hold, item
+type for item type, what `mkfs.btrfs` wrote into the `root` fixture; and
+no superblock is written before the trees are flushed. Host `btrfs check`
+(btrfs-progs 6.6.3) passes it fresh and filled, at both node sizes, through
+`tools/common/test/btrfs-check-writer.sh`; a negative control (one block
+group's usage understated by a node) made `btrfs check` fail.
+`mkfs.btrfs` as a program of its own (`/sbin/mkfs.btrfs`) is not built: the
+installer is its only user so far.
+
+Left for later, in §9's order: `BLKRRPART`, the ISO (I6b), `test-install` on AArch64, the boot menu (I8),
 UEFI variables (I9), the graphical installer (I10, I11), Secure Boot (I13),
 shrinking (S1–S6) and real PCs (H0–H7).

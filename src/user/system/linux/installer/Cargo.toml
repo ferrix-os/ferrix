@@ -25,6 +25,7 @@ name = "bootctl"
 path = "src/bootctl.rs"
 
 [dependencies]
+ferrix-btrfs-mkfs = { path = "../../../../lib/fs/btrfs-mkfs" }
 ferrix-partition = { path = "../../../../lib/fs/partition" }
 ferrix-slots = { path = "../../../../lib/proto/slots" }
 

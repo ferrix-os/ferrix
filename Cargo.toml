@@ -35,6 +35,7 @@ members = [
     "src/lib/kernel/heap",
     "src/lib/kernel/kmem",
     "src/lib/fs/btrfs",
+    "src/lib/fs/btrfs-mkfs",
     "src/lib/fs/btrfs-vfs",
     "src/lib/fs/btrfs-write",
     "src/lib/fs/cpio",
@@ -171,6 +172,7 @@ ferrix-fallible = { path = "src/lib/kernel/fallible" }
 ferrix-heap = { path = "src/lib/kernel/heap" }
 ferrix-kmem = { path = "src/lib/kernel/kmem" }
 ferrix-btrfs = { path = "src/lib/fs/btrfs" }
+ferrix-btrfs-mkfs = { path = "src/lib/fs/btrfs-mkfs" }
 ferrix-btrfs-vfs = { path = "src/lib/fs/btrfs-vfs" }
 ferrix-btrfs-write = { path = "src/lib/fs/btrfs-write" }
 ferrix-cpio = { path = "src/lib/fs/cpio" }

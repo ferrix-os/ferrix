@@ -5,8 +5,8 @@
 //!
 //! 1. an EFI system partition holding a byte copy of the live disk's FAT
 //!    volume -- the loader, the kernel and the initramfs the machine booted;
-//! 2. a root partition holding the empty btrfs volume labelled `ferrix-root`
-//!    that `run` boots on (`src/lib/fs/btrfs/testdata/root.img.packed`, 1 GiB).
+//! 2. a root partition, the rest of the disk, holding an empty btrfs volume
+//!    labelled `ferrix-root` made to its size (`ferrix-btrfs-mkfs`).
 //!
 //! The kernel does the rest at the installed disk's first boot, as it does
 //! for every `run`: it finds `ferrix-root`, now on a partition, and unpacks
@@ -43,13 +43,10 @@ const LIVE_NAME: &str = "FERRIX-LIVE";
 const LIVE_ROOT: &[u8] = b"ferrix.root=tmpfs";
 const INSTALLED_ROOT: &[u8] = b"ferrix.root=btrfs";
 
-/// The empty root volume, as `xtask` packs it: records of a little-endian
-/// `u64` offset and the 4 KiB block there; zeros elsewhere.
-const ROOT_PACKED: &str = "/usr/share/ferrix/root.img.packed";
-/// The root volume's size.
+/// The root volume's label, which is how the kernel finds it.
+const ROOT_LABEL: &[u8] = b"ferrix-root";
+/// The smallest root partition: the system unpacked, with room to work.
 const ROOT_BYTES: u64 = 1 << 30;
-/// A packed block.
-const BLOCK: usize = 4096;
 /// Bytes in a sector: virtio's unit.
 const SECTOR: u64 = 512;
 /// Partitions start on MiB boundaries, as every tool puts them.
@@ -214,8 +211,12 @@ fn run() -> Result<(), String> {
         }
         Ok(())
     })?;
-    step("writing the root volume", || {
-        write_root(&mut disk, root_first * SECTOR)
+    step("making the root volume", || {
+        write_root(
+            &mut disk,
+            root_first * SECTOR,
+            (root_last - root_first + 1) * SECTOR,
+        )
     })?;
     step("writing the partition table", || {
         table
@@ -389,24 +390,44 @@ fn copy_esp(source: &mut File, disk: &mut File, bytes: u64, first: u64) -> io::R
     Ok(())
 }
 
-/// Write the packed root volume at `at`, zeroing its first and last MiB
-/// first so nothing old is taken for part of it.
-fn write_root(disk: &mut File, at: u64) -> io::Result<()> {
-    let packed = std::fs::read(ROOT_PACKED)?;
-    let zeros = vec![0_u8; WIPE as usize];
-    write_at(disk, at, &zeros)?;
-    write_at(disk, at + ROOT_BYTES - WIPE, &zeros)?;
-    for record in packed.chunks_exact(8 + BLOCK) {
-        let (offset, block) = record.split_at(8);
-        let offset = u64::from_le_bytes(offset.try_into().map_err(io::Error::other)?);
-        if offset + BLOCK as u64 > ROOT_BYTES {
-            return Err(io::Error::other(
-                "the packed root volume is larger than it says",
-            ));
-        }
-        write_at(disk, at + offset, block)?;
+/// Make an empty btrfs volume labelled [`ROOT_LABEL`] of `bytes` at byte
+/// `at` of `disk`: the whole root partition (`ferrix-btrfs-mkfs`). The
+/// kernel unpacks the system onto it at the installed disk's first boot.
+fn write_root(disk: &mut File, at: u64, bytes: u64) -> io::Result<()> {
+    let mut random = [[0_u8; 16]; 4];
+    let mut urandom = File::open("/dev/urandom")?;
+    for uuid in &mut random {
+        urandom.read_exact(uuid)?;
     }
-    Ok(())
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    let options = ferrix_btrfs_mkfs::Options::new(bytes, ROOT_LABEL, random, now);
+    let image = ferrix_btrfs_mkfs::make(&options).map_err(|e| io::Error::other(e.to_string()))?;
+    println!(
+        "ferrix-install: a btrfs volume of {} MiB labelled {}",
+        image.size >> 20,
+        String::from_utf8_lossy(ROOT_LABEL)
+    );
+    image.write_to(&mut Volume { disk, at })
+}
+
+/// A volume at byte `at` of a disk, for `ferrix-btrfs-mkfs` to write.
+struct Volume<'a> {
+    disk: &'a mut File,
+    at: u64,
+}
+
+impl ferrix_btrfs_mkfs::Target for Volume<'_> {
+    type Error = io::Error;
+
+    fn write_at(&mut self, at: u64, data: &[u8]) -> io::Result<()> {
+        write_at(self.disk, self.at + at, data)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.disk.sync_data()
+    }
 }
 
 fn write_at(disk: &mut File, at: u64, bytes: &[u8]) -> io::Result<()> {

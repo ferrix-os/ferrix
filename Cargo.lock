@@ -131,6 +131,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-btrfs-mkfs"
+version = "0.1.0"
+dependencies = [
+ "ferrix-btrfs",
+ "ferrix-btrfs-write",
+]
+
+[[package]]
 name = "ferrix-btrfs-vfs"
 version = "0.1.0"
 dependencies = [

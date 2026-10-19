@@ -3,8 +3,9 @@
 //! from it and boots what it wrote.
 //!
 //! `build --installer` makes the MVP's live image: the usual image, a bare
-//! FAT volume, whose initramfs also carries `/sbin/ferrix-install` and the
-//! empty root volume it writes. `live` makes the live medium of §3.1: the
+//! FAT volume, whose initramfs also carries `/sbin/ferrix-install`, which
+//! makes the root volume itself (`ferrix-btrfs-mkfs`). `live` makes the live
+//! medium of §3.1: the
 //! same files on a GUID partition table, in an EFI system partition named
 //! `FERRIX-LIVE`, with `ferrix.root=tmpfs` on its command line so that the
 //! live session keeps `/` in memory whatever disks the machine has. Either,
@@ -72,10 +73,6 @@ pub(crate) const TASKS: &[Task] = &[
 const PROGRAM_PATH: &str = "sbin/ferrix-install";
 /// Where `bootctl`, built in the installer's workspace, goes.
 const BOOTCTL_PATH: &str = "sbin/bootctl";
-/// Where the empty root volume goes.
-const ROOT_PATH: &str = "usr/share/ferrix/root.img.packed";
-/// The empty root volume, packed as `src/lib/fs/btrfs/testdata` keeps it.
-const ROOT_PACKED: &[u8] = include_bytes!("../../../../src/lib/fs/btrfs/testdata/root.img.packed");
 /// The target disk's size.
 const TARGET_BYTES: u64 = 2 << 30;
 
@@ -161,11 +158,6 @@ pub(crate) fn files(arch: Arch) -> Result<Option<Vec<ports::File>>> {
             path: BOOTCTL_PATH.to_owned(),
             mode: 0o755,
             content: ports::Content::Bytes(bootctl),
-        },
-        ports::File {
-            path: ROOT_PATH.to_owned(),
-            mode: 0o644,
-            content: ports::Content::Bytes(ROOT_PACKED.to_vec()),
         },
     ]))
 }

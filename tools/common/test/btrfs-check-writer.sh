@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run host `btrfs check` over every volume the btrfs write path's tests write.
+# Run host `btrfs check` over every volume the btrfs write path's tests write,
+# and over the volumes `ferrix-btrfs-mkfs` makes.
 #
 # `src/lib/fs/btrfs-write` checks its own output with a consistency checker of its
 # own and with the stage 11 reader. Neither is btrfs. This script is the
@@ -28,6 +29,10 @@ trap 'rm -rf "$out"' EXIT
 FERRIX_BTRFS_OUT="$out" cargo test -q -p ferrix-btrfs-write -- \
     --ignored --exact tests::btrfs_check_images > "$out/test.log" 2>&1 \
     || { cat "$out/test.log" >&2; exit 1; }
+# And what `ferrix-btrfs-mkfs` makes, fresh and filled by the write path.
+FERRIX_BTRFS_OUT="$out" cargo test -q --release -p ferrix-btrfs-mkfs -- \
+    --ignored --exact tests::btrfs_check_images > "$out/mkfs.log" 2>&1 \
+    || { cat "$out/mkfs.log" >&2; exit 1; }
 
 shopt -s nullglob
 images=("$out"/*.img)

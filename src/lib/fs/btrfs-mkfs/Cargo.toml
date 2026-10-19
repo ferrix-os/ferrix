@@ -1,0 +1,15 @@
+[package]
+name = "ferrix-btrfs-mkfs"
+description = "mkfs.btrfs for one device: an empty volume ferrix-btrfs-write can open and grow"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrix-btrfs.workspace = true
+ferrix-btrfs-write.workspace = true
+
+[lints]
+workspace = true
