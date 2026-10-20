@@ -1183,6 +1183,11 @@ fn answered_drains(
 /// requests abandoned before their turn leave the queue at once, and
 /// requests the driver answers before their turn -- it may guess their ids
 /// -- still count against the queue's room until they leave it.
+///
+/// The steps before this one answer requests the control's task has not
+/// taken off the queue yet: it skips them only when it next runs, woken by
+/// an admit or `RECHECK_NANOS` (`super`) later. So the queue is read empty
+/// first, or round 0 finds less room than [`MAX_OUTSTANDING`] (fl-071).
 fn bounded(
     side: &Side,
     control: Handle,
@@ -1190,10 +1195,20 @@ fn bounded(
     program: &Side,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    for _ in 0..ROUNDS {
+    emptied(
+        side,
+        control,
+        core,
+        "answered requests stayed in the queue before its room was measured",
+    )?;
+    for round in 0..ROUNDS {
         let taken = fill(core, program)?;
         if taken.len() != MAX_OUTSTANDING {
-            return Err("after every request was abandoned a new one was refused");
+            return Err(if round == 0 {
+                "an empty queue to a driver that reads nothing refused a request before its room was full"
+            } else {
+                "after every request was abandoned a new one was refused"
+            });
         }
         report.refusals += 1;
         for request in &taken {
@@ -1218,16 +1233,12 @@ fn bounded(
         abandon(core, request);
     }
     report.abandoned += u32::try_from(more.len()).unwrap_or(u32::MAX);
-    drain_channel(side, control);
-    let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
-    while queued(core) != 0 {
-        if timer::now_nanos() > deadline {
-            return Err("answered requests stayed in the queue after its driver read again");
-        }
-        drain_channel(side, control);
-        sched::sleep_for(1_000_000);
-    }
-    Ok(())
+    emptied(
+        side,
+        control,
+        core,
+        "answered requests stayed in the queue after its driver read again",
+    )
 }
 
 /// The cookie the check names its dmabuf by.
@@ -2937,6 +2948,26 @@ fn queued(control: &Control) -> usize {
         .iter()
         .filter(|held| matches!(held, super::Outgoing::Request(_)))
         .count()
+}
+
+/// Read `control` dry until the queue to `core`'s driver holds no request,
+/// or fail with `late` after [`PATIENCE_NANOS`].
+fn emptied(
+    side: &Side,
+    control: Handle,
+    core: &Control,
+    late: &'static str,
+) -> Result<(), &'static str> {
+    drain_channel(side, control);
+    let deadline = timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while queued(core) != 0 {
+        if timer::now_nanos() > deadline {
+            return Err(late);
+        }
+        drain_channel(side, control);
+        sched::sleep_for(1_000_000);
+    }
+    Ok(())
 }
 
 /// Mark a copy for `request` in flight, as `copy` does before its chunks,
