@@ -101,6 +101,27 @@ tail -n 20 /tmp/yserver.log | sed 's/^/dxvk: yserver: /'
 echo "dxvk: end"
 "#;
 
+/// SCRATCH: vkcube on lavapipe, then on anv with the sw WSI, each traced.
+const CUBE: &str = r#"while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 1; done
+for icd in /data/usr/share/vulkan/icd.d/lvp_icd.json /intel/intel_icd.json; do
+    name=$(basename $icd)
+    VK_ICD_FILENAMES=$icd MESA_VK_WSI_DEBUG=sw MESA_SHADER_CACHE_DISABLE=1         /data/usr/bin/strace -f -tt -o /tmp/cube-$name.strace /intel/vkcube --c 20 > /tmp/cube-$name.txt 2>&1 &
+    p=$!
+    waited=0
+    while kill -0 $p 2>/dev/null && [ $waited -lt 40 ]; do sleep 1; waited=$((waited + 1)); done
+    if kill -0 $p 2>/dev/null; then
+        echo "dxvk: cube $name still running after ${waited}s"
+        kill -9 $p
+    else
+        wait $p
+        echo "dxvk: cube $name exited $? after ${waited}s"
+    fi
+    sed "s/^/dxvk: cube $name: /" /tmp/cube-$name.txt | tail -n 15
+    grep -c . /tmp/cube-$name.strace | sed "s/^/dxvk: cube $name strace lines: /"
+    tail -n 60 /tmp/cube-$name.strace | sed "s/^/dxvk: cube $name strace: /"
+done
+"#;
+
 /// The parts of `screen`, in thousandths, that are exactly `clear` and
 /// exactly `triangle`.
 fn coverage(screen: &Image, clear: [u8; 3], triangle: [u8; 3]) -> (usize, usize) {
@@ -159,11 +180,17 @@ pub(crate) fn test_dxvk_window(args: &Args, volume: PathBuf, dxvk: &Path) -> Res
             .map_err(|error| Error::new(format!("reading {}: {error}", lib.display())))?;
         ports.push(File { path: "intel".to_owned(), mode: 0o755, content: Content::Directory });
         ports.push(File { path: "intel/libvulkan_intel.so".to_owned(), mode: 0o755, content: Content::Bytes(content) });
+        let cube = Path::new(&tree).join("usr/bin/vkcube");
+        let cube = std::fs::read(&cube)
+            .map_err(|error| Error::new(format!("reading {}: {error}", cube.display())))?;
+        ports.push(File { path: "intel/vkcube".to_owned(), mode: 0o755, content: Content::Bytes(cube) });
+        ports.push(File { path: "intel/cube.sh".to_owned(), mode: 0o755, content: Content::Bytes(CUBE.as_bytes().to_vec()) });
         ports.push(File { path: "intel/intel_icd.json".to_owned(), mode: 0o644, content: Content::Bytes(br#"{"ICD":{"api_version":"1.4.305","library_path":"/intel/libvulkan_intel.so"},"file_format_version":"1.0.0"}"#.to_vec()) });
         let wsi = std::env::var("FERRIX_DXVK_WSI").unwrap_or_else(|_| "sw".to_owned());
         script = script.replace(
             "export VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json",
-            &format!("export VK_ICD_FILENAMES=/intel/intel_icd.json MESA_VK_WSI_DEBUG={wsi} MESA_SHADER_CACHE_DISABLE=1
+            &format!("busybox sh /intel/cube.sh
+export VK_ICD_FILENAMES=/intel/intel_icd.json MESA_VK_WSI_DEBUG={wsi} MESA_SHADER_CACHE_DISABLE=1
 ls -l /dev/dri | sed 's/^/dxvk: dri: /'"),
         );
         script = script.replace(
