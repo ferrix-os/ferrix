@@ -1298,6 +1298,12 @@ fn capability_lines(
 /// `top` and `ps` said every process was idle.
 pub(super) fn stat(process: &Process) -> Result<Vec<u8>> {
     let _ = sched::current_runtime();
+    // Every processor's running task charged up to now as well: one alone
+    // on its processor gets no tick and is charged only when something
+    // happens there, so without this a thread spinning alone read as
+    // having run nothing, and then, at its next charge, as having run the
+    // whole gap at once -- more than 100% of a window in `top`.
+    sched::charge_running();
     stat_of(process, process.pid(), Times::of(process.tasks().iter()))
 }
 
@@ -1319,6 +1325,12 @@ pub(super) fn thread_stat(of: &ThreadOf) -> Result<Vec<u8>> {
 /// [`time::process_runtime`] counts each.
 fn thread_times(process: &Process, tid: u32) -> Times {
     let _ = sched::current_runtime();
+    // Every processor's running task charged up to now as well: one alone
+    // on its processor gets no tick and is charged only when something
+    // happens there, so without this a thread spinning alone read as
+    // having run nothing, and then, at its next charge, as having run the
+    // whole gap at once -- more than 100% of a window in `top`.
+    sched::charge_running();
     let tasks = process.tasks();
     Times::of(tasks.iter().filter(|task| {
         crate::syscall::thread::of_task(task).is_some_and(|thread| thread.tid() == tid)

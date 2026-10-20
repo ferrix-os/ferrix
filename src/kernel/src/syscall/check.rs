@@ -1016,7 +1016,8 @@ fn check_memory_and_time_answer_as_linux_does(process: &Process) -> Result<(), &
     if told.is_err() {
         return Err("clock_gettime refused CLOCK_TAI");
     }
-    check_the_cpu_time_clocks(process).and_then(|()| check_getrusage_counts(process))
+    check_the_cpu_time_clocks(process).and_then(|()| check_getrusage_counts(process))?;
+    check_another_threads_time_is_current()
 }
 
 /// `CLOCK_THREAD_CPUTIME_ID` counts the time this thread runs, charged up to
@@ -13000,5 +13001,53 @@ fn check_getrusage_counts(process: &Process) -> Result<(), &'static str> {
         Ok(())
     })();
     let _ = memory::sys_munmap(process, page, PAGE_SIZE);
+    outcome
+}
+
+/// A thread running alone on another processor reads as running: the time
+/// `CLOCK_PROCESS_CPUTIME_ID` (and `/proc`'s `stat` and `RUSAGE_SELF`, which
+/// count the same way) gives a spinning program while it spins has moved by
+/// two milliseconds within a second. Alone there, it gets no tick and is
+/// charged only when something happens on its processor; a reader that took
+/// the last charge read it as having run nothing, and then the whole gap at
+/// once at its next charge -- more than 100% of a window in `top`.
+fn check_another_threads_time_is_current() -> Result<(), &'static str> {
+    const MILLI: u64 = 1_000_000;
+    let here = crate::smp::this_cpu()
+        .ok_or("no processor to run the running-time check on")?
+        .logical;
+    let count = crate::smp::count();
+    if count < 2 {
+        return Ok(());
+    }
+    let program = kernel_time_program(0, 0, TIMES_SPINS.saturating_mul(4))?;
+    let task = process::start_on(&program, Some((here + 1) % count))
+        .map_err(|_| "the running-time check's program could not be started")?;
+    let start = crate::timer::now_nanos();
+    let outcome = loop {
+        if program.wait_for_exit(crate::timer::now_nanos()).is_some() {
+            break Err(
+                "a program spinning alone on another processor ended before its time \
+                       read as moving: a reader took its processor's last charge",
+            );
+        }
+        let seen = time::process_runtime(&program);
+        if seen >= 2 * MILLI && program.wait_for_exit(crate::timer::now_nanos()).is_none() {
+            break Ok(());
+        }
+        if crate::timer::now_nanos().saturating_sub(start) > 1_000 * MILLI {
+            break Err(
+                "a program spinning alone on another processor read as having run \
+                       nothing for a second: a reader took its processor's last charge",
+            );
+        }
+        core::hint::spin_loop();
+    };
+    let deadline = crate::timer::now_nanos().saturating_add(PROGRAM_PATIENCE_NANOS);
+    match program.wait_for_exit(deadline) {
+        Some(status) if status == TIMES_STATUS as i32 => {}
+        _ => return Err("the running-time check's program did not exit with its own status"),
+    }
+    crate::sched::wait_until_gone(&task, PROGRAM_PATIENCE_NANOS)?;
     outcome
 }

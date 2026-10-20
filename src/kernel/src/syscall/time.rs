@@ -276,13 +276,15 @@ pub(crate) fn sys_clock_getres(
 
 /// `CLOCK_PROCESS_CPUTIME_ID`: what the process's threads have run for.
 ///
-/// The calling thread is charged up to now first; the others count up to
-/// their own processors' last charge, which is at most a tick behind. Not as
+/// The calling thread is charged up to now first, and every processor's
+/// running task with it (`sched::charge_running`): a thread alone on its
+/// processor gets no tick, so its last charge can be any age. Not as
 /// Linux: a thread that has ended takes its time with it, where Linux keeps
 /// it in the process's sum, so the clock can step back when one ends.
 /// Chrome's `ThreadTicks` reads the thread clock, which is exact.
 pub(crate) fn process_runtime(process: &Process) -> u64 {
     let _ = sched::current_runtime();
+    sched::charge_running(); // and every other processor's running task
     process
         .tasks()
         .iter()
@@ -613,6 +615,7 @@ impl Usage {
     /// with it.
     fn of_process(process: &Process) -> Usage {
         let _ = sched::current_runtime();
+        sched::charge_running();
         process
             .tasks()
             .iter()
