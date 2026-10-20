@@ -384,3 +384,225 @@ fn the_front_ends_backend_trait_reaches_it() {
     Backend::context_destroy(&mut be, ctx);
     Backend::vm_destroy(&mut be, vm);
 }
+
+/// The program's side of the chardev core, as little as the front end needs
+/// for an open, objects and an execbuffer.
+#[derive(Default)]
+struct Program {
+    memory: Vec<u8>,
+    replies: std::collections::BTreeMap<u64, i32>,
+}
+
+const BASE: u64 = 0x7000_0000;
+
+impl Program {
+    fn alloc(&mut self, bytes: &[u8]) -> u64 {
+        let at = self.memory.len().next_multiple_of(8);
+        self.memory.resize(at + bytes.len().max(8), 0);
+        self.memory[at..at + bytes.len()].copy_from_slice(bytes);
+        BASE + at as u64
+    }
+
+    fn read(&self, address: u64, len: usize) -> Vec<u8> {
+        let at = (address - BASE) as usize;
+        self.memory[at..at + len].to_vec()
+    }
+}
+
+impl crate::frontend::Host<Vec<u64>> for Program {
+    fn copy_in(
+        &mut self,
+        _r: u64,
+        address: u64,
+        out: &mut [u8],
+    ) -> Result<(), ferrix_linux_abi::errno::Errno> {
+        let at = (address - BASE) as usize;
+        out.copy_from_slice(&self.memory[at..at + out.len()]);
+        Ok(())
+    }
+
+    fn copy_out(
+        &mut self,
+        _r: u64,
+        address: u64,
+        bytes: &[u8],
+    ) -> Result<(), ferrix_linux_abi::errno::Errno> {
+        let at = (address - BASE) as usize;
+        self.memory[at..at + bytes.len()].copy_from_slice(bytes);
+        Ok(())
+    }
+
+    fn reply(&mut self, request: u64, status: i32) {
+        assert!(
+            self.replies.insert(request, status).is_none(),
+            "answered twice"
+        );
+    }
+
+    fn reply_map(
+        &mut self,
+        request: u64,
+        _m: &Vec<u64>,
+        _o: u64,
+        _wc: bool,
+    ) -> Result<(), ferrix_linux_abi::errno::Errno> {
+        self.reply(request, 0);
+        Ok(())
+    }
+
+    fn dmabuf_install(
+        &mut self,
+        _r: u64,
+        _m: &Vec<u64>,
+        _c: u64,
+        _w: bool,
+        _x: bool,
+    ) -> Result<crate::frontend::Installed, ferrix_linux_abi::errno::Errno> {
+        Err(ferrix_linux_abi::errno::Errno::ENODEV)
+    }
+
+    fn dmabuf_resolve(&mut self, _r: u64, _fd: i32) -> Result<u64, ferrix_linux_abi::errno::Errno> {
+        Err(ferrix_linux_abi::errno::Errno::EBADF)
+    }
+
+    fn dmabuf_fence(&mut self, _d: u64, _f: u64) -> Result<(), ferrix_linux_abi::errno::Errno> {
+        Ok(())
+    }
+
+    fn sync_install(
+        &mut self,
+        _r: u64,
+        _f: u64,
+        _x: bool,
+    ) -> Result<i32, ferrix_linux_abi::errno::Errno> {
+        Err(ferrix_linux_abi::errno::Errno::ENODEV)
+    }
+
+    fn sync_resolve(
+        &mut self,
+        _r: u64,
+        _fd: i32,
+    ) -> Result<(u64, bool), ferrix_linux_abi::errno::Errno> {
+        Err(ferrix_linux_abi::errno::Errno::EINVAL)
+    }
+
+    fn sync_signal(&mut self, _f: u64, _s: i32) {}
+
+    fn now_ns(&self) -> u64 {
+        1_000
+    }
+
+    fn privileged(&self, _r: u64) -> bool {
+        false
+    }
+
+    fn say(&mut self, _line: core::fmt::Arguments<'_>) {}
+}
+
+/// The front end over the real back end, on the model: a program opens the
+/// node, makes two objects, writes a batch, and an execbuffer of both runs
+/// it on RCS0 through the PPGTT the front end's VM is. What the driver
+/// process does with the chardev core in place of [`Program`].
+#[test]
+fn the_front_end_runs_a_batch_on_the_real_back_end() {
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(|| {
+            use crate::uapi::{ExecObject2, Execbuffer2, GemCreate, exec, ioctl};
+            let mut frontend = std::boxed::Box::new(crate::frontend::Frontend::new(backend()));
+            let mut program = Program::default();
+            let mut next = 1_u64;
+            let mut request = || {
+                next += 1;
+                next
+            };
+            let r = request();
+            frontend.open(&mut program, r, 1, 100);
+            assert_eq!(program.replies[&r], 0);
+            let create = |frontend: &mut crate::frontend::Frontend<XelpBackend<Model>>,
+                          program: &mut Program,
+                          size: u64,
+                          r: u64| {
+                let mut args = GemCreate {
+                    size,
+                    ..Default::default()
+                }
+                .to_bytes();
+                let arg = program.alloc(&args);
+                frontend.ioctl(program, r, 1, ioctl::GEM_CREATE, arg);
+                assert_eq!(program.replies[&r], 0);
+                let len = args.len();
+                args.copy_from_slice(&program.read(arg, len));
+                GemCreate::from_bytes(&args).expect("create").handle
+            };
+            let data = create(&mut frontend, &mut program, 8192, request());
+            let batch = create(&mut frontend, &mut program, 4096, request());
+            // The model's pages are handed out in order: the data object's
+            // two, then the batch's.
+            let (data_page, batch_page) = (0x4000_0000_u64, 0x4000_2000_u64);
+            let mut words = [0_u32; 6];
+            let mut cs = Cs::new(&mut words);
+            emit_store_dword(&mut cs, 0x10_0040, 0xfe_0003);
+            cs.push(gpu::MI_BATCH_BUFFER_END);
+            frontend
+                .backend
+                .platform()
+                .gpu
+                .pages
+                .get_mut(&batch_page)
+                .expect("page")[..6]
+                .copy_from_slice(&words);
+            let pinned = exec::OBJECT_PINNED | exec::OBJECT_SUPPORTS_48B_ADDRESS;
+            let mut list = Vec::new();
+            for (handle, offset, flags) in [
+                (data, 0x10_0000, pinned | exec::OBJECT_WRITE),
+                (batch, 0x20_0000, pinned),
+            ] {
+                list.extend_from_slice(
+                    &ExecObject2 {
+                        handle,
+                        offset,
+                        flags,
+                        ..Default::default()
+                    }
+                    .to_bytes(),
+                );
+            }
+            let buffers_ptr = program.alloc(&list);
+            let args = Execbuffer2 {
+                buffers_ptr,
+                buffer_count: 2,
+                flags: exec::NO_RELOC | exec::HANDLE_LUT,
+                ..Default::default()
+            }
+            .to_bytes();
+            let arg = program.alloc(&args);
+            let r = request();
+            frontend.ioctl(&mut program, r, 1, ioctl::GEM_EXECBUFFER2, arg);
+            assert_eq!(program.replies[&r], 0, "execbuffer taken");
+            let _ = frontend.backend.platform().gpu.run();
+            frontend.service(&mut program, false);
+            assert_eq!(
+                frontend.backend.platform().gpu.pages[&data_page][0x10],
+                0xfe_0003,
+                "the batch ran"
+            );
+            assert_eq!(frontend.backend.next_deadline(), None, "and retired");
+        })
+        .expect("thread")
+        .join()
+        .expect("passed");
+}
+
+/// The driver builds its front end and back end on a native process's 8 MiB
+/// stack (`frontend`'s own test holds the front end under 3 MiB).
+#[test]
+fn the_back_end_fits_a_native_stack() {
+    let bytes = size_of::<crate::frontend::Frontend<XelpBackend<Model>>>();
+    assert!(bytes < 4 << 20, "{bytes} bytes");
+    assert!(
+        size_of::<XelpBackend<Model>>() < 1 << 20,
+        "{}",
+        size_of::<XelpBackend<Model>>()
+    );
+}

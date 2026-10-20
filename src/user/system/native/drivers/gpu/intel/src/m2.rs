@@ -86,46 +86,46 @@ struct Obj {
 }
 
 /// Pages pinned into the device's domain, mapped write-back.
-struct Pool {
+pub(crate) struct Pool<const N: usize = POOL_PAGES> {
     _pin: Pin<Kernel>,
     _vmo: Vmo<Kernel>,
     base: usize,
-    device: [u64; POOL_PAGES],
-    used: [bool; POOL_PAGES],
+    device: [u64; N],
+    used: [bool; N],
 }
 
-impl Pool {
-    fn new(device: &Device<Kernel>) -> Result<Pool, Step> {
-        let bytes = POOL_PAGES * PAGE;
+impl<const N: usize> Pool<N> {
+    pub(crate) fn new(device: &Device<Kernel>) -> Result<Self, Step> {
+        let bytes = N * PAGE;
         let vmo = vmo::create(Kernel, bytes).map_err(|_| Step::Memory)?;
         let pin = device
             .pin(&vmo, 0, bytes, PinAccess::ReadWrite)
             .map_err(|_| Step::Memory)?;
-        let mut raw = [[0_u8; 8]; POOL_PAGES];
+        let mut raw = [[0_u8; 8]; N];
         let got = pin.addresses(&mut raw).map_err(|_| Step::Memory)?;
-        if !got.is_complete() || got.pages != POOL_PAGES {
+        if !got.is_complete() || got.pages != N {
             return Err(Step::Memory);
         }
-        let mut addresses = [0_u64; POOL_PAGES];
+        let mut addresses = [0_u64; N];
         for (slot, bytes) in addresses.iter_mut().zip(raw) {
             *slot = device_address(bytes);
         }
         let base = vmo
             .map(None, bytes, Protection::ReadWrite, 0)
             .map_err(|_| Step::Memory)?;
-        Ok(Pool {
+        Ok(Self {
             _pin: pin,
             _vmo: vmo,
             base,
             device: addresses,
-            used: [false; POOL_PAGES],
+            used: [false; N],
         })
     }
 
     /// `pages` free pages in a row, first fit.
     fn take(&mut self, pages: usize) -> Option<usize> {
         let mut run = 0;
-        for index in 0..POOL_PAGES {
+        for index in 0..N {
             run = if self.used.get(index).copied().unwrap_or(true) {
                 0
             } else {
@@ -154,15 +154,15 @@ impl Pool {
 
     /// The address of dword `index` of page `page`.
     fn at(&self, page: usize, index: usize) -> Option<usize> {
-        (page < POOL_PAGES && index < PAGE_DWORDS).then(|| self.base + page * PAGE + index * 4)
+        (page < N && index < PAGE_DWORDS).then(|| self.base + page * PAGE + index * 4)
     }
 
     /// An object's dwords. Borrowing the pool mutably keeps every other
     /// object's slice out of reach while this one is held; what the GPU
     /// writes into an object is read through [`Pool::read32`], not a slice.
     fn dwords(&mut self, obj: Obj) -> &mut [u32] {
-        let len = obj.pages.min(POOL_PAGES.saturating_sub(obj.first)) * PAGE_DWORDS;
-        let start = self.base + obj.first.min(POOL_PAGES) * PAGE;
+        let len = obj.pages.min(N.saturating_sub(obj.first)) * PAGE_DWORDS;
+        let start = self.base + obj.first.min(N) * PAGE;
         // SAFETY: `start..start + len * 4` lies inside the pool's mapping,
         // which this process made read-write and `self` keeps (`_vmo`); the
         // `&mut self` borrow makes it the only slice of the pool alive.
@@ -172,7 +172,7 @@ impl Pool {
     /// Two different objects at once: `a` to write, `b` to read.
     fn two(&mut self, a: Obj, b: Obj) -> Option<(&mut [u32], &[u32])> {
         let overlap = a.first < b.first + b.pages && b.first < a.first + a.pages;
-        if overlap || a.first + a.pages > POOL_PAGES || b.first + b.pages > POOL_PAGES {
+        if overlap || a.first + a.pages > N || b.first + b.pages > N {
             return None;
         }
         let at = |obj: Obj| self.base + obj.first * PAGE;
@@ -213,7 +213,7 @@ impl Pool {
 }
 
 /// The page tables live in the pool, a page each.
-impl PtMemory for Pool {
+impl<const N: usize> PtMemory for Pool<N> {
     fn alloc_pt(&mut self) -> Option<u64> {
         let first = self.take(1)?;
         self.device.get(first).copied()
@@ -1012,14 +1012,20 @@ impl M2<'_> {
         let vm = self.vm;
         vm.alloc_va_range(&mut self.pool, address, bytes)
             .map_err(|_| Step::Memory)?;
-        let mut addresses = [0_u64; 8];
-        for (slot, &page) in addresses.iter_mut().zip(self.pool.device_pages(obj)) {
-            *slot = page;
+        // Every page, one entry each. (Until 2026-10-20 the addresses went
+        // through an eight-entry array, so a larger object mapped nothing:
+        // the box's screen blit read and wrote the scratch page, 32768 of
+        // 32768 pixels differing.)
+        for page in 0..pages {
+            let device = self
+                .pool
+                .device_pages(obj)
+                .get(page)
+                .copied()
+                .ok_or(Step::Memory)?;
+            vm.insert_entry(&mut self.pool, device, address + (page * PAGE) as u64, 0)
+                .map_err(|_| Step::Memory)?;
         }
-        let pages_at = addresses.get(..pages).unwrap_or_default();
-        let _ = vm
-            .insert_entries(&mut self.pool, pages_at.iter().copied(), address, 0)
-            .map_err(|_| Step::Memory)?;
         Ok(obj)
     }
 
