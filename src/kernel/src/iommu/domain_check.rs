@@ -673,3 +673,258 @@ fn check_entry_never_rewritten() -> Result<usize, &'static str> {
     }
     Ok(refused)
 }
+
+/// The region [`check_rmrr_identity`] honoured on QEMU's unit, for
+/// [`check_rmrr_frames`] to read again after the reclaim.
+static CHECKED_RMRR: ferrix_sync::Once<ferrix_paging::vtd::rmrr::Identity> =
+    ferrix_sync::Once::new();
+
+/// Stage 10: an RMRR's identity domain, on the first translating VT-d unit,
+/// unless the boot skips its checks (`vtd-design.md` §3.9(b)).
+///
+/// QEMU's DMAR has no RMRR, and the QEMU patch that would give it one is
+/// deferred (a BACKLOG row), not unbuildable. So this makes the same
+/// thing bring-up makes for a real RMRR, through the same rules and the
+/// same `attach_identity` and claim, over a synthetic region -- the two
+/// pages below 2^39, which no QEMU memory map reaches -- for a requester
+/// no device has (ff:1f.7), on a unit already translating. It shows the
+/// kernel's own tables and rules; it is not device DMA into an RMRR, and
+/// identity-before-TE on a real one is the N150 box's row (`L.iommu.73`).
+///
+/// Halts on a failure, as every other stage's check does.
+///
+/// Verifies: L.iommu.73
+/// Verifies: L.iommu.74
+/// Verifies: L.iommu.75
+/// Verifies: L.iommu.76
+/// Verifies: L.iommu.77
+/// Verifies: L.iommu.78
+pub(crate) fn check_rmrr_identity(memory: &[ferrix_bootinfo::MemRegion]) {
+    if !crate::boot_checks::run() {
+        return;
+    }
+    match rmrr_identity(memory) {
+        Ok(Some(line)) => println!("  iommu    {line}"),
+        Ok(None) => {}
+        Err(problem) => fatal!(
+            catalog::STAGE10_IOMMU,
+            "stage 10 self-check failed: {problem}"
+        ),
+    }
+}
+
+/// [`check_rmrr_identity`]'s steps; `None` on a machine with no translating
+/// VT-d unit.
+fn rmrr_identity(
+    memory: &[ferrix_bootinfo::MemRegion],
+) -> Result<Option<alloc::string::String>, &'static str> {
+    use ferrix_paging::vtd::rmrr;
+
+    let Some(programmed) = super::PROGRAMMED.get() else {
+        return Ok(None);
+    };
+    let Some(unit) = programmed.vtd.iter().find(|unit| unit.translating()) else {
+        return Ok(None);
+    };
+    rmrr_over_the_allocator_refused(memory)?;
+
+    // The synthetic RMRR, honoured and attached as bring-up does.
+    let reach = 1_u64 << ferrix_paging::vtd::unit::DOMAIN_BITS;
+    let region = rmrr::identity(reach - 2 * rmrr::PAGE, reach - 1, ram(memory))
+        .map_err(|_| "the check's RMRR, the two pages below 2^39, was refused")?;
+    if super::frames_outside_allocator(region).is_err() {
+        return Err("the check's RMRR holds a frame the allocator holds");
+    }
+    let function = ferrix_pci::Address::new(0, 0xFF, 0x1F, 7).ok_or("no address ff:1f.7")?;
+    let attached = unit.attach_identity(function, &[region])?;
+    let _ = CHECKED_RMRR.call_once(|| region);
+    // FATAL-ALLOC: boot only: the check's identity domain is made once and, as every identity domain, kept for the boot.
+    let regions = alloc::vec![region];
+    // FATAL-ALLOC: boot only: the check's identity domain is made once and, as every identity domain, kept for the boot.
+    let identity: &'static super::IdentityDomain = alloc::boxed::Box::leak(alloc::boxed::Box::new(
+        super::IdentityDomain::new(function, attached, regions),
+    ));
+    let domain = identity
+        .claim(unit)
+        .ok_or("the check's identity domain could not be claimed")?;
+
+    // Exactly the RMRR's pages, each at its own address (`L.iommu.73`).
+    if !exact(&domain, region) {
+        return Err("an RMRR identity domain does not map exactly the RMRR's pages");
+    }
+    // Never handed out twice while it lives (`L.iommu.78`).
+    if !identity.claimed() || identity.claim(unit).is_some() {
+        return Err("an RMRR identity domain was handed out twice");
+    }
+    rmrr_pins_refused(&domain, region)?;
+    rmrr_unpin_refused(&domain, region)?;
+    rmrr_never_detached(identity, unit, domain, region)?;
+
+    // Its frames are still outside the allocator (`L.iommu.75`).
+    if super::frames_outside_allocator(region).is_err() {
+        return Err("an RMRR frame became the allocator's");
+    }
+    Ok(Some(alloc::format!(
+        "RMRR identity: {} pages mapped exactly, at their own addresses, for an absent \
+         requester on QEMU's unit; pins over them and an unpin naming them refused, a page \
+         beside them pinned and unpinned, never detached, never claimed twice, and RMRRs over \
+         RAM or an allocator's frame refused",
+        region.pages
+    )))
+}
+
+/// Every region the memory map calls RAM, as `(base, len)`.
+fn ram(memory: &[ferrix_bootinfo::MemRegion]) -> impl Iterator<Item = (u64, u64)> + '_ {
+    memory
+        .iter()
+        .filter(|region| region.kind.is_ram())
+        .map(|region| (region.base, region.len))
+}
+
+/// Whether `domain` maps exactly `region`'s pages, each at its own address:
+/// the page below it unmapped (the one above is past 2^39).
+fn exact(domain: &Domain, region: ferrix_paging::vtd::rmrr::Identity) -> bool {
+    region
+        .page_addresses()
+        .all(|page| domain.resolve(page) == Some(page))
+        && domain
+            .resolve(region.base - ferrix_paging::vtd::rmrr::PAGE)
+            .is_none()
+}
+
+/// The rules refuse an RMRR over a frame the allocator holds: by the
+/// memory map, and by the frame's own state (`L.iommu.74`, `L.iommu.75`).
+fn rmrr_over_the_allocator_refused(
+    memory: &[ferrix_bootinfo::MemRegion],
+) -> Result<(), &'static str> {
+    use ferrix_paging::vtd::rmrr::{self, Identity};
+
+    let taken = mm::allocate_frames(0).ok_or("no frame for the RMRR check")?;
+    let over = Identity {
+        base: taken * PAGE_SIZE,
+        pages: 1,
+    };
+    let by_state = super::frames_outside_allocator(over);
+    let by_map = rmrr::identity(over.base, over.end() - 1, ram(memory));
+    mm::deallocate_frames(taken, 0);
+    if by_state != Err(rmrr::Refusal::AllocatorFrame { page: over.base }) {
+        return Err("an RMRR over a frame the allocator holds was not refused");
+    }
+    if !matches!(by_map, Err(rmrr::Refusal::OverRam { .. })) {
+        return Err("an RMRR over RAM the memory map gives was not refused");
+    }
+    Ok(())
+}
+
+/// A pin over an RMRR page is refused, with nothing mapped; any other page
+/// pins and unpins as into any domain, a driver's (`L.iommu.76`).
+fn rmrr_pins_refused(
+    domain: &Domain,
+    region: ferrix_paging::vtd::rmrr::Identity,
+) -> Result<(), &'static str> {
+    let rmrr_frame = region.base / PAGE_SIZE;
+    if !matches!(
+        domain.pin(&[rmrr_frame], MapFlags::DMA),
+        Err(DomainError::Reserved)
+    ) {
+        return Err("a pin over an RMRR page was not refused");
+    }
+    let spare = mm::allocate_frames(0).ok_or("no frame for the RMRR check")?;
+    let beside = spare * PAGE_SIZE;
+    match domain.pin(&[spare, rmrr_frame], MapFlags::DMA) {
+        Err(DomainError::Reserved) => {}
+        Ok(pinned) => {
+            pinned.leak();
+            return Err("a pin with an RMRR page in it was not refused");
+        }
+        Err(_) => return Err("a pin with an RMRR page in it was refused for another reason"),
+    }
+    if domain.resolve(beside).is_some() || domain.pinned_pages() != 0 {
+        return Err("a refused pin over an RMRR mapped a page beside it");
+    }
+    let pinned = domain
+        .pin(&[spare], MapFlags::DMA)
+        .map_err(|_| "a page beside the RMRR could not be pinned into its domain")?;
+    if pinned.addresses() != [beside] || domain.resolve(beside) != Some(beside) {
+        pinned.leak();
+        return Err("a page pinned beside the RMRR is not at its own address");
+    }
+    if let Err((_, pinned)) = domain.unpin(pinned) {
+        pinned.leak();
+        return Err("a page pinned beside the RMRR could not be unpinned");
+    }
+    mm::deallocate_frames(spare, 0);
+    Ok(())
+}
+
+/// An unpin naming an RMRR page is refused, and takes nothing out
+/// (`L.iommu.77`).
+fn rmrr_unpin_refused(
+    domain: &Domain,
+    region: ferrix_paging::vtd::rmrr::Identity,
+) -> Result<(), &'static str> {
+    let forged = super::Pinned {
+        domain: domain.id,
+        // FATAL-ALLOC: boot only: one address, for the check's forged pin.
+        addresses: alloc::vec![region.base],
+    };
+    match domain.unpin(forged) {
+        Err((DomainError::Reserved, back)) => back.leak(),
+        Err((_, back)) => {
+            back.leak();
+            return Err("an unpin naming an RMRR page was refused for another reason");
+        }
+        Ok(()) => return Err("an unpin naming an RMRR page was not refused"),
+    }
+    if !exact(domain, region) {
+        return Err("an unpin took an RMRR page out of its identity domain");
+    }
+    Ok(())
+}
+
+/// Never detached: not when asked, not when dropped; the claim comes back,
+/// and the same tables with it (`L.iommu.78`).
+fn rmrr_never_detached(
+    identity: &'static super::IdentityDomain,
+    unit: &'static super::vtd::Unit,
+    domain: Domain,
+    region: ferrix_paging::vtd::rmrr::Identity,
+) -> Result<(), &'static str> {
+    if domain.translation.detach().is_ok() {
+        return Err("an RMRR identity domain was detached");
+    }
+    drop(domain);
+    let again = identity
+        .claim(unit)
+        .ok_or("a dropped RMRR identity domain did not give its claim back")?;
+    if !exact(&again, region) {
+        return Err("a dropped RMRR identity domain was detached");
+    }
+    Ok(())
+}
+
+/// After the reclaim: every frame an RMRR identity domain holds -- bring-up's,
+/// and [`check_rmrr_identity`]'s -- is still outside the frame allocator, so
+/// the reclaim gave none of them to it (`L.iommu.75`). Unless the boot skips
+/// its checks.
+///
+/// Verifies: L.iommu.75
+pub(crate) fn check_rmrr_frames() {
+    if !crate::boot_checks::run() {
+        return;
+    }
+    let mut pages = 0;
+    for region in super::identity_regions().chain(CHECKED_RMRR.get().copied()) {
+        if let Err(refusal) = super::frames_outside_allocator(region) {
+            fatal!(
+                catalog::STAGE10_IOMMU,
+                "stage 10 self-check failed: an RMRR identity domain's frame is the \
+                 allocator's after the reclaim: {refusal}"
+            );
+        }
+        pages += region.pages;
+    }
+    if pages != 0 {
+        println!("  iommu    RMRR frames after the reclaim: {pages} pages, none the allocator's");
+    }
+}

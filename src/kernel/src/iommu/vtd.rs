@@ -1511,3 +1511,71 @@ fn write64(registers: Mmio, at: u64, value: u64) {
     registers.write32(at, value as u32);
     registers.write32(at + 4, (value >> 32) as u32);
 }
+
+impl Unit {
+    /// Give `function` a domain of its own holding exactly `regions`'
+    /// pages, each readable and writable at its own address, and nothing
+    /// else: an RMRR's identity domain (`vtd-design.md` §3.9(b)), made
+    /// after [`Unit::enable`] and before [`Unit::translate`], and never
+    /// detached (`L.iommu.73`, `L.iommu.78`). The regions were honoured by
+    /// `ferrix_paging::vtd::rmrr::identity` and share no page.
+    ///
+    /// # Errors
+    ///
+    /// Why not: [`Unit::attach`]'s reasons, a page the tables would not
+    /// take, or a unit that never finished. What was made is taken down
+    /// again first; if the unit refuses even that, the tables are kept and
+    /// the answer says so -- the unit is then never told to translate, so
+    /// nothing walks them.
+    pub(crate) fn attach_identity(
+        &self,
+        function: Address,
+        regions: &[ferrix_paging::vtd::rmrr::Identity],
+    ) -> Result<Attached, &'static str> {
+        // Before translation goes on, but for stage 10's check, which makes
+        // one on QEMU's translating unit (`domain_check::check_rmrr_identity`).
+        if self.translating() && !crate::boot_checks::run() {
+            return Err("an RMRR identity domain is made before its unit translates");
+        }
+        let attached = self.attach(function)?;
+        let mut mapped: u64 = 0;
+        let mut refused = None;
+        'regions: for region in regions {
+            for page in region.page_addresses() {
+                match self.map(&attached, page, page, MapFlags::DMA) {
+                    Ok(()) => mapped += 1,
+                    // A map refused for a write not cleaned wrote its page.
+                    Err(MapError::NotCleaned) => {
+                        mapped += 1;
+                        refused = Some("an RMRR page was not cleaned to memory");
+                        break 'regions;
+                    }
+                    Err(_) => {
+                        refused = Some("an RMRR page could not be mapped");
+                        break 'regions;
+                    }
+                }
+            }
+        }
+        let flushed = match refused {
+            None => self.flush(&attached, true, Wait::Status),
+            Some(why) => Err(why),
+        };
+        let Err(why) = flushed else {
+            return Ok(attached);
+        };
+        let mut tables = mm::UnlinkedTables::of(mm::TableOwner::Device);
+        let taken = regions
+            .iter()
+            .flat_map(|region| region.page_addresses())
+            .take(usize::try_from(mapped).unwrap_or(usize::MAX))
+            .all(|page| self.unmap(&attached, page, &mut tables).is_ok());
+        if taken && self.flush(&attached, false, Wait::Status).is_ok() {
+            tables.release();
+            if self.detach(attached).is_ok() {
+                return Err(why);
+            }
+        }
+        Err("an RMRR identity domain could not be made, nor taken down: its tables are kept")
+    }
+}

@@ -1544,6 +1544,27 @@ would have to be made is named.
 
 ---
 
+### 2.2r An RMRR's identity domain at bring-up (`iommu::bring_up_vtd`, K2)
+
+Before any program runs, once per VT-d unit whose RMRRs are honoured
+(`L.iommu.73`), `vtd::Unit::attach_identity` maps each RMRR page at its own
+address: at most 2^18 pages an RMRR (`ferrix_paging::vtd::rmrr::MOST_PAGES`,
+1 GiB; the N150's is 17,408), and at most as many RMRRs as the DMAR's
+length holds (24 bytes and a scope each, the table's length a 32-bit
+field), each page one `mm::map_io` whose table writes are
+cleaned and published as every domain map's are, then one flush. The
+tables take at most one frame per 512 pages plus the levels above them
+(35 frames on the N150), from the frame allocator, kept for the boot.
+`plan_rmrrs` before it reads each page's frame state once
+(`mm::frame_state`, the allocator's lock, a leaf, held per read) and
+compares the RMRR with every memory-map region. The unit's `tables` lock
+is held only inside `attach` and each map's table walk; the unit's
+command gate across the flush and its wait, which is bounded as 2.2i
+says. Nothing else runs then, so this is boot time, not a bound any
+program waits on. At run time an identity domain adds to `Domain::pin`
+and `unpin` one comparison of each page against its RMRRs (one range on
+the N150), outside every lock.
+
 ## 3. Why F-24 is not closed, and F-23 is
 
 A document that says "the property does not hold" is not a closed finding, and

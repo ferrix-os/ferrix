@@ -124,39 +124,66 @@ impl<'a> Dmar<'a> {
     /// the segment has a scope only enumeration can follow (a
     /// sub-hierarchy, a longer path) -- behind the segment's one catch-all.
     /// Anything else is [`RmrrHold::Unfollowed`].
+    ///
+    /// The first of [`Dmar::rmrr_holds`].
     #[must_use]
     pub fn rmrr_hold(&self, unit: &Drhd<'a>) -> Option<RmrrHold> {
-        for structure in self.structures() {
-            let region = match structure {
-                Structure::Rmrr(region) => region,
+        self.rmrr_holds(*unit).next()
+    }
+
+    /// Every RMRR scope that reaches `unit`, in table order, as
+    /// [`Dmar::rmrr_hold`] decides each: a [`RmrrHold::Named`] for each scope
+    /// naming a function behind it, and a [`RmrrHold::Unfollowed`] for each
+    /// one on its segment that this table alone cannot place, a malformed
+    /// RMRR included. A unit is given identity domains for its RMRRs
+    /// (`vtd-design.md` §3.9(b)) only when every one of these is named and
+    /// honourable, so none may be passed over.
+    pub fn rmrr_holds(&self, unit: Drhd<'a>) -> impl Iterator<Item = RmrrHold> + '_ {
+        self.structures().flat_map(move |structure| {
+            let (region, malformed) = match structure {
+                Structure::Rmrr(region) => (Some(region), false),
                 // An RMRR too short for its fields names a region nobody
                 // can read: every unit is held, as for one not followed.
                 Structure::Malformed {
                     kind: STRUCTURE_RMRR,
                     ..
-                } => return Some(RmrrHold::Unfollowed { base: 0, limit: 0 }),
-                _ => continue,
+                } => (None, true),
+                _ => (None, false),
             };
-            if region.segment != unit.segment {
-                continue;
-            }
-            for scope in region.device_scopes() {
-                let held = match self.rmrr_owner(region.segment, &scope) {
-                    Owner::Unit(base) if base == unit.register_base => RmrrHold::Named {
-                        base: region.base,
-                        limit: region.limit,
-                        function: scope.endpoint().unwrap_or((0, 0, 0)),
-                    },
-                    Owner::Unit(_) => continue,
-                    Owner::Unfollowed => RmrrHold::Unfollowed {
-                        base: region.base,
-                        limit: region.limit,
-                    },
-                };
-                return Some(held);
-            }
+            let unreadable = malformed.then_some(RmrrHold::Unfollowed { base: 0, limit: 0 });
+            let named = region
+                .filter(|region| region.segment == unit.segment)
+                .into_iter()
+                .flat_map(move |region| {
+                    region
+                        .device_scopes()
+                        .filter_map(move |scope| self.scope_hold(&unit, &region, &scope))
+                });
+            unreadable.into_iter().chain(named)
+        })
+    }
+
+    /// The hold one scope of `region` puts on `unit`, as
+    /// [`Dmar::rmrr_holds`] reads each: `None` for a function behind
+    /// another unit.
+    fn scope_hold(
+        &self,
+        unit: &Drhd<'a>,
+        region: &Rmrr<'a>,
+        scope: &DeviceScope<'_>,
+    ) -> Option<RmrrHold> {
+        match self.rmrr_owner(region.segment, scope) {
+            Owner::Unit(base) if base == unit.register_base => Some(RmrrHold::Named {
+                base: region.base,
+                limit: region.limit,
+                function: scope.endpoint().unwrap_or((0, 0, 0)),
+            }),
+            Owner::Unit(_) => None,
+            Owner::Unfollowed => Some(RmrrHold::Unfollowed {
+                base: region.base,
+                limit: region.limit,
+            }),
         }
-        None
     }
 
     /// The unit an RMRR scope's function is behind, as [`Dmar::rmrr_hold`]

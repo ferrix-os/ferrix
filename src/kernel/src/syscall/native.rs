@@ -2832,6 +2832,7 @@ fn domain_status(why: crate::iommu::DomainError) -> Errno {
         DomainError::OutOfRange | DomainError::Tables => status::NO_MEMORY,
         DomainError::AlreadyPinned => status::ALREADY_BOUND,
         DomainError::Foreign | DomainError::Unit(_) => status::BAD_STATE,
+        DomainError::Reserved => status::ACCESS_DENIED,
     }
 }
 

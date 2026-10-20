@@ -265,10 +265,19 @@ pub fn place<U>(
     }
 }
 
+/// Whether `placed` puts a function behind `unit`, the unit an RMRR's
+/// identity domain was attached on for it at bring-up, from the DMAR alone:
+/// only then is that domain the function's. A function enumeration places
+/// elsewhere, under an alias or not at all gets none (`L.iommu.78`).
+pub fn agrees<U: PartialEq>(placed: Placed<U>, unit: &U) -> bool {
+    matches!(placed, Placed::Unit(at) if at == *unit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Behind, Bridge, CatchAll, Explicit, Placed, behind, claims, follow_path, own_to_root, place,
+        Behind, Bridge, CatchAll, Explicit, Placed, agrees, behind, claims, follow_path,
+        own_to_root, place,
     };
     use crate::Address;
 
@@ -684,5 +693,39 @@ mod tests {
             Placed::Unit(None),
             "a refused unit's function is not handed to the catch-all"
         );
+    }
+
+    /// Verifies: `L.iommu.78`
+    #[test]
+    fn an_identity_domain_is_its_functions_only_where_enumeration_agrees() {
+        let bridges = box_bridges();
+        // The box: the iGPU is dmar0's (index 0) by its endpoint scope.
+        let igpu = place(
+            Explicit::Own(Some(0)),
+            CatchAll::One(Some(1)),
+            at(0, 2, 0),
+            &bridges,
+        );
+        assert!(agrees(igpu, &Some(0)), "00:02.0 behind dmar0");
+        assert!(!agrees(igpu, &Some(1)), "not behind dmar1");
+        // Placed by the catch-all instead: not the unit the domain is on.
+        let elsewhere = place(
+            Explicit::None,
+            CatchAll::One(Some(1)),
+            at(0, 2, 0),
+            &bridges,
+        );
+        assert!(!agrees(elsewhere, &Some(0)));
+        // Unresolved, under an alias, or behind nothing: no domain.
+        let aliased = place(
+            Explicit::None,
+            CatchAll::One(Some(0)),
+            at(2, 1, 0),
+            &machine(),
+        );
+        assert_eq!(aliased, Placed::Unresolved);
+        assert!(!agrees(aliased, &Some(0)));
+        assert!(!agrees(Placed::Nothing, &Some(0)));
+        assert!(!agrees(Placed::Unit(None), &Some(0)), "a refused unit");
     }
 }

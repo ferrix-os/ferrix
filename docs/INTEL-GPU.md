@@ -436,6 +436,26 @@ allocate, and the box is reached over ssh (`fx.sh`).
     that mode, and no isolation claim covers the box;
   * (d) "the driver's own command streams only" is a property of the
     driver, recorded as such, and never cited as evidence.
+
+  **Under K2** (`intel-k2`, `vtd-design.md` §3.9(b), ledger 2388):
+  dmar0 translates, and 00:02.0's domain is the kernel's identity domain of
+  the RMRR, 0x7C000000-0x803FFFFF. By the iGPU's own GGC and BDSM that is
+  its stolen memory exactly: GSM (8 MiB, the GGTT) and DSM (60 MiB, the
+  scan-out and whatever else firmware put there), where the kernel keeps
+  nothing. By design the GPU then reaches the driver's pins and that
+  region, nothing else -- shown on QEMU for the kernel's tables only, the
+  box run owed (BACKLOG P1, intel-k2; ledger 2392 (5)) -- and counts as
+  translated, so (a) lets the chardev core accept its
+  client minors under `ferrix.intelgpu`. The framebuffer the display
+  engine scans out, and the GGTT entries that map it, are in the RMRR
+  (K4 condition (5)); CPU access through BAR 2 is not DMA. A pin over the
+  RMRR is refused and no unpin takes an RMRR page out; the domain is never
+  detached, across driver restarts too, and the pin quarantine applies to
+  the driver's other pins as in any domain. After a dead driver's
+  quarantine is released at the next HELLO, a plane still scanning a
+  released buffer faults on every frame until the new driver reprograms
+  it: refused DMA, not a leak (ledger 2388 C2). With K2 refused the box is
+  as (a) to (c) say.
 * **Client to client.** Each VM is its own PPGTT, and batches run
   non-privileged from it (`MI_BATCH_BUFFER_START` with the PPGTT address
   space). The hardware itself refuses privileged commands and register

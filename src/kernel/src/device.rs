@@ -2255,8 +2255,11 @@ impl DeviceNode {
         if let Some(domain) = held.as_ref() {
             return Ok(Arc::clone(domain));
         }
+        // A function whose RMRR identity domain is held already, or placed
+        // elsewhere, gets none (`iommu::domain_for`); a failed allocation
+        // drops the domain, which gives an identity domain's claim back.
         let domain = fallible::try_arc(match self.location {
-            Location::Pci(address) => iommu::domain_for(address),
+            Location::Pci(address) => iommu::domain_for(address).ok_or(AllocError)?,
             Location::VirtioMmio(_) | Location::Tree(_) => iommu::Domain::untranslated(),
         })?;
         // The Intel integrated GPU's budget is the kernel's, set before any

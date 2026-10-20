@@ -62,6 +62,7 @@ use ferrix_acpi::dmar::{self, Structure};
 use ferrix_acpi::iort;
 use ferrix_bootinfo::{BootView, PAGE_SIZE};
 use ferrix_fdt::{EcamHost, Fdt};
+use ferrix_paging::vtd::rmrr::{self, Identity};
 use ferrix_paging::{MapError, MapFlags};
 use ferrix_pci::Address;
 use ferrix_pci::topology::{self, Bridge};
@@ -730,6 +731,9 @@ pub(crate) enum DomainError {
     Tables,
     /// The unit never finished a command.
     Unit(&'static str),
+    /// A page is an RMRR's, which the domain holds for good: never pinned,
+    /// and never unpinned (`L.iommu.76`, `L.iommu.77`).
+    Reserved,
 }
 
 /// The memory one device's DMA may reach, and the addresses it reaches it by.
@@ -766,6 +770,9 @@ enum Translation {
         /// Held across a pin's or an unpin's changes to the tables and the
         /// unit's wait for them.
         changing: Gate,
+        /// The RMRR identity domain it is, whose pages it maps for good
+        /// ([`IdentityDomain`]); `None` for any other domain.
+        identity: Option<&'static IdentityDomain>,
     },
     /// An `SMMUv3`.
     SmmuV3 {
@@ -848,8 +855,24 @@ impl Translation {
         }
     }
 
-    /// Detach the domain from its unit and give back its tables.
+    /// The RMRR pages the domain holds for good: empty but for an RMRR's
+    /// identity domain.
+    fn held(&self) -> &'static [Identity] {
+        match self {
+            Translation::VtD {
+                identity: Some(identity),
+                ..
+            } => identity.regions(),
+            Translation::None | Translation::VtD { .. } | Translation::SmmuV3 { .. } => &[],
+        }
+    }
+
+    /// Detach the domain from its unit and give back its tables. An RMRR's
+    /// identity domain is never detached (`L.iommu.78`).
     fn detach(&self) -> Result<(), &'static str> {
+        if !self.held().is_empty() {
+            return Err("an RMRR's identity domain is never detached");
+        }
         match self {
             Translation::None => Ok(()),
             Translation::VtD { unit, attached, .. } => unit.detach(*attached),
@@ -980,7 +1003,9 @@ impl Domain {
     /// # Errors
     ///
     /// [`DomainError::Empty`] for no frames, [`DomainError::OutOfRange`] for a
-    /// frame the domain cannot address, [`DomainError::AlreadyPinned`],
+    /// frame the domain cannot address, [`DomainError::Reserved`] for a page
+    /// an RMRR holds in the domain, with nothing mapped (`L.iommu.76`),
+    /// [`DomainError::AlreadyPinned`],
     /// [`DomainError::Tables`] and [`DomainError::Unit`]. Whatever was mapped
     /// before a failure is unmapped again, except after a unit that never
     /// finished, whose pages stay mapped for good.
@@ -995,6 +1020,10 @@ impl Domain {
                 .checked_mul(PAGE_SIZE)
                 .ok_or(DomainError::OutOfRange)?;
             let _ = crate::fallible::push_within(&mut addresses, phys);
+        }
+        let held = self.translation.held();
+        if addresses.iter().any(|&phys| rmrr::held(held, phys)) {
+            return Err(DomainError::Reserved);
         }
         if let Some(changing) = self.translation.changing() {
             if addresses.iter().any(|&phys| phys >> TRANSLATED_BITS != 0) {
@@ -1030,7 +1059,8 @@ impl Domain {
     /// # Errors
     ///
     /// [`DomainError::Foreign`], handing the pin back, when another domain took
-    /// it.
+    /// it; [`DomainError::Reserved`], handing it back with nothing unmapped,
+    /// when it names a page an RMRR holds in the domain (`L.iommu.77`).
     pub(crate) fn unpin(&self, pinned: Pinned) -> Result<(), (DomainError, Pinned)> {
         self.unpin_waiting(pinned, Wait::Status)
     }
@@ -1055,6 +1085,10 @@ impl Domain {
     ) -> Result<(), (DomainError, Pinned)> {
         if pinned.domain != self.id {
             return Err((DomainError::Foreign, pinned));
+        }
+        let held = self.translation.held();
+        if pinned.addresses.iter().any(|&iova| rmrr::held(held, iova)) {
+            return Err((DomainError::Reserved, pinned));
         }
         if let Some(changing) = self.translation.changing() {
             let _held = match changing.enter() {
@@ -1122,8 +1156,23 @@ fn map_all(
 impl Drop for Domain {
     /// Detach a translated domain from its unit, unless pages are still pinned
     /// into it: the device may still be using those, so its tables and context
-    /// entry stay.
+    /// entry stay. An RMRR's identity domain is never detached, pinned or
+    /// not: firmware's device keeps reaching the RMRR. With no page pinned
+    /// its claim goes back instead, so the next [`domain_for`] hands out the
+    /// same attachment again and attaches nothing; with pages still pinned
+    /// it keeps the claim, so no second domain is ever made over tables
+    /// holding this one's pins (`L.iommu.78`).
     fn drop(&mut self) {
+        if let Translation::VtD {
+            identity: Some(identity),
+            ..
+        } = self.translation
+        {
+            if self.pinned.load(Ordering::Relaxed) == 0 {
+                identity.release();
+            }
+            return;
+        }
         if self.translated() && self.pinned.load(Ordering::Relaxed) == 0 {
             let _ = self.translation.detach();
         }
@@ -1157,6 +1206,308 @@ struct Programmed {
     smmu_phys: Vec<u64>,
     /// The requester IDs IORT root complexes send to them.
     streams: Vec<StreamMap>,
+    /// The RMRRs' identity domains, each with its unit's index in `vtd`.
+    identity: Vec<(usize, IdentityDomain)>,
+}
+
+impl Programmed {
+    /// The identity domain an RMRR gave `function`, by the requester
+    /// bring-up attached it for, and its unit's index in `vtd`.
+    fn identity_of(&'static self, function: Address) -> Option<(usize, &'static IdentityDomain)> {
+        self.identity
+            .iter()
+            .find(|(_, identity)| identity.function == function)
+            .map(|(index, identity)| (*index, identity))
+    }
+}
+
+/// An RMRR's identity domain (`vtd-design.md` §3.9(b), K2 of
+/// `docs/INTEL-GPU.md`): the kernel's, attached at bring-up before its unit
+/// translates, with exactly the RMRRs' pages mapped at their own addresses,
+/// and never detached (`L.iommu.73`, `L.iommu.78`).
+///
+/// It is handed out by [`IdentityDomain::claim`] as an ordinary [`Domain`]
+/// whose pins may never cover its RMRR pages and whose unpins may never take
+/// one out, and only while no other such `Domain` lives: a claim made while
+/// one does gets nothing, and a dropped one gives its claim back, so the
+/// claim is never lost to a failed allocation and never doubled. The device
+/// node keeps its domain for its life, so a driver that restarts gets the
+/// same one, and nothing is attached again.
+#[derive(Debug)]
+pub(crate) struct IdentityDomain {
+    /// The function the RMRRs name.
+    function: Address,
+    /// Its domain on the unit.
+    attached: vtd::Attached,
+    /// The RMRR pages it maps, which no two share.
+    regions: Vec<Identity>,
+    /// Whether a [`Domain`] for it lives, or a dropped one left pins.
+    claimed: AtomicBool,
+    /// Whether [`domain_for`] has said why it handed out no domain, so the
+    /// line is printed once, not at every ask.
+    said: AtomicBool,
+}
+
+impl IdentityDomain {
+    /// The record of `function`'s identity domain `attached`, holding
+    /// `regions`.
+    pub(crate) fn new(function: Address, attached: vtd::Attached, regions: Vec<Identity>) -> Self {
+        IdentityDomain {
+            function,
+            attached,
+            regions,
+            claimed: AtomicBool::new(false),
+            said: AtomicBool::new(false),
+        }
+    }
+
+    /// The domain, on `unit`, unless one for it lives already.
+    pub(crate) fn claim(&'static self, unit: &'static vtd::Unit) -> Option<Domain> {
+        if self.claimed.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        Some(Domain::with(Translation::VtD {
+            unit,
+            attached: self.attached,
+            changing: Gate::new(),
+            identity: Some(self),
+        }))
+    }
+
+    /// Give the claim back, as its [`Domain`] is dropped: nothing is
+    /// detached.
+    fn release(&self) {
+        self.claimed.store(false, Ordering::Release);
+    }
+
+    /// Whether no line has yet said why it was not handed out; from here
+    /// on, one has.
+    fn first_refusal(&self) -> bool {
+        !self.said.swap(true, Ordering::AcqRel)
+    }
+
+    /// Whether a [`Domain`] for it lives.
+    pub(crate) fn claimed(&self) -> bool {
+        self.claimed.load(Ordering::Acquire)
+    }
+
+    /// The RMRR pages it maps.
+    pub(crate) fn regions(&self) -> &[Identity] {
+        &self.regions
+    }
+}
+
+/// Every RMRR page range an identity domain holds, for the frame
+/// allocator's check (`L.iommu.75`).
+pub(crate) fn identity_regions() -> impl Iterator<Item = Identity> {
+    PROGRAMMED
+        .get()
+        .into_iter()
+        .flat_map(|programmed| programmed.identity.iter())
+        .flat_map(|(_, identity)| identity.regions().iter().copied())
+}
+
+/// What a unit's RMRRs ask of its bring-up ([`plan_rmrrs`]).
+#[derive(Debug)]
+enum RmrrPlan {
+    /// No RMRR reaches it: it translates.
+    None,
+    /// Every RMRR that reaches it can be honoured: each function's
+    /// identity domain is attached, then it translates.
+    Honour(Vec<(Address, Vec<Identity>)>),
+    /// An RMRR holds it to remapping only.
+    Hold(Held),
+}
+
+/// An RMRR that holds its unit to remapping only, and why it was not
+/// honoured, if it names a function behind the unit.
+#[derive(Clone, Copy, Debug)]
+struct Held {
+    /// The RMRR's scope, as the table places it.
+    hold: dmar::RmrrHold,
+    /// Why it is not honoured; `None` for one the table cannot place.
+    why: Option<Unhonoured>,
+}
+
+/// Why an RMRR naming a function behind its unit is not honoured.
+#[derive(Clone, Copy, Debug)]
+enum Unhonoured {
+    /// The region itself, or a frame the allocator holds
+    /// (`ferrix_paging::vtd::rmrr::Refusal`).
+    Refused(rmrr::Refusal),
+    /// Its identity domain could not be made.
+    Attach(&'static str),
+}
+
+impl core::fmt::Display for Unhonoured {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Unhonoured::Refused(refusal) => refusal.fmt(f),
+            Unhonoured::Attach(why) => f.write_str(why),
+        }
+    }
+}
+
+/// Whether `unit`'s RMRRs can be honoured, read from the table and the
+/// memory map before the unit is opened (`L.iommu.73`, `L.iommu.74`,
+/// `L.iommu.75`).
+///
+/// Every RMRR scope that reaches the unit is read
+/// (`ferrix_acpi::dmar::Dmar::rmrr_holds`). One the table cannot place holds
+/// it. Each one naming a function behind it must be whole pages, inside a
+/// domain's reach, bounded, over no region the memory map calls RAM
+/// (`ferrix_paging::vtd::rmrr::identity`), with every frame outside the
+/// frame allocator, and share no page with the function's other RMRRs.
+/// The first that is not holds the unit, with its reason.
+fn plan_rmrrs(
+    table: &dmar::Dmar<'_>,
+    unit: &dmar::Drhd<'_>,
+    memory: &[ferrix_bootinfo::MemRegion],
+) -> RmrrPlan {
+    let ram = || {
+        memory
+            .iter()
+            .filter(|region| region.kind.is_ram())
+            .map(|region| (region.base, region.len))
+    };
+    let mut functions: Vec<(Address, Vec<Identity>)> = Vec::new();
+    for hold in table.rmrr_holds(*unit) {
+        let held = |why| RmrrPlan::Hold(Held { hold, why });
+        let dmar::RmrrHold::Named {
+            base,
+            limit,
+            function: (bus, device, function),
+        } = hold
+        else {
+            return held(None);
+        };
+        let Some(function) = Address::new(unit.segment, bus, device, function) else {
+            return held(Some(Unhonoured::Attach(
+                "its function is not a PCI address",
+            )));
+        };
+        let region = match rmrr::identity(base, limit, ram()) {
+            Ok(region) => region,
+            Err(refusal) => return held(Some(Unhonoured::Refused(refusal))),
+        };
+        if let Err(refusal) = frames_outside_allocator(region) {
+            return held(Some(Unhonoured::Refused(refusal)));
+        }
+        let at = match functions.iter().position(|(named, _)| *named == function) {
+            Some(at) => at,
+            None => {
+                // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+                functions.push((function, Vec::new()));
+                functions.len() - 1
+            }
+        };
+        let Some((_, regions)) = functions.get_mut(at) else {
+            continue;
+        };
+        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+        regions.push(region);
+        if let Err(refusal) = rmrr::disjoint(regions) {
+            return held(Some(Unhonoured::Refused(refusal)));
+        }
+    }
+    if functions.is_empty() {
+        RmrrPlan::None
+    } else {
+        RmrrPlan::Honour(functions)
+    }
+}
+
+/// Whether every frame of `region` is outside the frame allocator: past its
+/// array, or recorded reserved -- never free, never handed out
+/// (`L.iommu.75`).
+///
+/// # Errors
+///
+/// [`rmrr::Refusal::AllocatorFrame`] for the first frame the allocator
+/// holds.
+pub(crate) fn frames_outside_allocator(region: Identity) -> Result<(), rmrr::Refusal> {
+    for page in region.page_addresses() {
+        match mm::frame_state(page / PAGE_SIZE) {
+            None | Some(ferrix_frame::State::Reserved) => {}
+            Some(_) => return Err(rmrr::Refusal::AllocatorFrame { page }),
+        }
+    }
+    Ok(())
+}
+
+/// Honour `plan` on `unit`, after its queue and interrupt remapping are on:
+/// attach each RMRR function's identity domain, then turn translation on --
+/// or, for a plan that holds the unit or an identity domain that could not
+/// be made, leave it off, the plan now saying why (`L.iommu.73`,
+/// `L.iommu.74`).
+///
+/// # Errors
+///
+/// [`vtd::Unit::translate`]'s.
+fn honour_and_translate(
+    unit: &vtd::Unit,
+    plan: &mut RmrrPlan,
+) -> Result<(vtd::Protected, Vec<IdentityDomain>), &'static str> {
+    let mut identities = Vec::new();
+    if let RmrrPlan::Honour(functions) = plan {
+        match attach_identities(unit, functions) {
+            Ok(made) => identities = made,
+            Err(held) => *plan = RmrrPlan::Hold(held),
+        }
+    }
+    if matches!(plan, RmrrPlan::Hold(_)) {
+        return Ok((vtd::Protected::None, identities));
+    }
+    Ok((unit.translate()?, identities))
+}
+
+/// Attach each RMRR function's identity domain on `unit`, before it
+/// translates.
+///
+/// # Errors
+///
+/// The first that could not be made, holding the unit to remapping only.
+/// Those made before it stay attached, and are never handed out: the unit
+/// does not translate, so its functions get untranslated domains.
+fn attach_identities(
+    unit: &vtd::Unit,
+    functions: &mut Vec<(Address, Vec<Identity>)>,
+) -> Result<Vec<IdentityDomain>, Held> {
+    let mut made = Vec::new();
+    for (function, regions) in functions.drain(..) {
+        let attached = unit.attach_identity(function, &regions).map_err(|why| {
+            let first = regions
+                .first()
+                .copied()
+                .unwrap_or(Identity { base: 0, pages: 0 });
+            Held {
+                hold: dmar::RmrrHold::Named {
+                    base: first.base,
+                    limit: first.end().saturating_sub(1),
+                    function: (function.bus(), function.device(), function.function()),
+                },
+                why: Some(Unhonoured::Attach(why)),
+            }
+        })?;
+        // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+        made.push(IdentityDomain::new(function, attached, regions));
+    }
+    Ok(made)
+}
+
+/// The line for one identity domain an RMRR gave a function behind `unit`.
+fn say_identity(unit: &dmar::Drhd<'_>, identity: &IdentityDomain) {
+    for region in identity.regions() {
+        println!(
+            "  iommu    vt-d unit {:#x}: RMRR {:#x}-{:#x} identity-mapped for pci {}, {} pages, \
+             held for the boot and never detached",
+            unit.register_base,
+            region.base,
+            region.end().saturating_sub(1),
+            identity.function,
+            region.pages,
+        );
+    }
 }
 
 /// A DMAR device scope kept past bring-up, whose path is followed only once
@@ -1258,7 +1609,7 @@ pub(crate) fn bring_up(view: &BootView<'_>) -> BringUp {
     if let Description::Acpi(firmware) = description::of(view) {
         let tables = firmware.acpi();
         if let Ok(table) = tables.dmar() {
-            bring_up_vtd(&table, &mut programmed, &mut report);
+            bring_up_vtd(&table, view.regions(), &mut programmed, &mut report);
         }
         if let Ok(table) = tables.iort() {
             bring_up_smmu(&table, &mut programmed, &mut report);
@@ -1271,15 +1622,23 @@ pub(crate) fn bring_up(view: &BootView<'_>) -> BringUp {
 /// Program every VT-d unit the DMAR describes, and record the functions its
 /// endpoint scopes name, and each segment's catch-all.
 ///
-/// A unit an RMRR holds (`ferrix_acpi::dmar::Dmar::rmrr_hold`) is brought
-/// up for interrupt remapping only, translation off: firmware keeps using
-/// the region for a function behind it -- the N150's iGPU scanning out its
-/// framebuffer from stolen memory -- and a unit that translated would cut it
-/// off. Its functions' DMA is untranslated and reaches all of memory, which
-/// its line says (`L.iommu.67`).
+/// Firmware keeps using an RMRR's region for a function behind a unit --
+/// the N150's iGPU scanning out its framebuffer from stolen memory -- and a
+/// unit that translated with no map of it would cut it off. So a unit whose
+/// RMRRs can all be honoured ([`plan_rmrrs`]) gives each RMRR's function an
+/// identity domain of them before it translates (`L.iommu.73`). One an RMRR
+/// holds -- an RMRR the table cannot place, or one not honoured
+/// (`L.iommu.74`) -- is brought up for interrupt remapping only,
+/// translation off; its functions' DMA is untranslated and reaches all of
+/// memory, which its line says (`L.iommu.67`).
 ///
 /// With `ferrix.vtd=off` every unit is left alone (`L.iommu.71`).
-fn bring_up_vtd(table: &dmar::Dmar<'_>, programmed: &mut Programmed, report: &mut BringUp) {
+fn bring_up_vtd(
+    table: &dmar::Dmar<'_>,
+    memory: &[ferrix_bootinfo::MemRegion],
+    programmed: &mut Programmed,
+    report: &mut BringUp,
+) {
     let intr_remap = table.flags() & dmar::FLAG_INTR_REMAP != 0;
     let switched_off = vtd_switched_off();
     let mut states = Vec::new();
@@ -1294,8 +1653,9 @@ fn bring_up_vtd(table: &dmar::Dmar<'_>, programmed: &mut Programmed, report: &mu
             remapping: false,
             compatibility_blocked: false,
         };
-        let hold = table.rmrr_hold(&unit);
+        let mut plan = plan_rmrrs(table, &unit, memory);
         let mut protected = vtd::Protected::None;
+        let mut identities = Vec::new();
         let opened = if switched_off {
             Err(VTD_OFF_WHY)
         } else {
@@ -1304,18 +1664,25 @@ fn bring_up_vtd(table: &dmar::Dmar<'_>, programmed: &mut Programmed, report: &mu
                 check::check_firmware_left_on(&opened);
                 opened.enable()?;
                 state = remapping::bring_up(&opened, &unit, table);
-                if hold.is_none() {
-                    protected = opened.translate()?;
-                }
+                (protected, identities) = honour_and_translate(&opened, &mut plan)?;
                 Ok(opened)
             })
         };
         // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
         states.push(state);
+        let hold = match &plan {
+            RmrrPlan::Hold(held) => Some(*held),
+            RmrrPlan::None | RmrrPlan::Honour(_) => None,
+        };
         let index = match opened {
             Ok(opened) => {
                 say_unit(&unit, &opened, hold, state, protected);
                 let index = programmed.vtd.len();
+                for identity in identities {
+                    say_identity(&unit, &identity);
+                    // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
+                    programmed.identity.push((index, identity));
+                }
                 // FATAL-ALLOC: boot only: IOMMU units are found, placed and programmed once, before any program runs.
                 programmed.vtd.push(opened);
                 if hold.is_none() {
@@ -1379,7 +1746,7 @@ fn record_scopes(unit: &dmar::Drhd<'_>, index: Option<usize>, programmed: &mut P
 fn say_unit(
     unit: &dmar::Drhd<'_>,
     opened: &vtd::Unit,
-    hold: Option<dmar::RmrrHold>,
+    hold: Option<Held>,
     state: ferrix_paging::vtd::remap::UnitState,
     protected: vtd::Protected,
 ) {
@@ -1395,18 +1762,27 @@ fn say_unit(
             opened.walk().name(),
             protected.says(),
         ),
-        Some(dmar::RmrrHold::Named {
-            base,
-            limit,
-            function: (bus, device, function),
+        Some(Held {
+            hold:
+                dmar::RmrrHold::Named {
+                    base,
+                    limit,
+                    function: (bus, device, function),
+                },
+            why,
         }) => println!(
             "  iommu    vt-d unit {:#x}: queue on, {remap_words}, translation left off: RMRR \
              {base:#x}-{limit:#x} names {:04x}:{bus:02x}:{device:02x}.{function}, which \
-             firmware keeps using; the DMA of every function behind this unit is \
-             untranslated and reaches all of memory",
-            unit.register_base, unit.segment,
+             firmware keeps using, and it is not honoured: {}; the DMA of every function \
+             behind this unit is untranslated and reaches all of memory",
+            unit.register_base,
+            unit.segment,
+            why.unwrap_or(Unhonoured::Attach("no reason was kept")),
         ),
-        Some(dmar::RmrrHold::Unfollowed { base, limit }) => println!(
+        Some(Held {
+            hold: dmar::RmrrHold::Unfollowed { base, limit },
+            ..
+        }) => println!(
             "  iommu    vt-d unit {:#x}: queue on, {remap_words}, translation left off: an RMRR \
              at {base:#x}-{limit:#x} names a function this table cannot place, which holds \
              every unit on segment {}; the DMA of every function behind this unit is \
@@ -1526,10 +1902,45 @@ fn endpoints<'a>(unit: &dmar::Drhd<'a>) -> impl Iterator<Item = Address> + 'a {
 /// The domain `function`'s DMA goes through: one on the VT-d unit the DMAR puts
 /// it behind, or on the `SMMUv3` an IORT root complex sends it to, when that
 /// unit is translating, and an untranslated one otherwise.
-pub(crate) fn domain_for(function: Address) -> Domain {
+///
+/// For a function an RMRR gave an identity domain at bring-up, that domain
+/// ([`IdentityDomain::claim`]), found by the requester it was attached for.
+/// `None`, no domain at all, while one for it lives, or when enumeration
+/// does not place the function behind that unit as its own requester
+/// (`ferrix_pci::topology::agrees`): never an untranslated one, whose first
+/// pin would say its DMA reaches all of memory while the unit confines it
+/// (`L.iommu.78`). Every other function gets `Some`.
+pub(crate) fn domain_for(function: Address) -> Option<Domain> {
     let Some(programmed) = PROGRAMMED.get() else {
-        return Domain::untranslated();
+        return Some(Domain::untranslated());
     };
+    if let Some((index, identity)) = programmed.identity_of(function) {
+        let unit = programmed.vtd.get(index)?;
+        if !topology::agrees(vtd_placed(programmed, function), &Some(index)) {
+            if !identity.first_refusal() {
+                return None;
+            }
+            println!(
+                "  iommu    pci {function} gets no domain: its RMRR identity domain is on the \
+                 unit at {:#x}, and enumeration does not place it there as its own requester",
+                unit.phys()
+            );
+            return None;
+        }
+        let domain = identity.claim(unit);
+        if domain.is_none() && identity.first_refusal() {
+            println!(
+                "  iommu    pci {function} gets no second domain: its RMRR identity domain is \
+                 held already"
+            );
+        }
+        return domain;
+    }
+    Some(domain_placed(programmed, function))
+}
+
+/// [`domain_for`] for a function no RMRR gave an identity domain.
+fn domain_placed(programmed: &'static Programmed, function: Address) -> Domain {
     let translation = if let Some(unit) = vtd_unit_for(programmed, function) {
         // A unit an RMRR holds to remapping only: its functions' DMA is
         // untranslated, and the first pin announces degraded trusted mode.
@@ -1540,6 +1951,7 @@ pub(crate) fn domain_for(function: Address) -> Domain {
             unit,
             attached,
             changing: Gate::new(),
+            identity: None,
         })
     } else if let Some((unit, stream)) = smmu_stream_for(programmed, function) {
         unit.attach(stream).map(|attached| Translation::SmmuV3 {
@@ -1587,6 +1999,20 @@ fn programmed_unit_for(function: Address) -> Option<&'static vtd::Unit> {
 /// followed through the bridges enumeration found, which a function below a
 /// root port is examined after (`discovery::pci`).
 fn vtd_unit_for(programmed: &'static Programmed, function: Address) -> Option<&'static vtd::Unit> {
+    match vtd_placed(programmed, function) {
+        topology::Placed::Unit(Some(index)) => programmed.vtd.get(index),
+        topology::Placed::Unit(None) | topology::Placed::Nothing | topology::Placed::Unresolved => {
+            None
+        }
+    }
+}
+
+/// Where enumeration places `function` among `programmed`'s VT-d units, by
+/// index (`None` for a unit left alone), as [`vtd_unit_for`] decides.
+fn vtd_placed(
+    programmed: &'static Programmed,
+    function: Address,
+) -> topology::Placed<Option<usize>> {
     let bridges = BRIDGES.lock();
     let mut explicit = topology::Explicit::None;
     // A single-hop endpoint on a bus behind an aliasing bridge is refused
@@ -1627,14 +2053,7 @@ fn vtd_unit_for(programmed: &'static Programmed, function: Address) -> Option<&'
         .iter()
         .find(|&&(segment, _)| segment == function.segment())
         .map_or(topology::CatchAll::None, |&(_, catch_all)| catch_all);
-    let placed = topology::place(explicit, catch_all, function, &bridges);
-    drop(bridges);
-    match placed {
-        topology::Placed::Unit(Some(index)) => programmed.vtd.get(index),
-        topology::Placed::Unit(None) | topology::Placed::Nothing | topology::Placed::Unresolved => {
-            None
-        }
-    }
+    topology::place(explicit, catch_all, function, &bridges)
 }
 
 /// The translating `SMMUv3` an IORT root complex sends `function` to, and the

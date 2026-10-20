@@ -31,6 +31,7 @@ use crate::{Encoding, Level, MapFlags, PhysAddr, VirtAddr};
 
 pub mod queue;
 pub mod remap;
+pub mod rmrr;
 pub mod unit;
 
 #[cfg(test)]

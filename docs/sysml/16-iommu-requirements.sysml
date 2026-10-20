@@ -177,7 +177,8 @@ package FerrixIommuRequirements {
                 against that stream: 1 or more out-of-domain writes faulted (the
                 `pci` line).";
             attribute :>> parent = "H.DMA.3";
-            attribute :>> unit = ("iommu::domain_for", "iommu::vtd_unit_for",
+            attribute :>> unit = ("iommu::domain_for", "iommu::domain_placed", "iommu::vtd_placed",
+                "iommu::vtd_unit_for",
                 "iommu::smmu_stream_for", "iommu::endpoints", "iommu::Domain::with",
                 "iommu::Translation::stream", "iommu::vtd::Unit::attach",
                 "iommu::vtd::Unit::install", "iommu::vtd::read_entry",
@@ -890,22 +891,23 @@ package FerrixIommuRequirements {
             attribute :>> parent = "H.DMA.8";
             attribute :>> unit = ("iommu::vtd::Unit::open", "iommu::vtd::Unit::invalidate_iotlb");
         }
-        requirement <'L.iommu.67'> aUnitAnRmrrNamesRemapsOnly : ItemLowLevel {
-            attribute :>> statement = "A VT-d unit an RMRR holds -- one naming, by a
-                single-hop endpoint scope, a function behind it, or one the table
-                alone cannot place, which holds every unit on its segment, a
-                malformed RMRR included -- shall be brought up with its queue and
-                interrupt remapping and its translation left off; its line shall say
-                that its functions' DMA is untranslated and reaches all of memory,
-                its functions shall get untranslated domains, and the discovery line
-                shall count them apart as untranslated, never as translated.";
-            attribute :>> criterion = "Host tests on the N150's DMAR bytes: the
-                RMRR 0x7C000000-0x803FFFFF names 00:02.0 and holds dmar0, not
-                dmar1; an RMRR for a function no scope names holds the catch-all;
-                one with a two-hop or odd path, or beside a sub-hierarchy scope,
-                and a short RMRR, hold every unit; 26 functions behind a unit that
-                translates and one behind dmar0 count 27 behind, 1 untranslated.
-                QEMU's DMAR has no RMRR, so the boot half rests on the N150's log.";
+        requirement <'L.iommu.67'> anRmrrTheTableCannotPlaceHoldsItsUnits : ItemLowLevel {
+            attribute :>> statement = "A VT-d unit an RMRR holds -- one on its
+                segment that the table alone cannot place (a scope that is not a
+                single-hop endpoint, or one beside a scope only enumeration can
+                follow), which holds every unit on the segment, a malformed RMRR
+                included -- shall be brought up with its queue and interrupt
+                remapping and its translation left off; its line shall say that its
+                functions' DMA is untranslated and reaches all of memory, its
+                functions shall get untranslated domains, and the discovery line
+                shall count them apart as untranslated, never as translated. An RMRR
+                naming a function behind the unit holds it only when L.iommu.74
+                refuses it.";
+            attribute :>> criterion = "Host tests on DMAR bytes: an RMRR with a
+                two-hop or odd path, or beside a sub-hierarchy scope, and a short
+                RMRR, hold every unit; a function behind a unit that only remaps is
+                counted untranslated. QEMU's DMAR has no RMRR, so the boot half
+                rests on the N150's log (its BACKLOG row).";
             attribute :>> parent = ("H.DMA.1", "H.FAIL.1");
             attribute :>> unit = ("iommu::bring_up_vtd",
                 "iommu::say_unit", "iommu::domain_for", "iommu::discover",
@@ -959,6 +961,113 @@ package FerrixIommuRequirements {
                 line; with the line renamed that boot fails.";
             attribute :>> parent = ("H.DMA.6", "H.AUD.12");
             attribute :>> unit = "iommu::report_unchecked_faults";
+        }
+        requirement <'L.iommu.73'> anRmrrIsIdentityMappedForItsFunction : ItemLowLevel {
+            attribute :>> statement = "A VT-d unit every RMRR of which, on its
+                segment, names a function behind it (Dmar::rmrr_holds, every scope
+                read) and is honoured (L.iommu.74) shall, after its queue and
+                interrupt remapping are on and before TE, give each such function a
+                domain of its own that maps exactly the pages of its RMRRs, each
+                read and write at its own address, and nothing else; only then shall
+                it translate. Its line shall name each RMRR, the function and its
+                pages.";
+            attribute :>> criterion = "Host tests: the N150's DMAR gives dmar0 one
+                RMRR, 0x7C000000-0x803FFFFF for 00:02.0, and dmar1 none; against the
+                box's memory map (Linux's e820) it is honoured as 17,408 pages, the
+                bytes either side not held. Boot check (x86-64, QEMU intel-iommu,
+                domain_check::check_rmrr_identity): an identity domain made by
+                attach_identity over two pages below 2^39 for an absent requester
+                resolves each page to itself and the page below to nothing; with
+                one page fewer mapped the check fails. Identity before TE on a real
+                RMRR is open: the N150 box row in BACKLOG.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::bring_up_vtd", "iommu::plan_rmrrs",
+                "iommu::attach_identities", "iommu::honour_and_translate",
+                "iommu::vtd::Unit::attach_identity",
+                "iommu::say_identity");
+        }
+        requirement <'L.iommu.74'> anRmrrThatCannotBeHonouredHoldsItsUnit : ItemLowLevel {
+            attribute :>> statement = "An RMRR naming a function behind a VT-d unit
+                shall be honoured only when its base and limit plus one are page
+                aligned, its limit is not below its base, it ends at or below 2^39,
+                it holds at most 2^18 pages, it shares no byte with a region the
+                memory map calls RAM, every frame of it is outside the frame
+                allocator, it shares no page with another RMRR for the same function,
+                and its identity domain is made. Otherwise the unit shall be held as
+                L.iommu.67 states, its line naming the RMRR, the function and the
+                reason.";
+            attribute :>> criterion = "Host tests (ferrix_paging::vtd::rmrr):
+                base and limit unaligned, limit below base, limit at and past 2^39,
+                2^18 + 1 pages, RAM over the first, last and middle page refused,
+                touching RAM and empty regions allowed, two RMRRs for one function
+                sharing a page refused; a unit's later and malformed RMRRs are read.
+                Boot check: an RMRR over a frame the allocator holds is refused by
+                the memory map and by the frame's state. Controls: the RAM rule, the
+                alignment rule and the frame-state rule removed each fail. That a
+                refused RMRR holds its unit, and the line it prints, rest on code
+                review and the N150 box row: no QEMU table has an RMRR.";
+            attribute :>> parent = ("H.DMA.1", "H.FAIL.1");
+            attribute :>> unit = ("iommu::plan_rmrrs", "iommu::frames_outside_allocator",
+                "iommu::say_unit", "iommu::Unhonoured::fmt");
+        }
+        requirement <'L.iommu.75'> rmrrFramesAreNeverTheAllocators : ItemLowLevel {
+            attribute :>> statement = "Every frame of an honoured RMRR shall be
+                outside the frame allocator -- past its array, or recorded reserved --
+                when its identity domain is made, and stay so for the boot: the
+                allocator is given only regions the memory map calls RAM, which an
+                honoured RMRR shares no byte with.";
+            attribute :>> criterion = "Boot check: the check's RMRR frames read
+                outside the allocator when made and again after the boot memory is
+                reclaimed (check_rmrr_frames); an allocated frame reads as the
+                allocator's. Host test: an RMRR over RAM is refused. On a real RMRR:
+                the N150 box row.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::frames_outside_allocator",
+                "iommu::identity_regions");
+        }
+        requirement <'L.iommu.76'> aPinOverAnRmrrIsRefused : ItemLowLevel {
+            attribute :>> statement = "Domain::pin shall refuse, with
+                DomainError::Reserved and nothing mapped, any pin one of whose pages
+                lies in an RMRR its identity domain holds; every other page pins as
+                into any translated domain.";
+            attribute :>> criterion = "Boot check: a pin of an RMRR page, and of a
+                free page with an RMRR page, refused Reserved, the free page not
+                mapped and no page counted; the free page alone pinned at its own
+                address and unpinned. With the refusal removed the check fails.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::Domain::pin", "iommu::Translation::held");
+        }
+        requirement <'L.iommu.77'> anUnpinNeverRemovesAnRmrrEntry : ItemLowLevel {
+            attribute :>> statement = "Domain::unpin shall hand back refused, with
+                DomainError::Reserved and nothing unmapped, any pin naming a page an
+                RMRR its identity domain holds.";
+            attribute :>> criterion = "Boot check: an unpin naming an RMRR page is
+                refused and every RMRR page still resolves to itself. With the
+                refusal removed the check fails.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = "iommu::Domain::unpin_waiting";
+        }
+        requirement <'L.iommu.78'> theRmrrDomainIsNeverDetached : ItemLowLevel {
+            attribute :>> statement = "An RMRR's identity domain shall never be
+                detached, asked or dropped, pinned into or not. It shall be handed
+                out (domain_for) only to the requester it was attached for, only
+                where enumeration places that function behind its unit as its own
+                requester, and only while no other domain for it lives; otherwise
+                the function gets no domain at all, never an untranslated one. A
+                dropped one gives its claim back, so a node, and a driver restarting
+                on it, always gets the same attachment and nothing is attached
+                again. One dropped with pages still pinned keeps its claim, so no
+                second domain is made over tables holding its pins.";
+            attribute :>> criterion = "Boot check: a second claim while one lives
+                gets nothing; detach is refused; after the drop a new claim succeeds
+                and every RMRR page still resolves. Controls: the claim flag
+                ignored, the detach refusal removed and the drop's release removed
+                each fail the check. Host test: topology::agrees on the N150's
+                topology.";
+            attribute :>> parent = "H.DMA.1";
+            attribute :>> unit = ("iommu::domain_for", "iommu::IdentityDomain::claim",
+                "iommu::Domain::drop", "iommu::Translation::detach",
+                "iommu::IdentityDomain::release");
         }
     }
 

@@ -291,6 +291,7 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     check_devices(view);
     iommu::report(view, device::devices());
     iommu::domain_check::check_iommu();
+    iommu::domain_check::check_rmrr_identity(view.regions());
 
     // Stage 9's device objects, on the nodes just published: an I/O mapping of
     // a device's own aperture and nothing past it, reached from a forked
@@ -403,6 +404,9 @@ fn say_booted() {
         // Last before the marker, so every driver the boot starts has run: a
         // DMA fault its unit recorded and nothing provoked fails the boot
         // here rather than sitting unread in the unit's record.
+        // After the reclaim, which must have given an RMRR's frames to
+        // nobody (`L.iommu.75`).
+        iommu::domain_check::check_rmrr_frames();
         let dma_faults_read = iommu::check_dma_faults();
         // And after it, since reading the faults is what records them.
         stages_check::check_audit_booted(dma_faults_read);

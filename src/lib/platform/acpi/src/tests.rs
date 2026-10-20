@@ -2381,7 +2381,7 @@ fn two_catch_alls_on_one_segment_are_neither_believed() {
     assert_eq!(parse_dmar(&bytes).catch_all(0), dmar::CatchAll::Several);
 }
 
-/// Verifies: `L.iommu.67`
+/// Verifies: `L.iommu.73`
 #[test]
 fn the_boxs_rmrr_holds_dmar0_and_not_dmar1() {
     let table = parse_dmar(&BOX_DMAR);
@@ -2440,7 +2440,7 @@ fn holds(table: &dmar::Dmar<'_>) -> Vec<Option<dmar::RmrrHold>> {
         .collect()
 }
 
-/// Verifies: `L.iommu.67`
+/// Verifies: `L.iommu.73`
 #[test]
 fn an_rmrr_for_a_catch_all_function_holds_the_catch_all() {
     let bytes = rmrr_machine(&scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[0x14, 0]), &[]);
@@ -2797,4 +2797,98 @@ fn the_q35_fixture_leaves_com1_where_isa_put_it() {
     let acpi = Acpi::from_rsdp(&memory, &rsdp).unwrap();
     let com1 = acpi.madt().unwrap().isa_interrupt(4);
     assert_eq!((com1.gsi, com1.active_low, com1.level), (4, false, false));
+}
+
+/// Every hold an RMRR puts on each unit, not only the first.
+fn all_holds(table: &dmar::Dmar<'_>) -> Vec<Vec<dmar::RmrrHold>> {
+    table
+        .structures()
+        .filter_map(|s| match s {
+            dmar::Structure::Drhd(unit) => Some(table.rmrr_holds(unit).collect()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Verifies: `L.iommu.73`
+#[test]
+fn the_boxs_dmar0_has_one_rmrr_to_honour_and_dmar1_none() {
+    assert_eq!(
+        all_holds(&parse_dmar(&BOX_DMAR)),
+        vec![
+            vec![dmar::RmrrHold::Named {
+                base: 0x7C00_0000,
+                limit: 0x803F_FFFF,
+                function: (0, 2, 0),
+            }],
+            vec![],
+        ]
+    );
+}
+
+/// Verifies: `L.iommu.74`
+#[test]
+fn a_units_later_rmrrs_are_read_too() {
+    // The RMRR `rmrr_machine` makes for the catch-all's 00:14.0, then a
+    // second for the explicit unit's 00:02.0, then one cut short.
+    let mut bytes = rmrr_machine(&scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[0x14, 0]), &[]);
+    let mut second = vec![0, 0];
+    second.extend_from_slice(&le16(0));
+    second.extend_from_slice(&0x7D00_0000_u64.to_le_bytes());
+    second.extend_from_slice(&0x7D00_FFFF_u64.to_le_bytes());
+    second.extend(scope(dmar::SCOPE_PCI_ENDPOINT, 0, 0, &[2, 0]));
+    let mut short = vec![0, 0];
+    short.extend_from_slice(&le16(0));
+    short.extend_from_slice(&[0; 8]);
+    let extra = [
+        structure(dmar::STRUCTURE_RMRR, &second),
+        structure(dmar::STRUCTURE_RMRR, &short),
+    ]
+    .concat();
+    bytes.extend_from_slice(&extra);
+    let length = bytes.len() as u32;
+    bytes[4..8].copy_from_slice(&length.to_le_bytes());
+    bytes[9] = 0;
+    let sum = bytes.iter().fold(0_u8, |a, &b| a.wrapping_add(b));
+    bytes[9] = 0_u8.wrapping_sub(sum);
+    let table = parse_dmar(&bytes);
+    let cut = dmar::RmrrHold::Unfollowed { base: 0, limit: 0 };
+    assert_eq!(
+        all_holds(&table),
+        vec![
+            vec![
+                dmar::RmrrHold::Named {
+                    base: 0x7D00_0000,
+                    limit: 0x7D00_FFFF,
+                    function: (0, 2, 0),
+                },
+                cut,
+            ],
+            vec![
+                dmar::RmrrHold::Named {
+                    base: 0x7C00_0000,
+                    limit: 0x7C0F_FFFF,
+                    function: (0, 0x14, 0),
+                },
+                cut,
+            ],
+        ],
+        "each unit's own RMRR, and the malformed one on both"
+    );
+    // The first hold is what `rmrr_hold` answers, as before.
+    let explicit = table
+        .structures()
+        .find_map(|s| match s {
+            dmar::Structure::Drhd(unit) => Some(unit),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        table.rmrr_hold(&explicit),
+        Some(dmar::RmrrHold::Named {
+            base: 0x7D00_0000,
+            limit: 0x7D00_FFFF,
+            function: (0, 2, 0),
+        })
+    );
 }

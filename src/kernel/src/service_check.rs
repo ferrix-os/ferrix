@@ -472,7 +472,7 @@ fn faults_and_domains_read_as_recorded(report: &mut Report) -> Result<(), &'stat
         if domain.translated()
             && let Location::Pci(function) = node.location()
         {
-            if crate::iommu::domain_for(function).translated() {
+            if crate::iommu::domain_for(function).is_some_and(|domain| domain.translated()) {
                 return Err("a function was given a second translated domain");
             }
             report.refusals += 1;
@@ -577,12 +577,14 @@ fn a_dropped_domain_gives_its_stream_back() -> Result<(), &'static str> {
         let Location::Pci(function) = node.location() else {
             continue;
         };
-        let first = crate::iommu::domain_for(function);
+        let Some(first) = crate::iommu::domain_for(function) else {
+            continue;
+        };
         if !first.translated() {
             continue;
         }
         drop(first);
-        if !crate::iommu::domain_for(function).translated() {
+        if !crate::iommu::domain_for(function).is_some_and(|domain| domain.translated()) {
             return Err("a dropped domain did not give its stream back to its unit");
         }
         return Ok(());

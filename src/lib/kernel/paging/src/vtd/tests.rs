@@ -519,8 +519,8 @@ fn the_box_units_need_nothing_else_the_driver_lacks() {
 /// Verifies: `L.iommu.67`
 #[test]
 fn a_function_behind_a_unit_that_only_remaps_is_counted_untranslated() {
-    // The box under slice 1: 26 functions behind dmar1, which translates,
-    // and the iGPU behind dmar0, which an RMRR holds to remapping only.
+    // 26 functions behind a unit that translates, and one behind a unit an
+    // RMRR holds to remapping only: the box before K2, or with K2 refused.
     let mut tally = unit::Tally::default();
     for _ in 0..26 {
         tally.add(true);

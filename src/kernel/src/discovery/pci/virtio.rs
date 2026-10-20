@@ -499,7 +499,9 @@ pub(super) fn entropy(
     };
     // The device is given the addresses its domain gives the pages, and on a
     // translated domain reaches nothing else.
-    let domain = iommu::domain_for(address);
+    let Some(domain) = iommu::domain_for(address) else {
+        return Ok(Entropy::Skipped("the device has no domain"));
+    };
     let Ok(pinned) = domain.pin(&[rings.frame, buffer.frame], MapFlags::DMA) else {
         return Ok(Entropy::Skipped("the DMA pages could not be pinned"));
     };

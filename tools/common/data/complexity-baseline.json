@@ -66,7 +66,7 @@
     },
     "discovery/pci/virtio.rs::entropy": {
       "complexity": 16,
-      "lines": 88,
+      "lines": 90,
       "recursive": false
     },
     "discovery/pci/virtio.rs::probe_out_of_domain": {
@@ -80,8 +80,8 @@
       "recursive": false
     },
     "main.rs::kmain": {
-      "complexity": 12,
-      "lines": 68,
+      "complexity": 11,
+      "lines": 69,
       "recursive": false
     },
     "main.rs::start_scheduler": {
