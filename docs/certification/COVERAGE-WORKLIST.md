@@ -97,7 +97,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `discovery/devmgr.rs` | `item` | 13 | 78 | 82 | 11 | 410, 576, 604, 611, 761, 855, 859-860, 878, 883, 1094 |
-| `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 31 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495-496, 498-499, 504, 512, 527, 548, 556, 558, 567, 615, 620, 625, 653, 679, 684, 697, 704, 795 |
+| `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 31 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495-496, 498-499, 506, 514, 529, 550, 558, 560, 569, 617, 622, 627, 655, 681, 686, 699, 706, 797 |
 
 ---
 
@@ -159,7 +159,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `main.rs` | `item` | 3 | 6 | 4 | 3 | 329, 725, 1352 |
+| `main.rs` | `item` | 3 | 6 | 4 | 3 | 330, 729, 1356 |
 
 ---
 

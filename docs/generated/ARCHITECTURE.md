@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 141 packages, 7166 elements, 217 relations. Model digest `b4447e235357bca4`.
+26 files, 141 packages, 7196 elements, 217 relations. Model digest `4452ab0c2696673e`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4139,11 +4139,17 @@ flowchart LR
 | `L.iommu.64` | `everyFaultRecordIsRead` | — | — | — |
 | `L.iommu.65` | `registersInsideTheWindow` | — | — | — |
 | `L.iommu.66` | `invalidationsDrainWhenTheUnitCan` | — | — | — |
-| `L.iommu.67` | `aUnitAnRmrrNamesRemapsOnly` | — | — | — |
+| `L.iommu.67` | `anRmrrTheTableCannotPlaceHoldsItsUnits` | — | — | — |
 | `L.iommu.68` | `protectedRegionsAreOnlyReadWhereTheyExist` | — | — | — |
 | `L.iommu.70` | `faultEventsMasked` | — | — | — |
 | `L.iommu.71` | `ferrixVtdOffLeavesEveryUnitAlone` | — | — | — |
 | `L.iommu.72` | `anUncheckedBootSaysItsFaults` | — | — | — |
+| `L.iommu.73` | `anRmrrIsIdentityMappedForItsFunction` | — | — | — |
+| `L.iommu.74` | `anRmrrThatCannotBeHonouredHoldsItsUnit` | — | — | — |
+| `L.iommu.75` | `rmrrFramesAreNeverTheAllocators` | — | — | — |
+| `L.iommu.76` | `aPinOverAnRmrrIsRefused` | — | — | — |
+| `L.iommu.77` | `anUnpinNeverRemovesAnRmrrEntry` | — | — | — |
+| `L.iommu.78` | `theRmrrDomainIsNeverDetached` | — | — | — |
 | `L.iommu.50` | `remappingOnlyWithCompatibilityBlocked` | — | — | — |
 | `L.iommu.52` | `anEntryIsWrittenOnceAndInvalidated` | — | — | — |
 | `L.iommu.53` | `anEntryCarriesItsFixedFields` | — | — | — |
