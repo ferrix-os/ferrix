@@ -1,11 +1,12 @@
 //! The kernel command-line words the driver process reads for the N150
 //! box's runs (`docs/INTEL-GPU.md` §10), none of them i915's: where to stop,
-//! whether to say every register access, and when to restart the machine.
+//! whether to say every register access, when to restart the machine, and
+//! whether to run M2's checks before serving.
 //! Parsed here, apart from the process, so a host test holds them. The words
 //! themselves are the driver's (`drivers/gpu/intel/src/steps.rs`): a library
 //! names no boot option (`check-build-flags.py`, ledger 2208 (2)).
 
-/// The three words, as the driver spells them.
+/// The four words, as the driver spells them.
 #[derive(Clone, Copy, Debug)]
 pub struct Words<'a> {
     /// Stop before step `N` (the driver's `steps::At`): `<stop>N`.
@@ -14,6 +15,9 @@ pub struct Words<'a> {
     pub trace: &'a [u8],
     /// Restart the machine `S` seconds after boot: `<reset>S`.
     pub reset: &'a [u8],
+    /// Run M2's checks (the commands, the blits, a hang) before serving:
+    /// the whole word.
+    pub selftest: &'a [u8],
 }
 
 /// The longest a restart may wait: an hour.
@@ -32,6 +36,8 @@ pub struct Options {
     /// A restart word whose value was not a number in range: said by the
     /// driver, and no restart.
     pub reset_refused: bool,
+    /// Run M2's checks before serving.
+    pub selftest: bool,
 }
 
 /// The words of `line` the driver reads. A `stop=` that is not a number is
@@ -44,6 +50,8 @@ pub fn parse(line: &[u8], words: &Words<'_>) -> Options {
     for word in line.split(u8::is_ascii_whitespace) {
         if word == words.trace {
             options.trace = true;
+        } else if word == words.selftest {
+            options.selftest = true;
         } else if let Some(value) = word.strip_prefix(words.stop) {
             options.stop = Some(number(value).unwrap_or(1).max(1));
         } else if let Some(value) = word.strip_prefix(words.reset) {
@@ -84,6 +92,7 @@ mod tests {
                 stop: b"ferrix.intelgpu.stop=",
                 trace: b"ferrix.intelgpu.trace",
                 reset: b"ferrix.intelgpu.reset=",
+                selftest: b"ferrix.intelgpu.m2",
             },
         )
     }
@@ -100,7 +109,7 @@ mod tests {
     fn every_word() {
         let options = parse(
             b"ferrix.init=/etc/reset-after.sh ferrix.intelgpu ferrix.intelgpu.trace \
-              ferrix.intelgpu.stop=9 ferrix.intelgpu.reset=60\n",
+              ferrix.intelgpu.stop=9 ferrix.intelgpu.reset=60 ferrix.intelgpu.m2\n",
         );
         assert_eq!(
             options,
@@ -109,6 +118,7 @@ mod tests {
                 trace: true,
                 reset_seconds: Some(60),
                 reset_refused: false,
+                selftest: true,
             }
         );
     }

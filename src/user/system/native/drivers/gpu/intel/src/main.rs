@@ -25,10 +25,16 @@
 //!    only, and the GGTT entries the firmware left present, read within a
 //!    time budget.
 //!
-//! 8. M2 ([`m2`]), unless the `WOPCM` is locked: the PAT, the workarounds and
-//!    the MOCS, RCS0 and BCS0 under execlists, a PPGTT, the default context
-//!    images, and three commands run and checked. It writes the GPU's
-//!    registers and only the GGTT entries of its own window.
+//! 8. Unless the `WOPCM` is locked: forcewake of the domains M1 does not
+//!    hold, then M2's checks ([`m2`]: the commands, the blits, a hang) only
+//!    under `ferrix.intelgpu.m2`.
+//! 9. M3: the GT brought up under `ferrix-intel-xelp`'s back end on the
+//!    real platform ([`platform`]: BAR 0, page tables in a pinned pool, the
+//!    driver's objects as pinned VMOs in its own GGTT window, the client's
+//!    objects pinned at their first bind), and the render node published
+//!    and served ([`serve`]) with the MSI on `serve::KEY_INTERRUPT` and
+//!    the 1 ms poll beside it. The kernel refuses the node while 00:02.0's
+//!    DMA is untranslated (K3); the driver then says so and stays.
 //!
 //! M1 writes nothing to the GPU but the forcewake requests. After the
 //! lines it stays, and once it has the device it stays after a failure too,
@@ -64,6 +70,8 @@ use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::{Bootstrap, Kernel};
 
 mod m2;
+mod platform;
+mod serve;
 mod steps;
 
 use steps::{At, Steps};
@@ -104,6 +112,10 @@ pub(crate) enum Step {
     /// Stopped before a step, as `ferrix.intelgpu.stop` asked. Never an
     /// exit status: the driver stays.
     Stopped = 11,
+    /// M3: the back end did not bring the GT up (said).
+    Backend = 12,
+    /// M3: the render node was refused or serving stopped (said).
+    Serve = 13,
 }
 
 impl From<steps::Stopped> for Step {
@@ -371,9 +383,8 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     let mut time = Time {
         idle: port::create(Kernel).map_err(|_| Step::Port)?,
     };
-    match m1(&device, info.apertures, &platform, &steps, &mut time) {
-        Err(Step::Stopped) => stay(&time),
-        Err(step) => {
+    let stopped = |step: Step| {
+        if !matches!(step, Step::Stopped) {
             // Exiting would have devmgr quiesce the function, and a quiesce
             // turns its bus mastering off (`device_quiesce`), under the
             // plane the firmware lit and the display engine still scans
@@ -382,25 +393,212 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
             say(format_args!(
                 "intel: stopped at {step:?}; the driver stays, so 00:02.0's bus mastering stays on under the lit screen"
             ));
-            stay(&time)
         }
-        Ok(()) => {
-            say(format_args!(
-                "intel: the driver now waits and touches nothing"
-            ));
+    };
+    let done = match m1(&device, info.apertures, &platform, &steps, &mut time) {
+        Ok(done) => done,
+        Err(step) => {
+            stopped(step);
+            return stay(&time);
+        }
+    };
+    if done.locked {
+        say(format_args!(
+            "intel: the WOPCM is locked: no M2 and no render node; the driver now waits and touches nothing"
+        ));
+        return stay(&time);
+    }
+    match serve_gpu(&device, info.location, info.device_id, done, &steps) {
+        Ok(never) => match never {},
+        Err(step) => {
+            stopped(step);
             stay(&time)
         }
     }
 }
 
-/// M1, then M2 unless the `WOPCM` is locked; each step said first.
+/// What M1 leaves for the rest: BAR 0 under render and GT forcewake, and
+/// the facts it read.
+struct M1Done {
+    bar: Bar0,
+    firmware: m2::Firmware,
+    locked: bool,
+}
+
+/// M3's driver: every forcewake domain for the bring-up, M2's checks if
+/// `ferrix.intelgpu.m2` asks, then the GT under `ferrix-intel-xelp`'s back
+/// end on the real platform, and the render node served through
+/// [`serve`] until the kernel takes it back.
+fn serve_gpu(
+    device: &Device<Kernel>,
+    location: u32,
+    device_id: u16,
+    done: M1Done,
+    steps: &Steps,
+) -> Result<core::convert::Infallible, Step> {
+    use ferrix_intel_xelp::backend::{Identity, XelpBackend};
+    use ferrix_intel_xelp::frontend::Frontend;
+    let M1Done {
+        mut bar, firmware, ..
+    } = done;
+    let mut time = Time {
+        idle: port::create(Kernel).map_err(|_| Step::Port)?,
+    };
+    // intel_gt_init_hw runs under FORCEWAKE_ALL. Render and GT are held
+    // since M1, so only the others are asked for: asking a held domain
+    // again waits for an ack that cannot clear (the box, 2026-10-20:
+    // "AckNotCleared { domain: 1, ack: 1 }", i915's
+    // fw_domain_wait_ack_clear refusing GT).
+    let all = uncore::fw_domains_init(firmware.engine_mask);
+    let rest = !(uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT);
+    steps.before(
+        At::ForcewakeAll,
+        format_args!(
+            "forcewake the domains M1 does not hold (engines {:#x}): media",
+            firmware.engine_mask
+        ),
+    )?;
+    let others = match uncore::fw_domains_get(&mut bar, &mut time, &all, rest) {
+        Ok(()) => true,
+        Err(error) => {
+            say(format_args!(
+                "intel: forcewake of the media domains failed ({error:?}); render and GT only"
+            ));
+            false
+        }
+    };
+    if steps.selftest {
+        match m2::run(&mut bar, device, &mut time, firmware, steps) {
+            Err(Step::Stopped) => return Err(Step::Stopped),
+            Err(step) => say(format_args!("intel: M2 stopped at {step:?}")),
+            Ok(()) => {}
+        }
+    }
+    steps.before(
+        At::Serve,
+        format_args!("bring the GT up under the back end and serve the render node"),
+    )?;
+    let port = port::create(Kernel).map_err(|_| Step::Port)?;
+    let interrupt = bind_interrupt(device, &port);
+    // Above everything the firmware left and above M2's window, if it ran.
+    let start = (firmware
+        .scanned
+        .max(firmware.last_present.map_or(0, |l| l + 1))
+        * 4096)
+        .max(SERVE_GGTT_FLOOR);
+    let ggtt = ferrix_intel_xelp::ggtt_space::GgttSpace::new(start, firmware.total);
+    let identity = Identity {
+        device_id,
+        revision: device.config_read(0x08, 1).map_or(0, |value| value as u8),
+        ggtt_bytes: firmware.total,
+        system_memory_bytes: steps::system_memory_bytes().unwrap_or(SYSTEM_MEMORY_FALLBACK),
+    };
+    let (fused, count) = fused_engines(firmware.engine_mask);
+    let real = platform::Real::new(
+        bar,
+        Time {
+            idle: port::create(Kernel).map_err(|_| Step::Port)?,
+        },
+        device,
+        ggtt,
+        interrupt,
+    )?;
+    let started = time.now_us();
+    let mut backend = XelpBackend::new(
+        real,
+        firmware.subslice_mask,
+        fused.get(..count).unwrap_or_default(),
+        2,
+        identity,
+    )
+    .map_err(|error| {
+        say(format_args!(
+            "intel: the back end did not come up: {error:?}"
+        ));
+        Step::Backend
+    })?;
+    let facts = *backend.facts();
+    say(format_args!(
+        "intel: back end up in {} ms: GGTT window {start:#x}, {} engines, {} EUs, {} MiB of system memory",
+        time.now_us().saturating_sub(started) / 1_000,
+        facts.engines.len(),
+        facts.sseu.eu_total,
+        facts.system_memory_bytes >> 20
+    ));
+    if others {
+        uncore::fw_domains_put(backend.platform().bar(), &all, rest);
+    }
+    let mut frontend = Frontend::new(backend);
+    let mut host = serve::publish(device, location).map_err(|stopped| {
+        say(format_args!(
+            "intel: no render node ({stopped:?}); the driver now waits"
+        ));
+        Step::Serve
+    })?;
+    match serve::serve(&mut host, &port, &mut frontend) {
+        Ok(never) => match never {},
+        Err(stopped) => {
+            say(format_args!("intel: serving stopped: {stopped:?}"));
+            Err(Step::Serve)
+        }
+    }
+}
+
+/// The MSI, bound to the serving loop's port under
+/// [`serve::KEY_INTERRUPT`]; none, said, and the back end polls. (On the box
+/// every M2 completion was seen by the poll, 2026-10-20.)
+fn bind_interrupt(
+    device: &Device<Kernel>,
+    port: &Port<Kernel>,
+) -> Option<ferrix_rt::native::device::Interrupt<Kernel>> {
+    match device.interrupt(0) {
+        Ok(interrupt) => match interrupt.bind(port, serve::KEY_INTERRUPT) {
+            Ok(()) => Some(interrupt),
+            Err(error) => {
+                say(format_args!(
+                    "intel: the interrupt could not be bound ({error:?}); polling only"
+                ));
+                None
+            }
+        },
+        Err(error) => {
+            say(format_args!(
+                "intel: no interrupt ({error:?}); polling only"
+            ));
+            None
+        }
+    }
+}
+
+/// The engines the media fuses leave, in id order, and how many.
+fn fused_engines(mask: u32) -> ([ferrix_intel_xelp::engine::EngineInfo; 5], usize) {
+    let mut fused = [ENGINES[0]; 5];
+    let mut count = 0;
+    for e in ENGINES.iter().filter(|e| mask & engine::bit(e.id) != 0) {
+        if let Some(slot) = fused.get_mut(count) {
+            *slot = *e;
+            count += 1;
+        }
+    }
+    (fused, count)
+}
+
+/// The lowest GGTT offset the serving back end binds at: past BAR 2's
+/// aperture and M2's window, which `ferrix.intelgpu.m2` fills first.
+const SERVE_GGTT_FLOOR: u64 = 1 << 30;
+
+/// System memory to report when `/proc/meminfo` cannot be read: the box's.
+const SYSTEM_MEMORY_FALLBACK: u64 = 16 << 30;
+
+/// M1, each step said first. Render and GT stay forcewoken for what
+/// follows.
 fn m1(
     device: &Device<Kernel>,
     apertures: u32,
     platform: &Platform,
     steps: &Steps,
     time: &mut Time,
-) -> Result<(), Step> {
+) -> Result<M1Done, Step> {
     steps.before(
         At::MapBar0,
         format_args!("map BAR 0, 16 MiB uncached (the kernel's io_mapping; no device access)"),
@@ -473,21 +671,18 @@ fn m1(
         time.now_us().saturating_sub(run_started) / 1_000
     ));
 
-    if locked {
-        say(format_args!("intel: M2 not run: the WOPCM is locked"));
-    } else {
-        let firmware = m2::Firmware {
+    Ok(M1Done {
+        bar,
+        firmware: m2::Firmware {
             scanned,
             last_present,
             total,
             subslice_mask,
             engine_mask,
             plane,
-        };
-        run_m2(&mut bar, device, time, firmware, steps)?;
-    }
-    uncore::fw_domains_put(&mut bar, &domains, wanted);
-    Ok(())
+        },
+        locked,
+    })
 }
 
 /// The configuration-space words M1 needs, read only.
@@ -667,42 +862,4 @@ fn stay(time: &Time) -> Result<core::convert::Infallible, Step> {
             Ok(_) => {}
         }
     }
-}
-
-/// M2 under every domain's forcewake: `intel_gt_init_hw` runs under
-/// `FORCEWAKE_ALL`, every domain the fused engines have (a fused-off
-/// VCS2's would never acknowledge).
-fn run_m2(
-    bar: &mut Bar0,
-    device: &Device<Kernel>,
-    time: &mut Time,
-    firmware: m2::Firmware,
-    steps: &Steps,
-) -> Result<(), Step> {
-    let all = uncore::fw_domains_init(firmware.engine_mask);
-    steps.before(
-        At::ForcewakeAll,
-        format_args!(
-            "forcewake every domain the fuses leave (engines {:#x}): media 0xa540.. and 0xa560.. too",
-            firmware.engine_mask
-        ),
-    )?;
-    let every = match uncore::fw_domains_get(bar, time, &all, !0) {
-        Ok(()) => true,
-        Err(error) => {
-            say(format_args!(
-                "intel: M2: forcewake of every domain failed ({error:?}); render and GT only"
-            ));
-            false
-        }
-    };
-    match m2::run(bar, device, time, firmware, steps) {
-        Err(Step::Stopped) => return Err(Step::Stopped),
-        Err(step) => say(format_args!("intel: M2 stopped at {step:?}")),
-        Ok(()) => {}
-    }
-    if every {
-        uncore::fw_domains_put(bar, &all, !0);
-    }
-    Ok(())
 }

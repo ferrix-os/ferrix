@@ -715,6 +715,26 @@ commits the disks first, as usbdev's restart does. The words are parsed in
 before `arch::reset`, as `power::finish` and the panic path do, so the
 newest lines of a log it leaves may be lost to the warm reset.
 
+**M2 on the box, and M3's driver wired (2026-10-20, branch `xelp-serve`).**
+The box ran main 976e7d9ef under `ferrix.intelgpu`: M1 ("the device
+answers", 1,397 ms), then M2's bring-up (PAT read [3,1,2,0,3,3,3,3], GT
+workarounds and MOCS none lost, RCS0 and BCS0 resumed with ESR 0 and
+RING_EMR 0xfffffffe, a PPGTT walked back), then the first GPU commands on
+Ferrix: both default images, the context workarounds read back by SRM,
+`MI_STORE_DWORD_IMM` "as written" and the 8 KiB `XY_FAST_COPY_BLT` exact by
+hash. Every completion came by the 1 ms poll, none by the MSI. Two faults,
+both fixed: forcewake of every domain asked again for the render and GT
+domains M1 already held, whose acks cannot clear (`AckNotCleared { domain:
+1 }`; only the other domains are asked now), and the screen blit mapped none
+of its 32 pages (an eight-entry array in `ppgtt_object`), so it read and
+wrote the scratch page. The driver now goes on from M1 to M3: the GT under
+`intel-xelp`'s `backend::XelpBackend` on the real platform (`platform.rs`),
+and the render node served through `serve.rs` with the MSI on
+`serve::KEY_INTERRUPT`; M2's checks run first only under
+`ferrix.intelgpu.m2`. The box checkpoint is
+`tools/common/n150/intel-m3-checkpoint.sh`, which needs K2 (and K4 for the
+box's sshd).
+
 **M3's hardware-independent part (branch `intel-uapi`, 2026-10-18).**
 
 * **The front end** is `intel-xelp`'s `frontend` module: every ioctl of

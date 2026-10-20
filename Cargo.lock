@@ -338,7 +338,9 @@ name = "ferrix-intel-driver"
 version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
+ "ferrix-chardevctl",
  "ferrix-intel-xelp",
+ "ferrix-linux-abi",
  "ferrix-native-abi",
  "ferrix-rt",
 ]

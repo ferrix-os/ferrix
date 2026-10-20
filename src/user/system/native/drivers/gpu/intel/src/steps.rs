@@ -82,6 +82,8 @@ pub(crate) enum At {
     Blits = 21,
     /// M2, checkpoint 4: a hung batch reset and banned.
     Hang = 22,
+    /// M3: the GT under the back end, and the render node served.
+    Serve = 23,
 }
 
 /// What the command line asked for.
@@ -91,6 +93,8 @@ pub(crate) struct Steps {
     pub(crate) stop: Option<u32>,
     /// Say every register access before it is made.
     pub(crate) trace: bool,
+    /// Run M2's checks before serving (`ferrix.intelgpu.m2`).
+    pub(crate) selftest: bool,
 }
 
 /// The command-line words, as the kernel's command line says them.
@@ -98,6 +102,7 @@ const WORDS: Words<'static> = Words {
     stop: b"ferrix.intelgpu.stop=",
     trace: b"ferrix.intelgpu.trace",
     reset: b"ferrix.intelgpu.reset=",
+    selftest: b"ferrix.intelgpu.m2",
 };
 
 /// The driver stopped before a step, as asked.
@@ -113,10 +118,11 @@ impl Steps {
             options::parse(line.get(..len).unwrap_or_default(), &WORDS)
         });
         say(format_args!(
-            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}",
+            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}",
             Show(options.stop),
             if options.trace { "on" } else { "off" },
             Show(options.reset_seconds),
+            if options.selftest { "on" } else { "off" },
         ));
         if options.reset_refused {
             say(format_args!(
@@ -133,6 +139,7 @@ impl Steps {
         Steps {
             stop: options.stop,
             trace: options.trace,
+            selftest: options.selftest,
         }
     }
 
@@ -197,25 +204,45 @@ impl fmt::Display for Show {
 
 /// `/proc/cmdline` into `line`: its length, or `None`, said.
 fn read_cmdline(line: &mut [u8]) -> Option<usize> {
+    read_file(b"/proc/cmdline\0", line).map_err(unreadable).ok()
+}
+
+/// System memory in bytes, from `/proc/meminfo`'s `MemTotal` (in kB): what
+/// the uAPI's `MEMORY_REGIONS` tells Mesa, which sizes its heaps from it.
+pub(crate) fn system_memory_bytes() -> Option<u64> {
+    let mut text = [0_u8; 2048];
+    let len = read_file(b"/proc/meminfo\0", &mut text).ok()?;
+    let line = text
+        .get(..len)?
+        .split(|&b| b == b'\n')
+        .find(|l| l.starts_with(b"MemTotal:"))?;
+    let kb = line
+        .iter()
+        .filter(|b| b.is_ascii_digit())
+        .fold(0_u64, |n, &d| {
+            n.saturating_mul(10).saturating_add(u64::from(d - b'0'))
+        });
+    (kb > 0).then_some(kb.saturating_mul(1024))
+}
+
+/// A small file, from its start, into `buf` (`path` NUL-terminated): its
+/// length.
+fn read_file(path: &[u8], buf: &mut [u8]) -> Result<usize, ferrix_linux_abi::errno::Errno> {
     use ferrix_rt::linux::{self, numbers};
-    const PATH: &[u8] = b"/proc/cmdline\0";
     const AT_FDCWD: usize = (-100_isize) as usize;
     const O_RDONLY: usize = 0;
-    // SAFETY: `PATH` is NUL-terminated and borrowed for the call.
-    let fd = match unsafe {
+    if path.last() != Some(&0) {
+        return Err(ferrix_linux_abi::errno::Errno::EINVAL);
+    }
+    // SAFETY: `path` is NUL-terminated and borrowed for the call.
+    let fd = unsafe {
         linux::call(
             numbers::OPENAT,
-            [AT_FDCWD, PATH.as_ptr().addr(), O_RDONLY, 0, 0, 0],
+            [AT_FDCWD, path.as_ptr().addr(), O_RDONLY, 0, 0, 0],
         )
-    } {
-        Ok(fd) => fd,
-        Err(errno) => {
-            unreadable(errno);
-            return None;
-        }
-    };
+    }?;
     let mut len = 0;
-    while let Some(rest) = line.get_mut(len..) {
+    while let Some(rest) = buf.get_mut(len..) {
         if rest.is_empty() {
             break;
         }
@@ -224,13 +251,12 @@ fn read_cmdline(line: &mut [u8]) -> Option<usize> {
             Ok(got) => len += got,
             Err(errno) => {
                 let _ = linux::close(fd);
-                unreadable(errno);
-                return None;
+                return Err(errno);
             }
         }
     }
     let _ = linux::close(fd);
-    Some(len)
+    Ok(len)
 }
 
 fn unreadable(errno: impl fmt::Debug) {

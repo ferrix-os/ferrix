@@ -121,6 +121,9 @@ pub trait Platform: Mmio + Clock + PtMemory {
     fn read_object(&mut self, object: KernelObject, index: usize) -> u32;
     /// Write dword `index` of a kernel object (volatile).
     fn write_object(&mut self, object: KernelObject, index: usize, value: u32);
+    /// The GT's interrupt was serviced ([`XelpBackend::service`] with
+    /// `interrupt`): acknowledge the vector, so the next one is delivered.
+    fn interrupt_serviced(&mut self) {}
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -856,6 +859,9 @@ impl<P: Platform> XelpBackend<P> {
         self.last_service_ns = now_ns;
         if interrupt {
             let _ = irq::gen11_irq_handler(&mut Regs(&self.platform), &mut Time(&self.platform));
+            // Reading acknowledges the GT; the vector after, or a level
+            // interrupt would fire again at once (as gc400 does).
+            self.platform.borrow_mut().interrupt_serviced();
         }
         for slot in 0..MAX_ENGINES {
             if self.engines.get(slot).and_then(Option::as_ref).is_none() {
