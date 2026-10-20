@@ -405,8 +405,14 @@ impl CpuQueue {
         self.stats.worst_lag = self.stats.worst_lag.max(worst);
     }
 
-    /// Wake every task whose sleep has ended.
-    pub(crate) fn wake_sleepers(&mut self, now: u64) {
+    /// Wake every task whose sleep has ended, each queued where `elsewhere`
+    /// queues it -- an idle processor's queue (`sched::place_on_idle`) --
+    /// or, when it answers `false`, here.
+    pub(crate) fn wake_sleepers(
+        &mut self,
+        now: u64,
+        mut elsewhere: impl FnMut(&Arc<Task>) -> bool,
+    ) {
         while let Some((_, task, slot)) = self.sleepers.pop_due(now) {
             task.return_sleep_slot(slot);
             // Only a task still blocked is woken. One already woken some other
@@ -416,6 +422,9 @@ impl CpuQueue {
                 continue;
             }
             task.set_state(RUNNABLE);
+            if elsewhere(&task) {
+                continue;
+            }
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
             self.insert(&task);
         }

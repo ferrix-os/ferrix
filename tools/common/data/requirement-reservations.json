@@ -26,13 +26,6 @@
       "purpose": "POSTMORTEM.md section 6 (S4): a processor that takes no interrupt for 10 s ends in a failure report (the lockup detector, stop code 7); an armed TCO watchdog resets a machine the kernel stopped feeding, and the next loader says so"
     },
     {
-      "ids": ["L.sched.85"],
-      "owner": "ef-sys",
-      "branch": "ef-sys-wake",
-      "date": "2026-10-20",
-      "purpose": "Wake placement: a task woken onto a busy processor is queued on an idle, allowed processor of its domain that runs nothing with nothing waiting, which is told to decide, and the running task is not switched away from; otherwise it is queued at home as before (parent H.SCHED.1; consultant design OK IF, ledger 2658, condition 5)"
-    },
-    {
       "ids": ["L.btrfs.117-118"],
       "owner": "i3",
       "branch": "fs-traits",

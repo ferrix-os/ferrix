@@ -424,7 +424,7 @@ log path and commit; a new sighting is added to its row the day it is seen.
 
 ### P2 — quality and performance, on the "fast" half of the goal
 
-169 items: performance, hardening, certification follow-ups the
+170 items: performance, hardening, certification follow-ups the
 consultant asked to ride with a later landing, and compatibility gaps that
 block nothing now. They are in [backlog/p2.md](backlog/p2.md). Read it
 when you take P2 work, or before touching an area to see what is owed there

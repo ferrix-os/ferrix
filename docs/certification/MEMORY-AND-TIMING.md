@@ -1570,6 +1570,39 @@ the view only reads, at a `/proc` open.
   walk; a loop of opens contends with `vmap` and every other kernel mapping
   change on the lock, as a loop over `/proc/<pid>/maps` contends with a
   space's lock. `stack` is root's alone; `syscall` the same user's.
+### 2.2u A woken task placed on an idle processor (`sched::place_on_idle`, 2026-10-20)
+
+`L.sched.85`; the certification consultant's design review, ledger 2658.
+
+* **Memory.** None allocated: the task moves into the destination's queue
+  in its own run slot (`CpuQueue::insert`), as a steal moves it. Two
+  counters a queue (`placed_in`, `placed_out`).
+* **Time, a wake** (`wake_at_home`, the home queue's lock held, interrupts
+  masked): only when the home processor runs a task, the wake is made
+  from another processor, not by the task home runs, and the task is not pinned.
+  Then one load of `IDLE`, a walk of at most the online processors from the
+  one after home, and for each idle one the task may run on a `try_lock` of
+  its queue, never a wait, and a read of two words under it. With a queue
+  taken, one `insert` (the run queue's EEVDF placement, as a steal's). That
+  is O(processors), no allocation, no wait.
+* **Time, a sleeper** (`choose_next`, after `wake_sleepers`, the processor's
+  own queue lock held, interrupts masked): the same for each sleeper whose
+  time came while this processor ran a task, so O(sleepers due x
+  processors). Each processor a sleeper was placed on is told with `kick`
+  under this lock. `kick` waits for no answer from the target. x86-64 in
+  x2APIC mode: one `WRMSR`, nothing waited on. In xAPIC mode the local
+  APIC's acceptance is polled, bounded at 1,000,000 reads (`apic::issue`),
+  as every kick already is; the target's reply is never waited for.
+  AArch64 and ARMv7-A: one SGI to the other processors (`send_ipi_to` there
+  is the broadcast), a `DSB` and a register write, nothing waited on.
+* **Lock order.** A queue's lock is now taken while another queue's lock is
+  held in a second place: `place_on_idle` takes the destination's with
+  `try_lock` while the home queue's is held, in either numeric order.
+  `steal_from` keeps the lowest-numbered first and waits. The new nesting
+  cannot deadlock, because the second lock is only tried: a processor that
+  holds it is never waited on, so no cycle of waits can include this step.
+  A failed try costs that one candidate and nothing else. No check asserts
+  the steal's order for two queue locks.
 
 ### 2.3 What is missing, per standard
 

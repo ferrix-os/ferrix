@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "9892cae87ac3868d784f7d3e44945e5d39f35219993705507d3bbdaead3ae99e",
+  "digest": "531a6f7eb03ff38c12a48bc51e5f1b2b905371f98618e09b1cbb60338a26482c",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 142,
-    "elements": 7255,
+    "elements": 7260,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -38255,6 +38255,63 @@
                     "file": "docs/sysml/15-sched-requirements.sysml",
                     "line": 906
                   }
+                },
+                {
+                  "name": "aWokenTaskIsPlacedOnAnIdleProcessor",
+                  "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWokenTaskIsPlacedOnAnIdleProcessor",
+                  "kind": "requirement",
+                  "shortName": "L.sched.85",
+                  "type": "ItemLowLevel",
+                  "source": {
+                    "file": "docs/sysml/15-sched-requirements.sysml",
+                    "line": 907
+                  },
+                  "children": [
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWokenTaskIsPlacedOnAnIdleProcessor",
+                      "kind": "attribute",
+                      "redefines": "statement",
+                      "value": "\"A task made runnable on a processor that runs a task -- woken from another processor, or a sleeper whose time came on that processor -- shall be queued on an idle processor of the same work-stealing domain that it may run on, whose queue, under its own lock, runs its idle task with nothing waiting, and that processor shall be told to decide, the running task keeping its processor; where no such queue's lock can be had without waiting, the task shall be queued on the first processor as before. A pinned task, or one in a domain that does not steal work, is never so placed.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 917
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWokenTaskIsPlacedOnAnIdleProcessor",
+                      "kind": "attribute",
+                      "redefines": "criterion",
+                      "value": "\"Stage 5's placement case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on an idle one, woken from a third processor and, in a second case, at its sleep's end, runs on the idle processor within a second and the spinner counts no involuntary switch (three attempts each); with no candidate taken, with the target not told, with the sleeper path placing nothing, or with affinity ignored, the boot fails with the case's own sentence or stage 5's affinity check's.\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 926
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWokenTaskIsPlacedOnAnIdleProcessor",
+                      "kind": "attribute",
+                      "redefines": "parent",
+                      "value": "\"H.SCHED.1\"",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 927
+                      }
+                    },
+                    {
+                      "name": "",
+                      "qualifiedName": "FerrixSchedRequirements::DirectSwitch::aWordThatIsNoRamReadsAsNothing::aWokenTaskIsPlacedOnAnIdleProcessor",
+                      "kind": "attribute",
+                      "redefines": "unit",
+                      "value": "(\"sched::place_on_idle\", \"sched::move_onto\", \"sched::placed_on_wake\", \"sched::wake_sleepers_placing\", \"sched::queue::CpuQueue::wake_sleepers\")",
+                      "source": {
+                        "file": "docs/sysml/15-sched-requirements.sysml",
+                        "line": 930
+                      }
+                    }
+                  ]
                 }
               ]
             }
