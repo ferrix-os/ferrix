@@ -151,10 +151,26 @@ pub(crate) fn test_dxvk_window(args: &Args, volume: PathBuf, dxvk: &Path) -> Res
     let mut ports = crate::yserver::desktop_files(&[]);
     ports.extend(crate::rustc::files(crate::wine::LINKS));
     ports.extend(crate::dxvk::files(dxvk)?);
+    let mut script = SCRIPT.to_owned();
+    if let Some(tree) = std::env::var_os("FERRIX_DXVK_ANV") {
+        // SCRATCH: anv over the fake back end, presenting through the sw WSI.
+        let lib = Path::new(&tree).join("usr/lib/x86_64-linux-gnu/libvulkan_intel.so");
+        let content = std::fs::read(&lib)
+            .map_err(|error| Error::new(format!("reading {}: {error}", lib.display())))?;
+        ports.push(File { path: "intel".to_owned(), mode: 0o755, content: Content::Directory });
+        ports.push(File { path: "intel/libvulkan_intel.so".to_owned(), mode: 0o755, content: Content::Bytes(content) });
+        ports.push(File { path: "intel/intel_icd.json".to_owned(), mode: 0o644, content: Content::Bytes(br#"{"ICD":{"api_version":"1.4.305","library_path":"/intel/libvulkan_intel.so"},"file_format_version":"1.0.0"}"#.to_vec()) });
+        let wsi = std::env::var("FERRIX_DXVK_WSI").unwrap_or_else(|_| "sw".to_owned());
+        script = script.replace(
+            "export VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json",
+            &format!("export VK_ICD_FILENAMES=/intel/intel_icd.json MESA_VK_WSI_DEBUG={wsi} MESA_SHADER_CACHE_DISABLE=1
+ls -l /dev/dri | sed 's/^/dxvk: dri: /'"),
+        );
+    }
     ports.push(File {
         path: SCRIPT_PATH.to_owned(),
         mode: 0o644,
-        content: Content::Bytes(SCRIPT.as_bytes().to_vec()),
+        content: Content::Bytes(script.into_bytes()),
     });
     let carried = Carried {
         busybox: Some(PathBuf::from(busybox)),
