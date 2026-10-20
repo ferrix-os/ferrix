@@ -904,6 +904,30 @@ package FerrixSchedRequirements {
                 x86_64, where the direct map has no such address.";
             attribute :>> parent = "H.SCHED.15";
             attribute :>> unit = "mm::read_kernel_word";
+        requirement <'L.sched.85'> aWokenTaskIsPlacedOnAnIdleProcessor : ItemLowLevel {
+            attribute :>> statement = "A task made runnable on a processor that runs a
+                task -- woken from another processor, or a sleeper whose time
+                came on that processor -- shall be queued
+                on an idle processor of the same work-stealing domain that it may
+                run on, whose queue, under its own lock, runs its idle task with
+                nothing waiting, and that processor shall be told to decide, the
+                running task keeping its processor; where no such queue's lock can
+                be had without waiting, the task shall be queued on the first
+                processor as before. A pinned task, or one in a domain that does
+                not steal work, is never so placed.";
+            attribute :>> criterion = "Stage 5's placement case, with three processors
+                or more and a stealing domain: a task homed on a processor that
+                runs a pinned spinner, allowed there and on an idle one, woken
+                from a third processor and, in a second case, at its sleep's end,
+                runs on the idle processor within a second and the spinner counts
+                no involuntary switch (three attempts each); with no candidate
+                taken, with the target not told, with the sleeper path placing
+                nothing, or with affinity ignored, the boot fails with the case's
+                own sentence or stage 5's affinity check's.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = ("sched::place_on_idle", "sched::move_onto",
+                "sched::placed_on_wake", "sched::wake_sleepers_placing",
+                "sched::queue::CpuQueue::wake_sleepers");
         }
     }
 }

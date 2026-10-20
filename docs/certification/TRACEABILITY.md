@@ -15,14 +15,14 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 136 | 85 | 51 |
-| Low (`L.*`) | 971 | 708 | 263 |
+| Low (`L.*`) | 972 | 709 | 263 |
 
-2104 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2109 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2106 |
-| Accessors, covered by the requirement they serve | 981 |
+| Named by a low-level requirement | 2111 |
+| Accessors, covered by the requirement they serve | 982 |
 | Check code in a product file | 82 |
 | Named by none | 938 |
 
@@ -696,6 +696,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.87` | The view of a task that is blocked and switched away shall report its kernel call chain from the frame pointer and return address its switch frame holds, innermost first, following only records inside the task's own stack, each above the last and aligned, and only return addresses inside the kernel image, at most backtrace::MAX_FRAMES, each with the image's slide taken off. | The task view case at boot on every architecture: a kernel task records its own chain and blocks; the view's chain of it ends in that chain, each address inside the image as it was linked; with the switch frame's frame pointer slot moved by a word, or the slide not taken off on a boot whose slide is not zero, the case fails with its sentence. | H.SCHED.15 | `sched::inspect::chain_of`, `sched::inspect::sample`, `sched::inspect::still`, `sched::inspect::walk`, `sched::inspect::first_link`, `sched::inspect::link_at`, `backtrace::in_image`, `backtrace::slide`, `backtrace::image_len` | `src/kernel/src/sched/inspect_check.rs::chain_is_the_tasks_own` | not built | not built | not built |
 | `L.sched.88` | A word of kernel memory read for the view shall be translated through the kernel's page tables under their lock and read through the direct map, so that a word of a stack that has been freed answers nothing and the read does not fault. | The task view case at boot: a stack from vmap, read while mapped, then freed and read again, answers nothing; with the read made through the address itself, the boot stops on a kernel page fault. | H.SCHED.15 | `mm::read_kernel_word`, `sched::inspect::word_at` | `src/kernel/src/sched/inspect_check.rs::a_freed_stack_reads_as_nothing` | not built | not built | not built |
 | `L.sched.89` | A word of kernel memory read for the view whose translation names a frame that is not RAM shall answer nothing, without the read being made. | The task view case at boot: a page of vmap mapped onto a physical address that is no RAM answers nothing; with the RAM test taken out, the boot stops on a kernel page fault on x86_64, where the direct map has no such address. | H.SCHED.15 | `mm::read_kernel_word` | `src/kernel/src/sched/inspect_check.rs::a_device_window_reads_as_nothing` | not built | not built | not built |
+| `L.sched.85` | A task made runnable on a processor that runs a task -- woken from another processor, or a sleeper whose time came on that processor -- shall be queued on an idle processor of the same work-stealing domain that it may run on, whose queue, under its own lock, runs its idle task with nothing waiting, and that processor shall be told to decide, the running task keeping its processor; where no such queue's lock can be had without waiting, the task shall be queued on the first processor as before. A pinned task, or one in a domain that does not steal work, is never so placed. | Stage 5's placement case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on an idle one, woken from a third processor and, in a second case, at its sleep's end, runs on the idle processor within a second and the spinner counts no involuntary switch (three attempts each); with no candidate taken, with the target not told, with the sleeper path placing nothing, or with affinity ignored, the boot fails with the case's own sentence or stage 5's affinity check's. | H.SCHED.1 | `sched::place_on_idle`, `sched::move_onto`, `sched::placed_on_wake`, `sched::wake_sleepers_placing`, `sched::queue::CpuQueue::wake_sleepers` | `src/kernel/src/sched/check.rs::a_woken_task_is_placed_on_an_idle_processor` | not reached | not reached | not reached |
 
 ### Discovery
 
@@ -2091,6 +2092,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look` | kernel | L.sched.71 |
 | `src/kernel/src/sched/check.rs::a_running_processor_is_not_idle_across_switches` | kernel | L.sched.50 |
 | `src/kernel/src/sched/check.rs::a_waiter_drained_as_it_is_listed_is_woken` | kernel | L.sched.73 |
+| `src/kernel/src/sched/check.rs::a_woken_task_is_placed_on_an_idle_processor` | kernel | L.sched.85 |
 | `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | kernel | L.sched.52 |
 | `src/kernel/src/sched/check.rs::many_tasks` | kernel | L.x86_64.17 |
 | `src/kernel/src/sched/check.rs::sleeping` | kernel | L.x86_64.91 |

@@ -230,6 +230,7 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     balancing(topology, &mut report)?;
     mark!(7);
     slice_scaling(&mut report)?;
+    a_woken_task_is_placed_on_an_idle_processor(topology)?;
     super::borrow_check::run(topology)?;
     mark!(8);
     // The last `mark!` advances `at` for a phase that never comes; reading it
@@ -1975,4 +1976,170 @@ fn blocks_after_its_last_look(_: usize) {
     let clean = returned && count_zero && crate::arch::interrupts_enabled();
     BLOCKING_RETURNED_CLEAN.store(clean, Ordering::Release);
     finish();
+}
+
+/// Set by [`placed_runner`] to the processor it ran on, plus one.
+static PLACED_RAN_ON: AtomicUsize = AtomicUsize::new(0);
+
+/// Block until woken, directly or by a sleep's end (`argument` 1: a sleep of
+/// [`PLACED_SLEEP_NANOS`]), then note the processor this runs on and finish.
+fn placed_runner(argument: usize) {
+    if argument == 1 {
+        super::sleep_for(PLACED_SLEEP_NANOS);
+    } else if let Some(me) = super::current() {
+        me.set_state(BLOCKED);
+        super::block();
+    }
+    let here = super::current().map_or(usize::MAX - 1, |me| me.cpu());
+    PLACED_RAN_ON.store(here + 1, Ordering::Release);
+    finish();
+}
+
+/// How long the sleeper of [`a_woken_task_is_placed_on_an_idle_processor`]
+/// sleeps: long enough for the spinner beside it to be running when its time
+/// comes.
+const PLACED_SLEEP_NANOS: u64 = 30_000_000;
+
+/// A task woken onto a processor that runs a task, while another processor
+/// that it may run on is idle, runs there, and the running task keeps its
+/// processor (L.sched.85): once for a wake from another processor
+/// (`wake_at_home`) and once for a sleep's end on the busy processor itself
+/// (`choose_next`'s sleepers). Processor A runs a spinner pinned to it; the
+/// woken task, homed on A and allowed on A and B, must run on B within a
+/// second, and the spinner must not have been switched away from. Needs
+/// three processors (this one, A and B) and a domain that steals work.
+/// Verifies: L.sched.85
+fn a_woken_task_is_placed_on_an_idle_processor(topology: &Topology) -> Result<(), &'static str> {
+    let online = topology.online();
+    let steals = super::DOMAIN
+        .get()
+        .is_some_and(|domain| domain.mode().steals_work());
+    if online < 3 || !steals {
+        crate::console::println!(
+            "  sched    wake placement not checked: {online} processor(s), {} domain",
+            if steals {
+                "a stealing"
+            } else {
+                "a partitioned"
+            }
+        );
+        return Ok(());
+    }
+    let here = super::current()
+        .ok_or("the checking task is not running")?
+        .cpu();
+    // B is not the first processor after A where there are four or more,
+    // so that a placement that ignored affinity would take the one between.
+    let a = (here + 1) % online;
+    let b = if online >= 4 {
+        (a + 2) % online
+    } else {
+        (a + 1) % online
+    };
+    for (case, argument) in [("a wake from another processor", 0), ("a sleep's end", 1)] {
+        let mut last = Ok(());
+        for _attempt in 0..3 {
+            last = placed_once(case, argument, a, b);
+            if last.is_ok() {
+                break;
+            }
+        }
+        last?;
+    }
+    crate::console::println!(
+        "  sched    wake placement: a woken task and a sleeper homed on a busy processor ran on an idle one, the running task never switched away from"
+    );
+    Ok(())
+}
+
+/// One run of a case of [`a_woken_task_is_placed_on_an_idle_processor`].
+fn placed_once(case: &str, argument: usize, a: usize, b: usize) -> Result<(), &'static str> {
+    {
+        let allocations = crate::vmap::usage().allocations;
+        STOP.store(false, Ordering::Release);
+        SPINNING.store(0, Ordering::Release);
+        DONE.store(0, Ordering::Release);
+        PLACED_RAN_ON.store(0, Ordering::Release);
+        let mut both = CpuSet::of(a);
+        both.insert(b)
+            .map_err(|_| "a processor outside the set's range")?;
+        // The task first, so that it blocks on A while A is idle and is
+        // homed there.
+        let woken = super::spawn_on(
+            "check-placed",
+            placed_runner,
+            argument,
+            NICE_0_WEIGHT,
+            a,
+            both,
+        )?;
+        if !spin_until(|| woken.state() == BLOCKED) {
+            return Err("wake placement: the task to be woken never blocked");
+        }
+        let spin = super::spawn_on(
+            "check-placed-spin",
+            spinner,
+            0,
+            NICE_0_WEIGHT,
+            a,
+            CpuSet::of(a),
+        )?;
+        wait_for(
+            || SPINNING.load(Ordering::Acquire) >= 1,
+            "wake placement: the spinner never started",
+        )?;
+        let switched = spin.involuntary_switches();
+        let kicks = super::kicks_begun(b);
+        let placements = super::placements();
+        if argument == 0 {
+            super::wake(&woken);
+        }
+        let ran = spin_until(|| PLACED_RAN_ON.load(Ordering::Acquire) != 0);
+        let switched_after = spin.involuntary_switches();
+        STOP.store(true, Ordering::Release);
+        wait_for(
+            || DONE.load(Ordering::Acquire) >= 2,
+            "wake placement: the woken task or the spinner never finished",
+        )?;
+        let ran_on = PLACED_RAN_ON.load(Ordering::Acquire).wrapping_sub(1);
+        if ran && ran_on != a && ran_on != b {
+            crate::console::println!(
+                "  sched    wake placement, {case}: ran on processor {ran_on}, allowed only {a} and {b}"
+            );
+            return Err("a woken task was placed on a processor its affinity does not allow");
+        }
+        if ran && ran_on != a && super::placements() == placements {
+            return Err("a woken task ran on another processor without a placement counted");
+        }
+        if ran && ran_on == b && super::kicks_begun(b) == kicks {
+            return Err(
+                "a woken task placed on an idle processor ran there, that processor not told",
+            );
+        }
+        if !ran {
+            return Err(
+                "a woken task did not run within a second: the processor it was queued on not told, or never deciding",
+            );
+        }
+        if ran_on == a {
+            crate::console::println!(
+                "  sched    wake placement, {case}: ran {ran}, on processor {ran_on}, home {a}, idle {b}"
+            );
+            return Err(
+                "a task woken onto a busy processor ran there, not on the idle processor it may run on",
+            );
+        }
+        if switched_after != switched {
+            crate::console::println!(
+                "  sched    wake placement, {case}: the spinner was switched away from {} time(s)",
+                switched_after.saturating_sub(switched)
+            );
+            return Err(
+                "a task woken onto a busy processor took it from its running task, with a processor idle",
+            );
+        }
+        reap_to(allocations, "a woken task placed on an idle processor")?;
+        drop((woken, spin));
+    }
+    Ok(())
 }

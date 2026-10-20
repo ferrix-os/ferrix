@@ -200,7 +200,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1344, 2350 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1344, 2497 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---

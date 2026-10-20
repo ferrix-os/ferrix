@@ -1988,6 +1988,10 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
         // the reaper was freeing.
         let _ = task.take_sleep_deadline();
         task.set_state(RUNNABLE);
+        if let Some(to) = placed_on_wake(task, &mut queue, cpu, here == Some(cpu)) {
+            kick_cpu = Some(to);
+            break;
+        }
         if !task.is_queued() {
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
             queue.insert(task);
@@ -2009,6 +2013,149 @@ fn wake_at_home(task: &Arc<Task>, defer: bool) {
     if let Some(cpu) = remote {
         kick(cpu);
     }
+}
+
+/// `CpuQueue::wake_sleepers` for `choose_next` on processor `cpu`, whose
+/// queue lock is held: a sleeper whose time came while this processor runs a
+/// task is queued on an idle processor that may run it, where one can be had
+/// without waiting (`place_on_idle`), and that processor is told to decide;
+/// the running task keeps this one. `kick` waits for no answer, so it is
+/// sent with this lock held.
+fn wake_sleepers_placing(queue: &mut CpuQueue, cpu: usize, now: u64) {
+    let busy = !queue.is_running_idle();
+    let mut placed = 0_u64;
+    queue.wake_sleepers(now, |task| {
+        busy && place_on_idle(task, cpu).is_some_and(|to| {
+            placed |= 1_u64 << to;
+            true
+        })
+    });
+    while placed != 0 {
+        let to = placed.trailing_zeros() as usize;
+        placed &= placed - 1;
+        kick(to);
+    }
+}
+
+/// For `wake_at_home`: `task`, just made runnable and on no queue, woken
+/// onto `cpu`, whose queue lock is held, is queued on an idle processor
+/// instead when `cpu` runs a task and another that may run it is idle
+/// (`place_on_idle`); the processor it went to, which the caller tells to
+/// decide. Only a wake from another processor (`!local`): the task `cpu`
+/// runs is then not the waker, and keeps running. A wake made on `cpu` is
+/// made by the task it runs, which commonly blocks next -- a channel round
+/// trip, a futex hand-off -- and the woken task then has the processor at
+/// once; placing that one elsewhere made every general-path channel round
+/// trip on four processors cross between processors (bench-ipc domain-call
+/// 729 -> 1,378 ns, call 2,656 -> 5,643 ns, 2026-10-20).
+fn placed_on_wake(
+    task: &Arc<Task>,
+    queue: &mut CpuQueue,
+    cpu: usize,
+    local: bool,
+) -> Option<usize> {
+    if local || task.is_queued() || queue.is_running_idle() {
+        return None;
+    }
+    place_on_idle(task, cpu)
+}
+
+/// Queue `task` on processor `to`'s queue, `queue`, whose lock the caller
+/// holds with the lock of the queue `task` comes from: the one move between
+/// queues, made by a steal (`steal_from`, with the state the victim's queue
+/// let go) and by a wake's placement (`place_on_idle`, with none: the task
+/// was on no queue, and carries the state it stored when it blocked). Either
+/// way the lag it carries is placed against `queue`'s own virtual time, by
+/// the same `insert`.
+fn move_onto(
+    task: &Arc<Task>,
+    state: Option<ferrix_sched::EntityState>,
+    to: usize,
+    queue: &mut CpuQueue,
+) {
+    if let Some(state) = state {
+        task.store_entity_state(state);
+    }
+    task.set_cpu(to);
+    // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
+    queue.insert(task);
+}
+
+/// Queue `task` -- runnable, woken onto `home`, which runs a task, and on no
+/// queue yet -- on an idle processor of `home`'s domain that it may run on,
+/// and answer which; `None`, with nothing done, when none can be had
+/// without waiting (L.sched.85).
+///
+/// Only where the domain steals work (`Mode::steals_work`, the throughput
+/// mode): a partitioned domain keeps a task where it was put, so nothing is
+/// moved across a domain or within a real-time one. A pinned task is never
+/// moved, as `steal_candidate` never steals one.
+///
+/// Called with `home`'s queue lock held and interrupts masked. The
+/// candidates come from `IDLE`, from the processor after `home` round, and
+/// each one's queue lock is only tried, never waited for: a processor that
+/// holds it is never waited on, so taking it while `home`'s is held cannot
+/// deadlock whatever their order (`docs/certification/MEMORY-AND-TIMING.md`,
+/// the lock order). A queue is taken only if, under its own lock, it runs
+/// its idle task with nothing waiting: `IDLE` only says where to try. One
+/// that found work of its own meanwhile is not taken; one that finds it
+/// after this runs `task` after its pick, as any queued task.
+/// Placements made, by the processor a task was woken onto (`out`) and the
+/// one it was queued on (`in`), apart from `CpuQueue`'s `Stats` so that the
+/// queue's layout, which the channel fast path reads, is unchanged.
+static PLACED: [[AtomicU64; 2]; 64] = [const { [const { AtomicU64::new(0) }; 2] }; 64];
+
+/// Count a placement from `home` to `to`, both of whose queue locks the
+/// caller holds: a load and a store each, as only holders write them.
+fn count_placed(home: usize, to: usize) {
+    for (cpu, side) in [(home, 0), (to, 1)] {
+        if let Some(count) = PLACED.get(cpu).and_then(|pair| pair.get(side)) {
+            count.store(
+                count.load(Ordering::Relaxed).wrapping_add(1),
+                Ordering::Relaxed,
+            );
+        }
+    }
+}
+
+/// Every placement made so far, on all processors: what the boot report and
+/// the placement check read.
+pub(crate) fn placements() -> u64 {
+    PLACED
+        .iter()
+        .map(|pair| pair[0].load(Ordering::Relaxed))
+        .fold(0, u64::wrapping_add)
+}
+
+fn place_on_idle(task: &Arc<Task>, home: usize) -> Option<usize> {
+    if task.is_pinned() {
+        return None;
+    }
+    let domain = DOMAIN.get()?;
+    if !domain.mode().steals_work() || !domain.cpus().contains(home) {
+        return None;
+    }
+    let idle = IDLE.load(Ordering::SeqCst);
+    let online = QUEUES.get()?.len().min(64);
+    for step in 1..online {
+        let to = (home + step) % online;
+        if idle & (1_u64 << to) == 0 || !task.may_run_on(to) || !domain.cpus().contains(to) {
+            continue;
+        }
+        let Some(lock) = queue_of(to) else {
+            continue;
+        };
+        let Some(mut queue) = lock.try_lock() else {
+            continue;
+        };
+        if !queue.is_running_idle() || queue.waiting() != 0 {
+            continue;
+        }
+        move_onto(task, None, to, &mut queue);
+        count_placed(home, to);
+        return Some(to);
+    }
+    None
 }
 
 /// Make the processor `task` is on take an interrupt, so that if it is running
@@ -2334,7 +2481,7 @@ fn choose_next(
     // The running task's kernel time up to this decision, from the same
     // reading; from here the processor is in the kernel whichever task runs.
     vtime::settle_on(cpu, queue.current.as_deref(), ticks);
-    queue.wake_sleepers(now);
+    wake_sleepers_placing(queue, cpu, now);
 
     let previous = queue.current.clone();
     if let Some(previous) = previous.as_ref().filter(|task| task.state() != RUNNABLE) {
@@ -2845,10 +2992,7 @@ fn steal_from(me: usize, victim: usize) -> bool {
     let moved = match theirs_queue.steal_candidate(me).filter(|_| !keeps_its_last) {
         Some(id) => match theirs_queue.release(id) {
             Some((task, state)) => {
-                task.store_entity_state(state);
-                task.set_cpu(me);
-                // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
-                mine_queue.insert(&task);
+                move_onto(&task, Some(state), me, mine_queue);
                 theirs_queue.stats.stolen_out += 1;
                 mine_queue.stats.stolen_in += 1;
                 true
