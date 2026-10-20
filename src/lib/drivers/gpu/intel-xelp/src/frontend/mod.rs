@@ -125,6 +125,13 @@ impl<B: Backend> Frontend<B> {
         }
     }
 
+    /// Say every ioctl, every held wait and every answer to the console
+    /// (`ferrix.intelgpu.trace`): what a box run reads to find a call that
+    /// never completes.
+    pub fn set_trace(&mut self, on: bool) {
+        self.state.trace = on;
+    }
+
     /// The earliest time [`Frontend::service`] must be called by, in
     /// monotonic nanoseconds: a held wait's deadline or the back end's.
     #[must_use]

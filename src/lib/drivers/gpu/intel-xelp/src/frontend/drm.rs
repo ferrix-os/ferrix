@@ -334,13 +334,27 @@ impl<B: Backend> Frontend<B> {
                     held = self.state.waits.hold(&call, &kdata, hold);
                 }
                 match held {
-                    Ok(()) => return Answer::Later,
+                    Ok(()) => {
+                        if self.state.trace {
+                            host.say(format_args!(
+                                "intel: trace: ioctl {cmd:#x} (nr {:#04x}) request {request} held",
+                                ioc_nr(cmd)
+                            ));
+                        }
+                        return Answer::Later;
+                    }
                     Err(errno) => -i32::from(errno.0),
                 }
             }
             Ok(None) => 0,
             Err(errno) => -i32::from(errno.0),
         };
+        if self.state.trace {
+            host.say(format_args!(
+                "intel: trace: ioctl {cmd:#x} (nr {:#04x}) request {request} -> {status}",
+                ioc_nr(cmd)
+            ));
+        }
         if out_size > 0
             && let Some(source) = kdata.get(..out_size)
             && host.copy_out(request, arg, source).is_err()
