@@ -365,7 +365,13 @@ pub(crate) fn test_dxvk(args: &Args) -> Result<()> {
     );
     let loader = cargo::build_loader(arch, args.release)?;
     let kernel = cargo::build_kernel_with_init(arch, args.release, &shell, SCRIPT)?;
-    let natives = native::build(arch, args.release)?;
+    let mut natives = native::build(arch, args.release)?;
+    // SCRATCH (not for landing): DXVK on anv over the fake back end.
+    let anv = std::env::var_os("FERRIX_DXVK_ANV");
+    if anv.is_some() {
+        args.intel_gpu_standin = true;
+        crate::intel_uapi::use_fake(&mut natives, arch, args.release)?;
+    }
     let bytes = std::fs::read(&shell)
         .map_err(|error| Error::new(format!("reading {}: {error}", shell.display())))?;
     let busybox = busybox::program(arch)?;
@@ -381,8 +387,28 @@ pub(crate) fn test_dxvk(args: &Args) -> Result<()> {
         content: crate::ports::Content::Bytes(RUN.as_bytes().to_vec()),
     });
     files.extend(self::files(&dxvk)?);
+    let mut options = None;
+    if let Some(tree) = &anv {
+        let lib = std::path::Path::new(tree).join("usr/lib/x86_64-linux-gnu/libvulkan_intel.so");
+        let content = std::fs::read(&lib)
+            .map_err(|error| Error::new(format!("reading {}: {error}", lib.display())))?;
+        files.push(crate::ports::File { path: "intel".to_owned(), mode: 0o755, content: crate::ports::Content::Directory });
+        files.push(crate::ports::File { path: "intel/libvulkan_intel.so".to_owned(), mode: 0o755, content: crate::ports::Content::Bytes(content) });
+        files.push(crate::ports::File { path: "intel/intel_icd.json".to_owned(), mode: 0o644, content: crate::ports::Content::Bytes(br#"{"ICD":{"api_version":"1.4.305","library_path":"/intel/libvulkan_intel.so"},"file_format_version":"1.0.0"}"#.to_vec()) });
+        let run = RUN.replace(
+            "export VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json",
+            "export VK_ICD_FILENAMES=/intel/intel_icd.json MESA_VK_WSI_DEBUG=sw MESA_SHADER_CACHE_DISABLE=1
+ls -l /dev/dri
+/data/usr/bin/vulkaninfo --summary 2>&1 | head -40",
+        );
+        if let Some(file) = files.iter_mut().find(|file| file.path == RUN_PATH) {
+            file.content = crate::ports::Content::Bytes(run.into_bytes());
+        }
+        options = Some("ferrix.intelgpu
+".to_owned());
+    }
     let archive = initramfs::build(Some(&busybox), &natives, Some(&bytes), &files)?;
-    let image = fat::write_image_with(arch, &loader, &kernel, &archive, None)?;
+    let image = fat::write_image_with(arch, &loader, &kernel, &archive, options.as_deref())?;
 
     println!(
         "  {arch}: running Direct3D 11 through DXVK on lavapipe on Ferrix with {} MiB \
