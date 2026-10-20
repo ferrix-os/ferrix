@@ -1,7 +1,7 @@
 //! Finding where the box hangs (2026-10-19). Booting with
 //! `ferrix.intelgpu` hard-hung the N150 box twice, with no panic, no timed
 //! reset and nobody at the screen, so the RAM log was lost to the power
-//! cycle. Two words on the kernel command line, read from `/proc/cmdline`,
+//! cycle. Three words on the kernel command line, read from `/proc/cmdline`,
 //! let one boot show where:
 //!
 //! * `ferrix.intelgpu.stop=N` stops the driver before step `N` of [`At`]:
@@ -16,10 +16,19 @@
 //!   the write-combining buffers drained (`console::screen`), so a photograph
 //!   of a hung box shows the last access asked for.
 //!
-//! Each step's line is said before the step whether or not either word is
-//! given: `intel: step N: <what>`.
+//! * `ferrix.intelgpu.reset=S` restarts the machine S seconds after boot
+//!   (`reboot(2)`, the disks committed first), whatever step the driver is
+//!   in: a box whose init never resets it, or a driver waiting forever,
+//!   comes back on its own. Only a processor stuck in a register access
+//!   misses it.
+//!
+//! Each step's line is said before the step whether or not any word is
+//! given: `intel: step N (Name): what`.
 
 use core::fmt;
+use core::sync::atomic::{AtomicU64, Ordering};
+
+use ferrix_intel_xelp::options::{self, Options};
 
 use crate::say;
 
@@ -76,7 +85,7 @@ pub(crate) enum At {
 }
 
 /// What the command line asked for.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Steps {
     /// Stop before this step.
     pub(crate) stop: Option<u32>,
@@ -88,23 +97,36 @@ pub(crate) struct Steps {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Stopped;
 
-/// The words, as the kernel's command line says them.
-const STOP: &[u8] = b"ferrix.intelgpu.stop=";
-const TRACE: &[u8] = b"ferrix.intelgpu.trace";
-
 impl Steps {
-    /// Read `/proc/cmdline`. Unreadable, it is said, and nothing is asked.
+    /// Read `/proc/cmdline` (`ferrix_intel_xelp::options`), and arm the
+    /// restart it asks for. Unreadable, it is said, and nothing is asked.
     pub(crate) fn from_command_line() -> Steps {
         let mut line = [0_u8; 2048];
-        let steps = read_cmdline(&mut line).map_or_else(Steps::default, |len| {
-            parse(line.get(..len).unwrap_or_default())
+        let options = read_cmdline(&mut line).map_or_else(Options::default, |len| {
+            options::parse(line.get(..len).unwrap_or_default())
         });
         say(format_args!(
-            "intel: ferrix.intelgpu.stop {}, trace {}",
-            Show(steps.stop),
-            if steps.trace { "on" } else { "off" }
+            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}",
+            Show(options.stop),
+            if options.trace { "on" } else { "off" },
+            Show(options.reset_seconds),
         ));
-        steps
+        if options.reset_refused {
+            say(format_args!(
+                "intel: ferrix.intelgpu.reset refused: seconds 1 to {} after boot; no restart",
+                options::RESET_MAX_SECONDS
+            ));
+        }
+        if let Some(seconds) = options.reset_seconds {
+            RESET_AT_NANOS.store(u64::from(seconds) * 1_000_000_000, Ordering::Relaxed);
+            say(format_args!(
+                "intel: the machine restarts {seconds} s after boot (ferrix.intelgpu.reset), whatever this driver is doing then"
+            ));
+        }
+        Steps {
+            stop: options.stop,
+            trace: options.trace,
+        }
     }
 
     /// Say step `at` before it is taken; [`Stopped`] if the command line
@@ -122,6 +144,38 @@ impl Steps {
     }
 }
 
+/// When `ferrix.intelgpu.reset` restarts the machine, in nanoseconds after
+/// boot on the monotonic clock; 0 for never.
+static RESET_AT_NANOS: AtomicU64 = AtomicU64::new(0);
+
+/// When the restart is due, if one is armed.
+pub(crate) fn reset_at_nanos() -> Option<u64> {
+    Some(RESET_AT_NANOS.load(Ordering::Relaxed)).filter(|&at| at != 0)
+}
+
+/// Restart the machine if `now` (monotonic nanoseconds) is past the armed
+/// time: `reboot(2)` `RESTART`, which commits the disks first, as usbdev's
+/// restart does. Every wait and every clock read of the driver comes here,
+/// so the restart comes whatever step the driver is in, unless its
+/// processor is stuck in a register access. Refused, it is said once and
+/// disarmed.
+pub(crate) fn reset_if_due(now: u64) {
+    let Some(at) = reset_at_nanos() else {
+        return;
+    };
+    if now < at {
+        return;
+    }
+    RESET_AT_NANOS.store(0, Ordering::Relaxed);
+    say(format_args!(
+        "intel: restarting the machine, {} s after boot, as ferrix.intelgpu.reset asks",
+        at / 1_000_000_000
+    ));
+    if let Err(error) = ferrix_rt::linux::reboot_restart() {
+        say(format_args!("intel: the restart was refused: {error:?}"));
+    }
+}
+
 /// `Option<u32>` said as a number or `none`.
 struct Show(Option<u32>);
 
@@ -132,30 +186,6 @@ impl fmt::Display for Show {
             None => f.write_str("none"),
         }
     }
-}
-
-/// The words of `line` this driver reads; a `stop=` that is not a number
-/// is taken as 1, so a misspelt value touches nothing rather than all.
-pub(crate) fn parse(line: &[u8]) -> Steps {
-    let mut steps = Steps::default();
-    for word in line.split(u8::is_ascii_whitespace) {
-        if word == TRACE {
-            steps.trace = true;
-        } else if let Some(value) = word.strip_prefix(STOP) {
-            steps.stop = Some(number(value).unwrap_or(1).max(1));
-        }
-    }
-    steps
-}
-
-fn number(digits: &[u8]) -> Option<u32> {
-    if digits.is_empty() || digits.len() > 4 {
-        return None;
-    }
-    digits.iter().try_fold(0_u32, |n, &byte| {
-        byte.is_ascii_digit()
-            .then(|| n * 10 + u32::from(byte - b'0'))
-    })
 }
 
 /// `/proc/cmdline` into `line`: its length, or `None`, said.
@@ -198,6 +228,6 @@ fn read_cmdline(line: &mut [u8]) -> Option<usize> {
 
 fn unreadable(errno: impl fmt::Debug) {
     say(format_args!(
-        "intel: /proc/cmdline unreadable ({errno:?}): no ferrix.intelgpu.stop, no trace"
+        "intel: /proc/cmdline unreadable ({errno:?}): no ferrix.intelgpu.stop, trace or reset"
     ));
 }

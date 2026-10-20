@@ -70,6 +70,7 @@ pub mod io;
 pub mod irq;
 pub mod lrc;
 pub mod mocs;
+pub mod options;
 pub mod plane;
 pub mod ppgtt;
 pub mod rc6;

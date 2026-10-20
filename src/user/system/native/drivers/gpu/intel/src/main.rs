@@ -300,13 +300,15 @@ pub(crate) struct Time {
 
 impl Clock for Time {
     fn now_us(&mut self) -> u64 {
-        ferrix_rt::linux::monotonic_nanos().unwrap_or(0) / 1_000
+        let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+        steps::reset_if_due(now);
+        now / 1_000
     }
 
     fn delay_us(&mut self, us: u32) {
-        let until = ferrix_rt::linux::monotonic_nanos()
-            .unwrap_or(0)
-            .saturating_add(u64::from(us) * 1_000);
+        let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+        steps::reset_if_due(now);
+        let until = now.saturating_add(u64::from(us) * 1_000);
         let _ = self.idle.wait(Deadline::At(until));
     }
 }
@@ -656,8 +658,13 @@ fn say_plane_and_ggtt(
 /// Stay, for the life of the machine.
 fn stay(time: &Time) -> Result<core::convert::Infallible, Step> {
     loop {
-        if time.idle.wait(Deadline::Never).is_err() {
-            return Err(Step::Port);
+        let deadline = steps::reset_at_nanos().map_or(Deadline::Never, Deadline::At);
+        match time.idle.wait(deadline) {
+            Err(ferrix_rt::native::error::Error::TimedOut) => {
+                steps::reset_if_due(ferrix_rt::linux::monotonic_nanos().unwrap_or(0));
+            }
+            Err(_) => return Err(Step::Port),
+            Ok(_) => {}
         }
     }
 }

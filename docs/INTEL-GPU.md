@@ -703,6 +703,18 @@ taken (`panic/reset.rs`). That no reset came at all means more than one
 processor stopped, no shootdown came, or the reset's own port writes could
 not leave the processor. The box runs are a `docs/BACKLOG.md` row.
 
+2026-10-20: the first cause is confirmed on the box. `/etc/reset-after.sh`
+exists only on the drive (`/sysroot/etc/reset-after.sh`), not in the tmpfs
+root main's image boots, so `ferrix.init=` fell back to `/sbin/init`: the
+desktop, without a card under `ferrix.intelgpu`, so no network and no reset.
+The driver now also takes `ferrix.intelgpu.reset=S`: S seconds after boot,
+whatever step it is in, it says so and calls `reboot(2)` `RESTART`, which
+commits the disks first, as usbdev's restart does. The words are parsed in
+`intel-xelp`'s `options`, host-tested. One gap stays in the kernel:
+`reboot(2)`'s restart does not write the pstore region back from the caches
+before `arch::reset`, as `power::finish` and the panic path do, so the
+newest lines of a log it leaves may be lost to the warm reset.
+
 **M3's hardware-independent part (branch `intel-uapi`, 2026-10-18).**
 
 * **The front end** is `intel-xelp`'s `frontend` module: every ioctl of
