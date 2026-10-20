@@ -456,7 +456,11 @@ pub(super) fn build_image(
 /// No gate or report counts a compositor boot as the self-checks' evidence:
 /// that is `test-boot`'s, on every row.
 fn command_line(args: &Args) -> String {
-    let init = crate::init::command_line();
+    let mut init = crate::init::command_line();
+    if std::env::var_os("FERRIX_DXVK_ANV").is_some() {
+        init = format!("{} ferrix.intelgpu
+", init.trim_end()); // SCRATCH
+    }
     if args.checks_skipped {
         format!("{} ferrix.checks=skip\n", init.trim_end())
     } else {
@@ -510,6 +514,9 @@ pub(super) fn build_parts(
     let loader = crate::cargo::build_loader(arch, args.release)?;
     let kernel = crate::cargo::build_kernel(arch, args.release)?;
     let mut natives = crate::native::build(arch, args.release)?;
+    if std::env::var_os("FERRIX_DXVK_ANV").is_some() {
+        crate::intel_uapi::use_fake(&mut natives, arch, args.release)?; // SCRATCH
+    }
     // `--nvidia`: the RTX 3060's driver, which devmgr starts for the card
     // and which drives its monitor (`crate::nvidia`).
     if args.nvidia {
