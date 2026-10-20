@@ -933,9 +933,92 @@ fn mmap_offsets_map_the_object() {
         let request = rig.request();
         rig.frontend.mmap(&mut rig.host, request, 1, wc, 1);
         assert_eq!(
-            rig.host.replies[&request], EINVAL,
-            "K6: WC only before any mapping"
+            rig.host.replies[&request], 0,
+            "WC served cached on an object already mapped WB: no K6 conflict"
         );
+        assert_eq!(rig.host.maps.last().copied(), Some((request, 1, 0, false)));
+    });
+}
+
+/// `mmap` of object `handle` in file 1 asked `flags`, answered: the map's
+/// write-combining bit, or the error.
+fn map_asked(rig: &mut Rig, handle: u32, flags: u64) -> Result<bool, i32> {
+    let mut args = GemMmapOffset {
+        handle,
+        flags,
+        ..Default::default()
+    }
+    .to_bytes();
+    let status = rig.ioctl(ioctl::GEM_MMAP_OFFSET, &mut args);
+    if status != 0 {
+        return Err(status);
+    }
+    let offset = GemMmapOffset::from_bytes(&args).expect("offset").offset;
+    let request = rig.request();
+    rig.frontend.mmap(&mut rig.host, request, 1, offset, 1);
+    match rig.host.maps.last().copied() {
+        Some((answered, _, _, wc)) if answered == request => Ok(wc),
+        _ => Err(rig.host.replies[&request]),
+    }
+}
+
+/// `SET_CACHING` of `handle` to `caching`: its status.
+fn set_caching(rig: &mut Rig, handle: u32, caching: u32) -> i32 {
+    let mut args = Caching { handle, caching }.to_bytes();
+    rig.ioctl(ioctl::GEM_SET_CACHING, &mut args)
+}
+
+/// A write-combining mmap on ADL-N (an LLC part, nothing scanned out) of an
+/// object at the LLC's PAT index, never exported, is served write-back: the
+/// software WSI's staging buffer, which anv maps WC, is then read cached.
+/// The object then keeps that PAT index.
+#[test]
+fn wc_is_served_cached_on_an_llc_part() {
+    big(|| {
+        let mut rig = Rig::new();
+        assert_eq!(rig.frontend.backend.facts().device_id, 0x46d4, "ADL-N");
+        const { assert!(super::gem::HAS_LLC && !super::gem::SCANOUT) };
+        let handle = rig.create(16384);
+        assert_eq!(map_asked(&mut rig, handle, gem::MMAP_OFFSET_WC), Ok(false));
+        assert_eq!(
+            set_caching(&mut rig, handle, gem::CACHING_NONE),
+            -i32::from(Errno::EBUSY.0),
+            "a cached-served object stays at the LLC's PAT index"
+        );
+        assert_eq!(set_caching(&mut rig, handle, gem::CACHING_CACHED), 0);
+        // WB asked is WB, as before.
+        let handle = rig.create(4096);
+        assert_eq!(map_asked(&mut rig, handle, gem::MMAP_OFFSET_WB), Ok(false));
+        assert_eq!(set_caching(&mut rig, handle, gem::CACHING_NONE), 0);
+    });
+}
+
+/// Where the rule does not hold, WC stays WC (K6): an object off the LLC's
+/// PAT index, and an exported one. And K6 still refuses the second mode.
+#[test]
+fn wc_stays_wc_off_the_llc_or_exported() {
+    big(|| {
+        let mut rig = Rig::new();
+        let uncached = rig.create(4096);
+        assert_eq!(set_caching(&mut rig, uncached, gem::CACHING_NONE), 0);
+        assert_eq!(map_asked(&mut rig, uncached, gem::MMAP_OFFSET_WC), Ok(true));
+        assert_eq!(
+            map_asked(&mut rig, uncached, gem::MMAP_OFFSET_WB),
+            Err(EINVAL),
+            "K6: WC only before any mapping, and then only WC"
+        );
+        let display = rig.create(4096);
+        assert_eq!(set_caching(&mut rig, display, gem::CACHING_DISPLAY), 0);
+        assert_eq!(map_asked(&mut rig, display, gem::MMAP_OFFSET_WC), Ok(true));
+        let exported = rig.create(4096);
+        let mut args = PrimeHandle {
+            handle: exported,
+            flags: drm::CLOEXEC | drm::RDWR,
+            fd: -1,
+        }
+        .to_bytes();
+        assert_eq!(rig.ioctl(ioctl::PRIME_HANDLE_TO_FD, &mut args), 0);
+        assert_eq!(map_asked(&mut rig, exported, gem::MMAP_OFFSET_WC), Ok(true));
     });
 }
 

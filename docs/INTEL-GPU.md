@@ -789,6 +789,24 @@ never scanned out on this box, whose GPU access is LLC-coherent at PAT 0,
 as cached) or to the WSI's path (the `alloc_shm` host-pointer import, which
 needs K7's userptr).
 
+**The front end's fix (2026-10-20): a WC request served cached where the
+two cannot be told apart.** `gem::wc_served_cached` answers a
+`MMAP_OFFSET_WC` mmap with a write-back mapping when all of these hold: the
+part has an LLC the GPU snoops (`gem::HAS_LLC`, which `GETPARAM`'s
+`HAS_LLC` reports; every Gen12 integrated part), the object is at the LLC's
+PAT index (`I915_CACHE_LLC`, index 0, a new object's), nothing can take an
+object to a display plane (`gem::SCANOUT` is `false`: the node is
+render-only, yserver has no DRI3, the N150's plane scans the firmware's
+framebuffer), and the object was never exported as a dmabuf. An object set
+to `CACHING_NONE` or `CACHING_DISPLAY`, or exported, is mapped WC as asked,
+and K6's rule (one mode per object, the first) holds for it. An object
+served so keeps its PAT index: a later `SET_CACHING` to another level is
+`EBUSY`. When DRI3 or direct scan-out lands, `SCANOUT` turns `true` (or
+becomes per object), and an object that may reach a plane keeps WC: the
+display engine does not snoop the CPU's caches. The unit tests
+`wc_is_served_cached_on_an_llc_part` and `wc_stays_wc_off_the_llc_or_exported`
+hold both sides.
+
 **M3's hardware-independent part (branch `intel-uapi`, 2026-10-18).**
 
 * **The front end** is `intel-xelp`'s `frontend` module: every ioctl of

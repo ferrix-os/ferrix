@@ -5,7 +5,8 @@
 //! An object is a VMO of the back end's (`Backend::Memory`), whole, never
 //! swapped or purged. Its mmaps are answered with the VMO itself
 //! (`MapReply::Vmo`), write-back or write-combining by its offset's mode
-//! (K6). Tiling, caching, domains and advice are recorded and told back: on
+//! (K6), except that a write-combining mmap is served write-back where
+//! [`wc_served_cached`] says the two cannot be told apart. Tiling, caching, domains and advice are recorded and told back: on
 //! an LLC part with softpin and no fence registers none of them changes what
 //! the GPU or the CPU sees.
 
@@ -30,6 +31,45 @@ const MAX_PAGES: u64 = i32::MAX as u64;
 /// i915's PAT index for `I915_CACHE_LLC` on Gen12 (`tgl_pat` index 0, WB),
 /// what a new object on an LLC part gets (`i915_gem_object_set_cache_coherency`).
 const PAT_WB: u8 = 0;
+/// Whether the parts this front end serves have an LLC the GPU snoops
+/// (`HAS_LLC`): every Gen12 integrated part (Tiger Lake, Alder Lake, ADL-N)
+/// does. `GETPARAM`'s `HAS_LLC` says this.
+pub const HAS_LLC: bool = true;
+
+/// Whether anything can hand an object of this driver to a display plane.
+/// Nothing can: the node is render-only (no KMS, no card node), yserver has
+/// no DRI3 to receive a buffer, and the N150's plane scans the firmware's
+/// framebuffer. When DRI3 or direct scan-out lands, this turns `true` (or
+/// becomes per object) and every object that may reach a plane is mapped
+/// write-combining as asked: the display engine does not snoop the CPU's
+/// caches, so a write-back mapping's writes could stay in them.
+pub const SCANOUT: bool = false;
+
+/// Whether a write-combining mmap of `entry` is served write-back.
+///
+/// anv maps scan-out and external objects write-combining
+/// (`anv_bo_get_mmap_mode`), and Mesa's software WSI allocates its linear
+/// staging buffer as scan-out (`wsi_create_buffer_blit_context`), so every
+/// frame the WSI copies to the X server is read by the CPU through a
+/// write-combining mapping: uncached reads, tens of milliseconds for a
+/// 1878x1158 frame. Write-combining buys nothing where the CPU's caches and
+/// the GPU agree, so it is dropped where all of these hold:
+///
+/// * the part has an LLC the GPU snoops ([`HAS_LLC`]);
+/// * the object's PAT index is `PAT_WB`, `I915_CACHE_LLC`, so the GPU's
+///   accesses to it go through the LLC, coherent with the CPU's;
+/// * nothing can take it to a display plane ([`SCANOUT`]);
+/// * it was never exported (`shared`): a dmabuf may reach another device or,
+///   once DRI3 exists, a plane.
+///
+/// i915 itself maps such an object write-combining when asked; the
+/// difference is only speed, since on an LLC part both mappings see the
+/// GPU's writes. An object served so may not leave `PAT_WB` afterwards
+/// ([`set_caching`]).
+pub fn wc_served_cached<M>(entry: &Object<M>) -> bool {
+    HAS_LLC && !SCANOUT && entry.pat_index == PAT_WB && !entry.shared
+}
+
 /// i915's PAT index for `I915_CACHE_NONE` on Gen12 (index 3, UC).
 const PAT_UC: u8 = 3;
 /// i915's PAT index for `I915_CACHE_WT` on Gen12 (index 2).
@@ -76,6 +116,7 @@ pub fn new_object<B: Backend>(
             pat_index: PAT_WB,
             mmap_files: 0,
             mapped_wc: None,
+            wc_as_cached: false,
             write: FenceRef::Signalled(0),
             reads: [FenceRef::Signalled(0); limits::OBJECT_READS],
             bindings: 0,
@@ -363,6 +404,8 @@ pub fn mmap<B: Backend, H: Host<B::Memory>>(
         if !within.is_multiple_of(PAGE) || end > entry.size || pages == 0 {
             return Err(Errno::EINVAL);
         }
+        let asked_wc = wc;
+        let wc = wc && !wc_served_cached(entry);
         // K6: a VMO turns write-combining only before anything maps it, and
         // then stays so. An object asked in both modes keeps its first.
         match entry.mapped_wc {
@@ -371,6 +414,7 @@ pub fn mmap<B: Backend, H: Host<B::Memory>>(
         }
         host.reply_map(request, &entry.memory, within, wc)?;
         entry.mapped_wc = Some(wc);
+        entry.wc_as_cached |= asked_wc && !wc;
         Ok(())
     })();
     if let Err(errno) = answer {
@@ -455,6 +499,11 @@ pub fn set_caching<B: Backend>(
         .objects
         .get_mut(usize::from(object))
         .ok_or(Errno::ENOENT)?;
+    // A write-combining mapping served write-back ([`wc_served_cached`]) is
+    // coherent only while the GPU goes through the LLC.
+    if entry.wc_as_cached && pat != PAT_WB {
+        return Err(Errno::EBUSY);
+    }
     entry.caching = args.caching;
     entry.pat_index = pat;
     Ok(())

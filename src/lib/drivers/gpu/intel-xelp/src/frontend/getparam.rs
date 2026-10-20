@@ -89,7 +89,7 @@ pub fn getparam<B: Backend, H: Host<B::Memory>>(
         param::HAS_BLT => has(query::ENGINE_CLASS_COPY, 0),
         param::HAS_VEBOX => has(query::ENGINE_CLASS_VIDEO_ENHANCE, 0),
         param::HAS_BSD2 => has(query::ENGINE_CLASS_VIDEO, 1),
-        param::HAS_LLC => 1,
+        param::HAS_LLC => i32::from(super::gem::HAS_LLC),
         param::HAS_WT => 0,
         // `INTEL_PPGTT_FULL`.
         param::HAS_ALIASING_PPGTT => 2,

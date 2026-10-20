@@ -186,6 +186,9 @@ pub struct Object<M> {
     /// The mode it was first mapped in, write-combining or not: K6 lets a
     /// VMO become write-combining only before anything maps it.
     pub mapped_wc: Option<bool>,
+    /// Whether a write-combining mmap of it was served write-back
+    /// (`gem::wc_served_cached`): it then keeps the LLC's PAT index.
+    pub wc_as_cached: bool,
     /// The last write's fence.
     pub write: FenceRef,
     /// The reads since that write.
