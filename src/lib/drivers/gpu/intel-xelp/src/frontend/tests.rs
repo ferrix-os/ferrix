@@ -1919,3 +1919,33 @@ fn the_tables_fit_a_native_stack() {
     let bytes = size_of::<Frontend<FakeBackend>>();
     assert!(bytes < 3 << 20, "{bytes} bytes");
 }
+
+/// `set_trace` makes the front end say each ioctl, a held wait, and its
+/// answer: the box run's trace of a call that never completes.
+#[test]
+fn trace_says_each_ioctl_and_wait() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.set_trace(true);
+        let sync = rig.syncobj(false);
+        // A wait on an unsignalled syncobj, no WAIT_FOR_SUBMIT: held, since
+        // its fence is not there and the timeout is in the future.
+        let handles = rig.host.alloc(&sync.to_le_bytes());
+        let mut args = SyncobjWait {
+            handles,
+            count_handles: 1,
+            timeout_nsec: (rig.host.now + 1_000_000_000) as i64,
+            flags: drm::SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT,
+            ..Default::default()
+        }
+        .to_bytes();
+        assert!(matches!(
+            rig.ioctl_on(1, ioctl::SYNCOBJ_WAIT, &mut args),
+            Status::Held(_)
+        ));
+        let held = rig.host.lines.iter().any(|l| l.contains("request") && l.contains("held"));
+        let created = rig.host.lines.iter().any(|l| l.contains("trace: ioctl") && l.contains("-> 0"));
+        assert!(created, "an ioctl line: {:?}", rig.host.lines);
+        assert!(held, "a held line: {:?}", rig.host.lines);
+    });
+}

@@ -480,6 +480,12 @@ fn answer_waits<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H) {
         {
             status = -(Errno::EFAULT.0 as i32);
         }
+        if state.trace {
+            host.say(format_args!(
+                "intel: trace: held request {} answered {status}",
+                wait.request
+            ));
+        }
         host.reply(wait.request, status);
     }
 }
