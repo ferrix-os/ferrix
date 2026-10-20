@@ -343,12 +343,12 @@ pub(crate) struct ScreenPlane {
 impl ScreenPlane {
     /// `PLANE_CTL_TILED_LINEAR` and `PLANE_CTL_FORMAT_XRGB_8888` (bits 27:23
     /// 4 << 1 on ICL+).
-    fn linear_xrgb8888(&self) -> bool {
+    pub(crate) fn linear_xrgb8888(&self) -> bool {
         (self.ctl >> 10) & 0x7 == 0 && (self.ctl >> 23) & 0x1f == 4 << 1
     }
 
     /// Bytes a row.
-    fn pitch_bytes(&self) -> u32 {
+    pub(crate) fn pitch_bytes(&self) -> u32 {
         (self.stride & 0xfff) * 64
     }
 }

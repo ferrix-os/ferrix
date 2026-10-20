@@ -263,8 +263,9 @@ pub(crate) fn publish(device: &Device<Kernel>, location: u32) -> Result<ChardevH
 }
 
 /// Serve the render node until the kernel takes it back. `port` is the
-/// loop's: the control's signals arrive on it with [`KEY_CONTROL`], and the
-/// back end's interrupt, if it bound one, with [`KEY_INTERRUPT`].
+/// loop's: the control's signals arrive on it with [`KEY_CONTROL`], the
+/// back end's interrupt, if it bound one, with [`KEY_INTERRUPT`], and
+/// every other key goes to `other` (the Intel driver's display card).
 ///
 /// # Errors
 ///
@@ -274,6 +275,7 @@ pub(crate) fn serve<B: Backend>(
     host: &mut ChardevHost,
     port: &Port<Kernel>,
     frontend: &mut Frontend<B>,
+    other: &mut dyn FnMut(u64, &Port<Kernel>),
 ) -> Result<core::convert::Infallible, Stopped>
 where
     B::Memory: AsVmo,
@@ -297,7 +299,7 @@ where
                 arm(host)?;
             }
             Ok(packet) if packet.key == KEY_INTERRUPT => frontend.service(host, true),
-            Ok(_) => {}
+            Ok(packet) => other(packet.key, port),
             Err(Error::TimedOut) => frontend.service(host, false),
             Err(_) => return Err(Stopped::Port),
         }

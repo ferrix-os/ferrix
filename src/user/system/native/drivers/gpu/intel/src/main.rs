@@ -35,6 +35,11 @@
 //!    and served ([`serve`]) with the MSI on `serve::KEY_INTERRUPT` and
 //!    the 1 ms poll beside it. The kernel refuses the node while 00:02.0's
 //!    DMA is untranslated (K3); the driver then says so and stays.
+//! 10. `card0` ([`display`]): where K4 lent the firmware framebuffer to
+//!     00:02.0, the lit plane served as a copying display card, each flushed
+//!     rectangle copied into its write-combining window, so a compositor runs
+//!     under `ferrix.intelgpu`. Served beside the render node, or alone when
+//!     the kernel refuses that.
 //!
 //! M1 writes nothing to the GPU but the forcewake requests. After the
 //! lines it stays, and once it has the device it stays after a failure too,
@@ -69,6 +74,7 @@ use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::{Bootstrap, Kernel};
 
+mod display;
 mod m2;
 mod platform;
 mod serve;
@@ -525,19 +531,7 @@ fn serve_gpu(
         uncore::fw_domains_put(backend.platform().bar(), &all, rest);
     }
     let mut frontend = Frontend::new(backend);
-    let mut host = serve::publish(device, location).map_err(|stopped| {
-        say(format_args!(
-            "intel: no render node ({stopped:?}); the driver now waits"
-        ));
-        Step::Serve
-    })?;
-    match serve::serve(&mut host, &port, &mut frontend) {
-        Ok(never) => match never {},
-        Err(stopped) => {
-            say(format_args!("intel: serving stopped: {stopped:?}"));
-            Err(Step::Serve)
-        }
-    }
+    serve_nodes(device, location, firmware.plane, &port, &mut frontend)
 }
 
 /// The MSI, bound to the serving loop's port under
@@ -931,5 +925,51 @@ fn power<P: ferrix_intel_xelp::backend::Platform>(
         say(format_args!(
             "intel: freqlog: one line a second while serving (ferrix.intelgpu.freqlog)"
         ));
+    }
+}
+
+/// `card0` over the lit plane where K4 lent it ([`display`]), then the
+/// render node, both served on `port`. A refused render node (K3, while
+/// 00:02.0's DMA is untranslated) leaves `card0` served alone.
+fn serve_nodes<B: ferrix_intel_xelp::frontend::Backend>(
+    device: &Device<Kernel>,
+    location: u32,
+    plane: Option<m2::ScreenPlane>,
+    port: &Port<Kernel>,
+    frontend: &mut ferrix_intel_xelp::frontend::Frontend<B>,
+) -> Result<core::convert::Infallible, Step>
+where
+    B::Memory: serve::AsVmo,
+{
+    let apertures = device.info().map_or(0, |info| info.apertures);
+    let mut card = display::Display::publish(device, apertures, location, plane, port);
+    let mut on_display = |key: u64, port: &Port<Kernel>| {
+        if key == display::KEY_DISPLAY
+            && let Some(display) = card.as_mut()
+            && !display.on_packet(port)
+        {
+            card = None;
+        }
+    };
+    let mut host = match serve::publish(device, location) {
+        Ok(host) => host,
+        Err(stopped) => {
+            say(format_args!(
+                "intel: no render node ({stopped:?}); card0 alone is served"
+            ));
+            loop {
+                match port.wait(Deadline::Never) {
+                    Ok(packet) => on_display(packet.key, port),
+                    Err(_) => return Err(Step::Serve),
+                }
+            }
+        }
+    };
+    match serve::serve(&mut host, port, frontend, &mut on_display) {
+        Ok(never) => match never {},
+        Err(stopped) => {
+            say(format_args!("intel: serving stopped: {stopped:?}"));
+            Err(Step::Serve)
+        }
     }
 }

@@ -16,6 +16,7 @@ bench = false
 [dependencies]
 ferrix-blkring.workspace = true
 ferrix-chardevctl.workspace = true
+ferrix-displayctl.workspace = true
 ferrix-intel-xelp.workspace = true
 ferrix-linux-abi.workspace = true
 ferrix-native-abi.workspace = true

@@ -807,6 +807,23 @@ display engine does not snoop the CPU's caches. The unit tests
 `wc_is_served_cached_on_an_llc_part` and `wc_stays_wc_off_the_llc_or_exported`
 hold both sides.
 
+**`card0` from the Intel driver (2026-10-20, branch `xelp-card`).** On the
+box, M3 passed under `ferrix.efifb ferrix.intelgpu` on main 05b8105c8: the
+back end up in 2 ms, `renderD128` published, anv naming "Intel(R) Graphics
+(ADL-N)" with Mesa's driver id, iris GL 4.6 and GLES 3.2, and off-screen
+`peglgears` at 11,088 fps on iris against llvmpipe's 1,382, with no unserved
+call and no hang. But K4 lends the framebuffer to 00:02.0, so efifb's
+`card0` is gone and no compositor could start. The Intel driver now serves
+`card0` itself, M6's first step and ring 3 only: the lent window (the one
+aperture of 00:02.0 that is no BAR, checked to be BAR 2 at the lit plane's
+GGTT offset) mapped write-combining, HELLO for one scanout at the plane's
+size with `copies` set (the display core's `may_copy_lent`, L.device.48),
+and each flushed rectangle copied by the processor, as efifb copies. The
+plane, its GGTT entries and the mode stay the firmware's. It is served
+beside the render node on the same port (`display::KEY_DISPLAY`, 3), or
+alone if the kernel refuses the render node. A blit by BCS0 and flips are
+next. The box check is `tools/common/n150/intel-card-checkpoint.sh`.
+
 **M3's hardware-independent part (branch `intel-uapi`, 2026-10-18).**
 
 * **The front end** is `intel-xelp`'s `frontend` module: every ioctl of

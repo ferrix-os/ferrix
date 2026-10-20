@@ -259,7 +259,7 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         pending: 0,
     });
     let mut host = serve::publish(&device, info.location).map_err(|_| Step::Serve)?;
-    match serve::serve(&mut host, &port, &mut frontend) {
+    match serve::serve(&mut host, &port, &mut frontend, &mut |_, _| {}) {
         Ok(never) => match never {},
         Err(stopped) => {
             say(format_args!("intel-fake: serving stopped: {stopped:?}"));

@@ -339,6 +339,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
  "ferrix-chardevctl",
+ "ferrix-displayctl",
  "ferrix-intel-xelp",
  "ferrix-linux-abi",
  "ferrix-native-abi",
