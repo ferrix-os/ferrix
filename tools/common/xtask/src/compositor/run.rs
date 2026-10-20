@@ -415,9 +415,9 @@ const RELEASE_INITRAMFS: &str = "ferrix-x86_64.initrd";
 /// archive's README says so: the rustc volume, a download of its own; the
 /// btrfs root and home disks, so `/` is in memory, as `--tmpfs-root` boots;
 /// and the disks only the self-checks read, which this image skips as every
-/// desktop does. The network is in it: the image runs `udhcpc`, and the run
-/// scripts give QEMU's own user-mode network, which answers it as xtask's
-/// gateway does.
+/// desktop does. The network is in it: the image runs `dhcpc`, Ferrix's own
+/// DHCP client (`crate::dhcp`), and the run scripts give QEMU's own user-mode
+/// network, which answers it as xtask's gateway does.
 ///
 /// Every app the image carries by default is built where it has no package
 /// yet, as `--everything` builds them, and a build that fails stops this:

@@ -131,6 +131,7 @@ paths = [
     "bin/vdagent",
     "bin/sessiond",
     "bin/pkg",
+    "bin/dhcpc",
     "bin/svc",
     "bin/passwd",
     "bin/authctl",
