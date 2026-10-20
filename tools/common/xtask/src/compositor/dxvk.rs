@@ -103,22 +103,24 @@ echo "dxvk: end"
 
 /// SCRATCH: vkcube on lavapipe, then on anv with the sw WSI, each traced.
 const CUBE: &str = r#"while [ ! -S /tmp/.X11-unix/X0 ]; do sleep 1; done
-for icd in /data/usr/share/vulkan/icd.d/lvp_icd.json /intel/intel_icd.json; do
-    name=$(basename $icd)
-    VK_ICD_FILENAMES=$icd MESA_VK_WSI_DEBUG=sw MESA_SHADER_CACHE_DISABLE=1         /data/usr/bin/strace -f -tt -o /tmp/cube-$name.strace /intel/vkcube --c 20 > /tmp/cube-$name.txt 2>&1 &
+for run in lvp:sw anv:sw anv:none; do
+    icd=/data/usr/share/vulkan/icd.d/lvp_icd.json
+    [ ${run%:*} = anv ] && icd=/intel/intel_icd.json
+    wsi=${run#*:}
+    [ $wsi = none ] && wsi=
+    MESA_VK_WSI_DEBUG=$wsi VK_ICD_FILENAMES=$icd MESA_SHADER_CACHE_DISABLE=1         /intel/vkcube --c 20 > /tmp/cube-$run.txt 2>&1 &
     p=$!
     waited=0
     while kill -0 $p 2>/dev/null && [ $waited -lt 40 ]; do sleep 1; waited=$((waited + 1)); done
     if kill -0 $p 2>/dev/null; then
-        echo "dxvk: cube $name still running after ${waited}s"
+        echo "dxvk: cube $run still running after ${waited}s"
+        for t in /proc/$p/task/*; do echo "dxvk: cube $run task $(cat $t/comm) $(cut -d')' -f2 $t/stat | cut -d' ' -f2) $(cat $t/wchan 2>/dev/null) $(cat $t/syscall 2>/dev/null)"; done
         kill -9 $p
     else
         wait $p
-        echo "dxvk: cube $name exited $? after ${waited}s"
+        echo "dxvk: cube $run exited $? after ${waited}s"
     fi
-    sed "s/^/dxvk: cube $name: /" /tmp/cube-$name.txt | tail -n 15
-    grep -c . /tmp/cube-$name.strace | sed "s/^/dxvk: cube $name strace lines: /"
-    tail -n 60 /tmp/cube-$name.strace | sed "s/^/dxvk: cube $name strace: /"
+    sed "s/^/dxvk: cube $run: /" /tmp/cube-$run.txt | tail -n 15
 done
 "#;
 
