@@ -14,6 +14,11 @@ reads both:
     fetch "$GIT_URL" "$src/$GIT_TARBALL" sha256sum "$GIT_SHA256"
 
 and a list of `"name version file url sha256"` lines, which a loop fetches.
+A `fetch` may name mirrors after the upstream URL, in the same quoted
+argument (`fetch "$ZLIB_URL $ZLIB_MIRROR" ...`), for an upstream that turns
+some machines away -- GitHub's runners, which build a release, among them.
+`url` is the upstream's, the one the licence inventory names; `local` tries
+the mirrors after it, and checks what each gives against the one pin.
 
 A `fetch` line whose arguments do not resolve is an error, never a skip:
 the release's sources and licence inventory are only as complete as this
@@ -52,6 +57,7 @@ class Download:
     url: str
     algorithm: str  # "sha256" or "sha512"
     digest: str
+    mirrors: tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
@@ -100,9 +106,10 @@ def downloads(script: pathlib.Path) -> list[Download]:
             url = _expand(url_text, variables)
             digest = _expand(digest_text, variables)
             file = _expand(path_text.rsplit("/", 1)[-1], variables)
-            if None in (url, digest, file):
+            if None in (url, digest, file) or not url.split():
                 raise SystemExit(f"{script}:{number}: a fetch this cannot resolve: {line.strip()}")
-            found.append(Download(script, file, url, tool.removesuffix("sum"), digest))
+            upstream, *mirrors = url.split()
+            found.append(Download(script, file, upstream, tool.removesuffix("sum"), digest, tuple(mirrors)))
         elif re.match(r"^\s*fetch\s", line) and "$url" not in line:
             raise SystemExit(f"{script}:{number}: a fetch in a shape this does not read: {line.strip()}")
     return found
@@ -159,13 +166,25 @@ def local(download: Download, fetch_into: pathlib.Path | None = None) -> pathlib
         )
     fetch_into.mkdir(parents=True, exist_ok=True)
     path = fetch_into / download.file
-    if not path.is_file():
-        # With curl, as the build scripts' own `fetch` does: some of these
-        # servers turn away other clients (busybox.net answers urllib 418).
-        print(f"fetching {download.url}", flush=True)
-        part = path.with_suffix(path.suffix + ".part")
-        subprocess.run(["curl", "-fsSL", "--max-time", "300", "-o", str(part), download.url], check=True)
-        part.rename(path)
-    if not verify(path, download):
-        raise SystemExit(f"{path}: fetched from {download.url}, does not match its pinned {download.algorithm}")
-    return path
+    if path.is_file():
+        if not verify(path, download):
+            raise SystemExit(f"{path}: does not match its pinned {download.algorithm} in {download.script}")
+        return path
+    # With curl, as the build scripts' own `fetch` does: some of these
+    # servers turn away other clients (busybox.net answers urllib 418). The
+    # upstream first, then each mirror, until one gives the pinned bytes;
+    # only a file that matches is moved into place.
+    part = path.with_suffix(path.suffix + ".part")
+    for url in (download.url, *download.mirrors):
+        print(f"fetching {url}", flush=True)
+        part.unlink(missing_ok=True)
+        if subprocess.run(["curl", "-fsSL", "--max-time", "300", "-o", str(part), url]).returncode != 0:
+            print(f"{url} did not answer; trying the next source", flush=True)
+            continue
+        if verify(part, download):
+            part.rename(path)
+            return path
+        print(f"{url} gave a {download.file} that does not match its pinned {download.algorithm}", flush=True)
+    part.unlink(missing_ok=True)
+    raise SystemExit(f"no source gave {download.file} with its pinned {download.algorithm}: "
+                     f"{' '.join((download.url, *download.mirrors))}")

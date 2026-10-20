@@ -33,26 +33,47 @@ OMZ_SHA256=89ccb57b3328f0df303d557bef54cc7d0efb6f22f016552943ef3e15273e0588
 ZSH_VERSION=5.9.2
 ZSH_TARBALL=zsh-$ZSH_VERSION.tar.xz
 ZSH_URL=https://www.zsh.org/pub/$ZSH_TARBALL
+# zsh's own mirror of its releases, for when zsh.org does not answer.
+ZSH_MIRROR=https://downloads.sourceforge.net/project/zsh/zsh/$ZSH_VERSION/$ZSH_TARBALL
 ZSH_SHA256=36fa734374b44783582cec09bcd67822e2f992c779ec1624ab5596df078d2f81
 
-fetch() { # url file checksum-command checksum
-    local url=$1 file=$2 tool=$3 sum=$4
-    if [ ! -f "$file" ]; then
-        curl -fsSL --max-time 300 -o "$file.part" "$url"
-        mv "$file.part" "$file"
+# As ferrousli's tools/ports/common.sh: the URLs, upstream first, tried in
+# turn until one gives the pinned bytes; a download that differs is thrown
+# away, a kept file that differs refused.
+fetch() { # "url [mirror ...]" file checksum-command checksum
+    local urls=$1 file=$2 tool=$3 sum=$4 url got
+    if [ -f "$file" ]; then
+        got=$("$tool" "$file" | cut -d' ' -f1)
+        if [ "$got" != "$sum" ]; then
+            echo "${0##*/}: $file does not match its pinned $tool" >&2
+            echo "  expected $sum" >&2
+            echo "  got      $got" >&2
+            exit 1
+        fi
+        return
     fi
-    local got
-    got=$("$tool" "$file" | cut -d' ' -f1)
-    if [ "$got" != "$sum" ]; then
-        echo "${0##*/}: $file does not match its pinned $tool" >&2
+    for url in $urls; do
+        rm -f "$file.part"
+        if ! curl -fsSL --max-time 300 -o "$file.part" "$url"; then
+            echo "${0##*/}: $url did not answer; trying the next source" >&2
+            continue
+        fi
+        got=$("$tool" "$file.part" | cut -d' ' -f1)
+        if [ "$got" = "$sum" ]; then
+            mv "$file.part" "$file"
+            return
+        fi
+        echo "${0##*/}: $url gave a ${file##*/} that does not match its pinned $tool" >&2
         echo "  expected $sum" >&2
         echo "  got      $got" >&2
-        exit 1
-    fi
+    done
+    rm -f "$file.part"
+    echo "${0##*/}: no source gave ${file##*/} with its pinned $tool: $urls" >&2
+    exit 1
 }
 
 fetch "$OMZ_URL" "$src/$OMZ_TARBALL" sha256sum "$OMZ_SHA256"
-fetch "$ZSH_URL" "$src/$ZSH_TARBALL" sha256sum "$ZSH_SHA256"
+fetch "$ZSH_URL $ZSH_MIRROR" "$src/$ZSH_TARBALL" sha256sum "$ZSH_SHA256"
 
 rm -rf "$dir/oh-my-zsh" "$dir/zsh-functions" "$dir/zsh-$ZSH_VERSION"
 mkdir -p "$dir/oh-my-zsh" "$dir/zsh-functions"

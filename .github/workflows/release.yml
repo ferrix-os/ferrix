@@ -5,6 +5,14 @@ name: Release
 # the repository's front page. The notes are the tag's section of
 # docs/RELEASES.md, so write that section before pushing the tag; the job
 # fails rather than publish a release with no notes.
+#
+# A dry run builds the three asset jobs exactly as a tag does, from the
+# commit given, and keeps what they make as the run's artifacts instead:
+# it makes no release and uploads nothing to one. Run one before pushing a
+# release tag, since a release's downloads come from hosts that may turn
+# GitHub's runners away (v0.1.0's did, docs/RELEASES.md):
+#
+#     gh workflow run release.yml -f dry_run=true -f ref=<commit>
 
 on:
   push:
@@ -12,22 +20,39 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: An existing tag to publish a release for
-        required: true
+        description: An existing tag to publish a release for (a dry run names its files after it, or "dry-run")
+        required: false
+      dry_run:
+        description: Build the assets as for a tag and keep them as the run's artifacts; no release
+        type: boolean
+        default: false
+      ref:
+        description: The commit or branch a dry run builds (default the tag, else the branch run from)
+        required: false
 
 permissions:
   contents: write
 
+# The tag the release and its assets are named for: a dry run's files are
+# named for the tag given, or for "dry-run".
+env:
+  TAG: ${{ inputs.tag || (inputs.dry_run && 'dry-run') || github.ref_name }}
+
 jobs:
   release:
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -z "$INPUT_TAG" ]; then
+            echo "a release needs a tag; to build the assets without one, run with dry_run" >&2
+            exit 1
+          fi
           python3 tools/common/gen/release-notes.py "$TAG" > "$RUNNER_TEMP/notes.md"
           title=$(python3 tools/common/gen/release-notes.py --title "$TAG")
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -46,6 +71,7 @@ jobs:
   pixel7:
     name: Pixel 7 desktop (${{ matrix.edition }})
     needs: release
+    if: ${{ !cancelled() && (needs.release.result == 'success' || (inputs.dry_run && needs.release.result == 'skipped')) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.97.1
@@ -107,10 +133,8 @@ jobs:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: sh tools/vendor/google/pixel7/build-desktop.sh "$RUNNER_TEMP/desktop" ${{ matrix.edition == 'full' && '--chrome' || '' }}
 
-      - name: Attach it to the release
+      - name: Pack it
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
           EDITION: ${{ matrix.edition }}
         run: |
           volume=
@@ -124,7 +148,23 @@ jobs:
             --out "$RUNNER_TEMP/licences" --tag "$TAG" --title "Pixel 7 desktop, $EDITION edition"
           cp "$RUNNER_TEMP/licences/THIRD-PARTY-LICENSES.md" \
             "$RUNNER_TEMP/assets/ferrix-pixel7-$EDITION-THIRD-PARTY-LICENSES.md"
-          gh release upload "$TAG" "$RUNNER_TEMP"/assets/* --clobber
+          ls -l "$RUNNER_TEMP"/assets
+
+      - name: Attach it to the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "$RUNNER_TEMP"/assets/* --clobber
+
+      - name: Keep it as the dry run's artifact
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel7-${{ matrix.edition }}
+          path: ${{ runner.temp }}/assets/*
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
 
   # The x86-64 desktop for somebody with QEMU and nothing else: one zip, the
   # image `cargo xtask release-image` writes beside run.sh, run.ps1 and a
@@ -134,11 +174,12 @@ jobs:
   desktop:
     name: x86-64 desktop for QEMU
     needs: release
+    if: ${{ !cancelled() && (needs.release.result == 'success' || (inputs.dry_run && needs.release.result == 'skipped')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.97.1
@@ -177,26 +218,38 @@ jobs:
       - name: Build and pack the desktop
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
-          TAG: ${{ inputs.tag || github.ref_name }}
         run: python3 tools/common/release/package-desktop.py "$RUNNER_TEMP/desktop" --tag "$TAG"
 
       # The source of every GPL and LGPL program in this release's assets,
       # the Pixel 7 editions' busybox and Chromium volume included, from the
       # downloads the build above just checked against their pins.
       - name: Pack the corresponding sources
-        env:
-          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           python3 tools/common/release/package-sources.py "$RUNNER_TEMP/sources" --tag "$TAG" \
             --fetch --inventory "$RUNNER_TEMP/desktop/licences/licences.json"
 
-      - name: Attach it to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+      - name: Gather the assets
         run: |
-          gh release upload "$TAG" --clobber \
-            "$RUNNER_TEMP/desktop/ferrix-x86_64-desktop.zip" \
+          mkdir -p "$RUNNER_TEMP/assets"
+          cp "$RUNNER_TEMP/desktop/ferrix-x86_64-desktop.zip" \
             "$RUNNER_TEMP/desktop/ferrix-x86_64-desktop.zip.sha256" \
             "$RUNNER_TEMP/desktop/ferrix-$TAG-THIRD-PARTY-LICENSES.md" \
-            "$RUNNER_TEMP/sources/ferrix-$TAG-sources.tar.gz"
+            "$RUNNER_TEMP/sources/ferrix-$TAG-sources.tar.gz" \
+            "$RUNNER_TEMP/assets/"
+          ls -l "$RUNNER_TEMP"/assets
+
+      - name: Attach it to the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" --clobber "$RUNNER_TEMP"/assets/*
+
+      - name: Keep it as the dry run's artifact
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-x86_64
+          path: ${{ runner.temp }}/assets/*
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
