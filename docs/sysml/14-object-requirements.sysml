@@ -2060,8 +2060,12 @@ package FerrixObjectRequirements {
                 job's slot, and moved into the slots of the job and every job above
                 it and into the machine's exactly once: when the queue charges
                 another job, when it switches to a task of another job or to its
-                idle task, when its running task leaves its job, and when cpu.stat
-                is read; after the move it shall hold no slot it no longer charges.";
+                idle task, when its running task leaves its job, and when every
+                processor's running task is charged up to now (sched::charge_running:
+                a read of cpu.stat, or of another thread's processor time through
+                /proc's stat, CLOCK_PROCESS_CPUTIME_ID, times or getrusage's
+                RUSAGE_SELF); after the move it shall hold no slot it no longer
+                charges.";
             attribute :>> criterion = "On records of its own, two charges to a
                 child job stay pending and hold its slot; a charge to the parent
                 moves the first into both slots and the machine once; flushes to

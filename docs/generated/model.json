@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "e680faccae6a75519109dbf6e175ec7b61714da24dc6d1d6e00016b3329b4159",
+  "digest": "24cd8e0417fc222fc7de64f30ed714d67b2d3d4174195cab595e6bcb561e7733",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -35124,10 +35124,10 @@
                   "qualifiedName": "FerrixObjectRequirements::FastPath::cpuTimeIsKeptBackOnce",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"A run queue's charge of processor time to a job shall be kept back in the queue's Pending record, holding the job's slot, and moved into the slots of the job and every job above it and into the machine's exactly once: when the queue charges another job, when it switches to a task of another job or to its idle task, when its running task leaves its job, and when cpu.stat is read; after the move it shall hold no slot it no longer charges.\"",
+                  "value": "\"A run queue's charge of processor time to a job shall be kept back in the queue's Pending record, holding the job's slot, and moved into the slots of the job and every job above it and into the machine's exactly once: when the queue charges another job, when it switches to a task of another job or to its idle task, when its running task leaves its job, and when every processor's running task is charged up to now (sched::charge_running: a read of cpu.stat, or of another thread's processor time through /proc's stat, CLOCK_PROCESS_CPUTIME_ID, times or getrusage's RUSAGE_SELF); after the move it shall hold no slot it no longer charges.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2064
+                    "line": 2068
                   }
                 },
                 {
@@ -35138,7 +35138,7 @@
                   "value": "\"On records of its own, two charges to a child job stay pending and hold its slot; a charge to the parent moves the first into both slots and the machine once; flushes to no job settle child 1000 20, parent 1000 320, machine 1000 320, leave nothing pending and give back both holds. A running task moved into a job and charged has that time in the job's cpu.stat once charge_running has run, with nothing switched; moved back, it leaves its queue keeping nothing for that job, and the job gone, its slot is free.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2073
+                    "line": 2077
                   }
                 },
                 {
@@ -35149,7 +35149,7 @@
                   "value": "\"H.QUOTA.10\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2074
+                    "line": 2078
                   }
                 },
                 {
@@ -35160,7 +35160,7 @@
                   "value": "(\"object::quota::add_cpu_time\", \"object::quota::Pending::charge\", \"object::quota::Pending::flush\", \"object::quota::switched\", \"object::quota::leaving\", \"object::quota::settle\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2078
+                    "line": 2082
                   }
                 }
               ]

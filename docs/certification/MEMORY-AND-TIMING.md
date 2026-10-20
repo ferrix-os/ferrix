@@ -803,7 +803,7 @@ the in-range, ALLOW and dispatched costs in ns.
 
 ### 2.2c What the cgroup controllers add to the time claim (2026-10-01)
 
-Four costs the controllers put on paths the claim covers, stated with their
+Five costs the controllers put on paths the claim covers, stated with their
 bounds, which are *not* constants, so AoU-4 and ASR-8 do not rest on them:
 
 * `charge_cpu` (every tick) and `throttled_until` / `runtime_left` (the arm of
@@ -825,8 +825,18 @@ bounds, which are *not* constants, so AoU-4 and ASR-8 do not rest on them:
 * A throttled task sleeps in slices of a millisecond, asking at each whether
   the way back to user mode has anything to do: a task throttled for a second
   wakes a thousand times.
+* `sched::charge_running` is reachable at will by any program, not only
+  through a read of `cpu.stat`: `CLOCK_PROCESS_CPUTIME_ID`, `times()`,
+  `getrusage(RUSAGE_SELF)` and a read of `/proc/<pid>/stat` or
+  `/proc/<pid>/task/<tid>/stat` call it (since ef-sys-utime, consultant ledger
+  2652), so that another thread's time is current. It masks interrupts on the
+  caller for the walk of every run queue, takes each queue's lock in turn --
+  lock traffic on every processor, the processor of a channel round trip
+  included -- and settles each queue's Pending charge up the job tree. Its
+  cost is processors x (one lock + the job tree's depth), unbounded in the
+  depth as the first bullet says.
 
-None of the four is on the path of a task in a job with none of the limits set,
+None of the first four is on the path of a task in a job with none of the limits set,
 which pays one load (`bandwidth_in_use`) and the `over_high` walk.
 
 ### 2.2c A channel round trip, measured, with and without a speculation domain
