@@ -69,8 +69,9 @@ it prints `licences: REFUSED: ...` for each and exits 1.
 
 `tools/common/release/package-sources.py` packs, for each `[sources]` entry,
 the tarballs its build script pins -- from the build's own download cache,
-checked against the pin, or fetched and checked with `--fetch` -- and the
-script's directory. Why each is there:
+checked against the pin, or fetched and checked with `--fetch`, from its
+upstream or from a mirror the script names after it -- and the script's
+directory. Why each is there:
 
 | Part | Licence | Why |
 |---|---|---|

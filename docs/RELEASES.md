@@ -11,7 +11,17 @@ the app updates the phone from ([tools/vendor/google/pixel7/README.md](../tools/
 and the x86-64 desktop for plain QEMU, `ferrix-x86_64-desktop.zip`, which
 [`tools/common/release/package-desktop.py`](../tools/common/release/package-desktop.py)
 builds, with each image's licence inventory and the corresponding sources of
-every GPL and LGPL program in them ([LICENSES.md](LICENSES.md)). See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
+every GPL and LGPL program in them ([LICENSES.md](LICENSES.md)).
+
+Before a release tag is pushed, the workflow runs once as a dry run for the
+commit to be tagged: `gh workflow run release.yml -f dry_run=true -f
+ref=<commit>` builds the three assets exactly as the tag would and keeps
+them as the run's artifacts, with no release made. The assets are built
+from pinned downloads, and their hosts can treat GitHub's runners as no
+other machine: v0.1.0's first run built none of its assets, because
+gitlab.alpinelinux.org, where busybox's config comes from, answers the
+runners 418. Each pinned download that such a host serves names a mirror
+too, which is checked against the same pin. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
 ## v0.1.0 — 2026-10-20, features at fb56e0cd5
