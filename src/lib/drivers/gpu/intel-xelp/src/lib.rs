@@ -38,6 +38,7 @@
 //! * [`execlists`]: descriptors, the submit queue and the status buffer;
 //! * [`irq`]: the Gen11 interrupt banks and identities;
 //! * [`plane`]: the firmware's lit plane, read so its GGTT entries are kept;
+//! * [`power`]: RPS and RC6 by the host, and the GT's frequency and power sampled;
 //! * [`ppgtt`]: `gen8_ppgtt.c`'s 4-level per-process GTT and its scratch;
 //! * [`request`]: a request's commands, in i915's order;
 //! * [`reset`]: one engine reset, and the hung context rewound and banned;
@@ -72,6 +73,7 @@ pub mod lrc;
 pub mod mocs;
 pub mod options;
 pub mod plane;
+pub mod power;
 pub mod ppgtt;
 pub mod rc6;
 pub mod reg;

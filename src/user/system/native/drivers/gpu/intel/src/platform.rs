@@ -338,4 +338,22 @@ impl Platform for Real<'_> {
             let _ = interrupt.ack();
         }
     }
+
+    fn frequency_report(
+        &mut self,
+        sample: &ferrix_intel_xelp::power::Sample,
+        milliwatts: u64,
+        rc6_permille: u64,
+    ) {
+        crate::say(format_args!(
+            "intel: freqlog: asked {} MHz, actual {} MHz (RPSTAT1 {:#010x}), RC6 {}.{} %, package {}.{:03} W",
+            sample.requested_mhz,
+            sample.actual_mhz,
+            sample.rpstat,
+            rc6_permille / 10,
+            rc6_permille % 10,
+            milliwatts / 1000,
+            milliwatts % 1000
+        ));
+    }
 }

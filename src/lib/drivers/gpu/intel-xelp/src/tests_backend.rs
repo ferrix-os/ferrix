@@ -24,6 +24,7 @@ const HWSP: u32 = 0x10_0000;
 /// as model pages, and time that runs the engine whenever it passes.
 struct Model {
     gpu: Gpu,
+    reports: Vec<(crate::power::Sample, u64, u64)>,
     next_ggtt: u32,
     hwsp_given: bool,
     now: u64,
@@ -34,6 +35,7 @@ impl Model {
     fn new() -> Self {
         Model {
             gpu: Gpu::new(&ENGINES[0], HWSP),
+            reports: Vec::new(),
             next_ggtt: 0x20_0000,
             hwsp_given: false,
             now: 0,
@@ -132,6 +134,10 @@ impl Platform for Model {
 
     fn write_object(&mut self, object: KernelObject, index: usize, value: u32) {
         self.gpu.object(object.ggtt)[index] = value;
+    }
+
+    fn frequency_report(&mut self, sample: &crate::power::Sample, milliwatts: u64, rc6: u64) {
+        self.reports.push((*sample, milliwatts, rc6));
     }
 }
 
@@ -605,4 +611,77 @@ fn the_back_end_fits_a_native_stack() {
         "{}",
         size_of::<XelpBackend<Model>>()
     );
+}
+
+#[test]
+fn rps_starts_at_rp1_takes_a_fixed_request_and_logs_each_second() {
+    use crate::rps;
+    let mut be = backend();
+    // M0's ADL-N: RP0 1000 MHz (20 x 50), RPn 200 (4 x 50), RP1 300 (6).
+    be.platform()
+        .gpu
+        .write32(rps::GEN6_RP_STATE_CAP.offset(), (4 << 16) | 20);
+    be.platform()
+        .gpu
+        .write32(rps::GEN10_FREQ_INFO_REC.offset(), 6 << 8);
+    let state = be.power_up(None, true);
+    assert_eq!(state.cur, 18, "RP1 in 16.67 MHz units");
+    let regs = &be.platform().gpu.regs;
+    assert_eq!(regs[&0xa008], 18 << 23, "GEN6_RPNSWREQ");
+    assert_eq!(regs[&0xa010], 50_000, "GEN6_RP_DOWN_TIMEOUT");
+    assert_eq!(regs[&0xa024] & (1 << 7), 1 << 7, "GEN6_RP_ENABLE");
+    assert_ne!(regs[&0xa090], 0, "GEN6_RC_CONTROL");
+    // The intervals in 16-clock units of the CS clock: 16 ms, and 95 % of it
+    // (19200 and 18240 at the box's 19.2 MHz).
+    let hz = be.facts().cs_timestamp_hz;
+    let regs = &be.platform().gpu.regs;
+    assert_eq!(
+        regs[&0xa068],
+        rps::intel_gt_ns_to_pm_interval(hz, 16_000_000)
+    );
+    assert_eq!(
+        regs[&0xa02c],
+        rps::intel_gt_ns_to_pm_interval(hz, 15_200_000)
+    );
+    assert_eq!(
+        rps::intel_gt_ns_to_pm_interval(19_200_000, 16_000_000),
+        19_200
+    );
+    assert_eq!(
+        rps::intel_gt_ns_to_pm_interval(19_200_000, 15_200_000),
+        18_240
+    );
+    // A fixed request at RP0, and one past it clamped.
+    assert_eq!(be.set_frequency_mhz(1000), Some(1000));
+    assert_eq!(be.platform().gpu.regs[&0xa008], 60 << 23);
+    assert_eq!(be.set_frequency_mhz(5000), Some(1000));
+    assert_eq!(be.set_frequency_mhz(10), Some(200));
+    // The actual frequency read back from GEN12_RPSTAT1's CAGF (bits 19:11).
+    be.platform().gpu.write32(0x13_81b4, 36 << 11);
+    assert_eq!(be.frequency_sample().expect("up").actual_mhz, 600);
+    // A second's log: power from the energy counter, RC6 from residency.
+    be.platform()
+        .gpu
+        .write32(rps::PCU_PACKAGE_POWER_SKU_UNIT.offset(), 14 << 8);
+    be.platform()
+        .gpu
+        .write32(rps::PCU_PACKAGE_ENERGY_STATUS.offset(), 1000);
+    be.set_freqlog(true, 0);
+    assert_eq!(be.next_deadline(), Some(crate::backend::FREQLOG_NS));
+    // 3 J (3 << 14 counts) and 0.5 s of RC6 (390625 x 1.28 us) in a second.
+    be.platform()
+        .gpu
+        .write32(rps::PCU_PACKAGE_ENERGY_STATUS.offset(), 1000 + (3 << 14));
+    be.platform().gpu.write32(0x13_8108, 390_625);
+    be.service(crate::backend::FREQLOG_NS / 2, false);
+    assert!(be.platform().reports.is_empty(), "not yet due");
+    be.service(crate::backend::FREQLOG_NS, false);
+    let reports = be.platform().reports.clone();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(
+        (reports[0].1, reports[0].2),
+        (3000, 500),
+        "3000 mW, 50.0 % in RC6"
+    );
+    assert_eq!(reports[0].0.actual_mhz, 600);
 }

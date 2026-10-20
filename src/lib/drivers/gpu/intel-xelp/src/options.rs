@@ -18,6 +18,14 @@ pub struct Words<'a> {
     /// Run M2's checks (the commands, the blits, a hang) before serving:
     /// the whole word.
     pub selftest: &'a [u8],
+    /// A fixed frequency request in MHz, for measurement: `<freq>MHz`.
+    pub freq: &'a [u8],
+    /// Say the GT's frequency, RC6 share and package power each second: the
+    /// whole word.
+    pub freqlog: &'a [u8],
+    /// The box's frequency checkpoint: RP1, then RP0, each held and sampled:
+    /// the whole word.
+    pub freqtest: &'a [u8],
 }
 
 /// The longest a restart may wait: an hour.
@@ -38,6 +46,12 @@ pub struct Options {
     pub reset_refused: bool,
     /// Run M2's checks before serving.
     pub selftest: bool,
+    /// A fixed request, in MHz (1 to 9999; clamped by the driver to RPn..RP0).
+    pub freq_mhz: Option<u32>,
+    /// The per-second frequency log.
+    pub freqlog: bool,
+    /// The frequency checkpoint.
+    pub freqtest: bool,
 }
 
 /// The words of `line` the driver reads. A `stop=` that is not a number is
@@ -52,6 +66,12 @@ pub fn parse(line: &[u8], words: &Words<'_>) -> Options {
             options.trace = true;
         } else if word == words.selftest {
             options.selftest = true;
+        } else if word == words.freqlog {
+            options.freqlog = true;
+        } else if word == words.freqtest {
+            options.freqtest = true;
+        } else if let Some(value) = word.strip_prefix(words.freq) {
+            options.freq_mhz = number(value).filter(|&mhz| mhz > 0);
         } else if let Some(value) = word.strip_prefix(words.stop) {
             options.stop = Some(number(value).unwrap_or(1).max(1));
         } else if let Some(value) = word.strip_prefix(words.reset) {
@@ -93,6 +113,9 @@ mod tests {
                 trace: b"ferrix.intelgpu.trace",
                 reset: b"ferrix.intelgpu.reset=",
                 selftest: b"ferrix.intelgpu.m2",
+                freq: b"ferrix.intelgpu.freq=",
+                freqlog: b"ferrix.intelgpu.freqlog",
+                freqtest: b"ferrix.intelgpu.freqtest",
             },
         )
     }
@@ -119,8 +142,20 @@ mod tests {
                 reset_seconds: Some(60),
                 reset_refused: false,
                 selftest: true,
+                ..Options::default()
             }
         );
+    }
+
+    #[test]
+    fn frequency_words() {
+        let options =
+            parse(b"ferrix.intelgpu.freq=650 ferrix.intelgpu.freqlog ferrix.intelgpu.freqtest");
+        assert_eq!(options.freq_mhz, Some(650));
+        assert!(options.freqlog && options.freqtest);
+        assert_eq!(parse(b"ferrix.intelgpu.freq=x").freq_mhz, None);
+        assert_eq!(parse(b"ferrix.intelgpu.freq=0").freq_mhz, None);
+        assert_eq!(parse(b"ferrix.intelgpu.freqlog").freq_mhz, None);
     }
 
     #[test]

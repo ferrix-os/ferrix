@@ -95,6 +95,12 @@ pub(crate) struct Steps {
     pub(crate) trace: bool,
     /// Run M2's checks before serving (`ferrix.intelgpu.m2`).
     pub(crate) selftest: bool,
+    /// A fixed GT frequency request in MHz (`ferrix.intelgpu.freq=MHz`).
+    pub(crate) freq_mhz: Option<u32>,
+    /// The per-second frequency log (`ferrix.intelgpu.freqlog`).
+    pub(crate) freqlog: bool,
+    /// The box's frequency checkpoint (`ferrix.intelgpu.freqtest`).
+    pub(crate) freqtest: bool,
 }
 
 /// The command-line words, as the kernel's command line says them.
@@ -103,6 +109,9 @@ const WORDS: Words<'static> = Words {
     trace: b"ferrix.intelgpu.trace",
     reset: b"ferrix.intelgpu.reset=",
     selftest: b"ferrix.intelgpu.m2",
+    freq: b"ferrix.intelgpu.freq=",
+    freqlog: b"ferrix.intelgpu.freqlog",
+    freqtest: b"ferrix.intelgpu.freqtest",
 };
 
 /// The driver stopped before a step, as asked.
@@ -118,11 +127,14 @@ impl Steps {
             options::parse(line.get(..len).unwrap_or_default(), &WORDS)
         });
         say(format_args!(
-            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}",
+            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}",
             Show(options.stop),
             if options.trace { "on" } else { "off" },
             Show(options.reset_seconds),
             if options.selftest { "on" } else { "off" },
+            Show(options.freq_mhz),
+            if options.freqlog { "on" } else { "off" },
+            if options.freqtest { "on" } else { "off" },
         ));
         if options.reset_refused {
             say(format_args!(
@@ -140,6 +152,9 @@ impl Steps {
             stop: options.stop,
             trace: options.trace,
             selftest: options.selftest,
+            freq_mhz: options.freq_mhz,
+            freqlog: options.freqlog,
+            freqtest: options.freqtest,
         }
     }
 

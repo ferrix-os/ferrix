@@ -124,6 +124,16 @@ pub trait Platform: Mmio + Clock + PtMemory {
     /// The GT's interrupt was serviced ([`XelpBackend::service`] with
     /// `interrupt`): acknowledge the vector, so the next one is delivered.
     fn interrupt_serviced(&mut self) {}
+    /// One second of [`XelpBackend::set_freqlog`]'s log: the GT's sample, the
+    /// package's average power over the second and its RC6 share.
+    fn frequency_report(
+        &mut self,
+        sample: &crate::power::Sample,
+        milliwatts: u64,
+        rc6_permille: u64,
+    ) {
+        let _ = (sample, milliwatts, rc6_permille);
+    }
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -259,6 +269,14 @@ pub struct XelpBackend<P: Platform> {
     vms: [Option<Ppgtt>; MAX_VMS],
     done: [Option<(u64, Completion)>; MAX_COMPLETIONS],
     facts: crate::frontend::Facts,
+    /// The engines the fuses leave, for RC6's per-engine idle counts.
+    fused: [EngineInfo; 5],
+    fused_count: usize,
+    /// RPS, once [`XelpBackend::power_up`] ran.
+    rps: Option<crate::power::Rps>,
+    /// The per-second log: when the next line is due, and the last sample
+    /// with its time.
+    freqlog: Option<(u64, crate::power::Sample, u64)>,
     last_service_ns: u64,
 }
 
@@ -370,6 +388,16 @@ impl<P: Platform> XelpBackend<P> {
                 max_pat_index: crate::gtt::MAX_PAT_INDEX as u8,
             },
             last_service_ns: 0,
+            fused: {
+                let mut fused = [ENGINES[0]; 5];
+                for (slot, e) in fused.iter_mut().zip(fused_engines) {
+                    *slot = *e;
+                }
+                fused
+            },
+            fused_count: fused_engines.len().min(5),
+            rps: None,
+            freqlog: None,
         };
         for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
             backend.engine_up(slot, *info)?;
@@ -857,6 +885,7 @@ impl<P: Platform> XelpBackend<P> {
     /// submits what is waiting.
     pub fn service(&mut self, now_ns: u64, interrupt: bool) {
         self.last_service_ns = now_ns;
+        self.freqlog_due(now_ns);
         if interrupt {
             let _ = irq::gen11_irq_handler(&mut Regs(&self.platform), &mut Time(&self.platform));
             // Reading acknowledges the GT; the vector after, or a level
@@ -1069,7 +1098,12 @@ impl<P: Platform> XelpBackend<P> {
             .iter()
             .flatten()
             .any(|e| e.contexts.iter().flatten().any(|c| c.count() > 0));
-        busy.then(|| self.last_service_ns.saturating_add(POLL_NS))
+        let poll = busy.then(|| self.last_service_ns.saturating_add(POLL_NS));
+        let log = self.freqlog.map(|(due, _, _)| due);
+        match (poll, log) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// Hand each finished request to `sink`, once.
@@ -1231,5 +1265,70 @@ impl<P: Platform> crate::frontend::Backend for XelpBackend<P> {
 
     fn timestamp(&mut self) -> u64 {
         XelpBackend::timestamp(self)
+    }
+}
+
+/// How often the frequency log says a line.
+pub const FREQLOG_NS: u64 = 1_000_000_000;
+
+impl<P: Platform> XelpBackend<P> {
+    /// `intel_rps_enable` and `intel_rc6_enable`: RPS on with its first
+    /// request at RP1, or at `start_mhz` (a fixed request, for measurement:
+    /// nothing moves it yet); RC6 programmed and enabled when `rc6`. Returns
+    /// the RPS state.
+    pub fn power_up(&mut self, start_mhz: Option<u32>, rc6: bool) -> crate::power::Rps {
+        let clock_hz = self.facts.cs_timestamp_hz;
+        let mut regs = Regs(&self.platform);
+        let rps = crate::power::Rps::enable(&mut regs, clock_hz, start_mhz);
+        if rc6 {
+            let _ = crate::power::rc6_enable(
+                &mut regs,
+                self.fused.get(..self.fused_count).unwrap_or_default(),
+            );
+        }
+        self.rps = Some(rps);
+        rps
+    }
+
+    /// Request `mhz` (rounded, clamped to RPn..RP0); the MHz asked, or
+    /// `None` before [`XelpBackend::power_up`].
+    pub fn set_frequency_mhz(&mut self, mhz: u32) -> Option<u32> {
+        let mut rps = self.rps?;
+        let asked = rps.set_mhz(&mut Regs(&self.platform), mhz);
+        self.rps = Some(rps);
+        Some(asked)
+    }
+
+    /// What the GT does now; `None` before [`XelpBackend::power_up`].
+    pub fn frequency_sample(&mut self) -> Option<crate::power::Sample> {
+        let rps = self.rps?;
+        Some(rps.sample(&mut Regs(&self.platform)))
+    }
+
+    /// Say the frequency, RC6 share and package power every second, through
+    /// [`Platform::frequency_report`], from the next [`XelpBackend::service`]
+    /// on; `false` stops it.
+    pub fn set_freqlog(&mut self, on: bool, now_ns: u64) {
+        self.freqlog = match (on, self.frequency_sample()) {
+            (true, Some(sample)) => Some((now_ns.saturating_add(FREQLOG_NS), sample, now_ns)),
+            _ => None,
+        };
+    }
+
+    fn freqlog_due(&mut self, now_ns: u64) {
+        let Some((due, before, at)) = self.freqlog else {
+            return;
+        };
+        if now_ns < due {
+            return;
+        }
+        let Some(after) = self.frequency_sample() else {
+            return;
+        };
+        let (milliwatts, rc6) = crate::power::between(&before, &after, now_ns.saturating_sub(at));
+        self.platform
+            .borrow_mut()
+            .frequency_report(&after, milliwatts, rc6);
+        self.freqlog = Some((now_ns.saturating_add(FREQLOG_NS), after, now_ns));
     }
 }
