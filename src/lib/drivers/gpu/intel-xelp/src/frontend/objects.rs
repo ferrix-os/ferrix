@@ -683,6 +683,8 @@ pub struct Tables<M> {
     pub next_cookie: u64,
     /// Lines said once.
     pub said: Said,
+    /// Say every ioctl, the held waits and their answers (`ferrix.intelgpu.trace`).
+    pub trace: bool,
 }
 
 impl<M> Tables<M> {
@@ -704,6 +706,7 @@ impl<M> Tables<M> {
             waits: Waits::new(),
             next_cookie: 1,
             said: Said { bits: 0 },
+            trace: false,
         }
     }
 
