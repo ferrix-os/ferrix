@@ -8,8 +8,11 @@
 
 //! Frequency control by the host, as i915 does it when `GuC`'s `SLPC` is not
 //! in use: the hardware's limits from `GEN6_RP_STATE_CAP`, and a request
-//! through `GEN6_RPNSWREQ`. Without a request the GT idles near its lowest
-//! frequency, which is what M4 fixes.
+//! through `GEN6_RPNSWREQ` (`gen6_rps_set`), with the up and down evaluation
+//! intervals and thresholds `rps_set_power` programs; the actual frequency
+//! read back from `GEN12_RPSTAT1` (`intel_rps_get_cagf`), and the package's
+//! energy from the MCHBAR mirror of its RAPL counter. Without a request the
+//! GT idles near its lowest frequency.
 
 use crate::generated::intel_gt_regs::GEN6_RPNSWREQ;
 use crate::reg::{Reg, field_get, genmask};
@@ -66,4 +69,148 @@ pub const fn gen9_frequency(val: u32) -> u32 {
 #[must_use]
 pub const fn gen6_rps_set(val: u32) -> (Reg, u32) {
     (GEN6_RPNSWREQ, gen9_frequency(val))
+}
+
+/// `intel_gt_ns_to_pm_interval` for Gen7+: nanoseconds to the PM unit's
+/// intervals, which count 16 command-streamer clocks (`clock_hz`).
+#[must_use]
+pub const fn intel_gt_ns_to_pm_interval(clock_hz: u32, ns: u64) -> u32 {
+    let clocks = ns * clock_hz as u64 / 1_000_000_000;
+    clocks.div_ceil(16) as u32
+}
+
+/// `rps->power.up_threshold`: busy above this percentage of an evaluation
+/// interval asks for more.
+pub const UP_THRESHOLD: u32 = 95;
+/// `rps->power.down_threshold`: busy below this asks for less.
+pub const DOWN_THRESHOLD: u32 = 85;
+
+/// `rps_set_power`'s modes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Power {
+    /// `LOW_POWER`: up after 16 ms, down after 32 ms.
+    Low,
+    /// `BETWEEN`: up after 13 ms.
+    Between,
+    /// `HIGH_POWER`: up after 10 ms.
+    High,
+}
+
+/// `rps_set_power`'s writes for `mode`: the up and down evaluation intervals
+/// and thresholds, then `GEN6_RP_CONTROL` (Gen10+: no media turbo; media
+/// in hardware normal mode, counted as graphics; RPS on, averaging busy up
+/// and idle down).
+#[must_use]
+pub const fn rps_set_power(mode: Power, clock_hz: u32) -> [(Reg, u32); 5] {
+    use crate::generated::intel_gt_regs as gr;
+    let (ei_up, ei_down): (u64, u64) = match mode {
+        Power::Low => (16_000, 32_000),
+        Power::Between => (13_000, 32_000),
+        Power::High => (10_000, 32_000),
+    };
+    [
+        (
+            gr::GEN6_RP_UP_EI,
+            intel_gt_ns_to_pm_interval(clock_hz, ei_up * 1000),
+        ),
+        (
+            gr::GEN6_RP_UP_THRESHOLD,
+            intel_gt_ns_to_pm_interval(clock_hz, ei_up * UP_THRESHOLD as u64 * 10),
+        ),
+        (
+            gr::GEN6_RP_DOWN_EI,
+            intel_gt_ns_to_pm_interval(clock_hz, ei_down * 1000),
+        ),
+        (
+            gr::GEN6_RP_DOWN_THRESHOLD,
+            intel_gt_ns_to_pm_interval(clock_hz, ei_down * DOWN_THRESHOLD as u64 * 10),
+        ),
+        (
+            gr::GEN6_RP_CONTROL,
+            gr::GEN6_RP_MEDIA_HW_NORMAL_MODE
+                | gr::GEN6_RP_MEDIA_IS_GFX
+                | gr::GEN6_RP_ENABLE
+                | gr::GEN6_RP_UP_BUSY_AVG
+                | gr::GEN6_RP_DOWN_IDLE_AVG,
+        ),
+    ]
+}
+
+/// `gen6_rps_enable`'s writes: "Power down if completely idle for over
+/// 50ms", and the idle hysteresis.
+#[must_use]
+pub const fn gen6_rps_enable() -> [(Reg, u32); 2] {
+    use crate::generated::intel_gt_regs as gr;
+    [
+        (gr::GEN6_RP_DOWN_TIMEOUT, 50_000),
+        (gr::GEN6_RP_IDLE_HYSTERSIS, 10),
+    ]
+}
+
+/// `gen6_rps_set_thresholds`' choice of power mode for a request of `val`
+/// from `cur`, by i915's rule, the soft limits being the hardware's.
+#[must_use]
+pub const fn gen6_rps_power_for(mode: Power, val: u32, cur: u32, caps: FreqCaps) -> Power {
+    let mut new = match mode {
+        Power::Low if val > caps.rp1_freq + 1 && val > cur => Power::Between,
+        Power::Between if val <= caps.rp1_freq && val < cur => Power::Low,
+        Power::Between if val >= caps.rp0_freq && val > cur => Power::High,
+        Power::High if val < (caps.rp1_freq + caps.rp0_freq) >> 1 && val < cur => Power::Between,
+        other => other,
+    };
+    if val <= caps.min_freq {
+        new = Power::Low;
+    }
+    if val >= caps.rp0_freq {
+        new = Power::High;
+    }
+    new
+}
+
+/// MHz to hardware units (the inverse of [`intel_gpu_freq`], as
+/// `intel_freq_opcode` does on Gen9+: `DIV_ROUND_CLOSEST(val * 3, 50)`),
+/// clamped to `caps`.
+#[must_use]
+pub const fn intel_freq_opcode(mhz: u32, caps: FreqCaps) -> u32 {
+    let val = (mhz * GEN9_FREQ_SCALER + GT_FREQUENCY_MULTIPLIER / 2) / GT_FREQUENCY_MULTIPLIER;
+    if val < caps.min_freq {
+        caps.min_freq
+    } else if val > caps.rp0_freq {
+        caps.rp0_freq
+    } else {
+        val
+    }
+}
+
+/// `intel_rps_get_cagf` for Gen12 below 12.70: the actual frequency, in
+/// hardware units, from `GEN12_RPSTAT1`.
+#[must_use]
+pub const fn gen12_cagf(rpstat: u32) -> u32 {
+    field_get(crate::generated::intel_gt_regs::GEN12_CAGF_MASK, rpstat)
+}
+
+/// `PCU_PACKAGE_POWER_SKU_UNIT`, the MCHBAR mirror of the package's RAPL
+/// units (`intel_mchbar_regs.h`).
+pub const PCU_PACKAGE_POWER_SKU_UNIT: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x5938);
+/// `PKG_ENERGY_UNIT`: energy counts are 1/2^n joules.
+pub const PKG_ENERGY_UNIT: u32 = genmask(12, 8);
+/// `PCU_PACKAGE_ENERGY_STATUS`: the package's energy, a 32-bit counter
+/// that wraps (`i915_hwmon.c` reads it on discrete parts; on this
+/// integrated one the mirror is read as the same, unverified until the box
+/// shows it moving).
+pub const PCU_PACKAGE_ENERGY_STATUS: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x593c);
+
+/// Microjoules between two energy readings `before` and `after` (the
+/// counter wraps at 32 bits) in units of 1/2^`unit` J.
+#[must_use]
+pub const fn energy_microjoules(before: u32, after: u32, unit: u32) -> u64 {
+    let counts = after.wrapping_sub(before) as u64;
+    (counts * 1_000_000) >> (unit & 31)
+}
+
+/// `GEN6_GT_GFX_RC6`'s count in nanoseconds: 1.28 us units on Gen6+ outside
+/// VLV/CHV and Gen9 LP (`intel_rc6_residency_ns`).
+#[must_use]
+pub const fn rc6_residency_ns(count: u32) -> u64 {
+    count as u64 * 1280
 }

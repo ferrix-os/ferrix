@@ -436,7 +436,7 @@ fn serve_gpu(
     done: M1Done,
     steps: &Steps,
 ) -> Result<core::convert::Infallible, Step> {
-    use ferrix_intel_xelp::backend::{Identity, XelpBackend};
+    use ferrix_intel_xelp::backend::XelpBackend;
     use ferrix_intel_xelp::frontend::Frontend;
     let M1Done {
         mut bar, firmware, ..
@@ -487,12 +487,7 @@ fn serve_gpu(
         * 4096)
         .max(SERVE_GGTT_FLOOR);
     let ggtt = ferrix_intel_xelp::ggtt_space::GgttSpace::new(start, firmware.total);
-    let identity = Identity {
-        device_id,
-        revision: device.config_read(0x08, 1).map_or(0, |value| value as u8),
-        ggtt_bytes: firmware.total,
-        system_memory_bytes: steps::system_memory_bytes().unwrap_or(SYSTEM_MEMORY_FALLBACK),
-    };
+    let identity = identity(device, device_id, firmware.total);
     let (fused, count) = fused_engines(firmware.engine_mask);
     let real = platform::Real::new(
         bar,
@@ -525,6 +520,7 @@ fn serve_gpu(
         facts.sseu.eu_total,
         facts.system_memory_bytes >> 20
     ));
+    power(&mut backend, steps);
     if others {
         uncore::fw_domains_put(backend.platform().bar(), &all, rest);
     }
@@ -567,6 +563,20 @@ fn bind_interrupt(
             ));
             None
         }
+    }
+}
+
+/// What the uAPI says of the device and the machine.
+fn identity(
+    device: &Device<Kernel>,
+    device_id: u16,
+    ggtt_bytes: u64,
+) -> ferrix_intel_xelp::backend::Identity {
+    ferrix_intel_xelp::backend::Identity {
+        device_id,
+        revision: device.config_read(0x08, 1).map_or(0, |value| value as u8),
+        ggtt_bytes,
+        system_memory_bytes: steps::system_memory_bytes().unwrap_or(SYSTEM_MEMORY_FALLBACK),
     }
 }
 
@@ -861,5 +871,65 @@ fn stay(time: &Time) -> Result<core::convert::Infallible, Step> {
             Err(_) => return Err(Step::Port),
             Ok(_) => {}
         }
+    }
+}
+
+/// RPS and RC6 by the host (`ferrix_intel_xelp::power`): the first request
+/// at RP1, or `ferrix.intelgpu.freq=MHz`; under `ferrix.intelgpu.freqtest`
+/// the box's checkpoint (RP1, then RP0, each held and sampled, then back);
+/// under `ferrix.intelgpu.freqlog` a line each second from then on.
+fn power<P: ferrix_intel_xelp::backend::Platform>(
+    backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+    steps: &Steps,
+) {
+    use ferrix_intel_xelp::rps::intel_gpu_freq;
+    let rps = backend.power_up(steps.freq_mhz, true);
+    say(format_args!(
+        "intel: RPS on: RP0 {} MHz, RP1 {} MHz, RPn {} MHz; request {} MHz{}; RC6 enabled (residency stays low while the driver holds forcewake)",
+        intel_gpu_freq(rps.caps.rp0_freq),
+        intel_gpu_freq(rps.caps.rp1_freq),
+        intel_gpu_freq(rps.caps.min_freq),
+        intel_gpu_freq(rps.cur),
+        if steps.freq_mhz.is_some() {
+            " (fixed: ferrix.intelgpu.freq)"
+        } else {
+            " (RP1)"
+        }
+    ));
+    if steps.freqtest {
+        let mut time = Time {
+            idle: match port::create(Kernel) {
+                Ok(port) => port,
+                Err(_) => return,
+            },
+        };
+        for (name, val) in [("RP1", rps.caps.rp1_freq), ("RP0", rps.caps.rp0_freq)] {
+            let asked = backend.set_frequency_mhz(intel_gpu_freq(val)).unwrap_or(0);
+            for n in 0..5 {
+                time.delay_us(100_000);
+                if let Some(sample) = backend.frequency_sample() {
+                    say(format_args!(
+                        "intel: freqtest {name}: asked {asked} MHz, sample {n}: RPSTAT1 {:#010x}, CAGF {} MHz, RC6 count {}, package energy {:#x} (unit 1/2^{} J)",
+                        sample.rpstat,
+                        sample.actual_mhz,
+                        sample.rc6_count,
+                        sample.energy_raw,
+                        sample.energy_unit
+                    ));
+                }
+            }
+        }
+        let back = backend
+            .set_frequency_mhz(intel_gpu_freq(rps.cur))
+            .unwrap_or(0);
+        say(format_args!(
+            "intel: freqtest done; the request is {back} MHz again"
+        ));
+    }
+    if steps.freqlog {
+        backend.set_freqlog(true, ferrix_rt::linux::monotonic_nanos().unwrap_or(0));
+        say(format_args!(
+            "intel: freqlog: one line a second while serving (ferrix.intelgpu.freqlog)"
+        ));
     }
 }

@@ -755,6 +755,40 @@ and the render node served through `serve.rs` with the MSI on
 `tools/common/n150/intel-m3-checkpoint.sh`, which needs K2 (and K4 for the
 box's sshd).
 
+**The GT's frequency and idle power by the host (2026-10-20, branch
+`xelp-rps`).** Nothing had written `GEN6_RPNSWREQ`, so the GT sat near RPn
+(200 MHz). `intel-xelp`'s `power` now does what i915 does without SLPC:
+`gen6_rps_enable` (down timeout, idle hysteresis), `rps_set_power`'s
+evaluation intervals and thresholds (95 % up, 85 % down) with
+`GEN6_RP_CONTROL`, the first request at RP1, and `gen11_rc6_enable` with the
+enable in `GEN6_RC_CONTROL`. The driver reads three more words:
+`ferrix.intelgpu.freq=MHz` pins the request (clamped to RPn..RP0),
+`ferrix.intelgpu.freqlog` says each second the request, the actual
+frequency (`GEN12_RPSTAT1`'s CAGF), the RC6 share and the package's power
+from the MCHBAR mirror of RAPL (`PCU_PACKAGE_ENERGY_STATUS`, unverified on
+this part until the box shows it moving; the GT's own RAPL plane has no
+MCHBAR mirror i915 reads), and `ferrix.intelgpu.freqtest` holds RP1, then
+RP0, sampling each, then goes back. Not yet: the up/down policy from the
+PM interrupts or the EI counters, so the request stays where it was set;
+and RC6 residency stays near zero, since the driver holds render and GT
+forcewake for its life where i915 takes it per access. The box checkpoint
+is `intelgpu-m2.sh BOX freq NAME`.
+
+**What anv's software WSI gets from the mmap path.** Our front end serves
+`MMAP_OFFSET_WB` as a cached mapping and `MMAP_OFFSET_WC` as K6's
+write-combining one, as asked. anv (Mesa, `anv_bo_get_mmap_mode` on i915
+without `set_pat_uapi`, which is ADL-N's case) asks WB for its host-visible
+memory on an LLC part, except for memory allocated as `ANV_BO_ALLOC_SCANOUT`
+or `_EXTERNAL`, which it maps WC. The software WSI's linear staging buffer
+(`wsi_create_buffer_blit_context`) is allocated with
+`wsi_memory_allocate_info` chained, which anv marks SCANOUT, so it is mapped
+WC, and the WSI's CPU read of each frame (8.7 MB at 1920x1200x4) goes
+through WC. That is the research agent's warning, confirmed in Mesa's code.
+The fix belongs to the front end (serve a WC request for an object that is
+never scanned out on this box, whose GPU access is LLC-coherent at PAT 0,
+as cached) or to the WSI's path (the `alloc_shm` host-pointer import, which
+needs K7's userptr).
+
 **M3's hardware-independent part (branch `intel-uapi`, 2026-10-18).**
 
 * **The front end** is `intel-xelp`'s `frontend` module: every ioctl of
