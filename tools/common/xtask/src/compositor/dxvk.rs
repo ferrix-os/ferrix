@@ -166,6 +166,13 @@ pub(crate) fn test_dxvk_window(args: &Args, volume: PathBuf, dxvk: &Path) -> Res
             &format!("export VK_ICD_FILENAMES=/intel/intel_icd.json MESA_VK_WSI_DEBUG={wsi} MESA_SHADER_CACHE_DISABLE=1
 ls -l /dev/dri | sed 's/^/dxvk: dri: /'"),
         );
+        script = script.replace(
+            "echo \"dxvk: the program presented after ${waited}s\"",
+            "echo \"dxvk: the program presented after ${waited}s\"
+head -c 6000 /tmp/present.txt | sed 's/^/dxvk: early: /'
+for t in /proc/$program/task/*; do echo \"dxvk: task $t $(cat $t/comm 2>/dev/null) $(cat $t/stat 2>/dev/null | cut -d' ' -f3) $(cat $t/wchan 2>/dev/null)\"; done
+kill -9 $program",
+        );
     }
     ports.push(File {
         path: SCRIPT_PATH.to_owned(),
