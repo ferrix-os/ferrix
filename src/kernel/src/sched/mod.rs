@@ -1947,7 +1947,7 @@ fn kick_after_wake(queue: &mut CpuQueue, cpu: usize, deferred: bool) -> Option<u
     // As `spawn_on`, and for the same three reasons: something better has
     // arrived, or the processor is idle, or this is the first task to wait
     // behind the running one and so the first that needs its timer to exist.
-    (queue.should_preempt() || queue.is_running_idle() || queue.waiting() == 1).then_some(cpu)
+    (queue.should_preempt_on_wake() || queue.is_running_idle() || queue.waiting() == 1).then_some(cpu)
 }
 
 /// [`wake`], and with `defer`, for a waker that blocks next ([`Wake::Sync`]):
@@ -2320,6 +2320,13 @@ fn pick_and_switch(interrupted_user: bool) {
 /// Choose what runs next, leaving the queue's lock held and returning where
 /// to save this context and what to resume — or releasing the lock and
 /// returning `None` when nothing has to change.
+/// EXPERIMENT (ef-sys): counts for `choose_next`'s preemptions.
+static WHY: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+/// EXPERIMENT (ef-sys): lags and weights summed over them.
+static LAGS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+/// EXPERIMENT (ef-sys): their total.
+static WHY_TOTAL: AtomicU64 = AtomicU64::new(0);
+
 fn choose_next(
     lock: &'static SpinLock<CpuQueue>,
     cpu: usize,
@@ -2353,7 +2360,50 @@ fn choose_next(
         }
     }
 
+    // EXPERIMENT (ef-sys): why a runnable task loses its processor.
+    let why = previous
+        .as_ref()
+        .filter(|task| task.state() == RUNNABLE && !queue.is_running_idle())
+        .map(|_| queue.fair.curr_state());
+    let lag_before = queue.fair.curr_lag();
+    let weight_before = queue.fair.curr_weight();
+    let queued_before = queue.fair.queued();
     let next = queue.pick_next();
+    if let (Some((eligible, protected)), Some(prev), Some(nx)) = (why, previous.as_ref(), next.as_ref())
+        && !Arc::ptr_eq(prev, nx)
+    {
+        let lag_after = queue.fair.curr_lag();
+        let _ = LAGS[0].fetch_add(lag_before.unsigned_abs(), Ordering::Relaxed);
+        let _ = LAGS[1].fetch_add(lag_after.unsigned_abs(), Ordering::Relaxed);
+        let _ = LAGS[2].fetch_add(u64::from(lag_after > 0), Ordering::Relaxed);
+        let _ = LAGS[3].fetch_add(queued_before as u64, Ordering::Relaxed);
+        let _ = LAGS[4].fetch_add(u64::from(weight_before), Ordering::Relaxed);
+        let _ = LAGS[5].fetch_add(u64::from(queue.fair.curr_weight()), Ordering::Relaxed);
+        let at = usize::from(eligible) * 2 + usize::from(protected);
+        let _ = WHY[at].fetch_add(1, Ordering::Relaxed);
+        let _ = WHY[4 + usize::from(interrupted_user)].fetch_add(1, Ordering::Relaxed);
+        let total = WHY_TOTAL.fetch_add(1, Ordering::Relaxed) + 1;
+        if total % 20_000 == 0 {
+            crate::console::println!(
+                "  efwhy    {total} preemptions: ineligible {} (protected {}), eligible {} (protected {}); from user {} kernel {}",
+                WHY[0].load(Ordering::Relaxed) + WHY[1].load(Ordering::Relaxed),
+                WHY[1].load(Ordering::Relaxed),
+                WHY[2].load(Ordering::Relaxed) + WHY[3].load(Ordering::Relaxed),
+                WHY[3].load(Ordering::Relaxed),
+                WHY[5].load(Ordering::Relaxed),
+                WHY[4].load(Ordering::Relaxed),
+            );
+            crate::console::println!(
+                "  efwhy    mean |lag| of the one leaving {} ns, of the one picked {} ns, picked with positive lag {}, queued {}, weights {} -> {}",
+                LAGS[0].load(Ordering::Relaxed) / total,
+                LAGS[1].load(Ordering::Relaxed) / total,
+                LAGS[2].load(Ordering::Relaxed),
+                LAGS[3].load(Ordering::Relaxed) * 100 / total,
+                LAGS[4].load(Ordering::Relaxed) / total,
+                LAGS[5].load(Ordering::Relaxed) / total,
+            );
+        }
+    }
     if queue.stats.measuring {
         queue.note_pick(now);
     }

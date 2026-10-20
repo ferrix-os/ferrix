@@ -650,7 +650,8 @@ impl CpuQueue {
     /// one is looked at. Scaling the slice makes the wait the target latency
     /// instead, until the floor stops it.
     fn rescale_slice(&mut self) {
-        let slice = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len());
+        // EXPERIMENT (ef-sys): a request no shorter than TARGET_LATENCY_NS.
+        let slice = slice_for(TARGET_LATENCY_NS, MIN_SLICE_NS, self.fair.len()).max(TARGET_LATENCY_NS);
         // The only refusal is a slice of zero, and `slice_for` floors at
         // `MIN_SLICE_NS`, which is not zero.
         let _ = self.fair.set_slice_ns(slice);
@@ -664,6 +665,12 @@ impl CpuQueue {
     /// Whether the running task should give way to something queued.
     pub(crate) fn should_preempt(&self) -> bool {
         self.fair.should_preempt()
+    }
+
+    /// EXPERIMENT (ef-sys): [`CpuQueue::should_preempt`] for a wake-up, which
+    /// leaves the running task the rest of the request it was picked for.
+    pub(crate) fn should_preempt_on_wake(&self) -> bool {
+        self.fair.should_preempt_on_wake()
     }
 
     /// Whether a sleeper's time has come by `now`: whether

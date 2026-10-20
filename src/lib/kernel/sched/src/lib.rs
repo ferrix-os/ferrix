@@ -408,6 +408,10 @@ pub struct RunQueue<T> {
     sum: i128,
     /// The sum of every entity's weight.
     load: u64,
+    /// The running entity's deadline when it was picked: while it is still
+    /// that, the entity has not yet used the request it was picked for, and a
+    /// wake-up does not take the processor from it (Linux's `RUN_TO_PARITY`).
+    protect: u64,
 }
 
 /// A real duration as the virtual time an entity of `weight` accrues in it.
@@ -482,6 +486,7 @@ impl<T> RunQueue<T> {
             zero: 0,
             sum: 0,
             load: 0,
+            protect: 0,
         })
     }
 
@@ -718,10 +723,20 @@ impl<T> RunQueue<T> {
     /// competes like anything else: this is the whole EEVDF decision, made
     /// afresh. `None` only when the queue is empty.
     pub fn pick_next(&mut self) -> Option<&T> {
+        // EXPERIMENT (ef-sys): RUN_TO_PARITY. A running entity still inside
+        // the request it was picked for, and eligible, keeps the processor.
+        if self
+            .curr
+            .as_ref()
+            .is_some_and(|curr| curr.entity.deadline == self.protect && self.is_eligible(curr.entity.vruntime))
+        {
+            return self.curr.as_ref().and_then(|curr| curr.entity.payload.as_ref());
+        }
         self.put_curr_back();
         let key = self.choose()?;
         let node = self.tree.remove(key)?;
         let chosen = self.curr.insert(node);
+        self.protect = chosen.entity.deadline;
         chosen.entity.payload.as_ref()
     }
 
@@ -804,6 +819,7 @@ impl<T> RunQueue<T> {
             sum_exec: state.sum_exec,
             payload: Some(payload),
         };
+        self.protect = deadline;
         self.curr = Some(node);
         let Some(payload) = leaving.entity.payload.take() else {
             return Ok(None);
@@ -861,6 +877,12 @@ impl<T> RunQueue<T> {
             curr.deadline = curr
                 .vruntime
                 .wrapping_add(to_virtual(slice_ns, curr.weight));
+            // EXPERIMENT (ef-sys): with nothing queued no pick follows, so
+            // the new request is the one it holds now, protected as a pick
+            // would protect it.
+            if self.tree.is_empty() {
+                self.protect = curr.deadline;
+            }
         }
         let weight = curr.weight;
 
@@ -920,6 +942,39 @@ impl<T> RunQueue<T> {
     /// deadline than the running one, while eligible, preempts it — which is
     /// how a task that sleeps a lot gets the latency its small lag is owed,
     /// rather than waiting out whatever slice is in progress.
+    /// EXPERIMENT (ef-sys): the running entity's lag, virtual nanoseconds.
+    #[must_use]
+    pub fn curr_lag(&self) -> i64 {
+        self.curr.as_ref().map_or(0, |curr| self.lag_at(curr.entity.vruntime))
+    }
+
+    /// EXPERIMENT (ef-sys): entities queued, the weight of the running one.
+    #[must_use]
+    pub fn curr_weight(&self) -> u32 {
+        self.curr.as_ref().map_or(0, |curr| curr.entity.weight)
+    }
+
+    /// EXPERIMENT (ef-sys): the running entity's eligibility and protection.
+    #[must_use]
+    pub fn curr_state(&self) -> (bool, bool) {
+        self.curr.as_ref().map_or((false, false), |curr| {
+            (self.is_eligible(curr.entity.vruntime), curr.entity.deadline == self.protect)
+        })
+    }
+
+    /// EXPERIMENT (ef-sys): should_preempt, leaving a protected request alone.
+    #[must_use]
+    pub fn should_preempt_on_wake(&self) -> bool {
+        if let Some(curr) = self.curr.as_ref().map(|node| &node.entity)
+            && curr.deadline == self.protect
+            && self.is_eligible(curr.vruntime)
+        {
+            return false;
+        }
+        self.should_preempt()
+    }
+
+    /// Whether something queued should run instead of the running entity, now.
     #[must_use]
     pub fn should_preempt(&self) -> bool {
         let Some(curr) = self.curr.as_ref().map(|node| &node.entity) else {
