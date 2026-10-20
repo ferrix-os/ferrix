@@ -28,7 +28,7 @@
 use core::fmt;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ferrix_intel_xelp::options::{self, Options};
+use ferrix_intel_xelp::options::{self, Options, Words};
 
 use crate::say;
 
@@ -93,6 +93,13 @@ pub(crate) struct Steps {
     pub(crate) trace: bool,
 }
 
+/// The command-line words, as the kernel's command line says them.
+const WORDS: Words<'static> = Words {
+    stop: b"ferrix.intelgpu.stop=",
+    trace: b"ferrix.intelgpu.trace",
+    reset: b"ferrix.intelgpu.reset=",
+};
+
 /// The driver stopped before a step, as asked.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Stopped;
@@ -103,7 +110,7 @@ impl Steps {
     pub(crate) fn from_command_line() -> Steps {
         let mut line = [0_u8; 2048];
         let options = read_cmdline(&mut line).map_or_else(Options::default, |len| {
-            options::parse(line.get(..len).unwrap_or_default())
+            options::parse(line.get(..len).unwrap_or_default(), &WORDS)
         });
         say(format_args!(
             "intel: ferrix.intelgpu.stop {}, trace {}, reset {}",

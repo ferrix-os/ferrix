@@ -1,16 +1,22 @@
 //! The kernel command-line words the driver process reads for the N150
 //! box's runs (`docs/INTEL-GPU.md` §10), none of them i915's: where to stop,
 //! whether to say every register access, and when to restart the machine.
-//! Parsed here, apart from the process, so a host test holds them.
+//! Parsed here, apart from the process, so a host test holds them. The words
+//! themselves are the driver's (`drivers/gpu/intel/src/steps.rs`): a library
+//! names no boot option (`check-build-flags.py`, ledger 2208 (2)).
 
-/// Stop before step `N` (the driver's `steps::At`).
-pub const STOP: &[u8] = b"ferrix.intelgpu.stop=";
-/// Say every register access before it is made.
-pub const TRACE: &[u8] = b"ferrix.intelgpu.trace";
-/// Restart the machine `S` seconds after boot.
-pub const RESET: &[u8] = b"ferrix.intelgpu.reset=";
+/// The three words, as the driver spells them.
+#[derive(Clone, Copy, Debug)]
+pub struct Words<'a> {
+    /// Stop before step `N` (the driver's `steps::At`): `<stop>N`.
+    pub stop: &'a [u8],
+    /// Say every register access before it is made: the whole word.
+    pub trace: &'a [u8],
+    /// Restart the machine `S` seconds after boot: `<reset>S`.
+    pub reset: &'a [u8],
+}
 
-/// The longest a [`RESET`] may wait: an hour.
+/// The longest a restart may wait: an hour.
 pub const RESET_MAX_SECONDS: u32 = 3600;
 
 /// What the command line asked for.
@@ -23,7 +29,7 @@ pub struct Options {
     /// Restart the machine this many seconds after boot, 1 to
     /// [`RESET_MAX_SECONDS`].
     pub reset_seconds: Option<u32>,
-    /// A [`RESET`] whose value was not a number in range: said by the
+    /// A restart word whose value was not a number in range: said by the
     /// driver, and no restart.
     pub reset_refused: bool,
 }
@@ -33,14 +39,14 @@ pub struct Options {
 /// a `reset=` that is not a number in range is refused, so a misspelt one
 /// never restarts a machine nobody asked to.
 #[must_use]
-pub fn parse(line: &[u8]) -> Options {
+pub fn parse(line: &[u8], words: &Words<'_>) -> Options {
     let mut options = Options::default();
     for word in line.split(u8::is_ascii_whitespace) {
-        if word == TRACE {
+        if word == words.trace {
             options.trace = true;
-        } else if let Some(value) = word.strip_prefix(STOP) {
+        } else if let Some(value) = word.strip_prefix(words.stop) {
             options.stop = Some(number(value).unwrap_or(1).max(1));
-        } else if let Some(value) = word.strip_prefix(RESET) {
+        } else if let Some(value) = word.strip_prefix(words.reset) {
             match number(value).filter(|s| (1..=RESET_MAX_SECONDS).contains(s)) {
                 Some(seconds) => {
                     options.reset_seconds = Some(seconds);
@@ -69,7 +75,18 @@ fn number(digits: &[u8]) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Options, parse};
+    use super::{Options, Words};
+
+    fn parse(line: &[u8]) -> Options {
+        super::parse(
+            line,
+            &Words {
+                stop: b"ferrix.intelgpu.stop=",
+                trace: b"ferrix.intelgpu.trace",
+                reset: b"ferrix.intelgpu.reset=",
+            },
+        )
+    }
 
     #[test]
     fn nothing_asked() {
