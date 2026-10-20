@@ -275,20 +275,24 @@ def crates(inventory: Inventory, extra_locks: list[pathlib.Path]) -> list[dict]:
                 entry["licence"] = inventory.judge(f"crate {name} {version}", expression)
                 seen[key] = entry
                 continue
+            # A crate of a workspace this machine never built is fetched,
+            # once per workspace: from crates.io, or a git dependency's
+            # checkout (media's pulseaudio-rs, on a release runner).
             if source.startswith("registry+"):
-                directory = registry_dir(name, version)
-                if directory is None and not fetched:
-                    print(f"cargo fetch --locked in {workspace}", flush=True)
-                    subprocess.run(
-                        ["cargo", "fetch", "--locked", "--manifest-path", str(lock.parent / "Cargo.toml")],
-                        check=False,
-                    )
-                    fetched = True
-                    directory = registry_dir(name, version)
+                find = lambda: registry_dir(name, version)  # noqa: E731
                 entry["kind"] = "crates.io"
             else:
-                directory = git_dir(name, source)
+                find = lambda: git_dir(name, source)  # noqa: E731
                 entry["kind"] = source.split("#")[0].removeprefix("git+")
+            directory = find()
+            if directory is None and not fetched:
+                print(f"cargo fetch --locked in {workspace}", flush=True)
+                subprocess.run(
+                    ["cargo", "fetch", "--locked", "--manifest-path", str(lock.parent / "Cargo.toml")],
+                    check=False,
+                )
+                fetched = True
+                directory = find()
             if directory is None:
                 inventory.problems.append(f"crate {name} {version} ({source}): not in cargo's cache to read")
                 entry["licence"] = "UNREAD"

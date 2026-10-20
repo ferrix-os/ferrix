@@ -95,6 +95,27 @@ upstream = "https://www.zsh.org/"
 pinned = "tools/common/fetch/fetch-shell-trees.sh"
 paths = ["usr/share/zsh/functions/**"]
 
+# The fonts an image that runs Chrome in a window carries, from
+# assets/fonts/, each unchanged from its project's release archive with
+# its licence beside it in the image (assets/fonts/README.md).
+[components.inter]
+licence = "OFL-1.1"
+upstream = "https://github.com/rsms/inter"
+note = "Inter 4.1, fontconfig's sans-serif on an image with Chrome"
+paths = ["usr/share/ferrix/fonts/inter/*"]
+
+[components.liberation]
+licence = "OFL-1.1"
+upstream = "https://github.com/liberationfonts/liberation-fonts"
+note = "Liberation Sans, Serif and Mono 2.1.5, for pages that name Arial, Times New Roman or Courier New"
+paths = ["usr/share/ferrix/fonts/liberation/*"]
+
+[components.noto-cjk]
+licence = "OFL-1.1"
+upstream = "https://github.com/notofonts/noto-cjk"
+note = "Noto Sans CJK 2.004, the fallback for Chinese, Japanese and Korean"
+paths = ["usr/share/ferrix/fonts/noto-cjk/*"]
+
 [components.zinc]
 licence = "MIT"
 upstream = "https://github.com/ferrix-os/zinc"
@@ -114,6 +135,12 @@ paths = [
     "etc/**",
     "usr/share/udhcpc/default.script",
     "usr/share/applications/*",
+    # What xtask writes beside Chrome (chrome.rs, start_page.rs): the
+    # fontconfig file naming the fonts below, the xdg-open that opens a
+    # link in Chrome, and Chrome's start page.
+    "usr/share/ferrix/fonts/fonts.conf",
+    "bin/xdg-open",
+    "usr/share/ferrix/start/*",
     "usr/share/icons/hicolor/index.theme",
     "usr/share/icons/hicolor/scalable/apps/ferrix-*.svg",
     ".ferrix/**",
