@@ -13,13 +13,15 @@
 #[inline]
 pub(crate) fn flush_line(address: usize) {
     #[cfg(target_arch = "x86_64")]
-    // SAFETY: `address` is inside a mapping this process holds; `clflush`
-    // and `mfence` only order and evict, unprivileged (CPUID.01H:EDX.CLFSH,
-    // every x86-64 part).
-    unsafe {
-        core::arch::x86_64::_mm_mfence();
-        core::arch::x86_64::_mm_clflush(address as *const u8);
-        core::arch::x86_64::_mm_mfence();
+    {
+        // SAFETY: `mfence` only orders; SSE2 is in every x86-64 part.
+        unsafe { core::arch::x86_64::_mm_mfence() };
+        // SAFETY: `address` is inside a mapping this process holds;
+        // `clflush` only evicts the line, unprivileged (CPUID.01H:EDX.CLFSH,
+        // every x86-64 part).
+        unsafe { core::arch::x86_64::_mm_clflush(address as *const u8) };
+        // SAFETY: as the first.
+        unsafe { core::arch::x86_64::_mm_mfence() };
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = address;
