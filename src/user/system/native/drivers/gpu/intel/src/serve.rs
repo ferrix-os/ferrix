@@ -287,6 +287,8 @@ where
     };
     arm(host)?;
     let mut last_dump = 0_u64;
+    let mut timeouts = 0_u64;
+    let mut late_ns = 0_u64;
     loop {
         // SCRATCH: every 10 s while anything is outstanding, say the state.
         let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
@@ -294,8 +296,12 @@ where
             || frontend.state.requests.retired + 1 < frontend.state.requests.next;
         if busy && now >= last_dump + 10_000_000_000 {
             if last_dump != 0 {
+                say(format_args!(
+                    "intel-dump: {timeouts} deadline wakes since the last dump, the latest {late_ns} ns after its deadline"
+                ));
                 dump(frontend);
             }
+            timeouts = 0;
             last_dump = now;
         }
         let tick = busy.then_some(last_dump + 10_000_000_000);
@@ -314,7 +320,15 @@ where
             }
             Ok(packet) if packet.key == KEY_INTERRUPT => frontend.service(host, true),
             Ok(packet) => other(packet.key, port),
-            Err(Error::TimedOut) => frontend.service(host, false),
+            Err(Error::TimedOut) => {
+                timeouts += 1;
+                if let Deadline::At(at) = deadline {
+                    late_ns = ferrix_rt::linux::monotonic_nanos()
+                        .unwrap_or(0)
+                        .saturating_sub(at);
+                }
+                frontend.service(host, false);
+            }
             Err(_) => return Err(Stopped::Port),
         }
     }
