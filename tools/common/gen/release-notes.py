@@ -2,11 +2,13 @@
 """Print a tag's release notes, or its release title, from docs/RELEASES.md.
 
     python3 tools/common/gen/release-notes.py <tag>           # the notes, as Markdown
-    python3 tools/common/gen/release-notes.py --title <tag>   # "<tag> — <date>"
+    python3 tools/common/gen/release-notes.py --title <tag>   # "<tag> (<date>)"
 
-A tag's section is the one whose heading starts `## <tag> — `. It runs to the
-next `## ` heading. The release workflow publishes exactly this, so a tag
-without a section fails here rather than going out as an empty release.
+A tag's section is the one whose heading starts `## <tag> (`, as in
+`## v0.1.1 (2026-10-21), features at 336e03bca`; the older milestones' form,
+`## <tag> — `, is still read. It runs to the next `## ` heading. The release
+workflow publishes exactly this, so a tag without a section fails here
+rather than going out as an empty release.
 """
 
 import sys
@@ -17,10 +19,10 @@ REPO = "https://github.com/ferrix-os/ferrix"
 
 
 def section(tag):
-    lines = RELEASES.read_text().splitlines()
+    lines = RELEASES.read_text(encoding="utf-8").splitlines()
     start = None
     for i, line in enumerate(lines):
-        if line.startswith(f"## {tag} — ") or line == f"## {tag}":
+        if line.startswith((f"## {tag} (", f"## {tag} — ")) or line == f"## {tag}":
             start = i
             break
     if start is None:
@@ -33,7 +35,7 @@ def main():
     args = sys.argv[1:]
     if args[:1] == ["--title"]:
         heading, _ = section(args[1])
-        # "## stage-9 — 2026-09-13, commit 80d0ea7" -> "stage-9 — 2026-09-13"
+        # "## v0.1.1 (2026-10-21), features at 336e03bca" -> "v0.1.1 (2026-10-21)"
         print(heading[3:].split(",")[0])
         return
     tag = args[0]
@@ -44,7 +46,7 @@ def main():
     print("---")
     print(f"Boot it: `git checkout {tag} && cargo xtask run --arch x86_64`. "
           f"Everything else is in the [README]({REPO}/blob/{tag}/README.md) "
-          f"and on the [website](https://ferrix-os.github.io/).")
+          f"and on the [website](https://ferrix-os.org/).")
 
 
 if __name__ == "__main__":

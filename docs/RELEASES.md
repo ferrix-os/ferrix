@@ -24,7 +24,7 @@ runners 418. Each pinned download that such a host serves names a mirror
 too, which is checked against the same pin. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
-## v0.1.1 — 2026-10-21, features at 336e03bca
+## v0.1.1 (2026-10-21), features at 336e03bca
 
 The first release with its downloads: the x86-64 desktop as one zip,
 booted by a script with plain QEMU. v0.1.0 was tagged but built none of its
@@ -81,8 +81,8 @@ What it has:
   shipped under and every licence text, and each Pixel 7 edition has its own
   (`ferrix-pixel7-<edition>-THIRD-PARTY-LICENSES.md`). `ferrix-v0.1.1-sources.tar.gz`
   holds the exact upstream source, build script, patches and config of
-  every GPL and LGPL program in these images -- busybox, git, alsa-utils,
-  alsa-lib -- and of what is linked into one, and the Debian package list
+  every GPL and LGPL program in these images (busybox, git, alsa-utils,
+  alsa-lib) and of what is linked into one, and the Debian package list
   of the Pixel 7 Chromium volume with where each package's source is
   ([docs/LICENSES.md](https://github.com/ferrix-os/ferrix/blob/main/docs/LICENSES.md)).
 
@@ -110,7 +110,7 @@ cargo xtask run-compositor --arch x86_64        # the same desktop from source
 cargo xtask test-boot --arch all
 ```
 
-## v0.1.0 — 2026-10-20, features at fb56e0cd5
+## v0.1.0 (2026-10-20), features at fb56e0cd5
 
 Tagged, but published with no downloads: its release run built none of the
 three assets, because a host of one pinned download refuses GitHub's
@@ -158,8 +158,8 @@ each.
   shipped under and every licence text, and each Pixel 7 edition has its own
   (`ferrix-pixel7-<edition>-THIRD-PARTY-LICENSES.md`). `ferrix-v0.1.0-sources.tar.gz`
   holds the exact upstream source, build script, patches and config of
-  every GPL and LGPL program in these images -- busybox, git, alsa-utils,
-  alsa-lib -- and of what is linked into one, and the Debian package list
+  every GPL and LGPL program in these images (busybox, git, alsa-utils,
+  alsa-lib) and of what is linked into one, and the Debian package list
   of the Pixel 7 Chromium volume with where each package's source is
   ([docs/LICENSES.md](https://github.com/ferrix-os/ferrix/blob/main/docs/LICENSES.md)).
 
