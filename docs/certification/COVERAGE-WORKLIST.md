@@ -107,7 +107,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `object/pin.rs` | `core` | 0 | 1 | 23 | 0 | - |
 | `object/oom.rs` | `core` | 0 | 6 | 5 | 0 | - |
-| `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 676-678, 683 |
+| `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 690-692, 697 |
 | `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 195, 234 |
 | `object/mod.rs` | `core` | 2 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
@@ -131,7 +131,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2525 |
+| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2635 |
 | `syscall/program.rs` | `item` | 3 | 4 | 2 | 1 | 89 |
 
 ---
@@ -199,7 +199,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1344, 2350 |
+| `sched/mod.rs` | `core` | 2 | 3 | 2 | 2 | 1344, 2353 |
 | `sched/task.rs` | `core` | 0 | 0 | 1 | 0 | - |
 
 ---
