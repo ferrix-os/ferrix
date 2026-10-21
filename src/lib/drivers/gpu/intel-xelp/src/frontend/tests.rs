@@ -20,7 +20,7 @@ use ferrix_linux_abi::errno::Errno;
 
 use super::backend::{Completion, ContextParams, Engine, Facts, HwContext, SubmitError, VmId};
 use super::host::{Host, Installed};
-use super::{Backend, Frontend, RequestId};
+use super::{Backend, Frontend, RequestId, limits};
 use crate::sseu::{Fuses, gen12_sseu_info_init};
 use crate::uapi::*;
 
@@ -327,6 +327,8 @@ struct FakeHost {
     now: u64,
     lines: Vec<String>,
     privileged: bool,
+    /// Requests their programs gave up on: the core refuses their copies.
+    abandoned: Vec<u64>,
 }
 
 impl FakeHost {
@@ -362,13 +364,19 @@ impl FakeHost {
 }
 
 impl Host<Memory> for FakeHost {
-    fn copy_in(&mut self, _request: u64, address: u64, out: &mut [u8]) -> Result<(), Errno> {
+    fn copy_in(&mut self, request: u64, address: u64, out: &mut [u8]) -> Result<(), Errno> {
+        if self.abandoned.contains(&request) {
+            return Err(Errno::EFAULT);
+        }
         let range = self.range(address, out.len())?;
         out.copy_from_slice(&self.memory[range]);
         Ok(())
     }
 
-    fn copy_out(&mut self, _request: u64, address: u64, bytes: &[u8]) -> Result<(), Errno> {
+    fn copy_out(&mut self, request: u64, address: u64, bytes: &[u8]) -> Result<(), Errno> {
+        if self.abandoned.contains(&request) {
+            return Err(Errno::EFAULT);
+        }
         let range = self.range(address, bytes.len())?;
         self.memory[range].copy_from_slice(bytes);
         Ok(())
@@ -1444,6 +1452,80 @@ fn waits_are_held_and_answered() {
         rig.host.now = 600_000;
         rig.frontend.service(&mut rig.host, false);
         assert_eq!(rig.host.replies[&late], ETIME);
+    });
+}
+
+/// A program that a signal interrupts in a held wait calls again (libdrm's
+/// `drmIoctl` on `EINTR`), and the driver is not told the first call was
+/// abandoned: once [`limits::WAITS`] such calls have piled up, the next
+/// wait must still be held, not refused `ENOMEM` (which Mesa reports as
+/// `VK_ERROR_UNKNOWN`, the device lost). Live waits are never swept.
+#[test]
+fn abandoned_waits_do_not_fill_the_table() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.backend.hold = true;
+        let batch = rig.create(4096);
+        let done = rig.syncobj(false);
+        assert_eq!(
+            rig.exec(
+                ioctl::GEM_EXECBUFFER2,
+                &[(batch, 0x1000, PINNED)],
+                0,
+                &[(done, exec::FENCE_SIGNAL)],
+                0
+            )
+            .0,
+            0
+        );
+        let handles = rig.host.alloc(&done.to_le_bytes());
+        let wait = |rig: &mut Rig| {
+            let mut sync = SyncobjWait {
+                handles,
+                timeout_nsec: i64::MAX,
+                count_handles: 1,
+                flags: drm::SYNCOBJ_WAIT_FLAGS_WAIT_ALL,
+                ..Default::default()
+            }
+            .to_bytes();
+            rig.ioctl_on(1, ioctl::SYNCOBJ_WAIT, &mut sync)
+        };
+        // One live wait, then a thread interrupted again and again.
+        let Status::Held(live) = wait(&mut rig) else {
+            panic!("not held");
+        };
+        for _ in 1..limits::WAITS {
+            let Status::Held(request) = wait(&mut rig) else {
+                panic!("not held");
+            };
+            rig.host.abandoned.push(request);
+        }
+        assert_eq!(rig.frontend.state.waits.len(), limits::WAITS);
+        let Status::Held(again) = wait(&mut rig) else {
+            panic!("the table full of abandoned waits refused a live one");
+        };
+        assert_eq!(rig.frontend.state.waits.len(), 2, "only the abandoned went");
+        rig.frontend.backend.finish(Completion::Ok);
+        rig.frontend.service(&mut rig.host, true);
+        assert_eq!(rig.host.replies[&live], 0);
+        assert_eq!(rig.host.replies[&again], 0);
+        // A table full of live waits still refuses, as before.
+        rig.host.abandoned.clear();
+        assert_eq!(
+            rig.exec(
+                ioctl::GEM_EXECBUFFER2,
+                &[(batch, 0x1000, PINNED)],
+                0,
+                &[(done, exec::FENCE_SIGNAL)],
+                0
+            )
+            .0,
+            0
+        );
+        for _ in 0..limits::WAITS {
+            assert!(matches!(wait(&mut rig), Status::Held(_)));
+        }
+        assert_eq!(wait(&mut rig), Status::Done(-12));
     });
 }
 

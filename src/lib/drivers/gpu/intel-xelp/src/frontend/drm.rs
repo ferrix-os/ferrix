@@ -325,10 +325,19 @@ impl<B: Backend> Frontend<B> {
         };
         let outcome = self.handle(host, &call, &mut kdata);
         let status = match outcome {
-            Ok(Some(hold)) => match self.state.waits.hold(&call, &kdata, hold) {
-                Ok(()) => return Answer::Later,
-                Err(errno) => -i32::from(errno.0),
-            },
+            Ok(Some(hold)) => {
+                // A full table may be full of waits their programs gave up
+                // on (`Waits::sweep_abandoned`); Linux has no such table, so
+                // only a table full of live waits refuses.
+                let mut held = self.state.waits.hold(&call, &kdata, hold);
+                if held.is_err() && self.state.waits.sweep_abandoned(host) > 0 {
+                    held = self.state.waits.hold(&call, &kdata, hold);
+                }
+                match held {
+                    Ok(()) => return Answer::Later,
+                    Err(errno) => -i32::from(errno.0),
+                }
+            }
             Ok(None) => 0,
             Err(errno) => -i32::from(errno.0),
         };

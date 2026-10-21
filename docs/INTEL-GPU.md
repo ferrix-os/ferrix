@@ -830,7 +830,12 @@ next. The box check is `tools/common/n150/intel-card-checkpoint.sh`.
   §2.1, the opens, mmaps and releases, and the chardev core's dmabuf events,
   answered as Linux v7.0's DRM core and i915 answer them on Gen12 (each
   function names the one it follows). Waits are deferred replies, at most 64
-  at once (C1). An execbuffer that reads or writes a shared object sets its
+  at once (C1). A signal abandons a program's request in the chardev core
+  without telling the driver, and libdrm calls again on `EINTR`, so a full
+  table first drops the waits whose requests are dead, which a one-byte
+  copy-in from each wait's argument finds (2026-10-21; a table full of
+  abandoned waits had answered the next one `ENOMEM`, which Mesa reports as
+  `VK_ERROR_UNKNOWN`). An execbuffer that reads or writes a shared object sets its
   dmabuf's slot (ledger 2360). No memory is allocated, so every table has a
   fixed size (`frontend::limits`). The uAPI's numbers and layouts are now
   printed by `probe/i915.c` from the v7.0 headers, and two tests hold

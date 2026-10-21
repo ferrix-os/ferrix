@@ -111,6 +111,30 @@ impl Waits {
             .min()
     }
 
+    /// Forget every wait whose program gave up on it: a signal abandons a
+    /// request in the chardev core (the program's call returns `EINTR`,
+    /// and libdrm calls again), and the driver is not told, so the wait
+    /// would keep its slot until what it waits for signals, for ever with
+    /// no deadline. The core refuses any copy for an abandoned request, so
+    /// a one-byte copy-in from the wait's argument tells. How many went.
+    pub fn sweep_abandoned<M, H: Host<M>>(&mut self, host: &mut H) -> usize {
+        let mut doomed = [usize::MAX; limits::WAITS];
+        let mut count = 0;
+        for (index, wait) in self.slots.iter() {
+            let mut probe = [0_u8; 1];
+            if host.copy_in(wait.request, wait.arg, &mut probe).is_err()
+                && let Some(slot) = doomed.get_mut(count)
+            {
+                *slot = index;
+                count += 1;
+            }
+        }
+        for index in doomed.iter().take(count) {
+            let _ = self.slots.remove(*index);
+        }
+        count
+    }
+
     /// Forget every wait of a released file: its program is gone.
     pub fn drop_file(&mut self, file: u8) {
         let mut doomed = [usize::MAX; limits::WAITS];
