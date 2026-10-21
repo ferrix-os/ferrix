@@ -102,10 +102,10 @@ fn the_address_space_has_its_block() {
     assert_eq!(nr::decode(0x107A), Some(NativeCall::SpaceMap));
     assert_eq!(nr::decode(0x107B), Some(NativeCall::SpaceUnmap));
     assert_eq!(nr::decode(0x107C), Some(NativeCall::SpaceProtect));
+    assert_eq!(nr::decode(0x107D), Some(NativeCall::SpaceAllocate));
     assert_eq!(nr::decode(0x107E), Some(NativeCall::SpaceRead));
-    for held in [0x107D, 0x107F, 0x1080] {
-        assert_eq!(nr::decode(held), None, "{held:#x} is held for slice B");
-    }
+    assert_eq!(nr::decode(0x107F), Some(NativeCall::SpaceWrite));
+    assert_eq!(nr::decode(0x1080), Some(NativeCall::SpaceClone));
 }
 
 #[test]

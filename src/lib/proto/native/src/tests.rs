@@ -1167,6 +1167,9 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = made_space.unmap(0, 1);
     let _ = made_space.protect(0, 1, Access::Read);
     let _ = made_space.read(0, &mut []);
+    let _ = made_space.allocate(None, 1, Access::ReadWrite);
+    let _ = made_space.write(0, &[]);
+    let _ = made_space.clone_space();
     let _ = Process::from_owned(handle()).space(Requested::Same);
     let _ = Vmo::from_owned(handle()).executable();
 
@@ -1288,4 +1291,41 @@ fn a_process_space_and_an_executable_vmo() {
     assert_eq!(calls[2], made(nr::VMO_EXECUTABLE, &[0xB5, 0]));
     assert_eq!(calls.len(), 3, "the replaced handle is not closed again");
     drop((taken, runnable, back, process));
+}
+
+#[test]
+fn a_space_allocates_writes_and_clones_by_handle() {
+    let sys = Recorder::default();
+    let made_space = Space::from_owned(owned(&sys, 0xC1));
+    sys.returns(0x7000);
+    assert_eq!(
+        made_space.allocate(None, 0x2000, Access::ReadWrite),
+        Ok(0x7000)
+    );
+    sys.answer(|raw| {
+        let [space, at, buffer, count, _, _] = raw.args();
+        assert_eq!((space, at, count), (0xC1, 0x7008, 5));
+        assert_eq!(raw.memory(buffer, 5), Some(&b"write"[..]));
+        5
+    });
+    assert_eq!(made_space.write(0x7008, b"write"), Ok(5));
+    sys.returns(0xC2);
+    let clone = made_space.clone_space().unwrap();
+    assert_eq!(clone.as_owned().handle(), Handle(0xC2));
+    let calls = sys.take();
+    assert_eq!(
+        calls[0],
+        made(
+            nr::SPACE_ALLOCATE,
+            &[
+                0xC1,
+                0,
+                0x2000,
+                (types::MAP_READ | types::MAP_WRITE) as usize
+            ]
+        )
+    );
+    assert_eq!(calls[1].number, nr::SPACE_WRITE);
+    assert_eq!(calls[2], made(nr::SPACE_CLONE, &[0xC1]));
+    drop((clone, made_space));
 }

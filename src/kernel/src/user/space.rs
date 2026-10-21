@@ -3454,6 +3454,75 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Map `len` bytes of fresh private anonymous memory, zero until written,
+    /// at `at` or wherever there is room: what `space_allocate` does
+    /// (`docs/microkernel/K2.md` §2.3). The memory is nobody else's, so its
+    /// ceiling is read, write and execute, one at a time with the third
+    /// (ASR-2, refused here under no lock yet whatever the caller decoded);
+    /// a clone copies it on write, and the Linux calls that reshape a region
+    /// refuse it, as they refuse every region a handle made.
+    ///
+    /// # Errors
+    ///
+    /// [`SpaceError::Refused`] for writable and executable together;
+    /// [`SpaceError::BadRange`] for a length that is not whole pages or a
+    /// range over a mapping; [`SpaceError::NotUserRange`] outside the user
+    /// half; [`SpaceError::OutOfMemory`] for no room or no memory.
+    pub(crate) fn allocate_by_handle(
+        &self,
+        at: Option<u64>,
+        len: u64,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
+        let flags = VmaFlags {
+            read: true,
+            shared: false,
+            grows_down: false,
+            ..flags
+        };
+        let ceiling = Ceiling::Handle {
+            write: true,
+            execute: true,
+        };
+        if !ceiling.admits(flags) {
+            return Err(SpaceError::Refused(at.unwrap_or(0)));
+        }
+        if len == 0 || !len.is_multiple_of(PAGE_SIZE) {
+            return Err(SpaceError::BadRange);
+        }
+        let mut inner = self.inner.lock();
+        let at = match at {
+            Some(at) => at,
+            None => inner
+                .map
+                .find_free(len, PAGE_SIZE, None)
+                .ok_or(SpaceError::OutOfMemory)?,
+        };
+        if !is_user_address(at) || at.checked_add(len).is_none_or(|end| end > USER_VIRT_END) {
+            return Err(SpaceError::NotUserRange(at));
+        }
+        let range = PageRange::from_len(at, len).map_err(|_| SpaceError::BadRange)?;
+        let id = inner.next_id;
+        inner.next_id = inner.next_id.saturating_add(1);
+        let vmo = Vmo::new_anonymous(len / PAGE_SIZE).map_err(|_| SpaceError::OutOfMemory)?;
+        self.add_region(
+            &mut inner,
+            NewRegion {
+                id,
+                range,
+                flags,
+                backing: Backing::Anonymous { id, offset: 0 },
+                sharing: Sharing::Private,
+            },
+            vmo,
+        )?;
+        if fallible::insert(&mut inner.native, id, ceiling).is_err() {
+            self.abandon_region(&mut inner, id, range);
+            return Err(SpaceError::OutOfMemory);
+        }
+        Ok(at)
+    }
+
     /// Change the protection of `len` bytes at `at`, every page of which a
     /// handle mapped, to `flags`' read, write and execute: what `space_protect`
     /// does (`docs/microkernel/K2.md` §2.3).

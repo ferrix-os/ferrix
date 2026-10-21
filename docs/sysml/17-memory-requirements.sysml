@@ -2580,6 +2580,39 @@ package FerrixMemoryRequirements {
                 "user::space::Ceiling::admits",
                 "user::space::AddressSpace::with_root_held");
         }
+        requirement <'L.user.160'> aCloneByHandleCopiesOnWrite : ItemLowLevel {
+            attribute :>> statement = "A clone by handle shall take the source's
+                writable translations of its private pages out of the source's
+                tables, and begin their shootdown, before it answers; after it,
+                neither space shall see a write the other makes to private memory
+                through a kernel copy, a page read-only at the clone and made
+                writable after it included; memory mapped shared shall stay shared;
+                and a page both hold shall go back to one holder as the clone goes.";
+            attribute :>> criterion = "The source's leaf for a page written before
+                the clone is writable before space_clone and not after it, and its
+                shootdowns-begun count rose; writes by handle after the clone, by
+                either side and to F-41's page on either side, are unseen by the
+                other; a shared VMO's write is seen by both; a page both hold has
+                two references, and one once the clone is closed. A program's own
+                store through a stale translation is stage 6's USER_COW_PROGRAM
+                check (H.MEM.8, L.user.61; F-41 itself is L.user.60).";
+            attribute :>> parent = "H.MEM.25";
+            attribute :>> unit = ("user::space::AddressSpace::fork",
+                "user::space::AddressSpace::allocate_by_handle");
+        }
+        requirement <'L.user.161'> aCopyBetweenSpacesHonoursTheRegion : ItemLowLevel {
+            attribute :>> statement = "A copy between two spaces by handle shall never
+                hold both spaces' locks at once, shall write only through a writable
+                region, copying a copy-on-write page first, and shall never make a
+                region writable.";
+            attribute :>> criterion = "A write by handle to a region made read-only
+                is FAULT and the page keeps its byte; a write to a copy-on-write page
+                after a clone gives the writer a copy (L.user.160's cases).";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("syscall::native::space_write",
+                "syscall::native::write_target", "syscall::native::space_read",
+                "syscall::native::read_target");
+        }
         requirement <'L.user.162'> anUnmapByHandleReachesARunningSpace : ItemLowLevel {
             attribute :>> statement = "An unmap or protect by handle of a space whose
                 program runs on another processor shall take its translations down

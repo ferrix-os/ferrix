@@ -275,6 +275,22 @@ package FerrixItemRequirements {
                 executable and more than 0 executable.";
             attribute :>> parent = ("O.ISOLATE", "O.WXN", "O.CAPABILITY", "ASR-2", "ASR-3");
         }
+        requirement <'H.MEM.25'> aCloneNeverSeesItsSourcesLaterWrites : ItemHighLevel {
+            attribute :>> statement = "A copy-on-write clone of an address space made
+                by handle shall never see a write its source makes after the clone,
+                by any path, nor the source one the clone makes; memory both map
+                shared shall stay shared.";
+            attribute :>> criterion = "Stage 9's `space` line, clone: the source's
+                writable translation of a private page gone and a shootdown begun
+                before space_clone answers; a write after the clone by either side,
+                by a kernel copy and to a page made read-only before the clone and
+                writable after it (F-41), unseen by the other; a shared mapping's
+                write seen by both; a page both hold given back to one as the clone
+                goes. A program's own store through a stale translation after a
+                fork is stage 6's USER_COW_PROGRAM check (H.MEM.8, L.user.61;
+                F-41 itself is L.user.60), through the same AddressSpace::fork.";
+            attribute :>> parent = ("O.ISOLATE", "ASR-1");
+        }
     }
 
     package Objects {

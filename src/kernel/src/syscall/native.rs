@@ -506,7 +506,10 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::SpaceMap
         | NativeCall::SpaceUnmap
         | NativeCall::SpaceProtect
-        | NativeCall::SpaceRead => space_call(call, process, &a),
+        | NativeCall::SpaceRead
+        | NativeCall::SpaceAllocate
+        | NativeCall::SpaceWrite
+        | NativeCall::SpaceClone => space_call(call, process, &a),
     }
 }
 
@@ -522,6 +525,9 @@ fn space_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize
         NativeCall::SpaceUnmap => space_unmap(process, handle(a[0]), a[1], a[2]),
         NativeCall::SpaceProtect => space_protect(process, handle(a[0]), a[1], a[2], a[3]),
         NativeCall::SpaceRead => space_read(process, handle(a[0]), a[1], a[2], a[3]),
+        NativeCall::SpaceAllocate => space_allocate(process, handle(a[0]), a[1], a[2], a[3]),
+        NativeCall::SpaceWrite => space_write(process, handle(a[0]), a[1], a[2], a[3]),
+        NativeCall::SpaceClone => space_clone(process, handle(a[0])),
         _ => Err(Errno::ENOSYS),
     }
 }
@@ -3003,6 +3009,16 @@ fn space_protection(protection: u64) -> Result<(bool, bool), Errno> {
 
 /// The space a handle names, if the handle carries `needed`.
 fn space_in(process: &Process, space: Handle, needed: Rights) -> Result<Arc<SpaceRef>, Errno> {
+    space_held(process, space, needed).map(|(space, _)| space)
+}
+
+/// The space a handle names and the rights it carries, if they include
+/// `needed`.
+fn space_held(
+    process: &Process,
+    space: Handle,
+    needed: Rights,
+) -> Result<(Arc<SpaceRef>, Rights), Errno> {
     process.with_handles(|table| {
         let (object, rights) = table.get(space).map_err(table_error)?;
         let Object::Space(space) = object else {
@@ -3011,7 +3027,7 @@ fn space_in(process: &Process, space: Handle, needed: Rights) -> Result<Arc<Spac
         if !rights.contains(needed) {
             return Err(status::ACCESS_DENIED);
         }
-        Ok(Arc::clone(space))
+        Ok((Arc::clone(space), rights))
     })
 }
 
@@ -3183,6 +3199,103 @@ fn space_protect(
             ProtectRefused::Space(why) => space_status(why),
         })?;
     Ok(0)
+}
+
+/// `space_allocate`: private anonymous memory in the space the handle
+/// names, copied on write by a clone (`docs/microkernel/K2.md` §2.3).
+fn space_allocate(
+    process: &Process,
+    space: Handle,
+    address: u64,
+    length: u64,
+    protection: u64,
+) -> Result<usize, Errno> {
+    let (write, execute) = space_protection(protection)?;
+    let needed = if execute {
+        Rights::MAP | Rights::EXECUTE
+    } else {
+        Rights::MAP
+    };
+    let target = space_in(process, space, needed)?;
+    let flags = VmaFlags {
+        write,
+        execute,
+        ..VmaFlags::READ
+    };
+    let at = (address != 0).then_some(address);
+    let _layout = target.space().layout();
+    let mapped = target
+        .space()
+        .allocate_by_handle(at, length, flags)
+        .map_err(space_status)?;
+    usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
+}
+
+/// `space_clone`: a copy-on-write clone of the space the handle names, as
+/// `fork` clones one, answered with the handle's own rights and never more.
+fn space_clone(process: &Process, space: Handle) -> Result<usize, Errno> {
+    let (source, rights) = space_held(process, space, Rights::READ)?;
+    let clone = source.clone_space().map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::Space(clone), rights)
+}
+
+/// `space_write`: copy the caller's buffer into the space the handle names,
+/// a page step at a time through one bounce page, as [`space_read`] copies
+/// the other way: the caller's lock, then the target's, never both. A page
+/// the step faults in, and the copy-on-write copy it makes, are the space
+/// owner's; a write needs a writable region and never makes one.
+fn space_write(
+    process: &Process,
+    space: Handle,
+    address: u64,
+    buffer: u64,
+    length: u64,
+) -> Result<usize, Errno> {
+    let target = space_in(process, space, Rights::WRITE)?;
+    let length = usize::try_from(length)
+        .unwrap_or(usize::MAX)
+        .min(nr::SPACE_COPY_MAX);
+    if length == 0 {
+        return Ok(0);
+    }
+    let mut bounce =
+        fallible::try_filled(0_u8, PAGE_SIZE as usize).map_err(|_| status::NO_MEMORY)?;
+    let mut done = 0_usize;
+    while done < length {
+        let step = space_step(address, done, length).and_then(|(to, step)| {
+            let from = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
+            let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
+            uaccess::copy_from_user(process.space(), from, chunk).map_err(fault)?;
+            let chunk = bounce.get(..step).ok_or(status::FAULT)?;
+            target.charging_owner(|| write_target(target.space(), to, chunk))?;
+            Ok(step)
+        });
+        match step {
+            Ok(step) => done += step,
+            Err(why) if done == 0 => return Err(why),
+            Err(_) => break,
+        }
+    }
+    Ok(done)
+}
+
+/// Write `data` into `space` at `to`, all in one page, faulting the page in
+/// for a write -- which copies a copy-on-write page -- with the space's own
+/// fault, never `oom::fault`, if it is not there to be written yet.
+fn write_target(space: &AddressSpace, to: u64, data: &[u8]) -> Result<(), Errno> {
+    for _ in 0..SPACE_COPY_TRIES {
+        match uaccess::copy_to_user_present(space, to, data) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(_) => return Err(status::FAULT),
+        }
+        match space.fault(to, Access::WRITE) {
+            Ok(()) => {}
+            Err(why) if object::oom::is_charge_refusal(&why) => return Err(status::NO_MEMORY),
+            Err(_) => return Err(status::FAULT),
+        }
+    }
+    Err(status::FAULT)
 }
 
 /// How many times a by-handle copy faults one page in before it gives up: a

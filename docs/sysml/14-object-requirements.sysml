@@ -2166,23 +2166,52 @@ package FerrixObjectRequirements {
             attribute :>> unit = ("syscall::native::space_protect",
                 "user::space::AddressSpace::protect_by_handle", "user::space::within_ceilings");
         }
-        requirement <'L.object.238'> aReadByHandleNeedsReadAndChargesTheOwner : ItemLowLevel {
+        requirement <'L.object.237'> privateMemoryByHandle : ItemLowLevel {
+            attribute :>> statement = "space_allocate shall map fresh private
+                anonymous memory, zero until written, into the space its handle
+                names, with MAP, executable only with EXECUTE on the space handle,
+                never writable and executable (INVALID_ARGS), and refuse a range
+                over a mapping with INVALID_ARGS.";
+            attribute :>> criterion = "An executable allocation through a space
+                handle without EXECUTE is ACCESS_DENIED; a writable and executable
+                one INVALID_ARGS; a read-write one is made where asked and reads
+                zero; a second over it is INVALID_ARGS.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("syscall::native::space_allocate",
+                "user::space::AddressSpace::allocate_by_handle");
+        }
+        requirement <'L.object.238'> aCopyByHandleNeedsItsRightAndChargesTheOwner : ItemLowLevel {
             attribute :>> statement = "space_read shall copy at most SPACE_COPY_MAX
-                bytes out of the space its handle names, with READ, honouring each
-                region's protection, short at the first page it cannot read and
-                FAULT if that is the first; a page it faults in shall be charged to
-                the space's owner and never to the caller, and at the owner's limit
-                the read shall answer NO_MEMORY with nothing killed.";
-            attribute :>> criterion = "Without READ the read is ACCESS_DENIED; a read
-                across a mapping's end is short; a read of an untouched page of a
-                created process's space raises the owner's job's memory by at least
-                a page and leaves the caller's job's unchanged; with the owner's
-                limit at its use the next such read is NO_MEMORY, the OOM kill
-                count and the caller's memory unchanged.";
+                bytes out of the space its handle names, with READ, and space_write
+                into it, with WRITE, each honouring each region's protection, short
+                at the first page it cannot copy and FAULT if that is the first; a
+                page either faults in, and a copy-on-write copy a write makes, shall
+                be charged to the space's owner and never to the caller, and at the
+                owner's limit either shall answer NO_MEMORY with nothing killed.";
+            attribute :>> criterion = "Without READ a read, and without WRITE a
+                write, is ACCESS_DENIED; a read across a mapping's end is short; a
+                read and a write of an untouched page of a created process's space
+                each raise the owner's job's memory by at least a page and leave the
+                caller's job's unchanged; with the owner's limit at its use the next
+                read and the next write are NO_MEMORY, the OOM kill count and the
+                caller's memory unchanged.";
             attribute :>> parent = "H.MEM.24";
             attribute :>> unit = ("syscall::native::space_read",
-                "syscall::native::read_target", "syscall::native::space_step",
+                "syscall::native::space_write", "syscall::native::read_target",
+                "syscall::native::write_target", "syscall::native::space_step",
                 "object::space::SpaceRef::charging_owner", "object::quota::charging_to");
+        }
+        requirement <'L.object.239'> aCloneCarriesItsSourcesRights : ItemLowLevel {
+            attribute :>> statement = "space_clone shall answer a copy-on-write clone
+                of the space its handle names, with READ, through a handle carrying
+                exactly the rights the given handle carries, the clone one native
+                object owned by the caller's job.";
+            attribute :>> criterion = "A clone of a READ and MAP handle carries READ
+                and MAP and nothing else; a clone through a handle without READ is
+                ACCESS_DENIED.";
+            attribute :>> parent = ("H.MEM.24", "H.MEM.25");
+            attribute :>> unit = ("syscall::native::space_clone",
+                "syscall::native::space_held", "object::space::SpaceRef::clone_space");
         }
         requirement <'L.object.240'> anExecutableVmoHandleCannotWrite : ItemLowLevel {
             attribute :>> statement = "vmo_executable shall replace a VMO handle that

@@ -73,6 +73,23 @@ impl SpaceRef {
         })
     }
 
+    /// A copy-on-write clone of this space (`AddressSpace::fork`), charged as
+    /// one object to the running task's job, which owns it.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] for no memory, or a job at its object limit.
+    pub(crate) fn clone_space(&self) -> Result<Arc<SpaceRef>, AllocError> {
+        let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
+        let owner = crate::sched::running_group();
+        let space = self.space.fork().map_err(|_| AllocError)?;
+        fallible::try_arc(SpaceRef {
+            space,
+            owner,
+            charge,
+        })
+    }
+
     /// The space.
     pub(crate) fn space(&self) -> &Arc<AddressSpace> {
         &self.space

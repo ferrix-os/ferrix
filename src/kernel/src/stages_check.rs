@@ -1199,6 +1199,11 @@ pub(super) fn check_spaces() {
          it faulted",
         report.owner_bytes / 1024,
     );
+    println!(
+        "           clone: {} cases, no write crossed between a space and its \
+         copy-on-write clone, F-41's page included; shared stayed shared",
+        report.clone_cases,
+    );
 }
 
 /// Stage 9: the vector registers of a task resumed from a blocking native

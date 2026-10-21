@@ -143,6 +143,67 @@ impl<S: Syscall> Space<S> {
     }
 }
 
+impl<S: Syscall> Space<S> {
+    /// `space_allocate` (0x107D): fresh private memory, zero until written,
+    /// `length` bytes at `at` or wherever the kernel finds room. A clone
+    /// copies it on write.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AccessDenied`] without `MAP` (and `EXECUTE` for
+    /// [`Access::ReadExecute`]); [`Error::InvalidArgs`].
+    pub fn allocate(
+        &self,
+        at: Option<usize>,
+        length: usize,
+        access: Access,
+    ) -> Result<usize, Error> {
+        let value = Call::new(nr::SPACE_ALLOCATE)
+            .value(register(self.handle()))
+            .value(at.unwrap_or(0))
+            .value(length)
+            .value(access.register())
+            .make(self.syscall());
+        decode(value)
+    }
+
+    /// `space_write` (0x107F): copy `buffer` into the space at `at`, at most
+    /// `nr::SPACE_COPY_MAX` bytes, and return how many were copied: short at
+    /// the first page that cannot be written.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AccessDenied`] without `WRITE`; [`Error::Fault`] if the first
+    /// page cannot be written; [`Error::NoMemory`] at the space owner's limit.
+    pub fn write(&self, at: usize, buffer: &[u8]) -> Result<usize, Error> {
+        let value = Call::new(nr::SPACE_WRITE)
+            .value(register(self.handle()))
+            .value(at)
+            .input(buffer)
+            .value(buffer.len())
+            .make(self.syscall());
+        decode(value)
+    }
+
+    /// `space_clone` (0x1080): a copy-on-write clone of the space, with this
+    /// handle's rights, owned by the caller's job.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AccessDenied`] without `READ`; [`Error::NoMemory`].
+    pub fn clone_space(&self) -> Result<Space<S>, Error> {
+        let handle = decode_handle(
+            Call::new(nr::SPACE_CLONE)
+                .value(register(self.handle()))
+                .make(self.syscall()),
+        )?;
+        Ok(Space::from_owned(OwnedHandle::from_raw(
+            self.syscall(),
+            handle,
+        )))
+    }
+}
+
 impl<S: Syscall> Process<S> {
     /// `process_space` (0x1035): a handle to this process's address space,
     /// with `rights`, while it has not started. The handle keeps its rights
