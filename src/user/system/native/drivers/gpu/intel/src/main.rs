@@ -882,7 +882,9 @@ fn stay(time: &Time) -> Result<core::convert::Infallible, Step> {
 fn power<P: ferrix_intel_xelp::backend::Platform>(
     backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
     steps: &Steps,
-) {
+) where
+    P::Memory: serve::AsVmo,
+{
     use ferrix_intel_xelp::rps::intel_gpu_freq;
     let rps = backend.power_up(steps.freq_mhz, true);
     say(format_args!(
@@ -906,6 +908,16 @@ fn power<P: ferrix_intel_xelp::backend::Platform>(
         };
         for (name, val) in [("RP1", rps.caps.rp1_freq), ("RP0", rps.caps.rp0_freq)] {
             let asked = backend.set_frequency_mhz(intel_gpu_freq(val)).unwrap_or(0);
+            // The GT under load: an idle GT runs below its request.
+            let busy = busy_start(backend);
+            say(format_args!(
+                "intel: freqtest {name}: {}",
+                if busy.is_some() {
+                    "a spinning batch keeps RCS0 busy while sampled"
+                } else {
+                    "no spinning batch (refused); sampled idle"
+                }
+            ));
             for n in 0..5 {
                 time.delay_us(100_000);
                 if let Some(sample) = backend.frequency_sample() {
@@ -918,6 +930,18 @@ fn power<P: ferrix_intel_xelp::backend::Platform>(
                         sample.energy_unit
                     ));
                 }
+            }
+            if let Some(busy) = busy {
+                let ended = busy_end(backend, busy, &mut time);
+                say(format_args!(
+                    "intel: freqtest {name}: the spinning batch {}",
+                    match ended {
+                        BusyEnd::Ended => "ran until ended",
+                        BusyEnd::Early =>
+                            "had completed before it was ended: the GT was NOT kept busy",
+                        BusyEnd::Stuck => "did not complete within 1 s of being ended",
+                    }
+                ));
             }
         }
         let back = backend
@@ -932,6 +956,137 @@ fn power<P: ferrix_intel_xelp::backend::Platform>(
         say(format_args!(
             "intel: freqlog: one line a second while serving (ferrix.intelgpu.freqlog)"
         ));
+    }
+}
+
+/// Where the spinning batch sits in its own VM, and the request id it runs
+/// as (above any the front end gives, which count up from 1).
+const BUSY_AT: u64 = 0x1_0000_0000;
+const BUSY_REQUEST: u64 = u64::MAX - 1;
+
+/// The spinning batch of [`busy_start`].
+struct Busy<M> {
+    memory: M,
+    vm: ferrix_intel_xelp::frontend::VmId,
+    context: ferrix_intel_xelp::frontend::HwContext,
+}
+
+/// How [`busy_end`] found the batch.
+enum BusyEnd {
+    /// It completed once ended.
+    Ended,
+    /// It had completed before: it never spun.
+    Early,
+    /// It did not complete within a second of being ended.
+    Stuck,
+}
+
+/// `igt_spinner` through the back end: an arbitration point and a jump
+/// back to itself (PPGTT), on the first engine (RCS0) in a VM of its own,
+/// so the GT is busy while freqtest samples. `None` if any step is refused.
+fn busy_start<P: ferrix_intel_xelp::backend::Platform>(
+    backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+) -> Option<Busy<P::Memory>>
+where
+    P::Memory: serve::AsVmo,
+{
+    use ferrix_intel_xelp::commands::gpu;
+    use ferrix_intel_xelp::frontend::{Backend as Fb, ContextParams};
+    use serve::AsVmo as _;
+    let memory = Fb::create_memory(backend, 4096).ok()?;
+    let words = [
+        gpu::MI_ARB_CHECK,
+        gpu::MI_BATCH_BUFFER_START_GEN8 | (1 << 8),
+        BUSY_AT as u32,
+        (BUSY_AT >> 32) as u32,
+    ];
+    let mut bytes = [0_u8; 16];
+    for (chunk, word) in bytes.chunks_exact_mut(4).zip(words) {
+        chunk.copy_from_slice(&word.to_le_bytes());
+    }
+    memory.vmo().write(&bytes, 0).ok()?;
+    let engine = *Fb::facts(backend).engines.first()?;
+    let vm = Fb::vm_create(backend).ok()?;
+    if Fb::bind(backend, vm, BUSY_AT, &memory, 4096, 0).is_err() {
+        Fb::vm_destroy(backend, vm);
+        return None;
+    }
+    let Ok(context) = Fb::context_create(backend, vm, engine, ContextParams::DEFAULT) else {
+        Fb::unbind(backend, vm, BUSY_AT, 4096);
+        Fb::vm_destroy(backend, vm);
+        return None;
+    };
+    if Fb::submit(backend, context, BUSY_AT, 16, BUSY_REQUEST).is_err() {
+        Fb::context_destroy(backend, context);
+        Fb::unbind(backend, vm, BUSY_AT, 4096);
+        Fb::vm_destroy(backend, vm);
+        return None;
+    }
+    Fb::service(
+        backend,
+        ferrix_rt::linux::monotonic_nanos().unwrap_or(0),
+        false,
+    );
+    Some(Busy {
+        memory,
+        vm,
+        context,
+    })
+}
+
+/// End [`busy_start`]'s batch (`MI_BATCH_BUFFER_END` over its first dword,
+/// as `igt_spinner_end` does), wait up to a second for it, and free it.
+fn busy_end<P: ferrix_intel_xelp::backend::Platform>(
+    backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+    busy: Busy<P::Memory>,
+    time: &mut Time,
+) -> BusyEnd
+where
+    P::Memory: serve::AsVmo,
+{
+    use ferrix_intel_xelp::commands::gpu;
+    use ferrix_intel_xelp::frontend::Backend as Fb;
+    use serve::AsVmo as _;
+    let mut done = false;
+    let take = |backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>| {
+        Fb::service(
+            backend,
+            ferrix_rt::linux::monotonic_nanos().unwrap_or(0),
+            false,
+        );
+        let mut seen = false;
+        Fb::completed(backend, &mut |id, _| {
+            seen |= id == BUSY_REQUEST;
+        });
+        seen
+    };
+    let early = take(backend);
+    done |= early;
+    let _ = busy
+        .memory
+        .vmo()
+        .write(&gpu::MI_BATCH_BUFFER_END.to_le_bytes(), 0);
+    for _ in 0..1000 {
+        if done {
+            break;
+        }
+        time.delay_us(1_000);
+        done |= take(backend);
+    }
+    if done {
+        Fb::context_destroy(backend, busy.context);
+        Fb::unbind(backend, busy.vm, BUSY_AT, 4096);
+        Fb::vm_destroy(backend, busy.vm);
+    }
+    // A batch still running keeps its memory, VM and context: leaked, for
+    // the box's checkpoint alone, rather than freed under the GPU.
+    match (early, done) {
+        (true, _) => BusyEnd::Early,
+        (false, true) => BusyEnd::Ended,
+        (false, false) => {
+            let _kept = core::mem::ManuallyDrop::new(busy.memory);
+            BusyEnd::Stuck
+        }
     }
 }
 

@@ -830,6 +830,19 @@ and RC6 residency stays near zero, since the driver holds render and GT
 forcewake for its life where i915 takes it per access. The box checkpoint
 is `intelgpu-m2.sh BOX freq NAME`.
 
+**RP0 under load (2026-10-21).** The box's first freq checkpoint ran RP1 at
+300 MHz, as asked, but with RP0 asked it ran at 350 MHz (`RPSTAT1`
+0x0150a86c, CAGF 21). The GT was idle while it was sampled. freqtest now
+keeps RCS0 busy during each hold, through the back end, with a spinning
+batch (`igt_spinner`: `MI_ARB_CHECK` and a PPGTT jump back to itself, in
+a VM and context of its own). The spinner is ended by `MI_BATCH_BUFFER_END`
+over its first dword and says whether it ran until then. Each request now
+also writes `GEN6_RP_INTERRUPT_LIMITS` as `intel_rps_set` does
+(`rps_limits`: the soft maximum, `RP0`, in bits 31:23; the soft minimum,
+`RPn`, in bits 22:14 once the request is at or below it). If RP0 still
+lands near 350 MHz with the GT busy, what is left is a power or current
+limit outside RPS.
+
 **A render-node call that never completes (2026-10-21).** On the box the
 GRYPHLINK launcher (DXVK 3.1.1 on anv, immediate present, no present wait)
 froze after its first frame. Its main thread spun at full speed, 40 % of

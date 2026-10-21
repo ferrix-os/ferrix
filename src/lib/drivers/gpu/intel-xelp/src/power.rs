@@ -81,11 +81,14 @@ impl Rps {
         state
     }
 
-    /// `rps_set` with `update`: `gen6_rps_set`, then the power mode
-    /// `gen6_rps_set_thresholds` picks for the new request.
+    /// `intel_rps_set`: `rps_set` with `update` (`gen6_rps_set`, then the
+    /// power mode `gen6_rps_set_thresholds` picks for the new request), and
+    /// the interrupt limits (`rps_limits`).
     pub fn set<M: Mmio + ?Sized>(&mut self, mmio: &mut M, val: u32) {
         let val = val.clamp(self.caps.min_freq, self.caps.rp0_freq);
         let (reg, value) = rps::gen6_rps_set(val);
+        mmio.write32(reg.offset(), value);
+        let (reg, value) = rps::rps_limits(self.caps, val);
         mmio.write32(reg.offset(), value);
         let mode = rps::gen6_rps_power_for(self.mode, val, self.cur, self.caps);
         if mode != self.mode {

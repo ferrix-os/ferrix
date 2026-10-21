@@ -628,6 +628,11 @@ fn rps_starts_at_rp1_takes_a_fixed_request_and_logs_each_second() {
     assert_eq!(state.cur, 18, "RP1 in 16.67 MHz units");
     let regs = &be.platform().gpu.regs;
     assert_eq!(regs[&0xa008], 18 << 23, "GEN6_RPNSWREQ");
+    assert_eq!(
+        regs[&0xa014],
+        60 << 23,
+        "GEN6_RP_INTERRUPT_LIMITS: RP0 only"
+    );
     assert_eq!(regs[&0xa010], 50_000, "GEN6_RP_DOWN_TIMEOUT");
     assert_eq!(regs[&0xa024] & (1 << 7), 1 << 7, "GEN6_RP_ENABLE");
     assert_ne!(regs[&0xa090], 0, "GEN6_RC_CONTROL");
@@ -656,6 +661,11 @@ fn rps_starts_at_rp1_takes_a_fixed_request_and_logs_each_second() {
     assert_eq!(be.platform().gpu.regs[&0xa008], 60 << 23);
     assert_eq!(be.set_frequency_mhz(5000), Some(1000));
     assert_eq!(be.set_frequency_mhz(10), Some(200));
+    assert_eq!(
+        be.platform().gpu.regs[&0xa014],
+        (60 << 23) | (12 << 14),
+        "GEN6_RP_INTERRUPT_LIMITS: RP0 and, at RPn, RPn"
+    );
     // The actual frequency read back from GEN12_RPSTAT1's CAGF (bits 19:11).
     be.platform().gpu.write32(0x13_81b4, 36 << 11);
     assert_eq!(be.frequency_sample().expect("up").actual_mhz, 600);

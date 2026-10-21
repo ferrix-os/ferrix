@@ -214,3 +214,19 @@ pub const fn energy_microjoules(before: u32, after: u32, unit: u32) -> u64 {
 pub const fn rc6_residency_ns(count: u32) -> u64 {
     count as u64 * 1280
 }
+
+/// `rps_limits` for Gen9+, written by `intel_rps_set` to
+/// `GEN6_RP_INTERRUPT_LIMITS`: the soft maximum (`RP0` here, nothing lowers
+/// it) in bits 31:23, and the soft minimum (`RPn`) in bits 22:14 once the
+/// request is at or below it.
+#[must_use]
+pub const fn rps_limits(caps: FreqCaps, val: u32) -> (Reg, u32) {
+    let mut limits = caps.rp0_freq << 23;
+    if val <= caps.min_freq {
+        limits |= caps.min_freq << 14;
+    }
+    (
+        crate::generated::intel_gt_regs::GEN6_RP_INTERRUPT_LIMITS,
+        limits,
+    )
+}
