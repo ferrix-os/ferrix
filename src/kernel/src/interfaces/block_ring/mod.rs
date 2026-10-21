@@ -687,7 +687,9 @@ fn decode_hello(
 /// Send REFUSED with `refusal`. A driver that has gone hears nothing.
 fn refuse(control: &Endpoint, refusal: Refusal) {
     let bytes = Message::Refused(refusal.raw()).encode().as_bytes().to_vec();
-    let _ = control.write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+    let _ = control.write(Sender::KERNEL, bytes, 0, || {
+        Ok::<Vec<Transfer>, Infallible>(Vec::new())
+    });
 }
 
 /// Take up the ring an accepted HELLO describes, publish its disk and answer
@@ -816,7 +818,9 @@ fn take_up<'s>(
     let handed = (Object::Port(Arc::clone(&kernel_port)), Rights::WRITE);
     if start
         .control
-        .write(Sender::KERNEL, ready, 1, || Ok::<Vec<Transfer>, Infallible>(vec![handed]))
+        .write(Sender::KERNEL, ready, 1, || {
+            Ok::<Vec<Transfer>, Infallible>(vec![handed])
+        })
         .is_err()
     {
         set_served(start.id, None);

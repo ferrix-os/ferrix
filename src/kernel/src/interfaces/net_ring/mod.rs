@@ -354,7 +354,9 @@ fn refuse(control: &Endpoint, refusal: Refusal) {
     let mut bytes = [0_u8; MAX_MESSAGE];
     if let Ok(written) = Message::Refused(refusal).encode(&mut bytes) {
         let body = bytes.get(..written).unwrap_or_default().to_vec();
-        let _ = control.write(Sender::KERNEL, body, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+        let _ = control.write(Sender::KERNEL, body, 0, || {
+            Ok::<Vec<Transfer>, Infallible>(Vec::new())
+        });
     }
 }
 
@@ -474,7 +476,9 @@ fn take_up(start: &Start, message: &ChannelMessage) -> Result<Serving, Refusal> 
     let handed = (Object::Port(Arc::clone(&kernel_port)), ready_rights);
     if start
         .control
-        .write(Sender::KERNEL, ready, 1, || Ok::<Vec<Transfer>, Infallible>(vec![handed]))
+        .write(Sender::KERNEL, ready, 1, || {
+            Ok::<Vec<Transfer>, Infallible>(vec![handed])
+        })
         .is_err()
     {
         net::device::park(key);

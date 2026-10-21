@@ -208,9 +208,9 @@ impl InputDevice {
                 continue;
             };
             let bytes = Message::Status(status).encode().as_bytes().to_vec();
-            let _ = self
-                .control
-                .write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+            let _ = self.control.write(Sender::KERNEL, bytes, 0, || {
+                Ok::<Vec<Transfer>, Infallible>(Vec::new())
+            });
         }
     }
 
@@ -384,7 +384,9 @@ fn receive(control: &Endpoint, deadline: u64) -> Option<ChannelMessage> {
 #[inline(never)]
 fn refuse(control: &Endpoint, refusal: Refusal) {
     let bytes = Message::Refused(refusal).encode().as_bytes().to_vec();
-    let _ = control.write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+    let _ = control.write(Sender::KERNEL, bytes, 0, || {
+        Ok::<Vec<Transfer>, Infallible>(Vec::new())
+    });
 }
 
 /// Wait for HELLO and publish the device, or refuse it.
@@ -470,7 +472,9 @@ fn send_ready(control: &Endpoint, index: u32) -> Result<(), Refusal> {
     let port = Port::new().map_err(|_| Refusal::Malformed)?;
     let handed = vec![(Object::Port(port), Rights::WRITE)];
     control
-        .write(Sender::KERNEL, ready, 1, || Ok::<Vec<Transfer>, Infallible>(handed))
+        .write(Sender::KERNEL, ready, 1, || {
+            Ok::<Vec<Transfer>, Infallible>(handed)
+        })
         .map_err(|_| Refusal::Malformed)
 }
 

@@ -118,9 +118,7 @@ fn read_attested(side: &Side, end: Handle) -> Result<Attested, Errno> {
         nr::CHANNEL_READ_ATTESTED,
         &[reg(end), INBOX, 64, HANDLES, 4, RECORD],
     )?;
-    let record = side
-        .get(RECORD, RECORD_BYTES)
-        .map_err(|_| status::FAULT)?;
+    let record = side.get(RECORD, RECORD_BYTES).map_err(|_| status::FAULT)?;
     let word = |at: usize, width: usize| {
         let mut raw = [0_u8; 8];
         if let (Some(to), Some(from)) = (raw.get_mut(..width), record.get(at..at + width)) {
@@ -129,9 +127,7 @@ fn read_attested(side: &Side, end: Handle) -> Result<Attested, Errno> {
         u64::from_le_bytes(raw)
     };
     let bytes = word(0, 4) as u32;
-    let body = side
-        .get(INBOX, bytes as usize)
-        .map_err(|_| status::FAULT)?;
+    let body = side.get(INBOX, bytes as usize).map_err(|_| status::FAULT)?;
     Ok(Attested {
         bytes,
         handles: word(4, 4) as u32,
@@ -306,7 +302,11 @@ fn check_the_writer_not_the_body(
         return Err(WRONG);
     }
     expect_from(b, far, &forged, writer, WRONG, report)?;
-    let process = give(b, Object::Process(ProcessRef::new(&a.process)), Rights::NONE)?;
+    let process = give(
+        b,
+        Object::Process(ProcessRef::new(&a.process)),
+        Rights::NONE,
+    )?;
     let job = give(b, Object::Job(a.process.job()), Rights::NONE)?;
     if object_id(b, process) != Ok(writer.0) || object_id(b, job) != Ok(writer.1) {
         return Err("sender case 1: object_id did not answer the writer's process and job ids");
@@ -346,10 +346,7 @@ fn write_into_the_slot(_argument: usize) {
 
 /// Cases 2 and 8: a message `channel_write_read` wrote into the slot reads as
 /// its writer's, and the writer's empty answer carries no identity.
-fn check_the_slot_and_the_registers(
-    b: &Side,
-    report: &mut Report,
-) -> Result<(), &'static str> {
+fn check_the_slot_and_the_registers(b: &Side, report: &mut Report) -> Result<(), &'static str> {
     // A process of its own, since the writer's thread ends it.
     let writer = Side::new()?;
     let (near, far) = connect(&writer, b)?;
@@ -403,10 +400,7 @@ fn check_a_transfer(a: &Side, b: &Side, c: &Side, report: &mut Report) -> Result
     write(a, x_a, b"before", &[]).map_err(|_| "sender case 3: channel_write failed")?;
     write(a, y_a, b"end", &[x_a]).map_err(|_| "sender case 3: an end could not be sent")?;
     let _ = c
-        .call(
-            nr::CHANNEL_READ,
-            &[reg(y_c), INBOX, 64, HANDLES, 4, RECORD],
-        )
+        .call(nr::CHANNEL_READ, &[reg(y_c), INBOX, 64, HANDLES, 4, RECORD])
         .map_err(|_| "sender case 3: the sent end could not be read")?;
     let x_c = Handle(c.get_u32(HANDLES)?);
     write(c, x_c, b"after", &[]).map_err(|_| "sender case 3: C's write failed")?;
@@ -420,10 +414,7 @@ fn check_a_transfer(a: &Side, b: &Side, c: &Side, report: &mut Report) -> Result
     write(a, z_a, b"waiting", &[]).map_err(|_| "sender case 3: channel_write failed")?;
     write(b, w_b, b"end", &[z_b]).map_err(|_| "sender case 3: an end could not be sent")?;
     let _ = c
-        .call(
-            nr::CHANNEL_READ,
-            &[reg(w_c), INBOX, 64, HANDLES, 4, RECORD],
-        )
+        .call(nr::CHANNEL_READ, &[reg(w_c), INBOX, 64, HANDLES, 4, RECORD])
         .map_err(|_| "sender case 3: the sent end could not be read")?;
     let z_c = Handle(c.get_u32(HANDLES)?);
     expect_from(c, z_c, b"waiting", ids_of(a), MOVED, report)
@@ -436,7 +427,11 @@ fn check_an_ended_writer(b: &Side, highest: u64, report: &mut Report) -> Result<
     let (near, far) = connect(&gone, b)?;
     let ids = ids_of(&gone);
     let pid = gone.process.pid();
-    let handle = give(b, Object::Process(ProcessRef::new(&gone.process)), Rights::NONE)?;
+    let handle = give(
+        b,
+        Object::Process(ProcessRef::new(&gone.process)),
+        Rights::NONE,
+    )?;
     write(&gone, near, b"last words", &[]).map_err(|_| "sender case 4: channel_write failed")?;
     gone.close_everything();
     process::kill(&gone.process, KILLED_STATUS);
@@ -516,12 +511,11 @@ fn check_the_refusals(a: &Side, b: &Side, report: &mut Report) -> Result<(), &'s
     write(a, near, body, &[]).map_err(|_| "sender case 9: channel_write failed")?;
 
     // Without READ: refused, nothing taken.
-    let write_only = b
-        .handle(
-            nr::HANDLE_DUPLICATE,
-            &[reg(far), u64::from(Rights::WRITE.0)],
-            "sender case 9: handle_duplicate failed",
-        )?;
+    let write_only = b.handle(
+        nr::HANDLE_DUPLICATE,
+        &[reg(far), u64::from(Rights::WRITE.0)],
+        "sender case 9: handle_duplicate failed",
+    )?;
     if read_attested(b, write_only) != Err(status::ACCESS_DENIED) {
         return Err("sender case 9: channel_read_attested without READ was not ACCESS_DENIED");
     }
@@ -541,7 +535,9 @@ fn check_the_refusals(a: &Side, b: &Side, report: &mut Report) -> Result<(), &'s
     sizes.extend_from_slice(&16_u32.to_ne_bytes());
     sizes.extend_from_slice(&0_u32.to_ne_bytes());
     if record.get(..8) != Some(sizes.as_slice())
-        || record.get(8..).is_none_or(|rest| rest.iter().any(|&byte| byte != UNTOUCHED))
+        || record
+            .get(8..)
+            .is_none_or(|rest| rest.iter().any(|&byte| byte != UNTOUCHED))
     {
         return Err("sender case 9: BUFFER_TOO_SMALL wrote more than the sizes");
     }
@@ -569,7 +565,11 @@ fn check_the_refusals(a: &Side, b: &Side, report: &mut Report) -> Result<(), &'s
     if object_id(b, far) != Err(status::WRONG_TYPE) {
         return Err("sender case 9: object_id on a channel was not WRONG_TYPE");
     }
-    let process = give(b, Object::Process(ProcessRef::new(&a.process)), Rights::NONE)?;
+    let process = give(
+        b,
+        Object::Process(ProcessRef::new(&a.process)),
+        Rights::NONE,
+    )?;
     if b.call(nr::OBJECT_ID, &[reg(process), UNMAPPED]) != Err(status::FAULT) {
         return Err("sender case 9: object_id to an unwritable answer was not FAULT");
     }

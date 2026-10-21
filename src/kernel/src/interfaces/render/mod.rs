@@ -794,7 +794,9 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Renderer>, Refu
     ];
     if start
         .control
-        .write(Sender::KERNEL, ready, 2, || Ok::<Vec<Transfer>, Infallible>(handed))
+        .write(Sender::KERNEL, ready, 2, || {
+            Ok::<Vec<Transfer>, Infallible>(handed)
+        })
         .is_err()
     {
         NUMBERS.give_back(index);

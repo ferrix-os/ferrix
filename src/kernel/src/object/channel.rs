@@ -760,11 +760,7 @@ impl Endpoint {
     /// # Errors
     ///
     /// [`WriteFailure`], never `Take`.
-    pub(crate) fn write_small(
-        &self,
-        sender: Sender,
-        bytes: &[u8],
-    ) -> Result<(), WriteFailure<()>> {
+    pub(crate) fn write_small(&self, sender: Sender, bytes: &[u8]) -> Result<(), WriteFailure<()>> {
         let peer = self.peer();
         let (fired, parked) = {
             let mut inbox = peer.inbox.lock();

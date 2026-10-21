@@ -257,7 +257,9 @@ impl Reader {
         if ferrix_logctl::message::data_header(&mut data, lost, read.copied).is_err() {
             return Answer::Failed;
         }
-        match control.write(Sender::KERNEL, data, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new())) {
+        match control.write(Sender::KERNEL, data, 0, || {
+            Ok::<Vec<Transfer>, Infallible>(Vec::new())
+        }) {
             Ok(()) => {
                 self.carried = self.carried.saturating_add(read.copied as u64);
                 Answer::Sent

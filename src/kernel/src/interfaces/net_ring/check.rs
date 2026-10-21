@@ -479,7 +479,9 @@ impl Driver {
             ),
         ];
         control
-            .write(Sender::KERNEL, body, 3, || Ok::<Vec<Transfer>, Infallible>(handles))
+            .write(Sender::KERNEL, body, 3, || {
+                Ok::<Vec<Transfer>, Infallible>(handles)
+            })
             .map_err(|_| "a HELLO could not be sent")?;
         Ok(())
     }

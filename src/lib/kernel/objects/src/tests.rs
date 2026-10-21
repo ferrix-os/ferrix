@@ -322,7 +322,11 @@ fn a_sender_travels_with_its_message_unchanged() {
     assert_eq!(head.sender, (7, 3), "popped with its own");
     q.unpop(head).unwrap();
     let senders: Vec<(u64, u64)> = q.drain().into_iter().map(|m| m.sender).collect();
-    assert_eq!(senders, vec![(7, 3), (8, 4)], "put back and drained with theirs");
+    assert_eq!(
+        senders,
+        vec![(7, 3), (8, 4)],
+        "put back and drained with theirs"
+    );
 }
 
 #[test]

@@ -14,7 +14,8 @@ use crate::signals::Signals;
 use crate::status;
 use crate::types::{
     APERTURE_INFO_BYTES, ApertureInfo, DEVICE_INFO_BYTES, DeviceInfo, IoMappingSpec,
-    PROCESS_EXITED, PROCESS_KILLED, PROCESS_RUNNING, PortPacket, ProcessStatus, ReadActual, ReadAttested,
+    PROCESS_EXITED, PROCESS_KILLED, PROCESS_RUNNING, PortPacket, ProcessStatus, ReadActual,
+    ReadAttested,
 };
 
 #[test]

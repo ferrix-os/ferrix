@@ -57,7 +57,9 @@ pub(crate) fn run() -> Result<u32, &'static str> {
     step("a put-back into an empty inbox")?;
     let _ = first.read_small();
     step("a small read that emptied the inbox")?;
-    let _ = second.write(Sender::KERNEL, alloc::vec![2_u8; 3], 0, || Ok::<_, ()>(Vec::new()));
+    let _ = second.write(Sender::KERNEL, alloc::vec![2_u8; 3], 0, || {
+        Ok::<_, ()>(Vec::new())
+    });
     step("a write into an empty inbox")?;
     let _ = first.read_small();
     step("a small read of a queued message")?;
@@ -76,7 +78,9 @@ pub(crate) fn run() -> Result<u32, &'static str> {
         };
         let what = match (seed >> 16) % 5 {
             0 => {
-                let _ = other.write(Sender::KERNEL, alloc::vec![7_u8; 3], 0, || Ok::<_, ()>(Vec::new()));
+                let _ = other.write(Sender::KERNEL, alloc::vec![7_u8; 3], 0, || {
+                    Ok::<_, ()>(Vec::new())
+                });
                 "a write"
             }
             1 => {

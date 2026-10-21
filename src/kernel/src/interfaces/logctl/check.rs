@@ -138,7 +138,9 @@ fn write(driver: &Endpoint, message: &Message<'_>) -> Result<(), &'static str> {
         .map_err(|_| "the log check could not encode its message")?;
     bytes.truncate(len);
     driver
-        .write(Sender::KERNEL, bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()))
+        .write(Sender::KERNEL, bytes, 0, || {
+            Ok::<Vec<Transfer>, Infallible>(Vec::new())
+        })
         .map_err(|_| "the log core's end of the channel would not take a message")
 }
 

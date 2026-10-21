@@ -451,6 +451,26 @@ package FerrixItemRequirements {
                 line); a filtered call is refused with the filter's errno.";
             attribute :>> parent = ("G.7", "O.CAPABILITY");
         }
+        requirement <'H.OBJ.19'> everyMessageSaysWhoWroteIt : ItemHighLevel {
+            attribute :>> statement = "Every channel message shall carry the identity
+                of the process that wrote it and of the job that process was in at the
+                write, written by the kernel at the write and never taken from the
+                message or the writer's arguments, and readable by its reader with the
+                message; a process's identity shall never be given to another process
+                while the kernel runs. A message the kernel writes shall carry zero
+                and zero, which attest that the kernel wrote it, not that its content
+                is the kernel's own. The identity is the writer's, not its
+                credentials (docs/microkernel/K6.md, MICROKERNEL.md §3 K6).";
+            attribute :>> criterion = "Stage 9's `sender` line: messages read with
+                channel_read_attested carry their writer's process and job ids, which
+                object_id confirms, whatever the body says, through the slot, either
+                end's transfer, the writer's end and a move between jobs; the kernel's
+                read as zero and zero; every process made has an id above every
+                earlier one; channel_write_read answers none. Stage 8's exec check: a
+                process's id survives its execve. Each with its negative control
+                (K6.md §7).";
+            attribute :>> parent = ("G.7", "O.CAPABILITY");
+        }
     }
 
     package Scheduling {

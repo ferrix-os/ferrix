@@ -469,7 +469,9 @@ fn receive(control: &Endpoint, deadline: u64) -> Option<ChannelMessage> {
 fn send(control: &Endpoint, message: &Message) -> bool {
     let bytes = message.encode().as_bytes().to_vec();
     control
-        .write(Sender::KERNEL, bytes, 0, || Ok::<Vec<_>, Infallible>(Vec::new()))
+        .write(Sender::KERNEL, bytes, 0, || {
+            Ok::<Vec<_>, Infallible>(Vec::new())
+        })
         .is_ok()
 }
 
