@@ -101,6 +101,10 @@ pub enum Object {
     /// grants `memscrub` a copy; `memory_scrub` answers a holder with
     /// `MANAGE`.
     MemoryScrub,
+    /// One faulting thread, held in the kernel until its supervisor decides
+    /// (`docs/microkernel/K4.md` §2.1). Its last handle closed undecided
+    /// hands the fault on.
+    Exception(Arc<exception::Exception>),
 }
 
 /// A queue nothing is woken on, for objects whose signals never change.
@@ -129,7 +133,8 @@ impl Object {
             | Object::Starter
             | Object::Audit
             | Object::CpuService
-            | Object::MemoryScrub => Signals::NONE,
+            | Object::MemoryScrub
+            | Object::Exception(_) => Signals::NONE,
         }
     }
 
@@ -154,7 +159,8 @@ impl Object {
             | Object::Starter
             | Object::Audit
             | Object::CpuService
-            | Object::MemoryScrub => &QUIET,
+            | Object::MemoryScrub
+            | Object::Exception(_) => &QUIET,
         }
     }
 }
@@ -327,7 +333,8 @@ impl Object {
             | Object::Starter
             | Object::Audit
             | Object::CpuService
-            | Object::MemoryScrub => true,
+            | Object::MemoryScrub
+            | Object::Exception(_) => true,
             Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,
         }
     }
