@@ -21,9 +21,10 @@
 //! section, because it runs with interrupts masked, so taking a handler out of
 //! the table and then waiting a grace period leaves nothing still running it.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use ferrix_sync::IrqSpinLock;
+use ferrix_sched::MAX_CPUS;
+use ferrix_sync::{IrqControl, IrqSpinLock};
 
 /// Interrupt numbers the table can hold.
 ///
@@ -76,6 +77,69 @@ static DELIVERED: AtomicU64 = AtomicU64::new(0);
 /// kernel forgot to quiesce or a controller programmed wrongly, and both are
 /// worth seeing in the boot log rather than discovering as a livelock.
 static UNCLAIMED: AtomicU64 = AtomicU64::new(0);
+
+/// Whether each processor is servicing an interrupt: set by [`serviced`]
+/// around the architecture's service loop.
+static SERVICING: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
+
+/// This processor's [`SERVICING`] flag. Before the processors' records are
+/// installed (`smp::discover`) only the boot processor runs, and the timer
+/// may already be ticking, so its flag, the first, is used.
+fn servicing() -> Option<&'static AtomicBool> {
+    match crate::smp::this_cpu() {
+        Some(cpu) => SERVICING.get(cpu.logical),
+        None => SERVICING.first(),
+    }
+}
+
+/// Run `service`, the architecture's interrupt service, marked as interrupt
+/// context on this processor ([`in_interrupt`]).
+pub(crate) fn serviced<R>(service: impl FnOnce() -> R) -> R {
+    let flag = servicing();
+    let outer = flag.is_some_and(|flag| flag.swap(true, Ordering::AcqRel));
+    let done = service();
+    if let Some(flag) = flag
+        && !outer
+    {
+        flag.store(false, Ordering::Release);
+    }
+    done
+}
+
+/// Whether this processor is servicing an interrupt: a memory reservation is
+/// never drawn on there (`docs/microkernel/K12.md` §2.4, ledger 2550 (1)), so
+/// that work done in an interrupt for one job never takes the frames another
+/// was promised.
+///
+/// The processor and its flag are read with interrupts masked, so a task
+/// cannot be moved between the two and read another processor's flag
+/// (ledger 2783 (1)): a task reads its own processor's `false`, and an
+/// interrupt, which runs masked where it was taken, its own `true`.
+///
+/// Every hardware interrupt the kernel handles reaches [`serviced`]: on all
+/// three architectures a device's, the local timer's and an IPI's arrive
+/// through the one entry (`ferrix_trap_entry`) at `trap::dispatch`, which
+/// marks the service loop. What does not: on x86-64 the paranoid entries
+/// (`#DB`, NMI, `#MC`), which count or stop and
+/// allocate nothing, and the spurious and interrupt-remapping check
+/// vectors, which `service_interrupts` acknowledges without dispatching.
+/// [`dispatch`] counts any interrupt it runs unmarked ([`unmarked`]), and
+/// stage 9's `reserve` line requires none.
+pub(crate) fn in_interrupt() -> bool {
+    let saved = <crate::arch::Irq as IrqControl>::disable();
+    let set = servicing().is_some_and(|flag| flag.load(Ordering::Acquire));
+    <crate::arch::Irq as IrqControl>::restore(saved);
+    set
+}
+
+/// Interrupts [`dispatch`] ran outside [`serviced`] since boot.
+static UNMARKED: AtomicU64 = AtomicU64::new(0);
+
+/// How many interrupts ran their handler unmarked as interrupt context:
+/// none, if every entry marks its service loop.
+pub(crate) fn unmarked() -> u64 {
+    UNMARKED.load(Ordering::Relaxed)
+}
 
 /// Where a device writes to raise one allocated interrupt, and the number it
 /// then arrives as. What `arch::msi_allocate` hands out.
@@ -191,6 +255,9 @@ pub(crate) fn dispatch(irq: u32) {
     match handler {
         Some(handler) => {
             let _ = DELIVERED.fetch_add(1, Ordering::Relaxed);
+            if !in_interrupt() {
+                let _ = UNMARKED.fetch_add(1, Ordering::Relaxed);
+            }
             handler(irq);
         }
         None => {

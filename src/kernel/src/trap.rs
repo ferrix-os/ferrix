@@ -92,6 +92,13 @@ pub(crate) fn user_interrupt_count() -> u64 {
     USER_INTERRUPTS.load(Ordering::Relaxed)
 }
 
+/// The architecture's interrupt service, marked as interrupt context for
+/// its length (`irq::in_interrupt`): a frame taken in it never draws on a
+/// memory reservation (`docs/microkernel/K12.md` §2.4).
+fn service_interrupts(frame: &mut arch::TrapFrame) {
+    crate::irq::serviced(|| arch::service_interrupts(frame, crate::irq::dispatch));
+}
+
 /// Where every trap arrives, from any architecture's entry stub.
 pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
     // From user mode, the task's time is kernel time from here to the way
@@ -125,7 +132,7 @@ pub(crate) fn dispatch(frame: &mut arch::TrapFrame) {
             if frame.came_from_user() {
                 let _ = USER_INTERRUPTS.fetch_add(1, Ordering::Relaxed);
             }
-            arch::service_interrupts(frame, crate::irq::dispatch);
+            service_interrupts(frame);
             // And only now, with the controller told this interrupt is done,
             // may the processor go and run something else. Switching inside
             // the handler would leave an interrupt in service for as long as

@@ -476,6 +476,102 @@ package FerrixMemoryRequirements {
         }
     }
 
+    package Reservations {
+        doc /* src/kernel/src/mm/reservation.rs: frames the kernel promises a
+             * job (K12, docs/microkernel/K12.md). F stands for the free
+             * frames, W for the watermark and O for the outstanding promise,
+             * the sum over the reservations of size less drawn. */
+
+        requirement <'L.mm.76'> aReservationIsAdmittedUnderTheLock : ItemLowLevel {
+            attribute :>> statement = "A reservation's growth by d frames of
+                promise shall be admitted in one hold of the frame allocator's
+                lock only if F - d >= W + O, raising O by d; a refusal shall
+                answer the shortfall and change nothing; a shrink shall always
+                be admitted.";
+            attribute :>> criterion = "At stage 2 a reservation of F - W - O + 1
+                frames is refused with O unchanged, and one of 64 frames raises O
+                by exactly 64.";
+            attribute :>> parent = "H.QUOTA.16";
+            attribute :>> unit = ("mm::reservation::resize", "mm::reservation_resize",
+                "mm::reservation::bind", "mm::reservation_bind");
+        }
+        requirement <'L.mm.77'> aProgramStopsAtThePromise : ItemLowLevel {
+            attribute :>> statement = "A frame, run or page table of a program's
+                not drawn from a reservation shall be refused when taking its n
+                frames would leave F - n < W + O.";
+            attribute :>> criterion = "At stage 2, with 64 frames promised,
+                program frames taken until refused leave exactly W + 64 free.";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = ("mm::reservation::take", "mm::take_frames",
+                "mm::allocate_program_frames", "mm::program_floor");
+        }
+        requirement <'L.mm.78'> theKernelStopsAtThePromise : ItemLowLevel {
+            attribute :>> statement = "allocate_frames, allocate_frame_run and the
+                heap's page supply shall be refused when taking n frames would
+                leave F - n < O.";
+            attribute :>> criterion = "At stage 2, with 64 frames promised and the
+                programs stopped, kernel frames taken until refused leave
+                exactly 64 free.";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = ("mm::allocate_frames", "mm::allocate_frame_run",
+                "mm::reservation::take");
+        }
+        requirement <'L.mm.79'> aReservationsFramesAreDrawn : ItemLowLevel {
+            attribute :>> statement = "A program's frames for a job whose
+                reservation is bound and has drawn + n <= size, in task context,
+                shall be given while n frames are free, tagged with the
+                reservation, drawn raised by n and O lowered by n, in the hold
+                that takes them; in interrupt context none shall be drawn.";
+            attribute :>> criterion = "At stage 2, below both floors, 64 frames
+                drawn from a 64-frame reservation are each given and tagged, O
+                falling one for one to 0, and the 65th is refused; at stage 9 a
+                reserved job's 16 frames are tagged, the 17th is not, and a frame
+                taken while an interrupt is serviced is not.";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = ("mm::reservation::drawn", "mm::reservation::room",
+                "mm::reservation_for", "irq::in_interrupt", "irq::serviced",
+                "irq::servicing", "irq::dispatch", "trap::service_interrupts");
+        }
+        requirement <'L.mm.80'> aFreedFrameGoesBackToItsPromise : ItemLowLevel {
+            attribute :>> statement = "A frame tagged with a reservation shall,
+                in the hold that frees it, leave the reservation's drawn count,
+                give O back what that makes outstanding again, and lose its
+                tag; an unbound reservation shall promise nothing and be bound
+                again only once nothing is drawn from it.";
+            attribute :>> criterion = "At stage 2 the 64 drawn frames freed bring
+                O back to 64 and leave no tag, and the reservation unbound brings
+                O back to what it was; at stage 9 a gone job's reservation
+                promises nothing.";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = ("mm::reservation::freed", "mm::reservation::adjust",
+                "mm::reservation::unbind", "mm::deallocate_frames", "mm::release_frame",
+                "mm::reservation::tag_of", "mm::reservation::install", "mm::place_tags");
+        }
+        requirement <'L.mm.82'> aReclaimLiftsOverThePromise : ItemLowLevel {
+            attribute :>> statement = "program_floor shall answer W + O, the
+                least free count a program's frame not drawn from a reservation is
+                given at, which a machine-wide reclaim for a frame lifts the free
+                count over (the load's fs::pages::reclaim_want).";
+            attribute :>> criterion = "At stage 2, with 64 frames promised,
+                program_floor answers W + 64, and program frames taken until
+                refused leave exactly that free; test-btrfs-pressure writes and
+                deletes its GiBs with no ENOSPC.";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = "mm::program_floor";
+        }
+        requirement <'L.user.145'> aReclaimSparesAnothersReservation : ItemLowLevel {
+            attribute :>> statement = "A reclaim shall not take a frame drawn from
+                a reservation other than the one the running task's job draws
+                from, nor any drawn frame in interrupt context.";
+            attribute :>> criterion = "At stage 9 a frame drawn from a job's
+                reservation is spared for a reclaim drawing from none and taken
+                for one drawing from it, and an undrawn frame is taken.";
+            attribute :>> parent = "H.QUOTA.17";
+            attribute :>> unit = ("user::cache::spares", "user::cache::reclaim",
+                "user::cache::take_from");
+        }
+    }
+
     package AllocationReserve {
         doc /* src/kernel/src/mm/reserve.rs: each processor's allocation reserve, which
              * lets an Arc or a map insert that has started finish (finding F-23). */

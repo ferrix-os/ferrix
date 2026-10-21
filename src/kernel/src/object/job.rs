@@ -534,12 +534,57 @@ impl Job {
     }
 
     /// Limit what it and everything beneath it may hold of `resource`.
-    /// Whether it could be: the tree's root takes no limit.
+    /// Whether it could be: the tree's root takes no limit, and a memory
+    /// limit is refused below the job's reservation or above a reserved job
+    /// (`L.object.223`).
     pub(crate) fn set_limit(&self, resource: Resource, limit: u64) -> bool {
         self.quota
             .as_ref()
-            .map(|quota| quota.set_limit(resource, limit))
-            .is_some()
+            .is_some_and(|quota| quota.set_limit(resource, limit))
+    }
+
+    /// Make its reservation `bytes`: memory the kernel promises it and every
+    /// job beneath it (`docs/microkernel/K12.md`). One machine-wide reclaim
+    /// of the shortfall runs, with no lock held, before a refusal for want of
+    /// free frames is answered, so clean cache is not taken for memory in
+    /// use (ledger 2550 (5)).
+    ///
+    /// # Errors
+    ///
+    /// [`quota::ReserveError`], with nothing changed; the tree's root takes
+    /// none.
+    pub(crate) fn set_reservation(&self, bytes: u64) -> Result<(), quota::ReserveError> {
+        let quota = self.quota.as_ref().ok_or(quota::ReserveError::Rule)?;
+        match quota.set_reservation(bytes) {
+            Err(quota::ReserveError::Short(short)) => {
+                let _ = crate::user::cache::reclaim(quota::NONE, short);
+                quota.set_reservation(bytes)
+            }
+            done => done,
+        }
+    }
+
+    /// Its reservation's size and what is drawn from it, in bytes, and the
+    /// reservations refused it (`L.object.224`): `None` for the root.
+    pub(crate) fn reservation(&self) -> Option<Usage> {
+        self.quota.as_ref().map(Quota::reservation)
+    }
+
+    /// The reservation it draws from, its own or an ancestor's.
+    pub(crate) fn draws_from(&self) -> crate::mm::Reservation {
+        self.quota
+            .as_ref()
+            .map_or(crate::mm::NO_RESERVATION, Quota::draws_from)
+    }
+
+    /// Whether work from a process in `from` may be put into it -- a process
+    /// made or moved there, a job made beneath it -- without a handle that
+    /// carries `RESERVE` (`docs/microkernel/K12.md` §2.6, ledger 2550 (2)):
+    /// it draws from no reservation, or `from` draws from the same one, so
+    /// nothing from outside a reserved subtree draws from its promise.
+    pub(crate) fn admits_work_from(&self, from: &Job) -> bool {
+        let into = self.draws_from();
+        into == crate::mm::NO_RESERVATION || into == from.draws_from()
     }
 
     /// Its `memory.high`, `memory.low` or `memory.min` mark; a `max` high and
@@ -555,12 +600,12 @@ impl Job {
         )
     }
 
-    /// Set a mark. Whether it could be: the tree's root takes none.
+    /// Set a mark. Whether it could be: the tree's root takes none, and a
+    /// `memory.high` is refused above a reserved job (`L.object.223`).
     pub(crate) fn set_mark(&self, mark: Mark, value: u64) -> bool {
         self.quota
             .as_ref()
-            .map(|quota| quota.set_mark(mark, value))
-            .is_some()
+            .is_some_and(|quota| quota.set_mark(mark, value))
     }
 
     /// How many of `counter` were counted in it and beneath it.

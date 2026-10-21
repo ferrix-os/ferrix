@@ -1550,7 +1550,7 @@ fn check_rights_only_shrink(
         counter,
     )?;
     refused(
-        side.call(nr::HANDLE_DUPLICATE, &[reg(narrow), 0x100]),
+        side.call(nr::HANDLE_DUPLICATE, &[reg(narrow), 0x200]),
         status::INVALID_ARGS,
         "a request for an undefined right was accepted",
         counter,

@@ -262,7 +262,9 @@ fn reclaim_want(scope: u32) -> u64 {
     if scope != quota::NONE {
         return run;
     }
-    let short = mm::watermark()
+    // The floor a program's frame is held to: the watermark beyond the
+    // reservations' outstanding promise (`L.mm.82`, `docs/microkernel/K12.md`).
+    let short = mm::program_floor()
         .saturating_add(1)
         .saturating_sub(mm::free_frames());
     run.saturating_add(short)

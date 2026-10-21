@@ -123,6 +123,11 @@ pub const JOB_TASKS: u64 = 2;
 /// `job_set_limit` and `job_get_quota`'s resource: the job's processor
 /// weight, 1 to 10,000.
 pub const JOB_CPU_WEIGHT: u64 = 3;
+/// `job_set_limit` and `job_get_quota`'s resource: the job's reservation,
+/// memory the kernel promises it, in bytes (`docs/microkernel/K12.md`).
+/// Setting it needs `RESERVE`; `job_get_quota` reads its size, what is drawn
+/// from it and the admissions refused.
+pub const JOB_RESERVE: u64 = 4;
 /// `job_set_limit`'s limit that is no limit, and what `job_get_quota` reads
 /// for one.
 pub const UNLIMITED: u64 = u64::MAX;

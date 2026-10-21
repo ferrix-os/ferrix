@@ -1401,7 +1401,9 @@ fn convert_console_line(new: u8, handle: u16) -> Result<(), &'static str> {
         ));
         *held = Some((input, u64::from(new)));
     }
-    crate::irq::dispatch(vector_number(new));
+    // Run as its interrupt would be, marked as interrupt context
+    // (`irq::in_interrupt`), so nothing it does draws on a reservation.
+    crate::irq::serviced(|| crate::irq::dispatch(vector_number(new)));
     Ok(())
 }
 

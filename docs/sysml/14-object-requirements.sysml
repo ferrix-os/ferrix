@@ -983,6 +983,78 @@ package FerrixObjectRequirements {
         }
     }
 
+    package JobReservations {
+        doc /* A job's memory reservation (K12, docs/microkernel/K12.md §2.6):
+             * who sets it, its rules, and its slot. */
+
+        requirement <'L.object.221'> aReservationNeedsReserve : ItemLowLevel {
+            attribute :>> statement = "job_set_limit with JOB_RESERVE shall need a
+                handle with the RESERVE right, which no new object's handle
+                carries; job_create shall give the new job's handle RESERVE only
+                when the parent's handle has it; and process_create and
+                job_create into a job that draws from a reservation shall be
+                refused ACCESS_DENIED to a caller whose job draws from another,
+                unless the handle carries RESERVE.";
+            attribute :>> criterion = "Through the native calls, a reservation on a
+                handle without RESERVE is refused ACCESS_DENIED, a duplicate
+                adding RESERVE is refused, a job made beneath a reserved one
+                through a handle without RESERVE from outside is refused, and one
+                made through a handle with it carries it.";
+            attribute :>> parent = "H.QUOTA.17";
+            attribute :>> unit = ("syscall::native::job_reserve", "syscall::native::job_create",
+                "syscall::native::process_create", "syscall::native::may_put_work",
+                "object::job::Job::admits_work_from");
+        }
+        requirement <'L.object.222'> aReservationIsOneLevel : ItemLowLevel {
+            attribute :>> statement = "A job shall be reserved for the first time
+                only while nothing but the job holds its slot, under the lock a
+                child slot is claimed under, and never with a reservation above
+                or beneath it.";
+            attribute :>> criterion = "At stage 9 a job beneath a reserved one and
+                a job with a child are each refused a reservation.";
+            attribute :>> parent = "H.QUOTA.17";
+            attribute :>> unit = ("object::quota::Quota::set_reservation", "object::job::Job::set_reservation");
+        }
+        requirement <'L.object.223'> aReservationIsBesideItsLimit : ItemLowLevel {
+            attribute :>> statement = "A job's reservation shall never exceed its
+                own memory limit; no job above a reserved job shall carry a
+                memory limit or memory.high; and a change that would break either
+                shall be refused with nothing changed, cgroupfs answering EBUSY.";
+            attribute :>> criterion = "At stage 9 a reservation above the job's own
+                limit, under a memory limit and under a memory.high are each
+                refused; once it is admitted, a limit and a memory.high above it
+                and a limit below it are refused, and a limit at it is set.";
+            attribute :>> parent = "H.QUOTA.17";
+            attribute :>> unit = ("object::quota::Quota::set_limit",
+                "object::quota::Quota::set_mark", "object::quota::limit_allowed",
+                "object::quota::above");
+        }
+        requirement <'L.object.224'> aReservationReadsBack : ItemLowLevel {
+            attribute :>> statement = "job_get_quota with JOB_RESERVE shall answer
+                the reservation's size, what is drawn from it and the admissions
+                refused it, in bytes; a set shall be audited LIMIT_SET and a
+                refusal for want of memory LIMIT, both against resource 7.";
+            attribute :>> criterion = "Through the native calls, a reservation of
+                four pages and a byte reads back as four pages, nothing drawn and
+                nothing refused.";
+            attribute :>> parent = "H.QUOTA.16";
+            attribute :>> unit = ("syscall::native::job_get_quota",
+                "object::quota::Quota::reservation", "object::quota::Quota::refused",
+                "audit::reservation_refused");
+        }
+        requirement <'L.object.225'> aReservationEndsWithItsSlot : ItemLowLevel {
+            attribute :>> statement = "A slot claimed beneath a reserved job shall
+                draw from its reservation, and a reserved job's slot, as its last
+                hold goes, shall unbind its reservation.";
+            attribute :>> criterion = "At stage 9 a job made beneath a reserved one
+                draws from its reservation, and once the tree is gone the promise
+                is what it was before and every slot is given back.";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = ("object::quota::claim", "object::quota::release",
+                "object::quota::reservation_of");
+        }
+    }
+
     package Jobs {
         doc /* src/kernel/src/object/job.rs. */
 
