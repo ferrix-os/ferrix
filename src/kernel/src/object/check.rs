@@ -229,18 +229,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
             "  sync     not checked: one processor, nowhere to move a reader to"
         );
     }
-    let sender = object::sender_check::run()?;
-    crate::console::println!(
-        "  sender   {} messages read with their writer's process and job, stamped by the kernel \
-         at the write: the writer not the body, the slot, a transfer either way, an ended \
-         writer, a move between jobs, the kernel's own; channel_write_read answered none; {} \
-         processes given fresh ids, plain, forked and made (a pid given again: {}); {} refusals",
-        sender.read,
-        sender.fresh,
-        if sender.pid_reused { "yes" } else { "no" },
-        sender.refusals
-    );
-    object::fast_path_check::run_and_report()?;
+    check_the_sender_and_the_fast_path()?;
     check_a_job_kill_takes_down_a_process_tree(&mut after)?;
     check_a_long_chain_of_jobs_is_freed_without_recursion()?;
     check_a_job_counts_its_members()?;
@@ -298,6 +287,13 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         spawned: after.spawned,
         abandoned: after.abandoned,
     })
+}
+
+/// K6's sender identity (`object::sender_check`), then the fast path's
+/// cases (`object::fast_path_check`), each with its line.
+fn check_the_sender_and_the_fast_path() -> Result<(), &'static str> {
+    object::sender_check::run_and_report()?;
+    object::fast_path_check::run_and_report()
 }
 
 /// The wake row (`sched::work::check`), and its line.

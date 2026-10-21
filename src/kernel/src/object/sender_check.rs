@@ -211,6 +211,23 @@ fn give(side: &Side, object: Object, rights: Rights) -> Result<Handle, &'static 
         .map_err(|_| "sender check: no room in a check's table")
 }
 
+/// Run every case and print the `sender` line.
+///
+/// # Errors
+///
+/// The first thing that was not so.
+pub(crate) fn run_and_report() -> Result<(), &'static str> {
+    let sender = run()?;
+    crate::console::println!(
+        "  sender   {} messages read with their writer's process and job, stamped by the kernel          at the write: the writer not the body, the slot, a transfer either way, an ended          writer, a move between jobs, the kernel's own; channel_write_read answered none; {}          processes given fresh ids, plain, forked and made (a pid given again: {}); {} refusals",
+        sender.read,
+        sender.fresh,
+        if sender.pid_reused { "yes" } else { "no" },
+        sender.refusals
+    );
+    Ok(())
+}
+
 /// Run every case. See the module.
 ///
 /// # Errors
@@ -219,7 +236,7 @@ fn give(side: &Side, object: Object, rights: Rights) -> Result<Handle, &'static 
 ///
 /// Verifies: H.OBJ.19, L.object.197, L.object.198, L.object.199
 /// Verifies: L.object.200, L.object.201, L.object.202
-pub(crate) fn run() -> Result<Report, &'static str> {
+fn run() -> Result<Report, &'static str> {
     let mut report = Report::default();
     let a = Side::new()?;
     let b = Side::new()?;
