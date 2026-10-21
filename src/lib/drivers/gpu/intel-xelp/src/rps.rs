@@ -370,3 +370,82 @@ pub const fn park_step(cur: u32, last_adj: i32, min: u32) -> (u32, i32) {
     let new = cur as i64 + adj as i64;
     (if new < min as i64 { min } else { new as u32 }, adj)
 }
+
+// Ferrix's additions to the policy, each a pure rule so the host tests can
+// pin it. i915 parks RPS when the GT's last wakeref goes and leans on the
+// client boost (`intel_rps_boost`) to bring a waiting program's work back
+// up; the rules below keep a frame's work from running at the idle
+// frequency between its submissions.
+
+/// How long nothing may be in flight before RPS parks: one longest
+/// evaluation interval ([`BUSY_MAX_EI_MS`]) past the last retire. A gap
+/// shorter than that is a gap inside a frame's work, which i915 would not
+/// see as idle either (its GT wakeref outlives a retire by the engines'
+/// heartbeat and the GT's own idle delay).
+pub const IDLE_HOLD_NS: u64 = BUSY_MAX_EI_MS as u64 * 1_000_000;
+
+/// What the park rule asks for at one service.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Park {
+    /// Work is in flight: unparked, whatever the timer said.
+    Unpark,
+    /// Leave RPS as it is.
+    Hold,
+    /// Idle for [`IDLE_HOLD_NS`]: `intel_rps_park`.
+    Park,
+}
+
+/// The park rule. `in_flight`: a request submitted and not retired, in the
+/// back end's ports or queues, or held by the front end until its fences
+/// signal; `active`: RPS is unparked; `idle_ns`: how long nothing has been
+/// in flight. Never parks while anything is in flight.
+#[must_use]
+pub const fn park_decision(in_flight: bool, active: bool, idle_ns: u64) -> Park {
+    if in_flight {
+        Park::Unpark
+    } else if active && idle_ns >= IDLE_HOLD_NS {
+        Park::Park
+    } else {
+        Park::Hold
+    }
+}
+
+/// The lowest request the policy steps down to while unparked, and the
+/// lowest the unpark returns to: RP1, the efficient frequency (where
+/// i915's down timeout stops first, `rps->efficient_freq`), never below
+/// `RPn`. Below it the GT goes only by parking.
+#[must_use]
+pub const fn active_floor(caps: FreqCaps) -> u32 {
+    if caps.rp1_freq > caps.min_freq {
+        caps.rp1_freq
+    } else {
+        caps.min_freq
+    }
+}
+
+/// `rps_work` with `client_boost` (a program waits on a request not yet
+/// retired: `rps->num_waiters`) and the boost frequency `boost`
+/// (`rps->boost_freq`, RP0 unless set): below it, straight to it; an up
+/// event steps as ever; any other event holds the request (`adj = 0`).
+/// Without a waiter, [`rps_work`] within `floor..=max`.
+#[must_use]
+pub const fn rps_work_boost(
+    event: Event,
+    cur: u32,
+    last_adj: i32,
+    floor: u32,
+    max: u32,
+    client_boost: bool,
+    boost: u32,
+) -> (u32, i32) {
+    if client_boost && cur < boost {
+        let boost = if boost > max { max } else { boost };
+        (boost, 0)
+    } else if matches!(event, Event::Up) {
+        rps_work(event, cur, last_adj, floor, max)
+    } else if client_boost {
+        (cur, 0)
+    } else {
+        rps_work(event, cur, last_adj, floor, max)
+    }
+}

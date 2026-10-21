@@ -421,8 +421,20 @@ pub fn settle<B: Backend, H: Host<B::Memory>>(frontend: &mut Frontend<B>, host: 
         }
     }
     retire(backend, state);
+    backend.set_held(holds_queued(state));
     signal_kernel_fences(state, host);
     answer_waits(state, host);
+}
+
+/// Whether a live request is still queued here, not yet given to the back
+/// end.
+fn holds_queued<M>(state: &Tables<M>) -> bool {
+    state.requests.live_ids().any(|id| {
+        state
+            .requests
+            .get(id)
+            .is_some_and(|request| matches!(request.state, RequestState::Queued))
+    })
 }
 
 /// Retire finished requests, then free the objects, contexts and VMs that

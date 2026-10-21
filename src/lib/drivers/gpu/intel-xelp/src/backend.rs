@@ -156,6 +156,8 @@ pub struct FrequencyReport {
     pub parked: bool,
     /// See [`FrequencyReport::parked`].
     pub pinned: bool,
+    /// How often RPS parked since the last line.
+    pub parks: u32,
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -319,9 +321,14 @@ pub struct XelpBackend<P: Platform> {
     /// The per-second log: when the next line is due, and the last sample
     /// with its time.
     freqlog: Option<Freqlog>,
-    /// Since when no engine has had work, while RPS is unparked.
+    /// Since when nothing has been in flight, while RPS is unparked.
     idle_since: Option<u64>,
     last_service_ns: u64,
+    /// The front end holds requests not yet submitted here (waiting on
+    /// their fences): work in flight for the park rule.
+    held: bool,
+    /// Parks since the last frequency log line.
+    parks: u32,
 }
 
 /// The per-second log's state: when the next line is due, and the last
@@ -334,14 +341,11 @@ struct Freqlog {
     busy: [u64; crate::power::POLICY_ENGINES],
 }
 
-/// How long the GT idles before RPS parks (`intel_rps_park`, which i915
-/// runs when the GT's last wakeref goes): one longest evaluation interval,
-/// so the gaps between a program's frames do not park it.
-pub const PARK_NS: u64 = rps_park_ns();
-
-const fn rps_park_ns() -> u64 {
-    crate::rps::BUSY_MAX_EI_MS as u64 * 1_000_000
-}
+/// How long nothing may be in flight before RPS parks (`intel_rps_park`,
+/// which i915 runs when the GT's last wakeref goes):
+/// [`crate::rps::IDLE_HOLD_NS`], one longest evaluation interval past the
+/// last retire.
+pub const PARK_NS: u64 = crate::rps::IDLE_HOLD_NS;
 
 /// The request id of the driver's own load ([`XelpBackend::load_start`]).
 const LOAD_ID: u64 = u64::MAX - 1;
@@ -477,6 +481,8 @@ impl<P: Platform> XelpBackend<P> {
             rps: None,
             freqlog: None,
             idle_since: None,
+            held: false,
+            parks: 0,
         };
         for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
             backend.engine_up(slot, *info)?;
@@ -1197,7 +1203,7 @@ impl<P: Platform> XelpBackend<P> {
         let policy = self.rps.and_then(|rps| rps.due());
         let park = self
             .rps
-            .filter(|rps| rps.active && !rps.pinned)
+            .filter(|rps| rps.active && !rps.pinned && !self.held)
             .and(self.idle_since)
             .map(|since| since.saturating_add(PARK_NS));
         let forcewake = self.platform.borrow().forcewake_due();
@@ -1356,6 +1362,10 @@ impl<P: Platform> crate::frontend::Backend for XelpBackend<P> {
         XelpBackend::next_deadline(self)
     }
 
+    fn set_held(&mut self, held: bool) {
+        XelpBackend::set_held(self, held);
+    }
+
     fn completed(
         &mut self,
         sink: &mut dyn FnMut(crate::frontend::RequestId, crate::frontend::Completion),
@@ -1504,25 +1514,42 @@ impl<P: Platform> XelpBackend<P> {
         self.rps = Some(rps);
     }
 
+    /// The front end holds requests it has not submitted yet (`held`),
+    /// waiting on their fences: RPS does not park while it does.
+    pub fn set_held(&mut self, held: bool) {
+        self.held = held;
+    }
+
     /// The policy's part of [`XelpBackend::service`]: the frequency log,
-    /// the park after [`PARK_NS`] idle, and `rps_timer` when due.
+    /// the park rule ([`crate::rps::park_decision`]: never while anything
+    /// is in flight, after [`PARK_NS`] with nothing), and `rps_timer` when
+    /// due.
     fn power_service(&mut self, now_ns: u64) {
+        use crate::rps::{Park, park_decision};
         self.freqlog_due(now_ns);
         let Some(mut rps) = self.rps else {
             return;
         };
-        if !self.is_idle() {
+        let in_flight = self.held || !self.is_idle();
+        let idle_ns = if in_flight {
             self.idle_since = None;
-            let busy = self.busy_totals(now_ns);
-            rps.unpark(&mut Regs(&self.platform), now_ns, &busy);
-        } else if rps.active {
-            let since = *self.idle_since.get_or_insert(now_ns);
-            if now_ns.saturating_sub(since) >= PARK_NS {
-                rps.park(&mut Regs(&self.platform));
+            0
+        } else {
+            now_ns.saturating_sub(*self.idle_since.get_or_insert(now_ns))
+        };
+        match park_decision(in_flight, rps.active, idle_ns) {
+            Park::Unpark => {
+                let busy = self.busy_totals(now_ns);
+                rps.unpark(&mut Regs(&self.platform), now_ns, &busy);
             }
+            Park::Park if !rps.pinned => {
+                rps.park(&mut Regs(&self.platform));
+                self.parks = self.parks.saturating_add(1);
+            }
+            Park::Park | Park::Hold => {}
         }
         let busy = self.busy_totals(now_ns);
-        let _ = rps.evaluate(&mut Regs(&self.platform), now_ns, &busy);
+        let _ = rps.evaluate(&mut Regs(&self.platform), now_ns, &busy, false);
         self.rps = Some(rps);
     }
 
@@ -1570,7 +1597,9 @@ impl<P: Platform> XelpBackend<P> {
                 busy_permille,
                 parked: !rps.active,
                 pinned: rps.pinned,
+                parks: self.parks,
             });
+        self.parks = 0;
         self.freqlog = Some(Freqlog {
             due: now_ns.saturating_add(FREQLOG_NS),
             sample: after,

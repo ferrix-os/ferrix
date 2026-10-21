@@ -458,7 +458,7 @@ impl Platform for Real<'_> {
     fn frequency_report(&mut self, report: &FrequencyReport) {
         let sample = &report.sample;
         crate::say(format_args!(
-            "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, RC6 {}.{} %, package {}.{:03} W",
+            "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, RC6 {}.{} %, package {}.{:03} W, parks {}",
             sample.requested_mhz,
             if report.pinned {
                 " (pinned)"
@@ -475,7 +475,8 @@ impl Platform for Real<'_> {
             report.rc6_permille / 10,
             report.rc6_permille % 10,
             report.milliwatts / 1000,
-            report.milliwatts % 1000
+            report.milliwatts % 1000,
+            report.parks
         ));
     }
 

@@ -763,6 +763,78 @@ fn the_policy_steps_as_i915_steps() {
     assert_eq!(park_step(30, i32::MIN, 12), (12, i32::MIN));
 }
 
+/// Ferrix's rules: no park while anything is in flight, a park only after
+/// the idle hold; no down step below RP1 while unparked; a waiter's boost
+/// to RP0 and no down step while it waits.
+#[test]
+fn the_park_floor_and_boost_rules() {
+    use crate::rps::{
+        Event, FreqCaps, IDLE_HOLD_NS, Park, active_floor, park_decision, rps_work_boost,
+    };
+    // In flight: unparked, whatever the idle time says.
+    assert_eq!(park_decision(true, false, 0), Park::Unpark);
+    assert_eq!(park_decision(true, true, IDLE_HOLD_NS * 10), Park::Unpark);
+    // Idle: held until the hold has passed, then parked once.
+    assert_eq!(park_decision(false, true, IDLE_HOLD_NS - 1), Park::Hold);
+    assert_eq!(park_decision(false, true, IDLE_HOLD_NS), Park::Park);
+    assert_eq!(park_decision(false, false, IDLE_HOLD_NS), Park::Hold);
+    assert_eq!(IDLE_HOLD_NS, 20_000_000);
+    // The floor is RP1 (ADL-N: RP0 1000, RP1 300, RPn 200 MHz), or RPn
+    // where RP1 reads lower.
+    let caps = FreqCaps {
+        rp0_freq: 60,
+        rp1_freq: 18,
+        min_freq: 12,
+    };
+    assert_eq!(active_floor(caps), 18);
+    assert_eq!(
+        active_floor(FreqCaps {
+            rp1_freq: 6,
+            ..caps
+        }),
+        12
+    );
+    // No waiter: rps_work within floor..=max.
+    assert_eq!(
+        rps_work_boost(Event::Down, 20, -1, 18, 60, false, 60),
+        (18, -2)
+    );
+    assert_eq!(rps_work_boost(Event::Up, 20, 1, 18, 60, false, 60), (22, 2));
+    // A waiter below the boost: straight to it, from any event.
+    for event in [Event::Up, Event::Down, Event::Steady] {
+        assert_eq!(rps_work_boost(event, 20, -4, 18, 60, true, 60), (60, 0));
+    }
+    // At the boost with a waiter: no down step; i915's boost_freq above
+    // the limit is clamped.
+    assert_eq!(
+        rps_work_boost(Event::Down, 60, -1, 18, 60, true, 60),
+        (60, 0)
+    );
+    assert_eq!(
+        rps_work_boost(Event::Down, 40, -1, 18, 50, true, 60),
+        (50, 0)
+    );
+}
+
+/// Requests the front end still holds (waiting on fences) keep RPS
+/// unparked past the idle hold; released, it parks after the hold.
+#[test]
+fn held_requests_keep_the_gt_unparked() {
+    use crate::backend::PARK_NS;
+    let mut be = backend_with_rps();
+    be.set_held(true);
+    for t in 1..=(3 * PARK_NS / 1_000_000) {
+        be.service(t * 1_000_000, false);
+    }
+    assert!(be.rps().expect("up").active, "held work is in flight");
+    let at = 3 * PARK_NS;
+    be.set_held(false);
+    be.service(at + 1_000_000, false);
+    assert!(be.rps().expect("up").active, "the hold starts now");
+    be.service(at + 1_000_000 + PARK_NS, false);
+    assert!(!be.rps().expect("up").active, "parked after the hold");
+}
+
 /// Busy work clocks the GT up to RP0 within milliseconds; idle, it parks
 /// at `RPn` after [`crate::backend::PARK_NS`]; the next work unparks it at the
 /// last request less a step, and the per-second log says the busy share.

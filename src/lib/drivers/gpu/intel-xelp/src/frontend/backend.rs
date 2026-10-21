@@ -177,4 +177,11 @@ pub trait Backend {
 
     /// The render engine's `RING_TIMESTAMP`, for `I915_REG_READ`.
     fn timestamp(&mut self) -> u64;
+
+    /// Whether the front end holds requests it has not submitted yet,
+    /// waiting on their fences: work in flight, so the GT's frequency is
+    /// not parked under it.
+    fn set_held(&mut self, held: bool) {
+        let _ = held;
+    }
 }

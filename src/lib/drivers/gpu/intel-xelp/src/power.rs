@@ -22,8 +22,14 @@
 //! step, doubling to 20 ms while nothing changes), and [`Rps::park`] and
 //! [`Rps::unpark`] are `intel_rps_park` and `intel_rps_unpark`: idle, the GT
 //! asks for `RPn`, and the next work restores the last request less a step.
-//! Not here: the client boost to RP0 when a program waits on a request
-//! (`intel_rps_boost`), which the front end would have to ask for.
+//! [`Rps::boost`] is `intel_rps_boost`'s effect: a program waits on a request
+//! not yet retired, so the request goes to RP0 and no down step is taken
+//! until the request retires (the back end counts the waiters).
+//!
+//! Ferrix's changes to the policy (see [`rps::park_decision`]): while
+//! unparked the request never steps below RP1 ([`rps::active_floor`]), and
+//! the back end parks only after [`rps::IDLE_HOLD_NS`] with nothing in
+//! flight.
 
 use crate::io::Mmio;
 use crate::rps::{self, Event, FreqCaps, Power};
@@ -242,7 +248,7 @@ impl Rps {
         let (reg, value) = rps::gen6_rps_set(idle);
         mmio.write32(reg.offset(), value);
         self.last = idle;
-        let (cur, adj) = rps::park_step(self.cur, self.last_adj, self.caps.min_freq);
+        let (cur, adj) = rps::park_step(self.cur, self.last_adj, rps::active_floor(self.caps));
         self.cur = cur;
         self.last_adj = adj;
     }
@@ -272,15 +278,31 @@ impl Rps {
         }
     }
 
+    /// `intel_rps_boost`'s work for a new waiter: unparked and not pinned,
+    /// a request below the boost frequency (RP0, i915's default
+    /// `boost_freq`) goes to it at once. Whether it moved.
+    pub fn boost<M: Mmio + ?Sized>(&mut self, mmio: &mut M) -> bool {
+        if !self.active || self.pinned || self.cur >= self.caps.rp0_freq {
+            return false;
+        }
+        self.set(mmio, self.caps.rp0_freq);
+        self.last_adj = 0;
+        self.interval_ms = 1;
+        true
+    }
+
     /// `rps_timer` then `rps_work`, if due at `now_ns`: the engines' busy
     /// time since the interval began (`busy`, each engine's running total in
     /// ns), combined as i915 combines it, against the thresholds; a step up
-    /// or down if asked; the next interval. Returns the event.
+    /// or down if asked, never below [`rps::active_floor`], and with
+    /// `client_boost` (a program waits) the boost instead of any down step;
+    /// the next interval. Returns the event.
     pub fn evaluate<M: Mmio + ?Sized>(
         &mut self,
         mmio: &mut M,
         now_ns: u64,
         busy: &[u64],
+        client_boost: bool,
     ) -> Option<Event> {
         if self.due()? > now_ns {
             return None;
@@ -291,15 +313,26 @@ impl Rps {
         }
         let dt = now_ns.saturating_sub(self.from_ns);
         let combined = rps::combined_busy(&deltas);
-        let (min, max) = (self.caps.min_freq, self.caps.rp0_freq);
-        let event = rps::rps_timer_event(combined, dt, self.cur, min, max);
-        if event == Event::Steady {
+        let (floor, max) = (rps::active_floor(self.caps), self.caps.rp0_freq);
+        let event = rps::rps_timer_event(combined, dt, self.cur, floor, max);
+        let boost = self.caps.rp0_freq;
+        if event == Event::Steady && !(client_boost && self.cur < boost) {
             self.last_adj = 0;
         } else {
-            let (new, adj) = rps::rps_work(event, self.cur, self.last_adj, min, max);
-            self.set(mmio, new);
+            let (new, adj) = rps::rps_work_boost(
+                event,
+                self.cur,
+                self.last_adj,
+                floor,
+                max,
+                client_boost,
+                boost,
+            );
+            if new != self.cur {
+                self.set(mmio, new);
+                self.interval_ms = 1;
+            }
             self.last_adj = adj;
-            self.interval_ms = 1;
         }
         self.from_ns = now_ns;
         self.take_busy(busy);
