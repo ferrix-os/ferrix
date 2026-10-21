@@ -83,7 +83,7 @@ records take Android's shape, and the policy is ARINC 653's Health Monitor.
 | S1 | §5: the stop word in the pstore header (version 2), the write-back on `reboot(2)`'s path, the loader's line, the gate's stop cases | kernel (console, power, reboot), loader | 4-5 |
 | S2 | the event log's kinds beyond panic: user stop, power loss or hang (no record after a cold boot that the previous boot did not end cleanly, which needs a mark on disk that init writes at shutdown), watchdog | loader, init, `ferrix-eventlog` | 3 |
 | S3 | PM2's ESP files: `BOOTLOG.TXT` and `LASTKERNEL.TXT` (branch `postmortem`) | loader | 3 |
-| S4 | the lockup detector (a panic with its own reason), then the TCO watchdog, petted from the kernel's timer and armed only when asked | kernel, a design review of its own | 6-8 |
+| S4 | §6: the lockup detector (a panic with its own reason), then the TCO watchdog, fed from the kernel's timer and armed only when asked | kernel, a design review of its own | 15-19 (re-sized in §6.7) |
 | S5 | ring-3 tombstones: the kernel's exception snapshot to a crash service, the record's format crate, rate and size limits, a summary in the event log | kernel interface, ring-3 service | 10-14 |
 | S6 | readers: a listing on Ferrix, PM1's decoding of the event log | ring 3, host | 2-3 |
 | S7 | a thermal reason, and the certification wiring (the HM table, problem-report use) | kernel, docs | 2-3 |
@@ -777,7 +777,221 @@ says that (the `reboot:` line, the panic), so V-14's acceptance covers it
 and `ferrix.pstore=off` still takes no region. VULNERABILITY-ANALYSIS's
 V-14 names the word.
 
-## 6. Where it stands
+## 6. S4: a hang ends in a report or a reset
+
+Version 1, 2026-10-21 (lockup). The customer's purpose: the N150 box runs
+unattended overnight, and a hard hang must reset it on its own. Today a
+hang is the one failure that leaves the box stopped. A processor that spins
+with interrupts masked stops taking anything, the kernel never panics, and
+`ferrix.panic=reset` never runs. S4 adds two layers, each its own landing:
+S4a, a **lockup detector** in which processors watch each other and turn a
+hang of one into a panic report; S4b, the PCH's **TCO watchdog**, which
+resets the machine when the kernel as a whole stops feeding it.
+
+### 6.1 What the box has (2026-10-16 capture, not memory)
+
+From `~/.local/share/ferrix/n150-linux/box-2026-10-16/` on the gate host:
+
+* `lspci.txt`: `00:1f.4 SMBus [0c05]: Intel Corporation Alder Lake-N
+  SMBus [8086:54a3]`, beside the eSPI controller at 00:1f.0 (8086:5481).
+* `lspci-xxxx.txt`, 00:1f.4's configuration space: offset 0x50 (TCOBASE)
+  reads `01 04 00 00`, so 0x401: the TCO's registers are I/O ports at 0x400,
+  bit 0 marking I/O space. Offset 0x54 (TCOCTL) reads `01 01 00 00`:
+  TCO_BASE_EN (bit 8) set and the base locked (bit 0).
+* `dmesg.txt`: no ACPI WDAT table among the tables firmware lists, so the
+  TCO is the watchdog to use, as Linux's i2c-i801 decides when it finds no
+  WDAT. No `iTCO_wdt` line: Ubuntu does not load watchdog modules unasked.
+
+Linux's drivers name 8086:54a3 a TCO of **version 6** (`i2c-i801.c`,
+`FEATURE_TCO_CNL`; `i801_add_tco_cnl`, `.version = 6`; read from
+torvalds/linux v6.17, kept in `~/.local/share/ferrix/ref-linux-tco/`).
+`iTCO_wdt.c` gives version 6's layout: TCO_RLD at +0x00 (a write reloads),
+TCO1_STS +0x04 (bit 3 TIMEOUT), TCO2_STS +0x06 (bit 1 SECOND_TO_STS, bit 2
+BOOT_STS), TCO1_CNT +0x08 (bit 11 TCO_TMR_HLT, bit 12 TCO_LOCK, bit 0
+NO_REBOOT from version 6 on: `update_no_reboot_bit_cnt`), TCO_TMR +0x12
+(10 bits of 0.6 s ticks). The reset comes at the timer's **second**
+expiry. It reads SECOND_TO_STS as the boot status: the bit survives the
+reset it caused.
+
+QEMU's q35 has the ICH9's TCO (`hw/acpi/ich9_tco.c`, QEMU 9.2.4 on the gate
+host): the same registers at the PM base plus 0x60, TCO version 2, its
+NO_REBOOT bit 5 of the chipset's GCS register (root complex base + 0x3410),
+set by default (`ICH9_CC_GCS_DEFAULT` 0x20). The second expiry sets
+SECOND_TO_STS and BOOT_STS and resets the machine unless NO_REBOOT or the
+`noreboot` strap holds it. Its reset handler leaves the TCO's registers
+alone, so the status survives as on the PCH. What the box's firmware leaves
+in TCO1_CNT (NO_REBOOT, TCO_LOCK) is not in the capture: §6.6's first box
+step reads it.
+
+### 6.2 S4a: processors watch each other
+
+* **Off unless asked**: `ferrix.lockup=on`. Any other value is said and taken
+  as off, as `ferrix.panic`'s are. The reference configuration keeps it
+  off: an emulator host that starves a virtual processor for seconds (FX-0001
+  measured 3.6 s) must not turn a slow gate into a panic. The N150's
+  command line asks for it.
+* **A heartbeat** per processor, an `AtomicU64` bumped by every timer and
+  inter-processor interrupt it takes (`timer::on_tick`, `smp::on_ipi`). A
+  processor with interrupts masked bumps nothing.
+* **Every processor ticks**: with the detector on, a processor's one-shot is
+  never armed later than **1 s** ahead, and never stopped (`timer::after`,
+  `after_from`, `stop` clamp to the watch period). Ferrix is tickless, so an
+  idle processor would otherwise sleep, unwatched and unwatching. One
+  interrupt a second per processor is the cost.
+* **A ring watch**: on each tick, processor *i* reads the heartbeat of the
+  next online processor, *i*+1 mod *n*. A heartbeat unchanged for **10 s**
+  on the counter (`timer::now_nanos`, not a count of ticks) is a lockup.
+  Ten seconds is the shootdown's stuck bound (`smp`, 2026-10-07) for the
+  same reason: under that, a starved emulator thread is slow, not stuck.
+  The ring means the watcher is watched too. One processor has no watcher,
+  so it relies on S4b alone.
+* **The report comes from the stuck processor where it can.** On x86-64 the
+  watcher names it in `LOCKUP_TARGET` and sends it an NMI. Its NMI handler
+  (`arch::x86_64::paranoid`) sees itself named, records the stop word
+  `Stop::Lockup` (code 7), and reports through `trap::fatal` with its own
+  frame. The report's backtrace is then the stuck code's, under the
+  catalog's new `LOCKUP` entry. If no report has begun 2 s after the NMI
+  (NMIs blocked, the target in an NMI already), the watcher records the
+  word and panics itself. It names the processor, its last heartbeat and
+  the counter. AArch64 and ARMv7-A have no NMI without GICv3's
+  pseudo-NMIs, which Ferrix does not use: the watcher reports at once, with
+  the stuck processor's identity and no backtrace.
+* **The stop word**: code 7, `a lockup`. The stop-word list (§5.1) gains
+  it. `panicked` stores the panic's word only when no lockup's word is
+  there, and `stop` replaces neither, so the next loader says `boot N
+  ended: a lockup`.
+* **What it does not catch**: a processor that takes interrupts but never
+  schedules (a soft lockup), and every processor masked at once. The first
+  is left for its own design. The second is S4b's.
+* **Bound** (MEMORY-AND-TIMING): a tick does one load and one compare more.
+  A detection does one NMI and at most a 2 s wait on the counter, then the
+  panic path's own bounds.
+
+### 6.3 S4b: the TCO watchdog
+
+* **Off unless asked**: `ferrix.watchdog=tco` (any other value said and
+  taken as off). The reference configuration keeps it off.
+* **Where it is, read from PCI, never assumed.** A device of a table of
+  verified identities: 8086:54a3 (version 6, TCOBASE and TCOCTL at 0x50 and
+  0x54 of its function, TCOCTL_EN required), and QEMU's ICH9 LPC 8086:2918
+  (version 2, PM base at 0x40 plus 0x60, NO_REBOOT in GCS through the root
+  complex base at 0xF0, which must be enabled; otherwise refused). Anything
+  else is no TCO, said in one line. The ports are the kernel's own, as the
+  reset and power ports are, in the ring-0 device-access allow-list.
+* **Arming**: read and clear TIMEOUT, SECOND_TO_STS and BOOT_STS (say what
+  was set: the second witness of §6.4), clear NO_REBOOT and read it back
+  (refused, say so and stay off: firmware locked it), set TCO_TMR to **50
+  ticks (30 s)**, reload, clear TCO_TMR_HLT and read it back. The reset then
+  comes 30 to 60 s after the last feed.
+* **Feeding**: one write of TCO_RLD on the boot processor's watch tick (S4a's
+  1 s), and only while every processor's heartbeat is fresh (under 3 s). A
+  machine with one stuck processor is not fed and resets. The detector's
+  report runs first, at 10 s, if it is on. With one processor, the tick
+  alone feeds.
+* **A panic stops feeding**: the report runs with interrupts masked, so the
+  TCO resets the machine 30 to 60 s after the panic whether it halts or
+  `ferrix.panic=reset` resets first. A halt, the default, becomes a reset
+  once the watchdog is armed. SAFETY-MANUAL says so.
+* **Power-off and reboot** leave it running. A reset restarts the platform,
+  and a power-off ends it. In QEMU, whose TCO survives a reset, the next
+  boot's arming feeds it in time, its timeout being longer than a boot.
+
+### 6.4 What a watchdog reset reads as
+
+S1's word stays **0, no stop recorded**: a hung kernel writes nothing, by
+design. S4 adds two witnesses:
+
+1. A lockup the detector catches stores **code 7** before its report, never
+   left as a plain panic.
+2. A TCO reset is the PCH's to say: SECOND_TO_STS survives the reset. The
+   **loader** reads it before it reports the previous boot. It finds the
+   TCO the kernel's way, through PCI configuration ports 0xCF8/0xCFC on
+   x86-64, read only. It says `boot N ended: no stop recorded; the TCO
+   watchdog reset the machine`, or after a word, `...; then the TCO watchdog
+   reset the machine`. It does not clear the bit. The kernel clears it
+   when it arms, and says so as well. PM4's event log gets a "watchdog" kind
+   with S2.
+
+### 6.5 Requirements, checks and controls
+
+Ids to reserve first: H.FAIL.6 (a processor taking no interrupt for 10 s
+ends in a failure report), H.FAIL.7 (an armed watchdog resets a machine
+the kernel stopped feeding), L.lockup.1-5, L.tco.1-6, L.console.49 (code
+7, and `panicked` keeping it).
+
+* **S4a's gate**, `cargo xtask test-postmortem`'s lockup case (x86-64 under
+  KVM, 4 processors, and AArch64): a check-only boot option
+  `ferrix.check.lockup=irqoff` (`*_check.rs`, outside the product) makes
+  processor 2 spin with interrupts masked once boot is up. The report must
+  come within 10 to 20 s, name processor 2, carry the catalog's `LOCKUP` code
+  and, on x86-64, a backtrace through the check's spin. After a QMP reset
+  the loader must say `a lockup`. A boot with the detector on and no
+  sabotage must run its whole test-boot with no report: the false-positive
+  row. Controls: the heartbeat's bump removed from `on_tick` (a report
+  where none is due) and the ring check removed (no report, the gate's
+  timeout); on x86-64, the NMI handler's lockup arm removed (the watcher's
+  own report, without the backtrace).
+* **S4b's gate** (x86-64, q35): `ferrix.watchdog=tco` with
+  `ferrix.check.lockup=all`, every processor masked. The detector cannot
+  report, and the machine must reset by itself within 30 to 70 s. The next
+  loader says the TCO reset it, and the next kernel says it cleared
+  SECOND_TO_STS. Controls: feeding regardless of heartbeats (no reset
+  within the bound) and the loader's status read removed (the line
+  missing). If the RCBA turns out disabled under OVMF, the q35 path is
+  refused and the gate says so. Then S4b's emulator evidence comes back to
+  review before code.
+* **Rows**: as §5.4's, plus the lockup cases.
+
+### 6.6 The box runs (the customer's)
+
+1. Read only, from the box's Linux:
+   `sudo modprobe iTCO_wdt && dmesg | grep -i tco` (the driver's `Found a
+   Intel PCH TCO device (Version=6, TCOBASE=0x0400)` or its NO_REBOOT
+   refusal), then `sudo modprobe -r iTCO_wdt`; and `sudo setpci -s 00:1f.4
+   50.l 54.l`. Nothing is armed: the driver arms only when `/dev/watchdog`
+   is opened.
+2. After S4a lands: an image of its hash with `ferrix.lockup=on
+   ferrix.check.lockup=irqoff ferrix.panic=reset`. The box must panic with
+   `LOCKUP` within 20 s, reset itself 10 s later, and its next loader say
+   `boot 1 ended: a lockup`.
+3. After S4b lands: `ferrix.watchdog=tco ferrix.check.lockup=all`. The box
+   must reset by itself within 70 s, and its next loader say the TCO reset
+   it.
+
+### 6.7 Sizing
+
+S4a 6-8 points, S4b 8-10, the box steps about 1: 15 to 19 points.
+
+### 6.8 As the design review asks (ledger line 2889, OK IF D1-D14)
+
+* **D2, D3: who halts and who clears.** Every Ferrix boot's loader, having
+  reported the previous boot (§6.4), writes SECOND_TO_STS and TIMEOUT back
+  to clear them and sets TCO_TMR_HLT. One write each, through the TCO it
+  found, outside the TOE. So a TCO reset is reported once, and no boot
+  starts with a previous boot's TCO counting down. The kernel arms only when
+  asked. `reboot(2)` and `power::finish` set TCO_TMR_HLT (and NO_REBOOT
+  where writable) after S1's `stop` and before the architecture's stop. The
+  kernel never sets TCO_LOCK. A boot of another system after a TCO-armed
+  one is box step 4 (D2): Linux with the watchdog off must not be reset 30
+  to 60 s later.
+* **D7.** `ferrix.watchdog=tco` brings the heartbeats and the 1 s watch tick
+  with it. The lockup *report* stays `ferrix.lockup=on`'s.
+* **D4.** The NMI fallback is per-target state (the NMI's time), decided
+  on a later tick. No tick waits.
+* **D6.** With both options off, the timer path reads one set-once flag and
+  is otherwise today's. `timer::stop` is unchanged: the idle path and the
+  tick arm the watch tick explicitly. The ring is the online processors,
+  less those `stop_others` stopped.
+* **D1.** The tick calls a hook core defines (`timer::Watch`), which the
+  lockup module registers into, as power's flushes do.
+* The rest (D5, D8-D12, D14) are the code reviews' to check.
+
+## 7. Where it stands
+
+2026-10-21, §6 (lockup): S4's design, the lockup detector and the TCO
+watchdog. Design verdict **OK IF D1-D14** (consultant ledger line 2889);
+§6.8 answers the choices it asked the design to make. S4a lands first, then
+S4b, each with its own code review.
 
 2026-10-21, version 3 (crashlog): §0's survey and slices, and §5's S1
 design. Design verdict **OK IF C1-C12** (consultant ledger

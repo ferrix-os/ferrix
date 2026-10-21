@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["H.FAIL.6-7", "L.lockup.1-5", "L.tco.1-6", "L.console.49"],
+      "owner": "lockup",
+      "branch": "lockup",
+      "date": "2026-10-21",
+      "purpose": "POSTMORTEM.md section 6 (S4): a processor that takes no interrupt for 10 s ends in a failure report (the lockup detector, stop code 7); an armed TCO watchdog resets a machine the kernel stopped feeding, and the next loader says so"
+    },
+    {
       "ids": ["L.sched.86-89", "H.SCHED.15"],
       "owner": "debug-s1",
       "branch": "debug-s1",
