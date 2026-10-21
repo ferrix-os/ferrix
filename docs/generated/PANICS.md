@@ -2419,22 +2419,24 @@ src/kernel/src/smp.rs synchronize; docs/OPAQUE-KERNEL.md §9.3b.
 Some of stage 9's checks need the item to do something at a point no program can
 aim at: the speculation domain check's case 11 makes another processor record a
 domain between a leave's scan and its grace period
-(`arch::speculation::leaving_domain`, the certification finding F-60), and the
-wake row's check needs `sched::work::notify` to say when a poster is between its
-post and its wake; stage 12's write check makes and writes a shared mapping
-between a reclaim's source answer and its take (`user::vmo`'s reclaim hook,
-armed only by stage 12). Each does that through a hook only its stage arms,
-which records the check that armed it and which that stage disarms before init
-starts (`docs/OPAQUE-KERNEL.md` §9.7's rules for such a hook). A hook left armed
-would run that check's code in every later leave, wake or reclaim, on a machine
-running programs. So boot stops before the success marker, naming the check and
-the hook, if one still is.
+(`arch::speculation::leaving_domain`, the certification finding F-60), its case
+12 makes another processor install a member's space between `forget_root`'s
+clear of its last root and the forget's return (F-64), and the wake row's check
+needs `sched::work::notify` to say when a poster is between its post and its
+wake; stage 12's write check makes and writes a shared mapping between a
+reclaim's source answer and its take (`user::vmo`'s reclaim hook, armed only by
+stage 12). Each does that through a hook only its stage arms, which records the
+check that armed it and which that stage disarms before init starts
+(`docs/OPAQUE-KERNEL.md` §9.7's rules for such a hook). A hook left armed would
+run that check's code in every later leave, forget, wake or reclaim, on a
+machine running programs. So boot stops before the success marker, naming the
+check and the hook, if one still is.
 
 1. A check that arms a hook returned, on success or on an error it reports,
    without disarming it.
 2. A new check arms a hook and was written without the disarm.
 
-See: src/kernel/src/arch/speculation.rs CheckHook;
+See: src/kernel/src/arch/speculation.rs CheckHook, forget_root;
 src/kernel/src/object/domain_check.rs; src/kernel/src/main.rs;
 docs/OPAQUE-KERNEL.md §9.7; src/kernel/src/sched/work.rs hook_armed_by;
 src/kernel/src/user/vmo.rs ReclaimHook; src/kernel/src/fs/btrfs_write_check.rs.

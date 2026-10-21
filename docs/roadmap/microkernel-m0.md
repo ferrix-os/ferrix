@@ -89,8 +89,8 @@ BF6's and DF6's item-review notes, and the plans for `smt=off`,
 * **`ssbd=on_request`** (`desktop`): SSBD per thread, written at a switch
   only when it changes; `PR_GET_SPECULATION_CTRL` truthful in every profile.
 * **`program_barrier=session`** (`desktop`): barriers between login
-  sessions' domains only, under `BUILD-FLAGS.md` §3.1's rules. **F-64 is
-  fixed before its code lands.**
+  sessions' domains only, under `BUILD-FLAGS.md` §3.1's rules. F-64, which
+  it waited on, is fixed (branch `m0-f64`, 2026-10-14).
 * **Zenbleed's and GDS's fixes** leave the `mitigations` flag and stay on in
   every profile (its own small review, DF6).
 

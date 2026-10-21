@@ -257,11 +257,11 @@ pub(crate) fn entered_space(root: u64) {
     //
     // Loads and stores, not read-modify-writes (OPAQUE-KERNEL.md §9.8, 2f):
     // this runs with interrupts masked (`AddressSpace::install`'s contract),
-    // and only this processor writes its `ENTERING_DOMAIN`. `LAST_DOMAIN` and
-    // `LAST_ROOT` are also written by `forget_root` from another processor,
-    // which clears a root no space uses yet and the domain with it: a store
-    // here that overwrites that clear stores this processor's own root and
-    // domain, never the forgotten root, which is all `forget_root` asks.
+    // and only this processor writes its `ENTERING_DOMAIN` and `LAST_DOMAIN`.
+    // `LAST_ROOT` is also written by `forget_root` from another processor,
+    // which clears a root no space uses yet, and only that (F-64): a store
+    // here that overwrites that clear stores this processor's own root,
+    // never the forgotten root, which is all `forget_root` asks.
     // And `LAST_DOMAIN`'s remote reader, `leaving_domain`'s scan, is since
     // F-60's fix only a shortcut: every processor checks its own at the
     // grace period's answer (`answer_leaving`), after any switch it was
@@ -573,21 +573,65 @@ pub(crate) fn entering_space(domain: u64) {
 /// Called by an architecture's `prepare_user_root` for a root that is about to
 /// belong to a new address space: no processor may treat it as the space it
 /// last ran.
+///
+/// The root only, never the processor's [`LAST_DOMAIN`] (the certification
+/// finding F-64). That word is the domain of the space the processor last
+/// ran, whichever root it had, and only the processor itself writes it. A
+/// second store of zero there, after the compare-exchange, could land after
+/// the processor had just recorded a member's domain in `entered_space`:
+/// the switch had skipped the barrier inside the domain, and a later leave
+/// of the domain would then find nothing owed on that processor, by the scan
+/// or by `answer_leaving`. Without it a reused root inherits nothing either:
+/// with the root cleared, the next install's root always differs, and the
+/// incoming domain always comes from `ENTERING_DOMAIN`, so a stale domain
+/// here can only match a member of the domain the processor did last run.
+/// Domain numbers are never reused (`object::job`'s `NEXT_DOMAIN`).
 pub(crate) fn forget_root(root: u64) {
     if !HARDENED {
         return;
     }
-    for (last, domain) in LAST_ROOT
-        .iter()
-        .zip(LAST_DOMAIN.iter())
-        .take(crate::smp::count())
-    {
-        // And its domain with it, so that a reused root never inherits one.
+    for cpu in 0..crate::smp::count() {
+        let Some(last) = LAST_ROOT.get(cpu) else {
+            break;
+        };
         if last
             .compare_exchange(root, 0, Ordering::Relaxed, Ordering::Relaxed)
             .is_ok()
         {
-            domain.store(0, Ordering::Relaxed);
+            // Where stage 9 makes processor `cpu` install a member's space
+            // between this clear and the end of the forget (case 12).
+            run_forget_hook();
         }
     }
+}
+
+/// The hook [`forget_root`] calls after each processor's root it clears, if a
+/// check has armed one: a lock, as [`LEAVE_HOOK`]'s, taken only where a
+/// processor's last root was the one being forgotten.
+static FORGET_HOOK: crate::sync::SpinLock<Option<&'static CheckHook>> =
+    crate::sync::SpinLock::new(None);
+
+/// Run the hook [`forget_root`] holds, if any, copied out so that the lock
+/// is not held while it runs.
+fn run_forget_hook() {
+    let hook = *FORGET_HOOK.lock();
+    if let Some(hook) = hook {
+        (hook.run)();
+    }
+}
+
+/// Arm `hook` in [`forget_root`]: stage 9's check only.
+pub(crate) fn arm_forget_hook(hook: &'static CheckHook) {
+    *FORGET_HOOK.lock() = Some(hook);
+}
+
+/// Disarm whatever hook [`forget_root`] holds.
+pub(crate) fn disarm_forget_hook() {
+    *FORGET_HOOK.lock() = None;
+}
+
+/// The check that armed the hook [`forget_root`] still holds, if any: for
+/// the boot check after stage 9.
+pub(crate) fn forget_hook_armed_by() -> Option<&'static str> {
+    FORGET_HOOK.lock().map(|hook| hook.armed_by)
 }

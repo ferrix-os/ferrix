@@ -606,8 +606,10 @@ runs on all three, called from each architecture's `install_user_root`.
   its domain while it ran is no longer in it at the switch that ends its turn.
 - The barrier is skipped exactly when the root differs and
   `LAST_DOMAIN == domain != 0`. Otherwise it is issued as now.
-- `forget_root` also clears `LAST_DOMAIN` wherever it clears a root, so a
-  reused root never inherits a domain.
+- `forget_root` clears a processor's `LAST_ROOT` where it names the root,
+  and only that, so a reused root is never the one a processor last ran.
+  Until F-64's fix (2026-10-14, §9.8) it cleared `LAST_DOMAIN` too, as a
+  second access that could erase a domain the processor had just recorded.
 
 The compare is two loads and a branch, at the place the barrier is decided.
 Arm's predictor invalidation (`entered_space` on AArch64 and ARMv7-A) follows
@@ -744,7 +746,9 @@ required**. What each finding changed:
 - **F3: the check covers what the rows claim.**
   - **Case 10** checks: a child job of a marked job; a member's fork; a
     process moved into a marked job and its fork; and a forgotten root,
-    after which the next member installed decides the barrier.
+    after which the next member installed decides the barrier. Since
+    F-64's fix (§9.8) the forgotten root's own space, installed again over
+    it, decides the barrier: the root goes, the domain stays.
   - Case 1 now also counts invalidations issued, which must be none, and
     x86-64's in-domain refills, which must be one per switch (`REFILL_IN_DOMAIN`).
   - Case 4 reads the `DOMAIN` record back: the job, its parent and its domain.
@@ -833,6 +837,19 @@ the Rust model, and closed on AArch64. The accepted fix is a local check:
   before the marker stops the machine with FX-0908 if a hook is still armed.
 - **Controls.** `answer_leaving` made a no-op stops the boot on case 11's
   own message. The case's disarm removed stops it on FX-0908.
+- **Case 12** (F-64, 2026-10-14). The check has a kernel task on another
+  processor install a member's space and take it off, so that processor's
+  last root is that space's and its last domain the member's. It forgets
+  that root with a second hook armed (`arch::arm_forget_hook`, its own
+  static), which `forget_root` runs after each processor's root it clears.
+  The hook starts a task in another member's space on that processor and
+  waits until the switch into it is made: the switch skips the barrier
+  inside the domain, and records the domain, inside the forget. Then the
+  member leaves its domain while its task runs there, and that processor
+  must decide the barrier before the leave returns. Controls: the old
+  second store of zero to `LAST_DOMAIN`, restored after the hook, stops the
+  boot on case 12's own message; the case's disarm removed stops it on
+  FX-0908, which now asks this hook too.
 - **L.object.116** names the scan, the local check and the ordering
   (condition d).
 
@@ -3757,7 +3774,7 @@ remote reader of a word the switch writes, and the ordering it relies on:
 |---|---|---|
 | `IDLE` | `wake_idle_processors`, `machine_is_quiet` | the set side's fence before the idle loop's look, and the waker's fence after its enqueue; the clear needs none, since a stale bit costs one interrupt. Unchanged |
 | `LAST_ROOT` | `forget_root` (compare-exchange) | none: this processor stores only the root it installs, never the forgotten one (above) |
-| `LAST_DOMAIN` | `forget_root` (store), `leaving_domain` (load) | after F-60's fix, none for the leave: each processor checks itself at the grace-period answer. `forget_root`'s as for `LAST_ROOT` |
+| `LAST_DOMAIN` | `leaving_domain` (load); before F-64's fix also `forget_root` (store) | after F-60's fix, none for the leave: each processor checks itself at the grace-period answer. Since F-64's fix no other processor writes it |
 | `RUNNING` | `current_id` from another processor (reports, the failure policy) | none: a whole word, a hint |
 | `RUNNING_GROUP` | a charge made by the running task; reports | written and read by the processor itself with interrupts masked; a remote read is a report |
 | `RUNNING_SEEN` against `MOVES` | `note_moved` increments `MOVES`, then each processor's way out compares | message passing, not a store-buffer pattern (the consultant's correction, 2026-10-05, ledger 382): a move stores the process's new job, then increments `MOVES`, and no mover reads a `RUNNING*` word afterwards; the way out loads `MOVES` (`Acquire`), then reads the job. The `Acquire` load orders the two; the way out also keeps a `SeqCst` fence between seeing a changed `MOVES` and reading the job, paired with the `SeqCst` increment after the job's store, as a second order kept on purpose. The fence runs only when the counts differ, so the common way out stays a load |
@@ -3772,7 +3789,8 @@ the functions that make them, was listed with `grep` and read:
 - `LAST_DOMAIN` is written by its own processor in `left_space`,
   `entered_space` (a load and a `Relaxed` store since 2f), `answer_leaving`
   and `serve_wanted_barrier` (each a `SeqCst` store), and by another
-  processor only in `forget_root`. It is read remotely by `leaving_domain`'s
+  processor only in `forget_root`, until F-64's fix took that store out
+  (below). It is read remotely by `leaving_domain`'s
   scan (`SeqCst`) and by stage 9's `last_domain_on`. **`answer_leaving` (F-60's
   fix) reads it, but never another processor's:** its one caller,
   `smp::answer_grace_periods`, runs on the answering processor with
@@ -3818,6 +3836,17 @@ in, and the incoming domain always comes from `ENTERING_DOMAIN`, so a reused
 root cannot inherit a domain through it. The consultant confirmed it and
 numbered it **F-64** (Moderate; ledger 382), reserved in FINDINGS.md; its
 fix is a landing of its own (`docs/BACKLOG.md`).
+
+**F-64's fix (2026-10-14, branch `m0-f64`).** As proposed: `forget_root`
+compares and clears each processor's `LAST_ROOT` and stores nothing else,
+so `LAST_DOMAIN` has no remote writer left. A stale domain there can only
+match a member of the domain the processor did last run: domain numbers
+are never reused (`object::job`'s `NEXT_DOMAIN`), and with the root
+cleared the next install's root always differs and its incoming domain
+comes from `ENTERING_DOMAIN`. §9.3c's case 12 reaches the window through a
+hook in `forget_root` under §9.7 condition 11's rules, and case 10's
+forgotten-root half now installs the forgotten space itself again, which
+must decide the barrier. The finding's entry is in FINDINGS.md.
 
 The 64-bit weight arithmetic is accepted with its host test at depths 1 to
 8, and the weight setters' assertion that every entity weight is below

@@ -244,30 +244,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
          packet put back, a registration passed over, a cycle walk meeting one end twice, a \
          delivery to a line nobody holds"
     );
-    let domains = object::domain_check::run()?;
-    if domains.hardened {
-        crate::console::println!(
-            "  domain   {} switches inside one speculation domain skipped the barrier, {} out of \
-             one kept it: none across domains, none by a mover, a leaver or a sharer; a leaver \
-             barriered at once here{}{}",
-            domains.skipped,
-            domains.kept,
-            if domains.elsewhere {
-                " and where its thread ran"
-            } else {
-                ", on a machine with one processor"
-            },
-            if domains.late {
-                ", and where its domain was recorded after the leave's scan"
-            } else {
-                ""
-            }
-        );
-    } else {
-        crate::console::println!(
-            "  domain   not checked: built --mitigations off, no switch decides a barrier"
-        );
-    }
+    say_domains(&object::domain_check::run()?);
     check_the_wake_row()?;
     let formatted = object::format_check::run()?;
     crate::console::println!(
@@ -3990,4 +3967,36 @@ fn check_a_pending_interrupt_is_queued_when_bound(
         .call(nr::HANDLE_CLOSE, &[reg(port)])
         .map_err(|_| "closing an interrupt's second port failed")?;
     Ok(())
+}
+
+/// The speculation domain check's boot line, from what it found.
+fn say_domains(domains: &object::domain_check::Report) {
+    if domains.hardened {
+        crate::console::println!(
+            "  domain   {} switches inside one speculation domain skipped the barrier, {} out of \
+             one kept it: none across domains, none by a mover, a leaver or a sharer; a leaver \
+             barriered at once here{}{}{}",
+            domains.skipped,
+            domains.kept,
+            if domains.elsewhere {
+                " and where its thread ran"
+            } else {
+                ", on a machine with one processor"
+            },
+            if domains.late {
+                ", and where its domain was recorded after the leave's scan"
+            } else {
+                ""
+            },
+            if domains.raced {
+                ", and where its space was installed inside a forget of the last root"
+            } else {
+                ""
+            }
+        );
+    } else {
+        crate::console::println!(
+            "  domain   not checked: built --mitigations off, no switch decides a barrier"
+        );
+    }
 }

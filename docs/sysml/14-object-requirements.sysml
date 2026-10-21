@@ -1684,14 +1684,15 @@ package FerrixObjectRequirements {
                 invalidation at a switch of address space only when the outgoing
                 space's domain, read as it leaves, and the incoming space's are the
                 same and not zero, and shall otherwise decide the barrier as it did
-                before; forget_root shall clear a processor's last domain with its
-                last root.";
+                before; forget_root shall clear a processor's last root where it
+                names the root being forgotten, and shall leave its last domain
+                as it is (F-64).";
             attribute :>> criterion = "Two members of one marked job switched both
                 ways on one processor decide 0 barriers; a member and a process of
                 no domain, and members of two marked jobs, decide 2; a switch inside
-                the domain issues no invalidation; and a member installed after a
-                forgotten member's root decides 1 (the `domain` line, cases 1, 2 and
-                10).";
+                the domain issues no invalidation; and a space installed again
+                after its root was forgotten decides 1 (the `domain` line, cases 1,
+                2 and 10).";
             attribute :>> parent = "H.TRAP.17";
             attribute :>> unit = ("arch::speculation::entered_space",
                 "arch::speculation::same_domain", "arch::speculation::left_space",
@@ -1763,7 +1764,11 @@ package FerrixObjectRequirements {
                 leave returns (case 8); and a processor made, by stage 9's hook
                 between the scan and the grace period, to record the domain after
                 the scan has passed it decides the barrier before the leave returns
-                (case 11), which the local check removed fails.";
+                (case 11), which the local check removed fails; and a processor
+                made, by stage 9's hook in forget_root after the clear of its last
+                root, to switch into a member's space decides the barrier when that
+                member leaves there (case 12), which forget_root's old store of zero
+                to the processor's last domain fails (F-64).";
             attribute :>> parent = "H.TRAP.17";
             attribute :>> unit = ("object::process::Process::leave_speculation_domain",
                 "object::process::Process::leave_speculation_domain_unstarted",
