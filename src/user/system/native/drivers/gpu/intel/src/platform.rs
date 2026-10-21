@@ -10,10 +10,11 @@
 use core::cell::OnceCell;
 use core::ptr;
 
-use ferrix_intel_xelp::backend::{Error, KernelObject, Platform};
+use ferrix_intel_xelp::backend::{Error, FrequencyReport, KernelObject, Platform};
 use ferrix_intel_xelp::ggtt_space::{GgttSpace, Range};
 use ferrix_intel_xelp::io::{Clock, Mmio};
 use ferrix_intel_xelp::ppgtt::PtMemory;
+use ferrix_intel_xelp::uncore::{AutoForcewake, ForcewakeDomains, FwDomains};
 use ferrix_rt::Kernel;
 use ferrix_rt::native::device::{Device, Interrupt};
 use ferrix_rt::native::pending::Protection;
@@ -80,6 +81,11 @@ pub(crate) struct Real<'a> {
     ggtt: GgttSpace,
     objects: [Option<Object>; MAX_OBJECTS],
     interrupt: Option<Interrupt<Kernel>>,
+    /// Forcewake per access, once [`Real::forcewake_per_access`] handed the
+    /// bring-up's hold over; until then the process holds it.
+    forcewake: Option<AutoForcewake>,
+    /// Forcewake failures already said.
+    forcewake_said: u32,
 }
 
 impl<'a> Real<'a> {
@@ -101,12 +107,26 @@ impl<'a> Real<'a> {
             ggtt,
             objects: [const { None }; MAX_OBJECTS],
             interrupt,
+            forcewake: None,
+            forcewake_said: 0,
         })
     }
 
     /// BAR 0, for the forcewake the process holds around the back end.
     pub(crate) fn bar(&mut self) -> &mut Bar0 {
         &mut self.bar
+    }
+
+    /// From here on, forcewake per access over `domains` as i915 takes it,
+    /// `held` (the bring-up's) handed over at `now_ns` and released once
+    /// unused like the rest.
+    pub(crate) fn forcewake_per_access(
+        &mut self,
+        domains: FwDomains,
+        held: ForcewakeDomains,
+        now_ns: u64,
+    ) {
+        self.forcewake = Some(AutoForcewake::new(domains, held, now_ns));
     }
 
     fn object(&self, id: u32) -> Option<&Object> {
@@ -163,10 +183,16 @@ fn pin_error(error: ferrix_rt::native::error::Error) -> Error {
 
 impl Mmio for Real<'_> {
     fn read32(&mut self, offset: u32) -> u32 {
+        if let Some(forcewake) = self.forcewake.as_mut() {
+            forcewake.access(&mut self.bar, &mut self.time, offset, false);
+        }
         self.bar.read32(offset)
     }
 
     fn write32(&mut self, offset: u32, value: u32) {
+        if let Some(forcewake) = self.forcewake.as_mut() {
+            forcewake.access(&mut self.bar, &mut self.time, offset, true);
+        }
         self.bar.write32(offset, value);
     }
 }
@@ -348,21 +374,45 @@ impl Platform for Real<'_> {
         }
     }
 
-    fn frequency_report(
-        &mut self,
-        sample: &ferrix_intel_xelp::power::Sample,
-        milliwatts: u64,
-        rc6_permille: u64,
-    ) {
+    fn frequency_report(&mut self, report: &FrequencyReport) {
+        let sample = &report.sample;
         crate::say(format_args!(
-            "intel: freqlog: asked {} MHz, actual {} MHz (RPSTAT1 {:#010x}), RC6 {}.{} %, package {}.{:03} W",
+            "intel: freqlog: asked {} MHz{}, actual {} MHz (RPSTAT1 {:#010x}), limits {}, busy {}.{} %, RC6 {}.{} %, package {}.{:03} W",
             sample.requested_mhz,
+            if report.pinned {
+                " (pinned)"
+            } else if report.parked {
+                " (parked)"
+            } else {
+                ""
+            },
             sample.actual_mhz,
             sample.rpstat,
-            rc6_permille / 10,
-            rc6_permille % 10,
-            milliwatts / 1000,
-            milliwatts % 1000
+            crate::Reasons(sample.limit_reasons),
+            report.busy_permille / 10,
+            report.busy_permille % 10,
+            report.rc6_permille / 10,
+            report.rc6_permille % 10,
+            report.milliwatts / 1000,
+            report.milliwatts % 1000
         ));
+    }
+
+    fn forcewake_release(&mut self, now_ns: u64) {
+        let Some(forcewake) = self.forcewake.as_mut() else {
+            return;
+        };
+        forcewake.release(&mut self.bar, now_ns);
+        if forcewake.failures != self.forcewake_said {
+            self.forcewake_said = forcewake.failures;
+            crate::say(format_args!(
+                "intel: forcewake: {} wakes failed so far, the last {:?}",
+                forcewake.failures, forcewake.last_error
+            ));
+        }
+    }
+
+    fn forcewake_due(&self) -> Option<u64> {
+        self.forcewake.as_ref().and_then(AutoForcewake::due)
     }
 }

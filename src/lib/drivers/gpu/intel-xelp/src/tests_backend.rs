@@ -24,7 +24,7 @@ const HWSP: u32 = 0x10_0000;
 /// as model pages, and time that runs the engine whenever it passes.
 struct Model {
     gpu: Gpu,
-    reports: Vec<(crate::power::Sample, u64, u64)>,
+    reports: Vec<crate::backend::FrequencyReport>,
     next_ggtt: u32,
     hwsp_given: bool,
     now: u64,
@@ -136,8 +136,8 @@ impl Platform for Model {
         self.gpu.object(object.ggtt)[index] = value;
     }
 
-    fn frequency_report(&mut self, sample: &crate::power::Sample, milliwatts: u64, rc6: u64) {
-        self.reports.push((*sample, milliwatts, rc6));
+    fn frequency_report(&mut self, report: &crate::backend::FrequencyReport) {
+        self.reports.push(*report);
     }
 }
 
@@ -657,10 +657,10 @@ fn rps_starts_at_rp1_takes_a_fixed_request_and_logs_each_second() {
         18_240
     );
     // A fixed request at RP0, and one past it clamped.
-    assert_eq!(be.set_frequency_mhz(1000), Some(1000));
+    assert_eq!(be.set_frequency_mhz(1000, true), Some(1000));
     assert_eq!(be.platform().gpu.regs[&0xa008], 60 << 23);
-    assert_eq!(be.set_frequency_mhz(5000), Some(1000));
-    assert_eq!(be.set_frequency_mhz(10), Some(200));
+    assert_eq!(be.set_frequency_mhz(5000, true), Some(1000));
+    assert_eq!(be.set_frequency_mhz(10, true), Some(200));
     assert_eq!(
         be.platform().gpu.regs[&0xa014],
         (60 << 23) | (12 << 14),
@@ -689,9 +689,321 @@ fn rps_starts_at_rp1_takes_a_fixed_request_and_logs_each_second() {
     let reports = be.platform().reports.clone();
     assert_eq!(reports.len(), 1);
     assert_eq!(
-        (reports[0].1, reports[0].2),
+        (reports[0].milliwatts, reports[0].rc6_permille),
         (3000, 500),
         "3000 mW, 50.0 % in RC6"
     );
-    assert_eq!(reports[0].0.actual_mhz, 600);
+    assert_eq!(reports[0].sample.actual_mhz, 600);
+    assert_eq!(reports[0].busy_permille, 0, "nothing ran");
+    assert!(reports[0].pinned);
+}
+
+/// The back end with M0's ADL-N caps (RP0 1000, RP1 300, `RPn` 200 MHz) and
+/// RPS up on the policy, at model time 0.
+fn backend_with_rps() -> XelpBackend<Model> {
+    use crate::rps;
+    let mut be = backend();
+    be.platform()
+        .gpu
+        .write32(rps::GEN6_RP_STATE_CAP.offset(), (4 << 16) | 20);
+    be.platform()
+        .gpu
+        .write32(rps::GEN10_FREQ_INFO_REC.offset(), 6 << 8);
+    let state = be.power_up(None, true);
+    assert!(state.active && !state.pinned);
+    be
+}
+
+/// `rps_timer`'s and `rps_work`'s rules, i915's numbers.
+#[test]
+fn the_policy_steps_as_i915_steps() {
+    use crate::rps::{Event, combined_busy, park_step, rps_timer_event, rps_work};
+    // The busiest engine in full, the next by half, the third by a quarter.
+    assert_eq!(combined_busy(&[100, 400, 0, 200]), 400 + 100 + 25);
+    assert_eq!(combined_busy(&[0, 0]), 0);
+    // 95 % up, 85 % down, between them steady; never past the limits.
+    assert_eq!(rps_timer_event(960, 1000, 18, 12, 60), Event::Up);
+    assert_eq!(rps_timer_event(960, 1000, 60, 12, 60), Event::Steady);
+    assert_eq!(rps_timer_event(900, 1000, 18, 12, 60), Event::Steady);
+    assert_eq!(rps_timer_event(800, 1000, 18, 12, 60), Event::Down);
+    assert_eq!(rps_timer_event(0, 1000, 12, 12, 60), Event::Steady);
+    // Steps double while they continue, and clamp.
+    assert_eq!(rps_work(Event::Up, 18, 0, 12, 60), (19, 1));
+    assert_eq!(rps_work(Event::Up, 19, 1, 12, 60), (21, 2));
+    assert_eq!(rps_work(Event::Up, 49, 16, 12, 60), (60, 32));
+    assert_eq!(rps_work(Event::Up, 60, 32, 12, 60), (60, 0));
+    assert_eq!(rps_work(Event::Down, 60, 32, 12, 60), (59, -1));
+    assert_eq!(rps_work(Event::Down, 13, -4, 12, 60), (12, -8));
+    assert_eq!(rps_work(Event::Down, 12, -8, 12, 60), (12, 0));
+    assert_eq!(rps_work(Event::Steady, 30, 4, 12, 60), (30, 0));
+    // A park is a downclock by an even bin, doubling; never below RPn.
+    assert_eq!(park_step(30, 0, 12), (28, -2));
+    assert_eq!(park_step(28, -2, 12), (24, -4));
+    assert_eq!(park_step(13, -4, 12), (12, -8));
+    assert_eq!(park_step(30, i32::MIN, 12), (12, i32::MIN));
+}
+
+/// Busy work clocks the GT up to RP0 within milliseconds; idle, it parks
+/// at `RPn` after [`crate::backend::PARK_NS`]; the next work unparks it at the
+/// last request less a step, and the per-second log says the busy share.
+#[test]
+fn the_gt_clocks_up_under_load_and_parks_when_idle() {
+    use crate::backend::{FREQLOG_NS, PARK_NS};
+    let mut be = backend_with_rps();
+    let swreq = |be: &mut XelpBackend<Model>| be.platform().gpu.regs[&0xa008] >> 23;
+    assert_eq!(swreq(&mut be), 18, "RP1 first");
+    be.set_freqlog(true, 0);
+    // Work that the model is not given time to run: the engine stays in
+    // the ports, busy for every interval.
+    let vm = be.vm_create().expect("vm");
+    let _out = store_batch(&mut be, vm, 0x1_0000_0000, 0x1_0000_1040, 1);
+    let (engine, ctx) = be.context_create(vm, RENDER, 16 << 10).expect("context");
+    be.submit(engine, ctx, 0x1_0000_0000, 7).expect("taken");
+    let mut now = 0;
+    let mut climbed_at = None;
+    while now < 200_000_000 {
+        now += 500_000;
+        be.service(now, false);
+        if climbed_at.is_none() && swreq(&mut be) == 60 {
+            climbed_at = Some(now);
+        }
+    }
+    let climbed_at = climbed_at.expect("the request reaches RP0");
+    assert!(
+        climbed_at <= 20_000_000,
+        "RP0 within 20 ms: {climbed_at} ns"
+    );
+    assert_eq!(be.rps().expect("up").cur, 60);
+    // Let it finish: idle from here.
+    let _ = be.platform().gpu.run();
+    be.service(now, true);
+    let mut done = Vec::new();
+    be.completed(&mut |id, how| done.push((id, how)));
+    assert_eq!(done, [(7, Completion::Ok)]);
+    // Not parked before PARK_NS of idle; parked at RPn after.
+    be.service(now + PARK_NS / 2, false);
+    assert!(be.rps().expect("up").active);
+    let deadline = be.next_deadline().expect("the park is a deadline");
+    assert!(deadline <= now + PARK_NS, "{deadline} {now}");
+    be.service(now + PARK_NS, false);
+    let parked = be.rps().expect("up");
+    assert!(!parked.active, "parked");
+    assert_eq!(swreq(&mut be), 12, "RPn while parked");
+    assert!(parked.cur < 60, "the unpark comes back a step lower");
+    // The log saw a busy second.
+    be.service(FREQLOG_NS, false);
+    let reports = be.platform().reports.clone();
+    assert!(!reports.is_empty());
+    assert!(reports[0].busy_permille >= 150, "{:?}", reports[0]);
+    // New work unparks it where it left off, less the park's step.
+    be.platform().now = (now + PARK_NS * 2) / 1_000;
+    be.submit(engine, ctx, 0x1_0000_0000, 8).expect("taken");
+    let unparked = be.rps().expect("up");
+    assert!(unparked.active);
+    assert_eq!(swreq(&mut be), parked.cur);
+}
+
+/// A pinned request stays where it was put: no step, no park.
+#[test]
+fn a_pinned_request_is_left_alone() {
+    let mut be = backend_with_rps();
+    assert_eq!(be.set_frequency_mhz(1000, true), Some(1000));
+    for t in 1..100 {
+        be.service(t * 1_000_000, false);
+    }
+    let rps = be.rps().expect("up");
+    assert!(rps.active && rps.pinned);
+    assert_eq!(be.platform().gpu.regs[&0xa008] >> 23, 60);
+    // Released to the policy, idle, it steps down and parks.
+    assert_eq!(be.set_frequency_mhz(1000, false), Some(1000));
+    for t in 100..200 {
+        be.service(t * 1_000_000, false);
+    }
+    assert!(!be.rps().expect("up").active);
+    assert_eq!(be.platform().gpu.regs[&0xa008] >> 23, 12);
+}
+
+/// The checkpoint's load: a spinner from the GGTT that runs until it is
+/// ended, then completes and is given back without a completion for the
+/// front end.
+#[test]
+fn the_drivers_own_load_spins_until_ended() {
+    let mut be = backend_with_rps();
+    be.platform().gpu.spin_resumes = true;
+    let load = be.load_start().expect("a load");
+    for t in 1..20 {
+        let _ = be.platform().gpu.run();
+        be.service(t * 1_000_000, false);
+    }
+    let busy = be.busy_totals(20_000_000);
+    assert!(busy[0] >= 18_000_000, "RCS0 busy: {busy:?}");
+    assert!(be.load_end(load, 100_000), "it ends");
+    let mut done = Vec::new();
+    be.completed(&mut |id, how| done.push((id, how)));
+    assert_eq!(done, [], "the load's completion is the driver's");
+    assert_eq!(be.resets(), [0, 0]);
+}
+
+/// Registers that answer forcewake as the hardware does: an ack follows
+/// its request at once.
+#[derive(Default)]
+struct FwRegs {
+    regs: std::collections::BTreeMap<u32, u32>,
+    log: Vec<(u32, u32)>,
+    now: u64,
+}
+
+impl Mmio for FwRegs {
+    fn read32(&mut self, offset: u32) -> u32 {
+        let ack = match offset {
+            0xd84 => Some(0xa278),
+            0x13_0044 => Some(0xa188),
+            _ => None,
+        };
+        let at = ack.unwrap_or(offset);
+        self.regs.get(&at).copied().unwrap_or(0)
+    }
+
+    fn write32(&mut self, offset: u32, value: u32) {
+        self.log.push((offset, value));
+        let old = self.regs.get(&offset).copied().unwrap_or(0);
+        let new = if matches!(offset, 0xa278 | 0xa188) {
+            let mask = value >> 16;
+            (old & !mask) | (value & mask & 0xffff)
+        } else {
+            value
+        };
+        let _ = self.regs.insert(offset, new);
+    }
+}
+
+impl Clock for FwRegs {
+    fn now_us(&mut self) -> u64 {
+        self.now
+    }
+
+    fn delay_us(&mut self, us: u32) {
+        self.now += u64::from(us);
+    }
+}
+
+/// Forcewake per access: woken for a register that needs it, not for one
+/// outside every domain nor for a shadowed write, kept while used, released
+/// a millisecond after the last use.
+#[test]
+fn forcewake_is_taken_per_access_and_released_when_idle() {
+    use crate::uncore::{
+        AutoForcewake, FORCEWAKE_GT, FORCEWAKE_RELEASE_NS, FORCEWAKE_RENDER, fw_domains_init,
+    };
+    let domains = fw_domains_init(1 | 2);
+    let mut regs = FwRegs::default();
+    // The bring-up's hold handed over: released once unused for 1 ms.
+    let mut fw = AutoForcewake::new(domains, FORCEWAKE_RENDER | FORCEWAKE_GT, 0);
+    assert_eq!(fw.due(), Some(FORCEWAKE_RELEASE_NS));
+    fw.release(&mut regs, FORCEWAKE_RELEASE_NS);
+    assert_eq!(fw.awake(), 0);
+    assert_eq!(regs.regs[&0xa278] & 1, 0, "render released");
+    assert_eq!(fw.due(), None);
+    // GEN12_RPSTAT1 (0x1381b4) needs GT; the PCU mailbox outside the GT
+    // ranges needs none here either way; RCS0's RING_TIMESTAMP needs render.
+    let before = regs.log.len();
+    fw.access(&mut regs, &mut FwRegs::default(), 0x13_81b4, false);
+    let gt = crate::uncore::read_fw_domains(crate::reg::Reg(0x13_81b4));
+    assert_eq!(fw.awake(), gt & domains.mask());
+    fw.access(&mut regs, &mut FwRegs::default(), 0x2358, false);
+    assert_ne!(fw.awake() & FORCEWAKE_RENDER, 0);
+    let woken = regs.log.len();
+    assert!(woken > before);
+    // Awake domains are not asked again.
+    fw.access(&mut regs, &mut FwRegs::default(), 0x2358, false);
+    assert_eq!(regs.log.len(), woken);
+    // A shadowed write (RCS0's RING_TAIL) wakes nothing.
+    let mut quiet = AutoForcewake::new(domains, 0, 0);
+    quiet.access(&mut regs, &mut FwRegs::default(), 0x2030, true);
+    assert_eq!(quiet.awake(), 0);
+    // Used since the timer was armed: kept, re-armed; then released.
+    let due = fw.due().expect("armed");
+    fw.release(&mut regs, due);
+    assert_ne!(fw.awake(), 0, "used, so kept");
+    fw.release(&mut regs, due + FORCEWAKE_RELEASE_NS);
+    assert_eq!(fw.awake(), 0);
+    assert_eq!(regs.regs[&0xa278] & 1, 0);
+    assert_eq!(fw.failures, 0);
+}
+
+/// A PCU that answers the mailbox: every request ends READY clear with
+/// success, a read of the ring table answers its row.
+#[derive(Default)]
+struct Pcu {
+    data: u32,
+    data1: u32,
+    mailbox: u32,
+    requests: Vec<(u32, u32)>,
+    now: u64,
+}
+
+impl Mmio for Pcu {
+    fn read32(&mut self, offset: u32) -> u32 {
+        match offset {
+            0x13_8124 => self.mailbox,
+            0x13_8128 => self.data,
+            0x13_812c => self.data1,
+            _ => 0,
+        }
+    }
+
+    fn write32(&mut self, offset: u32, value: u32) {
+        match offset {
+            0x13_8128 => self.data = value,
+            0x13_812c => self.data1 = value,
+            0x13_8124 => {
+                self.requests.push((value & 0xff, self.data));
+                if value & 0xff == 0x9 {
+                    // The row for GT frequency N: ring 2N x 100 MHz.
+                    self.data = (self.data * 2) << 8;
+                }
+                self.mailbox = 0;
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Clock for Pcu {
+    fn now_us(&mut self) -> u64 {
+        self.now
+    }
+
+    fn delay_us(&mut self, us: u32) {
+        self.now += u64::from(us);
+    }
+}
+
+/// `gen6_update_ring_freq`'s requests for ADL-N: RP0 (20 x 50 MHz) down to
+/// `RPn` (4), ring ratio = GT ratio, no IA ratio; the table read back as
+/// `i915_ring_freq_table` reads it; the mailbox's errors.
+#[test]
+fn the_ring_frequency_table_is_written_as_i915_writes_it() {
+    use crate::pcode::{PcodeError, gen6_update_ring_freq, gen7_check_mailbox_status};
+    let caps = crate::rps::gen6_rps_get_freq_caps((4 << 16) | 20, 6 << 8);
+    let mut pcu = Pcu::default();
+    let mut clock = Pcu::default();
+    assert_eq!(gen6_update_ring_freq(&mut pcu, &mut clock, caps), (0, None));
+    assert_eq!(pcu.requests.len(), 17);
+    assert_eq!(pcu.requests[0], (0x8, (20 << 16) | 20));
+    assert_eq!(pcu.requests[16], (0x8, (4 << 16) | 4));
+    let row = crate::pcode::read_ring_row(&mut pcu, &mut clock, 6).expect("read");
+    assert_eq!((row.gpu_freq, row.ring_mhz, row.ia_mhz), (6, 1200, 0));
+    assert_eq!(gen7_check_mailbox_status(0), Ok(()));
+    assert_eq!(gen7_check_mailbox_status(0x2), Err(PcodeError::Timeout));
+    assert_eq!(gen7_check_mailbox_status(0x11), Err(PcodeError::Rejected));
+    assert_eq!(gen7_check_mailbox_status(0x10), Err(PcodeError::OutOfRange));
+    // A busy mailbox is refused before anything is written.
+    pcu.mailbox = 1 << 31;
+    let n = pcu.requests.len();
+    assert_eq!(
+        crate::pcode::read_ring_row(&mut pcu, &mut clock, 6),
+        Err(PcodeError::Busy)
+    );
+    assert_eq!(pcu.requests.len(), n);
 }

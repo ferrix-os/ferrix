@@ -124,16 +124,38 @@ pub trait Platform: Mmio + Clock + PtMemory {
     /// The GT's interrupt was serviced ([`XelpBackend::service`] with
     /// `interrupt`): acknowledge the vector, so the next one is delivered.
     fn interrupt_serviced(&mut self) {}
-    /// One second of [`XelpBackend::set_freqlog`]'s log: the GT's sample, the
-    /// package's average power over the second and its RC6 share.
-    fn frequency_report(
-        &mut self,
-        sample: &crate::power::Sample,
-        milliwatts: u64,
-        rc6_permille: u64,
-    ) {
-        let _ = (sample, milliwatts, rc6_permille);
+    /// One second of [`XelpBackend::set_freqlog`]'s log.
+    fn frequency_report(&mut self, report: &FrequencyReport) {
+        let _ = report;
     }
+    /// Forcewake taken per access: release the domains not used since the
+    /// last call that are due at `now_ns` (`intel_uncore_fw_release_timer`).
+    fn forcewake_release(&mut self, now_ns: u64) {
+        let _ = now_ns;
+    }
+    /// When [`Platform::forcewake_release`] must next run, while a domain
+    /// is awake.
+    fn forcewake_due(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// One line of the per-second frequency log.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FrequencyReport {
+    /// What the GT does now.
+    pub sample: crate::power::Sample,
+    /// The package's average power over the second, in mW.
+    pub milliwatts: u64,
+    /// The GT's share of the second in RC6, in tenths of a percent.
+    pub rc6_permille: u64,
+    /// The busiest engine's share of the second in the ports, in tenths of
+    /// a percent.
+    pub busy_permille: u64,
+    /// Whether RPS is parked, and whether the request is pinned.
+    pub parked: bool,
+    /// See [`FrequencyReport::parked`].
+    pub pinned: bool,
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -233,6 +255,26 @@ struct Engine {
     watch: Option<(usize, u32, u64)>,
     /// Engine resets so far.
     resets: u32,
+    /// Time in the ports so far, in ns (i915's engine busy statistics, by
+    /// the context going in and out): counted from `seen_ns`, the last
+    /// check, when `was_active` was then.
+    busy_ns: u64,
+    seen_ns: u64,
+    was_active: bool,
+}
+
+impl Engine {
+    /// The time since the last check counted busy if the engine was in
+    /// the ports then, and the check moved to `now_ns`.
+    fn account(&mut self, now_ns: u64) {
+        if self.was_active {
+            self.busy_ns = self
+                .busy_ns
+                .saturating_add(now_ns.saturating_sub(self.seen_ns));
+        }
+        self.seen_ns = now_ns.max(self.seen_ns);
+        self.was_active = self.active.is_some();
+    }
 }
 
 /// What the process knows of the device and the machine that the GT does
@@ -276,8 +318,44 @@ pub struct XelpBackend<P: Platform> {
     rps: Option<crate::power::Rps>,
     /// The per-second log: when the next line is due, and the last sample
     /// with its time.
-    freqlog: Option<(u64, crate::power::Sample, u64)>,
+    freqlog: Option<Freqlog>,
+    /// Since when no engine has had work, while RPS is unparked.
+    idle_since: Option<u64>,
     last_service_ns: u64,
+}
+
+/// The per-second log's state: when the next line is due, and the last
+/// line's sample, time and busy totals.
+#[derive(Clone, Copy, Debug)]
+struct Freqlog {
+    due: u64,
+    sample: crate::power::Sample,
+    at: u64,
+    busy: [u64; crate::power::POLICY_ENGINES],
+}
+
+/// How long the GT idles before RPS parks (`intel_rps_park`, which i915
+/// runs when the GT's last wakeref goes): one longest evaluation interval,
+/// so the gaps between a program's frames do not park it.
+pub const PARK_NS: u64 = rps_park_ns();
+
+const fn rps_park_ns() -> u64 {
+    crate::rps::BUSY_MAX_EI_MS as u64 * 1_000_000
+}
+
+/// The request id of the driver's own load ([`XelpBackend::load_start`]).
+const LOAD_ID: u64 = u64::MAX - 1;
+
+/// The driver's own load on RCS0 for the frequency checkpoint: a spinning
+/// batch (`igt_spinner`'s arbitration point and jump back to itself), run
+/// privileged from the GGTT in a context and VM of its own, until
+/// [`XelpBackend::load_end`] writes `MI_BATCH_BUFFER_END` over its first
+/// command.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Load {
+    vm: usize,
+    context: usize,
+    batch: KernelObject,
 }
 
 impl<P: Platform> core::fmt::Debug for XelpBackend<P> {
@@ -398,6 +476,7 @@ impl<P: Platform> XelpBackend<P> {
             fused_count: fused_engines.len().min(5),
             rps: None,
             freqlog: None,
+            idle_since: None,
         };
         for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
             backend.engine_up(slot, *info)?;
@@ -480,6 +559,9 @@ impl<P: Platform> XelpBackend<P> {
                 cursor: 0,
                 watch: None,
                 resets: 0,
+                busy_ns: 0,
+                seen_ns: 0,
+                was_active: false,
             });
         }
         self.record_default(slot)
@@ -828,18 +910,21 @@ impl<P: Platform> XelpBackend<P> {
         });
         ctx.unsubmitted = true;
         ctx.last_tail = built.tail;
+        let now = platform.now_us().saturating_mul(1_000);
         drop(platform);
-        self.dequeue(slot);
+        self.unpark(now);
+        self.dequeue(slot, now);
         Ok(())
     }
 
     /// `execlists_dequeue`, one context in the ports at a time: the running
     /// context again if it has more (a lite restore), otherwise, once the
     /// engine is idle, the next runnable context round-robin.
-    fn dequeue(&mut self, slot: usize) {
+    fn dequeue(&mut self, slot: usize, now_ns: u64) {
         let Some(engine) = self.engines.get_mut(slot).and_then(Option::as_mut) else {
             return;
         };
+        engine.account(now_ns);
         if !engine.state.can_submit() {
             return;
         }
@@ -876,6 +961,7 @@ impl<P: Platform> XelpBackend<P> {
             engine.active = Some(pick);
             engine.cursor = (pick + 1) % MAX_CONTEXTS_PER_ENGINE;
         }
+        engine.account(now_ns);
     }
 
     /// Let the GPU's state machines run: after an interrupt (`interrupt`,
@@ -896,11 +982,16 @@ impl<P: Platform> XelpBackend<P> {
             if self.engines.get(slot).and_then(Option::as_ref).is_none() {
                 continue;
             }
+            if let Some(engine) = self.engines.get_mut(slot).and_then(Option::as_mut) {
+                engine.account(now_ns);
+            }
             self.process_csb(slot);
             self.retire(slot);
             self.watch(slot, now_ns);
-            self.dequeue(slot);
+            self.dequeue(slot, now_ns);
         }
+        self.power_service(now_ns);
+        self.platform.borrow_mut().forcewake_release(now_ns);
     }
 
     fn process_csb(&mut self, slot: usize) {
@@ -1099,11 +1190,18 @@ impl<P: Platform> XelpBackend<P> {
             .flatten()
             .any(|e| e.contexts.iter().flatten().any(|c| c.count() > 0));
         let poll = busy.then(|| self.last_service_ns.saturating_add(POLL_NS));
-        let log = self.freqlog.map(|(due, _, _)| due);
-        match (poll, log) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        let log = self.freqlog.map(|log| log.due);
+        let policy = self.rps.and_then(|rps| rps.due());
+        let park = self
+            .rps
+            .filter(|rps| rps.active && !rps.pinned)
+            .and(self.idle_since)
+            .map(|since| since.saturating_add(PARK_NS));
+        let forcewake = self.platform.borrow().forcewake_due();
+        [poll, log, policy, park, forcewake]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// Hand each finished request to `sink`, once.
@@ -1273,13 +1371,14 @@ pub const FREQLOG_NS: u64 = 1_000_000_000;
 
 impl<P: Platform> XelpBackend<P> {
     /// `intel_rps_enable` and `intel_rc6_enable`: RPS on with its first
-    /// request at RP1, or at `start_mhz` (a fixed request, for measurement:
-    /// nothing moves it yet); RC6 programmed and enabled when `rc6`. Returns
-    /// the RPS state.
+    /// request at RP1, or pinned at `start_mhz` (a fixed request, for
+    /// measurement); RC6 programmed and enabled when `rc6`. Returns the RPS
+    /// state.
     pub fn power_up(&mut self, start_mhz: Option<u32>, rc6: bool) -> crate::power::Rps {
         let clock_hz = self.facts.cs_timestamp_hz;
+        let now = self.platform.borrow_mut().now_us().saturating_mul(1_000);
         let mut regs = Regs(&self.platform);
-        let rps = crate::power::Rps::enable(&mut regs, clock_hz, start_mhz);
+        let rps = crate::power::Rps::enable(&mut regs, clock_hz, start_mhz, now);
         if rc6 {
             let _ = crate::power::rc6_enable(
                 &mut regs,
@@ -1287,14 +1386,67 @@ impl<P: Platform> XelpBackend<P> {
             );
         }
         self.rps = Some(rps);
+        self.idle_since = self.is_idle().then_some(now);
         rps
     }
 
-    /// Request `mhz` (rounded, clamped to RPn..RP0); the MHz asked, or
-    /// `None` before [`XelpBackend::power_up`].
-    pub fn set_frequency_mhz(&mut self, mhz: u32) -> Option<u32> {
+    /// `intel_llc_enable`: the PCU's minimum ring frequency for each GT
+    /// frequency (`gen6_update_ring_freq`); how many rows were refused and
+    /// the first refusal. Nothing before [`XelpBackend::power_up`].
+    pub fn update_ring_freq(&mut self) -> (u32, Option<crate::pcode::PcodeError>) {
+        let Some(rps) = self.rps else {
+            return (0, None);
+        };
+        crate::pcode::gen6_update_ring_freq(
+            &mut Regs(&self.platform),
+            &mut Time(&self.platform),
+            rps.caps,
+        )
+    }
+
+    /// The ring frequency table as the PCU answers it, `RPn` up, into `rows`;
+    /// how many rows were read. Stops at the first refusal.
+    pub fn ring_freq_table(&mut self, rows: &mut [crate::pcode::RingRow]) -> usize {
+        let Some(rps) = self.rps else {
+            return 0;
+        };
+        let (min, max) = crate::pcode::ring_table_rows(rps.caps);
+        let mut n = 0;
+        for (row, gpu_freq) in rows.iter_mut().zip(min..=max) {
+            match crate::pcode::read_ring_row(
+                &mut Regs(&self.platform),
+                &mut Time(&self.platform),
+                gpu_freq,
+            ) {
+                Ok(read) => *row = read,
+                Err(_) => break,
+            }
+            n += 1;
+        }
+        n
+    }
+
+    /// What may hold the GT below its request, read now.
+    pub fn limits(&mut self) -> crate::power::Limits {
+        crate::power::Limits::read(&mut Regs(&self.platform))
+    }
+
+    /// The RPS state, once [`XelpBackend::power_up`] ran.
+    #[must_use]
+    pub const fn rps(&self) -> Option<crate::power::Rps> {
+        self.rps
+    }
+
+    /// Request `mhz` (rounded, clamped to RPn..RP0), pinned there when
+    /// `pin`, else from where the policy goes on; the MHz asked, or `None`
+    /// before [`XelpBackend::power_up`]. A parked GT is unparked first.
+    pub fn set_frequency_mhz(&mut self, mhz: u32, pin: bool) -> Option<u32> {
         let mut rps = self.rps?;
-        let asked = rps.set_mhz(&mut Regs(&self.platform), mhz);
+        let now = self.platform.borrow_mut().now_us().saturating_mul(1_000);
+        let busy = self.busy_totals(now);
+        let mut regs = Regs(&self.platform);
+        rps.unpark(&mut regs, now, &busy);
+        let asked = rps.set_mhz(&mut regs, mhz, pin);
         self.rps = Some(rps);
         Some(asked)
     }
@@ -1305,30 +1457,199 @@ impl<P: Platform> XelpBackend<P> {
         Some(rps.sample(&mut Regs(&self.platform)))
     }
 
-    /// Say the frequency, RC6 share and package power every second, through
-    /// [`Platform::frequency_report`], from the next [`XelpBackend::service`]
-    /// on; `false` stops it.
+    /// Each engine's time in the ports so far, at `now_ns`.
+    #[must_use]
+    pub fn busy_totals(&self, now_ns: u64) -> [u64; crate::power::POLICY_ENGINES] {
+        let mut busy = [0; crate::power::POLICY_ENGINES];
+        for (total, engine) in busy.iter_mut().zip(&self.engines) {
+            if let Some(engine) = engine {
+                *total = engine.busy_ns.saturating_add(if engine.was_active {
+                    now_ns.saturating_sub(engine.seen_ns)
+                } else {
+                    0
+                });
+            }
+        }
+        busy
+    }
+
+    /// No engine has a request outstanding.
+    fn is_idle(&self) -> bool {
+        !self
+            .engines
+            .iter()
+            .flatten()
+            .any(|e| e.active.is_some() || e.contexts.iter().flatten().any(|c| c.count() > 0))
+    }
+
+    /// `intel_rps_unpark` when work arrives on a parked GT.
+    fn unpark(&mut self, now_ns: u64) {
+        self.idle_since = None;
+        let Some(mut rps) = self.rps.filter(|rps| !rps.active) else {
+            return;
+        };
+        let busy = self.busy_totals(now_ns);
+        rps.unpark(&mut Regs(&self.platform), now_ns, &busy);
+        self.rps = Some(rps);
+    }
+
+    /// The policy's part of [`XelpBackend::service`]: the frequency log,
+    /// the park after [`PARK_NS`] idle, and `rps_timer` when due.
+    fn power_service(&mut self, now_ns: u64) {
+        self.freqlog_due(now_ns);
+        let Some(mut rps) = self.rps else {
+            return;
+        };
+        if !self.is_idle() {
+            self.idle_since = None;
+            let busy = self.busy_totals(now_ns);
+            rps.unpark(&mut Regs(&self.platform), now_ns, &busy);
+        } else if rps.active {
+            let since = *self.idle_since.get_or_insert(now_ns);
+            if now_ns.saturating_sub(since) >= PARK_NS {
+                rps.park(&mut Regs(&self.platform));
+            }
+        }
+        let busy = self.busy_totals(now_ns);
+        let _ = rps.evaluate(&mut Regs(&self.platform), now_ns, &busy);
+        self.rps = Some(rps);
+    }
+
+    /// Say the frequency, RC6 share, busy share and package power every
+    /// second, through [`Platform::frequency_report`], from the next
+    /// [`XelpBackend::service`] on; `false` stops it.
     pub fn set_freqlog(&mut self, on: bool, now_ns: u64) {
         self.freqlog = match (on, self.frequency_sample()) {
-            (true, Some(sample)) => Some((now_ns.saturating_add(FREQLOG_NS), sample, now_ns)),
+            (true, Some(sample)) => Some(Freqlog {
+                due: now_ns.saturating_add(FREQLOG_NS),
+                sample,
+                at: now_ns,
+                busy: self.busy_totals(now_ns),
+            }),
             _ => None,
         };
     }
 
     fn freqlog_due(&mut self, now_ns: u64) {
-        let Some((due, before, at)) = self.freqlog else {
+        let Some(log) = self.freqlog else {
             return;
         };
-        if now_ns < due {
+        if now_ns < log.due {
             return;
         }
-        let Some(after) = self.frequency_sample() else {
+        let (Some(after), Some(rps)) = (self.frequency_sample(), self.rps) else {
             return;
         };
-        let (milliwatts, rc6) = crate::power::between(&before, &after, now_ns.saturating_sub(at));
+        let elapsed = now_ns.saturating_sub(log.at);
+        let (milliwatts, rc6_permille) = crate::power::between(&log.sample, &after, elapsed);
+        let busy = self.busy_totals(now_ns);
+        let busiest = busy
+            .iter()
+            .zip(&log.busy)
+            .map(|(now, then)| now.saturating_sub(*then))
+            .max()
+            .unwrap_or(0);
+        let busy_permille = (busiest * 1000).checked_div(elapsed).unwrap_or(0).min(1000);
         self.platform
             .borrow_mut()
-            .frequency_report(&after, milliwatts, rc6);
-        self.freqlog = Some((now_ns.saturating_add(FREQLOG_NS), after, now_ns));
+            .frequency_report(&FrequencyReport {
+                sample: after,
+                milliwatts,
+                rc6_permille,
+                busy_permille,
+                parked: !rps.active,
+                pinned: rps.pinned,
+            });
+        self.freqlog = Some(Freqlog {
+            due: now_ns.saturating_add(FREQLOG_NS),
+            sample: after,
+            at: now_ns,
+            busy,
+        });
+    }
+
+    /// Start the driver's own [`Load`] on RCS0.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoMemory`], or [`Error::Invalid`] without RCS0.
+    pub fn load_start(&mut self) -> Result<Load, Error> {
+        let vm = self.vm_create()?;
+        let context = match self.make_context(0, vm, RING_BYTES.0, true) {
+            Ok(context) => context,
+            Err(error) => {
+                self.vm_destroy(vm);
+                return Err(error);
+            }
+        };
+        let made = self.platform.borrow_mut().kernel_object(1);
+        let batch = match made {
+            Ok(batch) => batch,
+            Err(error) => {
+                self.context_destroy(0, context);
+                self.vm_destroy(vm);
+                return Err(error);
+            }
+        };
+        {
+            let mut platform = self.platform.borrow_mut();
+            let mut cs = crate::commands::Cs::new(platform.words(batch));
+            cs.push(crate::commands::gpu::MI_ARB_CHECK);
+            cs.push(crate::commands::gpu::MI_BATCH_BUFFER_START_GEN8);
+            cs.push(batch.ggtt);
+            cs.push(0);
+        }
+        let load = Load { vm, context, batch };
+        let submitted = self.emit(
+            0,
+            context,
+            Payload::Batch {
+                address: u64::from(batch.ggtt),
+                flags: crate::engine_cs::I915_DISPATCH_SECURE,
+            },
+            LOAD_ID,
+        );
+        if submitted.is_err() {
+            self.load_free(load);
+            return Err(Error::NoMemory);
+        }
+        Ok(load)
+    }
+
+    /// End `load`: `MI_BATCH_BUFFER_END` over its first command, then
+    /// serviced until it completes, at most `patience_us`, and its context,
+    /// VM and batch given back. Whether it completed; if not, the hang
+    /// watch resets it within [`HANG_NS`], and it stays allocated.
+    pub fn load_end(&mut self, load: Load, patience_us: u64) -> bool {
+        self.platform
+            .borrow_mut()
+            .write_object(load.batch, 0, lrc::MI_BATCH_BUFFER_END);
+        let start = self.platform.borrow_mut().now_us();
+        let done = loop {
+            let now = self.platform.borrow_mut().now_us();
+            self.service(now.saturating_mul(1_000), false);
+            if self.context(0, load.context).is_none_or(|c| c.count() == 0) {
+                break true;
+            }
+            if now.saturating_sub(start) > patience_us {
+                break false;
+            }
+            self.platform.borrow_mut().delay_us(100);
+        };
+        if done {
+            self.load_free(load);
+        }
+        done
+    }
+
+    fn load_free(&mut self, load: Load) {
+        for entry in &mut self.done {
+            if entry.is_some_and(|(r, _)| r == LOAD_ID) {
+                *entry = None;
+            }
+        }
+        self.context_destroy(0, load.context);
+        self.platform.borrow_mut().free_kernel_object(load.batch);
+        self.vm_destroy(load.vm);
     }
 }

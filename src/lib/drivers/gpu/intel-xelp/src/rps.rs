@@ -230,3 +230,143 @@ pub const fn rps_limits(caps: FreqCaps, val: u32) -> (Reg, u32) {
         limits,
     )
 }
+
+/// `GEN6_RP_STATE_LIMITS`, beside the caps in the MCHBAR mirror: the limits
+/// the firmware set (i915 reads it on no current part; said by the
+/// frequency checkpoint, raw).
+pub const GEN6_RP_STATE_LIMITS: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x5994);
+/// `PCU_PACKAGE_POWER_SKU`'s low word: `PKG_PKG_TDP` in its bits 14:0.
+pub const PCU_PACKAGE_POWER_SKU: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x5930);
+/// `PKG_PKG_TDP`.
+pub const PKG_PKG_TDP: u32 = genmask(14, 0);
+/// `PKG_PWR_UNIT`, in `PCU_PACKAGE_POWER_SKU_UNIT`: power counts are 1/2^n W.
+pub const PKG_PWR_UNIT: u32 = genmask(3, 0);
+/// `PCU_PACKAGE_TEMPERATURE`.
+pub const PCU_PACKAGE_TEMPERATURE: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x5978);
+/// `TEMP_MASK`.
+pub const TEMP_MASK: u32 = genmask(7, 0);
+/// `PCU_PACKAGE_RAPL_LIMIT`: the package's power limit 1 (`PL1`).
+pub const PCU_PACKAGE_RAPL_LIMIT: Reg = Reg(MCHBAR_MIRROR_BASE_SNB + 0x59a0);
+/// `PKG_PWR_LIM_1`.
+pub const PKG_PWR_LIM_1: u32 = genmask(14, 0);
+/// `PKG_PWR_LIM_1_EN`.
+pub const PKG_PWR_LIM_1_EN: u32 = 1 << 15;
+
+/// Milliwatts from a count of `PKG_PWR_UNIT` units (1/2^`unit` W).
+#[must_use]
+pub const fn power_milliwatts(count: u32, unit: u32) -> u64 {
+    (count as u64 * 1000) >> (unit & 31)
+}
+
+/// The names `GT0_PERF_LIMIT_REASONS`' status bits have in i915's
+/// `throttle_reason_*` attributes, in bit order: why the PCU holds the GT
+/// below the request.
+pub const LIMIT_REASONS: [(u32, &str); 8] = {
+    use crate::generated::i915_reg as r;
+    [
+        (r::PROCHOT_MASK, "prochot"),
+        (r::THERMAL_LIMIT_MASK, "thermal"),
+        (r::RATL_MASK, "ratl"),
+        (r::VR_THERMALERT_MASK, "vr_thermalert"),
+        (r::VR_TDC_MASK, "vr_tdc"),
+        (r::POWER_LIMIT_4_MASK, "pl4"),
+        (r::POWER_LIMIT_1_MASK, "pl1"),
+        (r::POWER_LIMIT_2_MASK, "pl2"),
+    ]
+};
+
+// The host's policy, as i915 runs it on Gen12 without SLPC: `rps_timer`
+// samples each engine's busy time and asks `rps_work` for a step up or down,
+// and the GT's park and unpark move the request to the idle frequency and
+// back.
+
+/// `BUSY_MAX_EI`: the longest the evaluation timer waits, in ms.
+pub const BUSY_MAX_EI_MS: u32 = 20;
+
+/// What `rps_timer` found over one interval.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Event {
+    /// `GEN6_PM_RP_UP_THRESHOLD`: busy above `UP_THRESHOLD`.
+    Up,
+    /// `GEN6_PM_RP_DOWN_THRESHOLD`: busy below `DOWN_THRESHOLD`.
+    Down,
+    /// Neither: `last_adj` is reset.
+    Steady,
+}
+
+/// `rps_timer`'s combination of the engines' busy times: the busiest in
+/// full, the next two by half and a quarter ("we hedge our bets by only
+/// contributing a factor of the distributed load").
+#[must_use]
+pub fn combined_busy(busy_ns: &[u64]) -> u64 {
+    let mut max = [0_u64; 3];
+    for &busy in busy_ns {
+        let mut busy = busy;
+        for slot in &mut max {
+            if busy > *slot {
+                core::mem::swap(&mut busy, slot);
+            }
+        }
+    }
+    let mut total = max[0];
+    for (i, &busy) in max.iter().enumerate().skip(1) {
+        if busy == 0 {
+            break;
+        }
+        total += busy >> i;
+    }
+    total
+}
+
+/// `rps_timer`'s decision for `busy` ns in `dt` ns at request `cur`, within
+/// the soft limits `min..=max`.
+#[must_use]
+pub const fn rps_timer_event(busy: u64, dt: u64, cur: u32, min: u32, max: u32) -> Event {
+    if 100 * busy > UP_THRESHOLD as u64 * dt && cur < max {
+        Event::Up
+    } else if 100 * busy < DOWN_THRESHOLD as u64 * dt && cur > min {
+        Event::Down
+    } else {
+        Event::Steady
+    }
+}
+
+/// `rps_work` for one event without a waiting client: the new request and
+/// the new `last_adj`. Up steps double while they continue (1, 2, 4, ...
+/// units of 16.67 MHz), down steps likewise; the result is clamped to
+/// `min..=max`.
+#[must_use]
+pub const fn rps_work(event: Event, cur: u32, last_adj: i32, min: u32, max: u32) -> (u32, i32) {
+    let adj = match event {
+        Event::Up if cur >= max => 0,
+        Event::Up if last_adj > 0 => last_adj.saturating_mul(2),
+        Event::Up => 1,
+        Event::Down if cur <= min => 0,
+        Event::Down if last_adj < 0 => last_adj.saturating_mul(2),
+        Event::Down => -1,
+        Event::Steady => 0,
+    };
+    let new = cur as i64 + adj as i64;
+    let new = if new < min as i64 {
+        min
+    } else if new > max as i64 {
+        max
+    } else {
+        new as u32
+    };
+    (new, adj)
+}
+
+/// `intel_rps_park`'s step for the next unpark: "treat this idle point as a
+/// downclock interrupt", by an even bin: the new `last_adj` and the request
+/// the unpark will start from, at least `min`.
+#[must_use]
+pub const fn park_step(cur: u32, last_adj: i32, min: u32) -> (u32, i32) {
+    let adj = if last_adj < 0 {
+        last_adj.saturating_mul(2)
+    } else {
+        -2
+    };
+    let new = cur as i64 + adj as i64;
+    (if new < min as i64 { min } else { new as u32 }, adj)
+}

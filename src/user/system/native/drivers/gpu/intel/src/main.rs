@@ -531,6 +531,7 @@ fn serve_gpu(
     if others {
         uncore::fw_domains_put(backend.platform().bar(), &all, rest);
     }
+    serving_power(&mut backend, steps, all);
     let mut frontend = Frontend::new(backend);
     frontend.set_trace(steps.uapitrace);
     if steps.uapitrace {
@@ -875,81 +876,31 @@ fn stay(time: &Time) -> Result<core::convert::Infallible, Step> {
     }
 }
 
-/// RPS and RC6 by the host (`ferrix_intel_xelp::power`): the first request
-/// at RP1, or `ferrix.intelgpu.freq=MHz`; under `ferrix.intelgpu.freqtest`
-/// the box's checkpoint (RP1, then RP0, each held and sampled, then back);
-/// under `ferrix.intelgpu.freqlog` a line each second from then on.
-fn power<P: ferrix_intel_xelp::backend::Platform>(
-    backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+/// What the driver serves under once the bring-up's hold of every domain
+/// is gone: forcewake per access (or render and GT held, under
+/// `ferrix.intelgpu.fwhold`), the frequency checkpoint if asked, and the
+/// per-second log if asked.
+fn serving_power(
+    backend: &mut ferrix_intel_xelp::backend::XelpBackend<platform::Real<'_>>,
     steps: &Steps,
-) where
-    P::Memory: serve::AsVmo,
-{
-    use ferrix_intel_xelp::rps::intel_gpu_freq;
-    let rps = backend.power_up(steps.freq_mhz, true);
-    say(format_args!(
-        "intel: RPS on: RP0 {} MHz, RP1 {} MHz, RPn {} MHz; request {} MHz{}; RC6 enabled (residency stays low while the driver holds forcewake)",
-        intel_gpu_freq(rps.caps.rp0_freq),
-        intel_gpu_freq(rps.caps.rp1_freq),
-        intel_gpu_freq(rps.caps.min_freq),
-        intel_gpu_freq(rps.cur),
-        if steps.freq_mhz.is_some() {
-            " (fixed: ferrix.intelgpu.freq)"
-        } else {
-            " (RP1)"
-        }
-    ));
-    if steps.freqtest {
-        let mut time = Time {
-            idle: match port::create(Kernel) {
-                Ok(port) => port,
-                Err(_) => return,
-            },
-        };
-        for (name, val) in [("RP1", rps.caps.rp1_freq), ("RP0", rps.caps.rp0_freq)] {
-            let asked = backend.set_frequency_mhz(intel_gpu_freq(val)).unwrap_or(0);
-            // The GT under load: an idle GT runs below its request.
-            let busy = busy_start(backend);
-            say(format_args!(
-                "intel: freqtest {name}: {}",
-                if busy.is_some() {
-                    "a spinning batch keeps RCS0 busy while sampled"
-                } else {
-                    "no spinning batch (refused); sampled idle"
-                }
-            ));
-            for n in 0..5 {
-                time.delay_us(100_000);
-                if let Some(sample) = backend.frequency_sample() {
-                    say(format_args!(
-                        "intel: freqtest {name}: asked {asked} MHz, sample {n}: RPSTAT1 {:#010x}, CAGF {} MHz, RC6 count {}, package energy {:#x} (unit 1/2^{} J)",
-                        sample.rpstat,
-                        sample.actual_mhz,
-                        sample.rc6_count,
-                        sample.energy_raw,
-                        sample.energy_unit
-                    ));
-                }
-            }
-            if let Some(busy) = busy {
-                let ended = busy_end(backend, busy, &mut time);
-                say(format_args!(
-                    "intel: freqtest {name}: the spinning batch {}",
-                    match ended {
-                        BusyEnd::Ended => "ran until ended",
-                        BusyEnd::Early =>
-                            "had completed before it was ended: the GT was NOT kept busy",
-                        BusyEnd::Stuck => "did not complete within 1 s of being ended",
-                    }
-                ));
-            }
-        }
-        let back = backend
-            .set_frequency_mhz(intel_gpu_freq(rps.cur))
-            .unwrap_or(0);
+    all: uncore::FwDomains,
+) {
+    if steps.fwhold {
         say(format_args!(
-            "intel: freqtest done; the request is {back} MHz again"
+            "intel: forcewake: render and GT held for the driver's life (ferrix.intelgpu.fwhold), so the GT never enters RC6"
         ));
+    } else {
+        backend.platform().forcewake_per_access(
+            all,
+            uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT,
+            ferrix_rt::linux::monotonic_nanos().unwrap_or(0),
+        );
+        say(format_args!(
+            "intel: forcewake per access from here, each domain released 1 ms after its last use, so the GT can enter RC6"
+        ));
+    }
+    if steps.freqtest {
+        freqtest(backend, steps);
     }
     if steps.freqlog {
         backend.set_freqlog(true, ferrix_rt::linux::monotonic_nanos().unwrap_or(0));
@@ -959,133 +910,286 @@ fn power<P: ferrix_intel_xelp::backend::Platform>(
     }
 }
 
-/// Where the spinning batch sits in its own VM, and the request id it runs
-/// as (above any the front end gives, which count up from 1).
-const BUSY_AT: u64 = 0x1_0000_0000;
-const BUSY_REQUEST: u64 = u64::MAX - 1;
-
-/// The spinning batch of [`busy_start`].
-struct Busy<M> {
-    memory: M,
-    vm: ferrix_intel_xelp::frontend::VmId,
-    context: ferrix_intel_xelp::frontend::HwContext,
-}
-
-/// How [`busy_end`] found the batch.
-enum BusyEnd {
-    /// It completed once ended.
-    Ended,
-    /// It had completed before: it never spun.
-    Early,
-    /// It did not complete within a second of being ended.
-    Stuck,
-}
-
-/// `igt_spinner` through the back end: an arbitration point and a jump
-/// back to itself (PPGTT), on the first engine (RCS0) in a VM of its own,
-/// so the GT is busy while freqtest samples. `None` if any step is refused.
-fn busy_start<P: ferrix_intel_xelp::backend::Platform>(
+/// RPS and RC6 by the host (`ferrix_intel_xelp::power`), under the
+/// bring-up's forcewake of every domain as `intel_gt_resume` runs them: RPS
+/// on with its first request at RP1 on i915's up/down policy, or pinned at
+/// `ferrix.intelgpu.freq=MHz`; the PCU's ring frequency table
+/// (`intel_llc_enable`), read before and after under
+/// `ferrix.intelgpu.freqtest`; RC6 enabled.
+fn power<P: ferrix_intel_xelp::backend::Platform>(
     backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
-) -> Option<Busy<P::Memory>>
-where
-    P::Memory: serve::AsVmo,
-{
-    use ferrix_intel_xelp::commands::gpu;
-    use ferrix_intel_xelp::frontend::{Backend as Fb, ContextParams};
-    use serve::AsVmo as _;
-    let memory = Fb::create_memory(backend, 4096).ok()?;
-    let words = [
-        gpu::MI_ARB_CHECK,
-        gpu::MI_BATCH_BUFFER_START_GEN8 | (1 << 8),
-        BUSY_AT as u32,
-        (BUSY_AT >> 32) as u32,
-    ];
-    let mut bytes = [0_u8; 16];
-    for (chunk, word) in bytes.chunks_exact_mut(4).zip(words) {
-        chunk.copy_from_slice(&word.to_le_bytes());
-    }
-    memory.vmo().write(&bytes, 0).ok()?;
-    let engine = *Fb::facts(backend).engines.first()?;
-    let vm = Fb::vm_create(backend).ok()?;
-    if Fb::bind(backend, vm, BUSY_AT, &memory, 4096, 0).is_err() {
-        Fb::vm_destroy(backend, vm);
-        return None;
-    }
-    let Ok(context) = Fb::context_create(backend, vm, engine, ContextParams::DEFAULT) else {
-        Fb::unbind(backend, vm, BUSY_AT, 4096);
-        Fb::vm_destroy(backend, vm);
-        return None;
-    };
-    if Fb::submit(backend, context, BUSY_AT, 16, BUSY_REQUEST).is_err() {
-        Fb::context_destroy(backend, context);
-        Fb::unbind(backend, vm, BUSY_AT, 4096);
-        Fb::vm_destroy(backend, vm);
-        return None;
-    }
-    Fb::service(
-        backend,
-        ferrix_rt::linux::monotonic_nanos().unwrap_or(0),
-        false,
-    );
-    Some(Busy {
-        memory,
-        vm,
-        context,
-    })
-}
-
-/// End [`busy_start`]'s batch (`MI_BATCH_BUFFER_END` over its first dword,
-/// as `igt_spinner_end` does), wait up to a second for it, and free it.
-fn busy_end<P: ferrix_intel_xelp::backend::Platform>(
-    backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
-    busy: Busy<P::Memory>,
-    time: &mut Time,
-) -> BusyEnd
-where
-    P::Memory: serve::AsVmo,
-{
-    use ferrix_intel_xelp::commands::gpu;
-    use ferrix_intel_xelp::frontend::Backend as Fb;
-    use serve::AsVmo as _;
-    let mut done = false;
-    let take = |backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>| {
-        Fb::service(
-            backend,
-            ferrix_rt::linux::monotonic_nanos().unwrap_or(0),
-            false,
-        );
-        let mut seen = false;
-        Fb::completed(backend, &mut |id, _| {
-            seen |= id == BUSY_REQUEST;
-        });
-        seen
-    };
-    let early = take(backend);
-    done |= early;
-    let _ = busy
-        .memory
-        .vmo()
-        .write(&gpu::MI_BATCH_BUFFER_END.to_le_bytes(), 0);
-    for _ in 0..1000 {
-        if done {
-            break;
+    steps: &Steps,
+) {
+    use ferrix_intel_xelp::rps::intel_gpu_freq;
+    let rps = backend.power_up(steps.freq_mhz, true);
+    say(format_args!(
+        "intel: RPS on: RP0 {} MHz, RP1 {} MHz, RPn {} MHz; request {} MHz{}; RC6 enabled",
+        intel_gpu_freq(rps.caps.rp0_freq),
+        intel_gpu_freq(rps.caps.rp1_freq),
+        intel_gpu_freq(rps.caps.min_freq),
+        intel_gpu_freq(rps.cur),
+        if steps.freq_mhz.is_some() {
+            " (pinned: ferrix.intelgpu.freq)"
+        } else {
+            " (RP1, then i915's up/down policy)"
         }
-        time.delay_us(1_000);
-        done |= take(backend);
+    ));
+    if steps.freqtest {
+        ring_table(backend, "before");
     }
-    if done {
-        Fb::context_destroy(backend, busy.context);
-        Fb::unbind(backend, busy.vm, BUSY_AT, 4096);
-        Fb::vm_destroy(backend, busy.vm);
+    let (refused, first) = backend.update_ring_freq();
+    say(format_args!(
+        "intel: the ring frequency table written (intel_llc_enable): {refused} rows refused{}",
+        Refusal(first)
+    ));
+    if steps.freqtest {
+        ring_table(backend, "after");
     }
-    // A batch still running keeps its memory, VM and context: leaked, for
-    // the box's checkpoint alone, rather than freed under the GPU.
-    match (early, done) {
-        (true, _) => BusyEnd::Early,
-        (false, true) => BusyEnd::Ended,
-        (false, false) => {
-            let _kept = core::mem::ManuallyDrop::new(busy.memory);
-            BusyEnd::Stuck
+}
+
+/// The PCU's ring frequency table, one line.
+fn ring_table<P: ferrix_intel_xelp::backend::Platform>(
+    backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+    when: &str,
+) {
+    let mut rows = [ferrix_intel_xelp::pcode::RingRow::default(); 32];
+    let n = backend.ring_freq_table(&mut rows);
+    say(format_args!(
+        "intel: freqtest ring table {when}: {}",
+        RingRows(rows.get(..n).unwrap_or_default())
+    ));
+}
+
+/// The ring table's rows as `GT MHz:ring MHz/IA MHz`.
+struct RingRows<'a>(&'a [ferrix_intel_xelp::pcode::RingRow]);
+
+impl fmt::Display for RingRows<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.is_empty() {
+            return f.write_str("unreadable");
+        }
+        for (i, row) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(" ")?;
+            }
+            write!(f, "{}:{}/{}", row.gpu_freq * 50, row.ring_mhz, row.ia_mhz)?;
+        }
+        Ok(())
+    }
+}
+
+/// A mailbox refusal, if any.
+struct Refusal(Option<ferrix_intel_xelp::pcode::PcodeError>);
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(error) => write!(f, " (first: {error:?})"),
+            None => Ok(()),
+        }
+    }
+}
+
+/// `GT0_PERF_LIMIT_REASONS`' set bits by i915's names: `none`, or e.g.
+/// `pl1,ratl`; the logged half after a slash.
+pub(crate) struct Reasons(pub(crate) u32);
+
+impl fmt::Display for Reasons {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        limit_names(self.0 & 0xffff, f)?;
+        f.write_str(" (logged ")?;
+        limit_names(self.0 >> 16, f)?;
+        f.write_str(")")
+    }
+}
+
+/// The names of the limit reasons set in `bits`, comma-separated, or
+/// `none`.
+fn limit_names(bits: u32, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut any = false;
+    for (bit, name) in rps::LIMIT_REASONS {
+        if bits & bit != 0 {
+            if any {
+                f.write_str(",")?;
+            }
+            f.write_str(name)?;
+            any = true;
+        }
+    }
+    if !any {
+        f.write_str("none")?;
+    }
+    Ok(())
+}
+
+/// The box's frequency checkpoint (`ferrix.intelgpu.freqtest`), with
+/// forcewake per access as the driver then serves: what may hold the GT
+/// low; RP1, then RP0, each pinned and sampled idle and then under the
+/// driver's own load (a spinner on RCS0); then the policy under that load,
+/// and idle after it, where it parks. Each sample says the request, the
+/// actual frequency, the PCU's limit reasons, RCS0's busy share, RC6's
+/// share and the package's power since the last sample.
+fn freqtest<P: ferrix_intel_xelp::backend::Platform>(
+    backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+    steps: &Steps,
+) {
+    use ferrix_intel_xelp::rps::intel_gpu_freq;
+    let Some(rps) = backend.rps() else {
+        return;
+    };
+    let Ok(idle) = port::create(Kernel) else {
+        return;
+    };
+    let limits = backend.limits();
+    say(format_args!(
+        "intel: freqtest limits: RP_STATE_CAP {:#010x}, RP_STATE_LIMITS {:#010x}, PL1 {}.{:03} W {} (RAPL_LIMIT {:#010x}), TDP {}.{:03} W, package {} C; RPNSWREQ {:#010x}, RP_INTERRUPT_LIMITS {:#010x}, RP_CONTROL {:#010x}",
+        limits.state_cap,
+        limits.state_limits,
+        limits.pl1_mw / 1000,
+        limits.pl1_mw % 1000,
+        if limits.pl1_enabled { "on" } else { "off" },
+        limits.rapl_limit,
+        limits.tdp_mw / 1000,
+        limits.tdp_mw % 1000,
+        limits.temperature,
+        limits.swreq,
+        limits.interrupt_limits,
+        limits.rp_control,
+    ));
+    let mut probe = Probe::new(backend, idle);
+    let phases = [
+        ("RP1", Some(rps.caps.rp1_freq)),
+        ("RP0", Some(rps.caps.rp0_freq)),
+        ("policy", None),
+    ];
+    for (name, pin) in phases {
+        let asked = backend
+            .set_frequency_mhz(
+                intel_gpu_freq(pin.unwrap_or(rps.caps.rp1_freq)),
+                pin.is_some(),
+            )
+            .unwrap_or(0);
+        say(format_args!(
+            "intel: freqtest {name}: asked {asked} MHz{}",
+            if pin.is_some() {
+                ", pinned"
+            } else {
+                ", on the policy"
+            }
+        ));
+        if pin.is_some() {
+            probe.samples(backend, name, "idle", 3, 100);
+        }
+        match backend.load_start() {
+            Ok(load) => {
+                probe.samples(backend, name, "busy", 5, 100);
+                if !backend.load_end(load, 100_000) {
+                    say(format_args!(
+                        "intel: freqtest {name}: the load did not end; the hang watch resets it"
+                    ));
+                }
+            }
+            Err(error) => say(format_args!("intel: freqtest {name}: no load ({error:?})")),
+        }
+    }
+    probe.samples(backend, "policy", "idle", 5, 100);
+    let back = match steps.freq_mhz {
+        Some(mhz) => backend.set_frequency_mhz(mhz, true).unwrap_or(0),
+        None => backend.rps().map_or(0, |rps| intel_gpu_freq(rps.last)),
+    };
+    say(format_args!(
+        "intel: freqtest done; the request is {back} MHz{}",
+        if steps.freq_mhz.is_some() {
+            ", pinned again"
+        } else {
+            ", on the policy"
+        }
+    ));
+}
+
+/// The checkpoint's sampler: the back end serviced as the serving loop
+/// would (at its deadlines, at least every millisecond), a line a sample.
+struct Probe {
+    idle: Port<Kernel>,
+    last: ferrix_intel_xelp::power::Sample,
+    at: u64,
+    busy: u64,
+}
+
+impl Probe {
+    fn new<P: ferrix_intel_xelp::backend::Platform>(
+        backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+        idle: Port<Kernel>,
+    ) -> Self {
+        let at = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+        Probe {
+            idle,
+            last: backend.frequency_sample().unwrap_or_default(),
+            at,
+            busy: backend.busy_totals(at)[0],
+        }
+    }
+
+    /// `count` samples `every_ms` apart, each said as `name` `phase`.
+    fn samples<P: ferrix_intel_xelp::backend::Platform>(
+        &mut self,
+        backend: &mut ferrix_intel_xelp::backend::XelpBackend<P>,
+        name: &str,
+        phase: &str,
+        count: u32,
+        every_ms: u64,
+    ) {
+        for n in 0..count {
+            let end = self.at.saturating_add(every_ms * 1_000_000);
+            loop {
+                let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+                steps::reset_if_due(now);
+                if now >= end {
+                    break;
+                }
+                let until = backend
+                    .next_deadline()
+                    .map_or(end, |due| due.min(end))
+                    .min(now.saturating_add(1_000_000))
+                    .max(now);
+                let _ = self.idle.wait(Deadline::At(until));
+                backend.service(ferrix_rt::linux::monotonic_nanos().unwrap_or(0), false);
+            }
+            let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+            let Some(sample) = backend.frequency_sample() else {
+                return;
+            };
+            let rps = backend.rps();
+            let elapsed = now.saturating_sub(self.at);
+            let (milliwatts, rc6) = ferrix_intel_xelp::power::between(&self.last, &sample, elapsed);
+            let busy = backend.busy_totals(now)[0];
+            let share = busy
+                .saturating_sub(self.busy)
+                .saturating_mul(100)
+                .checked_div(elapsed)
+                .unwrap_or(0);
+            say(format_args!(
+                "intel: freqtest {name} {phase}: asked {} MHz{}, sample {n}: CAGF {} MHz, RPSTAT1 {:#010x}, limits {:#010x} {}, RCS0 busy {share} %, PM up {}/{}, RC6 {}.{} %, package {}.{:03} W",
+                sample.requested_mhz,
+                if rps.is_some_and(|rps| !rps.active) {
+                    " (parked)"
+                } else {
+                    ""
+                },
+                sample.actual_mhz,
+                sample.rpstat,
+                sample.limit_reasons,
+                Reasons(sample.limit_reasons),
+                sample.busy_up,
+                sample.busy_up_ei,
+                rc6 / 10,
+                rc6 % 10,
+                milliwatts / 1000,
+                milliwatts % 1000,
+            ));
+            self.last = sample;
+            self.at = now;
+            self.busy = busy;
         }
     }
 }

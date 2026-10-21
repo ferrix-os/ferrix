@@ -126,6 +126,12 @@ pub(crate) struct Gpu {
     pub(crate) inhibited_runs: u32,
     /// Steps the command streamer may take in one run.
     pub(crate) budget: u32,
+    /// A run that spent its budget stays loaded, to go on from the command
+    /// it was in at the next run, as a spinner the CPU ends does (otherwise
+    /// it holds the engine until a reset).
+    pub(crate) spin_resumes: bool,
+    /// The loaded context is a resumed spinner: no promotion again.
+    resuming: bool,
 }
 
 impl Gpu {
@@ -134,6 +140,8 @@ impl Gpu {
             base: engine.mmio_base,
             hwsp_ggtt,
             budget: 10_000,
+            spin_resumes: false,
+            resuming: false,
             reset_domain: crate::reset::reset_domain(engine).unwrap_or(0),
             ..Gpu::default()
         };
@@ -240,12 +248,16 @@ impl Gpu {
     /// the ring from head to tail, save the head, then a CSB entry for its completion.
     /// A hung run writes no completion and leaves the context loaded.
     pub(crate) fn run(&mut self) -> Ran {
-        let Some([desc, _]) = self.loaded.take() else {
+        let Some([desc, other]) = self.loaded.take() else {
             return Ran::Nothing;
         };
+        let resumed = self.resuming;
+        self.resuming = false;
         let sw_id = ((desc >> 37) as u32) & GEN12_IDLE_CTX_ID;
         // Promotion: to the new context (lower), away from idle (upper).
-        self.csb((u64::from(GEN12_IDLE_CTX_ID << 15) << 32) | u64::from(sw_id << 15) | 1);
+        if !resumed {
+            self.csb((u64::from(GEN12_IDLE_CTX_ID << 15) << 32) | u64::from(sw_id << 15) | 1);
+        }
         let image_ggtt = (desc as u32) & !0xfff;
         let state = image_ggtt + lrc::LRC_STATE_OFFSET;
         let read_reg = |gpu: &mut Gpu, at: usize| gpu.ggtt_read(state + 4 * at as u32);
@@ -276,8 +288,14 @@ impl Gpu {
         // Context save: the ring's head, and on a first run the registers.
         self.ggtt_write(state + 4 * ctx::RING_HEAD as u32, head);
         if hung {
-            // Hung: it holds the engine until a reset, and runs no further.
-            self.loaded = None;
+            // Hung: it holds the engine until a reset, and runs no further,
+            // unless a spinner may be ended.
+            if self.spin_resumes {
+                self.loaded = Some([desc, other]);
+                self.resuming = true;
+            } else {
+                self.loaded = None;
+            }
             return Ran::Hung;
         }
         // A restore-inhibited image is saved whole by the hardware; what it

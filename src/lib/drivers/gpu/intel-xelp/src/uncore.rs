@@ -413,3 +413,112 @@ fn wait_ack_with_fallback<M: Mmio + ?Sized, C: Clock + ?Sized>(
         pass += 1;
     }
 }
+
+/// How long a domain woken for an access stays awake after its last use:
+/// `fw_domain_arm_timer`'s `NSEC_PER_MSEC`, re-armed while the domain is
+/// used again before it fires.
+pub const FORCEWAKE_RELEASE_NS: u64 = 1_000_000;
+
+/// i915's forcewake per access (`__force_wake_auto` and
+/// `intel_uncore_fw_release_timer`): before each register access the
+/// domains its offset needs (`__fwtable_reg_read_fw_domains`, or the write
+/// one, which leaves shadowed registers out) are woken if they are not
+/// awake; a millisecond after they were last used, they are released, so
+/// the GT can enter RC6 while the driver does not touch it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AutoForcewake {
+    domains: FwDomains,
+    awake: ForcewakeDomains,
+    /// `domain->active`: used since the release timer was armed.
+    used: bool,
+    due_ns: Option<u64>,
+    /// Wakes that failed (i915 says each and goes on), and the last one's
+    /// error.
+    pub failures: u32,
+    /// See [`AutoForcewake::failures`].
+    pub last_error: Option<ForcewakeError>,
+}
+
+impl AutoForcewake {
+    /// Per-access forcewake over `domains`, with `held` awake already (the
+    /// bring-up's hold, handed over at `now_ns` and released like any other).
+    #[must_use]
+    pub fn new(domains: FwDomains, held: ForcewakeDomains, now_ns: u64) -> Self {
+        let awake = held & domains.mask();
+        AutoForcewake {
+            domains,
+            awake,
+            used: false,
+            due_ns: (awake != 0).then_some(now_ns.saturating_add(FORCEWAKE_RELEASE_NS)),
+            failures: 0,
+            last_error: None,
+        }
+    }
+
+    /// The domains awake now.
+    #[must_use]
+    pub const fn awake(&self) -> ForcewakeDomains {
+        self.awake
+    }
+
+    /// When [`AutoForcewake::release`] must next run, while a domain is
+    /// awake.
+    #[must_use]
+    pub const fn due(&self) -> Option<u64> {
+        self.due_ns
+    }
+
+    /// Before an access to `offset` (a write if `write`): wake what it
+    /// needs.
+    pub fn access<M: Mmio + ?Sized, C: Clock + ?Sized>(
+        &mut self,
+        mmio: &mut M,
+        clock: &mut C,
+        offset: u32,
+        write: bool,
+    ) {
+        let need = if write {
+            write_fw_domains(Reg(offset))
+        } else {
+            read_fw_domains(Reg(offset))
+        } & self.domains.mask();
+        if need == 0 {
+            return;
+        }
+        self.used = true;
+        let missing = need & !self.awake;
+        if missing == 0 {
+            return;
+        }
+        if let Err(error) = fw_domains_get(mmio, clock, &self.domains, missing) {
+            self.failures = self.failures.saturating_add(1);
+            self.last_error = Some(error);
+        }
+        // Requested whatever the ack said, as fw_domains_get_with_fallback
+        // leaves it: released by the timer like the rest.
+        self.awake |= missing;
+        if self.due_ns.is_none() {
+            let now = clock.now_us().saturating_mul(1_000);
+            self.due_ns = Some(now.saturating_add(FORCEWAKE_RELEASE_NS));
+        }
+    }
+
+    /// `intel_uncore_fw_release_timer` at `now_ns`: when due, the domains
+    /// are released unless used since the timer was armed, which re-arms it.
+    pub fn release<M: Mmio + ?Sized>(&mut self, mmio: &mut M, now_ns: u64) {
+        let Some(due) = self.due_ns else {
+            return;
+        };
+        if now_ns < due {
+            return;
+        }
+        if self.used {
+            self.used = false;
+            self.due_ns = Some(now_ns.saturating_add(FORCEWAKE_RELEASE_NS));
+            return;
+        }
+        fw_domains_put(mmio, &self.domains, self.awake);
+        self.awake = 0;
+        self.due_ns = None;
+    }
+}

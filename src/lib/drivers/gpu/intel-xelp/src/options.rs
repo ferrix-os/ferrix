@@ -6,7 +6,7 @@
 //! themselves are the driver's (`drivers/gpu/intel/src/steps.rs`): a library
 //! names no boot option (`check-build-flags.py`, ledger 2208 (2)).
 
-/// The four words, as the driver spells them.
+/// The words, as the driver spells them.
 #[derive(Clone, Copy, Debug)]
 pub struct Words<'a> {
     /// Stop before step `N` (the driver's `steps::At`): `<stop>N`.
@@ -23,12 +23,15 @@ pub struct Words<'a> {
     /// Say the GT's frequency, RC6 share and package power each second: the
     /// whole word.
     pub freqlog: &'a [u8],
-    /// The box's frequency checkpoint: RP1, then RP0, each held and sampled:
-    /// the whole word.
+    /// The box's frequency checkpoint: RP1, then RP0, each held and sampled
+    /// idle and under load, then the policy: the whole word.
     pub freqtest: &'a [u8],
     /// Say the render node's held waits, their answers, each failed ioctl,
     /// and a wait held unanswered too long: the whole word.
     pub uapitrace: &'a [u8],
+    /// Hold forcewake for the driver's life rather than per access: the
+    /// whole word.
+    pub fwhold: &'a [u8],
 }
 
 /// The longest a restart may wait: an hour.
@@ -57,6 +60,8 @@ pub struct Options {
     pub freqtest: bool,
     /// The render node's trace.
     pub uapitrace: bool,
+    /// Forcewake held for the driver's life.
+    pub fwhold: bool,
 }
 
 /// The words of `line` the driver reads. A `stop=` that is not a number is
@@ -77,6 +82,8 @@ pub fn parse(line: &[u8], words: &Words<'_>) -> Options {
             options.freqtest = true;
         } else if word == words.uapitrace {
             options.uapitrace = true;
+        } else if word == words.fwhold {
+            options.fwhold = true;
         } else if let Some(value) = word.strip_prefix(words.freq) {
             options.freq_mhz = number(value).filter(|&mhz| mhz > 0);
         } else if let Some(value) = word.strip_prefix(words.stop) {
@@ -124,6 +131,7 @@ mod tests {
                 freqlog: b"ferrix.intelgpu.freqlog",
                 freqtest: b"ferrix.intelgpu.freqtest",
                 uapitrace: b"ferrix.intelgpu.uapitrace",
+                fwhold: b"ferrix.intelgpu.fwhold",
             },
         )
     }
@@ -167,6 +175,8 @@ mod tests {
         assert_eq!(parse(b"ferrix.intelgpu.freq=x").freq_mhz, None);
         assert_eq!(parse(b"ferrix.intelgpu.freq=0").freq_mhz, None);
         assert_eq!(parse(b"ferrix.intelgpu.freqlog").freq_mhz, None);
+        assert!(parse(b"ferrix.intelgpu.fwhold").fwhold);
+        assert!(!parse(b"ferrix.intelgpu.fwholdx").fwhold);
     }
 
     #[test]

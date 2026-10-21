@@ -824,11 +824,8 @@ frequency (`GEN12_RPSTAT1`'s CAGF), the RC6 share and the package's power
 from the MCHBAR mirror of RAPL (`PCU_PACKAGE_ENERGY_STATUS`, unverified on
 this part until the box shows it moving; the GT's own RAPL plane has no
 MCHBAR mirror i915 reads), and `ferrix.intelgpu.freqtest` holds RP1, then
-RP0, sampling each, then goes back. Not yet: the up/down policy from the
-PM interrupts or the EI counters, so the request stays where it was set;
-and RC6 residency stays near zero, since the driver holds render and GT
-forcewake for its life where i915 takes it per access. The box checkpoint
-is `intelgpu-m2.sh BOX freq NAME`.
+RP0, sampling each, then goes back. The box checkpoint is `intelgpu-m2.sh
+BOX freq NAME`.
 
 **RP0 under load (2026-10-21).** The box's first freq checkpoint ran RP1 at
 300 MHz, as asked, but with RP0 asked it ran at 350 MHz (`RPSTAT1`
@@ -842,6 +839,74 @@ also writes `GEN6_RP_INTERRUPT_LIMITS` as `intel_rps_set` does
 `RPn`, in bits 22:14 once the request is at or below it). If RP0 still
 lands near 350 MHz with the GT busy, what is left is a power or current
 limit outside RPS.
+
+**The box's first frequency checkpoint, and what followed (2026-10-21,
+branch `intel-rps2`).** Main d9f175677 on the box: pinned at RP1 the GT ran
+at 300 MHz, pinned at RP0 (1000) only at 350 MHz (`RPSTAT1` 0x0150a86c),
+both with the GT idle, forcewake held and RC6's count standing still; the
+package drew about 6 W meanwhile. No freqlog line came, because a
+`FX-1006` panic (stage 10's check: devmgr reported nothing within its
+20 s patience; not yet read, and not seen on the earlier boots of that
+day) reset the box right after the checkpoint. Off-screen `peglgears` on iris went from 11,088 to 13,522 fps
+with the request at RP1. Three causes for the 350 MHz were open, and the
+checkpoint now tells them apart: the PCU holding an idle GT low (its
+requests are written "until it determines the GPU is awake",
+`intel_rps_park`), a power or thermal limit (the N150's PL1 is 6 W), or
+the PCU's ring frequency table, which i915 writes on every LLC part
+(`intel_llc_enable` right after `intel_rps_enable`) and Ferrix did not.
+What changed:
+
+* **The ring frequency table** (`intel-xelp`'s new `pcode`:
+  `__snb_pcode_rw`, `gen7_check_mailbox_status`, `gen6_update_ring_freq`
+  with Gen9+'s ring ratio = GT ratio and no IA ratio) is written after RPS
+  comes up, RP0 down to RPn; under `freqtest` it is read back before and
+  after as `i915_ring_freq_table` reads it.
+* **i915's policy for Gen12 without SLPC** (`power::Rps::evaluate`,
+  `park`, `unpark`): `rps_timer` over each engine's time in the ports
+  (counted by the back end as i915's busy statistics count it, the context
+  going in and out), the busiest in full and the next two by a half and a
+  quarter, against 95 % up and 85 % down; `rps_work`'s doubling steps; the
+  interval 1 ms after a step and doubling to 20 ms. Idle for 20 ms (one
+  longest interval; i915 parks when the GT's last wakeref goes), RPS parks
+  at RPn and the next request unparks it at the last request less a step.
+  `ferrix.intelgpu.freq=MHz` pins the request, no policy and no park. Not
+  here: the client boost to RP0 when a program waits (`intel_rps_boost`),
+  which the front end would have to ask for. (The media forcewake i915
+  takes around the park's write is no request on Gen12, where no domain is
+  `FORCEWAKE_MEDIA`, so the park writes `RPNSWREQ`, a shadowed register,
+  alone, as i915 does.)
+* **Forcewake per access** (`uncore::AutoForcewake`, i915's
+  `__force_wake_auto` and `intel_uncore_fw_release_timer`): once RPS, the
+  ring table and RC6 are programmed under the bring-up's hold, the driver
+  hands render and GT over to a table-driven wake before each register
+  access that needs a domain (a shadowed write needs none), released a
+  millisecond after its last use, so the GT can enter RC6 while the driver
+  does not touch it. `ferrix.intelgpu.fwhold` keeps the old hold, for a
+  box where this misbehaves.
+* **The checkpoint samples under load.** `freqtest` runs after the hand-over:
+  a line of what may hold the GT low (`GEN6_RP_STATE_CAP` and `_LIMITS`,
+  the package's PL1 and TDP from the MCHBAR mirror, its temperature, and
+  `RPNSWREQ`, `RP_INTERRUPT_LIMITS` and `RP_CONTROL` read back); then RP1
+  and RP0, each pinned and sampled three times idle and five times under
+  the driver's own load (the spinner of the paragraph above, moved into
+  the back end as `backend::Load`: privileged from the GGTT in a context
+  and VM of its own, ended by writing `MI_BATCH_BUFFER_END` over it and
+  serviced until it completes, its completion kept from the front end);
+  then the
+  policy under that load, and idle after it. Each sample says the request,
+  CAGF, `GT0_PERF_LIMIT_REASONS` by i915's names (`pl1`, `thermal`, `ratl`
+  ...), RCS0's busy share, the PM unit's own busy count, RC6's share and the
+  package's watts since the last sample.
+* **freqlog** now also says the limit reasons, the busiest engine's share
+  and whether the request is pinned or parked.
+
+How to read the next box run: if RP0 under load reaches well above 350 MHz
+with `limits none`, the idle GT was the cause, and the policy is what a
+game needs; if it stays near 350 MHz with `pl1` (or `pl2`, `ratl`,
+`thermal`) set, the package's limit is, which the firmware sets and the
+driver does not move; if the ring table read back "before" lacks the
+higher rows and RP0 moves only "after", it was the table. RC6 above zero
+in the idle samples shows the per-access forcewake working.
 
 **A render-node call that never completes (2026-10-21).** On the box the
 GRYPHLINK launcher (DXVK 3.1.1 on anv, immediate present, no present wait)

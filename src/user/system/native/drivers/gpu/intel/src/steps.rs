@@ -105,6 +105,9 @@ pub(crate) struct Steps {
     pub(crate) uapitrace: bool,
     /// The box's frequency checkpoint (`ferrix.intelgpu.freqtest`).
     pub(crate) freqtest: bool,
+    /// Hold render and GT forcewake for the driver's life
+    /// (`ferrix.intelgpu.fwhold`), as before forcewake was taken per access.
+    pub(crate) fwhold: bool,
 }
 
 /// The command-line words, as the kernel's command line says them.
@@ -117,6 +120,7 @@ const WORDS: Words<'static> = Words {
     freqlog: b"ferrix.intelgpu.freqlog",
     freqtest: b"ferrix.intelgpu.freqtest",
     uapitrace: b"ferrix.intelgpu.uapitrace",
+    fwhold: b"ferrix.intelgpu.fwhold",
 };
 
 /// The driver stopped before a step, as asked.
@@ -132,7 +136,7 @@ impl Steps {
             options::parse(line.get(..len).unwrap_or_default(), &WORDS)
         });
         say(format_args!(
-            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}, uapitrace {}",
+            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}, uapitrace {}, fwhold {}",
             Show(options.stop),
             if options.trace { "on" } else { "off" },
             Show(options.reset_seconds),
@@ -141,6 +145,7 @@ impl Steps {
             if options.freqlog { "on" } else { "off" },
             if options.freqtest { "on" } else { "off" },
             if options.uapitrace { "on" } else { "off" },
+            if options.fwhold { "on" } else { "off" },
         ));
         if options.reset_refused {
             say(format_args!(
@@ -162,6 +167,7 @@ impl Steps {
             freqlog: options.freqlog,
             freqtest: options.freqtest,
             uapitrace: options.uapitrace,
+            fwhold: options.fwhold,
         }
     }
 
