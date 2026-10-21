@@ -33,6 +33,7 @@ const FLAGS: [Flag; 16] = [
         values: &[
             (cfg!(ferrix_profile = "present"), "present"),
             (cfg!(ferrix_profile = "desktop"), "desktop"),
+            (cfg!(ferrix_profile = "debug"), "debug"),
             (cfg!(ferrix_profile = "fast"), "fast"),
             (cfg!(ferrix_profile = "max"), "max"),
             (cfg!(ferrix_profile = "none"), "none"),
