@@ -121,6 +121,7 @@ pub(super) fn check_programs() {
     // Finding F-35: the job quotas FRU_RSA.1 claims, each driven to its
     // limit through the path a program's use takes.
     check_quotas();
+    k12_bench();
     // K12: a job's memory reservation, beside its limit.
     check_reservations();
     check_kernel_memory();
@@ -2262,4 +2263,48 @@ fn check_thread_times() {
             "stage 7 self-check failed: {problem}"
         );
     }
+}
+
+/// Scratch timing for K12's ABAB (not for landing).
+fn k12_bench() {
+    {
+        let tree = crate::object::job::Job::new_root().expect("bench job");
+        let job = tree.new_child().expect("bench job");
+        let (frame, heap) = k12_bench_in(job.quota_index());
+        println!("  k12bench plain frame {frame} ns heap {heap} ns");
+    }
+    {
+        let tree = crate::object::job::Job::new_root().expect("bench job");
+        let job = tree.new_child().expect("bench job");
+        job.set_reservation(4096 * 64).expect("bench reserve");
+        let (frame, heap) = k12_bench_in(job.quota_index());
+        println!("  k12bench reserved frame {frame} ns heap {heap} ns");
+    }
+}
+
+/// Best of 5 rounds: ns per program frame taken and released, and per
+/// 64-byte heap allocation and free, as a task of `group`.
+fn k12_bench_in(group: u32) -> (u64, u64) {
+    const N: u64 = 2000;
+    let own = crate::sched::running_group();
+    crate::sched::set_current_group(group);
+    let mut best = (u64::MAX, u64::MAX);
+    for _ in 0..5 {
+        let start = crate::timer::now_nanos();
+        for _ in 0..N {
+            if let Some(frame) = crate::mm::allocate_user_frame() {
+                let _ = crate::mm::release_frame(core::hint::black_box(frame));
+            }
+        }
+        let frame = (crate::timer::now_nanos() - start) / N;
+        let start = crate::timer::now_nanos();
+        for _ in 0..N {
+            let held: Result<alloc::vec::Vec<u8>, _> = crate::fallible::try_with_capacity(64);
+            drop(core::hint::black_box(held));
+        }
+        let heap = (crate::timer::now_nanos() - start) / N;
+        best = (best.0.min(frame), best.1.min(heap));
+    }
+    crate::sched::set_current_group(own);
+    best
 }
