@@ -225,6 +225,14 @@ pub(crate) fn adopt(ticket: Arc<Ticket>) {
 /// The running task gives up its adoption, if it has one: `LEAVE`, `exec`
 /// and a task's exit.
 pub(crate) fn leave() {
-    let old = crate::sched::with_current(crate::sched::Task::take_adoption);
+    // One load for the task that adopted nothing, as every task's exit and
+    // every `exec` ask: no lock is taken where there is nothing to give up.
+    let old = crate::sched::with_current(|task| {
+        if task.has_adoption() {
+            task.take_adoption()
+        } else {
+            None
+        }
+    });
     drop(old);
 }
