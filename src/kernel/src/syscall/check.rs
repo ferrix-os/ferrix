@@ -1017,7 +1017,7 @@ fn check_memory_and_time_answer_as_linux_does(process: &Process) -> Result<(), &
         return Err("clock_gettime refused CLOCK_TAI");
     }
     check_the_cpu_time_clocks(process).and_then(|()| check_getrusage_counts(process))?;
-    check_another_threads_time_is_current()
+    check_another_threads_time_is_current().and_then(|()| check_an_ended_threads_time_stays())
 }
 
 /// `CLOCK_THREAD_CPUTIME_ID` counts the time this thread runs, charged up to
@@ -13050,4 +13050,54 @@ fn check_another_threads_time_is_current() -> Result<(), &'static str> {
     }
     crate::sched::wait_until_gone(&task, PROGRAM_PATIENCE_NANOS)?;
     outcome
+}
+
+/// A thread's processor time stays in its process's once the thread has
+/// ended, as Linux keeps it in the thread group's sums, and is counted
+/// there once: a program that spins and exits must read, through
+/// `process_runtime` (`CLOCK_PROCESS_CPUTIME_ID`) and through
+/// `process_times` (the sums `times` and `getrusage(RUSAGE_SELF)` copy out),
+/// as having run at least a millisecond once its task is gone, and through
+/// `process_runtime` as no more than its task ran while the task is still
+/// held. Before `object::process::Retired` the first two read zero: the end
+/// took the time with it, and Wine's `GetProcessTimes` (`times`) stepped back
+/// each time a thread of a game ended.
+///
+/// `process_times` is read rather than `sys_times` itself: the program has
+/// ended, so its address space takes no page to copy into, and the system
+/// call's copy-out is `check_getrusage_counts`'s to check.
+///
+/// Verifies: L.object.226
+fn check_an_ended_threads_time_stays() -> Result<(), &'static str> {
+    const MILLI: u64 = 1_000_000;
+    let program = kernel_time_program(0, 0, TIMES_SPINS)?;
+    let task = process::start(&program)
+        .map_err(|_| "the ended-thread time check's program could not be started")?;
+    let deadline = crate::timer::now_nanos().saturating_add(PROGRAM_PATIENCE_NANOS);
+    match program.wait_for_exit(deadline) {
+        Some(status) if status == TIMES_STATUS as i32 => {}
+        _ => return Err("the ended-thread time check's program did not exit with its own status"),
+    }
+    crate::sched::wait_until_gone(&task, PROGRAM_PATIENCE_NANOS)?;
+    if time::process_runtime(&program) > task.runtime() {
+        return Err(
+            "an ended thread's time was counted twice in its process's: \
+                    once as retired and once as its task's",
+        );
+    }
+    drop(task);
+    if time::process_runtime(&program) < MILLI {
+        return Err(
+            "a program's time was gone from its process once its last thread had \
+                    ended: a thread's end took its time with it",
+        );
+    }
+    let (user, kernel) = time::process_times(&program);
+    if user.saturating_add(kernel) < MILLI {
+        return Err(
+            "times and getrusage(RUSAGE_SELF) lost an ended thread's time: \
+                    the process's sums did not add what its tasks that left had run",
+        );
+    }
+    Ok(())
 }

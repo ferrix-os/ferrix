@@ -1304,7 +1304,15 @@ pub(super) fn stat(process: &Process) -> Result<Vec<u8>> {
     // having run nothing, and then, at its next charge, as having run the
     // whole gap at once -- more than 100% of a window in `top`.
     sched::charge_running();
-    stat_of(process, process.pid(), Times::of(process.tasks().iter()))
+    // With the time of the threads that have ended, which Linux keeps in
+    // the thread group's sums: without it a thread's end stepped the
+    // process's times back.
+    let (tasks, retired) = process.tasks_and_retired();
+    stat_of(
+        process,
+        process.pid(),
+        Times::of(tasks.iter()).with(retired),
+    )
 }
 
 /// `/proc/<pid>/task/<tid>/stat`: the process's, with the thread's own id
@@ -1361,6 +1369,16 @@ impl Times {
             voluntary: sum.voluntary.saturating_add(task.voluntary_switches()),
             involuntary: sum.involuntary.saturating_add(task.involuntary_switches()),
         })
+    }
+
+    /// These and what a process's tasks that left had run.
+    fn with(self, retired: crate::object::process::Retired) -> Times {
+        Times {
+            runtime: self.runtime.saturating_add(retired.runtime),
+            kernel: self.kernel.saturating_add(retired.kernel),
+            voluntary: self.voluntary.saturating_add(retired.voluntary),
+            involuntary: self.involuntary.saturating_add(retired.involuntary),
+        }
     }
 }
 

@@ -278,18 +278,18 @@ pub(crate) fn sys_clock_getres(
 ///
 /// The calling thread is charged up to now first, and every processor's
 /// running task with it (`sched::charge_running`): a thread alone on its
-/// processor gets no tick, so its last charge can be any age. Not as
-/// Linux: a thread that has ended takes its time with it, where Linux keeps
-/// it in the process's sum, so the clock can step back when one ends.
-/// Chrome's `ThreadTicks` reads the thread clock, which is exact.
+/// processor gets no tick, so its last charge can be any age. A thread that
+/// has ended keeps its time in the process's sum, as on Linux
+/// (`object::process::Retired`), so the clock never steps back when one
+/// ends. Chrome's `ThreadTicks` reads the thread clock, which is exact.
 pub(crate) fn process_runtime(process: &Process) -> u64 {
     let _ = sched::current_runtime();
     sched::charge_running(); // and every other processor's running task
-    process
-        .tasks()
+    let (tasks, retired) = process.tasks_and_retired();
+    tasks
         .iter()
         .map(|task| task.runtime())
-        .fold(0, u64::saturating_add)
+        .fold(retired.runtime, u64::saturating_add)
 }
 
 /// `gettimeofday`: the real-time clock, in microseconds.
@@ -589,6 +589,14 @@ pub(crate) fn sys_times(process: &Process, at: u64, word: usize) -> Result<usize
     Ok((now_nanos() / (NANOS / USER_HZ)) as usize)
 }
 
+/// The user and kernel nanoseconds of `process`'s threads, the ones that
+/// have ended included: what `times` and `getrusage(RUSAGE_SELF)` copy out,
+/// in their units.
+pub(crate) fn process_times(process: &Process) -> (u64, u64) {
+    let usage = Usage::of_process(process);
+    (usage.user(), usage.kernel)
+}
+
 /// Processor time and switches of one thread or of a process's threads
 /// together, as `getrusage` and `times` report them.
 #[derive(Clone, Copy, Default)]
@@ -611,16 +619,22 @@ impl Usage {
     }
 
     /// `process`'s threads', the caller's charged up to now: as
-    /// [`process_runtime`] counts, so a thread that has ended takes its time
-    /// with it.
+    /// [`process_runtime`] counts, so a thread that has ended keeps its time
+    /// in the sum.
     fn of_process(process: &Process) -> Usage {
         let _ = sched::current_runtime();
         sched::charge_running();
-        process
-            .tasks()
+        let (tasks, retired) = process.tasks_and_retired();
+        let ended = Usage {
+            runtime: retired.runtime,
+            kernel: retired.kernel,
+            voluntary: retired.voluntary,
+            involuntary: retired.involuntary,
+        };
+        tasks
             .iter()
             .map(|task| Usage::of_task(task))
-            .fold(Usage::default(), |sum, one| Usage {
+            .fold(ended, |sum, one| Usage {
                 runtime: sum.runtime.saturating_add(one.runtime),
                 kernel: sum.kernel.saturating_add(one.kernel),
                 voluntary: sum.voluntary.saturating_add(one.voluntary),

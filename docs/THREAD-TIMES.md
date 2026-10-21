@@ -7,7 +7,7 @@ box, where the GRYPHLINK launcher's video decode took 4.9 times a Zen 5
 core's time against about 2.7 expected, and Ferrix could not say where
 the difference went.
 
-Ids: `H.SCHED.14` and `L.sched.80-83`, reserved on `main` at d04cff26a and ff18add48.
+Ids: `H.SCHED.14` and `L.sched.80-83`, reserved on `main` at d04cff26a and ff18add48; `L.object.226` (an ended thread's time kept in its process's), reserved with the ef-crash landing.
 
 ## 1. What is missing today
 
@@ -156,6 +156,21 @@ exited, its last decision.
 exact split is a later change (it needs `charge_cpu`'s bandwidth walk made
 once per charge, not once per mode). `times()`, `getrusage()` and `wait4`'s
 rusage still answer zeros. Both are in the backlog row.
+
+**A process's sums keep its ended threads' time (`L.object.226`).** A
+process's processor time -- `CLOCK_PROCESS_CPUTIME_ID`, `times()`,
+`getrusage(RUSAGE_SELF)`, `/proc/<pid>/stat` -- is its live tasks' plus
+`object::process::Retired`: what its tasks that have left had run, kernel
+time and both switch counts included, as Linux keeps them in
+`signal_struct`. The retire point is the personality's `end_thread`, after
+the task is charged up to now and before its `clear_child_tid` write, so a
+`pthread_join` returns to a process whose time already holds the thread's;
+the task leaves the list there, in the same hold of its lock as the sums
+grow, and readers take both under one hold, so it is counted once. What it
+runs after retiring, a few microseconds, is counted nowhere: the sums are a
+lower bound and never step back. Before this a thread's end took its time
+with it, and Wine's `GetProcessTimes` (`times()`) stepped back each time a
+thread of a game ended.
 
 ## 3. Switch counts
 
@@ -313,6 +328,12 @@ Estimate: 1 to 3 (5 to 8 points), the interface and host tool included;
 the `perf` subset 15 to 25 points more.
 
 ## 7. Where it stands
+
+* 2026-10-21 (ef-crash): a process's sums keep its ended threads' time
+  (§2, `L.object.226`). Change review: **OK IF**, conditions 1-9, ledger
+  `reviews.md` line 2715. Found after Endfield began exiting on the N150
+  box once `times()` reported real time (71a974d5d); whether it was that
+  exit's cause is for the box run to say.
 
 * 2026-10-18: design reviewed by the session's consultant: **OK IF**,
   conditions 1-14 (ledger `reviews.md` line 2406, verdict at 2409); the

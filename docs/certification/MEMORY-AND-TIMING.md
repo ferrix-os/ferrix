@@ -1208,6 +1208,16 @@ recorded refuses (`start_thread`). Listing a task
 can run, and a start whose task cannot be listed fails before anything runs
 (F-23).
 
+A leaving task takes itself out of the list (`retire_task`, `L.object.226`)
+with one search for its position and one removal, no allocation, under the
+same interrupt-masking lock, as `list_task`'s `retain` walks it; it adds
+four counters to the process's retired sums there. A retire changes the
+list's version as a start does, so a walk's restarts are bounded by the
+starts and the retires during it, and the retires by the tasks listed when
+it began plus those starts: restarts <= starts during the walk + tasks
+listed. A reader of the process's time takes the live tasks and the sums
+under one hold (`tasks_and_retired`), the same one `tasks()` takes.
+
 ### 2.2k The chardev core's tables (`interfaces::chardev`, load ring)
 
 NVIDIA's N1e forwarding core (`docs/NVIDIA.md` §4.4) is in the `load`
