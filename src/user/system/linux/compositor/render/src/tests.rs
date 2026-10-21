@@ -4401,3 +4401,49 @@ fn a_fullscreen_buffer_a_pixel_too_large_is_cropped_and_never_blurred() {
     assert_eq!(asked.blurs, 0, "a blur under a fullscreen window");
     assert_eq!(asked.cleared, 1920 * 1080, "what shows through is drawn");
 }
+
+/// A window drawn over a fullscreen one -- a fullscreen program's login
+/// window -- is drawn as it is: no shadow, no border and no blur behind it.
+#[test]
+fn a_window_over_a_fullscreen_one_is_undecorated() {
+    let style = decorated_style();
+    let (mut layout, _) = one_window(Rect::new(0, 0, 1920, 1080), 0, true);
+    layout.windows[0].focused = false;
+    layout.windows.push(Placed {
+        window: WindowId(2),
+        rect: Rect::new(640, 300, 640, 480),
+        border: 2,
+        focused: true,
+        floating: true,
+        fullscreen: false,
+    });
+    let full = vec![0xFF; 1920 * 1080 * 4];
+    let login = vec![0x40; 640 * 480 * 4];
+    let surfaces = BTreeMap::from([
+        (
+            WindowId(1),
+            Surface::new(&full, 1920, 1080, 7680, Format::Xrgb8888).unwrap(),
+        ),
+        (
+            WindowId(2),
+            Surface::new(&login, 640, 480, 2560, Format::Argb8888).unwrap(),
+        ),
+    ]);
+    let mut asked = Asked::default();
+    let _ = render_onto(
+        &mut asked,
+        Some(&mut ()),
+        &layout,
+        (0, 0),
+        &Styles::plain(&style),
+        &surfaces,
+        &[],
+        &Damage::full(1920, 1080),
+    );
+    assert_eq!(asked.composited.len(), 2, "both windows are drawn");
+    assert_eq!(
+        (asked.shadows, asked.blurs, asked.square_borders),
+        (0, 0, 0)
+    );
+    assert!(asked.gradients.is_empty(), "{:?}", asked.gradients);
+}

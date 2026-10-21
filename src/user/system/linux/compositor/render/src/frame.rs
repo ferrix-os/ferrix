@@ -609,6 +609,23 @@ pub fn render_onto<P: Painter>(
 ) -> Damage {
     let style = styles.base;
     let local = |rect: Rect| rect.translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+    // A window drawn over a fullscreen one -- a fullscreen program's own
+    // login or dialog window -- is drawn as it is: no border, no shadow and
+    // no blur behind it. Over a game none of them is anything but a frame
+    // round a window that is the game's, and the blur is of the screen.
+    let undecorated;
+    let overlaid;
+    let styles = match overlays(output, styles) {
+        Some(windows) => {
+            undecorated = windows;
+            overlaid = Styles {
+                base: styles.base,
+                windows: &undecorated,
+            };
+            &overlaid
+        }
+        None => styles,
+    };
     // A fullscreen window that fills the screen with its own opaque pixels
     // hides everything drawn before it: the background, the layer surfaces
     // under the windows, the backdrop taken of them, and any window under
@@ -670,6 +687,27 @@ pub fn render_onto<P: Painter>(
         });
     }
     damage.clipped(canvas.bounds())
+}
+
+/// `styles` with every window drawn after a fullscreen one in `output`
+/// undecorated and unblurred, or `None` when there is no such window.
+fn overlays(
+    output: &MonitorLayout,
+    styles: &Styles<'_>,
+) -> Option<BTreeMap<WindowId, WindowStyle>> {
+    let first = output.windows.iter().position(fullscreen)?;
+    let over = output.windows.get(first.saturating_add(1)..)?;
+    if over.is_empty() {
+        return None;
+    }
+    let mut windows = styles.windows.clone();
+    for placed in over {
+        let own = windows.entry(placed.window).or_default();
+        own.decorate = false;
+        own.shadow = false;
+        own.blur = false;
+    }
+    Some(windows)
 }
 
 /// The fullscreen window that hides everything drawn before it, by where it
@@ -1139,7 +1177,11 @@ fn window<P: Painter>(
     // box and the square one draws four windows onto it, so a window's
     // corner is the same colour whichever path drew it.
     let border = Timer::start(Phase::Border);
-    if !rounding.is_square() {
+    if width == 0 {
+        // No border at all is no fill: under a window that can be seen
+        // through, the rounded path's box would show its gradient where
+        // Hyprland shows what is behind.
+    } else if !rounding.is_square() {
         let outer = Rect::new(
             rect.x.saturating_sub(width),
             rect.y.saturating_sub(width),
