@@ -105,6 +105,9 @@ const DESKTOP_PATH: &str = "etc/yserver.sh";
 const DESKTOP_SCRIPT: &str = r#"export YSERVER_BACKEND=wayland YSERVER_ALLOW_SOFTWARE_VULKAN=1
 export RUST_LOG="${RUST_LOG:-info}" VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json
 unset LD_LIBRARY_PATH
+waited=0; while ! ls /dev/dri/renderD* > /dev/null 2>&1 && [ $waited -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+for node in /dev/dri/renderD*; do export YSERVER_DRI_RENDER_NODE=$node; done
+echo "yserver.sh: DRI3 node $YSERVER_DRI_RENDER_NODE after ${waited}s" > /tmp/yserver-node.txt
 for need in /data/usr/lib64/ld-linux-x86-64.so.2 /data/yserver/yserver; do
     if [ ! -e "$need" ]; then
         echo "yserver.sh: no X server on :0: $need is missing (the volume is not at /data)" \

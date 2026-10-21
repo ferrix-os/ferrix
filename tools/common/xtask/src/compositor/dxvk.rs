@@ -97,6 +97,8 @@ wait $program
 echo "dxvk: the program exited $?"
 grep -v '^info:    ' /tmp/present.txt | sed 's/^/dxvk: said: /'
 tail -n 20 /tmp/yserver.log | sed 's/^/dxvk: yserver: /'
+cat /tmp/yserver-node.txt | sed 's/^/dxvk: /'
+grep -E 'DRI3|zero-copy|dmabuf|direct' /tmp/yserver.log | tail -n 30 | sed 's/^/dxvk: zc: /'
 /usr/lib/wine/wineserver64 -k
 echo "dxvk: end"
 "#;
