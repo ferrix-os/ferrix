@@ -30,7 +30,9 @@
 //! by its length and CRC-32C in [`STAMP`]: a rebuilt image's programs arrive,
 //! and everything else a user put on the volume stays. A file the new archive
 //! also carries is replaced by the archive's; one it no longer carries is
-//! left where it was.
+//! left where it was. A directory with files in it, where the archive has a
+//! link or a file, is moved aside to `<name>.ferrix-old` and said, never
+//! emptied (`ferrix_vfs::initramfs`).
 //!
 //! # What reaches the disk
 //!
@@ -302,8 +304,22 @@ fn install(inside: &Context) -> Result<Installed, &'static str> {
     if read_stamp(inside).as_deref() == Some(stamp.as_bytes()) {
         return Ok(Installed::Kept);
     }
-    let unpacked = initramfs::unpack(ns, inside, archive)
-        .map_err(|_| "could not take the system: the initramfs did not unpack onto it")?;
+    // What stopped it is said: the reason was dropped until 2026-10-21,
+    // and the N150 box kept / in memory for days on errno 39 alone -- a
+    // directory of the volume's with files in it where the archive has a
+    // link, which the unpack now moves aside and names (`docs/N150.md` §12).
+    let (unpacked, set_aside) = initramfs::unpack_over(ns, inside, archive).map_err(|why| {
+        println!("  root     the initramfs's unpack onto the volume stopped: {why}");
+        "could not take the system: the initramfs did not unpack onto it"
+    })?;
+    for (was, now) in &set_aside {
+        println!(
+            "  root     /{} was a directory with files where the system has a link or a file; \
+             kept as /{}",
+            core::str::from_utf8(was).unwrap_or("?"),
+            core::str::from_utf8(now).unwrap_or("?")
+        );
+    }
     // AoU-24 on the volume too: pid 1's inputs stay in the archive.
     if ns.resolve(inside, None, b"/.ferrix", false).is_ok() {
         return Err("could not take the system: pid 1's inputs were unpacked onto it");

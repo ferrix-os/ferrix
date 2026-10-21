@@ -135,7 +135,7 @@ fn the_second_boot_must_find_what_the_first_wrote() {
     assert!(error.contains("the root the first left"), "{error}");
 }
 
-const DESKTOP: [&str; 12] = [
+const DESKTOP: [&str; 14] = [
     "  nvme     0000:00:04.0 NVMe 1.4 controller up",
     "  root     / is btrfs on vdd2; the system was installed on it",
     "  display  firmware framebuffer 1024x768 lent to a driver",
@@ -148,6 +148,8 @@ const DESKTOP: [&str; 12] = [
     "n150-desktop: yserver is up on :0 after 2s",
     "n150-desktop: ready",
     "sessiond: seat0's session for ferrix (uid 1000): /bin/hyprix --config /etc/hyprland.conf, pid 41, in user-1000.slice/session-1.scope",
+    "  root     /bin/gryphlink was a directory with files where the system has a link or a file; kept as /bin/gryphlink.ferrix-old",
+    "n150-desktop: the default route: default via 10.0.2.2 dev eth0",
 ];
 
 #[test]
@@ -160,6 +162,8 @@ fn the_desktop_boot_passes_with_every_line_and_fails_naming_the_missing_one() {
         (8, "got no lease"),
         (9, "yserver did not start"),
         (11, "not the user ferrix's session"),
+        (12, "did not move the directory at /bin/gryphlink aside"),
+        (13, "set no default route"),
     ] {
         let mut without = DESKTOP.to_vec();
         let _ = without.remove(missing);

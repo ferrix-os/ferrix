@@ -13,6 +13,13 @@
 //!   built by the build, but it is still a file.
 //! * **An existing name** is replaced: the old one is removed first. A
 //!   directory that already exists is kept and has its attributes updated.
+//! * **A directory with entries where the archive has something else**
+//!   (a link or a file) cannot be removed, and is moved aside instead, to
+//!   `<name>.ferrix-old` (or `.ferrix-old.1` to `.9` when that is taken), so
+//!   the archive's entry takes the name and nothing in the directory is
+//!   lost. Only an unpack onto a filesystem that already holds files meets
+//!   it: the kernel's install onto a btrfs root a user has written to
+//!   (`src/kernel/src/fs/root_disk.rs`). [`unpack_over`] names each one.
 //! * **Hard links.** newc gives every name of a multiply-linked file the same
 //!   inode number and puts the data on one of them, conventionally the last.
 //!   The first name creates the file; later names link to it, and any that
@@ -28,7 +35,7 @@ use ferrix_cpio::{Archive, CpioError, Entry, FileType as CpioType};
 use ferrix_linux_abi::errno::Errno;
 
 use crate::file::OpenFlags;
-use crate::namespace::{Context, Namespace};
+use crate::namespace::{Context, Namespace, RenameMode};
 use crate::node::{FileType, NewNode, SetAttributes, Timespec};
 
 /// Encode a device number as a 64-bit `dev_t`, the way `makedev(3)` does.
@@ -60,7 +67,13 @@ pub struct Unpacked {
     /// Entries left out because they are pid 1's inputs ([`is_init_input`]),
     /// which the kernel's init reads from the archive and nothing unpacks.
     pub init_inputs: u32,
+    /// Directories with entries moved aside to `<name>.ferrix-old` for an
+    /// entry that is not a directory (the module comment).
+    pub set_aside: u32,
 }
+
+/// The suffix a directory moved aside gets, before any `.1` to `.9`.
+pub const SET_ASIDE: &[u8] = b".ferrix-old";
 
 /// The directory an image carries pid 1's inputs under: the program, the
 /// script for its `sh -c` and the list of commands that `cargo xtask` once
@@ -119,8 +132,11 @@ pub enum UnpackError {
     Archive(CpioError),
     /// An entry could not be created.
     Entry {
-        /// Its position in the archive, from zero.
+        /// Its position in the archive, from zero; `usize::MAX` for a
+        /// directory's timestamps, applied after every entry.
         index: usize,
+        /// Its name relative to the root, without `./`: empty for the root.
+        name: Vec<u8>,
         /// What the VFS said.
         errno: Errno,
     },
@@ -130,8 +146,21 @@ impl fmt::Display for UnpackError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             UnpackError::Archive(why) => write!(f, "the archive is malformed: {why}"),
-            UnpackError::Entry { index, errno } => {
-                write!(f, "entry {index} could not be created: errno {}", errno.0)
+            UnpackError::Entry { index, name, errno } => {
+                let name = core::str::from_utf8(name).unwrap_or("(not UTF-8)");
+                if *index == usize::MAX {
+                    write!(
+                        f,
+                        "the times of directory /{name} could not be set: errno {}",
+                        errno.0
+                    )
+                } else {
+                    write!(
+                        f,
+                        "entry {index}, /{name}, could not be created: errno {}",
+                        errno.0
+                    )
+                }
             }
         }
     }
@@ -146,6 +175,8 @@ struct Unpacker<'a> {
     links: BTreeMap<(u32, u32, u32), Vec<u8>>,
     /// Directory timestamps to apply once everything is in place.
     directory_times: Vec<(Vec<u8>, Timespec)>,
+    /// Each directory moved aside, as `(name, the name it now has)`.
+    set_aside: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 /// Unpack `archive` beneath `ctx.root`.
@@ -155,12 +186,33 @@ struct Unpacker<'a> {
 /// [`UnpackError`]: the first malformed header or the first entry the VFS
 /// refused. What was created before it stays.
 pub fn unpack(ns: &Namespace, ctx: &Context, archive: &[u8]) -> Result<Unpacked, UnpackError> {
+    unpack_over(ns, ctx, archive).map(|(made, _)| made)
+}
+
+/// What [`unpack_over`] moved aside: each directory's name and the name it
+/// has now.
+pub type SetAside = Vec<(Vec<u8>, Vec<u8>)>;
+
+/// [`unpack`], with the name of each directory with entries it moved aside
+/// for an archive entry that is not a directory, and where it put it (the
+/// module comment): for an unpack onto files a user has written to, which
+/// says what it moved.
+///
+/// # Errors
+///
+/// As [`unpack`]'s.
+pub fn unpack_over(
+    ns: &Namespace,
+    ctx: &Context,
+    archive: &[u8],
+) -> Result<(Unpacked, SetAside), UnpackError> {
     let mut unpacker = Unpacker {
         ns,
         ctx,
         made: Unpacked::default(),
         links: BTreeMap::new(),
         directory_times: Vec::new(),
+        set_aside: Vec::new(),
     };
     for (index, entry) in Archive::new(archive).entries().enumerate() {
         let entry = entry.map_err(UnpackError::Archive)?;
@@ -172,9 +224,11 @@ pub fn unpack(ns: &Namespace, ctx: &Context, archive: &[u8]) -> Result<Unpacked,
             unpacker.made.init_inputs = unpacker.made.init_inputs.saturating_add(1);
             continue;
         }
-        unpacker
-            .entry(&entry)
-            .map_err(|errno| UnpackError::Entry { index, errno })?;
+        unpacker.entry(&entry).map_err(|errno| UnpackError::Entry {
+            index,
+            name: normalise(entry.name).to_vec(),
+            errno,
+        })?;
     }
     for (path, mtime) in unpacker.directory_times.iter().rev() {
         let change = SetAttributes {
@@ -182,17 +236,15 @@ pub fn unpack(ns: &Namespace, ctx: &Context, archive: &[u8]) -> Result<Unpacked,
             mtime: Some(*mtime),
             ..SetAttributes::default()
         };
-        let at = resolve_or_root(ns, ctx, path).map_err(|errno| UnpackError::Entry {
+        let failed = |errno| UnpackError::Entry {
             index: usize::MAX,
+            name: path.clone(),
             errno,
-        })?;
-        ns.set_attributes(&at, &change)
-            .map_err(|errno| UnpackError::Entry {
-                index: usize::MAX,
-                errno,
-            })?;
+        };
+        let at = resolve_or_root(ns, ctx, path).map_err(failed)?;
+        ns.set_attributes(&at, &change).map_err(failed)?;
     }
-    Ok(unpacker.made)
+    Ok((unpacker.made, unpacker.set_aside))
 }
 
 /// The name relative to the root: `./a/b/` becomes `a/b`, and `.` becomes
@@ -352,16 +404,49 @@ impl Unpacker<'_> {
     }
 
     /// Remove whatever `path` names, if anything, so an entry can replace it.
-    fn remove_existing(&self, path: &[u8]) -> crate::Result<()> {
+    /// A directory with entries is moved aside instead ([`Self::set_aside`]).
+    fn remove_existing(&mut self, path: &[u8]) -> crate::Result<()> {
         let root = Some(&self.ctx.root);
         match self.ns.resolve(self.ctx, root, path, false) {
             Ok(at) if at.inode()?.metadata().kind == FileType::Directory => {
-                self.ns.rmdir(self.ctx, root, path)
+                match self.ns.rmdir(self.ctx, root, path) {
+                    Err(Errno::ENOTEMPTY) => self.set_aside(path),
+                    done => done,
+                }
             }
             Ok(_) => self.ns.unlink(self.ctx, root, path),
             Err(Errno::ENOENT) => Ok(()),
             Err(other) => Err(other),
         }
+    }
+
+    /// Move the directory `path`, which has entries, to the first free name
+    /// of `path` with [`SET_ASIDE`], then `.1` to `.9`, never over anything;
+    /// `EEXIST` when all ten are taken.
+    fn set_aside(&mut self, path: &[u8]) -> crate::Result<()> {
+        let root = Some(&self.ctx.root);
+        for n in 0..10u8 {
+            let mut aside = path.to_vec();
+            aside.extend_from_slice(SET_ASIDE);
+            if n > 0 {
+                aside.extend_from_slice(&[b'.', b'0' + n]);
+            }
+            match self.ns.rename(
+                self.ctx,
+                (root, path),
+                (root, &aside),
+                RenameMode::NoReplace,
+            ) {
+                Ok(()) => {
+                    self.made.set_aside = self.made.set_aside.saturating_add(1);
+                    self.set_aside.push((path.to_vec(), aside));
+                    return Ok(());
+                }
+                Err(Errno::EEXIST) => {}
+                Err(other) => return Err(other),
+            }
+        }
+        Err(Errno::EEXIST)
     }
 
     fn attributes(&self, entry: &Entry<'_>, path: &[u8], with_time: bool) -> crate::Result<()> {

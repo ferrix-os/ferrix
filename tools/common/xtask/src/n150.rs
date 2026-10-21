@@ -225,7 +225,7 @@ fn install(args: &Args) -> Result<()> {
         .clone()
         .unwrap_or_else(|| paths::build_dir(arch).join("n150-disk.img"));
     let bytes = args.n150.disk_bytes.unwrap_or(DEFAULT_DISK_BYTES);
-    let layout = make_disk(&disk, &image, Some(&tree), bytes)?;
+    let layout = make_disk(&disk, &image, Some(&tree), bytes, &[])?;
     let (_, root_len) = layout.root_bytes();
     println!(
         "  n150: {} written: {} bytes, the ESP from {}, `{ROOT_LABEL}` {} GiB with {} at /data",
@@ -259,6 +259,7 @@ pub(crate) fn make_disk(
     esp_volume: &Path,
     tree: Option<&Path>,
     disk_bytes: u64,
+    root_files: &[(&str, &[u8])],
 ) -> Result<Layout> {
     refuse_devices(out)?;
     let esp_bytes = std::fs::metadata(esp_volume)
@@ -275,10 +276,19 @@ pub(crate) fn make_disk(
     if let Some(tree) = tree {
         stage(tree, &staging)?;
     }
+    for (path, bytes) in root_files {
+        let at = staging.join(path);
+        if let Some(parent) = at.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&at, bytes)
+            .map_err(|error| Error::new(format!("{}: {error}", at.display())))?;
+    }
     File::create(&root)
         .and_then(|file| file.set_len(root_len))
         .map_err(|error| Error::new(format!("{}: {error}", root.display())))?;
-    let made = mkfs(&root, tree.map(|_| staging.as_path()));
+    let rootdir = (tree.is_some() || !root_files.is_empty()).then_some(staging.as_path());
+    let made = mkfs(&root, rootdir);
     remove_own(&staging)?;
     made?;
     let total = total_bytes(&root)?;
@@ -568,7 +578,7 @@ fn test(args: &Args, sata: bool) -> Result<()> {
     }
     std::fs::write(&marker, format!("{MARKER_TEXT}\n"))?;
     let disk = build.join("n150-test-disk.img");
-    let layout = make_disk(&disk, &image, Some(&fixture), TEST_DISK_BYTES)?;
+    let layout = make_disk(&disk, &image, Some(&fixture), TEST_DISK_BYTES, &[])?;
     println!(
         "  {arch}: the box's disk written: ESP sectors {:?}, root sectors {:?}",
         layout.esp, layout.root
@@ -587,7 +597,7 @@ fn test(args: &Args, sata: bool) -> Result<()> {
         if sata { "SATA" } else { "NVMe" }
     );
     if REWRITE_BEFORE_SECOND_BOOT {
-        let _ = make_disk(&disk, &image, Some(&fixture), TEST_DISK_BYTES)?;
+        let _ = make_disk(&disk, &image, Some(&fixture), TEST_DISK_BYTES, &[])?;
     }
     check_second(&boot()?)?;
     println!("  {arch}: after a power cycle, what the first boot wrote was there");
@@ -617,6 +627,22 @@ fn test(args: &Args, sata: bool) -> Result<()> {
 /// `test-n150-desktop`'s disk: room for the launcher's tree (about 5 GB)
 /// and the system, sparse.
 const DESKTOP_TEST_DISK_BYTES: u64 = 16 << 30;
+/// What `test-n150-desktop`'s root volume holds before its first boot, as
+/// the box's drive did on 2026-10-20: a directory with a file in it where
+/// the image has a link. On the box that was `/etc/fonts`, a link into
+/// `/data`; the install stopped there with errno 39 and kept `/` in memory.
+/// It must move the directory aside, say so, and take the root.
+///
+/// Not `/etc/fonts` itself: that is a link only while the image carries no
+/// fonts of its own, and a gate slot whose Chrome is built carries a real
+/// directory there, where nothing is in the way (2026-10-21, the first
+/// control). `/bin/gryphlink`, the launcher's start, is a file in every box
+/// image ([`crate::compositor::n150_box`]), and a file over a directory with
+/// files in it is the same refusal, so the directory goes there.
+const IN_THE_WAY: &[(&str, &[u8])] = &[("bin/gryphlink/in-the-way", b"left by a user\n")];
+/// The line the install says for [`IN_THE_WAY`].
+const SET_ASIDE_LINE: &str = "/bin/gryphlink was a directory with files where the system has a link \
+                              or a file; kept as /bin/gryphlink.ferrix-old";
 /// Megabytes of guest RAM for the desktop boot, unless `--memory` says.
 const DESKTOP_MEMORY: u32 = 4096;
 /// Distinct colours the screen must show: a desktop, not a cleared screen.
@@ -631,9 +657,9 @@ const DESKTOP_COLOURS: usize = 8;
 /// with the system installed, the firmware framebuffer lent to efifb,
 /// hyprix on it with a keyboard in its seat, as the user `ferrix`'s session
 /// (`sessiond`), [`crate::compositor::n150_box`]'s script reporting the
-/// video host blocked, the launcher on `/data`, a lease and yserver up; and
-/// a screendump of the VGA that is a desktop, kept at
-/// `build/x86_64/n150-desktop.ppm`.
+/// video host blocked, the launcher on `/data`, a lease, the default route
+/// and yserver up; [`IN_THE_WAY`] moved aside; and a screendump of the VGA
+/// that is a desktop, kept at `build/x86_64/n150-desktop.ppm`.
 fn test_desktop(args: &Args) -> Result<()> {
     use crate::compositor::n150_box::READY;
     use crate::display::{Qmp, free_port, parse_ppm};
@@ -643,7 +669,13 @@ fn test_desktop(args: &Args) -> Result<()> {
     let tree = launcher_tree(args)?;
     let (image, kernel) = crate::compositor::n150_box::image(args)?;
     let disk = build.join("n150-desktop-test.img");
-    let layout = make_disk(&disk, &image, Some(&tree), DESKTOP_TEST_DISK_BYTES)?;
+    let layout = make_disk(
+        &disk,
+        &image,
+        Some(&tree),
+        DESKTOP_TEST_DISK_BYTES,
+        IN_THE_WAY,
+    )?;
     println!(
         "  {arch}: the box's desktop disk written: ESP sectors {:?}, root sectors {:?}",
         layout.esp, layout.root
@@ -753,8 +785,16 @@ pub(crate) fn check_desktop(lines: &[String]) -> Result<()> {
                 "the launcher's start is not on /data",
             ),
             (
+                SET_ASIDE_LINE,
+                "the install did not move the directory at /bin/gryphlink aside",
+            ),
+            (
                 "n150-desktop: a lease for eth0",
                 "the wired interface got no lease",
+            ),
+            (
+                "n150-desktop: the default route: default via",
+                "the lease set no default route",
             ),
             ("n150-desktop: yserver is up on :0", "yserver did not start"),
         ],

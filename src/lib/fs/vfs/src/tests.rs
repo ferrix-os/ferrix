@@ -2066,6 +2066,69 @@ fn a_truncated_archive_is_an_error_not_a_partial_success() {
     ));
 }
 
+/// The N150 box's drive (2026-10-21): an unpack onto a volume a user wrote
+/// to, where the archive has a link at a name that is a directory with
+/// files in it there. Removing it failed with `ENOTEMPTY` and the whole
+/// install stopped, leaving `/` in memory. The directory is moved aside,
+/// its files kept, the next free name taken when the first is, and each
+/// move named; a file under a link's name is still replaced.
+#[test]
+fn a_directory_with_files_where_the_archive_has_a_link_is_moved_aside() {
+    let mut first = Newc::new();
+    first.entry(".", 0o040_755, 1, 2, (0, 0), b"");
+    first.entry("etc", 0o040_755, 2, 2, (0, 0), b"");
+    first.entry("etc/fonts", 0o040_755, 3, 2, (0, 0), b"");
+    first.entry("etc/fonts/fonts.conf", 0o100_644, 4, 1, (0, 0), b"mine");
+    first.entry("etc/fonts.ferrix-old", 0o040_755, 5, 2, (0, 0), b"");
+    first.entry("etc/fonts.ferrix-old/older", 0o100_644, 6, 1, (0, 0), b"o");
+    first.entry("etc/ca.crt", 0o100_644, 7, 1, (0, 0), b"pem");
+    let first = first.finish();
+    let mut second = Newc::new();
+    second.entry(".", 0o040_755, 1, 2, (0, 0), b"");
+    second.entry("etc", 0o040_755, 2, 2, (0, 0), b"");
+    second.entry("etc/fonts", 0o120_777, 3, 1, (0, 0), b"/data/etc/fonts");
+    second.entry("etc/ca.crt", 0o120_777, 4, 1, (0, 0), b"/data/ca.crt");
+    let second = second.finish();
+
+    let (ns, ctx) = fresh();
+    let (_, none) = initramfs::unpack_over(&ns, &ctx, &first).unwrap();
+    assert!(none.is_empty());
+    let (made, aside) = initramfs::unpack_over(&ns, &ctx, &second).unwrap();
+    assert_eq!(made.set_aside, 1);
+    assert_eq!(
+        aside,
+        [(b"etc/fonts".to_vec(), b"etc/fonts.ferrix-old.1".to_vec())]
+    );
+    assert_eq!(made.symlinks, 2);
+    assert_eq!(kind(&ns, &ctx, "/etc/fonts", false), Ok(FileType::Symlink));
+    assert_eq!(kind(&ns, &ctx, "/etc/ca.crt", false), Ok(FileType::Symlink));
+    assert_eq!(
+        read_file(&ns, &ctx, "/etc/fonts.ferrix-old.1/fonts.conf").unwrap(),
+        b"mine"
+    );
+    assert_eq!(
+        read_file(&ns, &ctx, "/etc/fonts.ferrix-old/older").unwrap(),
+        b"o"
+    );
+}
+
+/// What stopped an unpack names the entry, so a refused install says which
+/// file it could not make.
+#[test]
+fn an_entry_that_cannot_be_made_is_named_in_the_error() {
+    let mut archive = Newc::new();
+    archive.entry("bin", 0o100_644, 1, 1, (0, 0), b"a file");
+    archive.entry("bin/sh", 0o100_755, 2, 1, (0, 0), b"x");
+    let archive = archive.finish();
+    let (ns, ctx) = fresh();
+    let why = initramfs::unpack(&ns, &ctx, &archive).unwrap_err();
+    assert!(matches!(
+        &why,
+        initramfs::UnpackError::Entry { index: 1, name, .. } if name == b"bin/sh"
+    ));
+    assert!(alloc::format!("{why}").starts_with("entry 1, /bin/sh, could not be created: errno"));
+}
+
 // -- Pipes, poll and statfs --------------------------------------------------
 
 use crate::pipe::{PIPE_BUF, PIPE_CAPACITY, PipeBuffer, ReadOutcome, WriteOutcome};

@@ -64,10 +64,16 @@ if [ -x /data/usr/bin/gryphlink ]; then
 else
     echo "n150-desktop: no gryphlink on /data"
 fi
-if dhcpc -i eth0 -n -q -t 30 -T 2 > /dev/null 2>&1; then
-    echo "n150-desktop: a lease for eth0"
+if lease=$(dhcpc -i eth0 -n -q -t 30 -T 2 2> /dev/null); then
+    echo "n150-desktop: a lease for eth0: $lease"
 else
     echo "n150-desktop: no lease for eth0 (dhcpc -i eth0 -q from a terminal tries again)"
+fi
+route=$(ip route 2> /dev/null | grep '^default')
+if [ -n "$route" ]; then
+    echo "n150-desktop: the default route: $route"
+else
+    echo "n150-desktop: no default route"
 fi
 waited=0
 while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do
@@ -77,7 +83,8 @@ done
 if [ -S /tmp/.X11-unix/X0 ]; then
     echo "n150-desktop: yserver is up on :0 after ${waited}s"
 else
-    echo "n150-desktop: no X server after ${waited}s; its log is /tmp/yserver.log"
+    echo "n150-desktop: no X server after ${waited}s; /tmp/yserver.log says:"
+    tail -n 5 /tmp/yserver.log 2> /dev/null | sed 's/^/n150-desktop:   /'
 fi
 echo "n150-desktop: ready"
 "#;
@@ -122,8 +129,11 @@ fi
 exec /data/usr/bin/gryphlink "$@"
 "#;
 
-/// The image's `/etc/hosts`.
-const HOSTS: &str = "127.0.0.1 localhost\n::1 localhost\n0.0.0.0 @HOST@\n";
+/// The image's `/etc/hosts`: the machine's own name, `ferrix`
+/// (`/etc/hostname`), on 127.0.1.1 as Debian puts it, so a program that
+/// resolves the host it runs on finds it -- the box needed it by hand for
+/// the launcher (2026-10-18) -- and the video host blocked.
+const HOSTS: &str = "127.0.0.1 localhost\n127.0.1.1 ferrix\n::1 localhost\n0.0.0.0 @HOST@\n";
 
 /// The compositor's configuration ahead of what [`desktop`] adds: a
 /// terminal to start with and one a key away, fuzzel a key away, the
@@ -208,6 +218,14 @@ pub(crate) fn image(args: &Args) -> Result<(PathBuf, PathBuf)> {
         session_user: Some(crate::session::USER.to_owned()),
         ..args.clone()
     };
+    // `--ssh` with no sshdt package made an image without a server, said in
+    // one line of the build's output, and the box was out of reach until
+    // somebody came to it. sshdt is a script app, which an image takes only
+    // once built, so it is built here.
+    if args.ssh.is_some() {
+        let package = crate::apps::build_unless_built(arch, "sshdt", false)?;
+        println!("  n150: --ssh: sshdt from {}", package.display());
+    }
     let programs = Programs::build(arch)?;
     let layout = args.layout.clone().unwrap_or_else(|| LAYOUT.to_owned());
     let size = args.size.unwrap_or(crate::wallpaper::SCREEN);
@@ -219,6 +237,12 @@ pub(crate) fn image(args: &Args) -> Result<(PathBuf, PathBuf)> {
         crate::session::USER
     );
     let config = crate::session::for_session(&config, &mut carried.ports, None);
+    if args.ssh.is_some() && !carried.ports.iter().any(|file| file.path == "bin/sshdt") {
+        return Err(Error::new(
+            "n150: --ssh, and the image has no /bin/sshdt (built, but not taken: --no-apps?); \
+             no image is written that the box cannot be reached on",
+        ));
+    }
     let more = files(&carried.ports);
     carried.ports.extend(more);
     let mut options = BOX_OPTIONS.to_owned();
@@ -261,6 +285,7 @@ mod tests {
         };
         let hosts = find("etc/hosts").expect("the image's /etc/hosts");
         assert!(hosts.contains(&format!("0.0.0.0 {VIDEO_HOST}")));
+        assert!(hosts.lines().any(|line| line == "127.0.1.1 ferrix"));
         let start = find("bin/gryphlink").expect("/bin/gryphlink");
         let block = start
             .find("drivers/etc/hosts")

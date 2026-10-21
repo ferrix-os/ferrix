@@ -90,7 +90,11 @@ const DESKTOP_PATH: &str = "etc/yserver.sh";
 /// runs on ferrousli, and yserver is built against Debian's glibc. The
 /// `--library-path` takes the place of the `LD_LIBRARY_PATH` that desktop
 /// gives its clients for ferrousli. Its log is `/tmp/yserver.log`, at the
-/// `RUST_LOG` the compositor's configuration gives, or `info`.
+/// `RUST_LOG` the compositor's configuration gives, or `info`. A volume
+/// missing at `/data` is said in that log and on standard error before
+/// anything is started, rather than as the shell's "not found" on an exec
+/// nobody saw (the N150 box, 2026-10-19); the box's script reads the log
+/// back to its console when no X server came up.
 ///
 /// It renders on lavapipe even where the desktop has Venus. Every frame
 /// yserver hands hyprix is read back to the CPU, and on Venus that read,
@@ -101,6 +105,13 @@ const DESKTOP_PATH: &str = "etc/yserver.sh";
 const DESKTOP_SCRIPT: &str = r#"export YSERVER_BACKEND=wayland YSERVER_ALLOW_SOFTWARE_VULKAN=1
 export RUST_LOG="${RUST_LOG:-info}" VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json
 unset LD_LIBRARY_PATH
+for need in /data/usr/lib64/ld-linux-x86-64.so.2 /data/yserver/yserver; do
+    if [ ! -e "$need" ]; then
+        echo "yserver.sh: no X server on :0: $need is missing (the volume is not at /data)" \
+            | tee /tmp/yserver.log >&2
+        exit 1
+    fi
+done
 exec /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu \
     /data/yserver/yserver :0 -nolisten tcp > /tmp/yserver.log 2>&1
 "#;

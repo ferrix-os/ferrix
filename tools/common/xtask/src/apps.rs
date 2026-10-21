@@ -665,6 +665,28 @@ pub(crate) fn build_apps(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// The app `name` built for `arch` unless its package is there already, a
+/// script app too: for an image that needs it and leaves this machine, as
+/// `n150-install --ssh` needs sshdt -- which, being a script app, an image
+/// otherwise leaves out with a line nobody on the box reads.
+///
+/// # Errors
+///
+/// No app of that name, one not built for `arch` or on this host, or a
+/// build that fails.
+pub(crate) fn build_unless_built(arch: Arch, name: &str, release: bool) -> Result<PathBuf> {
+    let app = discover()?
+        .into_iter()
+        .find(|app| app.name() == name)
+        .ok_or_else(|| Error::new(format!("there is no app `{name}` in {}", places())))?;
+    package(&app, arch, release, Fresh::UnlessBuilt)?.ok_or_else(|| {
+        Error::new(format!(
+            "{name} cannot be built for {arch} here: `cargo xtask build-apps --arch {arch} --app \
+             {name}` says why"
+        ))
+    })
+}
+
 /// Every app an image a person runs carries for `arch` -- the ones
 /// [`installed`] selects and the script apps [`ported`] takes -- built where
 /// it has no package yet, as `--everything` builds them: for an image that
