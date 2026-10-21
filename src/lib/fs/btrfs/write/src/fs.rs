@@ -952,7 +952,7 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// into the checksum tree.
     fn write_data(&mut self, at: u64, data: &[u8]) -> Result<()> {
         for physical in self.chunks.copies(at, data.len() as u64)? {
-            self.device.write_at(physical, data)?;
+            crate::device::write(&mut self.device, physical, data)?;
         }
         let sums: Vec<u32> =
             fallible::collect(data.chunks(self.sectorsize() as usize).map(crc32c))?;
@@ -1092,9 +1092,12 @@ impl<D: WriteDevice> WriteVolume<D> {
             .first()
             .copied()
             .ok_or(Error::Inconsistent("data extent has no copy"))?;
-        Ok(self
-            .device
-            .read_at(physical, dest, ferrix_btrfs::volume::ReadKind::Data)?)
+        crate::device::read(
+            &mut self.device,
+            physical,
+            dest,
+            ferrix_btrfs::volume::ReadKind::Data,
+        )
     }
 
     /// Decompress an extent's stored bytes into `ram_bytes` bytes.

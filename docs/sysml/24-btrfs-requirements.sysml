@@ -7,7 +7,12 @@
  * `ferrix-btrfs-write` (src/lib/fs/btrfs/write), the write path. They
  * joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their
  * interface below is the `Device` and `WriteDevice` traits, which the
- * kernel's block layer answers; above, `Volume` and `WriteVolume`, which the
+ * kernel's block layer answers; since branch fs-traits (docs/FS-COMMON.md,
+ * the consultant's OK IF of 2026-10-19, ledger line 2587) those are a third
+ * item crate's, `ferrix-fs-device` (src/lib/fs/common/device), which every
+ * on-disk filesystem shares and which each btrfs crate re-exports, turning
+ * a device's failure into its own error in one function (L.btrfs.117,
+ * L.btrfs.118). Above, `Volume` and `WriteVolume`, which the
  * VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs)
  * calls. A unit is named from the crate's src/, led by the crate's name:
  * `ferrix_btrfs::volume::Volume::read_node`.
@@ -141,14 +146,16 @@ package FerrixBtrfsRequirements {
         }
         requirement <'L.btrfs.23'> noArithmeticOverflows : ItemLowLevel {
             attribute :>> statement = "No addition, subtraction, multiplication or
-                shift in ferrix-btrfs or ferrix-btrfs-write shall be able to overflow:
-                each shall be checked, saturating or wrapping by intent, so that a
-                value read from a volume can neither wrap silently in the release
-                kernel, which has no overflow checks, nor panic one built with
-                them.";
+                shift in ferrix-btrfs, ferrix-btrfs-write or ferrix-fs-device shall be
+                able to overflow: each shall be checked, saturating or wrapping by
+                intent, so that a value read from a volume can neither wrap silently
+                in the release kernel, which has no overflow checks, nor panic one
+                built with them.";
             attribute :>> criterion = "clippy's arithmetic_side_effects lint, denied
-                for both crates' product code, reports no site. Not yet enforced: on
-                2026-10-02 it reports 112, 56 in each crate.";
+                for the product code of ferrix-btrfs, ferrix-btrfs-write and
+                ferrix-fs-device, reports no site. Not yet enforced: on 2026-10-02 it
+                reports 112, 56 in each btrfs crate; ferrix-fs-device has no
+                arithmetic.";
             attribute :>> parent = "H.STORE.1";
             attribute :>> unit = ("ferrix_btrfs::slice_at", "ferrix_btrfs::array_at",
                 "ferrix_btrfs::tree::Node::check_leaf",
@@ -595,7 +602,24 @@ package FerrixBtrfsRequirements {
                 DeviceRead at that address.";
             attribute :>> parent = "H.STORE.2";
             attribute :>> unit = ("ferrix_btrfs::volume::Volume::read_copy",
-                "ferrix_btrfs::volume::Volume::read_node");
+                "ferrix_btrfs::volume::Volume::read_node",
+                "ferrix_btrfs::volume::read_error",
+                "ferrix_btrfs::volume::read_device");
+        }
+        requirement <'L.btrfs.117'> theReaderMapsEachDeviceFailure : ItemLowLevel {
+            attribute :>> statement = "The reader shall answer a device read that failed
+                for want of memory with OutOfMemory, as it is, and one that failed in
+                any other way with DeviceRead at the physical address the reader asked
+                for, whatever address the device reported.";
+            attribute :>> criterion = "A device failing every read with each of
+                ferrix-fs-device's four errors, each reporting an address other than the
+                one asked, answers OutOfMemory for OutOfMemory and DeviceRead at the
+                address asked for the other three, through read_error, through
+                read_device and through Volume::open, at the primary superblock's
+                offset.";
+            attribute :>> parent = "H.STORE.2";
+            attribute :>> unit = ("ferrix_btrfs::volume::read_error",
+                "ferrix_btrfs::volume::read_device");
         }
         requirement <'L.btrfs.72'> overDeepTreesRefused : ItemLowLevel {
             attribute :>> statement = "A tree whose root names a level above MAX_LEVEL
@@ -790,10 +814,18 @@ package FerrixBtrfsRequirements {
                 directly precedes and directly follows the primary superblock, and no
                 node write comes after it.";
             attribute :>> parent = "H.STORE.3";
+            // ferrix_fs_device::write_durable is WriteDevice's default method,
+            // which the kernel's Disk does not override, so every commit's
+            // primary superblock runs it. It is named without its trait as
+            // owner because check-traceability.py gives a trait block none
+            // (the consultant's condition 1, ledger line 2806; BACKLOG has
+            // the resolver's row).
             attribute :>> unit = ("ferrix_btrfs_write::commit::WriteVolume::commit",
                 "ferrix_btrfs_write::commit::WriteVolume::write_nodes",
                 "ferrix_btrfs_write::commit::WriteVolume::write_superblocks",
-                "ferrix_btrfs_write::commit::WriteVolume::finish_commit");
+                "ferrix_btrfs_write::commit::WriteVolume::finish_commit",
+                "ferrix_btrfs_write::device::write_durable",
+                "ferrix_fs_device::write_durable");
         }
         requirement <'L.btrfs.14'> committedBlocksNeverOverwritten : ItemLowLevel {
             attribute :>> statement = "No write a transaction makes before its
@@ -1127,7 +1159,9 @@ package FerrixBtrfsRequirements {
                 "ferrix_btrfs_write::volume::WriteVolume::check_writable",
                 "ferrix_btrfs_write::volume::WriteVolume::guarded_with",
                 "ferrix_btrfs_write::volume::WriteVolume::operation_with",
-                "ferrix_btrfs_write::open::WriteVolume::reload_read_only");
+                "ferrix_btrfs_write::open::WriteVolume::reload_read_only",
+                "ferrix_btrfs_write::device::device_error",
+                "ferrix_btrfs_write::device::write");
         }
         requirement <'L.btrfs.107'> anUnreadableLastCommitStaysAborted : ItemLowLevel {
             attribute :>> statement = "reload_read_only shall leave the volume aborted,
@@ -1140,12 +1174,33 @@ package FerrixBtrfsRequirements {
                 ("ferrix_btrfs_write::open::WriteVolume::reload_read_only",
                 "ferrix_btrfs_write::open::WriteVolume::abort");
         }
+        requirement <'L.btrfs.118'> theWriterMapsEachDeviceFailure : ItemLowLevel {
+            attribute :>> statement = "The write path shall answer a device failure for
+                want of memory with OutOfMemory, as it is, from any operation; a failed
+                read with DeviceRead at the physical address it asked for; a failed
+                write with DeviceWrite at the address it asked for, or with Flush when
+                it was the flush of a durable write that failed; and a failed flush
+                with Flush; whatever address the device reported.";
+            attribute :>> criterion = "Each of ferrix-fs-device's four errors, each
+                reporting an address other than the one asked, from a read, a write and
+                a flush, maps through device_error to exactly that table, and a device
+                failing every call with each error answers it through the write path's
+                read, write, write_durable and flush.";
+            attribute :>> parent = "H.STORE.8";
+            attribute :>> unit = ("ferrix_btrfs_write::device::device_error",
+                "ferrix_btrfs_write::device::read",
+                "ferrix_btrfs_write::device::write",
+                "ferrix_btrfs_write::device::write_durable",
+                "ferrix_btrfs_write::device::flush");
+        }
         requirement <'L.btrfs.22'> allocationsAreFallible : ItemLowLevel {
-            attribute :>> statement = "Every heap allocation of the btrfs crates' product
-                code shall be made through a helper that reports a refused allocation
-                as an error, never through one that stops the element.";
+            attribute :>> statement = "Every heap allocation of the product code of
+                ferrix-btrfs, ferrix-btrfs-write and ferrix-fs-device shall be made
+                through a helper that reports a refused allocation as an error, never
+                through one that stops the element.";
             attribute :>> criterion = "tools/common/check/check-fallible-alloc.py finds
-                0 unmarked allocating calls in ferrix-btrfs and in ferrix-btrfs-write.";
+                0 unmarked allocating calls in ferrix-btrfs, in ferrix-btrfs-write and
+                in ferrix-fs-device.";
             attribute :>> parent = "H.STORE.7";
             attribute :>> unit = ("ferrix_btrfs_write::fallible::zeroed",
                 "ferrix_btrfs_write::fallible::filled",
@@ -1199,7 +1254,9 @@ package FerrixBtrfsRequirements {
                 one.";
             attribute :>> parent = "H.STORE.2";
             attribute :>> unit = ("ferrix_btrfs::volume::Volume::read_node",
-                "ferrix_btrfs::fs::read_checked");
+                "ferrix_btrfs::fs::read_checked",
+                "ferrix_btrfs::volume::read_error",
+                "ferrix_btrfs::volume::read_device");
         }
         requirement <'L.btrfs.111'> theWriterPassesOutOfMemoryOn : ItemLowLevel {
             attribute :>> statement = "WriteVolume::read_node shall answer a device read
@@ -1208,7 +1265,9 @@ package FerrixBtrfsRequirements {
                 with OutOfMemory, a lookup answers OutOfMemory after that one read,
                 aborts nothing, and succeeds once the device reads again.";
             attribute :>> parent = "H.STORE.7";
-            attribute :>> unit = "ferrix_btrfs_write::volume::WriteVolume::read_node";
+            attribute :>> unit = ("ferrix_btrfs_write::volume::WriteVolume::read_node",
+                "ferrix_btrfs::volume::read_device",
+                "ferrix_btrfs::volume::read_error");
         }
         requirement <'L.btrfs.112'> aRangeSetEditOutOfMemoryChangesNothing : ItemLowLevel {
             attribute :>> statement = "A RangeSet insert, removal or union that has to make

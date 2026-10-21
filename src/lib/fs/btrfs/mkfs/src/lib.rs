@@ -33,7 +33,6 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
-use core::ops::Range;
 
 use ferrix_btrfs::chunk::{
     BLOCK_GROUP_DATA, BLOCK_GROUP_DUP, BLOCK_GROUP_METADATA, BLOCK_GROUP_SYSTEM,
@@ -53,6 +52,7 @@ use ferrix_btrfs_write::extent::{
     METADATA_ITEM_KEY,
 };
 use ferrix_btrfs_write::node::{Body, LeafItem, TreeNode};
+use ferrix_fs_mkfs::Mkfs;
 
 use items::{BackupRoots, Bytes, DevFields, RootFields};
 
@@ -202,51 +202,21 @@ impl fmt::Display for Error {
     }
 }
 
-/// The volume as writes to its device, offsets from the device's start.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Image {
-    /// The volume's size: the device's, in whole sectors.
-    pub size: u64,
-    /// Bytes to zero first, so that nothing of an old file system at the
-    /// device's start survives: the boot area and the primary superblock.
-    pub zero: Range<u64>,
-    /// Every copy of every tree block.
-    pub blocks: Vec<(u64, Vec<u8>)>,
-    /// The superblock's copies, the primary first.
-    pub superblocks: Vec<(u64, Vec<u8>)>,
-}
+/// The volume as writes, and how they are made durable: every filesystem's
+/// mkfs shares it (`ferrix-fs-mkfs`).
+pub use ferrix_fs_mkfs::Image;
 
-/// Where [`Image::write_to`] writes: a device, or a partition of one.
-pub trait Target {
-    /// What a failed write or flush says.
-    type Error;
-    /// Write `data` at byte `at` of the volume.
-    fn write_at(&mut self, at: u64, data: &[u8]) -> Result<(), Self::Error>;
-    /// Make every write that has returned durable.
-    fn flush(&mut self) -> Result<(), Self::Error>;
-}
+/// btrfs, as a filesystem a mkfs makes: [`make`] behind `ferrix-fs-mkfs`'s
+/// trait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Btrfs;
 
-impl Image {
-    /// Write the volume to `target`: [`Image::zero`], the tree blocks, a
-    /// flush, the primary superblock, a flush, the mirrors, a flush. Until
-    /// the primary is down the device holds no superblock, so a write cut
-    /// short leaves no volume rather than half of one.
-    pub fn write_to<T: Target>(&self, target: &mut T) -> Result<(), T::Error> {
-        let wipe = usize::try_from(self.zero.end.saturating_sub(self.zero.start)).unwrap_or(0);
-        target.write_at(self.zero.start, &vec![0_u8; wipe])?;
-        for (at, block) in &self.blocks {
-            target.write_at(*at, block)?;
-        }
-        target.flush()?;
-        let mut superblocks = self.superblocks.iter();
-        if let Some((at, primary)) = superblocks.next() {
-            target.write_at(*at, primary)?;
-            target.flush()?;
-        }
-        for (at, mirror) in superblocks {
-            target.write_at(*at, mirror)?;
-        }
-        target.flush()
+impl Mkfs for Btrfs {
+    type Options<'a> = Options<'a>;
+    type Error = Error;
+
+    fn make(options: &Options<'_>) -> Result<Image, Error> {
+        make(options)
     }
 }
 

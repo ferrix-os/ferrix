@@ -1530,7 +1530,11 @@ package FerrixItemRequirements {
              * `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and
              * ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the
              * `Device` and `WriteDevice` traits the kernel's block layer
-             * answers, above it `Volume` and `WriteVolume`; the VFS glue on top
+             * answers, since branch fs-traits a third item crate's,
+             * `ferrix-fs-device` (docs/FS-COMMON.md; consultant ledger line
+             * 2587), each device failure mapped into the crate's own error
+             * (L.btrfs.117, L.btrfs.118); above it `Volume` and
+             * `WriteVolume`; the VFS glue on top
              * (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so
              * these promise what the two crates do at `Volume` and
              * `WriteVolume`, not what a program sees through a mount. The

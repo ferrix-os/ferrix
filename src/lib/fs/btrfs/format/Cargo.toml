@@ -8,6 +8,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+ferrix-fs-device.workspace = true
 
 # Test-only, and never linked into the kernel (`check-crate-layering.sh`
 # resolves normal edges only). Each is an independent implementation of one of

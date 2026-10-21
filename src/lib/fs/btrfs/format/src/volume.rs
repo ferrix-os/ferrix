@@ -63,37 +63,41 @@ use crate::{BtrfsError, truncated};
 /// apart on how deep a tree is.
 pub use crate::tree::MAX_LEVEL;
 
-/// What a read through a [`Device`] is for, so a device that caches can keep
-/// only what is worth keeping.
+/// The device the volume lives on and what a read is for: the traits every
+/// on-disk filesystem shares (`ferrix-fs-device`, `docs/FS-COMMON.md`),
+/// under the names this crate has always given them.
+pub use ferrix_fs_device::{Device, DeviceError, ReadKind};
+
+/// What the reader makes of a device's failure to read at `physical`, the
+/// address it asked for: [`BtrfsError::OutOfMemory`] passed on as it is,
+/// which says nothing about the volume and is never retried from another
+/// copy; anything else [`BtrfsError::DeviceRead`] there, which the reader
+/// may retry from another copy and reports as `EIO`.
 ///
-/// Tree nodes are read again by every lookup that descends past them; file data
-/// is read once, and belongs in a page cache above the filesystem. A device
-/// that caches should keep only [`ReadKind::Metadata`], so a node cache and the
-/// page cache never hold the same bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReadKind {
-    /// The superblock or a tree node.
-    Metadata,
-    /// File data: an extent's bytes, compressed or not.
-    Data,
+/// The one place a [`DeviceError`] becomes a [`BtrfsError`]: every arm is
+/// named, so a new kind of device failure is a compile error here and not a
+/// wildcard.
+#[must_use]
+pub const fn read_error(error: DeviceError, physical: u64) -> BtrfsError {
+    match error {
+        DeviceError::OutOfMemory => BtrfsError::OutOfMemory,
+        DeviceError::Read { .. } | DeviceError::Write { .. } | DeviceError::Flush => {
+            BtrfsError::DeviceRead { physical }
+        }
+    }
 }
 
-/// Byte-addressed access to the one device a volume lives on.
-///
-/// The reader never asks for anything but whole nodes and whole extents, so an
-/// implementation over a block cache can serve every call from cached sectors.
-pub trait Device {
-    /// Fill `buf` with the device's bytes starting at `physical`.
-    ///
-    /// A short device or a failed read is an error, typically
-    /// [`BtrfsError::DeviceRead`]; a partially filled buffer must never be
-    /// reported as success. A read that could not get the memory it needed
-    /// is [`BtrfsError::OutOfMemory`], which every caller passes on as it is:
-    /// it says nothing about the volume, so it is never retried from another
-    /// copy or reported as damage.
-    ///
-    /// `kind` says what the bytes are for; see [`ReadKind`].
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError>;
+/// Read `buf` from `device` at `physical`, a device failure turned into the
+/// reader's error by [`read_error`].
+pub fn read_device<D: Device + ?Sized>(
+    device: &mut D,
+    physical: u64,
+    buf: &mut [u8],
+    kind: ReadKind,
+) -> Result<(), BtrfsError> {
+    device
+        .read_at(physical, buf, kind)
+        .map_err(|error| read_error(error, physical))
 }
 
 /// Where a tree starts, and what its top node must say about itself.
@@ -167,7 +171,7 @@ impl<S: ChunkStorage> Volume<S> {
     /// refuses.
     pub fn open<D: Device>(device: &mut D, chunks: S, node: &mut [u8]) -> Result<Self, BtrfsError> {
         let mut block = [0u8; SUPERBLOCK_SIZE];
-        device.read_at(PRIMARY_OFFSET, &mut block, ReadKind::Metadata)?;
+        read_device(device, PRIMARY_OFFSET, &mut block, ReadKind::Metadata)?;
         let sb = Superblock::parse_at(&block, PRIMARY_OFFSET)?;
         check_mountable(&sb)?;
 
@@ -345,7 +349,7 @@ impl<S: ChunkStorage> Volume<S> {
         if span < buf.len() as u64 {
             return Err(BtrfsError::NotMapped(logical.saturating_add(span)));
         }
-        device.read_at(physical, buf, kind)
+        read_device(device, physical, buf, kind)
     }
 
     /// Descend `root` to the leaf that holds `key` or would.

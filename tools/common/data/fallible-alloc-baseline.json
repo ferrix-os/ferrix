@@ -29,6 +29,11 @@
       "count": 0,
       "by_file": {}
     },
+    "ferrix-fs-device": {
+      "//": "Held at 0 by cargo xtask check (L.btrfs.22) from the start (docs/FS-COMMON.md, branch fs-traits, 2026-10-21): the crate is no_std without alloc and allocates nothing.",
+      "count": 0,
+      "by_file": {}
+    },
     "ferrix-smbios": {
       "//": "Held at 0 from the start (docs/DMI.md, 2026-10-15): the crate is no_std without alloc and allocates nothing.",
       "count": 0,

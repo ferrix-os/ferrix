@@ -34,6 +34,7 @@ use crate::refs::DelayedRefs;
 use crate::space::{BlockGroup, Space};
 use crate::volume::{Geometry, Root};
 use crate::{Error, Result, Unsupported, WriteDevice, WriteVolume, fallible};
+use ferrix_fs_device::DeviceError;
 
 /// `compat_ro` bit: the free-space tree exists.
 const FREE_SPACE_TREE: u64 = 1 << 0;
@@ -76,7 +77,7 @@ impl<D: WriteDevice> WriteVolume<D> {
     /// transaction starts empty. What a checker wants.
     pub(crate) fn open_committed(mut device: D) -> Result<Self> {
         let mut block = fallible::zeroed(SUPERBLOCK_SIZE)?;
-        device.read_at(PRIMARY_OFFSET, &mut block, ReadKind::Metadata)?;
+        crate::device::read(&mut device, PRIMARY_OFFSET, &mut block, ReadKind::Metadata)?;
         let sb = Superblock::parse_at(&block, PRIMARY_OFFSET)?;
         check_writable(&sb)?;
         let dev = DevItem::parse(sb.dev_item())?;
@@ -233,7 +234,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             .first()
             .copied()
             .ok_or(Error::Inconsistent("chunk root has no copy"))?;
-        self.device.read_at(first, &mut buf, ReadKind::Metadata)?;
+        crate::device::read(&mut self.device, first, &mut buf, ReadKind::Metadata)?;
         Ok(NodeHeader::parse(&buf)?.chunk_tree_uuid)
     }
 
@@ -454,21 +455,25 @@ impl<D: WriteDevice> Device for Borrowed<'_, D> {
         physical: u64,
         buf: &mut [u8],
         kind: ReadKind,
-    ) -> core::result::Result<(), BtrfsError> {
+    ) -> core::result::Result<(), DeviceError> {
         self.0.read_at(physical, buf, kind)
     }
 }
 
 impl<D: WriteDevice> WriteDevice for Borrowed<'_, D> {
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> Result<()> {
+    fn write_at(&mut self, physical: u64, data: &[u8]) -> core::result::Result<(), DeviceError> {
         self.0.write_at(physical, data)
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> core::result::Result<(), DeviceError> {
         self.0.flush()
     }
 
-    fn write_durable(&mut self, physical: u64, data: &[u8]) -> Result<()> {
+    fn write_durable(
+        &mut self,
+        physical: u64,
+        data: &[u8],
+    ) -> core::result::Result<(), DeviceError> {
         self.0.write_durable(physical, data)
     }
 }

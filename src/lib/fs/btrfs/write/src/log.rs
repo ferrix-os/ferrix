@@ -161,7 +161,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             }
             let log = volume.root(TREE_LOG_OBJECTID)?;
             volume.write_nodes()?;
-            volume.device.flush()?;
+            crate::device::flush(&mut volume.device)?;
             volume.seal_log(log)?;
             let mut block = fallible::copy(&volume.superblock)?;
             let bad = Error::Inconsistent("superblock field out of range");
@@ -169,9 +169,11 @@ impl<D: WriteDevice> WriteVolume<D> {
             put_u64(&mut block, SB_LOG_ROOT_TRANSID, volume.transid).ok_or(bad)?;
             put_u8(&mut block, SB_LOG_ROOT_LEVEL, log.level).ok_or(bad)?;
             let block = crate::commit::sealed(block)?;
-            volume
-                .device
-                .write_durable(ferrix_btrfs::superblock::PRIMARY_OFFSET, &block)
+            crate::device::write_durable(
+                &mut volume.device,
+                ferrix_btrfs::superblock::PRIMARY_OFFSET,
+                &block,
+            )
         })
     }
 

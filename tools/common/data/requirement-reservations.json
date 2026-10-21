@@ -26,13 +26,6 @@
       "purpose": "Wake placement: a task woken onto a busy processor is queued on an idle, allowed processor of its domain that runs nothing with nothing waiting, which is told to decide, and the running task is not switched away from; otherwise it is queued at home as before (parent H.SCHED.1; consultant design OK IF, ledger 2658, condition 5)"
     },
     {
-      "ids": ["L.btrfs.117-118"],
-      "owner": "i3",
-      "branch": "fs-traits",
-      "date": "2026-10-19",
-      "purpose": "Common fs traits (docs/FS-COMMON.md, the consultant's OK IF of 2026-10-19, ledger line 2587, condition 4): the reader's and the write path's per-operation mapping of a ferrix-fs-device DeviceError into BtrfsError and btrfs-write's Error, keeping the address asked (parents H.STORE.2 and H.STORE.8)"
-    },
-    {
       "ids": ["L.user.111-124", "L.object.121-125", "H.MEM.20-21"],
       "owner": "nvidia",
       "branch": "nvidia-c3k",

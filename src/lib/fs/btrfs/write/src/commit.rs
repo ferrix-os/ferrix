@@ -101,7 +101,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             let _ = volume.cow_root(ROOT_TREE_OBJECTID)?;
             volume.settle()?;
             volume.write_nodes()?;
-            volume.device.flush()?;
+            crate::device::flush(&mut volume.device)?;
             // The last allocations of the commit: what unpinning leaves, and
             // the superblocks. Past the primary's write nothing allocates.
             let unpinned = volume.space.prepare_unpin()?;
@@ -359,7 +359,7 @@ impl<D: WriteDevice> WriteVolume<D> {
             )
             .ok_or(Error::Inconsistent("node does not fit its block"))?;
             for physical in self.chunks.copies(logical, u64::from(self.nodesize()))? {
-                self.device.write_at(physical, &buf)?;
+                crate::device::write(&mut self.device, physical, &buf)?;
             }
         }
         Ok(())
@@ -448,11 +448,11 @@ impl<D: WriteDevice> WriteVolume<D> {
         }
         if PRIMARY_OFFSET.saturating_add(size) <= self.geometry.device_size {
             let block = self.build_superblock(PRIMARY_OFFSET)?;
-            self.device.write_durable(PRIMARY_OFFSET, &block)?;
+            crate::device::write_durable(&mut self.device, PRIMARY_OFFSET, &block)?;
             primary = Some(block);
         }
         for (offset, block) in built {
-            self.device.write_at(offset, &block)?;
+            crate::device::write(&mut self.device, offset, &block)?;
         }
         primary.ok_or(Error::Inconsistent("device too small for a superblock"))
     }

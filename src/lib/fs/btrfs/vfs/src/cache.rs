@@ -21,8 +21,7 @@ use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
 use core::fmt;
 
-use ferrix_btrfs::BtrfsError;
-use ferrix_btrfs::volume::{Device, ReadKind};
+use ferrix_btrfs::volume::{Device, DeviceError, ReadKind};
 
 use crate::SpinLock;
 
@@ -186,7 +185,12 @@ impl<D> fmt::Debug for Cached<D> {
 }
 
 impl<D: Device> Device for Cached<D> {
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        kind: ReadKind,
+    ) -> Result<(), DeviceError> {
         if kind != ReadKind::Metadata {
             return self.device.read_at(physical, buf, kind);
         }

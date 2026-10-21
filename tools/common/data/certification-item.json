@@ -419,13 +419,22 @@
       "it is written against the VFS, which is load."
     ],
     "members": {
+      "ferrix-fs-device": {
+        "ring": "item",
+        "path": "src/lib/fs/common/device",
+        "in_ring0_when": [
+          "fs=kernel"
+        ],
+        "below": "nothing: no dependency, no allocation, no unsafe",
+        "above": "Device, WriteDevice, ReadKind, DeviceError: implemented by the kernel's Disk (src/kernel/src/fs/btrfs.rs) and ferrix-btrfs-vfs's Cached (load), named by ferrix-btrfs and ferrix-btrfs-write"
+      },
       "ferrix-btrfs": {
         "ring": "item",
         "path": "src/lib/fs/btrfs/format",
         "in_ring0_when": [
           "fs=kernel"
         ],
-        "below": "the `Device` trait (ferrix_btrfs::volume::Device): sector reads the kernel's block layer answers (src/kernel/src/fs/btrfs.rs, `Disk`); and caller-lent memory, `ExtentBuffers` and `ChunkStorage`",
+        "below": "ferrix-fs-device's `Device` trait and `DeviceError` (item; re-exported as ferrix_btrfs::volume::Device, the device's failure mapped by ferrix_btrfs::volume::read_error): sector reads the kernel's block layer answers (src/kernel/src/fs/btrfs.rs, `Disk`); and caller-lent memory, `ExtentBuffers` and `ChunkStorage`",
         "above": "`Volume` and the on-disk format types it returns (superblock, chunk map, keys, items, the fs and compress modules' readers), called by ferrix-btrfs-write, ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
       },
       "ferrix-btrfs-write": {
@@ -434,7 +443,7 @@
         "in_ring0_when": [
           "fs=kernel"
         ],
-        "below": "the `WriteDevice` trait (ferrix_btrfs_write::WriteDevice, a `Device` that also writes and flushes), implemented by the kernel's `Disk`; and ferrix-btrfs, item",
+        "below": "ferrix-fs-device's `WriteDevice` trait (item; re-exported as ferrix_btrfs_write::WriteDevice, a `Device` that also writes and flushes, its failures mapped by ferrix_btrfs_write::device::device_error), implemented by the kernel's `Disk`; and ferrix-btrfs, item",
         "above": "`WriteVolume` and its transaction, inode and extent operations, called by ferrix-btrfs-vfs and src/kernel/src/fs/btrfs*.rs"
       },
       "ferrix-smbios": {

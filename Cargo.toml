@@ -39,6 +39,8 @@ members = [
     "src/lib/fs/btrfs/vfs",
     "src/lib/fs/btrfs/write",
     "src/lib/fs/common/cpio",
+    "src/lib/fs/common/device",
+    "src/lib/fs/common/mkfs",
     "src/lib/fs/common/partition",
     "src/lib/kernel/crng",
     "src/lib/kernel/seccomp",
@@ -172,6 +174,8 @@ ferrix-fallible = { path = "src/lib/kernel/fallible" }
 ferrix-heap = { path = "src/lib/kernel/heap" }
 ferrix-kmem = { path = "src/lib/kernel/kmem" }
 ferrix-btrfs = { path = "src/lib/fs/btrfs/format" }
+ferrix-fs-device = { path = "src/lib/fs/common/device" }
+ferrix-fs-mkfs = { path = "src/lib/fs/common/mkfs" }
 ferrix-btrfs-mkfs = { path = "src/lib/fs/btrfs/mkfs" }
 ferrix-btrfs-vfs = { path = "src/lib/fs/btrfs/vfs" }
 ferrix-btrfs-write = { path = "src/lib/fs/btrfs/write" }

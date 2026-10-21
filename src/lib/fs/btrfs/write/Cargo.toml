@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 ferrix-btrfs.workspace = true
+ferrix-fs-device.workspace = true
 ferrix-fallible.workspace = true
 
 # Test-only: the size classes the kernel's reserve holds, which every map

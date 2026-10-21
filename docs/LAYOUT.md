@@ -116,7 +116,7 @@ format's is in `common/`. The crates keep their names (`ferrix-btrfs`,
 | Directory | Crates |
 |---|---|
 | `btrfs/` | `format` (the on-disk format and the read path, `ferrix-btrfs`, and the test images in its `testdata/`), `write` (`ferrix-btrfs-write`), `vfs` (`ferrix-btrfs-vfs`, mounted into the VFS), `mkfs` (`ferrix-btrfs-mkfs`) |
-| `common/` | `vfs`, `block` (the block core), `partition`, `cpio`, and the text of the pseudo-filesystems: `procfs`, `sysfs`, `cgroupfs` |
+| `common/` | `device` (`ferrix-fs-device`, the traits every on-disk filesystem reads and writes its device through; item code, `docs/FS-COMMON.md`), `mkfs` (`ferrix-fs-mkfs`, a new volume as writes and the trait each filesystem's mkfs implements; outside the item), `vfs`, `block` (the block core), `partition`, `cpio`, and the text of the pseudo-filesystems: `procfs`, `sysfs`, `cgroupfs` |
 
 **Choosing a group for a new lib.** Ask what the crate *is*, not who uses it
 first. A format two components agree on is `proto`, even if only the kernel

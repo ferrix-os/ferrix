@@ -70,12 +70,12 @@ extern crate alloc;
 use core::fmt;
 
 use ferrix_btrfs::BtrfsError;
-use ferrix_btrfs::volume::Device;
 
 mod bytes;
 mod chunks;
 mod commit;
 mod csum;
+pub mod device;
 pub mod extent;
 mod fallible;
 pub mod fs;
@@ -92,27 +92,15 @@ mod volume;
 pub use fs::NewInode;
 pub use volume::{TreeId, WriteVolume};
 
-/// A device a volume can be written to, as well as read from.
+/// A device a volume can be written to, as well as read from: the trait
+/// every on-disk filesystem shares (`ferrix-fs-device`,
+/// `docs/FS-COMMON.md`), under the name this crate has always given it.
 ///
 /// Writes may reach the medium in any order and may be cached by it; the only
 /// ordering this crate relies on is that everything written before a
-/// [`WriteDevice::flush`] is durable when the flush returns.
-pub trait WriteDevice: Device {
-    /// Write `data` at physical byte offset `physical`. Durable only after a
-    /// later [`WriteDevice::flush`] returns.
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> Result<()>;
-
-    /// Make every write that has returned durable.
-    fn flush(&mut self) -> Result<()>;
-
-    /// Write `data` and make it durable before returning: a write with the
-    /// block layer's FUA flag. The default writes and then flushes, which is
-    /// correct and costs a whole-cache flush; a device with FUA does better.
-    fn write_durable(&mut self, physical: u64, data: &[u8]) -> Result<()> {
-        self.write_at(physical, data)?;
-        self.flush()
-    }
-}
+/// [`WriteDevice::flush`] is durable when the flush returns. Its failures
+/// become this crate's [`Error`] in [`device::device_error`].
+pub use ferrix_fs_device::WriteDevice;
 
 /// Why a volume cannot be opened for writing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

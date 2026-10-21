@@ -535,8 +535,9 @@ is left, each with how to know it is done:
    remaining one argued at the site, and `L.btrfs.23` leaves the baseline
    on that gate.
 9. **The counts.** README.md, CLAIM.md §3.1, SECURITY-TARGET.md §1.2 and
-   SAFETY-MANUAL.md §1 carry ITEM.md §2's re-measure of 2026-10-02 (79,079
-   lines: 64,788 kernel, 14,291 crates). SECURITY-TARGET.md §2.2 and §8.3
+   SAFETY-MANUAL.md §1 carry ITEM.md §2's re-measure of 2026-10-21 on main
+   at a95473469 (102,499 lines: 86,786 kernel, 15,713 in four crates);
+   README.md states no figure. SECURITY-TARGET.md §2.2 and §8.3
    and VERIFICATION.md §4 still argue from older totals; re-measure and
    reconcile them at the next pass.
 

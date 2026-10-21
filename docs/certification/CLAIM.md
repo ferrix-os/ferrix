@@ -94,19 +94,21 @@ standard.
 
 ### 3.1 Where the Linux layer sits
 
-The item today is 79,079 lines of product code by the item-boundary gate on
-5625d22f (2026-10-02): 64,788 in the kernel, 56,644 of them `core`, and
-14,291 in two library crates. It holds memory protection,
+The item today is 102,499 lines of product code by the item-boundary gate on
+main at a95473469 (2026-10-21, ITEM.md §2): 86,786 in the kernel, 76,247 of
+them `core`, and 15,713 in four library crates. It holds memory protection,
 scheduling, capability objects, trap and system-call entry, the IOMMU, SMP,
-device discovery, and the native ABI a safety process uses, and since
-2026-10-02 the btrfs reader and write path, those two crates (without their
-8,278 lines of host tests). Their
-interface below is the `Device` and `WriteDevice` traits the kernel's block
-layer answers, and above it `Volume` and `WriteVolume`. The Linux layer (the
+device discovery, and the native ABI a safety process uses; since
+2026-10-02 the btrfs reader and write path, `ferrix-btrfs` and
+`ferrix-btrfs-write` (without their 9,268 lines of host tests), and since
+2026-10-21 the device traits they stand on, `ferrix-fs-device`; and
+`ferrix-smbios`. The btrfs crates' interface below is `ferrix-fs-device`'s
+`Device` and `WriteDevice` traits, which the kernel's block layer answers,
+and above it `Volume` and `WriteVolume`. The Linux layer (the
 personality, VFS, the btrfs glue on the VFS -- `ferrix-btrfs-vfs` and the
 kernel's `fs/btrfs*.rs` --, net, namespaces, procfs) is outside, as the
-`load` ring: 64,036 kernel lines, plus the libraries it calls, which the
-gate does not count but for `ferrix-btrfs-vfs`'s 2,185 (network about 16k,
+`load` ring: 76,332 kernel lines, plus the libraries it calls, which the
+gate does not count but for `ferrix-btrfs-vfs`'s 2,564 (network about 16k,
 vfs about 13k, by `wc` with tests).
 It stays outside.
 

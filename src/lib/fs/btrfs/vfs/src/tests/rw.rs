@@ -22,7 +22,6 @@ use ferrix_vfs::{Clock, Errno, FileSystem, FileType, Inode, Metadata, NewNode, T
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use ferrix_btrfs::BtrfsError;
 
 use super::{BLOCK, IMAGE_SIZE};
 use crate::rw::RwBtrfs;
@@ -57,12 +56,12 @@ impl Device for Disk {
         physical: u64,
         buf: &mut [u8],
         _kind: ReadKind,
-    ) -> Result<(), BtrfsError> {
+    ) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         if physical
             .checked_add(buf.len() as u64)
             .is_none_or(|end| end > IMAGE_SIZE)
         {
-            return Err(BtrfsError::DeviceRead { physical });
+            return Err(ferrix_btrfs::volume::DeviceError::Read { at: physical });
         }
         let blocks = self
             .0
@@ -87,12 +86,16 @@ impl Device for Disk {
 }
 
 impl ferrix_btrfs_write::WriteDevice for Disk {
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> ferrix_btrfs_write::Result<()> {
+    fn write_at(
+        &mut self,
+        physical: u64,
+        data: &[u8],
+    ) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         if physical
             .checked_add(data.len() as u64)
             .is_none_or(|end| end > IMAGE_SIZE)
         {
-            return Err(ferrix_btrfs_write::Error::DeviceWrite { physical });
+            return Err(ferrix_btrfs::volume::DeviceError::Write { at: physical });
         }
         let mut blocks = self
             .0
@@ -111,7 +114,7 @@ impl ferrix_btrfs_write::WriteDevice for Disk {
         Ok(())
     }
 
-    fn flush(&mut self) -> ferrix_btrfs_write::Result<()> {
+    fn flush(&mut self) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         Ok(())
     }
 }
@@ -650,23 +653,32 @@ struct Failing {
 }
 
 impl Device for Failing {
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        kind: ReadKind,
+    ) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         if self.fail_reads.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(BtrfsError::DeviceRead { physical });
+            return Err(ferrix_btrfs::volume::DeviceError::Read { at: physical });
         }
         self.disk.read_at(physical, buf, kind)
     }
 }
 
 impl ferrix_btrfs_write::WriteDevice for Failing {
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> ferrix_btrfs_write::Result<()> {
+    fn write_at(
+        &mut self,
+        physical: u64,
+        data: &[u8],
+    ) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         if self.fail.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(ferrix_btrfs_write::Error::DeviceWrite { physical });
+            return Err(ferrix_btrfs::volume::DeviceError::Write { at: physical });
         }
         self.disk.write_at(physical, data)
     }
 
-    fn flush(&mut self) -> ferrix_btrfs_write::Result<()> {
+    fn flush(&mut self) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         Ok(())
     }
 }
@@ -885,23 +897,32 @@ impl Starved {
 }
 
 impl Device for Starved {
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        kind: ReadKind,
+    ) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         if self.is_starved() {
-            return Err(BtrfsError::OutOfMemory);
+            return Err(ferrix_btrfs::volume::DeviceError::OutOfMemory);
         }
         self.disk.read_at(physical, buf, kind)
     }
 }
 
 impl ferrix_btrfs_write::WriteDevice for Starved {
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> ferrix_btrfs_write::Result<()> {
+    fn write_at(
+        &mut self,
+        physical: u64,
+        data: &[u8],
+    ) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         if self.is_starved() {
-            return Err(ferrix_btrfs_write::Error::OutOfMemory);
+            return Err(ferrix_btrfs::volume::DeviceError::OutOfMemory);
         }
         self.disk.write_at(physical, data)
     }
 
-    fn flush(&mut self) -> ferrix_btrfs_write::Result<()> {
+    fn flush(&mut self) -> Result<(), ferrix_btrfs::volume::DeviceError> {
         Ok(())
     }
 }

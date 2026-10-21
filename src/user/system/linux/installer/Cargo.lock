@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "ferrix-btrfs"
 version = "0.1.0"
+dependencies = [
+ "ferrix-fs-device",
+]
 
 [[package]]
 name = "ferrix-btrfs-mkfs"
@@ -12,6 +15,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-btrfs",
  "ferrix-btrfs-write",
+ "ferrix-fs-mkfs",
 ]
 
 [[package]]
@@ -20,6 +24,7 @@ version = "0.1.0"
 dependencies = [
  "ferrix-btrfs",
  "ferrix-fallible",
+ "ferrix-fs-device",
 ]
 
 [[package]]
@@ -30,10 +35,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-fs-device"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-fs-mkfs"
+version = "0.1.0"
+dependencies = [
+ "ferrix-fs-device",
+]
+
+[[package]]
 name = "ferrix-install"
 version = "0.1.0"
 dependencies = [
  "ferrix-btrfs-mkfs",
+ "ferrix-fs-device",
  "ferrix-partition",
  "ferrix-slots",
 ]

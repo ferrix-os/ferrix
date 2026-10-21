@@ -98,14 +98,14 @@ impl Device for PackedDevice {
         physical: u64,
         buf: &mut [u8],
         _kind: ReadKind,
-    ) -> Result<(), BtrfsError> {
+    ) -> Result<(), DeviceError> {
         let end = physical.checked_add(buf.len() as u64);
         if end.is_none_or(|end| end > self.size)
             || self
                 .fail_at
                 .is_some_and(|bad| (physical..end.unwrap()).contains(&bad))
         {
-            return Err(BtrfsError::DeviceRead { physical });
+            return Err(DeviceError::Read { at: physical });
         }
         // A block at a time: a per-byte loop made every image test crawl,
         // and under Miri it never finished.
@@ -608,4 +608,59 @@ fn a_default_entry_that_names_no_subvolume_is_refused() {
         }),
         "a default entry naming the root tree, which is no fs tree, is damage"
     );
+}
+
+/// A device that fails every read with `error`, reporting its own address
+/// (deliberately not the one asked for).
+struct Refusing(DeviceError);
+
+impl Device for Refusing {
+    fn read_at(&mut self, _: u64, _: &mut [u8], _: ReadKind) -> Result<(), DeviceError> {
+        Err(self.0)
+    }
+}
+
+/// Every kind of device failure, as the reader maps it: out of memory
+/// passed on as itself, anything else `DeviceRead` at the address the
+/// reader asked for, through the mapping and through a whole open.
+///
+/// Verifies: L.btrfs.117
+#[test]
+fn every_device_failure_maps_to_the_readers_error_at_the_address_asked() {
+    let asked = 0x1234_5000;
+    for (error, want) in [
+        (DeviceError::OutOfMemory, BtrfsError::OutOfMemory),
+        (
+            DeviceError::Read { at: 7 },
+            BtrfsError::DeviceRead { physical: asked },
+        ),
+        (
+            DeviceError::Write { at: 7 },
+            BtrfsError::DeviceRead { physical: asked },
+        ),
+        (
+            DeviceError::Flush,
+            BtrfsError::DeviceRead { physical: asked },
+        ),
+    ] {
+        assert_eq!(read_error(error, asked), want, "{error:?}");
+        let mut buf = [0u8; 16];
+        assert_eq!(
+            read_device(&mut Refusing(error), asked, &mut buf, ReadKind::Metadata),
+            Err(want),
+            "{error:?} through read_device"
+        );
+        let opened = Volume::open(
+            &mut Refusing(error),
+            vec![ChunkMapEntry::EMPTY; 8],
+            &mut vec![0u8; 65536],
+        );
+        let want_open = match want {
+            BtrfsError::OutOfMemory => BtrfsError::OutOfMemory,
+            _ => BtrfsError::DeviceRead {
+                physical: PRIMARY_OFFSET,
+            },
+        };
+        assert_eq!(opened.err(), Some(want_open), "{error:?} through open");
+    }
 }

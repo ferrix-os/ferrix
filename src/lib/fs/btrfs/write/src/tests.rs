@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::vec;
 use std::vec::Vec;
 
-use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::chunk::ChunkMapEntry;
 use ferrix_btrfs::items::{EXTENT_DATA_KEY, EXTENT_TREE_OBJECTID, ExtentData, FS_TREE_OBJECTID};
 use ferrix_btrfs::tree::BtrfsKey;
@@ -29,6 +28,7 @@ use crate::node::Body;
 use crate::ranges::RangeSet;
 use crate::space::Kind;
 
+mod device;
 mod fsops;
 mod full;
 mod inodes;
@@ -104,9 +104,9 @@ impl Device for MemDevice {
         physical: u64,
         buf: &mut [u8],
         _kind: ReadKind,
-    ) -> core::result::Result<(), BtrfsError> {
+    ) -> core::result::Result<(), ferrix_fs_device::DeviceError> {
         if physical + buf.len() as u64 > IMAGE_SIZE {
-            return Err(BtrfsError::DeviceRead { physical });
+            return Err(ferrix_fs_device::DeviceError::Read { at: physical });
         }
         let mut done = 0;
         while done < buf.len() {
@@ -127,16 +127,20 @@ impl Device for MemDevice {
 }
 
 impl WriteDevice for MemDevice {
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> Result<()> {
+    fn write_at(
+        &mut self,
+        physical: u64,
+        data: &[u8],
+    ) -> core::result::Result<(), ferrix_fs_device::DeviceError> {
         if physical + data.len() as u64 > IMAGE_SIZE {
-            return Err(Error::DeviceWrite { physical });
+            return Err(ferrix_fs_device::DeviceError::Write { at: physical });
         }
         self.store(physical, data);
         self.log.push(Op::Write(physical, data.to_vec()));
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn flush(&mut self) -> core::result::Result<(), ferrix_fs_device::DeviceError> {
         self.log.push(Op::Flush);
         Ok(())
     }

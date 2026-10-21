@@ -28,9 +28,9 @@ still has to happen. It happens at the integrator, and this item's certificate
 | | |
 |---|---|
 | Element | Ferrix certified item, `core` + `item` rings |
-| Size | 79,079 lines of product code: 64,788 in the kernel, 56,644 of it in `core`, and 14,291 in the two btrfs crates ([ITEM.md](ITEM.md) §2, 2026-10-02) |
-| Scope | memory protection, scheduling, capability objects, trap and syscall entry, IOMMU, SMP, device enumeration; since 2026-10-02 the btrfs reader and write path (`ferrix-btrfs`, `ferrix-btrfs-write`) |
-| Not in scope | VFS, the btrfs glue on it (`ferrix-btrfs-vfs`, `src/kernel/src/fs/btrfs*.rs`), network stack, Linux personality, ring-3 drivers — 64,036 lines of uncertified load in the kernel |
+| Size | 102,499 lines of product code: 86,786 in the kernel, 76,247 of it in `core`, and 15,713 in four library crates -- the two btrfs crates, `ferrix-fs-device` and `ferrix-smbios` ([ITEM.md](ITEM.md) §2, 2026-10-21, main at a95473469) |
+| Scope | memory protection, scheduling, capability objects, trap and syscall entry, IOMMU, SMP, device enumeration; since 2026-10-02 the btrfs reader and write path (`ferrix-btrfs`, `ferrix-btrfs-write`), and since branch fs-traits the device traits they stand on (`ferrix-fs-device`) |
+| Not in scope | VFS, the btrfs glue on it (`ferrix-btrfs-vfs`, `src/kernel/src/fs/btrfs*.rs`), network stack, Linux personality, ring-3 drivers — 76,332 lines of uncertified load in the kernel (2026-10-21) |
 | Reference configuration | x86-64, AArch64, ARMv7-A; release profile; rustc 1.97.1; zero Cargo features; built `--mitigations on`, the default |
 
 The boundary is enforced on every build by `tools/common/check/check-item-boundary.py`, so

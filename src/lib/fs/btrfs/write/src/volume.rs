@@ -459,10 +459,16 @@ impl<D: WriteDevice> WriteVolume<D> {
             .chunks
             .copies(logical, u64::from(self.geometry.nodesize))?
         {
-            let checked = self
-                .device
-                .read_at(physical, &mut buf, ReadKind::Metadata)
-                .and_then(|()| Node::parse(&buf, logical));
+            // The reader's own mapping: a device's OutOfMemory stays
+            // OutOfMemory, matched below, and anything else is DeviceRead
+            // at this copy, which the next copy may answer.
+            let checked = ferrix_btrfs::volume::read_device(
+                &mut self.device,
+                physical,
+                &mut buf,
+                ReadKind::Metadata,
+            )
+            .and_then(|()| Node::parse(&buf, logical));
             match checked {
                 Ok(node) if node.header().fsid == self.geometry.fsid => {
                     return TreeNode::from_node(&node);

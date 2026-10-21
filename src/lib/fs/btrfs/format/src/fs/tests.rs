@@ -824,10 +824,15 @@ struct Starved<'a> {
 }
 
 impl Device for Starved<'_> {
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        kind: ReadKind,
+    ) -> Result<(), ferrix_fs_device::DeviceError> {
         self.reads += 1;
         if self.reads == self.fail_at {
-            return Err(BtrfsError::OutOfMemory);
+            return Err(ferrix_fs_device::DeviceError::OutOfMemory);
         }
         self.device.read_at(physical, buf, kind)
     }

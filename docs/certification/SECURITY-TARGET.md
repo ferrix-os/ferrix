@@ -28,16 +28,18 @@ running as unprivileged user processes.
 
 ### 1.2 Physical and logical scope
 
-The TOE is the `core` and `item` rings of [ITEM.md](ITEM.md): **79,079 lines of
-Rust** (64,788 of the kernel and 14,291 of two library crates, re-measured
-2026-10-02), built for x86-64, AArch64 and ARMv7-A from the reference configuration.
+The TOE is the `core` and `item` rings of [ITEM.md](ITEM.md): **102,499 lines of
+Rust** (86,786 of the kernel and 15,713 of four library crates, re-measured
+2026-10-21 on main at a95473469), built for x86-64, AArch64 and ARMv7-A from the
+reference configuration.
 It comprises the memory manager (buddy allocator, VMOs, address spaces, page
 tables), the scheduler, the capability object system (handles, channels, ports,
 jobs, interrupts, I/O mappings), the trap and system-call entry paths, the
 IOMMU drivers (VT-d, SMMUv3), SMP bring-up and TLB shootdown, firmware table
 parsing, device enumeration, and the panic path. Since 2026-10-02 it also
 comprises the btrfs reader and write path, the library crates `ferrix-btrfs`
-and `ferrix-btrfs-write`: from the `Device`
+and `ferrix-btrfs-write`, and since branch fs-traits the device traits they
+stand on, the library crate `ferrix-fs-device`: from the `Device`
 and `WriteDevice` traits the kernel's block layer answers, up to `Volume` and
 `WriteVolume`.
 
@@ -46,8 +48,8 @@ btrfs glue on it (`ferrix-btrfs-vfs` and `src/kernel/src/fs/btrfs*.rs`: the
 page cache, the commit interval, what `fsync` commits), procfs, sysfs and
 tmpfs; the TCP/IP stack; the Linux system-call personality,
 from its dispatcher to its `mmap`, `futex`, rlimits and POSIX threads; the
-ring-3 device drivers; and all user software. 64,036 lines of kernel code
-are in this category and the boundary is enforced at build time by
+ring-3 device drivers; and all user software. 76,332 lines of kernel code
+are in this category (2026-10-21) and the boundary is enforced at build time by
 `tools/common/check/check-item-boundary.py`.
 
 The **loader** (`src/boot/common/uefi/`, 3,503 lines) is in the reference configuration but

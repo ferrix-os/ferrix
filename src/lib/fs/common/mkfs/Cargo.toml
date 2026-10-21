@@ -1,0 +1,15 @@
+[package]
+name = "ferrix-fs-mkfs"
+description = "A new volume as writes, in the order that keeps half of one from looking whole; the trait each filesystem's mkfs implements"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+# Outside the item: no item crate depends on it (docs/FS-COMMON.md).
+[dependencies]
+ferrix-fs-device.workspace = true
+
+[lints]
+workspace = true

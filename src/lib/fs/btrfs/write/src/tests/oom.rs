@@ -25,7 +25,6 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 
-use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::items::{FS_TREE_OBJECTID, S_IFDIR, S_IFREG, Timespec};
 use ferrix_btrfs::tree::BtrfsKey;
 use ferrix_btrfs::volume::{Device, ReadKind};
@@ -424,17 +423,26 @@ fn memory_that_stays_out_aborts_cleanly() {
 struct Shared(Rc<RefCell<MemDevice>>);
 
 impl Device for Shared {
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        kind: ReadKind,
+    ) -> Result<(), ferrix_fs_device::DeviceError> {
         self.0.borrow_mut().read_at(physical, buf, kind)
     }
 }
 
 impl WriteDevice for Shared {
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> crate::Result<()> {
+    fn write_at(
+        &mut self,
+        physical: u64,
+        data: &[u8],
+    ) -> Result<(), ferrix_fs_device::DeviceError> {
         self.0.borrow_mut().write_at(physical, data)
     }
 
-    fn flush(&mut self) -> crate::Result<()> {
+    fn flush(&mut self) -> Result<(), ferrix_fs_device::DeviceError> {
         self.0.borrow_mut().flush()
     }
 }
@@ -560,21 +568,30 @@ struct Starving {
 }
 
 impl Device for Starving {
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], kind: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        kind: ReadKind,
+    ) -> Result<(), ferrix_fs_device::DeviceError> {
         self.reads += 1;
         if self.reads == self.fail_at {
-            return Err(BtrfsError::OutOfMemory);
+            return Err(ferrix_fs_device::DeviceError::OutOfMemory);
         }
         self.disk.read_at(physical, buf, kind)
     }
 }
 
 impl WriteDevice for Starving {
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> crate::Result<()> {
+    fn write_at(
+        &mut self,
+        physical: u64,
+        data: &[u8],
+    ) -> Result<(), ferrix_fs_device::DeviceError> {
         self.disk.write_at(physical, data)
     }
 
-    fn flush(&mut self) -> crate::Result<()> {
+    fn flush(&mut self) -> Result<(), ferrix_fs_device::DeviceError> {
         self.disk.flush()
     }
 }

@@ -71,12 +71,12 @@ impl Device for Image {
         physical: u64,
         buf: &mut [u8],
         _kind: ReadKind,
-    ) -> core::result::Result<(), BtrfsError> {
+    ) -> core::result::Result<(), ferrix_btrfs::volume::DeviceError> {
         if physical
             .checked_add(buf.len() as u64)
             .is_none_or(|end| end > IMAGE_SIZE)
         {
-            return Err(BtrfsError::DeviceRead { physical });
+            return Err(ferrix_btrfs::volume::DeviceError::Read { at: physical });
         }
         let mut done = 0;
         while done < buf.len() {
@@ -431,7 +431,7 @@ impl Device for Counting {
         physical: u64,
         buf: &mut [u8],
         kind: ReadKind,
-    ) -> core::result::Result<(), BtrfsError> {
+    ) -> core::result::Result<(), ferrix_btrfs::volume::DeviceError> {
         let counter = match kind {
             ReadKind::Metadata => &self.metadata,
             ReadKind::Data => &self.data,
@@ -586,7 +586,7 @@ impl Device for Breakable {
         physical: u64,
         buf: &mut [u8],
         kind: ReadKind,
-    ) -> core::result::Result<(), BtrfsError> {
+    ) -> core::result::Result<(), ferrix_btrfs::volume::DeviceError> {
         self.image.read_at(physical, buf, kind)?;
         if kind == ReadKind::Data {
             self.reads.lock().push((physical, buf.len()));
@@ -689,9 +689,9 @@ impl Device for Starved {
         physical: u64,
         buf: &mut [u8],
         kind: ReadKind,
-    ) -> core::result::Result<(), BtrfsError> {
+    ) -> core::result::Result<(), ferrix_btrfs::volume::DeviceError> {
         if self.starved.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(BtrfsError::OutOfMemory);
+            return Err(ferrix_btrfs::volume::DeviceError::OutOfMemory);
         }
         self.image.read_at(physical, buf, kind)
     }

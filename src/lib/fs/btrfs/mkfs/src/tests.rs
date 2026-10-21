@@ -17,11 +17,10 @@ use std::collections::BTreeMap;
 use std::vec;
 use std::vec::Vec;
 
-use ferrix_btrfs::BtrfsError;
 use ferrix_btrfs::chunk::ChunkMapEntry;
 use ferrix_btrfs::items::{S_IFREG, Timespec};
 use ferrix_btrfs::superblock::{PRIMARY_OFFSET, SUPERBLOCK_SIZE, Superblock};
-use ferrix_btrfs::volume::{Device, ReadKind, Volume};
+use ferrix_btrfs::volume::{Device, DeviceError, ReadKind, Volume};
 use ferrix_btrfs_write::{NewInode, WriteDevice, WriteVolume};
 
 use super::*;
@@ -100,9 +99,9 @@ impl MemDevice {
 }
 
 impl Device for MemDevice {
-    fn read_at(&mut self, at: u64, buf: &mut [u8], _: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(&mut self, at: u64, buf: &mut [u8], _: ReadKind) -> Result<(), DeviceError> {
         if at + buf.len() as u64 > self.size {
-            return Err(BtrfsError::DeviceRead { physical: at });
+            return Err(DeviceError::Read { at });
         }
         let mut done = 0;
         while done < buf.len() {
@@ -123,16 +122,16 @@ impl Device for MemDevice {
 }
 
 impl WriteDevice for MemDevice {
-    fn write_at(&mut self, at: u64, data: &[u8]) -> ferrix_btrfs_write::Result<()> {
+    fn write_at(&mut self, at: u64, data: &[u8]) -> Result<(), DeviceError> {
         if at + data.len() as u64 > self.size {
-            return Err(ferrix_btrfs_write::Error::DeviceWrite { physical: at });
+            return Err(DeviceError::Write { at });
         }
         self.store(at, data);
         self.log.push(Op::Write(at, data.len()));
         Ok(())
     }
 
-    fn flush(&mut self) -> ferrix_btrfs_write::Result<()> {
+    fn flush(&mut self) -> Result<(), DeviceError> {
         self.log.push(Op::Flush);
         Ok(())
     }
@@ -152,18 +151,6 @@ fn formatted(size: u64, nodesize: u32) -> MemDevice {
     let mut device = MemDevice::new(size);
     image.write_to(&mut device).unwrap();
     device
-}
-
-impl Target for MemDevice {
-    type Error = ferrix_btrfs_write::Error;
-
-    fn write_at(&mut self, at: u64, data: &[u8]) -> ferrix_btrfs_write::Result<()> {
-        WriteDevice::write_at(self, at, data)
-    }
-
-    fn flush(&mut self) -> ferrix_btrfs_write::Result<()> {
-        WriteDevice::flush(self)
-    }
 }
 
 /// Every item of `tree`.

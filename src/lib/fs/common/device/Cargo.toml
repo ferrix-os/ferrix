@@ -1,0 +1,15 @@
+[package]
+name = "ferrix-fs-device"
+description = "The device every on-disk filesystem reads and writes: byte-addressed reads, writes and a flush"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+# Item code (docs/FS-COMMON.md, tools/common/data/certification-item.json):
+# no dependency, no allocation, no unsafe.
+[dependencies]
+
+[lints]
+workspace = true

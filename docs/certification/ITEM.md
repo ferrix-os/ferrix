@@ -38,30 +38,48 @@ it permits software items of different classes in one system.
 ## 2. Three rings
 
 The manifest puts every one of the kernel's source files into exactly one of
-three nested rings, and, since 2026-10-02, two library crates outside the
-kernel into the `item` ring whole (`crates` in the manifest; see *btrfs* below).
+three nested rings, and, since 2026-10-02, library crates outside the
+kernel into the `item` ring whole (`crates` in the manifest; see *btrfs* and
+*ferrix-smbios* below): btrfs's reader and write path, since branch
+fs-traits the device traits they stand on (`ferrix-fs-device`), and since
+2026-10-15 `ferrix-smbios`.
 A file in no ring fails the build, and so does a file of a classified crate
 that its module tree does not reach.
 
 | Ring | Product lines | In-kernel test lines | Carries |
 |---|---:|---:|---|
-| `core` | 56,644 | 18,815 | EAL6+, ASIL D, SIL 3/4, DAL B — *aspirational* |
-| `item` | 8,144 | 3,795 | EAL5+, DAL C, Class C, SIL 2 — *the present claim* |
-| `load` | 64,036 | 37,745 | nothing |
+| `core` | 76,247 | 35,642 | EAL6+, ASIL D, SIL 3/4, DAL B — *aspirational* |
+| `item` | 10,539 | 4,632 | EAL5+, DAL C, Class C, SIL 2 — *the present claim* |
+| `load` | 76,332 | 53,428 | nothing |
 
 | Library crate | Ring | Product lines | Host-test lines |
 |---|---|---:|---:|
-| `ferrix-btrfs` (`src/lib/fs/btrfs/format`), the reader | `item` | 8,272 | 6,031 |
-| `ferrix-btrfs-write` (`src/lib/fs/btrfs/write`), the write path | `item` | 6,019 | 2,247 |
-| `ferrix-btrfs-vfs` (`src/lib/fs/btrfs/vfs`), the VFS glue | `load` | 2,185 | 1,822 |
+| `ferrix-fs-device` (`src/lib/fs/common/device`), the device traits | `item` | 97 | 0 |
+| `ferrix-btrfs` (`src/lib/fs/btrfs/format`), the reader | `item` | 8,304 | 6,260 |
+| `ferrix-btrfs-write` (`src/lib/fs/btrfs/write`), the write path | `item` | 6,621 | 3,008 |
+| `ferrix-smbios` (`src/lib/platform/smbios`), the SMBIOS tables | `item` | 691 | 774 |
+| `ferrix-btrfs-vfs` (`src/lib/fs/btrfs/vfs`), the VFS glue | `load` | 2,564 | 2,208 |
 
-**The certified item is `core` + `item` and the item's crates: 79,079 lines of
-product code** -- 64,788 in the kernel and 14,291 in the two btrfs crates --
-against 64,036 lines of uncertified load in the kernel. The kernel's own part
-is 50.3% of its product code. A crate's product lines are the files its module
+**The certified item is `core` + `item` and the item's crates: 102,499 lines of
+product code** -- 86,786 in the kernel and 15,713 in the four item crates
+(15,022 of them btrfs's two and the device traits under them) -- against
+76,332 lines of uncertified load in the kernel. The kernel's own part is
+53.2% of its product code. A crate's product lines are the files its module
 tree reaches from `lib.rs`, other than through a `#[cfg(test)] mod`; those are
 host tests, `cargo test` and Miri, never in the image, and are counted apart.
-(Re-measured 2026-10-02 on main at 5625d22f with
+`ferrix-fs-device`'s 97 are its whole `lib.rs`; its traits' tests are the
+btrfs crates' (`L.btrfs.117`, `L.btrfs.118`).
+(Re-measured 2026-10-21 on branch fs-traits -- main at a95473469, the SP-2
+directory move and this change -- with
+`check-item-boundary.py --report`, when `ferrix-fs-device` joined the item.
+The kernel's rings and the btrfs crates moved with the work since
+2026-10-02, which this table does not attribute line by line; the
+2026-10-15 landing of `ferrix-smbios` did not re-measure it. Of the
+crates' change, the fs-traits branch itself moved the device traits out of
+the two btrfs crates into `ferrix-fs-device` and added the mapping of a
+device's failure to each. The figure before, 79,079 lines (64,788 in the
+kernel and 14,291 in the two btrfs crates, 56,644 in `core`, 64,036 of
+load), was measured on 2026-10-02 on main at 5625d22f with
 `check-item-boundary.py --report`, when btrfs joined the item. The kernel's
 rings moved with the work since 2026-09-27 -- the discovery relayout, the
 namespaces, System V IPC -- which this table does not attribute line by line.
@@ -225,17 +243,21 @@ code runs it: `main.rs` declares 10 load-ring modules and `syscall/mod.rs`
 declares 36. What either file's *code* then does with them is resolved and
 counted like any other reference.
 
-### btrfs — two crates in the item, and where it meets the VFS
+### btrfs — three crates in the item, and where it meets the VFS
 
 On 2026-10-02 the customer decided that btrfs is certified for as long as it
 runs inside the kernel. Its on-disk logic is two `no_std` crates outside
 `src/kernel`, so the manifest classifies crates as well as files, and puts
-both in `item`:
+both in `item`. Since branch fs-traits (the consultant's OK IF of
+2026-10-19, ledger line 2587; `docs/FS-COMMON.md`) the device traits they
+stand on are a third, `ferrix-fs-device`, which every on-disk filesystem
+shares and which is item code too:
 
 | Crate | Below it | Above it |
 |---|---|---|
-| `ferrix-btrfs`, the reader | the `Device` trait (`ferrix_btrfs::volume::Device`): sector reads, answered by the kernel's block layer through `Disk` in `src/kernel/src/fs/btrfs.rs`; and memory its caller lends, `ExtentBuffers` and `ChunkStorage` -- the crate allocates little of its own | `Volume`, and the format types it hands out: superblock, chunk map, keys, items, the readers of `fs` and `compress` |
-| `ferrix-btrfs-write`, the write path | the `WriteDevice` trait (`ferrix_btrfs_write::WriteDevice`, a `Device` that also writes and flushes), implemented by the same `Disk`; and `ferrix-btrfs` | `WriteVolume`: its transactions and its inode, directory and extent operations |
+| `ferrix-fs-device`, the device traits | nothing: no dependency, no allocation, no unsafe | `Device`, `WriteDevice`, `ReadKind` and `DeviceError`: implemented by the kernel's `Disk` (`src/kernel/src/fs/btrfs.rs`) and `ferrix-btrfs-vfs`'s `Cached` (load), named by `ferrix-btrfs` and `ferrix-btrfs-write` |
+| `ferrix-btrfs`, the reader | `ferrix-fs-device`'s `Device` trait (re-exported as `ferrix_btrfs::volume::Device`): sector reads, answered by the kernel's block layer through `Disk` in `src/kernel/src/fs/btrfs.rs`, a failure turned into the reader's error by `ferrix_btrfs::volume::read_error` (`L.btrfs.117`); and memory its caller lends, `ExtentBuffers` and `ChunkStorage` -- the crate allocates little of its own | `Volume`, and the format types it hands out: superblock, chunk map, keys, items, the readers of `fs` and `compress` |
+| `ferrix-btrfs-write`, the write path | `ferrix-fs-device`'s `WriteDevice` trait (re-exported as `ferrix_btrfs_write::WriteDevice`, a `Device` that also writes and flushes), implemented by the same `Disk`, each failure turned into the write path's error by `ferrix_btrfs_write::device::device_error` (`L.btrfs.118`); and `ferrix-btrfs` | `WriteVolume`: its transactions and its inode, directory and extent operations |
 
 **What stays load, and why.** `ferrix-btrfs-vfs` and `src/kernel/src/fs/btrfs*.rs`
 are not in the item. The first implements the VFS's `FileSystem` and `Inode`
@@ -243,9 +265,13 @@ over `Volume` and `WriteVolume`; the second mounts it, implements `Device` and
 `WriteDevice` over the block core, and runs the boot checks. Both are written
 against the VFS (`ferrix-vfs`, `src/kernel/src/fs/`), which is load, so neither
 can be item without the VFS coming with it. **The interface between btrfs and
-the VFS is therefore the two crates' public API**: `Volume` and `WriteVolume`
-and the types they take and return, called from the load, and `Device` and
-`WriteDevice`, implemented by the load. Nothing in the item names the VFS. What
+the VFS is therefore the item crates' public API**: `Volume` and `WriteVolume`
+and the types they take and return, called from the load, and
+`ferrix-fs-device`'s `Device` and `WriteDevice`, implemented by the load.
+Whatever a device answers, the item turns it into its own error in one named
+function per crate, keyed by the operation it asked for and keeping the
+address it asked (`L.btrfs.117`, `L.btrfs.118`), so no device's error value
+is trusted beyond which of four kinds it is. Nothing in the item names the VFS. What
 the item is to vouch for at that interface is what the crates do with the bytes
 a `Device` returns, and what a `WriteVolume` writes back: that a corrupt or
 hostile volume gives an error and never stops the machine. What holds is that
@@ -288,7 +314,12 @@ calls in the reader the gate counts by name that allocate nothing, argued
 `NOALLOC:` (both crates are at 0 since); and 40 functions over the
 complexity floors (18 and 22), none recursive, 43 since the conversion
 re-recorded them. Neither crate has an `unsafe` site or a panic
-exemption.
+exemption. The gates read `ferrix-fs-device` from the start, as they read
+any crate the manifest puts in `item`: 0 allocation sites (held at 0 by
+`cargo xtask check` with the btrfs crates, `L.btrfs.22`), no `unsafe` site,
+no panic exemption, no function over a complexity floor, and no arithmetic
+(`L.btrfs.23` names it beside them); `check-crate-layering.sh` forbids it
+the kernel and the loader, as it does them.
 
 The DMA and interrupt decisions the item makes about PCI rest on three more
 crates the manifest does not classify, `ferrix-pci`, `ferrix-acpi` and

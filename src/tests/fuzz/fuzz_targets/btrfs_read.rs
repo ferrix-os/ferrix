@@ -43,8 +43,8 @@ use ferrix_btrfs::compress::zstd::Workspace;
 use ferrix_btrfs::fs::{ExtentBuffers, ReadBuffers, Subvolume};
 use ferrix_btrfs::items::{INODE_ITEM_KEY, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG};
 use ferrix_btrfs::superblock::PRIMARY_OFFSET;
-use ferrix_btrfs::volume::{Device, ReadKind, Volume};
-use ferrix_btrfs::{BtrfsError, BtrfsKey, ChunkMapEntry, crc32c};
+use ferrix_btrfs::volume::{Device, DeviceError, ReadKind, Volume};
+use ferrix_btrfs::{BtrfsKey, ChunkMapEntry, crc32c};
 use libfuzzer_sys::fuzz_target;
 
 const PACKED: [&[u8]; 4] = [
@@ -141,12 +141,17 @@ impl Image {
 }
 
 impl Device for Image {
-    fn read_at(&mut self, physical: u64, buf: &mut [u8], _kind: ReadKind) -> Result<(), BtrfsError> {
+    fn read_at(
+        &mut self,
+        physical: u64,
+        buf: &mut [u8],
+        _kind: ReadKind,
+    ) -> Result<(), DeviceError> {
         if physical
             .checked_add(buf.len() as u64)
             .is_none_or(|end| end > IMAGE_SIZE)
         {
-            return Err(BtrfsError::DeviceRead { physical });
+            return Err(DeviceError::Read { at: physical });
         }
         let mut done = 0;
         while done < buf.len() {

@@ -27,11 +27,10 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::fmt;
 
-use ferrix_btrfs::BtrfsError;
-use ferrix_btrfs::volume::{Device, ReadKind};
+use ferrix_btrfs::volume::{Device, DeviceError, ReadKind};
 use ferrix_btrfs_vfs::Btrfs;
 use ferrix_btrfs_vfs::rw::RwBtrfs;
-use ferrix_btrfs_write::{Error as WriteError, WriteDevice};
+use ferrix_btrfs_write::WriteDevice;
 use ferrix_vfs::{Errno, FileSystem};
 
 use super::block::BlockDevice;
@@ -91,8 +90,8 @@ impl Device for Disk {
         physical: u64,
         buf: &mut [u8],
         _kind: ReadKind,
-    ) -> Result<(), BtrfsError> {
-        let failed = BtrfsError::DeviceRead { physical };
+    ) -> Result<(), DeviceError> {
+        let failed = DeviceError::Read { at: physical };
         if buf.is_empty() {
             return Ok(());
         }
@@ -105,7 +104,7 @@ impl Device for Disk {
         let sectors = end.div_ceil(self.sector).saturating_sub(first);
         let bytes = usize::try_from(sectors.saturating_mul(self.sector)).map_err(|_| failed)?;
         let mut bounce =
-            crate::fallible::try_filled(0u8, bytes).map_err(|_| BtrfsError::OutOfMemory)?;
+            crate::fallible::try_filled(0u8, bytes).map_err(|_| DeviceError::OutOfMemory)?;
         self.device.read(first, &mut bounce).map_err(|_| failed)?;
         let skip = usize::try_from(physical - first * self.sector).map_err(|_| failed)?;
         let taken = bounce.get(skip..skip + buf.len()).ok_or(failed)?;
@@ -123,8 +122,8 @@ impl WriteDevice for Disk {
     /// read, a patch and a write of the sectors it touches, which keeps the
     /// trait's contract on any sector size; nothing in a commit takes that
     /// path.
-    fn write_at(&mut self, physical: u64, data: &[u8]) -> Result<(), WriteError> {
-        let failed = WriteError::DeviceWrite { physical };
+    fn write_at(&mut self, physical: u64, data: &[u8]) -> Result<(), DeviceError> {
+        let failed = DeviceError::Write { at: physical };
         if data.is_empty() {
             return Ok(());
         }
@@ -137,7 +136,7 @@ impl WriteDevice for Disk {
         let sectors = end.div_ceil(self.sector).saturating_sub(first);
         let bytes = usize::try_from(sectors.saturating_mul(self.sector)).map_err(|_| failed)?;
         let mut bounce =
-            crate::fallible::try_filled(0u8, bytes).map_err(|_| WriteError::OutOfMemory)?;
+            crate::fallible::try_filled(0u8, bytes).map_err(|_| DeviceError::OutOfMemory)?;
         self.device.read(first, &mut bounce).map_err(|_| failed)?;
         let skip = usize::try_from(physical - first * self.sector).map_err(|_| failed)?;
         let patch = bounce.get_mut(skip..skip + data.len()).ok_or(failed)?;
@@ -147,8 +146,8 @@ impl WriteDevice for Disk {
 
     /// Everything written is durable when this returns: the driver's flush,
     /// which the commit puts between its nodes and its superblock.
-    fn flush(&mut self) -> Result<(), WriteError> {
-        self.device.flush().map_err(|_| WriteError::Flush)
+    fn flush(&mut self) -> Result<(), DeviceError> {
+        self.device.flush().map_err(|_| DeviceError::Flush)
     }
 }
 

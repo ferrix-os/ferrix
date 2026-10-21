@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 ferrix-btrfs.workspace = true
 ferrix-btrfs-write.workspace = true
+ferrix-fs-mkfs.workspace = true
 
 [lints]
 workspace = true

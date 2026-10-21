@@ -29,6 +29,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::process::ExitCode;
 
+use ferrix_fs_device::{Device, DeviceError, ReadKind, WriteDevice};
 use ferrix_install::fat::Fat;
 
 mod slots;
@@ -427,24 +428,46 @@ fn write_root(disk: &mut File, at: u64, bytes: u64) -> io::Result<()> {
         image.size >> 20,
         String::from_utf8_lossy(ROOT_LABEL)
     );
-    image.write_to(&mut Volume { disk, at })
+    image
+        .write_to(&mut Volume { disk, at })
+        .map_err(|error| io::Error::other(format!("{error:?}")))
 }
 
-/// A volume at byte `at` of a disk, for `ferrix-btrfs-mkfs` to write.
+/// A volume at byte `at` of a disk, written through the device every
+/// filesystem's mkfs takes (`ferrix-fs-device`).
+///
+/// That device's errors carry no detail, so each failure says its own
+/// `io::Error` here before it becomes one: a failed install still says why.
 struct Volume<'a> {
     disk: &'a mut File,
     at: u64,
 }
 
-impl ferrix_btrfs_mkfs::Target for Volume<'_> {
-    type Error = io::Error;
+impl Device for Volume<'_> {
+    fn read_at(&mut self, at: u64, buf: &mut [u8], _: ReadKind) -> Result<(), DeviceError> {
+        self.disk
+            .seek(SeekFrom::Start(self.at + at))
+            .and_then(|_| self.disk.read_exact(buf))
+            .map_err(|error| {
+                eprintln!("ferrix-install: reading the new volume at {at:#x}: {error}");
+                DeviceError::Read { at }
+            })
+    }
+}
 
-    fn write_at(&mut self, at: u64, data: &[u8]) -> io::Result<()> {
-        write_at(self.disk, self.at + at, data)
+impl WriteDevice for Volume<'_> {
+    fn write_at(&mut self, at: u64, data: &[u8]) -> Result<(), DeviceError> {
+        write_at(self.disk, self.at + at, data).map_err(|error| {
+            eprintln!("ferrix-install: writing the new volume at {at:#x}: {error}");
+            DeviceError::Write { at }
+        })
     }
 
-    fn flush(&mut self) -> io::Result<()> {
-        self.disk.sync_data()
+    fn flush(&mut self) -> Result<(), DeviceError> {
+        self.disk.sync_data().map_err(|error| {
+            eprintln!("ferrix-install: flushing the new volume: {error}");
+            DeviceError::Flush
+        })
     }
 }
 

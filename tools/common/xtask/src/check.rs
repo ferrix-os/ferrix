@@ -1133,10 +1133,11 @@ fn test_flags(args: &Args) -> Result<()> {
 }
 
 /// The item crates that must make every allocation fallibly, by package.
-const FALLIBLE_CRATES: [&str; 2] = ["ferrix-btrfs", "ferrix-btrfs-write"];
+const FALLIBLE_CRATES: [&str; 3] = ["ferrix-btrfs", "ferrix-btrfs-write", "ferrix-fs-device"];
 
-/// The btrfs crates allocate nothing that cannot fail: the fallible-allocation
-/// gate finds no unmarked allocating call in either. Its ratchet alone would
+/// The btrfs crates and the device traits they stand on allocate nothing that
+/// cannot fail: the fallible-allocation gate finds no unmarked allocating call
+/// in any of them. Its ratchet alone would
 /// let a count stand above zero once recorded; this holds it at zero.
 ///
 /// Verifies: `L.btrfs.22`
