@@ -14,7 +14,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`object`](#object) | 9 | 17 | 40 | 7 |
 | [`arch/x86_64`](#archx86_64) | 32 | - | - | 5 |
 | [`syscall`](#syscall) | 15 | 10 | 10 | 2 |
-| [`init`](#init) | 3 | 14 | 14 | 1 |
+| [`init`](#init) | 3 | 12 | 12 | 1 |
 | [`console`](#console) | 3 | 6 | 7 | 4 |
 | [`main`](#main) | 3 | 6 | 4 | 1 |
 | [`mm`](#mm) | 1 | 1 | 4 | 1 |
@@ -30,7 +30,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
 | [`user`](#user) | - | - | 1 | 1 |
-| **Total** | **129** | **176** | **232** | 37 |
+| **Total** | **129** | **174** | **230** | 37 |
 
 ---
 
@@ -96,7 +96,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `discovery/devmgr.rs` | `item` | 13 | 78 | 82 | 11 | 410, 576, 604, 611, 761, 855, 859-860, 878, 883, 1094 |
+| `discovery/devmgr.rs` | `item` | 13 | 78 | 82 | 11 | 410, 578, 606, 613, 763, 857, 861-862, 880, 885, 1096 |
 | `discovery/pci/virtio.rs` | `item` | 40 | 33 | 49 | 31 | 332-333, 379, 382, 388, 435, 437-438, 471, 480, 486, 495-496, 498-499, 506, 514, 529, 550, 558, 560, 569, 617, 622, 627, 655, 681, 686, 699, 706, 797 |
 
 ---
@@ -107,8 +107,8 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 |---|---|---:|---:|---:|---:|---|
 | `object/pin.rs` | `core` | 0 | 1 | 23 | 0 | - |
 | `object/oom.rs` | `core` | 0 | 6 | 5 | 0 | - |
-| `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 614-616, 621 |
-| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 186, 225 |
+| `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 676-678, 683 |
+| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 195, 234 |
 | `object/mod.rs` | `core` | 2 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
 | `object/quota.rs` | `core` | 0 | 1 | 1 | 0 | - |
@@ -131,7 +131,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2449 |
+| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2525 |
 | `syscall/program.rs` | `item` | 3 | 4 | 2 | 1 | 89 |
 
 ---
@@ -140,7 +140,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `init.rs` | `item` | 3 | 14 | 14 | 3 | 208, 352, 607 |
+| `init.rs` | `item` | 3 | 12 | 12 | 3 | 208, 358, 613 |
 
 ---
 
