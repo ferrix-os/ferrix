@@ -320,6 +320,14 @@ fn attach_permissions(who: &Access, from: &Arc<Job>, to: &Arc<Job>, shared: &Sha
         None if who.privileged() => {}
         None => return Err(Errno::EACCES),
     }
+    // Never into a subtree a supervisor watches (`docs/microkernel/K4.md`
+    // §11 (2)): its supervisor would gain control of a process its holder
+    // never made. No cgroup job can hold a channel -- their handles carry no
+    // `SUPERVISE` -- so this is defence in depth, held by a check that forges
+    // one.
+    if crate::object::exception::job_supervised(to) {
+        return Err(Errno::EBUSY);
+    }
     to.admits().map_err(move_errno)
 }
 
@@ -1507,6 +1515,7 @@ pub(crate) fn check() -> Checked<Report> {
         process::new_for_check().map_err(|_| "could not make a process for the cgroupfs check")?;
     check_the_root(&harness, process.pid())?;
     check_a_move_and_a_kill(&mut harness, &process)?;
+    check_no_move_under_a_supervisor(&mut harness)?;
     check_the_limits(&mut harness)?;
     harness.report.woken = events_check::run(&mut harness)?;
     let delegated = delegation_check::run(&mut harness)?;
@@ -1622,6 +1631,62 @@ fn check_a_move_and_a_kill(harness: &mut Harness, process: &Process) -> Checked<
     if harness.exists(b"/check-a") {
         return Err("a removed cgroup can still be found");
     }
+    Ok(())
+}
+
+/// K4's case o (`docs/microkernel/K4.md` §11 (2)): no `cgroup.procs` move
+/// into a subtree a supervisor watches. No handle that can reach a cgroup
+/// job carries `SUPERVISE`, so the channel is forged here, attached to a new
+/// cgroup's job by the kernel's own call; the move is `EBUSY` while its read
+/// end is open and is taken once it is closed. L.trap.13's evidence beside
+/// stage 9's `exceptions` line: the `cgroups` line.
+fn check_no_move_under_a_supervisor(harness: &mut Harness) -> Checked<()> {
+    harness
+        .mkdir(b"/check-k4")
+        .map_err(|_| "mkdir in cgroupfs failed")?;
+    let flags = ferrix_vfs::OpenFlags {
+        read: true,
+        ..ferrix_vfs::OpenFlags::default()
+    };
+    let directory = harness
+        .ns
+        .open(&harness.ctx, None, &Harness::path(b"/check-k4"), &flags, 0)
+        .map_err(|_| "a new cgroup's directory did not open")?;
+    let (job, _) = directory_job(&directory).ok_or("a cgroup's directory names no job")?;
+    drop(directory);
+    let (kernel_end, read_end) = crate::object::channel::Endpoint::pair()
+        .map_err(|_| "no memory for a forged exception channel")?;
+    let let_go = job
+        .supervisor()
+        .attach(kernel_end, 1_000)
+        .map_err(|_| "a forged exception channel was refused by a cgroup's job")?;
+    crate::object::dispose(let_go);
+    let process =
+        process::new_for_check().map_err(|_| "could not make a process for the supervised move")?;
+    let listed = alloc::format!("{}\n", process.pid());
+    let refused = harness.write(b"/check-k4/cgroup.procs", listed.as_bytes());
+    harness.refused(
+        refused.err(),
+        Errno::EBUSY,
+        "a process was moved into a cgroup a supervisor watches",
+    )?;
+    if process.job().name() == Some("check-k4") {
+        return Err("a refused move into a supervised cgroup moved the process");
+    }
+    crate::object::dispose([Object::Channel(read_end)]);
+    let _ = harness
+        .write(b"/check-k4/cgroup.procs", listed.as_bytes())
+        .map_err(|_| "a move into a cgroup whose supervisor detached was refused")?;
+    if process.job().name() != Some("check-k4") {
+        return Err("a move into a cgroup whose supervisor detached did not move it");
+    }
+    let _ = harness
+        .write(b"/check-k4/cgroup.kill", b"1\n")
+        .map_err(|_| "writing 1 to cgroup.kill failed")?;
+    drop(process);
+    harness
+        .rmdir(b"/check-k4")
+        .map_err(|_| "rmdir of the supervised cgroup failed")?;
     Ok(())
 }
 

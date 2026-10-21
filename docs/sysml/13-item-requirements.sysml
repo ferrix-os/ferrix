@@ -1038,6 +1038,24 @@ package FerrixItemRequirements {
                 decide one each way, on every architecture the suite boots.";
             attribute :>> parent = "O.ISOLATE";
         }
+        requirement <'H.TRAP.20'> faultsGoToTheirSupervisorsFirst : ItemHighLevel {
+            attribute :>> statement = "A fault a program takes in user mode that its
+                address space does not resolve shall be offered to the supervisors
+                attached to its process and to its jobs, nearest first, before the
+                personality sees it. Each shall answer resume, with registers checked
+                as sigreturn checks a frame, kill or hand on, within a bounded wait;
+                a fault unanswered, or handed on past the last, shall take the path
+                it takes with no supervisor. Only a holder of SUPERVISE attaches one,
+                and no process raises its ids while one watches it.";
+            attribute :>> criterion = "The `exceptions` line on every boot: a fault
+                resumed with written registers exits as written, forged registers are
+                refused, KILL ends the process, a hand on reaches the job's channel at
+                level 1, an unanswered fault ends with SIGSEGV after its timeout, an
+                exception closed or held by a supervisor that died is handed on at
+                once; a cgroup move into a supervised job is EBUSY (the `cgroups`
+                line).";
+            attribute :>> parent = ("O.CAPABILITY", "O.ISOLATE");
+        }
     }
 
     package Boot {

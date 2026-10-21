@@ -308,4 +308,26 @@ package FerrixArmv7aRequirements {
                 "arch::armv7a::switch::turn_on");
         }
     }
+
+    package ExceptionContexts {
+        doc /* A supervisor's registers checked as sigreturn's are
+             * (docs/microkernel/K4.md section 3.2). */
+
+        requirement <'L.armv7a.28'> aSupervisorsRegistersAreAProgramsOnly : ItemLowLevel {
+            attribute :>> statement = "UserContext::from_supervisor shall refuse,
+                changing nothing, registers whose CPSR is not USER_CPSR with nothing
+                outside CPSR_RESTORABLE, whose pc is misaligned for the state CPSR.T
+                names (the pc's low bit never switching state), whose pc or sp is
+                not a user address, or whose reserved word is not zero; the read it
+                pairs with shall show CPSR only so.";
+            attribute :>> criterion = "Case b: SVC and SYS mode, IRQs masked, FIQs
+                unmasked, J, E, an odd pc in ARM and in Thumb state, a pc misaligned
+                for ARM state, a kernel pc and sp and a reserved word are refused;
+                the N flag, Thumb with a halfword-aligned pc, and a general register
+                are taken.";
+            attribute :>> parent = ("H.TRAP.20", "H.TRAP.9");
+            attribute :>> unit = ("arch::armv7a::signal::UserContext::from_supervisor",
+                "arch::armv7a::signal::UserContext::supervised");
+        }
+    }
 }

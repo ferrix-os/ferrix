@@ -21,7 +21,9 @@
 //! USR mode's stack pointer and link register are banked rather than in the
 //! trap frame, so [`UserContext`] carries them beside it.
 
+use ferrix_bootinfo::is_user_address;
 use ferrix_linux_abi::types::{SA_RESTORER, SA_SIGINFO};
+use ferrix_native_abi::exception::Armv7aRegisters as ExceptionRegisters;
 
 use super::cpu;
 use super::switch::{self, UserState};
@@ -154,6 +156,61 @@ impl UserContext {
             4
         };
         self.frame.pc = self.frame.pc.wrapping_sub(back);
+    }
+
+    /// The registers as a supervisor reads them (`docs/microkernel/K4.md`
+    /// §3.2): `r13` and `r14` the banked USR pair, `r15` the pc, and `CPSR`
+    /// only as a program may hold it, so that a set read and written back
+    /// unchanged is accepted.
+    pub(crate) fn supervised(&self) -> ExceptionRegisters {
+        let mut r = [0_u32; 16];
+        r[..13].copy_from_slice(&self.frame.r);
+        r[13] = self.sp;
+        r[14] = self.lr;
+        r[15] = self.frame.pc;
+        ExceptionRegisters {
+            r,
+            cpsr: self.frame.cpsr & CPSR_RESTORABLE | USER_CPSR,
+            reserved: 0,
+        }
+    }
+
+    /// These registers with a supervisor's `written` in place
+    /// (`docs/microkernel/K4.md` §3.2, L.armv7a.28), or [`BadFrame`] with
+    /// nothing changed.
+    ///
+    /// `restore_signal_frame`'s rule, from the same definitions, refusing
+    /// where it masks: `CPSR` is `USER_CPSR` and nothing outside
+    /// `CPSR_RESTORABLE`, so USR mode, `A` and `F` as a program runs, and
+    /// never `J`, `E`, `I` or another mode. The pc's low bit is never an
+    /// interworking switch: the state is `CPSR.T` alone, and a pc whose
+    /// alignment does not fit it is refused. `pc` and `sp` are user addresses.
+    pub(crate) fn from_supervisor(
+        &self,
+        written: &ExceptionRegisters,
+    ) -> Result<UserContext, BadFrame> {
+        let pc = written.r[15];
+        let alignment = if written.cpsr & CPSR_THUMB != 0 { 1 } else { 3 };
+        if written.reserved != 0
+            || written.cpsr != written.cpsr & CPSR_RESTORABLE | USER_CPSR
+            || pc & alignment != 0
+            || !is_user_address(u64::from(pc))
+            || !is_user_address(u64::from(written.r[13]))
+        {
+            return Err(BadFrame);
+        }
+        let mut context = *self;
+        context.frame.r.copy_from_slice(&written.r[..13]);
+        context.sp = written.r[13];
+        context.lr = written.r[14];
+        context.frame.pc = pc;
+        context.frame.cpsr = written.cpsr;
+        Ok(context)
+    }
+
+    /// The saved program counter.
+    pub(crate) fn program_counter(&self) -> u64 {
+        u64::from(self.frame.pc)
     }
 }
 

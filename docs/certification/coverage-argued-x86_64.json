@@ -68,14 +68,14 @@
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1702, 1704",
+      "lines": "1704, 1706",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1765",
+      "lines": "1767",
       "category": "failure-path",
       "match": "cpu::hlt();",
       "why": "`halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run."
@@ -145,7 +145,7 @@
     },
     {
       "file": "arch/x86_64/trap.rs",
-      "lines": "656, 659-660, 675",
+      "lines": "663, 666-667, 682",
       "category": "failure-path",
       "match": "vector_name(frame.vector),",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it."
@@ -1216,70 +1216,70 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "215",
+      "lines": "216",
       "category": "defensive",
       "match": ".map(|served| served.call)",
       "why": "The call a boot finds the load ring left unanswered: register_load requires unserved() to be None before the boot goes on (LOAD_REGISTRATION), so the closure naming the call runs only on a kernel whose load forgot a handler."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "306",
+      "lines": "307",
       "category": "defensive",
       "match": "None => caller.core().is_terminated(),",
       "why": "The wait's exit test on a kernel with no personality registered: every build registers one before the first program runs (register_load, checked at boot), so a native wait always asks the personality."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "525-526",
+      "lines": "528-529",
       "category": "credited-elsewhere",
       "match": "TableError::Full => status::NO_HANDLES,",
       "why": "Run by the native refusal check: a duplicate into a full table answers NO_HANDLES and a message naming one handle twice answers INVALID_ARGS, both required. Those callers inline table_error; the arms' rows are only in its out-of-line copy, whose callers never meet these two errors."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1318-1319",
+      "lines": "1321-1322",
       "category": "defensive",
       "match": "object::dispose(message.handles.into_iter().map(|(object, _)",
       "why": "The queue refusing to take back at its head a message it gave up a moment earlier: its capacity still holds the slot, so putting it back needs no memory."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1995",
+      "lines": "2003",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2061",
+      "lines": "2069",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2064",
+      "lines": "2072",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2074",
+      "lines": "2082",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2080-2081",
+      "lines": "2088-2089",
       "category": "defensive",
       "match": "Err(Err(object)) => {",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2702",
+      "lines": "2796",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
@@ -1314,35 +1314,35 @@
     },
     {
       "file": "trap.rs",
-      "lines": "642",
+      "lines": "653",
       "category": "failure-path",
       "match": "fatal(",
       "why": "A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program."
     },
     {
       "file": "trap.rs",
-      "lines": "660",
+      "lines": "695",
       "category": "failure-path",
       "match": "FaultOutcome::NoProcess => fatal(",
       "why": "A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread."
     },
     {
       "file": "trap.rs",
-      "lines": "697",
+      "lines": "732",
       "category": "defensive",
       "match": "return Err(None);",
       "why": "A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved."
     },
     {
       "file": "trap.rs",
-      "lines": "775, 777, 780-783",
+      "lines": "810, 812, 815-818",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "797, 802, 812, 821-822, 824",
+      "lines": "832, 837, 847, 856-857, 859",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."

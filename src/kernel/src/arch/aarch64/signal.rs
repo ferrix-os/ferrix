@@ -21,7 +21,9 @@
 //! handler; glibc on AArch64 never does, having no trampoline of its own, and
 //! before the vDSO had one every glibc handler returned to address zero.
 
+use ferrix_bootinfo::is_user_address;
 use ferrix_linux_abi::types::SA_RESTORER;
+use ferrix_native_abi::exception::Aarch64Registers as ExceptionRegisters;
 
 use super::switch::{self, UserState};
 use super::trap::{TrapFrame, USER_SPSR};
@@ -116,6 +118,51 @@ impl UserContext {
             self.0.x[8] = ferrix_linux_abi::nr::aarch64::RESTART_SYSCALL as u64;
         }
         self.0.elr = self.0.elr.wrapping_sub(4);
+    }
+
+    /// The registers as a supervisor reads them (`docs/microkernel/K4.md`
+    /// §3.2): `PSTATE` only as a program may hold it, the condition flags
+    /// over EL0t, so that a set read and written back unchanged is accepted.
+    pub(crate) const fn supervised(&self) -> ExceptionRegisters {
+        ExceptionRegisters {
+            x: self.0.x,
+            sp: self.0.sp,
+            pc: self.0.elr,
+            pstate: self.0.spsr & PSTATE_NZCV | USER_SPSR,
+        }
+    }
+
+    /// These registers with a supervisor's `written` in place
+    /// (`docs/microkernel/K4.md` §3.2, L.aarch64.66), or [`BadFrame`] with
+    /// nothing changed.
+    ///
+    /// `restore_signal_frame`'s rule, from the same definitions, refusing
+    /// where it masks: `PSTATE` is the condition flags over `USER_SPSR`
+    /// exactly, so EL0t with `D`, `A` and `F` as a program runs and never
+    /// `SS`, `IL`, `I` masked or another exception level; and, stricter than
+    /// `sigreturn`, `pc` and `sp` are user addresses and `pc` is aligned.
+    pub(crate) fn from_supervisor(
+        &self,
+        written: &ExceptionRegisters,
+    ) -> Result<UserContext, BadFrame> {
+        if written.pstate != written.pstate & PSTATE_NZCV | USER_SPSR
+            || !is_user_address(written.pc)
+            || !is_user_address(written.sp)
+            || written.pc & 3 != 0
+        {
+            return Err(BadFrame);
+        }
+        let mut context = *self;
+        context.0.x = written.x;
+        context.0.sp = written.sp;
+        context.0.elr = written.pc;
+        context.0.spsr = written.pstate;
+        Ok(context)
+    }
+
+    /// The saved program counter.
+    pub(crate) const fn program_counter(&self) -> u64 {
+        self.0.elr
     }
 }
 

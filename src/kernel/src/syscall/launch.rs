@@ -143,6 +143,13 @@ pub(crate) fn load_native(
         // a native process can make Linux calls, so a child that did not keep
         // its creator's filter would be one call out of the sandbox.
         crate::syscall::seccomp::inherit_native(creator, &child);
+        // And the creator's refusal of supervisors: a native child of a
+        // process no supervisor may hear runs with its ids, and no
+        // supervisor hears it either (`docs/microkernel/K4.md` §13, the
+        // consultant's ledger 3011).
+        if creator.supervisor().is_refused() {
+            child.supervisor().refuse();
+        }
     }
     let process: Arc<dyn Host> = child;
     Ok(process)

@@ -98,6 +98,10 @@ pub(crate) enum Object {
     /// is, with `READ` and no other right, so it is neither duplicated nor
     /// sent; `audit_read` answers the holder, and nobody else can ask.
     Audit,
+    /// One faulting thread, held in the kernel until its supervisor decides
+    /// (`docs/microkernel/K4.md` §2.1). Its last handle closed undecided
+    /// hands the fault on.
+    Exception(Arc<exception::Exception>),
 }
 
 /// A queue nothing is woken on, for objects whose signals never change.
@@ -123,7 +127,8 @@ impl Object {
             | Object::Process(_)
             | Object::Port(_)
             | Object::Starter
-            | Object::Audit => Signals::NONE,
+            | Object::Audit
+            | Object::Exception(_) => Signals::NONE,
         }
     }
 
@@ -145,7 +150,8 @@ impl Object {
             | Object::IoMapping(_)
             | Object::Pin(_)
             | Object::Starter
-            | Object::Audit => &QUIET,
+            | Object::Audit
+            | Object::Exception(_) => &QUIET,
         }
     }
 }
@@ -315,7 +321,8 @@ impl Object {
             | Object::Pin(_)
             | Object::Port(_)
             | Object::Starter
-            | Object::Audit => true,
+            | Object::Audit
+            | Object::Exception(_) => true,
             Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,
         }
     }

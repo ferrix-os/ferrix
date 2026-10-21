@@ -606,6 +606,13 @@ pub(crate) fn classify(frame: &TrapFrame) -> crate::trap::Trap {
     }
 }
 
+/// The architecture's own word for a trap, as an exception report carries
+/// it (`docs/microkernel/K4.md` §3.1): the vector in the high 32 bits and
+/// the error code, zero for a vector that pushes none, in the low 32.
+pub(crate) const fn exception_code(frame: &TrapFrame) -> u64 {
+    frame.vector << 32 | frame.error_code & 0xffff_ffff
+}
+
 /// The signal Linux raises for a trap a program's own instruction took and
 /// nothing resolved, as `(signal, si_code, si_addr)`: a page fault `SIGSEGV`
 /// at the address, `#UD` `SIGILL` and `#DE` `SIGFPE` at the instruction,

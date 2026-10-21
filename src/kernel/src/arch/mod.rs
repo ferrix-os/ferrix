@@ -69,6 +69,14 @@ pub(crate) use armv7a::{drive_native_words, drive_system_call};
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{drive_native_words, drive_system_call};
 
+// K4's boot check, per architecture (`docs/microkernel/K4.md` §5).
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::exception_check;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::exception_check;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::exception_check;
+
 // Drivers for the Arm peripherals both Arm architectures can have: the GICv2,
 // the PL011, and the STM32MP1's USART, which is ARMv7-A's.
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
@@ -250,13 +258,15 @@ pub(crate) use x86_64::{USER_INTO_CGROUP_PROGRAM, USER_OOM_PROGRAM};
 pub(crate) use aarch64::{
     SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
     USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
-    USER_XSTATE_PROGRAM, UserContext, fault_signal, restore_signal_frame, setup_signal_frame,
+    USER_XSTATE_PROGRAM, UserContext, exception_code, fault_signal, restore_signal_frame,
+    setup_signal_frame,
 };
 #[cfg(target_arch = "arm")]
 pub(crate) use armv7a::{
     SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
     USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
-    USER_XSTATE_PROGRAM, UserContext, fault_signal, restore_signal_frame, setup_signal_frame,
+    USER_XSTATE_PROGRAM, UserContext, exception_code, fault_signal, restore_signal_frame,
+    setup_signal_frame,
 };
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::{
@@ -283,7 +293,8 @@ pub(crate) use x86_64::{
 pub(crate) use x86_64::{
     SIGNAL_RED_ZONE, USER_DETHREAD_PROGRAM, USER_EXITS_PROGRAM, USER_HANDOFF_PROGRAM,
     USER_SIGNAL_PROGRAM, USER_STOPPED_PROGRAM, USER_SYSLOG_PROGRAM, USER_THREAD_PROGRAM,
-    USER_XSTATE_PROGRAM, UserContext, fault_signal, restore_signal_frame, setup_signal_frame,
+    USER_XSTATE_PROGRAM, UserContext, exception_code, fault_signal, restore_signal_frame,
+    setup_signal_frame,
 };
 // The scoped TLB shootdown: one page invalidated, one processor interrupted,
 // and the program that checks it from user mode.

@@ -168,6 +168,25 @@ fn width(abi: Abi) -> Width {
     }
 }
 
+/// The ids a set-id file may give `process` as it `execve`s it: `set_ids`,
+/// or none at all.
+///
+/// `PR_SET_NO_NEW_PRIVS` gives up set-id programs for good, as it does on
+/// Linux: the file's bits are read and then dropped. So does a supervisor
+/// (`docs/microkernel/K4.md` §11 (1), the consultant's condition 1): one that
+/// may rewrite this process's registers at its next fault must not thereby
+/// control a program running with ids a file gave it, as Linux refuses the
+/// raise under `ptrace` (`LSM_UNSAFE_PTRACE`).
+pub(crate) fn ids_it_may_raise(process: &Process, set_ids: SetIds) -> SetIds {
+    if crate::syscall::attributes::get(process).no_new_privs
+        || object::exception::supervised(process)
+    {
+        SetIds::NONE
+    } else {
+        set_ids
+    }
+}
+
 /// A program to load, and the two names it goes by.
 ///
 /// Two, because Linux keeps them apart and programs read both: `exe` is the
@@ -440,6 +459,12 @@ fn populate(
         let secure = credentials.exec(program.set_ids.uid, program.set_ids.gid);
         (credentials.user, credentials.group, secure)
     });
+    // A program that runs with ids it was raised to is never offered to a
+    // supervisor, one attached afterwards included (`docs/microkernel/K4.md`
+    // §13, the consultant's condition 1, ledger 2973).
+    if secure {
+        process.supervisor().refuse();
+    }
     // The vDSO, where there is one: `AT_SYSINFO_EHDR` is how the C library
     // finds it, and a program started without the entry makes the system
     // calls the vDSO would have answered. Not for a 32-bit program: the vDSO
@@ -836,11 +861,7 @@ fn execve_at(
         thread.with_own_signals(crate::syscall::signal::ThreadSignals::reset_for_exec);
         thread.reset_for_exec();
     }
-    // `PR_SET_NO_NEW_PRIVS` gives up set-id programs for good, as it does on
-    // Linux: the file's bits are read and then dropped.
-    if crate::syscall::attributes::get(process).no_new_privs {
-        set_ids = SetIds::NONE;
-    }
+    set_ids = ids_it_may_raise(process, set_ids);
     // The caller's ids, which the new program's dumpability is judged by.
     let ids_before = crate::syscall::attributes::ids_before_exec(process);
     let program = Executable {

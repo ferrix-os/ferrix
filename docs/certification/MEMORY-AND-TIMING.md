@@ -1541,6 +1541,23 @@ architectures (a new address space's root, before it is ever installed),
 which may hold other locks or have interrupts masked; as a leaf, it adds
 no ordering to them. Since F-64's fix (2026-10-14).
 
+### 2.2t A fault's wait for its supervisors (`object::exception`, K4)
+
+A thread whose user-mode fault reaches a supervisor (`docs/microkernel/K4.md`
+§2.4) waits in the kernel, interrupts open and no lock held, for a verdict,
+its process's end, or a deadline. Each level waits at most the timeout its
+channel was attached with, 1 to 10,000 ms, and every level of one fault
+together at most `EXCEPTION_TIMEOUT_MAX_MS`, 10 s, after the first report:
+one chain deadline, however deep the job tree (the consultant's answer to
+K4's Q2, ledger 2871). Past it the fault takes the path it takes with no
+supervisor. The wait is the faulting thread's own; it holds nothing another
+task waits for. Walking the levels takes one leaf lock per process or job
+slot, held for one read; a report allocates fallibly, charged to the
+faulting process's job, before it is written. A supervisor that resumes the
+same fault again and again makes each round its own bounded wait; the
+kernel bounds no number of rounds, as Linux bounds no `SIGSEGV` handler
+that returns, and says the count in the report's `repeat`.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

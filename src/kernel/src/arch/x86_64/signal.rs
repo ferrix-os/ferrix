@@ -34,6 +34,7 @@ mod compat;
 
 use ferrix_bootinfo::is_user_address;
 use ferrix_linux_abi::types::{SA_RESTORER, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP};
+use ferrix_native_abi::exception::X86_64Registers as ExceptionRegisters;
 
 use super::cpu;
 use super::gdt;
@@ -248,6 +249,89 @@ impl UserContext {
         self.0.ss = USER_SS;
         self.0.rflags = self.0.rflags & FLAGS_RESTORABLE | FLAGS_ALWAYS;
         self
+    }
+
+    /// The registers as a supervisor reads them (`docs/microkernel/K4.md`
+    /// §3.2): the flags only as a program may hold them, so that a set read
+    /// and written back unchanged is accepted -- the processor's own `RF`,
+    /// which it sets in the image a fault pushes, is not shown.
+    pub(crate) const fn supervised(&self) -> ExceptionRegisters {
+        let r = &self.0;
+        ExceptionRegisters {
+            general: [
+                r.rax, r.rbx, r.rcx, r.rdx, r.rsi, r.rdi, r.rbp, r.rsp, r.r8, r.r9, r.r10, r.r11,
+                r.r12, r.r13, r.r14, r.r15,
+            ],
+            rip: r.rip,
+            rflags: r.rflags & FLAGS_RESTORABLE | FLAGS_ALWAYS,
+            cs: r.cs,
+            ss: r.ss,
+            reserved: [0; 2],
+        }
+    }
+
+    /// These registers with a supervisor's `written` in place of the ones it
+    /// may change (`docs/microkernel/K4.md` §3.2, L.x86_64.186), or
+    /// [`BadFrame`] with nothing changed.
+    ///
+    /// The rules are `restore_signal_frame`'s (`docs/I386.md` I2a and I2b,
+    /// T.ESCALATE path 8), from the same definitions, and refuse where that
+    /// masks: the code selector is 64-bit or 32-bit user code exactly, with
+    /// `rip` and `rsp` in the user half and `rip` below 4 GiB for 32-bit
+    /// code (`restored_code_selector`); the stack selector is user data; the
+    /// flags hold `FLAGS_ALWAYS` and nothing outside `FLAGS_RESTORABLE`, so
+    /// never `IOPL`, `VM`, `VIF`, `VIP`, `NT`, `RF`, `TF` or interrupts off.
+    /// The vector and error code the trap saved are kept.
+    pub(crate) fn from_supervisor(
+        &self,
+        written: &ExceptionRegisters,
+    ) -> Result<UserContext, BadFrame> {
+        if written.reserved != [0; 2]
+            || written.ss != USER_SS
+            || (written.cs != USER_CS && written.cs != USER_CS32)
+            || written.rflags & FLAGS_ALWAYS != FLAGS_ALWAYS
+            || written.rflags & !(FLAGS_RESTORABLE | FLAGS_ALWAYS) != 0
+        {
+            return Err(BadFrame);
+        }
+        let [
+            rax,
+            rbx,
+            rcx,
+            rdx,
+            rsi,
+            rdi,
+            rbp,
+            rsp,
+            r8,
+            r9,
+            r10,
+            r11,
+            r12,
+            r13,
+            r14,
+            r15,
+        ] = written.general;
+        let cs = restored_code_selector(written.cs as u16, written.rip, rsp)?;
+        if cs != written.cs {
+            return Err(BadFrame);
+        }
+        let mut context = *self;
+        let r = &mut context.0;
+        (r.rax, r.rbx, r.rcx, r.rdx, r.rsi, r.rdi, r.rbp, r.rsp) =
+            (rax, rbx, rcx, rdx, rsi, rdi, rbp, rsp);
+        (r.r8, r.r9, r.r10, r.r11, r.r12, r.r13, r.r14, r.r15) =
+            (r8, r9, r10, r11, r12, r13, r14, r15);
+        r.rip = written.rip;
+        r.rflags = written.rflags;
+        r.cs = cs;
+        r.ss = USER_SS;
+        Ok(context)
+    }
+
+    /// The saved program counter.
+    pub(crate) const fn program_counter(&self) -> u64 {
+        self.0.rip
     }
 
     /// True if these registers are a 32-bit program's: its code selector is

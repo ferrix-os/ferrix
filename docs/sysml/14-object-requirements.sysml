@@ -2091,9 +2091,10 @@ package FerrixObjectRequirements {
     package ExceptionChannels {
         doc /* src/kernel/src/object/exception.rs and syscall/native.rs's
              * exception_channel_create: a supervisor attached to a process or
-             * a job (docs/microkernel/K4.md section 2.2). The fault chain that
-             * reports to it, and its parent H.TRAP.20, come with K4's second
-             * landing. */
+             * a job (docs/microkernel/K4.md section 2.2), and the chain a
+             * fault walks to its supervisors (sections 2.3 to 2.7): trap.rs's
+             * user_fault_as asks object::exception::raise before the
+             * personality's signal. */
 
         requirement <'L.object.241'> anExceptionChannelIsAttachedOnlyBySupervise : ItemLowLevel {
             attribute :>> statement = "exception_channel_create shall attach an
@@ -2116,7 +2117,7 @@ package FerrixObjectRequirements {
                 names nothing are refused with their statuses; a write to the read
                 end is ACCESS_DENIED; an attach charges 2 objects and one at the
                 limit is NO_MEMORY with nothing attached.";
-            attribute :>> parent = ("H.OBJ.2", "H.QUOTA.3");
+            attribute :>> parent = ("H.OBJ.2", "H.QUOTA.3", "H.TRAP.20");
             attribute :>> unit = ("syscall::native::exception_channel_create",
                 "object::exception::Supervisor::attach");
         }
@@ -2132,7 +2133,7 @@ package FerrixObjectRequirements {
                 attach is taken; a process killed with its job closes its
                 supervisor's channel (PEER_CLOSED within the check's patience) and
                 a later attach is BAD_STATE.";
-            attribute :>> parent = "H.OBJ.2";
+            attribute :>> parent = ("H.OBJ.2", "H.TRAP.20");
             attribute :>> unit = ("object::exception::Supervisor::is_live",
                 "object::exception::Supervisor::close",
                 "object::exception::Supervisor::let_go_if_dead");
@@ -2149,9 +2150,142 @@ package FerrixObjectRequirements {
                 PROCESS_CREATED and JOB_CREATED off the handles the two calls
                 answer, and a Rights::JOB handle and a duplicate narrowed to
                 Rights::PROCESS are refused ACCESS_DENIED.";
-            attribute :>> parent = "H.OBJ.2";
+            attribute :>> parent = ("H.OBJ.2", "H.TRAP.20");
             attribute :>> unit = ("syscall::native::process_create",
                 "syscall::native::job_create");
+        }
+        requirement <'L.trap.9'> theChainIsNearestFirst : ItemLowLevel {
+            attribute :>> statement = "A user-mode fault its address space does not
+                resolve shall be offered, before the personality's fault_signal, to
+                the faulting process's channel (level 0) and then to each job's from
+                the process's own to the root (levels 1 and up). A level with no
+                channel whose read end is open, or whose report cannot be made or
+                queued, shall be skipped, and a skip counted; the end of the chain
+                shall take fault_signal as with no supervisor; a process whose end is
+                recorded shall not enter the chain.";
+            attribute :>> criterion = "Case d: the process's channel hears the fault
+                at level 0 and, handed on, the job's at level 1 with the same pc and
+                task. Case m: with no channel anywhere nothing is reported or skipped
+                and the program ends with SIGSEGV.";
+            attribute :>> parent = "H.TRAP.20";
+            attribute :>> unit = ("object::exception::raise",
+                "object::exception::Asked::into_raised", "trap::user_fault_as",
+                "trap::user_fault",
+                "object::exception::Supervisor::live");
+        }
+        requirement <'L.trap.10'> theWaitIsBounded : ItemLowLevel {
+            attribute :>> statement = "The faulting thread shall wait for a verdict
+                with interrupts open and no lock held, until a verdict, its process's
+                end, or the earlier of its level's timeout and one chain deadline
+                EXCEPTION_TIMEOUT_MAX_MS after the first report; a signal sent
+                meanwhile shall stay pending for the way out.";
+            attribute :>> criterion = "Case e: a fault on a 5 ms channel nobody reads
+                ends the program no sooner than 5 ms after it started. Case e2: a
+                program that is the only reader of its own job's channel is ended by
+                the expiry.";
+            attribute :>> parent = "H.TRAP.20";
+            attribute :>> unit = "object::exception::ask";
+        }
+        requirement <'L.trap.11'> anExpiryIsTheDefault : ItemLowLevel {
+            attribute :>> statement = "A wait that ends at its deadline undecided
+                shall mark the exception expired, so that a later verdict or register
+                call is refused TIMED_OUT, record EXCEPTION_KILLED with detail 2 and
+                the level, and end the chain: the fault takes fault_signal, with no
+                further level asked.";
+            attribute :>> criterion = "Case e: the program ends KILLED by SIGSEGV;
+                the last EXCEPTION_KILLED names it with 2 and level 0; the exception
+                read afterwards refuses exception_resolve and exception_state
+                TIMED_OUT.";
+            attribute :>> parent = "H.TRAP.20";
+            attribute :>> unit = ("object::exception::Chain::ask_level",
+                "object::exception::killed");
+        }
+        requirement <'L.trap.12'> theVerdictsAreKept : ItemLowLevel {
+            attribute :>> statement = "RESUME shall return to the program with the
+                exception's registers through the trap's own exit, recording
+                EXCEPTION_CONTEXT with both pcs when a supervisor wrote them; KILL
+                shall end the process as a job kill does, recording EXCEPTION_KILLED
+                with detail 1; HAND_ON, or the exception's last handle closed
+                undecided, shall go to the next level.";
+            attribute :>> criterion = "Case a: resumed at its exit with 42 the
+                program exits 42, and EXCEPTION_CONTEXT names both pcs. Case c: KILL
+                ends it KILLED by SIGKILL, recorded. Case f: closed undecided, it ends
+                with SIGSEGV before the 10 s timeout. Case i: moved past its
+                breakpoint it exits 97.";
+            attribute :>> parent = "H.TRAP.20";
+            attribute :>> unit = ("object::exception::Exception::resolve",
+                "object::exception::Exception::drop", "object::exception::audit_context");
+        }
+        requirement <'L.trap.13'> nestingRaisesNothing : ItemLowLevel {
+            attribute :>> statement = "A supervisor's own fault shall take its own
+                chain; a thread shall wait on at most one exception; a report's repeat
+                shall count the reports in a row its thread raised at the same pc and
+                address. While a channel watches a process or a job above it, execve
+                shall give it no set-id file's ids, and no cgroup.procs move or
+                CLONE_INTO_CGROUP shall put a process into the subtree (EBUSY). A
+                process that ran with ids it was raised to, had its ids changed, or
+                made itself not dumpable shall never again have a fault offered to
+                any supervisor, one attached afterwards included, and neither shall a
+                fork of it or a native child it launches.";
+            attribute :>> criterion = "Case k: an exception held by a supervisor
+                that dies is handed on to the job's channel at once. Case l: resumed
+                unchanged, repeat reads 0, 1 and 2. Case n: ids_it_may_raise gives a
+                supervised process no ids and an unsupervised one the file's. Case o
+                (the cgroups line): a move into a cgroup whose job holds a channel is
+                EBUSY and is taken once the channel closes. Case p: a program loaded
+                with a set-id file's ids is marked, and its fault, with a channel
+                attached afterwards, is reported to nobody and ends with SIGSEGV.
+                Cases q and r: its fork and a native child it launches are marked,
+                and the native child's fault is reported to nobody.";
+            attribute :>> parent = "H.TRAP.20";
+            attribute :>> unit = ("object::exception::supervised",
+                "object::exception::job_supervised", "object::exception::report_for",
+                "object::exception::note_resumed",
+                "object::exception::Supervisor::refuse",
+                "object::exception::Supervisor::is_refused");
+        }
+        requirement <'L.object.243'> aReportIsTheKernels : ItemLowLevel {
+            attribute :>> statement = "A report shall be 64 bytes the kernel writes,
+                every field its own: the kind, the level, the process, the task, the
+                job, the address, the architecture's code, the pc and the flags; the
+                message shall carry exactly one exception handle, with EXCEPTION:
+                TRANSFER, READ, WRITE and MANAGE, never DUPLICATE. Once K6's attested
+                sender is on main, the report's sender shall read as the kernel.";
+            attribute :>> criterion = "Case a: a store through null is reported as a
+                write page fault at address 0, level 0, in its job, its pc at the
+                store; its handle carries EXCEPTION and handle_duplicate is
+                ACCESS_DENIED. Case i: a breakpoint carries the architecture's code.";
+            attribute :>> parent = ("H.TRAP.20", "H.OBJ.2");
+            attribute :>> unit = ("object::exception::make",
+                "object::exception::report_for");
+        }
+        requirement <'L.object.244'> registersAreCheckedBeforeStored : ItemLowLevel {
+            attribute :>> statement = "exception_state shall copy the faulting
+                thread's registers out with READ, or replace them with WRITE only
+                after the architecture's rule has accepted every field, a refusal
+                INVALID_ARGS changing nothing; an unknown op or a length other than
+                the register set's shall be INVALID_ARGS; a decided exception
+                BAD_STATE and an expired one TIMED_OUT.";
+            attribute :>> criterion = "Case b on every architecture: each forged set
+                is refused and the registers read back unchanged; each set a program
+                may hold is taken and reads back as written. Case h: op 2 and a short
+                length are INVALID_ARGS.";
+            attribute :>> parent = ("H.TRAP.20", "H.OBJ.2");
+            attribute :>> unit = ("syscall::native::exception_state",
+                "object::exception::Exception::registers",
+                "object::exception::Exception::set_registers",
+                "object::exception::pending");
+        }
+        requirement <'L.object.245'> aVerdictIsGivenOnce : ItemLowLevel {
+            attribute :>> statement = "exception_resolve shall take RESUME, KILL or
+                HAND_ON with MANAGE, once, while the exception is pending: a second
+                BAD_STATE, one after expiry TIMED_OUT, any other verdict
+                INVALID_ARGS, any other object WRONG_TYPE.";
+            attribute :>> criterion = "Case h: a second verdict is BAD_STATE, verdict
+                3 INVALID_ARGS, a channel WRONG_TYPE. Case e: a verdict after expiry
+                is TIMED_OUT.";
+            attribute :>> parent = ("H.TRAP.20", "H.OBJ.2");
+            attribute :>> unit = "syscall::native::exception_resolve";
         }
     }
 }

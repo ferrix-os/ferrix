@@ -137,6 +137,14 @@ impl Rights {
     /// the kernel holds the only writing end.
     pub const EXCEPTION_CHANNEL: Rights =
         Rights(Rights::DUPLICATE.0 | Rights::TRANSFER.0 | Rights::READ.0 | Rights::WAIT.0);
+    /// What an exception -- one faulting thread, held in the kernel until a
+    /// verdict -- carries: its registers read ([`Rights::READ`]) and written
+    /// ([`Rights::WRITE`]), a verdict given ([`Rights::MANAGE`]), and the
+    /// handle moved to another supervisor ([`Rights::TRANSFER`]). No
+    /// [`Rights::DUPLICATE`]: one holder decides, and its last handle closed
+    /// undecided hands the fault on.
+    pub const EXCEPTION: Rights =
+        Rights(Rights::TRANSFER.0 | Rights::READ.0 | Rights::WRITE.0 | Rights::MANAGE.0);
 
     /// Whether every right in `other` is also in `self`.
     #[must_use]

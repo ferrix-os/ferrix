@@ -136,6 +136,12 @@ pub const CGROUP_KILLED: Event = Event::new(Class::Ended, 2);
 /// detail the job whose memory limit asked for it.
 pub const OOM_KILLED: Event = Event::new(Class::Ended, 3);
 
+/// A fault that ended without a resume because of its supervisors
+/// (`docs/microkernel/K4.md` §2.4, §2.5): the target is the faulting
+/// process; the detail says why -- 1 a supervisor's `KILL`, 2 no answer
+/// before the deadline, so the default action -- and at which level.
+pub const EXCEPTION_KILLED: Event = Event::new(Class::Ended, 4);
+
 /// A device quiesced before it was handed on: the target is the device.
 pub const QUIESCED: Event = Event::new(Class::Device, 1);
 
@@ -164,6 +170,11 @@ pub const CGROUP_LIMIT: Event = Event::new(Class::Changed, 2);
 /// detail the limit's number, its old value and its new one, each
 /// saturated.
 pub const DEVICE_LIMIT_SET: Event = Event::new(Class::Changed, 3);
+
+/// A faulting thread resumed with registers its supervisor wrote
+/// (`docs/microkernel/K4.md` §2.5): the target is the process; the detail
+/// the pc before and after, low words, and the level.
+pub const EXCEPTION_CONTEXT: Event = Event::new(Class::Changed, 4);
 
 /// A `device_set_limit` refused: as [`DEVICE_LIMIT_SET`], with the value
 /// asked for as the new one, and the status saying why -- `ACCESS_DENIED`
@@ -222,7 +233,7 @@ pub mod power {
 }
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 27] = [
+pub const NAMED: [(Event, &str); 29] = [
     (START, "START"),
     (CONFIG, "CONFIG"),
     (BOOTED, "BOOTED"),
@@ -244,12 +255,14 @@ pub const NAMED: [(Event, &str); 27] = [
     (JOB_KILLED, "JOB_KILLED"),
     (CGROUP_KILLED, "CGROUP_KILLED"),
     (OOM_KILLED, "OOM_KILLED"),
+    (EXCEPTION_KILLED, "EXCEPTION_KILLED"),
     (QUIESCED, "QUIESCED"),
     (DMA_FAULT, "DMA_FAULT"),
     (INTERRUPT_FAULT, "INTERRUPT_FAULT"),
     (LIMIT_SET, "LIMIT_SET"),
     (CGROUP_LIMIT, "CGROUP_LIMIT"),
     (DEVICE_LIMIT_SET, "DEVICE_LIMIT_SET"),
+    (EXCEPTION_CONTEXT, "EXCEPTION_CONTEXT"),
 ];
 
 /// What a record's target names, in its `target_kind`.

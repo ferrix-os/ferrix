@@ -236,6 +236,10 @@ pub(crate) fn exec_dumpable(process: &Process, before: IdsBeforeExec) {
             a.parent_death_signal = 0;
         }
     });
+    if changed || secure {
+        // Nor offered to a supervisor (`docs/microkernel/K4.md` §13).
+        process.supervisor().refuse();
+    }
 }
 
 /// The ids an `execve`'s caller had, for [`exec_dumpable`].
@@ -270,6 +274,8 @@ pub(crate) fn credentials_changed(process: &Process) {
         a.dumpable = false;
         a.parent_death_signal = 0;
     });
+    // Nor offered to a supervisor again (`docs/microkernel/K4.md` §13).
+    process.supervisor().refuse();
 }
 
 /// Drop the entries of processes that are gone.
@@ -442,6 +448,12 @@ pub(crate) fn sys_prctl(process: &Process, option: i32, args: [u64; 4]) -> Resul
                 _ => return Err(Errno::EINVAL),
             };
             update(process, |a| a.dumpable = dumpable);
+            // A program that makes itself not dumpable is never offered to a
+            // supervisor again, as no tracer may attach to it
+            // (`docs/microkernel/K4.md` §13).
+            if !dumpable {
+                process.supervisor().refuse();
+            }
             Ok(0)
         }
         option::PR_SET_NAME => {

@@ -332,6 +332,12 @@ impl UserRegs {
     }
 }
 
+/// The architecture's own word for a trap, as an exception report carries
+/// it (`docs/microkernel/K4.md` §3.1): the syndrome, `ESR_EL1`.
+pub(crate) const fn exception_code(frame: &TrapFrame) -> u64 {
+    frame.esr
+}
+
 /// The signal Linux raises for a trap a program's own instruction took and
 /// nothing resolved, as `(signal, si_code, si_addr)`: an abort `SIGSEGV` at
 /// the fault address, a misaligned program counter or stack pointer

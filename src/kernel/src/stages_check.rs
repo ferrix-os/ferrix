@@ -1188,8 +1188,14 @@ pub(super) fn check_exceptions() {
     match object::exception_check::run() {
         Ok(report) => println!(
             "  exceptions {} channels attached to jobs and processes and {} detached, \
-             {} refusals as specified, {} objects charged per channel",
-            report.attached, report.detached, report.refusals, report.charged,
+             {} refusals as specified, {} objects charged per channel; {} faults reported \
+             and resumed, killed, handed on or expired, {} forged register sets refused",
+            report.attached,
+            report.detached,
+            report.refusals,
+            report.charged,
+            report.faults,
+            report.forged,
         ),
         Err(problem) => fatal!(
             catalog::STAGE9_EXCEPTIONS,

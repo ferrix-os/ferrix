@@ -11,6 +11,7 @@
 mod check;
 pub(crate) mod console;
 mod cpu;
+pub(crate) mod exception_check;
 pub(crate) use cpu::dma_barrier;
 pub(crate) mod mmio;
 mod signal;
@@ -51,8 +52,8 @@ use crate::irq::Report;
 
 pub(crate) use smp::{CpuStarter, describe_cpus, hardware_id};
 pub(crate) use trap::{
-    TrapFrame, UserRegs, advance_past_breakpoint, breakpoint, classify, enter_user, fault_signal,
-    report_trap, resume_user, system_call,
+    TrapFrame, UserRegs, advance_past_breakpoint, breakpoint, classify, enter_user, exception_code,
+    fault_signal, report_trap, resume_user, system_call,
 };
 
 /// Point this CPU's per-CPU register at `address`.

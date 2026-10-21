@@ -2753,4 +2753,26 @@ package FerrixX8664Requirements {
                 "iommu::remapping::prepare_console");
         }
     }
+
+    package ExceptionContexts {
+        doc /* A supervisor's registers checked as sigreturn's are
+             * (docs/microkernel/K4.md section 3.2; docs/I386.md I2a, I2b). */
+
+        requirement <'L.x86_64.186'> aSupervisorsRegistersAreAProgramsOnly : ItemLowLevel {
+            attribute :>> statement = "UserContext::from_supervisor shall refuse,
+                changing nothing, registers whose cs is not 64-bit or 32-bit user code
+                exactly, whose rip or rsp is outside the user half or, for 32-bit
+                code, whose rip is at or above 4 GiB, whose ss is not user data,
+                whose rflags lacks the always-set bits or holds one outside
+                FLAGS_RESTORABLE, or whose reserved words are not zero; the read it
+                pairs with shall show rflags only within FLAGS_RESTORABLE.";
+            attribute :>> criterion = "Case b: a kernel and a data cs, 32-bit cs with
+                rip 4 GiB, a kernel ss, IOPL, VM, TF, NT, RF, interrupts off, every
+                flag outside FLAGS_RESTORABLE, a kernel rip, a non-canonical rsp and a
+                reserved word are refused; AC and a general register are taken.";
+            attribute :>> parent = ("H.TRAP.20", "H.TRAP.9");
+            attribute :>> unit = ("arch::x86_64::signal::UserContext::from_supervisor",
+                "arch::x86_64::signal::UserContext::supervised");
+        }
+    }
 }

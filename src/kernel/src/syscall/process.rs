@@ -553,6 +553,13 @@ impl Process {
             child.pids = Some(pidns::assign(&namespace, child.pid()).map_err(|_| AllocError)?);
         }
         child.groups = SpinLock::new(parent.groups.lock().clone());
+        // A parent no supervisor may hear has a child none may either: it
+        // runs with the ids the parent was raised to (`docs/microkernel/K4.md`
+        // §13, the consultant's ledger 3011), as Linux's fork keeps the
+        // parent's dumpability.
+        if parent.supervisor().is_refused() {
+            child.supervisor().refuse();
+        }
         child.state = SpinLock::new(parent.state.lock().for_fork()?);
         child.startup = SpinLock::new(parent.startup());
         child.parent = SpinLock::new(Arc::downgrade(parent));

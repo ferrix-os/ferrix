@@ -628,14 +628,25 @@ pub(crate) fn return_path() -> Option<&'static ReturnPath> {
 /// it or ends with it as its status. Never a kernel panic -- a program cannot
 /// be allowed to stop the machine with `hlt` -- unless the kernel entered user
 /// mode with no process to blame.
-fn user_fault(frame: &arch::TrapFrame, trap: &Trap) {
-    user_fault_as(frame, trap, arch::fault_signal(frame, trap));
+fn user_fault(frame: &mut arch::TrapFrame, trap: &Trap) {
+    let signal = arch::fault_signal(frame, trap);
+    user_fault_as(frame, trap, signal);
 }
 
 /// [`user_fault`] with the signal, `si_code` and address already decided, for
 /// a fault the architecture cannot classify alone: a touch of a file mapping
 /// past the end of its file is `SIGBUS`, which only the address space knows.
-fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, (signal, code, address): (u32, i32, u64)) {
+///
+/// First its supervisors are asked, if it has any (`docs/microkernel/K4.md`
+/// §2.3): a resume returns with the registers they leave, through this
+/// trap's own exit (`iretq`, `eret`, `rfeia`), never a fast system-call
+/// return; an end leaves on the way out; and the end of the chain, or an
+/// expiry, goes on to the signal below as a fault with no supervisor does.
+fn user_fault_as(
+    frame: &mut arch::TrapFrame,
+    trap: &Trap,
+    (signal, code, address): (u32, i32, u64),
+) {
     let Some(path) = return_path() else {
         // No personality registered, so nothing can turn a fault into a
         // signal. A kernel built that way has no user programs to fault.
@@ -653,7 +664,31 @@ fn user_fault_as(frame: &arch::TrapFrame, trap: &Trap, (signal, code, address): 
     // A trap from user mode holds no kernel lock, which is also what lets
     // the personality's return path open them from this same dispatch; they
     // are masked again before anything else here runs.
+    // Read with interrupts still masked, as the way back to user mode reads
+    // them: on ARMv7-A the context holds the banked USR stack pointer and
+    // link register, read from the processor.
+    let context = arch::UserContext::from_trap(frame);
     arch::enable_interrupts();
+    let fault = crate::object::exception::Fault {
+        trap: *trap,
+        bus: signal == ferrix_linux_abi::types::SIGBUS,
+        address,
+        code: arch::exception_code(frame),
+    };
+    match crate::object::exception::raise(context, &fault) {
+        crate::object::exception::Raised::Resume(context) => {
+            // Masked first, as the way back stores them: on ARMv7-A this
+            // writes the processor's banked USR pair.
+            arch::disable_interrupts();
+            context.store_trap(frame);
+            return;
+        }
+        crate::object::exception::Raised::Ended => {
+            arch::disable_interrupts();
+            return;
+        }
+        crate::object::exception::Raised::Default => {}
+    }
     let outcome = (path.fault_signal)(signal, code, address);
     arch::disable_interrupts();
     match outcome {

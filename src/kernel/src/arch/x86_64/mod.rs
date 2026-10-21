@@ -4,6 +4,7 @@ mod apic;
 mod clock;
 pub(crate) mod console;
 mod cpu;
+pub(crate) mod exception_check;
 pub(crate) use cpu::clean_for_walker;
 /// The region the kernel log is kept in across a reset, written back before
 /// a reset may discard the caches (see [`crate::arch::write_back_for_reset`]):
@@ -161,7 +162,8 @@ pub(crate) fn cpu_local_register() -> u64 {
     unsafe { cpu::read_msr(IA32_GS_BASE) }
 }
 pub(crate) use trap::{
-    TrapFrame, advance_past_breakpoint, breakpoint, classify, fault_signal, report_trap,
+    TrapFrame, advance_past_breakpoint, breakpoint, classify, exception_code, fault_signal,
+    report_trap,
 };
 
 /// What this architecture decides on its own from what the machine hands

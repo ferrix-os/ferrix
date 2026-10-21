@@ -3,6 +3,7 @@
 mod check;
 pub(crate) mod console;
 mod cpu;
+pub(crate) mod exception_check;
 pub(crate) use cpu::dma_barrier;
 mod gic;
 pub(crate) mod mmio;
@@ -120,8 +121,8 @@ pub(crate) fn cpu_local_register() -> u64 {
     cpu::read_tpidr_el1()
 }
 pub(crate) use trap::{
-    TrapFrame, UserRegs, advance_past_breakpoint, breakpoint, classify, enter_user, fault_signal,
-    report_trap, resume_user, system_call,
+    TrapFrame, UserRegs, advance_past_breakpoint, breakpoint, classify, enter_user, exception_code,
+    fault_signal, report_trap, resume_user, system_call,
 };
 
 /// Install the exception vector table.

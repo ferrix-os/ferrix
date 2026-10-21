@@ -1161,6 +1161,10 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = device.pin(&vmo, 0, 1, PinAccess::ReadOnly);
     let _ = Pin::from_owned(handle()).addresses(&mut []);
     let _ = crate::exception::attach(&job, 1000);
+    let exception = crate::exception::Exception::from_owned(handle());
+    let _ = exception.read_state(&mut [0; 8]);
+    let _ = exception.write_state(&[0; 8]);
+    let _ = exception.resolve(crate::exception::RESUME);
 
     let wrapped: BTreeSet<usize> = sys.numbers().into_iter().collect();
     let table: BTreeSet<usize> = nr::ALL.iter().map(|&call| nr::number(call)).collect();

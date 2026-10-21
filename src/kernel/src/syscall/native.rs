@@ -54,6 +54,7 @@ use alloc::vec::Vec;
 
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_linux_abi::errno::Errno;
+use ferrix_native_abi::exception::{self as exception_abi, Words};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr::{self, NativeCall};
 use ferrix_native_abi::rights::{Requested, Rights};
@@ -77,7 +78,7 @@ use crate::device::{ConfigRefusal, DeviceNode};
 use crate::fallible;
 use crate::hooks::{Full, Hooks};
 use crate::object::channel::{self, ChannelMessage, Endpoint, ReadError, WriteFailure};
-use crate::object::exception::{AttachRefused, Supervisor};
+use crate::object::exception::{self, AttachRefused, Exception, Supervisor};
 use crate::object::interrupt::{Interrupt, InterruptError};
 use crate::object::io_mapping::{IoMapping, IoMappingError};
 use crate::object::job::{self, Job};
@@ -451,7 +452,9 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::JobGetQuota
         | NativeCall::ProcessCreate
         | NativeCall::ProcessStart
-        | NativeCall::ExceptionChannelCreate => job_call(call, caller, &a),
+        | NativeCall::ExceptionChannelCreate
+        | NativeCall::ExceptionState
+        | NativeCall::ExceptionResolve => job_call(call, caller, &a),
         NativeCall::InterruptCreate => interrupt_create(process, handle(a[0]), a[1]),
         NativeCall::InterruptAck => interrupt_ack(process, handle(a[0])),
         NativeCall::InterruptBind => interrupt_bind(process, handle(a[0]), handle(a[1]), a[2]),
@@ -1635,8 +1638,9 @@ fn job_in(process: &Process, job: Handle, needed: Rights) -> Result<Arc<Job>, Er
 }
 
 /// The calls on a job and on the processes made in one -- an exception
-/// channel's attach to either among them (`docs/microkernel/K4.md`) --
-/// which `dispatch` hands on as one.
+/// channel's attach to either, and the calls on the faults it reports,
+/// among them (`docs/microkernel/K4.md`) -- which `dispatch` hands on as
+/// one.
 fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     let [first, second, third, fourth, ..] = *a;
     let process = caller.core();
@@ -1658,6 +1662,10 @@ fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, 
         NativeCall::ExceptionChannelCreate => {
             exception_channel_create(process, handle(first), second, third)
         }
+        NativeCall::ExceptionState => {
+            exception_state(process, handle(first), second, third, fourth)
+        }
+        NativeCall::ExceptionResolve => exception_resolve(process, handle(first), second),
         _ => Err(Errno::ENOSYS),
     }
 }
@@ -2323,6 +2331,92 @@ fn attach_channel(supervised: &Supervised, timeout_ms: u64) -> Result<Arc<Endpoi
             })
         }
     }
+}
+
+/// The exception a handle names, if it carries `needed`.
+fn exception_in(
+    process: &Process,
+    exception: Handle,
+    needed: Rights,
+) -> Result<Arc<Exception>, Errno> {
+    process.with_handles(|table| {
+        let (object, rights) = table.get(exception).map_err(table_error)?;
+        let Object::Exception(exception) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !rights.contains(needed) {
+            return Err(status::ACCESS_DENIED);
+        }
+        Ok(Arc::clone(exception))
+    })
+}
+
+/// What an exception's refusal is to a program.
+fn refused(why: exception::Refused) -> Errno {
+    match why {
+        exception::Refused::Decided => status::BAD_STATE,
+        exception::Refused::Expired => status::TIMED_OUT,
+        exception::Refused::Registers => status::INVALID_ARGS,
+    }
+}
+
+/// `exception_state(exception, op, buffer, length)`: read the faulting
+/// thread's registers, or replace them, checked by the architecture's rule
+/// (`docs/microkernel/K4.md` §3.2). The exception is taken out of the table
+/// and let go of through `dispose`, outside the table's lock: a handle
+/// closed meanwhile can make this the last reference, whose drop hands the
+/// fault on.
+fn exception_state(
+    process: &Process,
+    exception: Handle,
+    op: u64,
+    at: u64,
+    length: u64,
+) -> Result<usize, Errno> {
+    let needed = match op {
+        exception_abi::STATE_READ => Rights::READ,
+        exception_abi::STATE_WRITE => Rights::WRITE,
+        _ => return Err(status::INVALID_ARGS),
+    };
+    if length != <exception_abi::Registers as Words>::BYTES as u64 {
+        return Err(status::INVALID_ARGS);
+    }
+    let exception = exception_in(process, exception, needed)?;
+    let done = if op == exception_abi::STATE_READ {
+        exception
+            .registers()
+            .map_err(refused)
+            .and_then(|registers| {
+                let mut bytes = [0_u8; <exception_abi::Registers as Words>::BYTES];
+                registers.write(&mut bytes);
+                uaccess::copy_to_user(process.space(), at, &bytes).map_err(fault)
+            })
+    } else {
+        let mut bytes = [0_u8; <exception_abi::Registers as Words>::BYTES];
+        uaccess::copy_from_user(process.space(), at, &mut bytes)
+            .map_err(fault)
+            .and_then(|()| {
+                <exception_abi::Registers as Words>::read(&bytes).ok_or(status::INVALID_ARGS)
+            })
+            .and_then(|written| exception.set_registers(&written).map_err(refused))
+    };
+    object::dispose([Object::Exception(exception)]);
+    done.map(|()| 0)
+}
+
+/// `exception_resolve(exception, verdict)`: resume, kill or hand on, once
+/// (`docs/microkernel/K4.md` §2.5).
+fn exception_resolve(process: &Process, exception: Handle, verdict: u64) -> Result<usize, Errno> {
+    let verdict = match verdict {
+        exception_abi::RESUME => exception::Verdict::Resume,
+        exception_abi::KILL => exception::Verdict::Kill,
+        exception_abi::HAND_ON => exception::Verdict::HandOn,
+        _ => return Err(status::INVALID_ARGS),
+    };
+    let exception = exception_in(process, exception, Rights::MANAGE)?;
+    let done = exception.resolve(verdict).map_err(refused);
+    object::dispose([Object::Exception(exception)]);
+    done.map(|()| 0)
 }
 
 /// The device node a handle names, if it carries `needed`.
@@ -3246,7 +3340,8 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         | Object::IoMapping(_)
         | Object::Pin(_)
         | Object::Starter
-        | Object::Audit => None,
+        | Object::Audit
+        | Object::Exception(_) => None,
     }
 }
 

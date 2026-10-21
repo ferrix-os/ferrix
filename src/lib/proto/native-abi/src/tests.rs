@@ -375,6 +375,68 @@ fn supervise_is_only_a_creators_and_the_read_end_never_writes() {
     assert!(Rights::EXCEPTION_CHANNEL.contains(Rights::READ | Rights::WAIT));
     assert_eq!(nr::decode(0x1081), Some(NativeCall::ExceptionChannelCreate));
     assert_eq!(nr::number(NativeCall::ExceptionChannelCreate), 0x1081);
-    assert_eq!(nr::decode(0x1082), None, "with the fault chain");
-    assert_eq!(nr::decode(0x1083), None, "with the fault chain");
+    assert_eq!(nr::decode(0x1082), Some(NativeCall::ExceptionState));
+    assert_eq!(nr::decode(0x1083), Some(NativeCall::ExceptionResolve));
+    assert!(
+        !Rights::EXCEPTION.contains(Rights::DUPLICATE),
+        "one holder decides"
+    );
+    assert!(Rights::EXCEPTION.contains(Rights::READ | Rights::WRITE | Rights::MANAGE));
+    assert!(Rights::EXCEPTION.is_known());
+}
+
+/// K4's report and register layouts: fixed sizes, every field where the
+/// documentation puts it, and a round trip through bytes.
+#[test]
+fn exception_layouts_are_fixed_and_round_trip() {
+    use crate::exception::{
+        AARCH64_REGISTERS_BYTES, ARMV7A_REGISTERS_BYTES, Aarch64Registers, Armv7aRegisters,
+        REPORT_BYTES, Report, Words, X86_64_REGISTERS_BYTES, X86_64Registers,
+    };
+    assert_eq!(size_of::<Report>(), REPORT_BYTES);
+    assert_eq!(offset_of!(Report, tid), 16);
+    assert_eq!(offset_of!(Report, pc), 48);
+    assert_eq!(offset_of!(Report, flags), 56);
+    assert_eq!(size_of::<X86_64Registers>(), X86_64_REGISTERS_BYTES);
+    assert_eq!(size_of::<Aarch64Registers>(), AARCH64_REGISTERS_BYTES);
+    assert_eq!(size_of::<Armv7aRegisters>(), ARMV7A_REGISTERS_BYTES);
+    let report = Report {
+        kind: 1,
+        level: 2,
+        pid: 3,
+        repeat: 4,
+        tid: 5,
+        job: 6,
+        address: 7,
+        code: 8,
+        pc: 9,
+        flags: 10,
+        reserved: 0,
+    };
+    let bytes = report.to_bytes();
+    assert_eq!(Report::from_bytes(&bytes), Some(report));
+    assert_eq!(&bytes[48..56], &9_u64.to_ne_bytes());
+    assert_eq!(Report::from_bytes(&bytes[..63]), None);
+    let mut x86 = X86_64Registers::default();
+    x86.general[7] = 0x7000;
+    x86.rip = 0x1234;
+    x86.cs = 0x33;
+    let mut out = [0_u8; X86_64_REGISTERS_BYTES];
+    x86.write(&mut out);
+    assert_eq!(&out[16 * 8..17 * 8], &0x1234_u64.to_ne_bytes());
+    assert_eq!(X86_64Registers::read(&out), Some(x86));
+    let mut a64 = Aarch64Registers::default();
+    a64.x[30] = 30;
+    a64.pc = 0x4000;
+    let mut out = [0_u8; AARCH64_REGISTERS_BYTES];
+    a64.write(&mut out);
+    assert_eq!(Aarch64Registers::read(&out), Some(a64));
+    let mut a32 = Armv7aRegisters::default();
+    a32.r[15] = 0x8000;
+    a32.cpsr = 0x10;
+    let mut out = [0_u8; ARMV7A_REGISTERS_BYTES];
+    a32.write(&mut out);
+    assert_eq!(&out[15 * 4..16 * 4], &0x8000_u32.to_ne_bytes());
+    assert_eq!(Armv7aRegisters::read(&out), Some(a32));
+    assert_eq!(Armv7aRegisters::read(&out[..4]), None);
 }
