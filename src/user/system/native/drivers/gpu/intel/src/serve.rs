@@ -371,7 +371,10 @@ fn dump<B: Backend>(frontend: &Frontend<B>) {
     let state = &frontend.state;
     let requests = &state.requests;
     say(format_args!(
-        "intel-dump: requests next {} retired {}, waits {}, kernel fences {}",
+        "intel-dump: now {} next {:?} backend {:?}; requests next {} retired {}, waits {}, kernel fences {}",
+        ferrix_rt::linux::monotonic_nanos().unwrap_or(0),
+        frontend.next_deadline(),
+        frontend.backend.next_deadline(),
         requests.next,
         requests.retired,
         state.waits.len(),
