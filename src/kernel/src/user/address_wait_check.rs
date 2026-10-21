@@ -580,17 +580,20 @@ fn a_requeue_moves_waiters_across_buckets(
     {
         return Err("addrwait: a requeue did not move its waiters onto the other word");
     }
-    // Back the other way, waking the oldest and moving the other: a
-    // requeue's wake rouses as a wake does.
-    set(a, target, 9)?;
+    // Back the other way, waking the oldest and moving nothing: a requeue's
+    // wake rouses as a wake does, and stops at its count, leaving the other
+    // where it is.
     let taken = a
-        .call(nr::ADDRESS_REQUEUE, &[target, source, 1, 1, 0, 0])
+        .call(nr::ADDRESS_REQUEUE, &[target, source, 1, 0, 0, 0])
         .map_err(|_| "addrwait: a requeue that wakes was refused")?;
-    if taken != 2 || answer(0, PATIENCE_NANOS) != Some(Ok(0)) {
-        return Err("addrwait: a requeue's wake did not rouse the oldest waiter");
+    if taken != 1
+        || answer(0, PATIENCE_NANOS) != Some(Ok(0))
+        || address_wait::waiters_on(core::slice::from_ref(&to)) != 1
+    {
+        return Err("addrwait: a requeue's wake did not rouse the oldest waiter alone");
     }
     let woken = a
-        .call(nr::ADDRESS_WAKE, &[source, 1, u64::from(u32::MAX), 0, 0, 0])
+        .call(nr::ADDRESS_WAKE, &[target, 1, u64::from(u32::MAX), 0, 0, 0])
         .map_err(|_| "addrwait: a wake after a requeue was refused")?;
     if woken != 1 || answer(1, PATIENCE_NANOS) != Some(Ok(0)) {
         return Err("addrwait: requeued waiters were not woken on their new word");
