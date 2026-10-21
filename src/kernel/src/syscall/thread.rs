@@ -308,6 +308,10 @@ impl Thread {
     pub(crate) fn reset_for_exec(&self) {
         self.clear_dispatch();
         self.set_name(None);
+        // A ticket the old program adopted is not the new one's
+        // (`docs/microkernel/K7.md`, 2525 (5)). Called only for the calling
+        // thread, whose task this is.
+        crate::object::ticket::leave();
     }
 
     /// A copy of its Syscall User Dispatch settings, the lock let go before

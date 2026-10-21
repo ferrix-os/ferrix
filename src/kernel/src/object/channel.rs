@@ -77,6 +77,7 @@ use ferrix_objects::message::{Limits, Message, MessageQueue, ReceiveError, SendE
 use ferrix_objects::reach::{Reach, reaches};
 
 use super::port::{Observer, Observers, PortError, deliver, register, trigger};
+use super::ticket::{IssueError, Ticket, Tickets};
 use super::{Object, Transfer, dispose};
 use crate::fallible::{self, AllocError};
 use crate::object::quota::{Charge, Resource};
@@ -430,6 +431,14 @@ enum Side {
 }
 
 impl Side {
+    /// Its index in a per-side array: the first is 0.
+    fn index(self) -> usize {
+        match self {
+            Side::First => 0,
+            Side::Second => 1,
+        }
+    }
+
     /// The other side.
     fn other(self) -> Side {
         match self {
@@ -540,6 +549,10 @@ struct Channel {
         reason = "AUDIT: held for its drop, which uncharges the job"
     )]
     charge: Charge,
+    /// The tickets each end issued (`object::ticket`, `docs/microkernel/K7.md`),
+    /// behind a lock of their own: taken only by `CHARGE_TICKET` and by an
+    /// end's close, never by a read or a write.
+    tickets: SpinLock<Tickets>,
 }
 
 impl Channel {
@@ -574,6 +587,7 @@ impl Endpoint {
             first: Half::new(),
             second: Half::new(),
             charge,
+            tickets: SpinLock::new(Tickets::default()),
         })?;
         let first = fallible::try_arc(Endpoint {
             channel: Arc::clone(&channel),
@@ -1253,6 +1267,10 @@ impl Drop for Endpoint {
         fence(Ordering::SeqCst);
         wake_parked(parked, &peer.waiters, crate::sched::Wake::Home);
         peer.waiters.wake_all();
+        // Every ticket on the channel ends with either end (L.object.210),
+        // dropped once the registry's lock is let go.
+        let ended = self.channel.tickets.lock().end_all();
+        drop(ended);
         dispose(
             unread
                 .into_iter()
@@ -1262,6 +1280,39 @@ impl Drop for Endpoint {
 }
 
 impl Endpoint {
+    /// Issue a ticket on this end for `issuer`, charged to `slot`
+    /// (`CHARGE_TICKET ISSUE`).
+    ///
+    /// # Errors
+    ///
+    /// [`IssueError`]: this end has [`ferrix_native_abi::types::MAX_TICKETS`]
+    /// live, the other end has gone, or the issuer cannot pay.
+    pub(crate) fn issue_ticket(&self, issuer: Sender, slot: u32) -> Result<u64, IssueError> {
+        let mut tickets = self.channel.tickets.lock();
+        // Under the registry's lock, which the other end's close takes after
+        // marking itself closed: a ticket issued here is either refused or
+        // ended by that close.
+        if self.peer().is_closed() {
+            return Err(IssueError::PeerClosed);
+        }
+        tickets.issue(self.side.index(), issuer, slot)
+    }
+
+    /// The live ticket `id`, if the other end issued it: the only end a
+    /// ticket is adopted through (L.object.208).
+    pub(crate) fn adoptable_ticket(&self, id: u64) -> Option<Arc<Ticket>> {
+        self.channel
+            .tickets
+            .lock()
+            .find(self.side.other().index(), id)
+    }
+
+    /// End the live ticket `id`, issued by either end. Whether there was one.
+    pub(crate) fn end_ticket(&self, id: u64) -> bool {
+        let ended = self.channel.tickets.lock().end(id);
+        ended.is_some()
+    }
+
     /// Close this side and take out what the messages queued for it and
     /// never read carry: what closing it has to free, and what [`dispose`]
     /// queues rather than drop inside the close.

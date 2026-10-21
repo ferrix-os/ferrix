@@ -1329,6 +1329,24 @@ package FerrixItemRequirements {
                 comes back (the `watermark` line).";
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
+        // K7, charging that follows the client (docs/microkernel/K7.md; the
+        // consultant's OK IF, ledger 2525).
+        requirement <'H.QUOTA.14'> chargesFollowTheClient : ItemHighLevel {
+            attribute :>> statement = "The VMO commits and new objects a server's
+                native calls make while it holds a live ticket shall be charged to
+                the job the kernel recorded when it issued the ticket, and to no
+                job a server names; a ticket shall stay live until END from either
+                side or the close of either end of its channel, the client's
+                library ending it when the reply arrives or it gives up.";
+            attribute :>> criterion = "Stage 9's ticket check: a ticket names its
+                issuer's process and job, adoptions through any other end and of
+                ended or unknown ids are refused and audited, an adopted call's
+                commits and objects land on the client and none on the server,
+                each end stops the charging at the next call, at most 64 tickets
+                live on one end, and every counter comes back (the `ticket`
+                line).";
+            attribute :>> parent = "O.QUOTA";
+        }
     }
 
     package Audit {

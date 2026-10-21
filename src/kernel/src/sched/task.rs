@@ -57,6 +57,34 @@ pub(crate) const BLOCKED: u8 = 1;
 /// Dead: it has returned or exited, and its stack is waiting to be freed.
 pub(crate) const DEAD: u8 = 2;
 
+/// A task's adoption of a ticket (`CHARGE_TICKET ADOPT`,
+/// `docs/microkernel/K7.md`).
+#[derive(Debug)]
+struct Adoption {
+    /// Whether `adopted` holds a ticket: read at every native call's entry
+    /// without the lock (`object::ticket::charging_for_call`).
+    adopting: AtomicBool,
+    /// The ticket, if any: dropped at `LEAVE`, a new `ADOPT`, `exec` and
+    /// exit, and inert once the ticket has ended.
+    adopted: crate::sync::SpinLock<Option<Arc<crate::object::ticket::Ticket>>>,
+    /// The slot the task's VMO commits and new objects are charged to for
+    /// the native call it is in, set from a live adoption at the call's
+    /// entry and cleared as it returns; [`quota::NO_TARGET`] otherwise
+    /// (`quota::charge_target`).
+    charge_target: AtomicU32,
+}
+
+impl Adoption {
+    /// None.
+    const fn new() -> Adoption {
+        Adoption {
+            adopting: AtomicBool::new(false),
+            adopted: crate::sync::SpinLock::new(None),
+            charge_target: AtomicU32::new(quota::NO_TARGET),
+        }
+    }
+}
+
 /// One kernel thread.
 #[derive(Debug)]
 pub(crate) struct Task {
@@ -120,6 +148,9 @@ pub(crate) struct Task {
     /// joining, leaving and changing job at once always takes out exactly
     /// what it put in, from where it put it.
     group: AtomicU64,
+    /// The ticket it adopted, and where its charges go for the native call
+    /// it is in (`docs/microkernel/K7.md`).
+    adoption: Adoption,
     /// How many moves between jobs it had seen when it last looked at its
     /// process's job (`crate::sched::regroup_current`).
     seen_moves: AtomicU64,
@@ -427,6 +458,7 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            adoption: Adoption::new(),
         })
     }
 
@@ -484,6 +516,7 @@ impl Task {
             reply: [const { AtomicU64::new(0) }; 4],
             run_slot: SlotCell::new(run_slot),
             sleep_slot: SlotCell::new(sleep_slot),
+            adoption: Adoption::new(),
         })
     }
 
@@ -630,6 +663,45 @@ impl Task {
     pub(crate) fn group_word(&self) -> (u32, u32) {
         let word = self.group.load(Ordering::Acquire);
         (group_of(word), counted_of(word))
+    }
+
+    /// Whether it holds an adopted ticket.
+    pub(crate) fn has_adoption(&self) -> bool {
+        self.adoption.adopting.load(Ordering::Acquire)
+    }
+
+    /// The ticket it adopted, if any.
+    pub(crate) fn adopted_ticket(&self) -> Option<Arc<crate::object::ticket::Ticket>> {
+        self.adoption.adopted.lock().clone()
+    }
+
+    /// Put `ticket` in place of its adoption, and hand back the one it had,
+    /// for the caller to drop with no lock held.
+    pub(crate) fn replace_adoption(
+        &self,
+        ticket: Option<Arc<crate::object::ticket::Ticket>>,
+    ) -> Option<Arc<crate::object::ticket::Ticket>> {
+        let mut adopted = self.adoption.adopted.lock();
+        self.adoption
+            .adopting
+            .store(ticket.is_some(), Ordering::Release);
+        core::mem::replace(&mut *adopted, ticket)
+    }
+
+    /// Give up its adoption, handing the ticket back to be dropped.
+    pub(crate) fn take_adoption(&self) -> Option<Arc<crate::object::ticket::Ticket>> {
+        self.replace_adoption(None)
+    }
+
+    /// The slot its charges go to for the native call it is in, or
+    /// [`quota::NO_TARGET`].
+    pub(crate) fn charge_target(&self) -> u32 {
+        self.adoption.charge_target.load(Ordering::Acquire)
+    }
+
+    /// Set that slot, or clear it with [`quota::NO_TARGET`].
+    pub(crate) fn set_charge_target(&self, slot: u32) {
+        self.adoption.charge_target.store(slot, Ordering::Release);
     }
 
     /// Run in `index`'s share from now on, taking its weight out of the job

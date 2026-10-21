@@ -61,6 +61,56 @@ use crate::sync::SpinLock;
 /// No slot: the tree's root, a kernel thread, a frame nobody is charged for.
 pub(crate) const NONE: u32 = u32::MAX;
 
+/// No per-call target (`docs/microkernel/K7.md`): a task's charges go to its
+/// own job, [`crate::sched::running_group`]. Never a slot's index: the table
+/// holds at most `CHUNK * CHUNKS` slots, far below it.
+pub(crate) const NO_TARGET: u32 = u32::MAX - 1;
+
+const _: () = assert!(
+    CHUNK * CHUNKS < NO_TARGET as usize,
+    "a slot index could be NO_TARGET"
+);
+
+/// The job a VMO commit or a new object is charged to: the adopted ticket's
+/// for the native call the running task is in, when it adopted a live one
+/// (`object::ticket::charging_for_call`), and the running task's own job
+/// otherwise. One load of a word the task carries, through
+/// [`crate::sched::with_current`], which is safe with interrupts masked, as
+/// [`crate::sched::running_group`] is.
+///
+/// Its sites, and what stays the server's (2525 (3)): `mm`'s user frames and
+/// [`Charge::running`] read it. Faults on the task's own space suspend it
+/// ([`charging_own`]); page tables are charged to their space's owner, and
+/// the kernel heap (`KernelHeap::current`, the handle table, regions) to the
+/// running task's own job, so a client is never charged for a server's own
+/// structures. Processor time is not moved: K9 will read the same adoption.
+pub(crate) fn charge_target() -> u32 {
+    match crate::sched::with_current(crate::sched::Task::charge_target) {
+        Some(target) if target != NO_TARGET => target,
+        _ => crate::sched::running_group(),
+    }
+}
+
+/// Run `work` with the running task's per-call target suspended, so that
+/// what it charges goes to the task's own job: a fault on the task's own
+/// space, which is its own memory however it came to be touched (K7.md
+/// §2.3, Q2).
+pub(crate) fn charging_own<R>(work: impl FnOnce() -> R) -> R {
+    let target = crate::sched::with_current(|task| {
+        let target = task.charge_target();
+        if target != NO_TARGET {
+            task.set_charge_target(NO_TARGET);
+        }
+        target
+    })
+    .unwrap_or(NO_TARGET);
+    let done = work();
+    if target != NO_TARGET {
+        let _ = crate::sched::with_current(|task| task.set_charge_target(target));
+    }
+    done
+}
+
 /// A limit that is no limit.
 pub(crate) const UNLIMITED: u64 = u64::MAX;
 
@@ -839,14 +889,18 @@ impl ferrix_kmem::Account for KernelHeap {
 /// process's first descriptors. Each such use is a constant a process,
 /// which the task limit bounds.
 pub(crate) fn charging_nobody<R>(work: impl FnOnce() -> R) -> R {
-    let own = crate::sched::running_group();
-    if own == NONE {
-        return work();
-    }
-    crate::sched::set_current_group(NONE);
-    let done = work();
-    crate::sched::set_current_group(own);
-    done
+    // A per-call target is suspended first: nobody wins over an adopted
+    // ticket too (2525 (8)).
+    charging_own(|| {
+        let own = crate::sched::running_group();
+        if own == NONE {
+            return work();
+        }
+        crate::sched::set_current_group(NONE);
+        let done = work();
+        crate::sched::set_current_group(own);
+        done
+    })
 }
 
 /// The one [`KernelHeap`].
@@ -879,7 +933,7 @@ impl Charge {
     ///
     /// [`Exceeded`].
     pub(crate) fn running(resource: Resource, amount: u64) -> Result<Charge, Exceeded> {
-        Charge::to(crate::sched::running_group(), resource, amount)
+        Charge::to(charge_target(), resource, amount)
     }
 
     /// Charge `amount` of `resource` to `index`.

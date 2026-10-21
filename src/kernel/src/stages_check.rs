@@ -121,6 +121,9 @@ pub(super) fn check_programs() {
     // Finding F-35: the job quotas FRU_RSA.1 claims, each driven to its
     // limit through the path a program's use takes.
     check_quotas();
+    // K7: charging that follows the client, by a ticket the kernel issued
+    // (`docs/microkernel/K7.md`).
+    check_tickets();
     check_kernel_memory();
 }
 
@@ -1249,6 +1252,25 @@ pub(super) fn check_quotas() {
         report.objects,
         report.alone_share / 10,
         report.alone_share % 10,
+    );
+}
+
+/// K7: a server's adopted calls charge the client that issued the ticket,
+/// only while it is live, and what they charged comes back
+/// (`docs/microkernel/K7.md` §4).
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_tickets() {
+    let report = match object::ticket_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_TICKETS,
+            "ticket self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  ticket   issued to the caller's job and process; {} adoptions refused and audited;          {} pages and {} objects charged to the client, none to the server, and {} pages of          the server's own faults to the server; refused at the client's limit with no wait          and no kill; ended by either side and by a close; {} live at the bound; every          counter back to zero",
+        report.refused, report.pages, report.objects, report.own_pages, report.bound,
     );
 }
 

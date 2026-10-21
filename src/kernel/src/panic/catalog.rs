@@ -339,6 +339,20 @@ pub(crate) static STAGE9_QUOTAS: Explanation = Explanation {
           docs/certification/IMPLEMENTATION.md",
 };
 
+/// For `check_tickets` in `stages_check.rs`, when `object::ticket_check::run` fails.
+pub(crate) static STAGE9_TICKETS: Explanation = Explanation {
+    code: "FX-0912",
+    title: "a server's charges did not follow the client's ticket",
+    meaning: "`object::ticket_check::run` drives charging that follows the client               (`docs/microkernel/K7.md`): a client issues a ticket on its end of a channel,               and a server thread that adopts it through the other end has the VMO commits               and new objects of its native calls charged to the client's job while the               ticket is live. The check requires the ticket to name its issuer's own process               and job, adoptions through any other end or of ended or unknown ids to be               refused and audited, the server's own faults and heap to stay the server's, a               refusal at the client's limit to cost the server no wait and no kill, every end               (either side's `END`, a close) to stop the charging at the next call, at most               64 live tickets per end, and every counter to come back. A kernel failing this               lets a server charge a job that did not ask it to, or a client fill a shared               server (T.EXHAUST).",
+    causes: &[
+        "`quota::charge_target` stopped answering the adopted ticket's slot, or a charge          site stopped reading it (`mm::allocate_user_frame`, `quota::Charge::running`).",
+        "`ticket::charging_for_call` set the target from an ended ticket, or did not clear          it as the call returned.",
+        "The channel's ticket registry honoured an id from the wrong end or channel, or an          end's close stopped ending its tickets.",
+        "A fault path stopped suspending the target (`quota::charging_own`), so a server's          own memory was charged to its client.",
+    ],
+    see: "src/kernel/src/object/ticket.rs; src/kernel/src/object/ticket_check.rs;           src/kernel/src/object/quota.rs; docs/microkernel/K7.md",
+};
+
 /// For `check_kernel_memory` in `stages_check.rs`, when `fs::kmem_check::run` fails.
 pub(crate) static STAGE9_KMEM: Explanation = Explanation {
     code: "FX-0906",
@@ -3447,6 +3461,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SPECULATION_DOMAIN_LEAVE_MAY_NOT_WAIT,
     &CHECK_HOOK_LEFT_ARMED,
     &SMBIOS,
+    &STAGE9_TICKETS,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

@@ -165,6 +165,15 @@ pub const DEVICE_LIMIT_SET: Event = Event::new(Class::Changed, 3);
 /// handle can provoke one.
 pub const DEVICE_LIMIT: Event = Event::new(Class::Refused, 5);
 
+/// A `charge_ticket` refused or ending a ticket (`docs/microkernel/K7.md`):
+/// an `ADOPT` of an id the other end of the channel did not issue or that
+/// has ended, an `END` of one with no live ticket (`BAD_STATE`), and every
+/// `END` done. The detail is the call's number, the op and the id's low
+/// word. Successful issues, adoptions and leaves are not recorded: one of
+/// each per request would flood the ring. In the refusal ring, since any
+/// holder of a channel end can provoke one.
+pub const TICKET: Event = Event::new(Class::Refused, 6);
+
 /// The resources a [`LIMIT`] or [`LIMIT_SET`] record names, by number.
 pub mod resource {
     /// Memory, in bytes.
@@ -215,7 +224,7 @@ pub mod power {
 }
 
 /// Every event this crate names, with its name.
-pub const NAMED: [(Event, &str); 26] = [
+pub const NAMED: [(Event, &str); 27] = [
     (START, "START"),
     (CONFIG, "CONFIG"),
     (BOOTED, "BOOTED"),
@@ -226,6 +235,7 @@ pub const NAMED: [(Event, &str); 26] = [
     (WIDEN, "WIDEN"),
     (LIMIT, "LIMIT"),
     (DEVICE_LIMIT, "DEVICE_LIMIT"),
+    (TICKET, "TICKET"),
     (PROCESS_MADE, "PROCESS_MADE"),
     (DELEGATED, "DELEGATED"),
     (CONTROL, "CONTROL"),

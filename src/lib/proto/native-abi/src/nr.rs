@@ -187,6 +187,8 @@ pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// [`NativeCall::ChardevDmabufFence`].
 pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
+/// [`NativeCall::ChargeTicket`].
+pub const CHARGE_TICKET: usize = 0x1070;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -647,10 +649,26 @@ pub enum NativeCall {
     /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
     /// Answered by the load ring.
     ChardevDmabufFence,
+    /// `(op, channel, id_low, id_high, out)`, the id's low and high 32 bits
+    /// in two registers on every architecture. Charging that follows the client
+    /// (`docs/microkernel/K7.md`): a ticket the kernel issues for the
+    /// caller's own job on a channel, which a server thread adopts through
+    /// the other end so that what its native calls make for the request is
+    /// charged to the client. `op` is one of
+    /// [`crate::types::TICKET_ISSUE`] (needs `WRITE`; writes the new id, a
+    /// `u64`, to `out`; `SHOULD_WAIT` past
+    /// [`crate::types::MAX_TICKETS`] live on this end, `PEER_CLOSED`),
+    /// [`crate::types::TICKET_ADOPT`] (needs `READ`; writes the issuer, a
+    /// [`crate::types::TicketIssuer`], to `out`; `BAD_STATE` for an id the
+    /// other end of this channel did not issue or that has ended),
+    /// [`crate::types::TICKET_LEAVE`] (the other arguments ignored) and
+    /// [`crate::types::TICKET_END`] (either end; `BAD_STATE` for an id this
+    /// channel has no live ticket for). `INVALID_ARGS` for another `op`.
+    ChargeTicket,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 67] = [
+pub const ALL: [NativeCall; 68] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -718,6 +736,7 @@ pub const ALL: [NativeCall; 67] = [
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
     NativeCall::ChardevDmabufFence,
+    NativeCall::ChargeTicket,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -800,6 +819,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
+        CHARGE_TICKET => NativeCall::ChargeTicket,
         _ => return None,
     };
     Some(call)
@@ -876,5 +896,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
         NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
+        NativeCall::ChargeTicket => CHARGE_TICKET,
     }
 }

@@ -1600,6 +1600,9 @@ pub(crate) fn exit() -> ! {
 
 /// [`exit`] and [`exit_leaving`]: `leaving` when [`begin_leaving`] counted it.
 fn exit_counted(leaving: bool) -> ! {
+    // A ticket it adopted is let go of here, with interrupts still open: the
+    // last reference frees memory (`docs/microkernel/K7.md`, 2525 (5)).
+    crate::object::ticket::leave();
     // **Nothing switches it out while this frame holds the task.** From the
     // moment it is marked dead, a switch takes it off its queue for good and
     // the reaper frees this stack, with whatever it held still held: the

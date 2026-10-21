@@ -2,7 +2,9 @@
 
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr;
-use ferrix_native_abi::types::CHANNEL_MAX_HANDLES;
+use ferrix_native_abi::types::{
+    CHANNEL_MAX_HANDLES, TICKET_ADOPT, TICKET_END, TICKET_ISSUE, TICKET_LEAVE, TicketIssuer,
+};
 
 use crate::call::{Call, Syscall};
 use crate::error::{Error, decode, decode_unit};
@@ -180,6 +182,95 @@ impl<S: Syscall> Channel<S> {
             .ok_or(Error::Unsupported)?;
         let len = decode(value)?;
         Ok(Words { len, words: back })
+    }
+
+    /// `charge_ticket(ISSUE)`: a ticket for this process's own job on this
+    /// end, for the server at the other end to adopt while it works on one
+    /// request (`docs/microkernel/K7.md`). Its id, to send with the request.
+    /// End it with [`Channel::end_ticket`] when the reply comes or the
+    /// request is given up.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::ShouldWait`] past `MAX_TICKETS` live on this end;
+    /// [`Error::PeerClosed`]; [`Error::NoMemory`]; [`Error::AccessDenied`]
+    /// without `WRITE`.
+    pub fn issue_ticket(&self) -> Result<u64, Error> {
+        let mut id = [0_u8; 8];
+        let value = Call::new(nr::CHARGE_TICKET)
+            .value(TICKET_ISSUE as usize)
+            .value(register(self.handle()))
+            .value(0)
+            .value(0)
+            .output(&mut id)
+            .make(self.syscall());
+        decode_unit(value).map(|()| u64::from_ne_bytes(id))
+    }
+
+    /// `charge_ticket(ADOPT)`: this thread's native calls charge what they
+    /// make to the job of ticket `id`, which the other end issued, until
+    /// [`Channel::leave_ticket`] or the ticket's end. Its issuer, as the
+    /// kernel recorded it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadState`] for an id the other end did not issue or that has
+    /// ended; [`Error::AccessDenied`] without `READ`.
+    pub fn adopt_ticket(&self, id: u64) -> Result<TicketIssuer, Error> {
+        let mut issuer = [0_u8; 16];
+        let value = Call::new(nr::CHARGE_TICKET)
+            .value(TICKET_ADOPT as usize)
+            .value(register(self.handle()))
+            .value(low(id))
+            .value(high(id))
+            .output(&mut issuer)
+            .make(self.syscall());
+        decode_unit(value)?;
+        let word = |at: usize| {
+            let mut raw = [0_u8; 8];
+            if let Some(from) = issuer.get(at..at + 8) {
+                raw.copy_from_slice(from);
+            }
+            u64::from_ne_bytes(raw)
+        };
+        Ok(TicketIssuer {
+            process: word(0),
+            job: word(8),
+        })
+    }
+
+    /// `charge_ticket(LEAVE)`: this thread charges its own job again.
+    ///
+    /// # Errors
+    ///
+    /// None the kernel answers; [`Error`] only if the call itself is
+    /// unsupported.
+    pub fn leave_ticket(&self) -> Result<(), Error> {
+        let value = Call::new(nr::CHARGE_TICKET)
+            .value(TICKET_LEAVE as usize)
+            .value(register(self.handle()))
+            .value(0)
+            .value(0)
+            .value(0)
+            .make(self.syscall());
+        decode_unit(value)
+    }
+
+    /// `charge_ticket(END)`: end ticket `id`, from either end: the client
+    /// when the reply came or it gave up, the server as it replies.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadState`] for an id with no live ticket on this channel.
+    pub fn end_ticket(&self, id: u64) -> Result<(), Error> {
+        let value = Call::new(nr::CHARGE_TICKET)
+            .value(TICKET_END as usize)
+            .value(register(self.handle()))
+            .value(low(id))
+            .value(high(id))
+            .value(0)
+            .make(self.syscall());
+        decode_unit(value)
     }
 
     /// `channel_write` of bytes alone.
@@ -365,4 +456,14 @@ impl<S: Syscall> Channel<S> {
             },
         ))
     }
+}
+
+/// A ticket id's low 32 bits, as `charge_ticket` takes them.
+fn low(id: u64) -> usize {
+    (id & u64::from(u32::MAX)) as usize
+}
+
+/// Its high 32 bits.
+fn high(id: u64) -> usize {
+    (id >> 32) as usize
 }

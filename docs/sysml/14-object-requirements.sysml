@@ -983,6 +983,104 @@ package FerrixObjectRequirements {
         }
     }
 
+    package Tickets {
+        doc /* src/kernel/src/object/ticket.rs: charging that follows the client
+             * (docs/microkernel/K7.md; OPAQUE-KERNEL.md section 2 point 5; the
+             * consultant's OK IF, ledger 2525). A ticket the kernel issues for
+             * the caller's own job on one end of a channel, adopted by a server
+             * thread through the other end. */
+
+        requirement <'L.object.207'> aTicketNamesItsIssuer : ItemLowLevel {
+            attribute :>> statement = "A ticket shall be issued only by
+                charge_ticket ISSUE, for the process that makes the call and the
+                job it is in, both read by the kernel; no operation shall take a
+                job, a process or a quota slot; on an end shared by several
+                processes each issue shall name its own issuer's job.";
+            attribute :>> criterion = "A ticket issued by the client is adopted
+                with the client's process id and job id, and a commit under it is
+                charged to the client's job; one issued on the same end by a
+                second process in job D is adopted with that process's ids and
+                D's.";
+            attribute :>> parent = "H.QUOTA.14";
+            attribute :>> unit = ("object::ticket::Tickets::issue",
+                "object::channel::Endpoint::issue_ticket",
+                "object::process::Process::issuer_and_slot");
+        }
+        requirement <'L.object.208'> aTicketIsAdoptedFromThePeer : ItemLowLevel {
+            attribute :>> statement = "charge_ticket ADOPT shall honour a ticket
+                only through the other end of the channel it was issued on, and
+                only while it is live; any other id shall be refused BAD_STATE,
+                audited as TICKET, with the caller's adoption unchanged.";
+            attribute :>> criterion = "An id never issued, an ended one, one
+                issued on the adopting end and one issued on another channel are
+                each refused BAD_STATE, the server's next commit is charged to its
+                own job, and a TICKET record is kept for each.";
+            attribute :>> parent = "H.QUOTA.14";
+            attribute :>> unit = ("object::ticket::Tickets::find",
+                "object::channel::Endpoint::adoptable_ticket",
+                "object::channel::Side::index", "object::ticket::adopt");
+        }
+        requirement <'L.object.209'> anAdoptedCallChargesTheClient : ItemLowLevel {
+            attribute :>> statement = "While a thread holds an adoption whose
+                ticket is live, the VMO commits and pins and the new objects its
+                native calls make shall be charged to the ticket's job and every
+                job above it, against their limits; faults on its own space, its
+                page tables and its kernel heap shall stay its own job's; a commit
+                refused at the client's limit shall be answered NO_MEMORY with no
+                throttle, no kill and no charge to the server's job.";
+            attribute :>> criterion = "Under an adoption, four committed pages, a
+                channel and a port raise the client's frames by four and objects
+                by four and the server's by none, the client's heap unchanged; a
+                read into the server's own fresh memory faults its pages in on the
+                server; at the client's limit the commit is NO_MEMORY, neither
+                job's high count moves, no process ends.";
+            attribute :>> parent = "H.QUOTA.14";
+            attribute :>> unit = ("object::quota::charge_target",
+                "object::quota::charging_own", "object::ticket::charging_for_call",
+                "mm::allocate_user_frame", "object::oom::fault_own",
+                "object::oom::user_fault_own");
+        }
+        requirement <'L.object.210'> aTicketEndsForGood : ItemLowLevel {
+            attribute :>> statement = "A ticket shall end at charge_ticket END
+                from either end and when either end of its channel closes, never
+                become live again, and its id never be issued again; a native
+                call that starts after the end shall charge the calling thread's
+                own job, with or without LEAVE; at most the rest of one call per
+                adopted thread shall be charged to the client after the end,
+                within the client's own limits.";
+            attribute :>> criterion = "After the server's END, the client's END
+                and the client's close, the server's next commit is charged to its
+                own job with no LEAVE; every id issued in the check is greater
+                than the one before.";
+            attribute :>> parent = "H.QUOTA.14";
+            attribute :>> unit = ("object::ticket::Tickets::end",
+                "object::ticket::Tickets::end_all", "object::ticket::leave",
+                "object::channel::Endpoint::end_ticket");
+        }
+        requirement <'L.object.211'> whatATicketChargedComesBack : ItemLowLevel {
+            attribute :>> statement = "What a ticket charged shall stay charged
+                to the client's job after the ticket ends, until the object goes,
+                and shall then be taken back from exactly the levels it charged.";
+            attribute :>> criterion = "A ticket's END leaves the client's frames
+                as they were; once the server closes what it made and the
+                processes are gone, the client's, the server's and their parent's
+                frames and objects read zero.";
+            attribute :>> parent = "H.QUOTA.14";
+            attribute :>> unit = ("object::quota::Charge::to", "mm::release_frame");
+        }
+        requirement <'L.object.212'> ticketsAreBoundedPerEnd : ItemLowLevel {
+            attribute :>> statement = "At most MAX_TICKETS (64) tickets shall be
+                live on one end of a channel, the next ISSUE refused SHOULD_WAIT,
+                and each ticket shall be one native object charged to its
+                issuer's job.";
+            attribute :>> criterion = "64 issues on one end raise the client's
+                objects by 64, the 65th is refused SHOULD_WAIT, an END makes room
+                for one more, and closing the channel gives every one back.";
+            attribute :>> parent = "H.QUOTA.14";
+            attribute :>> unit = "object::ticket::Tickets::issue";
+        }
+    }
+
     package Jobs {
         doc /* src/kernel/src/object/job.rs. */
 

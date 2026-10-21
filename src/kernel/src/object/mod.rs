@@ -38,6 +38,8 @@ pub(crate) mod process;
 pub(crate) mod quota;
 pub(crate) mod quota_check;
 pub(crate) mod sender_check;
+pub(crate) mod ticket;
+pub(crate) mod ticket_check;
 pub(crate) mod write_read_check;
 
 use alloc::sync::Arc;

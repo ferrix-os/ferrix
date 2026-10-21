@@ -100,6 +100,7 @@ Causes are listed most likely first.
 | [FX-0907](#fx-0907) | a process left its speculation domain where it may not wait |
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
+| [FX-0912](#fx-0912) | a server's charges did not follow the client's ticket |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2458,6 +2459,36 @@ none it should.
 
 See: src/kernel/src/discovery/smbios.rs;
 src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
+
+<a id="fx-0912"></a>
+
+## FX-0912 — a server's charges did not follow the client's ticket
+
+`object::ticket_check::run` drives charging that follows the client
+(`docs/microkernel/K7.md`): a client issues a ticket on its end of a channel,
+and a server thread that adopts it through the other end has the VMO commits
+and new objects of its native calls charged to the client's job while the
+ticket is live. The check requires the ticket to name its issuer's own process
+and job, adoptions through any other end or of ended or unknown ids to be
+refused and audited, the server's own faults and heap to stay the server's, a
+refusal at the client's limit to cost the server no wait and no kill, every end
+(either side's `END`, a close) to stop the charging at the next call, at most
+64 live tickets per end, and every counter to come back. A kernel failing this
+lets a server charge a job that did not ask it to, or a client fill a shared
+server (T.EXHAUST).
+
+1. `quota::charge_target` stopped answering the adopted ticket's slot, or a
+   charge          site stopped reading it (`mm::allocate_user_frame`,
+   `quota::Charge::running`).
+2. `ticket::charging_for_call` set the target from an ended ticket, or did not
+   clear          it as the call returned.
+3. The channel's ticket registry honoured an id from the wrong end or channel,
+   or an          end's close stopped ending its tickets.
+4. A fault path stopped suspending the target (`quota::charging_own`), so a
+   server's          own memory was charged to its client.
+
+See: src/kernel/src/object/ticket.rs; src/kernel/src/object/ticket_check.rs;
+src/kernel/src/object/quota.rs; docs/microkernel/K7.md.
 
 <a id="fx-1001"></a>
 

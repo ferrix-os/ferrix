@@ -352,7 +352,14 @@ pub(crate) fn server_count() -> usize {
 pub(crate) fn dispatch(args: &SyscallArgs, caller: Option<&dyn Host>) -> Result<usize, Errno> {
     let call = decode(args.number).ok_or(Errno::ENOSYS)?;
     let caller = caller.ok_or(Errno::ESRCH)?;
-    let answered = answer(call, caller, args.args);
+    // A thread that adopted a live ticket charges what this call makes for
+    // the request to the ticket's job (`object::ticket`); `CHARGE_TICKET`
+    // itself never does, so a ticket's own charge is always its issuer's.
+    let answered = if call == NativeCall::ChargeTicket {
+        answer(call, caller, args.args)
+    } else {
+        object::ticket::charging_for_call(|| answer(call, caller, args.args))
+    };
     record_call(call, args.number, caller.core(), &args.args, &answered);
     answered
 }
@@ -381,6 +388,22 @@ fn record_call(
         }
         // Audited by the call itself, with the device and the values.
         (NativeCall::DeviceSetLimit, _) => return,
+        // A ticket's refusals and its ends, never a successful adoption,
+        // issue or leave: one of each per request would flood the ring
+        // (the consultant's answer to K7's Q5, ledger 2525).
+        (NativeCall::ChargeTicket, Err(status::BAD_STATE) | Ok(_))
+            if a.first().copied().is_some_and(|op| {
+                op == types::TICKET_END || op == types::TICKET_ADOPT && answered.is_err()
+            }) =>
+        {
+            let op = a.first().copied().unwrap_or(0);
+            let id = a.get(2).copied().unwrap_or(0);
+            (
+                audit::TICKET,
+                named(a.get(1).copied().unwrap_or(0)),
+                [number, op as u32, id as u32],
+            )
+        }
         (_, Err(status::ACCESS_DENIED)) => (audit::RIGHTS, named(a[0]), [number, 0, 0]),
         (NativeCall::JobForCgroup, Ok(given)) => {
             (audit::DELEGATED, named(*given as u64), [number, 0, 0])
@@ -453,7 +476,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::JobSetLimit
         | NativeCall::JobGetQuota
         | NativeCall::ProcessCreate
-        | NativeCall::ProcessStart => job_call(call, caller, &a),
+        | NativeCall::ProcessStart
+        | NativeCall::ChargeTicket => job_call(call, caller, &a),
         NativeCall::InterruptCreate => interrupt_create(process, handle(a[0]), a[1]),
         NativeCall::InterruptAck => interrupt_ack(process, handle(a[0])),
         NativeCall::InterruptBind => interrupt_bind(process, handle(a[0]), handle(a[1]), a[2]),
@@ -1692,8 +1716,8 @@ fn job_in(process: &Process, job: Handle, needed: Rights) -> Result<Arc<Job>, Er
     })
 }
 
-/// The calls on a job and on the processes made in one, which `dispatch`
-/// hands on as one.
+/// The calls on a job, on the processes made in one, and on the charging
+/// of a job by ticket (`charge_ticket`), which `dispatch` hands on as one.
 fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     let [first, second, third, fourth, ..] = *a;
     let process = caller.core();
@@ -1712,6 +1736,9 @@ fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, 
             },
         ),
         NativeCall::ProcessStart => process_start(process, handle(first), handle(second)),
+        NativeCall::ChargeTicket => {
+            charge_ticket(process, first, handle(second), ticket_id(*a), a[4])
+        }
         _ => Err(Errno::ENOSYS),
     }
 }
@@ -2204,6 +2231,89 @@ fn process_bootstrap(process: &Process) -> Result<usize, Errno> {
 /// `object_id` (`docs/microkernel/K6.md` §4): the id of the process or job
 /// `target` names, a process's from its [`Exit`](object::process::Exit), so
 /// an ended process still answers. Any rights: an id grants nothing.
+/// A ticket's id from `charge_ticket`'s third and fourth registers, its low
+/// and high 32 bits: the same on every architecture, ARMv7-A's 32-bit
+/// registers included, so an id is never cut short.
+fn ticket_id(a: [u64; 6]) -> u64 {
+    (a[2] & u64::from(u32::MAX)) | (a[3] << 32)
+}
+
+/// `charge_ticket(op, channel, id_low, id_high, out)`: charging that follows the client
+/// (`docs/microkernel/K7.md`, `object::ticket`).
+///
+/// `ISSUE` issues a ticket on the caller's end for the caller's own job and
+/// process, read by the kernel under the process's membership lock (never
+/// from an argument), and writes its id to `out`. `ADOPT` finds a live
+/// ticket the other end issued, writes its issuer to `out`, and only then
+/// makes it the calling task's adoption, so a fault on `out` adopts nothing.
+/// `LEAVE` gives the adoption up. `END` ends a ticket from either end.
+fn charge_ticket(
+    process: &Process,
+    op: u64,
+    channel: Handle,
+    id: u64,
+    out: u64,
+) -> Result<usize, Errno> {
+    match op {
+        types::TICKET_ISSUE => issue_ticket(process, channel, out),
+        types::TICKET_ADOPT => adopt_ticket(process, channel, id, out),
+        types::TICKET_LEAVE => {
+            object::ticket::leave();
+            Ok(0)
+        }
+        types::TICKET_END => {
+            let endpoint =
+                process.with_handles(|table| channel_in(table, channel, Rights::NONE))?;
+            if endpoint.end_ticket(id) {
+                Ok(0)
+            } else {
+                Err(status::BAD_STATE)
+            }
+        }
+        _ => Err(status::INVALID_ARGS),
+    }
+}
+
+/// `charge_ticket(ISSUE)`: a ticket on `channel` for the caller's own job
+/// and process, its id written to `out`.
+fn issue_ticket(process: &Process, channel: Handle, out: u64) -> Result<usize, Errno> {
+    use object::ticket::IssueError;
+    let endpoint = process.with_handles(|table| channel_in(table, channel, Rights::WRITE))?;
+    let (issuer, slot) = process.issuer_and_slot();
+    let id = endpoint
+        .issue_ticket(issuer, slot)
+        .map_err(|refused| match refused {
+            IssueError::Full => status::SHOULD_WAIT,
+            IssueError::PeerClosed => status::PEER_CLOSED,
+            IssueError::NoMemory => status::NO_MEMORY,
+        })?;
+    if let Err(error) = uaccess::copy_to_user(process.space(), out, &id.to_ne_bytes()) {
+        // An id nobody can name is a ticket nobody can end: end it.
+        let _ = endpoint.end_ticket(id);
+        return Err(fault(error));
+    }
+    Ok(0)
+}
+
+/// `charge_ticket(ADOPT)`: the live ticket `id` the other end of `channel`
+/// issued becomes the calling task's adoption, once its issuer is written
+/// to `out`, so a fault there adopts nothing.
+fn adopt_ticket(process: &Process, channel: Handle, id: u64, out: u64) -> Result<usize, Errno> {
+    let endpoint = process.with_handles(|table| channel_in(table, channel, Rights::READ))?;
+    let adopted = endpoint.adoptable_ticket(id).ok_or(status::BAD_STATE)?;
+    let issuer = adopted.issuer();
+    let mut bytes = [0_u8; size_of::<types::TicketIssuer>()];
+    for (to, word) in bytes
+        .chunks_exact_mut(8)
+        .zip([issuer.process(), issuer.job()])
+    {
+        to.copy_from_slice(&word.to_ne_bytes());
+    }
+    uaccess::copy_to_user(process.space(), out, &bytes).map_err(fault)?;
+    object::ticket::adopt(adopted);
+    Ok(0)
+}
+
 fn object_id(process: &Process, target: Handle, out: u64) -> Result<usize, Errno> {
     let id = process.with_handles(|table| {
         let (object, _) = table.get(target).map_err(table_error)?;

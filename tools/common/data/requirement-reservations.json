@@ -110,13 +110,6 @@
       "purpose": "MICROKERNEL.md §3 K5, wait on a user address (docs/microkernel/K5.md): H.OBJ.20, a wait on a user word sleeps only while the word holds the value given and ends at a wake of its key, its deadline or its caller's leaving; L.user.135-144, the core's address-wait table (keys private by space and address, shared by VMO and offset, no lost wake, wake N oldest first, requeue, wait on any of up to 128 words, the deadline on the scheduler's one timer queue, interruption, unmap, waiters charged to the caller's job); L.object.203-206, the four native calls' decoding and refusals"
     },
     {
-      "ids": ["L.object.207-212", "H.QUOTA.14"],
-      "owner": "mk-k7",
-      "branch": "mk/k7",
-      "date": "2026-10-19",
-      "purpose": "MICROKERNEL.md §3 K7, charging that follows the client (OPAQUE-KERNEL.md §2 point 5, ledger 35-36): H.QUOTA.14, memory a server holds for a client's request charged to the client's job, only through a ticket the kernel issued for that request and only until it is answered; L.object.207-212, the ticket's issue, adoption through the issuing end's peer, charging while adopted, its end, the charges' return and the per-end bound"
-    },
-    {
       "ids": ["H.OBJ.21", "L.object.213-220", "L.sched.84"],
       "owner": "mk-k10",
       "branch": "mk/k10",

@@ -83,6 +83,31 @@ pub struct ReadAttested {
     pub job: u64,
 }
 
+/// [`crate::nr::NativeCall::ChargeTicket`]'s `op`: issue a ticket for the
+/// caller's own job on its end of a channel (`docs/microkernel/K7.md`).
+pub const TICKET_ISSUE: u64 = 1;
+/// `op`: adopt a ticket the other end issued, so that the calling thread's
+/// native calls charge the ticket's job while it is live.
+pub const TICKET_ADOPT: u64 = 2;
+/// `op`: give up the calling thread's adoption.
+pub const TICKET_LEAVE: u64 = 3;
+/// `op`: end a ticket, from either end of its channel.
+pub const TICKET_END: u64 = 4;
+/// The most tickets one end of a channel has live at once.
+pub const MAX_TICKETS: usize = 64;
+
+/// Who issued a ticket, as `charge_ticket`'s `TICKET_ADOPT` writes it: the
+/// issuing process's id and the id of the job it was in at the issue, both
+/// recorded by the kernel, as [`ReadAttested`]'s writer is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct TicketIssuer {
+    /// The issuing process's id.
+    pub process: u64,
+    /// The id of the job it was in at the issue.
+    pub job: u64,
+}
+
 /// `vmo_pin`'s option: the device may read the pinned pages but not write
 /// them.
 pub const PIN_READ_ONLY: u64 = 1;

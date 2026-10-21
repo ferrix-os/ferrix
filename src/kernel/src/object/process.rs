@@ -414,6 +414,15 @@ impl Process {
         self.slot.load(Ordering::Acquire)
     }
 
+    /// Its attested sender and its job's quota slot, read together under
+    /// `membership`, which every move between jobs holds: so the job a
+    /// ticket names and the slot it charges are the same job's
+    /// (`object::ticket`, L.object.207).
+    pub(crate) fn issuer_and_slot(&self) -> (crate::object::channel::Sender, u32) {
+        let _membership = self.membership.lock();
+        (crate::object::channel::Sender::of(self), self.quota_slot())
+    }
+
     /// Charge a thread beside its first to its job, before the thread's id
     /// is chosen.
     ///
