@@ -3,7 +3,8 @@
 The Windows game *Arknights: Endfield* runs on Ferrix: through Wine, drawing
 with DXVK on NVIDIA's Vulkan, on the RTX 3060. Put on the roadmap by the
 customer on 2026-10-10 as the road after Steam ("update the roadmap to
-Endfield"). Nothing of it is built. A feasibility study was written the same
+Endfield"). On that day nothing of it was built; steps 1 to 4 have begun since,
+as each step below says. A feasibility study was written the same
 day (`~/.local/share/ferrix/endfield/STUDY.md` on nazuna, research only); this
 page is that study's route as a stage, with each claim about the tree checked
 against `main` 557b939ed and the four places it was wrong corrected below.
@@ -111,7 +112,7 @@ NVIDIA's Vulkan, and Wine's X11 driver against yserver.
   and downloads over, and a root on btrfs. Stage 22's container (N5 to N7)
   is needed only by step 7.
 * **Stage 13**, if step 5 takes seccomp's way: `SECCOMP_RET_TRAP` needs
-  `SIGSYS` delivered, which is S4, on a branch.
+  `SIGSYS` delivered, which is S4, on `main` since 2026-10-18.
 * **The certified item.** Steps 1, 3 and 5 change what the kernel answers to
   programs. Part of that is in the certified item's core ring
   (`src/kernel/src/arch/x86_64/syscall.rs` and whatever else reaches
@@ -192,6 +193,10 @@ since been deleted from the guest on the customer's word.
   is on `main` since, untried on the box) and, with no MSI arriving, USB
   and the NIC poll ([`docs/N150.md`](../N150.md) §13). The kernel
   bring-up is on `main` since the n150k landing (ledger 1884), evidenced on QEMU only and not yet run on the box with checks on (BACKLOG).
+  The box has no NVIDIA card: its GPU route is the Intel GPU driver
+  ([stage 21's page](stage-21-bare-metal-gpu-ferrix.md), `docs/INTEL-GPU.md`),
+  whose M1 and M2 ran on the box on 2026-10-20; the first Endfield run on it
+  (the launcher on lavapipe, only the game on anv) is prepared, not made.
 * *Not known, and worth stating:* whether ACE accepts Wine or Proton on
   Linux on bare metal. The reports above are of that, not of a VM, and
   none was checked here; ACE has broken under Wine more than once in 2026.
@@ -449,14 +454,17 @@ logged into and nothing of the game was downloaded.
   reclaim is the branch `mm-pcache`; L.object.188-190 (reclaim of a
   writable mount's clean pages, the write that reclaims before it answers
   `ENOSPC`, the cache's totals in `/proc/meminfo`) are reserved on `main`
-  (77e87403a) and the code is not landed. A second download (install5, 4
+  (77e87403a) and the code **landed on 2026-10-15** as f0bc9ab2d. A second download (install5, 4
   vCPUs, 56.9 GB in 54 parts) ran at 2.0 to 3.3 MB/s and stopped at 00:22
   after 9.5 GB, with the button reading "Download Error": the guest's
   virtio-net driver had been restarted twice by `devmgr` (status 7, the
   serve loop stopped on a fault, about 23:29 and 00:06) and after the
   second restart sent nothing (the process at 13 to 25% CPU, xtask's
-  gateway idle). A bug in the driver restart, not the disk; branch
-  `net-restart-stall`, in progress. The launcher's looping background
+  gateway idle). A bug in the driver restart, not the disk: the net ring's
+  shared indices were composed from bytes and tore. Every one is a single
+  aligned access, and a ring the kernel ended makes the driver leave, since
+  2026-10-15 on `main` (36a1bea84, 11d006073, bdccab15d; the branch
+  `net-restart-stall`). The launcher's looping background
   video, not the download, was taking about 2.6 of the 4 vCPUs; its
   STATIC switch (a pill at the top of the window, in memory only, so
   clicked after every launcher start) pauses it. install6 (8 vCPUs, a
@@ -468,9 +476,9 @@ logged into and nothing of the game was downloaded.
   unproven.
 * *Still to do:* the image path of another process (`ptrace` and
   `/proc/<pid>/mem`, E5.2, which the launcher asks for every five seconds
-  and Wine cannot give it on Ferrix); the current launcher version; the network driver's restart
-  (`net-restart-stall`) and `mm-pcache` on `main`; a resumed download
-  shown after a restart; and, when Ferrix runs on the machine, E4.1, the
+  and Wine cannot give it on Ferrix); the current launcher version; a download run again on
+  `main`, now that `mm-pcache` and the net ring's fix are on it; a resumed
+  download shown after a restart; and, when Ferrix runs on the machine, E4.1, the
   installer itself (E4.2), then E4.4 to E4.6.
 
 ### Step 5: past the anti-cheat  ·  29 points as a guess; unknown
@@ -492,8 +500,9 @@ ends and the customer decides.
   anti-cheat's code, which GE-Proton catches with Syscall User Dispatch
   and DW-Proton with a seccomp filter that returns `SECCOMP_RET_TRAP`.
   Both are built: S4's `SIGSYS` for `TRAP` (on `main` since 6c025174e, ledger line
-  2331) and Syscall User Dispatch (branch `sud`, `docs/SECCOMP.md` §13,
-  ledger line 2323), each landing on its own review. DW's filter also needs
+  2331) and Syscall User Dispatch (on `main` since 2026-10-18,
+  `docs/SECCOMP.md` §13, ledger line 2323; `test-sud`, and `test-wine-dispatch`
+  runs a PE probe's direct call in GE-Proton), each landed on its own review. DW's filter also needs
   Ferrix's mmap layout to match Linux's (`ENDFIELD-GAME.md` (b)), which is
   not part of either. 8.
 * **E5.4** What Ferrix says of itself. `uname -s` says `Ferrix` (the

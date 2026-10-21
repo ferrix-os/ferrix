@@ -477,9 +477,9 @@ package FerrixRoadmap {
              * MAP_SHARED pages. */
     }
 
-    #inProgress requirement <'S13'> stage13Isolation : Stage {
+    #implemented requirement <'S13'> stage13Isolation : Stage {
         attribute :>> number = 13;
-        attribute :>> status = StageStatus::InProgress;
+        attribute :>> status = StageStatus::Done;
         attribute :>> size = "month";
         doc /* All eight namespaces, the unified cgroup hierarchy with cpu,
              * memory, io and pids, cgroupfs, classic-BPF seccomp with the
@@ -526,9 +526,14 @@ package FerrixRoadmap {
              * UTS, IPC, cgroup, pid and network namespaces are in too, and so
              * are seccomp's classic-BPF checker and interpreter, its hook at
              * the four system-call entries and its filters (S1 to S3, the
-             * last on 2026-10-04). Left: time namespaces, SECCOMP_RET_TRAP and
-             * TSYNC (S4 to S6), and test-container, the exit criterion as a
-             * program. */
+             * last on 2026-10-04). SECCOMP_RET_TRAP, TSYNC and test-seccomp (S4
+             * to S6) and Syscall User Dispatch are on main since 2026-10-18,
+             * and test-container, the exit criterion as one program, since
+             * 2026-10-14: it passed on all three architectures, so the exit is
+             * met. A writable mount's clean pages are reclaimed since
+             * 2026-10-15 (L.object.188-190). Left: time namespaces,
+             * unprivileged mounting, reclaim of the dentry and inode caches,
+             * memory.reclaim, io.weight, cpu.max.burst and cpu.idle. */
     }
 
     #planned requirement <'S14'> stage14RealTime : Stage {
@@ -719,7 +724,14 @@ package FerrixRoadmap {
              * booting the RTX 3060's GSP with nvidia-smi, are on main
              * (2026-10-03), and the chardev core's queue bound (F-63) with
              * stage 10's chardev self-check since 2026-10-05. N2 to N4 and
-             * the screen on the customer's TV are built and not landed.
+             * the screen on the customer's TV landed on 2026-10-05, and N3b's
+             * kernel half (a chardev render node, dmabufs and sync-file
+             * fences) on 2026-10-11. The customer's Intel N150 box is the
+             * stage's first bare-metal machine (docs/N150.md): Ferrix booted
+             * on it on 2026-10-15, its drivers (AHCI, the YT6801, a
+             * firmware framebuffer, VT-d, SMBIOS, an event log) and a render
+             * driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and
+             * the kernel bring-up is evidenced on QEMU only.
              * Exit: the stage 19 exit on real hardware, drawn by the card. */
     }
 
@@ -764,10 +776,12 @@ package FerrixRoadmap {
              * waits on stage 13, and its GPU process on user copies
              * through a device window and a render group
              * (docs/STEAM.md section 6). On 2026-10-01 the second step
-             * got its gate, cargo xtask test-steam-game, not passing
-             * yet: Teeworlds installs on request and downloads, and
+             * got its gate, cargo xtask test-steam-game, not passing then
+             * (the customer reports a game running by 2026-10-21): Teeworlds installs on request and downloads, and
              * Steam then stalls staging it, for a reason not yet
-             * known (docs/STEAM.md section 7). */
+             * known (docs/STEAM.md section 7). Since 2026-10-10 a native
+             * game can be preinstalled on the host and started by a
+             * compatibility tool outside the runtime's container. */
     }
 
     #inProgress requirement <'S23'> stage23Endfield : Stage {
@@ -781,8 +795,10 @@ package FerrixRoadmap {
              * anti-cheat refuses a virtual machine), Wine, DXVK and a Unity
              * game run on Ferrix with no card, and Endfield's launcher draws
              * its install dialog in Debian's Wine and in GE-Proton11-7's;
-             * the game's download stopped on ENOSPC from Ferrix's btrfs and
-             * is open. Eight
+             * the game's download stopped on ENOSPC from Ferrix's btrfs,
+             * whose cause, a writable mount's page cache never reclaimed, is
+             * fixed on main since 2026-10-15, and no download has run since;
+             * Syscall User Dispatch and seccomp's TRAP are on main. Eight
              * steps in the order they can be proved: the game on plain
              * Linux in the same VM shape, which costs no Ferrix work and
              * answers whether its anti-cheat accepts a virtual machine;

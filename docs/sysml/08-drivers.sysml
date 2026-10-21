@@ -271,7 +271,12 @@ package FerrixDrivers {
              * memory is pinned PIN_COHERENT. No QEMU machine has the
              * device, so no boot test exercises it: its gates are
              * src/lib/drivers/usb/usb-host's tests against a model of EHCI and the board's
-             * bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7). */
+             * bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7).
+             * Since 2026-10-10 it also drives a PC's xHCI controller, picked
+             * by what START names (docs/XHCI.md; a bulk-only disk is read and
+             * not yet served to the block core), gated under QEMU by cargo
+             * xtask test-usb; a USB keyboard worked on the N150 box on
+             * 2026-10-15. */
     }
 
     #inProgress part def Gc400Driver :> DriverProcess {
@@ -319,7 +324,68 @@ package FerrixDrivers {
              * before it disables it. Its gates are the library's host tests
              * against a model of a controller, and cargo xtask test-nvme on
              * QEMU's emulated one, with / on a drive below a PCIe switch. It
-             * has not run on a real drive (2026-10-10). */
+             * has since driven a real WD SN720 through VFIO and installed
+             * Ferrix onto it (the customer's word, 2026-10-21). */
+    }
+
+    #inProgress part def AhciDriver :> DriverProcess {
+        @stage { number = 10; }
+        doc /* src/user/system/native/drivers/block/ahci over
+             * src/lib/drivers/block/ahci: a SATA disk behind an AHCI
+             * controller as a disk behind the block ring (docs/AHCI.md), for
+             * the customer's N150 box. devmgr starts it on class code
+             * 01:06:01 of any vendor. The controller is brought up polled
+             * (COMRESET of a link firmware left down, a busy device waited
+             * for, a refused IDENTIFY said), and each block-ring request is
+             * carried out whole by one transfer. A controller with no ATA
+             * disk is nothing to serve, not a failed driver. Its gates are
+             * the library's tests against a model HBA and cargo xtask
+             * test-n150-sata on QEMU's q35 controller; it served the box's
+             * drive on 2026-10-15. */
+    }
+
+    #inProgress part def Yt6801Driver :> DriverProcess {
+        @stage { number = 10; }
+        doc /* src/user/system/native/drivers/net/yt6801 over
+             * src/lib/drivers/net/yt6801 and src/lib/drivers/net/dwmac: the
+             * Motorcomm YT6801, the N150 box's gigabit port (networking
+             * page), speaking the net ring under ferrix-netserve's loop.
+             * devmgr starts it on 1F0A:6801. The kernel holds the function's
+             * MSI-X off and grants its table page (L.device.35-37). Its
+             * gates are the libraries' tests against models of the chip and
+             * the DesignWare core, and a QEMU e1000e for the kernel change;
+             * on the box on 2026-10-15 the link came up at one gigabit, and
+             * the driver polls every millisecond until its one MSI arrives,
+             * which it does rarely (docs/BACKLOG.md). */
+    }
+
+    #inProgress part def EfifbDriver :> DriverProcess {
+        @stage { number = 21; }
+        doc /* src/user/system/native/drivers/display/efifb: the firmware's
+             * framebuffer as the display core's card0, for a PC whose GPU has
+             * no driver (docs/DISPLAY.md section 8). Under the kernel option
+             * ferrix.efifb the last finder lends the framebuffer to a node of
+             * its own, write-combining from its first map, and the driver
+             * copies each flushed rectangle onto it; hyprix composites into
+             * dumb buffers as on virtio-gpu. Its gate is cargo xtask
+             * test-compositor --boot firmware-screen; hyprix drew on the N150
+             * box's framebuffer on 2026-10-15. */
+    }
+
+    #inProgress part def IntelGpuDriver :> DriverProcess {
+        @stage { number = 21; }
+        doc /* src/user/system/native/drivers/gpu/intel over
+             * src/lib/drivers/gpu/intel-xelp: a render driver for the N150's
+             * Xe-LP graphics (docs/INTEL-GPU.md), following i915 file by
+             * file. The library is the i915 uAPI front end over a back end,
+             * the GT's bring-up, execlists, the PPGTT and the power
+             * management a host does, all host-tested; the process serves a
+             * render-only chardev node and is started on ferrix.intelgpu.
+             * The kernel lends it the screen by identity and maps its
+             * buffers write-combining. On the box, M1 (the device answers)
+             * and M2 (the first GPU commands) ran on 2026-10-20; M3, the
+             * render node over the GT back end, is wired and not shown on
+             * the box. */
     }
 
     #implemented action def DriverBootstrap {

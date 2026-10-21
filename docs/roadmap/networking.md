@@ -547,8 +547,20 @@ given the listener's flag, so a server that accepted on a non-blocking
 listener and then read with a timeout saw `EAGAIN` before the client's bytes
 arrived. The boot checks ask both families.
 
-**Written ahead — the N150 box's wired port, a Motorcomm YT6801
-(2026-10-15, branch `net-yt6801`).** The box's gigabit port is a YT6801, PCI
+**Done — a DHCP client of Ferrix's own (2026-10-19).** `/bin/dhcpc`
+(`src/user/system/linux/dhcp`, 1f1db198d) asks DISCOVER, OFFER, REQUEST and
+ACK over an `AF_PACKET` socket and applies the lease itself over rtnetlink --
+the link up, the address, the default route through the first router and
+`/etc/resolv.conf` -- so no lease script, shell, `ip` or `sed` runs. It
+replaces busybox's `udhcpc` in the desktop boots, `test-net`, the devloop,
+the N150 box's script and the Steam, Claude Code and adb gates; the release
+image carries it as Ferrix's own program (aacbd72a6). Also on `main` on
+2026-10-15: the gateway scales the guest's TCP window and probes a shut one
+(a7af71269), and the guest's receive buffer is 1 MiB with the reassembly
+list capped at 1,024 runs (7a367b755).
+
+**Done — the N150 box's wired port, a Motorcomm YT6801
+(2026-10-15, branch `net-yt6801`, landed 2026-10-15).** The box's gigabit port is a YT6801, PCI
 `1F0A:6801`: a Synopsys DesignWare Ethernet QoS core ("dwmac4") at offset
 `0x2000` of BAR 0, a YT8531S PHY inside the chip at MDIO address 0, and
 Motorcomm's own registers in BAR 0's second page -- the PHY's reset, an eFuse

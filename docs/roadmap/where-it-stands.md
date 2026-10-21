@@ -1,7 +1,138 @@
 # Where it stands, in full
 
-*Reviewed 2026-10-09, to `main` d884add58; the stage 23 and 24 paragraphs
-2026-10-15, to `main` e31ba0c8e; the installer entries to 4a8a54517.* The short version is on the [overview](README.md).
+*reviewed 2026-10-21, to `main` 2ba25d12a: the first section holds the
+landings since 2026-10-09, and the older sections are corrected where `main`
+has overtaken them. Dates are the day a commit reached `main`.* The short
+version is on the [overview](README.md).
+
+## Landed 2026-10-09 to 2026-10-21 (`main` 2ba25d12a)
+
+* **The switch to a microkernel begins** (`docs/MICROKERNEL.md`, the
+  customer's go for M0 on 2026-10-13; [M0's page](microkernel-m0.md)). The
+  plan went through fifteen revisions under the certification consultant's
+  reviews. On `main`: the build-flag system with its four kernel profiles
+  (`present`, `desktop`, `fast`, `max`; the last two are validated, not built,
+  until M5), the resolver, the boot line the gate compares with the profile,
+  `checks=off` and the load ratchet (2026-10-17, d98ab2314, b91a85311); a
+  type-check of the item with upstream Rust 1.95.0, the release Ferrocene 26.05
+  is built from (e56d1a75c; Ferrocene's own compiler is owed by the customer's
+  subscription); F-73 (every x86-64 processor sets `CR4.MCE`, d9c93c7c9) and
+  F-64 (505c5aa1b), both on 2026-10-21, which `smt=off` and
+  `program_barrier=session` waited on; and `bench-rows`, the tooling for the
+  performance baselines (40996829f), whose baselines are not taken yet. M1's
+  designs K5, K6, K7, K10 and K12 are on `main` with the consultant's OK IF and
+  their ids reserved (2026-10-19); the code is on `mk/*` branches, none
+  gated, about 33 of about 70 points spent (`docs/BACKLOG.md`). The ids of M2's
+  K2, K3 and K4 are reserved (2026-10-21, 2426e7038).
+* **Stage 13's exit is met** (`docs/CGROUPS.md` §15). `cargo xtask
+  test-container` (f231cdf09, 2026-10-14) runs the criterion as one program,
+  an unprivileged user namespace with a pid 1 under a memory limit with
+  scoped reclaim and a scoped OOM kill, behind a seccomp filter, and passed
+  on all three architectures with six negative controls fired. Seccomp's
+  `TRAP`, `TSYNC` and `test-seccomp` (S4 to S6) reached `main` on 2026-10-18,
+  and Syscall User Dispatch (`prctl` 59, for Proton's Wine, `test-sud`,
+  `docs/SECCOMP.md` §13) with them. A writable mount's clean pages are
+  reclaimed, `/proc/meminfo` counts the cache truthfully and a commit writes
+  back in slices (f0bc9ab2d, 2026-10-15, L.object.188-190: the work of the
+  branch `mm-pcache`, landed under another hash), which the Endfield download's
+  ENOSPC asked for. Time namespaces, unprivileged mounting (N5) and a few
+  controllers' files stay on branches or unwritten.
+* **Ferrix on the customer's N150 box** (stage 21, `docs/N150.md`).
+  Built from the branch `ahci`, it booted on the box on 2026-10-15 to a
+  desktop on the firmware framebuffer, `/` on the SATA drive and the network
+  up, with `gryphlink` showing the launcher. On `main`: the AHCI driver, the
+  YT6801's network driver (`ferrix-dwmac`, `ferrix-yt6801`), `efifb` with
+  hyprix on the firmware's framebuffer and the framebuffer write-combining
+  (H6), the boot console on that framebuffer, a PC's xHCI controller behind
+  `usbhid` with bulk-only disks (2026-10-11), an NVMe driver (2026-10-11),
+  x2APIC mode and bounded PIT and HPET waits with a CPUID fallback for the
+  clock, Intel HWP at bring-up and `ferrix.epp`, `CR0.NE` and `CR4.MCE` on
+  every processor, the loader's SMBIOS copy shown in sysfs as Linux does (DMI
+  D1), a kernel log kept across a warm reset (PM3) and an event-log partition
+  the loader appends panic reports to (PM4), `ferrix.panic=reset`, the
+  defences for RFDS and BHI (F-84, F-85), and VT-d driven on the box's two
+  units (2026-10-20) with K2's kernel-held identity domain for the iGPU's
+  RMRR. The kernel bring-up is evidenced on QEMU only and has not run on the
+  box with checks on; the NIC and USB still poll, since the YT6801's one MSI
+  arrives rarely and xHCI raises none (BACKLOG). On 2026-10-21: `/` is on the
+  box's drive again, after the image's unpack stopped on a directory the drive
+  held where the archive has a link and kept the system in memory; the unpack
+  now moves such a directory aside to `<name>.ferrix-old` (94d6c39fa). The
+  pstore header is version 2 with a stop word that says how the last boot
+  ended, and `reboot(2)`'s restart writes the region back (S1, a0025e505).
+  `docs/POSTMORTEM.md` §6 gains S4, a design for review: a lockup detector
+  and the PCH TCO watchdog, so that the unattended box resets after a hard
+  hang (68cc4a702).
+* **An Intel GPU driver for the box** (`docs/INTEL-GPU.md`, design OK IF,
+  ledger 2352): ring 3, following i915 file by file. On `main`: the kernel's
+  render-only chardev node, the screen lent to the driver by identity,
+  write-combining mappings and sync-file fences on a dmabuf's slot (K3 to K6),
+  and `intel-xelp`, the i915 uAPI front end over a back end with the GT's
+  bring-up, host-tested. On the box on 2026-10-20: M1 (the device answers) and
+  M2 (workarounds, the engines resumed, the first GPU commands, a blit exact by
+  hash); M3, the render node served over the GT back end, is wired and not
+  shown on the box. The box hung hard twice under `ferrix.intelgpu` (the first
+  cause was found on 2026-10-20), the GT's frequency and RC6 are set by the
+  host, and `ferrix.intelgpu.uapitrace` finds a render-node call that never
+  completes. The GT ran at 350 MHz with the request pinned at RP0 on the
+  box, so 2026-10-21 brought i915's frequency policy for Gen12 without SLPC,
+  the ring frequency table and forcewake per access (2ba25d12a), and the
+  status page read past the processor's cache (6627e499f). Endfield's first run on it is prepared: the launcher on
+  lavapipe, only the game on anv.
+* **NVIDIA's dmabufs** (stage 21, N3b's kernel half, 2026-10-11): a chardev
+  render node, VMO dmabufs, `sync_file` fences and name-only dmabufs of video
+  memory that `nvrm` exports. hyprix drawing on the card (N3c) and an X
+  window drawn by the card (`nv-next`) stay on branches.
+* **Installing and releasing.** I3: `ferrix-install` makes the root volume at
+  its partition's size with `ferrix-btrfs-mkfs` (2026-10-19). A/B system slots
+  (`docs/AB-BOOT.md`, 2026-10-11): the loader boots a trial slot once and
+  falls back to the good one, `bootctl` writes the idle slot, `cargo xtask
+  test-ab-boot` judges it. The first numbered release, v0.1.0 (tagged
+  2026-10-20), built none of its assets, because a host answered the release
+  workflow's runners 418; each pinned download now names a mirror, and v0.1.1
+  (2026-10-21, `docs/RELEASES.md`) carries the x86-64 desktop as a zip that
+  plain QEMU boots, a licence inventory and the sources of its GPL programs.
+  `/bin/dhcpc`, a Rust DHCP client, replaces busybox's `udhcpc` (2026-10-19).
+  `cargo xtask test-install` fails on `main` in the live medium's boot (a
+  BACKLOG row).
+* **Developing Ferrix on Ferrix** (`docs/DEV-ON-FERRIX.md`, 2026-10-11): the
+  loop walked by `cargo xtask test-devloop`, helix and rust-analyzer on the
+  volume, `pkg install --replace` and `install-app`, and QEMU measured running
+  on Ferrix (it does not end on its guest's power-off).
+* **The desktop and its apps.** A `settings` app and the `compositor-desktop`
+  crate (2026-10-11); the Claude desktop app shows its sign-in screen on the
+  `--everything` desktop, natively on ferrousli (C1 to C4, 2026-10-16);
+  `hyprctl clients` lists every mapped window; an opaque fullscreen window is
+  drawn alone, with no shadow and nothing under it (2026-10-21, f0d338fcf,
+  which saved 21 of a 78 ms software frame on the box).
+* **Stages 22 to 24.** Steam has a way to start a native library game around
+  the stalled in-guest install (`--steam-preinstall` and `ferrix_direct`,
+  2026-10-10). Wine's notepad, DXVK on lavapipe, 32-bit Windows programs, a
+  Unity game, fsync through `futex_waitv` (449) and Endfield's launcher in
+  Debian's Wine and in GE-Proton are on `main` (stage 23's page). The
+  download's two stops, the page cache (above) and a virtio-net ring whose
+  shared indices tore (every one is a single aligned access since 2026-10-15,
+  36a1bea84, 11d006073, bdccab15d), are fixed, and no download has run on
+  `main` since. Stage 24's R1 to R3 and I1 stand as its page says.
+* **The Linux surface.** An `epoll` ready list the files' wakes fill, per-thread
+  kernel time and switch counts, a nice value that is a thread's, `getrusage`
+  and `times` reporting processor time, thread names as `PR_SET_NAME` and
+  `/proc/.../comm`, `sendmmsg` and `recvmmsg`, `memfd_create`'s exec seal,
+  `arch_prctl`'s GS base, and a `connect` to `0.0.0.0` refused by the loopback.
+* **The channel round trip.** The direct switch folds its tasks' job load
+  (L.sched.64-66), a Linux call lends the caller's thread, and pipe waits trust
+  their queues (all 2026-10-11); `bench-pipe` times pipe, Unix-socket and futex
+  round trips. No figure has been taken for the whole of `main` since F-69
+  ([the page](ipc-round-trip.md)).
+* **Building and testing.** A step cache for the gate's checks and test
+  binaries, host tests side by side while `check` goes on, and a dev profile
+  without LTO (`docs/TEST-TIME.md`); the kernel is split along its rings in
+  the tools (`docs/KERNEL-CRATES.md`: S1, S2 and S3a are on `main`, S3 and S4
+  are not started); xtask's commands register themselves.
+* **The certification register** stands at 28 open and 62 closed, of 90
+  (`docs/certification/FINDINGS.md`, 2026-10-21). F-70 to F-90 are new, most of
+  them from the N150's first boots and from btrfs under memory pressure; F-86 to
+  F-89 and F-72 (`TSYNC`'s lock holds) are open.
 
 ## Where it stands now (2026-09-30)
 
@@ -227,7 +358,7 @@ Since the 2026-09-27 wind-down, everything finished is on `main` and pushed:
   off. F-55, which the GPU route through Venus met first, is closed; the
   rest of that route is designed (`docs/STEAM.md` §6) and not started.
   The second exit step, a game from the library, has its gate,
-  `test-steam-game` (2026-10-01, not passing yet): Teeworlds is claimed for
+  `test-steam-game` (2026-10-01, not passing then; the customer reports a game running by 2026-10-21): Teeworlds is claimed for
   the test account, installed on request and downloaded in about 90 s
   since the guest's network took Steam's dozen connections (3b1b1de7,
   020dc9b2), and then Steam's staging of the files stands still, for a
@@ -487,7 +618,7 @@ Left: K-C (P2.2) is not started;
 the other desktop images still run as root; and ending a user's processes
 at logout is the customer's call.
 
-Stage 13 is under way, cgroups first because init needs them: cgroup2 with
+Stage 13 is done on its exit criterion (2026-10-14; what it left out is on its page), built cgroups first because init needs them: cgroup2 with
 `pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);
 mount, user, UTS, IPC, cgroup and pid namespaces, seccomp's checker and
 hook (S1, S2), and network namespaces (2026-10-04, 22384874f) are in.
@@ -496,9 +627,11 @@ the cgroup controllers (reclaim of a read-only mount's clean pages,
 `memory.high`, freezing, `cpu.max`, `io`; 23 negative controls) landed on
 2026-10-07, and on 2026-10-08 `cpu.stat`'s charge moved off the fast path's
 every direction (df7ee418c); seccomp's `TRAP`, `TSYNC` and `cargo xtask
-test-seccomp` (S4 to S6) were ported onto `main` on 2026-10-11
-(`docs/SECCOMP.md` §12); time namespaces are on a branch
-(`stage-13-handover.md`).
+test-seccomp` (S4 to S6) were ported on 2026-10-11 and are on `main` since
+2026-10-18 (`docs/SECCOMP.md` §12), with Syscall User Dispatch; `cargo xtask
+test-container`, the exit criterion as one program, is on `main` since
+2026-10-14 and passes on all three architectures, so the exit is met; time
+namespaces are on a branch (`stage-13-handover.md`).
 
 Chrome runs on Ferrix (2026-09-24): Google's prebuilt Chrome for Testing,
 headless and in a window on the compositor, on x86-64, and both on ferrousli's
@@ -616,12 +749,14 @@ Proton and the launcher are on the `--everything` desktop as `gryphlink`
 (2026-10-14); the game's download is not done: it stopped on ENOSPC from
 Ferrix's btrfs after about 5.8 GB with about 150 GB unallocated, because
 the 8 GiB guest ran out of frames and a writable mount's page cache is not
-reclaimed. The fix is the branch `mm-pcache`; its requirement ids
-L.object.188-190 are reserved on `main` (2026-10-14) and its code is not
-landed. On 2026-10-15 a download on a scratch image reached about 9.5 GB
+reclaimed. The fix, the work of the branch `mm-pcache` under another hash
+(f0bc9ab2d, L.object.188-190), is on `main` since 2026-10-15. On 2026-10-15
+a download on a scratch image reached about 9.5 GB
 of 56.9 GB at 2.5 MB/s and died at 00:22: the guest's virtio-net driver
-stopped sending after two `devmgr` restarts of it, a bug in the driver
-restart (branch `net-restart-stall`, in progress). What took the CPU was
+stopped sending after two `devmgr` restarts of it, because the net ring's
+shared indices were composed from bytes and tore; every one is a single
+aligned access since 2026-10-15 (36a1bea84, 11d006073, bdccab15d, the work of
+`net-restart-stall`). No download has run on `main` since. What took the CPU was
 the launcher's looping background video, not the download; a click on its
 STATIC switch pauses it. The next download (8 vCPUs, a fresh image, from
 a scratch branch that is not for `main`) runs at about 3.7 MB/s. A restart
@@ -669,7 +804,8 @@ fails on it, and the anchors two landings had skipped were carried again; it fil
 closed F-63 too, the queue from the chardev core to `nvrm` able to grow
 without bound, which abandoned requests now leave and admission counts. The
 register stood at 16 open and 48 closed, of 64; on 2026-10-08 it was 17 open and
-52 closed, of 69 (the register's own count), F-65, F-66, F-68 and F-69 among the closed. CI on `main` is green again (run
+52 closed, of 69 (the register's own count), F-65, F-66, F-68 and F-69 among the closed;
+on 2026-10-21 it is 28 open and 62 closed, of 90. CI on `main` is green again (run
 37331100176, after a rerun of a flaky job), after the Windows gateway test
 `a_lost_segment_is_sent_again_alone` stopped racing the gateway's timer
 (39e520e31); another gateway test, `resets_a_connection_to_a_port_nothing_listens_on`,

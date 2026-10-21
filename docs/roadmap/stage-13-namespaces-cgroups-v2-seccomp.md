@@ -1,4 +1,4 @@
-# Stage 13 — Namespaces, cgroups v2, seccomp  ·  *month*
+# Stage 13 — Namespaces, cgroups v2, seccomp ✅  ·  *month*
 
 All eight namespaces, the unified hierarchy with `cpu`/`memory`/`io`/`pids`,
 cgroupfs, and classic-BPF seccomp with the interpreter in `src/lib/`.
@@ -258,8 +258,8 @@ conditions on the core are built.
 and opcode; a second, independent checker held to `verify` over 300,000 seeded
 programs; three of Chrome 151's filters run against what a Linux 7.0 kernel did
 with calls 0 to 449; a fuzz target; Miri in CI. S2 to S6 (the core hook,
-filters, `TRAP`, `TSYNC`, the guest test) are designed in `docs/SECCOMP.md`
-and not landed.
+filters, `TRAP`, `TSYNC`, the guest test) are designed in `docs/SECCOMP.md`;
+S2 landed by 2026-10-01, S3 on 2026-10-04 and S4 to S6 on 2026-10-18 (below).
 
 **Done -- S1's review conditions on the crate (2026-10-01):** the consultant's
 after-the-fact review of S1 found `MAX_INSNS_PER_PATH` eight times too large, a
@@ -281,7 +281,30 @@ zygote, SECCOMP R4). Evidence: the `procacc` line (FX-0894), its negative
 controls each stopping the boot with the check's message, and the packet
 pipe's owed control. The newborn-child window is a BACKLOG row.
 
-**Where stage 13 stands (wind-down, 2026-10-01 evening).** The takeover guide, with every branch's tip, worktree and what it owes, is [stage-13-handover.md](stage-13-handover.md). The exit criterion
+**Where stage 13 stands (2026-10-21).** The exit criterion is met.
+`cargo xtask test-container` (f231cdf09, on `main` since 2026-10-14;
+`docs/CGROUPS.md` §15) runs an unprivileged user namespace whose pid 1 sits
+under a `memory.max` that reclaims and then OOM-kills inside its cgroup, behind
+a seccomp filter that blocks a call, and passed on x86-64 under KVM, AArch64
+and ARMv7-A (two processors and four) with its six negative controls
+fired. The time namespace is not part of it. On `main` besides the landings
+below: seccomp's S4 to S6 (`SECCOMP_RET_TRAP`, `TSYNC` and `cargo xtask
+test-seccomp`, ported on 2026-10-11 and on `main` since 2026-10-18,
+`docs/SECCOMP.md` §12; F-72, `TSYNC`'s lock holds, is open); Syscall User
+Dispatch (`prctl` 59, `test-sud`, `docs/SECCOMP.md` §13, 2026-10-18); reclaim of
+a writable mount's clean pages (f0bc9ab2d, 2026-10-15, L.object.188-190); and
+the cgroupfs flakes' fixes (fl-cg, 2026-10-16). **The stage is marked done on
+its exit criterion (2026-10-21, at the customer's word).** Checked against
+`main`'s code on that day, these are not built and are left out of it, not
+claimed: time namespaces (`CLONE_NEWTIME` is refused; `stage13-timens` has six
+commits not on `main`), unprivileged mounting (`may_mount` asks `CAP_SYS_ADMIN`
+only; `stage13-n5` and `stage13-bwrap-user` are branches), `memory.reclaim`,
+`io.weight` and `io.latency` (`fs/blkio.rs` says "Not built"), `cpu.max.burst`
+and `cpu.idle` (their ids L.object.182-187 are reserved, not written), the
+dentry and inode caches' reclaim, and Linux's own `seccomp_bpf` selftest (a
+BACKLOG row). Steam's N5 to N7 stand on the first of the unprivileged ones.
+
+**Where stage 13 stood (wind-down, 2026-10-01 evening).** The takeover guide, with every branch's tip, worktree and what it owes, is [stage-13-handover.md](stage-13-handover.md). The exit criterion
 -- an unprivileged user namespace runs a pid 1 under a memory limit with a
 scoped OOM kill and a seccomp filter that blocks a call -- is **not met**.
 On `main`: N4 user namespaces, S1 the filter checker, S2 the core hook, the
@@ -295,13 +318,13 @@ conditions are in `~/.local/share/ferrix/cert-consultant/reviews.md` there.
 |---|---|---|
 | `stage13-cgctl` (`po6/cgctl`, `po10-cgctl/cgctl`) | M2's reclaim and `memory.high`, `cgroup.freeze`, `cpu.max`, the `io` controller | **2026-10-05:** po6 fixed the consultant's D1 (the freeze posts `STOP` through the pending-work word; a parked process moved out of a frozen cgroup is released) and all 23 controls of `CGROUPS.md` §14 FIRED (`po6-cgctl-ctl-*`). **2026-10-07:** rebased onto main 4466212c3 by po10-cgctl; the fast path's exits now honour `cpu.max`, and the `cpu.max` cut is armed for the task a switch picks (main's 2f arms the timer before it stores the pick, which left a lone thread unthrottled on armv7a `--smp 2`); rows and the controls the rebase touched re-run (`po10-cgctl-*`); consultant OK IF (po10-cgctl-cert), its conditions met; **landed 2026-10-07** (batch 08984c2db..8ec24ef0e) |
 | `stage13-s3-on-netns` 0527dd365 | seccomp filters (`SECCOMP_SET_MODE_FILTER`, strict mode, the actions), on main 22384874f | **2026-10-04:** every row PASSED on 6c539b276 (`l13s3f-*`: check, three boots, `test-threads`, `test-init`, `test-shell`, `test-vfs`) and all 19 controls FIRED; consultant OK (ledger line 336). Rebased onto netns: k7, k13, k17 FIRED on 0527dd365 (`l13s3n2-*`), the other 16 carry by range-diff. Batch 20261004T135748Z stopped at the wind-down undecided: every gate PASSED but `test-selfhost` (red on main) and `test-shell` (QEMU killed from outside); owed: one batch re-run, then the consultant's final OK. `stage13-s3`, `-onmain`, `-rebase` are history |
-| `stage13-s4` 9ad2c718e, `stage13-s5` 298399f1e, `stage13-s6` 64e891f7e | `SECCOMP_RET_TRAP`, `TSYNC`, `cargo xtask test-seccomp` (S6a) | **2026-10-11:** ported onto main 9c3e0df30 as `land-seccomp-s4` with the consultant's conditions of 2026-10-01 written (`docs/SECCOMP.md` §12, "S4 to S6 ported"); the rows, the controls and the consultant's verdict on the ported hashes are in the landing's messages. Linux's `seccomp_bpf` selftest is not done (BACKLOG) |
+| `stage13-s4` 9ad2c718e, `stage13-s5` 298399f1e, `stage13-s6` 64e891f7e | `SECCOMP_RET_TRAP`, `TSYNC`, `cargo xtask test-seccomp` (S6a) | **2026-10-11:** ported onto main 9c3e0df30 as `land-seccomp-s4` with the consultant's conditions of 2026-10-01 written (`docs/SECCOMP.md` §12, "S4 to S6 ported"); the rows, the controls and the consultant's verdict on the ported hashes are in the landing's messages. Linux's `seccomp_bpf` selftest is not done (BACKLOG). **On `main` since 2026-10-18** |
 | `stage13-fdinfo` | **landed 2026-10-04** (NP, as AUTH P2.1) | see above |
 | `stage13-n5` 7a0c04fdd | unprivileged mounting | on fdinfo; consultant asked for changes, built (remount by the superblock's owner, the bottom mount locked, a sleeping write-out), not gated; earlier tip's boots, `test-vfs`, `test-shell`, `test-bwrap` PASSED |
 | `stage13-bwrap-user` dad30e7f2 | `test-bwrap` as uid 1000 | passes (a new tmpfs is now 1777 and the mounter's); needs a rebase onto N5, a control for the tmpfs case, review |
 | `stage13-netns` | network namespaces, veth, per-namespace stacks | **landed 2026-10-04 in 22384874f**: every row PASSED on 2428b0d95 (`l13ns-*`, `test-init` on its third run), kmem controls nn20/24/28-30 and b1, 31c re-run and FIRED; the consultant's OK (ledger line 333) |
 | `stage13-timens` 88b073c3a | time namespaces | on netns; boots on x86_64; native child gets its creator's time namespace (c25, c26); gate and 26 controls stopped mid-run (c01, c03-c07 FIRED); not reviewed |
-| `stage13-container` cda83faef | `cargo xtask test-container`, the exit criterion as a program | written, never built or run; needs cgctl and S3 on `main` |
+| `stage13-container` cda83faef | `cargo xtask test-container`, the exit criterion as a program | **landed 2026-10-14** (f231cdf09, `docs/CGROUPS.md` §15): passed on all three architectures with six negative controls fired |
 
 Every namespace and seccomp review found the same hole: `launch::load_native`
 must give a native child its creator's whole namespace set, pid namespace,
@@ -397,8 +420,8 @@ running before writing the quota (about one ARMv7-A `--smp 2` boot in
 twenty had stopped there, the waiter never let run), and the freeze check to
 read `cpu.stat` only once every task is switched out.
 
-**Still to do:** reclaim of a writable btrfs mount's clean pages, of the
-dentry and inode caches, and `memory.reclaim`; `io.weight` and `io.latency`;
+**Left out (not built, see "Where stage 13 stands (2026-10-21)"):** reclaim of the dentry and inode caches, and `memory.reclaim`
+(a writable btrfs mount's clean pages are reclaimed since 2026-10-15); `io.weight` and `io.latency`;
 `cpu.idle` and `cpu.max.burst`; `anon` and `pagetables` in `memory.stat`.
 `docs/CGROUPS.md` §7.1 says how landings are gated now, and what cost a gate
 on 2026-09-23.

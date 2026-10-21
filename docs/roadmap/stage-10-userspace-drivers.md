@@ -753,9 +753,23 @@ changed: the disk arrives over the block ring as a virtio disk does.
 `cargo xtask test-nvme` boots `/` from an NVMe drive below a root port and a
 PCIe switch, reads, writes and flushes a second drive of 4096-byte blocks,
 and kills both drivers under load; `test-restart --boot nvme` is the restart
-gate's rounds on that root. It has not run on a real drive, and
+gate's rounds on that root. It has since driven a real WD SN720 through VFIO and installed Ferrix onto it (the customer; the run's log is not on `main`), and
 `docs/NVME.md` §8 says what that leaves unshown: the Host Memory Buffer, a
 command timeout and the shutdown notification among it.
+
+**Done — the drivers a PC needs (2026-10-10 to 2026-10-21).** `usbhid`
+drives a PC's xHCI controller, and `devmgr` starts it on class `0C:03:30`
+(the USB bus is generic over a `Host` trait; a bulk-only disk is read and not
+yet served to the block core; `docs/XHCI.md`). `ahci` serves a SATA disk over
+the block ring, started on class `01:06:01` (ee2d5bf0f, `docs/AHCI.md`), and
+`yt6801` the Motorcomm network chip (3f4769222, on the networking page).
+`devmgr` holds 32 drivers, and `xtask` refuses an image with more (ee066cd2e,
+F-82). The stage's checks learned what a real PC does: W7 passes over a
+function whose command register does not take the rewrite (F-80), the block
+ring check over one whose bus mastering will not go off (F-83), and the DMA
+switch check runs on the first function that is not a bridge (b342f0922).
+Besides the xHCI controller, AHCI and the YT6801 on the customer's N150 box on
+2026-10-15 and the NVMe driver on a real SN720, all of it is shown under QEMU.
 
 **Still to do:** the other seven drivers onto `ferrix-driver` (net, snd,
 vport, gpu, then stm32-ltdc, gc400, usbhid, usbdev; `docs/BACKLOG.md` P2);

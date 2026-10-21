@@ -8,7 +8,7 @@ stage has its own page, and the details are linked at the end.
 
 The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
 
-## Where it stands (2026-09-30)
+## Where it stands (2026-10-21)
 
 **Done**
 
@@ -18,14 +18,19 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   (stage 16).
 - Display, input and the compositor (stages 17 and 18), networking, dynamic
   linking and sysfs.
+- **Stage 13**, namespaces, cgroups and seccomp, on its exit criterion: the
+  mount, user, UTS, IPC, cgroup, pid and network namespaces, the cgroup
+  controllers (`pids`, `memory` with reclaim and `memory.high`, `cpu`
+  with `cpu.max`, `io` with `io.max`, freezing), seccomp's filters, `TRAP`
+  and `TSYNC`, and Syscall User Dispatch. `test-container`, an unprivileged
+  user namespace with a pid 1 under a memory limit and a seccomp filter,
+  passes on all three architectures (2026-10-14). Not built, and left out of
+  the stage: time namespaces, unprivileged mounting (N5), `memory.reclaim`,
+  `io.weight`, `io.latency`, `cpu.max.burst`, `cpu.idle`, the dentry and inode
+  caches' reclaim and Linux's `seccomp_bpf` selftest.
 
 **In progress**
 
-- **Stage 13:** cgroups with pids, memory, OOM kill and CPU weight. The
-  mount, user, UTS, IPC, cgroup, pid and network namespaces are in, and so
-  are seccomp's filters (S3, 2026-10-04). The cgroup controllers (reclaim and
-  `memory.high`, freezing, `cpu.max`, `io`) landed on 2026-10-07; time
-  namespaces, seccomp's S4 to S6 and the exit program are left.
 - **Stage 15:** the init is done (L1 to L13), its sandboxing keys all in:
   L13a (`NoNewPrivileges=`, `PrivateTmp=`, `ProtectSystem=`), L13b
   (`PrivateNetwork=`, 2026-10-05) and L13c (`SystemCallFilter=`, 2026-10-08).
@@ -62,7 +67,28 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   about 60 ns on the general path until a cheaper hold is written. On
   ARMv7-A a switch between two programs that never used VFP moves none
   (lazy VFP, §9.15), not yet timed.
-- **The installer:** an MVP installs Ferrix on a VM's disk (2026-09-28).
+- **The installer:** an MVP installs Ferrix on a VM's disk (2026-09-28); the
+  root volume is made to its partition's size (I3, 2026-10-19); A/B system
+  slots give an update a trial boot and a way back (2026-10-11); NVMe, AHCI and
+  a PC's xHCI have drivers (the NVMe driver has driven a real WD SN720 through
+  VFIO and installed Ferrix onto it); a netboot stick boots a bare-metal PC
+  (2026-10-15). The first release, v0.1.0, was tagged on 2026-10-20 and built
+  none of its assets; v0.1.1 (2026-10-21) carries the x86-64 desktop as a zip
+  that plain QEMU boots (`docs/RELEASES.md`). `test-install` fails on
+  `main` in the live medium's boot (a BACKLOG row).
+- **The customer's N150 box (stage 21):** Ferrix booted on it on 2026-10-15
+  to a desktop on the firmware framebuffer, `/` on its SATA drive and the
+  network up, on a branch; its drivers (AHCI, the YT6801's network, the
+  framebuffer, VT-d, SMBIOS, an event log for panics) and an Intel GPU render
+  driver, whose first GPU commands ran on the box on 2026-10-20, are on
+  `main`. The kernel bring-up is evidenced on QEMU only so far.
+- **The switch to a microkernel (M0, `docs/MICROKERNEL.md`):** ordered by the
+  customer on 2026-10-13. The build-flag system with its four kernel
+  profiles, the load ratchet and a Ferrocene-version type-check are on
+  `main`; so are the two fixes `smt=off` waited on (F-73, F-64) and the
+  tooling for the performance baselines, which are not measured yet; M1's
+  designs (K5, K6, K7, K10, K12) are reviewed, with their code on branches
+  ([its page](microkernel-m0.md)).
 - **Chrome** runs headless and in a window, on glibc and on ferrousli, Ferrix's
   own C library. On ARMv7-A, Debian's armhf Chromium runs headless in 512 MiB
   under QEMU, and the DK1's SD card has a driver; neither has run on the board.
@@ -79,8 +105,12 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   Direct3D 11 draws through DXVK and a Unity game starts in it, with no card,
   and Endfield's launcher draws its install dialog in Debian's Wine and in
   GE-Proton11-7's (2026-10-14); the game's download stopped on ENOSPC from
-  Ferrix's btrfs and is being worked, and the GPU steps stand on stage 21's
-  unlanded branches ([its page](stage-23-arknights-endfield.md)).
+  Ferrix's btrfs, whose cause (a writable mount's page cache was never
+  reclaimed) is fixed on `main` since 2026-10-15 and not yet run again.
+  Syscall User Dispatch and seccomp's `TRAP`, which Proton's Wine and the
+  anti-cheat's direct calls need, landed on 2026-10-18. The GPU steps stand
+  on stage 21's unlanded branches and on the N150 box's Intel GPU driver
+  ([its page](stage-23-arknights-endfield.md)).
 - **Stage 24 (the game path):** where a fullscreen game can be faster on
   Ferrix than on a stock Linux desktop: input to scan-out, and even frames
   under a background load. A design (`docs/GAME-PATH.md`) the customer made a
@@ -102,7 +132,8 @@ them; what is red, parked and waiting is in
 
 **Under way, but outside the list above:** stage 21, NVIDIA's own driver on the
 RTX 3060 (`docs/NVIDIA.md`): N0, the kernel prerequisites, and N1, the GSP
-booting with `nvidia-smi`, are on `main`.
+booting with `nvidia-smi`, are on `main`, and so are N2 to N4, the desktop on
+the card's monitor and the kernel half of N3b's dmabufs.
 
 ## Forecast
 
@@ -156,7 +187,7 @@ single file across.
 |  | [sysfs — the device tree, fed by the services that own it](sysfs.md) | ✓ done | 26 points, spent |
 |  | [Chrome — a browser on Ferrix](chrome.md) | ◐ in progress | headless and in a window, 2026-09-24; the DK1 ≈ 45–55 points |
 |  | [Claude Code — Anthropic's coding agent on Ferrix](claude-code.md) | ◐ in progress | the command line, 2026-09-30; the desktop app assessed, 2026-10-14 |
-| 13 | [Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md) | ◐ in progress | month |
+| 13 | [Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md) | ✓ done | month |
 | 14 | [Real-time domains](stage-14-real-time-domains.md) | ○ not started | month |
 | 15 | [A real userland](stage-15-real-userland.md) | ◐ in progress | week |
 | 16 | [`rustc`](stage-16-rustc.md) | ✓ done | the goal; ≈ 40 guessed, 8 spent |
@@ -168,7 +199,7 @@ single file across.
 | 22 | [Steam](stage-22-steam.md) | ◐ in progress | unsized, over 300 points |
 | 23 | [Arknights: Endfield](stage-23-arknights-endfield.md) | ◐ in progress | ≈ 205 points as a first guess, step 5 unknown |
 | 24 | [The game path](stage-24-game-path.md) | ◐ in progress | ≈ 68 points before the game domain, about 190 with it and the later rows |
-|  | [Microkernel M0 — the build flags, the baselines, the checks](microkernel-m0.md) |  | ≈ 45–60 points |
+|  | [Microkernel M0 — the build flags, the baselines, the checks](microkernel-m0.md) | ◐ in progress | ≈ 45–60 points |
 |  | [Written ahead of their stage](written-ahead.md) |  |  |
 |  | [Continuously, from stage 1](continuously.md) |  |  |
 
