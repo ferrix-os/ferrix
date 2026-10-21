@@ -175,17 +175,20 @@ const KILL_GPU_PATH: &str = "etc/killgpu";
 /// display driver, and wait for devmgr to have started another. zinc's, since a gate boot carries no busybox and
 /// `exec-once` runs one program with no shell.
 ///
-/// A card is open to one program at a time, so an open that fails on a card
-/// that is there says the compositor has it: the second kill waits for that,
-/// or it would land while the compositor was still looking for the first
-/// card and the gate would see one loss where it asked for two.
+/// The compositor holds `card0` when one of its descriptors is the card
+/// that is there now: `-ef` follows `/proc/<pid>/fd/<fd>` to the open file
+/// and compares it with `/dev/dri/card0`, so a descriptor still on a card
+/// that went away does not count. The second kill waits for that, or it
+/// would land while the compositor was still looking for the first card and
+/// the gate would see one loss where it asked for two. (An open that failed
+/// said this while `card0` was one open at a time; since e06b456b9 it takes
+/// several, and the script's own open succeeds.)
 const KILL_GPU: &str = r#"gpu() {
   for p in /proc/[0-9]*; do
     read n < $p/comm 2>/dev/null
     if [[ $n == gpu ]]; then echo ${p#/proc/}; return; fi
   done
 }
-held() { [[ -e /dev/dri/card0 ]] && ! { : 3<> /dev/dri/card0 } 2>/dev/null }
 newest() {
   most=0
   for p in /proc/[0-9]*; do
@@ -193,6 +196,13 @@ newest() {
     if [[ $n == $1 ]] && (( ${p#/proc/} > most )); then most=${p#/proc/}; fi
   done
   echo $most
+}
+held() {
+  [[ -e /dev/dri/card0 ]] || return 1
+  for f in /proc/$(newest hyprix)/fd/*; do
+    if [[ $f -ef /dev/dri/card0 ]]; then return 0; fi
+  done
+  return 1
 }
 until held; do :; done
 until [[ -e /tmp/pattern-two.drawn ]]; do :; done
