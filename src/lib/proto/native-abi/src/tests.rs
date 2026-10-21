@@ -160,6 +160,16 @@ fn a_rights_request_with_an_unknown_bit_is_refused() {
         "bit 8 is not a right"
     );
     assert_eq!(
+        Requested::from_register(1 << 12),
+        None,
+        "bit 12 is not a right"
+    );
+    assert_eq!(
+        Requested::from_register(u64::from(Rights::SUPERVISE.0)),
+        Some(Requested::Exactly(Rights::SUPERVISE)),
+        "bit 11 is SUPERVISE"
+    );
+    assert_eq!(
         Requested::from_register(u64::from(SAME_RIGHTS | 1)),
         None,
         "the sentinel is exact"
@@ -181,6 +191,10 @@ fn default_rights_are_defined_rights() {
         Rights::INTERRUPT,
         Rights::IO_MAPPING,
         Rights::DEVICE,
+        Rights::PROCESS,
+        Rights::PROCESS_CREATED,
+        Rights::JOB_CREATED,
+        Rights::EXCEPTION_CHANNEL,
     ] {
         assert!(rights.is_known(), "{rights:?} has an undefined bit");
     }
@@ -369,4 +383,29 @@ fn timers_have_their_numbers_rights_and_a_whole_spec() {
     assert_eq!(TimerSpec::from_bytes(&spec.to_bytes()), Some(spec));
     assert_eq!(TimerSpec::from_bytes(&spec.to_bytes()[..15]), None, "short");
     assert_ne!(TIMER_CLOCK_MONOTONIC, TIMER_CLOCK_BOOT);
+}
+
+/// K4's attach: `SUPERVISE` only where a creator made the process or job,
+/// never in the rights the kernel hands out with authority of its own, and
+/// an exception channel's read end never writes.
+#[test]
+fn supervise_is_only_a_creators_and_the_read_end_never_writes() {
+    assert_eq!(Rights::SUPERVISE, Rights(1 << 11));
+    assert!(Rights::ALL.contains(Rights::SUPERVISE));
+    assert!(
+        !Rights::PROCESS.contains(Rights::SUPERVISE),
+        "devmgr_start's"
+    );
+    assert!(
+        !Rights::JOB.contains(Rights::SUPERVISE),
+        "job_for_cgroup's and the root's"
+    );
+    assert!(Rights::PROCESS_CREATED.contains(Rights::PROCESS | Rights::SUPERVISE));
+    assert!(Rights::JOB_CREATED.contains(Rights::JOB | Rights::SUPERVISE));
+    assert!(!Rights::EXCEPTION_CHANNEL.contains(Rights::WRITE));
+    assert!(Rights::EXCEPTION_CHANNEL.contains(Rights::READ | Rights::WAIT));
+    assert_eq!(nr::decode(0x1081), Some(NativeCall::ExceptionChannelCreate));
+    assert_eq!(nr::number(NativeCall::ExceptionChannelCreate), 0x1081);
+    assert_eq!(nr::decode(0x1082), None, "with the fault chain");
+    assert_eq!(nr::decode(0x1083), None, "with the fault chain");
 }
