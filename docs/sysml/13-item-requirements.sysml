@@ -1213,6 +1213,11 @@ package FerrixItemRequirements {
             attribute :>> parent = "O.QUOTA";
         }
         // Added by the low-level pilot on object/ (W-8 step 3), like H.OBJ.10-13.
+        // The memory a killed or ended process held goes back before a
+        // parent can see the end: the load's Process::release unmaps it, as
+        // Linux's exit_mm (F-91, ledger 2962). The kill's claim leans on that
+        // load-side rule, whose evidence is stage 13's OOM check, until the
+        // personality is lifted out (MICROKERNEL.md).
         requirement <'H.QUOTA.6'> oomKillIsScoped : ItemHighLevel {
             attribute :>> statement = "A user page fault refused by a job's memory
                 limit shall end a process in the job whose limit was full or beneath

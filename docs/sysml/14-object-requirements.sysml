@@ -1464,10 +1464,12 @@ package FerrixObjectRequirements {
         }
         requirement <'L.object.103'> anEndedVictimIsEmptied : ItemLowLevel {
             attribute :>> statement = "A victim that has ended and closed
-                everything, whose address space no live process shares, shall have
-                that space emptied at once rather than at its parent's wait, and a
-                fault that finds a victim still ending shall wait and retry, killing
-                no second process.";
+                everything, whose address space no live process shares and still
+                holds pages -- which a release that unmapped it leaves none of
+                (F-91) -- shall have that space emptied by the next fault at its
+                full limit rather than at its parent's wait, and a fault that finds
+                a victim still ending shall wait and retry, killing no second
+                process.";
             attribute :>> criterion = "Two faults at one full limit while the first
                 victim is ending kill 1 process, and the job's memory use falls by
                 the victim's resident pages before its parent waits.";

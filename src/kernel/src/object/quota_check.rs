@@ -487,6 +487,10 @@ fn check_an_ended_victim_is_emptied(tree: &Arc<Job>) -> Result<(), &'static str>
         };
         let kills = oom::kills();
         victim.thread_starting();
+        // Its release leaves its memory, as a refused unmap would, so that
+        // what empties it is the OOM path (`L.object.103`); a release that
+        // unmaps, the usual end, is stage 13's OOM check's.
+        victim.keep_space_at_release();
 
         if !refused() || oom::out_of_memory(faulter.space()) != oom::Answer::Retry {
             return Err("a fault at a full limit did not kill and retry");

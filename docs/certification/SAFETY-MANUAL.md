@@ -202,6 +202,12 @@ carries on, unless the load's heap-borne demand uses up the watermark's
 frames as well, which still stops it with FX-0008; the job limits below
 remain the integrator's to set.
 
+A process's memory is given back before its end can be seen (F-91): its
+release, in the load, unmaps its user half before a parent's `wait4` or a
+handle's `TERMINATED` can tell of it, so a parent in the same limited job is
+not refused at the limit its ended child filled. The scoped kill
+(`H.QUOTA.6`) leans on that, and stage 13's OOM check is its evidence.
+
 Since 2026-09-26 the element bounds what a partition's programs hold, when
 the partition is a job with limits set: the frames of their memory and their
 page tables, the kernel heap the Linux personality holds for them (counted

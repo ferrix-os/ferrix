@@ -46,6 +46,11 @@ const COOKIE: u64 = 0x00_0E_4B_11;
 /// before the scoped OOM kill.
 const SEGV_STATUS: i32 = 128 + 11;
 
+/// What `v` may still be charged once its killed program's end can be seen:
+/// its page tables and kernel objects, a few pages, and nowhere near the
+/// 1 MiB it filled.
+const GIVEN_BACK_BELOW: u64 = 256 * 1024;
+
 /// How long the program may take to be killed.
 const RUN_NANOS: u64 = 10_000_000_000;
 
@@ -196,6 +201,29 @@ fn check_the_kill(
     }
     if oom::kills().wrapping_sub(kills) != 1 {
         return Err("the scoped OOM kill did not end exactly one process");
+    }
+    // Its memory was given back before its end could be seen: once
+    // `wait_for_exit` has answered, which is what `wait4` reaps by, its space
+    // holds no page and `v` is charged for none of them, though this check
+    // still holds the process and so its space. Otherwise a parent in `v`
+    // reaping it could be refused its next allocation at the limit the
+    // victim filled (test-container's `memory.stat could not be read`).
+    if program
+        .space()
+        .resident_pages()
+        .map_or(true, |pages| pages != 0)
+    {
+        return Err("an OOM-killed program's pages were still resident when its end could be seen");
+    }
+    let current = harness
+        .read(b"/check-m/v/memory.current")
+        .ok()
+        .and_then(|text| core::str::from_utf8(&text).ok()?.trim().parse::<u64>().ok())
+        .ok_or("memory.current of the OOM check's cgroup could not be read")?;
+    if current >= GIVEN_BACK_BELOW {
+        return Err(
+            "an OOM-killed program's cgroup was still charged its memory when its end could be seen",
+        );
     }
     match answer.event {
         Some((bits, COOKIE)) if bits & EPOLLPRI != 0 => {}

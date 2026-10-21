@@ -359,6 +359,12 @@ The VFS, btrfs's glue into it (`ferrix-btrfs-vfs` and the kernel's
 Linux personality's syscall surface; the display, render, input and ring
 drivers' kernel halves; STM32MP1 board support.
 
+One of the item's claims leans on a rule the load keeps: a process's memory
+is given back before its end can be seen, its release unmapping its user half
+before any waiter is told (F-91, ledger 2962). `H.QUOTA.6` and `H.QUOTA.12`
+(the scoped kill and reclaim) assume it, and stage 13's OOM check is its
+evidence; SAFETY-MANUAL AoU-5 names it.
+
 This is not a list of code that matters less — it is most of what makes Ferrix
 useful. It is excluded because a defect in it is bounded by the item's own
 enforcement, and because a claim over 103,397 lines is one nobody can afford to

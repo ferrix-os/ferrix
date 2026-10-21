@@ -180,6 +180,9 @@ pub(crate) struct Process {
     /// [`Process::thread_gone`], with [`EXIT_MET`] set once a waiting thread
     /// saw its partner arrive in time. See [`Process::arm_exit_meet`].
     exit_meet: AtomicU32,
+    /// Set by a boot check only ([`Process::keep_space_at_release`]): its
+    /// release leaves its memory to the space, as a refused unmap would.
+    keep_space: AtomicBool,
     /// Its threads, each listed before it can run -- and a fork child's before
     /// the child can be found -- so that a signal sent to the process is
     /// judged against the mask of the thread that will take it. Weak, as
@@ -436,6 +439,7 @@ impl Process {
             release_finished: AtomicBool::new(false),
             leader_status: AtomicI32::new(0),
             exit_meet: AtomicU32::new(0),
+            keep_space: AtomicBool::new(false),
             threads: SpinLock::new(Vec::new()),
             parent: SpinLock::new(Weak::new()),
             // A process the kernel starts leads its own group and session.
@@ -1111,6 +1115,16 @@ impl Process {
         }
     }
 
+    /// Have its release leave its memory to its address space, as an unmap
+    /// refused there leaves it: for the quota check that drives the item's
+    /// own way of emptying an ended victim, the OOM path's
+    /// (`object::oom::kill_within`, `L.object.103`), which every release that
+    /// unmaps leaves nothing to do. Before the process ends; a process never
+    /// marked gives its memory back at release.
+    pub(crate) fn keep_space_at_release(&self) {
+        self.keep_space.store(true, Ordering::Release);
+    }
+
     /// Arm the meet in [`Process::thread_gone`], for a boot check that makes
     /// two of its threads leave at once: each leaving thread waits there, after
     /// it has read the live count and before it writes it, until two have
@@ -1266,6 +1280,32 @@ impl Process {
         // other process shares the space: `clone` refuses `CLONE_VM` without
         // `CLONE_THREAD`, and `vfork` copies.
         crate::syscall::shm::exit(self.space());
+        // And its memory goes now, as Linux's `exit_mm` drops the mm before
+        // `exit_notify`: every page and region of its user half is given
+        // back, and its job uncharged for them, before anything below can
+        // tell a waiter it has ended. It used to go when the last reference
+        // to the space did -- the ending task's own, let go of after it had
+        // switched away, or the zombie's, held until its parent reaped it --
+        // so a parent's `wait4` could return while the child's frames still
+        // counted against their cgroup, and the parent's next call in that
+        // cgroup, a read of `memory.stat` after an OOM kill, was refused
+        // ENOMEM at the limit the child had filled (test-container on
+        // aarch64). No thread of it runs in user mode any more, and no other
+        // process shares the space (`clone` refuses `CLONE_VM` without
+        // `CLONE_THREAD`, and `vfork` copies), so nothing can fault it back
+        // in. The unmap's own small allocations are charged to nobody: at
+        // the job's limit they must not be what keeps its memory from being
+        // given back. A refusal leaves the pages to go with the space, as
+        // before.
+        if !self.keep_space.load(Ordering::Acquire) {
+            let space = self.space();
+            let _ = crate::object::quota::charging_nobody(|| {
+                space.unmap(
+                    MMAP_MIN_ADDR,
+                    ferrix_bootinfo::USER_VIRT_END - MMAP_MIN_ADDR,
+                )
+            });
+        }
         // Nothing of it can run any more, so it leaves its job's count: a job
         // is empty once its last member gets here, not once that member is
         // reaped, which is what `cgroup.events` says on Linux too.
