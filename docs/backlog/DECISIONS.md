@@ -7,6 +7,13 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-21 (customer, through the coordinator os-22)** **ptrace is out
+  of the certified `present` profile** (docs/DEBUG.md S2; the consultant's
+  design review, ledger 2937, condition D2). The facility is compiled out of
+  `present` by a build flag rather than refused at run time, its
+  requirements cover the debug builds alone, and the N150 box is given an
+  image built with the flag on when gdbserver or strace are needed there.
+
 * **2026-10-13 (customer)** **Ferrix becomes a microkernel whose ring 0
   is the certified item whole** (`docs/MICROKERNEL.md`, route C with
   restricted mode). The customer asked to "plan out the switch of ferrix to
