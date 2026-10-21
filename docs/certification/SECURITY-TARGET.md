@@ -321,6 +321,13 @@ processor is given to whichever job can use it. A share bounds what one job
 takes from another under contention, which is what T.EXHAUST is about, and a
 maximum would additionally leave a processor idle while work waits.
 
+*Application note (K12a).* Beside its maximum, a job may hold a reservation:
+frames for its programs' memory and page tables that the TSF keeps from
+every other job and from its own allocations (`H.QUOTA.15` to 17,
+`docs/microkernel/K12.md`). It is not yet claimed as `FRU_RSA.2`, which
+enters with K12b, when the reservation covers the job's kernel heap too
+(ledger 2550 (6)).
+
 ### FIA — identification and authentication
 **None claimed.** See §9.1.
 
