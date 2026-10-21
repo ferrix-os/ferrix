@@ -401,9 +401,10 @@ fn draw_windows(
 /// screen's buffer, once, rather than into the canvas and from there to the
 /// screen. Whether it did; the canvas is then [`Output::stale`].
 ///
-/// Only in software, upright, at scale 1, with no pointer drawn into the
-/// frame, no drag, no counter and no night-light: each of those is
-/// something drawn over the window or done to its pixels on the way out.
+/// Only in software, upright, at scale 1, with no drag, no counter and no
+/// night-light: each of those is something drawn over the window or done to
+/// its pixels on the way out. A pointer drawn into the frame is blended
+/// over the window in the screen's buffer.
 fn direct(
     target: &mut Output<'_>,
     output: &MonitorLayout,
@@ -418,7 +419,6 @@ fn direct(
         || target.gamma.is_some()
         || target.overlay.is_some()
         || target.drag_icon.is_some()
-        || target.cursor.is_some_and(|cursor| cursor.shown)
     {
         return false;
     }
@@ -463,6 +463,30 @@ fn direct(
     timed(Phase::Surface, || {
         compositor_render::copy_to_target(&surface, rect, &mut screen, &target.present);
     });
+    // The pointer, where it is drawn into the frame rather than on a plane
+    // (card0 over the N150's lit plane has none): blended over the window
+    // in the screen's buffer, as it would have been over the canvas. Where
+    // it was is in the damage, so the window's copy has put that back.
+    let arrow;
+    if let Some(cursor) = target.cursor.filter(|cursor| cursor.shown)
+        && let Some(at) = cursor_rect(clients, &cursor, target.origin, target.scale)
+    {
+        let _over = Timer::start(Phase::Over);
+        let own = cursor.surface.and_then(|(client, surface, _)| {
+            let slot = clients.get(client)?;
+            pixels(slot, surface)
+        });
+        let pointer = match own {
+            Some(surface) => Some(surface),
+            None => {
+                arrow = compositor_render::cursor::arrow();
+                compositor_render::cursor::surface(&arrow).ok()
+            }
+        };
+        if let Some(pointer) = pointer {
+            compositor_render::blend_onto_target(&pointer, at, &mut screen, &target.present);
+        }
+    }
     compositor_render::timing::drawn_surface(
         (surface.width(), surface.height()),
         false,

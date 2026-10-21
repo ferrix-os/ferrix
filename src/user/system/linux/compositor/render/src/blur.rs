@@ -195,6 +195,10 @@ pub(crate) struct Block {
     pub(crate) origin: (i64, i64),
     /// The canvas's own size, which the noise coordinate is relative to.
     pub(crate) screen: (u32, u32),
+    /// Whether the last step back up is [`doubled`]: decided by the size of
+    /// what is blurred, the window, not of the block read for it, so that a
+    /// damaged strip of a large window is blurred as the whole of it is.
+    pub(crate) doubled: bool,
 }
 
 /// A buffer of premultiplied `RGBA` floats, as the blur works on it.
@@ -528,6 +532,38 @@ fn up(from: &Plane, width: usize, height: usize, radius: f32) -> Plane {
     to
 }
 
+/// Above this many pixels a block's last step back up to its own size is
+/// [`doubled`] rather than [`up`]'s eight taps.
+///
+/// That step is three quarters of the whole blur's taps, and over a block
+/// the size of a screen it is what a slow machine cannot pay: 750 to 850 ms
+/// a frame on the N150 for a 1921x1201 window floating over the desktop.
+/// What is lost is the last reconstruction of a picture that is a blur
+/// already, a softer edge at the finest scale; every block of a screen
+/// under about 1440x1040, which is every window of the committed images,
+/// is drawn exactly as before.
+const LARGE: usize = 1_500_000;
+
+/// Whether a blur over `rect` is large enough for [`LARGE`]'s cheaper
+/// last step.
+pub(crate) fn large(rect: crate::Rect) -> bool {
+    usize::try_from(rect.width.max(0).saturating_mul(rect.height.max(0))).unwrap_or(usize::MAX)
+        > LARGE
+}
+
+/// A plain bilinear doubling of `from` to `width` x `height`: one tap where
+/// [`up`] has eight.
+fn doubled(from: &Plane, width: usize, height: usize) -> Plane {
+    let mut to = Plane::new(width, height);
+    let taps = [Tap {
+        offset: 0.0,
+        row: 0,
+        weight: 1.0,
+    }];
+    pass(from, &mut to, &[0.0], &taps, 0.5, |color| color);
+    to
+}
+
 /// `blurprepare.glsl`: the contrast curve and the brightening half of
 /// `brightness`, as a table of what each byte a colour channel can hold
 /// becomes.
@@ -850,9 +886,15 @@ pub(crate) fn blur(pixels: &mut [u8], block: &Block, settings: &Blur) {
         let next = down(&plane, radius, settings);
         std::mem::replace(&mut plane, next).back();
     }
-    // And back up, in reverse.
+    // And back up, in reverse: the last step to the block's own size a
+    // plain doubling where the block is large ([`LARGE`]).
+    let last = sizes.first().copied();
     for (wide, tall) in sizes.into_iter().rev() {
-        let next = up(&plane, wide, tall, radius);
+        let next = if Some((wide, tall)) == last && block.doubled {
+            doubled(&plane, wide, tall)
+        } else {
+            up(&plane, wide, tall, radius)
+        };
         std::mem::replace(&mut plane, next).back();
     }
     finish(&mut plane, block, settings);

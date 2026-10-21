@@ -20,6 +20,7 @@ fn block(width: usize, height: usize) -> Block {
         height,
         origin: (0, 0),
         screen: (width as u32, height as u32),
+        doubled: false,
     }
 }
 
@@ -255,6 +256,7 @@ fn the_noise_is_fixed_to_the_screen() {
                 height: 32,
                 origin,
                 screen: (256, 256),
+                doubled: false,
             },
             &settings,
         );

@@ -3886,6 +3886,8 @@ struct Asked {
     shadows: usize,
     /// The area of every `keep_backdrop`.
     kept: i64,
+    /// How many blurs were asked for, of the frame or of the backdrop.
+    blurs: usize,
 }
 
 impl crate::Painter for Asked {
@@ -3910,7 +3912,9 @@ impl crate::Painter for Asked {
     fn shadow(&mut self, _: Rect, _: &crate::Shadow, _: &Damage) {
         self.shadows += 1;
     }
-    fn blur(&mut self, _: Rect, _: Rounding, _: &Blur, _: &Damage) {}
+    fn blur(&mut self, _: Rect, _: Rounding, _: &Blur, _: &Damage) {
+        self.blurs += 1;
+    }
     fn composite(&mut self, _: &Surface<'_>, _: Rect, _: &Damage) {}
     fn composite_scaled(
         &mut self,
@@ -4352,4 +4356,48 @@ fn a_window_drawn_alone_is_the_frame_presented() {
     let mut unfocused = layout.clone();
     unfocused.windows[0].focused = false;
     assert!(crate::alone(&unfocused, (0, 0), &styles, &surfaces, &[], &damage, bounds).is_none());
+}
+
+/// A fullscreen window's buffer a pixel larger than the screen each way, as
+/// a CEF window through yserver hands over, is cropped to the screen and
+/// drawn alone -- not stretched -- and nothing is blurred under a fullscreen
+/// window, even one that can be seen through.
+#[test]
+fn a_fullscreen_buffer_a_pixel_too_large_is_cropped_and_never_blurred() {
+    let style = decorated_style();
+    assert!(style.blur.is_some(), "blur is on by default");
+    let (full, _) = one_window(Rect::new(0, 0, 1920, 1080), 0, true);
+    let bytes = vec![0xFF; 1921 * 1081 * 4];
+    let surface = Surface::new(&bytes, 1921, 1081, 1921 * 4, Format::Argb8888).unwrap();
+    let surfaces = BTreeMap::from([(WindowId(1), surface)]);
+    let styles = Styles::plain(&style);
+    let damage = Damage::full(1920, 1080);
+    let (_, alone) = crate::alone(
+        &full,
+        (0, 0),
+        &styles,
+        &surfaces,
+        &[],
+        &damage,
+        Rect::new(0, 0, 1920, 1080),
+    )
+    .expect("cropped, opaque and alone");
+    assert_eq!((alone.width(), alone.height()), (1920, 1080));
+
+    let mut see_through = bytes.clone();
+    see_through[3] = 0x80;
+    let surface = Surface::new(&see_through, 1921, 1081, 1921 * 4, Format::Argb8888).unwrap();
+    let mut asked = Asked::default();
+    let _ = render_onto(
+        &mut asked,
+        Some(&mut ()),
+        &full,
+        (0, 0),
+        &styles,
+        &BTreeMap::from([(WindowId(1), surface)]),
+        &[],
+        &damage,
+    );
+    assert_eq!(asked.blurs, 0, "a blur under a fullscreen window");
+    assert_eq!(asked.cleared, 1920 * 1080, "what shows through is drawn");
 }

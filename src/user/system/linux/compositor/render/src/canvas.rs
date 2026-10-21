@@ -845,6 +845,7 @@ impl Canvas {
                 height: tall,
                 origin: (read.x, read.y),
                 screen: (self.width(), self.height()),
+                doubled: crate::blur::large(rect),
             },
             blur,
         );
@@ -1045,6 +1046,45 @@ pub fn copy_to_target(surface: &Surface<'_>, rect: Rect, target: &mut Target<'_>
             }
         }
     });
+}
+
+/// Blend `surface`, premultiplied, drawn at `rect` in `target`'s pixels,
+/// over what `target` holds within `damage`: the pointer over a window
+/// copied straight into the screen's buffer ([`copy_to_target`]), with the
+/// same arithmetic a canvas blends it with. One thread: a pointer is small.
+pub fn blend_onto_target(
+    surface: &Surface<'_>,
+    rect: Rect,
+    target: &mut Target<'_>,
+    damage: &Damage,
+) {
+    let bounds = Rect::new(0, 0, i64::from(target.width()), i64::from(target.height()));
+    let opaque = surface.format() == Format::Xrgb8888;
+    for clip in damage.clipped(bounds).rects() {
+        let Some(part) = intersect(*clip, rect) else {
+            continue;
+        };
+        let len = index(part.width) * 4;
+        let from = index(part.x.saturating_sub(rect.x)) * 4;
+        for y in part.y..part.bottom() {
+            let Some(row) = u32::try_from(y.saturating_sub(rect.y))
+                .ok()
+                .and_then(|row| surface.row(row))
+            else {
+                continue;
+            };
+            let (Some(src), Some(dst)) = (
+                row.get(from..from + len),
+                u32::try_from(part.x)
+                    .ok()
+                    .zip(u32::try_from(y).ok())
+                    .and_then(|(x, y)| target.span_mut(x, y, len)),
+            ) else {
+                continue;
+            };
+            over_row(dst, src, opaque, 1.0);
+        }
+    }
 }
 
 /// Copy the part of `surface`, drawn at `rect`, that `clip` covers into

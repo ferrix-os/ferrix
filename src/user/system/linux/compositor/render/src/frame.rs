@@ -727,8 +727,14 @@ fn hiding(
 /// same bytes: an opaque premultiplied pixel blended over anything is
 /// itself. A frame in which one pixel is not opaque is drawn as before.
 ///
-/// Only at the surface's own size: a stretched one goes through the
-/// sampler, whose reads reach past any one rectangle.
+/// At the surface's own size the pixels proved are those inside the
+/// damage; a stretched one goes through the sampler, whose reads reach
+/// past any one rectangle, so all of it is. Either way an opaque one is
+/// then drawn by the opaque paths: copied, or stretched in whole numbers a
+/// band a core, never through the floating-point shader.
+///
+/// And each fullscreen surface is [`fitted`] first: a buffer a pixel or
+/// two larger than the screen is cropped to it, not stretched.
 fn proved_opaque<'a>(
     output: &MonitorLayout,
     origin: (i64, i64),
@@ -748,31 +754,72 @@ fn proved_opaque<'a>(
         let rect = placed
             .rect
             .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+        let fitted = fitted(*surface, rect);
+        let exact =
+            i64::from(fitted.width()) == rect.width && i64::from(fitted.height()) == rect.height;
         // A dmabuf a GPU renderer samples where it lies: its bytes here are
         // a mapping that may be slow to read, and are not what is drawn.
-        if own.opaque
-            || surface.device().is_some()
-            || surface.format() != Format::Argb8888
-            || opacity < 1.0
-            || i64::from(surface.width()) != rect.width
-            || i64::from(surface.height()) != rect.height
-        {
-            continue;
+        let checked = !own.opaque
+            && fitted.device().is_none()
+            && fitted.format() == Format::Argb8888
+            && opacity >= 1.0;
+        // At its size, what is copied is the damage; stretched, the sampler
+        // reads anywhere, so all of it has to be opaque.
+        let opaque = checked
+            && if exact {
+                let seen = damage.clipped(rect);
+                !seen.is_empty()
+                    && seen
+                        .rects()
+                        .iter()
+                        .all(|&part| fitted.opaque_within(part.translate(-rect.x, -rect.y)))
+            } else {
+                fitted.opaque_within(Rect::new(
+                    0,
+                    0,
+                    i64::from(fitted.width()),
+                    i64::from(fitted.height()),
+                ))
+            };
+        let made = if opaque { fitted.as_opaque() } else { fitted };
+        if opaque || (fitted.width(), fitted.height()) != (surface.width(), surface.height()) {
+            let _ = proved
+                .get_or_insert_with(|| surfaces.clone())
+                .insert(placed.window, made);
         }
-        let seen = damage.clipped(rect);
-        if seen.is_empty()
-            || !seen
-                .rects()
-                .iter()
-                .all(|&part| surface.opaque_within(part.translate(-rect.x, -rect.y)))
-        {
-            continue;
-        }
-        let _ = proved
-            .get_or_insert_with(|| surfaces.clone())
-            .insert(placed.window, surface.as_opaque());
     }
     proved
+}
+
+/// How many pixels larger than its rectangle a fullscreen window's buffer
+/// may be and be cropped rather than stretched.
+const SLACK: i64 = 2;
+
+/// `surface` cropped to `rect`'s size where it is larger by no more than
+/// [`SLACK`] in that direction.
+///
+/// A CEF window through yserver hands over 1921x1201 for a 1920x1200
+/// screen, and stays so whatever it is told. Stretched, that one pixel cost
+/// the whole window a bilinear sample a pixel and a blend -- hundreds of
+/// milliseconds a frame in software -- for a picture no one can tell from
+/// the buffer's top-left 1920x1200, which is what is drawn instead.
+fn fitted<'a>(surface: Surface<'a>, rect: Rect) -> Surface<'a> {
+    let fit = |have: u32, want: i64| {
+        let over = i64::from(have) - want;
+        if over > 0 && over <= SLACK {
+            u32::try_from(want).unwrap_or(have)
+        } else {
+            have
+        }
+    };
+    let (width, height) = (
+        fit(surface.width(), rect.width),
+        fit(surface.height(), rect.height),
+    );
+    if (width, height) == (surface.width(), surface.height()) {
+        return surface;
+    }
+    surface.cropped(0, 0, width, height).unwrap_or(surface)
 }
 
 /// The window `output`'s frame is within `damage`, and nothing else: a
@@ -1017,7 +1064,13 @@ fn window<P: Painter>(
             .get(&placed.window)
             .is_some_and(|surface| surface.format() == Format::Argb8888)
             || opacity < 1.0);
-    let blur = style.blur.filter(|_| own.blur && translucent);
+    // Never under a fullscreen window: all that is behind one is the
+    // background, and a blur the size of the screen is the most a software
+    // frame can be asked for -- half a second on the N150 -- for a screen
+    // that shows a game.
+    let blur = style
+        .blur
+        .filter(|_| own.blur && translucent && !fullscreen(placed));
     // The shadow first, under the border and the window: Hyprland draws it
     // as a decoration behind them and does not cut the window's own shape
     // out of it.
