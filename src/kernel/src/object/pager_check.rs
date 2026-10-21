@@ -682,8 +682,11 @@ fn case_c_failed(world: &World, report: &mut Report) -> Result<(), &'static str>
     let _ = served
         .op(PAGER_OP_FAIL, 1, 1, u64::from(Errno::EIO.0), 0)
         .map_err(|_| "c: pager_op FAIL was refused")?;
-    if outcome(&client, &task)?.0 != Outcome::Bus {
-        return Err("c: a fault its pager failed was not SIGBUS");
+    // Served's bound is the maximum: a failure taken for a supply would
+    // ask again and time out 30 s later, which this tells apart.
+    let (ended, took) = outcome(&client, &task)?;
+    if ended != Outcome::Bus || took > PROMPTLY_NANOS || !served.quiet() {
+        return Err("c: a fault its pager failed was not SIGBUS at once");
     }
     report.ended += 1;
     Ok(())
