@@ -286,10 +286,24 @@ where
             .map_err(|_| Stopped::Port)
     };
     arm(host)?;
+    let mut last_dump = 0_u64;
     loop {
-        let deadline = frontend
-            .next_deadline()
-            .map_or(Deadline::Never, Deadline::At);
+        // SCRATCH: every 10 s while anything is outstanding, say the state.
+        let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
+        let busy = !frontend.state.waits.is_empty()
+            || frontend.state.requests.retired + 1 < frontend.state.requests.next;
+        if busy && now >= last_dump + 10_000_000_000 {
+            if last_dump != 0 {
+                dump(frontend);
+            }
+            last_dump = now;
+        }
+        let tick = busy.then_some(last_dump + 10_000_000_000);
+        let next = match (frontend.next_deadline(), tick) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let deadline = next.map_or(Deadline::Never, Deadline::At);
         match port.wait(deadline) {
             Ok(packet) if packet.key == KEY_CONTROL => {
                 if Signals(packet.signals).intersects(Signals::PEER_CLOSED) {
@@ -349,5 +363,79 @@ where
             request.pages,
             request.file,
         ),
+    }
+}
+
+/// SCRATCH: the front end's requests and held waits, said.
+fn dump<B: Backend>(frontend: &Frontend<B>) {
+    let state = &frontend.state;
+    let requests = &state.requests;
+    say(format_args!(
+        "intel-dump: requests next {} retired {}, waits {}, kernel fences {}",
+        requests.next,
+        requests.retired,
+        state.waits.len(),
+        state.kernel_fences.len()
+    ));
+    let mut shown = 0;
+    for id in requests.live_ids() {
+        if let Some(request) = requests.get(id) {
+            if shown < 12 {
+                let deps = request.deps.get(..usize::from(request.dep_count)).unwrap_or(&[]);
+                say(format_args!(
+                    "intel-dump: request {id} {:?} ctx {} slot {} deps {:?} -> {:?}",
+                    request.state,
+                    request.context,
+                    request.slot,
+                    deps,
+                    deps.iter().map(|dep| requests.status(*dep)).collect::<heapless_free::Vec4>()
+                ));
+            }
+            shown += 1;
+        }
+    }
+    for (_, wait) in state.waits.slots.iter() {
+        match wait.kind {
+            ferrix_intel_xelp::frontend::fence::WaitKind::Object { object, .. } => say(format_args!(
+                "intel-dump: wait {} file {} GEM_WAIT object {object} deadline {:?}",
+                wait.request, wait.file, wait.deadline
+            )),
+            ferrix_intel_xelp::frontend::fence::WaitKind::Syncobjs(sync) => {
+                say(format_args!(
+                    "intel-dump: wait {} file {} SYNCOBJ timeline {} flags {:#x} count {} deadline {:?}",
+                    wait.request, wait.file, sync.timeline, sync.flags, sync.count, wait.deadline
+                ));
+                for index in 0..usize::from(sync.count).min(8) {
+                    let slot = usize::from(sync.slots.get(index).copied().unwrap_or(0));
+                    let point = sync.points.get(index).copied().unwrap_or(0);
+                    let fence = sync.fences.get(index).copied().flatten();
+                    let chain = state.syncobjs.get(slot).map(|sync| sync.fence);
+                    say(format_args!(
+                        "intel-dump:   [{index}] syncobj {slot} point {point} fence {:?} status {:?} now {:?}",
+                        fence,
+                        fence.map(|fence| requests.status(fence)),
+                        chain
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// SCRATCH: four statuses, no allocator.
+mod heapless_free {
+    #[derive(Debug, Default)]
+    pub(super) struct Vec4(pub(super) [Option<Option<i32>>; 16], pub(super) usize);
+    impl FromIterator<Option<i32>> for Vec4 {
+        fn from_iter<I: IntoIterator<Item = Option<i32>>>(iter: I) -> Self {
+            let mut out = Vec4::default();
+            for item in iter {
+                if let Some(cell) = out.0.get_mut(out.1) {
+                    *cell = Some(item);
+                    out.1 += 1;
+                }
+            }
+            out
+        }
     }
 }

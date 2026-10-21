@@ -76,7 +76,8 @@ pub struct Wait {
 
 /// The held waits.
 pub struct Waits {
-    slots: Slab<Wait, { limits::WAITS }>,
+    /// SCRATCH: public for the dump.
+    pub slots: Slab<Wait, { limits::WAITS }>,
 }
 
 impl Waits {
