@@ -103,7 +103,7 @@ version is on the [overview](README.md).
   crate (2026-10-11); the Claude desktop app shows its sign-in screen on the
   `--everything` desktop, natively on ferrousli (C1 to C4, 2026-10-16);
   `hyprctl clients` lists every mapped window; an opaque fullscreen window is
-  drawn alone, with no shadow and nothing under it (2026-10-21, f0d338fcf,
+  drawn alone, with no shadow and nothing under it (2026-10-21, f0d338fcf; a fullscreen window drawn alone is copied straight to the screen, e4a418554, and a window over a fullscreen one is undecorated, e63185611,
   which saved 21 of a 78 ms software frame on the box).
 * **Stages 22 to 24.** Steam has a way to start a native library game around
   the stalled in-guest install (`--steam-preinstall` and `ferrix_direct`,
@@ -119,6 +119,12 @@ version is on the [overview](README.md).
   and `times` reporting processor time, thread names as `PR_SET_NAME` and
   `/proc/.../comm`, `sendmmsg` and `recvmmsg`, `memfd_create`'s exec seal,
   `arch_prctl`'s GS base, and a `connect` to `0.0.0.0` refused by the loopback.
+  `/proc/<pid>/task/<tid>/syscall`, `wchan`, `stack` and `environ` tell what a
+  blocked thread waits in (2026-10-21, 2022ed449, S1 of `docs/DEBUG.md`).
+  `ptrace` is compiled out of the certified present profile by the customer's
+  decision, its requirements cover debug builds only (H.DEBUG.1 and L.debug.1-14
+  are reserved, 62d2b09da); the box gets an image with it on when `gdbserver` or
+  `strace` is needed.
 * **The channel round trip.** The direct switch folds its tasks' job load
   (L.sched.64-66), a Linux call lends the caller's thread, and pipe waits trust
   their queues (all 2026-10-11); `bench-pipe` times pipe, Unix-socket and futex

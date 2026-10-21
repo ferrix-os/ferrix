@@ -494,7 +494,8 @@ ends and the customer decides.
 * **E5.2** Reading and writing another process's memory: `ptrace`,
   `process_vm_readv` and `process_vm_writev` are not in the table, and
   whether `/proc/<pid>/mem` serves was not checked. `ptrace` is the large
-  one: it reaches the certified item's core (another process's memory and
+  one (the customer decided on 2026-10-21 that `ptrace` is compiled out of the
+  certified present profile and exists in debug builds, 62d2b09da): it reaches the certified item's core (another process's memory and
   stopped state) and owes a design review before code. 13, if it is needed.
 * **E5.3** Windows system calls made directly by the game's or the
   anti-cheat's code, which GE-Proton catches with Syscall User Dispatch
