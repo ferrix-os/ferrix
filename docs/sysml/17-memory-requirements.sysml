@@ -2571,7 +2571,8 @@ package FerrixMemoryRequirements {
                 "user::vmo::Vmo::sourced", "user::space::AddressSpace::ask_pager",
                 "user::space::AddressSpace::fault_with", "user::space::commit_page",
                 "object::pager::Request::covers", "user::vmo::Vmo::pager",
-                "user::vmo::Vmo::filler");
+                "user::vmo::Vmo::filler", "user::space::AddressSpace::paged_object_at",
+                "user::space::ask", "user::space::permitted");
         }
         requirement <'L.user.147'> aRequestIsListedWithoutAllocating : ItemLowLevel {
             attribute :>> statement = "A request shall be opened with no address
@@ -2645,7 +2646,8 @@ package FerrixMemoryRequirements {
                 page waits for its supply and reads it; one from a NO_COPY_WAIT
                 VMO's absent page fails at once with no packet.";
             attribute :>> parent = "H.MEM.22";
-            attribute :>> unit = ("object::oom::user_fault", "syscall::native::copy_paged");
+            attribute :>> unit = ("object::oom::user_fault", "syscall::native::copy_paged",
+                "syscall::native::read_paged", "syscall::native::write_paged");
         }
         requirement <'L.user.153'> aSupplyMovesThePagersOwnPages : ItemLowLevel {
             attribute :>> statement = "pager_supply shall move only committed pages
@@ -2659,7 +2661,8 @@ package FerrixMemoryRequirements {
                 they were; a supply of a page another supply filled moves nothing;
                 a supplied fault reads the aux bytes.";
             attribute :>> parent = "H.MEM.22";
-            attribute :>> unit = "user::vmo::Vmo::supply_from";
+            attribute :>> unit = ("user::vmo::Vmo::supply_from", "user::vmo::Vmo::absent_in",
+                "user::vmo::Vmo::take_for_supply", "user::vmo::Vmo::put_supplied");
         }
         requirement <'L.user.154'> aCleanPageIsNeverWritable : ItemLowLevel {
             attribute :>> statement = "A Clean page of a pager-backed VMO shall
@@ -2679,6 +2682,7 @@ package FerrixMemoryRequirements {
                 "user::vmo::Vmo::write_paged", "user::vmo::Vmo::page_state",
                 "user::vmo::state_of", "user::space::AddressSpace::read_only_paged",
                 "user::space::writable_in_place", "user::space::writable_flags",
+                "user::space::writable_in",
                 "user::vmo::Vmo::dirty_range", "object::pager::PagerLink::dirtied");
         }
         requirement <'L.user.155'> aWriteBackKeepsLaterWrites : ItemLowLevel {

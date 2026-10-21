@@ -453,9 +453,9 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::JobGetQuota
         | NativeCall::ProcessCreate
         | NativeCall::ProcessStart => job_call(call, caller, &a),
-        NativeCall::InterruptCreate => interrupt_create(process, handle(a[0]), a[1]),
-        NativeCall::InterruptAck => interrupt_ack(process, handle(a[0])),
-        NativeCall::InterruptBind => interrupt_bind(process, handle(a[0]), handle(a[1]), a[2]),
+        NativeCall::InterruptCreate | NativeCall::InterruptAck | NativeCall::InterruptBind => {
+            interrupt_call(call, process, &a)
+        }
         NativeCall::BlockRingCreate
         | NativeCall::NetRingCreate
         | NativeCall::DisplayControlCreate
@@ -481,19 +481,11 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::AuditRead => audit_read(process, handle(a[0]), a[1], a[2], a[3], a[4]),
         NativeCall::ProcessBootstrap => process_bootstrap(process),
         NativeCall::ProcessStatus => process_status(process, handle(a[0]), a[1]),
-        NativeCall::PagerCreate => pager_create(process, handle(a[0]), a[1], a[2]),
-        NativeCall::PagerCreateVmo => pager_create_vmo(process, handle(a[0]), a[1]),
-        NativeCall::PagerSupply => {
-            pager_supply(process, handle(a[0]), handle(a[1]), handle(a[2]), a[3])
-        }
-        NativeCall::PagerOp => pager_op(process, handle(a[0]), handle(a[1]), a[2], a[3]),
-        NativeCall::PagerQueryDirty => pager_query_dirty(
-            process,
-            handle(a[0]),
-            handle(a[1]),
-            a[2],
-            buffer(a[3], a[4]),
-        ),
+        NativeCall::PagerCreate
+        | NativeCall::PagerCreateVmo
+        | NativeCall::PagerSupply
+        | NativeCall::PagerOp
+        | NativeCall::PagerQueryDirty => pager_call(call, process, &a),
         NativeCall::IoMappingCreate
         | NativeCall::IoMappingMap
         | NativeCall::IoMappingMapCombining
@@ -1394,6 +1386,17 @@ fn vmo_in(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<Arc<Vmo>, 
     Ok(Arc::clone(vmo))
 }
 
+/// [`vmo_in`] for a call that pins: a pager's object is refused
+/// `BAD_STATE`, since its pages are the pager's to supply and take back
+/// (`docs/microkernel/K3.md` §4).
+fn unpaged_vmo_in(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<Arc<Vmo>, Errno> {
+    let vmo = vmo_in(table, vmo, needed)?;
+    if vmo.is_pager_backed() {
+        return Err(status::BAD_STATE);
+    }
+    Ok(vmo)
+}
+
 /// A count from a register, if it is at most `max`.
 fn within(count: u64, max: usize) -> Result<usize, Errno> {
     usize::try_from(count)
@@ -1570,24 +1573,80 @@ fn copy_paged(
         uaccess::copy_from_user(process.space(), user, slot).map_err(fault)?;
     }
     for _ in 0..PAGED_TRIES {
-        match direction {
-            Direction::Read => {
-                if vmo.read_present(index, within, slot).map_err(vmo_error)? {
-                    return uaccess::copy_to_user(process.space(), user, slot).map_err(fault);
+        let wanted = match direction {
+            Direction::Read => read_paged(vmo, index, within, slot)?,
+            Direction::Write => write_paged(vmo, link, index, within, slot)?,
+        };
+        let Some(command) = wanted else {
+            return match direction {
+                Direction::Read => {
+                    uaccess::copy_to_user(process.space(), user, slot).map_err(fault)
                 }
-                asked(Command::Read)?;
-            }
-            Direction::Write => match vmo
-                .write_paged(index, within, slot, link.traps_dirty())
-                .map_err(vmo_error)?
-            {
-                PagedWrite::Done => return Ok(()),
-                PagedWrite::Absent => asked(Command::Read)?,
-                PagedWrite::NeedsDirty => asked(Command::Dirty)?,
-            },
-        }
+                Direction::Write => Ok(()),
+            };
+        };
+        asked(command)?;
     }
     Err(status::FAULT)
+}
+
+/// One try of [`copy_paged`]'s read: `None` once `slot` holds the page's
+/// bytes, or the request the page needs first.
+fn read_paged(
+    vmo: &Vmo,
+    index: u64,
+    within: usize,
+    slot: &mut [u8],
+) -> Result<Option<Command>, Errno> {
+    let present = vmo.read_present(index, within, slot).map_err(vmo_error)?;
+    Ok((!present).then_some(Command::Read))
+}
+
+/// One try of [`copy_paged`]'s write: `None` once `slot` is written and its
+/// page Dirty, or the request the page needs first.
+fn write_paged(
+    vmo: &Vmo,
+    link: &PagerLink,
+    index: u64,
+    within: usize,
+    slot: &[u8],
+) -> Result<Option<Command>, Errno> {
+    let written = vmo
+        .write_paged(index, within, slot, link.traps_dirty())
+        .map_err(vmo_error)?;
+    Ok(match written {
+        PagedWrite::Done => None,
+        PagedWrite::Absent => Some(Command::Read),
+        PagedWrite::NeedsDirty => Some(Command::Dirty),
+    })
+}
+
+/// The pager calls, 0x1074 to 0x1078 (`docs/microkernel/K3.md` §4).
+fn pager_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    match call {
+        NativeCall::PagerCreate => pager_create(process, handle(a[0]), a[1], a[2]),
+        NativeCall::PagerCreateVmo => pager_create_vmo(process, handle(a[0]), a[1]),
+        NativeCall::PagerSupply => {
+            pager_supply(process, handle(a[0]), handle(a[1]), handle(a[2]), a[3])
+        }
+        NativeCall::PagerOp => pager_op(process, handle(a[0]), handle(a[1]), a[2], a[3]),
+        _ => pager_query_dirty(
+            process,
+            handle(a[0]),
+            handle(a[1]),
+            a[2],
+            buffer(a[3], a[4]),
+        ),
+    }
+}
+
+/// The interrupt calls.
+fn interrupt_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    match call {
+        NativeCall::InterruptCreate => interrupt_create(process, handle(a[0]), a[1]),
+        NativeCall::InterruptAck => interrupt_ack(process, handle(a[0])),
+        _ => interrupt_bind(process, handle(a[0]), handle(a[1]), a[2]),
+    }
 }
 
 /// How many times [`copy_paged`] asks for a page that is taken again before
@@ -1733,41 +1792,65 @@ fn pager_op(
         drop(pager);
         return Ok(0);
     }
-    let (first, count) = page_range(&vmo, offset, length)?;
-    if op != PAGER_OP_FAIL && (value != 0 || request != 0) {
-        return Err(status::INVALID_ARGS);
-    }
+    let range = page_range(&vmo, offset, length)?;
+    let done = if op == PAGER_OP_FAIL {
+        pager_fail(&link, range, value, request)
+    } else if value != 0 || request != 0 {
+        Err(status::INVALID_ARGS)
+    } else {
+        pager_page_op(&vmo, &link, op, range)
+    };
+    drop(pager);
+    done.map(|()| 0)
+}
+
+/// `PAGER_OP_FAIL` over `(first, count)`: `EIO` or `ENOSPC`, of every request
+/// or of the one named.
+fn pager_fail(
+    link: &PagerLink,
+    (first, count): (u64, u64),
+    value: u64,
+    request: u64,
+) -> Result<(), Errno> {
+    let errno = match value {
+        5 => Errno::EIO,
+        28 => Errno::ENOSPC,
+        _ => return Err(status::INVALID_ARGS),
+    };
+    let _ = link.fail(first, count, errno, request);
+    Ok(())
+}
+
+/// Every `pager_op` but `FAIL` and `DETACH`, over `(first, count)`.
+fn pager_page_op(
+    vmo: &Vmo,
+    link: &PagerLink,
+    op: u64,
+    (first, count): (u64, u64),
+) -> Result<(), Errno> {
     match op {
-        PAGER_OP_FAIL => {
-            let errno = match value {
-                5 => Errno::EIO,
-                28 => Errno::ENOSPC,
-                _ => return Err(status::INVALID_ARGS),
-            };
-            let _ = link.fail(first, count, errno, request);
-        }
         PAGER_OP_DIRTY => match vmo.dirty_range(first, count) {
             Ok(true) => {
                 let _ = link.dirtied(first, count);
+                Ok(())
             }
-            Ok(false) => return Err(status::BAD_STATE),
-            Err(_) => return Err(status::NO_MEMORY),
+            Ok(false) => Err(status::BAD_STATE),
+            Err(_) => Err(status::NO_MEMORY),
         },
         PAGER_OP_WRITEBACK_BEGIN => {
             let _ = vmo.writeback_begin(first, count);
+            Ok(())
         }
         PAGER_OP_WRITEBACK_END => {
             let _ = vmo.writeback_end(first, count);
+            Ok(())
         }
-        PAGER_OP_DECOMMIT => {
-            let _ = vmo
-                .decommit_clean(first, count)
-                .map_err(|_| status::NO_MEMORY)?;
-        }
-        _ => return Err(status::INVALID_ARGS),
+        PAGER_OP_DECOMMIT => vmo
+            .decommit_clean(first, count)
+            .map(|_| ())
+            .map_err(|_| status::NO_MEMORY),
+        _ => Err(status::INVALID_ARGS),
     }
-    drop(pager);
-    Ok(0)
 }
 
 /// `pager_query_dirty`: the Dirty and awaiting-clean runs of a range, as
@@ -2839,13 +2922,8 @@ fn vmo_pin(
         if !read_only {
             let _ = vmo_in(table, vmo, Rights::WRITE)?;
         }
-        vmo_in(table, vmo, Rights::READ)
+        unpaged_vmo_in(table, vmo, Rights::READ)
     })?;
-    // A pager's object is not pinned: its pages are the pager's to supply
-    // and take back (`docs/microkernel/K3.md` §4).
-    if vmo.is_pager_backed() {
-        return Err(status::BAD_STATE);
-    }
     let past_caches = options & PIN_COHERENT != 0 && !node.dma_shape().coherent;
     if past_caches && (offset != 0 || length != vmo.len_bytes()) {
         return Err(status::INVALID_ARGS);

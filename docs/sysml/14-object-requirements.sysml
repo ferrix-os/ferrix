@@ -2118,7 +2118,7 @@ package FerrixObjectRequirements {
             attribute :>> parent = "H.MEM.22";
             attribute :>> unit = ("syscall::native::pager_create_vmo",
                 "object::pager::PagerCore::link", "user::vmo::Vmo::new_paged",
-                "user::vmo::Vmo::grow_to");
+                "user::vmo::Vmo::grow_to", "syscall::native::unpaged_vmo_in");
         }
         requirement <'L.object.228'> aSupplyIsChecked : ItemLowLevel {
             attribute :>> statement = "pager_supply shall need PAGER on the pager
@@ -2147,7 +2147,8 @@ package FerrixObjectRequirements {
                 trap-dirty write shows that page alone as Dirty.";
             attribute :>> parent = "H.MEM.23";
             attribute :>> unit = ("syscall::native::pager_op",
-                "syscall::native::pager_query_dirty");
+                "syscall::native::pager_query_dirty", "syscall::native::pager_call",
+                "syscall::native::pager_fail", "syscall::native::pager_page_op");
         }
         requirement <'L.object.230'> aPageRequestSaysWhatItAsks : ItemLowLevel {
             attribute :>> statement = "A page request's packet shall carry the VMO's

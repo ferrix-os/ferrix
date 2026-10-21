@@ -2517,62 +2517,20 @@ impl Vmo {
         {
             return Err(SupplyError::Range);
         }
-        let room = usize::try_from(count).map_err(|_| SupplyError::Range)?;
-        let mut wanted: Vec<u64> =
-            crate::fallible::try_with_capacity(room).map_err(|_| SupplyError::NoMemory)?;
-        {
-            let pages = self.pages.lock();
-            for at in 0..count {
-                if !pages.frames.contains_key(&(first + at)) {
-                    // NOALLOC: room for every page of the range.
-                    let _ = crate::fallible::push_within(&mut wanted, at);
-                }
-            }
-        }
-        let mut moved: Vec<(u64, Frame)> =
-            crate::fallible::try_with_capacity(wanted.len()).map_err(|_| SupplyError::NoMemory)?;
+        let wanted = self.absent_in(first, count)?;
+        let moved = aux.take_for_supply(aux_first, count, &wanted)?;
         let mut kept: Vec<bool> =
-            crate::fallible::try_filled(false, wanted.len()).map_err(|_| SupplyError::NoMemory)?;
-        {
-            let mut source = aux.pages.lock();
-            let end = aux_first + count;
-            if source.held.range(aux_first..end).next().is_some() {
-                return Err(SupplyError::BadAux);
-            }
-            for at in aux_first..end {
-                match source.frames.get(&at) {
-                    Some(&frame) if mm::frame_references(frame) <= 1 => {}
-                    _ => return Err(SupplyError::BadAux),
-                }
-            }
-            for &at in &wanted {
-                if let Some(frame) = source.frames.remove(&(aux_first + at)) {
-                    // NOALLOC: room for every wanted page.
-                    let _ = crate::fallible::push_within(&mut moved, (aux_first + at, frame));
-                }
-            }
-        }
+            crate::fallible::try_filled(false, moved.len()).map_err(|_| SupplyError::NoMemory)?;
         // Every mapper of `aux` forgets the moved pages before they are this
         // object's; nothing is released.
         let mut runs = [(0, 0); RUNS];
         let used = runs_of(&moved, &mut runs);
         aux.retire_runs(&[], false, runs.get(..used).unwrap_or(&[]), None, false);
-        let mut supplied = 0;
-        {
-            let mut pages = self.pages.lock();
-            for (&(aux_index, frame), keep) in moved.iter().zip(kept.iter_mut()) {
-                let index = aux_index - aux_first + first;
-                if pages.frames.contains_key(&index) {
-                    continue;
-                }
-                if crate::fallible::insert(&mut pages.frames, index, frame).is_ok() {
-                    // Clean, whatever a page once there was.
-                    let _ = pages.states.remove(&index);
-                    *keep = true;
-                    supplied += 1;
-                }
-            }
-        }
+        let supplied = self.put_supplied(
+            &moved,
+            aux_first.wrapping_neg().wrapping_add(first),
+            &mut kept,
+        );
         for (&(_, frame), &keep) in moved.iter().zip(kept.iter()) {
             if !keep {
                 // Out of every mapping of `aux` since its shootdown, and in
@@ -2581,6 +2539,73 @@ impl Vmo {
             }
         }
         Ok(supplied)
+    }
+
+    /// The offsets in `[first, first + count)` of the pages this object
+    /// lacks, read under its lock alone.
+    fn absent_in(&self, first: u64, count: u64) -> Result<Vec<u64>, SupplyError> {
+        let room = usize::try_from(count).map_err(|_| SupplyError::Range)?;
+        let mut wanted: Vec<u64> =
+            crate::fallible::try_with_capacity(room).map_err(|_| SupplyError::NoMemory)?;
+        let pages = self.pages.lock();
+        for at in (0..count).filter(|at| !pages.frames.contains_key(&(first + at))) {
+            // NOALLOC: room for every page of the range.
+            let _ = crate::fallible::push_within(&mut wanted, at);
+        }
+        Ok(wanted)
+    }
+
+    /// Take the pages at `wanted` offsets from `aux_first` out of this
+    /// object, an aux VMO, for a supply: refused, taking nothing, unless
+    /// every page of `[aux_first, aux_first + count)` is committed, held by
+    /// no device and referenced by no other object.
+    fn take_for_supply(
+        &self,
+        aux_first: u64,
+        count: u64,
+        wanted: &[u64],
+    ) -> Result<Vec<(u64, Frame)>, SupplyError> {
+        let mut moved: Vec<(u64, Frame)> =
+            crate::fallible::try_with_capacity(wanted.len()).map_err(|_| SupplyError::NoMemory)?;
+        let mut source = self.pages.lock();
+        let end = aux_first + count;
+        let unshared = |at: u64| {
+            source
+                .frames
+                .get(&at)
+                .is_some_and(|&frame| mm::frame_references(frame) <= 1)
+        };
+        if source.held.range(aux_first..end).next().is_some() || !(aux_first..end).all(unshared) {
+            return Err(SupplyError::BadAux);
+        }
+        for &at in wanted {
+            if let Some(frame) = source.frames.remove(&(aux_first + at)) {
+                // NOALLOC: room for every wanted page.
+                let _ = crate::fallible::push_within(&mut moved, (aux_first + at, frame));
+            }
+        }
+        Ok(moved)
+    }
+
+    /// Put each of `moved`, an aux page and its frame, at its index plus
+    /// `shift` (modulo 2^64) where this object still lacks it, marking it
+    /// Clean and noting it in `kept`; how many went in.
+    fn put_supplied(&self, moved: &[(u64, Frame)], shift: u64, kept: &mut [bool]) -> u64 {
+        let mut supplied = 0;
+        let mut pages = self.pages.lock();
+        for (&(aux_index, frame), keep) in moved.iter().zip(kept.iter_mut()) {
+            let index = aux_index.wrapping_add(shift);
+            if pages.frames.contains_key(&index)
+                || crate::fallible::insert(&mut pages.frames, index, frame).is_err()
+            {
+                continue;
+            }
+            // Clean, whatever a page once there was.
+            let _ = pages.states.remove(&index);
+            *keep = true;
+            supplied += 1;
+        }
+        supplied
     }
 
     /// `PAGER_OP_DIRTY`: the present pages of `[first, first + count)` become

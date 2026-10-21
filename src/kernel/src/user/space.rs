@@ -537,7 +537,9 @@ fn copy_or_zero(file: &Vmo, index: u64, frame: Frame) -> Result<(), SpaceError> 
 /// end is read under the object's pages lock, and a truncation lowers it
 /// before it takes that lock to take pages away.
 fn commit_page(vmo: &Vmo, index: u64, file: bool, address: u64) -> Result<Frame, SpaceError> {
-    if file {
+    // A pager-backed object's absent page is its pager's, never zeros: it is
+    // committed as a file's is, and its absence sends the fault round again.
+    if file || vmo.is_pager_backed() {
         match vmo.commit_within(index).map_err(SpaceError::Backing)? {
             Commit::Frame(frame) => Ok(frame),
             Commit::PastEnd => Err(SpaceError::PastEnd(address)),
@@ -1041,48 +1043,10 @@ impl AddressSpace {
     /// or will never answer, or that a copy may not wait for;
     /// [`SpaceError::OutOfMemory`] for the request's own record.
     fn ask_pager(&self, address: u64, access: Access, mode: FaultMode) -> Result<bool, SpaceError> {
-        let (vmo, index, writes) = {
-            let inner = self.inner.lock();
-            let Some(region) = inner.map.find(address) else {
-                return Ok(true);
-            };
-            let (id, offset) = match region.backing {
-                Backing::Anonymous { id, offset } => (id, offset),
-                Backing::File { id, offset } if region.flags.shared => (id, offset),
-                _ => return Ok(true),
-            };
-            let Some(vmo) = inner
-                .objects
-                .get(&id)
-                .filter(|vmo| vmo.is_pager_backed())
-                .map(Arc::clone)
-            else {
-                return Ok(true);
-            };
-            let into = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start());
-            (
-                vmo,
-                offset.saturating_add(into) / PAGE_SIZE,
-                access.write && region.flags.write,
-            )
-        };
-        let Some(link) = vmo.pager() else {
+        let Some((vmo, index, writes)) = self.paged_object_at(address, access) else {
             return Ok(true);
         };
-        let asked = match vmo.page_state(index) {
-            PageState::Absent => link.request(&vmo, index, Command::Read, mode),
-            PageState::Clean | PageState::AwaitingClean if writes => {
-                if link.traps_dirty() {
-                    link.request(&vmo, index, Command::Dirty, mode)
-                } else {
-                    vmo.mark_dirty(index)
-                        .map(|_| ())
-                        .map_err(|_| Refusal::NoMemory)
-                }
-            }
-            _ => Ok(()),
-        };
-        match asked {
+        match ask(&vmo, index, writes, mode) {
             Ok(()) => Ok(true),
             Err(Refusal::Interrupted) if mode == FaultMode::Program => Ok(false),
             Err(Refusal::NoMemory) => Err(SpaceError::OutOfMemory),
@@ -1090,19 +1054,32 @@ impl AddressSpace {
         }
     }
 
+    /// The pager-backed object a shared or anonymous region maps at
+    /// `address`, the page's index in it, and whether `access` writes a
+    /// region that may be written; `None` for any other region or none.
+    fn paged_object_at(&self, address: u64, access: Access) -> Option<(Arc<Vmo>, u64, bool)> {
+        let inner = self.inner.lock();
+        let region = inner.map.find(address)?;
+        let (id, offset) = match region.backing {
+            Backing::Anonymous { id, offset } => (id, offset),
+            Backing::File { id, offset } if region.flags.shared => (id, offset),
+            _ => return None,
+        };
+        let vmo = inner.objects.get(&id).filter(|vmo| vmo.is_pager_backed())?;
+        let into = (address & !(PAGE_SIZE - 1)).saturating_sub(region.range.start());
+        Some((
+            Arc::clone(vmo),
+            offset.saturating_add(into) / PAGE_SIZE,
+            access.write && region.flags.write,
+        ))
+    }
+
     /// [`AddressSpace::fault`] once a file's page is in its object: find the
     /// region, ask its object for the page, install it.
     fn resolve(&self, address: u64, access: Access) -> Result<(), SpaceError> {
         let inner = self.inner.lock();
 
-        let region = *inner
-            .map
-            .find(address)
-            .ok_or(SpaceError::NotMapped(address))?;
-
-        if !permits(region.flags, access) {
-            return Err(SpaceError::Refused(address));
-        }
+        let region = permitted(&inner, address, access)?;
 
         let page = address & !(PAGE_SIZE - 1);
         let into_region = page.saturating_sub(region.range.start());
@@ -1209,11 +1186,7 @@ impl AddressSpace {
         // sends it round again, and a read-only translation the page had
         // while Clean is replaced, with its shootdown, as a copy-on-write
         // page's is.
-        let paged = vmo.is_pager_backed();
-        if paged
-            && access.write
-            && let Some(frame) = self.read_only_paged(&vmo, index, page, address)?
-        {
+        if let Some(frame) = self.read_only_paged(&vmo, index, (page, address), access)? {
             let flags = writable_flags(&region, &vmo);
             return self.install_page(inner, placed(id, index, page, frame), flags, true);
         }
@@ -1232,13 +1205,13 @@ impl AddressSpace {
         }
 
         // A pager-backed object's absent page is its pager's, never zeros.
-        let frame = commit_page(&vmo, index, file || paged, address)?;
+        let frame = commit_page(&vmo, index, file, address)?;
 
         // A copy-on-write region is installed read-only however writable the
         // region is, so that the *next* write faults here again and can copy;
         // and so is a pager-backed object's page that is not Dirty, so that
         // its first write faults and is seen.
-        let writable = region.flags.write && !region.cow && (!paged || vmo.writable_page(index));
+        let writable = writable_in(&region, &vmo, index);
         let flags = MapFlags {
             read: true,
             write: writable,
@@ -1280,9 +1253,12 @@ impl AddressSpace {
         &self,
         vmo: &Vmo,
         index: u64,
-        page: u64,
-        address: u64,
+        (page, address): (u64, u64),
+        access: Access,
     ) -> Result<Option<Frame>, SpaceError> {
+        if !access.write || !vmo.is_pager_backed() {
+            return Ok(None);
+        }
         if !vmo.writable_page(index) {
             return Err(SpaceError::Evicted);
         }
@@ -2093,6 +2069,53 @@ struct Placement {
     index: u64,
     page: u64,
     frame: Frame,
+}
+
+/// Ask `vmo`'s pager for page `index`: supplied if absent, and for a write
+/// (`writes`) to a Clean or awaiting-clean page let Dirty, by the pager first
+/// in a trap-dirty object (`docs/microkernel/K3.md` §2.2 to §2.5). With no
+/// lock held.
+fn ask(vmo: &Vmo, index: u64, writes: bool, mode: FaultMode) -> Result<(), Refusal> {
+    let Some(link) = vmo.pager() else {
+        return Ok(());
+    };
+    match vmo.page_state(index) {
+        PageState::Absent => link.request(vmo, index, Command::Read, mode),
+        PageState::Clean | PageState::AwaitingClean if writes && link.traps_dirty() => {
+            link.request(vmo, index, Command::Dirty, mode)
+        }
+        PageState::Clean | PageState::AwaitingClean if writes => vmo
+            .mark_dirty(index)
+            .map(|_| ())
+            .map_err(|_| Refusal::NoMemory),
+        _ => Ok(()),
+    }
+}
+
+/// The region `address` lies in, if `access` is one it permits: what a fault
+/// resolves through.
+///
+/// # Errors
+///
+/// [`SpaceError::NotMapped`] for no region, [`SpaceError::Refused`] for an
+/// access the region forbids.
+fn permitted(inner: &Inner, address: u64, access: Access) -> Result<Vma, SpaceError> {
+    let region = *inner
+        .map
+        .find(address)
+        .ok_or(SpaceError::NotMapped(address))?;
+    if !permits(region.flags, access) {
+        return Err(SpaceError::Refused(address));
+    }
+    Ok(region)
+}
+
+/// Whether page `index` of `vmo` is installed writable through `region`:
+/// never in a copy-on-write region, whose next write must fault to copy, and
+/// never while a pager-backed object's page is not Dirty, whose next write
+/// must fault to be seen (`docs/microkernel/K3.md` §2.5).
+fn writable_in(region: &Vma, vmo: &Vmo, index: u64) -> bool {
+    region.flags.write && !region.cow && vmo.writable_page(index)
 }
 
 /// How a page of `vmo` that may be written in place is mapped through

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "094b049c85af4fe03ad3807ab8778a1493c4298ee4ba7dffdcf75e00684e78f7",
+  "digest": "1fbf3fa90533427567bf46a76731259672fe166c0da57649cde49961875b6ff2",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -35375,7 +35375,7 @@
                   "qualifiedName": "FerrixObjectRequirements::Pagers::aPagerVmoIsMadeOverItsPager",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"syscall::native::pager_create_vmo\", \"object::pager::PagerCore::link\", \"user::vmo::Vmo::new_paged\", \"user::vmo::Vmo::grow_to\")",
+                  "value": "(\"syscall::native::pager_create_vmo\", \"object::pager::PagerCore::link\", \"user::vmo::Vmo::new_paged\", \"user::vmo::Vmo::grow_to\", \"syscall::native::unpaged_vmo_in\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 2121
@@ -35489,10 +35489,10 @@
                   "qualifiedName": "FerrixObjectRequirements::Pagers::aPagerOpIsChecked",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"syscall::native::pager_op\", \"syscall::native::pager_query_dirty\")",
+                  "value": "(\"syscall::native::pager_op\", \"syscall::native::pager_query_dirty\", \"syscall::native::pager_call\", \"syscall::native::pager_fail\", \"syscall::native::pager_page_op\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2150
+                    "line": 2151
                   }
                 }
               ]
@@ -35505,7 +35505,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2152
+                "line": 2153
               },
               "children": [
                 {
@@ -35516,7 +35516,7 @@
                   "value": "\"A page request's packet shall carry the VMO's key, kind PACKET_PAGE_REQUEST, its command in the low byte of its signals word and the run's length in pages above it, the run's first byte offset, and the request's id, never 0 and never reused.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2156
+                    "line": 2157
                   }
                 },
                 {
@@ -35527,7 +35527,7 @@
                   "value": "\"Stage 9's pager check: the read packet for a fault on page 2 of 8 says READ, 6 pages, offset 8192 and a nonzero id; a trap-dirty write's says DIRTY, 1 page.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2159
+                    "line": 2160
                   }
                 },
                 {
@@ -35538,7 +35538,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2160
+                    "line": 2161
                   }
                 },
                 {
@@ -35549,7 +35549,7 @@
                   "value": "(\"object::pager::PagerLink::request\", \"object::pager::Command::number\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2162
+                    "line": 2163
                   }
                 }
               ]
@@ -35562,7 +35562,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2164
+                "line": 2165
               },
               "children": [
                 {
@@ -35573,7 +35573,7 @@
                   "value": "\"vmo_map with MAP_NO_PAGER shall refuse a pager-backed VMO with WRONG_TYPE, and map any other VMO as without it.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2167
+                    "line": 2168
                   }
                 },
                 {
@@ -35584,7 +35584,7 @@
                   "value": "\"Stage 9's pager check: a pager VMO is refused WRONG_TYPE and an anonymous one mapped, both with MAP_NO_PAGER.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2169
+                    "line": 2170
                   }
                 },
                 {
@@ -35595,7 +35595,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2170
+                    "line": 2171
                   }
                 },
                 {
@@ -35606,7 +35606,7 @@
                   "value": "\"syscall::native::vmo_map\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2171
+                    "line": 2172
                   }
                 }
               ]
@@ -53445,10 +53445,10 @@
                   "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::anAbsentPagerPageIsAsked",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"object::pager::PagerLink::request\", \"object::pager::PagerCore::list_or_join\", \"user::vmo::Vmo::absent_run\", \"user::vmo::Vmo::sourced\", \"user::space::AddressSpace::ask_pager\", \"user::space::AddressSpace::fault_with\", \"user::space::commit_page\", \"object::pager::Request::covers\", \"user::vmo::Vmo::pager\", \"user::vmo::Vmo::filler\")",
+                  "value": "(\"object::pager::PagerLink::request\", \"object::pager::PagerCore::list_or_join\", \"user::vmo::Vmo::absent_run\", \"user::vmo::Vmo::sourced\", \"user::space::AddressSpace::ask_pager\", \"user::space::AddressSpace::fault_with\", \"user::space::commit_page\", \"object::pager::Request::covers\", \"user::vmo::Vmo::pager\", \"user::vmo::Vmo::filler\", \"user::space::AddressSpace::paged_object_at\", \"user::space::ask\", \"user::space::permitted\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2574
+                    "line": 2575
                   }
                 }
               ]
@@ -53461,7 +53461,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2576
+                "line": 2577
               },
               "children": [
                 {
@@ -53472,7 +53472,7 @@
                   "value": "\"A request shall be opened with no address space, VMO or pager lock held; its record and its packet's room on the pager's port shall be had before the registry's lock is taken, listing it under that lock shall allocate nothing, and its packet shall be queued on the room promised once the lock is let go; a refusal of the record or the room shall be the fault's out-of-memory.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2583
+                    "line": 2584
                   }
                 },
                 {
@@ -53483,7 +53483,7 @@
                   "value": "\"Stage 9's pager check: every forwarded fault's packet arrives on the pager's port and the port loses none.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2585
+                    "line": 2586
                   }
                 },
                 {
@@ -53494,7 +53494,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2586
+                    "line": 2587
                   }
                 },
                 {
@@ -53505,7 +53505,7 @@
                   "value": "(\"object::port::Port::queue_promised\", \"object::pager::PagerCore::list_or_join\", \"object::pager::PagerLink::request\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2588
+                    "line": 2589
                   }
                 }
               ]
@@ -53518,7 +53518,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2590
+                "line": 2591
               },
               "children": [
                 {
@@ -53529,7 +53529,7 @@
                   "value": "\"A request shall end supplied when a supply makes its first page present, and its waiting threads shall retry the access, which then sees the bytes supplied.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2593
+                    "line": 2594
                   }
                 },
                 {
@@ -53540,7 +53540,7 @@
                   "value": "\"Stage 9's pager check: a fault resumed by a supply of page 2 reads the byte the pager wrote there, and its request is no longer outstanding.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2596
+                    "line": 2597
                   }
                 },
                 {
@@ -53551,7 +53551,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2597
+                    "line": 2598
                   }
                 },
                 {
@@ -53562,7 +53562,7 @@
                   "value": "(\"object::pager::PagerLink::supplied\", \"object::pager::PagerCore::end_where\", \"object::pager::take_ended\", \"object::pager::PagerLink::wait\", \"object::pager::PagerCore::leave\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2600
+                    "line": 2601
                   }
                 }
               ]
@@ -53575,7 +53575,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2602
+                "line": 2603
               },
               "children": [
                 {
@@ -53586,7 +53586,7 @@
                   "value": "\"A request its pager fails shall end its waiting threads' faults as unreadable, a SIGBUS to a program and an error to a copy, and shall be audited PAGER; a failure naming one request by its id shall end that request alone.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2606
+                    "line": 2607
                   }
                 },
                 {
@@ -53597,7 +53597,7 @@
                   "value": "\"Stage 9's pager check: a fault its pager fails is SIGBUS; with two jobs' requests on one page, failing one job's by its id ends that fault alone and the other job's is supplied after.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2610
+                    "line": 2611
                   }
                 },
                 {
@@ -53608,7 +53608,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2611
+                    "line": 2612
                   }
                 },
                 {
@@ -53619,7 +53619,7 @@
                   "value": "(\"object::pager::PagerLink::fail\", \"object::pager::record\", \"object::pager::Request::meets\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2613
+                    "line": 2614
                   }
                 }
               ]
@@ -53632,7 +53632,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2615
+                "line": 2616
               },
               "children": [
                 {
@@ -53643,7 +53643,7 @@
                   "value": "\"A thread shall wait for its pager no longer than the pager's bound, and no wait shall end for the bound before it has passed; a wait that ends at the bound shall be a SIGBUS or an error, audited PAGER once for its request, and the last waiter to leave an open request shall end it.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2620
+                    "line": 2621
                   }
                 },
                 {
@@ -53654,7 +53654,7 @@
                   "value": "\"Stage 9's pager check: with a 5 ms bound and no answer, the fault is SIGBUS no sooner than 5 ms and within 5 s, and no request is left outstanding.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2623
+                    "line": 2624
                   }
                 },
                 {
@@ -53665,7 +53665,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2624
+                    "line": 2625
                   }
                 },
                 {
@@ -53676,7 +53676,7 @@
                   "value": "(\"object::pager::PagerLink::wait\", \"object::pager::PagerCore::leave\", \"object::pager::clamp_wait\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2626
+                    "line": 2627
                   }
                 }
               ]
@@ -53689,7 +53689,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2628
+                "line": 2629
               },
               "children": [
                 {
@@ -53700,7 +53700,7 @@
                   "value": "\"A thread waiting for its pager whose process is ending shall leave the wait at once, a program's fault returning with nothing installed; signals that do not end the process shall not end the wait.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2632
+                    "line": 2633
                   }
                 },
                 {
@@ -53711,7 +53711,7 @@
                   "value": "\"Stage 9's pager check: a client killed while its fault waits on a pager that never answers ends within 5 s, and its request is no longer outstanding.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2635
+                    "line": 2636
                   }
                 },
                 {
@@ -53722,7 +53722,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2636
+                    "line": 2637
                   }
                 },
                 {
@@ -53733,7 +53733,7 @@
                   "value": "(\"sched::work::own_word\", \"object::pager::PagerLink::wait\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2637
+                    "line": 2638
                   }
                 }
               ]
@@ -53746,7 +53746,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2639
+                "line": 2640
               },
               "children": [
                 {
@@ -53757,7 +53757,7 @@
                   "value": "\"A kernel copy shall wait for a pager as a fault does, except into a VMO made with NO_COPY_WAIT or from a context that cannot block, where an absent page shall fail the copy at once and send nothing.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2643
+                    "line": 2644
                   }
                 },
                 {
@@ -53768,7 +53768,7 @@
                   "value": "\"Stage 9's pager check: a copy from an absent page waits for its supply and reads it; one from a NO_COPY_WAIT VMO's absent page fails at once with no packet.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2646
+                    "line": 2647
                   }
                 },
                 {
@@ -53779,7 +53779,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2647
+                    "line": 2648
                   }
                 },
                 {
@@ -53787,10 +53787,10 @@
                   "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aCopyWaitsOrIsRefused",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"object::oom::user_fault\", \"syscall::native::copy_paged\")",
+                  "value": "(\"object::oom::user_fault\", \"syscall::native::copy_paged\", \"syscall::native::read_paged\", \"syscall::native::write_paged\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2648
+                    "line": 2650
                   }
                 }
               ]
@@ -53803,7 +53803,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2650
+                "line": 2652
               },
               "children": [
                 {
@@ -53814,7 +53814,7 @@
                   "value": "\"pager_supply shall move only committed pages of an anonymous VMO that no device holds and no other object shares into the absent pages of the range, skipping present ones, which stay in the aux VMO; the moved pages shall leave every mapping of the aux VMO, with its shootdown, before they are the pager VMO's; and any refusal shall move nothing.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2656
+                    "line": 2658
                   }
                 },
                 {
@@ -53825,7 +53825,7 @@
                   "value": "\"Stage 9's pager check: a supply over a range whose second page is present leaves that page and its aux page as they were; a supply of a page another supply filled moves nothing; a supplied fault reads the aux bytes.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2660
+                    "line": 2662
                   }
                 },
                 {
@@ -53836,7 +53836,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2661
+                    "line": 2663
                   }
                 },
                 {
@@ -53844,10 +53844,10 @@
                   "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aSupplyMovesThePagersOwnPages",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "\"user::vmo::Vmo::supply_from\"",
+                  "value": "(\"user::vmo::Vmo::supply_from\", \"user::vmo::Vmo::absent_in\", \"user::vmo::Vmo::take_for_supply\", \"user::vmo::Vmo::put_supplied\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2662
+                    "line": 2665
                   }
                 }
               ]
@@ -53860,7 +53860,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2664
+                "line": 2667
               },
               "children": [
                 {
@@ -53871,7 +53871,7 @@
                   "value": "\"A Clean page of a pager-backed VMO shall never be mapped writable nor written in place by a kernel copy; its first write shall mark it Dirty, or, in a trap-dirty VMO, send a dirty request that PAGER_OP DIRTY lets through and FAIL refuses, the page then staying Clean; a kernel write into it shall mark it Dirty.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2670
+                    "line": 2673
                   }
                 },
                 {
@@ -53882,7 +53882,7 @@
                   "value": "\"Stage 9's pager check: a write to a Clean trap-dirty page asks the pager, lands once DIRTY answers, and the query shows it alone Dirty; a refused one is SIGBUS and its page stays Clean; a read leaves a page mapped read-only, and a write of an untrapped page marks it Dirty with no packet and maps it writable.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2676
+                    "line": 2679
                   }
                 },
                 {
@@ -53893,7 +53893,7 @@
                   "value": "\"H.MEM.23\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2677
+                    "line": 2680
                   }
                 },
                 {
@@ -53901,10 +53901,10 @@
                   "qualifiedName": "FerrixMemoryRequirements::PagerBackedObjects::aCleanPageIsNeverWritable",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"user::vmo::Vmo::writable_page\", \"user::vmo::Vmo::mark_dirty\", \"user::vmo::Vmo::write_paged\", \"user::vmo::Vmo::page_state\", \"user::vmo::state_of\", \"user::space::AddressSpace::read_only_paged\", \"user::space::writable_in_place\", \"user::space::writable_flags\", \"user::vmo::Vmo::dirty_range\", \"object::pager::PagerLink::dirtied\")",
+                  "value": "(\"user::vmo::Vmo::writable_page\", \"user::vmo::Vmo::mark_dirty\", \"user::vmo::Vmo::write_paged\", \"user::vmo::Vmo::page_state\", \"user::vmo::state_of\", \"user::space::AddressSpace::read_only_paged\", \"user::space::writable_in_place\", \"user::space::writable_flags\", \"user::space::writable_in\", \"user::vmo::Vmo::dirty_range\", \"object::pager::PagerLink::dirtied\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2682
+                    "line": 2686
                   }
                 }
               ]
@@ -53917,7 +53917,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2684
+                "line": 2688
               },
               "children": [
                 {
@@ -53928,7 +53928,7 @@
                   "value": "\"PAGER_OP WRITEBACK_BEGIN shall make the range's Dirty pages awaiting-clean and return only once no processor holds a writable translation of the range; WRITEBACK_END shall clean only awaiting-clean pages; a write between them shall make its page Dirty again; and DECOMMIT shall take Clean pages only.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2690
+                    "line": 2694
                   }
                 },
                 {
@@ -53939,7 +53939,7 @@
                   "value": "\"Stage 9's pager check: after BEGIN the page is no longer mapped writable; a page written after BEGIN is still Dirty after END while the other is Clean; DECOMMIT takes the Clean page and leaves the Dirty one.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2694
+                    "line": 2698
                   }
                 },
                 {
@@ -53950,7 +53950,7 @@
                   "value": "\"H.MEM.23\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2695
+                    "line": 2699
                   }
                 },
                 {
@@ -53961,7 +53961,7 @@
                   "value": "(\"user::vmo::Vmo::writeback_begin\", \"user::vmo::Vmo::writeback_end\", \"user::vmo::Vmo::decommit_clean\", \"user::vmo::Vmo::dirty_runs\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2698
+                    "line": 2702
                   }
                 }
               ]
@@ -53974,7 +53974,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/17-memory-requirements.sysml",
-                "line": 2700
+                "line": 2704
               },
               "children": [
                 {
@@ -53985,7 +53985,7 @@
                   "value": "\"The close of a pager's handle, or DETACH, run where it may block, shall end every outstanding request of its VMOs at once, audited, refuse every later request, and leave the present pages mapped and usable.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2704
+                    "line": 2708
                   }
                 },
                 {
@@ -53996,7 +53996,7 @@
                   "value": "\"Stage 9's pager check: a fault waiting on a pager whose handle closes is SIGBUS well within its bound; a later fault on an absent page is SIGBUS with no packet; a present page still reads.\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2708
+                    "line": 2712
                   }
                 },
                 {
@@ -54007,7 +54007,7 @@
                   "value": "\"H.MEM.22\"",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2709
+                    "line": 2713
                   }
                 },
                 {
@@ -54018,7 +54018,7 @@
                   "value": "(\"object::pager::Pager::drop\", \"object::pager::PagerCore::close\", \"object::pager::PagerLink::detach\", \"object::pager::PagerLink::is_gone\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
-                    "line": 2711
+                    "line": 2715
                   }
                 }
               ]
