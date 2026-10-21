@@ -51,7 +51,7 @@
     },
     "discovery/devmgr.rs::write_devices": {
       "complexity": 17,
-      "lines": 54,
+      "lines": 56,
       "recursive": false
     },
     "discovery/pci.rs::check_function": {
@@ -310,8 +310,8 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 30,
-      "lines": 96,
+      "complexity": 31,
+      "lines": 83,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {

@@ -633,14 +633,13 @@ impl Endpoint {
             // costs it nothing: the handles leave only if the write succeeds.
             inbox.reserve().map_err(|_| WriteFailure::NoMemory)?;
             let handles = take().map_err(WriteFailure::Take)?;
+            let message = Message {
+                bytes,
+                handles,
+                sender,
+            };
             // NOALLOC: the room `reserve` made above.
-            let refused = inbox
-                .push(Message {
-                    bytes,
-                    handles,
-                    sender,
-                })
-                .err();
+            let refused = inbox.push(message).err();
             peer.note(&inbox);
             let fired = refused.is_none() && trigger(&mut peer.observers.lock(), Signals::READABLE);
             // A parked reader is woken whatever became of the write: one

@@ -194,9 +194,7 @@ pub(crate) fn bootstrap_channel() -> Option<(Arc<Endpoint>, Arc<Endpoint>)> {
     let (kernel_end, program_end) = Endpoint::pair().ok()?;
     let hello = fallible::try_to_vec(&init_hello()).ok()?;
     kernel_end
-        .write(Sender::KERNEL, hello, 0, || {
-            Ok::<Vec<Transfer>, Infallible>(Vec::new())
-        })
+        .write(Sender::KERNEL, hello, 0, || Ok::<_, Infallible>(Vec::new()))
         .ok()?;
     Some((kernel_end, program_end))
 }
@@ -220,7 +218,7 @@ fn next_bootstrap() -> Option<Transfer> {
                 let _ = fallible::push_within(&mut transfers, (starter, Rights::MANAGE));
                 kernel_end
                     .write(Sender::KERNEL, message, 1, || {
-                        Ok::<Vec<Transfer>, Infallible>(transfers)
+                        Ok::<_, Infallible>(transfers)
                     })
                     .map_err(|_| ())
             });
@@ -263,7 +261,7 @@ fn give_audit(kernel_end: &Arc<Endpoint>) {
             let _ = fallible::push_within(&mut transfers, (Object::Audit, AUDIT_RIGHTS));
             kernel_end
                 .write(Sender::KERNEL, message, 1, || {
-                    Ok::<Vec<Transfer>, Infallible>(transfers)
+                    Ok::<_, Infallible>(transfers)
                 })
                 .map_err(|_| ())
         });
@@ -318,7 +316,7 @@ pub(crate) fn notify_root(switched: bool) {
         .and_then(|message| {
             kernel_end
                 .write(Sender::KERNEL, message, 0, || {
-                    Ok::<Vec<Transfer>, Infallible>(Vec::new())
+                    Ok::<_, Infallible>(Vec::new())
                 })
                 .map_err(|_| ())
         });

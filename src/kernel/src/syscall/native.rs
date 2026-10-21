@@ -429,19 +429,15 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
             buffer(a[1], a[2]),
             buffer(a[3], a[4]),
         ),
-        NativeCall::ChannelRead => channel_read(
+        NativeCall::ChannelRead | NativeCall::ChannelReadAttested => channel_read(
             process,
             handle(a[0]),
             buffer(a[1], a[2]),
             buffer(a[3], a[4]),
-            Actual::plain(a[5]),
-        ),
-        NativeCall::ChannelReadAttested => channel_read(
-            process,
-            handle(a[0]),
-            buffer(a[1], a[2]),
-            buffer(a[3], a[4]),
-            Actual::attested(a[5]),
+            Actual {
+                at: a[5],
+                attested: call == NativeCall::ChannelReadAttested,
+            },
         ),
         NativeCall::ObjectId => object_id(process, handle(a[0]), a[1]),
         NativeCall::VmoCreate => vmo_create(process, a[0]),
@@ -742,19 +738,6 @@ struct Actual {
 }
 
 impl Actual {
-    /// `channel_read`'s.
-    const fn plain(at: u64) -> Actual {
-        Actual {
-            at,
-            attested: false,
-        }
-    }
-
-    /// `channel_read_attested`'s.
-    const fn attested(at: u64) -> Actual {
-        Actual { at, attested: true }
-    }
-
     /// How many bytes of the reader's memory a delivery writes.
     const fn size(self) -> usize {
         if self.attested {
