@@ -71,6 +71,31 @@ impl AsVmo for Memory {
     }
 }
 
+/// `clflush` the cache line at `address`, fenced on both sides: i915's
+/// `invalidate_csb_entries` and `drm_clflush_virt_range` for the status
+/// page the GPU writes and this driver reads. On the N150 box (2026-10-21,
+/// Endfield on anv under `ferrix.intelgpu.uapitrace`) a request whose batch
+/// had finished stayed unseen for seconds while the box was idle, and was
+/// seen within milliseconds of the console's drawing (which evicts lines):
+/// the processor kept reading a stale status page from its own cache. i915
+/// flushes the CSB entries it consumed after each pass; this flushes every
+/// status-page dword before it is read and after it is written, which
+/// covers the CSB write pointer and each context's seqno too.
+#[inline]
+fn flush_line(address: usize) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: `address` is inside a mapping this process holds; `clflush`
+    // and `mfence` only order and evict, unprivileged (CPUID.01H:EDX.CLFSH,
+    // every x86-64 part).
+    unsafe {
+        core::arch::x86_64::_mm_mfence();
+        core::arch::x86_64::_mm_clflush(address as *const u8);
+        core::arch::x86_64::_mm_mfence();
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = address;
+}
+
 /// The real platform.
 pub(crate) struct Real<'a> {
     bar: Bar0,
@@ -319,9 +344,14 @@ impl Platform for Real<'_> {
 
     fn read_object(&mut self, object: KernelObject, index: usize) -> u32 {
         match self.at(object, index) {
-            // SAFETY: inside the object's mapping, aligned; volatile, since
-            // the GPU writes it.
-            Some(address) => unsafe { ptr::read_volatile(address as *const u32) },
+            Some(address) => {
+                // The line out of this processor's caches first, so the read
+                // is of what the GPU wrote (see `flush_line`).
+                flush_line(address);
+                // SAFETY: inside the object's mapping, aligned; volatile,
+                // since the GPU writes it.
+                unsafe { ptr::read_volatile(address as *const u32) }
+            }
             None => 0,
         }
     }
@@ -330,6 +360,10 @@ impl Platform for Real<'_> {
         if let Some(address) = self.at(object, index) {
             // SAFETY: as for `read_object`.
             unsafe { ptr::write_volatile(address as *mut u32, value) }
+            // Written back and out of the caches, so a dirty line never
+            // lands later over what the GPU wrote beside it (the CSB's
+            // consumed entries share a line with its write pointer).
+            flush_line(address);
         }
     }
 
