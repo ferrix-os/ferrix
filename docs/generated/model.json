@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "d7b9b2d1f19ff11575758e66e3660b8621b8d6b95b789b3a4a142e1cd57521b0",
+  "digest": "d9a434dfeb23cce8155e87f06849c7b6559aacb7b1d5ee5e4e4903c4a61f7c1f",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -35500,7 +35500,7 @@
                   "qualifiedName": "FerrixObjectRequirements::SpacesByHandle::aProtectionStaysWithinItsHandle",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"syscall::native::space_protect\", \"user::space::AddressSpace::protect_by_handle\")",
+                  "value": "(\"syscall::native::space_protect\", \"user::space::AddressSpace::protect_by_handle\", \"user::space::within_ceilings\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
                     "line": 2167
@@ -53513,7 +53513,7 @@
                   "qualifiedName": "FerrixMemoryRequirements::SpacesByHandle::noRegionByHandleIsWritableAndExecutable",
                   "kind": "attribute",
                   "redefines": "unit",
-                  "value": "(\"user::space::AddressSpace::map_by_handle\", \"user::space::AddressSpace::protect_by_handle\", \"user::space::Ceiling::admits\", \"mm::check::sweep_user_root\", \"user::space::AddressSpace::with_root_held\")",
+                  "value": "(\"user::space::AddressSpace::map_by_handle\", \"user::space::AddressSpace::protect_by_handle\", \"user::space::Ceiling::admits\", \"user::space::AddressSpace::with_root_held\")",
                   "source": {
                     "file": "docs/sysml/17-memory-requirements.sysml",
                     "line": 2581

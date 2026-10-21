@@ -2164,7 +2164,7 @@ package FerrixObjectRequirements {
                 unchanged after the refusals.";
             attribute :>> parent = "H.MEM.24";
             attribute :>> unit = ("syscall::native::space_protect",
-                "user::space::AddressSpace::protect_by_handle");
+                "user::space::AddressSpace::protect_by_handle", "user::space::within_ceilings");
         }
         requirement <'L.object.238'> aReadByHandleNeedsReadAndChargesTheOwner : ItemLowLevel {
             attribute :>> statement = "space_read shall copy at most SPACE_COPY_MAX

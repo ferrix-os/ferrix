@@ -2577,7 +2577,7 @@ package FerrixMemoryRequirements {
             attribute :>> parent = ("H.MEM.24", "H.MEM.4");
             attribute :>> unit = ("user::space::AddressSpace::map_by_handle",
                 "user::space::AddressSpace::protect_by_handle",
-                "user::space::Ceiling::admits", "mm::check::sweep_user_root",
+                "user::space::Ceiling::admits",
                 "user::space::AddressSpace::with_root_held");
         }
         requirement <'L.user.162'> anUnmapByHandleReachesARunningSpace : ItemLowLevel {

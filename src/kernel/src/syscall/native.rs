@@ -3026,17 +3026,16 @@ fn vmo_executable(process: &Process, vmo: Handle, options: u64) -> Result<usize,
     }
     let placed = process.with_handles(|table| {
         let _ = vmo_held(table, vmo, Rights::MAP | Rights::READ).map_err(|why| (why, None))?;
-        table
-            .reserve(1)
-            .map_err(|error| (table_error(error), None))?;
+        // FALLIBLE: the handle table's reserve refuses with `TableError::NoMemory`.
+        let reserved = table.reserve(1);
+        reserved.map_err(|error| (table_error(error), None))?;
         let (object, held) = table
             .remove(vmo)
             .map_err(|error| (table_error(error), None))?;
         let rights = Rights((held.0 & !Rights::WRITE.0) | Rights::EXECUTE.0);
         // FALLIBLE: the handle table's insert hands the object back.
-        table
-            .insert(object, rights)
-            .map_err(|object| (status::NO_HANDLES, Some(object)))
+        let inserted = table.insert(object, rights);
+        inserted.map_err(|object| (status::NO_HANDLES, Some(object)))
     });
     match placed {
         Ok(handle) => Ok(returned(handle)),
