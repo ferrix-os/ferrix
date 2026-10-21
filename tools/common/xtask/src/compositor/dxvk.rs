@@ -188,6 +188,17 @@ pub(crate) fn test_dxvk_window(args: &Args, volume: PathBuf, dxvk: &Path) -> Res
         ports.push(File { path: "intel/vkcube".to_owned(), mode: 0o755, content: Content::Bytes(cube) });
         ports.push(File { path: "intel/cube.sh".to_owned(), mode: 0o755, content: Content::Bytes(CUBE.as_bytes().to_vec()) });
         ports.push(File { path: "intel/intel_icd.json".to_owned(), mode: 0o644, content: Content::Bytes(br#"{"ICD":{"api_version":"1.4.305","library_path":"/intel/libvulkan_intel.so"},"file_format_version":"1.0.0"}"#.to_vec()) });
+        if let Some(long) = std::env::var_os("FERRIX_LONG_DIR") {
+            // SCRATCH: minutes of d3d9 and d3d11 on anv.
+            ports.push(File { path: "long".to_owned(), mode: 0o755, content: Content::Directory });
+            for name in ["d3d9-spin.exe", "d3d9.dll", "d3d11-scene.exe", "d3d11.dll", "dxgi.dll"] {
+                let bytes = std::fs::read(Path::new(&long).join(name))
+                    .map_err(|error| Error::new(format!("reading {name}: {error}")))?;
+                ports.push(File { path: format!("long/{name}"), mode: 0o755, content: Content::Bytes(bytes) });
+            }
+            let secs = std::env::var("FERRIX_LONG_SECS").unwrap_or_else(|_| "600".to_owned());
+            script = include_str!("dxvk-long.sh").replace("LONGSECS", &secs);
+        }
         let wsi = std::env::var("FERRIX_DXVK_WSI").unwrap_or_else(|_| "sw".to_owned());
         script = script.replace(
             "export VK_ICD_FILENAMES=/data/usr/share/vulkan/icd.d/lvp_icd.json",
@@ -242,7 +253,7 @@ for t in /proc/$program/task/*; do echo \"dxvk: task $t $(cat $t/comm 2>/dev/nul
             .map_err(|error| Error::new(format!("reading {}: {error}", dump.display())))?;
         screen = Some(parse_ppm(&bytes)?);
         let ended = watching.read_more(
-            Instant::now() + Duration::from_secs(u64::from(SECONDS) + 90),
+            Instant::now() + Duration::from_secs(u64::from(SECONDS) + 90 + std::env::var("FERRIX_LONG_SECS").ok().and_then(|s| s.parse::<u64>().ok()).map_or(0, |s| 4 * s + 2000)),
             reached(END),
         )?;
         said = watching
