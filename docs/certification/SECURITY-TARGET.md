@@ -321,12 +321,21 @@ processor is given to whichever job can use it. A share bounds what one job
 takes from another under contention, which is what T.EXHAUST is about, and a
 maximum would additionally leave a processor idle while work waits.
 
-*Application note (K12a).* Beside its maximum, a job may hold a reservation:
-frames for its programs' memory and page tables that the TSF keeps from
-every other job and from its own allocations (`H.QUOTA.15` to 17,
-`docs/microkernel/K12.md`). It is not yet claimed as `FRU_RSA.2`, which
-enters with K12b, when the reservation covers the job's kernel heap too
-(ledger 2550 (6)).
+**FRU_RSA.2** Minimum and maximum quotas. The TSF shall enforce maximum
+quotas of the resources FRU_RSA.1 names, and shall ensure the provision of
+**a minimum quantity of physical memory -- order-0 frames for the memory and
+page tables of a job's programs, and pages of the kernel heap for the
+objects they make in their own calls -- for a job a holder of the RESERVE
+right has reserved it for, up to its reservation's size,** that **the job,
+together with every job beneath it,** can use **simultaneously**.
+
+*Refinement* (K12, `docs/microkernel/K12.md`, ledger 2550 (6)). The
+minimum is the reservation: admitted only from frames free at that moment,
+beyond the watermark and every other reservation, kept from every other
+job's frames and objects and from the TSF's own allocations, and never
+reclaimed for another. It does not provide contiguous runs, memory for
+work the TSF does for the job outside its own calls, or objects the job
+gave to another, which stay on its pages until freed.
 
 ### FIA — identification and authentication
 **None claimed.** See §9.1.
@@ -460,7 +469,7 @@ nothing else is claimed to meet it.
 | O.CAPABILITY | FDP_ACC.1, FDP_ACF.1, FMT_MSA.1, FMT_MSA.3 |
 | O.DMA | FDP_ACF.1, FDP_IFF.1 |
 | O.SCRUB | FDP_RIP.2 |
-| O.QUOTA | FRU_RSA.1 |
+| O.QUOTA | FRU_RSA.1, FRU_RSA.2 |
 | O.VALIDATE | FPT_TDC.1 |
 | O.FAILSAFE | FPT_FLS.1 |
 | O.MEDIA | FPT_TDC.1, FDP_SDI.2 |
@@ -500,6 +509,7 @@ them. Three are unmet, each by design.
 | FPT_STM.1 | none | -- |
 | FPT_TDC.1 | none | -- |
 | FRU_RSA.1 | none | -- |
+| FRU_RSA.2 | none | -- |
 
 1. **FIA_UID.1.** People are identified outside the TOE (OE.AUTH, A.AUTH,
    §9.1). FAU_GEN.2 is refined to the TSF's own subjects, a process and its

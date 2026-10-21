@@ -1242,10 +1242,11 @@ pub(super) fn check_reservations() {
         ),
     };
     println!(
-        "  reserve  {} pages reserved for a job and drawn by its frames, an interrupt's never, \
-         and all {} interrupts so far marked; {} rules refused; a reclaim for another spared \
-         them; the promise back to {} pages and every slot given back",
-        report.reserved, report.interrupts, report.rules, report.promise,
+        "  reserve  {} pages reserved for a job and drawn by its frames, its kernel objects on \
+         {} pages of its own, an interrupt's never, and all {} interrupts so far marked; {} \
+         rules refused; a reclaim for another spared them; the promise back to {} pages and \
+         every slot given back",
+        report.reserved, report.heap_pages, report.interrupts, report.rules, report.promise,
     );
 }
 

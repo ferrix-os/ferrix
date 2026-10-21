@@ -139,6 +139,9 @@ pub(crate) enum Floor {
     Program(Entry),
     /// The kernel's own: held above the promise.
     Kernel,
+    /// A reservation's own heap pages (`L.mm.81`): drawn from it while it
+    /// has room, and refused otherwise, never taken plain.
+    Drawn(Entry),
 }
 
 /// What [`take`] decided, for the caller to finish in the same hold.
@@ -161,7 +164,8 @@ pub(crate) enum Taking {
 pub(super) fn take(floor: Floor, free: u64, n: u64, watermark: u64) -> Option<Taking> {
     let outstanding = outstanding();
     let (taking, least) = match floor {
-        Floor::Program(entry) if room(entry, n) => (Taking::Drawn(entry), 0),
+        Floor::Program(entry) | Floor::Drawn(entry) if room(entry, n) => (Taking::Drawn(entry), 0),
+        Floor::Drawn(_) => return None,
         Floor::Program(_) => (Taking::Plain, watermark.saturating_add(outstanding)),
         Floor::Kernel => (Taking::Plain, outstanding),
     };
@@ -231,12 +235,18 @@ fn adjust(slot: &Slot, change: impl FnOnce(&Slot)) {
     });
 }
 
-/// Bind a free entry, of size 0: one with nothing drawn and no owner.
-/// Under the frame allocator's lock. `None` when every entry is bound or
-/// still draining.
-pub(super) fn bind() -> Option<Entry> {
-    let at = SLOTS.iter().position(|slot| {
-        !slot.bound.load(Ordering::Relaxed) && slot.drawn.load(Ordering::Relaxed) == 0
+/// Bind a free entry, of size 0: one with no owner whose drawn frames are
+/// only the empty pages its own heap keeps, `kept[at]` (`u64::MAX` for a heap
+/// still holding objects). Under the frame allocator's lock. `None` when every
+/// entry is bound or still draining.
+///
+/// A heap keeps one empty page per size class rather than give it back
+/// (`ferrix_heap`), so an entry whose objects are all freed may still have
+/// those pages drawn; they stay tagged with it and serve the next job it is
+/// bound for, from inside its size.
+pub(super) fn bind(kept: &[u64; MOST]) -> Option<Entry> {
+    let at = SLOTS.iter().zip(kept).position(|(slot, &kept)| {
+        !slot.bound.load(Ordering::Relaxed) && slot.drawn.load(Ordering::Relaxed) == kept
     })?;
     let slot = SLOTS.get(at)?;
     slot.size.store(0, Ordering::Relaxed);

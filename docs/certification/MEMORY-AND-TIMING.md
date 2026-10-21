@@ -341,10 +341,20 @@ below `O`. With no reservation `O` is 0 and every route is as it was.
   so a machine-wide reclaim's walk grows by at most the drawn frames it
   passes over. A machine-wide reclaim for a frame asks for the shortfall of
   `W + O`, not of `W` (`mm::program_floor`).
-* **Not guaranteed**: contiguity (the promise is a count, so a run can fail
-  on a fragmented machine); kernel work for the job outside its own calls
-  (kernel threads, interrupt work); and, until K12b, the kernel heap's
-  pages, which still come from the shared heap under the kernel's floor.
+* **The kernel heap** (K12b, `L.mm.81`): a reserved job's objects, made in
+  task context, come from its reservation's own heap (`mm::HEAPS`), whose
+  pages are drawn from that reservation alone, so no other job's object can
+  take a slot of a page it grew. Past its size they come from the shared
+  heap, under the kernel's floor `O`, where they can take `W` as any
+  program's heap can. A free finds its heap by its page's tag, with no
+  lock: the tag changes only while the heap takes or gives back the page.
+  Each reservation's heap keeps an empty page a size class, at most 9 pages,
+  which stay drawn and serve the next job the entry is bound for.
+* **Not guaranteed**: contiguity (the promise is a count, so a run, or a
+  heap object larger than a class, can fail on a fragmented machine);
+  kernel work for the job outside its own calls (kernel threads, interrupt
+  work); objects the job made and another holds, which stay on its pages
+  until freed.
 
 Evidence: the `reserve` line of stage 2 (the floors, admission, the tags and
 the drain) and of stage 9 (the rules, a reserved job's frames, an

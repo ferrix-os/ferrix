@@ -131,13 +131,6 @@
       "purpose": "MICROKERNEL.md §3 K10, timer objects (docs/microkernel/K10.md): a one-shot deadline object on the monotonic or boot counter, absolute or relative, with slack, on the scheduler's per-processor sleeper timeline that K5's timeouts use, fired from the timer interrupt, signalled READABLE and delivered to ports; set and cancel against an in-flight fire; destruction while armed; charged to the creating job (F-35 objects, F-37 kernel bytes); L.sched.84, the scheduler's sleeper removed by key (consultant OK IF, ledger 2538, condition 2)"
     },
     {
-      "ids": ["L.mm.81"],
-      "owner": "mk-k12",
-      "branch": "mk/k12",
-      "date": "2026-10-19",
-      "purpose": "MICROKERNEL.md §3 K12b, the per-reservation slab heap (K12a wrote the rest); kernel-memory reservation (docs/microkernel/K12.md): admission against free frames above the watermark and the outstanding promise; the three floors; the drawn-frame tag and its exact accounting under the frame lock; per-reservation slab heap; RESERVE right, one level, limit at or above reservation; per-job report; release and drain; OOM choice and machine-wide reclaim never take a reservation's frames for another job (consultant pre-read, ledger 2458)"
-    },
-    {
       "ids": ["H.TRAP.19", "L.x86_64.183-185", "L.aarch64.65", "L.armv7a.27"],
       "owner": "mk-m0rest",
       "branch": "mk/smt-off",

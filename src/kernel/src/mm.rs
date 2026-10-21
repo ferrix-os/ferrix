@@ -468,7 +468,18 @@ fn reservation_for(owner: u32) -> Reservation {
 /// Bind a free reservation, promising nothing yet, for a job's slot. `None`
 /// when every one is bound or still draining.
 pub(crate) fn reservation_bind() -> Option<Reservation> {
-    with_frames(|_| reservation::bind()).flatten()
+    // The pages each idle reservation's heap keeps, read before the frame
+    // allocator's lock, which is taken inside a heap's and never around one.
+    // An unbound entry's heap is reached by no task, so what is read here
+    // stays true until the bind.
+    let mut kept = [u64::MAX; reservation::MOST];
+    for (kept, heap) in kept.iter_mut().zip(&HEAPS) {
+        let heap = heap.lock();
+        if heap.allocated_bytes() == 0 && heap.large_pages() == 0 {
+            *kept = heap.slab_pages() as u64;
+        }
+    }
+    with_frames(|_| reservation::bind(&kept)).flatten()
 }
 
 /// Make `entry`'s size `frames` (`L.mm.76`): refused, with nothing changed
@@ -811,6 +822,66 @@ unsafe impl Backing for KernelPages {
     }
 }
 
+/// Each reservation's own heap (`L.mm.81`, `docs/microkernel/K12.md` §2.4):
+/// the kernel objects a job with a reservation makes, in task context, over
+/// pages drawn from that reservation alone. A shared heap could not keep the
+/// promise: a page grown for a reserved job's object would have its other
+/// slots taken by anyone's.
+static HEAPS: [IrqSpinLock<Heap, crate::arch::Irq>; reservation::MOST] =
+    [const { IrqSpinLock::new(Heap::new()) }; reservation::MOST];
+
+/// A reservation's heap's page supply: frames drawn from it only
+/// (`reservation::Floor::Drawn`), refused once it has no room.
+struct ReservedPages(Reservation);
+
+// SAFETY: (KMEM) as `KernelPages`: `allocate_pages` returns frames the buddy
+// allocator handed out, drawn from the reservation, addressed through the
+// direct map; the link and slab accessors are `KernelPages`' own, on pages
+// this heap took and has not given back.
+unsafe impl Backing for ReservedPages {
+    fn allocate_pages(&mut self, order: u8) -> Option<u64> {
+        let frame = take_frames(order, reservation::Floor::Drawn(self.0))?;
+        count(Route::HeapTaken, 1 << order);
+        Some(physmap(frame * PAGE_SIZE))
+    }
+
+    fn deallocate_pages(&mut self, address: u64, order: u8) {
+        KernelPages.deallocate_pages(address, order);
+    }
+
+    fn read_link(&self, at: u64) -> u64 {
+        KernelPages.read_link(at)
+    }
+
+    fn write_link(&mut self, at: u64, value: u64) {
+        KernelPages.write_link(at, value);
+    }
+
+    fn slab_free(&self, page: u64) -> u16 {
+        KernelPages.slab_free(page)
+    }
+
+    fn set_slab_free(&mut self, page: u64, objects: u16) {
+        KernelPages.set_slab_free(page, objects);
+    }
+}
+
+/// The heap of reservation `entry`, if it has one.
+fn reserved_heap(entry: Reservation) -> Option<&'static IrqSpinLock<Heap, crate::arch::Irq>> {
+    usize::from(entry)
+        .checked_sub(1)
+        .and_then(|at| HEAPS.get(at))
+}
+
+/// The reservation the heap page holding `address` was drawn from, or
+/// [`NO_RESERVATION`]: which heap an object there belongs to (`L.mm.81`).
+/// No lock: a page's tag is written before the heap is given the page and
+/// cleared after it gives the page back, so it cannot change under a live
+/// object.
+pub(crate) fn heap_drawn_from(address: u64) -> Reservation {
+    reservation::drawn_from(unmap(address & !(PAGE_SIZE - 1)) / PAGE_SIZE)
+}
+
 /// The kernel's `alloc` implementation.
 struct KernelAllocator;
 
@@ -827,7 +898,17 @@ unsafe impl GlobalAlloc for KernelAllocator {
         {
             return address as *mut u8;
         }
-        let address = with_heap(|heap| heap.allocate(&mut KernelPages, request).ok())
+        // A job with a reservation, in task context, is served by its own
+        // heap while the reservation has room, and by the shared heap after
+        // (`L.mm.81`); interrupt context never draws (`reservation_for`).
+        let entry = reservation_for(crate::sched::running_group());
+        let address = reserved_heap(entry)
+            .and_then(|heap| {
+                heap.lock()
+                    .allocate(&mut ReservedPages(entry), request)
+                    .ok()
+            })
+            .or_else(|| with_heap(|heap| heap.allocate(&mut KernelPages, request).ok()))
             // Refused: inside a reserved section, the reserve serves it
             // instead (`mm/reserve.rs`, finding F-23).
             .or_else(|| reserve::draw(request));
@@ -846,6 +927,12 @@ unsafe impl GlobalAlloc for KernelAllocator {
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
         let request = Request::new(layout.size(), layout.align());
+        let entry = heap_drawn_from(pointer as u64);
+        if let Some(heap) = reserved_heap(entry) {
+            heap.lock()
+                .deallocate(&mut ReservedPages(entry), pointer as u64, request);
+            return;
+        }
         with_heap(|heap| heap.deallocate(&mut KernelPages, pointer as u64, request));
     }
 }

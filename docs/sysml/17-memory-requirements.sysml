@@ -547,6 +547,26 @@ package FerrixMemoryRequirements {
                 "mm::reservation::unbind", "mm::deallocate_frames", "mm::release_frame",
                 "mm::reservation::tag_of", "mm::reservation::install", "mm::place_tags");
         }
+        requirement <'L.mm.81'> aReservationHasItsOwnHeap : ItemLowLevel {
+            attribute :>> statement = "An allocation by a task whose job draws
+                from a reservation, in task context, shall be served by that
+                reservation's own heap, whose pages are drawn from it alone,
+                and by the shared heap only once it has no room; every other
+                allocation by the shared heap, whose pages are never drawn; a
+                heap object shall be freed to the heap its page's tag names;
+                and an entry whose heap keeps only empty pages shall be bound
+                again with those pages still drawn.";
+            attribute :>> criterion = "At stage 9 a reserved job's 32 objects lie
+                on pages tagged with its reservation, a sibling's 32 of the same
+                size class and one made while an interrupt is serviced on
+                untagged pages, and once freed at most a page a size class
+                stays drawn; the next reservation reads at most that drawn.";
+            attribute :>> parent = "H.QUOTA.15";
+            attribute :>> unit = ("mm::KernelAllocator::alloc", "mm::KernelAllocator::dealloc",
+                "mm::ReservedPages::allocate_pages", "mm::ReservedPages::deallocate_pages",
+                "mm::reserved_heap", "mm::heap_drawn_from", "mm::reservation_bind",
+                "mm::reservation::bind");
+        }
         requirement <'L.mm.82'> aReclaimLiftsOverThePromise : ItemLowLevel {
             attribute :>> statement = "program_floor shall answer W + O, the
                 least free count a program's frame not drawn from a reservation is

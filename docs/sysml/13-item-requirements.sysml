@@ -1310,13 +1310,14 @@ package FerrixItemRequirements {
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
         // K12 (docs/microkernel/K12.md): a job's reservation beside its
-        // limit. H.QUOTA.15 holds frames and page tables here; K12b widens
-        // it by the kernel heap's pages (ledger 2550 (4)).
+        // limit. K12a held frames and page tables; K12b widened it by the
+        // kernel heap's pages (ledger 2550 (4)).
         requirement <'H.QUOTA.15'> aReservationIsThere : ItemHighLevel {
             attribute :>> statement = "A frame of a job's memory or page tables,
-                taken in task context while the job holds fewer frames drawn
-                from its reservation than the reservation's size, shall not be
-                refused for want of free memory; no other job's frame and no
+                or a page of the kernel heap its objects are made on, taken in
+                task context while the job holds fewer frames drawn from its
+                reservation than the reservation's size, shall not be refused
+                for want of free memory; no other job's frame or object and no
                 frame of the kernel's own shall take a frame promised to a
                 reservation.";
             attribute :>> criterion = "At stage 2, with a reservation admitted,
