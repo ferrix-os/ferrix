@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 136 | 85 | 51 |
-| Low (`L.*`) | 969 | 706 | 263 |
+| High (`H.*`) | 137 | 86 | 51 |
+| Low (`L.*`) | 975 | 712 | 263 |
 
-2086 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2102 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2088 |
-| Accessors, covered by the requirement they serve | 977 |
+| Named by a low-level requirement | 2104 |
+| Accessors, covered by the requirement they serve | 988 |
 | Check code in a product file | 82 |
-| Named by none | 937 |
+| Named by none | 942 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -144,7 +144,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
-| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.STORE.7` |
+| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.QUOTA.14`, `H.STORE.7` |
 | O.SCRUB | `H.MEM.6` |
 | O.VALIDATE | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.3`, `H.TRAP.5`, `H.TRAP.7`, `H.TRAP.11`, `H.TRAP.12`, `H.TRAP.13`, `H.TRAP.16` |
 | O.WXN | `H.MEM.4`, `H.MEM.5`, `H.MEM.10`, `H.MEM.13`, `H.MEM.18` |
@@ -322,6 +322,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.QUOTA.11` | A process in a job, or beneath one, whose cgroup.freeze is set shall run no user code until the job is thawed or the process is killed; SIGCONT shall not thaw it, and cgroup.events shall say frozen only once every live process beneath has stopped. | A program of three threads in a frozen cgroup stops counting, cgroup.events says frozen 1 and wakes its poller, SIGCONT changes neither, and thawing restarts its futex wait (the `cgroups` line, freeze). | O.QUOTA | `src/kernel/src/fs/cgroupfs/freeze_check.rs::freeze_a_program` | not built | not built | not built |
 | `H.QUOTA.12` | A charge refused by a job's memory limit, and a program over its memory.high, shall first take back clean file cache charged to that job or beneath it, never a sibling's and never a child's at or under its memory.min, and read back as its source has it, before anything is killed. | A cgroup reading a file twice its memory.high is brought back to it, its sibling's cache untouched, every page read back as the source has it, and a read at memory.max kills nothing where its clean cache was room (the `cgroups` line, reclaim). | G.8, O.QUOTA | `src/kernel/src/fs/cgroupfs/reclaim_check.rs::high` | not built | not built | not built |
 | `H.QUOTA.13` | A frame for a program's memory or page tables shall be refused when taking it would leave fewer frames free than the kernel's watermark, whatever job the program is in, with nothing taken; the kernel's own allocations shall not be refused by it. | At stage 2, program frames taken until refused leave exactly the watermark free; at that count a program's page table is refused and a kernel frame and a fresh heap page are given; a run of two frames is given at two above it and refused at one above with a block of two free; every frame comes back (the `watermark` line). | G.8, O.QUOTA | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
+| `H.QUOTA.14` | The VMO commits and new objects a server's native calls make while it holds a live ticket shall be charged to the job the kernel recorded when it issued the ticket, and to no job a server names; a ticket shall stay live until END from either side or the close of either end of its channel, the client's library ending it when the reply arrives or it gives up. | Stage 9's ticket check: a ticket names its issuer's process and job, adoptions through any other end and of ended or unknown ids are refused and audited, an adopted call's commits and objects land on the client and none on the server, each end stops the charging at the next call, at most 64 tickets live on one end, and every counter comes back (the `ticket` line). | O.QUOTA | `src/kernel/src/object/ticket_check.rs::run` | not built | not built | not built |
 
 ### Audit (`H.AUD`)
 
@@ -505,6 +506,17 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.62` | Quota::set_weight shall clamp the weight to 1 to 10000, and change a busy job's contribution to its parent's load at once. | A weight of 0 is stored as 1 and one of 20000 as 10000; setting a busy job's weight changes its parent's load by the difference of the scaled weights. | H.SCHED.3 | `object::quota::Quota::set_weight` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
 | `L.object.160` | quota::effective shall carry a task's weight up its jobs in 64-bit arithmetic (ferrix_sched::carried_weight), giving, before it clamps the answer, the value the same formula gives in 128-bit arithmetic, bit for bit, for every base and entity weight below 2^32 and every load. | ferrix-sched's host test compares the two over 50000 random and boundary bases, weights and loads at each job depth from 1 to 8, and at every weight 2^32 - 1, and finds no difference; with one division made in 32 bits, it finds one. | H.SCHED.3 | `object::quota::effective` | `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host test | host test | host test |
 | `L.object.161` | Every entity weight a job can be given, its cpu.weight clamped to 1 to 10000 and scaled to task units, shall be below 2^32, as every task's weight, a u32, is. | The kernel's build asserts that 10000 scaled to task units fits a u32; the quota check sets cpu.weight to 20000, reads 10000 back, and finds it scaled below 2^32. | H.SCHED.3 | `object::quota::Quota::set_weight`, `object::quota::Slot::entity_weight` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
+
+### Tickets
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.object.207` | A ticket shall be issued only by charge_ticket ISSUE, for the process that makes the call and the job it is in, both read by the kernel; no operation shall take a job, a process or a quota slot; on an end shared by several processes each issue shall name its own issuer's job. | A ticket issued by the client is adopted with the client's process id and job id, and a commit under it is charged to the client's job; one issued on the same end by a second process in job D is adopted with that process's ids and D's. | H.QUOTA.14 | `object::ticket::Tickets::issue`, `object::channel::Endpoint::issue_ticket`, `object::process::Process::issuer_and_slot` | `src/kernel/src/object/ticket_check.rs::check_the_issuer` | not built | not built | not built |
+| `L.object.208` | charge_ticket ADOPT shall honour a ticket only through the other end of the channel it was issued on, and only while it is live; any other id shall be refused BAD_STATE, audited as TICKET, with the caller's adoption unchanged. | An id never issued, an ended one, one issued on the adopting end and one issued on another channel are each refused BAD_STATE, the server's next commit is charged to its own job, and a TICKET record is kept for each. | H.QUOTA.14 | `object::ticket::Tickets::find`, `object::channel::Endpoint::adoptable_ticket`, `object::channel::Side::index`, `object::ticket::adopt` | `src/kernel/src/object/ticket_check.rs::check_refused_adoptions` | not built | not built | not built |
+| `L.object.209` | While a thread holds an adoption whose ticket is live, the VMO commits and pins and the new objects its native calls make shall be charged to the ticket's job and every job above it, against their limits; faults on its own space, its page tables and its kernel heap shall stay its own job's; a commit refused at the client's limit shall be answered NO_MEMORY with no throttle, no kill and no charge to the server's job. | Under an adoption, four committed pages, a channel and a port raise the client's frames by four and objects by four and the server's by none, the client's heap unchanged; a read into the server's own fresh memory faults its pages in on the server; at the client's limit the commit is NO_MEMORY, neither job's high count moves, no process ends. | H.QUOTA.14 | `object::quota::charge_target`, `object::quota::charging_own`, `object::ticket::charging_for_call`, `mm::allocate_user_frame`, `object::oom::fault_own`, `object::oom::user_fault_own` | `src/kernel/src/object/ticket_check.rs::check_adopted_charges` | not built | not built | not built |
+| `L.object.210` | A ticket shall end at charge_ticket END from either end and when either end of its channel closes, never become live again, and its id never be issued again; a native call that starts after the end shall charge the calling thread's own job, with or without LEAVE; at most the rest of one call per adopted thread shall be charged to the client after the end, within the client's own limits. | After the server's END, the client's END and the client's close, the server's next commit is charged to its own job with no LEAVE; every id issued in the check is greater than the one before. | H.QUOTA.14 | `object::ticket::Tickets::end`, `object::ticket::Tickets::end_all`, `object::ticket::leave`, `object::channel::Endpoint::end_ticket` | `src/kernel/src/object/ticket_check.rs::check_the_end` | not built | not built | not built |
+| `L.object.211` | What a ticket charged shall stay charged to the client's job after the ticket ends, until the object goes, and shall then be taken back from exactly the levels it charged. | A ticket's END leaves the client's frames as they were; once the server closes what it made and the processes are gone, the client's, the server's and their parent's frames and objects read zero. | H.QUOTA.14 | `object::quota::Charge::to`, `mm::release_frame` | `src/kernel/src/object/ticket_check.rs::check_everything_came_back` | not built | not built | not built |
+| `L.object.212` | At most MAX_TICKETS (64) tickets shall be live on one end of a channel, the next ISSUE refused SHOULD_WAIT, and each ticket shall be one native object charged to its issuer's job. | 64 issues on one end raise the client's objects by 64, the 65th is refused SHOULD_WAIT, an END makes room for one more, and closing the channel gives every one back. | H.QUOTA.14 | `object::ticket::Tickets::issue` | `src/kernel/src/object/ticket_check.rs::check_the_bound` | not built | not built | not built |
 
 ### Jobs
 
@@ -2083,6 +2095,13 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/quota_check.rs::run` | kernel | L.object.53, H.QUOTA.4 |
 | `src/kernel/src/object/sender_check.rs::run` | kernel | H.OBJ.19, L.object.197, L.object.198, L.object.199 |
 | `src/kernel/src/object/sender_check.rs::run` | kernel | L.object.200, L.object.201, L.object.202 |
+| `src/kernel/src/object/ticket_check.rs::check_adopted_charges` | kernel | L.object.209 |
+| `src/kernel/src/object/ticket_check.rs::check_everything_came_back` | kernel | L.object.211 |
+| `src/kernel/src/object/ticket_check.rs::check_refused_adoptions` | kernel | L.object.208 |
+| `src/kernel/src/object/ticket_check.rs::check_the_bound` | kernel | L.object.212 |
+| `src/kernel/src/object/ticket_check.rs::check_the_end` | kernel | L.object.210 |
+| `src/kernel/src/object/ticket_check.rs::check_the_issuer` | kernel | L.object.207 |
+| `src/kernel/src/object/ticket_check.rs::run` | kernel | H.QUOTA.14 |
 | `src/kernel/src/object/write_read_check.rs::check_a_sync_wake_keeps_a_pinned_reader` | kernel | L.sched.8, H.SCHED.4 |
 | `src/kernel/src/object/write_read_check.rs::check_a_sync_wake_moves_the_reader` | kernel | L.sched.8 |
 | `src/kernel/src/object/write_read_check.rs::run` | kernel | L.object.128, L.object.129, L.object.130, L.object.131 |

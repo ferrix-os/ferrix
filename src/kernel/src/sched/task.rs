@@ -299,6 +299,19 @@ const REPLY_FULL: u64 = 1 << 63;
 /// The node a queue, a sleeper set or the reaper holds a task in.
 pub(crate) type TaskSlot = Slot<Arc<Task>>;
 
+/// The user registers a task keeps while it does not run: `user_state`, or
+/// fresh ones, for a task with a thread; none for a kernel thread.
+fn user_state_for(
+    has_thread: bool,
+    user_state: Option<arch::UserState>,
+) -> Result<Option<Box<UnsafeCell<arch::UserState>>>, AllocError> {
+    if !has_thread {
+        return Ok(None);
+    }
+    let state = user_state.unwrap_or_else(arch::UserState::new);
+    Ok(Some(fallible::try_box(UnsafeCell::new(state))?))
+}
+
 /// The two slots a task needs, allocated together.
 fn slots() -> Result<(TaskSlot, TaskSlot), AllocError> {
     Ok((Slot::new()?, Slot::new()?))
@@ -414,12 +427,7 @@ impl Task {
             thread,
             user_state,
         } = new;
-        let user = match thread.as_ref() {
-            Some(_) => Some(fallible::try_box(UnsafeCell::new(
-                user_state.unwrap_or_else(arch::UserState::new),
-            ))?),
-            None => None,
-        };
+        let user = user_state_for(thread.is_some(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
         let core = thread
             .as_ref()
