@@ -18,16 +18,16 @@ The sidebar marks each stage: ✓ done, ◐ in progress, ○ not started.
   (stage 16).
 - Display, input and the compositor (stages 17 and 18), networking, dynamic
   linking and sysfs.
-- **Stage 13**, namespaces, cgroups and seccomp, on its exit criterion: the
+- **Stage 13**, namespaces, cgroups and seccomp, as built: the
   mount, user, UTS, IPC, cgroup, pid and network namespaces, the cgroup
   controllers (`pids`, `memory` with reclaim and `memory.high`, `cpu`
   with `cpu.max`, `io` with `io.max`, freezing), seccomp's filters, `TRAP`
   and `TSYNC`, and Syscall User Dispatch. `test-container`, an unprivileged
   user namespace with a pid 1 under a memory limit and a seccomp filter,
-  passes on all three architectures (2026-10-14). Not built, and left out of
-  the stage: time namespaces, unprivileged mounting (N5), `memory.reclaim`,
-  `io.weight`, `io.latency`, `cpu.max.burst`, `cpu.idle`, the dentry and inode
-  caches' reclaim and Linux's `seccomp_bpf` selftest.
+  passes on all three architectures (2026-10-14). What the stage was first
+  written to hold beyond that (time namespaces, unprivileged mounting,
+  `memory.reclaim`, `io.weight`, `cpu.max.burst` and the rest) is not built and
+  is in the [follow-ons](follow-ons.md).
 
 **In progress**
 
@@ -188,6 +188,7 @@ single file across.
 |  | [Chrome — a browser on Ferrix](chrome.md) | ◐ in progress | headless and in a window, 2026-09-24; the DK1 ≈ 45–55 points |
 |  | [Claude Code — Anthropic's coding agent on Ferrix](claude-code.md) | ◐ in progress | the command line, 2026-09-30; the desktop app assessed, 2026-10-14 |
 | 13 | [Namespaces, cgroups v2, seccomp](stage-13-namespaces-cgroups-v2-seccomp.md) | ✓ done | month |
+|  | [Namespace and cgroup follow-ons](follow-ons.md) | ○ not started | unsized |
 | 14 | [Real-time domains](stage-14-real-time-domains.md) | ○ not started | month |
 | 15 | [A real userland](stage-15-real-userland.md) | ◐ in progress | week |
 | 16 | [`rustc`](stage-16-rustc.md) | ✓ done | the goal; ≈ 40 guessed, 8 spent |

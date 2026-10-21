@@ -1,7 +1,12 @@
 # Stage 13 — Namespaces, cgroups v2, seccomp ✅  ·  *month*
 
-All eight namespaces, the unified hierarchy with `cpu`/`memory`/`io`/`pids`,
-cgroupfs, and classic-BPF seccomp with the interpreter in `src/lib/`.
+Seven namespaces (mount, user, UTS, IPC, cgroup, pid and network), the
+unified hierarchy with `cpu`, `memory`, `io` and `pids` and cgroupfs as built,
+classic-BPF seccomp with the interpreter in `src/lib/`, and Syscall User
+Dispatch. The customer set this scope on 2026-10-21 to what is on `main`; what
+the stage was first written to hold beyond it moved to the
+[follow-ons](follow-ons.md). The sections below keep the history in the order
+it happened, and so still name some of those items.
 
 **Exit:** an unprivileged user namespace runs a process whose pid is 1 inside
 it, under a memory limit that triggers scoped reclaim and a scoped OOM kill,
@@ -293,16 +298,13 @@ test-seccomp`, ported on 2026-10-11 and on `main` since 2026-10-18,
 `docs/SECCOMP.md` §12; F-72, `TSYNC`'s lock holds, is open); Syscall User
 Dispatch (`prctl` 59, `test-sud`, `docs/SECCOMP.md` §13, 2026-10-18); reclaim of
 a writable mount's clean pages (f0bc9ab2d, 2026-10-15, L.object.188-190); and
-the cgroupfs flakes' fixes (fl-cg, 2026-10-16). **The stage is marked done on
-its exit criterion (2026-10-21, at the customer's word).** Checked against
-`main`'s code on that day, these are not built and are left out of it, not
-claimed: time namespaces (`CLONE_NEWTIME` is refused; `stage13-timens` has six
-commits not on `main`), unprivileged mounting (`may_mount` asks `CAP_SYS_ADMIN`
-only; `stage13-n5` and `stage13-bwrap-user` are branches), `memory.reclaim`,
-`io.weight` and `io.latency` (`fs/blkio.rs` says "Not built"), `cpu.max.burst`
-and `cpu.idle` (their ids L.object.182-187 are reserved, not written), the
-dentry and inode caches' reclaim, and Linux's own `seccomp_bpf` selftest (a
-BACKLOG row). Steam's N5 to N7 stand on the first of the unprivileged ones.
+the cgroupfs flakes' fixes (fl-cg, 2026-10-16). **The stage is done (2026-10-21):**
+its scope is what `main` holds, and its exit is met. Time namespaces,
+unprivileged mounting (N5), `memory.reclaim`, `io.weight` and `io.latency`,
+`cpu.max.burst` and `cpu.idle`, the dentry and inode caches' reclaim, `anon`
+and `pagetables` in `memory.stat` and Linux's `seccomp_bpf` selftest are not
+built; they are the [follow-ons](follow-ons.md), with their branches and the
+reserved ids L.object.182-187.
 
 **Where stage 13 stood (wind-down, 2026-10-01 evening).** The takeover guide, with every branch's tip, worktree and what it owes, is [stage-13-handover.md](stage-13-handover.md). The exit criterion
 -- an unprivileged user namespace runs a pid 1 under a memory limit with a
@@ -420,7 +422,7 @@ running before writing the quota (about one ARMv7-A `--smp 2` boot in
 twenty had stopped there, the waiter never let run), and the freeze check to
 read `cpu.stat` only once every task is switched out.
 
-**Left out (not built, see "Where stage 13 stands (2026-10-21)"):** reclaim of the dentry and inode caches, and `memory.reclaim`
+**Moved to the [follow-ons](follow-ons.md) (not built):** reclaim of the dentry and inode caches, and `memory.reclaim`
 (a writable btrfs mount's clean pages are reclaimed since 2026-10-15); `io.weight` and `io.latency`;
 `cpu.idle` and `cpu.max.burst`; `anon` and `pagetables` in `memory.stat`.
 `docs/CGROUPS.md` §7.1 says how landings are gated now, and what cost a gate

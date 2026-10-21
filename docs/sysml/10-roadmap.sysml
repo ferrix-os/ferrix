@@ -481,9 +481,15 @@ package FerrixRoadmap {
         attribute :>> number = 13;
         attribute :>> status = StageStatus::Done;
         attribute :>> size = "month";
-        doc /* All eight namespaces, the unified cgroup hierarchy with cpu,
-             * memory, io and pids, cgroupfs, classic-BPF seccomp with the
-             * interpreter in src/lib/. Exit: an unprivileged user namespace runs
+        doc /* Seven namespaces (mount, user, UTS, IPC, cgroup, pid, network),
+             * the unified cgroup hierarchy with cpu, memory, io and pids as
+             * built, cgroupfs, classic-BPF seccomp with the interpreter in
+             * src/lib/, and Syscall User Dispatch. The customer set this
+             * scope on 2026-10-21 to what main holds; time namespaces,
+             * unprivileged mounting, memory.reclaim, io.weight, io.latency,
+             * cpu.max.burst, cpu.idle, the dentry and inode caches' reclaim
+             * and Linux's seccomp_bpf selftest are follow-ons, not built
+             * (docs/roadmap/follow-ons.md). Exit: an unprivileged user namespace runs
              * pid 1 under a memory limit that triggers scoped reclaim and a
              * scoped OOM kill, with a seccomp filter blocking a syscall.
              *
@@ -531,9 +537,8 @@ package FerrixRoadmap {
              * and test-container, the exit criterion as one program, since
              * 2026-10-14: it passed on all three architectures, so the exit is
              * met. A writable mount's clean pages are reclaimed since
-             * 2026-10-15 (L.object.188-190). Left: time namespaces,
-             * unprivileged mounting, reclaim of the dentry and inode caches,
-             * memory.reclaim, io.weight, cpu.max.burst and cpu.idle. */
+             * 2026-10-15 (L.object.188-190). The stage is done on that scope;
+             * L.object.182-187 stay reserved for the follow-ons. */
     }
 
     #planned requirement <'S14'> stage14RealTime : Stage {

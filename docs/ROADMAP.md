@@ -90,6 +90,10 @@ Now [`docs/roadmap/claude-code.md`](roadmap/claude-code.md).
 
 Now [`docs/roadmap/stage-13-namespaces-cgroups-v2-seccomp.md`](roadmap/stage-13-namespaces-cgroups-v2-seccomp.md).
 
+## Namespace and cgroup follow-ons  ·  *unsized*
+
+Now [`docs/roadmap/follow-ons.md`](roadmap/follow-ons.md).
+
 ## Stage 14 — Real-time domains  ·  *month*
 
 Now [`docs/roadmap/stage-14-real-time-domains.md`](roadmap/stage-14-real-time-domains.md).

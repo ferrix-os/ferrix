@@ -618,7 +618,7 @@ Left: K-C (P2.2) is not started;
 the other desktop images still run as root; and ending a user's processes
 at logout is the customer's call.
 
-Stage 13 is done on its exit criterion (2026-10-14; what it left out is on its page), built cgroups first because init needs them: cgroup2 with
+Stage 13 is done on its exit criterion (2026-10-14; its scope is what `main` holds, and the rest is in the follow-ons page), built cgroups first because init needs them: cgroup2 with
 `pids`, `memory` and its scoped OOM kill, and `cpu.weight` (2026-09-26);
 mount, user, UTS, IPC, cgroup and pid namespaces, seccomp's checker and
 hook (S1, S2), and network namespaces (2026-10-04, 22384874f) are in.
