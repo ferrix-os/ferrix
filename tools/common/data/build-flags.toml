@@ -155,6 +155,11 @@ why = "whether the image contains game mode's privileged, per-application run-ti
 values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
 values.game_mode = { allows = ["none"], lands = "game mode's design", built = "stand-in", stands_in = "none" }
 
+[flags.debug]
+why = "whether the image contains the ptrace subset that gdbserver and strace need (docs/DEBUG.md S2); with `off` its code is absent. Out of every certified level (customer, 2026-10-21; DECISIONS.md)"
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
+values.ptrace = { allows = ["none"], lands = "today", built = "yes" }
+
 # ---------------------------------------------------------------------------
 # The boot options that stay boot options (BF4): the registry. A read of any
 # option not declared here fails the gate (check-item-boundary.py, with a

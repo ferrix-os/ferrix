@@ -25,6 +25,7 @@ program_barrier = "switch"
 ssbd = "always"
 smt = "stibp"
 runtime_trades = "none"
+debug = "off"
 
 [boot_options]
 "ferrix.checks" = ["run"]

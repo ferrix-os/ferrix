@@ -150,6 +150,13 @@ const FLAGS: [Flag; 15] = [
             (cfg!(ferrix_runtime_trades = "game_mode"), "game_mode"),
         ],
     },
+    Flag {
+        name: "debug",
+        values: &[
+            (cfg!(ferrix_debug = "off"), "off"),
+            (cfg!(ferrix_debug = "ptrace"), "ptrace"),
+        ],
+    },
 ];
 
 /// How many of `values` this build was compiled with.
