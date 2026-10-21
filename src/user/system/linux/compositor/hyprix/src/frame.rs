@@ -76,6 +76,11 @@ pub struct Output<'a> {
     /// the flip waits for the host to show the frame and nothing a client
     /// draws next depends on that.
     pub flip: Option<Damage>,
+    /// Whether the canvas is behind the screen's buffer, which the drawing
+    /// reads and leaves as it found the frame: a frame of one fullscreen
+    /// window copied straight into the buffer leaves the canvas without it
+    /// (`direct`), and the next frame drawn on the canvas is drawn whole.
+    pub stale: bool,
 }
 
 /// A frame drawn on a GPU: the canvas, and what is kept behind the windows.
@@ -354,6 +359,20 @@ fn draw_windows(
     layers: &[Placed],
     damage: &Damage,
 ) -> Result<(), String> {
+    if direct(target, output, clients, sources, layers, damage) {
+        return Ok(());
+    }
+    // A canvas that frames went past, copied straight into the screen's
+    // buffer, holds none of them: this frame is drawn and shown whole.
+    let whole;
+    let damage = if target.stale {
+        target.stale = false;
+        whole = Damage::from(target.canvas.bounds());
+        target.present = whole.clone();
+        &whole
+    } else {
+        damage
+    };
     let scene = Scene {
         output,
         clients,
@@ -377,6 +396,83 @@ fn draw_windows(
     shown(target)
 }
 
+/// Show a frame that is one fullscreen window and nothing else
+/// ([`compositor_render::alone`]) by copying the window straight into the
+/// screen's buffer, once, rather than into the canvas and from there to the
+/// screen. Whether it did; the canvas is then [`Output::stale`].
+///
+/// Only in software, upright, at scale 1, with no pointer drawn into the
+/// frame, no drag, no counter and no night-light: each of those is
+/// something drawn over the window or done to its pixels on the way out.
+fn direct(
+    target: &mut Output<'_>,
+    output: &MonitorLayout,
+    clients: &[Slot],
+    sources: &BTreeMap<WindowId, Source>,
+    layers: &[Placed],
+    damage: &Damage,
+) -> bool {
+    if target.gpu.is_some()
+        || target.transform != Transform::Normal
+        || (target.scale - 1.0).abs() > f64::EPSILON
+        || target.gamma.is_some()
+        || target.overlay.is_some()
+        || target.drag_icon.is_some()
+        || target.cursor.is_some_and(|cursor| cursor.shown)
+    {
+        return false;
+    }
+    let scene = Scene {
+        output,
+        clients,
+        sources,
+        layers,
+        damage,
+        origin: target.origin,
+        scale: target.scale,
+        style: target.style,
+        styles: target.styles,
+        cursor: target.cursor,
+        drag_icon: target.drag_icon,
+        overlay: target.overlay,
+    };
+    let (surfaces, drawn) = gathered(&scene, output);
+    let styles = compositor_render::Styles {
+        base: target.style,
+        windows: target.styles,
+    };
+    let Some((rect, surface)) = compositor_render::alone(
+        output,
+        target.origin,
+        &styles,
+        &surfaces,
+        &drawn,
+        // What is copied, which is what has to be opaque.
+        &target.present,
+        target.canvas.bounds(),
+    ) else {
+        return false;
+    };
+    let (width, height) = target.backend.size();
+    let stride = target.backend.stride();
+    let Ok(mut screen) = Target::new(target.backend.buffer(), width, height, stride) else {
+        return false;
+    };
+    // What the screen's buffer is owed, which for a buffer two frames old
+    // is more than this frame's damage: all of it is the window's.
+    timed(Phase::Surface, || {
+        compositor_render::copy_to_target(&surface, rect, &mut screen, &target.present);
+    });
+    compositor_render::timing::drawn_surface(
+        (surface.width(), surface.height()),
+        false,
+        compositor_render::timing::Path::Direct,
+    );
+    target.flip = Some(target.present.clone());
+    target.stale = true;
+    true
+}
+
 /// Draw `scene` with `painter`: the windows and the layer surfaces, then
 /// what a drag carries, then `debug:overlay`'s counter, then the pointer.
 /// How long the counter took.
@@ -385,14 +481,41 @@ fn composed<P: Painter>(
     backdrop: &mut P::Backdrop,
     scene: &Scene<'_>,
 ) -> Duration {
-    let (origin, scale, clients, damage) = (scene.origin, scene.scale, scene.clients, scene.damage);
+    let (origin, scale, damage) = (scene.origin, scene.scale, scene.damage);
     // The layout, the decorations and the layer surfaces are all in logical
     // pixels; a scaled monitor draws each of them as `scale` buffer pixels.
     let output = &compositor_render::scaled(scene.output, origin, scale);
     let style = &scene.style.at_scale(scale);
-    // Gather every window's pixels first: `render` takes them all at once, so
-    // each borrow of a mapping has to live as long as the call.
-    let mut surfaces: BTreeMap<WindowId, Surface<'_>> = BTreeMap::new();
+    let (surfaces, drawn) = gathered(scene, output);
+
+    // Every window's rectangle is in the global space all monitors share;
+    // the canvas is this monitor's, so the origin is where the monitor is.
+    let styles = compositor_render::Styles {
+        base: style,
+        windows: scene.styles,
+    };
+    let _ = render_onto(
+        painter,
+        Some(backdrop),
+        output,
+        origin,
+        &styles,
+        &surfaces,
+        &drawn,
+        damage,
+    );
+    over_everything(painter, scene)
+}
+
+/// Every window's pixels on `output` (the scene's layout as the screen's
+/// scale has it) and every layer surface's, for one frame: `render` takes
+/// them all at once, so each borrow of a mapping lives as long as the call.
+fn gathered<'a>(
+    scene: &Scene<'a>,
+    output: &MonitorLayout,
+) -> (BTreeMap<WindowId, Surface<'a>>, Vec<LayerFrame<'a>>) {
+    let (origin, scale, clients) = (scene.origin, scene.scale, scene.clients);
+    let mut surfaces: BTreeMap<WindowId, Surface<'a>> = BTreeMap::new();
     for placed in &output.windows {
         let Some(source) = scene.sources.get(&placed.window) else {
             continue;
@@ -416,7 +539,7 @@ fn composed<P: Painter>(
 
     // The bars and wallpapers, in the order they were made, which is the
     // order they were placed in.
-    let drawn: Vec<LayerFrame<'_>> = scene
+    let drawn: Vec<LayerFrame<'a>> = scene
         .layers
         .iter()
         .map(|placed| LayerFrame {
@@ -437,24 +560,15 @@ fn composed<P: Painter>(
             xray: placed.rules.xray,
         })
         .collect();
+    (surfaces, drawn)
+}
 
-    // Every window's rectangle is in the global space all monitors share;
-    // the canvas is this monitor's, so the origin is where the monitor is.
-    let styles = compositor_render::Styles {
-        base: style,
-        windows: scene.styles,
-    };
-    let _ = render_onto(
-        painter,
-        Some(backdrop),
-        output,
-        origin,
-        &styles,
-        &surfaces,
-        &drawn,
-        damage,
-    );
-
+/// What is drawn over the windows and the layer surfaces: what a drag
+/// carries, `debug:overlay`'s counter and the pointer. How long the counter
+/// took.
+fn over_everything<P: Painter>(painter: &mut P, scene: &Scene<'_>) -> Duration {
+    let (origin, scale, clients, damage) = (scene.origin, scene.scale, scene.clients, scene.damage);
+    let style = &scene.style.at_scale(scale);
     let _over = Timer::start(Phase::Over);
     // The drag icon under the pointer and over everything else: what a
     // drag looks like is a thing following the pointer, and a compositor

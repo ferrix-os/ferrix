@@ -2782,6 +2782,10 @@ struct Screen {
     said_gone: bool,
     /// Whether a dropped frame has been said since it last showed one.
     said_dropped: bool,
+    /// Whether the canvas is behind the screen's buffer: frames of one
+    /// fullscreen window were copied straight into the buffer
+    /// (`crate::frame::Output::stale`), and the canvas holds none of them.
+    stale: bool,
     /// Frames the GPU failed in a row: [`GPU_TRIES`] of them give it up.
     gpu_failures: u32,
     /// When a screen that gave its GPU up looks for one again, and how long
@@ -3021,6 +3025,7 @@ impl Screen {
                 plane: crate::plane::Plane::default(),
                 said_gone: false,
                 said_dropped: false,
+                stale: false,
                 hidden: Vec::new(),
                 gpu_failures: 0,
                 gpu_again: None,
@@ -4211,17 +4216,20 @@ fn copy_screen(
     // The software canvas is the frame; a GPU's frame is not there, and
     // what was fetched of it for the screen is the screen's own buffer,
     // turned already.
-    let (from, stride, (left, top)) = match screen.gpu {
-        Some(_) => (
+    // So is a frame of one fullscreen window copied straight into the
+    // buffer, upright (`crate::frame::Output::stale`): the canvas is behind.
+    let (from, stride, (left, top)) = if screen.gpu.is_some() || screen.stale {
+        (
             screen.backend.drawn(),
             screen.backend.stride() as usize,
             (placed.x.max(0) as usize * 4, placed.y.max(0) as usize),
-        ),
-        None => (
+        )
+    } else {
+        (
             screen.canvas.data(),
             screen.canvas.width() as usize * 4,
             (area.x.max(0) as usize * 4, area.y.max(0) as usize),
-        ),
+        )
     };
     // A turned canvas is turned into the client's buffer on the way, as it
     // is into the screen's.

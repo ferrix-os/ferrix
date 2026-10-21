@@ -134,6 +134,9 @@ pub enum Path {
     Stretch,
     /// Stretched and blended.
     StretchBlend,
+    /// Copied straight into the screen's buffer, the frame drawn nowhere
+    /// else: a window drawn alone (`crate::alone`).
+    Direct,
 }
 
 impl Path {
@@ -145,6 +148,7 @@ impl Path {
             Path::Blend => "blend",
             Path::Stretch => "stretch",
             Path::StretchBlend => "stretch-blend",
+            Path::Direct => "direct",
         }
     }
 }
@@ -189,6 +193,7 @@ pub fn drawn_surface(size: (u32, u32), alpha: bool, path: Path) {
         Path::Blend => 1,
         Path::Stretch => 2,
         Path::StretchBlend => 3,
+        Path::Direct => 4,
     };
     let packed = (width << 40) | (height << 16) | (u64::from(alpha) << 8) | path | 0x80;
     let area = |packed: u64| (packed >> 40) * ((packed >> 16) & 0xFF_FFFF);
@@ -212,7 +217,8 @@ pub fn take_surface() -> Option<Drawn> {
         0 => Path::Copy,
         1 => Path::Blend,
         2 => Path::Stretch,
-        _ => Path::StretchBlend,
+        3 => Path::StretchBlend,
+        _ => Path::Direct,
     };
     Some(Drawn {
         size,

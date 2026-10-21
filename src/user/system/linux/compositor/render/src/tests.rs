@@ -4282,3 +4282,74 @@ fn only_an_opaque_square_window_covers_what_is_under_it() {
         Some(&opaque)
     ));
 }
+
+/// A fullscreen window drawn alone is copied straight into the screen's
+/// buffer, and what lands there is what drawing it on a canvas and
+/// presenting that would have put there, to the byte -- with alpha read as
+/// full when every pixel's is, and a padded stride on both sides.
+#[test]
+fn a_window_drawn_alone_is_the_frame_presented() {
+    let style = decorated_style();
+    let (width, height) = (96_u32, 64_u32);
+    let (layout, _) = one_window(Rect::new(0, 0, 96, 64), 0, true);
+    let stride = width * 4 + 32;
+    let bytes: Vec<u8> = (0..stride * height)
+        .map(|at| {
+            if at % 4 == 3 {
+                0xFF
+            } else {
+                (at * 7 % 251) as u8
+            }
+        })
+        .collect();
+    let surface = Surface::new(&bytes, width, height, stride, Format::Argb8888).unwrap();
+    let surfaces = BTreeMap::from([(WindowId(1), surface)]);
+    let styles = Styles::plain(&style);
+    let damage = Damage::from(Rect::new(10, 5, 50, 40));
+    let bounds = Rect::new(0, 0, 96, 64);
+
+    let (rect, alone) =
+        crate::alone(&layout, (0, 0), &styles, &surfaces, &[], &damage, bounds).expect("alone");
+    assert_eq!(rect, bounds);
+    let screen_stride = (width * 4 + 64) as usize;
+    let mut direct = vec![0x5A; screen_stride * height as usize];
+    let mut target = Target::new(&mut direct, width, height, screen_stride as u32).unwrap();
+    crate::copy_to_target(&alone, rect, &mut target, &damage);
+
+    let mut canvas = canvas(width, height);
+    let _ = render(
+        &mut canvas,
+        &layout,
+        (0, 0),
+        &style,
+        &surfaces,
+        &Damage::full(width, height),
+    );
+    let mut drawn = vec![0x5A; screen_stride * height as usize];
+    let mut target = Target::new(&mut drawn, width, height, screen_stride as u32).unwrap();
+    canvas.present(&mut target, &damage).unwrap();
+    assert_eq!(direct, drawn);
+    assert!(direct.contains(&0x5A), "outside the damage is untouched");
+
+    // Not alone: a pixel that can be seen through, a layer above, a
+    // maximized window, a dimmed one.
+    let mut holed = bytes.clone();
+    holed[(20 * stride + 30 * 4 + 3) as usize] = 0x80;
+    let holed_surface = Surface::new(&holed, width, height, stride, Format::Argb8888).unwrap();
+    let holed_map = BTreeMap::from([(WindowId(1), holed_surface)]);
+    assert!(crate::alone(&layout, (0, 0), &styles, &holed_map, &[], &damage, bounds).is_none());
+    let bar = LayerFrame {
+        rect: Rect::new(0, 0, 96, 8),
+        above: true,
+        surface: None,
+        dim_around: false,
+        blur: false,
+        xray: false,
+    };
+    assert!(crate::alone(&layout, (0, 0), &styles, &surfaces, &[bar], &damage, bounds).is_none());
+    let (maximized, _) = one_window(Rect::new(0, 0, 96, 64), 2, true);
+    assert!(crate::alone(&maximized, (0, 0), &styles, &surfaces, &[], &damage, bounds).is_none());
+    let mut unfocused = layout.clone();
+    unfocused.windows[0].focused = false;
+    assert!(crate::alone(&unfocused, (0, 0), &styles, &surfaces, &[], &damage, bounds).is_none());
+}

@@ -630,6 +630,7 @@ impl Compositor<'_> {
             overlay: picture.as_ref(),
             overlay_took: Duration::ZERO,
             flip: None,
+            stale: screen.stale,
         };
         let result = if dark {
             crate::frame::draw_dark(&mut target, &frame.canvas)
@@ -649,9 +650,11 @@ impl Compositor<'_> {
             )
         };
         let overlay_took = target.overlay_took;
+        let stale = target.stale;
         if let Some(damage) = target.flip.take() {
             drew.flips.push((which, damage));
         }
+        screen.stale = stale;
         if with.overlay_on {
             self.overlay
                 .rendered(&screen.name, screen_began.elapsed(), overlay_took);

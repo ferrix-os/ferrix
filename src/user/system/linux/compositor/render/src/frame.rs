@@ -775,6 +775,56 @@ fn proved_opaque<'a>(
     proved
 }
 
+/// The window `output`'s frame is within `damage`, and nothing else: a
+/// fullscreen one that [`hiding`] says hides everything under it, on top,
+/// at its own size, opaque (read so by [`proved_opaque`] where its alpha is
+/// full), not dimmed, with no layer surface above the windows. Its pixels
+/// and where they go, in the canvas's pixels; `None` for every other frame.
+///
+/// What a compositor may then do instead of drawing the frame: copy the
+/// window into the screen's buffer, once ([`crate::copy_to_target`]). The
+/// pointer, a drag, a counter, a night-light and a turned or scaled monitor
+/// are the caller's to rule out: none of them is a window.
+#[must_use]
+pub fn alone<'a>(
+    output: &MonitorLayout,
+    origin: (i64, i64),
+    styles: &Styles<'_>,
+    surfaces: &BTreeMap<WindowId, Surface<'a>>,
+    layers: &[LayerFrame<'_>],
+    damage: &Damage,
+    bounds: Rect,
+) -> Option<(Rect, Surface<'a>)> {
+    if layers.iter().any(|layer| layer.above) {
+        return None;
+    }
+    let proved = proved_opaque(output, origin, styles, surfaces, damage);
+    let surfaces = proved.as_ref().unwrap_or(surfaces);
+    let (top, _) = hiding(output, origin, styles, surfaces, layers, bounds)?;
+    let placed = output.windows.get(top)?;
+    if top.saturating_add(1) != output.windows.len() {
+        return None;
+    }
+    let own = styles.of(placed.window);
+    let dimmed = styles.base.dim > 0.0 && !placed.focused && own.dim;
+    if dimmed || own.dim_around {
+        return None;
+    }
+    let surface = surfaces.get(&placed.window)?;
+    let surface = if own.opaque {
+        surface.as_opaque()
+    } else {
+        *surface
+    };
+    let rect = placed
+        .rect
+        .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+    (surface.format() == Format::Xrgb8888
+        && i64::from(surface.width()) == rect.width
+        && i64::from(surface.height()) == rect.height)
+        .then_some((rect, surface))
+}
+
 /// Whether `placed` is in the fullscreen mode, not maximized: the layout
 /// gives the first no border and the second the workspace's, which is how
 /// the two are told apart here. (Under `general:border_size = 0` a

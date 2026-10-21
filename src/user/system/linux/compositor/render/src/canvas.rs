@@ -995,6 +995,58 @@ impl Canvas {
     }
 }
 
+/// Copy `surface`, read as opaque and drawn at `rect` in `target`'s pixels,
+/// straight into `target` within `damage`: the bytes a canvas would hold
+/// after copying it in and then [`Canvas::present`] would copy out, with
+/// neither copy made. A band of rows a core.
+///
+/// For a window drawn alone ([`crate::alone`]): the frame *is* the window,
+/// and a canvas between it and the screen is two passes over every pixel
+/// where one does.
+pub fn copy_to_target(surface: &Surface<'_>, rect: Rect, target: &mut Target<'_>, damage: &Damage) {
+    let bounds = Rect::new(0, 0, i64::from(target.width()), i64::from(target.height()));
+    let clips: Vec<Rect> = damage
+        .clipped(bounds)
+        .rects()
+        .iter()
+        .filter_map(|&damaged| intersect(damaged, rect))
+        .collect();
+    let Some(covered) = bounding(&clips) else {
+        return;
+    };
+    let stride = index(i64::from(target.stride()));
+    let data = target.data_mut();
+    let end = (index(covered.bottom()) * stride).min(data.len());
+    let Some(rows) = data.get_mut(index(covered.y) * stride..end) else {
+        return;
+    };
+    crate::cores::bands(rows, stride, |first, band| {
+        let top = covered.y.saturating_add(i64::try_from(first).unwrap_or(0));
+        let tall = i64::try_from(band.len().div_ceil(stride.max(1))).unwrap_or(0);
+        for &clip in &clips {
+            let Some(part) = intersect(clip, Rect::new(clip.x, top, clip.width, tall)) else {
+                continue;
+            };
+            let len = index(part.width) * 4;
+            let from = index(part.x.saturating_sub(rect.x)) * 4;
+            for y in part.y..part.bottom() {
+                let Some(row) = u32::try_from(y.saturating_sub(rect.y))
+                    .ok()
+                    .and_then(|row| surface.row(row))
+                else {
+                    continue;
+                };
+                let start = index(y.saturating_sub(top)) * stride + index(part.x) * 4;
+                if let (Some(src), Some(dst)) =
+                    (row.get(from..from + len), band.get_mut(start..start + len))
+                {
+                    copy_opaque(dst, src);
+                }
+            }
+        }
+    });
+}
+
 /// Copy the part of `surface`, drawn at `rect`, that `clip` covers into
 /// `data`, rows `width` pixels wide whose first is the row `rect` and `clip`
 /// count from.
