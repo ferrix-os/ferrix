@@ -13,7 +13,7 @@
 //! | supplied (`pager_supply`, or `PAGER_OP_DIRTY` for a dirty request) | retries |
 //! | failed (`PAGER_OP_FAIL`) | `SIGBUS`, or the copy's error; audited |
 //! | timed out at the bound | as failed; audited once per request |
-//! | killed, or for a program's own fault a signal pending | returns, nothing installed |
+//! | its process's end (a signal does not end it) | returns, nothing installed |
 //! | the pager's close or detach | as failed, at once; audited |
 //!
 //! None of them stops the kernel.
@@ -77,12 +77,12 @@ static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 /// its wait (K3.md §2.4).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum FaultMode {
-    /// A program's own fault, from the trap path: a pending signal ends the
-    /// wait, and the access faults again after the handler.
+    /// A program's own fault, from the trap path: it always may wait.
     Program,
-    /// A kernel copy, or the kernel's own touch of a page: only the process's
-    /// end ends the wait early. Into a `PAGER_VMO_NO_COPY_WAIT` VMO, or where
-    /// the copy cannot block, it is refused at once.
+    /// A kernel copy, or the kernel's own touch of a page: into a
+    /// `PAGER_VMO_NO_COPY_WAIT` VMO, or where the copy cannot block, it is
+    /// refused at once. Either kind's wait ends early only at its process's
+    /// end: killable, not interruptible.
     Copy,
 }
 
@@ -112,7 +112,7 @@ pub(crate) enum Refusal {
     Failed(Errno),
     /// The pager's bound passed first.
     TimedOut,
-    /// The process is ending, or a signal is pending for a program's fault.
+    /// The process is ending.
     Interrupted,
     /// The pager is closed, or the VMO detached from it.
     Gone,
@@ -507,18 +507,16 @@ impl PagerLink {
         } else {
             drop(promise);
         }
-        self.wait(&request, mode)
+        self.wait(&request)
     }
 
     /// Wait on `request`, bounded by the pager's `wait_ns`, and leave it.
-    fn wait(&self, request: &Arc<Request>, mode: FaultMode) -> Result<(), Refusal> {
+    fn wait(&self, request: &Arc<Request>) -> Result<(), Refusal> {
         let deadline = crate::timer::now_nanos().saturating_add(self.core.wait_ns);
-        let interrupted = || {
-            let word = sched::work::own_word();
-            word & sched::work::END != 0
-                || (mode == FaultMode::Program
-                    && word & (sched::work::SIGNAL | sched::work::STOP) != 0)
-        };
+        // Killable, not interruptible: only the process's end ends the wait
+        // early. A signal that could not be delivered would otherwise send a
+        // program's fault back to user mode in a loop (K3.md, "As built").
+        let interrupted = || sched::work::own_word() & sched::work::END != 0;
         let _ = request
             .queue
             .wait_until_deadline(|| request.state() != OPEN || interrupted(), deadline);
