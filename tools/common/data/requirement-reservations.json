@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.console.46-48"],
+      "owner": "crashlog",
+      "branch": "crashlog",
+      "date": "2026-10-21",
+      "purpose": "POSTMORTEM.md section 5 (S1): each stop the kernel makes on purpose records its code in the pstore header's stop word after its last line, and the first report alone a panic; reboot(2) writes the region back before every stop it makes; the stop word's format and self-check"
+    },
+    {
       "ids": ["L.sched.85"],
       "owner": "ef-sys",
       "branch": "ef-sys-wake",

@@ -15,6 +15,82 @@ Three pieces, each useful without the next:
 | PM2 | The loader's boot log, `FERRIX/BOOTLOG.TXT` on the ESP | `src/boot/common/uefi` | outside the TOE, A.FIRMWARE |
 | PM3 | The kernel's log across a reset (a minimal pstore), copied by the next boot's loader to `FERRIX/LASTKERNEL.TXT` | loader, `ferrix-bootinfo`, kernel console | **yes**: console ring, panic path |
 
+PM4 (§4, 2026-10-17) added the event log across a power cycle. §0 is
+version 3's plan for the whole.
+
+## 0. Version 3: a production crash log
+
+Version 3, 2026-10-21 (crashlog). The customer's ask: "a true
+production-ready persistent crash log", the best of Fuchsia, QNX, Linux and
+others. PM1 to PM4 are the parts of it that exist. This section compares
+them with what others do, says what Ferrix takes from each, and puts the
+rest in order as slices S1 to S7. §5 is S1's design.
+
+### 0.1 What others do
+
+The 2026-10-17 survey (`~/.local/share/ferrix/n150-linux/panic-log-design.md`
+§2, on the gate host) compared where a kernel panic's record is stored:
+ramoops, efi-pstore, ERST, pstore-blk and mtdoops, Windows' dump stack,
+Fuchsia, ChromeOS, seL4 and QNX's kdumper. Its option E became PM4. This
+comparison widens it to every part of a crash log:
+
+| Part | Fuchsia | QNX | Linux | Android | Windows | Certified systems (seL4; ARINC 653: LynxOS-178, INTEGRITY-178, PikeOS) | Ferrix takes |
+|---|---|---|---|---|---|---|---|
+| Kernel panic | Zircon's crashlog: persistent RAM with a header, uptime, a typed reason and the log's tail; the bootloader names the region | kdumper, set up at startup, writes a dump to reserved RAM or a raw device | pstore records the oops; kdump boots a second kernel to save a vmcore | pstore ramoops (`console-ramoops`, formerly `last_kmsg`) | a bugcheck writes through a second, polled copy of the disk driver to blocks of the page file resolved at boot | seL4's kernel keeps no log, faults go to a user-level handler; ARINC 653 sends module errors to the Health Monitor (HM) | RAM only at panic time (PM3), as Fuchsia and ramoops do |
+| A hang | a lockup detector (a heartbeat per processor) records a software watchdog; a hardware watchdog for the rest | HAM heartbeats; a board watchdog | soft and hard lockup detectors (NMI), `hung_task`, `/dev/watchdog` (iTCO) | as Linux, and the bootloader reads the watchdog's bit | the DPC watchdog (bugcheck 0x133), the ACPI WDAT table | HM deadline and heartbeat errors, each with a configured action | a cross-processor lockup detector that panics, then the PCH's TCO watchdog (S4) |
+| Why the last boot ended | a closed list (`KERNEL_PANIC`, `HARDWARE_WATCHDOG_TIMEOUT`, `SOFTWARE_WATCHDOG_TIMEOUT`, `USER_REQUEST`, `SYSTEM_UPDATE`, `HIGH_TEMPERATURE`, `BRIEF_POWER_LOSS`, `COLD` ...): a planned reboot writes it first, an unplanned one is read from the crashlog or the hardware | none common | none generic: `reboot_mode`, the pstore record's type | `sys.boot.reason` from a fixed list (`kernel_panic`, `watchdog`, `reboot,userrequested`, `shutdown,thermal` ...), kept by `bootstat` | Kernel-Power 41 when the clean-shutdown mark is missing; 1074 names who shut down and why | the HM log | a closed list in the pstore header, written by whatever stops the machine (S1); no record at all means power loss or a hang (S2) |
+| A user program's crash | `crashsvc` takes the exception; a Crashpad minidump; `crash_reporter` adds logs | `dumper` writes core files, with count and size limits | `core_pattern` and systemd-coredump with size and disk limits; the kernel's `segfault at` line, rate-limited | debuggerd, `crash_dump`, tombstoned: registers, backtrace, memory near the registers, maps, the abort message, recent log lines | WER and LocalDumps (`DumpCount`, 10) | seL4's fault endpoint and the system's own monitor; HM for process and partition errors (restart, stop or ignore) | a tombstone for every ring-3 crash, drivers first, written by a ring-3 crash service (S5) |
+| Limits | per-program quotas, a store with a size cap | dumper's limits | printk's rate limit, coredump's `MaxUse` | a ring of tombstones (32 by default, from memory) | `DumpCount` | fixed tables | fixed-size records, a rate per program, a ring of 32, the same crash collapsed into one record with a count (PM4's rule) |
+| Warm reset / power cycle | RAM, then user space stores it on the next boot | per board | ramoops in RAM; efi, ERST and blk across a power cycle | ramoops, then `/data` | disk | per product, often NVRAM | PM3 in RAM, PM4's partition written by the next boot's loader; no firmware call or disk write at panic time |
+| Integrity | magic and version | | ramoops' optional ECC | a versioned protobuf | checksummed dump headers | CRC'd records | CRC-32C, versions, two header copies, torn writes safe; unchecked text said so |
+| Privacy | uploads need consent; logs are redacted | | `dmesg_restrict`, `kptr_restrict`; makedumpfile drops user pages | tombstones readable by the system alone | the minidump keeps the least | the security target says | no memory contents kept, kernel addresses as image offsets, root alone reads (S5) |
+| Readers | the feedback component, `ffx` | gdb on cores | `/sys/fs/pstore`, `crash` | `bootstat`, `logcat -b crash`, bugreport | WinDbg, the event viewer | ground tools | the loader's lines, `ferrix-eventlog`, PM1 on a host, a reader on Ferrix (S6) |
+| Certification | | QNX OS for Safety uses HAM | | | | HM: a configured table of error and action whose log is evidence | records feed problem reports (IEC 62304 §9, DO-178C's problem reporting) and field data; every reason is a requirement with a gate and a control |
+
+The other systems' facts are from their documentation as I remember it.
+They were not looked up again for this version.
+
+### 0.2 What Ferrix takes, and why
+
+The pattern is **Fuchsia's and ChromeOS's**: the failing context writes RAM
+and nothing else, and a healthy next boot keeps the record on disk. The
+records take Android's shape, and the policy is ARINC 653's Health Monitor.
+
+* **The panic path writes no disk and calls no firmware.** Windows' way
+  needs a disk driver in ring 0, which ARCHITECTURE §7 rules out.
+  efi-pstore depends on firmware that a failing kernel calls in SMM, and
+  NV-store full once bricked laptops. PM3 and PM4 already have the
+  better shape.
+* **The reboot reason is a closed list.** Fuchsia and Android show that a
+  list beats free text: every value can be tested, counted and traced.
+  The stopper writes it, because it alone knows. What no stopper wrote
+  (a hang, a watchdog, power loss) is inferred, as Windows does from its
+  missing mark.
+* **Ring-3 crashes matter most here.** Ferrix's drivers are processes, so a
+  driver's crash is the commonest failure there is. Android's tombstone is
+  the right size of record. Core dumps are left out for their size and
+  for what they disclose. The record is made by a ring-3 service, with
+  only the snapshot in the kernel.
+* **Certification reads it as health monitoring.** The reasons and the
+  actions form a configured table, as ARINC 653's HM, so the evidence
+  reads the way assessors know. A record is never what stops a failure;
+  the failure's own countermeasure does, and the record says it happened.
+
+### 0.3 The slices
+
+| Slice | What | Item | Points |
+|---|---|---|---|
+| S1 | §5: the stop word in the pstore header (version 2), the write-back on `reboot(2)`'s path, the loader's line, the gate's stop cases | kernel (console, power, reboot), loader | 4-5 |
+| S2 | the event log's kinds beyond panic: user stop, power loss or hang (no record after a cold boot that the previous boot did not end cleanly, which needs a mark on disk that init writes at shutdown), watchdog | loader, init, `ferrix-eventlog` | 3 |
+| S3 | PM2's ESP files: `BOOTLOG.TXT` and `LASTKERNEL.TXT` (branch `postmortem`) | loader | 3 |
+| S4 | the lockup detector (a panic with its own reason), then the TCO watchdog, petted from the kernel's timer and armed only when asked | kernel, a design review of its own | 6-8 |
+| S5 | ring-3 tombstones: the kernel's exception snapshot to a crash service, the record's format crate, rate and size limits, a summary in the event log | kernel interface, ring-3 service | 10-14 |
+| S6 | readers: a listing on Ferrix, PM1's decoding of the event log | ring 3, host | 2-3 |
+| S7 | a thermal reason, and the certification wiring (the HM table, problem-report use) | kernel, docs | 2-3 |
+
+About 30 to 39 points in all. Each slice is reviewed on its own before its
+code.
+
 ## 1. PM1: the host script
 
 `tools/common/debug/ferrix-postmortem.sh [--image FILE]` on the host (Ubuntu):
@@ -498,7 +574,216 @@ removed (`the_same_pstore_record_is_appended_once`); `ev2-ctl-classify`, a
 table with two logs answered as absent
 (`a_present_but_unusable_log_is_never_taken_for_absent`).
 
-## 5. Where it stands
+## 5. S1: how the last boot stopped
+
+Version 1, 2026-10-21 (crashlog). Two gaps on main a95473469. The first is
+that a program's `reboot(2)` resets with no write-back.
+`syscall/system.rs`'s RESTART and RESTART2 call `arch::reset()` straight
+away, while `panic::conclude` and `power::finish` write the region back
+first, so on hardware the record can lose its last lines to a cache. The
+second is that nothing says why a boot ended: the loader shows the last
+line of the text and leaves the reader to guess.
+
+### 5.1 The stop word
+
+The pstore header goes to **version 2**. The kernel writes one more field,
+the **stop word**, at byte 72, and nothing else changes:
+
+```
+ 64  written    u64              bytes ever recorded
+ 72  stop       u64              low half: the stop's code; high half: its complement; 0 = none yet
+ 80..4096  zero
+```
+
+`HEADER_BYTES` grows from 72 to 80. The CRC still covers bytes 0..32, the
+loader's. The word is unchecked as `written` is, but it checks itself: a
+word whose high half is not the complement of its low half is **damaged**,
+never taken for a stop. A scribbled byte or a stale half reads as damaged,
+not as some other code. The codes are a closed list, kept in
+`ferrix_bootinfo::pstore::Stop`:
+
+| Code | Stop | Written by |
+|---|---|---|
+| 0 | none recorded | the loader's fresh header (the kernel's attach refuses anything else) |
+| 1 | a panic | `panic::begin_report`, when it admits the first report |
+| 2 | a restart a program asked for | `reboot(2)` RESTART and RESTART2 |
+| 3 | a power-off a program asked for | `reboot(2)` POWER_OFF |
+| 4 | a halt a program asked for | `reboot(2)` HALT |
+| 5 | a reset after init exited | `power::finish`, `ferrix.onexit=reset` |
+| 6 | a power-off after init exited | `power::finish`, the default |
+| 7-255 | reserved for S2, S4 and S7 (lockup, thermal, update) | — |
+
+A whole word whose code is not on the list is said as `unknown code N (a
+newer kernel's)`: after an A/B fallback, an older loader can meet a newer
+kernel's word. The code 0 with its complement is damaged, like any word
+whose halves do not match.
+
+The **clean-shutdown mark** is the same word: codes 2 to 6 are the stops
+the system chose. Code 0 in a region that survived means the kernel never
+said it stopped: a hang ended by a reset button or a watchdog, or a reset
+from outside (QEMU's `system_reset`). It is said as exactly that, never as
+one of the three. The mark lives in RAM, so it answers for a **warm reset**
+only. After a power cycle there is no region, and telling a clean power-off
+from a power cut needs a mark on disk. That is S2's, written by init before
+`reboot(2)`.
+
+### 5.2 The kernel
+
+* **One writer for stops, one store.** `console::pstore::stop(Stop)` stores
+  the word with one aligned 8-byte atomic update (Release) into the header
+  of the attached region, then writes the region back
+  (`arch::write_back_for_reset`, as today). It takes no lock and allocates
+  nothing, and does nothing when no region is attached. **A panic's word is
+  never replaced**: the update leaves a panic's word as it is, so a
+  `reboot(2)` racing a failure report on another processor does not say
+  the boot ended in a restart. Any other word is replaced by the last stop.
+* **The panic's word is stored as the report begins** (C4).
+  `panic::begin_report`, when it admits the first report, stores
+  `Stop::Panic` (`console::pstore::panicked`, a store and nothing else). A
+  first report that faults on its way into an abridged one has still
+  recorded its panic. `conclude` keeps its write-back where it is. An
+  abridged report stores nothing.
+* **Every other stop on purpose calls `stop`, after its caller's last
+  line, past the last point that can return, and before the
+  architecture's stop** (C3, C5):
+  * `reboot(2)`: after `sync_disks`, the audit record and its `reboot: ...`
+    line, and for RESTART2 after the word is copied in (a fault there is
+    EFAULT and returns, with no word stored) and after
+    `request_boot_mode`'s line. Then `arch::reset()` or `arch::shutdown()`.
+    This is the restart path's missing write-back.
+  * `power::finish`: `Stop::ExitReset` before the reset (in place of
+    today's bare `write_back`) and `Stop::ExitPowerOff` before the
+    power-off. `ferrix.onexit=panic` goes through the panic.
+
+  What the architecture's stop prints comes after the write-back and may
+  miss the region: `FERRIX-POWER-OFF` and `FERRIX-POWER-OFF-FAILED`,
+  AArch64's `firmware did not reset the machine; powering off`. So may a
+  line another processor logs while `reboot(2)` runs, since it stops
+  nobody else.
+* **Attach fails closed on it** (C2, L.console.43): the kernel's
+  acceptance is `pstore::fresh`, host-tested, which takes only a header
+  that `validate` takes, of version 2 exactly, with nothing recorded and a
+  stop word of 0, whole or damaged.
+* **One more unsafe block** (C8): `adopt` maps the header's byte 72 as a
+  `&'static AtomicU64`, as it maps the count, tagged (KMEM). The new
+  write-backs add none: `stop` and `write_back_for_reset` are safe.
+* **Bound** (C9, MEMORY-AND-TIMING §2.2o): one store more than today on
+  each path, and `reboot(2)`'s and finish's power-off's write-back is
+  §2.2o's: 16 448 `clflush` and one `mfence` on x86-64, 16 448 `dc cvac`
+  on AArch64, 32 896 `DCCMVAC` at the DK1's 32-byte lines on ARMv7-A.
+  `reboot(2)`'s runs in a system call after `sync_disks`, with interrupts
+  on, other processors running and no lock held, once, on a path that
+  ends the machine.
+
+### 5.3 The loader
+
+`pstore::validate` reads both versions. Version 1, from a kernel before
+S1, is found with **no stop word**, whatever its bytes 72 to 80 hold, and
+its text is reported and kept in the event log as before, so the first
+boot of an upgrade loses nothing. After the existing two lines, one more:
+
+```
+  pstore   boot 7 ended: a restart a program asked for (reboot(2))
+  pstore   boot 7 ended: a panic
+  pstore   boot 7 ended: no stop recorded: a hang, a watchdog or a reset from outside the kernel
+  pstore   boot 7 ended: its stop word is damaged (0x...)
+  pstore   boot 7 ended: unknown code 9 (a newer kernel's)
+  pstore   boot 7 ended: unknown, an older kernel's header
+```
+
+It writes a version-2 fresh header with the word 0. PM4 still keeps only
+records with a panic report (its kinds are S2). Its identity, the CRC-32C
+of the whole header, now covers 80 bytes, not 72: on the boot of an upgrade
+a record kept by the other reader too (the inspection Linux and the
+loader) may be appended twice, once.
+
+**Mixed versions fail closed** (C10). A new loader with a kernel before S1
+(an A/B fallback) gives a version-2 header, which that kernel refuses in
+its one line (`its header is not the loader's`) and mirrors nothing that
+boot. A loader before S1 with a new kernel gives version 1, which the new
+kernel refuses the same way. `test-ab-boot` boots both slots.
+
+### 5.4 Requirements, checks and controls
+
+Ids reserved first in a docs-only landing (C1):
+
+* **L.console.46**, the kernel's stores: codes 1 to 6 at the named call
+  sites, each only on a path that does not return, a panic's word never
+  replaced; the abridged report stores nothing, by inspection. Checked by
+  test-postmortem's stop cases and its record case.
+* **L.console.47**, `reboot(2)`'s write-back: each of its four stopping
+  arms calls `stop` last, by inspection, and the N150 BACKLOG row. No QEMU
+  check and no control is claimed for the write-back itself.
+* **L.console.48**, the word's format: encode, decode, the complement, 0
+  as none, every single-bit change damaged, version 1 and 2 read, version 3
+  refused. Checked by the host tests alone.
+
+L.console.43's criterion names `the_kernel_takes_only_a_fresh_version_2_header`
+in place of "by inspection" for the count. L.console.44 keeps the panic's
+write-back and finish's, now through `stop`, with its units updated, so no
+clause is claimed by two ids.
+
+* **Host tests** (`ferrix-bootinfo::pstore`): every stop's word round-trips
+  and 0 is none; every single-bit change to a word is damaged; an
+  unassigned code is a newer kernel's; version 1 reads with no stop word
+  whatever bytes 72 to 80 hold, version 3 is refused; the kernel's
+  acceptance refuses version 1, a count, and every nonzero word. In
+  `ferrix-eventlog`: a version-1 region with a panic is kept.
+* **`cargo xtask test-postmortem`**, x86-64 under KVM and AArch64, adds
+  **the stops** (C6). One QEMU each, its RAM kept across a reset as in
+  `across_a_reset`, busybox at `/bin/sh` with links for `reboot`,
+  `poweroff`, `halt` and `sleep`, the compositor's `reboot` at
+  `/bin/reboot2`, and a script that `ferrix.init=` starts:
+  * `reboot -f` (RESTART) and `/bin/reboot2 pm-word` (RESTART2): the
+    machine resets by itself;
+  * `poweroff -f`, `halt -f`, and init's exit in `test-boot`'s image
+    (code 6): QEMU pauses at the stop, the gate asks QMP whether it is
+    paused, then resets it;
+  * `ferrix.onexit=reset` in `test-boot`'s image: it resets by itself;
+  * the script says it is waiting and sleeps, and the gate resets the
+    machine over QMP: `no stop recorded: ...`. This is the evidence that
+    nothing writes the word unasked.
+
+  Each case requires boot 1's own stopping line on a cold first boot, the
+  loader's banner a second time, boot 2's `boot 1 ended: ...` line exactly,
+  and boot 2's kernel mirroring boot 2 on the fresh header. `across_a_reset`
+  also requires the saved region's word to be a panic and boot 2's loader to
+  say `boot 1 ended: a panic`.
+* **Controls** (C7; `fleet/gate.sh control`, x86-64 under KVM, each must
+  FIRE; host tests with `--expect-host`):
+  1. RESTART's `stop` removed -> the RESTART case;
+  2. RESTART2's `stop` removed -> the RESTART2 case;
+  3. `begin_report`'s `panicked` removed -> the record's case;
+  4. POWER_OFF's and HALT's codes swapped -> the power-off case;
+  5. finish storing 6 for `ferrix.onexit=reset` -> the reset-after-init
+     case;
+  6. the attach storing a restart -> the reset-from-outside case;
+  7. the complement check removed -> `a_changed_bit_is_damaged`;
+  8. the stop-word refusal removed from `fresh` ->
+     `the_kernel_takes_only_a_fresh_version_2_header`;
+  9. version 1 accepted by `fresh` -> the same test.
+* **Not observable under QEMU**: the write-back itself, whose caches are
+  the host's (as L.console.44). The hardware run gets a BACKLOG row: on
+  the N150 box, `reboot` from the shell, and the next loader's line.
+* **Rows**: check; build --arch all --release; test-boot x86_64 kvm and
+  tcg, aarch64, armv7a, armv7a --smp 2; test-boot --reset x86_64 and
+  aarch64; test-postmortem x86_64 kvm and aarch64; test-ab-boot;
+  test-shell x86_64 with busybox (the `reboot(2)` path).
+
+### 5.5 What a stop word discloses
+
+Which of seven stops ended the previous boot. The text beside it already
+says that (the `reboot:` line, the panic), so V-14's acceptance covers it
+and `ferrix.pstore=off` still takes no region. VULNERABILITY-ANALYSIS's
+V-14 names the word.
+
+## 6. Where it stands
+
+2026-10-21, version 3 (crashlog): §0's survey and slices, and §5's S1
+design. Design verdict **OK IF C1-C12** (consultant ledger
+`~/.local/share/ferrix/cert-consultant/reviews.md` line 2749); §5 is as
+amended for C1-C10 and the lesser points L1 and L2. §0.1's facts about
+other systems are from memory and are not evidence (L4).
 
 2026-10-17, PM4: code verdict **OK IF (1)-(6)** (consultant ledger line
 2195), after the design's OK IF (E1)-(E12) (line 2153). E1's deviation,
