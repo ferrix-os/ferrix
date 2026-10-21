@@ -226,7 +226,41 @@ tr '\0' '\n' < /proc/$PID/environ
   the queue-locked sample, `read_kernel_word` under `TABLES`, no call view
   on Arm, and the environ test against the program's own block. The call
   view's coverage is owed (p2-141). The open-then-render window of the
-  private entries is named, not fixed (p2-142).
+  private entries is named, not fixed (p2-142). Landed 2022ed449.
+
+### S2 (branch `debug-s2`, in progress)
+
+* 2026-10-21: the customer decided D2 (DECISIONS.md, landed 62d2b09da):
+  ptrace is **out of the certified `present` profile**, compiled out by a
+  build flag, its requirements covering debug builds alone. Ids reserved:
+  H.DEBUG.1 and L.debug.1-14 (62d2b09da). The S2 design draft (§4) has the
+  consultant's **OK IF D1-D12**, ledger 2937.
+* **Done on the branch, not yet landed:** the `debug` build flag
+  (`off` | `ptrace`), set `off` in every profile and declared in
+  `build-flags.toml`, `src/kernel/src/build_flags.rs` (its `FLAGS` array and
+  the `ferrix_profile` value list, now `[Flag; 16]` with `debug` a profile
+  name); and a `debug` profile (`tools/common/data/profiles/debug.toml`),
+  which is `desktop` with `debug=ptrace`, no claim, for a machine a person
+  debugs. Both `present` and `debug` build and boot on x86_64; the `debug`
+  boot line ends `debug=ptrace`. `check-item-boundary` and
+  `check-boot-line --self-test` pass. **No ptrace code yet**, so the flag is
+  inert and the profile is a no-op; it lands with the first behaviour, not
+  alone, since a no-op profile only adds a `test-flags` build.
+* **Still to do**, in order (D1-D12): the `attach`/`seize`/`detach`/
+  `interrupt` path and the access rules (D3); the stops on the `sched::work`
+  way back, reusing a `WATCH_TRACE` bit in `Thread::watched` so the untraced
+  path and the IPC fast path keep today's instructions (§4.4, D10); register
+  read and write with D5's validation; `PEEK`/`POKE`, `/proc/<pid>/mem` and
+  the copy-on-write forced write (D6, core code); `SINGLESTEP` and `int3`;
+  set-id exec under trace (D4); tracer exit and `SIGKILL` of a stopped
+  tracee (D7, D8); `waitpid` reporting; `src/tests/ptrace` with a check and a
+  control per L id; the round-trip measurement before and after (D10);
+  `test-ptrace` scoped to `debug=ptrace`; `test-flags` building both flag
+  values. Hardware breakpoints (the debug registers, D9) stay out of S2.
+* S3 (§5) follows S2: a debug-profile box image
+  (`build-box-main.sh` with a profile argument to xtask), Debian's
+  gdbserver and strace under `/data`, and the `wine64-preloader` recipe,
+  rehearsed on QEMU first.
 
 ---
 
