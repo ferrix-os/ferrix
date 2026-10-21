@@ -1,9 +1,9 @@
 //! The `--everything` desktop as a session of the user `ferrix`
 //! (`docs/AUTH.md` §6, customer 2026-10-03).
 //!
-//! `init`'s `hyprix.service` starts `/bin/sessiond --user ferrix --
-//! /bin/hyprix ...` instead of the compositor itself. `sessiond` is root and
-//! owns seat0's devices; the compositor, and every program it starts, run as
+//! `init`'s `hyprix.service` starts `/bin/sessiond --user ferrix --headless
+//! WxH --display-wait SECONDS -- /bin/hyprix ...` instead of the compositor
+//! itself. `sessiond` is root and owns seat0's devices; the compositor, and every program it starts, run as
 //! `ferrix` (`src/user/system/linux/compositor/sessiond`).
 //!
 //! What the desktop's configuration started as root and has to stay root

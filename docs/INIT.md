@@ -300,7 +300,12 @@ command line overrides it, as `systemd.unit=` does.
 **Devices.** A unit can wait for a device node: `hyprix.service` says
 `Requires=dev-dri-card0.device` and `After=dev-dri-card0.device`, and does
 not start until `/dev/dri/card0` exists, however long a driver takes to
-publish it. A device unit needs no file; its name is the node's path,
+publish it. A session desktop's (`sessiond`) unit says neither: a GPU
+booted without a monitor publishes a render node and no card0, and a unit
+cannot wait for one node or another, so `sessiond --headless WxH
+--display-wait SECONDS` waits for card0 itself and, when none came in time
+but a render node is there, starts the compositor with `--headless WxH`.
+A device unit needs no file; its name is the node's path,
 escaped as for mounts (`-` is `/`, `\x2d` a literal `-`), and a name that is
 not a node below `/dev` refuses the unit. Its start asks the backend to
 watch for the node (`Action::WatchDevice`) and waits, `activating

@@ -631,6 +631,42 @@ fn console_getty(session: bool, shell: bool) -> Vec<File> {
     }
 }
 
+/// The compositor's command: itself, or under `sessiond` for `session_user`,
+/// which waits for card0 and goes headless when the GPU has no display.
+fn compositor_command(session_user: Option<&str>) -> Vec<String> {
+    match session_user {
+        Some(user) => vec![
+            "/bin/sessiond".to_owned(),
+            "--user".to_owned(),
+            exec_word(user),
+            "--headless".to_owned(),
+            HEADLESS_SIZE.to_owned(),
+            "--display-wait".to_owned(),
+            DISPLAY_WAIT.to_string(),
+            "--".to_owned(),
+            "/bin/hyprix".to_owned(),
+        ],
+        None => vec!["/bin/hyprix".to_owned()],
+    }
+}
+
+/// The compositor unit's device lines: card0's device unit without a
+/// session, which `sessiond` replaces by its own wait with one.
+fn unit_device(session: bool) -> &'static str {
+    if session {
+        "# sessiond waits for card0, or goes headless without a display.\n"
+    } else {
+        "Requires=dev-dri-card0.device\nAfter=dev-dri-card0.device\n"
+    }
+}
+
+/// The size of the compositor's headless output when the GPU has no display.
+pub(crate) const HEADLESS_SIZE: &str = "1920x1200";
+
+/// Seconds `sessiond` waits for card0 before it goes headless; more than the
+/// half minute nvrm takes to publish it.
+pub(crate) const DISPLAY_WAIT: u32 = 60;
+
 /// What a desktop image carries so that init is pid 1 and the compositor a
 /// service of `graphical.target` (landing L10): init and its units, the
 /// compositor at `/bin/hyprix` with `hyprix.service` running it with
@@ -640,10 +676,13 @@ fn console_getty(session: bool, shell: bool) -> Vec<File> {
 /// `graphical.target` too, started before the compositor, and every client
 /// the compositor starts is told where it listens (`docs/AUDIO.md`, U2d).
 ///
-/// The compositor's unit requires and is ordered after `dev-dri-card0.device`
-/// (`docs/INIT.md` §4.3): the screen it opens is published when its driver's
-/// card is up, which for nvrm is half a minute into boot, once the GPU's
-/// firmware runs.
+/// Without a session user the compositor's unit requires and is ordered
+/// after `dev-dri-card0.device` (`docs/INIT.md` §4.3): the screen it opens is
+/// published when its driver's card is up, which for nvrm is half a minute
+/// into boot, once the GPU's firmware runs. With one, `sessiond` waits for
+/// card0 itself ([`HEADLESS_SIZE`], [`DISPLAY_WAIT`]): a GPU booted without
+/// a monitor publishes a render node and no card0, and the unit would never
+/// start, so after the wait `sessiond` starts the compositor headless.
 ///
 /// # Errors
 ///
@@ -663,16 +702,7 @@ pub(crate) fn desktop_files(
     // With a session user, `sessiond` starts the compositor as that user
     // and hands it seat0's devices (`crate::session`); it sets the user's
     // own `HOME`.
-    let mut command = match session_user {
-        Some(user) => vec![
-            "/bin/sessiond".to_owned(),
-            "--user".to_owned(),
-            exec_word(user),
-            "--".to_owned(),
-            "/bin/hyprix".to_owned(),
-        ],
-        None => vec!["/bin/hyprix".to_owned()],
-    };
+    let mut command = compositor_command(session_user);
     command.extend(arguments.iter().map(|word| exec_word(word)));
     let home = if session_user.is_some() {
         // sessiond, the unit's own process, takes the seat channel and arms
@@ -684,13 +714,13 @@ pub(crate) fn desktop_files(
          # no User= is not given; the clients find ~/.config through it.\n\
          Environment=HOME=/\n"
     };
+    let device = unit_device(session_user.is_some());
     let restart = restart_line(session_user.is_some());
     let unit = format!(
         "# The compositor, a service of graphical.target (docs/INIT.md, L10).\n\
          [Unit]\n\
          Description=The compositor\n\
-         Requires=dev-dri-card0.device\n\
-         After=dev-dri-card0.device\n\
+         {device}\
          \n\
          [Service]\n\
          ExecStart={}\n\
@@ -3176,6 +3206,23 @@ mod tests {
         assert_eq!(exec_word("two words"), "\"two words\"");
         assert_eq!(exec_word("say \"hi\""), "\"say \\\"hi\\\"\"");
         assert_eq!(exec_word(""), "\"\"");
+    }
+
+    /// A session's compositor unit waits for no card0 (a GPU booted without
+    /// a monitor publishes only a render node); sessiond waits and falls
+    /// back to a headless output. Without a session, the unit waits.
+    #[test]
+    fn a_session_compositor_goes_headless_without_card0() {
+        assert_eq!(
+            compositor_command(Some("ferrix")).join(" "),
+            "/bin/sessiond --user ferrix --headless 1920x1200 --display-wait 60 -- /bin/hyprix"
+        );
+        assert!(!unit_device(true).contains("Requires="));
+        assert_eq!(compositor_command(None), ["/bin/hyprix"]);
+        assert_eq!(
+            unit_device(false),
+            "Requires=dev-dri-card0.device\nAfter=dev-dri-card0.device\n"
+        );
     }
 
     #[test]

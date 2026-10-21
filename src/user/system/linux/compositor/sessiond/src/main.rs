@@ -26,6 +26,13 @@
 //! session left running. An image that logs a named user in at once
 //! (decision 8) is the one case built; a greeter would choose the account
 //! instead of `--user`.
+//!
+//! A GPU booted without a monitor publishes a render node and no card0, and
+//! init cannot wait for one node or the other (`docs/INIT.md` §4.3): with
+//! `--headless WxH` this waits for card0 itself, and when none came within
+//! `--display-wait` seconds but a render node is there, starts the
+//! compositor with `--headless WxH`. The wait outlasts nvrm, which
+//! publishes card0 half a minute into boot.
 
 use std::io::Write;
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -51,10 +58,99 @@ mod scope;
 /// How often a seat channel that went is asked for again.
 const ASK_AGAIN: Duration = Duration::from_secs(5);
 
-const USAGE: &str = "usage: sessiond --user NAME -- PROGRAM [ARGUMENT...]\n\
+const USAGE: &str = "usage: sessiond --user NAME [--headless WxH [--display-wait SECONDS]] -- PROGRAM [ARGUMENT...]\n\
     \n\
     Start PROGRAM, the session's compositor, as the account NAME, and hand it\n\
-    seat0's card, render node and input nodes when it asks.\n";
+    seat0's card, render node and input nodes when it asks.\n\
+    \n\
+    With --headless, wait for /dev/dri/card0; when none appears within\n\
+    SECONDS (60) but a render node is there, the GPU has no display (no\n\
+    monitor at boot), and PROGRAM is started with `--headless WxH`.\n";
+
+/// Where the screen is published, and the render nodes' directory.
+const CARD: &str = "/dev/dri/card0";
+const DRI: &str = "/dev/dri";
+
+/// What to do when no screen is published: the size of the headless output
+/// and how long to wait for card0 first.
+#[derive(Debug, PartialEq, Eq)]
+struct Headless {
+    size: String,
+    wait: Duration,
+}
+
+/// The `--headless WxH` and `--display-wait SECONDS` words, taken out of
+/// `args`; the rest is for [`parse`].
+fn split_headless(args: &[String]) -> Result<(Option<Headless>, Vec<String>), String> {
+    let (mut size, mut wait) = (None, 60);
+    let mut rest = Vec::new();
+    let mut words = args.iter();
+    let mut options = true;
+    while let Some(word) = words.next() {
+        if options && (word == "--headless" || word == "--display-wait") {
+            let value = words.next().ok_or_else(|| USAGE.to_owned())?;
+            if word == "--headless" {
+                size = Some(value.clone());
+            } else {
+                wait = value.parse::<u64>().map_err(|_| USAGE.to_owned())?;
+            }
+            continue;
+        }
+        options &= word != "--";
+        rest.push(word.clone());
+    }
+    let headless = size.map(|size| Headless {
+        size,
+        wait: Duration::from_secs(wait),
+    });
+    Ok((headless, rest))
+}
+
+/// Whether `names` (the entries of /dev/dri) has a render node.
+fn has_render_node(names: &[String]) -> bool {
+    names.iter().any(|name| name.starts_with("renderD"))
+}
+
+/// Whether to start the compositor headless, given how long card0 has been
+/// awaited: no card0 after the wait, and a render node, so a GPU driver is
+/// up and has no display. Without a render node the wait goes on.
+fn start_headless(card0: bool, names: &[String], waited: Duration, wait: Duration) -> bool {
+    !card0 && waited >= wait && has_render_node(names)
+}
+
+/// Wait for card0 or the decision to go headless; the program with
+/// `--headless WxH` after the compositor's name in the second case.
+fn choose_display(headless: &Headless, program: Vec<String>) -> Vec<String> {
+    let began = Instant::now();
+    loop {
+        let card0 = std::path::Path::new(CARD).exists();
+        let names: Vec<String> = std::fs::read_dir(DRI)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if card0 {
+            return program;
+        }
+        if start_headless(card0, &names, began.elapsed(), headless.wait) {
+            say(&format!(
+                "no card0 after {} s, a render node: headless {}",
+                headless.wait.as_secs(),
+                headless.size
+            ));
+            let mut program = program;
+            program.insert(1, headless.size.clone());
+            program.insert(1, "--headless".to_owned());
+            // The driver publishes its nodes together; let it finish.
+            std::thread::sleep(Duration::from_secs(1));
+            return program;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
 
 /// Where each account's runtime directory goes.
 const RUNTIME: &str = "/run/user";
@@ -212,7 +308,11 @@ fn seed(
 }
 
 fn run(args: &[String]) -> Result<i32, String> {
-    let (name, program) = parse(args).ok_or_else(|| USAGE.to_owned())?;
+    let (headless, args) = split_headless(args)?;
+    let (name, mut program) = parse(&args).ok_or_else(|| USAGE.to_owned())?;
+    if let Some(headless) = &headless {
+        program = choose_display(headless, program);
+    }
     let passwd = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
     let group = std::fs::read_to_string("/etc/group").unwrap_or_default();
     let account =
@@ -598,6 +698,40 @@ mod tests {
     const PASSWD: &str =
         "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/home/ferrix:/bin/zsh\n";
     const GROUP: &str = "root:x:0:\nferrix:x:1000:\naudio:x:29:ferrix,other\nvideo:x:44:other\n";
+
+    #[test]
+    fn headless_options_are_split_off_before_the_program() {
+        let words = |text: &str| -> Vec<String> { text.split(' ').map(str::to_owned).collect() };
+        let (headless, rest) = split_headless(&words(
+            "--user ferrix --headless 1920x1200 --display-wait 5 -- /bin/hyprix --headless",
+        ))
+        .unwrap();
+        assert_eq!(
+            headless,
+            Some(Headless {
+                size: "1920x1200".to_owned(),
+                wait: Duration::from_secs(5)
+            })
+        );
+        assert_eq!(rest, words("--user ferrix -- /bin/hyprix --headless"));
+        let (none, rest) = split_headless(&words("--user ferrix -- /bin/hyprix")).unwrap();
+        assert_eq!(none, None);
+        assert_eq!(rest.len(), 4);
+        assert!(split_headless(&words("--user ferrix --headless")).is_err());
+    }
+
+    /// The nvrm case: card0 comes 30 s in, and nothing falls back before the
+    /// wait is over, nor without a render node.
+    #[test]
+    fn headless_only_after_the_wait_with_a_render_node() {
+        let render = vec!["renderD128".to_owned()];
+        let wait = Duration::from_secs(60);
+        let at = Duration::from_secs;
+        assert!(!start_headless(false, &render, at(30), wait));
+        assert!(!start_headless(true, &render, at(90), wait));
+        assert!(!start_headless(false, &[], at(90), wait));
+        assert!(start_headless(false, &render, at(60), wait));
+    }
 
     #[test]
     fn an_account_has_its_ids_home_shell_and_groups() {
