@@ -235,6 +235,7 @@ fn message(bytes: usize, handles: u32) -> Message<u32> {
     Message {
         bytes: vec![0xA5; bytes],
         handles: (0..handles).collect(),
+        sender: (),
     }
 }
 
@@ -301,6 +302,31 @@ fn unpop_restores_the_head() {
     assert_eq!(q.peek_sizes(), Some((1, 0)), "the first is first again");
     assert_eq!(q.drain().len(), 2, "both");
     assert!(q.is_empty(), "drained");
+}
+
+#[test]
+fn a_sender_travels_with_its_message_unchanged() {
+    // K6 (`docs/microkernel/K6.md`): the queue carries each message's
+    // stamp through push, a refused push, pop, put-back and drain.
+    let stamped = |bytes: u8, sender: (u64, u64)| Message {
+        bytes: vec![bytes],
+        handles: Vec::<u32>::new(),
+        sender,
+    };
+    let mut q = MessageQueue::new(LIMITS);
+    q.push(stamped(1, (7, 3))).unwrap();
+    q.push(stamped(2, (8, 4))).unwrap();
+    let refused = stamped(3, (9, 5));
+    assert_eq!(q.push(refused.clone()), Err((SendError::Full, refused)));
+    let head = q.pop_fitting(8, 2).unwrap();
+    assert_eq!(head.sender, (7, 3), "popped with its own");
+    q.unpop(head).unwrap();
+    let senders: Vec<(u64, u64)> = q.drain().into_iter().map(|m| m.sender).collect();
+    assert_eq!(
+        senders,
+        vec![(7, 3), (8, 4)],
+        "put back and drained with theirs"
+    );
 }
 
 #[test]
@@ -477,6 +503,7 @@ fn a_drained_queue_keeps_its_order() {
         q.push(Message {
             bytes: vec![n],
             handles: Vec::<u32>::new(),
+            sender: (),
         })
         .unwrap();
     }
