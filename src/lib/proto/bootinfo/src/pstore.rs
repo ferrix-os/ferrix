@@ -192,8 +192,7 @@ pub struct Found {
 }
 
 /// How a boot stopped when it stopped on purpose: the closed list of codes
-/// the stop word holds (`docs/POSTMORTEM.md` §5.1). Code 7 is the lockup
-/// detector's (§6.2); 9 to 255 are kept for the stops later slices add.
+/// the stop word holds (`docs/POSTMORTEM.md` §5.1). 9 to 255 are kept for the stops later slices add.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Stop {
     /// The first failure report began.
@@ -208,6 +207,10 @@ pub enum Stop {
     ExitReset = 5,
     /// Init exited, and the default powers off.
     ExitPowerOff = 6,
+    /// A lockup: a processor that took no interrupt for ten seconds
+    /// (`docs/POSTMORTEM.md` §6.2), or user space that stopped feeding its
+    /// watchdog (§6.9).
+    Lockup = 7,
     /// A machine check stopped the machine: its first report
     /// (`docs/MACHINE-CHECK-RESTART.md` §2.1).
     MachineCheck = 8,
@@ -215,13 +218,14 @@ pub enum Stop {
 
 impl Stop {
     /// Every stop, in code order.
-    pub const ALL: [Stop; 7] = [
+    pub const ALL: [Stop; 8] = [
         Stop::Panic,
         Stop::Restart,
         Stop::PowerOff,
         Stop::Halt,
         Stop::ExitReset,
         Stop::ExitPowerOff,
+        Stop::Lockup,
         Stop::MachineCheck,
     ];
 
@@ -250,6 +254,7 @@ impl Stop {
             4 => Some(Stop::Halt),
             5 => Some(Stop::ExitReset),
             6 => Some(Stop::ExitPowerOff),
+            7 => Some(Stop::Lockup),
             8 => Some(Stop::MachineCheck),
             _ => None,
         }
@@ -265,6 +270,7 @@ impl Stop {
             Stop::Halt => "a halt a program asked for (reboot(2))",
             Stop::ExitReset => "a reset after init exited (ferrix.onexit=reset)",
             Stop::ExitPowerOff => "a power-off after init exited",
+            Stop::Lockup => "a lockup",
             Stop::MachineCheck => "a machine check",
         }
     }

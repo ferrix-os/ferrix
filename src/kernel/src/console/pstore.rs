@@ -95,7 +95,7 @@ pub(crate) fn write_back() -> bool {
 /// the architecture's reset, power-off or halt: the lines those print, and
 /// any another processor logs meanwhile, may miss the region's RAM.
 ///
-/// A failure's word -- a panic's, a machine check's -- is never replaced: a
+/// A failure's word -- a panic's, a machine check's, a lockup's -- is never replaced: a
 /// stop racing a failure report on another processor is not how the boot
 /// ended. Takes no lock and allocates nothing.
 pub fn stop(stop: Stop) -> bool {
@@ -111,10 +111,28 @@ pub fn stop(stop: Stop) -> bool {
     })
 }
 
-/// Whether `word` records a failure: a panic or a machine check, which
-/// nothing replaces.
+/// Whether `word` records a failure: a panic, a machine check or a lockup,
+/// which nothing replaces.
 fn is_failure(word: u64) -> bool {
-    word == Stop::Panic.word() || word == Stop::MachineCheck.word()
+    word == Stop::Panic.word()
+        || word == Stop::MachineCheck.word()
+        || word == Stop::Lockup.word()
+}
+
+/// Record a lockup as how this boot stopped: the lockup detector and the
+/// user-space watchdog, before the report they start (`docs/POSTMORTEM.md`
+/// §6.2, §6.9; `L.console.49`). The report's own [`panicked`] keeps it, and
+/// no [`stop`] replaces it; a failure's word already there stands. One
+/// compare-and-swap, no lock, no allocation.
+pub fn locked_up() {
+    if let Some(region) = REGION.get() {
+        let word = Stop::Lockup.word();
+        let _ = region
+            .stop
+            .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
+                (!is_failure(now)).then_some(word)
+            });
+    }
 }
 
 /// Record how this boot stopped at its first failure report, as it begins
