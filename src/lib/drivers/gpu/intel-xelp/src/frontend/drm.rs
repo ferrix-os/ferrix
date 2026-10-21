@@ -325,7 +325,7 @@ impl<B: Backend> Frontend<B> {
         };
         let outcome = self.handle(host, &call, &mut kdata);
         let status = match outcome {
-            Ok(Some(hold)) => match self.state.waits.hold(&call, &kdata, hold) {
+            Ok(Some(hold)) => match self.state.waits.hold(&call, &kdata, hold, host.now_ns()) {
                 Ok(()) => {
                     if self.state.trace {
                         host.say(format_args!(
@@ -340,7 +340,9 @@ impl<B: Backend> Frontend<B> {
             Ok(None) => 0,
             Err(errno) => -i32::from(errno.0),
         };
-        if self.state.trace {
+        // A failure only: every success would flood the console at a
+        // frame's worth of ioctls, and a poll's ETIME is no failure.
+        if self.state.trace && status != 0 && status != -i32::from(super::ETIME.0) {
             host.say(format_args!(
                 "intel: trace: ioctl {cmd:#x} (nr {:#04x}) request {request} -> {status}",
                 ioc_nr(cmd)

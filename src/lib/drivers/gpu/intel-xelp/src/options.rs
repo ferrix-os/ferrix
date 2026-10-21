@@ -26,6 +26,9 @@ pub struct Words<'a> {
     /// The box's frequency checkpoint: RP1, then RP0, each held and sampled:
     /// the whole word.
     pub freqtest: &'a [u8],
+    /// Say the render node's held waits, their answers, each failed ioctl,
+    /// and a wait held unanswered too long: the whole word.
+    pub uapitrace: &'a [u8],
 }
 
 /// The longest a restart may wait: an hour.
@@ -52,6 +55,8 @@ pub struct Options {
     pub freqlog: bool,
     /// The frequency checkpoint.
     pub freqtest: bool,
+    /// The render node's trace.
+    pub uapitrace: bool,
 }
 
 /// The words of `line` the driver reads. A `stop=` that is not a number is
@@ -70,6 +75,8 @@ pub fn parse(line: &[u8], words: &Words<'_>) -> Options {
             options.freqlog = true;
         } else if word == words.freqtest {
             options.freqtest = true;
+        } else if word == words.uapitrace {
+            options.uapitrace = true;
         } else if let Some(value) = word.strip_prefix(words.freq) {
             options.freq_mhz = number(value).filter(|&mhz| mhz > 0);
         } else if let Some(value) = word.strip_prefix(words.stop) {
@@ -116,6 +123,7 @@ mod tests {
                 freq: b"ferrix.intelgpu.freq=",
                 freqlog: b"ferrix.intelgpu.freqlog",
                 freqtest: b"ferrix.intelgpu.freqtest",
+                uapitrace: b"ferrix.intelgpu.uapitrace",
             },
         )
     }
@@ -153,6 +161,9 @@ mod tests {
             parse(b"ferrix.intelgpu.freq=650 ferrix.intelgpu.freqlog ferrix.intelgpu.freqtest");
         assert_eq!(options.freq_mhz, Some(650));
         assert!(options.freqlog && options.freqtest);
+        assert!(!options.uapitrace && !options.trace);
+        let options = parse(b"ferrix.intelgpu.uapitrace");
+        assert!(options.uapitrace && !options.trace, "{options:?}");
         assert_eq!(parse(b"ferrix.intelgpu.freq=x").freq_mhz, None);
         assert_eq!(parse(b"ferrix.intelgpu.freq=0").freq_mhz, None);
         assert_eq!(parse(b"ferrix.intelgpu.freqlog").freq_mhz, None);

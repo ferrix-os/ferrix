@@ -683,7 +683,8 @@ pub struct Tables<M> {
     pub next_cookie: u64,
     /// Lines said once.
     pub said: Said,
-    /// Say every ioctl, the held waits and their answers (`ferrix.intelgpu.trace`).
+    /// Say each failed ioctl, the held waits, their answers, and a wait
+    /// held unanswered too long (`ferrix.intelgpu.uapitrace`).
     pub trace: bool,
 }
 
