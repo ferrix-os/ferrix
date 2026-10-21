@@ -971,6 +971,13 @@ impl Process {
             .with_tasks(|tasks| tasks.iter().filter_map(Weak::upgrade).collect())
     }
 
+    /// Its live tasks and what its tasks that left had run, taken together
+    /// (`object::process::Process::tasks_and_retired`): what its processor
+    /// time is summed from, so that a thread's end never takes time out.
+    pub(crate) fn tasks_and_retired(&self) -> (Vec<Arc<Task>>, object::process::Retired) {
+        self.core().tasks_and_retired()
+    }
+
     /// Whether the running task, waiting on behalf of this process, is to stop
     /// waiting and leave: the process is ending, or the task is a thread of it
     /// that another thread's `execve` is ending. What a wait that does not look
@@ -2544,6 +2551,14 @@ fn end_thread(status: Option<i32>, group: bool) -> ! {
             if group {
                 let _ = process.terminate(status);
             }
+        }
+        // Its time stays the process's, as Linux keeps a thread's in the
+        // process's sums once it has gone: charged up to now and moved
+        // there before a `pthread_join` can hear of the end, so that the
+        // joiner's reading of the process's time already holds it.
+        let _ = sched::current_runtime();
+        if let Some(task) = sched::current() {
+            process.core().retire_task(&task);
         }
         // The address `CLONE_CHILD_CLEARTID` or `set_tid_address` registered
         // is zeroed and its futex woken, which is how a `pthread_join` or a

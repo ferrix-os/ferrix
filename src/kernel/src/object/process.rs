@@ -167,6 +167,26 @@ pub(crate) struct TaskList {
     /// Counted up at every change, so that a walk that let go of the lock
     /// between batches can tell its place in the list is stale.
     version: u64,
+    /// What the tasks taken out as they left had run ([`Process::retire_task`]).
+    retired: Retired,
+}
+
+/// What a process's tasks that have left had run, which its processor time
+/// goes on counting: Linux's `signal_struct` sums (`utime`, `stime`,
+/// `nvcsw`, `nivcsw`) that `times`, `getrusage(RUSAGE_SELF)`,
+/// `CLOCK_PROCESS_CPUTIME_ID` and `/proc/<pid>/stat` add to the live
+/// threads'. Without it a thread's end took its time out of the process's,
+/// and those readings stepped back.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Retired {
+    /// Nanoseconds run.
+    pub(crate) runtime: u64,
+    /// Nanoseconds of `runtime` spent in the kernel.
+    pub(crate) kernel: u64,
+    /// Switches away while blocked, asleep or dead.
+    pub(crate) voluntary: u64,
+    /// Switches away while still runnable.
+    pub(crate) involuntary: u64,
 }
 
 /// Where a process's bootstrap handle waits for `process_bootstrap`
@@ -302,6 +322,7 @@ impl Process {
             task_list: SpinLock::new(TaskList {
                 tasks: Vec::new(),
                 version: 0,
+                retired: Retired::default(),
             }),
         })
     }
@@ -641,6 +662,54 @@ impl Process {
     /// address space, which no lock may be held across.
     pub(crate) fn with_tasks<R>(&self, look: impl FnOnce(&[Weak<Task>]) -> R) -> R {
         look(&self.task_list.lock().tasks)
+    }
+
+    /// Take `task` out of the list as it leaves, and add what it has run, as
+    /// charged now, to what the process's tasks that left had run. Called by
+    /// the leaving task itself, charged up to now first, once nothing it does
+    /// after is the program's: the little it runs from here on is counted
+    /// nowhere, so no reading of the process's time steps back, as one did
+    /// when a task's end took its time with it.
+    ///
+    /// Under the list's lock, so that a reader taking the list and the sum
+    /// under one hold ([`Process::tasks_and_retired`]) counts the task once,
+    /// in one or the other. Dropping its `Weak` there lets go of no task: the
+    /// caller holds it. A task not listed is left alone.
+    ///
+    /// From here the list's other readers no longer see the task: posting
+    /// ([`Process::post_to_tasks`]), a freeze's "every task blocked", and the
+    /// personality's thread counts and lookups. It never returns to user
+    /// mode, so none of them has anything left to ask of it; Linux likewise
+    /// takes a leaving thread out of `signal->live` before its
+    /// `clear_child_tid` write. A task that ends without the personality's
+    /// `end_thread` -- one killed before it entered its program -- is not
+    /// retired, and took no time worth keeping.
+    pub(crate) fn retire_task(&self, task: &Task) {
+        let mut list = self.task_list.lock();
+        let Some(at) = list
+            .tasks
+            .iter()
+            .position(|listed| core::ptr::eq(listed.as_ptr(), task))
+        else {
+            return;
+        };
+        let _ = list.tasks.remove(at);
+        list.version = list.version.wrapping_add(1);
+        let sum = &mut list.retired;
+        sum.runtime = sum.runtime.saturating_add(task.runtime());
+        sum.kernel = sum.kernel.saturating_add(task.kernel_time());
+        sum.voluntary = sum.voluntary.saturating_add(task.voluntary_switches());
+        sum.involuntary = sum.involuntary.saturating_add(task.involuntary_switches());
+    }
+
+    /// The tasks running its code that are still alive, and what the ones
+    /// that left had run, under one hold of the list's lock: a task retiring
+    /// meanwhile is in exactly one of the two. The tasks are taken out of the
+    /// list rather than looked at under its lock, as `with_tasks` asks.
+    pub(crate) fn tasks_and_retired(&self) -> (Vec<Arc<Task>>, Retired) {
+        let list = self.task_list.lock();
+        let tasks = list.tasks.iter().filter_map(Weak::upgrade).collect();
+        (tasks, list.retired)
     }
 
     /// Post `bits` to every task listed but `except`, waking each and

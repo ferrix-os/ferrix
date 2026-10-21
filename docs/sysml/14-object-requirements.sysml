@@ -2081,5 +2081,23 @@ package FerrixObjectRequirements {
                 "object::quota::switched", "object::quota::leaving",
                 "object::quota::settle");
         }
+        requirement <'L.object.226'> anEndedThreadsTimeStaysItsProcesss : ItemLowLevel {
+            attribute :>> statement = "A task leaving a process shall be taken out of
+                the process's task list, under the list's lock, with its runtime,
+                kernel time and voluntary and involuntary switches added to the
+                process's retired sums in the same hold; the live tasks and those
+                sums shall be answered under one hold of the lock; so the
+                process's processor time (CLOCK_PROCESS_CPUTIME_ID, times,
+                getrusage's RUSAGE_SELF, /proc/<pid>/stat) shall keep the time of
+                its threads that have ended, counted once.";
+            attribute :>> criterion = "Stage 7: a program that spins and exits reads,
+                its task ended and still held, as having run no more than the
+                task's own runtime; with the task let go, as having run at least a
+                millisecond through process_runtime and through the user and
+                kernel sums times and getrusage's RUSAGE_SELF copy out.";
+            attribute :>> parent = "H.SCHED.14";
+            attribute :>> unit = ("object::process::Process::retire_task",
+                "object::process::Process::tasks_and_retired");
+        }
     }
 }

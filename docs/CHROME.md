@@ -611,8 +611,7 @@ reading where it stopped:
 4. Chrome's time code reads `CLOCK_THREAD_CPUTIME_ID` and `CHECK`s that it
    answered; it was `EINVAL`. Done: a thread's clock is its scheduler task's
    run time, charged up to the instant it is read, and a process's the sum
-   of its threads'. Not as Linux: a thread that has ended takes its time
-   with it.
+   of its threads', the ones that have ended included, as on Linux.
 5. The sandbox's thread helper counts threads by the link count of
    `/proc/self/task`, two and one per thread on Linux, and `CHECK`s it; it
    was two. Done.
