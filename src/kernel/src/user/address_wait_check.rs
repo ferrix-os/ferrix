@@ -568,10 +568,14 @@ fn a_requeue_moves_waiters_across_buckets(
         "addrwait: a compared requeue of a changed word moved waiters",
         report,
     )?;
+    // A stale entry of a waiter already woken through another word, listed
+    // behind the two: a requeue of up to three takes it off, and counts it
+    // neither as woken nor as moved.
+    let stale = stale_entry(&from)?;
     let moved = a
         .call(
             nr::ADDRESS_REQUEUE,
-            &[source, target, 0, 2, ADDRESS_COMPARE, 9],
+            &[source, target, 0, 3, ADDRESS_COMPARE, 9],
         )
         .map_err(|_| "addrwait: a requeue was refused")?;
     if moved != 2
@@ -579,6 +583,9 @@ fn a_requeue_moves_waiters_across_buckets(
         || address_wait::waiters_on(core::slice::from_ref(&to)) != 2
     {
         return Err("addrwait: a requeue did not move its waiters onto the other word");
+    }
+    if still_listed(stale) {
+        return Err("addrwait: a requeue left a stale entry on the table");
     }
     // Back the other way, waking the oldest and moving nothing: a requeue's
     // wake rouses as a wake does, and stops at its count, leaving the other
@@ -600,6 +607,33 @@ fn a_requeue_moves_waiters_across_buckets(
     }
     report.woken += 2;
     Ok(())
+}
+
+/// A stale entry listed on `key`: the sabotage hook's, in a kernel with its
+/// checks.
+#[cfg(ferrix_checks = "on")]
+fn stale_entry(key: &Key) -> Result<Option<address_wait::sabotage::StaleEntry>, &'static str> {
+    address_wait::sabotage::list_stale_entry(key.clone())
+        .map(Some)
+        .map_err(|()| "addrwait: a stale entry could not be listed")
+}
+
+/// None in a kernel built `checks=off`, which runs no check.
+#[cfg(not(ferrix_checks = "on"))]
+fn stale_entry(_: &Key) -> Result<Option<()>, &'static str> {
+    Ok(None)
+}
+
+/// Whether a stale entry is still listed, taking it off if it is.
+#[cfg(ferrix_checks = "on")]
+fn still_listed(stale: Option<address_wait::sabotage::StaleEntry>) -> bool {
+    stale.is_some_and(address_wait::sabotage::StaleEntry::remove)
+}
+
+/// Never, in a kernel built `checks=off`.
+#[cfg(not(ferrix_checks = "on"))]
+fn still_listed(_: Option<()>) -> bool {
+    false
 }
 
 /// Case 7: a wait on three words answers the index of the one woken, and

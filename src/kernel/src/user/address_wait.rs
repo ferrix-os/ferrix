@@ -968,7 +968,8 @@ pub(crate) fn bucket_of(key: &Key) -> usize {
 }
 
 /// The entries and room of bucket `index`: for the self-check of the bound on
-/// a bucket's uncharged room.
+/// a bucket's uncharged room, which only a kernel with its checks runs.
+#[cfg(ferrix_checks = "on")]
 pub(crate) fn bucket_room(index: usize) -> (usize, usize) {
     let table = bucket_lock(index).lock();
     (table.len(), table.capacity())
