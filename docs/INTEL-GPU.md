@@ -694,6 +694,41 @@ M1 and M2, without the box.
 
 ## 10. Where it stands
 
+**M5's box run prepared: the launcher on lavapipe, only the game on anv
+(2026-10-21, `tools/common/n150/endfield/`).** On the box the GRYPHLINK
+launcher froze after its first frame on anv and works on lavapipe, so the
+first GPU run keeps it there and puts only `Endfield.exe` on the Intel GPU.
+Environment cannot split them: Proton's `WINEDLLOVERRIDES` beat the
+registry's AppDefaults, every Wine child inherits the launcher's environment,
+and the Vulkan loader's per-application settings key on the Unix executable,
+which is Wine's for all of them. DXVK's configuration file can (DXVK 3.1.1,
+`util/config/config.cpp`): it is `$DXVK_CONFIG_FILE`, else `dxvk.conf` in the
+current directory, not the exe's; a line `[Endfield.exe]` makes the lines
+after it apply only to the program of that file name, exact and
+case-sensitive; and `dxvk.deviceFilter` is the file's form of
+`DXVK_FILTER_DEVICE_NAME`, a substring of the Vulkan device name, which the
+environment variable overrides. So `ef-player-anv.sh` lists both ICDs and
+writes `dxvk.deviceFilter = llvmpipe` for every program, then
+`[Endfield.exe]` with `dxvk.deviceFilter = Intel`, `dxgi.syncInterval = 0`
+(the present-wait hang) and DXVK's HUD. `$DXVK_CONFIG` is parsed after the
+file with its section reset, so what Proton appends there stays global.
+Wine's fps channel is turned on for the game alone with a per-process
+`WINEDEBUG` (`-all,Endfield.exe:+fps`, which this Wine honours: one
+`win32u_vkQueuePresentKHR ... @ approx N fps` line about every 1.5 s).
+`ef-gpu-run.sh start` sets the game to 1280 by 800 and Unity quality 0
+(`ef-settings.sh`, backup first), starts `ef-fullscreen.sh` and the
+launcher, and every 15 s says the game's process, whether it holds the
+render node, its window, the device DXVK chose in each program's log, and
+the last fps line. In QEMU over the fake back end (`test-dxvk`'s window
+boot with the scripts carried, scratch, not landed), two copies of
+`d3d11-triangle.exe` named `Games.exe` and `Endfield.exe` ran at once:
+Games chose llvmpipe and skipped anv by the filter, Endfield chose
+"Intel(R) Graphics (ADL-N)" and skipped llvmpipe, only Endfield's fps lines
+were written, both `Z:/...` and Unix paths worked for `DXVK_CONFIG_FILE`,
+and the watcher made one window full-screen and then left it. Every DXVK
+process holds `renderD128` open in the split, because anv enumerates its
+device in each; only the game draws on it.
+
 **The box hangs under `ferrix.intelgpu` (2026-10-19, branch `igpu-hang`).**
 Booting the box with `ferrix.intelgpu` hard-hung it twice, with no panic and
 no timed reset, and the RAM log was lost to the power cycle: on 2026-10-18 on
