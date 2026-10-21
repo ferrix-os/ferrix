@@ -4309,3 +4309,40 @@ fn lifting_a_window_leaves_its_floating_rectangle_alone() {
     let _ = dispatch(&mut state, "togglefloating", "");
     assert_eq!(rects(&state)[1], (2, r(100, 100, 300, 200)));
 }
+
+/// A floating window raised over a fullscreen one -- a fullscreen program's
+/// own login or dialog window -- is drawn over it, takes the focus, and is
+/// listed as not covered; a tiled one still opens behind, and closing the
+/// raised one gives the focus back to the fullscreen window.
+#[test]
+fn a_window_raised_over_a_fullscreen_one_is_drawn_over_it() {
+    let mut state = setup(BARE);
+    open(&mut state, &[1]);
+    let _changes = dispatch(&mut state, "fullscreen", "");
+    let _changes = state
+        .open_floating(WindowId(2), r(400, 300, 640, 480))
+        .unwrap();
+    assert_eq!(
+        rects(&state),
+        [(1, r(0, 0, 1920, 1080))],
+        "behind until raised"
+    );
+    let _changes = state.raise_over_fullscreen(WindowId(2)).unwrap();
+    assert_eq!(
+        rects(&state),
+        [(1, r(0, 0, 1920, 1080)), (2, r(400, 300, 640, 480))]
+    );
+    assert_eq!(focused(&state), Some(2));
+    assert!(
+        state.listing().iter().all(|listed| !listed.covered),
+        "{:?}",
+        state.listing()
+    );
+    // A tiled window is not raised.
+    let _changes = state.open_window(WindowId(3)).unwrap();
+    let _changes = state.raise_over_fullscreen(WindowId(3)).unwrap();
+    assert_eq!(rects(&state).len(), 2);
+    let _changes = state.window_gone(WindowId(2)).unwrap();
+    assert_eq!(rects(&state), [(1, r(0, 0, 1920, 1080))]);
+    assert_eq!(focused(&state), Some(1));
+}

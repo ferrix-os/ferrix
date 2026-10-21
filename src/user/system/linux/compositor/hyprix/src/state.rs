@@ -2167,11 +2167,20 @@ fn watch_children(report: &mut dyn FnMut(&str)) -> Option<crate::children::Child
 fn configure_first(
     client: &mut Client,
     unsized_dialogs: &mut std::collections::BTreeSet<WindowId>,
+    own: &[(ObjectId, WindowId)],
     toplevel: ObjectId,
     window: WindowId,
     state: &mut State,
 ) {
-    if float_dialog(client, toplevel, window, state) {
+    // A window a fullscreen program opens -- a dialog, a login page --
+    // floats over the program and takes the focus, rather than tiling
+    // behind it where nobody can see it while the program waits for it.
+    let over = over_own_fullscreen(own, window, state);
+    let floated = float_dialog(client, toplevel, window, over, state);
+    if over {
+        let _ = state.raise_over_fullscreen(window);
+    }
+    if floated {
         let _ = unsized_dialogs.insert(window);
         let focused = state.focused_window() == Some(window);
         client.configure_toplevel(toplevel, 0, 0, &states(focused));
@@ -2189,11 +2198,18 @@ fn configure_first(
 /// A window a rule floated already is left where the rule put it. Floats
 /// it, for now, centred at half the monitor, until its first buffer gives
 /// its size (`fit_dialog`); gives whether it did.
-fn float_dialog(client: &Client, toplevel: ObjectId, window: WindowId, state: &mut State) -> bool {
-    let dialog = client.toplevel(toplevel).is_some_and(|top| {
-        let (min, max) = (top.min_size, top.max_size);
-        top.parent.is_some() || (min.0 != 0 && min.1 != 0 && (min.0 == max.0 || min.1 == max.1))
-    });
+fn float_dialog(
+    client: &Client,
+    toplevel: ObjectId,
+    window: WindowId,
+    over: bool,
+    state: &mut State,
+) -> bool {
+    let dialog = over
+        || client.toplevel(toplevel).is_some_and(|top| {
+            let (min, max) = (top.min_size, top.max_size);
+            top.parent.is_some() || (min.0 != 0 && min.1 != 0 && (min.0 == max.0 || min.1 == max.1))
+        });
     if !dialog || state.is_floating(window) {
         return false;
     }
@@ -2212,6 +2228,15 @@ fn float_dialog(client: &Client, toplevel: ObjectId, window: WindowId, state: &m
         height.max(1),
     );
     state.float_window(window, rect).is_ok()
+}
+
+/// Whether `window`'s workspace has a fullscreen window that is another of
+/// the same client's, `own`: what makes a window one opened over it.
+fn over_own_fullscreen(own: &[(ObjectId, WindowId)], window: WindowId, state: &State) -> bool {
+    state
+        .workspace_of(window)
+        .and_then(|workspace| state.fullscreen(workspace))
+        .is_some_and(|(full, _)| full != window && own.iter().any(|(_, mine)| *mine == full))
 }
 
 /// Give a dialog `float_dialog` floated the size of the buffer it has just

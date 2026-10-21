@@ -459,6 +459,12 @@ pub struct State {
     pointer: Option<(f64, f64)>,
     /// Every window, most recently focused last.
     history: Vec<WindowId>,
+    /// Floating windows shown over their workspace's fullscreen window:
+    /// Hyprland's `m_bCreatedOverFullscreen`, a dialog or a login window a
+    /// fullscreen program opened, which is drawn over it and takes the
+    /// focus rather than opening behind it where nobody can reach it
+    /// ([`State::raise_over_fullscreen`]).
+    over_fullscreen: BTreeSet<WindowId>,
     /// Each window the focus went to since [`State::take_focus_trail`] was
     /// last asked, in order: `None` where nothing was focused.
     focus_trail: Vec<Option<WindowId>>,
@@ -547,6 +553,7 @@ impl State {
             floating_rects: BTreeMap::new(),
             lifted: BTreeMap::new(),
             history: Vec::new(),
+            over_fullscreen: BTreeSet::new(),
             focus_trail: Vec::new(),
             names: BTreeMap::new(),
             groups: BTreeMap::new(),
@@ -1096,6 +1103,34 @@ impl State {
         }))
     }
 
+    /// Show the floating `window` over its workspace's fullscreen window
+    /// and give it the focus, as Hyprland does a window opened over one
+    /// (`m_bCreatedOverFullscreen`): what a fullscreen program's own dialog
+    /// or login window needs, which would otherwise open behind the program
+    /// that waits for it. Nothing for a window that is tiled, is itself the
+    /// fullscreen one, or is on a workspace with none.
+    ///
+    /// # Errors
+    ///
+    /// A window this state does not have.
+    pub fn raise_over_fullscreen(&mut self, window: WindowId) -> Result<Vec<Change>, Error> {
+        if !self.windows.contains_key(&window) {
+            return Err(Error::UnknownWindow(window));
+        }
+        Ok(self.run(|state| {
+            let over = state.is_floating(window)
+                && state
+                    .workspace_of(window)
+                    .and_then(|workspace| state.fullscreen(workspace))
+                    .is_some_and(|(full, _)| full != window);
+            if over {
+                let _ = state.over_fullscreen.insert(window);
+                state.focus(window);
+            }
+            Vec::new()
+        }))
+    }
+
     /// Every window, most recently focused first.
     ///
     /// The focus history, which is what a rule that gives the focus back
@@ -1152,6 +1187,7 @@ impl State {
             state.history.retain(|id| *id != window);
             let _rect = state.floating_rects.remove(&window);
             let _lifted = state.lifted.remove(&window);
+            let _over = state.over_fullscreen.remove(&window);
             // `master:focus_master_on_close`: the focus goes to the master
             // rather than to whatever the history has next, which is what
             // `getNextCandidate` does with the option on.
@@ -4108,10 +4144,30 @@ impl State {
                 ),
             }
         });
+        // What floats over the fullscreen window, above it in the order it
+        // floats in: the windows opened over it.
+        let over: Vec<Placed> = full
+            .map(|full| {
+                let (x, y) = (output.monitor.rect.x, output.monitor.rect.y);
+                ws.floating
+                    .iter()
+                    .filter(|&&window| {
+                        window != full.window && self.over_fullscreen.contains(&window)
+                    })
+                    .filter_map(|&window| {
+                        self.floating_rects
+                            .get(&window)
+                            .map(|rect| place(window, rect.translate(x, y), border, true, false))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         if let Some(full) = full
             && !every
         {
-            return vec![full];
+            let mut shown = vec![full];
+            shown.extend(over);
+            return shown;
         }
         // The monocle layout draws the workspace's focused window, so the
         // focus is part of what the slots are: `recalculate` reads the
@@ -4138,8 +4194,11 @@ impl State {
                 .map(|rect| place(window, rect.translate(x, y), border, true, false))
         }));
         if let Some(full) = full {
-            windows.retain(|placed| placed.window != full.window);
+            windows.retain(|placed| {
+                placed.window != full.window && !over.iter().any(|on| on.window == placed.window)
+            });
             windows.push(full);
+            windows.extend(over);
         }
         windows
     }

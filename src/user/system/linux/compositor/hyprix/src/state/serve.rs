@@ -707,6 +707,7 @@ impl Compositor<'_> {
             configure_first(
                 &mut slot.client,
                 &mut slot.unsized_dialogs,
+                &slot.windows,
                 toplevel,
                 window,
                 &mut self.state,
