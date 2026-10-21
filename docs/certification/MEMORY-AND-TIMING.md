@@ -291,6 +291,66 @@ run at 8 GiB that stopped the kernel ended without it on 2026-10-13
 ran on), so the BACKLOG row now holds only the residual: heap-borne
 demand and the load's infallible allocations.
 
+**A job's reservation** (`H.QUOTA.15` to 17, L.mm.76 to 80 and 82,
+L.object.221 to 225, L.user.145; K12a, `docs/microkernel/K12.md`). A
+reservation promises a job frames: while it holds fewer frames drawn from
+its reservation than the reservation's size, its next program frame or page
+table is there. `mm::reservation` keeps one number for the machine, the
+outstanding promise `O` (the sum over the reservations of size less drawn),
+and every frame route makes one decision with the free count `F` in the hold
+of the frame allocator's lock that takes the frames: a reserved job's frame
+with room is given while one is free, tagged and drawn; any other program's
+frame is refused below `W + O`; the kernel's own frames and the heap's pages
+below `O`. With no reservation `O` is 0 and every route is as it was.
+
+* **What the kernel keeps.** Below the promise the kernel keeps the
+  watermark, F-23's per-processor reserve, and what reclaim and writeback
+  need to make progress (ledger 2550, Q2): the kernel's own allocations stop
+  at `O`, so they never take a promised frame, and they still have `W` that
+  no program reaches.
+* **Admission.** A reservation, or its growth by `d` frames of promise, is
+  admitted only while `F − d >= W + O`, in one hold, so the sum of
+  reservations never exceeds the managed frames less the watermark, and
+  only frames free at that moment are promised. Before a refusal, one
+  machine-wide reclaim of the shortfall runs with no lock held, and the
+  test is taken again (`Job::set_reservation`); its bound is the reclaim's, two
+  passes round the list of file objects, above.
+* **What each hold K12 adds costs** (ledger 2783 (3)): a take or a free of
+  `2^order` frames reads or writes one tag a frame, `2^order` tag
+  operations, besides one entry and `O`; the largest a route takes is a
+  block of `2^MAX_ORDER` frames (1024), and the free of
+  `allocate_frame_run`'s blocks is that per block. A bind scans the 64
+  entries once. Every free pays the tag reads, reservation or none, and the
+  ABAB of a fault and of a heap allocate/free pair against `main` says
+  whether that is visible. The tag array is one byte a managed frame, carved
+  beside the page array at `mm::init`.
+* **Interrupt context never draws** (ledger 2550 (1)). `irq::in_interrupt`
+  is set around the architectures' interrupt service, and read with
+  interrupts masked, so a task cannot read another processor's flag (ledger
+  2783 (1)); a frame taken there is the kernel's own or a plain program
+  frame, whoever is current. Every device, timer and IPI interrupt reaches
+  the marked loop through `trap::dispatch` on all three architectures;
+  x86-64's paranoid entries (`#DB`, NMI, `#MC`) and its spurious and
+  remapping-check vectors are not dispatched and allocate nothing.
+  `irq::dispatch` counts any interrupt run unmarked, and stage 9's
+  `reserve` line requires none of the interrupts since boot. A
+  tagged frame freed in interrupt context gives its promise back under the
+  same interrupt-masking lock as any free.
+* **Reclaim spares another's reservation.** A reclaim takes a drawn frame
+  only for a task drawing from the same reservation (`user::cache::spares`),
+  so a machine-wide reclaim's walk grows by at most the drawn frames it
+  passes over. A machine-wide reclaim for a frame asks for the shortfall of
+  `W + O`, not of `W` (`mm::program_floor`).
+* **Not guaranteed**: contiguity (the promise is a count, so a run can fail
+  on a fragmented machine); kernel work for the job outside its own calls
+  (kernel threads, interrupt work); and, until K12b, the kernel heap's
+  pages, which still come from the shared heap under the kernel's floor.
+
+Evidence: the `reserve` line of stage 2 (the floors, admission, the tags and
+the drain) and of stage 9 (the rules, a reserved job's frames, an
+interrupt's, a reclaim's), on the four boots; the consultant's review is
+ledger line 2550.
+
 **The load the item runs.** That line is clean for the Linux personality,
 which is load from its entry, and not clean for two native calls, which are
 item calls that run load code. `process_create` makes a POSIX process through
