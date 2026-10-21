@@ -577,6 +577,7 @@ const TASKS: &[&[Task]] = &[
     shader_cache::TASKS,
     slot_image::TASKS,
     steamcmd::TASKS,
+    symbolize::TASKS,
     sysfs::TASKS,
     uutils::TASKS,
     wallpaper::TASKS,

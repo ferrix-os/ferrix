@@ -118,3 +118,25 @@ fn read_word(root: u64, virt: u64) -> Option<u64> {
     let value = unsafe { address.read_volatile() };
     Some(value as u64)
 }
+
+/// Whether `address` is inside the kernel image as it runs: the test every
+/// return address of a walk passes, for `sched::inspect`'s walk of another
+/// task's chain (`docs/DEBUG.md` §1.1).
+pub(crate) fn in_image(address: u64) -> bool {
+    in_kernel(address)
+}
+
+/// How far the image was moved from where it was linked (KASLR), zero for an
+/// image at its link address: what `sched::inspect` takes off each address so
+/// that it names the ELF's, as the panic report's `kaslr slide` line lets
+/// `xtask` do.
+pub(crate) fn slide() -> u64 {
+    image_start().wrapping_sub(ferrix_bootinfo::KERNEL_VIRT_BASE)
+}
+
+/// The image's length, from its first byte to its last.
+pub(crate) fn image_len() -> u64 {
+    u64::try_from((&raw const __kernel_end).addr())
+        .unwrap_or(0)
+        .saturating_sub(image_start())
+}

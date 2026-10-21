@@ -156,6 +156,15 @@ pub(crate) fn mitigations_off_target_dir() -> PathBuf {
     paths::target_dir().join("mitigations-off")
 }
 
+/// Where the kernel ELF for `arch` is once built with `release` as asked and
+/// the default flags: what `xtask symbolize` names addresses from.
+pub(crate) fn kernel_elf(arch: Arch, release: bool) -> PathBuf {
+    paths::target_dir()
+        .join(arch.kernel_target())
+        .join(kernel_profile(release))
+        .join("ferrix-kernel")
+}
+
 /// `cargo build -p ferrix-kernel` for `arch`, with the setting
 /// [`set_kernel_build`] chose, and where the ELF it makes will be.
 fn kernel(arch: Arch, release: bool) -> Result<(Build, PathBuf)> {

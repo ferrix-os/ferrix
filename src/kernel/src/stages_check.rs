@@ -472,6 +472,7 @@ pub(super) fn check_namespaces(disk: bool) {
     check_pid_namespaces();
     check_network_namespaces();
     check_proc_access();
+    check_task_view();
 }
 
 /// User namespaces: the rules of `docs/NAMESPACES.md` §4 attempted and
@@ -501,7 +502,7 @@ fn check_proc_access() {
         ),
     };
     println!(
-        "  procacc  {} calls answered as Linux answers them, {} of them refusals: root, cwd, exe, fd, fdinfo, maps and ns/* of another uid's or a non-dumpable process refused EACCES, read by the same user, by root, and by root inside a user namespace as ptrace_may_access allows; get_robust_list of another uid's thread refused",
+        "  procacc  {} calls answered as Linux answers them, {} of them refusals: root, cwd, exe, fd, fdinfo, maps, environ, syscall and ns/* of another uid's or a non-dumpable process refused EACCES, read by the same user, by root, and by root inside a user namespace as ptrace_may_access allows; get_robust_list of another uid's thread refused; stack root's alone",
         checked.calls, checked.refusals,
     );
 }
@@ -2239,4 +2240,22 @@ fn check_thread_times() {
             "stage 7 self-check failed: {problem}"
         );
     }
+}
+
+/// The view of a task that is not running, which `/proc/<pid>/task/<tid>/
+/// syscall`, `wchan` and `stack` render (`docs/DEBUG.md` §1.3): a blocked
+/// task's chain as it recorded it itself, a freed stack and a device window
+/// read as nothing.
+fn check_task_view() {
+    let report = match sched::inspect_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE5_TASK_VIEW,
+            "task view self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  inspect  a blocked task's chain of {} frames read from outside it, ending in the {} it recorded itself, at link addresses (slide {:#x}); a freed stack's word and a device window's read as nothing",
+        report.frames, report.matched, report.slide,
+    );
 }

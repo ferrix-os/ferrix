@@ -335,6 +335,14 @@ struct Identity {
     exe_at: Option<Location>,
     /// Its argument vector: `/proc/<pid>/cmdline`.
     args: Vec<Vec<u8>>,
+    /// Where its program's environment strings are in its memory, from the
+    /// first byte of the first to one past the last one's terminator, as
+    /// `execve` laid them out: `/proc/<pid>/environ` (`docs/DEBUG.md` §1).
+    /// Empty for a process whose program was given none, a native one's.
+    env: (u64, u64),
+    /// The ABI its program runs in: which entry frame a blocked thread of it
+    /// left (`sched::inspect`).
+    abi: crate::trap::Abi,
 }
 
 /// The classic `brk` heap: one region that grows upward.
@@ -628,11 +636,26 @@ impl Process {
     /// Record what it was started as: the path, the file when there was one,
     /// and the arguments.
     pub(crate) fn record_exec(&self, exe: &[u8], exe_at: Option<Location>, args: &[&[u8]]) {
+        self.record_program(exe, exe_at, args, (0, 0), crate::trap::Abi::Native);
+    }
+
+    /// [`Process::record_exec`], with where `execve` put the environment
+    /// strings and the ABI the program runs in.
+    pub(crate) fn record_program(
+        &self,
+        exe: &[u8],
+        exe_at: Option<Location>,
+        args: &[&[u8]],
+        env: (u64, u64),
+        abi: crate::trap::Abi,
+    ) {
         let exe = exe.to_vec();
         let args = args.iter().map(|arg| arg.to_vec()).collect();
         let mut identity = self.identity.lock();
         identity.exe = exe;
         identity.args = args;
+        identity.env = env;
+        identity.abi = abi;
         // The old file goes after the lock: its dentry's last reference may be
         // this one.
         let old = core::mem::replace(&mut identity.exe_at, exe_at);
@@ -653,6 +676,17 @@ impl Process {
     /// Its argument vector.
     pub(crate) fn args(&self) -> Vec<Vec<u8>> {
         self.identity.lock().args.clone()
+    }
+
+    /// Where its environment strings are in its memory: the first byte and
+    /// one past the last, empty for none.
+    pub(crate) fn env_range(&self) -> (u64, u64) {
+        self.identity.lock().env
+    }
+
+    /// The ABI its program runs in.
+    pub(crate) fn program_abi(&self) -> crate::trap::Abi {
+        self.identity.lock().abi
     }
 
     /// The command name: the last component of the path it was started from,

@@ -172,6 +172,10 @@ fn guarded(target: &Process) -> alloc::vec::Vec<(alloc::string::String, Kind)> {
         // Followed: the network namespace's own open (`net::netns_file`).
         ("ns/net", Kind::Opened),
         ("maps", Kind::File),
+        // What it started with and the call its thread waits in
+        // (`docs/DEBUG.md` §1).
+        ("environ", Kind::File),
+        ("syscall", Kind::File),
     ]
     .into_iter()
     .map(|(name, kind)| (alloc::string::String::from(name), kind))
@@ -270,7 +274,46 @@ pub(crate) fn run() -> Result<Counts, &'static str> {
     )?;
     robust_lists(&mut tally, &user, &split, &dumpable, &other)?;
     fdinfo(&mut tally)?;
+    stacks(&mut tally, &user, &administrator, &dumpable)?;
     Ok(counts)
+}
+
+/// `/proc/<pid>/stack` and `task/<tid>/stack` (`docs/DEBUG.md` §1): root's
+/// in the first namespace alone, as Linux's `proc_pid_stack` asks
+/// `CAP_SYS_ADMIN` there -- refused to a user on its own process, which
+/// `ptrace_may_access` alone would allow, and read by root of another's.
+fn stacks(
+    tally: &mut Tally<'_>,
+    user: &Process,
+    administrator: &Process,
+    dumpable: &Process,
+) -> Result<(), &'static str> {
+    for (reader, target) in [(user, user), (user, dumpable)] {
+        for path in [
+            format!("/proc/{}/stack", target.pid()),
+            format!("/proc/{0}/task/{0}/stack", target.pid()),
+        ] {
+            tally.report.calls += 1;
+            if ask(reader, &path, Kind::File)? != Err(Errno::EACCES) {
+                return Err(message(format!(
+                    "a user read a process's kernel stack: {path} was not refused"
+                )));
+            }
+            tally.report.refusals += 1;
+        }
+    }
+    for path in [
+        format!("/proc/{}/stack", dumpable.pid()),
+        format!("/proc/{0}/task/{0}/stack", dumpable.pid()),
+    ] {
+        tally.report.calls += 1;
+        if let Err(errno) = ask(administrator, &path, Kind::File)? {
+            return Err(message(format!(
+                "root was refused another process's kernel stack: {path} answered {errno:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// uid 1000 is refused every other kind of target, and reads the dumpable one.
@@ -340,10 +383,16 @@ fn allowed(
         }
         let path = format!("/proc/{}/{name}", target.pid());
         tally.report.calls += 1;
-        if let Err(errno) = ask(reader, &path, kind)? {
-            return Err(message(format!(
-                "{what}: /proc/<pid>/{name} answered {errno:?}"
-            )));
+        match ask(reader, &path, kind)? {
+            Ok(_) => {}
+            // Past the rule, where no call is read (`docs/DEBUG.md` §1.1).
+            Err(Errno::EOPNOTSUPP)
+                if name == "syscall" && !crate::sched::inspect::calls_are_visible() => {}
+            Err(errno) => {
+                return Err(message(format!(
+                    "{what}: /proc/<pid>/{name} answered {errno:?}"
+                )));
+            }
         }
     }
     Ok(())

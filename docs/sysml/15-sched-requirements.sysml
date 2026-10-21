@@ -831,5 +831,79 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::switch_chosen",
                 "sched::task::Task::note_switched_out");
         }
+        requirement <'L.sched.86'> aBlockedCallIsReadFromItsEntryFrame : ItemLowLevel {
+            doc /* x86-64 only: on AArch64 and ARMv7-A the exception frame is
+                 * pushed where the task last returned to user mode, no fixed
+                 * place, and the view reads no call there (docs/DEBUG.md 1.1;
+                 * BACKLOG p2-140). The fault case's -1 sp pc and a 32-bit
+                 * program's int 0x80 frame are read the same way and are not
+                 * claimed: no check drives them. */
+            attribute :>> statement = "On x86-64, the view of a thread blocked in a
+                system call made through the 64-bit entry shall report the call's
+                number and six arguments, the program's stack pointer and its
+                instruction pointer, as the entry saved them in the system call
+                frame at the top of the task's kernel stack, read while the task is
+                blocked and switched away under its run queue's lock; and the view
+                of the reading thread itself shall report it running. On AArch64
+                and ARMv7-A the view shall read no call, so that /proc answers
+                EOPNOTSUPP rather than a call it did not read.";
+            attribute :>> criterion = "test-procfs's debug step on x86_64: a thread
+                blocked in read of a pipe reads back read's number, the descriptor,
+                the buffer's address and the length, a stack pointer and a nonzero
+                instruction pointer, and the reader's own file reads running; with
+                the frame's first argument read from the second's place, the step
+                fails with its sentence; on aarch64 and armv7a the step reads
+                syscall as EOPNOTSUPP.";
+            attribute :>> parent = "H.SCHED.15";
+            attribute :>> unit = ("sched::inspect::call_of", "sched::inspect::sample",
+                "sched::inspect::still", "sched::inspect::calls_are_visible",
+                "sched::inspect::read_call", "sched::inspect::field",
+                "arch::x86_64::inspect::entry_frame",
+                "arch::aarch64::inspect::entry_frame", "arch::aarch64::inspect::x",
+                "arch::armv7a::inspect::entry_frame", "arch::armv7a::inspect::r",
+                "sched::task::Task::in_call");
+        }
+        requirement <'L.sched.87'> aBlockedChainIsReadFromItsSwitchFrame : ItemLowLevel {
+            attribute :>> statement = "The view of a task that is blocked and switched
+                away shall report its kernel call chain from the frame pointer and
+                return address its switch frame holds, innermost first, following
+                only records inside the task's own stack, each above the last and
+                aligned, and only return addresses inside the kernel image, at most
+                backtrace::MAX_FRAMES, each with the image's slide taken off.";
+            attribute :>> criterion = "The task view case at boot on every
+                architecture: a kernel task records its own chain and blocks; the
+                view's chain of it ends in that chain, each address inside the
+                image as it was linked; with the switch frame's frame pointer slot
+                moved by a word, or the slide not taken off on a boot whose slide
+                is not zero, the case fails with its sentence.";
+            attribute :>> parent = "H.SCHED.15";
+            attribute :>> unit = ("sched::inspect::chain_of", "sched::inspect::sample",
+                "sched::inspect::still", "sched::inspect::walk",
+                "sched::inspect::first_link", "sched::inspect::link_at",
+                "backtrace::in_image", "backtrace::slide", "backtrace::image_len");
+        }
+        requirement <'L.sched.88'> aFreedStackReadsAsNothing : ItemLowLevel {
+            attribute :>> statement = "A word of kernel memory read for the view shall
+                be translated through the kernel's page tables under their lock and
+                read through the direct map, so that a word of a stack that has
+                been freed answers nothing and the read does not fault.";
+            attribute :>> criterion = "The task view case at boot: a stack from vmap,
+                read while mapped, then freed and read again, answers nothing; with
+                the read made through the address itself, the boot stops on a
+                kernel page fault.";
+            attribute :>> parent = "H.SCHED.15";
+            attribute :>> unit = ("mm::read_kernel_word", "sched::inspect::word_at");
+        }
+        requirement <'L.sched.89'> aWordThatIsNoRamReadsAsNothing : ItemLowLevel {
+            attribute :>> statement = "A word of kernel memory read for the view whose
+                translation names a frame that is not RAM shall answer nothing,
+                without the read being made.";
+            attribute :>> criterion = "The task view case at boot: a page of vmap
+                mapped onto a physical address that is no RAM answers nothing; with
+                the RAM test taken out, the boot stops on a kernel page fault on
+                x86_64, where the direct map has no such address.";
+            attribute :>> parent = "H.SCHED.15";
+            attribute :>> unit = "mm::read_kernel_word";
+        }
     }
 }

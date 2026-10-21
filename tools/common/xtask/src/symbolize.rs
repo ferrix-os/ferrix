@@ -7,9 +7,44 @@
 //! up as the report arrives and prints the function beside it.
 
 use std::cell::Cell;
+use std::io::BufRead;
 use std::path::Path;
 
 use ferrix_elf::Elf;
+
+use crate::args::Args;
+use crate::task::Task;
+use crate::{Error, Result};
+
+/// `xtask symbolize`.
+pub(crate) const TASKS: &[Task] = &[Task {
+    name: "symbolize",
+    help_at: 505,
+    help: &[
+        "symbolize     name each `[<0>] 0x...` line of a /proc/<pid>/task/<tid>/stack read on Ferrix, from stdin,",
+        "              with the kernel this tree built (--arch, --release as the image was built; docs/DEBUG.md)",
+    ],
+    run: |_, args| symbolize_stack(args),
+}];
+
+/// Read `/proc/.../stack` lines on stdin and print each with its function.
+/// The addresses are link-time ones -- the kernel took its slide off -- so
+/// they are looked up as they are.
+fn symbolize_stack(args: &Args) -> Result<()> {
+    let arch = args.single_arch()?;
+    let path = crate::cargo::kernel_elf(arch, args.release);
+    let symbols = Symbolizer::open(&path).ok_or_else(|| {
+        Error::new(format!(
+            "symbolize: no kernel with a symbol table at {}; build the image this tree booted first",
+            path.display()
+        ))
+    })?;
+    for line in std::io::stdin().lock().lines() {
+        let line = line.map_err(|error| Error::new(format!("symbolize: stdin: {error}")))?;
+        println!("{}", symbols.name_stack_line(&line).unwrap_or(line));
+    }
+    Ok(())
+}
 
 /// What a backtrace line in a panic report begins with, after indentation.
 ///
@@ -65,6 +100,28 @@ impl Symbolizer {
             offset.saturating_add(1)
         ))
     }
+}
+
+impl Symbolizer {
+    /// A `/proc/<pid>/task/<tid>/stack` line, `[<0>] 0x<address>`, with the
+    /// function its link-time return address is in appended.
+    pub(crate) fn name_stack_line(&self, line: &str) -> Option<String> {
+        let address = stack_address(line)?;
+        let elf = Elf::parse(&self.image).ok()?;
+        let (symbol, offset) = elf.function_at(address.checked_sub(1)?)?;
+        Some(format!(
+            "{line}  {}+{:#x}",
+            demangle(symbol.name),
+            offset.saturating_add(1)
+        ))
+    }
+}
+
+/// The address on a `stack` line, which the kernel writes as `[<0>] 0x...`
+/// (`src/kernel/src/fs/procfs/debug.rs`).
+fn stack_address(line: &str) -> Option<u64> {
+    let digits = line.trim().strip_prefix("[<0>] 0x")?;
+    u64::from_str_radix(digits.split_whitespace().next()?, 16).ok()
 }
 
 /// The address on a backtrace line: the first `0x` word after the label.

@@ -1056,4 +1056,12 @@ impl Task {
     pub(crate) fn is_blocked(&self) -> bool {
         self.state() == BLOCKED
     }
+
+    /// Whether it was inside a system call when it was last switched away
+    /// from, as [`Task::swap_in_call`] keeps it: what `sched::inspect` reads
+    /// of a task that is not running. Meaningless while it runs, when the
+    /// processor's flag has it.
+    pub(crate) fn in_call(&self) -> bool {
+        self.in_call.load(Ordering::Relaxed)
+    }
 }

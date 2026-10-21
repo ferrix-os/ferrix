@@ -83,6 +83,7 @@ pub(crate) fn status_text(process: &Process) -> Option<Vec<u8>> {
     render::status(process).ok()
 }
 
+mod debug;
 pub(crate) mod loadavg;
 mod render;
 
@@ -443,7 +444,7 @@ static SYS_KERNEL: [Entry<Kernel>; 8] = [
 ];
 
 /// `/proc/<pid>`.
-pub(crate) static PER_PROCESS: [Entry<Process>; 19] = [
+pub(crate) static PER_PROCESS: [Entry<Process>; 23] = [
     Entry {
         name: b"fd",
         permissions: 0o500,
@@ -517,12 +518,40 @@ pub(crate) static PER_PROCESS: [Entry<Process>; 19] = [
         permissions: 0o777,
         content: Content::Link(render::root),
     },
+    // What its first thread is doing, and what it started with
+    // (`docs/DEBUG.md` §1). After the rest, so that no older name's inode
+    // number moves.
+    Entry {
+        name: b"environ",
+        permissions: 0o400,
+        content: Content::File {
+            render: debug::environ,
+            write: None,
+        },
+    },
+    Entry {
+        name: b"syscall",
+        permissions: 0o400,
+        content: Content::File {
+            render: debug::syscall,
+            write: None,
+        },
+    },
+    file(b"wchan", debug::wchan),
+    Entry {
+        name: b"stack",
+        permissions: 0o400,
+        content: Content::File {
+            render: debug::stack,
+            write: None,
+        },
+    },
 ];
 
 /// `/proc/<pid>/task/<tid>`: what a thread has something true to say in. A
 /// thread shares its process's memory, files and ids, so these are the
 /// process's own files with the thread's id where Linux puts one.
-pub(crate) static PER_THREAD: [Entry<ThreadOf>; 3] = [
+pub(crate) static PER_THREAD: [Entry<ThreadOf>; 6] = [
     file(b"status", render::thread_status),
     file(b"stat", render::thread_stat),
     Entry {
@@ -531,6 +560,24 @@ pub(crate) static PER_THREAD: [Entry<ThreadOf>; 3] = [
         content: Content::File {
             render: render::thread_comm,
             write: Some(render::set_thread_comm),
+        },
+    },
+    // What the thread is doing (`docs/DEBUG.md` §1).
+    Entry {
+        name: b"syscall",
+        permissions: 0o400,
+        content: Content::File {
+            render: debug::thread_syscall,
+            write: None,
+        },
+    },
+    file(b"wchan", debug::thread_wchan),
+    Entry {
+        name: b"stack",
+        permissions: 0o400,
+        content: Content::File {
+            render: debug::thread_stack,
+            write: None,
         },
     },
 ];
@@ -949,8 +996,8 @@ impl Node {
                         .map(|snapshot| Some(snapshot.only_at_start()))
                 }
                 Some(Content::File { render, write }) => {
-                    if is_private(index) {
-                        may_inspect(pid)?;
+                    if let Some(entry) = PER_PROCESS.get(index) {
+                        may_open(pid, entry.name)?;
                     }
                     let process = alive(pid)?;
                     let bytes = render(&process)?;
@@ -974,6 +1021,9 @@ impl Node {
             Place::ThreadEntry(pid, tid, index) => {
                 match PER_THREAD.get(index).map(|entry| &entry.content) {
                     Some(Content::File { render, write }) => {
+                        if let Some(entry) = PER_THREAD.get(index) {
+                            may_open(pid, entry.name)?;
+                        }
                         let of = thread_alive(pid, tid)?;
                         let bytes = render(&of)?;
                         Snapshot::new(
@@ -1091,7 +1141,50 @@ fn may_inspect(pid: u32) -> Result<()> {
 fn is_private(index: usize) -> bool {
     PER_PROCESS
         .get(index)
-        .is_some_and(|entry| matches!(entry.name, b"root" | b"cwd" | b"exe" | b"maps"))
+        .is_some_and(|entry| guard_of(entry.name) != Guard::Open)
+}
+
+/// Who may open a name in a process's or a thread's directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Guard {
+    /// Anyone.
+    Open,
+    /// A reader [`may_inspect`] allows: the links into its tree, what
+    /// describes its memory, the environment it started with, and the call a
+    /// thread waits in (`docs/DEBUG.md` §1).
+    Private,
+    /// Root in the first user namespace, and then as [`Guard::Private`]: a
+    /// thread's kernel stack, as Linux's `proc_pid_stack` asks
+    /// `CAP_SYS_ADMIN` in the initial namespace before `ptrace_may_access`.
+    Administrator,
+}
+
+/// [`Guard`] of the entry called `name`.
+fn guard_of(name: &[u8]) -> Guard {
+    match name {
+        b"root" | b"cwd" | b"exe" | b"maps" | b"environ" | b"syscall" => Guard::Private,
+        b"stack" => Guard::Administrator,
+        _ => Guard::Open,
+    }
+}
+
+/// Whether the running process may open `name` of process `pid`'s, or one
+/// of its threads', directory: `EACCES` if not, at the open, where Linux
+/// refuses `syscall` and `stack` with `EPERM` at the read (`docs/DEBUG.md`
+/// §1). The kernel's own reads, with no process running, may.
+fn may_open(pid: u32, name: &[u8]) -> Result<()> {
+    match guard_of(name) {
+        Guard::Open => Ok(()),
+        Guard::Private => may_inspect(pid),
+        Guard::Administrator => {
+            let privileged = userns::acting()
+                .is_none_or(|caller| caller.with_credentials(|held| held.privileged()));
+            if !privileged {
+                return Err(Errno::EACCES);
+            }
+            may_inspect(pid)
+        }
+    }
 }
 
 /// The live process with this pid, or `ENOENT`: a directory a program is

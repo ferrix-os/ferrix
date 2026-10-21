@@ -566,3 +566,13 @@ pub(crate) use aarch64::sync_instructions;
 pub(crate) use armv7a::sync_instructions;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use x86_64::sync_instructions;
+
+// Where a task that is not running keeps its entry frame and the start of its
+// call chain, for `sched::inspect` (`docs/DEBUG.md` §1.1).
+pub(crate) mod inspect;
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::inspect::{SWITCH_FRAME, entry_frame};
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::inspect::{SWITCH_FRAME, entry_frame};
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::inspect::{SWITCH_FRAME, entry_frame};

@@ -2209,3 +2209,6 @@ pub(crate) static MACHINE_CHECK_ENABLED: core::sync::atomic::AtomicUsize =
 pub(crate) fn check_machine_check_enabled() -> Result<(), &'static str> {
     paranoid::check::check_machine_check_enabled()
 }
+
+// What `sched::inspect` reads of a task that is not running (`docs/DEBUG.md`).
+pub(crate) mod inspect;

@@ -3392,3 +3392,8 @@ pub(crate) fn decision_pending_here() -> bool {
     <arch::Irq as IrqControl>::restore(saved);
     pending
 }
+
+// A view of a task that is not running, from outside it (`docs/DEBUG.md`),
+// and its boot check.
+pub(crate) mod inspect;
+pub(crate) mod inspect_check;

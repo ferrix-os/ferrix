@@ -27,6 +27,10 @@
 //!   having written the first two bytes and left the rest; an address off a
 //!   page boundary is `EINVAL`, a vector at address 0 `EFAULT`, and a length
 //!   of 0 answers 0.
+//! * **debug** (`docs/DEBUG.md` §1): a thread blocked in `read` of a pipe,
+//!   read from outside it through `/proc/self/task/<tid>/syscall`, `wchan`
+//!   and `stack`; a uid 1000 child refused them but `wchan`, which reads
+//!   `0`; and `/proc/self/environ`, the environment block in the program's memory.
 //!
 //! Built with `negative-fd`, the link steps `lstat` where they mean `stat`
 //! and must fail on the first; with `negative-ino`, the inode step holds the
@@ -349,7 +353,10 @@ fn mincore() -> Step {
         // SAFETY: `vec` has a byte for each page.
         let got = unsafe { libc::mincore(at.cast(), PAGES * page, vec.as_mut_ptr()) };
         if got != 0 || vec.iter().any(|&byte| byte & 1 == 0) {
-            return Err(format!("over four written pages: {got} {vec:?}, errno {}", errno()));
+            return Err(format!(
+                "over four written pages: {got} {vec:?}, errno {}",
+                errno()
+            ));
         }
         // SAFETY: the third page of the mapping.
         if unsafe { libc::munmap(at.add(2 * page).cast(), page) } != 0 {
@@ -523,8 +530,295 @@ fn walk_proc() -> Result<(usize, u64), String> {
     Ok((seen.len(), widest))
 }
 
+/// What the blocked thread of the debug step reads into, so that its
+/// address is known to the step reading `syscall`.
+static mut DEBUG_BUFFER: [u8; DEBUG_LEN] = [0; DEBUG_LEN];
+
+/// How much the blocked thread asks `read` for.
+const DEBUG_LEN: usize = 77;
+
+/// A whole `/proc` file, or its errno.
+fn read_proc(path: &str) -> Result<Vec<u8>, c_int> {
+    std::fs::read(path).map_err(|error| error.raw_os_error().unwrap_or(0))
+}
+
+/// The child that reads its parent's files as uid 1000: `wchan` must be
+/// `0`, and `syscall`, `stack` and `environ` refused `EACCES`.
+fn refused_child(parent: i32, tid: i32) -> ! {
+    // SAFETY: plain calls; the child is single-threaded after `fork`.
+    let dropped = unsafe { libc::setgid(1000) == 0 && libc::setuid(1000) == 0 };
+    if !dropped {
+        std::process::exit(10);
+    }
+    let base = format!("/proc/{parent}/task/{tid}");
+    let code = if read_proc(&format!("{base}/wchan")).as_deref() != Ok(&b"0"[..]) {
+        11
+    } else if read_proc(&format!("{base}/syscall")) != Err(libc::EACCES) {
+        12
+    } else if read_proc(&format!("{base}/stack")) != Err(libc::EACCES) {
+        13
+    } else if read_proc(&format!("/proc/{parent}/environ")) != Err(libc::EACCES) {
+        14
+    } else {
+        0
+    };
+    std::process::exit(code)
+}
+
+/// Wait for child `pid` and return its exit status, or what stopped it.
+fn status_of(pid: i32) -> Result<c_int, String> {
+    let mut status: c_int = 0;
+    // SAFETY: `status` is an int to fill.
+    if unsafe { libc::waitpid(pid, &raw mut status, 0) } != pid {
+        return Err(format!("waitpid failed with errno {}", errno()));
+    }
+    if libc::WIFEXITED(status) {
+        Ok(libc::WEXITSTATUS(status))
+    } else {
+        Err(format!("child ended by status {status:#x}"))
+    }
+}
+
+/// **debug** (`docs/DEBUG.md` §1): a thread blocked in `read` of a pipe, read
+/// from outside it. Its `wchan` names the call and the pipe; its `syscall`
+/// is `read`'s number, the descriptor, the buffer and the length, and a
+/// stack and instruction pointer; the reader's own `syscall` is `running`;
+/// its `stack` is a line per frame; a uid 1000 child reads `wchan` as `0` and
+/// is refused the rest; and `/proc/self/environ` is the program's own
+/// environment block, read from its memory.
+fn debug() -> Step {
+    let mut fds = [0 as c_int; 2];
+    // SAFETY: `fds` holds the two descriptors `pipe` makes.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(format!("pipe failed with errno {}", errno()));
+    }
+    let [read_end, write_end] = fds;
+    let tid = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
+    let told = std::sync::Arc::clone(&tid);
+    let address = (&raw mut DEBUG_BUFFER).cast::<u8>() as usize;
+    let blocked = std::thread::spawn(move || {
+        // SAFETY: `gettid` has no arguments.
+        let own = unsafe { libc::gettid() };
+        told.store(own, std::sync::atomic::Ordering::Release);
+        // SAFETY: the buffer is a static of `DEBUG_LEN` bytes only this thread
+        // writes; the step reads its address, never its bytes.
+        unsafe { libc::read(read_end, address as *mut libc::c_void, DEBUG_LEN) }
+    });
+    let result = debug_while_blocked(&tid, read_end, address);
+    // SAFETY: one byte from a static, to the pipe the thread reads.
+    let _ = unsafe { libc::write(write_end, c"x".as_ptr().cast(), 1) };
+    let _ = blocked.join();
+    // SAFETY: the step's own descriptors, closed once.
+    unsafe {
+        let _ = libc::close(read_end);
+        let _ = libc::close(write_end);
+    }
+    result
+}
+
+/// The looks of [`debug`], while its thread is blocked.
+fn debug_while_blocked(
+    tid: &std::sync::atomic::AtomicI32,
+    read_end: c_int,
+    address: usize,
+) -> Step {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let tid = loop {
+        let tid = tid.load(std::sync::atomic::Ordering::Acquire);
+        if tid != 0 {
+            break tid;
+        }
+        if std::time::Instant::now() > deadline {
+            return Err("the blocked thread never started".into());
+        }
+        std::thread::yield_now();
+    };
+    let base = format!("/proc/self/task/{tid}");
+    if !CALLS_VISIBLE {
+        return debug_without_calls(&base, tid);
+    }
+    // Until the thread is in its call: a bounded poll of `wchan`.
+    let wchan = loop {
+        let wchan = read_proc(&format!("{base}/wchan"))
+            .map_err(|errno| format!("{base}/wchan: errno {errno}"))?;
+        if wchan.starts_with(b"read:") {
+            break wchan;
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(format!(
+                "wchan: the blocked thread's wchan stayed {:?}",
+                String::from_utf8_lossy(&wchan)
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    if !wchan.starts_with(b"read:pipe:[") {
+        return Err(format!(
+            "wchan: {:?} does not name the pipe",
+            String::from_utf8_lossy(&wchan)
+        ));
+    }
+    let syscall =
+        read_proc(&format!("{base}/syscall")).map_err(|errno| format!("syscall: errno {errno}"))?;
+    let text = String::from_utf8_lossy(&syscall);
+    let fields: Vec<&str> = text.split_whitespace().collect();
+    let number = fields.first().and_then(|n| n.parse::<i64>().ok());
+    let hex = |index: usize| {
+        fields
+            .get(index)
+            .and_then(|field| field.strip_prefix("0x"))
+            .and_then(|digits| u64::from_str_radix(digits, 16).ok())
+    };
+    let want = [
+        Some(read_end as u64),
+        Some(address as u64),
+        Some(DEBUG_LEN as u64),
+    ];
+    if fields.len() != 9
+        || number != Some(libc::SYS_read as i64)
+        || [hex(1), hex(2), hex(3)] != want
+        || hex(8).is_none_or(|pc| pc == 0)
+        || hex(7).is_none()
+    {
+        return Err(format!(
+            "syscall: read {text:?}, not read({read_end}, {address:#x}, {DEBUG_LEN}) as number {}",
+            libc::SYS_read
+        ));
+    }
+    // SAFETY: `gettid` has no arguments.
+    let own = unsafe { libc::gettid() };
+    let mine = read_proc(&format!("/proc/self/task/{own}/syscall"))
+        .map_err(|errno| format!("syscall: own errno {errno}"))?;
+    if mine != b"running\n" {
+        return Err(format!(
+            "syscall: the reader's own read {:?}, not running",
+            String::from_utf8_lossy(&mine)
+        ));
+    }
+    let stack =
+        read_proc(&format!("{base}/stack")).map_err(|errno| format!("stack: errno {errno}"))?;
+    if !is_a_chain(&stack) {
+        return Err(format!(
+            "stack: {:?} is not a line per frame",
+            String::from_utf8_lossy(&stack)
+        ));
+    }
+    refused_and_environ(tid)
+}
+
+/// Whether `stack` is two or more `[<0>] 0x<address>` lines.
+fn is_a_chain(stack: &[u8]) -> bool {
+    let stack = String::from_utf8_lossy(stack);
+    let lines: Vec<&str> = stack.lines().collect();
+    lines.len() >= 2
+        && lines.iter().all(|line| {
+            line.strip_prefix("[<0>] 0x")
+                .is_some_and(|digits| u64::from_str_radix(digits, 16).is_ok())
+        })
+}
+
+/// Whether the kernel reads a blocked thread's call on this architecture:
+/// x86-64's entry frame is at a fixed place, the Arm architectures' not yet
+/// (`docs/DEBUG.md` §1.1), where `syscall` is `EOPNOTSUPP` and `wchan` `0`.
+const CALLS_VISIBLE: bool = cfg!(any(target_arch = "x86_64", target_arch = "x86"));
+
+/// [`debug_while_blocked`] where calls are not read: the thread's `stack`
+/// polled until it is a chain, `syscall` refused `EOPNOTSUPP`, `wchan` `0`.
+fn debug_without_calls(base: &str, tid: i32) -> Step {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let stack =
+            read_proc(&format!("{base}/stack")).map_err(|errno| format!("stack: errno {errno}"))?;
+        if is_a_chain(&stack) {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(format!(
+                "stack: the blocked thread's stack stayed {:?}",
+                String::from_utf8_lossy(&stack)
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if read_proc(&format!("{base}/syscall")) != Err(libc::EOPNOTSUPP) {
+        return Err("syscall: not EOPNOTSUPP where calls are not read".into());
+    }
+    if read_proc(&format!("{base}/wchan")).as_deref() != Ok(&b"0"[..]) {
+        return Err("wchan: not 0 where calls are not read".into());
+    }
+    refused_and_environ(tid)
+}
+
+/// The refused reader and `environ`, after the thread's own files.
+fn refused_and_environ(tid: i32) -> Step {
+    // A reader who may not look.
+    // SAFETY: plain calls.
+    let parent = unsafe { libc::getpid() };
+    // SAFETY: `fork` in a program whose other thread is blocked in `read`;
+    // the child calls only what it needs and `exit`s.
+    let child = unsafe { libc::fork() };
+    if child == 0 {
+        refused_child(parent, tid);
+    }
+    match status_of(child)? {
+        0 => {}
+        code => return Err(format!("refused: the uid 1000 child exited {code}")),
+    }
+    environ_reads_memory()
+}
+
+/// `/proc/self/environ` is the environment block in the program's own memory:
+/// the strings `environ` points at, each with its terminator, and a byte
+/// changed in place there is read back changed, as Linux reads
+/// `env_start..env_end` rather than a copy.
+fn environ_reads_memory() -> Step {
+    unsafe extern "C" {
+        static mut environ: *mut *mut libc::c_char;
+    }
+    // SAFETY: the C library's `environ`, NULL-terminated, which nothing in
+    // this program changes; read before any `setenv`.
+    let first = unsafe { *(&raw const environ).read() };
+    if first.is_null() {
+        return Err("environ: this program was started with no environment".into());
+    }
+    let mut want = Vec::new();
+    for (key, value) in std::env::vars_os() {
+        want.extend_from_slice(key.as_encoded_bytes());
+        want.push(b'=');
+        want.extend_from_slice(value.as_encoded_bytes());
+        want.push(0);
+    }
+    let got = read_proc("/proc/self/environ").map_err(|errno| format!("environ: errno {errno}"))?;
+    if got != want {
+        return Err(format!(
+            "environ: read {:?}, not {:?}",
+            String::from_utf8_lossy(&got),
+            String::from_utf8_lossy(&want)
+        ));
+    }
+    // SAFETY: the first environment string's first byte, in this program's
+    // own stack, written and put back while nothing else reads it.
+    let changed = unsafe {
+        let byte = first.cast::<u8>();
+        let old = byte.read();
+        byte.write(b'#');
+        let changed = read_proc("/proc/self/environ");
+        byte.write(old);
+        changed
+    };
+    match changed {
+        Ok(changed) if changed.first() == Some(&b'#') && changed.get(1..) == want.get(1..) => {
+            Ok(())
+        }
+        other => Err(format!(
+            "environ: a byte changed in place read back as {:?}",
+            other.map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        )),
+    }
+}
+
 fn main() {
-    let steps: [Named; 8] = [
+    let steps: [Named; 9] = [
         ("tcp", tcp),
         ("unix", unix),
         ("eventfd", eventfd),
@@ -533,6 +827,7 @@ fn main() {
         ("memfd", memfd),
         ("inodes", inodes),
         ("mincore", mincore),
+        ("debug", debug),
     ];
     for (name, step) in steps {
         if let Err(what) = step() {

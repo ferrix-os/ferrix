@@ -2831,15 +2831,30 @@ pub(crate) static STAGE13_NETWORK_NAMESPACES: Explanation = Explanation {
     see: "src/kernel/src/fs/netns_check.rs; src/kernel/src/net/namespace.rs; src/kernel/src/net/veth.rs; src/kernel/src/net/device.rs; src/kernel/src/net/netlink/link.rs; docs/NETNS.md",
 };
 
+/// For `check_task_view` in `stages_check.rs`, when
+/// `sched::inspect_check::run` fails.
+pub(crate) static STAGE5_TASK_VIEW: Explanation = Explanation {
+    code: "FX-0536",
+    title: "the view of a blocked task read it wrongly",
+    meaning: "`sched::inspect` reads a task that is not running from outside it, for /proc/<pid>/task/<tid>/syscall, wchan and stack (docs/DEBUG.md): its entry frame and its frame-pointer chain, each word through mm::read_kernel_word, which translates under the page tables' lock and reads only RAM through the direct map. The check holds a kernel task blocked after it recorded its own chain, and requires the view's chain to end in that chain at link addresses; then reads a freed stack and a device window, which must answer nothing. A wrong view sends a person debugging a frozen program to the wrong place; a read that faults stops the kernel from a /proc read.",
+    causes: &[
+        "`arch::SWITCH_FRAME` no longer names the frame pointer or return address `ferrix_switch` saves, after a change to the switch's pushes.",
+        "`chain_of` does not take `backtrace::slide` off, or reports a word that failed `backtrace::in_image`.",
+        "`mm::read_kernel_word` reads an address that is unmapped or not RAM instead of answering None.",
+        "`sample` reads a task that has not finished its switch away, or is the queue's current.",
+    ],
+    see: "src/kernel/src/sched/inspect.rs; src/kernel/src/sched/inspect_check.rs; src/kernel/src/mm.rs; src/kernel/src/arch/inspect.rs; docs/DEBUG.md",
+};
+
 /// For `check_proc_access` in `stages_check.rs`, when
 /// `fs::procaccess_check::run` fails.
 pub(crate) static STAGE13_PROC_ACCESS: Explanation = Explanation {
     code: "FX-0894",
     title: "/proc let a process look into another's tree",
-    meaning: "`fs::procaccess_check::run` makes a dumpable process of uid 1000, one that cleared PR_SET_DUMPABLE, one of uid 2000 and one of root, and reads their /proc/<pid>/root, cwd, exe, fd, fdinfo, maps and ns/*, and asks get_robust_list of their threads, as uid 1000, as root and as root inside a user namespace. Linux's ptrace_may_access decides: the same user reads a dumpable process of its own, never a non-dumpable one or another user's; root reads all; root inside a namespace reads nothing of another uid. A refusal is EACCES. get_robust_list of a thread of another uid's process must be refused.",
+    meaning: "`fs::procaccess_check::run` makes a dumpable process of uid 1000, one that cleared PR_SET_DUMPABLE, one of uid 2000 and one of root, and reads their /proc/<pid>/root, cwd, exe, fd, fdinfo, maps, environ, syscall and ns/*, and asks get_robust_list of their threads, as uid 1000, as root and as root inside a user namespace. Linux's ptrace_may_access decides: the same user reads a dumpable process of its own, never a non-dumpable one or another user's; root reads all; root inside a namespace reads nothing of another uid. A refusal is EACCES. get_robust_list of a thread of another uid's process must be refused, and /proc/<pid>/stack is root's alone in the first namespace, as Linux's proc_pid_stack asks CAP_SYS_ADMIN.",
     causes: &[
         "`credentials::may_access` answers true for a caller that is neither the same user nor privileged over the target's user namespace.",
-        "`procfs::may_inspect` is skipped on a link, on the `fd` or `fdinfo` directory, or on `maps`.",
+        "`procfs::may_inspect` is skipped on a link, on the `fd` or `fdinfo` directory, or on `maps`, `environ` or `syscall`, or `procfs::may_open` lets a reader that is not root in the first namespace open `stack`.",
         "`credentials::may_access` lets the capability over a target's user namespace stand for the capability over a target that is not dumpable, or reads a process findable before `attributes::inherit` as dumpable.",
         "`attributes::credentials_changed` is not called when a process changes the ids it acts as, so the process stays dumpable.",
     ],
@@ -3412,6 +3427,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &FAST_PATH_CONTINUATION_MASKED,
     &TASK_SLOT_RETURNED_TWICE,
     &ENDPOINT_CLOSED_MASKED,
+    &STAGE5_TASK_VIEW,
     &STAGE6_USER_MEMORY,
     &STAGE6_REVERSE_MAP,
     &STAGE7_SYSCALLS,

@@ -1920,3 +1920,47 @@ impl FrameWindow {
         );
     }
 }
+
+/// One machine word of kernel memory at `virt`, read where it is RAM:
+/// translated through the kernel's page tables with [`TABLES`] held, and read
+/// through the direct map's alias of the frame found, or `None` where nothing
+/// is mapped, the frame is not RAM ([`direct_map_ram`]) or `virt` is not
+/// word-aligned.
+///
+/// What `sched::inspect` reads another task's kernel stack with
+/// (`docs/DEBUG.md` §1.1; the consultant's design review, ledger 2831,
+/// conditions 2 and 3). Held per word: an unmap that empties a table frees it
+/// after letting [`TABLES`] go and after its shootdown, so a walk under the
+/// lock never follows a descriptor into a freed table, and the leaf it reads
+/// is the frame the address is mapped to at that moment. A stack freed after
+/// the lock is let go is read as whatever its frame holds next -- a wrong
+/// value, never a fault, because the direct map holds every frame of RAM for
+/// the kernel's whole life.
+///
+/// The read races the stores of the task whose stack it is, through an
+/// alias that task's code cannot see. It is one aligned word, single-copy
+/// atomic on x86-64 and AArch64 (eight bytes) and on ARMv7-A (four, one
+/// `ldr`), so the value is one the word held, and the caller takes it as an
+/// untrusted integer and never dereferences it. `direct_map_ram` answers only
+/// for RAM inside the direct map's span, so a frame above ARMv7-A's direct map
+/// answers `None`.
+///
+/// Bounded: one walk of at most the paging depth, plus one word, under an
+/// interrupt-masking lock (`docs/certification/MEMORY-AND-TIMING.md` §2.2t).
+pub(crate) fn read_kernel_word(virt: u64) -> Option<u64> {
+    let word = size_of::<usize>() as u64;
+    if !virt.is_multiple_of(word) {
+        return None;
+    }
+    with_tables(|mapper| {
+        let physical = mapper.translate(&KernelPhysMem, VirtAddr(virt))?.0;
+        let alias = usize::try_from(direct_map_ram(physical)?).ok()?;
+        // SAFETY: (KMEM) the direct map's alias of a frame of RAM, readable for
+        // the kernel's whole life, so the read cannot fault; word-aligned as
+        // `virt` is. It races the owning task's plain stores through an alias
+        // its code cannot see: one aligned word, single-copy atomic on all
+        // three architectures; the caller never dereferences the value.
+        let value = unsafe { (alias as *const usize).read_volatile() };
+        Some(value as u64)
+    })
+}

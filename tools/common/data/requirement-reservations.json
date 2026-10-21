@@ -19,13 +19,6 @@
       "purpose": "POSTMORTEM.md section 6 (S4): a processor that takes no interrupt for 10 s ends in a failure report (the lockup detector, stop code 7); an armed TCO watchdog resets a machine the kernel stopped feeding, and the next loader says so"
     },
     {
-      "ids": ["L.sched.86-89", "H.SCHED.15"],
-      "owner": "debug-s1",
-      "branch": "debug-s1",
-      "date": "2026-10-21",
-      "purpose": "docs/DEBUG.md S1: a view of a task that is not running, read without a fault from its kernel stack -- the system call it is blocked in (number, arguments, user stack and instruction pointer) or the trap it waits in, and its kernel call chain as link-time addresses -- for /proc/<pid>/task/<tid>/syscall, wchan and stack; H.SCHED.15 their parent, a non-running task reportable from outside without fault or added work (consultant design OK IF, ledger 2831, condition 5)"
-    },
-    {
       "ids": ["L.sched.85"],
       "owner": "ef-sys",
       "branch": "ef-sys-wake",

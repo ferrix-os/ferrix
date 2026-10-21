@@ -62,6 +62,7 @@ Causes are listed most likely first.
 | [FX-0533](#fx-0533) | the fast path went the general way with interrupts masked or a lock held |
 | [FX-0534](#fx-0534) | a task's run or sleep slot was given back while it held one |
 | [FX-0535](#fx-0535) | a channel end was closed with interrupts masked |
+| [FX-0536](#fx-0536) | the view of a blocked task read it wrongly |
 | [FX-0601](#fx-0601) | the memory a process is built from failed its self-check |
 | [FX-0602](#fx-0602) | a page taken from a mapped object stayed reachable, or was not taken as it should be |
 | [FX-0701](#fx-0701) | the system call dispatch path failed its self-check |
@@ -1207,6 +1208,32 @@ See: src/kernel/src/object/channel.rs Endpoint::drop;
 src/kernel/src/syscall/native.rs release_unmasked;
 docs/certification/FINDINGS.md F-65; docs/OPAQUE-KERNEL.md §9.7 part 2.
 
+<a id="fx-0536"></a>
+
+## FX-0536 — the view of a blocked task read it wrongly
+
+`sched::inspect` reads a task that is not running from outside it, for
+/proc/<pid>/task/<tid>/syscall, wchan and stack (docs/DEBUG.md): its entry frame
+and its frame-pointer chain, each word through mm::read_kernel_word, which
+translates under the page tables' lock and reads only RAM through the direct
+map. The check holds a kernel task blocked after it recorded its own chain, and
+requires the view's chain to end in that chain at link addresses; then reads a
+freed stack and a device window, which must answer nothing. A wrong view sends a
+person debugging a frozen program to the wrong place; a read that faults stops
+the kernel from a /proc read.
+
+1. `arch::SWITCH_FRAME` no longer names the frame pointer or return address
+   `ferrix_switch` saves, after a change to the switch's pushes.
+2. `chain_of` does not take `backtrace::slide` off, or reports a word that
+   failed `backtrace::in_image`.
+3. `mm::read_kernel_word` reads an address that is unmapped or not RAM instead
+   of answering None.
+4. `sample` reads a task that has not finished its switch away, or is the
+   queue's current.
+
+See: src/kernel/src/sched/inspect.rs; src/kernel/src/sched/inspect_check.rs;
+src/kernel/src/mm.rs; src/kernel/src/arch/inspect.rs; docs/DEBUG.md.
+
 <a id="fx-0601"></a>
 
 ## FX-0601 — the memory a process is built from failed its self-check
@@ -2186,17 +2213,20 @@ src/kernel/src/net/netlink/link.rs; docs/NETNS.md.
 
 `fs::procaccess_check::run` makes a dumpable process of uid 1000, one that
 cleared PR_SET_DUMPABLE, one of uid 2000 and one of root, and reads their
-/proc/<pid>/root, cwd, exe, fd, fdinfo, maps and ns/*, and asks get_robust_list
-of their threads, as uid 1000, as root and as root inside a user namespace.
-Linux's ptrace_may_access decides: the same user reads a dumpable process of its
-own, never a non-dumpable one or another user's; root reads all; root inside a
-namespace reads nothing of another uid. A refusal is EACCES. get_robust_list of
-a thread of another uid's process must be refused.
+/proc/<pid>/root, cwd, exe, fd, fdinfo, maps, environ, syscall and ns/*, and
+asks get_robust_list of their threads, as uid 1000, as root and as root inside a
+user namespace. Linux's ptrace_may_access decides: the same user reads a
+dumpable process of its own, never a non-dumpable one or another user's; root
+reads all; root inside a namespace reads nothing of another uid. A refusal is
+EACCES. get_robust_list of a thread of another uid's process must be refused,
+and /proc/<pid>/stack is root's alone in the first namespace, as Linux's
+proc_pid_stack asks CAP_SYS_ADMIN.
 
 1. `credentials::may_access` answers true for a caller that is neither the same
    user nor privileged over the target's user namespace.
 2. `procfs::may_inspect` is skipped on a link, on the `fd` or `fdinfo`
-   directory, or on `maps`.
+   directory, or on `maps`, `environ` or `syscall`, or `procfs::may_open` lets a
+   reader that is not root in the first namespace open `stack`.
 3. `credentials::may_access` lets the capability over a target's user namespace
    stand for the capability over a target that is not dumpable, or reads a
    process findable before `attributes::inherit` as dumpable.

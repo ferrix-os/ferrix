@@ -624,6 +624,17 @@ package FerrixItemRequirements {
                 (the `vtime` lines).";
             attribute :>> parent = "G.1";
         }
+        requirement <'H.SCHED.15'> aTaskNotRunningIsReportableFromOutside : ItemHighLevel {
+            attribute :>> statement = "A task that is not running shall be reportable
+                from outside it, from what its entry from user mode and its switch
+                away already saved, without the report faulting, changing the task,
+                or adding work to any path the task takes.";
+            attribute :>> criterion = "A thread blocked in a system call reads back
+                its call's number and arguments, a blocked kernel task's chain ends
+                in the chain it recorded itself, and a freed stack and a device
+                window read as nothing (docs/DEBUG.md section 1.3).";
+            attribute :>> parent = "G.1";
+        }
     }
 
     package Interrupts {

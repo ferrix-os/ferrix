@@ -496,7 +496,13 @@ fn populate(
         Source::File(file) => Some(file.file().location().clone()),
         Source::Bytes(_) => None,
     };
-    process.record_exec(program.exe, exe_at, args);
+    process.record_program(
+        program.exe,
+        exe_at,
+        args,
+        (startup.env_start, startup.env_end),
+        loaded.abi,
+    );
     Ok(Startup {
         entry: loaded.start,
         stack: startup.sp,

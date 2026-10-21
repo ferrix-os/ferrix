@@ -11,7 +11,13 @@
 //! `/proc` recursively and requires every inode number to fit 32 bits and
 //! be a name's own, and every entry's offset to fit a 32-bit `off_t`. Last,
 //! `mincore` over a mapping and over one with a hole, as Chromium's memory
-//! dumps call it, with Linux's refusals. It
+//! dumps call it, with Linux's refusals. Then the debug step
+//! (`docs/DEBUG.md` §1): a thread blocked in `read` of a pipe, whose
+//! `/proc/self/task/<tid>/syscall` must be `read`'s number, descriptor, buffer
+//! and length, whose `wchan` names the pipe and whose `stack` is a line per
+//! frame, the reader's own `syscall` `running`, a uid 1000 child refused all
+//! but `wchan`, which reads `0`, and `environ` the program's own environment
+//! block, a byte changed in place read back changed. It
 //! prints a line per step and `procfs: all ok`, and exits 0; this requires
 //! every one of those lines, in order, and the status.
 //!
@@ -36,6 +42,7 @@ const STEPS: &[&str] = &[
     "procfs: memfd ok",
     "procfs: inodes ok",
     "procfs: mincore ok",
+    "procfs: debug ok",
     "procfs: all ok",
 ];
 
@@ -60,6 +67,8 @@ const NEGATIVE: &[(&str, &str, &str)] = &[
 ];
 
 /// The test on every architecture asked for.
+///
+/// Verifies: L.sched.86, H.SCHED.15
 pub(crate) fn test_procfs(args: &Args) -> Result<()> {
     for arch in args.arches()? {
         let log = paths::build_dir(arch).join("serial.log");

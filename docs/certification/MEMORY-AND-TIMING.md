@@ -1541,6 +1541,36 @@ architectures (a new address space's root, before it is ever installed),
 which may hold other locks or have interrupts masked; as a leaf, it adds
 no ordering to them. Since F-64's fix (2026-10-14).
 
+### 2.2t The view of a task that is not running (`sched::inspect`, 2026-10-21)
+
+What `/proc/<pid>/task/<tid>/syscall`, `wchan` and `stack` read
+(`docs/DEBUG.md` §1, `L.sched.86`-`89`; the consultant's design review,
+ledger 2831, conditions 1 and 2). Nothing runs on any path the task takes:
+the view only reads, at a `/proc` open.
+
+* **Memory.** None allocated in the item: a sample of five words on the
+  stack, the chain into the caller's array of `backtrace::MAX_FRAMES` (24)
+  words.
+* **The run queue's lock.** `inspect::sample` takes the lock of the queue
+  that owns the task, with interrupts masked, as `set_weight` takes it,
+  and holds it for a pointer comparison and five loads: the state, the
+  saved stack pointer, `in_call`, the switch count, and the stack's bounds.
+  It retries only when the task moved between its processor's read and the
+  lock, as `wake` does. Nothing else is taken while it is held, and it is
+  let go before any word of the stack is read.
+* **The page tables' lock.** Each word is read by `mm::read_kernel_word`,
+  which takes `TABLES` (interrupts masked) for one walk of at most the
+  paging depth -- four levels on the 64-bit pair, three on ARMv7-A -- one
+  RAM-run test (`direct_map_ram`, at most `RAM_RUNS` comparisons) and one
+  word's load, then lets it go. An open reads at most 2 x `MAX_FRAMES` + 2
+  words of the chain, or the entry frame's 9 fields, each taking the lock
+  on its own. The two locks are never held together.
+* **What a reader can cost others.** A reader allowed to open the files
+  can take `TABLES` about 50 times per open, back to back, each for one
+  walk; a loop of opens contends with `vmap` and every other kernel mapping
+  change on the lock, as a loop over `/proc/<pid>/maps` contends with a
+  space's lock. `stack` is root's alone; `syscall` the same user's.
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that
