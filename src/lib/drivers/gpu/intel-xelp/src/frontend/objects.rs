@@ -683,6 +683,9 @@ pub struct Tables<M> {
     pub next_cookie: u64,
     /// Lines said once.
     pub said: Said,
+    /// Say each failed ioctl, the held waits, their answers, and a wait
+    /// held unanswered too long (`ferrix.intelgpu.uapitrace`).
+    pub trace: bool,
 }
 
 impl<M> Tables<M> {
@@ -704,6 +707,7 @@ impl<M> Tables<M> {
             waits: Waits::new(),
             next_cookie: 1,
             said: Said { bits: 0 },
+            trace: false,
         }
     }
 

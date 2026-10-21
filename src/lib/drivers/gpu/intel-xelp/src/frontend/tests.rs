@@ -20,7 +20,7 @@ use ferrix_linux_abi::errno::Errno;
 
 use super::backend::{Completion, ContextParams, Engine, Facts, HwContext, SubmitError, VmId};
 use super::host::{Host, Installed};
-use super::{Backend, Frontend, RequestId, limits};
+use super::{Backend, Frontend, RequestId, fence, limits};
 use crate::sseu::{Fuses, gen12_sseu_info_init};
 use crate::uapi::*;
 
@@ -2000,4 +2000,72 @@ fn reg_read_reads_the_timestamp_alone() {
 fn the_tables_fit_a_native_stack() {
     let bytes = size_of::<Frontend<FakeBackend>>();
     assert!(bytes < 3 << 20, "{bytes} bytes");
+}
+
+/// `set_trace` makes the front end say a held wait, then, once it has gone
+/// unanswered for `STUCK_NS`, what it waits on, once; a successful ioctl
+/// says nothing: the box run's trace of a call that never completes.
+#[test]
+fn trace_says_a_held_wait_and_names_it_when_stuck() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.set_trace(true);
+        let sync = rig.syncobj(false);
+        // A wait on an unsignalled syncobj, no WAIT_FOR_SUBMIT: held, since
+        // its fence is not there and the timeout is in the future.
+        let handles = rig.host.alloc(&sync.to_le_bytes());
+        let mut args = SyncobjWait {
+            handles,
+            count_handles: 1,
+            timeout_nsec: (rig.host.now + 10_000_000_000) as i64,
+            flags: drm::SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT,
+            ..Default::default()
+        }
+        .to_bytes();
+        assert!(matches!(
+            rig.ioctl_on(1, ioctl::SYNCOBJ_WAIT, &mut args),
+            Status::Held(_)
+        ));
+        let held = rig
+            .host
+            .lines
+            .iter()
+            .any(|l| l.contains("request") && l.contains("held"));
+        let quiet = !rig
+            .host
+            .lines
+            .iter()
+            .any(|l| l.contains("trace: ioctl") && l.contains("-> 0"));
+        assert!(quiet, "no line for a success: {:?}", rig.host.lines);
+        assert!(held, "a held line: {:?}", rig.host.lines);
+        // The front end asks to be serviced when the wait turns stuck.
+        let due = rig.host.now + fence::STUCK_NS;
+        assert_eq!(rig.frontend.next_deadline(), Some(due));
+        rig.host.now = due;
+        rig.frontend.service(&mut rig.host, false);
+        let named = |rig: &Rig| {
+            rig.host
+                .lines
+                .iter()
+                .filter(|l| l.contains("unanswered for 2000 ms"))
+                .count()
+        };
+        assert_eq!(named(&rig), 1, "{:?}", rig.host.lines);
+        assert!(
+            rig.host
+                .lines
+                .iter()
+                .any(|l| l.contains("WAIT flags 0x2 entry 0") && l.contains("fence None")),
+            "{:?}",
+            rig.host.lines
+        );
+        // Named once; then only its own deadline is left.
+        rig.host.now += 1_000_000;
+        rig.frontend.service(&mut rig.host, false);
+        assert_eq!(named(&rig), 1, "{:?}", rig.host.lines);
+        assert_eq!(
+            rig.frontend.next_deadline(),
+            Some(due - fence::STUCK_NS + 10_000_000_000)
+        );
+    });
 }

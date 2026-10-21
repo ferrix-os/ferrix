@@ -125,11 +125,19 @@ impl<B: Backend> Frontend<B> {
         }
     }
 
+    /// Say each held wait, its answer, each failed ioctl, and a wait held
+    /// unanswered for [`fence::STUCK_NS`] with its fences
+    /// (`ferrix.intelgpu.uapitrace`): what a box run reads to find a call
+    /// that never completes.
+    pub fn set_trace(&mut self, on: bool) {
+        self.state.trace = on;
+    }
+
     /// The earliest time [`Frontend::service`] must be called by, in
     /// monotonic nanoseconds: a held wait's deadline or the back end's.
     #[must_use]
     pub fn next_deadline(&self) -> Option<u64> {
-        let waits = self.state.waits.next_deadline();
+        let waits = self.state.waits.next_deadline(self.state.trace);
         match (waits, self.backend.next_deadline()) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),

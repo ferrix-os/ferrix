@@ -14,6 +14,11 @@ use ferrix_linux_abi::errno::Errno;
 use super::backend::{Completion, ContextParams, SubmitError};
 use super::drm::{Call, KDATA};
 use super::objects::{FenceRef, KernelFence, RequestState, Slab, SyncFence, Tables};
+
+/// How long a held wait goes unanswered before the trace names it
+/// (`ferrix.intelgpu.uapitrace`): once, with its fences and the requests not
+/// done, the call a hung program is in.
+pub const STUCK_NS: u64 = 2_000_000_000;
 use super::{Backend, Frontend, Host, RequestId, gem, limits, syncobj, vm};
 
 /// A held wait's kind.
@@ -63,6 +68,10 @@ pub struct Wait {
     pub deadline: Option<u64>,
     /// What it waits for.
     pub kind: WaitKind,
+    /// When it was held (monotonic ns).
+    pub since: u64,
+    /// Whether the trace has named it as unanswered.
+    pub told: bool,
 }
 
 /// The held waits.
@@ -82,7 +91,13 @@ impl Waits {
     /// # Errors
     ///
     /// `ENOMEM` when [`limits::WAITS`] are held already.
-    pub fn hold(&mut self, call: &Call, kdata: &[u8; KDATA], hold: Hold) -> Result<(), Errno> {
+    pub fn hold(
+        &mut self,
+        call: &Call,
+        kdata: &[u8; KDATA],
+        hold: Hold,
+        now: u64,
+    ) -> Result<(), Errno> {
         let mut data = [0_u8; 48];
         let length = call.out_size.min(48);
         if let (Some(target), Some(source)) = (data.get_mut(..length), kdata.get(..length)) {
@@ -97,17 +112,24 @@ impl Waits {
                 data,
                 deadline: hold.deadline,
                 kind: hold.kind,
+                since: now,
+                told: false,
             })
             .map(|_| ())
             .ok_or(Errno::ENOMEM)
     }
 
-    /// The earliest deadline.
+    /// The earliest deadline; with `trace`, also when a wait not yet named
+    /// becomes [`STUCK_NS`] old.
     #[must_use]
-    pub fn next_deadline(&self) -> Option<u64> {
+    pub fn next_deadline(&self, trace: bool) -> Option<u64> {
         self.slots
             .iter()
-            .filter_map(|(_, wait)| wait.deadline)
+            .flat_map(|(_, wait)| {
+                let stuck = (trace && !wait.told).then(|| wait.since.saturating_add(STUCK_NS));
+                [wait.deadline, stuck]
+            })
+            .flatten()
             .min()
     }
 
@@ -482,6 +504,14 @@ fn answer_waits<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H) {
                 syncobj::evaluate_wait(state, sync, &mut wait.data, expired)
             }
         };
+        if result.is_none()
+            && state.trace
+            && !wait.told
+            && now.saturating_sub(wait.since) >= STUCK_NS
+        {
+            wait.told = true;
+            say_stuck(state, host, &wait, now);
+        }
         if let Some(entry) = state.waits.slots.get_mut(index) {
             *entry = wait;
         }
@@ -504,6 +534,79 @@ fn answer_waits<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H) {
         {
             status = -(Errno::EFAULT.0 as i32);
         }
+        if state.trace {
+            host.say(format_args!(
+                "intel: trace: held request {} answered {status}",
+                wait.request
+            ));
+        }
         host.reply(wait.request, status);
+    }
+}
+
+/// The trace's account of a wait held [`STUCK_NS`] unanswered: what it
+/// waits on, each fence's state, and every request not done (the first
+/// eight), the one a hung program's call is stuck behind.
+fn say_stuck<M, H: Host<M>>(state: &Tables<M>, host: &mut H, wait: &Wait, now: u64) {
+    let requests = &state.requests;
+    host.say(format_args!(
+        "intel: trace: held request {} unanswered for {} ms (file {}); requests next {} retired {}",
+        wait.request,
+        now.saturating_sub(wait.since) / 1_000_000,
+        wait.file,
+        requests.next,
+        requests.retired
+    ));
+    match &wait.kind {
+        WaitKind::Object { object, .. } => {
+            host.say(format_args!(
+                "intel: trace:   GEM_WAIT on object slot {object}"
+            ));
+        }
+        WaitKind::Syncobjs(sync) => {
+            let name = if sync.timeline {
+                "TIMELINE_WAIT"
+            } else {
+                "WAIT"
+            };
+            for index in 0..usize::from(sync.count) {
+                let slot = usize::from(sync.slots.get(index).copied().unwrap_or(0));
+                let point = sync.points.get(index).copied().unwrap_or(0);
+                let fence = sync.fences.get(index).copied().flatten();
+                let status = fence.map(|fence| requests.status(fence));
+                let (head, reached) = state.syncobjs.get(slot).map_or((0, 0), |sync| {
+                    (
+                        sync.fence.query(true, requests),
+                        sync.fence.query(false, requests),
+                    )
+                });
+                host.say(format_args!(
+                    "intel: trace:   {name} flags {:#x} entry {index}: syncobj slot {slot} point {point}: fence {fence:?} status {status:?}; timeline head {head} reached {reached}",
+                    sync.flags
+                ));
+            }
+        }
+    }
+    let mut said = 0;
+    for id in requests.live_ids() {
+        let Some(request) = requests.get(id) else {
+            continue;
+        };
+        if matches!(request.state, RequestState::Done(_)) {
+            continue;
+        }
+        if said == 8 {
+            host.say(format_args!("intel: trace:   (more requests not done)"));
+            break;
+        }
+        said += 1;
+        let deps = request
+            .deps
+            .get(..usize::from(request.dep_count))
+            .unwrap_or(&[]);
+        host.say(format_args!(
+            "intel: trace:   request {id} {:?} context {} engine {:?}: deps {deps:?}",
+            request.state, request.context, request.engine
+        ));
     }
 }

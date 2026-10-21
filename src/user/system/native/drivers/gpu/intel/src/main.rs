@@ -531,6 +531,12 @@ fn serve_gpu(
         uncore::fw_domains_put(backend.platform().bar(), &all, rest);
     }
     let mut frontend = Frontend::new(backend);
+    frontend.set_trace(steps.uapitrace);
+    if steps.uapitrace {
+        say(format_args!(
+            "intel: uapitrace: held waits, their answers, failed ioctls, and a wait unanswered for 2 s (ferrix.intelgpu.uapitrace)"
+        ));
+    }
     serve_nodes(device, location, firmware.plane, &port, &mut frontend)
 }
 
