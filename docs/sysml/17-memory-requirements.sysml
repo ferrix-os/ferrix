@@ -2541,4 +2541,174 @@ package FerrixMemoryRequirements {
             attribute :>> unit = "user::space::AddressSpace::map_code_page";
         }
     }
+
+    package PagerBackedObjects {
+        doc /* src/kernel/src/object/pager.rs and the pager-backed half of
+             * src/kernel/src/user/vmo.rs and user/space.rs: K3, pager-backed
+             * VMOs (docs/microkernel/K3.md; MICROKERNEL.md section 3; the
+             * consultant's OK IF, ledger 2858). An absent page of such an
+             * object is its pager's: a fault on it, or a kernel copy into
+             * it, sends the pager one page request over its port and waits,
+             * bounded by the pager. Dirty tracking keeps a Clean page
+             * read-only so that its first write is seen. The one
+             * fault-forwarding mechanism NVIDIA.md section 11.4's windows
+             * are built on. */
+
+        requirement <'L.user.146'> anAbsentPagerPageIsAsked : ItemLowLevel {
+            attribute :>> statement = "An absent page of a pager-backed VMO shall
+                never be committed as zeros; a fault on it, or a kernel copy that
+                may wait, shall open one request for the run of absent pages from
+                it, at most 32, or join the open request of the same VMO, the same
+                job and the same command that covers it, and a fault from another
+                job shall open a request of its own.";
+            attribute :>> criterion = "Stage 9's pager check: a read fault on page
+                2 of 8 sends one packet for pages 2 to 7; two faults of one job on
+                one page send one packet and both are resumed by its supply; two
+                jobs' faults on one page send two packets.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::PagerLink::request",
+                "object::pager::PagerCore::list_or_join", "user::vmo::Vmo::absent_run",
+                "user::vmo::Vmo::sourced", "user::space::AddressSpace::ask_pager",
+                "user::space::AddressSpace::fault_with", "user::space::commit_page",
+                "object::pager::Request::covers", "user::vmo::Vmo::pager",
+                "user::vmo::Vmo::filler");
+        }
+        requirement <'L.user.147'> aRequestIsListedWithoutAllocating : ItemLowLevel {
+            attribute :>> statement = "A request shall be opened with no address
+                space, VMO or pager lock held; its record and its packet's room on
+                the pager's port shall be had before the registry's lock is taken,
+                listing it under that lock shall allocate nothing, and its packet
+                shall be queued on the room promised once the lock is let go; a
+                refusal of the record or the room shall be the fault's
+                out-of-memory.";
+            attribute :>> criterion = "Stage 9's pager check: every forwarded fault's
+                packet arrives on the pager's port and the port loses none.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::port::Port::queue_promised",
+                "object::pager::PagerCore::list_or_join", "object::pager::PagerLink::request");
+        }
+        requirement <'L.user.148'> aSuppliedFaultIsRetried : ItemLowLevel {
+            attribute :>> statement = "A request shall end supplied when a supply
+                makes its first page present, and its waiting threads shall retry
+                the access, which then sees the bytes supplied.";
+            attribute :>> criterion = "Stage 9's pager check: a fault resumed by a
+                supply of page 2 reads the byte the pager wrote there, and its
+                request is no longer outstanding.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::PagerLink::supplied",
+                "object::pager::PagerCore::end_where", "object::pager::take_ended",
+                "object::pager::PagerLink::wait", "object::pager::PagerCore::leave");
+        }
+        requirement <'L.user.149'> aFailedFaultIsABusError : ItemLowLevel {
+            attribute :>> statement = "A request its pager fails shall end its
+                waiting threads' faults as unreadable, a SIGBUS to a program and an
+                error to a copy, and shall be audited PAGER; a failure naming one
+                request by its id shall end that request alone.";
+            attribute :>> criterion = "Stage 9's pager check: a fault its pager fails
+                is SIGBUS; with two jobs' requests on one page, failing one job's by
+                its id ends that fault alone and the other job's is supplied
+                after.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::PagerLink::fail", "object::pager::record",
+                "object::pager::Request::meets");
+        }
+        requirement <'L.user.150'> aWaitIsBounded : ItemLowLevel {
+            attribute :>> statement = "A thread shall wait for its pager no longer
+                than the pager's bound, and no wait shall end for the bound before
+                it has passed; a wait that ends at the bound shall be a SIGBUS or
+                an error, audited PAGER once for its request, and the last waiter
+                to leave an open request shall end it.";
+            attribute :>> criterion = "Stage 9's pager check: with a 5 ms bound and
+                no answer, the fault is SIGBUS no sooner than 5 ms and within 5 s,
+                and no request is left outstanding.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::PagerLink::wait",
+                "object::pager::PagerCore::leave", "object::pager::clamp_wait");
+        }
+        requirement <'L.user.151'> aKillEndsTheWait : ItemLowLevel {
+            attribute :>> statement = "A thread waiting for its pager whose process
+                is ending shall leave the wait at once, a program's fault returning
+                with nothing installed; signals that do not end the process shall
+                not end the wait.";
+            attribute :>> criterion = "Stage 9's pager check: a client killed while
+                its fault waits on a pager that never answers ends within 5 s, and
+                its request is no longer outstanding.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("sched::work::own_word", "object::pager::PagerLink::wait");
+        }
+        requirement <'L.user.152'> aCopyWaitsOrIsRefused : ItemLowLevel {
+            attribute :>> statement = "A kernel copy shall wait for a pager as a
+                fault does, except into a VMO made with NO_COPY_WAIT or from a
+                context that cannot block, where an absent page shall fail the copy
+                at once and send nothing.";
+            attribute :>> criterion = "Stage 9's pager check: a copy from an absent
+                page waits for its supply and reads it; one from a NO_COPY_WAIT
+                VMO's absent page fails at once with no packet.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::oom::user_fault", "syscall::native::copy_paged");
+        }
+        requirement <'L.user.153'> aSupplyMovesThePagersOwnPages : ItemLowLevel {
+            attribute :>> statement = "pager_supply shall move only committed pages
+                of an anonymous VMO that no device holds and no other object shares
+                into the absent pages of the range, skipping present ones, which
+                stay in the aux VMO; the moved pages shall leave every mapping of
+                the aux VMO, with its shootdown, before they are the pager VMO's;
+                and any refusal shall move nothing.";
+            attribute :>> criterion = "Stage 9's pager check: a supply over a range
+                whose second page is present leaves that page and its aux page as
+                they were; a supply of a page another supply filled moves nothing;
+                a supplied fault reads the aux bytes.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = "user::vmo::Vmo::supply_from";
+        }
+        requirement <'L.user.154'> aCleanPageIsNeverWritable : ItemLowLevel {
+            attribute :>> statement = "A Clean page of a pager-backed VMO shall
+                never be mapped writable nor written in place by a kernel copy; its
+                first write shall mark it Dirty, or, in a trap-dirty VMO, send a
+                dirty request that PAGER_OP DIRTY lets through and FAIL refuses,
+                the page then staying Clean; a kernel write into it shall mark it
+                Dirty.";
+            attribute :>> criterion = "Stage 9's pager check: a write to a Clean
+                trap-dirty page asks the pager, lands once DIRTY answers, and the
+                query shows it alone Dirty; a refused one is SIGBUS and its page
+                stays Clean; a read leaves a page mapped read-only, and a write of
+                an untrapped page marks it Dirty with no packet and maps it
+                writable.";
+            attribute :>> parent = "H.MEM.23";
+            attribute :>> unit = ("user::vmo::Vmo::writable_page", "user::vmo::Vmo::mark_dirty",
+                "user::vmo::Vmo::write_paged", "user::vmo::Vmo::page_state",
+                "user::vmo::state_of", "user::space::AddressSpace::read_only_paged",
+                "user::space::writable_in_place", "user::space::writable_flags",
+                "user::vmo::Vmo::dirty_range", "object::pager::PagerLink::dirtied");
+        }
+        requirement <'L.user.155'> aWriteBackKeepsLaterWrites : ItemLowLevel {
+            attribute :>> statement = "PAGER_OP WRITEBACK_BEGIN shall make the
+                range's Dirty pages awaiting-clean and return only once no
+                processor holds a writable translation of the range;
+                WRITEBACK_END shall clean only awaiting-clean pages; a write
+                between them shall make its page Dirty again; and DECOMMIT shall
+                take Clean pages only.";
+            attribute :>> criterion = "Stage 9's pager check: after BEGIN the page
+                is no longer mapped writable; a page written after BEGIN is still
+                Dirty after END while the other is Clean; DECOMMIT takes the Clean
+                page and leaves the Dirty one.";
+            attribute :>> parent = "H.MEM.23";
+            attribute :>> unit = ("user::vmo::Vmo::writeback_begin",
+                "user::vmo::Vmo::writeback_end", "user::vmo::Vmo::decommit_clean",
+                "user::vmo::Vmo::dirty_runs");
+        }
+        requirement <'L.user.156'> aPagersCloseEndsItsFaults : ItemLowLevel {
+            attribute :>> statement = "The close of a pager's handle, or DETACH,
+                run where it may block, shall end every outstanding request of its
+                VMOs at once, audited, refuse every later request, and leave the
+                present pages mapped and usable.";
+            attribute :>> criterion = "Stage 9's pager check: a fault waiting on a
+                pager whose handle closes is SIGBUS well within its bound; a later
+                fault on an absent page is SIGBUS with no packet; a present page
+                still reads.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::Pager::drop", "object::pager::PagerCore::close",
+                "object::pager::PagerLink::detach", "object::pager::PagerLink::is_gone");
+        }
+    }
 }

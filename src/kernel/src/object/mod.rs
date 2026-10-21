@@ -32,6 +32,8 @@ pub(crate) mod interrupt;
 pub(crate) mod io_mapping;
 pub(crate) mod job;
 pub(crate) mod oom;
+pub(crate) mod pager;
+pub(crate) mod pager_check;
 pub(crate) mod pin;
 pub(crate) mod port;
 pub(crate) mod process;
@@ -81,6 +83,9 @@ pub(crate) enum Object {
     Process(process::ProcessRef),
     /// An event queue.
     Port(Arc<port::Port>),
+    /// A pager: the one handle that serves its VMOs' faults
+    /// (`docs/microkernel/K3.md`). Its close is the pager's death.
+    Pager(Arc<pager::Pager>),
     /// The capability to ask the kernel to start `devmgr`
     /// (`docs/INIT.md` §7.3, L12): a token with nothing in it. What it
     /// permits is decided where `devmgr_start` is answered -- the kernel
@@ -120,6 +125,7 @@ impl Object {
             | Object::Pin(_)
             | Object::Process(_)
             | Object::Port(_)
+            | Object::Pager(_)
             | Object::Starter
             | Object::Audit => Signals::NONE,
         }
@@ -142,6 +148,7 @@ impl Object {
             | Object::Device(_)
             | Object::IoMapping(_)
             | Object::Pin(_)
+            | Object::Pager(_)
             | Object::Starter
             | Object::Audit => &QUIET,
         }
@@ -312,6 +319,7 @@ impl Object {
             | Object::IoMapping(_)
             | Object::Pin(_)
             | Object::Port(_)
+            | Object::Pager(_)
             | Object::Starter
             | Object::Audit => true,
             Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,

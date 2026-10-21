@@ -2087,4 +2087,88 @@ package FerrixObjectRequirements {
                 "object::quota::settle");
         }
     }
+
+    package Pagers {
+        doc /* src/kernel/src/syscall/native.rs's pager calls, 0x1074 to
+             * 0x1078, and the page-request packet (docs/microkernel/K3.md
+             * section 4; the consultant's OK IF, ledger 2858). */
+
+        requirement <'L.object.226'> aPagerHasOneHandle : ItemLowLevel {
+            attribute :>> statement = "pager_create shall take a port with WRITE
+                and a bound read whole through a pointer, clamped to 1 ms and 30 s
+                with 0 the maximum, refuse any option, charge one object and its
+                heap to the caller's job, and give one handle with TRANSFER and
+                PAGER and no DUPLICATE.";
+            attribute :>> criterion = "Stage 9's pager check: an option and a VMO as
+                the port are refused; a duplicate of the pager's handle is
+                ACCESS_DENIED; a bound of 0 is 30 s, of 1 ns is 1 ms, of 5 ms is 5
+                ms.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("syscall::native::pager_create", "object::pager::Pager::new",
+                "syscall::native::read_words", "syscall::native::pager_in");
+        }
+        requirement <'L.object.227'> aPagerVmoIsMadeOverItsPager : ItemLowLevel {
+            attribute :>> statement = "pager_create_vmo shall need PAGER, read its
+                key, size and options whole, refuse an unknown option or no pages,
+                and make a VMO that is pager-backed and not anonymous for life,
+                which is never pinned and never grows.";
+            attribute :>> criterion = "Stage 9's pager check: an unknown option is
+                refused; a supply naming another pager's VMO is refused, and the
+                pager VMO is refused as an aux VMO.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("syscall::native::pager_create_vmo",
+                "object::pager::PagerCore::link", "user::vmo::Vmo::new_paged",
+                "user::vmo::Vmo::grow_to");
+        }
+        requirement <'L.object.228'> aSupplyIsChecked : ItemLowLevel {
+            attribute :>> statement = "pager_supply shall need PAGER on the pager
+                and READ and WRITE on the aux VMO, refuse with BAD_STATE a VMO not
+                this pager's, an aux VMO that is not anonymous, an uncommitted or
+                held aux page and a detached VMO, with INVALID_ARGS an unaligned or
+                out-of-range range or an option, and change nothing when it
+                refuses.";
+            attribute :>> criterion = "Stage 9's pager check: nine refusals, each
+                with its status, the pager VMO's page still absent and the aux page
+                still in the aux VMO.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("syscall::native::pager_supply",
+                "syscall::native::pager_and_vmo", "syscall::native::page_range",
+                "object::pager::PagerCore::serves");
+        }
+        requirement <'L.object.229'> aPagerOpIsChecked : ItemLowLevel {
+            attribute :>> statement = "pager_op shall need PAGER and the VMO to be
+                the pager's, refuse an unknown operation, a FAIL errno other than
+                EIO or ENOSPC, a value or request id given to any other operation,
+                and DIRTY over an absent page; pager_query_dirty shall report
+                exactly the Dirty and awaiting-clean runs of its range, lowest
+                first.";
+            attribute :>> criterion = "Stage 9's pager check: an unknown operation,
+                errno 7 and DIRTY of an absent page are refused; the query after a
+                trap-dirty write shows that page alone as Dirty.";
+            attribute :>> parent = "H.MEM.23";
+            attribute :>> unit = ("syscall::native::pager_op",
+                "syscall::native::pager_query_dirty");
+        }
+        requirement <'L.object.230'> aPageRequestSaysWhatItAsks : ItemLowLevel {
+            attribute :>> statement = "A page request's packet shall carry the VMO's
+                key, kind PACKET_PAGE_REQUEST, its command in the low byte of its
+                signals word and the run's length in pages above it, the run's
+                first byte offset, and the request's id, never 0 and never reused.";
+            attribute :>> criterion = "Stage 9's pager check: the read packet for a
+                fault on page 2 of 8 says READ, 6 pages, offset 8192 and a nonzero
+                id; a trap-dirty write's says DIRTY, 1 page.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = ("object::pager::PagerLink::request",
+                "object::pager::Command::number");
+        }
+        requirement <'L.object.231'> noPagerMapsWhenAsked : ItemLowLevel {
+            attribute :>> statement = "vmo_map with MAP_NO_PAGER shall refuse a
+                pager-backed VMO with WRONG_TYPE, and map any other VMO as without
+                it.";
+            attribute :>> criterion = "Stage 9's pager check: a pager VMO is refused
+                WRONG_TYPE and an anonymous one mapped, both with MAP_NO_PAGER.";
+            attribute :>> parent = "H.MEM.22";
+            attribute :>> unit = "syscall::native::vmo_map";
+        }
+    }
 }

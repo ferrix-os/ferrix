@@ -1130,6 +1130,7 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             // A process handle holds how the process ended, not its table.
             | Object::Process(_)
             | Object::Port(_)
+            | Object::Pager(_)
             | Object::Starter
             | Object::Audit => None,
         });

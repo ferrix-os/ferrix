@@ -81,6 +81,7 @@ use ferrix_frame::Frame;
 use ferrix_sched::CpuSet;
 
 use crate::mm;
+use crate::object::pager::PagerLink;
 use crate::object::quota::{Charge, Resource};
 use crate::smp::{self, TlbPages};
 use crate::user::space::AddressSpace;
@@ -267,9 +268,11 @@ pub(crate) struct Vmo {
     /// owner last asked ([`Vmo::take_mapped_writes`]): its writes mark no page
     /// dirty, so the owner writes back every page it holds instead.
     mapped_written: AtomicBool,
-    /// What fills an absent page of a file on a disk before a fault commits
-    /// it; `None` for every other object, whose absent pages are zeros.
-    filler: Option<Arc<dyn Filler>>,
+    /// What makes an absent page present before a fault commits it: the page
+    /// cache's [`Filler`] in ring 0, or a pager in user space
+    /// (`docs/microkernel/K3.md` §2.1); `None` for every other object, whose
+    /// absent pages are zeros.
+    source: Option<Source>,
     /// Shared with a device that does not snoop the caches: every mapping
     /// bypasses them, and the kernel copies nothing in or out through its own
     /// cached view. Set once, by [`Vmo::make_coherent`], and never cleared.
@@ -292,6 +295,48 @@ pub(crate) struct Vmo {
     )]
     charge: Charge,
 }
+
+/// Where an object's absent pages come from (`docs/microkernel/K3.md` §2.1):
+/// one field, so that a fault asks one place whichever side serves it.
+#[derive(Debug, Clone)]
+pub(crate) enum Source {
+    /// In ring 0: the page cache's fill, run in the faulting thread, as it
+    /// always was.
+    Kernel(Arc<dyn Filler>),
+    /// A pager in user space, over its port (`object::pager`).
+    Pager(Arc<PagerLink>),
+}
+
+/// A present page of a pager-backed object, as dirty tracking sees it
+/// (K3.md §2.5). A page with no entry in [`Pages::states`] is Clean.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PageState {
+    /// Not present.
+    Absent,
+    /// Present, unwritten since it was supplied or last cleaned: never mapped
+    /// writable.
+    Clean,
+    /// Written since its last write-back began.
+    Dirty,
+    /// Its write-back has begun and not ended, and nothing wrote it since.
+    AwaitingClean,
+}
+
+/// Why a supply moved nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SupplyError {
+    /// A page of the aux range is absent, or held in place.
+    BadAux,
+    /// The range is past either object's end, or longer than
+    /// [`SUPPLY_MAX_PAGES`].
+    Range,
+    /// No memory to list the pages.
+    NoMemory,
+}
+
+/// The most pages one supply moves: bounds the list it makes and the pages
+/// lock's holds (`MEMORY-AND-TIMING.md`).
+pub(crate) const SUPPLY_MAX_PAGES: u64 = 256;
 
 /// How an address space maps an object.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -352,6 +397,9 @@ struct Pages {
     frames: BTreeMap<u64, Frame>,
     /// Page index to how many [`Held`] guards hold it. Absent means none.
     held: BTreeMap<u64, u32>,
+    /// A pager-backed object's Dirty and awaiting-clean pages; every other
+    /// present page is Clean. Empty for any other object.
+    states: BTreeMap<u64, PageState>,
 }
 
 /// Frames phase one took out of an object's list, whose translations are still
@@ -488,11 +536,46 @@ impl Vmo {
     ) -> Result<Arc<Vmo>, AllocError> {
         let vmo = crate::fallible::try_arc(Vmo::unfilled(
             pages,
-            filler,
+            filler.map(Source::Kernel),
             Charge::none(Resource::Objects),
         ))?;
         crate::user::cache::register(&vmo)?;
         Ok(vmo)
+    }
+
+    /// A pager-backed object of `pages` pages (`pager_create_vmo`): its
+    /// absent pages are `link`'s pager's, never zeros. One object charged to
+    /// the running task's job, as any VMO; its pages to whoever pays for each.
+    /// Not registered for reclaim: until the page cache's move (K3b) its
+    /// pages leave only by the pager's `PAGER_OP_DECOMMIT`.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] at the job's object limit or with no memory.
+    pub(crate) fn new_paged(pages: u64, link: Arc<PagerLink>) -> Result<Arc<Vmo>, AllocError> {
+        let charge = Charge::running(Resource::Objects, 1).map_err(|_| AllocError)?;
+        crate::fallible::try_arc(Vmo::unfilled(pages, Some(Source::Pager(link)), charge))
+    }
+
+    /// The pager its absent pages come from, if it is pager-backed.
+    pub(crate) fn pager(&self) -> Option<&Arc<PagerLink>> {
+        match &self.source {
+            Some(Source::Pager(link)) => Some(link),
+            _ => None,
+        }
+    }
+
+    /// Whether its absent pages are a pager's.
+    pub(crate) fn is_pager_backed(&self) -> bool {
+        self.pager().is_some()
+    }
+
+    /// The page cache's fill, if it is a file's on a disk.
+    fn filler(&self) -> Option<&Arc<dyn Filler>> {
+        match &self.source {
+            Some(Source::Kernel(filler)) => Some(filler),
+            _ => None,
+        }
     }
 
     /// Whether this is plain anonymous memory: not a file's object, whose
@@ -501,21 +584,19 @@ impl Vmo {
     /// certification consultant's ledger 316, (2)). The same test as
     /// [`Vmo::commit_run`]'s.
     pub(crate) fn is_anonymous(&self) -> bool {
-        self.filler.is_none() && self.bound.load(Ordering::SeqCst) == u64::MAX
+        self.source.is_none() && self.bound.load(Ordering::SeqCst) == u64::MAX
     }
 
     /// Whether this is the object of a file on a disk.
     pub(crate) fn is_disk_file(&self) -> bool {
-        self.filler.is_some()
+        self.filler().is_some()
     }
 
     /// Whether reclaim may drop this object's pages: its source can read
     /// them again and has no newer copy, and no shared mapping may write
     /// them without a mark (`user::cache`).
     pub(crate) fn reclaimable(&self) -> bool {
-        self.filler
-            .as_ref()
-            .is_some_and(|filler| filler.reclaimable())
+        self.filler().is_some_and(|filler| filler.reclaimable())
             && !self.writably_mapped()
             && !self.mapped_written.load(Ordering::SeqCst)
     }
@@ -524,9 +605,7 @@ impl Vmo {
     /// written back ([`Filler::dirty_pages`]); none for an object that is not
     /// a disk file's.
     pub(crate) fn dirty_pages(&self) -> u64 {
-        self.filler
-            .as_ref()
-            .map_or(0, |filler| filler.dirty_pages())
+        self.filler().map_or(0, |filler| filler.dirty_pages())
     }
 
     /// Give back those of `picked` (page indices, lowest first) the source
@@ -546,7 +625,7 @@ impl Vmo {
         if !self.reclaimable() {
             return 0;
         }
-        let Some(filler) = self.filler.as_ref() else {
+        let Some(filler) = self.filler() else {
             return 0;
         };
         filler.reclaim_clean(picked, &mut |clean| {
@@ -609,7 +688,7 @@ impl Vmo {
     }
 
     /// The object [`Vmo::new_filled`] allocates.
-    fn unfilled(pages: u64, filler: Option<Arc<dyn Filler>>, charge: Charge) -> Vmo {
+    fn unfilled(pages: u64, source: Option<Source>, charge: Charge) -> Vmo {
         Vmo {
             pages: SpinLock::new(Pages::default()),
             len: AtomicU64::new(pages),
@@ -617,7 +696,7 @@ impl Vmo {
             mappers: SpinLock::new(Vec::new()),
             shared_may_write: AtomicU64::new(0),
             mapped_written: AtomicBool::new(false),
-            filler,
+            source,
             coherent: AtomicBool::new(false),
             combining: AtomicBool::new(false),
             kernel_view: AtomicBool::new(false),
@@ -632,7 +711,7 @@ impl Vmo {
     ///
     /// As [`Filler::fill`].
     pub(crate) fn fill_for_fault(&self, index: u64) -> Result<(), ferrix_vfs::Errno> {
-        match &self.filler {
+        match self.filler() {
             Some(filler) => filler.fill(self, index),
             None => Ok(()),
         }
@@ -645,7 +724,7 @@ impl Vmo {
     ///
     /// As [`Filler::fill_one`].
     pub(crate) fn fill_one_page(&self, index: u64) -> Result<(), ferrix_vfs::Errno> {
-        match &self.filler {
+        match self.filler() {
             Some(filler) => filler.fill_one(self, index),
             None => Ok(()),
         }
@@ -918,6 +997,7 @@ impl Vmo {
             pages: SpinLock::new(Pages {
                 frames,
                 held: BTreeMap::new(),
+                states: BTreeMap::new(),
             }),
             len: AtomicU64::new(self.len_pages()),
             bound: AtomicU64::new(self.bound.load(Ordering::SeqCst)),
@@ -925,7 +1005,7 @@ impl Vmo {
             shared_may_write: AtomicU64::new(0),
             mapped_written: AtomicBool::new(false),
             // A page neither side has is still the file's.
-            filler: self.filler.clone(),
+            source: self.source.clone(),
             // Forked for a private mapping, which a coherent object never
             // has: `vmo_map` maps it shared. The copy is the process's own.
             coherent: AtomicBool::new(false),
@@ -1097,9 +1177,12 @@ impl Vmo {
 
     /// Whether page `index`, if absent, is its file's source to fill.
     pub(crate) fn sourced(&self, index: u64) -> bool {
-        self.filler
-            .as_ref()
-            .is_some_and(|filler| filler.is_sourced(index))
+        match &self.source {
+            Some(Source::Kernel(filler)) => filler.is_sourced(index),
+            // Every absent page of a pager-backed object is the pager's.
+            Some(Source::Pager(_)) => true,
+            None => false,
+        }
     }
 
     /// [`Vmo::read_page`], but `false`, reading nothing, for a page the
@@ -1451,7 +1534,7 @@ impl Vmo {
     /// [`RunError::OutOfMemory`] when the job is at its limit or there is no
     /// free block. Nothing is committed or charged then.
     pub(crate) fn commit_run(&self, first: u64, pages: u64) -> Result<Frame, RunError> {
-        if self.filler.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
+        if self.source.is_some() || self.bound.load(Ordering::SeqCst) != u64::MAX {
             return Err(RunError::NotAnonymous);
         }
         if pages == 0 || pages > 1 << ferrix_frame::MAX_ORDER {
@@ -1880,6 +1963,11 @@ impl Vmo {
     /// touched. Never shrinks: another mapping of the object may still reach
     /// the pages a shorter length would put out of range.
     pub(crate) fn grow_to(&self, pages: u64) {
+        // A pager-backed object keeps the size its pager made it at: pages
+        // past it are nobody's to supply.
+        if self.is_pager_backed() {
+            return;
+        }
         let _ = self.len.fetch_max(pages, Ordering::Relaxed);
     }
 
@@ -2290,4 +2378,358 @@ fn run_reclaim_hook(vmo: &Vmo) {
 /// for a write-combining object (`L.user.133`).
 fn flush_frame(frame: Frame) {
     crate::arch::flush_cache_lines(mm::direct_map(frame * PAGE_SIZE), PAGE_SIZE);
+}
+
+/// What [`Vmo::write_paged`] found.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PagedWrite {
+    /// Written, and the page is Dirty.
+    Done,
+    /// The page is absent: the pager is to be asked for it.
+    Absent,
+    /// The page is Clean or awaiting-clean in a trap-dirty object: the pager
+    /// is to be asked to let it be written.
+    NeedsDirty,
+}
+
+/// The runs [`Vmo::dirty_runs`] lists: first page, length, state.
+pub(crate) type DirtyRuns = Vec<(u64, u64, PageState)>;
+
+/// What [`Vmo::dirty_runs`] lists at most in one call.
+pub(crate) const DIRTY_RUNS_MAX: usize = 256;
+
+/// A pager-backed object's pages (`docs/microkernel/K3.md` §2.5 to §2.8).
+/// Each takes the pages lock alone, and none is called with another VMO's
+/// lock held.
+impl Vmo {
+    /// How many pages from `index` on are absent, at most `max` and never
+    /// past the end; 0 when `index` is present.
+    pub(crate) fn absent_run(&self, index: u64, max: u64) -> u64 {
+        let len = self.len_pages();
+        if index >= len {
+            return 0;
+        }
+        let end = index.saturating_add(max).min(len);
+        let pages = self.pages.lock();
+        match pages.frames.range(index..end).next() {
+            Some((&present, _)) => present - index,
+            None => end - index,
+        }
+    }
+
+    /// Page `index`'s state.
+    pub(crate) fn page_state(&self, index: u64) -> PageState {
+        state_of(&self.pages.lock(), index)
+    }
+
+    /// Whether a mapping may write page `index` in place: any page of an
+    /// object that is not pager-backed, and only a Dirty page of one that is.
+    /// A Clean page is never mapped writable, so that its first write faults
+    /// and is seen (H.MEM.23).
+    pub(crate) fn writable_page(&self, index: u64) -> bool {
+        !self.is_pager_backed() || self.page_state(index) == PageState::Dirty
+    }
+
+    /// Make present page `index` Dirty, from Clean or awaiting-clean: the
+    /// kernel's own mark, for an object that does not trap dirty. `Ok(false)`
+    /// for an absent page.
+    ///
+    /// # Errors
+    ///
+    /// [`VmoError::OutOfMemory`] with no room to record it.
+    pub(crate) fn mark_dirty(&self, index: u64) -> Result<bool, VmoError> {
+        let mut pages = self.pages.lock();
+        if !pages.frames.contains_key(&index) {
+            return Ok(false);
+        }
+        let _ = crate::fallible::insert(&mut pages.states, index, PageState::Dirty)
+            .map_err(|_| VmoError::OutOfMemory)?;
+        Ok(true)
+    }
+
+    /// Write `data` into present page `index` at `offset`, marking it Dirty:
+    /// `vmo_write` into a pager-backed object, under one hold of the pages
+    /// lock, as [`Vmo::commit_and_write`] writes. Nothing is committed here:
+    /// an absent page is the pager's. With `traps`, a page that is not Dirty
+    /// already is left for the pager to allow first.
+    ///
+    /// # Errors
+    ///
+    /// As [`Vmo::write_page`].
+    pub(crate) fn write_paged(
+        &self,
+        index: u64,
+        offset: usize,
+        data: &[u8],
+        traps: bool,
+    ) -> Result<PagedWrite, VmoError> {
+        self.check_span(index, offset, data.len())?;
+        let mut pages = self.pages.lock();
+        let Some(&frame) = pages.frames.get(&index) else {
+            return Ok(PagedWrite::Absent);
+        };
+        if traps && state_of(&pages, index) != PageState::Dirty {
+            return Ok(PagedWrite::NeedsDirty);
+        }
+        let _ = crate::fallible::insert(&mut pages.states, index, PageState::Dirty)
+            .map_err(|_| VmoError::OutOfMemory)?;
+        let at = mm::direct_map(frame * PAGE_SIZE) as usize + offset;
+        // SAFETY: (FRAME) the frame is this object's and held under its lock:
+        // a pager-backed object is mapped shared only, and a supply refuses a
+        // frame anyone else holds, so nobody shares it; `check_span` kept the
+        // write inside the page; the direct map is writable for all of RAM.
+        unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), at as *mut u8, data.len()) };
+        Ok(PagedWrite::Done)
+    }
+
+    /// Move pages `[aux_first, aux_first + count)` of `aux` into the pages
+    /// `[first, first + count)` this object lacks (`pager_supply`, K3.md
+    /// §2.7); how many moved. A page this object holds is skipped and stays
+    /// in `aux`.
+    ///
+    /// Every page of the aux range must be committed, held by no device and
+    /// referenced by no other object (a `fork` copy): a frame someone else
+    /// reaches would be shared with every mapper of this one. The moved
+    /// frames leave `aux`'s list, then every mapper of `aux` forgets them
+    /// with one shootdown, and only then do they join this object, so no
+    /// translation of `aux` reaches a page a client of this object may write.
+    /// A frame whose page another supply filled meanwhile is released.
+    ///
+    /// Never holds two objects' locks at once. Must not be called holding a
+    /// spin lock.
+    ///
+    /// # Errors
+    ///
+    /// [`SupplyError`]; nothing moved.
+    pub(crate) fn supply_from(
+        &self,
+        aux: &Vmo,
+        aux_first: u64,
+        first: u64,
+        count: u64,
+    ) -> Result<u64, SupplyError> {
+        let inside = |start: u64, len: u64| start.checked_add(count).is_some_and(|end| end <= len);
+        if count == 0
+            || count > SUPPLY_MAX_PAGES
+            || core::ptr::eq(self, aux)
+            || !inside(first, self.len_pages())
+            || !inside(aux_first, aux.len_pages())
+        {
+            return Err(SupplyError::Range);
+        }
+        let room = usize::try_from(count).map_err(|_| SupplyError::Range)?;
+        let mut wanted: Vec<u64> =
+            crate::fallible::try_with_capacity(room).map_err(|_| SupplyError::NoMemory)?;
+        {
+            let pages = self.pages.lock();
+            for at in 0..count {
+                if !pages.frames.contains_key(&(first + at)) {
+                    // NOALLOC: room for every page of the range.
+                    let _ = crate::fallible::push_within(&mut wanted, at);
+                }
+            }
+        }
+        let mut moved: Vec<(u64, Frame)> =
+            crate::fallible::try_with_capacity(wanted.len()).map_err(|_| SupplyError::NoMemory)?;
+        let mut kept: Vec<bool> =
+            crate::fallible::try_filled(false, wanted.len()).map_err(|_| SupplyError::NoMemory)?;
+        {
+            let mut source = aux.pages.lock();
+            let end = aux_first + count;
+            if source.held.range(aux_first..end).next().is_some() {
+                return Err(SupplyError::BadAux);
+            }
+            for at in aux_first..end {
+                match source.frames.get(&at) {
+                    Some(&frame) if mm::frame_references(frame) <= 1 => {}
+                    _ => return Err(SupplyError::BadAux),
+                }
+            }
+            for &at in &wanted {
+                if let Some(frame) = source.frames.remove(&(aux_first + at)) {
+                    // NOALLOC: room for every wanted page.
+                    let _ = crate::fallible::push_within(&mut moved, (aux_first + at, frame));
+                }
+            }
+        }
+        // Every mapper of `aux` forgets the moved pages before they are this
+        // object's; nothing is released.
+        let mut runs = [(0, 0); RUNS];
+        let used = runs_of(&moved, &mut runs);
+        aux.retire_runs(&[], false, runs.get(..used).unwrap_or(&[]), None, false);
+        let mut supplied = 0;
+        {
+            let mut pages = self.pages.lock();
+            for (&(aux_index, frame), keep) in moved.iter().zip(kept.iter_mut()) {
+                let index = aux_index - aux_first + first;
+                if pages.frames.contains_key(&index) {
+                    continue;
+                }
+                if crate::fallible::insert(&mut pages.frames, index, frame).is_ok() {
+                    // Clean, whatever a page once there was.
+                    let _ = pages.states.remove(&index);
+                    *keep = true;
+                    supplied += 1;
+                }
+            }
+        }
+        for (&(_, frame), &keep) in moved.iter().zip(kept.iter()) {
+            if !keep {
+                // Out of every mapping of `aux` since its shootdown, and in
+                // no object: the pager's page, lost to a race it made.
+                let _ = mm::release_frame(frame);
+            }
+        }
+        Ok(supplied)
+    }
+
+    /// `PAGER_OP_DIRTY`: the present pages of `[first, first + count)` become
+    /// Dirty. `Ok(false)`, changing nothing, if one is absent.
+    ///
+    /// # Errors
+    ///
+    /// [`VmoError::OutOfMemory`] with no room to record a mark (those already
+    /// made stay: more dirty is safe).
+    pub(crate) fn dirty_range(&self, first: u64, count: u64) -> Result<bool, VmoError> {
+        let mut pages = self.pages.lock();
+        let end = first.saturating_add(count);
+        if pages.frames.range(first..end).count() as u64 != count {
+            return Ok(false);
+        }
+        for index in first..end {
+            let _ = crate::fallible::insert(&mut pages.states, index, PageState::Dirty)
+                .map_err(|_| VmoError::OutOfMemory)?;
+        }
+        Ok(true)
+    }
+
+    /// `PAGER_OP_WRITEBACK_BEGIN`: the Dirty pages of `[first, first +
+    /// count)` become awaiting-clean, and every mapping of the range loses its
+    /// translations, with one shootdown, before this returns, so that a
+    /// write after it faults and makes its page Dirty again (H.MEM.23).
+    /// How many began. Must not be called holding a spin lock.
+    pub(crate) fn writeback_begin(&self, first: u64, count: u64) -> u64 {
+        let end = first.saturating_add(count);
+        let mut began = 0;
+        {
+            let mut pages = self.pages.lock();
+            for (_, state) in pages.states.range_mut(first..end) {
+                if *state == PageState::Dirty {
+                    *state = PageState::AwaitingClean;
+                    began += 1;
+                }
+            }
+        }
+        self.retire_runs(&[], false, &[(first, count)], None, false);
+        began
+    }
+
+    /// `PAGER_OP_WRITEBACK_END`: the awaiting-clean pages of `[first, first +
+    /// count)` become Clean; a page written since its write-back began is
+    /// Dirty and stays so. How many were cleaned.
+    pub(crate) fn writeback_end(&self, first: u64, count: u64) -> u64 {
+        let end = first.saturating_add(count);
+        let mut pages = self.pages.lock();
+        let before = pages.states.len();
+        pages.states.retain(|index, state| {
+            !((first..end).contains(index) && *state == PageState::AwaitingClean)
+        });
+        (before - pages.states.len()) as u64
+    }
+
+    /// `PAGER_OP_DECOMMIT`: take the Clean, unheld pages of `[first, first +
+    /// count)` out, in the three phases; Dirty and awaiting-clean pages stay.
+    /// How many went. Must not be called holding a spin lock.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] with no room to list them; nothing taken.
+    pub(crate) fn decommit_clean(&self, first: u64, count: u64) -> Result<u64, AllocError> {
+        let end = first.saturating_add(count);
+        let clean = |pages: &Pages, index: u64| {
+            !pages.held.contains_key(&index) && !pages.states.contains_key(&index)
+        };
+        let wanted = {
+            let pages = self.pages.lock();
+            pages
+                .frames
+                .range(first..end)
+                .filter(|&(&index, _)| clean(&pages, index))
+                .count()
+        };
+        if wanted == 0 {
+            return Ok(0);
+        }
+        let mut retired = Retired::with_room(wanted)?;
+        {
+            let mut pages = self.pages.lock();
+            let mut from = first;
+            while retired.has_room() {
+                let next = pages
+                    .frames
+                    .range(from..end)
+                    .map(|(&index, _)| index)
+                    .find(|&index| clean(&pages, index));
+                let Some(index) = next else { break };
+                if let Some(frame) = pages.frames.remove(&index) {
+                    retired.record(index, frame);
+                }
+                from = index + 1;
+            }
+        }
+        let taken = retired.frames.len() as u64;
+        self.retire(retired, None);
+        Ok(taken)
+    }
+
+    /// The Dirty and awaiting-clean runs of `[first, first + count)`, lowest
+    /// first, at most `room` (and [`DIRTY_RUNS_MAX`]) of them, each as its
+    /// first page, its length and its state; and whether more remain.
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] with no memory for the list.
+    pub(crate) fn dirty_runs(
+        &self,
+        first: u64,
+        count: u64,
+        room: usize,
+    ) -> Result<(DirtyRuns, bool), AllocError> {
+        let room = room.min(DIRTY_RUNS_MAX);
+        let mut runs: DirtyRuns = crate::fallible::try_with_capacity(room)?;
+        let end = first.saturating_add(count);
+        let pages = self.pages.lock();
+        let mut more = false;
+        for (&index, &state) in pages.states.range(first..end) {
+            if !pages.frames.contains_key(&index) {
+                continue;
+            }
+            if let Some((start, len, was)) = runs.last_mut()
+                && *was == state
+                && *start + *len == index
+            {
+                *len += 1;
+                continue;
+            }
+            if runs.len() == room {
+                more = true;
+                break;
+            }
+            // NOALLOC: below its capacity, checked above.
+            let _ = crate::fallible::push_within(&mut runs, (index, 1, state));
+        }
+        Ok((runs, more))
+    }
+}
+
+/// Page `index`'s state in `pages`.
+fn state_of(pages: &Pages, index: u64) -> PageState {
+    if !pages.frames.contains_key(&index) {
+        return PageState::Absent;
+    }
+    pages
+        .states
+        .get(&index)
+        .copied()
+        .unwrap_or(PageState::Clean)
 }

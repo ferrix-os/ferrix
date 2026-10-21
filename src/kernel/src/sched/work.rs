@@ -150,6 +150,14 @@ pub(crate) fn own_end() -> bool {
     with_running(has_end).unwrap_or(false)
 }
 
+/// The running task's word as it stands, clearing nothing: what a pager's
+/// bounded wait reads to end early on [`END`], and for a program's own fault
+/// on [`SIGNAL`] or [`STOP`] (`object::pager`, `docs/microkernel/K3.md`
+/// §2.3). Zero where nothing runs.
+pub(crate) fn own_word() -> u32 {
+    with_running(|task| task.work().load(Ordering::Acquire)).unwrap_or(0)
+}
+
 /// Whether `task` has [`END`] posted: for a start that re-checks after it
 /// lists its task, so as not to post twice.
 pub(crate) fn has_end(task: &Task) -> bool {

@@ -40,6 +40,132 @@ pub const PACKET_USER: u32 = 0;
 pub const PACKET_SIGNAL: u32 = 1;
 /// A packet a bound interrupt produced.
 pub const PACKET_INTERRUPT: u32 = 2;
+/// A packet a pager-backed VMO's fault produced (`docs/microkernel/K3.md`
+/// §2.2): `key` is the VMO's, `signals` the command and the run's length
+/// ([`page_request`]), `data[0]` the run's first byte offset in the VMO and
+/// `data[1]` the request's id, never reused: the K7 ticket the kernel issued
+/// for it once tickets are wired in, which `pager_op`'s
+/// [`PagerOpSpec::request`] names.
+pub const PACKET_PAGE_REQUEST: u32 = 3;
+
+/// A page request's command: the run is absent; supply it.
+pub const PAGE_REQUEST_READ: u32 = 1;
+/// A page request's command: a Clean page of a [`PAGER_VMO_TRAP_DIRTY`] VMO
+/// is about to be written; mark it dirty or fail it.
+pub const PAGE_REQUEST_DIRTY: u32 = 2;
+
+/// A page request's `signals` word: the command in bits 0-7, the run's
+/// length in pages in bits 8-31.
+#[must_use]
+pub const fn page_request(command: u32, pages: u32) -> u32 {
+    (command & 0xFF) | (pages << 8)
+}
+
+/// The command and the run's length in pages a page request's `signals`
+/// word carries.
+#[must_use]
+pub const fn page_request_parts(signals: u32) -> (u32, u32) {
+    (signals & 0xFF, signals >> 8)
+}
+
+/// The shortest a fault waits for a pager, in nanoseconds: one millisecond.
+pub const PAGER_WAIT_MIN_NS: u64 = 1_000_000;
+/// The longest a fault waits for a pager, in nanoseconds: thirty seconds, the
+/// block layer's own request timeout on Linux. A pager asking for 0 gets it.
+pub const PAGER_WAIT_MAX_NS: u64 = 30_000_000_000;
+
+/// `pager_create_vmo`'s option: a write to a Clean page asks the pager first
+/// (a [`PAGE_REQUEST_DIRTY`]), rather than being marked dirty by the kernel.
+pub const PAGER_VMO_TRAP_DIRTY: u64 = 1 << 0;
+/// `pager_create_vmo`'s option: a kernel copy never waits for this VMO's
+/// pager; an absent page fails the copy at once.
+pub const PAGER_VMO_NO_COPY_WAIT: u64 = 1 << 1;
+
+/// `pager_op`: end the requests touching the range, failed with the errno
+/// number in `value`: `EIO` (5) or `ENOSPC` (28).
+pub const PAGER_OP_FAIL: u64 = 1;
+/// `pager_op`: the range's Clean pages become Dirty, ending their dirty
+/// requests.
+pub const PAGER_OP_DIRTY: u64 = 2;
+/// `pager_op`: Dirty pages become awaiting-clean and lose their writable
+/// translations before the call returns.
+pub const PAGER_OP_WRITEBACK_BEGIN: u64 = 3;
+/// `pager_op`: awaiting-clean pages become Clean.
+pub const PAGER_OP_WRITEBACK_END: u64 = 4;
+/// `pager_op`: the range's Clean pages are taken out.
+pub const PAGER_OP_DECOMMIT: u64 = 5;
+/// `pager_op`: the VMO is detached from the pager, as at the pager's close.
+pub const PAGER_OP_DETACH: u64 = 6;
+
+/// What `pager_create_vmo` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct PagerVmoSpec {
+    /// The key its page requests carry.
+    pub key: u64,
+    /// Its size in pages.
+    pub pages: u64,
+    /// `PAGER_VMO_*` bits.
+    pub options: u64,
+}
+
+/// What `pager_supply` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct PagerSupplySpec {
+    /// The first byte of the pager VMO's range, page-aligned.
+    pub offset: u64,
+    /// The range's length in bytes, page-aligned.
+    pub length: u64,
+    /// Where the pages come from in the aux VMO, page-aligned.
+    pub aux_offset: u64,
+    /// Must be 0.
+    pub options: u64,
+}
+
+/// What `pager_op` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct PagerOpSpec {
+    /// The first byte of the range, page-aligned.
+    pub offset: u64,
+    /// The range's length in bytes, page-aligned.
+    pub length: u64,
+    /// The operation's value: [`PAGER_OP_FAIL`]'s errno, otherwise 0.
+    pub value: u64,
+    /// [`PAGER_OP_FAIL`]: the one request to fail, by the id its packet
+    /// carried, so that one job's failure fails no other job's fault on the
+    /// same pages (the consultant's 2858 (1)); 0 for every request touching
+    /// the range. 0 for every other operation.
+    pub request: u64,
+}
+
+/// A range `pager_query_dirty` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct PagerRange {
+    /// The first byte, page-aligned.
+    pub offset: u64,
+    /// The length in bytes, page-aligned.
+    pub length: u64,
+}
+
+/// A run `pager_query_dirty` writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct DirtyRange {
+    /// Its first byte.
+    pub offset: u64,
+    /// Its length in bytes.
+    pub length: u64,
+    /// [`DIRTY_STATE_DIRTY`] or [`DIRTY_STATE_AWAITING_CLEAN`].
+    pub state: u64,
+}
+
+/// A run written since its last write-back began.
+pub const DIRTY_STATE_DIRTY: u64 = 1;
+/// A run whose write-back has begun and not ended.
+pub const DIRTY_STATE_AWAITING_CLEAN: u64 = 2;
 
 /// `port_fd`'s flag: the descriptor is closed on `execve`, as `O_CLOEXEC`
 /// makes one.
@@ -49,6 +175,10 @@ pub const PORT_FD_CLOEXEC: u64 = 1;
 pub const MAP_READ: u32 = 1 << 0;
 /// `vmo_map`'s protection: the mapping may also be written.
 pub const MAP_WRITE: u32 = 1 << 1;
+/// `vmo_map`'s protection bit: refuse a pager-backed VMO (`WRONG_TYPE`), and
+/// map any other as without it. The kernel's part of the safety-partition
+/// assumption of use (`docs/microkernel/K3.md` §5). Bit 2 is K2's `MAP_EXECUTE`.
+pub const MAP_NO_PAGER: u32 = 1 << 3;
 
 /// What a `channel_read` found.
 ///

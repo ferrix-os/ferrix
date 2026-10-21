@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 141 packages, 7216 elements, 217 relations. Model digest `2cf9006ee52a7be3`.
+26 files, 143 packages, 7311 elements, 217 relations. Model digest `094b049c85af4fe0`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -252,8 +252,10 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may hold the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
 | `H.MEM.18` | The kernel shall refuse to map a device window or a native VMO executable into a user address space, and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
 | `H.MEM.19` | Once a grace period the kernel waits for has ended, no read-side section that was running on any processor when the wait began shall still be running. | A writer that replaces an object every other online processor is reading, waits a grace period and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line). | `O.ISOLATE, ASR-1` |
+| `H.MEM.22` | An absent page of a pager-backed VMO shall become present only by its pager's supply. A thread shall wait on a pager only for a fault on, or a kernel copy into, a pager-backed VMO its own process maps or names, and the wait shall end on the supply, the pager's failure, the process's end, the pager's close, or the pager's bound of at most 30 s; every ending but the supply shall give the faulting process SIGBUS or its call an error, and none shall stop the kernel. | Stage 9's pager check (the `pager` line): faults forwarded and supplied, shared within a job and apart across jobs; failed, timed-out, closed and killed waits ended without their page, the bound held from below, the failures audited; copies waiting or refused; each with its negative control (K3.md section 6). | `O.FAILSAFE, O.ISOLATE` |
+| `H.MEM.23` | A write to a page of a pager-backed VMO shall keep the page in the dirty set until a write-back that began after the write ends; a page in the dirty set shall never be decommitted or reclaimed. | Stage 9's pager check (the `pager` line): a Clean page is never mapped writable, a write-back takes the write right away before it returns, a write after it is Dirty after its end, and a decommit takes Clean pages only; each with its negative control (K3.md section 6). | `O.ISOLATE, ASR-1` |
 
-19 requirements.
+21 requirements.
 
 ### Objects
 
@@ -4032,6 +4034,12 @@ flowchart LR
 | `L.object.170` | `theWayOutsAreShared` | — | — | — |
 | `L.object.179` | `theFastPathLetsGoOfItsEndUnmasked` | — | — | — |
 | `L.object.180` | `cpuTimeIsKeptBackOnce` | — | — | — |
+| `L.object.226` | `aPagerHasOneHandle` | — | — | — |
+| `L.object.227` | `aPagerVmoIsMadeOverItsPager` | — | — | — |
+| `L.object.228` | `aSupplyIsChecked` | — | — | — |
+| `L.object.229` | `aPagerOpIsChecked` | — | — | — |
+| `L.object.230` | `aPageRequestSaysWhatItAsks` | — | — | — |
+| `L.object.231` | `noPagerMapsWhenAsked` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |
@@ -4339,6 +4347,17 @@ flowchart LR
 | `L.user.104` | `aFaultIsResolvedWithNoPreemptionLockHeld` | — | — | — |
 | `L.user.105` | `anUnmapFreesNothingBeforeItsShootdown` | — | — | — |
 | `L.user.106` | `aCodePageIsReadAndRunAlone` | — | — | — |
+| `L.user.146` | `anAbsentPagerPageIsAsked` | — | — | — |
+| `L.user.147` | `aRequestIsListedWithoutAllocating` | — | — | — |
+| `L.user.148` | `aSuppliedFaultIsRetried` | — | — | — |
+| `L.user.149` | `aFailedFaultIsABusError` | — | — | — |
+| `L.user.150` | `aWaitIsBounded` | — | — | — |
+| `L.user.151` | `aKillEndsTheWait` | — | — | — |
+| `L.user.152` | `aCopyWaitsOrIsRefused` | — | — | — |
+| `L.user.153` | `aSupplyMovesThePagersOwnPages` | — | — | — |
+| `L.user.154` | `aCleanPageIsNeverWritable` | — | — | — |
+| `L.user.155` | `aWriteBackKeepsLaterWrites` | — | — | — |
+| `L.user.156` | `aPagersCloseEndsItsFaults` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |

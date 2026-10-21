@@ -107,7 +107,9 @@ pub(crate) fn user_fault(
     access: Access,
 ) -> Result<(), SpaceError> {
     quota::count(crate::sched::running_group(), Counter::Faults, 1);
-    match space.fault(address, access) {
+    // A program's own fault: never refused for a pager-backed object's
+    // `PAGER_VMO_NO_COPY_WAIT`, which is about copies (K3.md §2.4).
+    match space.fault_with(address, access, crate::object::pager::FaultMode::Program) {
         Err(error) if is_charge_refusal(&error) => match out_of_memory(space) {
             Answer::Refused => Err(error),
             Answer::Retry | Answer::Victim => Ok(()),

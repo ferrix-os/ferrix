@@ -183,6 +183,16 @@ pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// [`NativeCall::ChardevDmabufFence`].
 pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
+/// [`NativeCall::PagerCreate`].
+pub const PAGER_CREATE: usize = 0x1074;
+/// [`NativeCall::PagerCreateVmo`].
+pub const PAGER_CREATE_VMO: usize = 0x1075;
+/// [`NativeCall::PagerSupply`].
+pub const PAGER_SUPPLY: usize = 0x1076;
+/// [`NativeCall::PagerOp`].
+pub const PAGER_OP: usize = 0x1077;
+/// [`NativeCall::PagerQueryDirty`].
+pub const PAGER_QUERY_DIRTY: usize = 0x1078;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -618,10 +628,33 @@ pub enum NativeCall {
     /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
     /// Answered by the load ring.
     ChardevDmabufFence,
+    /// `(port, wait_ns: *u64, options)` → pager. A pager whose page requests
+    /// go to `port` (WRITE), and whose faults wait at most the `u64` at
+    /// `wait_ns`, clamped to [`crate::types::PAGER_WAIT_MIN_NS`] and
+    /// [`crate::types::PAGER_WAIT_MAX_NS`], 0 for the maximum. `options` must
+    /// be 0. The handle carries [`crate::rights::Rights::PAGER_OBJECT`]: no
+    /// `DUPLICATE`, so its close is the pager's death
+    /// (`docs/microkernel/K3.md` §2.1).
+    PagerCreate,
+    /// `(pager, spec: *PagerVmoSpec)` → VMO. A VMO of `pages` pages whose
+    /// absent pages are the pager's, with `key` in its requests and the
+    /// `PAGER_VMO_*` options. Needs `PAGER` on the pager.
+    PagerCreateVmo,
+    /// `(pager, vmo, aux, spec: *PagerSupplySpec)`. Move the committed pages
+    /// of the anonymous `aux` (READ, WRITE) into the absent pages of `vmo`,
+    /// skipping pages `vmo` holds; end the requests now satisfied.
+    PagerSupply,
+    /// `(pager, vmo, op, spec: *PagerOpSpec)`. One of the `PAGER_OP_*`
+    /// operations on a range of `vmo`.
+    PagerOp,
+    /// `(pager, vmo, spec: *PagerRange, buffer: *DirtyRange, capacity)` →
+    /// count. The Dirty and awaiting-clean runs of a range, lowest first;
+    /// `BUFFER_TOO_SMALL` with the first `capacity` written when more remain.
+    PagerQueryDirty,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 65] = [
+pub const ALL: [NativeCall; 70] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -687,6 +720,11 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
     NativeCall::ChardevDmabufFence,
+    NativeCall::PagerCreate,
+    NativeCall::PagerCreateVmo,
+    NativeCall::PagerSupply,
+    NativeCall::PagerOp,
+    NativeCall::PagerQueryDirty,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -767,6 +805,11 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
+        PAGER_CREATE => NativeCall::PagerCreate,
+        PAGER_CREATE_VMO => NativeCall::PagerCreateVmo,
+        PAGER_SUPPLY => NativeCall::PagerSupply,
+        PAGER_OP => NativeCall::PagerOp,
+        PAGER_QUERY_DIRTY => NativeCall::PagerQueryDirty,
         _ => return None,
     };
     Some(call)
@@ -841,5 +884,10 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
         NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
+        NativeCall::PagerCreate => PAGER_CREATE,
+        NativeCall::PagerCreateVmo => PAGER_CREATE_VMO,
+        NativeCall::PagerSupply => PAGER_SUPPLY,
+        NativeCall::PagerOp => PAGER_OP,
+        NativeCall::PagerQueryDirty => PAGER_QUERY_DIRTY,
     }
 }

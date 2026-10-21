@@ -339,3 +339,73 @@ fn the_messages_after_the_hello_read_back() {
     assert_eq!(read_after_hello(&root[..7]), None, "short");
     assert_eq!(read_after_hello(&[0; 9]), None, "long");
 }
+
+/// K3's five calls sit at 0x1074-0x1078, in that order, and K7's and K10's
+/// numbers before them are not K3's (`docs/microkernel/K3.md` §4).
+#[test]
+fn the_pager_calls_sit_where_they_were_allotted() {
+    assert_eq!(nr::decode(0x1074), Some(NativeCall::PagerCreate));
+    assert_eq!(nr::decode(0x1075), Some(NativeCall::PagerCreateVmo));
+    assert_eq!(nr::decode(0x1076), Some(NativeCall::PagerSupply));
+    assert_eq!(nr::decode(0x1077), Some(NativeCall::PagerOp));
+    assert_eq!(nr::decode(0x1078), Some(NativeCall::PagerQueryDirty));
+    assert_eq!(nr::decode(0x1079), None, "past K3's block");
+}
+
+/// A pager handle can be moved and never duplicated, and its right is bit 9,
+/// which `ALL` holds and a request may name.
+#[test]
+fn a_pager_has_one_handle_and_its_own_right() {
+    assert_eq!(Rights::PAGER.0, 1 << 9);
+    assert!(Rights::ALL.contains(Rights::PAGER));
+    assert!(Rights::PAGER_OBJECT.is_known());
+    assert!(
+        !Rights::PAGER_OBJECT.contains(Rights::DUPLICATE),
+        "one handle"
+    );
+    assert!(
+        Rights::PAGER_OBJECT.contains(Rights::TRANSFER),
+        "K13 moves it"
+    );
+    assert!(
+        !Rights::VMO.contains(Rights::PAGER),
+        "a VMO serves no pager"
+    );
+    assert_eq!(
+        Requested::from_register(u64::from(Rights::PAGER.0)),
+        Some(Requested::Exactly(Rights::PAGER))
+    );
+}
+
+/// The page request's `signals` word and the specs' layouts, the same on
+/// every target.
+#[test]
+fn page_requests_and_pager_specs_have_one_layout() {
+    use crate::types::{
+        DirtyRange, MAP_NO_PAGER, MAP_READ, MAP_WRITE, PACKET_INTERRUPT, PACKET_PAGE_REQUEST,
+        PAGE_REQUEST_DIRTY, PAGE_REQUEST_READ, PagerOpSpec, PagerRange, PagerSupplySpec,
+        PagerVmoSpec, page_request, page_request_parts,
+    };
+    assert_eq!(PACKET_PAGE_REQUEST, PACKET_INTERRUPT + 1);
+    assert_eq!(page_request(PAGE_REQUEST_READ, 32), 0x2001);
+    assert_eq!(
+        page_request_parts(page_request(PAGE_REQUEST_DIRTY, 1)),
+        (PAGE_REQUEST_DIRTY, 1)
+    );
+    assert_eq!(
+        page_request_parts(page_request(PAGE_REQUEST_READ, 0x00FF_FFFF)).1,
+        0x00FF_FFFF
+    );
+    assert_eq!(MAP_NO_PAGER, 1 << 3, "1 << 2 is K2's MAP_EXECUTE");
+    assert_eq!(MAP_NO_PAGER & (MAP_READ | MAP_WRITE), 0);
+    assert_eq!(size_of::<PagerVmoSpec>(), 24);
+    assert_eq!(offset_of!(PagerVmoSpec, options), 16);
+    assert_eq!(size_of::<PagerSupplySpec>(), 32);
+    assert_eq!(offset_of!(PagerSupplySpec, aux_offset), 16);
+    assert_eq!(size_of::<PagerOpSpec>(), 32);
+    assert_eq!(offset_of!(PagerOpSpec, value), 16);
+    assert_eq!(offset_of!(PagerOpSpec, request), 24);
+    assert_eq!(size_of::<PagerRange>(), 16);
+    assert_eq!(size_of::<DirtyRange>(), 24);
+    assert_eq!(offset_of!(DirtyRange, state), 16);
+}

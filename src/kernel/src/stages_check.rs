@@ -121,6 +121,10 @@ pub(super) fn check_programs() {
     // Finding F-35: the job quotas FRU_RSA.1 claims, each driven to its
     // limit through the path a program's use takes.
     check_quotas();
+
+    // K3: pager-backed VMOs, their faults forwarded to a pager over a port
+    // and waited for, bounded (docs/microkernel/K3.md §6).
+    check_pager();
     check_kernel_memory();
 }
 
@@ -1249,6 +1253,24 @@ pub(super) fn check_quotas() {
         report.objects,
         report.alone_share / 10,
         report.alone_share % 10,
+    );
+}
+
+/// K3: pager-backed VMOs (`docs/microkernel/K3.md` §6, the consultant's
+/// OK IF, ledger 2858): faults forwarded, shared within a job and not across
+/// jobs, supplied; failed, timed out, closed and killed waits ended without
+/// the safe state, audited; copies waiting or refused; dirty tracking and
+/// write-back; supplies, maps and decoding refused as specified.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_pager() {
+    let report = match object::pager_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(catalog::STAGE9_PAGER, "pager self-check failed: {problem}"),
+    };
+    println!(
+        "  pager    {} faults forwarded, shared within a job, apart across jobs, and supplied;          {} waits ended unsupplied -- failed, timed out after {} us at a 5 ms bound, closed,          killed -- and {} audited; copies waited or refused; trap-dirty and write-back kept          every write Dirty; {} refusals as specified",
+        report.supplied, report.ended, report.timed_out_micros, report.audited, report.refused,
     );
 }
 

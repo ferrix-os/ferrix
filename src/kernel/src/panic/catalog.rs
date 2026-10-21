@@ -339,6 +339,38 @@ pub(crate) static STAGE9_QUOTAS: Explanation = Explanation {
           docs/certification/IMPLEMENTATION.md",
 };
 
+/// For `check_pager` in `stages_check.rs`, when `object::pager_check::run`
+/// fails.
+pub(crate) static STAGE9_PAGER: Explanation = Explanation {
+    code: "FX-0915",
+    title: "a pager-backed VMO's fault, wait or dirty tracking was not as K3 states",
+    meaning: "`object::pager_check::run` (docs/microkernel/K3.md section 6) serves pagers from \
+              a check process and faults their VMOs from threads of client processes in two \
+              jobs: a fault on an absent page must send one page request, shared by threads of \
+              one job and not across jobs, and be resumed by a supply with the bytes supplied; \
+              a failed, timed-out, closed or killed wait must end without its page and never \
+              before the pager's bound, the first three audited; a kernel copy must wait, or \
+              fail at once for a NO_COPY_WAIT VMO; a Clean page must never be mapped writable, \
+              a write-back must take the write right away before it returns, and only Clean \
+              pages may be cleaned or decommitted; and the calls must refuse as specified. A \
+              kernel failing this lets a pager stall a process for ever, hand it zeros for a \
+              file's page, or lose a write from the dirty set (H.MEM.22, H.MEM.23).",
+    causes: &[
+        "An absent page of a pager-backed VMO was committed as zeros: `Vmo::sourced` or \
+         `commit_page` no longer treats it as the pager's.",
+        "A request's wait ignores its deadline, the pager's close, or the process's end \
+         (`object::pager`'s `PagerLink::wait`, `PagerCore::close`).",
+        "Requests are coalesced across jobs, or `PAGER_OP_FAIL` fails requests it was not \
+         named for.",
+        "A Clean page is installed writable, or `writeback_begin` leaves a translation \
+         writable, so a write marks nothing (`user/space.rs`'s `resolve`, `Vmo::writeback_begin`).",
+        "A supply moved a page it must refuse (held, shared, uncommitted) or took one from a \
+         VMO that is not anonymous.",
+    ],
+    see: "src/kernel/src/object/pager.rs; src/kernel/src/object/pager_check.rs; \
+          src/kernel/src/user/vmo.rs; src/kernel/src/user/space.rs; docs/microkernel/K3.md",
+};
+
 /// For `check_kernel_memory` in `stages_check.rs`, when `fs::kmem_check::run` fails.
 pub(crate) static STAGE9_KMEM: Explanation = Explanation {
     code: "FX-0906",
@@ -3450,6 +3482,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SPECULATION_DOMAIN_LEAVE_MAY_NOT_WAIT,
     &CHECK_HOOK_LEFT_ARMED,
     &SMBIOS,
+    &STAGE9_PAGER,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

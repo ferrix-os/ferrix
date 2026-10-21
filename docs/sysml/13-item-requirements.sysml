@@ -254,6 +254,37 @@ package FerrixItemRequirements {
                 among more than 0 reads (the `grace` line).";
             attribute :>> parent = ("O.ISOLATE", "ASR-1");
         }
+        // K3, pager-backed VMOs (docs/microkernel/K3.md; the consultant's OK
+        // IF, ledger 2858).
+        requirement <'H.MEM.22'> aPagerAnswersWithinItsBound : ItemHighLevel {
+            attribute :>> statement = "An absent page of a pager-backed VMO shall
+                become present only by its pager's supply. A thread shall wait on a
+                pager only for a fault on, or a kernel copy into, a pager-backed VMO
+                its own process maps or names, and the wait shall end on the supply,
+                the pager's failure, the process's end, the pager's close, or the
+                pager's bound of at most 30 s; every ending but the supply shall
+                give the faulting process SIGBUS or its call an error, and none
+                shall stop the kernel.";
+            attribute :>> criterion = "Stage 9's pager check (the `pager` line):
+                faults forwarded and supplied, shared within a job and apart across
+                jobs; failed, timed-out, closed and killed waits ended without their
+                page, the bound held from below, the failures audited; copies
+                waiting or refused; each with its negative control (K3.md section
+                6).";
+            attribute :>> parent = ("O.FAILSAFE", "O.ISOLATE");
+        }
+        requirement <'H.MEM.23'> noWriteLeavesTheDirtySet : ItemHighLevel {
+            attribute :>> statement = "A write to a page of a pager-backed VMO
+                shall keep the page in the dirty set until a write-back that began
+                after the write ends; a page in the dirty set shall never be
+                decommitted or reclaimed.";
+            attribute :>> criterion = "Stage 9's pager check (the `pager` line): a
+                Clean page is never mapped writable, a write-back takes the write
+                right away before it returns, a write after it is Dirty after its
+                end, and a decommit takes Clean pages only; each with its negative
+                control (K3.md section 6).";
+            attribute :>> parent = ("O.ISOLATE", "ASR-1");
+        }
     }
 
     package Objects {
