@@ -27,7 +27,7 @@ struct Flag {
 }
 
 /// The profile, then the level, then every flag in the flag file's order.
-const FLAGS: [Flag; 15] = [
+const FLAGS: [Flag; 16] = [
     Flag {
         name: "profile",
         values: &[
