@@ -2466,26 +2466,26 @@ src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
 
 `object::ticket_check::run` drives charging that follows the client
 (`docs/microkernel/K7.md`): a client issues a ticket on its end of a channel,
-and a server thread that adopts it through the other end has the VMO commits
-and new objects of its native calls charged to the client's job while the
-ticket is live. The check requires the ticket to name its issuer's own process
-and job, adoptions through any other end or of ended or unknown ids to be
-refused and audited, the server's own faults and heap to stay the server's, a
-refusal at the client's limit to cost the server no wait and no kill, every end
-(either side's `END`, a close) to stop the charging at the next call, at most
-64 live tickets per end, and every counter to come back. A kernel failing this
-lets a server charge a job that did not ask it to, or a client fill a shared
-server (T.EXHAUST).
+and a server thread that adopts it through the other end has the VMO commits and
+new objects of its native calls charged to the client's job while the ticket is
+live. The check requires the ticket to name its issuer's own process and job,
+adoptions through any other end or of ended or unknown ids to be refused and
+audited, the server's own faults and heap to stay the server's, a refusal at the
+client's limit to cost the server no wait and no kill, every end (either side's
+`END`, a close) to stop the charging at the next call, at most 64 live tickets
+per end, and every counter to come back. A kernel failing this lets a server
+charge a job that did not ask it to, or a client fill a shared server
+(T.EXHAUST).
 
 1. `quota::charge_target` stopped answering the adopted ticket's slot, or a
-   charge          site stopped reading it (`mm::allocate_user_frame`,
+   charge site stopped reading it (`mm::allocate_user_frame`,
    `quota::Charge::running`).
 2. `ticket::charging_for_call` set the target from an ended ticket, or did not
-   clear          it as the call returned.
+   clear it as the call returned.
 3. The channel's ticket registry honoured an id from the wrong end or channel,
-   or an          end's close stopped ending its tickets.
+   or an end's close stopped ending its tickets.
 4. A fault path stopped suspending the target (`quota::charging_own`), so a
-   server's          own memory was charged to its client.
+   server's own memory was charged to its client.
 
 See: src/kernel/src/object/ticket.rs; src/kernel/src/object/ticket_check.rs;
 src/kernel/src/object/quota.rs; docs/microkernel/K7.md.

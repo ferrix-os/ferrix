@@ -1269,7 +1269,11 @@ pub(super) fn check_tickets() {
         ),
     };
     println!(
-        "  ticket   issued to the caller's job and process; {} adoptions refused and audited;          {} pages and {} objects charged to the client, none to the server, and {} pages of          the server's own faults to the server; refused at the client's limit with no wait          and no kill; ended by either side and by a close; {} live at the bound; every          counter back to zero",
+        "  ticket   issued to the caller's job and process; {} adoptions refused and audited; \
+         {} pages and {} objects charged to the client, none to the server, and {} pages of \
+         the server's own faults to the server; refused at the client's limit with no wait \
+         and no kill; ended by either side and by a close; {} live at the bound; every \
+         counter back to zero",
         report.refused, report.pages, report.objects, report.own_pages, report.bound,
     );
 }
