@@ -198,3 +198,100 @@ fn a_misspelt_value_must_be_said_and_halt() {
         "reset"
     );
 }
+
+/// Boot 1 of a stop case, and boot 2 as its loader and kernel say it.
+fn stop_boots(stopping: &str, ended: &str) -> (Vec<String>, Vec<String>) {
+    let mut boot_1 = serial();
+    boot_1.push(stopping.to_owned());
+    let after = lines(&[
+        "Ferrix loader 0.1",
+        "  pstore   at 0x1000000, 1 MiB: boot 1's kernel log, 900 bytes, 900 kept (unchecked)",
+        ended,
+        "  pstore   mirroring the log to 0x1000000, 1024 KiB, boot 2; 40 bytes so far",
+    ]);
+    (boot_1, after)
+}
+
+#[test]
+fn a_stop_is_judged_by_its_line_and_the_loaders() {
+    let restart = &CASES[0];
+    let (boot_1, after) = stop_boots(
+        "reboot: Restarting system",
+        "  pstore   boot 1 ended: a restart a program asked for (reboot(2))",
+    );
+    assert_eq!(stop_problem(restart, &boot_1, &after), None, "a restart");
+    let (_, none) = stop_boots(
+        "reboot: Restarting system",
+        "  pstore   boot 1 ended: no stop recorded: a hang, a watchdog or a reset from outside the kernel",
+    );
+    assert!(
+        stop_problem(restart, &boot_1, &none).is_some_and(|why| why.contains("it said")),
+        "no word where a restart was wanted"
+    );
+    let quiet: Vec<String> = boot_1
+        .iter()
+        .filter(|line| !line.starts_with("reboot:"))
+        .cloned()
+        .collect();
+    assert!(
+        stop_problem(restart, &quiet, &after).is_some(),
+        "boot 1 never said it restarts"
+    );
+    let unattached: Vec<String> = after
+        .iter()
+        .filter(|line| !line.contains("boot 2;"))
+        .cloned()
+        .collect();
+    assert!(
+        stop_problem(restart, &boot_1, &unattached).is_some(),
+        "boot 2 not mirrored"
+    );
+    assert!(
+        stop_problem(restart, &boot_1, &[]).is_some(),
+        "no second loader"
+    );
+}
+
+#[test]
+fn every_case_names_a_different_stop_and_the_hang_none() {
+    for (index, case) in CASES.iter().enumerate() {
+        for other in CASES.iter().skip(index + 1) {
+            assert!(
+                case.ended != other.ended || case.stopping != other.stopping,
+                "{} and {} are the same case",
+                case.name,
+                other.name
+            );
+        }
+    }
+    for stop in Stop::ALL.into_iter().filter(|stop| *stop != Stop::Panic) {
+        assert!(
+            CASES.iter().any(|case| case.ended == Ended::Stopped(stop)),
+            "{stop:?} has a case"
+        );
+    }
+    assert!(
+        CASES
+            .iter()
+            .any(|case| case.ended == Ended::NoneRecorded && case.how == How::Reset),
+        "the reset from outside"
+    );
+}
+
+#[test]
+fn the_record_must_say_a_panic() {
+    let mut panicked = region(1, LOGGED);
+    panicked[pstore::STOP_OFFSET..pstore::STOP_OFFSET + 8]
+        .copy_from_slice(&Stop::Panic.word().to_le_bytes());
+    let said = lines(&["  pstore   boot 1 ended: a panic"]);
+    assert_eq!(
+        panic_word_problem(&panicked, &said),
+        None,
+        "the word and the line"
+    );
+    assert!(
+        panic_word_problem(&region(1, LOGGED), &said).is_some(),
+        "no word in the region"
+    );
+    assert!(panic_word_problem(&panicked, &[]).is_some(), "no line");
+}

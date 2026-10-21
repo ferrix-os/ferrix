@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "7129963e9c65cb3798206147a31145d0ac4a1f7091364b873bd3d668ab24f25f",
+  "digest": "2cf9006ee52a7be33be9f42317854bd7e8a9cb354df5e0339b3722545dce7772",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 141,
-    "elements": 7201,
+    "elements": 7216,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -75482,10 +75482,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Pstore::attachingFailsClosed",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"At boot, placement refuses a region made up inside the kernel image's entry and, around the loader's region, one not on a page, one no longer than its header, one whose ring is not a power of two and one running past its entry, and takes the loader's region: 5 of 5 refused when a region was attached, 1 of 1 when none. The header clause is ferrix-bootinfo's validate, whose host tests refuse a wrong magic, version, header length, capacity, region length, CRC and count: every_field_is_checked and capacities_outside_the_bounds_are_refused. By inspection of check: a valid header with a count other than 0 is refused, and nothing is written to the region before every clause passes (adopt is its only writer).\"",
+                  "value": "\"At boot, placement refuses a region made up inside the kernel image's entry and, around the loader's region, one not on a page, one no longer than its header, one whose ring is not a power of two and one running past its entry, and takes the loader's region: 5 of 5 refused when a region was attached, 1 of 1 when none. The header clause is ferrix-bootinfo's validate, whose host tests refuse a wrong magic, version, header length, capacity, region length, CRC and count: every_field_is_checked and capacities_outside_the_bounds_are_refused. The kernel takes the header through ferrix-bootinfo's fresh, whose host test the_kernel_takes_only_a_fresh_version_2_header refuses a version-1 header, a count other than 0 and every stop word other than 0. By inspection of check: nothing is written to the region before every clause passes (adopt is its only writer).\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 607
+                    "line": 609
                   }
                 },
                 {
@@ -75496,7 +75496,7 @@
                   "value": "\"H.BOOT.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 608
+                    "line": 610
                   }
                 },
                 {
@@ -75507,7 +75507,7 @@
                   "value": "(\"console::pstore::attach\", \"console::pstore::check\", \"console::pstore::placement\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 610
+                    "line": 612
                   }
                 }
               ]
@@ -75520,7 +75520,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 612
+                "line": 614
               },
               "children": [
                 {
@@ -75528,10 +75528,10 @@
                   "qualifiedName": "FerrixConsoleRequirements::Pstore::theFirstReportWritesTheRegionBack",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"conclude shall write the pstore region back from the caches after the report's last line is drained and before the screen is drawn, taking no lock and allocating nothing; an abridged report shall write nothing back. finish shall write it back before the reset ferrix.onexit=reset asks for, after its last line.\"",
+                  "value": "\"conclude shall write the pstore region back from the caches after the report's last line is drained and before the screen is drawn, taking no lock and allocating nothing; an abridged report shall write nothing back. finish shall write it back, through stop, after its last line and before the reset ferrix.onexit=reset asks for or the power-off of its default.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 617
+                    "line": 620
                   }
                 },
                 {
@@ -75542,7 +75542,7 @@
                   "value": "\"In test-postmortem's boot 1, the unlogged `written back for the next boot` line comes straight after the report's explanation, and the region saved after it holds that explanation (x86-64 and AArch64); in test-boot --reset, the loader that comes back quotes the kernel's resetting line as the log's last (x86-64 and AArch64). Neither write-back is observable under QEMU, whose caches are the host's: the hardware run is a BACKLOG row.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 624
+                    "line": 627
                   }
                 },
                 {
@@ -75553,7 +75553,7 @@
                   "value": "\"H.FAIL.1\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 625
+                    "line": 628
                   }
                 },
                 {
@@ -75564,7 +75564,181 @@
                   "value": "(\"console::pstore::write_back\", \"panic::conclude\", \"power::finish\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 627
+                    "line": 630
+                  }
+                }
+              ]
+            },
+            {
+              "name": "eachStopOnPurposeRecordsItself",
+              "qualifiedName": "FerrixConsoleRequirements::Pstore::eachStopOnPurposeRecordsItself",
+              "kind": "requirement",
+              "shortName": "L.console.46",
+              "type": "ItemLowLevel",
+              "doc": "docs/POSTMORTEM.md section 5 (S1); the consultant's OK IF C1-C12, ledger line 2749.",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 632
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::eachStopOnPurposeRecordsItself",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"On a path that does not return, each stop on purpose shall record its code in the attached region's stop word, as one atomic update after its caller's last line and before the architecture's stop: reboot(2)'s RESTART and RESTART2 a restart, POWER_OFF a power-off, HALT a halt, finish a reset under ferrix.onexit=reset and a power-off by default; begin_report shall record a panic when it admits the first report, and an abridged report nothing. No stop shall replace a panic's word.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 642
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::eachStopOnPurposeRecordsItself",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem's stop cases (x86-64 and AArch64), boot 2's loader says boot 1 ended in a restart after reboot -f and after a RESTART2 word, a power-off after poweroff -f, a halt after halt -f, a reset after init exited under ferrix.onexit=reset, and a power-off after init exited by default; no stop recorded after a reset from outside while a program sleeps; and in its record case, the saved region's word and boot 2's loader both say a panic. By inspection: an abridged report stores nothing, and stop's update leaves a panic's word as it is.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 651
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::eachStopOnPurposeRecordsItself",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.1\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 652
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::eachStopOnPurposeRecordsItself",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::pstore::stop\", \"console::pstore::panicked\", \"panic::begin_report\", \"power::finish\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 654
+                  }
+                }
+              ]
+            },
+            {
+              "name": "rebootWritesTheRegionBack",
+              "qualifiedName": "FerrixConsoleRequirements::Pstore::rebootWritesTheRegionBack",
+              "kind": "requirement",
+              "shortName": "L.console.47",
+              "type": "ItemLowLevel",
+              "doc": "reboot(2) itself, syscall/system.rs's sys_reboot, is load-ring code and cannot be a unit here: its four calls are argued by inspection, and the unit is what they call.",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 656
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::rebootWritesTheRegionBack",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"reboot(2) shall write the pstore region back from the caches, through stop, in each of its four stopping arms (RESTART, RESTART2, POWER_OFF, HALT), after its last line and before the architecture's reset or power-off, taking no lock and allocating nothing.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 664
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::rebootWritesTheRegionBack",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem's stop cases (x86-64 and AArch64), boot 2's loader reads the word each of the RESTART, RESTART2, POWER_OFF and HALT arms' stop call stored. By inspection: stop writes the region back in the same body after the store, and nothing in each arm can return after it. The write-back itself is not observable under QEMU, whose caches are the host's: the N150 run is a BACKLOG row.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 671
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::rebootWritesTheRegionBack",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.1\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 672
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::rebootWritesTheRegionBack",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"console::pstore::stop\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 673
+                  }
+                }
+              ]
+            },
+            {
+              "name": "theStopWordChecksItself",
+              "qualifiedName": "FerrixConsoleRequirements::Pstore::theStopWordChecksItself",
+              "kind": "requirement",
+              "shortName": "L.console.48",
+              "type": "ItemLowLevel",
+              "doc": "The word's format is ferrix-bootinfo's pstore module, which the loader and the kernel compile and which is unclassified (the consultant's L3, ledger line 2749): its units are named here by the kernel functions that store it.",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 675
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::theStopWordChecksItself",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"The stop word the kernel stores shall be ferrix-bootinfo's Stop::word: a stop's code in its low half and the code's complement in its high half, so that a word of 0 reads as no stop recorded, a word whose halves do not match or whose code is 0 as damaged, and a whole word with a code the list does not name as unknown; validate shall read version 1, with no stop word whatever its bytes hold, and version 2, and refuse any other.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 686
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::theStopWordChecksItself",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Host tests of ferrix-bootinfo's pstore: every_stop_round_trips_and_none_is_zero, a_changed_bit_is_damaged (every single-bit change of every stop's word), an_unassigned_code_is_a_newer_kernels, and version_1_reads_with_no_stop_word_and_version_3_is_refused. By inspection: stop and panicked store Stop::word and nothing else.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 692
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::theStopWordChecksItself",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.BOOT.1\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 693
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Pstore::theStopWordChecksItself",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::pstore::stop\", \"console::pstore::panicked\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 694
                   }
                 }
               ]
@@ -75578,7 +75752,7 @@
           "doc": "`ferrix.panic=reset` (src/kernel/src/panic/reset.rs), the N150 stop-gap of 2026-10-17 (consultant ledger line 2143): the reset a failure report ends in when asked. Its own family, L.panic, since panic.rs had no low-level ids; here beside the pstore it exists for. The device-tree read of the option gets an id when it is built.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 631
+            "line": 698
           },
           "children": [
             {
@@ -75589,7 +75763,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 639
+                "line": 706
               },
               "children": [
                 {
@@ -75600,7 +75774,7 @@
                   "value": "\"read_option shall arm the reset once, for exactly the value reset of ferrix.panic; no option or halt shall leave it unarmed, and any other value shall be said as not understood and leave it unarmed.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 643
+                    "line": 710
                   }
                 },
                 {
@@ -75611,7 +75785,7 @@
                   "value": "\"In test-postmortem, a boot with ferrix.panic=reset says it resets after the report; one with ferrix.panic=Reset says the value is not understood, its report says it halts and holds no reset line; one with no option holds no reset line.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 648
+                    "line": 715
                   }
                 },
                 {
@@ -75622,7 +75796,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 649
+                    "line": 716
                   }
                 },
                 {
@@ -75633,7 +75807,7 @@
                   "value": "(\"panic::reset::read_option\", \"panic::reset::armed\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 650
+                    "line": 717
                   }
                 }
               ]
@@ -75646,7 +75820,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 652
+                "line": 719
               },
               "children": [
                 {
@@ -75657,7 +75831,7 @@
                   "value": "\"When armed, conclude shall say in its stopped line that the processor resets the machine, print and drain the reset line before the pstore write-back and the screen, and after the screen wait and reset instead of halting.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 656
+                    "line": 723
                   }
                 },
                 {
@@ -75668,7 +75842,7 @@
                   "value": "\"In test-postmortem's reset case boot 1's report says the processor resets the machine after the report, holds the reset line, and the machine starts again by itself.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 659
+                    "line": 726
                   }
                 },
                 {
@@ -75679,7 +75853,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 660
+                    "line": 727
                   }
                 },
                 {
@@ -75690,7 +75864,7 @@
                   "value": "(\"panic::conclude\", \"panic::reset::announce\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 661
+                    "line": 728
                   }
                 }
               ]
@@ -75703,7 +75877,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 663
+                "line": 730
               },
               "children": [
                 {
@@ -75714,7 +75888,7 @@
                   "value": "\"wait_then_reset shall wait 10 seconds on the free-running counter, reading nothing but counter_hz and counter_now, taking no lock and allocating nothing, wait not at all when the rate is 0, and then call arch::reset.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 667
+                    "line": 734
                   }
                 },
                 {
@@ -75725,7 +75899,7 @@
                   "value": "\"In test-postmortem's reset case the loader's banner comes again at least 9.5 s and at most 60 s after the reset line. By inspection: the function's body is the counter loop and the reset.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 671
+                    "line": 738
                   }
                 },
                 {
@@ -75736,7 +75910,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 672
+                    "line": 739
                   }
                 },
                 {
@@ -75747,7 +75921,7 @@
                   "value": "\"panic::reset::wait_then_reset\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 673
+                    "line": 740
                   }
                 }
               ]
@@ -75760,7 +75934,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 675
+                "line": 742
               },
               "children": [
                 {
@@ -75771,7 +75945,7 @@
                   "value": "\"When armed and the reset announced, abridged on the processor that announced it shall go on to wait_then_reset; on any other processor it shall halt. (On x86-64 a fault taken before the kernel's GS base is installed reads another register value and may halt: the fail-safe direction.)\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 680
+                    "line": 747
                   }
                 },
                 {
@@ -75782,7 +75956,7 @@
                   "value": "\"A fault forced inside screen::draw under ferrix.panic=reset still ends in the reset in test-postmortem's reset case, and fails it with abridged's reset removed (gate.sh control, the commit names both runs). By inspection: resetting_here compares this processor's per-CPU register with the announcer's.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 685
+                    "line": 752
                   }
                 },
                 {
@@ -75793,7 +75967,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 686
+                    "line": 753
                   }
                 },
                 {
@@ -75804,7 +75978,7 @@
                   "value": "(\"panic::abridged\", \"panic::reset::resetting_here\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 687
+                    "line": 754
                   }
                 }
               ]

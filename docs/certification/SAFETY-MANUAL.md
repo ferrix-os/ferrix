@@ -594,7 +594,9 @@ it (AoU-15's argument: root, through the raw device).
 ### AoU-30 — the previous boot's log is reported only when RAM survived
 With `ferrix.pstore=on`, the reference, the kernel mirrors its log into a
 region of RAM the loader gives and writes it back from the caches at the
-end of a panic report and before a reset `ferrix.onexit=reset` asks for;
+end of a panic report and before every other stop it makes on purpose,
+recording how it stopped in the header's stop word (`docs/POSTMORTEM.md`
+§5);
 the next boot's loader, outside the element, reports what it finds
 (`docs/POSTMORTEM.md` §3). The claim is only **when the region survived the
 reset, its text is reported**: never that it survives. A cold boot, a power

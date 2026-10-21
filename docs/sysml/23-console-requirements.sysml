@@ -601,10 +601,12 @@ package FerrixConsoleRequirements {
                 The header clause is ferrix-bootinfo's validate, whose host tests
                 refuse a wrong magic, version, header length, capacity, region
                 length, CRC and count: every_field_is_checked and
-                capacities_outside_the_bounds_are_refused. By inspection of check:
-                a valid header with a count other than 0 is refused, and nothing is
-                written to the region before every clause passes (adopt is its only
-                writer).";
+                capacities_outside_the_bounds_are_refused. The kernel takes the
+                header through ferrix-bootinfo's fresh, whose host test
+                the_kernel_takes_only_a_fresh_version_2_header refuses a version-1
+                header, a count other than 0 and every stop word other than 0. By
+                inspection of check: nothing is written to the region before every
+                clause passes (adopt is its only writer).";
             attribute :>> parent = "H.BOOT.1";
             attribute :>> unit = ("console::pstore::attach", "console::pstore::check",
                 "console::pstore::placement");
@@ -613,8 +615,9 @@ package FerrixConsoleRequirements {
             attribute :>> statement = "conclude shall write the pstore region back from
                 the caches after the report's last line is drained and before the
                 screen is drawn, taking no lock and allocating nothing; an abridged
-                report shall write nothing back. finish shall write it back before
-                the reset ferrix.onexit=reset asks for, after its last line.";
+                report shall write nothing back. finish shall write it back, through
+                stop, after its last line and before the reset ferrix.onexit=reset
+                asks for or the power-off of its default.";
             attribute :>> criterion = "In test-postmortem's boot 1, the unlogged
                 `written back for the next boot` line comes straight after the
                 report's explanation, and the region saved after it holds that
@@ -625,6 +628,70 @@ package FerrixConsoleRequirements {
             attribute :>> parent = "H.FAIL.1";
             attribute :>> unit = ("console::pstore::write_back", "panic::conclude",
                 "power::finish");
+        }
+        requirement <'L.console.46'> eachStopOnPurposeRecordsItself : ItemLowLevel {
+            doc /* docs/POSTMORTEM.md section 5 (S1); the consultant's OK IF C1-C12,
+                 * ledger line 2749. */
+            attribute :>> statement = "On a path that does not return, each stop on
+                purpose shall record its code in the attached region's stop word, as
+                one atomic update after its caller's last line and before the
+                architecture's stop: reboot(2)'s RESTART and RESTART2 a restart,
+                POWER_OFF a power-off, HALT a halt, finish a reset under
+                ferrix.onexit=reset and a power-off by default; begin_report shall
+                record a panic when it admits the first report, and an abridged
+                report nothing. No stop shall replace a panic's word.";
+            attribute :>> criterion = "In test-postmortem's stop cases (x86-64 and
+                AArch64), boot 2's loader says boot 1 ended in a restart after
+                reboot -f and after a RESTART2 word, a power-off after poweroff -f, a
+                halt after halt -f, a reset after init exited under
+                ferrix.onexit=reset, and a power-off after init exited by default;
+                no stop recorded after a reset from outside while a program sleeps;
+                and in its record case, the saved region's word and boot 2's loader
+                both say a panic. By inspection: an abridged report stores nothing,
+                and stop's update leaves a panic's word as it is.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = ("console::pstore::stop", "console::pstore::panicked",
+                "panic::begin_report", "power::finish");
+        }
+        requirement <'L.console.47'> rebootWritesTheRegionBack : ItemLowLevel {
+            doc /* reboot(2) itself, syscall/system.rs's sys_reboot, is load-ring code
+                 * and cannot be a unit here: its four calls are argued by
+                 * inspection, and the unit is what they call. */
+            attribute :>> statement = "reboot(2) shall write the pstore region back
+                from the caches, through stop, in each of its four stopping arms
+                (RESTART, RESTART2, POWER_OFF, HALT), after its last line and before
+                the architecture's reset or power-off, taking no lock and allocating
+                nothing.";
+            attribute :>> criterion = "In test-postmortem's stop cases (x86-64 and
+                AArch64), boot 2's loader reads the word each of the RESTART,
+                RESTART2, POWER_OFF and HALT arms' stop call stored. By inspection:
+                stop writes the region back in the same body after the store, and
+                nothing in each arm can return after it. The write-back itself is
+                not observable under QEMU, whose caches are the host's: the N150
+                run is a BACKLOG row.";
+            attribute :>> parent = "H.FAIL.1";
+            attribute :>> unit = "console::pstore::stop";
+        }
+        requirement <'L.console.48'> theStopWordChecksItself : ItemLowLevel {
+            doc /* The word's format is ferrix-bootinfo's pstore module, which the
+                 * loader and the kernel compile and which is unclassified (the
+                 * consultant's L3, ledger line 2749): its units are named here by
+                 * the kernel functions that store it. */
+            attribute :>> statement = "The stop word the kernel stores shall be
+                ferrix-bootinfo's Stop::word: a stop's code in its low half and the
+                code's complement in its high half, so that a word of 0 reads as no
+                stop recorded, a word whose halves do not match or whose code is 0
+                as damaged, and a whole word with a code the list does not name as
+                unknown; validate shall read version 1, with no stop word whatever
+                its bytes hold, and version 2, and refuse any other.";
+            attribute :>> criterion = "Host tests of ferrix-bootinfo's pstore:
+                every_stop_round_trips_and_none_is_zero,
+                a_changed_bit_is_damaged (every single-bit change of every stop's
+                word), an_unassigned_code_is_a_newer_kernels, and
+                version_1_reads_with_no_stop_word_and_version_3_is_refused. By
+                inspection: stop and panicked store Stop::word and nothing else.";
+            attribute :>> parent = "H.BOOT.1";
+            attribute :>> unit = ("console::pstore::stop", "console::pstore::panicked");
         }
     }
 

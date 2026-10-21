@@ -430,6 +430,13 @@ pub(crate) fn build_programs(arch: Arch) -> Result<()> {
     Programs::build(arch).map(drop)
 }
 
+/// The compositor's `reboot` for `arch`: the program that asks for
+/// `reboot(2)`'s RESTART2 with a word, which `test-postmortem` stops a boot
+/// with.
+pub(crate) fn reboot_program(arch: Arch) -> Result<PathBuf> {
+    build(arch, "compositor-reboot", "reboot")
+}
+
 /// Build one of the compositor's programs for `arch`, and say where it is.
 fn build(arch: Arch, package: &str, binary: &str) -> Result<PathBuf> {
     let target = crate::display::target(arch).ok_or_else(|| {

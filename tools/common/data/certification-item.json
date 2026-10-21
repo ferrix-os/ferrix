@@ -85,9 +85,12 @@
       "(docs/POSTMORTEM.md 3). `on`, the default and the reference, has the",
       "loader give the kernel one region of RAM, which the kernel checks and",
       "mirrors its log into, and writes back at the end of a panic report; the",
-      "next boot's loader reports what survived. `off`, or any other value, said,",
-      "takes no region. Claims: L.console.42-44 and L.mm.75; the record is a",
-      "diagnostic only (SAFETY-MANUAL AoU-30, VULNERABILITY-ANALYSIS V-14)."
+      "next boot's loader reports what survived. Every stop on purpose records",
+      "how in the header's stop word and writes the region back (docs/POSTMORTEM.md",
+      "5), so the next loader says how the boot ended. `off`, or any other value,",
+      "said, takes no region. Claims: L.console.42-44, L.console.46-48 and L.mm.75;",
+      "the record is a diagnostic only (SAFETY-MANUAL AoU-30, VULNERABILITY-ANALYSIS",
+      "V-14)."
     ],
     "efifb": "off",
     "efifb_settings": [

@@ -6,20 +6,25 @@
 //! ([`validate`]), reports the text the previous kernel left in the ring
 //! ([`Text`]), and writes a fresh header ([`encode`]) before it hands the
 //! region to the kernel. The kernel checks the header once more, as the loader
-//! left it, and from then on writes ring bytes and the one count,
-//! [`WRITTEN_OFFSET`], and nothing else.
+//! left it ([`fresh`]), and from then on writes ring bytes, the one count,
+//! [`WRITTEN_OFFSET`], and the stop word, [`STOP_OFFSET`], and nothing else.
 //!
 //! ```text
 //!   0  magic      "FXPSTORE"
-//!   8  version    u32 = 1
+//!   8  version    u32 = 2
 //!  12  header     u32 = 4096       the ring starts here
 //!  16  capacity   u64              bytes of ring, a power of two
 //!  24  sequence   u64              which boot wrote it
 //!  32  crc        u32              CRC-32C of bytes 0..32
 //!  36  reserved   u32 = 0
 //!  64  written    u64              bytes ever recorded
+//!  72  stop       u64              how the boot stopped: a code and its complement, 0 = none
 //! 4096 ring       byte n at 4096 + n % capacity
 //! ```
+//!
+//! Version 1 had no stop word (`docs/POSTMORTEM.md` §5). [`validate`] still
+//! reads it, so the loader reports and keeps what a kernel before version 2
+//! left; the kernel attaches to version 2 alone.
 //!
 //! Nothing checks the ring's bytes: a firmware that used the region's RAM on
 //! its way up leaves a valid header over damaged text. So the text is called
@@ -30,8 +35,11 @@ use crate::PAGE_SIZE;
 
 /// The region's first eight bytes.
 pub const MAGIC: [u8; 8] = *b"FXPSTORE";
-/// The header's layout version.
-pub const VERSION: u32 = 1;
+/// The header's layout version: the one [`encode`] writes and [`fresh`]
+/// takes.
+pub const VERSION: u32 = 2;
+/// The version before the stop word, which [`validate`] still reads.
+pub const VERSION_1: u32 = 1;
 /// Bytes before the ring: one page.
 pub const HEADER: u64 = PAGE_SIZE;
 /// The ring's length the loader gives: 1 MiB.
@@ -42,13 +50,16 @@ pub const LEN: u64 = HEADER + CAPACITY;
 pub const MIN_CAPACITY: u64 = PAGE_SIZE;
 /// The largest ring a header may describe.
 pub const MAX_CAPACITY: u64 = 16 << 20;
-/// Where the count of bytes ever recorded is, the only header field the
-/// kernel writes. Eight-byte aligned.
+/// Where the count of bytes ever recorded is, one of the two header fields
+/// the kernel writes. Eight-byte aligned.
 pub const WRITTEN_OFFSET: usize = 64;
 /// A count at or above this is not one a kernel wrote: 256 TiB of log.
 pub const WRITTEN_LIMIT: u64 = 1 << 48;
+/// Where the stop word is ([`Stop::word`]), the other header field the
+/// kernel writes. Eight-byte aligned.
+pub const STOP_OFFSET: usize = WRITTEN_OFFSET + 8;
 /// Bytes of the header [`validate`] reads and [`encode`] writes.
-pub const HEADER_BYTES: usize = WRITTEN_OFFSET + 8;
+pub const HEADER_BYTES: usize = STOP_OFFSET + 8;
 /// How far above the lowest conventional memory the region goes at least:
 /// past where firmware does its own work before it hands over. OVMF
 /// rewrites 8 to 27 MiB on every reset (its MEMFD and the firmware volumes
@@ -129,6 +140,10 @@ pub enum Refusal {
     Crc,
     /// The count is beyond anything a kernel wrote.
     Written,
+    /// Not a fresh header ([`fresh`]): something was recorded already.
+    Recorded,
+    /// Not a fresh header ([`fresh`]): a stop word is there, whole or not.
+    Stopped,
 }
 
 impl core::fmt::Display for Refusal {
@@ -139,6 +154,8 @@ impl core::fmt::Display for Refusal {
             Refusal::Layout => f.write_str("damaged: its layout is not this format's"),
             Refusal::Crc => f.write_str("damaged: its CRC does not match"),
             Refusal::Written => f.write_str("damaged: its count is out of bounds"),
+            Refusal::Recorded => f.write_str("something was recorded already"),
+            Refusal::Stopped => f.write_str("a stop was recorded already"),
         }
     }
 }
@@ -146,15 +163,148 @@ impl core::fmt::Display for Refusal {
 /// A header [`validate`] took.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Found {
+    /// Its layout version: [`VERSION`] or [`VERSION_1`].
+    pub version: u32,
     /// The ring's length.
     pub capacity: u64,
     /// The boot that wrote it.
     pub sequence: u64,
     /// Bytes ever recorded.
     pub written: u64,
+    /// The stop word as it is there, unjudged ([`ended`]); a version-1
+    /// header has none, whatever its bytes are.
+    pub stop: u64,
+}
+
+/// How a boot stopped when it stopped on purpose: the closed list of codes
+/// the stop word holds (`docs/POSTMORTEM.md` §5.1). Codes 7 to 255 are kept
+/// for the stops later slices add.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Stop {
+    /// The first failure report began.
+    Panic = 1,
+    /// `reboot(2)`'s RESTART or RESTART2.
+    Restart = 2,
+    /// `reboot(2)`'s `POWER_OFF`.
+    PowerOff = 3,
+    /// `reboot(2)`'s HALT.
+    Halt = 4,
+    /// Init exited, and `ferrix.onexit=reset` asks for a reset.
+    ExitReset = 5,
+    /// Init exited, and the default powers off.
+    ExitPowerOff = 6,
+}
+
+impl Stop {
+    /// Every stop, in code order.
+    pub const ALL: [Stop; 6] = [
+        Stop::Panic,
+        Stop::Restart,
+        Stop::PowerOff,
+        Stop::Halt,
+        Stop::ExitReset,
+        Stop::ExitPowerOff,
+    ];
+
+    /// Its code.
+    #[must_use]
+    pub const fn code(self) -> u32 {
+        self as u32
+    }
+
+    /// The stop word that records it: the code in the low half, its
+    /// complement in the high half, so that no word of zeros, and no word
+    /// one changed bit away from another stop's, reads as a stop.
+    #[must_use]
+    pub const fn word(self) -> u64 {
+        let code = self.code();
+        (code as u64) | ((!code as u64) << 32)
+    }
+
+    /// The stop a code names, if it names one.
+    #[must_use]
+    pub const fn of(code: u32) -> Option<Stop> {
+        match code {
+            1 => Some(Stop::Panic),
+            2 => Some(Stop::Restart),
+            3 => Some(Stop::PowerOff),
+            4 => Some(Stop::Halt),
+            5 => Some(Stop::ExitReset),
+            6 => Some(Stop::ExitPowerOff),
+            _ => None,
+        }
+    }
+
+    /// What the loader says of it.
+    #[must_use]
+    pub const fn says(self) -> &'static str {
+        match self {
+            Stop::Panic => "a panic",
+            Stop::Restart => "a restart a program asked for (reboot(2))",
+            Stop::PowerOff => "a power-off a program asked for (reboot(2))",
+            Stop::Halt => "a halt a program asked for (reboot(2))",
+            Stop::ExitReset => "a reset after init exited (ferrix.onexit=reset)",
+            Stop::ExitPowerOff => "a power-off after init exited",
+        }
+    }
+}
+
+/// How a found region's boot ended, as its stop word says.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Ended {
+    /// A version-1 header, which has no stop word.
+    NotKept,
+    /// The word is 0: the kernel never said it stopped.
+    NoneRecorded,
+    /// A stop the list names.
+    Stopped(Stop),
+    /// A whole word whose code the list does not name: a newer kernel's.
+    Unknown(u32),
+    /// A word whose halves do not match.
+    Damaged(u64),
+}
+
+/// Judge a stop word.
+#[must_use]
+pub const fn ended(word: u64) -> Ended {
+    if word == 0 {
+        return Ended::NoneRecorded;
+    }
+    let code = word as u32;
+    if (word >> 32) as u32 != !code || code == 0 {
+        return Ended::Damaged(word);
+    }
+    match Stop::of(code) {
+        Some(stop) => Ended::Stopped(stop),
+        None => Ended::Unknown(code),
+    }
+}
+
+impl core::fmt::Display for Ended {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Ended::NotKept => f.write_str("unknown, an older kernel's header"),
+            Ended::NoneRecorded => f.write_str(
+                "no stop recorded: a hang, a watchdog or a reset from outside the kernel",
+            ),
+            Ended::Stopped(stop) => f.write_str(stop.says()),
+            Ended::Unknown(code) => write!(f, "unknown code {code} (a newer kernel's)"),
+            Ended::Damaged(word) => write!(f, "its stop word is damaged ({word:#x})"),
+        }
+    }
 }
 
 impl Found {
+    /// How its boot ended.
+    #[must_use]
+    pub const fn ended(&self) -> Ended {
+        if self.version == VERSION_1 {
+            Ended::NotKept
+        } else {
+            ended(self.stop)
+        }
+    }
+
     /// How many bytes of the ring are text: the last `written`, or the last
     /// `capacity - 1` once it went round, the slot of the place being
     /// claimed being in flight (as in the kernel's own log ring).
@@ -200,7 +350,7 @@ pub fn validate(header: &[u8; HEADER_BYTES], len: u64) -> Result<Found, Refusal>
         return Err(Refusal::NothingThere);
     }
     let version = u32_at(header, 8);
-    if version != VERSION {
+    if version != VERSION && version != VERSION_1 {
         return Err(Refusal::Version(version));
     }
     let capacity = u64_at(header, 16);
@@ -218,10 +368,29 @@ pub fn validate(header: &[u8; HEADER_BYTES], len: u64) -> Result<Found, Refusal>
         return Err(Refusal::Written);
     }
     Ok(Found {
+        version,
         capacity,
         sequence: u64_at(header, 24),
         written,
+        stop: u64_at(header, STOP_OFFSET),
     })
+}
+
+/// Judge a header as the loader leaves it for the kernel: one [`validate`]
+/// takes, of version [`VERSION`] exactly, with nothing recorded and a stop
+/// word of 0. The kernel's acceptance, before it writes a byte there.
+pub fn fresh(header: &[u8; HEADER_BYTES], len: u64) -> Result<Found, Refusal> {
+    let found = validate(header, len)?;
+    if found.version != VERSION {
+        return Err(Refusal::Version(found.version));
+    }
+    if found.written != 0 {
+        return Err(Refusal::Recorded);
+    }
+    if found.stop != 0 {
+        return Err(Refusal::Stopped);
+    }
+    Ok(found)
 }
 
 /// Where the region goes, given the conventional memory the firmware's map

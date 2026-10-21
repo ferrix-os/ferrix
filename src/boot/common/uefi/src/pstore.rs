@@ -183,6 +183,11 @@ fn report(region: Allocation, found: &Found) {
     } else {
         println!("  pstore   boot {}'s log is empty", found.sequence);
     }
+    println!(
+        "  pstore   boot {} ended: {}",
+        found.sequence,
+        found.ended()
+    );
 }
 
 /// Bytes `pstore::shown` produced, which are ASCII, as text.

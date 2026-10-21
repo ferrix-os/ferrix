@@ -22,10 +22,19 @@
 //!
 //! The panic path writes the region back from the caches ([`write_back`]),
 //! since a reset need not.
+//!
+//! # How the boot stopped
+//!
+//! Whatever stops the machine on purpose records how in the header's stop
+//! word ([`stop`], `docs/POSTMORTEM.md` §5): `reboot(2)`, `power::finish`,
+//! and the first failure report ([`panicked`]). One store each, after the
+//! caller's last line and before the architecture's stop, so the next boot's
+//! loader can say how this one ended; a word of 0 there says nothing
+//! stopped it on purpose.
 
 use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
-use ferrix_bootinfo::pstore::{self, HEADER_BYTES, WRITTEN_OFFSET};
+use ferrix_bootinfo::pstore::{self, HEADER_BYTES, STOP_OFFSET, Stop, WRITTEN_OFFSET};
 use ferrix_bootinfo::{BootView, MemKind, PAGE_SIZE};
 use ferrix_sync::Once;
 
@@ -39,6 +48,8 @@ struct Region {
     slots: &'static [AtomicU8],
     /// The header's count of bytes ever recorded.
     written: &'static AtomicU64,
+    /// The header's stop word.
+    stop: &'static AtomicU64,
     /// The region's physical address and length, for the reports and the
     /// boot check.
     phys: u64,
@@ -62,12 +73,46 @@ pub(crate) fn record(bytes: &[u8]) {
 
 /// Write the region back from the caches to memory, for a reset that may
 /// discard them, and say whether there was one. The panic path's, last
-/// before the screen, and the reset's. Takes no lock and allocates nothing.
+/// before the screen; every other stop's goes through [`stop`]. Takes no
+/// lock and allocates nothing.
 pub(crate) fn write_back() -> bool {
     REGION.get().is_some_and(|region| {
         arch::write_back_for_reset(region.virt, region.len);
         true
     })
+}
+
+/// Record `stop` as how this boot stopped, then write the region back for
+/// the stop to come ([`write_back`]); whether there was a region. For a stop
+/// on purpose that does not return, after its caller's last line and before
+/// the architecture's reset, power-off or halt: the lines those print, and
+/// any another processor logs meanwhile, may miss the region's RAM.
+///
+/// A panic's word is never replaced: a stop racing a failure report on
+/// another processor is not how the boot ended. Takes no lock and allocates
+/// nothing.
+pub(crate) fn stop(stop: Stop) -> bool {
+    REGION.get().is_some_and(|region| {
+        let word = stop.word();
+        let panic = Stop::Panic.word();
+        let _ = region
+            .stop
+            .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
+                (now != panic).then_some(word)
+            });
+        arch::write_back_for_reset(region.virt, region.len);
+        true
+    })
+}
+
+/// Record a panic as how this boot stopped: the first failure report, as it
+/// begins, so that a report that faults on its way still says so. The
+/// report's own write-back ([`write_back`]) comes later. One store, no lock,
+/// no allocation.
+pub(crate) fn panicked() {
+    if let Some(region) = REGION.get() {
+        region.stop.store(Stop::Panic.word(), Ordering::Release);
+    }
 }
 
 /// The attached region's physical address and length: for the boot check
@@ -107,10 +152,11 @@ fn check(view: &BootView<'_>, phys: u64, len: u64) -> Result<(u64, u64), &'stati
             virt as usize,
         ))
     };
-    let found = pstore::validate(&header, len).map_err(|_| "its header is not the loader's")?;
-    if found.written != 0 {
-        return Err("its header says something was recorded already");
-    }
+    let found = pstore::fresh(&header, len).map_err(|why| match why {
+        pstore::Refusal::Recorded => "its header says something was recorded already",
+        pstore::Refusal::Stopped => "its header says a stop was recorded already",
+        _ => "its header is not the loader's",
+    })?;
     Ok((virt, found.sequence))
 }
 
@@ -157,6 +203,11 @@ fn adopt(phys: u64, len: u64, virt: u64, sequence: u64) {
     // every bit pattern is one, and from here on it is reached only through
     // this reference.
     let written = unsafe { &*core::ptr::with_exposed_provenance::<AtomicU64>(count_at as usize) };
+    let stop_at = virt + STOP_OFFSET as u64;
+    // SAFETY: (KMEM) as for the count: `stop_at` is eight-byte aligned (a page
+    // plus 72) inside the same checked region, and from here on it is
+    // reached only through this reference.
+    let stop = unsafe { &*core::ptr::with_exposed_provenance::<AtomicU64>(stop_at as usize) };
     // SAFETY: (KMEM) as above, for the `capacity` ring bytes after the header page,
     // inside the same region; `AtomicU8` has `u8`'s layout.
     let slots = unsafe {
@@ -182,6 +233,7 @@ fn adopt(phys: u64, len: u64, virt: u64, sequence: u64) {
     let _ = REGION.call_once(|| Region {
         slots,
         written,
+        stop,
         phys,
         len,
         virt,

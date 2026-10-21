@@ -783,7 +783,9 @@ V-14 names the word.
 design. Design verdict **OK IF C1-C12** (consultant ledger
 `~/.local/share/ferrix/cert-consultant/reviews.md` line 2749); §5 is as
 amended for C1-C10 and the lesser points L1 and L2. §0.1's facts about
-other systems are from memory and are not evidence (L4).
+other systems are from memory and are not evidence (L4). Code verdict
+**OK IF K1-K4** (ledger line 2821): the rows and the nine controls on the
+landing, and L.console.47 verified by the stop cases, not baselined.
 
 2026-10-17, PM4: code verdict **OK IF (1)-(6)** (consultant ledger line
 2195), after the design's OK IF (E1)-(E12) (line 2153). E1's deviation,

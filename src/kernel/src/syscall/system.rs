@@ -34,6 +34,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use ferrix_bootinfo::pstore::Stop;
 use ferrix_bootinfo::{Arch, PAGE_SIZE, is_user_address};
 use ferrix_kmem::Charge;
 use ferrix_linux_abi::errno::Errno;
@@ -725,16 +726,22 @@ pub(crate) fn sys_reboot(
     }
     match cmd {
         command::CAD_ON | command::CAD_OFF => Ok(0),
+        // Each stop records itself and writes the pstore region back after
+        // its last line, past the last point that can return
+        // (`console::pstore::stop`).
         command::POWER_OFF => {
             println!("reboot: Power down");
+            let _ = crate::console::pstore::stop(Stop::PowerOff);
             arch::shutdown()
         }
         command::HALT => {
             println!("reboot: System halted");
+            let _ = crate::console::pstore::stop(Stop::Halt);
             arch::shutdown()
         }
         command::RESTART => {
             println!("reboot: Restarting system");
+            let _ = crate::console::pstore::stop(Stop::Restart);
             arch::reset()
         }
         command::RESTART2 => {
@@ -752,6 +759,7 @@ pub(crate) fn sys_reboot(
                 Ok(what) => println!("reboot: {what}"),
                 Err(why) => println!("reboot: '{word}' changes nothing: {why}"),
             }
+            let _ = crate::console::pstore::stop(Stop::Restart);
             arch::reset()
         }
         _ => Err(Errno::EINVAL),

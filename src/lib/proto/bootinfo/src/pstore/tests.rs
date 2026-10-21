@@ -25,9 +25,11 @@ fn a_fresh_header_validates_as_written() {
     assert_eq!(
         found,
         Found {
+            version: VERSION,
             capacity: CAPACITY,
             sequence: 7,
-            written: 0
+            written: 0,
+            stop: 0
         },
         "what encode wrote"
     );
@@ -44,7 +46,7 @@ fn every_field_is_checked() {
         validate(&bytes, LEN)
     };
     assert_eq!(refused(0, 1), Err(Refusal::NothingThere), "magic");
-    assert_eq!(refused(8, 1), Err(Refusal::Version(0)), "version");
+    assert_eq!(refused(8, 1), Err(Refusal::Version(3)), "version");
     assert_eq!(refused(13, 1), Err(Refusal::Layout), "header length");
     assert_eq!(
         refused(18, 1),
@@ -207,9 +209,11 @@ fn recorded(capacity: usize, text: &[u8]) -> (Vec<u8>, Found) {
         ring[place % capacity] = byte;
     }
     let found = Found {
+        version: VERSION,
         capacity: capacity as u64,
         sequence: 1,
         written: text.len() as u64,
+        stop: 0,
     };
     (ring, found)
 }
@@ -329,5 +333,119 @@ fn the_switch_fails_closed() {
         switch("ferrix.pstore"),
         Switch::On,
         "a bare word is not the option"
+    );
+}
+
+/// A header for `capacity` and `sequence` with `written` and the stop word
+/// set.
+fn stopped(written: u64, stop: u64) -> [u8; HEADER_BYTES] {
+    let mut bytes = header(CAPACITY, 5, written);
+    put(&mut bytes, STOP_OFFSET, &stop.to_le_bytes());
+    bytes
+}
+
+/// The same header as version 1 would have written it: CRC and all.
+fn version_1(written: u64, stop: u64) -> [u8; HEADER_BYTES] {
+    let mut bytes = stopped(written, stop);
+    put(&mut bytes, 8, &VERSION_1.to_le_bytes());
+    let crc = crc32c(&bytes[..CHECKED]);
+    put(&mut bytes, CHECKED, &crc.to_le_bytes());
+    bytes
+}
+
+/// Verifies: `L.console.48`
+#[test]
+fn every_stop_round_trips_and_none_is_zero() {
+    assert_eq!(ended(0), Ended::NoneRecorded, "a word of zeros is no stop");
+    for (index, stop) in Stop::ALL.into_iter().enumerate() {
+        assert_eq!(stop.code() as usize, index + 1, "{stop:?}'s code");
+        assert_eq!(Stop::of(stop.code()), Some(stop), "{stop:?} by its code");
+        assert_eq!(ended(stop.word()), Ended::Stopped(stop), "{stop:?}'s word");
+        let found = validate(&stopped(9, stop.word()), LEN).unwrap();
+        assert_eq!(found.ended(), Ended::Stopped(stop), "{stop:?} in a header");
+    }
+    assert_eq!(
+        validate(&encode(CAPACITY, 2), LEN).unwrap().ended(),
+        Ended::NoneRecorded,
+        "the fresh header's word"
+    );
+}
+
+/// Verifies: `L.console.48`
+#[test]
+fn a_changed_bit_is_damaged() {
+    for stop in Stop::ALL {
+        for bit in 0..64 {
+            let word = stop.word() ^ (1 << bit);
+            assert_eq!(ended(word), Ended::Damaged(word), "{stop:?}, bit {bit}");
+        }
+    }
+    assert_eq!(
+        ended(0xFFFF_FFFF_0000_0000),
+        Ended::Damaged(0xFFFF_FFFF_0000_0000),
+        "code 0 with its complement is no stop either"
+    );
+}
+
+/// Verifies: `L.console.48`
+#[test]
+fn an_unassigned_code_is_a_newer_kernels() {
+    for code in [7u32, 255, 0x1234_5678, u32::MAX - 1] {
+        let word = u64::from(code) | (u64::from(!code) << 32);
+        assert_eq!(ended(word), Ended::Unknown(code), "code {code}");
+    }
+}
+
+/// Verifies: `L.console.48`
+#[test]
+fn version_1_reads_with_no_stop_word_and_version_3_is_refused() {
+    let old = version_1(40, Stop::Restart.word());
+    let found = validate(&old, LEN).unwrap();
+    assert_eq!(found.version, VERSION_1, "read as version 1");
+    assert_eq!(found.written, 40, "its count");
+    assert_eq!(
+        found.ended(),
+        Ended::NotKept,
+        "whatever its bytes 72..80 are"
+    );
+    let mut newer = stopped(0, 0);
+    put(&mut newer, 8, &3u32.to_le_bytes());
+    let crc = crc32c(&newer[..CHECKED]);
+    put(&mut newer, CHECKED, &crc.to_le_bytes());
+    assert_eq!(validate(&newer, LEN), Err(Refusal::Version(3)), "version 3");
+}
+
+/// Verifies: `L.console.43`
+#[test]
+fn the_kernel_takes_only_a_fresh_version_2_header() {
+    assert!(
+        fresh(&encode(CAPACITY, 4), LEN).is_ok(),
+        "the loader's fresh header"
+    );
+    assert_eq!(
+        fresh(&version_1(0, 0), LEN),
+        Err(Refusal::Version(VERSION_1)),
+        "a version-1 header"
+    );
+    assert_eq!(
+        fresh(&stopped(1, 0), LEN),
+        Err(Refusal::Recorded),
+        "a count"
+    );
+    for word in Stop::ALL
+        .map(Stop::word)
+        .into_iter()
+        .chain([1, 1 << 40, u64::MAX])
+    {
+        assert_eq!(
+            fresh(&stopped(0, word), LEN),
+            Err(Refusal::Stopped),
+            "a stop word {word:#x}, whole or damaged"
+        );
+    }
+    assert_eq!(
+        fresh(&[0; HEADER_BYTES], LEN),
+        Err(Refusal::NothingThere),
+        "zeroed RAM"
     );
 }

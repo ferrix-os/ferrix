@@ -185,7 +185,13 @@ impl core::fmt::Write for Prefix {
 pub(crate) fn begin_report() -> bool {
     arch::disable_interrupts();
     console::begin_panic();
-    !REPORTING.swap(true, Ordering::AcqRel)
+    let first = !REPORTING.swap(true, Ordering::AcqRel);
+    if first {
+        // How this boot stopped, for the next boot's loader, before anything
+        // in the report can fault (`console::pstore`).
+        console::pstore::panicked();
+    }
+    first
 }
 
 /// End a report that is not the first. Its opening lines are printed; the

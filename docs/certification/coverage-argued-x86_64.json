@@ -1027,7 +1027,7 @@
     },
     {
       "file": "power.rs",
-      "lines": "125",
+      "lines": "126",
       "category": "other-architecture",
       "match": ".and_then(|tree| option_in(tree.bootargs()?, OPTION))",
       "why": "`/chosen/bootargs`, read only when the loader handed over a device tree; the x86-64 loader hands over ACPI and never a device tree."

@@ -32,6 +32,16 @@
 //! line. A fourth, with `ferrix.panic=Reset`, shows a misspelt value
 //! said as not understood and taken as halt.
 //!
+//! **The stops** (`docs/POSTMORTEM.md` §5). One QEMU for each way the kernel
+//! stops on purpose but a panic, kept across a reset as the first: a program's
+//! `reboot(2)` RESTART, RESTART2, `POWER_OFF` and HALT, and init's exit under
+//! `ferrix.onexit=reset` and under the default. A power-off or a halt only
+//! pauses QEMU, which the gate resets over QMP. Boot 2's loader must say how
+//! boot 1 ended, and boot 2's kernel attach the fresh header. One more QEMU
+//! is reset over QMP while its program sleeps, and boot 2's loader must say
+//! that no stop was recorded. The record's case requires `a panic`, in the
+//! saved region's word and in boot 2's loader's line.
+//!
 //! **The event log** (`docs/POSTMORTEM.md` §4, x86-64). The image's ESP in a
 //! GUID partition table laid out as the N150 box's disk is, with the event
 //! log's partition at LBA 40-2047 before it. Boot 1 panics and resets by
@@ -44,7 +54,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use ferrix_bootinfo::pstore::{self, HEADER_BYTES, Text};
+use ferrix_bootinfo::pstore::{self, Ended, HEADER_BYTES, Stop, Text};
 
 use crate::args::Args;
 use crate::display::Qmp;
@@ -127,6 +137,7 @@ pub(crate) fn test_postmortem(
         switched_off(arch, args, &build)?;
         reset_by_itself(arch, args, &build)?;
         misspelt(arch, args, &build)?;
+        stops(arch, args, &build)?;
         if arch == Arch::X86_64 {
             kept_across_power(arch, args, &build)?;
         } else {
@@ -276,8 +287,31 @@ fn judge(arch: Arch, boot_1: &[String], region: &[u8], after: &[String]) -> Resu
     {
         return fail("boot 2's kernel did not mirror boot 2 to the region".to_owned());
     }
+    if let Some(problem) = panic_word_problem(region, after) {
+        return fail(problem);
+    }
     println!("  {arch}: boot 2's loader found boot 1's log and its panic: {panic}");
     Ok(())
+}
+
+/// Why the record does not say boot 1 ended in a panic, if it does not: the
+/// saved region's stop word, and boot 2's loader's line.
+///
+/// Verifies: `L.console.46`
+fn panic_word_problem(region: &[u8], after: &[String]) -> Option<String> {
+    let header: &[u8; HEADER_BYTES] = region.get(..HEADER_BYTES)?.try_into().ok()?;
+    let found = pstore::validate(header, region.len() as u64).ok()?;
+    if found.ended() != Ended::Stopped(Stop::Panic) {
+        return Some(format!(
+            "the region boot 1 left says it ended in {}, not a panic",
+            found.ended()
+        ));
+    }
+    let ended = format!("pstore   boot 1 ended: {}", Stop::Panic.says());
+    if !after.iter().any(|line| line.trim_end().ends_with(&ended)) {
+        return Some(format!("boot 2's loader did not say `{ended}`"));
+    }
+    None
 }
 
 /// Why boot 1's report did not write the region back after its last logged
@@ -546,6 +580,303 @@ fn reset_problem(boot_1: &[String], after: &[String], waited: Option<Duration>) 
         return Some(format!(
             "after the reset, the loader did not quote boot 1's panic: wanted a line ending `{quoted}`"
         ));
+    }
+    None
+}
+
+/// How a stop case's boot 1 is made to stop.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum How {
+    /// It resets by itself.
+    ByItself,
+    /// It powers off or halts, which pauses QEMU; the gate resets it.
+    Paused,
+    /// Nothing stops it: the gate resets it once it has said it waits.
+    Reset,
+}
+
+/// One stop case: its name, the script's body (none for the image
+/// `test-boot` boots), the option beside it, how boot 1 stops, the line boot
+/// 1 says last before it does, and what boot 2's loader must say of it.
+#[derive(Debug)]
+struct Case {
+    name: &'static str,
+    script: Option<&'static str>,
+    option: Option<&'static str>,
+    how: How,
+    stopping: &'static str,
+    ended: Ended,
+}
+
+/// The script's path, which `ferrix.init=` names.
+const STOP_SCRIPT: &str = "/etc/pm-stop";
+/// What the hang case's script says before it sleeps.
+const WAITING: &str = "pm-stop: waiting for the reset";
+/// Where the RESTART2 program goes: busybox has the name `reboot`.
+const REBOOT2: &str = "bin/reboot2";
+
+/// Every stop case.
+const CASES: [Case; 7] = [
+    Case {
+        name: "reboot(2) RESTART",
+        script: Some("reboot -f\n"),
+        option: None,
+        how: How::ByItself,
+        stopping: "reboot: Restarting system",
+        ended: Ended::Stopped(Stop::Restart),
+    },
+    Case {
+        name: "reboot(2) RESTART2",
+        script: Some("/bin/reboot2 pm-word\n"),
+        option: None,
+        how: How::ByItself,
+        stopping: "reboot: Restarting system with command 'pm-word'",
+        ended: Ended::Stopped(Stop::Restart),
+    },
+    Case {
+        name: "reboot(2) POWER_OFF",
+        script: Some("poweroff -f\n"),
+        option: None,
+        how: How::Paused,
+        stopping: "reboot: Power down",
+        ended: Ended::Stopped(Stop::PowerOff),
+    },
+    Case {
+        name: "reboot(2) HALT",
+        script: Some("halt -f\n"),
+        option: None,
+        how: How::Paused,
+        stopping: "reboot: System halted",
+        ended: Ended::Stopped(Stop::Halt),
+    },
+    Case {
+        name: "init's exit under ferrix.onexit=reset",
+        script: None,
+        option: Some("ferrix.onexit=reset"),
+        how: How::ByItself,
+        stopping: "  power    resetting, as ferrix.onexit=reset asks",
+        ended: Ended::Stopped(Stop::ExitReset),
+    },
+    Case {
+        name: "init's exit, powering off",
+        script: None,
+        option: None,
+        how: How::Paused,
+        stopping: "FERRIX-POWER-OFF",
+        ended: Ended::Stopped(Stop::ExitPowerOff),
+    },
+    Case {
+        name: "a reset from outside",
+        script: Some("echo \"pm-stop: waiting for the reset\"\nsleep 600\n"),
+        option: None,
+        how: How::Reset,
+        stopping: WAITING,
+        ended: Ended::NoneRecorded,
+    },
+];
+
+/// The stops: each case's boot 1 stops as it says, and boot 2's loader says
+/// how it ended.
+///
+/// Verifies: `L.console.46`
+/// Verifies: `L.console.47`
+fn stops(
+    arch: Arch,
+    args: &Args,
+    build: &impl Fn(Arch, &Args) -> Result<(PathBuf, PathBuf)>,
+) -> Result<()> {
+    let busybox = crate::busybox::program(arch)?;
+    let shell = read(&busybox)?;
+    let reboot2 = read(&crate::compositor::reboot_program(arch)?)?;
+    let loader = crate::cargo::build_loader(arch, args.release)?;
+    let kernel = crate::cargo::build_kernel_with_init(arch, args.release, &busybox, "")?;
+    let natives = crate::native::build(arch, args.release)?;
+    let mut carried = crate::shell::carried_for(arch, &busybox, args)?;
+    carried.push(crate::ports::File {
+        path: REBOOT2.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(reboot2),
+    });
+    let parts = crate::init_file::Parts {
+        arch,
+        loader: &loader,
+        kernel: &kernel,
+        natives: &natives,
+        program: &busybox,
+        carried: &carried,
+    };
+    for case in &CASES {
+        let mut wanted = args.clone();
+        wanted.keep_ram = true;
+        let port = crate::display::free_port()?;
+        wanted.qmp_port = Some(port);
+        let (image, elf) = if let Some(body) = case.script {
+            let mut options = qemu::init_option(STOP_SCRIPT);
+            if let Some(option) = case.option {
+                options.push(' ');
+                options.push_str(option);
+            }
+            let image = parts.image_with(
+                &shell,
+                STOP_SCRIPT,
+                &format!("#!/bin/sh\n{body}"),
+                &options,
+                &["bin/reboot", "bin/poweroff", "bin/halt", "bin/sleep"],
+            )?;
+            (image, kernel.elf.clone())
+        } else {
+            wanted.kernel_options.extend(case.option.map(str::to_owned));
+            build(arch, &wanted)?
+        };
+        println!("  {arch}: stopping boot 1 by {}", case.name);
+        let (boot_1, after) = stopped(arch, &image, &elf, &wanted, port, case)?;
+        stop_problem(case, &boot_1, &after).map_or(Ok(()), |problem| {
+            Err(Error::new(format!("{arch}: {}: {problem}", case.name)))
+        })?;
+        println!(
+            "  {arch}: {}: boot 2's loader said boot 1 ended in {}",
+            case.name, case.ended
+        );
+    }
+    Ok(())
+}
+
+/// The bytes of the file at `path`.
+fn read(path: &std::path::Path) -> Result<Vec<u8>> {
+    std::fs::read(path).map_err(|error| Error::new(format!("reading {}: {error}", path.display())))
+}
+
+/// Boot `image`, stop boot 1 as `case` says, and read until boot 2's kernel
+/// attaches: boot 1's lines and boot 2's.
+fn stopped(
+    arch: Arch,
+    image: &std::path::Path,
+    elf: &std::path::Path,
+    wanted: &Args,
+    port: u16,
+    case: &Case,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let mut boot_1 = Vec::new();
+    let mut after = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let deadline = Instant::now() + PATIENCE;
+        let before = watching
+            .lines()
+            .iter()
+            .any(|line| line.contains(case.stopping));
+        let said = before
+            || watching.read_more(deadline, |lines| {
+                lines.iter().any(|line| line.contains(case.stopping))
+            })?;
+        if !said {
+            return Err(Error::new(format!(
+                "{arch}: {}: boot 1 never said `{}`",
+                case.name,
+                case.stopping.trim()
+            )));
+        }
+        let seen = watching.after().len();
+        match case.how {
+            How::ByItself => {}
+            How::Paused => {
+                let mut qmp = Qmp::connect(port, deadline)?;
+                if !paused(&mut qmp, deadline)? {
+                    return Err(Error::new(format!(
+                        "{arch}: {}: QEMU did not pause at boot 1's stop",
+                        case.name
+                    )));
+                }
+                let _ = qmp.execute("system_reset", None)?;
+                // A paused machine stays paused across the reset; one that
+                // runs again already refuses this, which changes nothing.
+                let _ = qmp.execute("cont", None);
+            }
+            How::Reset => {
+                let mut qmp = Qmp::connect(port, deadline)?;
+                let _ = qmp.execute("system_reset", None)?;
+            }
+        }
+        let deadline = Instant::now() + PATIENCE;
+        let _ = watching.read_more(deadline, |lines| {
+            let new = lines.get(seen..).unwrap_or_default();
+            new.iter()
+                .position(|line| line.contains(LOADER_BANNER))
+                .is_some_and(|banner| {
+                    new.get(banner..)
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|line| line.contains(MIRRORING))
+                })
+        })?;
+        let banner = watching
+            .after()
+            .iter()
+            .skip(seen)
+            .position(|line| line.contains(LOADER_BANNER))
+            .map_or(watching.after().len(), |at| seen + at);
+        boot_1 = watching
+            .lines()
+            .iter()
+            .chain(watching.after().get(..banner).unwrap_or_default())
+            .cloned()
+            .collect();
+        after = watching.after().get(banner..).unwrap_or_default().to_vec();
+        watching.stop_when_done();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, image, elf, wanted, qemu::SUCCESS_MARKER, hook)?;
+    Ok((boot_1, after))
+}
+
+/// Whether QEMU says the machine is paused, asked until `deadline`: a
+/// power-off under `-action shutdown=pause`, not an exit.
+fn paused(qmp: &mut Qmp, deadline: Instant) -> Result<bool> {
+    loop {
+        let status = qmp.execute("query-status", None)?;
+        if status.replace(' ', "").contains("\"running\":false") {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Why a stop case's boots do not show its stop, if they do not: boot 1
+/// said its stopping line on a cold start with a mirror, the loader started
+/// again, it says exactly how boot 1 ended, and boot 2's kernel attached the
+/// fresh header it gave.
+fn stop_problem(case: &Case, boot_1: &[String], after: &[String]) -> Option<String> {
+    if !boot_1.iter().any(|line| line.contains(case.stopping)) {
+        return Some(format!("boot 1 never said `{}`", case.stopping.trim()));
+    }
+    if !boot_1
+        .iter()
+        .any(|line| line.contains("no previous kernel log (nothing there)"))
+    {
+        return Some("boot 1's loader did not find RAM with nothing there".to_owned());
+    }
+    let address = match region_address(boot_1) {
+        Ok(address) => address,
+        Err(error) => return Some(error.to_string()),
+    };
+    if !after.iter().any(|line| line.contains(LOADER_BANNER)) {
+        return Some("the loader did not start again after boot 1's stop".to_owned());
+    }
+    let ended = format!("pstore   boot 1 ended: {}", case.ended);
+    if !after.iter().any(|line| line.trim_end().ends_with(&ended)) {
+        let said = after
+            .iter()
+            .find(|line| line.contains("pstore   boot 1 ended: "))
+            .map_or("nothing of it", |line| line.trim());
+        return Some(format!(
+            "boot 2's loader did not say `{ended}`; it said {said}"
+        ));
+    }
+    let mirror = format!("{MIRRORING}{address:#x}, 1024 KiB, boot 2;");
+    if !after.iter().any(|line| line.contains(&mirror)) {
+        return Some(format!("boot 2's kernel did not say `{mirror}`"));
     }
     None
 }

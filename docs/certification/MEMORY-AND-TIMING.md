@@ -1433,7 +1433,15 @@ allocates nothing. Its time is bounded by the hardware:
 * **ARMv7-A**: `DCCMVAC` over the region alone: 32 896 at the Cortex-A7's
   32-byte lines (the DK1), 16 448 at 64.
 
-The same write-back runs before a reset `ferrix.onexit=reset` asks for.
+The same write-back runs, through `console::pstore::stop` (`docs/POSTMORTEM.md`
+§5), before the reset `ferrix.onexit=reset` asks for and before finish's
+power-off, and in each of `reboot(2)`'s four stopping arms (`L.console.47`):
+there in a system call after `sync_disks`, with interrupts on, the other
+processors running and no lock held, once, on a path that ends the machine.
+Each stop adds one atomic update of the stop word before its write-back
+(`L.console.46`), a compare-and-exchange that only a stop racing another on
+a second processor repeats, at most once per such stop; the first report adds
+one store of the panic's word as it begins.
 Under `ferrix.panic=reset` (H.FAIL.5) the panic path's bound gains 10 s on
 the counter, then `arch::reset`'s bounded tries.
 The mirror itself (`L.console.42`) is the log's own lock-free record, once

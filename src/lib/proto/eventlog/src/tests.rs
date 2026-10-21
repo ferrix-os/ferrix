@@ -597,3 +597,28 @@ fn a_present_but_unusable_log_is_never_taken_for_absent() {
         Store::Present(geometry())
     );
 }
+
+/// A version-1 region, as a kernel before the stop word left it, with
+/// bytes where version 2's stop word is: still a panic's record, and kept
+/// (`docs/POSTMORTEM.md` §5.3, the consultant's C10).
+#[test]
+fn a_version_1_region_with_a_panic_is_kept() {
+    let (mut header, ring) = region(4, &panicked("before the stop word"));
+    header[8..12].copy_from_slice(&pstore::VERSION_1.to_le_bytes());
+    let crc = pstore::crc32c(&header[..32]);
+    header[32..36].copy_from_slice(&crc.to_le_bytes());
+    header[pstore::STOP_OFFSET..pstore::STOP_OFFSET + 8].copy_from_slice(&[0xA5; 8]);
+    let mut record = vec![0u8; RECORD_LEN];
+    let event = compose(&header, &ring, [0; 8], &mut record[HEAD_LEN..])
+        .unwrap_or_else(|| panic!("a version-1 panic composed no event"));
+    let mut disk = Disk::new();
+    let mut scratch = vec![0u8; RECORD_LEN];
+    assert_eq!(
+        append(&mut disk, &geometry(), &event, &mut record, &mut scratch),
+        Ok(Outcome::Appended { index: 0, slot: 0 })
+    );
+    assert_eq!(
+        listing(&mut disk),
+        vec![(0, 1, b"FERRIX_PANIC before the stop word".to_vec())]
+    );
+}

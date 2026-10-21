@@ -30,6 +30,7 @@
 
 use core::sync::atomic::{AtomicU8, Ordering};
 
+use ferrix_bootinfo::pstore::Stop;
 use ferrix_bootinfo::{BootView, option_in};
 use ferrix_linux_abi::errno::Errno;
 use ferrix_sync::Once;
@@ -173,15 +174,18 @@ pub(crate) fn finish() -> ! {
     match ON_EXIT.load(Ordering::Relaxed) {
         RESET_ON_EXIT => {
             println!("  power    resetting, as {OPTION}={RESET} asks");
-            // What the next boot's loader reports, out of caches a reset may
-            // discard (`console::pstore`).
-            let _ = crate::console::pstore::write_back();
+            // How the boot stopped, and what the next boot's loader reports,
+            // out of caches a reset may discard (`console::pstore`).
+            let _ = crate::console::pstore::stop(Stop::ExitReset);
             arch::reset()
         }
         PANIC_ON_EXIT => fatal!(
             catalog::INIT_EXITED,
             "init exited, and {OPTION}={PANIC} asks for a panic"
         ),
-        _ => arch::shutdown(),
+        _ => {
+            let _ = crate::console::pstore::stop(Stop::ExitPowerOff);
+            arch::shutdown()
+        }
     }
 }
