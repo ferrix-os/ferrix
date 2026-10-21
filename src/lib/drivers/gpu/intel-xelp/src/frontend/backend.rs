@@ -184,4 +184,12 @@ pub trait Backend {
     fn set_held(&mut self, held: bool) {
         let _ = held;
     }
+
+    /// `intel_rps_boost`: a program waits on `request`, which has not
+    /// signalled. The GT goes to its boost frequency until the request
+    /// retires; once per request, however often this is called. A request
+    /// the back end has not been given yet is ignored (asked again later).
+    fn boost(&mut self, request: RequestId) {
+        let _ = request;
+    }
 }

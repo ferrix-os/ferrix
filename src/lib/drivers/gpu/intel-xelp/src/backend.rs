@@ -158,6 +158,10 @@ pub struct FrequencyReport {
     pub pinned: bool,
     /// How often RPS parked since the last line.
     pub parks: u32,
+    /// How many requests a waiting program boosted since the last line.
+    pub boosts: u32,
+    /// Requests a program waits on now (`num_waiters`).
+    pub waiters: u32,
 }
 
 /// An engine as the uAPI names it (`I915_ENGINE_CLASS_*`, instance).
@@ -210,6 +214,9 @@ struct Request {
     built: Built,
     /// Already handed out (a hang reported it); retired silently.
     reported: bool,
+    /// A program waits on it: counted in [`XelpBackend::waiters`] until
+    /// it retires (`I915_FENCE_FLAG_BOOST`).
+    boost: bool,
 }
 
 /// One hardware context.
@@ -329,6 +336,11 @@ pub struct XelpBackend<P: Platform> {
     held: bool,
     /// Parks since the last frequency log line.
     parks: u32,
+    /// `rps->num_waiters`: requests in flight a program waits on; recounted
+    /// at each service while not 0.
+    waiters: u32,
+    /// Requests boosted since the last frequency log line.
+    boosts: u32,
 }
 
 /// The per-second log's state: when the next line is due, and the last
@@ -483,6 +495,8 @@ impl<P: Platform> XelpBackend<P> {
             idle_since: None,
             held: false,
             parks: 0,
+            waiters: 0,
+            boosts: 0,
         };
         for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
             backend.engine_up(slot, *info)?;
@@ -916,6 +930,7 @@ impl<P: Platform> XelpBackend<P> {
             seqno,
             built,
             reported: false,
+            boost: false,
         });
         ctx.unsubmitted = true;
         ctx.last_tail = built.tail;
@@ -1366,6 +1381,10 @@ impl<P: Platform> crate::frontend::Backend for XelpBackend<P> {
         XelpBackend::set_held(self, held);
     }
 
+    fn boost(&mut self, request: crate::frontend::RequestId) {
+        XelpBackend::boost(self, request);
+    }
+
     fn completed(
         &mut self,
         sink: &mut dyn FnMut(crate::frontend::RequestId, crate::frontend::Completion),
@@ -1520,6 +1539,51 @@ impl<P: Platform> XelpBackend<P> {
         self.held = held;
     }
 
+    /// `intel_rps_boost` for request `id`: marked, counted as a waiter until
+    /// it retires, and the GT's request raised to RP0 now if it is lower.
+    /// Once per request; an id not in flight here is ignored.
+    pub fn boost(&mut self, id: u64) {
+        let found = self
+            .engines
+            .iter_mut()
+            .flatten()
+            .flat_map(|engine| engine.contexts.iter_mut().flatten())
+            .flat_map(|ctx| ctx.inflight.iter_mut().flatten())
+            .find(|request| request.id == id);
+        let Some(request) = found else {
+            return;
+        };
+        if request.boost {
+            return;
+        }
+        request.boost = true;
+        self.waiters = self.waiters.saturating_add(1);
+        self.boosts = self.boosts.saturating_add(1);
+        if let Some(mut rps) = self.rps {
+            let _ = rps.boost(&mut Regs(&self.platform));
+            self.rps = Some(rps);
+        }
+    }
+
+    /// Requests in flight a program waits on, as of the last service.
+    #[must_use]
+    pub const fn waiters(&self) -> u32 {
+        self.waiters
+    }
+
+    /// The boosted requests still in flight.
+    fn count_waiters(&self) -> u32 {
+        let count = self
+            .engines
+            .iter()
+            .flatten()
+            .flat_map(|engine| engine.contexts.iter().flatten())
+            .flat_map(|ctx| ctx.inflight.iter().flatten())
+            .filter(|request| request.boost)
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
     /// The policy's part of [`XelpBackend::service`]: the frequency log,
     /// the park rule ([`crate::rps::park_decision`]: never while anything
     /// is in flight, after [`PARK_NS`] with nothing), and `rps_timer` when
@@ -1548,8 +1612,17 @@ impl<P: Platform> XelpBackend<P> {
             }
             Park::Park | Park::Hold => {}
         }
+        if self.waiters > 0 {
+            self.waiters = self.count_waiters();
+        }
+        let client_boost = self.waiters > 0;
+        if client_boost {
+            // A waiter that came while parked (i915: the work runs at the
+            // unpark's first rps_work).
+            let _ = rps.boost(&mut Regs(&self.platform));
+        }
         let busy = self.busy_totals(now_ns);
-        let _ = rps.evaluate(&mut Regs(&self.platform), now_ns, &busy, false);
+        let _ = rps.evaluate(&mut Regs(&self.platform), now_ns, &busy, client_boost);
         self.rps = Some(rps);
     }
 
@@ -1598,8 +1671,11 @@ impl<P: Platform> XelpBackend<P> {
                 parked: !rps.active,
                 pinned: rps.pinned,
                 parks: self.parks,
+                boosts: self.boosts,
+                waiters: self.waiters,
             });
         self.parks = 0;
+        self.boosts = 0;
         self.freqlog = Some(Freqlog {
             due: now_ns.saturating_add(FREQLOG_NS),
             sample: after,

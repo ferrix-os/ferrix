@@ -183,6 +183,8 @@ struct FakeBackend {
     hold: bool,
     held: Vec<RequestId>,
     full: bool,
+    /// What [`Backend::boost`] was asked for, each time.
+    boosts: Vec<RequestId>,
 }
 
 impl FakeBackend {
@@ -288,6 +290,10 @@ impl Backend for FakeBackend {
     }
 
     fn service(&mut self, _now_ns: u64, _interrupt: bool) {}
+
+    fn boost(&mut self, request: RequestId) {
+        self.boosts.push(request);
+    }
 
     fn next_deadline(&self) -> Option<u64> {
         None
@@ -1417,6 +1423,10 @@ fn waits_are_held_and_answered() {
         let Status::Held(gem_wait) = rig.ioctl_on(1, ioctl::GEM_WAIT, &mut wait) else {
             panic!("not held");
         };
+        // The held wait boosts the request it waits on (`intel_rps_boost`);
+        // the poll before it did not.
+        let request = rig.frontend.backend.submits[0].3;
+        assert_eq!(rig.frontend.backend.boosts, [request]);
         let handles = rig.host.alloc(&done.to_le_bytes());
         let mut sync = SyncobjWait {
             handles,
@@ -1429,9 +1439,21 @@ fn waits_are_held_and_answered() {
         let Status::Held(sync_wait) = rig.ioctl_on(1, ioctl::SYNCOBJ_WAIT, &mut sync) else {
             panic!("not held");
         };
+        assert!(
+            rig.frontend.backend.boosts.len() >= 3,
+            "both waits boost it"
+        );
+        assert!(rig.frontend.backend.boosts.iter().all(|&id| id == request));
         rig.host.now = 500_000;
         rig.frontend.backend.finish(Completion::Ok);
         rig.frontend.service(&mut rig.host, true);
+        let boosted = rig.frontend.backend.boosts.len();
+        rig.frontend.service(&mut rig.host, false);
+        assert_eq!(
+            rig.frontend.backend.boosts.len(),
+            boosted,
+            "nothing is boosted once the waits are answered"
+        );
         assert_eq!(rig.host.replies[&gem_wait], 0);
         assert_eq!(rig.host.replies[&sync_wait], 0);
 

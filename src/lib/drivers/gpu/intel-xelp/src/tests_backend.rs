@@ -816,6 +816,51 @@ fn the_park_floor_and_boost_rules() {
     );
 }
 
+/// A program waiting on a request boosts the GT to RP0 at once, counted
+/// once, until the request retires; then the policy steps down again, not
+/// below RP1, and parks after the hold. (The model runs the batch at the
+/// first register access that waits, so the request retires at the first
+/// service; holding RP0 while it waits is the pure rule's test.)
+#[test]
+fn a_waiter_boosts_until_its_request_retires() {
+    use crate::backend::PARK_NS;
+    let mut be = backend_with_rps();
+    let swreq = |be: &mut XelpBackend<Model>| be.platform().gpu.regs[&0xa008] >> 23;
+    let vm = be.vm_create().expect("vm");
+    let _out = store_batch(&mut be, vm, 0x1_0000_0000, 0x1_0000_1040, 1);
+    let (engine, ctx) = be.context_create(vm, RENDER, 16 << 10).expect("context");
+    be.submit(engine, ctx, 0x1_0000_0000, 7).expect("taken");
+    assert_eq!(swreq(&mut be), 18, "RP1 before anyone waits");
+    // An id not in flight is ignored.
+    be.boost(99);
+    assert_eq!((swreq(&mut be), be.waiters()), (18, 0));
+    be.boost(7);
+    be.boost(7);
+    assert_eq!((swreq(&mut be), be.waiters()), (60, 1), "RP0 at once, once");
+    // Retired: no waiter left; idle, the request steps down to RP1 and no
+    // lower until the park.
+    let _ = be.platform().gpu.run();
+    be.service(500_000, true);
+    let mut now = 500_000;
+    while now < PARK_NS {
+        now += 500_000;
+        be.service(now, false);
+    }
+    let mut done = Vec::new();
+    be.completed(&mut |id, how| done.push((id, how)));
+    assert_eq!(done, [(7, Completion::Ok)]);
+    assert_eq!(be.waiters(), 0);
+    let rps = be.rps().expect("up");
+    assert!(rps.active, "not parked within the hold");
+    assert!(
+        rps.cur < 60 && rps.cur >= 18,
+        "stepped down to the floor: {}",
+        rps.cur
+    );
+    be.service(now + PARK_NS, false);
+    assert_eq!(swreq(&mut be), 12, "RPn once parked");
+}
+
 /// Requests the front end still holds (waiting on fences) keep RPS
 /// unparked past the idle hold; released, it parks after the hold.
 #[test]

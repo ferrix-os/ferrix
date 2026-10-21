@@ -424,6 +424,46 @@ pub fn settle<B: Backend, H: Host<B::Memory>>(frontend: &mut Frontend<B>, host: 
     backend.set_held(holds_queued(state));
     signal_kernel_fences(state, host);
     answer_waits(state, host);
+    boost_waits(backend, state);
+}
+
+/// `intel_rps_boost` for every fence a held wait still waits on
+/// (`i915_gem_object_wait`'s and `i915_request_wait`'s boost): the back end
+/// raises the GT's frequency until each request retires. i915 boosts only a
+/// request that has not started; here a started one is boosted too, since a
+/// program blocked on it is the case the boost is for and the GT may be
+/// running it at any frequency.
+fn boost_waits<B: Backend>(backend: &mut B, state: &Tables<B::Memory>) {
+    let mut boost = |fence: FenceRef| {
+        if state.requests.status(fence).is_none()
+            && let FenceRef::Request(id) | FenceRef::UpTo(id) = fence
+        {
+            backend.boost(id);
+        }
+    };
+    for (_, wait) in state.waits.slots.iter() {
+        match &wait.kind {
+            WaitKind::Object {
+                object, generation, ..
+            } => {
+                let index = usize::from(*object);
+                if state.generations.get(index) != Some(generation) {
+                    continue;
+                }
+                if let Some(entry) = state.objects.get(index) {
+                    boost(entry.write);
+                    for read in entry.reads {
+                        boost(read);
+                    }
+                }
+            }
+            WaitKind::Syncobjs(sync) => {
+                for fence in sync.fences.iter().take(usize::from(sync.count)).flatten() {
+                    boost(*fence);
+                }
+            }
+        }
+    }
 }
 
 /// Whether a live request is still queued here, not yet given to the back
