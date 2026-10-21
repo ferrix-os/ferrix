@@ -118,6 +118,41 @@ fn reaches_machine_check(path: &str) -> bool {
     .contains(&path)
 }
 
+/// The `smt=off` rows (DF4, `L.x86_64.183`-`185`): two cores of two threads
+/// with the siblings parked, under both accelerators, and a machine check
+/// injected into a parked thread; the variant is built by no profile today.
+const TEST_SMT: &[&str] = &[
+    "test-flags --arch x86_64 --accel kvm --set smt=off --no-claim --smp 4 --smp-threads 2",
+    "test-flags --arch x86_64 --accel tcg --set smt=off --no-claim --smp 4 --smp-threads 2",
+    "test-mce --arch x86_64 --accel kvm --set smt=off --no-claim --smp 4 --smp-threads 2",
+];
+
+/// Whether a change to `path` reaches `smt=off`'s parking or its checks: the
+/// processors' records and start, x86-64's start and topology, and the Arm
+/// topology readers' kernel side.
+fn reaches_smt(path: &str) -> bool {
+    path == "src/kernel/src/smp.rs"
+        || path.starts_with("src/kernel/src/arch/arm_common/smt")
+        || path.starts_with("src/kernel/src/arch/x86_64/smp")
+}
+
+/// The rows a change to the processors' bring-up adds to the image row:
+/// the machine check's, and `smt=off`'s.
+fn processor_rows(path: &str, rows: &mut Rows) {
+    let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
+    if reaches_machine_check(path) {
+        rows.add(TEST_MCE);
+        reason(rows, "the machine check's code: test-mce under KVM and TCG");
+    }
+    if reaches_smt(path) {
+        rows.add(TEST_SMT);
+        reason(
+            rows,
+            "smt=off's parking or checks: the parked variant's rows",
+        );
+    }
+}
+
 /// Whether `path` is documentation only: under `docs/`, or a Markdown file
 /// at the top of the tree.
 fn is_docs(path: &str) -> bool {
@@ -212,10 +247,7 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
     {
         rows.add(IMAGE_ROW);
         reason(rows, "in the image: the image row");
-        if reaches_machine_check(path) {
-            rows.add(TEST_MCE);
-            reason(rows, "the machine check's code: test-mce under KVM and TCG");
-        }
+        processor_rows(path, rows);
         rows.ask(
             "stage 7 or 8? then test-shell --arch x86_64 (zinc, --init ferrousli, the musl and \
              the glibc busybox) and test-vfs --arch x86_64 (ferrousli and musl busybox)",
@@ -697,6 +729,20 @@ mod tests {
             rows_of(&["src/kernel/src/arch/x86_64/apic.rs"]).commands,
             IMAGE_ROW
         );
+    }
+
+    #[test]
+    fn the_parking_code_adds_the_smt_rows() {
+        let rows = rows_of(&["src/kernel/src/arch/x86_64/smp/topology.rs"]);
+        assert!(
+            rows.commands.ends_with(
+                &TEST_SMT
+                    .iter()
+                    .map(|row| (*row).to_owned())
+                    .collect::<Vec<_>>()
+            )
+        );
+        assert!(rows_of(&["src/kernel/src/smp/check.rs"]).commands == IMAGE_ROW);
     }
 
     #[test]

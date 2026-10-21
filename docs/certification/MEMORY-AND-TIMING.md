@@ -1591,3 +1591,19 @@ F-23 closed on 2026-09-26 because what it described stopped being true, and a
 gate and a boot check say so: no allocation in the item's product code is
 fatal except at bring-up. What it did not describe, a bound, stays unclaimed,
 and says so in §1.5.
+
+### 2.2t Parked hardware threads (`smt=off`, 2026-10-21)
+
+A thread `smt=off` parks (`arch::x86_64::smp::park`, `L.x86_64.184`) does
+no work after it reports in: its last store is its record's `parked` word,
+and then it halts with interrupts masked for good. It holds no lock and
+allocates nothing once parked; its bring-up allocates what a processor's
+does (a kernel stack and the GDT's interrupt stacks, once, at boot, never
+freed). Nothing waits on it after `start_secondaries`, which waits for its
+report as it waits for a processor's, at most `START_TIMEOUT_NANOS`. An NMI
+it takes counts one and returns to the halt; a machine check stops the
+machine as FX-9005 from it, through the report every processor's takes.
+Stage 4's `smt` check walks the processors' records twice over
+(O(processors squared), at most 256 squared comparisons, once a boot) and
+the parked records once.
+

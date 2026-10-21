@@ -31,6 +31,9 @@ use ferrix_paging::MapFlags;
 use super::{ROOT_SLOTS, UPPER_HALF_SLOT, apic, cpu};
 use crate::smp::Described;
 
+pub(crate) mod check;
+pub(crate) mod topology;
+
 /// Every processor firmware says can be started, and which one this is.
 ///
 /// # Errors
@@ -61,11 +64,33 @@ pub(crate) fn describe_cpus(view: &BootView<'_>) -> Result<Described, &'static s
         }
     }
 
+    let parked = to_park(&ids)?;
     Ok(Described {
         id_name: "APIC ID",
         boot: hardware_id(),
         ids,
+        parked,
     })
+}
+
+/// Of `ids`, the hardware threads to park: under `smt=off`, every thread
+/// whose number within its core is not zero (`L.x86_64.183`, `184`); none
+/// under `stibp`. The topology is read either way, for stage 4's line.
+///
+/// # Errors
+///
+/// A topology that cannot be read (`topology::read`).
+fn to_park(ids: &[u64]) -> Result<Vec<u64>, &'static str> {
+    let (shift, _) = topology::discover()?;
+    if !cfg!(ferrix_smt = "off") {
+        return Ok(Vec::new());
+    }
+    Ok(ids
+        .iter()
+        .copied()
+        .filter(|id| topology::thread_of(*id, shift) != 0)
+        // FATAL-ALLOC: boot only: stage 4 lists the processors firmware describes, once.
+        .collect())
 }
 
 /// This processor's hardware identifier: its local APIC ID.
@@ -436,6 +461,12 @@ fn spin_nanos(nanos: u64) {
 /// the upper half, on its own stack, with interrupts masked — and still on the
 /// trampoline's tree and GDT, both of which are about to be given back.
 extern "C" fn secondary_start(record: u64) -> ! {
+    // A thread started only to be parked (`smt=off`) sets up what it needs
+    // to take a machine check, and nothing it would count among the
+    // processors that run work.
+    if crate::smp::parked_record(record).is_some() {
+        park(record);
+    }
     // Whether the trampoline wrote this processor's PAT before paging was
     // on: counted for stage 9, before `program_pat` writes it again below.
     // Read only where the boot processor's was programmed, so the register
@@ -535,4 +566,81 @@ extern "C" fn secondary_start(record: u64) -> ! {
     }
     apic::init_this_cpu();
     crate::smp::secondary_main(record)
+}
+
+/// A hardware thread parked by the kernel (`smt=off`, `L.x86_64.184`).
+///
+/// It runs the start path's first steps, as a processor that runs work
+/// does: its local APIC into the boot processor's mode (with every local
+/// vector still masked, as INIT left them: Intel SDM Vol. 3A §11.4.7.3), the
+/// kernel's root and the boot processor's `CR4` without `MCE`, the IDT, its
+/// record, and its own GDT and TSS with the interrupt stacks. Then
+/// `CR4.MCE`, so that a machine check broadcast to it is taken through the
+/// gate onto its own stack and stops the machine as FX-9005 rather than
+/// shutting it down (F-73). It says what it parked with, in its record, and
+/// halts for good with interrupts masked: an NMI returns to the halt, and a
+/// fixed interrupt stays pending.
+///
+/// It counts nothing the processors that run work are counted by, never
+/// runs `apic::init_this_cpu` (no timer, no LVT unmasked), and never reaches
+/// `smp::secondary_main`, so nothing lists, waits for or schedules on it.
+fn park(record: u64) -> ! {
+    apic::check::put_first_in_x2apic();
+    if let Err(problem) = apic::enter_mode() {
+        let initial = core::arch::x86_64::__cpuid(1).ebx >> 24;
+        crate::panic::fatal!(
+            crate::panic::catalog::X2APIC_LOCKED,
+            "parked thread with APIC ID {initial}: {problem}"
+        );
+    }
+    // SAFETY: (TRANSLATE) as in `secondary_start`: the kernel's root maps the
+    // upper half as the trampoline's copy does, and nothing here touches the
+    // lower half.
+    unsafe { cpu::write_cr3(crate::mm::root_table()) };
+    let boot_cr4 = BOOT_CR4.load(Ordering::Relaxed);
+    if cpu::read_cr4() != boot_cr4 {
+        // SAFETY: (SYSREG) as in `secondary_start`: the boot processor's own
+        // `CR4`, without `MCE`, on a processor of the same kind in the same
+        // mode, with `CR3`'s low bits clear.
+        unsafe { cpu::write_cr4(boot_cr4) };
+    }
+    // SAFETY: (ENTRY) the boot processor filled the table in `init_traps`.
+    unsafe { super::trap::load_on_this_cpu() };
+    crate::smp::install_secondary_record(record);
+    // SAFETY: (ENTRY) once, on this thread, with interrupts masked.
+    if let Err(problem) = unsafe { super::gdt::init_secondary() } {
+        crate::panic::fatal!(
+            crate::panic::catalog::SECONDARY_GDT,
+            "a parked hardware thread could not build its GDT: {problem}"
+        );
+    }
+    let _ = cpu::enable_machine_check();
+    report_parked(record, cpu::read_cr4());
+    super::halt()
+}
+
+/// Say, on the parked thread whose record is installed, that it has parked
+/// with `cr4`, [`crate::smp::PARKED`] added: the last store a parked thread
+/// makes before it halts for good.
+///
+/// Checks the record first, as `smp::secondary_main` does a processor's: a
+/// thread whose register does not lead to its own parked record stops the
+/// boot by name.
+fn report_parked(record: u64, cr4: u64) {
+    let Some(expected) = crate::smp::parked_record(record) else {
+        crate::panic::fatal!(
+            crate::panic::catalog::SECONDARY_NO_RECORD,
+            "a parked hardware thread arrived with no record of its own"
+        );
+    };
+    if super::cpu_local_register() != record || expected.hardware_id != hardware_id() {
+        crate::panic::fatal!(
+            crate::panic::catalog::SECONDARY_RECORD_MISMATCH,
+            "parked hardware thread {}: arrived without its own record installed",
+            expected.logical
+        );
+    }
+    expected
+        .parked
+        .store(cr4 | crate::smp::PARKED, Ordering::Release);
 }

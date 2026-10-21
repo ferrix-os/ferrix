@@ -71,14 +71,14 @@
     },
     {
       "file": "arch/armv7a/smp.rs",
-      "lines": "177",
+      "lines": "178",
       "category": "absent-hardware",
       "match": "None => psci,",
       "why": "A processor node with no `enable-method`, taken to mean PSCI where the tree has a `/psci` node, as Linux does on this architecture. QEMU's tree names `psci` on every processor; the STM32MP157's `/cpus` nodes carry none, and the DK1 starts both processors through this rule (`2 online`, docs/vendor/st/stm32mp157-dk.md, \"What is actually verified\")."
     },
     {
       "file": "arch/armv7a/smp.rs",
-      "lines": "521",
+      "lines": "527",
       "category": "absent-hardware",
       "match": "seen - set,",
       "why": "`ACTLR.SMP` set on some processors and clear on others: firmware that joined some cores to coherency and missed the rest, which the boot reports rather than proceeds silently on. QEMU reports it clear on every processor, which the suite's boots print (`ACTLR.SMP clear on all 2 processors`)."

@@ -169,21 +169,21 @@
     },
     {
       "file": "arch/aarch64/smp.rs",
-      "lines": "122",
+      "lines": "145",
       "category": "absent-hardware",
       "match": "None => psci,",
       "why": "A `/cpus` node with no `enable-method`, taken to mean PSCI where the tree has a `/psci` node, as Linux does. QEMU's tree names `psci` on every processor, and so does the Pixel 7's; the STM32MP157's does not, and ARMv7-A runs the same rule there."
     },
     {
       "file": "arch/aarch64/smp.rs",
-      "lines": "404",
+      "lines": "427",
       "category": "absent-hardware",
       "match": "None => Err(\"the device tree describes no PSCI, and spin tables are not supported\"),",
       "why": "A device tree with no `/psci` node: a machine whose secondaries are started by spin table, which this kernel does not speak, so it stays on one processor. QEMU and the Pixel 7 both describe PSCI."
     },
     {
       "file": "arch/aarch64/smp.rs",
-      "lines": "417",
+      "lines": "440",
       "category": "absent-hardware",
       "match": "return Err(\"firmware does not say PSCI is implemented, and the parking protocol is not\");",
       "why": "An FADT whose ARM boot flags do not say PSCI: a machine using the ACPI parking protocol, which this kernel does not speak. QEMU's FADT says PSCI."

@@ -110,14 +110,14 @@
     },
     {
       "file": "arch/x86_64/smp.rs",
-      "lines": "56",
+      "lines": "59",
       "category": "absent-hardware",
       "match": "MadtEntry::LocalX2Apic(local) if local.is_enabled() => {",
       "why": "An x2APIC entry in the MADT, which firmware writes only for a processor whose APIC ID does not fit the eight bits of a local APIC entry: on QEMU, more than 255 processors with interrupt remapping in x2APIC mode. The suite boots four and one; q35's firmware describes each with a local APIC entry."
     },
     {
       "file": "arch/x86_64/smp.rs",
-      "lines": "299",
+      "lines": "324",
       "category": "defensive",
       "match": "return Err(\"the trampoline does not fit in a page\");",
       "why": "The trampoline's length is fixed when the image is built, by three symbols around the assembly in this file, and is well under a page. The refusal defends against an edit that grows it past 4 KiB, which would otherwise be copied over whatever follows its frame below one mebibyte."
@@ -1188,28 +1188,28 @@
     },
     {
       "file": "smp.rs",
-      "lines": "983, 987-988",
+      "lines": "1070, 1074-1075",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The failure arm of a `debug_assert!` and its message's arguments: a shootdown requested while holding a lock that disables preemption, which the assertion exists to stop on. It holds on every run of the suite."
     },
     {
       "file": "smp.rs",
-      "lines": "1009",
+      "lines": "1096",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The failure arm of a `debug_assert!`: a shootdown that has to wait for other processors requested with interrupts masked, which no other processor could answer. It holds on every run."
     },
     {
       "file": "smp.rs",
-      "lines": "1050",
+      "lines": "1137",
       "category": "failure-path",
       "match": "stood / 1_000_000",
       "why": "The millisecond count in the `fatal!` a processor raises when no shootdown turn started for the timeout while it waited, printed as the kernel stops."
     },
     {
       "file": "smp.rs",
-      "lines": "1113",
+      "lines": "1200",
       "category": "failure-path",
       "match": "waited / 1_000_000",
       "why": "The millisecond count in the `fatal!` raised when a processor never answered a shootdown or a grace period, printed as the kernel stops."

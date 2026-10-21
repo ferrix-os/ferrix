@@ -178,6 +178,10 @@ pub(crate) struct Args {
     pub(crate) help: bool,
     /// `--smp`, virtual CPUs.
     pub(crate) smp: u32,
+    /// `--smp-threads`, hardware threads a core of those (`smt`'s checks,
+    /// `docs/BUILD-FLAGS.md` §3.1 DF4); zero or one for one thread a core,
+    /// QEMU's own topology.
+    pub(crate) smp_threads: u32,
     /// Whether `--smp` was given, rather than left at its default: under WHPX
     /// the default is one processor, and a count asked for is kept.
     pub(crate) smp_given: bool,
@@ -899,7 +903,7 @@ impl Args {
                 "--screens" => args.screens = number(&mut items, "--screens")?,
                 "--arch" => args.arch = Some(value(&mut items, "--arch")?),
                 "--smp" | "--memory" | "--timeout" => args.machine(&item, &mut items)?,
-                "--seeds" | "--jobs" => args.counts(&item, &mut items)?,
+                "--seeds" | "--jobs" | "--smp-threads" => args.counts(&item, &mut items)?,
                 flag if NAMED_FLAGS.contains(&flag) => args.named(flag, &mut items)?,
                 "--port" => args.port = Some(value(&mut items, "--port")?),
                 "--init" => args.init = Some(value(&mut items, "--init")?),
@@ -956,6 +960,7 @@ impl Args {
     fn counts(&mut self, key: &str, items: &mut impl Iterator<Item = String>) -> Result<()> {
         match key {
             "--seeds" => self.seeds = number(items, key)?,
+            "--smp-threads" => self.smp_threads = number(items, key)?,
             _ => self.jobs = Some(count(items, key)?),
         }
         Ok(())

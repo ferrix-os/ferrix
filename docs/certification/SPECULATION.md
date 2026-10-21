@@ -841,7 +841,14 @@ instructions per clamp.
   it is an integrator's (AoU-11).
 * **Sibling hyperthreads on an MDS-affected part.** `VERW` clears buffers on
   the way out of the kernel, not while a sibling runs. Such a part is to run
-  with SMT off (AoU-11).
+  with SMT off (AoU-11): in firmware, or by building `smt=off`
+  (`docs/BUILD-FLAGS.md` §3.1 DF4), under which the kernel finds each core's
+  threads from `CPUID` leaf `0x1F` or `0xB`, starts every thread but a
+  core's first only to park it (`CR4.MCE` set, interrupts masked, halted
+  for good; `L.x86_64.183`-`185`), and stage 4's `smt` line requires one
+  thread a core to run work. On the Arm architectures `smt=off` is a check
+  of the PPTT or the device tree's `cpu-map` (`L.aarch64.65`,
+  `L.armv7a.27`), since no reference core has SMT.
 * **An exhaustive Spectre v1 audit.** §2's sites are the system call boundary.
   No tool at the pinned toolchain finds gadgets in Rust, and the deeper tables
   were not read for them.

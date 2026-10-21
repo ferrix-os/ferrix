@@ -2892,3 +2892,190 @@ fn a_units_later_rmrrs_are_read_too() {
         })
     );
 }
+
+// ---------------------------------------------------------------------------
+// PPTT
+// ---------------------------------------------------------------------------
+
+/// A processor hierarchy node: type 0, length 20, no private resources.
+fn pptt_node(flags: u32, parent: u32, acpi_id: u32) -> Vec<u8> {
+    let mut node = vec![pptt::NODE_PROCESSOR, 20, 0, 0];
+    node.extend_from_slice(&flags.to_le_bytes());
+    node.extend_from_slice(&parent.to_le_bytes());
+    node.extend_from_slice(&acpi_id.to_le_bytes());
+    node.extend_from_slice(&0u32.to_le_bytes());
+    node
+}
+
+/// Offset of the `index`th 20-byte node after the header.
+fn pptt_at(index: u32) -> u32 {
+    SDT_HEADER_LEN as u32 + 20 * index
+}
+
+/// A PPTT shaped as QEMU `virt`'s with `-smp 4,cores=2,threads=2`: one
+/// package, two cores, two threads each (ACPI IDs 0 to 3), the threads
+/// leaves flagged as threads.
+fn pptt_two_by_two() -> Vec<u8> {
+    let thread = pptt::FLAG_ID_VALID | pptt::FLAG_THREAD | pptt::FLAG_LEAF;
+    TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&pptt_node(1, 0, 0))
+        .raw(&pptt_node(0, pptt_at(0), 0))
+        .raw(&pptt_node(thread, pptt_at(1), 0))
+        .raw(&pptt_node(thread, pptt_at(1), 1))
+        .raw(&pptt_node(0, pptt_at(0), 1))
+        .raw(&pptt_node(thread, pptt_at(4), 2))
+        .raw(&pptt_node(thread, pptt_at(4), 3))
+        .build()
+}
+
+fn pptt_of(bytes: &[u8]) -> pptt::Pptt<'_> {
+    pptt::Pptt::parse(Table::parse(bytes).unwrap()).unwrap()
+}
+
+#[test]
+fn a_pptt_with_two_threads_a_core_says_so() {
+    let bytes = pptt_two_by_two();
+    let found = pptt_of(&bytes).threads(|_| true).unwrap();
+    assert_eq!(
+        found,
+        pptt::Threads {
+            threads: 4,
+            cores: 2,
+            most_a_core: 2
+        }
+    );
+}
+
+#[test]
+fn a_disabled_thread_is_not_counted() {
+    let bytes = pptt_two_by_two();
+    let found = pptt_of(&bytes).threads(|id| id % 2 == 0).unwrap();
+    assert_eq!(
+        found,
+        pptt::Threads {
+            threads: 2,
+            cores: 2,
+            most_a_core: 1
+        }
+    );
+}
+
+#[test]
+fn a_pptt_of_cores_alone_names_no_thread() {
+    let leaf = pptt::FLAG_ID_VALID | pptt::FLAG_LEAF;
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&pptt_node(1, 0, 0))
+        .raw(&pptt_node(leaf, pptt_at(0), 0))
+        .raw(&pptt_node(leaf, pptt_at(0), 1))
+        .build();
+    let found = pptt_of(&bytes).threads(|_| true).unwrap();
+    assert_eq!(
+        found,
+        pptt::Threads {
+            threads: 0,
+            cores: 0,
+            most_a_core: 0
+        }
+    );
+}
+
+#[test]
+fn a_pptt_parent_outside_the_table_is_refused() {
+    let thread = pptt::FLAG_ID_VALID | pptt::FLAG_THREAD | pptt::FLAG_LEAF;
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&pptt_node(thread, 4096, 0))
+        .build();
+    assert_eq!(
+        pptt_of(&bytes).threads(|_| true),
+        Err(AcpiError::BadParent {
+            offset: SDT_HEADER_LEN
+        })
+    );
+}
+
+#[test]
+fn a_pptt_parent_inside_a_node_is_refused() {
+    let thread = pptt::FLAG_ID_VALID | pptt::FLAG_THREAD | pptt::FLAG_LEAF;
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&pptt_node(0, 0, 0))
+        .raw(&pptt_node(thread, pptt_at(0) + 4, 0))
+        .build();
+    assert!(matches!(
+        pptt_of(&bytes).threads(|_| true),
+        Err(AcpiError::BadParent { .. })
+    ));
+}
+
+#[test]
+fn a_pptt_parent_cycle_is_refused() {
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&pptt_node(0, pptt_at(1), 0))
+        .raw(&pptt_node(0, pptt_at(0), 1))
+        .build();
+    assert!(matches!(
+        pptt_of(&bytes).threads(|_| true),
+        Err(AcpiError::BadParent { .. })
+    ));
+}
+
+#[test]
+fn a_pptt_thread_of_no_core_is_refused() {
+    let thread = pptt::FLAG_ID_VALID | pptt::FLAG_THREAD | pptt::FLAG_LEAF;
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&pptt_node(thread, 0, 0))
+        .build();
+    assert_eq!(
+        pptt_of(&bytes).threads(|_| true),
+        Err(AcpiError::BadParent {
+            offset: SDT_HEADER_LEN
+        })
+    );
+}
+
+#[test]
+fn a_pptt_subtable_of_length_one_is_refused() {
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&[1, 1, 0, 0])
+        .build();
+    assert_eq!(
+        pptt_of(&bytes).threads(|_| true),
+        Err(AcpiError::ZeroLengthEntry {
+            offset: SDT_HEADER_LEN
+        })
+    );
+}
+
+#[test]
+fn a_pptt_subtable_past_the_end_is_refused() {
+    let mut node = pptt_node(0, 0, 0);
+    node[1] = 40;
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE).raw(&node).build();
+    assert_eq!(
+        pptt_of(&bytes).threads(|_| true),
+        Err(AcpiError::EntryOutOfBounds {
+            offset: SDT_HEADER_LEN
+        })
+    );
+}
+
+#[test]
+fn a_pptt_steps_over_cache_nodes() {
+    let thread = pptt::FLAG_ID_VALID | pptt::FLAG_THREAD | pptt::FLAG_LEAF;
+    let mut cache = vec![1u8, 24];
+    cache.resize(24, 0);
+    let core = SDT_HEADER_LEN as u32 + 24;
+    let bytes = TableBuilder::new(pptt::PPTT_SIGNATURE)
+        .raw(&cache)
+        .raw(&pptt_node(0, 0, 0))
+        .raw(&pptt_node(thread, core, 0))
+        .build();
+    let found = pptt_of(&bytes).threads(|_| true).unwrap();
+    assert_eq!(
+        found,
+        pptt::Threads {
+            threads: 1,
+            cores: 1,
+            most_a_core: 1
+        }
+    );
+}

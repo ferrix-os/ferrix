@@ -281,6 +281,8 @@ OPTIONS:
                                          (docs/certification/SPECULATION.md)
     --smp <N>                            Virtual CPUs          [default: 4; 1 under whpx with a
                                          QEMU not built by fetch-qemu-windows.sh]
+    --smp-threads <T>                    Of those, hardware threads a core, for smt's checks:
+                                         -smp N,cores=N/T,threads=T  [default: one a core]
     --memory <MiB>                       Guest memory          [default: 512]
     --timeout <SECONDS>                  test-boot patience    [default: 120]
     --seeds <N>                          test-powerfail cuts   [default: 8]

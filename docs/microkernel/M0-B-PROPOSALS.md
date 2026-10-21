@@ -787,6 +787,83 @@ path and readers, carry and justification after the final rebase.
 tests (1.5): **11.5 to 14.5** points, about 5 to 7 hours of work and the
 gate time on top.
 
+### 3.2 The code, and ledger 2563's conditions (2026-10-21, branch `mk/smt-off-code`)
+
+**(1) What a parked thread runs.** `arch::x86_64::smp::secondary_start`
+asks `smp::parked_record(record)` first and, for a parked thread, goes to
+`park`: `apic::check::put_first_in_x2apic` and `apic::enter_mode` (the
+mode check every started processor makes, counted by check R8 among the
+processors started), `write_cr3` of the kernel's root, the boot
+processor's `CR4` without `MCE`, `trap::load_on_this_cpu`,
+`smp::install_secondary_record`, `gdt::init_secondary` (its kernel stack
+and interrupt stacks, allocated once at boot), `cpu::enable_machine_check`,
+`smp::report_parked` and `halt`. It skips everything a processor that runs
+work is counted by: the PAT, `FSGSBASE`, the x87 controls, `XCR0`, HWP, the
+speculation defences' application, `apic::init_this_cpu` and
+`smp::secondary_main`. After it parks it can run two things:
+* **An NMI**: `ferrix_paranoid_entry`'s NMI arm, `note_gs` (which walks
+  the records, `cpus` and `parked`, comparing addresses, with no lock, no
+  allocation, no index) and two counter increments, then the return to the
+  halt.
+* **A machine check**: `trap::fatal` → `panic::begin_report` (one
+  atomic), the console's lock (the one every report takes), `conclude`:
+  `this_cpu_for_report` (the same walk; it names the thread "processor 3
+  (hardware id 0x3)", its logical number past `count()`), `stop_others`
+  (counts `online()` over `cpus` alone; sends the fixed IPI through the
+  ICR, which a local APIC software-disabled since INIT may still send,
+  Intel SDM Vol. 3A §11.4.7.2), the console's drain and the pstore
+  write-back, and `halt`.
+None of them indexes an array by the thread's logical number: every array
+sized for the processors is indexed by `cpus`' logical numbers, which the
+parked records' numbers (`count()` and up) never are, and `smp::record(n)`
+reads `cpus` alone, so a parked number would read `None`, never another
+processor's record.
+
+**(2) A machine check on a parked thread** is reported from the parked
+thread itself, as above. `test-mce` with `--smp-threads` injects into
+QEMU's last processor alone, the last thread of the last core, which
+`smt=off` parks; locally under TCG it reported "on processor 3 (hardware
+id 0x3)" and FX-9005. The panic stop is not an NMI on x86-64: `stop_others`
+sends the fixed IPI (`ICR_ALL_BUT_SELF`), which a parked thread, with
+`IF=0` for good, leaves pending, and counts only `online()`.
+
+**(3) Arm, fail closed.** `arch::arm_common::smt::record` stops the boot under
+`smt=off` on a malformed PPTT or `cpu-map` (`describe_cpus`' error);
+`arm_common::smt::check::check_arm_smt` passes "no topology table" only where every
+online processor reads `MPIDR.MT` clear. The PPTT walk
+(`ferrix_acpi::pptt`) is bounded by the table's length over the 20-byte
+node size, refuses a parent outside the table, inside a node, a loop or a
+thread with no parent, and allocates nothing (nine host tests, the
+malformed shapes among them); `ferrix_fdt::cpu_map` walks the tree's own
+bounded walk, refuses a thread outside a core or naming no processor, and
+allocates nothing (seven host tests). AArch64's reference boot reads the
+PPTT (QEMU `virt` publishes one); the line reads "the PPTT lists no
+threads, one a core" on today's rows.
+
+**(5) The local APIC's mode.** The parked thread runs `apic::enter_mode`,
+so its APIC is in the boot processor's mode (x2APIC or xAPIC, as check R8
+says for every started processor), and never runs `apic::init_this_cpu`,
+so every local vector stays masked as INIT left them (Intel SDM Vol. 3A
+§11.4.7.1 and §11.4.7.3: after INIT the LVT entries' mask bits are set and
+the APIC is software-disabled). No mixed-mode system is made.
+
+**(6) Controls**, each through `gate.sh control --expect`:
+* S1, `to_park`'s filter made to start the first sibling for work
+  (`!= 0` → `!= 0 && *id != 1`): "two online processors share a core";
+* S2, `park`'s `enable_machine_check` call removed: "a parked hardware
+  thread reads CR4.MCE clear";
+* S3, AArch64, xtask's `smp_topology` forced to two threads a core under a
+  plain `smt=off` boot: "a core lists two threads";
+* S4, the same on ARMv7-A through `cpu-map`;
+* S5, AArch64, `check_arm_smt` made to see no table and an `MT` set (one
+  edit): "no topology table, and a processor's MPIDR.MT is set".
+
+**(7)** F-73 landed first (d9c93c7c9). **(8)** SPECULATION.md's SMT
+paragraph and SAFETY-MANUAL's AoU-11 name `smt=off`; build-flags.toml has
+`smt.off` built, `xtask check` lints the variant on every architecture,
+and gate-rows adds the variant's rows for changes to the parking code;
+MEMORY-AND-TIMING §2.2t; `coverage-owed.json` names the new code.
+
 ---
 
 ## 4. Plan: `ssbd=on_request` (DF3)

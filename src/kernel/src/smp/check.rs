@@ -64,6 +64,8 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     arch::check_user_counter()?;
     arch::check_x87_controls()?;
     arch::check_machine_check_enabled()?;
+    parked_reported(topology)?;
+    arch::check_smt()?;
     Ok(report)
 }
 
@@ -1037,4 +1039,32 @@ pub(crate) fn late_answer(topology: &Topology) -> Result<Option<LateAnswers>, &'
         grace_us,
         shootdown_us,
     }))
+}
+
+/// Every hardware thread started to be parked (`smt=off`) reported that it
+/// parked, and no processor that runs work did: none of the records apart
+/// from `cpus` was left unreported, and none in it carries a parked report.
+///
+/// # Errors
+///
+/// A parked thread that never reported, or a processor that runs work with
+/// a parked report.
+///
+/// Verifies: `L.x86_64.184`
+fn parked_reported(topology: &Topology) -> Result<(), &'static str> {
+    if topology
+        .parked()
+        .iter()
+        .any(|thread| thread.parked.load(Ordering::Acquire) & crate::smp::PARKED == 0)
+    {
+        return Err("smt: a parked hardware thread never reported in");
+    }
+    if topology
+        .cpus()
+        .iter()
+        .any(|cpu| cpu.parked.load(Ordering::Acquire) != 0)
+    {
+        return Err("smt: a processor that runs work reported itself parked");
+    }
+    Ok(())
 }
