@@ -185,6 +185,13 @@ pub trait Backend {
         let _ = held;
     }
 
+    /// Whether a kernel fence (a sync file, a dmabuf's fence) is still to
+    /// be signalled: a program outside the driver may be blocked on it, so
+    /// completions should be seen promptly.
+    fn set_watched(&mut self, watched: bool) {
+        let _ = watched;
+    }
+
     /// `intel_rps_boost`: a program waits on `request`, which has not
     /// signalled. The GT goes to its boost frequency until the request
     /// retires; once per request, however often this is called. A request

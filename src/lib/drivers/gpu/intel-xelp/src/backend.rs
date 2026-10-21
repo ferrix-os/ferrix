@@ -45,8 +45,33 @@ use crate::{gt, irq, lrc, mocs, reset, workarounds};
 /// reset.
 pub const HANG_NS: u64 = 2_000_000_000;
 /// How often [`XelpBackend::service`] wants to be called while work is
-/// outstanding: the bounded poll for a box whose MSI does not arrive.
+/// outstanding and a program waits on it, or a context waits for the
+/// ports: the bounded poll for a box whose MSI does not arrive (the N150,
+/// docs/N150.md section 13).
 pub const POLL_NS: u64 = 1_000_000;
+/// The longest the poll backs off to while work is outstanding but nothing
+/// waits on it: no program in a wait, no kernel fence to signal, no request
+/// the front end holds for its fences, no context waiting for the ports. A
+/// completion is then seen at most this late, which delays only retiring
+/// and freeing.
+pub const POLL_MAX_NS: u64 = 4_000_000;
+
+/// The poll's next interval after one at `prev`: back to [`POLL_NS`] when
+/// the service moved anything (`progressed`: a request retired or a
+/// context went into the ports) or a program or context waits (`urgent`),
+/// else doubled up to [`POLL_MAX_NS`].
+#[must_use]
+pub const fn next_poll_ns(prev: u64, progressed: bool, urgent: bool) -> u64 {
+    if progressed || urgent {
+        POLL_NS
+    } else if prev >= POLL_MAX_NS / 2 {
+        POLL_MAX_NS
+    } else if prev < POLL_NS {
+        POLL_NS * 2
+    } else {
+        prev * 2
+    }
+}
 /// VMs at once.
 pub const MAX_VMS: usize = 64;
 /// Hardware contexts at once on one engine: one timeline slot each in its
@@ -341,6 +366,12 @@ pub struct XelpBackend<P: Platform> {
     waiters: u32,
     /// Requests boosted since the last frequency log line.
     boosts: u32,
+    /// The poll's interval now ([`next_poll_ns`]), and whether the current
+    /// service retired or submitted anything.
+    poll_ns: u64,
+    progressed: bool,
+    /// A kernel fence is still to be signalled (`Backend::set_watched`).
+    watched: bool,
 }
 
 /// The per-second log's state: when the next line is due, and the last
@@ -497,6 +528,9 @@ impl<P: Platform> XelpBackend<P> {
             parks: 0,
             waiters: 0,
             boosts: 0,
+            poll_ns: POLL_NS,
+            progressed: false,
+            watched: false,
         };
         for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
             backend.engine_up(slot, *info)?;
@@ -936,6 +970,7 @@ impl<P: Platform> XelpBackend<P> {
         ctx.last_tail = built.tail;
         let now = platform.now_us().saturating_mul(1_000);
         drop(platform);
+        self.poll_ns = POLL_NS;
         self.unpark(now);
         self.dequeue(slot, now);
         Ok(())
@@ -982,6 +1017,7 @@ impl<P: Platform> XelpBackend<P> {
             .submit(&mut Regs(&self.platform), desc, pick as u16)
         {
             ctx.unsubmitted = false;
+            self.progressed = true;
             engine.active = Some(pick);
             engine.cursor = (pick + 1) % MAX_CONTEXTS_PER_ENGINE;
         }
@@ -995,6 +1031,7 @@ impl<P: Platform> XelpBackend<P> {
     /// submits what is waiting.
     pub fn service(&mut self, now_ns: u64, interrupt: bool) {
         self.last_service_ns = now_ns;
+        self.progressed = interrupt;
         self.freqlog_due(now_ns);
         if interrupt {
             let _ = irq::gen11_irq_handler(&mut Regs(&self.platform), &mut Time(&self.platform));
@@ -1015,7 +1052,17 @@ impl<P: Platform> XelpBackend<P> {
             self.dequeue(slot, now_ns);
         }
         self.power_service(now_ns);
+        let urgent = self.waiters > 0 || self.held || self.watched || self.ports_wanted();
+        self.poll_ns = next_poll_ns(self.poll_ns, self.progressed, urgent);
         self.platform.borrow_mut().forcewake_release(now_ns);
+    }
+
+    /// A context has requests not yet in the ports.
+    fn ports_wanted(&self) -> bool {
+        self.engines
+            .iter()
+            .flatten()
+            .any(|e| e.contexts.iter().flatten().any(|c| c.unsubmitted))
     }
 
     fn process_csb(&mut self, slot: usize) {
@@ -1082,6 +1129,7 @@ impl<P: Platform> XelpBackend<P> {
                     head = Some((age, request.built.wa_tail));
                 }
                 *entry = None;
+                self.progressed = true;
             }
             if let Some((_, head)) = head {
                 ctx.hw.retire(head);
@@ -1204,8 +1252,9 @@ impl<P: Platform> XelpBackend<P> {
         }
     }
 
-    /// When [`XelpBackend::service`] must next be called: [`POLL_NS`] after
-    /// the last call while any request is outstanding.
+    /// When [`XelpBackend::service`] must next be called: the poll's
+    /// interval ([`next_poll_ns`]) after the last call while any request is
+    /// outstanding.
     #[must_use]
     pub fn next_deadline(&self) -> Option<u64> {
         let busy = self
@@ -1213,7 +1262,7 @@ impl<P: Platform> XelpBackend<P> {
             .iter()
             .flatten()
             .any(|e| e.contexts.iter().flatten().any(|c| c.count() > 0));
-        let poll = busy.then(|| self.last_service_ns.saturating_add(POLL_NS));
+        let poll = busy.then(|| self.last_service_ns.saturating_add(self.poll_ns));
         let log = self.freqlog.map(|log| log.due);
         let policy = self.rps.and_then(|rps| rps.due());
         let park = self
@@ -1379,6 +1428,10 @@ impl<P: Platform> crate::frontend::Backend for XelpBackend<P> {
 
     fn set_held(&mut self, held: bool) {
         XelpBackend::set_held(self, held);
+    }
+
+    fn set_watched(&mut self, watched: bool) {
+        self.watched = watched;
     }
 
     fn boost(&mut self, request: crate::frontend::RequestId) {
@@ -1557,6 +1610,7 @@ impl<P: Platform> XelpBackend<P> {
             return;
         }
         request.boost = true;
+        self.poll_ns = POLL_NS;
         self.waiters = self.waiters.saturating_add(1);
         self.boosts = self.boosts.saturating_add(1);
         if let Some(mut rps) = self.rps {

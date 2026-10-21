@@ -423,6 +423,7 @@ pub fn settle<B: Backend, H: Host<B::Memory>>(frontend: &mut Frontend<B>, host: 
     retire(backend, state);
     backend.set_held(holds_queued(state));
     signal_kernel_fences(state, host);
+    backend.set_watched(!state.kernel_fences.is_empty());
     answer_waits(state, host);
     boost_waits(backend, state);
 }

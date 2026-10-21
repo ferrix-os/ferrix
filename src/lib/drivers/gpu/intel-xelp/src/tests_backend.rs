@@ -861,6 +861,19 @@ fn a_waiter_boosts_until_its_request_retires() {
     assert_eq!(swreq(&mut be), 12, "RPn once parked");
 }
 
+/// The poll backs off while nothing moves and nobody waits, and is back at
+/// 1 ms the moment anything moves or anyone waits.
+#[test]
+fn the_poll_backs_off_only_when_nobody_waits() {
+    use crate::backend::{POLL_MAX_NS, POLL_NS, next_poll_ns};
+    assert_eq!(next_poll_ns(POLL_NS, false, false), 2 * POLL_NS);
+    assert_eq!(next_poll_ns(2 * POLL_NS, false, false), POLL_MAX_NS);
+    assert_eq!(next_poll_ns(POLL_MAX_NS, false, false), POLL_MAX_NS);
+    assert_eq!(next_poll_ns(POLL_MAX_NS, true, false), POLL_NS);
+    assert_eq!(next_poll_ns(POLL_MAX_NS, false, true), POLL_NS);
+    assert_eq!(next_poll_ns(0, false, false), 2 * POLL_NS);
+}
+
 /// Requests the front end still holds (waiting on fences) keep RPS
 /// unparked past the idle hold; released, it parks after the hold.
 #[test]
