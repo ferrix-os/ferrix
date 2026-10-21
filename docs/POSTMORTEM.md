@@ -849,8 +849,8 @@ step reads it.
   watcher names it in `LOCKUP_TARGET` and sends it an NMI. Its NMI handler
   (`arch::x86_64::paranoid`) sees itself named, records the stop word
   `Stop::Lockup` (code 7), and reports through `trap::fatal` with its own
-  frame. The report's backtrace is then the stuck code's, under the
-  catalog's new `LOCKUP` entry. If no report has begun 2 s after the NMI
+  frame. The report's `rip` is then the stuck code's (its backtrace
+  ends at the NMI's own stack), under the catalog's new `LOCKUP` entry. If no report has begun 2 s after the NMI
   (NMIs blocked, the target in an NMI already), the watcher records the
   word and panics itself. It names the processor, its last heartbeat and
   the counter. AArch64 and ARMv7-A have no NMI without GICv3's
@@ -922,12 +922,13 @@ the kernel stopped feeding), L.lockup.1-5, L.tco.1-6, L.console.49 (code
 * **S4a's gate**, `cargo xtask test-postmortem`'s lockup case (x86-64 under
   KVM, 4 processors, and AArch64): a check-only boot option
   `ferrix.check.lockup=irqoff` (`*_check.rs`, outside the product) makes
-  processor 2 spin with interrupts masked once boot is up. The report must
-  come within 10 to 20 s, name processor 2, carry the catalog's `LOCKUP` code
-  and, on x86-64, a backtrace through the check's spin. After a QMP reset
-  the loader must say `a lockup`. A boot with the detector on and no
-  sabotage must run its whole test-boot with no report: the false-positive
-  row. Controls: the heartbeat's bump removed from `on_tick` (a report
+  the boot processor spin with interrupts masked once boot is up. The report must
+  come within 9.5 to 30 s, name the masked processor, carry the catalog's `LOCKUP` code
+  and, on x86-64, a `rip` in the check's spin. After a QMP reset
+  the loader must say `a lockup`. The quiet case, the detector on and every
+  processor idle for 25 s under a sleeping script, must report nothing: the
+  false-positive row. (test-boot stops at its marker, before the detector
+  starts, so it cannot be that row.) Controls: the heartbeat's bump removed from `on_tick` (a report
   where none is due) and the ring check removed (no report, the gate's
   timeout); on x86-64, the NMI handler's lockup arm removed (the watcher's
   own report, without the backtrace).
@@ -992,6 +993,14 @@ S4a 6-8 points, S4b 8-10, the box steps about 1: 15 to 19 points.
 watchdog. Design verdict **OK IF D1-D14** (consultant ledger line 2889);
 §6.8 answers the choices it asked the design to make. S4a lands first, then
 S4b, each with its own code review.
+
+S4a (lockup): `src/kernel/src/watch.rs` (core: heartbeats, the 1 s watch
+tick, the hook and the NMI's name), `src/kernel/src/lockup.rs` (item: the
+ring watch and the report), `lockup_check.rs` (the check), stop code 7 and
+the catalog's FX-9007. Requirements H.FAIL.6, L.lockup.1-3, L.console.49.
+Gate: test-postmortem's lockup case and its quiet case, on x86-64 under KVM
+(4 processors) and AArch64. Code verdict **OK IF L1-L6** (consultant ledger
+line 3002), after the design's at line 2889.
 
 2026-10-21, version 3 (crashlog): §0's survey and slices, and §5's S1
 design. Design verdict **OK IF C1-C12** (consultant ledger

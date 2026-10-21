@@ -390,7 +390,7 @@ fn a_changed_bit_is_damaged() {
 /// Verifies: `L.console.48`
 #[test]
 fn an_unassigned_code_is_a_newer_kernels() {
-    for code in [7u32, 255, 0x1234_5678, u32::MAX - 1] {
+    for code in [8u32, 255, 0x1234_5678, u32::MAX - 1] {
         let word = u64::from(code) | (u64::from(!code) << 32);
         assert_eq!(ended(word), Ended::Unknown(code), "code {code}");
     }

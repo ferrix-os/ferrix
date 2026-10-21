@@ -1089,6 +1089,9 @@ fn idle_loop() -> ! {
             arch::enable_interrupts();
             let _ = reap_batch(true);
         } else {
+            // A processor that halts arms nothing of its own: once watching,
+            // its watch tick wakes it within the second (`watch`).
+            crate::watch::arm_here();
             arch::wait_for_work();
             set_idle(cpu, false);
         }

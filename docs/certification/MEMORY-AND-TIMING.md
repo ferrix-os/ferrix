@@ -1451,6 +1451,26 @@ The boot check that no frame of the region is free (`L.mm.75`) takes the
 frame allocator's lock once a frame, 257 times for the region, once a boot
 after the reclaim, on the boot processor.
 
+### 2.2o' The watch and the lockup detector (`watch`, `lockup`, 2026-10-21)
+
+`docs/POSTMORTEM.md` §6.2, off unless `ferrix.lockup=on`. Off, every timer
+and inter-processor interrupt and every idle halt reads one flag set once
+(`watch::watching`), and nothing more. On:
+
+* **Interrupts.** Each processor takes at least one timer interrupt a
+  second: its one-shot is armed no later than a second ahead
+  (`watch::arm_here`, through `timer::after`, which writes the hardware only
+  when nothing sooner is armed).
+* **Per tick.** One atomic add (the heartbeat); then, for the watch, one
+  load of the next online processor's heartbeat and a compare, the ring's
+  target found by a walk over at most the processor count's records; on a
+  lockup, one store of the stop word and one NMI write to the local APIC
+  (x86-64). The NMI's two-second fallback is decided on a later tick: no
+  tick waits.
+* **Per NMI** (x86-64): one load and compare of the named processor before
+  the NMI's own counting, then, when named, the failure report's own bounds
+  (§2.2o and the panic path's).
+
 ### 2.2p The firmware's SMBIOS tables (2026-10-15)
 
 * **Memory.** The loader's copy is the entry point padded to 32 bytes and

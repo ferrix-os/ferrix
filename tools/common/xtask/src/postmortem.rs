@@ -138,6 +138,7 @@ pub(crate) fn test_postmortem(
         reset_by_itself(arch, args, &build)?;
         misspelt(arch, args, &build)?;
         stops(arch, args, &build)?;
+        locked_up(arch, args, &build)?;
         if arch == Arch::X86_64 {
             kept_across_power(arch, args, &build)?;
         } else {
@@ -584,6 +585,196 @@ fn reset_problem(boot_1: &[String], after: &[String], waited: Option<Duration>) 
     None
 }
 
+/// The check's line as the masked processor begins to spin.
+const MASKING: &str = "ferrix.check.lockup=irqoff: processor ";
+/// The detector's line once it watches.
+const WATCHING: &str = "  lockup   ferrix.lockup=on: ";
+/// The catalog's code for a lockup.
+const LOCKUP_CODE: &str = "  code      FX-9007";
+/// The earliest and latest the report may come after the masking line:
+/// the detector's ten seconds less the slack of reading the port, and those
+/// plus its tick, the NMI's two seconds and a loaded host's delay.
+const LOCKUP_AT_LEAST: Duration = Duration::from_millis(9_500);
+const LOCKUP_AT_MOST: Duration = Duration::from_secs(30);
+
+/// The lockup: with `ferrix.lockup=on`, the check masks the boot
+/// processor's interrupts and spins; its watcher must report it within the
+/// bound, and after a reset the next loader must say the boot ended in a
+/// lockup.
+///
+/// Verifies: H.FAIL.6, `L.lockup.1`, `L.lockup.2`, `L.lockup.3`, `L.console.49`
+fn locked_up(
+    arch: Arch,
+    args: &Args,
+    build: &impl Fn(Arch, &Args) -> Result<(PathBuf, PathBuf)>,
+) -> Result<()> {
+    let mut wanted = args.clone();
+    wanted.kernel_options.push("ferrix.lockup=on".to_owned());
+    wanted
+        .kernel_options
+        .push("ferrix.check.lockup=irqoff".to_owned());
+    wanted.keep_ram = true;
+    let port = crate::display::free_port()?;
+    wanted.qmp_port = Some(port);
+    let (image, kernel) = build(arch, &wanted)?;
+    let mut boot_1 = Vec::new();
+    let mut after = Vec::new();
+    let mut waited = None;
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let deadline = Instant::now() + PATIENCE;
+        let masked = watching.read_more(deadline, |lines| {
+            lines.iter().any(|line| line.contains(MASKING))
+        })?;
+        if !masked {
+            return Err(Error::new(format!(
+                "{arch}: the check never said `{MASKING}...`"
+            )));
+        }
+        let at = Instant::now();
+        let reported = watching.read_more(at + LOCKUP_AT_MOST + PATIENCE, |lines| {
+            lines.iter().any(|line| line.contains(WRITTEN_BACK))
+        })?;
+        if !reported {
+            return Err(Error::new(format!(
+                "{arch}: no lockup report within {} s of the masking line",
+                (LOCKUP_AT_MOST + PATIENCE).as_secs()
+            )));
+        }
+        waited = watching
+            .after()
+            .iter()
+            .position(|line| line.contains("FERRIX-PANIC"))
+            .map(|_| at.elapsed());
+        boot_1 = watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .cloned()
+            .collect();
+        let mut qmp = Qmp::connect(port, Instant::now() + PATIENCE)?;
+        let _ = qmp.execute("system_reset", None)?;
+        let seen = watching.after().len();
+        let deadline = Instant::now() + PATIENCE;
+        let _ = watching.read_more(deadline, |lines| {
+            lines
+                .get(seen..)
+                .unwrap_or_default()
+                .iter()
+                .any(|line| line.contains(MIRRORING))
+        })?;
+        after = watching.after().get(seen..).unwrap_or_default().to_vec();
+        watching.stop_when_done();
+        Ok(())
+    };
+    let _ = qemu::watch_then(arch, &image, &kernel, &wanted, qemu::SUCCESS_MARKER, hook)?;
+    // The report's addresses named from the image booted, as the boot test
+    // names them, so the judge can tell whose report it is: the trace, and
+    // the instruction the NMI interrupted, named once the slide is known
+    // (the report says it after the registers).
+    if let Some(names) = crate::symbolize::Symbolizer::open(&kernel) {
+        boot_1 = boot_1
+            .iter()
+            .map(|line| names.annotate(line).unwrap_or_else(|| line.clone()))
+            .collect();
+        boot_1 = boot_1
+            .iter()
+            .map(|line| interrupted_named(&names, line).unwrap_or_else(|| line.clone()))
+            .collect();
+    }
+    lockup_problem(arch, &boot_1, &after, waited).map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch}: the lockup: {problem}")))
+    })?;
+    println!(
+        "  {arch}: the lockup was reported, and the next loader said the boot ended in a lockup"
+    );
+    Ok(())
+}
+
+/// The register dump's `rip` line with the function it is in, named as a
+/// trace line is: `None` for any other line, or one that names nothing.
+fn interrupted_named(names: &crate::symbolize::Symbolizer, line: &str) -> Option<String> {
+    let (_, rest) = line.split_once(RIP)?;
+    let address = rest.split_whitespace().next()?;
+    let named = names.annotate(&format!("  trace     #0  {address}"))?;
+    let function = named.split_once(address)?.1.trim();
+    Some(format!("{line}  ({function})"))
+}
+
+/// What the register dump of an x86-64 trap report calls the interrupted
+/// instruction.
+const RIP: &str = "  rip      ";
+
+/// Why the lockup case does not show a lockup caught and reported, if it
+/// does not: the detector watching, the check masking a processor, the
+/// report with the catalog's code within the bound, on x86-64 from the
+/// masked processor itself and through the check's spin, and the next
+/// loader's line.
+fn lockup_problem(
+    arch: Arch,
+    boot_1: &[String],
+    after: &[String],
+    waited: Option<Duration>,
+) -> Option<String> {
+    if !boot_1.iter().any(|line| line.contains(WATCHING)) {
+        return Some(format!("the detector never said `{}...`", WATCHING.trim()));
+    }
+    let Some(masked) = boot_1
+        .iter()
+        .find_map(|line| line.split_once(MASKING).map(|(_, rest)| rest))
+        .and_then(|rest| rest.split_whitespace().next())
+    else {
+        return Some(format!("the check never said `{MASKING}...`"));
+    };
+    let Some(panic) = boot_1.iter().position(|line| line.contains("FERRIX-PANIC")) else {
+        return Some("no failure report after the masking line".to_owned());
+    };
+    let report = boot_1.get(panic..).unwrap_or_default();
+    if !report.iter().any(|line| line.contains(LOCKUP_CODE)) {
+        return Some(format!(
+            "the report is not the lockup's: no `{}` line; it began `{}`",
+            LOCKUP_CODE.trim(),
+            boot_1.get(panic).map_or("", |line| line.trim())
+        ));
+    }
+    let waited = waited?;
+    if waited < LOCKUP_AT_LEAST || waited > LOCKUP_AT_MOST {
+        return Some(format!(
+            "the report came {} ms after the masking line, outside {} to {} s",
+            waited.as_millis(),
+            LOCKUP_AT_LEAST.as_secs_f32(),
+            LOCKUP_AT_MOST.as_secs()
+        ));
+    }
+    if arch == Arch::X86_64 {
+        let own = format!("  on        processor {masked} ");
+        if !report.iter().any(|line| line.contains(&own)) {
+            return Some(format!(
+                "the report is not the masked processor's own: no `{}` line",
+                own.trim()
+            ));
+        }
+        let Some(interrupted) = report.iter().find(|line| line.contains(RIP)) else {
+            return Some("the report has no `rip` line".to_owned());
+        };
+        if !interrupted.contains("lockup_check") {
+            return Some(format!(
+                "the NMI did not interrupt the check's spin: `{}`",
+                interrupted.trim()
+            ));
+        }
+    } else {
+        let named = format!("processor {masked} took no interrupt for ");
+        if !report.iter().any(|line| line.contains(&named)) {
+            return Some(format!("the watcher's report does not say `{named}...`"));
+        }
+    }
+    let ended = format!("pstore   boot 1 ended: {}", Stop::Lockup.says());
+    if !after.iter().any(|line| line.trim_end().ends_with(&ended)) {
+        return Some(format!("the next loader did not say `{ended}`"));
+    }
+    None
+}
+
 /// How a stop case's boot 1 is made to stop.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum How {
@@ -738,7 +929,91 @@ fn stops(
             case.name, case.ended
         );
     }
+    watched_quietly(arch, args, &parts, &shell)
+}
+
+/// What the quiet case's script says, before and after its sleep.
+const QUIET_START: &str = "pm-watch: idle with the detector on";
+const QUIET_END: &str = "pm-watch: still running";
+/// How long the quiet case's script sleeps: past two of the detector's
+/// bounds, with every processor idle.
+const QUIET_SECONDS: u64 = 25;
+
+/// The false-positive case: `ferrix.lockup=on`, and a script that sleeps
+/// for [`QUIET_SECONDS`] with every processor idle, then powers off. The
+/// detector must watch the whole time and report nothing: idle processors
+/// tick and beat (`L.lockup.2`).
+///
+/// Verifies: `L.lockup.2`
+fn watched_quietly(
+    arch: Arch,
+    args: &Args,
+    parts: &crate::init_file::Parts<'_>,
+    shell: &[u8],
+) -> Result<()> {
+    let options = format!("{} ferrix.lockup=on", qemu::init_option(STOP_SCRIPT));
+    let script = format!(
+        "#!/bin/sh\necho \"{QUIET_START}\"\nsleep {QUIET_SECONDS}\necho \"{QUIET_END}\"\npoweroff -f\n"
+    );
+    let image = parts.image_with(
+        shell,
+        STOP_SCRIPT,
+        &script,
+        &options,
+        &["bin/poweroff", "bin/sleep"],
+    )?;
+    println!("  {arch}: {QUIET_SECONDS} s idle with ferrix.lockup=on");
+    let mut lines = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        let deadline = Instant::now() + PATIENCE;
+        let _ = watching.read_more(deadline, |lines| {
+            lines
+                .iter()
+                .any(|line| line.contains(QUIET_END) || line.contains("FERRIX-PANIC"))
+        })?;
+        lines = watching
+            .lines()
+            .iter()
+            .chain(watching.after())
+            .cloned()
+            .collect();
+        watching.stop_when_done();
+        Ok(())
+    };
+    let _ = qemu::watch_then(
+        arch,
+        &image,
+        &parts.kernel.elf,
+        args,
+        qemu::SUCCESS_MARKER,
+        hook,
+    )?;
+    quiet_problem(&lines).map_or(Ok(()), |problem| {
+        Err(Error::new(format!("{arch}: the quiet case: {problem}")))
+    })?;
+    println!("  {arch}: {QUIET_SECONDS} s idle with the detector on, and no report");
     Ok(())
+}
+
+/// Why the quiet case shows no quiet watch, if it does not: the detector
+/// watched, the script slept and woke, and nothing was reported.
+fn quiet_problem(lines: &[String]) -> Option<String> {
+    if !lines.iter().any(|line| line.contains(WATCHING)) {
+        return Some(format!("the detector never said `{}...`", WATCHING.trim()));
+    }
+    if let Some(report) = lines.iter().find(|line| line.contains("FERRIX-PANIC")) {
+        return Some(format!(
+            "a report came with nothing stuck: `{}`",
+            report.trim()
+        ));
+    }
+    if !lines.iter().any(|line| line.contains(QUIET_START)) {
+        return Some(format!("the script never said `{QUIET_START}`"));
+    }
+    if !lines.iter().any(|line| line.contains(QUIET_END)) {
+        return Some(format!("the script never said `{QUIET_END}`"));
+    }
+    None
 }
 
 /// The bytes of the file at `path`.

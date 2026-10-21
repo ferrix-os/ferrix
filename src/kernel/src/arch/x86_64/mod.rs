@@ -389,6 +389,13 @@ pub(crate) fn send_ipi_to(hardware_id: u64) -> Result<(), &'static str> {
     apic::send_ipi_to(apic_id)
 }
 
+/// Send the processor whose hardware identifier is `hardware_id` the lockup
+/// detector's non-maskable interrupt (`lockup`): its local APIC ID.
+pub(crate) fn send_lockup_nmi(hardware_id: u64) -> Result<(), &'static str> {
+    let apic_id = u32::try_from(hardware_id).map_err(|_| "an APIC ID wider than 32 bits")?;
+    apic::send_nmi_to(apic_id)
+}
+
 /// The reverse map check's program: touches one shared page, or holds still,
 /// as the kernel tells it through the next page.
 ///

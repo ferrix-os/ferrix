@@ -695,6 +695,81 @@ package FerrixConsoleRequirements {
         }
     }
 
+    package Lockup {
+        doc /* The lockup detector (src/kernel/src/lockup.rs, item) and the watch
+             * it runs on (src/kernel/src/watch.rs, core): docs/POSTMORTEM.md
+             * section 6.2; the consultant's OK IF D1-D14, ledger line 2889. */
+
+        requirement <'L.lockup.1'> theOptionTurnsItOnOnlyOnOn : ItemLowLevel {
+            attribute :>> statement = "read_option shall ask for the detector for
+                exactly the value on of ferrix.lockup; no option or off shall leave
+                it off, and any other value shall be said as not understood and
+                leave it off.";
+            attribute :>> criterion = "In test-postmortem, the lockup case's boot
+                with ferrix.lockup=on says the detector watches; every boot without
+                the option says nothing of it and is never reported as a lockup. By
+                inspection: a value other than on and off is said and leaves it
+                off.";
+            attribute :>> parent = "H.FAIL.6";
+            attribute :>> unit = ("lockup::read_option", "lockup::asked", "lockup::start");
+        }
+        requirement <'L.lockup.2'> everyProcessorTicksAndBeats : ItemLowLevel {
+            attribute :>> statement = "Once the watch has started, every online
+                processor shall count each timer and inter-processor interrupt it
+                takes in its heartbeat and keep a one-shot armed no later than one
+                second ahead, from its tick and before it halts idle; until the watch
+                starts, each of these shall be one read of a flag set once.";
+            attribute :>> criterion = "In test-postmortem's quiet case (x86-64
+                under KVM with 4 processors, AArch64) the detector watches while every
+                processor idles for 25 s and reports nothing; in the lockup case the
+                check sees every online processor's heartbeat move before it masks
+                one. The watch tick re-arms at every expiry (watch::tick), and the idle
+                path arms it again before every halt: by inspection each alone keeps a
+                processor ticking once its first watch tick is armed. Controls: the
+                heartbeat's bump removed makes the quiet case report FX-9007; the
+                watch tick's arming removed, both arms at once (arm_here arms
+                nothing), leaves the detector dead. By inspection: with the watch not
+                started, tick, beat and arm_here return after reading WATCHING.";
+            attribute :>> parent = "H.FAIL.6";
+            attribute :>> unit = ("watch::start", "watch::tick", "watch::beat",
+                "watch::arm_here", "watch::beats", "watch::register");
+        }
+        requirement <'L.lockup.3'> aStuckProcessorIsReported : ItemLowLevel {
+            attribute :>> statement = "On its tick, each watcher shall read the
+                heartbeat of the next online processor in logical order; one that
+                stood still for 10 seconds shall have the stop word set to a lockup
+                and, on x86-64, be named and sent an NMI whose handler, first of
+                all, reports from its own frame, the watcher reporting itself when
+                no report has begun 2 seconds later, decided on a later tick; on the
+                Arm architectures the watcher shall report at once, naming it.
+                Nothing shall be judged while a panic stops the processors.";
+            attribute :>> criterion = "In test-postmortem's lockup case, the report
+                carries the lockup's code 9.5 to 30 s after the check masks the boot
+                processor: on x86-64 under KVM the masked processor's own, the
+                instruction its NMI interrupted in the check's spin; on AArch64 the watcher's, naming it.
+                Controls: the heartbeat's bump removed reports where nothing is
+                stuck; the ring check removed leaves the masking unreported; on
+                x86-64 the NMI's arm removed leaves the watcher's own report; on
+                AArch64 the ring check removed leaves the masking unreported. By
+                inspection: nothing is judged while smp::stopping().";
+            attribute :>> parent = "H.FAIL.6";
+            attribute :>> unit = ("lockup::on_tick", "lockup::stuck", "lockup::send_nmi",
+                "lockup::target_of", "watch::name_for_nmi", "watch::named_here",
+                "arch::x86_64::send_lockup_nmi");
+        }
+        requirement <'L.console.49'> aLockupsWordIsKept : ItemLowLevel {
+            attribute :>> statement = "locked_up shall store a lockup's stop word,
+                code 7; panicked shall not replace it, and stop shall replace
+                neither a lockup's word nor a panic's.";
+            attribute :>> criterion = "In test-postmortem's lockup case the next
+                loader says the boot ended in a lockup, though a panic's report
+                followed the store; by inspection, stop's update keeps both words.";
+            attribute :>> parent = "H.FAIL.6";
+            attribute :>> unit = ("console::pstore::locked_up", "console::pstore::panicked",
+                "console::pstore::stop", "console::pstore::failed");
+        }
+    }
+
     package PanicReset {
         doc /* `ferrix.panic=reset` (src/kernel/src/panic/reset.rs), the N150
              * stop-gap of 2026-10-17 (consultant ledger line 2143): the reset a

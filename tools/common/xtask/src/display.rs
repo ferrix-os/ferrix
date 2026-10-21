@@ -254,7 +254,13 @@ impl Qmp {
             reader: BufReader::new(stream),
             writer,
         };
-        let greeting = session.line("its greeting")?;
+        // An event can come before the greeting: test-postmortem's stop
+        // cases met a SHUTDOWN first on AArch64 (lockup-pm-a64-1,
+        // 2026-10-21). Skipped, as `execute` skips them.
+        let mut greeting = session.line("its greeting")?;
+        while greeting.contains("\"event\"") {
+            greeting = session.line("its greeting")?;
+        }
         if !greeting.contains("\"QMP\"") {
             return Err(Error::new(format!("QMP greeted with `{greeting}`")));
         }

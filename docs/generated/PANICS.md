@@ -134,6 +134,7 @@ Causes are listed most likely first.
 | [FX-9004](#fx-9004) | a processor exception the kernel has no handler for |
 | [FX-9005](#fx-9005) | the processor reported a hardware error |
 | [FX-9006](#fx-9006) | an exception nested on its own interrupt stack |
+| [FX-9007](#fx-9007) | a processor took no interrupt for ten seconds |
 
 <a id="fx-0001"></a>
 
@@ -3574,3 +3575,26 @@ registers in the report are the second exception's.
 
 See: src/kernel/src/arch/x86_64/paranoid.rs; src/kernel/src/arch/x86_64/trap.rs
 ferrix_paranoid_common; src/kernel/src/arch/x86_64/gdt.rs.
+
+<a id="fx-9007"></a>
+
+## FX-9007 — a processor took no interrupt for ten seconds
+
+With `ferrix.lockup=on` every processor watches the next one in a ring, reading
+the count of timer and inter-processor interrupts it has taken, and each ticks
+at least once a second. One whose count stood still for ten seconds has
+interrupts masked and never unmasks them: it spins, or waits on something that
+will not come. On x86-64 its watcher sent it a non-maskable interrupt and this
+report is that processor's own: `rip` is where the stuck code was. Otherwise the
+watcher reports, naming it. The pstore's stop word says a lockup.
+
+1. A spin lock, or a wait on another processor, taken with interrupts masked and
+   never released: `rip` names where.
+2. A loop in an interrupt handler, or code that masked interrupts and runs on
+   without end.
+3. The check `ferrix.check.lockup=irqoff`, which masks one processor on purpose;
+   its boot line comes before this report.
+4. On a virtual machine, a host that stopped running the processor for ten
+   seconds.
+
+See: src/kernel/src/lockup.rs; src/kernel/src/watch.rs; docs/POSTMORTEM.md §6.2.

@@ -204,6 +204,13 @@ pub(crate) fn flush_tlb_page(address: u64) {
 /// hardware, and every reason an interrupt is sent is answered by whoever
 /// takes it. A processor that did not need it looks, finds nothing, and goes
 /// back to what it was doing.
+/// The lockup detector's non-maskable interrupt: none here, since the
+/// kernel uses no GICv3 pseudo-NMI, so its watcher reports instead
+/// (`lockup`).
+pub(crate) fn send_lockup_nmi(_hardware_id: u64) -> Result<(), &'static str> {
+    Err("this architecture has no NMI here")
+}
+
 pub(crate) fn send_ipi_to(_hardware_id: u64) -> Result<(), &'static str> {
     send_ipi_to_others()
 }

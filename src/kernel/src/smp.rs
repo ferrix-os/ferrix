@@ -661,6 +661,10 @@ fn next_job(me: &PerCpu) -> Option<(u64, Work)> {
 /// before the first is taken become.
 fn on_ipi(_irq: u32) {
     halt_if_stopping();
+    // The heartbeat, and this processor's watch tick once the watch has
+    // started: what `watch::start`'s interrupt is sent for.
+    crate::watch::beat();
+    crate::watch::arm_here();
     if let Some(me) = this_cpu() {
         let _ = me.ipis.fetch_add(1, Ordering::Relaxed);
         service_tlb(me);
@@ -1767,6 +1771,12 @@ pub(crate) fn stop_others() -> usize {
         let _ = arch::send_ipi_to_others();
     }
     others
+}
+
+/// Whether a panic has asked every processor to stop: then nothing watches
+/// any more (`lockup`).
+pub(crate) fn stopping() -> bool {
+    STOPPING.load(Ordering::Acquire)
 }
 
 /// Stop this processor if a panic has asked every processor to.

@@ -591,6 +591,16 @@ options apply to a slot's command line as they do to the ESP's
 `CMDLINE.TXT` (§1, AoU-8), and a slot is only as authentic as whoever wrote
 it (AoU-15's argument: root, through the raw device).
 
+### AoU-35 — no `ferrix.check.*` option on an integrator's command line
+`ferrix.check.lockup=irqoff` masks a processor's interrupts on purpose and
+spins it for good (`src/kernel/src/lockup_check.rs`), for the gates that
+show the lockup detector catches it (`docs/POSTMORTEM.md` §6.5). Every
+`ferrix.check.*` option is verification's, and an integrator's command line
+(the ESP's `CMDLINE.TXT` or a slot's) never carries one. The reference
+configuration has none (`certification-item.json`, `check_lockup`).
+`ferrix.lockup=on`, the detector itself, is off in the reference
+configuration and a mitigation only when on (H.FAIL.6).
+
 ### AoU-30 — the previous boot's log is reported only when RAM survived
 With `ferrix.pstore=on`, the reference, the kernel mirrors its log into a
 region of RAM the loader gives and writes it back from the caches at the

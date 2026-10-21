@@ -3499,4 +3499,30 @@ pub(crate) static ALL: &[&Explanation] = &[
     &UNEXPECTED_EXCEPTION,
     &MACHINE_CHECK,
     &NESTED_INTERRUPT_STACK,
+    &LOCKUP,
 ];
+
+/// For the lockup detector (`lockup.rs`) and its NMI in
+/// `arch/x86_64/paranoid.rs`: a processor that took no interrupt for ten
+/// seconds.
+pub(crate) static LOCKUP: Explanation = Explanation {
+    code: "FX-9007",
+    title: "a processor took no interrupt for ten seconds",
+    meaning: "With `ferrix.lockup=on` every processor watches the next one in a ring, \
+              reading the count of timer and inter-processor interrupts it has taken, and each \
+              ticks at least once a second. One whose count stood still for ten seconds has \
+              interrupts masked and never unmasks them: it spins, or waits on something that \
+              will not come. On x86-64 its watcher sent it a non-maskable interrupt and this \
+              report is that processor's own: `rip` is where the stuck code was. Otherwise \
+              the watcher reports, naming it. The pstore's stop word says a lockup.",
+    causes: &[
+        "A spin lock, or a wait on another processor, taken with interrupts masked and never \
+         released: `rip` names where.",
+        "A loop in an interrupt handler, or code that masked interrupts and runs on without \
+         end.",
+        "The check `ferrix.check.lockup=irqoff`, which masks one processor on purpose; its \
+         boot line comes before this report.",
+        "On a virtual machine, a host that stopped running the processor for ten seconds.",
+    ],
+    see: "src/kernel/src/lockup.rs; src/kernel/src/watch.rs; docs/POSTMORTEM.md §6.2",
+};

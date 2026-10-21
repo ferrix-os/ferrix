@@ -1534,6 +1534,22 @@ package FerrixItemRequirements {
                 line.";
             attribute :>> parent = ("O.FAILSAFE", "ASR-6");
         }
+        // Added 2026-10-21 by lockup (consultant ledger line 2889, D12): a
+        // mitigation only when ferrix.lockup=on, outside the reference
+        // configuration (ITEM.md section 5).
+        requirement <'H.FAIL.6'> aLockupEndsInAReport : ItemHighLevel {
+            attribute :>> statement = "With ferrix.lockup=on, a processor that takes no
+                interrupt for 10 seconds while another runs shall end in a failure
+                report that names it, and the pstore region's stop word shall say a
+                lockup; with the option off nothing shall watch.";
+            attribute :>> criterion = "In cargo xtask test-postmortem's lockup case
+                (x86-64 under KVM with 4 processors, AArch64), the check that masks a
+                processor is reported 9.5 to 30 s later under the lockup's catalog
+                code, and the next loader says the boot ended in a lockup; its quiet
+                case, every processor idle for 25 s with ferrix.lockup=on, reports
+                nothing.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
     }
 
     package Storage {

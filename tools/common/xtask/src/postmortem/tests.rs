@@ -264,7 +264,11 @@ fn every_case_names_a_different_stop_and_the_hang_none() {
             );
         }
     }
-    for stop in Stop::ALL.into_iter().filter(|stop| *stop != Stop::Panic) {
+    // A panic and a lockup have cases of their own.
+    for stop in Stop::ALL
+        .into_iter()
+        .filter(|stop| !matches!(stop, Stop::Panic | Stop::Lockup))
+    {
         assert!(
             CASES.iter().any(|case| case.ended == Ended::Stopped(stop)),
             "{stop:?} has a case"

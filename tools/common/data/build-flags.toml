@@ -211,6 +211,15 @@ why = "x86-64 only, ignored on aarch64 and armv7a: the energy and performance pr
 values = ["halt", "reset"]
 why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the reference; reset, a stop-gap for the N150 box set by no loader, outside the reference configuration (SAFETY-MANUAL AoU-32, certification-item.json `panic`)"
 
+[boot_options."ferrix.lockup"]
+values = ["on", "off"]
+why = "whether processors watch each other (lockup.rs, H.FAIL.6, docs/POSTMORTEM.md 6.2): on reports a processor that takes no interrupt for 10 s, the N150 box's; off, the reference and the default; anything else is said and taken as off (certification-item.json `lockup`)"
+
+[boot_options."ferrix.check.lockup"]
+values = ["irqoff"]
+test_only = true
+why = "the lockup case's check (lockup_check.rs, test-only): irqoff masks the boot processor and spins; never in a certified profile or an integrator's command line (SAFETY-MANUAL AoU-35)"
+
 [boot_options."ferrix.vtd"]
 values = ["on", "off"]
 why = "whether the kernel drives the VT-d units it accepts (iommu.rs, L.iommu.71): on, the reference and the default; off leaves every unit alone, no DMA translated and no interrupt remapped, outside the reference configuration, for recovery only (SAFETY-MANUAL AoU-8, certification-item.json `vtd`)"

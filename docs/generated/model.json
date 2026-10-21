@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "3257440060e7c223a27466c8060c4c4aac7a33ab19d7ed0429ef4c38c3fa29c4",
+  "digest": "efce1311f08cde764ecfaa6e8ed57f13e3d8c60d6df91e050cb9d922e808dba1",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -108,8 +108,8 @@
     }
   ],
   "summary": {
-    "packages": 141,
-    "elements": 7240,
+    "packages": 142,
+    "elements": 7265,
     "maturity": {
       "implemented": 281,
       "inProgress": 25,
@@ -26137,6 +26137,52 @@
                               }
                             }
                           ]
+                        },
+                        {
+                          "name": "aLockupEndsInAReport",
+                          "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aLockupEndsInAReport",
+                          "kind": "requirement",
+                          "shortName": "H.FAIL.6",
+                          "type": "ItemHighLevel",
+                          "source": {
+                            "file": "docs/sysml/13-item-requirements.sysml",
+                            "line": 1540
+                          },
+                          "children": [
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aLockupEndsInAReport",
+                              "kind": "attribute",
+                              "redefines": "statement",
+                              "value": "\"With ferrix.lockup=on, a processor that takes no interrupt for 10 seconds while another runs shall end in a failure report that names it, and the pstore region's stop word shall say a lockup; with the option off nothing shall watch.\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1544
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aLockupEndsInAReport",
+                              "kind": "attribute",
+                              "redefines": "criterion",
+                              "value": "\"In cargo xtask test-postmortem's lockup case (x86-64 under KVM with 4 processors, AArch64), the check that masks a processor is reported 9.5 to 30 s later under the lockup's catalog code, and the next loader says the boot ended in a lockup; its quiet case, every processor idle for 25 s with ferrix.lockup=on, reports nothing.\"",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1550
+                              }
+                            },
+                            {
+                              "name": "",
+                              "qualifiedName": "FerrixItemRequirements::Scheduling::Traps::Boot::Failure::aLockupEndsInAReport",
+                              "kind": "attribute",
+                              "redefines": "parent",
+                              "value": "(\"O.FAILSAFE\", \"ASR-6\")",
+                              "source": {
+                                "file": "docs/sysml/13-item-requirements.sysml",
+                                "line": 1551
+                              }
+                            }
+                          ]
                         }
                       ]
                     },
@@ -26147,7 +26193,7 @@
                       "doc": "The btrfs reader and write path, `ferrix-btrfs` and `ferrix-btrfs-write`, in the item since 2026-10-02: O.MEDIA and ASR-9 (FPT_TDC.1, FDP_SDI.2). Their interface below is the `Device` and `WriteDevice` traits the kernel's block layer answers, above it `Volume` and `WriteVolume`; the VFS glue on top (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs*.rs) is load, so these promise what the two crates do at `Volume` and `WriteVolume`, not what a program sees through a mount. The low-level requirements are part 24. Some sit under a requirement here by decomposition rather than as a case of its criterion: L.btrfs.31 and .70 (a node's address and generation) refine H.STORE.2, whose criterion tests a data sector, and L.btrfs.16 and .92 (superblock stripes) refine H.STORE.5, whose criterion tests the trees' consistency.",
                       "source": {
                         "file": "docs/sysml/13-item-requirements.sysml",
-                        "line": 1539
+                        "line": 1555
                       },
                       "children": [
                         {
@@ -26158,7 +26204,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1555
+                            "line": 1571
                           },
                           "children": [
                             {
@@ -26169,7 +26215,7 @@
                               "value": "\"The btrfs reader and writer shall answer every volume image, whatever its bytes, with a value or an error, without reading or writing outside a buffer, panicking or looping without bound.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1559
+                                "line": 1575
                               }
                             },
                             {
@@ -26180,7 +26226,7 @@
                               "value": "\"Each of 4,096 single-byte patches of a superblock, and of a leaf, parses or is refused, and every accessor of what parses answers, 0 panics. The decoders' own totality, and the `btrfs_read` fuzzer's resealed images, are their low-level requirements' and outside this criterion; the write path, which parses every node through the reader, has no hostile-image check of its own yet (TODO.md).\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1566
+                                "line": 1582
                               }
                             },
                             {
@@ -26191,7 +26237,7 @@
                               "value": "\"O.MEDIA\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1567
+                                "line": 1583
                               }
                             }
                           ]
@@ -26204,7 +26250,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1569
+                            "line": 1585
                           },
                           "children": [
                             {
@@ -26215,7 +26261,7 @@
                               "value": "\"A block whose checksum disagrees with its contents shall never be returned as valid: the reader shall read another copy where the chunk keeps one, and otherwise answer an error.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1573
+                                "line": 1589
                               }
                             },
                             {
@@ -26226,7 +26272,7 @@
                               "value": "\"With the first copy of a DUP data sector damaged, a file read returns the file's bytes from the second; with both damaged, it answers DataChecksum and hands back none of the sector's bytes.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1577
+                                "line": 1593
                               }
                             },
                             {
@@ -26237,7 +26283,7 @@
                               "value": "(\"O.MEDIA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1578
+                                "line": 1594
                               }
                             }
                           ]
@@ -26250,7 +26296,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1580
+                            "line": 1596
                           },
                           "children": [
                             {
@@ -26261,7 +26307,7 @@
                               "value": "\"Until a commit's superblock is written, the volume on the device shall be exactly the last commit, whatever of the commit's other writes have reached it.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1583
+                                "line": 1599
                               }
                             },
                             {
@@ -26272,7 +26318,7 @@
                               "value": "\"500 inserts committed, and the commit's writes replayed without its superblocks onto the volume as it was, leave a volume that checks clean and holds exactly the last commit's items.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1586
+                                "line": 1602
                               }
                             },
                             {
@@ -26283,7 +26329,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1587
+                                "line": 1603
                               }
                             }
                           ]
@@ -26296,7 +26342,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1589
+                            "line": 1605
                           },
                           "children": [
                             {
@@ -26307,7 +26353,7 @@
                               "value": "\"What a commit or a log commit returned success for shall be found, no older, when the volume is opened after a power cut at any later point, the log replayed if the superblock names one.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1593
+                                "line": 1609
                               }
                             },
                             {
@@ -26318,7 +26364,7 @@
                               "value": "\"Of 100 cuts over 4 random scenarios of writes, logs and commits, each rebuilt as the device may have left the disk, every one opens, checks clean down to free space and checksums, and rolls back no completed promise.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1597
+                                "line": 1613
                               }
                             },
                             {
@@ -26329,7 +26375,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1598
+                                "line": 1614
                               }
                             }
                           ]
@@ -26342,7 +26388,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1600
+                            "line": 1616
                           },
                           "children": [
                             {
@@ -26353,7 +26399,7 @@
                               "value": "\"Each commit shall leave the extent tree, the block groups' usage, the free-space tree and the superblock's totals agreeing with the trees, so that no block in use is free.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1603
+                                "line": 1619
                               }
                             },
                             {
@@ -26364,7 +26410,7 @@
                               "value": "\"After 3,000 random edits on the blank fixture, committed as they go, the writer's checker finds every tree block's and data extent's references, each block group's usage and free space and the superblock's total consistent.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1607
+                                "line": 1623
                               }
                             },
                             {
@@ -26375,7 +26421,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1608
+                                "line": 1624
                               }
                             }
                           ]
@@ -26388,7 +26434,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1610
+                            "line": 1626
                           },
                           "children": [
                             {
@@ -26399,7 +26445,7 @@
                               "value": "\"An operation the volume has no room for shall be refused with no space before it changes anything, leaving the transaction able to commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1613
+                                "line": 1629
                               }
                             },
                             {
@@ -26410,7 +26456,7 @@
                               "value": "\"On a 128 MiB volume, creates until its trees are full end in NoSpace with the transaction not aborted, its commit succeeds, and a deletion still makes room for another create.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1616
+                                "line": 1632
                               }
                             },
                             {
@@ -26421,7 +26467,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1617
+                                "line": 1633
                               }
                             }
                           ]
@@ -26434,7 +26480,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1619
+                            "line": 1635
                           },
                           "children": [
                             {
@@ -26445,7 +26491,7 @@
                               "value": "\"An allocation the btrfs writer cannot make shall be answered to its caller as an error, aborting the transaction if an edit had begun, and never as a panic or a stop of the element.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1622
+                                "line": 1638
                               }
                             },
                             {
@@ -26456,7 +26502,7 @@
                               "value": "\"With every allocation of the writer's operations failed in turn, each operation succeeds or answers an error, no panic is taken, and the volume reopened from the device is the last commit and checks clean.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1626
+                                "line": 1642
                               }
                             },
                             {
@@ -26467,7 +26513,7 @@
                               "value": "(\"O.QUOTA\", \"ASR-9\")",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1627
+                                "line": 1643
                               }
                             }
                           ]
@@ -26480,7 +26526,7 @@
                           "type": "ItemHighLevel",
                           "source": {
                             "file": "docs/sysml/13-item-requirements.sysml",
-                            "line": 1629
+                            "line": 1645
                           },
                           "children": [
                             {
@@ -26491,7 +26537,7 @@
                               "value": "\"An operation that fails after it changed something shall abort its transaction, so that none of it is committed, and the volume reloaded at its last commit shall take no further change.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1633
+                                "line": 1649
                               }
                             },
                             {
@@ -26502,7 +26548,7 @@
                               "value": "\"Through a mount, a commit whose device write fails answers EIO; the mount then reads the last commit, has no trace of the aborted transaction, answers EROFS to a write, a truncation and a create, and the disk holds the last commit.\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1637
+                                "line": 1653
                               }
                             },
                             {
@@ -26513,7 +26559,7 @@
                               "value": "\"ASR-9\"",
                               "source": {
                                 "file": "docs/sysml/13-item-requirements.sysml",
-                                "line": 1638
+                                "line": 1654
                               }
                             }
                           ]
@@ -76021,13 +76067,253 @@
           ]
         },
         {
+          "name": "Lockup",
+          "qualifiedName": "FerrixConsoleRequirements::Lockup",
+          "kind": "package",
+          "doc": "The lockup detector (src/kernel/src/lockup.rs, item) and the watch it runs on (src/kernel/src/watch.rs, core): docs/POSTMORTEM.md section 6.2; the consultant's OK IF D1-D14, ledger line 2889.",
+          "source": {
+            "file": "docs/sysml/23-console-requirements.sysml",
+            "line": 698
+          },
+          "children": [
+            {
+              "name": "theOptionTurnsItOnOnlyOnOn",
+              "qualifiedName": "FerrixConsoleRequirements::Lockup::theOptionTurnsItOnOnlyOnOn",
+              "kind": "requirement",
+              "shortName": "L.lockup.1",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 703
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::theOptionTurnsItOnOnlyOnOn",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"read_option shall ask for the detector for exactly the value on of ferrix.lockup; no option or off shall leave it off, and any other value shall be said as not understood and leave it off.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 707
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::theOptionTurnsItOnOnlyOnOn",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem, the lockup case's boot with ferrix.lockup=on says the detector watches; every boot without the option says nothing of it and is never reported as a lockup. By inspection: a value other than on and off is said and leaves it off.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 712
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::theOptionTurnsItOnOnlyOnOn",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.6\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 713
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::theOptionTurnsItOnOnlyOnOn",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"lockup::read_option\", \"lockup::asked\", \"lockup::start\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 714
+                  }
+                }
+              ]
+            },
+            {
+              "name": "everyProcessorTicksAndBeats",
+              "qualifiedName": "FerrixConsoleRequirements::Lockup::everyProcessorTicksAndBeats",
+              "kind": "requirement",
+              "shortName": "L.lockup.2",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 716
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::everyProcessorTicksAndBeats",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"Once the watch has started, every online processor shall count each timer and inter-processor interrupt it takes in its heartbeat and keep a one-shot armed no later than one second ahead, from its tick and before it halts idle; until the watch starts, each of these shall be one read of a flag set once.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 721
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::everyProcessorTicksAndBeats",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem's quiet case (x86-64 under KVM with 4 processors, AArch64) the detector watches while every processor idles for 25 s and reports nothing; in the lockup case the check sees every online processor's heartbeat move before it masks one. The watch tick re-arms at every expiry (watch::tick), and the idle path arms it again before every halt: by inspection each alone keeps a processor ticking once its first watch tick is armed. Controls: the heartbeat's bump removed makes the quiet case report FX-9007; the watch tick's arming removed, both arms at once (arm_here arms nothing), leaves the detector dead. By inspection: with the watch not started, tick, beat and arm_here return after reading WATCHING.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 732
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::everyProcessorTicksAndBeats",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.6\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 733
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::everyProcessorTicksAndBeats",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"watch::start\", \"watch::tick\", \"watch::beat\", \"watch::arm_here\", \"watch::beats\", \"watch::register\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 735
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aStuckProcessorIsReported",
+              "qualifiedName": "FerrixConsoleRequirements::Lockup::aStuckProcessorIsReported",
+              "kind": "requirement",
+              "shortName": "L.lockup.3",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 737
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aStuckProcessorIsReported",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"On its tick, each watcher shall read the heartbeat of the next online processor in logical order; one that stood still for 10 seconds shall have the stop word set to a lockup and, on x86-64, be named and sent an NMI whose handler, first of all, reports from its own frame, the watcher reporting itself when no report has begun 2 seconds later, decided on a later tick; on the Arm architectures the watcher shall report at once, naming it. Nothing shall be judged while a panic stops the processors.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 745
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aStuckProcessorIsReported",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem's lockup case, the report carries the lockup's code 9.5 to 30 s after the check masks the boot processor: on x86-64 under KVM the masked processor's own, the instruction its NMI interrupted in the check's spin; on AArch64 the watcher's, naming it. Controls: the heartbeat's bump removed reports where nothing is stuck; the ring check removed leaves the masking unreported; on x86-64 the NMI's arm removed leaves the watcher's own report; on AArch64 the ring check removed leaves the masking unreported. By inspection: nothing is judged while smp::stopping().\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 754
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aStuckProcessorIsReported",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.6\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 755
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aStuckProcessorIsReported",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"lockup::on_tick\", \"lockup::stuck\", \"lockup::send_nmi\", \"lockup::target_of\", \"watch::name_for_nmi\", \"watch::named_here\", \"arch::x86_64::send_lockup_nmi\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 758
+                  }
+                }
+              ]
+            },
+            {
+              "name": "aLockupsWordIsKept",
+              "qualifiedName": "FerrixConsoleRequirements::Lockup::aLockupsWordIsKept",
+              "kind": "requirement",
+              "shortName": "L.console.49",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/23-console-requirements.sysml",
+                "line": 760
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aLockupsWordIsKept",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"locked_up shall store a lockup's stop word, code 7; panicked shall not replace it, and stop shall replace neither a lockup's word nor a panic's.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 763
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aLockupsWordIsKept",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"In test-postmortem's lockup case the next loader says the boot ended in a lockup, though a panic's report followed the store; by inspection, stop's update keeps both words.\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 766
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aLockupsWordIsKept",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.FAIL.6\"",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 767
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixConsoleRequirements::Lockup::aLockupsWordIsKept",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"console::pstore::locked_up\", \"console::pstore::panicked\", \"console::pstore::stop\", \"console::pstore::failed\")",
+                  "source": {
+                    "file": "docs/sysml/23-console-requirements.sysml",
+                    "line": 769
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
           "name": "PanicReset",
           "qualifiedName": "FerrixConsoleRequirements::PanicReset",
           "kind": "package",
           "doc": "`ferrix.panic=reset` (src/kernel/src/panic/reset.rs), the N150 stop-gap of 2026-10-17 (consultant ledger line 2143): the reset a failure report ends in when asked. Its own family, L.panic, since panic.rs had no low-level ids; here beside the pstore it exists for. The device-tree read of the option gets an id when it is built.",
           "source": {
             "file": "docs/sysml/23-console-requirements.sysml",
-            "line": 698
+            "line": 773
           },
           "children": [
             {
@@ -76038,7 +76324,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 706
+                "line": 781
               },
               "children": [
                 {
@@ -76049,7 +76335,7 @@
                   "value": "\"read_option shall arm the reset once, for exactly the value reset of ferrix.panic; no option or halt shall leave it unarmed, and any other value shall be said as not understood and leave it unarmed.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 710
+                    "line": 785
                   }
                 },
                 {
@@ -76060,7 +76346,7 @@
                   "value": "\"In test-postmortem, a boot with ferrix.panic=reset says it resets after the report; one with ferrix.panic=Reset says the value is not understood, its report says it halts and holds no reset line; one with no option holds no reset line.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 715
+                    "line": 790
                   }
                 },
                 {
@@ -76071,7 +76357,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 716
+                    "line": 791
                   }
                 },
                 {
@@ -76082,7 +76368,7 @@
                   "value": "(\"panic::reset::read_option\", \"panic::reset::armed\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 717
+                    "line": 792
                   }
                 }
               ]
@@ -76095,7 +76381,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 719
+                "line": 794
               },
               "children": [
                 {
@@ -76106,7 +76392,7 @@
                   "value": "\"When armed, conclude shall say in its stopped line that the processor resets the machine, print and drain the reset line before the pstore write-back and the screen, and after the screen wait and reset instead of halting.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 723
+                    "line": 798
                   }
                 },
                 {
@@ -76117,7 +76403,7 @@
                   "value": "\"In test-postmortem's reset case boot 1's report says the processor resets the machine after the report, holds the reset line, and the machine starts again by itself.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 726
+                    "line": 801
                   }
                 },
                 {
@@ -76128,7 +76414,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 727
+                    "line": 802
                   }
                 },
                 {
@@ -76139,7 +76425,7 @@
                   "value": "(\"panic::conclude\", \"panic::reset::announce\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 728
+                    "line": 803
                   }
                 }
               ]
@@ -76152,7 +76438,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 730
+                "line": 805
               },
               "children": [
                 {
@@ -76163,7 +76449,7 @@
                   "value": "\"wait_then_reset shall wait 10 seconds on the free-running counter, reading nothing but counter_hz and counter_now, taking no lock and allocating nothing, wait not at all when the rate is 0, and then call arch::reset.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 734
+                    "line": 809
                   }
                 },
                 {
@@ -76174,7 +76460,7 @@
                   "value": "\"In test-postmortem's reset case the loader's banner comes again at least 9.5 s and at most 60 s after the reset line. By inspection: the function's body is the counter loop and the reset.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 738
+                    "line": 813
                   }
                 },
                 {
@@ -76185,7 +76471,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 739
+                    "line": 814
                   }
                 },
                 {
@@ -76196,7 +76482,7 @@
                   "value": "\"panic::reset::wait_then_reset\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 740
+                    "line": 815
                   }
                 }
               ]
@@ -76209,7 +76495,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/23-console-requirements.sysml",
-                "line": 742
+                "line": 817
               },
               "children": [
                 {
@@ -76220,7 +76506,7 @@
                   "value": "\"When armed and the reset announced, abridged on the processor that announced it shall go on to wait_then_reset; on any other processor it shall halt. (On x86-64 a fault taken before the kernel's GS base is installed reads another register value and may halt: the fail-safe direction.)\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 747
+                    "line": 822
                   }
                 },
                 {
@@ -76231,7 +76517,7 @@
                   "value": "\"A fault forced inside screen::draw under ferrix.panic=reset still ends in the reset in test-postmortem's reset case, and fails it with abridged's reset removed (gate.sh control, the commit names both runs). By inspection: resetting_here compares this processor's per-CPU register with the announcer's.\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 752
+                    "line": 827
                   }
                 },
                 {
@@ -76242,7 +76528,7 @@
                   "value": "\"H.FAIL.5\"",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 753
+                    "line": 828
                   }
                 },
                 {
@@ -76253,7 +76539,7 @@
                   "value": "(\"panic::abridged\", \"panic::reset::resetting_here\")",
                   "source": {
                     "file": "docs/sysml/23-console-requirements.sysml",
-                    "line": 754
+                    "line": 829
                   }
                 }
               ]

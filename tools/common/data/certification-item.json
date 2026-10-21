@@ -92,6 +92,31 @@
       "the record is a diagnostic only (SAFETY-MANUAL AoU-30, VULNERABILITY-ANALYSIS",
       "V-14)."
     ],
+    "lockup": "off",
+    "lockup_settings": [
+      "off",
+      "on"
+    ],
+    "lockup_why": [
+      "`ferrix.lockup=on` (docs/POSTMORTEM.md 6.2, H.FAIL.6): processors watch",
+      "each other, each ticking at least once a second, and one that takes no",
+      "interrupt for 10 s ends in a failure report and the stop word `a lockup`.",
+      "Off, the default and the reference: an emulator host that starves a",
+      "virtual processor must not turn a slow boot into a panic. The N150 box",
+      "asks for it. A mitigation only when on; any other value is said and taken",
+      "as off."
+    ],
+    "check_lockup": "absent",
+    "check_lockup_settings": [
+      "absent",
+      "irqoff"
+    ],
+    "check_lockup_why": [
+      "`ferrix.check.lockup=irqoff` masks a processor on purpose, for the gates",
+      "that show the detector catches it (src/kernel/src/lockup_check.rs,",
+      "verification code). Never on an integrator's command line (SAFETY-MANUAL",
+      "AoU-35)."
+    ],
     "efifb": "off",
     "efifb_settings": [
       "off",
@@ -243,6 +268,7 @@
         "sync.rs",
         "syscall/uaccess.rs",
         "timer.rs",
+        "watch.rs",
         "trap.rs",
         "trap/**",
         "user/**",
@@ -291,6 +317,8 @@
         "init.rs",
         "init_check.rs",
         "main.rs",
+        "lockup.rs",
+        "lockup_check.rs",
         "power.rs",
         "random.rs",
         "service_check.rs",

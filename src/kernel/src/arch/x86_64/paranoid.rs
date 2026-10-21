@@ -78,6 +78,10 @@
 //!   handler takes none: it touches statics and per-CPU records mapped since
 //!   boot, never the demand window, prints nothing, and `DR7` is clear. Linux's
 //!   nested-NMI frame juggling exists because its NMI handlers do fault.
+//!   That holds for the arms that return. The lockup arm (`watch::named_here`,
+//!   `docs/POSTMORTEM.md` §6.2) reports and never returns: it prints, and a
+//!   fault during its report is a report nested in it on the panic path,
+//!   never an early `iretq` of the NMI.
 //! * **`#MC` and `#DF` never return**, and a second on the same stack is the
 //!   report failing.
 
@@ -140,6 +144,16 @@ extern "C" fn ferrix_paranoid_entry(frame: &mut TrapFrame, occupants: u64) {
     match frame.vector {
         DEBUG => debug(frame),
         NMI => {
+            // First, from ring 3 as from ring 0: the NMI a lockup's watcher
+            // sent this processor, which never returns. No other NMI is
+            // read as one: the watcher names its target before it sends.
+            if crate::watch::named_here() {
+                crate::trap::fatal(
+                    frame,
+                    "a lockup: this processor took no interrupt for 10 s",
+                    &catalog::LOCKUP,
+                );
+            }
             note_gs();
             let _ = NMIS.fetch_add(1, Ordering::Relaxed);
             if frame.cs & 3 == 3 {

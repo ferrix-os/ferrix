@@ -88,17 +88,16 @@ pub(crate) fn write_back() -> bool {
 /// the architecture's reset, power-off or halt: the lines those print, and
 /// any another processor logs meanwhile, may miss the region's RAM.
 ///
-/// A panic's word is never replaced: a stop racing a failure report on
-/// another processor is not how the boot ended. Takes no lock and allocates
+/// A panic's or a lockup's word is never replaced: a stop racing a failure
+/// report on another processor is not how the boot ended. Takes no lock and allocates
 /// nothing.
 pub(crate) fn stop(stop: Stop) -> bool {
     REGION.get().is_some_and(|region| {
         let word = stop.word();
-        let panic = Stop::Panic.word();
         let _ = region
             .stop
             .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
-                (now != panic).then_some(word)
+                (!failed(now)).then_some(word)
             });
         arch::write_back_for_reset(region.virt, region.len);
         true
@@ -111,8 +110,29 @@ pub(crate) fn stop(stop: Stop) -> bool {
 /// no allocation.
 pub(crate) fn panicked() {
     if let Some(region) = REGION.get() {
-        region.stop.store(Stop::Panic.word(), Ordering::Release);
+        let lockup = Stop::Lockup.word();
+        let _ = region
+            .stop
+            .fetch_update(Ordering::Release, Ordering::Relaxed, |now| {
+                (now != lockup).then_some(Stop::Panic.word())
+            });
     }
+}
+
+/// Record a lockup as how this boot stopped: the lockup detector, before
+/// the report it starts (`lockup`). The report's own panic keeps it
+/// ([`panicked`]), and no stop replaces it ([`stop`]). One store, no lock,
+/// no allocation.
+pub(crate) fn locked_up() {
+    if let Some(region) = REGION.get() {
+        region.stop.store(Stop::Lockup.word(), Ordering::Release);
+    }
+}
+
+/// Whether `word` says the boot failed: a panic's or a lockup's, which no
+/// stop on purpose replaces.
+fn failed(word: u64) -> bool {
+    word == Stop::Panic.word() || word == Stop::Lockup.word()
 }
 
 /// The attached region's physical address and length: for the boot check

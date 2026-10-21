@@ -14,15 +14,15 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 136 | 85 | 51 |
-| Low (`L.*`) | 971 | 708 | 263 |
+| High (`H.*`) | 137 | 86 | 51 |
+| Low (`L.*`) | 975 | 712 | 263 |
 
-2104 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2122 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2106 |
-| Accessors, covered by the requirement they serve | 981 |
+| Named by a low-level requirement | 2124 |
+| Accessors, covered by the requirement they serve | 985 |
 | Check code in a product file | 82 |
 | Named by none | 938 |
 
@@ -128,7 +128,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | ASR-3 | `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.14`, `H.OBJ.15`, `H.IRQ.1`, `H.DEV.1` |
 | ASR-4 | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
 | ASR-5 | `H.MEM.6` |
-| ASR-6 | `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
+| ASR-6 | `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5`, `H.FAIL.6` |
 | ASR-7 | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.5` |
 | ASR-8 | `H.SCHED.1`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.5`, `H.SCHED.13` |
 | ASR-9 | `H.STORE.2`, `H.STORE.3`, `H.STORE.4`, `H.STORE.5`, `H.STORE.6`, `H.STORE.7`, `H.STORE.8` |
@@ -141,7 +141,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | O.AUDIT | `H.AUD.1`, `H.AUD.2`, `H.AUD.3`, `H.AUD.4`, `H.AUD.5`, `H.AUD.6`, `H.AUD.7`, `H.AUD.8`, `H.AUD.9`, `H.AUD.10`, `H.AUD.11`, `H.AUD.12`, `H.AUD.13` |
 | O.CAPABILITY | `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1` |
 | O.DMA | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.4`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
-| O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
+| O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5`, `H.FAIL.6` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
 | O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.STORE.7` |
@@ -350,6 +350,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.FAIL.3` | A kernel stack overflow shall end in the halt and diagnostic of the safe state, never in a write below the stack. | A kernel thread that recurses past its stack ends the boot in a report naming the fault -- on x86-64 a double fault taken on its own stack (FX-9004) -- on each architecture, 3 of 3. | O.FAILSAFE, ASR-6 | *baselined* | — | — | — |
 | `H.FAIL.4` | Once a failure report has begun, a line the kernel writes shall reach the console port after a bounded wait even when the port's lock is held and will never be released. | A report begun while another context holds the port's lock for good reaches the port whole, after at most 10,000,000 attempts at the lock, on each architecture, 3 of 3. | O.FAILSAFE, ASR-6 | *baselined* | — | — | — |
 | `H.FAIL.5` | With ferrix.panic=reset read after stage 1's check, the first failure report shall, once its diagnostic and the reset line are on the port, in the pstore record and on the screen, wait 10 seconds on the free-running counter where its rate is known and reset the machine; with no value, halt, any other value, or in a report on another processor, it shall halt. | In cargo xtask test-postmortem (x86-64 under KVM, AArch64): a boot with ferrix.onexit=panic ferrix.panic=reset prints the reset line and the loader's banner comes again at least 9.5 s and at most 60 s later, quoting the panic; the same boot without the option and with ferrix.panic=Reset says it halts and prints no reset line. | O.FAILSAFE, ASR-6 | `tools/common/xtask/src/postmortem.rs::reset_by_itself` | xtask gate | xtask gate | xtask gate |
+| `H.FAIL.6` | With ferrix.lockup=on, a processor that takes no interrupt for 10 seconds while another runs shall end in a failure report that names it, and the pstore region's stop word shall say a lockup; with the option off nothing shall watch. | In cargo xtask test-postmortem's lockup case (x86-64 under KVM with 4 processors, AArch64), the check that masks a processor is reported 9.5 to 30 s later under the lockup's catalog code, and the next loader says the boot ended in a lockup; its quiet case, every processor idle for 25 s with ferrix.lockup=on, reports nothing. | O.FAILSAFE, ASR-6 | `tools/common/xtask/src/postmortem.rs::locked_up` | xtask gate | xtask gate | xtask gate |
 
 ### Storage (`H.STORE`)
 
@@ -1595,6 +1596,15 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.console.47` | reboot(2) shall write the pstore region back from the caches, through stop, in each of its four stopping arms (RESTART, RESTART2, POWER_OFF, HALT), after its last line and before the architecture's reset or power-off, taking no lock and allocating nothing. | In test-postmortem's stop cases (x86-64 and AArch64), boot 2's loader reads the word each of the RESTART, RESTART2, POWER_OFF and HALT arms' stop call stored. By inspection: stop writes the region back in the same body after the store, and nothing in each arm can return after it. The write-back itself is not observable under QEMU, whose caches are the host's: the N150 run is a BACKLOG row. | H.FAIL.1 | `console::pstore::stop` | `tools/common/xtask/src/postmortem.rs::stops` | xtask gate | xtask gate | xtask gate |
 | `L.console.48` | The stop word the kernel stores shall be ferrix-bootinfo's Stop::word: a stop's code in its low half and the code's complement in its high half, so that a word of 0 reads as no stop recorded, a word whose halves do not match or whose code is 0 as damaged, and a whole word with a code the list does not name as unknown; validate shall read version 1, with no stop word whatever its bytes hold, and version 2, and refuse any other. | Host tests of ferrix-bootinfo's pstore: every_stop_round_trips_and_none_is_zero, a_changed_bit_is_damaged (every single-bit change of every stop's word), an_unassigned_code_is_a_newer_kernels, and version_1_reads_with_no_stop_word_and_version_3_is_refused. By inspection: stop and panicked store Stop::word and nothing else. | H.BOOT.1 | `console::pstore::stop`, `console::pstore::panicked` | `src/lib/proto/bootinfo/src/pstore/tests.rs::every_stop_round_trips_and_none_is_zero`, `src/lib/proto/bootinfo/src/pstore/tests.rs::a_changed_bit_is_damaged`, `src/lib/proto/bootinfo/src/pstore/tests.rs::an_unassigned_code_is_a_newer_kernels`, `src/lib/proto/bootinfo/src/pstore/tests.rs::version_1_reads_with_no_stop_word_and_version_3_is_refused` | host test | host test | host test |
 
+### Lockup
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.lockup.1` | read_option shall ask for the detector for exactly the value on of ferrix.lockup; no option or off shall leave it off, and any other value shall be said as not understood and leave it off. | In test-postmortem, the lockup case's boot with ferrix.lockup=on says the detector watches; every boot without the option says nothing of it and is never reported as a lockup. By inspection: a value other than on and off is said and leaves it off. | H.FAIL.6 | `lockup::read_option`, `lockup::asked`, `lockup::start` | `tools/common/xtask/src/postmortem.rs::locked_up` | xtask gate | xtask gate | xtask gate |
+| `L.lockup.2` | Once the watch has started, every online processor shall count each timer and inter-processor interrupt it takes in its heartbeat and keep a one-shot armed no later than one second ahead, from its tick and before it halts idle; until the watch starts, each of these shall be one read of a flag set once. | In test-postmortem's quiet case (x86-64 under KVM with 4 processors, AArch64) the detector watches while every processor idles for 25 s and reports nothing; in the lockup case the check sees every online processor's heartbeat move before it masks one. The watch tick re-arms at every expiry (watch::tick), and the idle path arms it again before every halt: by inspection each alone keeps a processor ticking once its first watch tick is armed. Controls: the heartbeat's bump removed makes the quiet case report FX-9007; the watch tick's arming removed, both arms at once (arm_here arms nothing), leaves the detector dead. By inspection: with the watch not started, tick, beat and arm_here return after reading WATCHING. | H.FAIL.6 | `watch::start`, `watch::tick`, `watch::beat`, `watch::arm_here`, `watch::beats`, `watch::register` | `tools/common/xtask/src/postmortem.rs::locked_up`, `tools/common/xtask/src/postmortem.rs::watched_quietly` | xtask gate | xtask gate | xtask gate |
+| `L.lockup.3` | On its tick, each watcher shall read the heartbeat of the next online processor in logical order; one that stood still for 10 seconds shall have the stop word set to a lockup and, on x86-64, be named and sent an NMI whose handler, first of all, reports from its own frame, the watcher reporting itself when no report has begun 2 seconds later, decided on a later tick; on the Arm architectures the watcher shall report at once, naming it. Nothing shall be judged while a panic stops the processors. | In test-postmortem's lockup case, the report carries the lockup's code 9.5 to 30 s after the check masks the boot processor: on x86-64 under KVM the masked processor's own, the instruction its NMI interrupted in the check's spin; on AArch64 the watcher's, naming it. Controls: the heartbeat's bump removed reports where nothing is stuck; the ring check removed leaves the masking unreported; on x86-64 the NMI's arm removed leaves the watcher's own report; on AArch64 the ring check removed leaves the masking unreported. By inspection: nothing is judged while smp::stopping(). | H.FAIL.6 | `lockup::on_tick`, `lockup::stuck`, `lockup::send_nmi`, `lockup::target_of`, `watch::name_for_nmi`, `watch::named_here`, `arch::x86_64::send_lockup_nmi` | `tools/common/xtask/src/postmortem.rs::locked_up` | xtask gate | xtask gate | xtask gate |
+| `L.console.49` | locked_up shall store a lockup's stop word, code 7; panicked shall not replace it, and stop shall replace neither a lockup's word nor a panic's. | In test-postmortem's lockup case the next loader says the boot ended in a lockup, though a panic's report followed the store; by inspection, stop's update keeps both words. | H.FAIL.6 | `console::pstore::locked_up`, `console::pstore::panicked`, `console::pstore::stop`, `console::pstore::failed` | `tools/common/xtask/src/postmortem.rs::locked_up` | xtask gate | xtask gate | xtask gate |
+
 ### PanicReset
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
@@ -2490,12 +2500,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `tools/common/xtask/src/machine_check.rs::test_mce` | gate | L.x86_64.175 |
 | `tools/common/xtask/src/main.rs::test_shell` | gate | L.init.1 |
 | `tools/common/xtask/src/main.rs::test_vfs` | gate | L.init.1 |
+| `tools/common/xtask/src/postmortem.rs::locked_up` | gate | H.FAIL.6, L.lockup.1, L.lockup.2, L.lockup.3, L.console.49 |
 | `tools/common/xtask/src/postmortem.rs::misspelt` | gate | L.panic.1 |
 | `tools/common/xtask/src/postmortem.rs::panic_word_problem` | gate | L.console.46 |
 | `tools/common/xtask/src/postmortem.rs::region_problem` | gate | L.console.42 |
 | `tools/common/xtask/src/postmortem.rs::reset_by_itself` | gate | H.FAIL.5, L.panic.2, L.panic.3 |
 | `tools/common/xtask/src/postmortem.rs::stops` | gate | L.console.46 |
 | `tools/common/xtask/src/postmortem.rs::stops` | gate | L.console.47 |
+| `tools/common/xtask/src/postmortem.rs::watched_quietly` | gate | L.lockup.2 |
 | `tools/common/xtask/src/postmortem.rs::write_back_problem` | gate | L.console.44 |
 | `tools/common/xtask/src/procfs.rs::test_procfs` | gate | L.sched.86, H.SCHED.15 |
 | `tools/common/xtask/src/qemu.rs::cleaning_problem` | gate | L.iommu.56 |

@@ -19,7 +19,7 @@
       "purpose": "docs/DEBUG.md S2, a ptrace subset in debug builds only (customer, 2026-10-21; consultant OK IF D1-D12, ledger 2937): the parent, and one id per check -- attach refused by may_access, by the scope, across jobs and to native processes; set-id exec under trace; register read and write validation; memory round trip and the forced write; call stops; single step; int3; exit, exec and detach; tracer exit; SIGKILL of a stopped tracee"
     },
     {
-      "ids": ["H.FAIL.6-7", "L.lockup.1-5", "L.tco.1-6", "L.console.49"],
+      "ids": ["H.FAIL.7", "L.lockup.4-5", "L.tco.1-6"],
       "owner": "lockup",
       "branch": "lockup",
       "date": "2026-10-21",

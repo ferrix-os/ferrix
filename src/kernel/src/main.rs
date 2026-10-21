@@ -32,6 +32,8 @@ mod init_check;
 mod interfaces;
 mod iommu;
 mod irq;
+mod lockup;
+mod lockup_check;
 mod mm;
 mod mmio;
 mod net;
@@ -67,6 +69,7 @@ mod timer;
 mod trap;
 mod user;
 mod vmap;
+mod watch;
 
 use ferrix_bootinfo::{BootInfo, BootView, KASLR_FIXED_IMAGE, KASLR_MOVED, MemKind, PAGE_SIZE};
 use ferrix_paging::MapError;
@@ -426,6 +429,10 @@ fn say_booted() {
              ferrix.checks=skip asks"
         );
     }
+    // After the marker, every processor online: the lockup detector, if
+    // asked, then the check that masks a processor on purpose, if asked.
+    lockup::start();
+    lockup_check::run();
 }
 
 /// Stage 8: build the root from the initramfs, and require it to be what the
@@ -1797,6 +1804,8 @@ fn verify_hand_off(view: &BootView<'_>, memory: &mut EarlyMemory) {
     println!("  stage 1  loader hand-off verified");
     // After the check: a panic before it halts, whatever the command line.
     panic::reset::read_option(view);
+    lockup::read_option(view);
+    lockup_check::read_option(view);
     console::screen::milestone(2);
 }
 
