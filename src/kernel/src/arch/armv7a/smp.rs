@@ -163,6 +163,7 @@ pub(crate) fn describe_cpus(view: &BootView<'_>) -> Result<Described, &'static s
             boot,
             // FATAL-ALLOC: boot only: stage 4 lists the processors firmware describes, once.
             ids: alloc::vec![boot],
+            parked: Vec::new(),
         });
     }
 
@@ -181,10 +182,15 @@ pub(crate) fn describe_cpus(view: &BootView<'_>) -> Result<Described, &'static s
         // FATAL-ALLOC: boot only: stage 4 lists the processors firmware describes, once.
         .collect();
 
+    // Which of them are threads of one core, as the tree's `cpu-map` says
+    // (`smt`, `L.armv7a.27`).
+    crate::smp::threads::record(threads_in_tree(&tree))?;
+
     Ok(Described {
         id_name: "MPIDR",
         boot,
         ids,
+        parked: Vec::new(),
     })
 }
 
@@ -558,4 +564,24 @@ extern "C" fn secondary_start(record: u32) -> ! {
     // program: after the record, which is where it says what it applied.
     super::speculation::apply_this_cpu();
     crate::smp::secondary_main(u64::from(record))
+}
+
+/// Which processors are threads of one core, as the tree's `cpu-map` says
+/// (`smt`, `L.armv7a.27`).
+fn threads_in_tree(tree: &ferrix_fdt::Fdt<'_>) -> crate::smp::threads::Found {
+    use crate::smp::threads::Found;
+    match tree.cpu_map() {
+        Ok(None) => Found::NoTable,
+        Ok(Some(map)) => Found::Map {
+            table: "cpu-map",
+            cores: map.cores,
+            most_a_core: map.most_a_core,
+        },
+        Err(ferrix_fdt::CpuMapError::ThreadOutsideCore) => {
+            Found::Malformed("smt: cpu-map has a thread outside a core")
+        }
+        Err(ferrix_fdt::CpuMapError::ThreadWithoutCpu) => {
+            Found::Malformed("smt: cpu-map has a thread that names no processor")
+        }
+    }
 }

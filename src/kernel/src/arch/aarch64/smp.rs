@@ -69,6 +69,7 @@ pub(crate) fn describe_cpus(view: &BootView<'_>) -> Result<Described, &'static s
             boot,
             // FATAL-ALLOC: boot only: stage 4 lists the processors firmware describes, once.
             ids: alloc::vec![boot],
+            parked: Vec::new(),
         });
     }
     let ids = if view.raw().rsdp == 0 {
@@ -80,6 +81,7 @@ pub(crate) fn describe_cpus(view: &BootView<'_>) -> Result<Described, &'static s
         id_name: "MPIDR",
         boot,
         ids,
+        parked: Vec::new(),
     })
 }
 
@@ -91,6 +93,7 @@ fn cpus_from_madt(view: &BootView<'_>) -> Result<Vec<u64>, &'static str> {
     let madt = acpi.madt().map_err(|_| "the machine has no MADT")?;
 
     let mut ids = Vec::new();
+    let mut uids = Vec::new();
     for entry in madt.entries() {
         // As on x86-64, a processor whose enabled flag is clear is one that
         // cannot be started now, and is not counted.
@@ -99,8 +102,27 @@ fn cpus_from_madt(view: &BootView<'_>) -> Result<Vec<u64>, &'static str> {
         {
             // FATAL-ALLOC: boot only: stage 4 lists the processors firmware describes, once.
             ids.push(gicc.mpidr & MPIDR_AFFINITY);
+            // FATAL-ALLOC: boot only: stage 4 lists the processors firmware describes, once.
+            uids.push(gicc.acpi_processor_uid);
         }
     }
+    // Which of them are threads of one core: the PPTT, of the processors
+    // enabled here, which are the ones started (`smt`, `L.aarch64.65`).
+    let found = match acpi.pptt() {
+        Err(ferrix_acpi::AcpiError::NotFound(_)) => crate::smp::threads::Found::NoTable,
+        Err(_) => crate::smp::threads::Found::Malformed("smt: the PPTT cannot be read"),
+        Ok(pptt) => match pptt.threads(|uid| uids.contains(&uid)) {
+            Ok(threads) => crate::smp::threads::Found::Map {
+                table: "the PPTT",
+                cores: threads.cores,
+                most_a_core: threads.most_a_core,
+            },
+            Err(_) => crate::smp::threads::Found::Malformed(
+                "smt: the PPTT is malformed (a parent out of the table, a loop, or a thread of no core)",
+            ),
+        },
+    };
+    crate::smp::threads::record(found)?;
     Ok(ids)
 }
 
@@ -110,6 +132,7 @@ fn cpus_from_madt(view: &BootView<'_>) -> Result<Vec<u64>, &'static str> {
 /// one naming another method is left out, since nothing here speaks it.
 fn cpus_from_tree(view: &BootView<'_>) -> Result<Vec<u64>, &'static str> {
     let tree = crate::discovery::fdt::open(view)?;
+    crate::smp::threads::record(threads_in_tree(&tree))?;
     let boot = hardware_id();
     let psci = tree.psci_conduit().is_some();
     Ok(tree
@@ -458,4 +481,24 @@ extern "C" fn secondary_start(record: u64) -> ! {
     // program: after the record, which is where it says what it applied.
     super::speculation::apply_this_cpu();
     crate::smp::secondary_main(record)
+}
+
+/// Which processors are threads of one core, as the tree's `cpu-map` says
+/// (`smt`, `L.aarch64.65`).
+fn threads_in_tree(tree: &ferrix_fdt::Fdt<'_>) -> crate::smp::threads::Found {
+    use crate::smp::threads::Found;
+    match tree.cpu_map() {
+        Ok(None) => Found::NoTable,
+        Ok(Some(map)) => Found::Map {
+            table: "cpu-map",
+            cores: map.cores,
+            most_a_core: map.most_a_core,
+        },
+        Err(ferrix_fdt::CpuMapError::ThreadOutsideCore) => {
+            Found::Malformed("smt: cpu-map has a thread outside a core")
+        }
+        Err(ferrix_fdt::CpuMapError::ThreadWithoutCpu) => {
+            Found::Malformed("smt: cpu-map has a thread that names no processor")
+        }
+    }
 }

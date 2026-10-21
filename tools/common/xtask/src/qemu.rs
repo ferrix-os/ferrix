@@ -2574,7 +2574,7 @@ fn qemu_command(
         "-m",
         &args.memory.to_string(),
         "-smp",
-        &processors.to_string(),
+        &smp_topology(processors, args.smp_threads)?,
         "-monitor",
         "none",
     ]);
@@ -4658,4 +4658,25 @@ mod tests {
         ));
         assert!(!version_translates(""));
     }
+}
+
+/// QEMU's `-smp` value: `processors`, and with `threads` above one, as cores
+/// of that many hardware threads each (`--smp-threads`, for `smt`'s checks).
+///
+/// # Errors
+///
+/// A thread count that does not divide the processors.
+fn smp_topology(processors: u32, threads: u32) -> Result<String> {
+    if threads <= 1 {
+        return Ok(processors.to_string());
+    }
+    if processors % threads != 0 {
+        return Err(Error::new(format!(
+            "--smp-threads {threads} does not divide --smp {processors}"
+        )));
+    }
+    Ok(format!(
+        "{processors},cores={},threads={threads}",
+        processors / threads
+    ))
 }

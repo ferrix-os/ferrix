@@ -64,6 +64,7 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     arch::check_user_counter()?;
     arch::check_x87_controls()?;
     arch::check_machine_check_enabled()?;
+    arch::check_smt()?;
     Ok(report)
 }
 

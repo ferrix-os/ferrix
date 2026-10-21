@@ -1663,3 +1663,20 @@ pub(crate) const USER_KERNEL_TIME_PROGRAM: &[u8] = &[
     0x01, 0x00, 0x00, 0xd4, 0x00, 0x00, 0x00, 0x14, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
     0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f,
 ];
+
+/// This processor's `MPIDR`, whole: for `smt`'s check, which reads its `MT`
+/// bit.
+pub(crate) fn mpidr() -> u64 {
+    cpu::read_mpidr()
+}
+
+/// Stage 4's look at how many threads of a core run work: see
+/// [`crate::smp::threads_check::check_arm_smt`].
+///
+/// # Errors
+///
+/// Under `smt=off`, a core listing two threads, a malformed table, or no
+/// table where `MPIDR.MT` is set.
+pub(crate) fn check_smt() -> Result<(), &'static str> {
+    crate::smp::threads_check::check_arm_smt()
+}

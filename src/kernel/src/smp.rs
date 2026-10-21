@@ -22,6 +22,10 @@
 //! handler in particular, which is told nothing at all.
 
 pub(crate) mod check;
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) mod threads;
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) mod threads_check;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -50,6 +54,10 @@ pub(crate) struct Described {
     /// Every processor firmware says can be started, in table order, the boot
     /// processor included.
     pub(crate) ids: Vec<u64>,
+    /// Of `ids`, the hardware threads to start only to park them: under
+    /// `smt=off` on x86-64, every thread of a core but its first
+    /// (`L.x86_64.184`). Empty everywhere else.
+    pub(crate) parked: Vec<u64>,
 }
 
 /// One processor's own state.
@@ -123,6 +131,11 @@ pub(crate) struct PerCpu {
     /// x86-64: where this processor's TSS keeps `RSP0`, as `STR` and `SGDT`
     /// found it at the same moment, or zero for no TSS. Kept as [`PerCpu::gdt`].
     pub(crate) privilege_stack: AtomicU64,
+    /// A parked hardware thread's report, written once by the thread itself
+    /// just before it halts for good (`smt=off`): non-zero once it has
+    /// parked, and what the architecture says it parked with (x86-64: its
+    /// `CR4`, with [`PARKED`] set). Zero on every processor that runs work.
+    pub(crate) parked: AtomicU64,
     /// Linux system calls this processor has answered: `fs::seam`'s count,
     /// added to only by this processor through `arch::this_cpu_add`
     /// ([`SYSCALLS_WORD_OFFSET`]) and summed over every record by the reader,
@@ -182,6 +195,10 @@ impl OwnCount {
     }
 }
 
+/// Set in [`PerCpu::parked`] by every parked thread, so its report is never
+/// zero.
+pub(crate) const PARKED: u64 = 1 << 63;
+
 /// Where in a [`PerCpu`] record its Linux system call count is, for
 /// `arch::this_cpu_add`.
 pub(crate) const SYSCALLS_WORD_OFFSET: usize =
@@ -218,12 +235,23 @@ pub(crate) struct Topology {
     /// One record per processor, indexed by logical number. Index zero is the
     /// boot processor.
     cpus: &'static [PerCpu],
+    /// One record per parked hardware thread (`smt=off`), apart from
+    /// [`Topology::cpus`] so that nothing that counts, lists or waits for the
+    /// processors sees one. Their logical numbers follow the processors',
+    /// at [`Topology::count`] and up, so that none indexes anything sized
+    /// for the processors that run work.
+    parked: &'static [PerCpu],
 }
 
 impl Topology {
     /// Check what the architecture found and build a record per processor.
     fn from_described(described: Described) -> Result<Topology, &'static str> {
-        let Described { id_name, boot, ids } = described;
+        let Described {
+            id_name,
+            boot,
+            ids,
+            parked,
+        } = described;
 
         if ids.is_empty() {
             return Err("firmware describes no processor that can be started");
@@ -245,45 +273,36 @@ impl Topology {
         if !ids.contains(&boot) {
             return Err("the processor running this code is not among those firmware describes");
         }
+        // A thread parked is one firmware describes, and never the one that
+        // is running this.
+        if parked.contains(&boot) || parked.iter().any(|id| !ids.contains(id)) {
+            return Err("the threads to park are not among those firmware describes");
+        }
 
         // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
         let mut ordered = Vec::with_capacity(ids.len());
         // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
         ordered.push(boot);
         // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
-        ordered.extend(ids.iter().copied().filter(|id| *id != boot));
+        ordered.extend(
+            ids.iter()
+                .copied()
+                .filter(|id| *id != boot && !parked.contains(id)),
+        );
+        let running = ordered.len();
 
-        let records: Vec<PerCpu> = ordered
-            .into_iter()
-            .enumerate()
-            .map(|(logical, hardware_id)| PerCpu {
-                this: 0,
-                kernel_stack: AtomicU64::new(0),
-                user_stack: 0,
-                logical,
-                hardware_id,
-                online: AtomicBool::new(logical == 0),
-                job_done: AtomicU64::new(0),
-                ipis: AtomicU64::new(0),
-                tlb_seen: AtomicU64::new(0),
-                gp_seen: AtomicU64::new(0),
-                preempt: crate::sched::PreemptState::new(),
-                running: crate::sched::RunningSlot::new(),
-                gdt: AtomicU64::new(0),
-                privilege_stack: AtomicU64::new(0),
-                syscalls: OwnCount::new(),
-            })
-            // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
-            .collect();
-
-        // Leaked, deliberately: a register on every processor is about to
-        // hold an address into this, for as long as the machine runs.
-        // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
-        let cpus: &'static mut [PerCpu] = Box::leak(records.into_boxed_slice());
-        for cpu in cpus.iter_mut() {
-            cpu.this = (&raw const *cpu) as u64;
-        }
-        Ok(Topology { id_name, cpus })
+        let cpus = leak_records(ordered.into_iter().enumerate());
+        let parked = leak_records(
+            parked
+                .into_iter()
+                .enumerate()
+                .map(|(index, id)| (running + index, id)),
+        );
+        Ok(Topology {
+            id_name,
+            cpus,
+            parked,
+        })
     }
 
     /// How many processors there are, the boot processor included.
@@ -294,6 +313,11 @@ impl Topology {
     /// Every processor's record, by logical number.
     pub(crate) const fn cpus(&self) -> &'static [PerCpu] {
         self.cpus
+    }
+
+    /// Every parked hardware thread's record (`smt=off`), none elsewhere.
+    pub(crate) const fn parked(&self) -> &'static [PerCpu] {
+        self.parked
     }
 
     /// How many processors have said they are running.
@@ -310,6 +334,41 @@ impl Topology {
     pub(crate) const fn id_name(&self) -> &'static str {
         self.id_name
     }
+}
+
+/// A record for each `(logical, hardware_id)`, leaked, each holding its own
+/// address. Only the boot processor's, logical zero, starts online.
+fn leak_records(numbered: impl Iterator<Item = (usize, u64)>) -> &'static [PerCpu] {
+    let records: Vec<PerCpu> = numbered
+        .map(|(logical, hardware_id)| PerCpu {
+            this: 0,
+            kernel_stack: AtomicU64::new(0),
+            user_stack: 0,
+            logical,
+            hardware_id,
+            online: AtomicBool::new(logical == 0),
+            job_done: AtomicU64::new(0),
+            ipis: AtomicU64::new(0),
+            tlb_seen: AtomicU64::new(0),
+            gp_seen: AtomicU64::new(0),
+            preempt: crate::sched::PreemptState::new(),
+            running: crate::sched::RunningSlot::new(),
+            gdt: AtomicU64::new(0),
+            privilege_stack: AtomicU64::new(0),
+            parked: AtomicU64::new(0),
+            syscalls: OwnCount::new(),
+        })
+        // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
+        .collect();
+
+    // Leaked, deliberately: a register on every processor is about to hold
+    // an address into this, for as long as the machine runs.
+    // FATAL-ALLOC: boot only: stage 4 builds the processor table once, before the secondaries start.
+    let records: &'static mut [PerCpu] = Box::leak(records.into_boxed_slice());
+    for record in records.iter_mut() {
+        record.this = (&raw const *record) as u64;
+    }
+    records
 }
 
 /// The processors, once [`discover`] has run.
@@ -415,6 +474,15 @@ pub(crate) fn start_secondaries(view: &BootView<'_>) -> Result<(), &'static str>
         starter.start(cpu.hardware_id, stack.top, cpu.this)?;
         wait_until_online(cpu)?;
     }
+    // The parked threads last (`smt=off`, `L.x86_64.184`), each started only
+    // to set itself up to take a machine check and halt for good. Each has
+    // a stack of its own, for its exceptions, and a record outside `cpus`.
+    for thread in topology.parked {
+        let stack = crate::vmap::allocate_stack()
+            .map_err(|_| "no kernel stack for a parked hardware thread")?;
+        starter.start(thread.hardware_id, stack.top, thread.this)?;
+        wait_until_parked(thread)?;
+    }
 
     // Only now, and deliberately not on the failure paths above: a core that
     // has not reported in may still be about to read the start block, and
@@ -436,11 +504,61 @@ fn wait_until_online(cpu: &PerCpu) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// The record at `address`, if it is one of the processors' records.
+/// Wait for the parked thread `thread` to say it has parked, for at most
+/// [`START_TIMEOUT_NANOS`].
+fn wait_until_parked(thread: &PerCpu) -> Result<(), &'static str> {
+    let deadline = crate::timer::now_nanos().saturating_add(START_TIMEOUT_NANOS);
+    while thread.parked.load(Ordering::Acquire) == 0 {
+        if crate::timer::now_nanos() > deadline {
+            return Err("a hardware thread was started to be parked and never reported in");
+        }
+        spin_loop();
+    }
+    Ok(())
+}
+
+/// The record at `address`, if it is one of the processors' records or a
+/// parked thread's.
 fn record_at(address: u64) -> Option<&'static PerCpu> {
+    TOPOLOGY.get().and_then(|topology| {
+        topology
+            .cpus
+            .iter()
+            .chain(topology.parked)
+            .find(|cpu| cpu.this == address)
+    })
+}
+
+/// The parked thread's record at `address`, if `address` is one: what a
+/// thread the architecture starts asks to learn that it is to park.
+pub(crate) fn parked_record(address: u64) -> Option<&'static PerCpu> {
     TOPOLOGY
         .get()
-        .and_then(|topology| topology.cpus.iter().find(|cpu| cpu.this == address))
+        .and_then(|topology| topology.parked.iter().find(|cpu| cpu.this == address))
+}
+
+/// Say, on the parked thread whose record is installed, that it has parked
+/// with `report` (the architecture's, [`PARKED`] added): the last store a
+/// parked thread makes before it halts for good.
+///
+/// Checks the record first, as [`secondary_main`] does a processor's: a
+/// thread whose register does not lead to its own parked record stops the
+/// boot by name.
+pub(crate) fn report_parked(record: u64, report: u64) {
+    let Some(expected) = parked_record(record) else {
+        crate::panic::fatal!(
+            crate::panic::catalog::SECONDARY_NO_RECORD,
+            "a parked hardware thread arrived with no record of its own"
+        );
+    };
+    if arch::cpu_local_register() != expected.this || expected.hardware_id != arch::hardware_id() {
+        crate::panic::fatal!(
+            crate::panic::catalog::SECONDARY_RECORD_MISMATCH,
+            "parked hardware thread {}: arrived without its own record installed",
+            expected.logical
+        );
+    }
+    expected.parked.store(report | PARKED, Ordering::Release);
 }
 
 /// Make `record` this secondary processor's own, before anything on it can
@@ -1791,6 +1909,7 @@ pub(crate) fn this_cpu_for_report() -> Result<&'static PerCpu, &'static str> {
     topology
         .cpus
         .iter()
+        .chain(topology.parked)
         .find(|cpu| cpu.this == register)
         .ok_or("a processor that has not installed its per-CPU record")
 }

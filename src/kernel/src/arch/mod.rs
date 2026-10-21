@@ -417,6 +417,24 @@ pub(crate) const fn check_machine_check_enabled() -> Result<(), &'static str> {
     Ok(())
 }
 
+// How many hardware threads of a core run work, checked once all are online
+// (`smt`, `docs/BUILD-FLAGS.md` §3.1 DF4): under `smt=off`, one, with every
+// other thread parked (x86-64) or absent (the Arm architectures, which only
+// check).
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::check_smt;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::check_smt;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::check_smt;
+
+// This processor's `MPIDR`, whole, for `smt`'s check on the Arm
+// architectures (its `MT` bit).
+#[cfg(target_arch = "aarch64")]
+pub(crate) use aarch64::mpidr;
+#[cfg(target_arch = "arm")]
+pub(crate) use armv7a::mpidr;
+
 // Cache maintenance for a device that does not snoop the caches: the
 // DK board's display controller reads a framebuffer straight from memory, so
 // whatever a program drew has to be written back from the caches to the point

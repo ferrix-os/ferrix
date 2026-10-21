@@ -147,7 +147,7 @@ values.on_request = { allows = ["none"], lands = "M0", built = "stand-in", stand
 
 [flags.smt]
 why = "one hardware thread per core, parked by the kernel (`off`), or sibling threads running under STIBP or eIBRS/AutoIBRS (`stibp`)"
-values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M0", built = "no" }
+values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "M0", built = "yes" }
 values.stibp = { allows = ["present", "sc2", "none"], lands = "today", built = "yes" }
 
 [flags.runtime_trades]

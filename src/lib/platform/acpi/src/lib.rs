@@ -54,6 +54,7 @@
 pub mod dmar;
 pub mod hpet;
 pub mod iort;
+pub mod pptt;
 
 use core::fmt;
 
@@ -193,6 +194,13 @@ pub enum AcpiError {
     /// The MADT describes more entries than `MAX_MADT_ENTRIES`, so the walk
     /// was cut short rather than run for an unbounded time at boot.
     TooManyEntries,
+    /// A PPTT processor node at this offset names a parent that is no
+    /// processor node of the table, is a thread with no parent, or starts a
+    /// parent chain that loops.
+    BadParent {
+        /// Byte offset of the node within the table.
+        offset: usize,
+    },
 }
 
 impl fmt::Display for AcpiError {
@@ -229,6 +237,9 @@ impl fmt::Display for AcpiError {
                 write!(f, "MADT entry at offset {offset} runs past the table")
             }
             AcpiError::TooManyEntries => f.write_str("MADT describes too many entries"),
+            AcpiError::BadParent { offset } => {
+                write!(f, "PPTT node at offset {offset} has no valid parent chain")
+            }
         }
     }
 }
@@ -787,6 +798,11 @@ impl<'t, T: Tables> Acpi<'t, T> {
     /// The IORT, decoded: which SMMU an Arm machine's devices sit behind.
     pub fn iort(&self) -> Result<iort::Iort<'t>, AcpiError> {
         iort::Iort::parse(self.find(iort::IORT_SIGNATURE)?)
+    }
+
+    /// The PPTT, decoded: which processors are threads of one core.
+    pub fn pptt(&self) -> Result<pptt::Pptt<'t>, AcpiError> {
+        pptt::Pptt::parse(self.find(pptt::PPTT_SIGNATURE)?)
     }
 }
 
