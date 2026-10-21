@@ -319,9 +319,14 @@ impl Platform for Real<'_> {
 
     fn read_object(&mut self, object: KernelObject, index: usize) -> u32 {
         match self.at(object, index) {
-            // SAFETY: inside the object's mapping, aligned; volatile, since
-            // the GPU writes it.
-            Some(address) => unsafe { ptr::read_volatile(address as *const u32) },
+            Some(address) => {
+                // The line out of this processor's caches first, so the read
+                // is of what the GPU wrote (see `arch::flush_line`).
+                crate::arch::flush_line(address);
+                // SAFETY: inside the object's mapping, aligned; volatile,
+                // since the GPU writes it.
+                unsafe { ptr::read_volatile(address as *const u32) }
+            }
             None => 0,
         }
     }
@@ -330,6 +335,10 @@ impl Platform for Real<'_> {
         if let Some(address) = self.at(object, index) {
             // SAFETY: as for `read_object`.
             unsafe { ptr::write_volatile(address as *mut u32, value) }
+            // Written back and out of the caches, so a dirty line never
+            // lands later over what the GPU wrote beside it (the CSB's
+            // consumed entries share a line with its write pointer).
+            crate::arch::flush_line(address);
         }
     }
 
