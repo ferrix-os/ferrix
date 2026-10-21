@@ -594,6 +594,10 @@ fn say_booted() {
             );
         }
     }
+    // After the marker, every processor online: the lockup detector, if
+    // asked, then the check that masks a processor on purpose, if asked.
+    lockup::start();
+    lockup_check::run();
 }
 
 #[cfg(ferrix_load_built = "ring0")]
@@ -2179,6 +2183,8 @@ fn verify_hand_off(view: &BootView<'_>, memory: &mut EarlyMemory) {
     println!("  stage 1  loader hand-off verified");
     // After the check: a panic before it halts, whatever the command line.
     panic::reset::read_option(view);
+    lockup::read_option(view);
+    lockup_check::read_option(view);
     console::screen::milestone(2);
 }
 
