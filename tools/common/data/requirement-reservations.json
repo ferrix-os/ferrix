@@ -124,13 +124,6 @@
       "purpose": "MICROKERNEL.md §3 K7, charging that follows the client (OPAQUE-KERNEL.md §2 point 5, ledger 35-36): H.QUOTA.14, memory a server holds for a client's request charged to the client's job, only through a ticket the kernel issued for that request and only until it is answered; L.object.207-212, the ticket's issue, adoption through the issuing end's peer, charging while adopted, its end, the charges' return and the per-end bound"
     },
     {
-      "ids": ["H.OBJ.21", "L.object.213-220", "L.sched.84"],
-      "owner": "mk-k10",
-      "branch": "mk/k10",
-      "date": "2026-10-19",
-      "purpose": "MICROKERNEL.md §3 K10, timer objects (docs/microkernel/K10.md): a one-shot deadline object on the monotonic or boot counter, absolute or relative, with slack, on the scheduler's per-processor sleeper timeline that K5's timeouts use, fired from the timer interrupt, signalled READABLE and delivered to ports; set and cancel against an in-flight fire; destruction while armed; charged to the creating job (F-35 objects, F-37 kernel bytes); L.sched.84, the scheduler's sleeper removed by key (consultant OK IF, ledger 2538, condition 2)"
-    },
-    {
       "ids": ["H.QUOTA.15-17", "L.mm.76-82", "L.object.221-225", "L.user.145"],
       "owner": "mk-k12",
       "branch": "mk/k12",

@@ -735,7 +735,7 @@ fn a_dead_task_is_not_filed_as_a_sleeper() -> Result<(), &'static str> {
 
     // Unfiled before anything is reported, so a failure is a sentence and not
     // a dead task the timer wakes an hour from now.
-    if super::unfile_sleeper(task.id) {
+    if super::unfile_sleeper(&task) {
         return Err("a dead task was filed as a sleeper under a deadline it abandoned");
     }
 

@@ -111,6 +111,13 @@ impl Rights {
     /// under `ferrix.devmgr=init` -- hands its holder none of that authority.
     pub const PROCESS: Rights =
         Rights(Rights::DUPLICATE.0 | Rights::TRANSFER.0 | Rights::WAIT.0 | Rights::MANAGE.0);
+    /// What a new timer carries (`docs/microkernel/K10.md`).
+    ///
+    /// [`Rights::WAIT`] to hear it fire, directly or through a port, and
+    /// [`Rights::WRITE`] to set and cancel it. It may be duplicated and moved:
+    /// a timer holds nothing but its deadline.
+    pub const TIMER: Rights =
+        Rights(Rights::DUPLICATE.0 | Rights::TRANSFER.0 | Rights::WAIT.0 | Rights::WRITE.0);
 
     /// Whether every right in `other` is also in `self`.
     #[must_use]

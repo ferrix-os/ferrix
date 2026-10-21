@@ -1532,6 +1532,74 @@ forgotten, in the contexts `prepare_user_root` is called from on all three
 architectures (a new address space's root, before it is ever installed),
 which may hold other locks or have interrupts masked; as a leaf, it adds
 no ordering to them. Since F-64's fix (2026-10-14).
+### 2.2t Timer objects on the sleeper sets (`object::timer`, `sched::queue`, K10, 2026-10-21)
+
+A timer's arm is filed on its processor's sleeper set beside sleeping
+tasks (`docs/microkernel/K10.md`, `L.object.218`), and fired by that
+processor's timer interrupt. Its bounds:
+
+* **The sleeper set** is an AVL tree keyed by instant and id. Filing,
+  taking the first, and removing by the key an entry was filed under are
+  each O(log n), n the tasks and timer arms filed on that processor, under
+  its run queue's lock, interrupts masked. Nothing walks it: an early wake
+  removes a task by the instant it was filed under (`L.sched.84`), where it
+  used to walk the set, and a set or cancel removes a timer's arm by its key.
+* **A wake pass** (every decision, and the timer interrupt) takes entries
+  in key order while the first is due, or is a timer arm whose window has
+  opened and the fired buffer has room. Per pass: the tasks it wakes, at
+  most `FIRE_BATCH` (16) arms moved into the fired buffer, and at most
+  `FIRE_BATCH` arms filed again `MIN_ARM_NS` (20 us) on when the buffer is
+  full; past that it stops. Each step O(log n).
+* **A fire pass** (`sched::fire_timers`, the timer interrupt) takes the
+  timer arms at the head of the set and stops at a sleeping task that is
+  due: the interrupt wakes no task, since a wake charges the running task
+  and the interrupt does not know whether it cut user mode; the decision it
+  asks for wakes it after `account_in`. Arms behind such a task are taken
+  by that decision's pass and fired `MIN_ARM_NS` later. It fires at most
+  `FIRE_BATCH` arms, with the run queue's lock let go. Each fire takes the
+  timer's interrupt-safe lock, triggers at most `TIMER_OBSERVERS` (4)
+  registrations, and, with the lock let go, queues each one's packet under
+  its port's interrupt-safe lock (room promised when it registered, so
+  nothing allocates) and wakes the port's and the timer's wait queues
+  (`WaitQueue::wake_all`, whose bound is §2.2q's and the waiters').
+* **Lateness, and interference between jobs.** A timer never fires before
+  its deadline. It fires by `deadline + slack` plus: the processor's
+  interrupt latency; `MIN_ARM_NS` when a decision outside an interrupt took
+  it into the fired buffer; and one further interrupt, `MIN_ARM_NS` apart,
+  for every `FIRE_BATCH` arms due before it on that processor, whoever's
+  they are. So a job that arms many timers due at one instant delays other
+  jobs' timers on that processor by one interrupt per `FIRE_BATCH` of its
+  own. A sleeping task is delayed by them only past `FIRE_BATCH` re-files
+  in one pass: by one interrupt, `MIN_ARM_NS`, per `2 * FIRE_BATCH` arms
+  due ahead of it. The number of arms is bounded by each job's object quota
+  (one object per timer, F-35). Bounding the interference itself is K9's
+  (`docs/MICROKERNEL.md` §3), which owns interrupt time; until it lands,
+  that time is charged to the task the interrupt cut, as every
+  interrupt's is.
+* **Coalescing is a prefix.** An arm whose window is open is taken only
+  while it is first: one behind an entry not yet due waits for its own key
+  or for that entry, never past `deadline + slack`.
+* **Frees in the interrupt.** A fire may hold the last reference to a
+  timer closed while its arm was in flight. Its drop then frees heap only
+  (its slot's node and three vectors), under the heap's locks, which mask
+  interrupts (`mm.rs`); its registrations and the ports it kept were let go
+  by the close, in task context, and `TimerCore`'s drop asserts it. A port a
+  fire delivered to is kept on the timer and let go by the timer's next
+  set, cancel, registration or close, never in the interrupt.
+* **A close** waits out a delivery in flight on another processor: at
+  most `TIMER_OBSERVERS` packets queued and the wakes after them. It
+  spins, and cannot wait on itself: every delivery runs with preemption
+  off -- in the timer interrupt, or in a set that fired in the call, which
+  turns preemption off for it -- so a delivery on the closing processor has
+  finished before the close runs (the K10 code review, ledger 2773, (1)).
+* **Charged** per timer to the job that made it: one object (F-35) and
+  `object::timer::heap_bytes()` of kernel memory (F-37's rule), both
+  before it exists.
+
+Lock order: a timer's lock, then a run queue's (a set and a cancel file
+and unfile under both); the fire path lets the run queue's lock go before
+it takes a timer's; a port's lock and the wakes only once the timer's is
+let go. Nothing takes a timer's lock under a run queue's or a port's.
 
 ### 2.3 What is missing, per standard
 

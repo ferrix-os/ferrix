@@ -831,5 +831,26 @@ package FerrixSchedRequirements {
             attribute :>> unit = ("sched::switch_chosen",
                 "sched::task::Task::note_switched_out");
         }
+        requirement <'L.sched.84'> aSleeperLeavesByItsKey : ItemLowLevel {
+            doc /* Rationale: the sleeper set holds timer arms beside sleeping
+                tasks since K10 (docs/microkernel/K10.md §9, condition 2), so a
+                walk of it on every early wake would let one job's timers
+                lengthen every other job's wakes; a removal by key is a descent of
+                the AVL tree. */
+            attribute :>> statement = "A task filed in its processor's sleeper set
+                shall keep the instant it was filed under, and an early wake shall
+                take it out by that instant and its id, never by a walk of the set;
+                a removal under any other key shall take nothing out.";
+            attribute :>> criterion = "Stage 9's early-wake case: a task asleep
+                among three armed timers on its processor, woken early, takes the
+                set from n to n - 1 entries with every timer's arm still filed;
+                with the removal's key made wrong, the case fails with its
+                sentence. The sched crate's host test removes by key and refuses
+                a wrong instant and a wrong id.";
+            attribute :>> parent = "H.SCHED.5";
+            attribute :>> unit = ("sched::queue::CpuQueue::remove_sleeper",
+                "sched::queue::CpuQueue::file_sleeper",
+                "sched::task::Task::set_filed_at", "sched::task::Task::filed_at");
+        }
     }
 }

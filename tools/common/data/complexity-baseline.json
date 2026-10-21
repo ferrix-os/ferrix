@@ -89,6 +89,11 @@
       "lines": 83,
       "recursive": false
     },
+    "sched/task.rs::new": {
+      "complexity": 5,
+      "lines": 60,
+      "recursive": false
+    },
     "smp.rs::invalidate_pages": {
       "complexity": 21,
       "lines": 82,
@@ -310,8 +315,8 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 30,
-      "lines": 96,
+      "complexity": 33,
+      "lines": 99,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {

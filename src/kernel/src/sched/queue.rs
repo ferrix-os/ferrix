@@ -31,7 +31,25 @@ use ferrix_sched::{
     Config, CpuLoad, EntityState, JobPlan, Load, RunQueue, Timeline, settle_job_fold, slice_for,
 };
 
-use super::task::{BLOCKED, RUNNABLE, Task, TaskId};
+use super::task::{BLOCKED, RUNNABLE, SleepSlot, Task, TaskId};
+use crate::object::timer::Armed;
+
+/// What a processor's sleeper set holds: one set for every deadline the
+/// processor keeps, so that one hardware one-shot, armed by
+/// [`CpuQueue::arm_timer`] for the set's first key, serves them all
+/// (`docs/microkernel/K10.md` §2.1).
+#[derive(Debug)]
+pub(crate) enum Due {
+    /// A sleeping task, made runnable at its instant.
+    Wake(Arc<Task>),
+    /// A timer object's arm, keyed by the latest instant of its window.
+    Fire(Armed),
+}
+
+/// The most timer arms one processor holds between being taken off its
+/// sleeper set and being fired by its timer interrupt, and the most a pass
+/// re-files when that is full (`L.object.218`).
+pub(crate) const FIRE_BATCH: usize = 16;
 
 /// The most a task under a `cpu.max` runs before the quota is looked at
 /// again, however much is left: with `n` tasks of one job running at once on
@@ -137,6 +155,116 @@ pub(crate) struct Pick {
     pub(crate) count: usize,
 }
 
+/// Timer arms a pass took off a sleeper set and the timer interrupt has not
+/// fired yet: at most [`FIRE_BATCH`], in a fixed array, so that a pass
+/// allocates nothing.
+#[derive(Debug)]
+pub(crate) struct Fired {
+    /// The arms and their slots; the first `len` are full.
+    pub(crate) slots: [Option<(Armed, SleepSlot)>; FIRE_BATCH],
+    /// How many are full.
+    pub(crate) len: usize,
+}
+
+impl Fired {
+    /// None.
+    pub(crate) const fn new() -> Fired {
+        Fired {
+            slots: [const { None }; FIRE_BATCH],
+            len: 0,
+        }
+    }
+
+    /// Every arm held, emptying it.
+    pub(crate) fn take(&mut self) -> [Option<(Armed, SleepSlot)>; FIRE_BATCH] {
+        self.len = 0;
+        core::mem::replace(&mut self.slots, [const { None }; FIRE_BATCH])
+    }
+}
+
+/// One pass's next step over `sleepers` at `now`: entries leave in key
+/// order while the first is due. A timer's arm goes into `fired`, which only
+/// the timer interrupt empties: a decision holds the run queue's lock across
+/// its switch, and a fire wakes waiters, which takes run queue locks. An arm
+/// whose window has opened (its earliest instant passed) leaves too while it
+/// is first and `fired` has room: that is how one interrupt serves every
+/// timer at the head of the set whose window it falls in (`L.object.217`).
+/// When `fired` is full a due arm is filed again [`MIN_ARM_NS`] from now, so
+/// that the tasks behind it are still woken on time: timers never delay a
+/// task's wake. At most [`FIRE_BATCH`] arms a pass are filed again
+/// (`refiled` counts them across the pass's calls); past that the pass
+/// stops, and the tasks behind wait for the next interrupt, armed
+/// [`MIN_ARM_NS`] away (`docs/certification/MEMORY-AND-TIMING.md` §2.2t).
+///
+/// Answers the next due sleeping task, taken out with its slot, for the
+/// caller to wake; with `tasks` false it stops at one instead and takes it
+/// out not. `None` when nothing more is due. A free function over the set
+/// and the buffer so that stage 9's coalescing case runs this same code over
+/// a set it built (`object::timer_check`).
+pub(crate) fn take_next(
+    sleepers: &mut Timeline<Due>,
+    fired: &mut Fired,
+    now: u64,
+    refiled: &mut usize,
+    tasks: bool,
+) -> Option<(Arc<Task>, SleepSlot)> {
+    loop {
+        let room = fired.len < FIRE_BATCH;
+        let (key, due, wake) = sleepers.first().map(|(at, _, payload)| {
+            let open = matches!(payload, Due::Fire(armed) if room && armed.earliest <= now);
+            (at, at <= now || open, matches!(payload, Due::Wake(_)))
+        })?;
+        if !due || (wake && !tasks) {
+            return None;
+        }
+        let (id, payload, slot) = sleepers.pop_first()?;
+        match payload {
+            Due::Wake(task) => return Some((task, slot)),
+            Due::Fire(armed) => {
+                let stop = place(sleepers, fired, (key, id), armed, slot, now, refiled);
+                if stop {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Where [`take_next`] puts a due timer arm taken off the set under
+/// `(key, id)`: into `fired` while it has room, else filed again
+/// [`MIN_ARM_NS`] on, at most [`FIRE_BATCH`] a pass, and past that back
+/// where it was. Answers whether the pass stops.
+fn place(
+    sleepers: &mut Timeline<Due>,
+    fired: &mut Fired,
+    (key, id): (u64, u64),
+    armed: Armed,
+    slot: SleepSlot,
+    now: u64,
+    refiled: &mut usize,
+) -> bool {
+    if fired.len < FIRE_BATCH {
+        armed.timer.unfiled();
+        if let Some(place) = fired.slots.get_mut(fired.len) {
+            *place = Some((armed, slot));
+            fired.len += 1;
+        }
+        return false;
+    }
+    let (at, stop) = if *refiled < FIRE_BATCH {
+        *refiled += 1;
+        (now.saturating_add(MIN_ARM_NS), false)
+    } else {
+        // Back where it was, first: nothing behind it is looked at this
+        // pass.
+        (key, true)
+    };
+    armed.timer.refiled(at);
+    // NOALLOC: filed in the slot it was taken out with.
+    sleepers.insert(at, id, Due::Fire(armed), slot);
+    stop
+}
+
 /// Whether `a` is before `b` in wrapping virtual time.
 const fn before(a: u64, b: u64) -> bool {
     (a.wrapping_sub(b) as i64) < 0
@@ -157,8 +285,14 @@ pub(crate) struct CpuQueue {
     /// finish with.
     pub(crate) previous: Option<Arc<Task>>,
     /// Tasks asleep on this CPU, by the instant they wake, each in its own
-    /// sleep slot: filing and waking allocate nothing.
-    sleepers: Timeline<Arc<Task>>,
+    /// sleep slot, and timer objects' arms, by the latest instant of their
+    /// windows, each in the slot its timer made: filing and waking allocate
+    /// nothing.
+    sleepers: Timeline<Due>,
+    /// Timer arms taken off `sleepers` and not yet fired: filled by a pass
+    /// ([`take_next`]), emptied by the timer interrupt
+    /// ([`CpuQueue::take_fired`]).
+    fired: Fired,
     /// How busy this processor has been, decaying.
     ///
     /// "Busy" means running something that is not the idle task. It is
@@ -193,6 +327,7 @@ impl CpuQueue {
             idle: None,
             previous: None,
             sleepers: Timeline::new(),
+            fired: Fired::new(),
             load: Load::new(),
             load_updated: 0,
             exec_start: 0,
@@ -405,13 +540,20 @@ impl CpuQueue {
         self.stats.worst_lag = self.stats.worst_lag.max(worst);
     }
 
-    /// Wake every task whose sleep has ended.
+    /// Wake every task whose sleep has ended, and take every timer arm that
+    /// is due off the sleeper set into the fired buffer ([`take_next`]):
+    /// a decision's pass, under this lock, after the running task was
+    /// charged (`choose_next`'s `account_in`).
     pub(crate) fn wake_sleepers(&mut self, now: u64) {
-        while let Some((_, task, slot)) = self.sleepers.pop_due(now) {
+        let mut refiled = 0_usize;
+        while let Some((task, slot)) =
+            take_next(&mut self.sleepers, &mut self.fired, now, &mut refiled, true)
+        {
+            task.set_filed_at(0);
             task.return_sleep_slot(slot);
-            // Only a task still blocked is woken. One already woken some other
-            // way is running or queued, and one that has exited must never run
-            // again; for either, the entry is stale and is dropped.
+            // Only a task still blocked is woken. One already woken some
+            // other way is running or queued, and one that has exited must
+            // never run again; for either, the entry is stale and is dropped.
             if task.state() != BLOCKED {
                 continue;
             }
@@ -419,6 +561,38 @@ impl CpuQueue {
             // NOALLOC: `CpuQueue::insert` queues the task in its own run slot.
             self.insert(&task);
         }
+    }
+
+    /// The timer interrupt's pass: take the timer arms due at the head of
+    /// the sleeper set into the fired buffer, and stop at a sleeping task
+    /// that is due. Tasks are woken by the decision this interrupt asks for,
+    /// after `choose_next` has charged the task the interrupt cut, never
+    /// here, where nothing has: waking one charges the running task
+    /// (`CpuQueue::insert`), and from the interrupt that charge would be
+    /// made without knowing whether the cut was in user mode. The arms
+    /// behind such a task are taken by that decision's pass and fired by
+    /// the interrupt it arms [`MIN_ARM_NS`] away (`L.object.218`).
+    pub(crate) fn take_due_timers(&mut self, now: u64) {
+        let mut refiled = 0_usize;
+        let _ = take_next(
+            &mut self.sleepers,
+            &mut self.fired,
+            now,
+            &mut refiled,
+            false,
+        );
+    }
+
+    /// The timer arms a pass took off the sleeper set, with their slots,
+    /// emptying the fired buffer: for the timer interrupt, which fires them
+    /// once this lock is let go.
+    pub(crate) fn take_fired(&mut self) -> [Option<(Armed, SleepSlot)>; FIRE_BATCH] {
+        self.fired.take()
+    }
+
+    /// Timer arms waiting in the fired buffer.
+    pub(crate) fn fired_len(&self) -> usize {
+        self.fired.len
     }
 
     /// File `task`, which is blocking, to wake at `at`. Answers whether it
@@ -430,9 +604,51 @@ impl CpuQueue {
         let Some(slot) = task.take_sleep_slot() else {
             return false;
         };
+        // Zero is the task's "not filed" (`Task::filed_at`), so an instant of
+        // zero -- the counter's first nanosecond -- is filed at one, under
+        // the key kept (K10 code review, ledger 2773, (2)).
+        let at = at.max(1);
+        task.set_filed_at(at);
+        let wake = Due::Wake(Arc::clone(task));
         // NOALLOC: a `Timeline` files the task in the slot it is given.
-        self.sleepers.insert(at, task.id, Arc::clone(task), slot);
+        self.sleepers.insert(at, task.id, wake, slot);
         true
+    }
+
+    /// File a timer's arm, keyed by the latest instant of its window, under
+    /// timeline id `id`, in the slot the timer made at its creation. Under
+    /// the timer's lock, which is taken before this one (`object::timer`).
+    pub(crate) fn file_timer(&mut self, latest: u64, id: u64, armed: Armed, slot: SleepSlot) {
+        armed.timer.refiled(latest);
+        // NOALLOC: a `Timeline` files the arm in the slot it is given.
+        self.sleepers.insert(latest, id, Due::Fire(armed), slot);
+    }
+
+    /// Take a timer's arm filed under `latest` and `id` out of this
+    /// processor's sleeper set, with its slot: a descent by its key, never a
+    /// walk. `None` when it is not filed here under that key: taken into the
+    /// fired buffer, or being fired.
+    pub(crate) fn unfile_timer(&mut self, latest: u64, id: u64) -> Option<(Armed, SleepSlot)> {
+        match self.sleepers.remove_at(latest, id)? {
+            (Due::Fire(armed), slot) => {
+                armed.timer.unfiled();
+                Some((armed, slot))
+            }
+            (wake @ Due::Wake(_), slot) => {
+                // A timer's id has its top bit set and a task's never does
+                // (`object::timer::timeline_id`), so this is not reached; if
+                // it were, the task goes back where it was.
+                // NOALLOC: back into the slot it was taken out with.
+                self.sleepers.insert(latest, id, wake, slot);
+                None
+            }
+        }
+    }
+
+    /// How many entries, tasks and timer arms, this processor's sleeper set
+    /// holds: for the checks.
+    pub(crate) fn sleepers_len(&self) -> usize {
+        self.sleepers.len()
     }
 
     /// Put a runnable task into the fair class, carrying its lag.
@@ -586,7 +802,13 @@ impl CpuQueue {
 
     /// Arm the timer for the next decision this CPU has to make.
     pub(crate) fn arm_timer(&self, now: u64) {
-        let sleeper = self.sleepers.first_due();
+        // A timer arm waiting in the fired buffer is fired by the next timer
+        // interrupt, so one is asked for at once.
+        let sleeper = if self.fired.len > 0 {
+            Some(now)
+        } else {
+            self.sleepers.first_due()
+        };
         // A slice only ends in a decision if something is waiting for it. One
         // task alone on a CPU is left to run: interrupting it would change
         // nothing, and this is where tickless comes from. With something
@@ -672,7 +894,10 @@ impl CpuQueue {
     /// declined attempt leaves the queue as it found it (T12,
     /// `docs/OPAQUE-KERNEL.md` §9.7).
     pub(crate) fn sleeper_due(&self, now: u64) -> bool {
-        self.sleepers.first_due().is_some_and(|at| at <= now)
+        let room = self.fired.len < FIRE_BATCH;
+        self.sleepers.first().is_some_and(|(at, _, payload)| {
+            at <= now || matches!(payload, Due::Fire(armed) if room && armed.earliest <= now)
+        })
     }
 
     /// The direct switch's queue operation (`docs/OPAQUE-KERNEL.md` §9.7,
@@ -777,15 +1002,31 @@ impl CpuQueue {
     /// millisecond sleep cut short by a five millisecond deadline the task had
     /// abandoned two checks earlier.
     ///
-    /// Scanned rather than keyed, because the map is keyed by wake-up time and
-    /// the task's own copy of that was consumed when it was filed. Sleeper sets
-    /// are short.
-    pub(crate) fn remove_sleeper(&mut self, id: TaskId) -> bool {
-        let Some((task, slot)) = self.sleepers.remove(id) else {
+    /// Keyed, not scanned: the task keeps the instant it was filed under
+    /// ([`Task::filed_at`]), so this is a descent of the set, never a walk,
+    /// however many tasks and timer arms the set holds (`L.sched.84`). A
+    /// task filed on another processor's set is not found here, and stays
+    /// filed there under its key, as before.
+    pub(crate) fn remove_sleeper(&mut self, task: &Task) -> bool {
+        let at = task.filed_at();
+        if at == 0 {
             return false;
-        };
-        task.return_sleep_slot(slot);
-        true
+        }
+        match self.sleepers.remove_at(at, task.id) {
+            Some((Due::Wake(task), slot)) => {
+                task.set_filed_at(0);
+                task.return_sleep_slot(slot);
+                true
+            }
+            Some((other, slot)) => {
+                // A timer's id never equals a task's (`object::timer`), so
+                // this is not reached; if it were, the arm goes back.
+                // NOALLOC: back into the slot it was taken out with.
+                self.sleepers.insert(at, task.id, other, slot);
+                false
+            }
+            None => false,
+        }
     }
 
     /// Tasks waiting to run: everything on the queue but the running one.

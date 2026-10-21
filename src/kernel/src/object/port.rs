@@ -394,6 +394,13 @@ impl Observer {
     /// promise goes with it: it is released when the packet is taken, not
     /// when this is dropped.
     pub(crate) fn fire(self, asserted: Signals) {
+        drop(self.fire_keeping(asserted));
+    }
+
+    /// [`Observer::fire`], handing back the port it queued on instead of
+    /// letting go of it: for a caller in an interrupt handler, which must
+    /// not be the one to drop a port's last reference (`object::timer`).
+    pub(crate) fn fire_keeping(self, asserted: Signals) -> Option<Arc<Port>> {
         let Observer {
             mut promise,
             key,
@@ -401,9 +408,9 @@ impl Observer {
         } = self;
         let port = core::mem::take(&mut promise.port);
         drop(promise);
-        if let Some(port) = port.upgrade() {
-            port.queue_signal(key, asserted.intersection(signals));
-        }
+        let port = port.upgrade()?;
+        port.queue_signal(key, asserted.intersection(signals));
+        Some(port)
     }
 }
 
@@ -444,6 +451,47 @@ impl Observers {
     pub(crate) fn take_listed(&mut self) -> Vec<Observer> {
         core::mem::take(&mut self.listed)
     }
+
+    /// No registrations, with room made for `room` to be listed and fired
+    /// at once: for an object whose registrations are listed and fired
+    /// under an interrupt-safe lock, where nothing may allocate
+    /// ([`register_within`]).
+    ///
+    /// # Errors
+    ///
+    /// [`AllocError`] when the room could not be made.
+    pub(crate) fn with_room(room: usize) -> Result<Observers, AllocError> {
+        let mut list = Observers::new();
+        fallible::try_reserve(&mut list.listed, room)?;
+        fallible::try_reserve(&mut list.firing, room)?;
+        Ok(list)
+    }
+
+    /// Whether it holds no registration, listed or fired.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.listed.is_empty() && self.firing.is_empty()
+    }
+}
+
+/// Add `observer` to registrations made [`Observers::with_room`], allocating
+/// nothing: refused with [`PortError::Full`] when the room is used up,
+/// counting those fired and not yet delivered, so that [`trigger`] always
+/// finds room to fire every one listed. The refused observer is handed back,
+/// for the caller to drop once it has let go of its own lock: its drop gives
+/// its port's promise back, under that port's lock.
+pub(crate) fn register_within(
+    list: &mut Observers,
+    observer: Observer,
+) -> Result<(), (PortError, Observer)> {
+    // Those whose port has gone owe nothing: their drop finds no port and
+    // takes no lock.
+    list.listed.retain(Observer::is_live);
+    let used = list.listed.len().saturating_add(list.firing.len());
+    if list.listed.len() >= list.listed.capacity() || used >= list.firing.capacity() {
+        return Err((PortError::Full, observer));
+    }
+    fallible::push_within(&mut list.listed, observer)
+        .map_err(|observer| (PortError::Full, observer))
 }
 
 /// Add `observer` to an object's registrations.

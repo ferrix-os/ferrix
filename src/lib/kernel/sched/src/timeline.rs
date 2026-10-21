@@ -75,11 +75,28 @@ impl<T> Timeline<T> {
         self.take(key)
     }
 
-    /// Take out entity `id`, wherever it is filed: a walk, since the order
-    /// is by instant and not by name.
-    pub fn remove(&mut self, id: u64) -> Option<(T, Slot<T>)> {
-        let key = self.tree.find(id)?;
-        self.take(key).map(|(_, payload, slot)| (payload, slot))
+    /// Take out entity `id`, filed due at `at`: a descent of the tree, never
+    /// a walk, for a caller that kept the instant it filed the entity under.
+    /// `None` when nothing is filed under that pair -- a wrong instant
+    /// included, which leaves the entity where it is.
+    pub fn remove_at(&mut self, at: u64, id: u64) -> Option<(T, Slot<T>)> {
+        self.take(Key { deadline: at, id })
+            .map(|(_, payload, slot)| (payload, slot))
+    }
+
+    /// The earliest entity, without taking it out: its instant, its
+    /// identifier and its payload.
+    #[must_use]
+    pub fn first(&self) -> Option<(u64, u64, &T)> {
+        let entity = self.tree.first()?;
+        Some((entity.deadline, entity.id, entity.payload.as_ref()?))
+    }
+
+    /// Take out the earliest entity, whenever it is due: its identifier, its
+    /// payload and its slot.
+    pub fn pop_first(&mut self) -> Option<(u64, T, Slot<T>)> {
+        let key = self.tree.first()?.key();
+        self.take(key)
     }
 
     /// Take out the entity at `key`, emptying its slot.

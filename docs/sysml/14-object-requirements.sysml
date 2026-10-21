@@ -2087,4 +2087,148 @@ package FerrixObjectRequirements {
                 "object::quota::settle");
         }
     }
+
+    package Timers {
+        doc /* src/kernel/src/object/timer.rs, its arms on the sleeper sets of
+            src/kernel/src/sched/queue.rs, and the calls in syscall/native.rs
+            (docs/microkernel/K10.md). */
+
+        requirement <'L.object.213'> aTimerIsChargedToItsJob : ItemLowLevel {
+            attribute :>> statement = "timer_create shall make a disarmed timer on
+                the monotonic or the boot clock, refusing any other clock or an
+                option with INVALID_ARGS; it shall charge the caller's job one
+                object and the timer's heap as kernel memory before the handle
+                exists, refuse NO_MEMORY with nothing made at either limit, and
+                the timer's drop shall take both back.";
+            attribute :>> criterion = "A timer made in a job raises its objects by
+                1 and its kernel memory by heap_bytes, the next is refused at an
+                object limit equal to the use, and the drop leaves both at 0;
+                timer_create on clock 2 and with option 1 is INVALID_ARGS.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("object::timer::Timer::new", "object::timer::heap_bytes",
+                "object::timer::TimerCore::now", "syscall::native::timer_create");
+        }
+        requirement <'L.object.214'> aSetIsOneShotInItsWindow : ItemLowLevel {
+            attribute :>> statement = "timer_set shall read the deadline and slack
+                whole through its pointer on every architecture; with
+                TIMER_RELATIVE it shall take the deadline from the clock read once
+                in the call; it shall clear READABLE, supersede the timer's
+                previous arm, and arm it once for [deadline, deadline + slack]; a
+                deadline at or before the clock's reading shall fire in the call;
+                an unknown option shall be INVALID_ARGS, a handle that is not a
+                timer WRONG_TYPE, one without WRITE ACCESS_DENIED.";
+            attribute :>> criterion = "A deadline past 2^32 ns and a slack past
+                2^33 ns reach the timer's window whole; a past deadline reads
+                READABLE when timer_set returns, fired by no interrupt pass; the
+                refusals as stated; the ABI crate's host test reads a TimerSpec
+                back whole.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("object::timer::TimerCore::set",
+                "syscall::native::timer_set", "syscall::native::timer_in");
+        }
+        requirement <'L.object.215'> aCancelledArmNeverSignals : ItemLowLevel {
+            attribute :>> statement = "timer_cancel shall clear READABLE and
+                disarm the timer, so that nothing its cancelled arm filed or had in
+                flight signals afterwards.";
+            attribute :>> criterion = "A timer set 100 ms ahead and cancelled is
+                not heard in 150 ms, reads quiet, and has its slot home; with the
+                cancel's supersession taken out, the case fails with its
+                sentence.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("object::timer::TimerCore::cancel", "object::timer::TimerCore::disarm",
+                "object::timer::TimerCore::supersede", "syscall::native::timer_cancel");
+        }
+        requirement <'L.object.216'> aFireIsTheInterruptsAndNeverEarly : ItemLowLevel {
+            doc /* The fire allocates nothing: the slot, the registrations' room
+                and the room for the ports it keeps are made with the timer, and
+                the packet's room was promised by its registration
+                (TRACEABILITY.md argues it; no allocation guard runs in the
+                interrupt). */
+            attribute :>> statement = "A timer's arm shall be fired only by its
+                processor's timer interrupt, with no run queue's lock held, or by
+                a set whose deadline has passed; never before its deadline; the
+                fire shall assert READABLE, deliver the registrations that want it
+                and wake its waiters, allocating nothing, and one interrupt pass
+                shall fire at most FIRE_BATCH arms.";
+            attribute :>> criterion = "A timer set 2 ms ahead is heard on its port
+                with its key, fired no earlier than 2 ms after the set, and reads
+                READABLE; FIRE_BATCH + 4 timers due at once all fire, no pass
+                firing more than FIRE_BATCH; with the window filed 1 ms early, or
+                the buffer let past its size, the cases fail with their
+                sentences.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("object::timer::fire", "object::timer::TimerCore::signal",
+                "object::timer::TimerCore::signals",
+                "object::timer::TimerCore::deliver", "sched::fire_timers",
+                "sched::timer_expired");
+        }
+        requirement <'L.object.217'> anOpenWindowFiresWithTheHead : ItemLowLevel {
+            attribute :>> statement = "An arm shall be filed keyed by the latest
+                instant of its window, and a sleeper set's pass shall also take an
+                arm whose window has opened while it is first and the fired buffer
+                has room.";
+            attribute :>> criterion = "Of two timers, the second keyed 5 ms after
+                the first with its window open at the first's deadline, filed in a
+                sleeper set of the check's own holding nothing else, the shipped
+                pass function (sched::take_next) run over that set at the first's
+                deadline, not a timed interrupt, takes both, and they fire in one
+                pass; with the open window not taken, the case fails with its
+                sentence.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("sched::queue::CpuQueue::wake_sleepers",
+                "sched::queue::CpuQueue::sleeper_due");
+        }
+        requirement <'L.object.218'> timersShareTheSleeperSet : ItemLowLevel {
+            attribute :>> statement = "A timer's arm shall be filed on its
+                processor's sleeper set beside sleeping tasks, in a slot made with
+                the timer; a pass shall move a due arm into the fixed fired buffer
+                and, when the buffer is full, file it again MIN_ARM_NS on, at most
+                FIRE_BATCH a pass, so that the tasks behind it are still woken;
+                the timer interrupt's pass shall wake no task and stop at a due
+                one, leaving it to the decision the interrupt asks for; the run
+                queue shall arm its timer MIN_ARM_NS away while the buffer holds
+                any.";
+            attribute :>> criterion = "FIRE_BATCH + 4 timers due at once fire over
+                at least two passes with none lost; an arm a pass took out is
+                filed again, once, by the fire that returns its slot.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("sched::queue::CpuQueue::wake_sleepers",
+                "sched::queue::take_next", "sched::queue::place", "sched::queue::CpuQueue::take_due_timers",
+                "sched::queue::Fired::new", "sched::queue::Fired::take",
+                "sched::queue::CpuQueue::take_fired", "sched::queue::CpuQueue::file_timer",
+                "sched::queue::CpuQueue::unfile_timer", "sched::queue::CpuQueue::arm_timer",
+                "sched::file_timer_here", "sched::unfile_timer");
+        }
+        requirement <'L.object.219'> aSupersededArmSignalsNothing : ItemLowLevel {
+            attribute :>> statement = "Every set and cancel shall move the timer to
+                a new generation; a fire of an arm from an older generation shall
+                signal nothing, put the slot home and file the newer arm if one
+                waits, so that an arm is filed exactly once by whichever of the
+                set and the fire holds the slot.";
+            attribute :>> criterion = "An arm taken off its sleeper set and then
+                superseded by a set signals nothing when fired; the newer arm is
+                filed by that fire and heard once, no earlier than its deadline;
+                with the generation not compared, the case fails with its
+                sentence.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("object::timer::fire", "object::timer::TimerCore::take_back",
+                "object::timer::TimerCore::file_if_home");
+        }
+        requirement <'L.object.220'> aClosedTimerIsDisarmed : ItemLowLevel {
+            attribute :>> statement = "The drop of a timer's last handle shall
+                cancel it, wait out a delivery in flight, and let go of its
+                registrations and the ports its fires kept in task context; a
+                timer shall hold at most TIMER_OBSERVERS registrations, in room
+                made with it, registering none past it.";
+            attribute :>> criterion = "An armed, watched timer whose last handle
+                closes is never heard and is freed; with the close not cancelling,
+                the case fails.";
+            attribute :>> parent = "H.OBJ.21";
+            attribute :>> unit = ("object::timer::TimerCore::close",
+                "object::timer::Timer::drop", "object::timer::TimerCore::drop",
+                "object::timer::TimerCore::spend", "object::port::Observers::is_empty",
+                "object::timer::TimerCore::observe", "object::port::register_within",
+                "object::port::Observers::with_room", "object::port::Observer::fire_keeping");
+        }
+    }
 }

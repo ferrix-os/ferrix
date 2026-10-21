@@ -1130,6 +1130,9 @@ fn queued_endpoints(endpoint: &Arc<Endpoint>) -> Option<Vec<Arc<Endpoint>>> {
             // A process handle holds how the process ended, not its table.
             | Object::Process(_)
             | Object::Port(_)
+            // A timer holds ports it delivered to, and a port holds packets,
+            // never an object.
+            | Object::Timer(_)
             | Object::Starter
             | Object::Audit => None,
         });

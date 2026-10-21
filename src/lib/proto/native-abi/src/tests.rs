@@ -15,6 +15,7 @@ use crate::status;
 use crate::types::{
     APERTURE_INFO_BYTES, ApertureInfo, DEVICE_INFO_BYTES, DeviceInfo, IoMappingSpec,
     PROCESS_EXITED, PROCESS_KILLED, PROCESS_RUNNING, PortPacket, ProcessStatus, ReadActual,
+    TIMER_CLOCK_BOOT, TIMER_CLOCK_MONOTONIC, TIMER_SPEC_BYTES, TimerSpec,
 };
 
 #[test]
@@ -338,4 +339,29 @@ fn the_messages_after_the_hello_read_back() {
     assert_eq!(read_after_hello(&root), Some((ROOT_MAGIC, ROOT_SWITCHED)));
     assert_eq!(read_after_hello(&root[..7]), None, "short");
     assert_eq!(read_after_hello(&[0; 9]), None, "long");
+}
+
+/// The timer calls sit at the numbers allotted to them, a timer handle
+/// carries only defined rights, and a `TimerSpec` carries both words whole,
+/// past 2^32, in the 16 bytes every architecture reads through `timer_set`'s
+/// pointer: ARMv7-A's 32-bit registers never carry them.
+///
+/// Verifies: L.object.214
+#[test]
+fn timers_have_their_numbers_rights_and_a_whole_spec() {
+    assert_eq!(nr::decode(0x1071), Some(NativeCall::TimerCreate));
+    assert_eq!(nr::decode(0x1072), Some(NativeCall::TimerSet));
+    assert_eq!(nr::decode(0x1073), Some(NativeCall::TimerCancel));
+    assert!(Rights::TIMER.is_known(), "a timer's rights are defined");
+    assert!(Rights::TIMER.contains(Rights::WAIT | Rights::WRITE));
+    assert!(!Rights::TIMER.contains(Rights::MANAGE));
+    assert_eq!(size_of::<TimerSpec>(), TIMER_SPEC_BYTES, "TimerSpec");
+    assert_eq!(offset_of!(TimerSpec, slack), 8, "slack");
+    let spec = TimerSpec {
+        deadline: (1 << 32) + 7,
+        slack: (5 << 32) | 3,
+    };
+    assert_eq!(TimerSpec::from_bytes(&spec.to_bytes()), Some(spec));
+    assert_eq!(TimerSpec::from_bytes(&spec.to_bytes()[..15]), None, "short");
+    assert_ne!(TIMER_CLOCK_MONOTONIC, TIMER_CLOCK_BOOT);
 }

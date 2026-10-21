@@ -83,6 +83,7 @@ use crate::object::job::{self, Job};
 use crate::object::port::{Observer, Port, PortError};
 use crate::object::process::{Bootstrap, GiveRefused, Host, Process, ProcessRef};
 use crate::object::quota::{self, Resource, Usage};
+use crate::object::timer::{Clock as TimerClock, Timer};
 use crate::object::{self, HandleTable, Object};
 use crate::syscall::uaccess::{self, UserError};
 use crate::trap::SyscallArgs;
@@ -499,6 +500,9 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
             object_wait_async(process, handle(a[0]), handle(a[1]), a[2], a[3])
         }
         NativeCall::VmoMap => vmo_map(process, handle(a[0]), a[1], a[2], a[3], a[4]),
+        NativeCall::TimerCreate => timer_create(process, a[0], a[1]),
+        NativeCall::TimerSet => timer_set(process, handle(a[0]), a[1], a[2]),
+        NativeCall::TimerCancel => timer_cancel(process, handle(a[0])),
     }
 }
 
@@ -3093,6 +3097,65 @@ fn object_wait_async(
     }
 }
 
+/// `timer_create` (`docs/microkernel/K10.md` §3): a disarmed timer on
+/// `clock`, charged to the caller's job.
+fn timer_create(process: &Process, clock: u64, options: u64) -> Result<usize, Errno> {
+    let clock = match clock {
+        types::TIMER_CLOCK_MONOTONIC => TimerClock::Monotonic,
+        types::TIMER_CLOCK_BOOT => TimerClock::Boot,
+        _ => return Err(status::INVALID_ARGS),
+    };
+    if options != 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let timer = Timer::new(clock).map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::Timer(timer), Rights::TIMER)
+}
+
+/// The timer a handle names, if it carries `needed`.
+fn timer_in(process: &Process, timer: Handle, needed: Rights) -> Result<Arc<Timer>, Errno> {
+    process.with_handles(|table| {
+        let (object, rights) = table.get(timer).map_err(table_error)?;
+        let Object::Timer(timer) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !rights.contains(needed) {
+            return Err(status::ACCESS_DENIED);
+        }
+        Ok(Arc::clone(timer))
+    })
+}
+
+/// `timer_set`: the deadline and slack read whole through `spec_at`, on
+/// every architecture.
+fn timer_set(process: &Process, timer: Handle, spec_at: u64, options: u64) -> Result<usize, Errno> {
+    if options & !types::TIMER_RELATIVE != 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let timer = timer_in(process, timer, Rights::WRITE)?;
+    let mut bytes = [0_u8; types::TIMER_SPEC_BYTES];
+    let read = uaccess::copy_from_user(process.space(), spec_at, &mut bytes).map_err(fault);
+    let set = read.and_then(|()| {
+        let spec = types::TimerSpec::from_bytes(&bytes).ok_or(status::INVALID_ARGS)?;
+        timer.core().set(
+            spec.deadline,
+            spec.slack,
+            options & types::TIMER_RELATIVE != 0,
+        );
+        Ok(0)
+    });
+    object::dispose([Object::Timer(timer)]);
+    set
+}
+
+/// `timer_cancel`.
+fn timer_cancel(process: &Process, timer: Handle) -> Result<usize, Errno> {
+    let timer = timer_in(process, timer, Rights::WRITE)?;
+    timer.core().cancel();
+    object::dispose([Object::Timer(timer)]);
+    Ok(0)
+}
+
 /// Register `observer` on `target`, or `None` for an object with no signal
 /// that changes.
 fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>> {
@@ -3100,6 +3163,7 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         Object::Channel(endpoint) => Some(endpoint.observe(observer)),
         Object::Job(job) => Some(job.observe(observer)),
         Object::Process(process) => Some(process.exit().observe(observer)),
+        Object::Timer(timer) => Some(timer.core().observe(observer)),
         Object::Vmo(_)
         | Object::Port(_)
         | Object::Device(_)

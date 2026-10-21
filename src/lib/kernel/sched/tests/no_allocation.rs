@@ -105,8 +105,46 @@ fn a_timeline_gives_entities_back_in_order_and_by_name() {
     assert!(timeline.pop_due(9).is_none(), "nothing is due before ten");
     let (id, payload, _) = timeline.pop_due(10).unwrap();
     assert_eq!((id, payload), (1, "one"));
-    let (payload, _) = timeline.remove(3).unwrap();
+    let (payload, _) = timeline.remove_at(30, 3).unwrap();
     assert_eq!(payload, "three");
     assert_eq!(timeline.len(), 1);
     assert_eq!(timeline.check(), Ok(1));
+}
+
+/// Removal by the instant an entity was filed under finds exactly it, and a
+/// wrong instant takes nothing out; peeking leaves the order alone.
+///
+/// Verifies: L.sched.84
+#[test]
+fn a_timeline_removes_by_the_key_it_filed_under() {
+    let mut timeline: Timeline<&str> = Timeline::new();
+    timeline.insert(30, 3, "three", Slot::new().unwrap());
+    timeline.insert(10, 1, "one", Slot::new().unwrap());
+    timeline.insert(20, 2, "two", Slot::new().unwrap());
+    timeline.insert(20, 7, "seven", Slot::new().unwrap());
+    assert_eq!(
+        timeline.first().map(|(at, id, payload)| (at, id, *payload)),
+        Some((10, 1, "one"))
+    );
+    assert!(
+        timeline.remove_at(21, 2).is_none(),
+        "a wrong instant took something out"
+    );
+    assert!(
+        timeline.remove_at(20, 3).is_none(),
+        "a wrong name took something out"
+    );
+    assert_eq!(timeline.len(), 4);
+    let (payload, _) = timeline.remove_at(20, 2).unwrap();
+    assert_eq!(payload, "two");
+    assert_eq!(timeline.len(), 3);
+    assert_eq!(timeline.check(), Ok(3));
+    let made = allocations_in(|| {
+        let (id, payload, slot) = timeline.pop_first().unwrap();
+        assert_eq!((id, payload), (1, "one"));
+        timeline.insert(40, 1, "one", slot);
+        let _ = timeline.remove_at(40, 1).unwrap();
+    });
+    assert_eq!(made, 0, "removal by key allocated");
+    assert_eq!(timeline.first().map(|(at, _, _)| at), Some(20));
 }

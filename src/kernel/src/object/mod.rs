@@ -37,6 +37,8 @@ pub(crate) mod port;
 pub(crate) mod process;
 pub(crate) mod quota;
 pub(crate) mod quota_check;
+pub(crate) mod timer;
+pub(crate) mod timer_check;
 pub(crate) mod write_read_check;
 
 use alloc::sync::Arc;
@@ -81,6 +83,8 @@ pub(crate) enum Object {
     Process(process::ProcessRef),
     /// An event queue.
     Port(Arc<port::Port>),
+    /// A deadline, signalled when it passes (`docs/microkernel/K10.md`).
+    Timer(Arc<timer::Timer>),
     /// The capability to ask the kernel to start `devmgr`
     /// (`docs/INIT.md` §7.3, L12): a token with nothing in it. What it
     /// permits is decided where `devmgr_start` is answered -- the kernel
@@ -114,6 +118,7 @@ impl Object {
             Object::Interrupt(interrupt) if interrupt.is_pending() => Signals::READABLE,
             Object::Port(port) if !port.is_empty() => Signals::READABLE,
             Object::Process(process) if process.exit().is_closed() => Signals::TERMINATED,
+            Object::Timer(timer) => timer.core().signals(),
             Object::Device(_)
             | Object::Interrupt(_)
             | Object::IoMapping(_)
@@ -138,6 +143,7 @@ impl Object {
             Object::Process(process) => process.exit().exited(),
             // Woken from the interrupt handler itself; see `interrupt`.
             Object::Interrupt(interrupt) => interrupt.waiters(),
+            Object::Timer(timer) => timer.core().waiters(),
             Object::Vmo(_)
             | Object::Device(_)
             | Object::IoMapping(_)
@@ -312,6 +318,7 @@ impl Object {
             | Object::IoMapping(_)
             | Object::Pin(_)
             | Object::Port(_)
+            | Object::Timer(_)
             | Object::Starter
             | Object::Audit => true,
             Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,

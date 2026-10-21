@@ -451,6 +451,24 @@ package FerrixItemRequirements {
                 line); a filtered call is refused with the filter's errno.";
             attribute :>> parent = ("G.7", "O.CAPABILITY");
         }
+        requirement <'H.OBJ.21'> timersFireInTheirWindowOnce : ItemHighLevel {
+            doc /* docs/microkernel/K10.md, MICROKERNEL.md §3 K10. The lateness
+                bound, and the interference between jobs' timers on one
+                processor that makes it, is MEMORY-AND-TIMING.md §2.2t's, owned
+                by K9. */
+            attribute :>> statement = "A timer object shall signal its waiters and
+                the ports registered on it no earlier than its deadline and within
+                its slack plus the lateness MEMORY-AND-TIMING.md §2.2t states, at
+                most once a set; never for an arm a later set or cancel superseded,
+                nor after its last handle closed; and shall be charged to the job
+                that made it, one object and its heap as kernel memory.";
+            attribute :>> criterion = "Stage 9's `timers` line on every boot: a
+                timer is heard no earlier than its deadline, a cancelled or
+                superseded arm and a closed timer are never heard, and a timer is
+                charged to its job and refused past its object limit
+                (object::timer_check).";
+            attribute :>> parent = ("G.7", "O.CAPABILITY", "O.QUOTA");
+        }
     }
 
     package Scheduling {

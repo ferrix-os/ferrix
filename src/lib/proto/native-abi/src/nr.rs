@@ -183,6 +183,12 @@ pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// [`NativeCall::ChardevDmabufFence`].
 pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
+/// [`NativeCall::TimerCreate`].
+pub const TIMER_CREATE: usize = 0x1071;
+/// [`NativeCall::TimerSet`].
+pub const TIMER_SET: usize = 0x1072;
+/// [`NativeCall::TimerCancel`].
+pub const TIMER_CANCEL: usize = 0x1073;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -618,10 +624,30 @@ pub enum NativeCall {
     /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
     /// Answered by the load ring.
     ChardevDmabufFence,
+    /// `(clock, options)` → handle. A disarmed timer on `clock`
+    /// ([`crate::types::TIMER_CLOCK_MONOTONIC`] or
+    /// [`crate::types::TIMER_CLOCK_BOOT`], the same counter while nothing
+    /// suspends), with [`crate::rights::Rights::TIMER`]. `options` must be
+    /// 0. Charged to the caller's job: one object, and its heap as kernel
+    /// memory. `INVALID_ARGS` for another clock or an option bit,
+    /// `NO_MEMORY` at either limit (`docs/microkernel/K10.md`).
+    TimerCreate,
+    /// `(timer, spec: *TimerSpec, options)`. Arm `timer` (`WRITE`) once, at
+    /// the spec's deadline on its clock -- from now with
+    /// [`crate::types::TIMER_RELATIVE`] -- to fire within its slack after
+    /// it, never before; a deadline already past fires in the call. Clears
+    /// `READABLE` and supersedes any earlier arm. When it fires the timer is
+    /// `READABLE` until it is set or cancelled again: a port hears it
+    /// through [`NativeCall::ObjectWaitAsync`], a thread through
+    /// [`NativeCall::ObjectWaitOne`]. One-shot only.
+    TimerSet,
+    /// `(timer)`. Disarm `timer` (`WRITE`) and clear `READABLE`; nothing
+    /// the cancelled arm would have fired signals afterwards.
+    TimerCancel,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 65] = [
+pub const ALL: [NativeCall; 68] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -687,6 +713,9 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
     NativeCall::ChardevDmabufFence,
+    NativeCall::TimerCreate,
+    NativeCall::TimerSet,
+    NativeCall::TimerCancel,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -767,6 +796,9 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
+        TIMER_CREATE => NativeCall::TimerCreate,
+        TIMER_SET => NativeCall::TimerSet,
+        TIMER_CANCEL => NativeCall::TimerCancel,
         _ => return None,
     };
     Some(call)
@@ -841,5 +873,8 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
         NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
+        NativeCall::TimerCreate => TIMER_CREATE,
+        NativeCall::TimerSet => TIMER_SET,
+        NativeCall::TimerCancel => TIMER_CANCEL,
     }
 }

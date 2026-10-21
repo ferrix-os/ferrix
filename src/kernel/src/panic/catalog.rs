@@ -2349,6 +2349,36 @@ pub(crate) static STAGE9_OBJECTS: Explanation = Explanation {
           src/kernel/src/object/channel.rs; docs/ROADMAP.md stage 9",
 };
 
+/// For `check_timers` in `stages_check.rs`, when `object::timer_check::run`
+/// fails.
+pub(crate) static STAGE9_TIMERS: Explanation = Explanation {
+    code: "FX-0913",
+    title: "the timer objects failed their self-check",
+    meaning: "`object::timer_check::run` drives `timer_create`, `timer_set` and \
+              `timer_cancel` through the native dispatch from a check process \
+              (`docs/microkernel/K10.md` §5). A timer must be heard on its port no earlier \
+              than its deadline; a deadline past 2^32 ns must reach it whole; a cancelled \
+              timer must stay quiet; an arm superseded while in flight must signal nothing, \
+              and the newer arm fire once; a timer whose window is open must fire in the same \
+              interrupt pass as the one due beside it; a past deadline must fire in the call; \
+              no pass may fire more than a batch, and none may be lost; a closed timer must \
+              never fire; a timer must be charged to its job; the calls must refuse what they \
+              specify; and a sleeping task woken early must take out its own sleeper-set \
+              entry and nothing else. A kernel failing any of these would give the Linux \
+              personality timers that fire early, late, twice or after they were cancelled.",
+    causes: &[
+        "`TimerCore::set` or `cancel` stopped moving the timer to a new generation, or \
+         `fire` stopped comparing it, so a superseded arm signals.",
+        "`CpuQueue::wake_sleepers` lost a timer arm when the fired buffer was full, or \
+         stopped taking an arm whose window had opened.",
+        "`CpuQueue::remove_sleeper` took out an entry by the wrong key, or the task's \
+         filed key was not kept where it was filed.",
+        "`Timer::new` stopped charging its job, or its drop stopped cancelling.",
+    ],
+    see: "src/kernel/src/object/timer_check.rs run; src/kernel/src/object/timer.rs; \
+          src/kernel/src/sched/queue.rs; docs/microkernel/K10.md",
+};
+
 /// For `check_syscalls` in `stages_check.rs`, when `syscall::check::run` fails.
 pub(crate) static STAGE7_SYSCALLS: Explanation = Explanation {
     code: "FX-0701",
@@ -3442,6 +3472,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_NETWORK_NAMESPACES,
     &STAGE13_PROC_ACCESS,
     &STAGE9_OBJECTS,
+    &STAGE9_TIMERS,
     &STAGE9_ALLOCATION,
     &STAGE9_REFUSALS,
     &SERVICES,
