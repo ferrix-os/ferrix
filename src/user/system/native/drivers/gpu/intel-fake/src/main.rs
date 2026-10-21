@@ -89,12 +89,35 @@ impl AsVmo for Memory {
     }
 }
 
-/// The fake GT: every submission done at once.
+/// Microseconds a batch takes, at least and up to twice, when
+/// `FERRIX_FAKE_LATENCY_US` names it at build time; at once otherwise.
+const LATENCY_US: u64 = match option_env!("FERRIX_FAKE_LATENCY_US") {
+    Some(text) => parse_u64(text),
+    None => 0,
+};
+
+const fn parse_u64(text: &str) -> u64 {
+    let mut value = 0_u64;
+    let mut rest = text.as_bytes();
+    while let [digit, tail @ ..] = rest {
+        value = value * 10 + (*digit - b'0') as u64;
+        rest = tail;
+    }
+    value
+}
+
+/// The fake GT: every submission done at once, or after [`LATENCY_US`], in
+/// submission order.
 struct Fake {
     facts: Facts,
     next: u32,
-    done: [RequestId; 64],
+    done: [(RequestId, u64); 64],
     pending: usize,
+    seed: u64,
+}
+
+fn now_ns() -> u64 {
+    ferrix_rt::linux::monotonic_nanos().unwrap_or(0)
 }
 
 impl Backend for Fake {
@@ -157,8 +180,22 @@ impl Backend for Fake {
         _length: u32,
         request: RequestId,
     ) -> Result<(), SubmitError> {
+        let last = self
+            .pending
+            .checked_sub(1)
+            .and_then(|index| self.done.get(index))
+            .map_or(0, |(_, due)| *due);
+        let mut due = 0;
+        if LATENCY_US != 0 {
+            self.seed = self
+                .seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let jitter = (self.seed >> 33) % (LATENCY_US * 1000);
+            due = (now_ns() + LATENCY_US * 1000 + jitter).max(last);
+        }
         let slot = self.done.get_mut(self.pending).ok_or(SubmitError::Full)?;
-        *slot = request;
+        *slot = (request, due);
         self.pending += 1;
         Ok(())
     }
@@ -166,14 +203,23 @@ impl Backend for Fake {
     fn service(&mut self, _now_ns: u64, _interrupt: bool) {}
 
     fn next_deadline(&self) -> Option<u64> {
-        None
+        (self.pending > 0)
+            .then(|| self.done.first().map(|(_, due)| *due))
+            .flatten()
     }
 
     fn completed(&mut self, sink: &mut dyn FnMut(RequestId, Completion)) {
-        for id in self.done.iter().take(self.pending) {
+        let now = if LATENCY_US != 0 { now_ns() } else { u64::MAX };
+        let mut finished = 0;
+        for (id, due) in self.done.iter().take(self.pending) {
+            if *due > now {
+                break;
+            }
             sink(*id, Completion::Ok);
+            finished += 1;
         }
-        self.pending = 0;
+        self.done.copy_within(finished..self.pending, 0);
+        self.pending -= finished;
     }
 
     fn timestamp(&mut self) -> u64 {
@@ -251,12 +297,19 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
         facts.sseu.subslice_mask,
         facts.cs_timestamp_hz
     ));
+    if LATENCY_US != 0 {
+        say(format_args!(
+            "intel-fake: (built with latency: each batch completes {LATENCY_US} to {} us after submission, in order)",
+            2 * LATENCY_US
+        ));
+    }
     let port = port::create(Kernel).map_err(|_| Step::Port)?;
     let mut frontend = Frontend::new(Fake {
         facts,
         next: 0,
-        done: [0; 64],
+        done: [(0, 0); 64],
         pending: 0,
+        seed: 0x9e37_79b9_7f4a_7c15,
     });
     let mut host = serve::publish(&device, info.location).map_err(|_| Step::Serve)?;
     match serve::serve(&mut host, &port, &mut frontend, &mut |_, _| {}) {
