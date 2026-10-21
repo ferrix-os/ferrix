@@ -361,9 +361,22 @@ fn other_tree(args: &Args, tree: &std::path::Path, reference: &str, pinned: bool
 /// same configuration. The kernel options go too, or `ferrix.fastpath=on`
 /// would be measured against the general path.
 fn other_tree_args(args: &Args) -> Vec<String> {
-    let mut out: Vec<String> = ["xtask", "bench-ipc", "--arch", "x86_64", "--smp", "1"]
-        .map(String::from)
-        .to_vec();
+    // The architecture and processor count this run boots, not x86-64 on
+    // one: with those fixed, `--arch aarch64` and `--smp 4` were measured
+    // against an x86-64 boot on one processor, and the ratio meant nothing.
+    let arch = args.arch.clone().unwrap_or_else(|| "x86_64".to_owned());
+    let smp = if args.smp_given { args.smp } else { 1 };
+    let mut out: Vec<String> = vec![
+        "xtask".to_owned(),
+        "bench-ipc".to_owned(),
+        "--arch".to_owned(),
+        arch,
+        "--smp".to_owned(),
+        smp.to_string(),
+    ];
+    if args.memory_given {
+        out.extend(["--memory".to_owned(), args.memory.to_string()]);
+    }
     if let Some(init) = args.init.as_deref() {
         out.extend(["--init".to_owned(), init.to_owned()]);
     }
@@ -748,6 +761,32 @@ mod other_tree_tests {
         assert_eq!(out[at + 1], "ferrix.fastpath=on");
         assert!(out.contains(&"--release".to_owned()));
         assert!(!out.contains(&"--alternate".to_owned()));
+    }
+
+    #[test]
+    fn the_other_tree_boots_the_same_architecture_and_processors() {
+        let out = other_tree_args(&args(&[
+            "bench-ipc",
+            "--arch",
+            "aarch64",
+            "--smp",
+            "4",
+            "--memory",
+            "1024",
+            "--alternate",
+            "main",
+        ]));
+        let after = |flag: &str| {
+            let at = out.iter().position(|word| word == flag).unwrap();
+            out[at + 1].clone()
+        };
+        assert_eq!(after("--arch"), "aarch64");
+        assert_eq!(after("--smp"), "4");
+        assert_eq!(after("--memory"), "1024");
+        let plain = other_tree_args(&args(&["bench-ipc", "--alternate", "main"]));
+        let at = plain.iter().position(|word| word == "--smp").unwrap();
+        assert_eq!(plain[at + 1], "1");
+        assert!(plain.contains(&"x86_64".to_owned()));
     }
 
     #[test]
