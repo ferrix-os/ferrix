@@ -143,6 +143,27 @@
       "branch": "mk/smt-off",
       "date": "2026-10-19",
       "purpose": "M0 part B's smt=off (BUILD-FLAGS.md section 3.1 DF4; docs/microkernel/M0-B-PROPOSALS.md section 3.1): x86-64 topology from CPUID 0x1F/0xB with a fail-closed stop (183), siblings parked by the kernel after CR4.MCE, never counted online (184), stage 4's one-thread-a-core check with every sibling parked and CR4.MCE set (185); AArch64 (PPTT or cpu-map) and ARMv7-A (cpu-map): no two threads of one core online under smt=off; H.TRAP.19, their parent under O.ISOLATE: under smt=off no two hardware threads of one core run at once (consultant OK IF, ledger 2563)"
+    },
+    {
+      "ids": ["H.MEM.22-23", "L.user.146-157", "L.object.226-231"],
+      "owner": "mk-k3",
+      "branch": "mk/k3",
+      "date": "2026-10-21",
+      "purpose": "MICROKERNEL.md §3 K3, pager-backed VMOs (docs/microkernel/K3.md): H.MEM.22, an absent page of a pager-backed VMO is made present only by its pager's supply, and a thread waits on a pager only for a fault on or a kernel copy into such a VMO, ending on supply, failure, kill, the pager's death or the pager's bound, with SIGBUS or EIO to the faulting process and never a kernel stop; H.MEM.23, no write to a pager-backed page leaves the dirty set before a write-back begun after it ends; L.user.146-157, the forwarded request, the bounded wait and its endings, kernel copies, supply, FAIL, dirty tracking, write-back, decommit, detach and pager death, the K7 ticket per request, MAP_NO_PAGER; L.object.226-231, the pager object, its five calls and the page-request packet"
+    },
+    {
+      "ids": ["H.MEM.24-25", "L.object.232-240", "L.user.158-162"],
+      "owner": "mk-k2",
+      "branch": "mk/k2",
+      "date": "2026-10-21",
+      "purpose": "MICROKERNEL.md §3 K2, address space by handle (docs/microkernel/K2.md): H.MEM.24, a space reached by handle is mapped, unmapped, protected, read and written only as the handle's rights allow, no mapping made by handle is ever writable and executable (ASR-2), and an executable mapping needs EXECUTE on the space handle and on the VMO handle; H.MEM.25, a copy-on-write clone of a space never sees a write its source makes after the clone, and the source never sees one the clone makes (F-41); L.object.232-240, the space object and its calls; L.user.158-162, maximum protection, W^X at map and protect time with the user-root sweep, the clone's isolation, cross-space copies, and unmap/protect of a running space"
+    },
+    {
+      "ids": ["H.TRAP.20", "L.trap.9-13", "L.object.241-246", "L.x86_64.186", "L.aarch64.66", "L.armv7a.28"],
+      "owner": "mk-k4",
+      "branch": "mk/k4",
+      "date": "2026-10-21",
+      "purpose": "MICROKERNEL.md §3 K4, exception channels (docs/microkernel/K4.md): a user-mode fault the address space does not resolve goes to the faulting process's exception channel, then up its jobs' channels, before the personality's signal; the faulting thread's wait is bounded, with the no-supervisor path as the default action; verdicts are resume (the context checked as sigreturn's I2a/I2b rules require, per architecture), kill or hand on; nested faults and detaching; the SUPERVISE right on process and job handles (H.TRAP.20 is the parent)"
     }
   ]
 }
