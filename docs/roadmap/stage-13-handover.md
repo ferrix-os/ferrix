@@ -10,7 +10,15 @@ the designs are `docs/NAMESPACES.md`, `docs/PIDNS.md`, `docs/NETNS.md`,
 
 The exit criterion -- an unprivileged user namespace runs a pid 1 under a
 memory limit with a scoped OOM kill and a seccomp filter that blocks a call --
-is **not met**. It needs cgctl and S3 on `main`, then `stage13-container` run.
+was **not met** on 2026-10-01. It needed cgctl and S3 on `main`, then
+`stage13-container` run.
+
+*Reconciled 2026-10-21: the criterion is met. S3 landed on 2026-10-04, the
+controllers on 2026-10-07, `stage13-container` as `cargo xtask test-container`
+on 2026-10-14 (f231cdf09, `docs/CGROUPS.md` §15) and S4 to S6 on 2026-10-18.
+The rows below keep the state they were written in unless they are marked.
+Still branches: time namespaces (`stage13-timens`), unprivileged mounting
+(`stage13-n5`, `stage13-bwrap-user`).*
 
 ## On main
 
@@ -85,7 +93,7 @@ The two rows below are history.
 
 | Branch | Tip | Worktree | State | To land it |
 |---|---|---|---|---|
-| `stage13-container` | cda83faef | `container` | `cargo xtask test-container`, the exit criterion as one program. Written, never built or run. | Needs cgctl and S3 on `main`; then build, run on three architectures, land. |
+| `stage13-container` | cda83faef | `container` | `cargo xtask test-container`, the exit criterion as one program. Written, never built or run. | **Landed 2026-10-14** (f231cdf09), run on three architectures. |
 
 ### Not started
 

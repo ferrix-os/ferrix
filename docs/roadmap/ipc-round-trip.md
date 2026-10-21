@@ -1,6 +1,6 @@
 # The native channel round trip
 
-*Reviewed 2026-10-09, to `main` d884add58.* The customer's target for the
+*reviewed 2026-10-21, to `main` 2ba25d12a; the latest figure here is of 2026-10-10.* The customer's target for the
 round trip is seL4's matched figure, 440 ns, and since 2026-10-06 under 400.
 This page is where its progress is kept: what is measured, the points so far,
 and what is in flight. The design, step by step, is
@@ -97,13 +97,22 @@ bases; there is no retake of the whole of `main` in a quiet window yet, and
 none since `df7ee418c` and `d884add58`, which move the figure in opposite
 directions. The budget for what is left is §9.10.
 
+## Landed 2026-10-11, with no figure on this page
+
+The job-load fold of the direct switch (`9d98ca6f0`, L.sched.64-66; −10 to
+−25 ns by ablation was its estimate), the lend of the caller's thread through a
+Linux call with a per-processor call count (`291687dc0`, the pipe stream's P2)
+and pipe waits that trust their queues (`b1be8b23d`, P3) are on `main`. Their
+commits carry negative controls and no round-trip timing, so none is a row of
+the table above. `bench-pipe` (`3632166fa`) times Linux-ABI pipe, Unix-socket
+and futex round trips, and `bench-ipc --alternate` boots the other tree on the
+run's own architecture and processor count (`3f7b09345`, 2026-10-21).
+
 ## In flight
 
 Not on `main`; none is written up above as landed.
 
-- The job-load fold, −10 to −25 ns by ablation.
-- The pipe's P2 and P3a, the scheduler's J and K and the slots are branches
-  too (`open-branches.md`).
+- The scheduler's K and the slots are branches (`open-branches.md`).
 
 Ids reserved on `main` and not written: L.sched.69-70 (the direct switch's
 run-slot take and give-back, and the outgoing task's current reference kept on

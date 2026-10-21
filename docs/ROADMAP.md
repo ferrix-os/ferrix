@@ -86,7 +86,7 @@ Now [`docs/roadmap/chrome.md`](roadmap/chrome.md).
 
 Now [`docs/roadmap/claude-code.md`](roadmap/claude-code.md).
 
-## Stage 13 — Namespaces, cgroups v2, seccomp  ·  *month*
+## Stage 13 — Namespaces, cgroups v2, seccomp ✅  ·  *month*
 
 Now [`docs/roadmap/stage-13-namespaces-cgroups-v2-seccomp.md`](roadmap/stage-13-namespaces-cgroups-v2-seccomp.md).
 

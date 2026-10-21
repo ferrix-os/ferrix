@@ -7,7 +7,11 @@ was built for it, what it decided, where it departs from that plan, what
 only QEMU's emulated controller has shown so far, and the checklist for the
 first run on a real drive.
 
-**Nothing here has run on a real drive.** Every claim below that says
+**Update, 2026-10-21 (the customer's word):** the driver has driven a real
+WD PC SN720 through VFIO and installed Ferrix onto it. The record of that run
+is not in this document, so §8, §9 and §11 below are still the plan and the
+checklist, not the result. The rest of this document is as written on
+2026-10-10, when nothing had run on a real drive: every claim below that says
 "shown" was shown on QEMU 10.2.1's `nvme` device; §8 lists what that cannot
 show.
 

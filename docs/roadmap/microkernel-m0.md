@@ -90,7 +90,7 @@ BF6's and DF6's item-review notes, and the plans for `smt=off`,
   only when it changes; `PR_GET_SPECULATION_CTRL` truthful in every profile.
 * **`program_barrier=session`** (`desktop`): barriers between login
   sessions' domains only, under `BUILD-FLAGS.md` §3.1's rules. F-64, which
-  it waited on, is fixed (branch `m0-f64`, 2026-10-14).
+  it waited on, is fixed on `main` (505c5aa1b, 2026-10-21).
 * **Zenbleed's and GDS's fixes** leave the `mitigations` flag and stay on in
   every profile (its own small review, DF6).
 
@@ -212,3 +212,27 @@ the load ratchet, as `docs/BUILD-FLAGS.md`'s "Where it stands" lists,
 passed by the certification consultant's landing review (ledger 1039, its
 five conditions met). B's values are declared and build as stand-ins in
 `desktop` until their own landings.
+
+**On `main`, 2026-10-21 (`40996829f`).** A and D landed on 2026-10-17
+(d98ab2314, b91a85311), rebased with conflicts and checked again under the
+consultant's OK IF (ledger 2208). E's research check (5d680dc51) and the
+Ferrocene-version type-check (e56d1a75c, upstream Rust 1.95.0; Ferrocene's
+own compiler is still owed by the customer's subscription) are on `main`.
+Of B, the two fixes `smt=off` waited on landed on 2026-10-21: F-73, every
+x86-64 processor setting `CR4.MCE` (d9c93c7c9, with `test-mce`), and F-64
+(505c5aa1b). The plan for `smt=off` is restated for code and reviewed (OK IF,
+ledger 2563, parent H.TRAP.19; 044e263d9), and has no code. The move of
+`ipc_fastpath` to a flag, `ssbd=on_request`, `program_barrier=session` and
+the Zenbleed and GDS change are not built. Of C, the tooling landed on
+2026-10-21 (`bench-rows`, 40996829f, [its page](microkernel-m0-baselines.md)):
+no baseline is taken on a named commit yet, because the gate host was never
+idle. Nothing on `main` records the Pixel 7's cores as read, and no board is bought.
+
+**M1** (`docs/MICROKERNEL.md`): the designs of K5 (wait on a user address),
+K6 (kernel-attested sender identity), K7 (charging that follows the client),
+K10 (timer objects) and K12 (a job's reserved frames and kernel heap) are on
+`main` with the consultant's OK IF (2026-10-19), and their requirement ids,
+call numbers and panic codes are reserved (f5c048964). Their code is on the
+branches `mk/k5`, `mk/k6`, `mk/k7`, `mk/k10` and `mk/k12`, none of it gated;
+about 33 of the program's about 70 points were spent at the wind-down of
+2026-10-19 (`docs/BACKLOG.md`).

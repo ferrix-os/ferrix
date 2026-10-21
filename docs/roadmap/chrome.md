@@ -117,8 +117,11 @@ to 5.2 MB/s, and a Wikipedia article in 0.21 s instead of about 0.5
   default since 2026-09-27; `--interpreter glibc` for the volume's own.)
 * Why the GPU process's fallback path stops at the sandbox's
   `proc_util.cc:115` with `ENOENT` on Ferrix (`docs/CHROME.md` §8, item 8).
-* The GPU: Chrome draws in software. (`inotify` landed on 2026-09-27; the
-  vDSO on x86-64 on 2026-09-26: `docs/CHROME.md` §3.)
+* The GPU: Chrome draws in software, except on NVIDIA's RTX 3060, where
+  WebGL renders on the card through ANGLE on NVIDIA's Vulkan since
+  2026-10-05 (stage 21; the compositing is still software, and the dmabufs
+  that would move it are N3b, whose kernel half is on `main`). (`inotify`
+  landed on 2026-09-27; the vDSO on x86-64 on 2026-09-26: `docs/CHROME.md` §3.)
 * Where Chrome still says Linux: `navigator.platform`, the client hints
   and `chrome://version`, all constants in Chrome's build. The customer
   chose the flag alone over a patched binary; a Chromium built from

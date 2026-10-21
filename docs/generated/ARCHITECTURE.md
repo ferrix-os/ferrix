@@ -121,12 +121,12 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 141 packages, 7216 elements, 217 relations. Model digest `2cf9006ee52a7be3`.
+26 files, 141 packages, 7220 elements, 217 relations. Model digest `ab094b4de5c3eecf`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
-| `#implemented` | 281 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
-| `#inProgress` | 25 | The owning stage has started; part of the element runs. |
+| `#implemented` | 282 | The code exists and the QEMU boot test exercises it on every architecture it applies to. |
+| `#inProgress` | 28 | The owning stage has started; part of the element runs. |
 | `#writtenAhead` | 1 | A src/lib/ crate exists and passes its host tests, but nothing in src/kernel/ calls it yet. |
 | `#planned` | 24 | Only the design exists, in docs/ARCHITECTURE.md. Nothing stands in for it. |
 | `@deferred` | 20 | Work a finished stage explicitly left behind, carrying the reason that stage gave. |
@@ -166,7 +166,7 @@ flowchart LR
   n11_FerrixRoadmap_stage7LinuxAbi["S7  Stage 7 Linux ABI<br>Done"]
   n12_FerrixRoadmap_stage8Vfs["S8  Stage 8 VFS<br>Done"]
   n13_FerrixRoadmap_stage12BtrfsWrite["S12  Stage 12 btrfs write<br>Done"]
-  n14_FerrixRoadmap_stage13Isolation["S13  Stage 13 isolation<br>InProgress"]
+  n14_FerrixRoadmap_stage13Isolation["S13  Stage 13 isolation<br>Done"]
   n0_FerrixRequirements_hostsRustc -- "part of" --> n1_FerrixRequirements_hostsRustc_kernelThre
   n0_FerrixRequirements_hostsRustc -- "part of" --> n2_FerrixRequirements_hostsRustc_addressSpa
   n0_FerrixRequirements_hostsRustc -- "part of" --> n3_FerrixRequirements_hostsRustc_signalDeli
@@ -184,9 +184,7 @@ flowchart LR
   n13_FerrixRoadmap_stage12BtrfsWrite -. "depends on" .-> n7_FerrixRequirements_hostsRustc_durableFil
   n14_FerrixRoadmap_stage13Isolation -. "depends on" .-> n8_FerrixRequirements_hostsRustc_memoryPres
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
-  classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
-  class n9_FerrixRoadmap_stage5Scheduler,n10_FerrixRoadmap_stage6UserMode,n11_FerrixRoadmap_stage7LinuxAbi,n12_FerrixRoadmap_stage8Vfs,n13_FerrixRoadmap_stage12BtrfsWrite implemented
-  class n14_FerrixRoadmap_stage13Isolation inProgress
+  class n9_FerrixRoadmap_stage5Scheduler,n10_FerrixRoadmap_stage6UserMode,n11_FerrixRoadmap_stage7LinuxAbi,n12_FerrixRoadmap_stage8Vfs,n13_FerrixRoadmap_stage12BtrfsWrite,n14_FerrixRoadmap_stage13Isolation implemented
 ```
 
 **Figure 1 — Hosts rustc.** The goal's parts, and the roadmap stage each one waits for. A part with no stage pointing at it is one nothing on the roadmap has claimed yet. [SVG](diagrams/goal-decomposition.svg) Source: `01-requirements.sysml`.
@@ -2271,6 +2269,10 @@ flowchart TB
   n6_FerrixDrivers_Gc400Driver["Gc400Driver<br>stage 19"]
   n7_FerrixDrivers_Stm32SdmmcDriver["Stm32SdmmcDriver<br>stage 10"]
   n8_FerrixDrivers_NvmeDriver["NvmeDriver<br>stage 10"]
+  n9_FerrixDrivers_AhciDriver["AhciDriver<br>stage 10"]
+  n10_FerrixDrivers_Yt6801Driver["Yt6801Driver<br>stage 10"]
+  n11_FerrixDrivers_EfifbDriver["EfifbDriver<br>stage 21"]
+  n12_FerrixDrivers_IntelGpuDriver["IntelGpuDriver<br>stage 21"]
   n1_FerrixDrivers_VirtioBlkDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n2_FerrixDrivers_VirtioNetDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n3_FerrixDrivers_VirtioGpuDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
@@ -2279,13 +2281,17 @@ flowchart TB
   n6_FerrixDrivers_Gc400Driver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n7_FerrixDrivers_Stm32SdmmcDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   n8_FerrixDrivers_NvmeDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n9_FerrixDrivers_AhciDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n10_FerrixDrivers_Yt6801Driver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n11_FerrixDrivers_EfifbDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
+  n12_FerrixDrivers_IntelGpuDriver -- "specializes" --> n0_FerrixDrivers_DriverProcess
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   class n0_FerrixDrivers_DriverProcess,n1_FerrixDrivers_VirtioBlkDriver,n2_FerrixDrivers_VirtioNetDriver,n3_FerrixDrivers_VirtioGpuDriver,n4_FerrixDrivers_VirtioInputDriver,n5_FerrixDrivers_UsbHidDriver implemented
-  class n6_FerrixDrivers_Gc400Driver,n7_FerrixDrivers_Stm32SdmmcDriver,n8_FerrixDrivers_NvmeDriver inProgress
+  class n6_FerrixDrivers_Gc400Driver,n7_FerrixDrivers_Stm32SdmmcDriver,n8_FerrixDrivers_NvmeDriver,n9_FerrixDrivers_AhciDriver,n10_FerrixDrivers_Yt6801Driver,n11_FerrixDrivers_EfifbDriver,n12_FerrixDrivers_IntelGpuDriver inProgress
 ```
 
-**Figure 13 — Driver process and its subtypes.** 8 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
+**Figure 13 — Driver process and its subtypes.** 12 definitions specialize `DriverProcess`; the hollow arrow points at what they have in common. [SVG](diagrams/ferrix-drivers-driver-process.svg) Source: `08-drivers.sysml`.
 
 ```mermaid
 flowchart TB
@@ -2473,7 +2479,7 @@ src/user/system/native/drivers/input/virtio-input over src/lib/drivers/input/vir
 
 `#implemented`  ·  stage 17  ·  specialises `DriverProcess`
 
-src/user/system/native/drivers/usb/usbhid over src/lib/drivers/usb/usb-host: the STM32MP157's EHCI controller, its hubs, and HID keyboards, mice and media keys read by their report descriptors, each served to the input core over a control channel of its own, keyboards' LEDs lit by the core's STATUS. devmgr starts it as a bus host and does not wait for it; its memory is pinned PIN_COHERENT. No QEMU machine has the device, so no boot test exercises it: its gates are src/lib/drivers/usb/usb-host's tests against a model of EHCI and the board's bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7).
+src/user/system/native/drivers/usb/usbhid over src/lib/drivers/usb/usb-host: the STM32MP157's EHCI controller, its hubs, and HID keyboards, mice and media keys read by their report descriptors, each served to the input core over a control channel of its own, keyboards' LEDs lit by the core's STATUS. devmgr starts it as a bus host and does not wait for it; its memory is pinned PIN_COHERENT. No QEMU machine has the device, so no boot test exercises it: its gates are src/lib/drivers/usb/usb-host's tests against a model of EHCI and the board's bus, and it ran on the DK1 on 2026-09-23 (docs/INPUT.md §7). Since 2026-10-10 it also drives a PC's xHCI controller, picked by what START names (docs/XHCI.md; a bulk-only disk is read and not yet served to the block core), gated under QEMU by cargo xtask test-usb; a USB keyboard worked on the N150 box on 2026-10-15.
 
 #### Gc400Driver
 
@@ -2491,7 +2497,31 @@ src/user/system/native/drivers/block/stm32-sdmmc over src/lib/drivers/block/stm3
 
 `#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
 
-src/user/system/native/drivers/block/nvme over src/lib/drivers/block/nvme: an NVM Express controller's first namespace as a disk behind the block ring (docs/NVME.md), the first driver for a disk a PC has. devmgr starts it on any function of class code 01:08:02; the kernel is not changed. It resets and enables the controller, transfers straight into the ring's data region through PRP lists, lends a drive without DRAM its host memory buffer, aborts and resets on a command that does not come back, and notifies the controller before it disables it. Its gates are the library's host tests against a model of a controller, and cargo xtask test-nvme on QEMU's emulated one, with / on a drive below a PCIe switch. It has not run on a real drive (2026-10-10).
+src/user/system/native/drivers/block/nvme over src/lib/drivers/block/nvme: an NVM Express controller's first namespace as a disk behind the block ring (docs/NVME.md), the first driver for a disk a PC has. devmgr starts it on any function of class code 01:08:02; the kernel is not changed. It resets and enables the controller, transfers straight into the ring's data region through PRP lists, lends a drive without DRAM its host memory buffer, aborts and resets on a command that does not come back, and notifies the controller before it disables it. Its gates are the library's host tests against a model of a controller, and cargo xtask test-nvme on QEMU's emulated one, with / on a drive below a PCIe switch. It has since driven a real WD SN720 through VFIO and installed Ferrix onto it (the customer's word, 2026-10-21).
+
+#### AhciDriver
+
+`#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
+
+src/user/system/native/drivers/block/ahci over src/lib/drivers/block/ahci: a SATA disk behind an AHCI controller as a disk behind the block ring (docs/AHCI.md), for the customer's N150 box. devmgr starts it on class code 01:06:01 of any vendor. The controller is brought up polled (COMRESET of a link firmware left down, a busy device waited for, a refused IDENTIFY said), and each block-ring request is carried out whole by one transfer. A controller with no ATA disk is nothing to serve, not a failed driver. Its gates are the library's tests against a model HBA and cargo xtask test-n150-sata on QEMU's q35 controller; it served the box's drive on 2026-10-15.
+
+#### Yt6801Driver
+
+`#inProgress`  ·  stage 10  ·  specialises `DriverProcess`
+
+src/user/system/native/drivers/net/yt6801 over src/lib/drivers/net/yt6801 and src/lib/drivers/net/dwmac: the Motorcomm YT6801, the N150 box's gigabit port (networking page), speaking the net ring under ferrix-netserve's loop. devmgr starts it on 1F0A:6801. The kernel holds the function's MSI-X off and grants its table page (L.device.35-37). Its gates are the libraries' tests against models of the chip and the DesignWare core, and a QEMU e1000e for the kernel change; on the box on 2026-10-15 the link came up at one gigabit, and the driver polls every millisecond until its one MSI arrives, which it does rarely (docs/BACKLOG.md).
+
+#### EfifbDriver
+
+`#inProgress`  ·  stage 21  ·  specialises `DriverProcess`
+
+src/user/system/native/drivers/display/efifb: the firmware's framebuffer as the display core's card0, for a PC whose GPU has no driver (docs/DISPLAY.md section 8). Under the kernel option ferrix.efifb the last finder lends the framebuffer to a node of its own, write-combining from its first map, and the driver copies each flushed rectangle onto it; hyprix composites into dumb buffers as on virtio-gpu. Its gate is cargo xtask test-compositor --boot firmware-screen; hyprix drew on the N150 box's framebuffer on 2026-10-15.
+
+#### IntelGpuDriver
+
+`#inProgress`  ·  stage 21  ·  specialises `DriverProcess`
+
+src/user/system/native/drivers/gpu/intel over src/lib/drivers/gpu/intel-xelp: a render driver for the N150's Xe-LP graphics (docs/INTEL-GPU.md), following i915 file by file. The library is the i915 uAPI front end over a back end, the GT's bring-up, execlists, the PPGTT and the power management a host does, all host-tested; the process serves a render-only chardev node and is started on ferrix.intelgpu. The kernel lends it the screen by identity and maps its buffers write-combining. On the box, M1 (the device answers) and M2 (the first GPU commands) ran on 2026-10-20; M3, the render node over the GT back end, is wired and not shown on the box.
 
 #### DriverBootstrap
 
@@ -3038,7 +3068,7 @@ flowchart TB
   n15_FerrixRoadmap_stageSysfs["SY  Stage sysfs<br>Done · 26 points, spent"]
   n16_FerrixRoadmap_stageChrome["SC  Stage chrome<br>InProgress · headless and a window spent; the DK1 about 45 to 55 points"]
   n17_FerrixRoadmap_stage12BtrfsWrite["S12  Stage 12 btrfs write<br>Done · about 60 points, spent"]
-  n18_FerrixRoadmap_stage13Isolation["S13  Stage 13 isolation<br>InProgress · month"]
+  n18_FerrixRoadmap_stage13Isolation["S13  Stage 13 isolation<br>Done · month"]
   n19_FerrixRoadmap_stage14RealTime["S14  Stage 14 real time<br>Planned · month"]
   n20_FerrixRoadmap_stage15Userland["S15  Stage 15 userland<br>InProgress · week, about 20 points, of which job control is spent"]
   n21_FerrixRoadmap_stage16Rustc["S16  Stage 16 rustc<br>Done · the goal; about 40 guessed, 8 spent"]
@@ -3096,8 +3126,8 @@ flowchart TB
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
-  class n0_FerrixRoadmap_stage0Foundation,n1_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixRoadmap_stage3TrapsInterruptsTime,n4_FerrixRoadmap_stage4Smp,n5_FerrixRoadmap_armv7aPort,n6_FerrixRoadmap_stage5Scheduler,n7_FerrixRoadmap_stage6UserMode,n8_FerrixRoadmap_stage7LinuxAbi,n9_FerrixRoadmap_stage8Vfs,n10_FerrixRoadmap_stage9NativeAbi,n11_FerrixRoadmap_stage10UserspaceDrivers,n12_FerrixRoadmap_stage11BtrfsRead,n13_FerrixRoadmap_stageNetworking,n14_FerrixRoadmap_stageDynamicLinking,n15_FerrixRoadmap_stageSysfs,n17_FerrixRoadmap_stage12BtrfsWrite,n21_FerrixRoadmap_stage16Rustc,n22_FerrixRoadmap_stage17DisplayAndInput,n23_FerrixRoadmap_stage18Compositor implemented
-  class n16_FerrixRoadmap_stageChrome,n18_FerrixRoadmap_stage13Isolation,n20_FerrixRoadmap_stage15Userland,n24_FerrixRoadmap_stage19HyprlandFidelity,n25_FerrixRoadmap_stage21BareMetalGpu,n26_FerrixRoadmap_stage22Steam,n27_FerrixRoadmap_stage23Endfield,n28_FerrixRoadmap_stage24GamePath,n29_FerrixRoadmap_stage20SelfHosting inProgress
+  class n0_FerrixRoadmap_stage0Foundation,n1_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixRoadmap_stage3TrapsInterruptsTime,n4_FerrixRoadmap_stage4Smp,n5_FerrixRoadmap_armv7aPort,n6_FerrixRoadmap_stage5Scheduler,n7_FerrixRoadmap_stage6UserMode,n8_FerrixRoadmap_stage7LinuxAbi,n9_FerrixRoadmap_stage8Vfs,n10_FerrixRoadmap_stage9NativeAbi,n11_FerrixRoadmap_stage10UserspaceDrivers,n12_FerrixRoadmap_stage11BtrfsRead,n13_FerrixRoadmap_stageNetworking,n14_FerrixRoadmap_stageDynamicLinking,n15_FerrixRoadmap_stageSysfs,n17_FerrixRoadmap_stage12BtrfsWrite,n18_FerrixRoadmap_stage13Isolation,n21_FerrixRoadmap_stage16Rustc,n22_FerrixRoadmap_stage17DisplayAndInput,n23_FerrixRoadmap_stage18Compositor implemented
+  class n16_FerrixRoadmap_stageChrome,n20_FerrixRoadmap_stage15Userland,n24_FerrixRoadmap_stage19HyprlandFidelity,n25_FerrixRoadmap_stage21BareMetalGpu,n26_FerrixRoadmap_stage22Steam,n27_FerrixRoadmap_stage23Endfield,n28_FerrixRoadmap_stage24GamePath,n29_FerrixRoadmap_stage20SelfHosting inProgress
   class n19_FerrixRoadmap_stage14RealTime planned
 ```
 
@@ -3123,7 +3153,7 @@ flowchart TB
 | `SY` | 12 | Stage sysfs | Done | 26 points, spent | `#implemented` |
 | `SC` | 12 | Stage chrome | InProgress | headless and a window spent; the DK1 about 45 to 55 points | `#inProgress` |
 | `S12` | 12 | Stage 12 btrfs write | Done | about 60 points, spent | `#implemented` |
-| `S13` | 13 | Stage 13 isolation | InProgress | month | `#inProgress` |
+| `S13` | 13 | Stage 13 isolation | Done | month | `#implemented` |
 | `S14` | 14 | Stage 14 real time | Planned | month | `#planned` |
 | `S15` | 15 | Stage 15 userland | InProgress | week, about 20 points, of which job control is spent | `#inProgress` |
 | `S16` | 16 | Stage 16 rustc | Done | the goal; about 40 guessed, 8 spent | `#implemented` |
@@ -3320,13 +3350,13 @@ btrfs stage B. Exit, strict: Ferrix writes a tree and host btrfs check finds not
 
 ### S13 — Stage 13 isolation
 
-**InProgress**  ·  size month  ·  `#inProgress`
+**Done**  ·  size month  ·  `#implemented`
 
 All eight namespaces, the unified cgroup hierarchy with cpu, memory, io and pids, cgroupfs, classic-BPF seccomp with the interpreter in src/lib/. Exit: an unprivileged user namespace runs pid 1 under a memory limit that triggers scoped reclaim and a scoped OOM kill, with a seccomp filter blocking a syscall.
 
 Cgroups first (customer, 2026-09-23): stage 15's init is planned as if they exist, so the cgroup half is built before namespaces and seccomp. docs/INIT.md section 0.1 lists what init needs, C1-C5 before its first boot. C8, accepted the same day: every cgroup is backed by a Job. docs/CGROUPS.md is the design: landings G1-G5 (27 points) for init, then the controllers (58), 85 for the cgroup half. G1 done on 2026-09-23: every process in exactly one job, fork inheriting it, populated counted exactly, the two kills apart. G2 done the same day: cgroupfs mounts as cgroup2, over src/lib/fs/cgroupfs. G3 and G4 done on 2026-09-24: cgroup.events wakes poll, select and epoll with POLLPRI; clone3 starts a child in a cgroup; chown delegates a subtree under cgroup v2's common-ancestor rule. C1-C5 and C7 are met. G5 done on 2026-09-24. P1, M1's charging and S1 done on 2026-09-26, as the certification's job quotas (F-35): a quota slot per job, charged for tasks, memory and native objects, a weight per job scaling its tasks', and cgroupfs's cpu, memory and pids files over the same slot. M1's scoped OOM kill done on 2026-09-26: a fault past a cgroup's memory.max kills the process with the most resident pages in that cgroup, counted in memory.events with POLLPRI. M2's reclaim of a read-only mount's clean pages, memory.high, cgroup.freeze, cpu.max with cpu.stat and the io controller with io.max landed on 2026-10-07; on 2026-10-08 cpu.stat's charge is kept back in a run queue's own record and moved into the jobs' slots once, and cpu.max's walk is made only while one is set (L.object.180).
 
-Namespaces, for Steam's container, designed in docs/NAMESPACES.md (39 points, N1 to N6) and reviewed by the certification consultant on 2026-09-28. N1 done on 2026-09-28: per-mount flags enforced, MS_REMOUNT and mountinfo. N2 done on 2026-09-30: binds, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem so a plain remount reaches every bind of it. N3, mount namespaces with pivot_root and openat2, on 2026-09-30. The user, UTS, IPC, cgroup, pid and network namespaces are in too, and so are seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters (S1 to S3, the last on 2026-10-04). Left: time namespaces, SECCOMP_RET_TRAP and TSYNC (S4 to S6), and test-container, the exit criterion as a program.
+Namespaces, for Steam's container, designed in docs/NAMESPACES.md (39 points, N1 to N6) and reviewed by the certification consultant on 2026-09-28. N1 done on 2026-09-28: per-mount flags enforced, MS_REMOUNT and mountinfo. N2 done on 2026-09-30: binds, MS_REC, MNT_DETACH of a subtree, and a superblock per filesystem so a plain remount reaches every bind of it. N3, mount namespaces with pivot_root and openat2, on 2026-09-30. The user, UTS, IPC, cgroup, pid and network namespaces are in too, and so are seccomp's classic-BPF checker and interpreter, its hook at the four system-call entries and its filters (S1 to S3, the last on 2026-10-04). SECCOMP_RET_TRAP, TSYNC and test-seccomp (S4 to S6) and Syscall User Dispatch are on main since 2026-10-18, and test-container, the exit criterion as one program, since 2026-10-14: it passed on all three architectures, so the exit is met. A writable mount's clean pages are reclaimed since 2026-10-15 (L.object.188-190). Left: time namespaces, unprivileged mounting, reclaim of the dentry and inode caches, memory.reclaim, io.weight, cpu.max.burst and cpu.idle.
 
 **Allocated to: **`ferrix.kernel.namespaces`, `ferrix.kernel.cgroups` and `ferrix.kernel.seccomp`
 
@@ -3404,7 +3434,7 @@ The desktop's own clients, begun on 2026-09-26 at the customer's request: waybar
 
 **InProgress**  ·  size unsized, over 100 points  ·  `#inProgress`
 
-Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV are built and not landed. Exit: the stage 19 exit on real hardware, drawn by the card.
+Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the GPU decision of 2026-09-18, opened when the customer wants real hardware. NVIDIA's open kernel modules as a ring-3 driver process behind an OS interface layer written for Ferrix, their GSP firmware, and a userspace that is either glibc-built closed libraries or Mesa's NVK over a Rust driver such as Linux's Nova, weighed when the stage opens. The customer chose NVIDIA's own driver and userspace on 2026-10-02 (docs/NVIDIA.md): N0, the kernel prerequisites, and N1, nvrm booting the RTX 3060's GSP with nvidia-smi, are on main (2026-10-03), and the chardev core's queue bound (F-63) with stage 10's chardev self-check since 2026-10-05. N2 to N4 and the screen on the customer's TV landed on 2026-10-05, and N3b's kernel half (a chardev render node, dmabufs and sync-file fences) on 2026-10-11. The customer's Intel N150 box is the stage's first bare-metal machine (docs/N150.md): Ferrix booted on it on 2026-10-15, its drivers (AHCI, the YT6801, a firmware framebuffer, VT-d, SMBIOS, an event log) and a render driver for its Intel GPU (docs/INTEL-GPU.md) are on main, and the kernel bring-up is evidenced on QEMU only. Exit: the stage 19 exit on real hardware, drawn by the card.
 
 ### S22 — Stage 22 steam
 
@@ -3412,13 +3442,13 @@ Ferrix on bare metal with an NVIDIA card driven by Ferrix itself: Path B of the 
 
 Steam on Ferrix, put on the roadmap by the customer on 2026-09-18 as the step after the GPU decision; a guest's stage first, on Path A's GPU, that does not wait for bare metal. What it stands on that nothing else staged: the 32-bit x86 ABI for the i386 client and 32-bit Wine, glibc's place taken by ferrousli under the Steam runtime, bubblewrap's needs over stage 13, a root on btrfs, XWayland, sound (virtio-snd, an audio core, a PulseAudio or PipeWire server), and Vulkan through Venus on a KVM host. Exit in three boots: the client logs in with its browser helper drawing; a native game installs, plays and sounds; a Windows game runs through Proton.
 
-Under way since 2026-09-26. Sound's playback is done (docs/AUDIO.md, 24 points): a ring-3 virtio-snd driver, the kernel's audio core and /dev/snd, verified by cargo xtask test-audio on x86-64 and AArch64; alsa-lib (U1, 3) and a sound server (U2, unsized) are left. The 32-bit x86 ABI is designed in docs/I386.md, I1 to I4 at 42 points, and I1 is met: a 32-bit program entered in compatibility mode, making its calls through int $0x80, on a GDT in Linux's order. I2 to I4 followed on 2026-09-27 (threads, signals, fork, and Alpine's and Debian's i386 busybox), with I5a: Valve's steamcmd logs in to Steam. Sound was finished the same day with alsa-lib and pulsed, a PulseAudio-protocol server. On 2026-09-29 the Steam client, unchanged, drew its sign-in window on hyprix through yserver (docs/STEAM.md, cargo xtask test-steam-window), with launch-side workarounds each owned by a fix: namespaces for pressure-vessel, the /proc gaps, and a SIGBUS that needs a 16 GiB guest. On 2026-09-30 the exit's first step was met: on the --everything desktop, its 64-bit side on ferrousli, the client signs in and shows its store, gated by cargo xtask test-steam-store with a test account. Its sandbox waits on stage 13, and its GPU process on user copies through a device window and a render group (docs/STEAM.md section 6). On 2026-10-01 the second step got its gate, cargo xtask test-steam-game, not passing yet: Teeworlds installs on request and downloads, and Steam then stalls staging it, for a reason not yet known (docs/STEAM.md section 7).
+Under way since 2026-09-26. Sound's playback is done (docs/AUDIO.md, 24 points): a ring-3 virtio-snd driver, the kernel's audio core and /dev/snd, verified by cargo xtask test-audio on x86-64 and AArch64; alsa-lib (U1, 3) and a sound server (U2, unsized) are left. The 32-bit x86 ABI is designed in docs/I386.md, I1 to I4 at 42 points, and I1 is met: a 32-bit program entered in compatibility mode, making its calls through int $0x80, on a GDT in Linux's order. I2 to I4 followed on 2026-09-27 (threads, signals, fork, and Alpine's and Debian's i386 busybox), with I5a: Valve's steamcmd logs in to Steam. Sound was finished the same day with alsa-lib and pulsed, a PulseAudio-protocol server. On 2026-09-29 the Steam client, unchanged, drew its sign-in window on hyprix through yserver (docs/STEAM.md, cargo xtask test-steam-window), with launch-side workarounds each owned by a fix: namespaces for pressure-vessel, the /proc gaps, and a SIGBUS that needs a 16 GiB guest. On 2026-09-30 the exit's first step was met: on the --everything desktop, its 64-bit side on ferrousli, the client signs in and shows its store, gated by cargo xtask test-steam-store with a test account. Its sandbox waits on stage 13, and its GPU process on user copies through a device window and a render group (docs/STEAM.md section 6). On 2026-10-01 the second step got its gate, cargo xtask test-steam-game, not passing then (the customer reports a game running by 2026-10-21): Teeworlds installs on request and downloads, and Steam then stalls staging it, for a reason not yet known (docs/STEAM.md section 7). Since 2026-10-10 a native game can be preinstalled on the host and started by a compatibility tool outside the runtime's container.
 
 ### S23 — Stage 23 endfield
 
 **InProgress**  ·  size about 205 points as a first guess, step 5 unknown  ·  `#inProgress`
 
-The Windows game Arknights: Endfield on Ferrix, through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the customer on 2026-10-10 as the road after Steam. A feasibility study was written the same day; step 0 answered on 2026-10-13 (the anti-cheat refuses a virtual machine), Wine, DXVK and a Unity game run on Ferrix with no card, and Endfield's launcher draws its install dialog in Debian's Wine and in GE-Proton11-7's; the game's download stopped on ENOSPC from Ferrix's btrfs and is open. Eight steps in the order they can be proved: the game on plain Linux in the same VM shape, which costs no Ferrix work and answers whether its anti-cheat accepts a virtual machine; plain Wine starts on Ferrix, which needs arch_prctl(ARCH_SET_GS) first; a Direct3D 11 program draws through DXVK on the card, on stage 21's unlanded branches; a Unity DirectX 11 game without anti-cheat; the game's installer, launcher and login; past the anti-cheat, unknown until it is run; playable; and, optional, by way of Steam's own Proton, which is also stage 22's third exit step. What Wine needs of the kernel is sized here and not in stage 22. The anti-cheat's tolerance of Wine and of a virtual machine, an account ban and the game's terms are outside Ferrix's engineering and can stop it. Exit: the game reaches its world past the login and is playable at 1920x1080 and 60 frames a second on the RTX 3060; a recorded run on the card with the customer's account, not a boot in CI.
+The Windows game Arknights: Endfield on Ferrix, through Wine with DXVK on NVIDIA's Vulkan, put on the roadmap by the customer on 2026-10-10 as the road after Steam. A feasibility study was written the same day; step 0 answered on 2026-10-13 (the anti-cheat refuses a virtual machine), Wine, DXVK and a Unity game run on Ferrix with no card, and Endfield's launcher draws its install dialog in Debian's Wine and in GE-Proton11-7's; the game's download stopped on ENOSPC from Ferrix's btrfs, whose cause, a writable mount's page cache never reclaimed, is fixed on main since 2026-10-15, and no download has run since; Syscall User Dispatch and seccomp's TRAP are on main. Eight steps in the order they can be proved: the game on plain Linux in the same VM shape, which costs no Ferrix work and answers whether its anti-cheat accepts a virtual machine; plain Wine starts on Ferrix, which needs arch_prctl(ARCH_SET_GS) first; a Direct3D 11 program draws through DXVK on the card, on stage 21's unlanded branches; a Unity DirectX 11 game without anti-cheat; the game's installer, launcher and login; past the anti-cheat, unknown until it is run; playable; and, optional, by way of Steam's own Proton, which is also stage 22's third exit step. What Wine needs of the kernel is sized here and not in stage 22. The anti-cheat's tolerance of Wine and of a virtual machine, an account ban and the game's terms are outside Ferrix's engineering and can stop it. Exit: the game reaches its world past the login and is playable at 1920x1080 and 60 frames a second on the RTX 3060; a recorded run on the card with the customer's account, not a boot in CI.
 
 ### S24 — Stage 24 game path
 
@@ -3680,8 +3710,8 @@ flowchart LR
   classDef implemented fill:#dceae2,stroke:#2c6e4e,color:#16191d
   classDef inProgress fill:#dae5f0,stroke:#2a5f8f,color:#16191d
   classDef planned fill:#e4e7ea,stroke:#6a737e,color:#16191d
-  class n0_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixStructure_Kernel_mm,n4_FerrixStructure_Kernel_vmap,n5_FerrixRoadmap_stage3TrapsInterruptsTime,n6_FerrixStructure_Kernel_trap,n7_FerrixStructure_Kernel_irq,n8_FerrixStructure_Kernel_timer,n9_FerrixRoadmap_stage4Smp,n10_FerrixStructure_Kernel_smp,n11_FerrixRoadmap_armv7aPort,n13_FerrixRoadmap_stage5Scheduler,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_tasks,n16_FerrixRoadmap_stage6UserMode,n17_FerrixStructure_Kernel_vm,n18_FerrixRoadmap_stage7LinuxAbi,n19_FerrixStructure_Kernel_syscalls,n20_FerrixStructure_Kernel_signals,n21_FerrixStructure_Kernel_futex,n22_FerrixRoadmap_stage8Vfs,n23_FerrixStructure_Kernel_vfs,n24_FerrixStructure_Kernel_filesystems,n25_FerrixRoadmap_stageSysfs,n28_FerrixRoadmap_stage9NativeAbi,n29_FerrixStructure_Kernel_native,n30_FerrixRoadmap_stage10UserspaceDrivers,n33_FerrixRoadmap_stage11BtrfsRead,n34_FerrixStructure_Kernel_blockCore,n35_FerrixRoadmap_stageNetworking,n36_FerrixStructure_Kernel_netCore,n37_FerrixRoadmap_stageDynamicLinking,n44_FerrixRoadmap_stage16Rustc,n45_FerrixStructure_Userland_rustc implemented
-  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n38_FerrixRoadmap_stage13Isolation,n39_FerrixStructure_Kernel_namespaces,n40_FerrixStructure_Kernel_cgroups,n41_FerrixStructure_Kernel_seccomp,n43_FerrixRoadmap_stage15Userland inProgress
+  class n0_FerrixRoadmap_stage1Boot,n2_FerrixRoadmap_stage2Memory,n3_FerrixStructure_Kernel_mm,n4_FerrixStructure_Kernel_vmap,n5_FerrixRoadmap_stage3TrapsInterruptsTime,n6_FerrixStructure_Kernel_trap,n7_FerrixStructure_Kernel_irq,n8_FerrixStructure_Kernel_timer,n9_FerrixRoadmap_stage4Smp,n10_FerrixStructure_Kernel_smp,n11_FerrixRoadmap_armv7aPort,n13_FerrixRoadmap_stage5Scheduler,n14_FerrixStructure_Kernel_sched,n15_FerrixStructure_Kernel_tasks,n16_FerrixRoadmap_stage6UserMode,n17_FerrixStructure_Kernel_vm,n18_FerrixRoadmap_stage7LinuxAbi,n19_FerrixStructure_Kernel_syscalls,n20_FerrixStructure_Kernel_signals,n21_FerrixStructure_Kernel_futex,n22_FerrixRoadmap_stage8Vfs,n23_FerrixStructure_Kernel_vfs,n24_FerrixStructure_Kernel_filesystems,n25_FerrixRoadmap_stageSysfs,n28_FerrixRoadmap_stage9NativeAbi,n29_FerrixStructure_Kernel_native,n30_FerrixRoadmap_stage10UserspaceDrivers,n33_FerrixRoadmap_stage11BtrfsRead,n34_FerrixStructure_Kernel_blockCore,n35_FerrixRoadmap_stageNetworking,n36_FerrixStructure_Kernel_netCore,n37_FerrixRoadmap_stageDynamicLinking,n38_FerrixRoadmap_stage13Isolation,n44_FerrixRoadmap_stage16Rustc,n45_FerrixStructure_Userland_rustc implemented
+  class n26_FerrixRoadmap_stageChrome,n27_FerrixStructure_Ferrix_userland,n39_FerrixStructure_Kernel_namespaces,n40_FerrixStructure_Kernel_cgroups,n41_FerrixStructure_Kernel_seccomp,n43_FerrixRoadmap_stage15Userland inProgress
   class n42_FerrixRoadmap_stage14RealTime planned
 ```
 
@@ -3869,7 +3899,7 @@ flowchart LR
 | `SY` | `stageSysfs` | `allocate` | — | `#implemented` |
 | `SC` | `stageChrome` | `allocate` | — | `#inProgress` |
 | `S12` | `stage12BtrfsWrite` | `dependency` | — | `#implemented` |
-| `S13` | `stage13Isolation` | `allocate` and `dependency` | — | `#inProgress` |
+| `S13` | `stage13Isolation` | `allocate` and `dependency` | — | `#implemented` |
 | `S14` | `stage14RealTime` | `allocate` and `dependency` | — | `#planned` |
 | `S15` | `stage15Userland` | `allocate` and `dependency` | yes | `#inProgress` |
 | `S16` | `stage16Rustc` | `allocate` and `dependency` | yes | `#implemented` |
@@ -5023,6 +5053,8 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 10 | `FerrixDrivers::VirtioBlkDriver` | part | `#implemented` |
 | 10 | `FerrixDrivers::Stm32SdmmcDriver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::NvmeDriver` | part | `#inProgress` |
+| 10 | `FerrixDrivers::AhciDriver` | part | `#inProgress` |
+| 10 | `FerrixDrivers::Yt6801Driver` | part | `#inProgress` |
 | 10 | `FerrixDrivers::DriverBootstrap` | action | `#implemented` |
 | 10 | `FerrixAssurance::RestartTest` | verification | `#implemented` |
 | 11 | `FerrixStructure::Workspace::btrfs` | part | `#implemented` |
@@ -5076,8 +5108,10 @@ Every element carrying @stage, which names the roadmap stage that owns it. An el
 | 19 | `FerrixStructure::Workspace::gc400` | part | `#implemented` |
 | 19 | `FerrixDrivers::Gc400Driver` | part | `#inProgress` |
 | 19 | `FerrixAssurance::VideoTest` | verification | `#implemented` |
+| 21 | `FerrixDrivers::EfifbDriver` | part | `#inProgress` |
+| 21 | `FerrixDrivers::IntelGpuDriver` | part | `#inProgress` |
 
-188 elements across 18 stages.
+192 elements across 19 stages.
 
 ## Figures
 
@@ -5097,7 +5131,7 @@ Every diagram in this document, drawn from the model by tools/common/gen/sysml/d
 | 10 | Demand fault | 5 nodes, 4 edges | `04-memory.sysml` | [ferrix-memory-demand-fault.svg](diagrams/ferrix-memory-demand-fault.svg) |
 | 11 | Domain lifecycle | 5 nodes, 5 edges | `05-scheduling.sysml` | [ferrix-scheduling-domain-lifecycle.svg](diagrams/ferrix-scheduling-domain-lifecycle.svg) |
 | 12 | Kernel object and its subtypes | 10 nodes, 9 edges | `06-objects.sysml` | [ferrix-objects-kernel-object.svg](diagrams/ferrix-objects-kernel-object.svg) |
-| 13 | Driver process and its subtypes | 9 nodes, 8 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
+| 13 | Driver process and its subtypes | 13 nodes, 12 edges | `08-drivers.sysml` | [ferrix-drivers-driver-process.svg](diagrams/ferrix-drivers-driver-process.svg) |
 | 14 | Driver bootstrap | 8 nodes, 7 edges | `08-drivers.sysml` | [ferrix-drivers-driver-bootstrap.svg](diagrams/ferrix-drivers-driver-bootstrap.svg) |
 | 15 | Filesystem and its subtypes | 7 nodes, 6 edges | `09-storage.sysml` | [ferrix-storage-filesystem.svg](diagrams/ferrix-storage-filesystem.svg) |
 | 16 | The crate graph | 56 nodes, 114 edges | `02-structure.sysml` | [crate-dependencies.svg](diagrams/crate-dependencies.svg) |

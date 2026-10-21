@@ -206,7 +206,7 @@ a `render` group, and the helper's flags, 14 to 23 points, designed with
 the certification consultant's conditions and not started
 (`docs/STEAM.md` §6).
 
-The second step has its gate and does not pass yet (2026-10-01):
+The second step has its gate and did not pass on 2026-10-01:
 `cargo xtask test-steam-game` signs in as `test-steam-store` does, asks
 the client to install Teeworlds, a free native game the test account owns,
 presses Install, follows the download and is to start the game and require
@@ -219,6 +219,15 @@ on the btrfs volume and on tmpfs alike). After that come
 the runtime Steam installs beside a native game, the Steam Linux Runtime
 1.0 (scout), whose container needs pressure-vessel; the GPU path; and
 sound.
+
+Since 2026-10-10 there is a way around the stall for a native game:
+`--steam-preinstall` installs Teeworlds and the scout runtime with `steamcmd`
+on the host and merges them into the `--everything` volume, where Steam finds
+them installed (ee9eade0b, 62d6369b5), and `ferrix_direct`, a compatibility
+tool the client script maps a game to, starts the game outside the runtime's
+container (3a2740642), so pressure-vessel and N5 to N7 are not needed for it.
+The in-guest install's staging stall is still unexplained, and
+`docs/STEAM.md` does not record the gate passing, but the customer reports (2026-10-21) that Steam runs on Ferrix and a game has also run.
 
 None of it is sized past a first guess, and the sum of the first guesses is
 already over 300 points, so the stage is written as a list of what has to be

@@ -8,7 +8,8 @@ wind-down's branches are in the sections after this introduction, and
 has landed since, and which branches origin no longer has; *2026-10-05,
 wind-down* and *2026-10-07* say the rest; *2026-10-09* says what landed on the
 night of 2026-10-08; *2026-10-15* lists the branches of the night of
-2026-10-14. It is where the next session starts.
+2026-10-14, and *2026-10-21* says what became of them. It is where the next
+session starts.
 The *what* of each line of work is in its design document and in
 `docs/BACKLOG.md`; this page says which branch carries it and which of a
 family's branches to resume from.
@@ -34,6 +35,56 @@ Every landing still follows `docs/CONVENTIONS.md` and *What a landing runs* in
 `docs/BACKLOG.md`: rebase onto `main`, `cargo xtask gate-rows --since main`
 for the rows, gate on nazuna (`fleet/gate.sh`), the certification consultant
 for the item, `land.sh`.
+
+## 2026-10-21: what became of the night's branches, and the microkernel's
+
+Against `main` 2ba25d12a. Counts are `git cherry main origin/<branch>` against
+this clone's remote-tracking refs, which were not fetched again for this page;
+a branch that origin no longer has is listed from `main`'s log by file, and its
+tip is not quoted. A branch rebased before it landed counts as unlanded by
+patch-id although its change is on `main`, and the table says so. Nothing is
+landed unless `main` shows it.
+
+| Branch | State | What `main` shows |
+|---|---|---|
+| `mm-pcache` | landed under another hash | f0bc9ab2d (2026-10-15) is its commit rebased; `origin/mm-pcache` still counts its two unrebased commits (reservation and code). Superseded |
+| `net-restart-stall` | landed | 36a1bea84, 11d006073, bdccab15d (2026-10-15), with NET-RING §3's object-code reading (08dfd7591, 7e2b6fe9e). Gone from origin |
+| `net-gw` | landed in part, at least | a7af71269 (the window scaling and the shut-window probe), 7a367b755 (nettcp's receive buffer) and 6d6df1add (a gateway test). Whether anything of the branch is left was not compared file by file. Gone from origin |
+| `g24-i1` | landed | 26f22eaf1 and its pins, ac796c168 (2026-10-15). Gone from origin |
+| `claude-desktop` | landed | d787e7991, b6f7667ca, df37652a7 and ferrousli's pin 634d21e9e (2026-10-16). Gone from origin |
+| `claude-desktop-assess` | history | `git cherry` counts 0 |
+| `net-yt6801` | landed | f1322a76d, 3c1e9ba38, 3f4769222, 42789ccf7 and the ids L.device.35-37 (2026-10-15). Gone from origin |
+| `ef-night` | scratch | never for `main`; gone from origin |
+| `endfield-esync` | landed | 55fba3890 and f00644f39; the local copy counts 0 |
+| `bm-h6-gop` | superseded | H6 is on `main` as c7d81aeef, 95d9bba44 and e70898c1e; the two WIP commits on origin are not needed |
+| `btrfs-enospc` | never land | still on origin, 1 commit |
+| `ahci` | partly landed | the driver and the kernel fixes the box needed are on `main` (`docs/AHCI.md`, `docs/N150.md`); 8 of its 47 commits are not, by patch-id, and were not compared one by one |
+| `vtd-n150`, `sud`, `xelp-serve`, `xelp-rps`, `igpu-hang` | landed | 16e113583 and a1c5d897d (VT-d, K2; 2026-10-20), ffa63ae4f and the Syscall User Dispatch commits (2026-10-18), 6ae77e2d1, 2f51773a9, 9776b3008 (2026-10-19 and -20) |
+
+Still branches, from the same count:
+
+| Branch | Unlanded | What it carries |
+|---|---|---|
+| `stage13-timens` | 6 of 9 | Time namespaces (stage 13) |
+| `stage13-n5` | 15 of 15 | Unprivileged mounting; `stage13-bwrap-user` (16 of 16) runs `test-bwrap` as uid 1000 on it |
+| `nv-next`, `nv-next-stall` | 48 of 62, 49 of 63 | An X program's window drawn by the card: DRI3 and Present over `nvrm`; `check` red on `nv-next` |
+| `nv-zerocopy` | 13 of 15 | hyprix drawing on the 3060 through virglrenderer's test server (N3c). `nv-vram-dmabuf` (8 of 10) was squashed into b05d045c9 and is superseded |
+| `boot-21b`, `w8-armv7a` | 1 and 1 | As the section below says |
+
+The microkernel program's branches (the wind-down of 2026-10-19 in
+`docs/BACKLOG.md`, which lists what each still owes):
+
+| Branch | Unlanded | State |
+|---|---|---|
+| `mk/f73`, `mk/f64`, `mk/baselines` | 0 of 1 each | landed: d9c93c7c9, 505c5aa1b (2026-10-21), 40996829f |
+| `mk/k5` | 5 of 5 | wait on a user address, partly built, about 12 points left |
+| `mk/k6` | 4 of 4 | kernel-attested sender, `cargo check` on three architectures, never booted, about 6 points left; `mk/k7` lands on it |
+| `mk/k7` | 13 of 13 | charging that follows the client; the BACKLOG row says no code yet |
+| `mk/k10` | 1 of 3 | timer objects, unbuilt, about 5 points left |
+| `mk/k12` | 2 of 2 | a job's reserved kernel memory, most of K12a, never compiled, about 9 points left |
+| `mk/smt-off` | 2 of 2 | superseded by the plan on `main` (044e263d9); no code lands from it |
+
+The designs of K5, K6, K7, K10 and K12 are on `main` with their ids reserved.
 
 ## 2026-10-15: the night's branches
 

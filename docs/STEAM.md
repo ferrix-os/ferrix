@@ -18,7 +18,7 @@ tools/common/fetch/fetch-steam-window.sh     # once: the volume, about 7 GB spar
 cargo xtask test-steam-window           # the gate: waits for the window, judges the screen
 cargo xtask run-steam                   # the same boot, screens dumped until the timeout
 cargo xtask test-steam-store            # the --everything desktop's Steam, on ferrousli: sign-in, then the store
-cargo xtask test-steam-game             # the same, then Teeworlds installed from the library and started (§7; not passing yet)
+cargo xtask test-steam-game             # the same, then Teeworlds installed from the library and started (§7; the customer reports a game running, 2026-10-21; this gate's last result is not recorded here)
 ```
 
 Both need KVM and the internet, as `test-steamcmd` does, and neither is in
@@ -91,7 +91,7 @@ else: every line of the transcript and the gate's error are redacted of
 both, and a screen dumped after the typing is kept shrunk eight times, too
 small to read (`store.ppm`, `not-signed-in.ppm`, `after-sign-in.ppm`).
 
-**A game, gated (not passing yet).** `test-steam-game` boots the same
+**A game, gated (its 2026-10-01 state: not passing; see §7's update).** `test-steam-game` boots the same
 desktop with `tools/common/steam/game-watch.sh` beside the store's watcher,
 needs the account file, and goes on from the store: the guest hands the
 running client `steam://install/380840` (Teeworlds) the way a second
@@ -298,7 +298,13 @@ reaches every guest program too.
 Stage 22's second exit step is a native Linux game from the library that
 installs to btrfs, launches and draws through the GPU path with sound. On
 2026-10-01 the gate for its first part, `test-steam-game` (§1), got as far
-as the install's download; it does not pass yet. In order:
+as the install's download; it did not pass then. In order:
+
+**Update, 2026-10-21 (the customer's word):** Steam is running on Ferrix and
+a game has also run. No test name or log of that is recorded in this
+document, so the list below stays as the 2026-10-01 account of the stall and
+of the way around it (`--steam-preinstall`, `ferrix_direct`, 2026-10-10), not
+as the result.
 
 1. **The game.** Teeworlds (app 380840): free, `isfreeapp`, so steamcmd's
    `app_license_request` adds it to an account; a Linux build whose

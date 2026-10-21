@@ -2,7 +2,7 @@
 
 *Stream C of [Microkernel M0](microkernel-m0.md), written 2026-10-13 to
 2026-10-14 on branch `m0-baselines`; its tooling landed on its own on
-2026-10-19 (branch `mk/baselines`), the baselines to be measured on `main`
+2026-10-21 (40996829f, from the branch `mk/baselines`), the baselines to be measured on `main`
 once the gate host is quiet.* The switch to a microkernel is gated by the rows of
 `docs/MICROKERNEL.md` §7. This page gives each row its method, the command
 that measures it, its baseline on a named commit with the range and the host
