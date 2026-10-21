@@ -48,6 +48,8 @@ pub const HANDLE_REPLACE: usize = 0x1002;
 pub const OBJECT_WAIT_ONE: usize = 0x1008;
 /// [`NativeCall::ObjectWaitAsync`].
 pub const OBJECT_WAIT_ASYNC: usize = 0x1009;
+/// [`NativeCall::ObjectId`].
+pub const OBJECT_ID: usize = 0x100A;
 
 /// [`NativeCall::ChannelCreate`].
 pub const CHANNEL_CREATE: usize = 0x1010;
@@ -57,6 +59,8 @@ pub const CHANNEL_WRITE: usize = 0x1011;
 pub const CHANNEL_READ: usize = 0x1012;
 /// [`NativeCall::ChannelWriteRead`].
 pub const CHANNEL_WRITE_READ: usize = 0x1013;
+/// [`NativeCall::ChannelReadAttested`].
+pub const CHANNEL_READ_ATTESTED: usize = 0x1014;
 /// The most bytes a [`NativeCall::ChannelWriteRead`] carries each way: three
 /// words, which travel in registers.
 pub const CHANNEL_WRITE_READ_BYTES: usize = 3 * size_of::<usize>();
@@ -217,6 +221,14 @@ pub enum NativeCall {
     /// `key`, the next time any of `signals` is asserted — at once, if one
     /// already is. One-shot. Needs `WAIT` on the object and `WRITE` on the port.
     ObjectWaitAsync,
+    /// `(handle, out: *u64)`. Write the id of the process or job `handle`
+    /// names: a process's is given once, as it is made, and never to another
+    /// process while the kernel runs, and is answered after the process has
+    /// ended too; a job's is its number. What a sender's identity from
+    /// [`NativeCall::ChannelReadAttested`] is compared with. Any rights, as
+    /// an id grants nothing. `WRONG_TYPE` for any other object, `BAD_HANDLE`
+    /// for a handle not held, `FAULT` for `out`.
+    ObjectId,
     /// `(out: *[u32; 2])`. Make a channel, writing its two endpoints' handles.
     ChannelCreate,
     /// `(channel, bytes, byte_count, handles: *u32, handle_count)`. Send one
@@ -247,6 +259,23 @@ pub enum NativeCall {
     /// keeping the callee-saved ones and the control words (the module's
     /// vector-state contract).
     ChannelWriteRead,
+    /// `(channel, bytes, byte_capacity, handles: *u32, handle_capacity,
+    /// actual: *ReadAttested)`. [`NativeCall::ChannelRead`], with the same
+    /// rights and refusals, and with who wrote the message: the
+    /// [`crate::types::ReadAttested`] written last, after the bytes and the
+    /// handles, holds the writer's process id and the id of the job it was in
+    /// at the write, both stamped by the kernel at the write and never taken
+    /// from the message (`docs/microkernel/K6.md`). Zero and zero say the
+    /// kernel wrote it: that the kernel wrote the message, not that its
+    /// content is the kernel's own, since a kernel control channel may pass
+    /// on bytes a program gave it. The stamp is the writer's, whoever holds
+    /// the end now, and stays the same after the writer has ended. It names
+    /// a process, not its credentials: a process keeps its id across
+    /// `execve`, a set-id one included, so a privilege must never be cached
+    /// by process id across an exec. On `BUFFER_TOO_SMALL` only the sizes
+    /// are written. `actual` needs no alignment. Needs `READ`.
+    /// [`NativeCall::ChannelWriteRead`] answers no sender.
+    ChannelReadAttested,
     /// `()` → handle. Make a port.
     PortCreate,
     /// `(port, packet: *PortPacket)`. Queue a user packet. Needs `WRITE`.
@@ -621,16 +650,18 @@ pub enum NativeCall {
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 65] = [
+pub const ALL: [NativeCall; 67] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
     NativeCall::ObjectWaitOne,
     NativeCall::ObjectWaitAsync,
+    NativeCall::ObjectId,
     NativeCall::ChannelCreate,
     NativeCall::ChannelWrite,
     NativeCall::ChannelRead,
     NativeCall::ChannelWriteRead,
+    NativeCall::ChannelReadAttested,
     NativeCall::PortCreate,
     NativeCall::PortQueue,
     NativeCall::PortWait,
@@ -707,10 +738,12 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         HANDLE_REPLACE => NativeCall::HandleReplace,
         OBJECT_WAIT_ONE => NativeCall::ObjectWaitOne,
         OBJECT_WAIT_ASYNC => NativeCall::ObjectWaitAsync,
+        OBJECT_ID => NativeCall::ObjectId,
         CHANNEL_CREATE => NativeCall::ChannelCreate,
         CHANNEL_WRITE => NativeCall::ChannelWrite,
         CHANNEL_READ => NativeCall::ChannelRead,
         CHANNEL_WRITE_READ => NativeCall::ChannelWriteRead,
+        CHANNEL_READ_ATTESTED => NativeCall::ChannelReadAttested,
         PORT_CREATE => NativeCall::PortCreate,
         PORT_QUEUE => NativeCall::PortQueue,
         PORT_WAIT => NativeCall::PortWait,
@@ -781,10 +814,12 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::HandleReplace => HANDLE_REPLACE,
         NativeCall::ObjectWaitOne => OBJECT_WAIT_ONE,
         NativeCall::ObjectWaitAsync => OBJECT_WAIT_ASYNC,
+        NativeCall::ObjectId => OBJECT_ID,
         NativeCall::ChannelCreate => CHANNEL_CREATE,
         NativeCall::ChannelWrite => CHANNEL_WRITE,
         NativeCall::ChannelRead => CHANNEL_READ,
         NativeCall::ChannelWriteRead => CHANNEL_WRITE_READ,
+        NativeCall::ChannelReadAttested => CHANNEL_READ_ATTESTED,
         NativeCall::PortCreate => PORT_CREATE,
         NativeCall::PortQueue => PORT_QUEUE,
         NativeCall::PortWait => PORT_WAIT,

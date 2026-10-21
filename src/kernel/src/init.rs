@@ -86,7 +86,7 @@ use ferrix_sync::Once;
 
 use crate::console::println;
 use crate::fallible;
-use crate::object::channel::Endpoint;
+use crate::object::channel::{Endpoint, Sender};
 use crate::object::{Object, Transfer};
 use crate::sync::SpinLock;
 use crate::syscall;
@@ -194,7 +194,7 @@ pub(crate) fn bootstrap_channel() -> Option<(Arc<Endpoint>, Arc<Endpoint>)> {
     let (kernel_end, program_end) = Endpoint::pair().ok()?;
     let hello = fallible::try_to_vec(&init_hello()).ok()?;
     kernel_end
-        .write(hello, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()))
+        .write(Sender::KERNEL, hello, 0, || Ok::<_, Infallible>(Vec::new()))
         .ok()?;
     Some((kernel_end, program_end))
 }
@@ -217,7 +217,9 @@ fn next_bootstrap() -> Option<Transfer> {
             .and_then(|(message, mut transfers): (Vec<u8>, Vec<Transfer>)| {
                 let _ = fallible::push_within(&mut transfers, (starter, Rights::MANAGE));
                 kernel_end
-                    .write(message, 1, || Ok::<Vec<Transfer>, Infallible>(transfers))
+                    .write(Sender::KERNEL, message, 1, || {
+                        Ok::<_, Infallible>(transfers)
+                    })
                     .map_err(|_| ())
             });
         if written.is_err() {
@@ -258,7 +260,9 @@ fn give_audit(kernel_end: &Arc<Endpoint>) {
         .and_then(|(message, mut transfers): (Vec<u8>, Vec<Transfer>)| {
             let _ = fallible::push_within(&mut transfers, (Object::Audit, AUDIT_RIGHTS));
             kernel_end
-                .write(message, 1, || Ok::<Vec<Transfer>, Infallible>(transfers))
+                .write(Sender::KERNEL, message, 1, || {
+                    Ok::<_, Infallible>(transfers)
+                })
                 .map_err(|_| ())
         });
     if written.is_err() {
@@ -311,7 +315,9 @@ pub(crate) fn notify_root(switched: bool) {
         .map_err(|_| ())
         .and_then(|message| {
             kernel_end
-                .write(message, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()))
+                .write(Sender::KERNEL, message, 0, || {
+                    Ok::<_, Infallible>(Vec::new())
+                })
                 .map_err(|_| ())
         });
     if written.is_err() {

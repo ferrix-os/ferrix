@@ -28,6 +28,18 @@ pub struct Received {
     pub handles: usize,
 }
 
+/// Who wrote a message, as the kernel stamped it at the write
+/// (`docs/microkernel/K6.md`): never taken from the message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Writer {
+    /// The writing process's id, or zero for the kernel. An identity, not
+    /// credentials: a process keeps its id across `execve`, a set-id one
+    /// included, so a privilege is never cached by it across an exec.
+    pub process: u64,
+    /// The id of the job it was in at the write, or zero for the kernel.
+    pub job: u64,
+}
+
 /// Why a read delivered nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadError {
@@ -283,5 +295,74 @@ impl<S: Syscall> Channel<S> {
             bytes: message_bytes,
             handles: received,
         })
+    }
+
+    /// `channel_read_attested`: [`Channel::read`], and who wrote the message.
+    ///
+    /// # Errors
+    ///
+    /// As [`Channel::read`].
+    pub fn read_attested(
+        &self,
+        bytes: &mut [u8],
+        handles: &mut [Handle],
+    ) -> Result<(Received, Writer), ReadError> {
+        let mut values = [0_u8; HANDLE_BUFFER];
+        let capacity = handles.len().min(CHANNEL_MAX_HANDLES);
+        let byte_capacity = bytes.len();
+        let mut actual = [0_u8; 24];
+        let value = Call::new(nr::CHANNEL_READ_ATTESTED)
+            .value(register(self.handle()))
+            .output(bytes)
+            .value(byte_capacity)
+            .output(
+                values
+                    .get_mut(..capacity * HANDLE_BYTES)
+                    .unwrap_or_default(),
+            )
+            .value(capacity)
+            .output(&mut actual)
+            .make(self.syscall());
+        let word = |at: usize| {
+            let mut raw = [0_u8; 8];
+            if let Some(from) = actual.get(at..at + 8) {
+                raw.copy_from_slice(from);
+            }
+            u64::from_ne_bytes(raw)
+        };
+        let sizes = word(0).to_ne_bytes();
+        let [b0, b1, b2, b3, h0, h1, h2, h3] = sizes;
+        let message_bytes = u32::from_ne_bytes([b0, b1, b2, b3]) as usize;
+        let message_handles = u32::from_ne_bytes([h0, h1, h2, h3]) as usize;
+        match decode_unit(value) {
+            Ok(()) => {}
+            Err(Error::BufferTooSmall) => {
+                return Err(ReadError::TooSmall {
+                    bytes: message_bytes,
+                    handles: message_handles,
+                });
+            }
+            Err(error) => return Err(ReadError::Failed(error)),
+        }
+        let received = message_handles.min(capacity);
+        for (slot, word) in handles
+            .iter_mut()
+            .zip(values.chunks_exact(HANDLE_BYTES))
+            .take(received)
+        {
+            if let Ok(word) = <[u8; HANDLE_BYTES]>::try_from(word) {
+                *slot = Handle(u32::from_ne_bytes(word));
+            }
+        }
+        Ok((
+            Received {
+                bytes: message_bytes,
+                handles: received,
+            },
+            Writer {
+                process: word(8),
+                job: word(16),
+            },
+        ))
     }
 }

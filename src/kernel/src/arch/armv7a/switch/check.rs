@@ -39,7 +39,7 @@ use ferrix_native_abi::rights::Rights;
 use super::UserState;
 use crate::console::println;
 use crate::object::Object;
-use crate::object::channel::Endpoint;
+use crate::object::channel::{Endpoint, Sender};
 use crate::object::job::KILLED_STATUS;
 use crate::sched::Task;
 use crate::syscall::process::{self, Process};
@@ -1033,7 +1033,7 @@ fn run_vector_case(wake: Wake) -> Result<(), &'static str> {
 /// Send the message that wakes a victim blocked in `channel_write_read`.
 fn send(end: Option<&Endpoint>) -> Result<(), &'static str> {
     end.ok_or("the check's end of the channel is gone")?
-        .write_small(b"vectors!")
+        .write_small(Sender::KERNEL, b"vectors!")
         .map_err(|_| "the check could not write the message that wakes the vector program")
 }
 

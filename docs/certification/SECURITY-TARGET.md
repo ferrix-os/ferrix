@@ -200,7 +200,13 @@ the Capability Access Control SFP based on **the handle a subject presents and
 the rights that handle carries**. A subject may perform an operation only if it
 presents a handle naming the object and that handle carries the right the
 operation requires. A handle is valid only in the handle table of the process
-holding it.
+holding it. **The sender identity is a subject security attribute too**
+(`docs/microkernel/K6.md`, H.OBJ.19). The TSF stamps every channel message
+at the write with its writing subject's process id, which is never reused,
+and the id of the job that subject was in. The stamp is never taken from
+the message. A reader reads it with `channel_read_attested`, and so can
+decide on it. The kernel's own messages are stamped zero and zero, which
+attest that the kernel wrote them, not that their content is its own.
 
 **FDP_IFC.1 / FDP_IFF.1** Subset information flow control. The TSF shall
 enforce the **Address Space Separation SFP**: information flows between two

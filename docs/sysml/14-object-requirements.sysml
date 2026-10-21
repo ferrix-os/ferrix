@@ -2087,4 +2087,92 @@ package FerrixObjectRequirements {
                 "object::quota::settle");
         }
     }
+
+    package SenderIdentity {
+        doc /* docs/microkernel/K6.md: kernel-attested sender identity on a
+             * channel message (MICROKERNEL.md §3 K6), the consultant's OK IF at
+             * ledger 2485 and 2524. Checked by object::sender_check, the
+             * `sender` line, and fs::exec_check's execve case. */
+
+        requirement <'L.object.197'> everyWriteIsStamped : ItemLowLevel {
+            attribute :>> statement = "Every channel write shall stamp its message,
+                under the peer's inbox lock, with the Sender its caller names: a
+                program's write, by channel_write or channel_write_read, with
+                Sender::of its own process, its id and its job at the write; the
+                kernel's with Sender::KERNEL, zero and zero. The stamp shall be
+                carried unchanged through the queue, the slot, which holds a
+                message and its stamp as one, a put-back, and the transfer of either
+                end; a Sender shall be made only by Sender::of and Sender::KERNEL.";
+            attribute :>> criterion = "Cases 1, 2, 3 and 7 of the `sender` line;
+                controls C1 to C4 fire on their cases.";
+            attribute :>> parent = "H.OBJ.19";
+            attribute :>> unit = ("object::channel::Sender::of",
+                "object::channel::Endpoint::write", "object::channel::Endpoint::write_small",
+                "object::channel::Inbox::put_small", "object::channel::Inbox::pop_fitting",
+                "object::channel::Inbox::unpop");
+        }
+        requirement <'L.object.198'> aProcessIdIsGivenOnce : ItemLowLevel {
+            attribute :>> statement = "A process's id shall be given once, as its
+                core process is made, from a counter that only grows and starts at
+                one; it shall be held by the process's Exit, kept across execve,
+                and never given to another process.";
+            attribute :>> criterion = "Case 5 of the `sender` line: plain, forked
+                and process_create processes each above every earlier id, and one
+                made after another ended not given its id; stage 8's exec check: the
+                id after an execve is the id before, and a message written after it
+                reads as that id; control C5 fires.";
+            attribute :>> parent = "H.OBJ.19";
+            attribute :>> unit = ("object::process::next_id", "object::process::Process::id",
+                "object::process::Exit::id");
+        }
+        requirement <'L.object.199'> aReadSaysWhoWrote : ItemLowLevel {
+            attribute :>> statement = "channel_read_attested (0x1014) shall answer as
+                channel_read and, on success, write a ReadAttested holding the sizes
+                and the message's stamp after the bytes and the handles, byte by byte
+                with no alignment assumed; on BUFFER_TOO_SMALL it shall write the
+                sizes only, and a delivery whose record cannot be written shall put
+                the message back with its stamp.";
+            attribute :>> criterion = "Cases 1 to 4, 6, 7 and 9 of the `sender`
+                line, every record at an address one past an 8-byte boundary; a read
+                without READ is ACCESS_DENIED, one too small writes the sizes only,
+                one with an unwritable record is FAULT and the message is read again
+                whole as its writer's.";
+            attribute :>> parent = "H.OBJ.19";
+            attribute :>> unit = ("syscall::native::channel_read",
+                "syscall::native::record_bytes", "syscall::native::deliver");
+        }
+        requirement <'L.object.200'> anIdNamesAProcessOrAJob : ItemLowLevel {
+            attribute :>> statement = "object_id (0x100A) shall write the id of the
+                process or job a handle with any rights names, a process's also after
+                it has ended, and refuse any other object WRONG_TYPE, a handle not
+                held BAD_HANDLE and an unwritable answer FAULT.";
+            attribute :>> criterion = "Cases 1, 4 and 9 of the `sender` line.";
+            attribute :>> parent = "H.OBJ.19";
+            attribute :>> unit = "syscall::native::object_id";
+        }
+        requirement <'L.object.201'> theJobIsTheJobAtTheWrite : ItemLowLevel {
+            attribute :>> statement = "The job in a program's stamp shall be the job
+                its process was in at the write, read without the membership lock
+                from a mirror written under it wherever the process's job changes.";
+            attribute :>> criterion = "Case 6 of the `sender` line: a process moved
+                between two writes stamps each with its job then; control C6 fires.";
+            attribute :>> parent = "H.OBJ.19";
+            attribute :>> unit = ("object::process::Process::job_id",
+                "object::process::Process::move_charged", "object::process::Process::new");
+        }
+        requirement <'L.object.202'> theRoundTripAnswersNoSender : ItemLowLevel {
+            attribute :>> statement = "channel_write_read shall answer no sender on
+                either path: its read drops the slot's stamp, and the fast path's
+                commit hands its words to the parked reader without one and puts no
+                message in an inbox. A server that answers and waits through it
+                receives its next request without identity, and reads with
+                channel_read_attested where it decides by sender.";
+            attribute :>> criterion = "Case 8 of the `sender` line: the writer's
+                empty answer is zero and three zero words; ipc-equiv's transcripts
+                agree with the fast path on and off.";
+            attribute :>> parent = "H.OBJ.19";
+            attribute :>> unit = ("object::channel::Inbox::pop_small",
+                "object::channel::Endpoint::send_direct");
+        }
+    }
 }
