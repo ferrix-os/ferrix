@@ -183,6 +183,10 @@ pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// [`NativeCall::ChardevDmabufFence`].
 pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
+/// [`NativeCall::ExceptionChannelCreate`] (`docs/microkernel/K4.md`).
+/// `0x1082` and `0x1083` are the exception calls that act on a reported
+/// fault, which come with the fault chain.
+pub const EXCEPTION_CHANNEL_CREATE: usize = 0x1081;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -618,10 +622,20 @@ pub enum NativeCall {
     /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
     /// Answered by the load ring.
     ChardevDmabufFence,
+    /// `(task, timeout_ms, options)` → handle. Attach an exception channel
+    /// to a process or a job (`docs/microkernel/K4.md` §2.2), and answer its
+    /// read end, with [`crate::rights::Rights::EXCEPTION_CHANNEL`]. The
+    /// kernel keeps the only writing end, so everything read from it is the
+    /// kernel's. Needs `SUPERVISE` on `task`; `timeout_ms` in
+    /// `1..=EXCEPTION_TIMEOUT_MAX_MS` and `options` 0, else `INVALID_ARGS`;
+    /// `ALREADY_BOUND` while a channel whose read end is open is attached;
+    /// `BAD_STATE` for a process that has ended. Closing every handle to the
+    /// read end detaches it.
+    ExceptionChannelCreate,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 65] = [
+pub const ALL: [NativeCall; 66] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -687,6 +701,7 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
     NativeCall::ChardevDmabufFence,
+    NativeCall::ExceptionChannelCreate,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -767,6 +782,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
+        EXCEPTION_CHANNEL_CREATE => NativeCall::ExceptionChannelCreate,
         _ => return None,
     };
     Some(call)
@@ -841,5 +857,6 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
         NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
+        NativeCall::ExceptionChannelCreate => EXCEPTION_CHANNEL_CREATE,
     }
 }

@@ -1670,6 +1670,33 @@ pub(crate) static SMBIOS: Explanation = Explanation {
          src/lib/platform/smbios; docs/DMI.md",
 };
 
+/// For `check_exceptions` in `stages_check.rs`, when `object::exception_check::run`
+/// fails (`docs/microkernel/K4.md` §5).
+pub(crate) static STAGE9_EXCEPTIONS: Explanation = Explanation {
+    code: "FX-0917",
+    title: "an exception channel was attached where it must be refused, or refused where it \
+            must be attached",
+    meaning: "`object::exception_check::run` attaches exception channels to a job and to a \
+              process it made, through `exception_channel_create` as a program would: one \
+              each is attached, a second is `ALREADY_BOUND`, closing the read end detaches, a \
+              process that has ended is `BAD_STATE` and its supervisor saw `PEER_CLOSED`, a \
+              handle without `SUPERVISE` is `ACCESS_DENIED`, a bad timeout or option is \
+              `INVALID_ARGS`, the read end cannot be written, and the channel pair is charged \
+              to the caller's job and refused at its limit. A failure means a supervisor -- \
+              which may come to control how the faults beneath it end -- could be attached \
+              without the right, twice, or past a limit.",
+    causes: &[
+        "`exception_channel_create` in src/kernel/src/syscall/native.rs stopped checking \
+         `SUPERVISE`, the timeout or the options.",
+        "`Supervisor::attach` in src/kernel/src/object/exception.rs replaced a live channel, or \
+         a process's slot was not closed as it ended.",
+        "`process_create` or `job_create` stopped answering `Rights::PROCESS_CREATED` or \
+         `Rights::JOB_CREATED`.",
+    ],
+    see: "src/kernel/src/object/exception.rs; src/kernel/src/object/exception_check.rs; \
+          docs/microkernel/K4.md",
+};
+
 /// For `check_sysfs` in `stages_check.rs`, when `fs::sysfs::check::run` fails.
 pub(crate) static SYSFS: Explanation = Explanation {
     code: "FX-0890",
@@ -3450,6 +3477,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SPECULATION_DOMAIN_LEAVE_MAY_NOT_WAIT,
     &CHECK_HOOK_LEFT_ARMED,
     &SMBIOS,
+    &STAGE9_EXCEPTIONS,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

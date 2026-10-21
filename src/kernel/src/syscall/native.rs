@@ -77,6 +77,7 @@ use crate::device::{ConfigRefusal, DeviceNode};
 use crate::fallible;
 use crate::hooks::{Full, Hooks};
 use crate::object::channel::{self, ChannelMessage, Endpoint, ReadError, WriteFailure};
+use crate::object::exception::{AttachRefused, Supervisor};
 use crate::object::interrupt::{Interrupt, InterruptError};
 use crate::object::io_mapping::{IoMapping, IoMappingError};
 use crate::object::job::{self, Job};
@@ -449,7 +450,8 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::JobSetLimit
         | NativeCall::JobGetQuota
         | NativeCall::ProcessCreate
-        | NativeCall::ProcessStart => job_call(call, caller, &a),
+        | NativeCall::ProcessStart
+        | NativeCall::ExceptionChannelCreate => job_call(call, caller, &a),
         NativeCall::InterruptCreate => interrupt_create(process, handle(a[0]), a[1]),
         NativeCall::InterruptAck => interrupt_ack(process, handle(a[0])),
         NativeCall::InterruptBind => interrupt_bind(process, handle(a[0]), handle(a[1]), a[2]),
@@ -1632,8 +1634,9 @@ fn job_in(process: &Process, job: Handle, needed: Rights) -> Result<Arc<Job>, Er
     })
 }
 
-/// The calls on a job and on the processes made in one, which `dispatch`
-/// hands on as one.
+/// The calls on a job and on the processes made in one -- an exception
+/// channel's attach to either among them (`docs/microkernel/K4.md`) --
+/// which `dispatch` hands on as one.
 fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     let [first, second, third, fourth, ..] = *a;
     let process = caller.core();
@@ -1652,6 +1655,9 @@ fn job_call(call: NativeCall, caller: &dyn Host, a: &[u64; 6]) -> Result<usize, 
             },
         ),
         NativeCall::ProcessStart => process_start(process, handle(first), handle(second)),
+        NativeCall::ExceptionChannelCreate => {
+            exception_channel_create(process, handle(first), second, third)
+        }
         _ => Err(Errno::ENOSYS),
     }
 }
@@ -1714,7 +1720,7 @@ fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, 
             [parent_id as u32, (parent_id >> 32) as u32, domain as u32],
         );
     }
-    insert_new(process, Object::Job(child), Rights::JOB)
+    insert_new(process, Object::Job(child), Rights::JOB_CREATED)
 }
 
 /// `job_kill`.
@@ -1958,7 +1964,7 @@ fn process_create(
     }
     let pid = child.core().pid();
     let created = ProcessRef::created(child).map_err(|_| status::NO_MEMORY)?;
-    let handle = insert_new(process, Object::Process(created), Rights::PROCESS)?;
+    let handle = insert_new(process, Object::Process(created), Rights::PROCESS_CREATED)?;
     let made_in = job.id();
     audit::record(
         audit::PROCESS_MADE,
@@ -2184,6 +2190,139 @@ fn process_status(process: &Process, target: Handle, out: u64) -> Result<usize, 
     uaccess::copy_to_user(process.space(), out, &[s0, s1, s2, s3, v0, v1, v2, v3])
         .map_err(fault)?;
     Ok(0)
+}
+
+/// What an exception channel is attached to: the slot of a process or of a
+/// job, and what the audit record names.
+enum Supervised {
+    /// A process, held while the attach runs.
+    Process(Arc<dyn Host>),
+    /// A job.
+    Job(Arc<Job>),
+}
+
+impl Supervised {
+    /// Its supervisor slot.
+    fn slot(&self) -> &Supervisor {
+        match self {
+            Supervised::Process(host) => host.core().supervisor(),
+            Supervised::Job(job) => job.supervisor(),
+        }
+    }
+
+    /// What an audit record names it by.
+    fn target(&self) -> audit::Target {
+        match self {
+            Supervised::Process(host) => audit::Target {
+                kind: audit::target::PROCESS,
+                id: u64::from(host.core().pid()),
+            },
+            Supervised::Job(job) => audit::Target {
+                kind: audit::target::JOB,
+                id: job.id(),
+            },
+        }
+    }
+}
+
+/// `exception_channel_create(task, timeout_ms, options)`: attach an
+/// exception channel to a process or a job and answer its read end
+/// (`docs/microkernel/K4.md` §2.2).
+///
+/// Everything that can be refused is refused before anything is made:
+/// `SUPERVISE`, the arguments, a process that has ended. The channel pair
+/// is charged to the caller's job as `channel_create`'s is. The kernel's end
+/// goes into the task's slot under its lock, which refuses a slot whose
+/// channel's read end is open (`ALREADY_BOUND`) and one closed by the
+/// process's end (`BAD_STATE`); only then is the read end placed, and if
+/// that fails the slot is emptied again. A kernel end the slot let go of,
+/// and every refused end, is disposed of with no lock held.
+fn exception_channel_create(
+    process: &Process,
+    task: Handle,
+    timeout_ms: u64,
+    options: u64,
+) -> Result<usize, Errno> {
+    let supervised = supervised_in(process, task)?;
+    if options != 0 || !(1..=types::EXCEPTION_TIMEOUT_MAX_MS).contains(&timeout_ms) {
+        return Err(status::INVALID_ARGS);
+    }
+    if let Supervised::Process(host) = &supervised
+        && host.core().is_terminated()
+    {
+        return Err(status::BAD_STATE);
+    }
+    let read_end = attach_channel(&supervised, timeout_ms)?;
+    // The read end placed last: refused, it is closed by `insert_new`'s
+    // dispose, and the slot finds its peer closed and lets the kernel end
+    // go at once.
+    let placed = insert_new(
+        process,
+        Object::Channel(read_end),
+        Rights::EXCEPTION_CHANNEL,
+    );
+    if placed.is_err() {
+        object::dispose(supervised.slot().let_go_if_dead());
+        return placed;
+    }
+    audit::record(
+        audit::EXCEPTION_ATTACHED,
+        audit::Outcome::Done,
+        0,
+        audit::Subject::of(process),
+        supervised.target(),
+        [timeout_ms as u32, 0, 0],
+    );
+    placed
+}
+
+/// The process or job `task` names, if the handle carries `SUPERVISE`: a
+/// process through its handle's way back, `BAD_STATE` once it has gone.
+fn supervised_in(process: &Process, task: Handle) -> Result<Supervised, Errno> {
+    process.with_handles(|table| {
+        let (object, rights) = table.get(task).map_err(table_error)?;
+        let supervised = match object {
+            Object::Process(target) => target
+                .control()
+                .and_then(|control| control.host())
+                .map(Supervised::Process)
+                .ok_or(status::BAD_STATE),
+            Object::Job(job) => Ok(Supervised::Job(Arc::clone(job))),
+            _ => return Err(status::WRONG_TYPE),
+        };
+        if !rights.contains(Rights::SUPERVISE) {
+            return Err(status::ACCESS_DENIED);
+        }
+        supervised
+    })
+}
+
+/// Make a channel and put its kernel end in `supervised`'s slot, answering
+/// the read end. Every end refused or let go of is disposed of here, with
+/// no lock held.
+fn attach_channel(supervised: &Supervised, timeout_ms: u64) -> Result<Arc<Endpoint>, Errno> {
+    let (kernel_end, read_end) = Endpoint::pair().map_err(|_| status::NO_MEMORY)?;
+    match supervised
+        .slot()
+        .attach(Arc::clone(&kernel_end), timeout_ms)
+    {
+        Ok(let_go) => {
+            object::dispose(let_go);
+            drop(kernel_end);
+            Ok(read_end)
+        }
+        Err((why, refused)) => {
+            object::dispose([
+                Object::Channel(refused),
+                Object::Channel(kernel_end),
+                Object::Channel(read_end),
+            ]);
+            Err(match why {
+                AttachRefused::Bound => status::ALREADY_BOUND,
+                AttachRefused::Closed => status::BAD_STATE,
+            })
+        }
+    }
 }
 
 /// The device node a handle names, if it carries `needed`.

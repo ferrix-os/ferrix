@@ -46,9 +46,24 @@ impl Rights {
     /// `cgroup.procs` and root still owns `memory.max`. A job made with
     /// `job_create` carries it, so a limit can be set on what one makes.
     pub const SET_LIMIT: Rights = Rights(1 << 7);
+    /// A supervisor may be attached: an exception channel on a process or a
+    /// job (`docs/microkernel/K4.md` §2.2), which hears the faults of the
+    /// process, or of every process in the job and the jobs inside it.
+    ///
+    /// Apart from [`Rights::MANAGE`] because it is more: a supervisor that
+    /// resumes a fault with a context of its own runs any code it likes with
+    /// every handle the process holds, including those others give it later.
+    /// So the kernel never hands it out with authority of its own: only
+    /// `process_create` and `job_create` answer it ([`Rights::PROCESS_CREATED`],
+    /// [`Rights::JOB_CREATED`]), to the caller that chose the image and
+    /// holds `MANAGE` on the job, which is the authority a parent has over
+    /// a child under `ptrace`. [`Rights::PROCESS`] and [`Rights::JOB`],
+    /// what `devmgr_start`, `job_for_cgroup` and the root job's handles carry,
+    /// never hold it. Bits 8 to 10 are other rows' (K12, K3, K2).
+    pub const SUPERVISE: Rights = Rights(1 << 11);
 
     /// Every defined right.
-    pub const ALL: Rights = Rights(0xFF);
+    pub const ALL: Rights = Rights(0xFF | Rights::SUPERVISE.0);
 
     /// What a new channel endpoint carries.
     pub const CHANNEL: Rights = Rights(
@@ -111,6 +126,17 @@ impl Rights {
     /// under `ferrix.devmgr=init` -- hands its holder none of that authority.
     pub const PROCESS: Rights =
         Rights(Rights::DUPLICATE.0 | Rights::TRANSFER.0 | Rights::WAIT.0 | Rights::MANAGE.0);
+    /// What `process_create` answers: [`Rights::PROCESS`] and
+    /// [`Rights::SUPERVISE`], for the caller that chose its image and its
+    /// bootstrap.
+    pub const PROCESS_CREATED: Rights = Rights(Rights::PROCESS.0 | Rights::SUPERVISE.0);
+    /// What `job_create` answers: [`Rights::JOB`] and [`Rights::SUPERVISE`].
+    pub const JOB_CREATED: Rights = Rights(Rights::JOB.0 | Rights::SUPERVISE.0);
+    /// What the read end of an exception channel carries: a supervisor reads
+    /// its reports and may hand the end on, but never writes to it, since
+    /// the kernel holds the only writing end.
+    pub const EXCEPTION_CHANNEL: Rights =
+        Rights(Rights::DUPLICATE.0 | Rights::TRANSFER.0 | Rights::READ.0 | Rights::WAIT.0);
 
     /// Whether every right in `other` is also in `self`.
     #[must_use]

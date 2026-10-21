@@ -109,7 +109,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `object/pin.rs` | `core` | 0 | 1 | 23 | 0 | - |
 | `object/oom.rs` | `core` | 0 | 6 | 5 | 0 | - |
 | `object/channel.rs` | `core` | 4 | 4 | 4 | 4 | 614-616, 621 |
-| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 186, 225 |
+| `object/process.rs` | `core` | 3 | 3 | 3 | 2 | 190, 229 |
 | `object/mod.rs` | `core` | 2 | 2 | 2 | 0 | - |
 | `object/port.rs` | `core` | 0 | 0 | 2 | 0 | - |
 | `object/quota.rs` | `core` | 0 | 1 | 1 | 0 | - |
@@ -132,7 +132,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2449 |
+| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2588 |
 | `syscall/program.rs` | `item` | 3 | 4 | 2 | 1 | 89 |
 
 ---

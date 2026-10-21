@@ -2087,4 +2087,71 @@ package FerrixObjectRequirements {
                 "object::quota::settle");
         }
     }
+
+    package ExceptionChannels {
+        doc /* src/kernel/src/object/exception.rs and syscall/native.rs's
+             * exception_channel_create: a supervisor attached to a process or
+             * a job (docs/microkernel/K4.md section 2.2). The fault chain that
+             * reports to it, and its parent H.TRAP.20, come with K4's second
+             * landing. */
+
+        requirement <'L.object.241'> anExceptionChannelIsAttachedOnlyBySupervise : ItemLowLevel {
+            attribute :>> statement = "exception_channel_create shall attach an
+                exception channel to a process, started or not, or to a job, only
+                through a handle carrying SUPERVISE (else ACCESS_DENIED; any other
+                object WRONG_TYPE), with a timeout in 1 to EXCEPTION_TIMEOUT_MAX_MS
+                milliseconds and options 0 (else INVALID_ARGS); it shall refuse a
+                second channel while one whose read end is open is attached
+                (ALREADY_BOUND) and a process that has ended (BAD_STATE); it shall
+                charge the channel's two ends to the caller's job and be refused
+                NO_MEMORY at its object limit; a refusal shall attach nothing. The
+                read end it answers shall carry DUPLICATE, TRANSFER, READ and
+                WAIT and never WRITE, the kernel holding the only writing end, and
+                the attach shall be audited EXCEPTION_ATTACHED.";
+            attribute :>> criterion = "Stage 9's exceptions line: a job made with
+                job_create and an unstarted process made with process_create are
+                each attached once and a second attach is ALREADY_BOUND; a process
+                handle without SUPERVISE, a Rights::JOB handle, timeouts 0 and
+                EXCEPTION_TIMEOUT_MAX_MS + 1, an option bit, a VMO and a handle that
+                names nothing are refused with their statuses; a write to the read
+                end is ACCESS_DENIED; an attach charges 2 objects and one at the
+                limit is NO_MEMORY with nothing attached.";
+            attribute :>> parent = ("H.OBJ.2", "H.QUOTA.3");
+            attribute :>> unit = ("syscall::native::exception_channel_create",
+                "object::exception::Supervisor::attach");
+        }
+        requirement <'L.object.242'> closingTheReadEndDetaches : ItemLowLevel {
+            attribute :>> statement = "An exception channel whose read end has
+                closed shall no longer count as attached: the next attach to its
+                process or job shall be taken, and the kernel end it held let go.
+                A process's slot shall be closed as the process ends, so that its
+                supervisor sees PEER_CLOSED then and an attach afterwards is
+                BAD_STATE.";
+            attribute :>> criterion = "Stage 9's exceptions line: after the read
+                end of a job's channel is closed the slot is not live and a new
+                attach is taken; a process killed with its job closes its
+                supervisor's channel (PEER_CLOSED within the check's patience) and
+                a later attach is BAD_STATE.";
+            attribute :>> parent = "H.OBJ.2";
+            attribute :>> unit = ("object::exception::Supervisor::is_live",
+                "object::exception::Supervisor::close",
+                "object::exception::Supervisor::let_go_if_dead");
+        }
+        requirement <'L.object.246'> superviseIsOnlyACreators : ItemLowLevel {
+            attribute :>> statement = "SUPERVISE shall be right bit 11. Only
+                process_create's and job_create's handles shall carry it
+                (Rights::PROCESS_CREATED, Rights::JOB_CREATED); Rights::PROCESS and
+                Rights::JOB, which devmgr_start, devmgr's drivers job,
+                job_for_cgroup and the root job's handles carry, shall not; a
+                duplicate or a replace shall only ever remove it.";
+            attribute :>> criterion = "native-abi's host test pins bit 11, ALL,
+                and that PROCESS and JOB lack it; stage 9's exceptions line reads
+                PROCESS_CREATED and JOB_CREATED off the handles the two calls
+                answer, and a Rights::JOB handle and a duplicate narrowed to
+                Rights::PROCESS are refused ACCESS_DENIED.";
+            attribute :>> parent = "H.OBJ.2";
+            attribute :>> unit = ("syscall::native::process_create",
+                "syscall::native::job_create");
+        }
+    }
 }

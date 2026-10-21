@@ -1220,6 +1220,10 @@ impl Process {
         // And a bootstrap handle it was given and never took (`docs/INIT.md`
         // §6), which no table held.
         object::dispose(self.close_bootstrap());
+        // And the kernel's end of an exception channel attached to it
+        // (`docs/microkernel/K4.md` §2.2), so its supervisor sees
+        // `PEER_CLOSED` as it ends, not when the last reference goes.
+        object::dispose(self.supervisor().close());
         // Its descriptors close now, as Linux's exit closes them, rather than
         // when the last reference to the process goes -- which a parent that
         // has not reaped it yet still holds. Otherwise a pipe's write end

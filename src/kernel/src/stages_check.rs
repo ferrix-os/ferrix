@@ -109,6 +109,10 @@ pub(super) fn check_programs() {
     // driver.
     check_native_objects();
 
+    // K4's exception channels (docs/microkernel/K4.md): who may attach a
+    // supervisor to a process or a job, once each, and what it costs.
+    check_exceptions();
+
     // What the switch gives a program back after a blocking native call,
     // and the FS base kept in the task: programs on the native calls just
     // proved (x86-64; docs/OPAQUE-KERNEL.md §9.8, 3a and 3b).
@@ -1174,6 +1178,24 @@ pub(super) fn check_native_objects() {
          {} never started, ended with their last handle",
         report.spawned, report.abandoned,
     );
+}
+
+/// Stage 9: exception channels attached and refused (`docs/microkernel/K4.md`
+/// §5, cases g, h and j).
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_exceptions() {
+    match object::exception_check::run() {
+        Ok(report) => println!(
+            "  exceptions {} channels attached to jobs and processes and {} detached, \
+             {} refusals as specified, {} objects charged per channel",
+            report.attached, report.detached, report.refusals, report.charged,
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE9_EXCEPTIONS,
+            "stage 9 exception channel check failed: {problem}"
+        ),
+    }
 }
 
 /// Stage 9: the vector registers of a task resumed from a blocking native

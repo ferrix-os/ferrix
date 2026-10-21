@@ -133,6 +133,11 @@ pub const UNLIMITED: u64 = u64::MAX;
 /// §9.2). Only as the job is made; any other bit is `INVALID_ARGS`.
 pub const JOB_SPECULATION_DOMAIN: u64 = 1;
 
+/// The longest `exception_channel_create`'s `timeout_ms` may be, and the
+/// longest one fault waits for its supervisors in all
+/// (`docs/microkernel/K4.md` §2.4): ten seconds.
+pub const EXCEPTION_TIMEOUT_MAX_MS: u64 = 10_000;
+
 /// [`crate::nr::NativeCall::AuditRead`]'s `which`: the high-value ring --
 /// grants, ends, device events, changes and the system's records.
 pub const AUDIT_HIGH: u64 = 0;

@@ -159,7 +159,7 @@
       "purpose": "MICROKERNEL.md §3 K2, address space by handle (docs/microkernel/K2.md): H.MEM.24, a space reached by handle is mapped, unmapped, protected, read and written only as the handle's rights allow, no mapping made by handle is ever writable and executable (ASR-2), and an executable mapping needs EXECUTE on the space handle and on the VMO handle; H.MEM.25, a copy-on-write clone of a space never sees a write its source makes after the clone, and the source never sees one the clone makes (F-41); L.object.232-240, the space object and its calls; L.user.158-162, maximum protection, W^X at map and protect time with the user-root sweep, the clone's isolation, cross-space copies, and unmap/protect of a running space"
     },
     {
-      "ids": ["H.TRAP.20", "L.trap.9-13", "L.object.241-246", "L.x86_64.186", "L.aarch64.66", "L.armv7a.28"],
+      "ids": ["H.TRAP.20", "L.trap.9-13", "L.object.243-245", "L.x86_64.186", "L.aarch64.66", "L.armv7a.28"],
       "owner": "mk-k4",
       "branch": "mk/k4",
       "date": "2026-10-21",
