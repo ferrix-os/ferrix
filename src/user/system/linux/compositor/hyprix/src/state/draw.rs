@@ -725,7 +725,17 @@ impl Compositor<'_> {
         self.tally.since = self.tally.since.max(took);
         self.tally.spent = self.tally.spent.saturating_add(took);
         self.tally.counted = self.tally.counted.saturating_add(1);
+        crate::dmabuf::end_frame();
         if self.tally.reported.elapsed() >= FRAME_REPORT {
+            // The frames drawn straight from a client's buffer, with no
+            // copy before the composite (`crate::dmabuf`): silent when none.
+            let zero_copy = crate::dmabuf::take_frames();
+            if zero_copy > 0 {
+                (self.report)(&format!(
+                    "hyprix: zero-copy frames {zero_copy} of the last {}",
+                    self.tally.counted
+                ));
+            }
             (self.report)(&format!(
                 "hyprix: frames {drawn} slowest of the last {counted} {} us, all of them {} us ({}; drew {} px in {} rects, showed {} px; from layout {} commits {} backdrop {} blurs {}{})",
                 self.tally.since.as_micros(),

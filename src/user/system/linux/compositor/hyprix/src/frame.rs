@@ -1036,6 +1036,7 @@ pub(crate) fn pixels(slot: &Slot, surface: ObjectId) -> Option<Surface<'_>> {
     let bytes = match (buffer.solid.as_ref(), imported) {
         (_, Some(imported)) => {
             let (start, end) = buffer.range()?;
+            crate::dmabuf::note_read();
             imported.bytes().get(start..end)?
         }
         (Some(colour), None) => colour.as_slice(),

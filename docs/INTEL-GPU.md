@@ -694,6 +694,24 @@ M1 and M2, without the box.
 
 ## 10. Where it stands
 
+**A game's frame composited from its own buffer (2026-10-22, branch
+`zc-intel`).** With DRI3 on, a frame still took four CPU passes after anv
+drew it: yserver filled its pixmap from the client's buffer, copied the
+pixmap into the window's backing, read the backing back into `wl_shm` and
+hashed its rows, and hyprix composited the `wl_shm` copy. Now a
+whole-window `PresentPixmap` of a LINEAR DRI3 buffer is not copied: the
+window's backing is owed it (yserver's `kms/render/wl_direct.rs`, settled
+the moment anything reads the window or a present that cannot go direct
+writes it), and yserver attaches the client's buffer to the window's
+surface as a `zwp_linux_dmabuf_v1` buffer (`wayland/direct.rs`). hyprix,
+drawing in software, offers that global beside an Intel render node as it
+did beside NVIDIA's and composites straight from the mapped buffer
+(`dmabuf.rs`); its once-a-second line `hyprix: zero-copy frames N of the
+last M` and yserver's `yserver: zero-copy frames N` say it happened.
+`YSERVER_WAYLAND_DIRECT=0` turns it off. `gem::SCANOUT` stays `false`:
+hyprix reads the buffer with the CPU through the LLC, and nothing scans it
+out.
+
 **DRI3 and Present through yserver, and an empty slot's fence imported
 (2026-10-21).** yserver's card-less Wayland server gives X clients DRI3 on
 the render node `YSERVER_DRI_RENDER_NODE` names, while it renders on

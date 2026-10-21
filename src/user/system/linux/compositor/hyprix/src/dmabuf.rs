@@ -14,9 +14,14 @@
 //! does. A client that drew on the GPU and never moved its bytes back has
 //! nothing there, which is why the global is offered only where the frames
 //! are drawn on the GPU -- or where the GPU is NVIDIA's (`docs/NVIDIA.md`
-//! §4.6, N3b): its buffers are linear system memory the GPU wrote, so the
-//! dmabuf is mapped and read as it is, and no node is asked at all.
+//! §4.6, N3b) or Intel's (`docs/INTEL-GPU.md` §10): their buffers are
+//! linear system memory the GPU wrote, so the dmabuf is mapped and read as
+//! it is, and no node is asked at all. That is how a game's frame reaches
+//! the screen with no copy before the composite: yserver hands the game's
+//! own DRI3 buffer over (its `wayland/direct.rs`), and the frame is drawn
+//! from it. [`take_frames`] counts the frames that were.
 
+use std::cell::Cell;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::rc::Rc;
@@ -31,20 +36,51 @@ pub enum Importer {
     /// the frames.
     Node(Rc<Render>),
     /// Mapped from the descriptor itself, for screens drawn in software
-    /// beside a GPU whose buffers are linear memory: NVIDIA's.
+    /// beside a GPU whose buffers are linear memory: NVIDIA's or Intel's.
     Map,
+}
+
+thread_local! {
+    /// A client's dmabuf was read for the frame being drawn.
+    static READ: Cell<bool> = const { Cell::new(false) };
+    /// Frames drawn from a client's dmabuf since [`take_frames`].
+    static FRAMES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Note that a client's dmabuf was read for the frame being drawn.
+pub fn note_read() {
+    READ.with(|read| read.set(true));
+}
+
+/// End a frame: count it when it read a client's dmabuf.
+pub fn end_frame() {
+    if READ.with(|read| read.replace(false)) {
+        FRAMES.with(|frames| frames.set(frames.get() + 1));
+    }
+}
+
+/// The frames drawn from a client's dmabuf since asked last.
+#[must_use]
+pub fn take_frames() -> u64 {
+    FRAMES.with(|frames| frames.replace(0))
 }
 
 impl Importer {
     /// The importer for screens drawn on the GPU when `on_gpu`, and
-    /// otherwise for an NVIDIA render node if there is one, found by its
-    /// driver's name (the consultant's B8, ledger 316).
+    /// otherwise for an NVIDIA or Intel render node if there is one, found
+    /// by its driver's name (the consultant's B8, ledger 316). Ferrix's
+    /// Intel node is render-only: a buffer mapped here is read by the CPU
+    /// and never reaches a display plane, so its driver's
+    /// `gem::SCANOUT` stays as it is.
     #[must_use]
     pub fn find(on_gpu: bool) -> Option<Self> {
         if on_gpu {
             return Render::open().ok().map(|node| Self::Node(Rc::new(node)));
         }
-        let map = Render::open_driven_by("nvidia-drm").ok().map(|_| Self::Map);
+        let map = Render::open_driven_by("nvidia-drm")
+            .or_else(|_| Render::open_driven_by("i915"))
+            .ok()
+            .map(|_| Self::Map);
         // Buffers mapped from the CPU must be linear: offered alone, so
         // NVIDIA's GBM backend allocates pitch-linear system memory.
         compositor_server::offer_linear_only(map.is_some());
