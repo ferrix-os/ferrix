@@ -26,6 +26,7 @@ pub mod interrupt;
 pub mod io_mapping;
 pub mod job;
 pub mod oom;
+pub mod pager;
 pub mod pin;
 pub mod port;
 pub mod process;
@@ -79,6 +80,9 @@ pub enum Object {
     Timer(Arc<timer::Timer>),
     /// An address space (`docs/microkernel/K2.md`).
     Space(Arc<space::SpaceRef>),
+    /// A pager: the one handle that serves its VMOs' faults
+    /// (`docs/microkernel/K3.md`). Its close is the pager's death.
+    Pager(Arc<pager::Pager>),
     /// The capability to ask the kernel to start `devmgr`
     /// (`docs/INIT.md` §7.3, L12): a token with nothing in it. What it
     /// permits is decided where `devmgr_start` is answered -- the kernel
@@ -134,6 +138,7 @@ impl Object {
             | Object::Pin(_)
             | Object::Process(_)
             | Object::Port(_)
+            | Object::Pager(_)
             | Object::Starter
             | Object::Audit
             | Object::CpuService
@@ -161,6 +166,7 @@ impl Object {
             | Object::Device(_)
             | Object::IoMapping(_)
             | Object::Pin(_)
+            | Object::Pager(_)
             | Object::Starter
             | Object::Audit
             | Object::CpuService
@@ -335,6 +341,7 @@ impl Object {
             | Object::Pin(_)
             | Object::Port(_)
             | Object::Timer(_)
+            | Object::Pager(_)
             | Object::Starter
             | Object::Audit
             | Object::CpuService
