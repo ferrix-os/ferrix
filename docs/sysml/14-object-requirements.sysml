@@ -2087,4 +2087,113 @@ package FerrixObjectRequirements {
                 "object::quota::settle");
         }
     }
+
+    package SpacesByHandle {
+        doc /* K2 of docs/MICROKERNEL.md section 3: an address space named by a
+             * handle (docs/microkernel/K2.md, slice A; the consultant's OK IF,
+             * ledger 2845 and 2857). Stage 9's `space` line verifies each,
+             * through the architecture's system call entry. */
+
+        requirement <'L.object.232'> aMadeSpaceIsEmptyAndItsMakers : ItemLowLevel {
+            attribute :>> statement = "space_create shall make an empty address space
+                and answer a handle carrying Rights::SPACE, the space one native
+                object charged to the caller's job, which owns it.";
+            attribute :>> criterion = "A made space has no region, and the caller's
+                job's object count rose by exactly one.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("syscall::native::space_create",
+                "object::space::SpaceRef::create");
+        }
+        requirement <'L.object.233'> onlyTheCreatorBeforeTheStart : ItemLowLevel {
+            attribute :>> statement = "process_space shall answer a handle to the
+                address space of a process process_create made, through a handle
+                that carries MANAGE and the process's Control, before the process
+                starts, with rights a subset of Rights::SPACE and owned by the
+                process's job; it shall refuse ACCESS_DENIED without MANAGE or
+                Control, BAD_STATE once the process has started or ended, and
+                INVALID_ARGS for a right a space does not carry. A space handle
+                taken before the start shall keep its rights after it.";
+            attribute :>> criterion = "Before the start a full and a READ-only
+                handle are given; a handle with WAIT alone and a process handle
+                with no Control are ACCESS_DENIED; READ with MANAGE is
+                INVALID_ARGS; after the start process_space is BAD_STATE, and the
+                READ-only handle from before it reads the running child's text.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("syscall::native::process_space",
+                "object::process::Control::is_unstarted", "object::space::SpaceRef::of");
+        }
+        requirement <'L.object.234'> anExecutableMappingNeedsBothHandles : ItemLowLevel {
+            attribute :>> statement = "space_map shall map a VMO shared into the space
+                its handle names with MAP on the space and MAP and READ on the VMO,
+                WRITE on the VMO for a writable mapping, and EXECUTE on both handles
+                for an executable one, and shall refuse a writable and executable
+                protection, or any bit outside MAP_READ, MAP_WRITE and MAP_EXECUTE,
+                with INVALID_ARGS before it looks at a handle.";
+            attribute :>> criterion = "A VMO's bytes read back through a mapping by
+                handle; an executable mapping is ACCESS_DENIED through a VMO handle
+                without EXECUTE and through a space handle without it, and made
+                through both; a writable and executable protection is
+                INVALID_ARGS; a mapping without MAP is ACCESS_DENIED.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("syscall::native::space_map",
+                "syscall::native::space_protection", "syscall::native::vmo_held",
+                "syscall::native::space_in");
+        }
+        requirement <'L.object.235'> anUnmapByHandleNeedsMap : ItemLowLevel {
+            attribute :>> statement = "space_unmap shall unmap whatever lies in a
+                whole-page range of the space its handle names, with MAP, and
+                refuse a range that is not whole pages with INVALID_ARGS.";
+            attribute :>> criterion = "Without MAP the unmap is ACCESS_DENIED; with
+                it, a mapped page is gone and a read of it by handle is FAULT.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = "syscall::native::space_unmap";
+        }
+        requirement <'L.object.236'> aProtectionStaysWithinItsHandle : ItemLowLevel {
+            attribute :>> statement = "space_protect shall change the protection only
+                of a range every region of which a handle mapped, within the
+                protection each region's handle allowed, executable only with
+                EXECUTE on the space handle, and never writable and executable; it
+                shall refuse a range reaching a region no handle mapped with
+                BAD_STATE and a protection past a region's ceiling with
+                ACCESS_DENIED, changing nothing.";
+            attribute :>> criterion = "A region from a read-only VMO handle made
+                writable, one from an executable handle made writable, and one
+                from a handle without EXECUTE made executable are each
+                ACCESS_DENIED; a writable region made read-only and back is
+                allowed; a program's own region is BAD_STATE; the bytes read back
+                unchanged after the refusals.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("syscall::native::space_protect",
+                "user::space::AddressSpace::protect_by_handle");
+        }
+        requirement <'L.object.238'> aReadByHandleNeedsReadAndChargesTheOwner : ItemLowLevel {
+            attribute :>> statement = "space_read shall copy at most SPACE_COPY_MAX
+                bytes out of the space its handle names, with READ, honouring each
+                region's protection, short at the first page it cannot read and
+                FAULT if that is the first; a page it faults in shall be charged to
+                the space's owner and never to the caller, and at the owner's limit
+                the read shall answer NO_MEMORY with nothing killed.";
+            attribute :>> criterion = "Without READ the read is ACCESS_DENIED; a read
+                across a mapping's end is short; a read of an untouched page of a
+                created process's space raises the owner's job's memory by at least
+                a page and leaves the caller's job's unchanged; with the owner's
+                limit at its use the next such read is NO_MEMORY, the OOM kill
+                count and the caller's memory unchanged.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("syscall::native::space_read",
+                "syscall::native::read_target", "syscall::native::space_step",
+                "object::space::SpaceRef::charging_owner", "object::quota::charging_to");
+        }
+        requirement <'L.object.240'> anExecutableVmoHandleCannotWrite : ItemLowLevel {
+            attribute :>> statement = "vmo_executable shall replace a VMO handle that
+                carries MAP and READ with one that carries EXECUTE and not WRITE,
+                closing the one it took, and change nothing when it refuses;
+                vmo_create shall give no EXECUTE, and no duplicate shall add it.";
+            attribute :>> criterion = "The replaced handle is BAD_HANDLE, the new one
+                is refused vmo_write with ACCESS_DENIED and maps executable; a
+                duplicate asking EXECUTE of a plain VMO handle is ACCESS_DENIED.";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = "syscall::native::vmo_executable";
+        }
+    }
 }

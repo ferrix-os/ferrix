@@ -849,6 +849,24 @@ pub(crate) fn charging_nobody<R>(work: impl FnOnce() -> R) -> R {
     done
 }
 
+/// Run `work` charging what it commits to `index` rather than to the
+/// running task's job: for the target-side half of a call that acts on an
+/// address space by handle, whose memory is the space's owner's to pay for
+/// (`docs/microkernel/K2.md` §2.6). As [`charging_nobody`], by moving the
+/// running task into `index`'s group for the length of `work` and back.
+/// K7's per-call charge target will take this over; whichever of the two
+/// lands second makes them one.
+pub(crate) fn charging_to<R>(index: u32, work: impl FnOnce() -> R) -> R {
+    let own = crate::sched::running_group();
+    if own == index {
+        return work();
+    }
+    crate::sched::set_current_group(index);
+    let done = work();
+    crate::sched::set_current_group(own);
+    done
+}
+
 /// The one [`KernelHeap`].
 static KERNEL_HEAP: KernelHeap = KernelHeap;
 

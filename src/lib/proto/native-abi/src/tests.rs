@@ -71,7 +71,7 @@ fn pinning_sits_in_the_vmo_block() {
     assert_eq!(nr::decode(0x1057), Some(NativeCall::DeviceSetLimit));
     assert_eq!(nr::decode(0x1058), Some(NativeCall::DeviceGetLimit));
     assert_eq!(nr::decode(0x1059), Some(NativeCall::DeviceIsolation));
-    assert_eq!(nr::decode(0x1027), None, "0x1027 stays free");
+    assert_eq!(nr::decode(0x1027), Some(NativeCall::VmoExecutable));
     assert!(
         !Rights::PIN.contains(Rights::TRANSFER),
         "a pin stays with the driver that made it"
@@ -85,13 +85,46 @@ fn process_creation_opens_its_block() {
     assert_eq!(nr::decode(0x1032), Some(NativeCall::ProcessGive));
     assert_eq!(nr::decode(0x1033), Some(NativeCall::ProcessBootstrap));
     assert_eq!(nr::decode(0x1034), Some(NativeCall::ProcessStatus));
-    for number in 0x1035..=0x1037 {
+    assert_eq!(nr::decode(0x1035), Some(NativeCall::ProcessSpace));
+    for number in 0x1036..=0x1037 {
         assert_eq!(nr::decode(number), None, "{number:#x} was assigned");
     }
     assert_eq!(
         nr::decode(0x1029),
         Some(NativeCall::JobKill),
         "JobKill moved"
+    );
+}
+
+#[test]
+fn the_address_space_has_its_block() {
+    assert_eq!(nr::decode(0x1079), Some(NativeCall::SpaceCreate));
+    assert_eq!(nr::decode(0x107A), Some(NativeCall::SpaceMap));
+    assert_eq!(nr::decode(0x107B), Some(NativeCall::SpaceUnmap));
+    assert_eq!(nr::decode(0x107C), Some(NativeCall::SpaceProtect));
+    assert_eq!(nr::decode(0x107E), Some(NativeCall::SpaceRead));
+    for held in [0x107D, 0x107F, 0x1080] {
+        assert_eq!(nr::decode(held), None, "{held:#x} is held for slice B");
+    }
+}
+
+#[test]
+fn execute_is_never_given_with_a_new_vmo() {
+    assert!(
+        !Rights::VMO.contains(Rights::EXECUTE),
+        "VmoCreate gives no EXECUTE"
+    );
+    assert!(Rights::SPACE.contains(Rights::EXECUTE | Rights::MAP));
+    assert!(Rights::EXECUTE.is_known());
+    assert!(
+        !Rights(1 << 8).is_known(),
+        "bit 8 is K12's, not yet defined"
+    );
+    assert!(!Rights(1 << 9).is_known(), "bit 9 is K3's, not yet defined");
+    assert_eq!(
+        Requested::Exactly(Rights::READ | Rights::EXECUTE).resolve(Rights::VMO),
+        None,
+        "a duplicate cannot add EXECUTE"
     );
 }
 
@@ -180,6 +213,7 @@ fn default_rights_are_defined_rights() {
         Rights::INTERRUPT,
         Rights::IO_MAPPING,
         Rights::DEVICE,
+        Rights::SPACE,
     ] {
         assert!(rights.is_known(), "{rights:?} has an undefined bit");
     }

@@ -37,6 +37,8 @@ pub(crate) mod port;
 pub(crate) mod process;
 pub(crate) mod quota;
 pub(crate) mod quota_check;
+pub(crate) mod space;
+pub(crate) mod space_check;
 pub(crate) mod write_read_check;
 
 use alloc::sync::Arc;
@@ -81,6 +83,8 @@ pub(crate) enum Object {
     Process(process::ProcessRef),
     /// An event queue.
     Port(Arc<port::Port>),
+    /// An address space (`docs/microkernel/K2.md`).
+    Space(Arc<space::SpaceRef>),
     /// The capability to ask the kernel to start `devmgr`
     /// (`docs/INIT.md` §7.3, L12): a token with nothing in it. What it
     /// permits is decided where `devmgr_start` is answered -- the kernel
@@ -114,7 +118,8 @@ impl Object {
             Object::Interrupt(interrupt) if interrupt.is_pending() => Signals::READABLE,
             Object::Port(port) if !port.is_empty() => Signals::READABLE,
             Object::Process(process) if process.exit().is_closed() => Signals::TERMINATED,
-            Object::Device(_)
+            Object::Space(_)
+            | Object::Device(_)
             | Object::Interrupt(_)
             | Object::IoMapping(_)
             | Object::Pin(_)
@@ -139,6 +144,7 @@ impl Object {
             // Woken from the interrupt handler itself; see `interrupt`.
             Object::Interrupt(interrupt) => interrupt.waiters(),
             Object::Vmo(_)
+            | Object::Space(_)
             | Object::Device(_)
             | Object::IoMapping(_)
             | Object::Pin(_)
@@ -314,7 +320,9 @@ impl Object {
             | Object::Port(_)
             | Object::Starter
             | Object::Audit => true,
-            Object::Channel(_) | Object::Job(_) | Object::Process(_) => false,
+            // A space's last reference tears down its tables and every
+            // object it maps, as a process's end does.
+            Object::Channel(_) | Object::Job(_) | Object::Process(_) | Object::Space(_) => false,
         }
     }
 }

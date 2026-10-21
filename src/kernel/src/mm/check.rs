@@ -82,6 +82,49 @@ pub(crate) fn sweep_w_xor_x(view: &BootView<'_>) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The W^X sweep over one user root: every leaf of `space`'s own half, under
+/// the space's lock so no fault or unmap changes the tables mid-walk. What
+/// stage 9's `space` line runs over every space it mapped by handle
+/// (`docs/microkernel/K2.md` §2.4): ASR-2's detection, FM-2, carried to the
+/// spaces K2 maps. The kernel's half of an x86-64 user root is the kernel's
+/// own tables, which [`sweep_w_xor_x`] has swept; only user leaves count.
+///
+/// # Errors
+///
+/// The first user leaf both writable and executable.
+pub(crate) fn sweep_user_root(
+    space: &crate::user::space::AddressSpace,
+) -> Result<WxReport, WriteExecute> {
+    let mut report = WxReport {
+        leaves: 0,
+        executable: 0,
+    };
+    let mut offender = None;
+    space.with_root_held(|root| {
+        let _ = sweep(root, |leaf| {
+            if !leaf.flags.user {
+                return true;
+            }
+            report.leaves += 1;
+            if leaf.flags.execute {
+                report.executable += 1;
+            }
+            if leaf.is_write_execute() {
+                offender = Some(WriteExecute {
+                    virt: leaf.virt.0,
+                    len: leaf.bytes(),
+                });
+                return false;
+            }
+            true
+        });
+    });
+    match offender {
+        Some(found) => Err(found),
+        None => Ok(report),
+    }
+}
+
 /// A mapping that is both writable and executable.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WriteExecute {

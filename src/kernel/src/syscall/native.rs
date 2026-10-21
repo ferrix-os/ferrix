@@ -61,8 +61,8 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     self, APERTURE_INFO_BYTES, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
-    DEVICE_INFO_BYTES, DeviceInfo, JOB_SPECULATION_DOMAIN, MAP_READ, MAP_WRITE, PortPacket,
-    ProcessStatus, ReadActual,
+    DEVICE_INFO_BYTES, DeviceInfo, JOB_SPECULATION_DOMAIN, MAP_EXECUTE, MAP_READ, MAP_WRITE,
+    PortPacket, ProcessStatus, ReadActual,
 };
 use ferrix_objects::message::Message;
 use ferrix_objects::reach::Reach;
@@ -83,10 +83,11 @@ use crate::object::job::{self, Job};
 use crate::object::port::{Observer, Port, PortError};
 use crate::object::process::{Bootstrap, GiveRefused, Host, Process, ProcessRef};
 use crate::object::quota::{self, Resource, Usage};
+use crate::object::space::SpaceRef;
 use crate::object::{self, HandleTable, Object};
 use crate::syscall::uaccess::{self, UserError};
 use crate::trap::SyscallArgs;
-use crate::user::space::SpaceError;
+use crate::user::space::{Access, AddressSpace, Ceiling, ProtectRefused, SpaceError};
 use crate::user::vmo::{Vmo, VmoError};
 
 /// The largest VMO a program may create, in pages: four gibibytes.
@@ -499,6 +500,15 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
             object_wait_async(process, handle(a[0]), handle(a[1]), a[2], a[3])
         }
         NativeCall::VmoMap => vmo_map(process, handle(a[0]), a[1], a[2], a[3], a[4]),
+        NativeCall::VmoExecutable => vmo_executable(process, handle(a[0]), a[1]),
+        NativeCall::ProcessSpace => process_space(process, handle(a[0]), a[1]),
+        NativeCall::SpaceCreate => space_create(process),
+        NativeCall::SpaceMap => {
+            space_map(process, handle(a[0]), handle(a[1]), a[2], a[3], a[4], a[5])
+        }
+        NativeCall::SpaceUnmap => space_unmap(process, handle(a[0]), a[1], a[2]),
+        NativeCall::SpaceProtect => space_protect(process, handle(a[0]), a[1], a[2], a[3]),
+        NativeCall::SpaceRead => space_read(process, handle(a[0]), a[1], a[2], a[3]),
     }
 }
 
@@ -2931,18 +2941,315 @@ fn vmo_map(
     } else {
         Rights::MAP | Rights::READ
     };
-    let vmo = process.with_handles(|table| vmo_in(table, vmo, needed))?;
+    let (vmo, held) = process.with_handles(|table| vmo_held(table, vmo, needed))?;
     let offset = read_u64(process, offset_at)?;
     let flags = VmaFlags {
         write,
         ..VmaFlags::READ
     };
+    // Never executable here, whatever the handle carries: an executable
+    // mapping is `space_map`'s, through a space handle with `EXECUTE`.
+    let ceiling = Ceiling::Handle {
+        write: held.contains(Rights::WRITE),
+        execute: false,
+    };
     let at = (address != 0).then_some(address);
     let mapped = process
         .space()
-        .map_object(at, length, vmo, offset, flags)
+        .map_object(at, length, vmo, offset, flags, ceiling)
         .map_err(space_status)?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
+}
+
+/// The VMO a handle names and the rights it carries, if they include
+/// `needed`.
+fn vmo_held(table: &HandleTable, vmo: Handle, needed: Rights) -> Result<(Arc<Vmo>, Rights), Errno> {
+    let (object, rights) = table.get(vmo).map_err(table_error)?;
+    let Object::Vmo(vmo) = object else {
+        return Err(status::WRONG_TYPE);
+    };
+    if !rights.contains(needed) {
+        return Err(status::ACCESS_DENIED);
+    }
+    Ok((Arc::clone(vmo), rights))
+}
+
+/// What a protection word asks for, as `(write, execute)`: `MAP_READ`,
+/// `MAP_READ | MAP_WRITE` or `MAP_READ | MAP_EXECUTE`. Writable and
+/// executable together is never valid (ASR-2), nor is any other bit; K3's
+/// `MAP_NO_PAGER` (`1 << 3`) is reserved until it lands.
+fn space_protection(protection: u64) -> Result<(bool, bool), Errno> {
+    match u32::try_from(protection) {
+        Ok(MAP_READ) => Ok((false, false)),
+        Ok(bits) if bits == MAP_READ | MAP_WRITE => Ok((true, false)),
+        Ok(bits) if bits == MAP_READ | MAP_EXECUTE => Ok((false, true)),
+        _ => Err(status::INVALID_ARGS),
+    }
+}
+
+/// The space a handle names, if the handle carries `needed`.
+fn space_in(process: &Process, space: Handle, needed: Rights) -> Result<Arc<SpaceRef>, Errno> {
+    process.with_handles(|table| {
+        let (object, rights) = table.get(space).map_err(table_error)?;
+        let Object::Space(space) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !rights.contains(needed) {
+            return Err(status::ACCESS_DENIED);
+        }
+        Ok(Arc::clone(space))
+    })
+}
+
+/// `vmo_executable`.
+///
+/// The handle is taken out and a new one put in under one hold of the table,
+/// with room for it had first, so the VMO is under exactly one of the two
+/// handles throughout and a refusal changes nothing.
+fn vmo_executable(process: &Process, vmo: Handle, options: u64) -> Result<usize, Errno> {
+    if options != 0 {
+        return Err(status::INVALID_ARGS);
+    }
+    let placed = process.with_handles(|table| {
+        let _ = vmo_held(table, vmo, Rights::MAP | Rights::READ).map_err(|why| (why, None))?;
+        table
+            .reserve(1)
+            .map_err(|error| (table_error(error), None))?;
+        let (object, held) = table
+            .remove(vmo)
+            .map_err(|error| (table_error(error), None))?;
+        let rights = Rights((held.0 & !Rights::WRITE.0) | Rights::EXECUTE.0);
+        // FALLIBLE: the handle table's insert hands the object back.
+        table
+            .insert(object, rights)
+            .map_err(|object| (status::NO_HANDLES, Some(object)))
+    });
+    match placed {
+        Ok(handle) => Ok(returned(handle)),
+        Err((why, object)) => {
+            // Not reached with room reserved; were it, the VMO goes.
+            object::dispose(object);
+            Err(why)
+        }
+    }
+}
+
+/// `process_space`.
+///
+/// Only a process `process_create` made, through a handle carrying its
+/// `Control` and `MANAGE`, and only before it starts: once its task is
+/// listed, or once it has ended, no call reaches its memory from a process
+/// handle (`docs/microkernel/K2.md` §2.2). A space handle taken before the
+/// start keeps its rights after it.
+fn process_space(process: &Process, target: Handle, rights: u64) -> Result<usize, Errno> {
+    let rights = match Requested::from_register(rights).ok_or(status::INVALID_ARGS)? {
+        Requested::Same => Rights::SPACE,
+        Requested::Exactly(rights) if Rights::SPACE.contains(rights) => rights,
+        Requested::Exactly(_) => return Err(status::INVALID_ARGS),
+    };
+    let control = process.with_handles(|table| {
+        let (object, held) = table.get(target).map_err(table_error)?;
+        let Object::Process(child) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        if !held.contains(Rights::MANAGE) {
+            return Err(status::ACCESS_DENIED);
+        }
+        // A process the kernel started has no way back: nothing inside it is
+        // reachable from its handle.
+        child.control().map(Arc::clone).ok_or(status::ACCESS_DENIED)
+    })?;
+    let child = control.host().ok_or(status::BAD_STATE)?;
+    let core = child.core();
+    if !control.is_unstarted() || core.is_terminated() || core.with_tasks(|tasks| !tasks.is_empty())
+    {
+        return Err(status::BAD_STATE);
+    }
+    let space =
+        SpaceRef::of(Arc::clone(core.space()), core.quota_slot()).map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::Space(space), rights)
+}
+
+/// `space_create`.
+fn space_create(process: &Process) -> Result<usize, Errno> {
+    let space = SpaceRef::create().map_err(|_| status::NO_MEMORY)?;
+    insert_new(process, Object::Space(space), Rights::SPACE)
+}
+
+/// `space_map`: [`vmo_map`] into the space the handle names, with
+/// executable mappings through handles that carry `EXECUTE`
+/// (`docs/microkernel/K2.md` §2.3, §2.4).
+fn space_map(
+    process: &Process,
+    space: Handle,
+    vmo: Handle,
+    address: u64,
+    length: u64,
+    protection: u64,
+    offset_at: u64,
+) -> Result<usize, Errno> {
+    let (write, execute) = space_protection(protection)?;
+    let on_space = if execute {
+        Rights::MAP | Rights::EXECUTE
+    } else {
+        Rights::MAP
+    };
+    let target = space_in(process, space, on_space)?;
+    let mut on_vmo = Rights::MAP | Rights::READ;
+    if write {
+        on_vmo = on_vmo | Rights::WRITE;
+    }
+    if execute {
+        on_vmo = on_vmo | Rights::EXECUTE;
+    }
+    let (vmo, held) = process.with_handles(|table| vmo_held(table, vmo, on_vmo))?;
+    let offset = read_u64(process, offset_at)?;
+    let flags = VmaFlags {
+        write,
+        execute,
+        ..VmaFlags::READ
+    };
+    let ceiling = Ceiling::Handle {
+        write: held.contains(Rights::WRITE),
+        execute: held.contains(Rights::EXECUTE),
+    };
+    let at = (address != 0).then_some(address);
+    let _layout = target.space().layout();
+    let mapped = target
+        .space()
+        .map_object(at, length, vmo, offset, flags, ceiling)
+        .map_err(space_status)?;
+    usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
+}
+
+/// `space_unmap`: `munmap` in the space the handle names.
+fn space_unmap(
+    process: &Process,
+    space: Handle,
+    address: u64,
+    length: u64,
+) -> Result<usize, Errno> {
+    let target = space_in(process, space, Rights::MAP)?;
+    if length == 0 || !address.is_multiple_of(PAGE_SIZE) || !length.is_multiple_of(PAGE_SIZE) {
+        return Err(status::INVALID_ARGS);
+    }
+    let _layout = target.space().layout();
+    target
+        .space()
+        .unmap(address, length)
+        .map_err(space_status)?;
+    Ok(0)
+}
+
+/// `space_protect`.
+fn space_protect(
+    process: &Process,
+    space: Handle,
+    address: u64,
+    length: u64,
+    protection: u64,
+) -> Result<usize, Errno> {
+    let (write, execute) = space_protection(protection)?;
+    let needed = if execute {
+        Rights::MAP | Rights::EXECUTE
+    } else {
+        Rights::MAP
+    };
+    let target = space_in(process, space, needed)?;
+    let flags = VmaFlags {
+        write,
+        execute,
+        ..VmaFlags::READ
+    };
+    let _layout = target.space().layout();
+    target
+        .space()
+        .protect_by_handle(address, length, flags)
+        .map_err(|why| match why {
+            ProtectRefused::NotByHandle => status::BAD_STATE,
+            ProtectRefused::Beyond => status::ACCESS_DENIED,
+            ProtectRefused::Space(why) => space_status(why),
+        })?;
+    Ok(0)
+}
+
+/// How many times a by-handle copy faults one page in before it gives up: a
+/// page taken away between the fault and the copy (reclaim, a racing unmap)
+/// is faulted in again, but not for ever.
+const SPACE_COPY_TRIES: usize = 4;
+
+/// `space_read`: copy out of the space the handle names, a page step at a
+/// time through one bounce page, a fallible allocation for the call's length.
+///
+/// Each step reads the target under the target's lock, with nothing else
+/// held, and then writes the caller's buffer under the caller's lock: never
+/// two spaces' locks at once (`user::space`'s lock order). At most
+/// [`nr::SPACE_COPY_MAX`] bytes, so at most sixteen steps. A page the step
+/// faults in is the space owner's to pay for, and a refusal at the owner's
+/// limit is `NO_MEMORY` to the caller, with no throttle and no kill: the
+/// fault is the space's own, not `oom::fault` (K2 review, ledger 2845 (3)).
+fn space_read(
+    process: &Process,
+    space: Handle,
+    address: u64,
+    buffer: u64,
+    length: u64,
+) -> Result<usize, Errno> {
+    let target = space_in(process, space, Rights::READ)?;
+    let length = usize::try_from(length)
+        .unwrap_or(usize::MAX)
+        .min(nr::SPACE_COPY_MAX);
+    if length == 0 {
+        return Ok(0);
+    }
+    let mut bounce =
+        fallible::try_filled(0_u8, PAGE_SIZE as usize).map_err(|_| status::NO_MEMORY)?;
+    let mut done = 0_usize;
+    while done < length {
+        let step = space_step(address, done, length).and_then(|(from, step)| {
+            let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
+            target.charging_owner(|| read_target(target.space(), from, chunk))?;
+            let to = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
+            let chunk = bounce.get(..step).ok_or(status::FAULT)?;
+            uaccess::copy_to_user(process.space(), to, chunk).map_err(fault)?;
+            Ok(step)
+        });
+        match step {
+            Ok(step) => done += step,
+            Err(why) if done == 0 => return Err(why),
+            Err(_) => break,
+        }
+    }
+    Ok(done)
+}
+
+/// The next step of a by-handle copy of `length` bytes from `address` with
+/// `done` copied: its address in the target, and its length, which keeps it
+/// in one page.
+fn space_step(address: u64, done: usize, length: usize) -> Result<(u64, usize), Errno> {
+    let from = address.checked_add(done as u64).ok_or(status::FAULT)?;
+    let in_page = (PAGE_SIZE - from % PAGE_SIZE) as usize;
+    Ok((from, in_page.min(length - done)))
+}
+
+/// Read `out.len()` bytes of `space` at `from`, all in one page, faulting
+/// the page in with the space's own fault (never `oom::fault`) if it is not
+/// there yet.
+fn read_target(space: &AddressSpace, from: u64, out: &mut [u8]) -> Result<(), Errno> {
+    for _ in 0..SPACE_COPY_TRIES {
+        match uaccess::copy_from_user_present(space, from, out) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(_) => return Err(status::FAULT),
+        }
+        match space.fault(from, Access::READ) {
+            Ok(()) => {}
+            Err(why) if object::oom::is_charge_refusal(&why) => return Err(status::NO_MEMORY),
+            Err(SpaceError::OutOfMemory) => return Err(status::NO_MEMORY),
+            Err(_) => return Err(status::FAULT),
+        }
+    }
+    Err(status::FAULT)
 }
 
 /// The status an address space's refusal travels as.
@@ -3101,6 +3408,7 @@ fn observe(target: &Object, observer: Observer) -> Option<Result<(), PortError>>
         Object::Job(job) => Some(job.observe(observer)),
         Object::Process(process) => Some(process.exit().observe(observer)),
         Object::Vmo(_)
+        | Object::Space(_)
         | Object::Port(_)
         | Object::Device(_)
         | Object::Interrupt(_)

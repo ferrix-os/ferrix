@@ -49,6 +49,10 @@ pub const PORT_FD_CLOEXEC: u64 = 1;
 pub const MAP_READ: u32 = 1 << 0;
 /// `vmo_map`'s protection: the mapping may also be written.
 pub const MAP_WRITE: u32 = 1 << 1;
+/// `space_map`'s and `space_protect`'s protection: instructions may be
+/// fetched from the mapping. Never with [`MAP_WRITE`] (ASR-2), and only
+/// through handles that carry `EXECUTE`.
+pub const MAP_EXECUTE: u32 = 1 << 2;
 
 /// What a `channel_read` found.
 ///

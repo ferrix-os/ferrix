@@ -2298,6 +2298,21 @@ pub(crate) static STAGE8_PATH_CALLS: Explanation = Explanation {
           src/kernel/src/syscall/stat.rs; src/lib/fs/vfs; docs/ROADMAP.md stage 8",
 };
 
+/// For `check_spaces` in `stages_check.rs`, when `object::space_check::run`
+/// fails.
+pub(crate) static STAGE9_SPACES: Explanation = Explanation {
+    code: "FX-0916",
+    title: "an address space reached by handle was not held to the handle's rights",
+    meaning: "`object::space_check::run` (docs/microkernel/K2.md) drives the native calls               that act on an address space by handle from a thread of a check's process,               through the architecture's system call entry: `space_create`, `space_map`,               `space_protect`, `space_unmap`, `space_read`, `process_space` and               `vmo_executable`. Each must be refused without its right, an executable               mapping must need EXECUTE on the space handle and on the VMO handle, no               mapping by handle may be writable and executable (ASR-2), a protection must               stay within what the region's handle allowed, a process's space must be               reachable only by its creator before it starts, a page a by-handle read               faults in must be charged to the space's owner and never to the caller, and               the W^X sweep of every user root the check reached must find no leaf               writable and executable. The message names the case.",
+    causes: &[
+        "`space_protection` in src/kernel/src/syscall/native.rs took a protection word it          should refuse, or a call stopped asking for a right.",
+        "`Ceiling::admits` in src/kernel/src/user/space.rs stopped refusing writable and          executable, or a ceiling recorded more than the handle carried.",
+        "`process_space` answered without `Control`, without `MANAGE`, or after the start.",
+        "`quota::charging_to` no longer moves the target-side half of a by-handle copy          to the space's owner.",
+    ],
+    see: "src/kernel/src/object/space_check.rs; src/kernel/src/object/space.rs;           src/kernel/src/user/space.rs; src/kernel/src/syscall/native.rs;           docs/microkernel/K2.md",
+};
+
 /// For `check_native_objects` in `stages_check.rs`, when `object::check::run` fails.
 pub(crate) static STAGE9_OBJECTS: Explanation = Explanation {
     code: "FX-0901",
@@ -3442,6 +3457,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE13_NETWORK_NAMESPACES,
     &STAGE13_PROC_ACCESS,
     &STAGE9_OBJECTS,
+    &STAGE9_SPACES,
     &STAGE9_ALLOCATION,
     &STAGE9_REFUSALS,
     &SERVICES,

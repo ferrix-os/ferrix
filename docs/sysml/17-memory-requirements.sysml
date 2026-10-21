@@ -2541,4 +2541,55 @@ package FerrixMemoryRequirements {
             attribute :>> unit = "user::space::AddressSpace::map_code_page";
         }
     }
+
+    package SpacesByHandle {
+        doc /* K2 of docs/MICROKERNEL.md section 3 (docs/microkernel/K2.md,
+             * slice A; the consultant's OK IF, ledger 2845 and 2857): what the
+             * address space keeps of a mapping made by handle. Stage 9's `space`
+             * line verifies each. */
+
+        requirement <'L.user.158'> aRegionByHandleKeepsItsCeiling : ItemLowLevel {
+            attribute :>> statement = "A region vmo_map or space_map made shall record
+                the most its handle allowed, readable always, writable only with
+                WRITE and executable only with EXECUTE on the VMO handle, and the
+                kernel's own code pages shall record that no call may change them;
+                the Linux calls that reshape a region shall refuse every such
+                region, as they refused vmo_map's.";
+            attribute :>> criterion = "A protection past a region's ceiling is
+                refused and one within it allowed (L.object.236's cases), and
+                vmo_map's regions keep refusing mprotect and mremap (the native
+                check's vmo_map case).";
+            attribute :>> parent = "H.MEM.24";
+            attribute :>> unit = ("user::space::AddressSpace::map_object",
+                "user::space::Ceiling::admits");
+        }
+        requirement <'L.user.159'> noRegionByHandleIsWritableAndExecutable : ItemLowLevel {
+            attribute :>> statement = "The address space shall refuse, under its own
+                lock, to map or protect a region by handle both writable and
+                executable, whatever the handle carried; and no user root the
+                stage 9 check reached shall hold a leaf both writable and
+                executable.";
+            attribute :>> criterion = "map_object asked for a writable and executable
+                region with a ceiling allowing both is refused, and
+                protect_by_handle asked the same is refused Beyond while read and
+                execute is allowed; the user-root sweep counts L leaves, E > 0
+                executable, 0 both (the `space` line).";
+            attribute :>> parent = ("H.MEM.24", "H.MEM.4");
+            attribute :>> unit = ("user::space::AddressSpace::map_object",
+                "user::space::AddressSpace::protect_by_handle",
+                "user::space::Ceiling::admits", "mm::check::sweep_user_root",
+                "user::space::AddressSpace::with_root_held");
+        }
+        requirement <'L.user.162'> anUnmapByHandleReachesARunningSpace : ItemLowLevel {
+            attribute :>> statement = "An unmap or protect by handle of a space whose
+                program runs on another processor shall take its translations down
+                there, through the space's own shootdown, before it returns.";
+            attribute :>> criterion = "A started process spinning in its text has its
+                text page unmapped by its creator's handle from before the start,
+                and ends killed by SIGSEGV within the check's patience.";
+            attribute :>> parent = ("H.MEM.24", "H.MEM.17");
+            attribute :>> unit = ("syscall::native::space_unmap",
+                "user::space::AddressSpace::unmap");
+        }
+    }
 }

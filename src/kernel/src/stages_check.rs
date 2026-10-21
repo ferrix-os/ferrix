@@ -109,6 +109,10 @@ pub(super) fn check_programs() {
     // driver.
     check_native_objects();
 
+    // K2: an address space mapped, protected, unmapped and read by handle,
+    // W^X on every space so mapped, and who pays (docs/microkernel/K2.md).
+    check_spaces();
+
     // What the switch gives a program back after a blocking native call,
     // and the FS base kept in the task: programs on the native calls just
     // proved (x86-64; docs/OPAQUE-KERNEL.md §9.8, 3a and 3b).
@@ -1173,6 +1177,24 @@ pub(super) fn check_native_objects() {
         "  spawn    {} programs made from a VMO and started through a handle, their ends heard; \
          {} never started, ended with their last handle",
         report.spawned, report.abandoned,
+    );
+}
+
+/// Stage 9: an address space reached by handle (`docs/microkernel/K2.md`).
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_spaces() {
+    let report = match object::space_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(catalog::STAGE9_SPACES, "{problem}"),
+    };
+    println!(
+        "  space    {} maps, protects and unmaps by handle, {} refusals as specified;          w^x: 0 of {} user leaves writable and executable, {} executable",
+        report.changes, report.refusals, report.leaves, report.executable,
+    );
+    println!(
+        "           a page read in by handle charged {} KiB to the space's owner, none to          the caller; a pre-start READ handle read the running child; its text unmapped, it faulted",
+        report.owner_bytes / 1024,
     );
 }
 

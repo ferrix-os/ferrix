@@ -46,9 +46,14 @@ impl Rights {
     /// `cgroup.procs` and root still owns `memory.max`. A job made with
     /// `job_create` carries it, so a limit can be set on what one makes.
     pub const SET_LIMIT: Rights = Rights(1 << 7);
+    /// Instructions may be fetched from the object's memory: on a VMO, its
+    /// pages may be mapped executable; on an address space, executable
+    /// mappings may be made in it. An executable mapping by handle needs it on
+    /// both (`docs/microkernel/K2.md`). Bits 8 and 9 are K12's and K3's.
+    pub const EXECUTE: Rights = Rights(1 << 10);
 
     /// Every defined right.
-    pub const ALL: Rights = Rights(0xFF);
+    pub const ALL: Rights = Rights(0xFF | Rights::EXECUTE.0);
 
     /// What a new channel endpoint carries.
     pub const CHANNEL: Rights = Rights(
@@ -98,17 +103,37 @@ impl Rights {
     /// reach those pages, and it is kept, or given back by closing it, where it
     /// was made.
     pub const PIN: Rights = Rights(Rights::READ.0);
+    /// What a new address space carries, from `space_create`, and the most
+    /// `process_space` may give.
+    ///
+    /// No [`Rights::WAIT`] or [`Rights::MANAGE`]: a space has no signal, and
+    /// nothing to control beyond its mappings ([`Rights::MAP`]), executable
+    /// ones ([`Rights::EXECUTE`]), and copies out of ([`Rights::READ`]) and
+    /// into ([`Rights::WRITE`]) its memory.
+    pub const SPACE: Rights = Rights(
+        Rights::DUPLICATE.0
+            | Rights::TRANSFER.0
+            | Rights::READ.0
+            | Rights::WRITE.0
+            | Rights::MAP.0
+            | Rights::EXECUTE.0,
+    );
     /// What a handle to a process carries.
     ///
     /// [`Rights::WAIT`] to hear that it has ended, directly or through a port,
     /// and [`Rights::MANAGE`] for the calls that act on it, which come with
     /// native process creation.
     ///
-    /// None of those calls reaches inside the process: no call reads or
-    /// writes its memory, takes or copies its handles, or gives it anything
-    /// once it has started (`process_start` is `BAD_STATE` then). So a handle
-    /// to a process the kernel started with authority of its own -- `devmgr`
-    /// under `ferrix.devmgr=init` -- hands its holder none of that authority.
+    /// One of those calls reaches inside the process, and only before it
+    /// starts: `process_space` gives the creator -- through a handle
+    /// `process_create` made -- a handle to its address space, until
+    /// `process_start`. That space handle keeps its rights after the start;
+    /// no other call reads or writes a process's memory, takes or copies its
+    /// handles, or gives it anything once it has started. So the rule is:
+    /// only the creator, only through a space handle it took before the
+    /// start, and no wider than that handle's rights. A handle to a process
+    /// the kernel started with authority of its own -- `devmgr` under
+    /// `ferrix.devmgr=init` -- hands its holder none of that authority.
     pub const PROCESS: Rights =
         Rights(Rights::DUPLICATE.0 | Rights::TRANSFER.0 | Rights::WAIT.0 | Rights::MANAGE.0);
 

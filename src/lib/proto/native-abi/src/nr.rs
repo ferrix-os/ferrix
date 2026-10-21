@@ -86,6 +86,8 @@ pub const VMO_MAP: usize = 0x1024;
 pub const VMO_PIN: usize = 0x1025;
 /// [`NativeCall::VmoPinAddresses`].
 pub const VMO_PIN_ADDRESSES: usize = 0x1026;
+/// [`NativeCall::VmoExecutable`].
+pub const VMO_EXECUTABLE: usize = 0x1027;
 
 /// [`NativeCall::JobCreate`].
 pub const JOB_CREATE: usize = 0x1028;
@@ -108,6 +110,8 @@ pub const PROCESS_GIVE: usize = 0x1032;
 pub const PROCESS_BOOTSTRAP: usize = 0x1033;
 /// [`NativeCall::ProcessStatus`].
 pub const PROCESS_STATUS: usize = 0x1034;
+/// [`NativeCall::ProcessSpace`].
+pub const PROCESS_SPACE: usize = 0x1035;
 
 /// [`NativeCall::InterruptCreate`].
 pub const INTERRUPT_CREATE: usize = 0x1038;
@@ -183,6 +187,21 @@ pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// [`NativeCall::ChardevDmabufFence`].
 pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
+/// [`NativeCall::SpaceCreate`]. `0x1079..=0x1080` is the address space's
+/// block (`docs/microkernel/K2.md`); `0x107D`, `0x107F` and `0x1080` are
+/// held for its allocate, write and clone.
+pub const SPACE_CREATE: usize = 0x1079;
+/// [`NativeCall::SpaceMap`].
+pub const SPACE_MAP: usize = 0x107A;
+/// [`NativeCall::SpaceUnmap`].
+pub const SPACE_UNMAP: usize = 0x107B;
+/// [`NativeCall::SpaceProtect`].
+pub const SPACE_PROTECT: usize = 0x107C;
+/// [`NativeCall::SpaceRead`].
+pub const SPACE_READ: usize = 0x107E;
+/// The most bytes one [`NativeCall::SpaceRead`] copies: sixteen pages, each
+/// a step that holds one address space's lock and never two.
+pub const SPACE_COPY_MAX: usize = 64 * 1024;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -190,8 +209,9 @@ pub const PROCESS_NAME_MAX: usize = 32;
 
 /// A native system call.
 ///
-/// `0x1035..=0x1037` is left for the calls that act on a process beyond
-/// making, starting, giving it its bootstrap and reading how it ended.
+/// `0x1036..=0x1037` is left for the calls that act on a process beyond
+/// making, starting, giving it its bootstrap, reading how it ended and taking
+/// its address space before it starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NativeCall {
     /// `(handle)`. Close a handle. The object lives on if anything else holds it.
@@ -282,8 +302,9 @@ pub enum NativeCall {
     /// `length` bytes of a VMO from `offset`, both whole pages, at `address`,
     /// or wherever there is room if it is zero. Shared: a write through the
     /// mapping is a write to the VMO. `protection` is `MAP_READ`, or
-    /// `MAP_READ | MAP_WRITE`; nothing maps a VMO executable. Needs `MAP`,
-    /// and `READ`/`WRITE` for the protection asked for.
+    /// `MAP_READ | MAP_WRITE`; this call maps nothing executable (that is
+    /// [`NativeCall::SpaceMap`]'s, through a space handle). Needs `MAP`, and
+    /// `READ`/`WRITE` for the protection asked for.
     VmoMap,
     /// `(device, vmo, offset, length, options)` → handle. Pin a range of a VMO
     /// into the device's IOMMU domain, so the device may reach it, and hold
@@ -297,6 +318,12 @@ pub enum NativeCall {
     /// device address, in page order, up to `capacity`; the answer is how many
     /// pages the pin holds, whatever fits. Needs `READ`.
     VmoPinAddresses,
+    /// `(vmo, options)` → handle. Replace a VMO handle with one that carries
+    /// `EXECUTE` and not `WRITE`, keeping its other rights; the handle given
+    /// is closed, as `HandleReplace` closes it. `options` must be zero. Needs
+    /// `MAP` and `READ`. `VmoCreate` gives no `EXECUTE`, so this is the one
+    /// way a VMO handle gets it.
+    VmoExecutable,
     /// `(parent, options)` → handle. Make a job inside `parent`. Needs
     /// `MANAGE`. `options` is zero, or [`crate::types::JOB_SPECULATION_DOMAIN`]
     /// to make the job one speculation domain; any other bit is
@@ -383,6 +410,16 @@ pub enum NativeCall {
     /// reads an end. Needs `WAIT`; `WRONG_TYPE` for a handle to anything but
     /// a process, `FAULT` for `out`.
     ProcessStatus,
+    /// `(process, rights)` → handle. A handle to the address space of a
+    /// process made by [`NativeCall::ProcessCreate`] that has not started,
+    /// with `rights`, a subset of [`crate::rights::Rights::SPACE`]. Its
+    /// owner, which pays for what by-handle calls commit there, is the
+    /// process's job. Needs `MANAGE` on a handle `process_create` made;
+    /// `ACCESS_DENIED` for any other process handle, `BAD_STATE` once the
+    /// process has started or ended, `INVALID_ARGS` for rights outside
+    /// `Rights::SPACE`. A space handle taken before the start keeps its
+    /// rights after it.
+    ProcessSpace,
     /// `(resource, vector)` → handle. Claim a hardware interrupt.
     InterruptCreate,
     /// `(interrupt, port, key: *u64)`. Deliver the interrupt to a port as
@@ -618,10 +655,37 @@ pub enum NativeCall {
     /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
     /// Answered by the load ring.
     ChardevDmabufFence,
+    /// `()` → handle. A new, empty address space, with
+    /// [`crate::rights::Rights::SPACE`]; its owner is the caller's job.
+    SpaceCreate,
+    /// `(space, vmo, address, length, protection, offset: *u64)` → address.
+    /// [`NativeCall::VmoMap`] into the space the handle names. `protection` is
+    /// `MAP_READ`, `MAP_READ | MAP_WRITE` or `MAP_READ | MAP_EXECUTE`;
+    /// writable and executable together is `INVALID_ARGS`. Needs `MAP` on the
+    /// space, `MAP` and `READ` on the VMO, `WRITE` on the VMO for a writable
+    /// mapping, and `EXECUTE` on both for an executable one.
+    SpaceMap,
+    /// `(space, address, length)`. Unmap whatever lies in the range, whole
+    /// pages; a hole is not an error. Needs `MAP`.
+    SpaceUnmap,
+    /// `(space, address, length, protection)`. Change the protection of a
+    /// range wholly mapped by handle, within what each region's handle
+    /// allowed (`ACCESS_DENIED` past it), never writable and executable
+    /// (`INVALID_ARGS`). `BAD_STATE` for a range that reaches a region not
+    /// mapped by handle. Needs `MAP`, and `EXECUTE` for an executable
+    /// protection.
+    SpaceProtect,
+    /// `(space, address, buffer, length)` → bytes. Copy out of the space into
+    /// the caller's buffer, at most [`SPACE_COPY_MAX`] bytes, short at the
+    /// first page that cannot be read (`FAULT` if that is the first).
+    /// Honours the region's protection. A page it faults in is charged to the
+    /// space's owner, and refused at the owner's limit with `NO_MEMORY`.
+    /// Needs `READ`.
+    SpaceRead,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 65] = [
+pub const ALL: [NativeCall; 72] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -642,6 +706,7 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::VmoMap,
     NativeCall::VmoPin,
     NativeCall::VmoPinAddresses,
+    NativeCall::VmoExecutable,
     NativeCall::JobCreate,
     NativeCall::JobKill,
     NativeCall::JobForCgroup,
@@ -652,6 +717,7 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::ProcessGive,
     NativeCall::ProcessBootstrap,
     NativeCall::ProcessStatus,
+    NativeCall::ProcessSpace,
     NativeCall::InterruptCreate,
     NativeCall::InterruptBind,
     NativeCall::InterruptAck,
@@ -687,6 +753,11 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
     NativeCall::ChardevDmabufFence,
+    NativeCall::SpaceCreate,
+    NativeCall::SpaceMap,
+    NativeCall::SpaceUnmap,
+    NativeCall::SpaceProtect,
+    NativeCall::SpaceRead,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -722,6 +793,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         VMO_MAP => NativeCall::VmoMap,
         VMO_PIN => NativeCall::VmoPin,
         VMO_PIN_ADDRESSES => NativeCall::VmoPinAddresses,
+        VMO_EXECUTABLE => NativeCall::VmoExecutable,
         JOB_CREATE => NativeCall::JobCreate,
         JOB_KILL => NativeCall::JobKill,
         JOB_FOR_CGROUP => NativeCall::JobForCgroup,
@@ -732,6 +804,7 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         PROCESS_GIVE => NativeCall::ProcessGive,
         PROCESS_BOOTSTRAP => NativeCall::ProcessBootstrap,
         PROCESS_STATUS => NativeCall::ProcessStatus,
+        PROCESS_SPACE => NativeCall::ProcessSpace,
         INTERRUPT_CREATE => NativeCall::InterruptCreate,
         INTERRUPT_BIND => NativeCall::InterruptBind,
         INTERRUPT_ACK => NativeCall::InterruptAck,
@@ -767,6 +840,11 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
+        SPACE_CREATE => NativeCall::SpaceCreate,
+        SPACE_MAP => NativeCall::SpaceMap,
+        SPACE_UNMAP => NativeCall::SpaceUnmap,
+        SPACE_PROTECT => NativeCall::SpaceProtect,
+        SPACE_READ => NativeCall::SpaceRead,
         _ => return None,
     };
     Some(call)
@@ -796,6 +874,7 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::VmoMap => VMO_MAP,
         NativeCall::VmoPin => VMO_PIN,
         NativeCall::VmoPinAddresses => VMO_PIN_ADDRESSES,
+        NativeCall::VmoExecutable => VMO_EXECUTABLE,
         NativeCall::JobCreate => JOB_CREATE,
         NativeCall::JobKill => JOB_KILL,
         NativeCall::JobForCgroup => JOB_FOR_CGROUP,
@@ -806,6 +885,7 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ProcessGive => PROCESS_GIVE,
         NativeCall::ProcessBootstrap => PROCESS_BOOTSTRAP,
         NativeCall::ProcessStatus => PROCESS_STATUS,
+        NativeCall::ProcessSpace => PROCESS_SPACE,
         NativeCall::InterruptCreate => INTERRUPT_CREATE,
         NativeCall::InterruptBind => INTERRUPT_BIND,
         NativeCall::InterruptAck => INTERRUPT_ACK,
@@ -841,5 +921,10 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
         NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
+        NativeCall::SpaceCreate => SPACE_CREATE,
+        NativeCall::SpaceMap => SPACE_MAP,
+        NativeCall::SpaceUnmap => SPACE_UNMAP,
+        NativeCall::SpaceProtect => SPACE_PROTECT,
+        NativeCall::SpaceRead => SPACE_READ,
     }
 }
