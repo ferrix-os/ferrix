@@ -2025,8 +2025,16 @@ fn trace_says_each_ioctl_and_wait() {
             rig.ioctl_on(1, ioctl::SYNCOBJ_WAIT, &mut args),
             Status::Held(_)
         ));
-        let held = rig.host.lines.iter().any(|l| l.contains("request") && l.contains("held"));
-        let created = rig.host.lines.iter().any(|l| l.contains("trace: ioctl") && l.contains("-> 0"));
+        let held = rig
+            .host
+            .lines
+            .iter()
+            .any(|l| l.contains("request") && l.contains("held"));
+        let created = rig
+            .host
+            .lines
+            .iter()
+            .any(|l| l.contains("trace: ioctl") && l.contains("-> 0"));
         assert!(created, "an ioctl line: {:?}", rig.host.lines);
         assert!(held, "a held line: {:?}", rig.host.lines);
     });
