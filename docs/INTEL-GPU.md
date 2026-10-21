@@ -809,6 +809,21 @@ and RC6 residency stays near zero, since the driver holds render and GT
 forcewake for its life where i915 takes it per access. The box checkpoint
 is `intelgpu-m2.sh BOX freq NAME`.
 
+**A render-node call that never completes (2026-10-21).** On the box the
+GRYPHLINK launcher (DXVK 3.1.1 on anv, immediate present, no present wait)
+froze after its first frame. Its main thread spun at full speed, 40 % of
+it in the kernel, while DXVK's submit and queue threads, wineserver and
+this driver were idle. That is a DXVK resource wait yielding while its
+submit thread sleeps in a fence or timeline wait the front end holds. No
+present wait is involved. `ferrix.intelgpu.uapitrace` finds that call
+without `trace`'s every register access. It says each wait the front
+end holds and its answer, each ioctl that fails (a poll's `ETIME`
+aside: a success says nothing, so a frame's ioctls do not flood the
+console), and, once a wait has gone 2 s unanswered (`fence::STUCK_NS`;
+the front end asks to be serviced then), what it waits on: each
+syncobj's point, fence and status, the timeline's head and the point
+reached, and the requests not yet done with their dependencies.
+
 **What anv's software WSI gets from the mmap path.** Our front end serves
 `MMAP_OFFSET_WB` as a cached mapping and `MMAP_OFFSET_WC` as K6's
 write-combining one, as asked. anv (Mesa, `anv_bo_get_mmap_mode` on i915

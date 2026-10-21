@@ -99,6 +99,10 @@ pub(crate) struct Steps {
     pub(crate) freq_mhz: Option<u32>,
     /// The per-second frequency log (`ferrix.intelgpu.freqlog`).
     pub(crate) freqlog: bool,
+    /// The render node's trace (`ferrix.intelgpu.uapitrace`): held waits,
+    /// their answers, failed ioctls, and a wait unanswered for 2 s named
+    /// with its fences, without `trace`'s every register access.
+    pub(crate) uapitrace: bool,
     /// The box's frequency checkpoint (`ferrix.intelgpu.freqtest`).
     pub(crate) freqtest: bool,
 }
@@ -112,6 +116,7 @@ const WORDS: Words<'static> = Words {
     freq: b"ferrix.intelgpu.freq=",
     freqlog: b"ferrix.intelgpu.freqlog",
     freqtest: b"ferrix.intelgpu.freqtest",
+    uapitrace: b"ferrix.intelgpu.uapitrace",
 };
 
 /// The driver stopped before a step, as asked.
@@ -127,7 +132,7 @@ impl Steps {
             options::parse(line.get(..len).unwrap_or_default(), &WORDS)
         });
         say(format_args!(
-            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}",
+            "intel: ferrix.intelgpu.stop {}, trace {}, reset {}, m2 {}, freq {}, freqlog {}, freqtest {}, uapitrace {}",
             Show(options.stop),
             if options.trace { "on" } else { "off" },
             Show(options.reset_seconds),
@@ -135,6 +140,7 @@ impl Steps {
             Show(options.freq_mhz),
             if options.freqlog { "on" } else { "off" },
             if options.freqtest { "on" } else { "off" },
+            if options.uapitrace { "on" } else { "off" },
         ));
         if options.reset_refused {
             say(format_args!(
@@ -155,6 +161,7 @@ impl Steps {
             freq_mhz: options.freq_mhz,
             freqlog: options.freqlog,
             freqtest: options.freqtest,
+            uapitrace: options.uapitrace,
         }
     }
 
