@@ -152,13 +152,6 @@
       "purpose": "MICROKERNEL.md §3 K3, pager-backed VMOs (docs/microkernel/K3.md): H.MEM.22, an absent page of a pager-backed VMO is made present only by its pager's supply, and a thread waits on a pager only for a fault on or a kernel copy into such a VMO, ending on supply, failure, kill, the pager's death or the pager's bound, with SIGBUS or EIO to the faulting process and never a kernel stop; H.MEM.23, no write to a pager-backed page leaves the dirty set before a write-back begun after it ends; L.user.146-157, the forwarded request, the bounded wait and its endings, kernel copies, supply, FAIL, dirty tracking, write-back, decommit, detach and pager death, the K7 ticket per request, MAP_NO_PAGER; L.object.226-231, the pager object, its five calls and the page-request packet"
     },
     {
-      "ids": ["H.MEM.25", "L.object.237", "L.object.239", "L.user.160-161"],
-      "owner": "mk-k2",
-      "branch": "mk/k2",
-      "date": "2026-10-21",
-      "purpose": "MICROKERNEL.md §3 K2, address space by handle (docs/microkernel/K2.md): H.MEM.24, a space reached by handle is mapped, unmapped, protected, read and written only as the handle's rights allow, no mapping made by handle is ever writable and executable (ASR-2), and an executable mapping needs EXECUTE on the space handle and on the VMO handle; H.MEM.25, a copy-on-write clone of a space never sees a write its source makes after the clone, and the source never sees one the clone makes (F-41); L.object.232-240, the space object and its calls; L.user.158-162, maximum protection, W^X at map and protect time with the user-root sweep, the clone's isolation, cross-space copies, and unmap/protect of a running space. Slice A (map, unmap, protect, read, EXECUTE) writes H.MEM.24, L.object.232-236, 238, 240 and L.user.158, 159, 162; what is left here is slice B's"
-    },
-    {
       "ids": ["H.TRAP.20", "L.trap.9-13", "L.object.241-246", "L.x86_64.186", "L.aarch64.66", "L.armv7a.28"],
       "owner": "mk-k4",
       "branch": "mk/k4",

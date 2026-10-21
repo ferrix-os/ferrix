@@ -3262,23 +3262,13 @@ fn space_write(
     }
     let mut bounce =
         fallible::try_filled(0_u8, PAGE_SIZE as usize).map_err(|_| status::NO_MEMORY)?;
-    let mut done = 0_usize;
-    while done < length {
-        let step = space_step(address, done, length).and_then(|(to, step)| {
-            let from = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
-            let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
-            uaccess::copy_from_user(process.space(), from, chunk).map_err(fault)?;
-            let chunk = bounce.get(..step).ok_or(status::FAULT)?;
-            target.charging_owner(|| write_target(target.space(), to, chunk))?;
-            Ok(step)
-        });
-        match step {
-            Ok(step) => done += step,
-            Err(why) if done == 0 => return Err(why),
-            Err(_) => break,
-        }
-    }
-    Ok(done)
+    space_steps(address, length, |done, to, step| {
+        let from = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
+        let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
+        uaccess::copy_from_user(process.space(), from, chunk).map_err(fault)?;
+        let chunk = bounce.get(..step).ok_or(status::FAULT)?;
+        target.charging_owner(|| write_target(target.space(), to, chunk))
+    })
 }
 
 /// Write `data` into `space` at `to`, all in one page, faulting the page in
