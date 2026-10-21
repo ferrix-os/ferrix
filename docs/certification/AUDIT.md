@@ -26,6 +26,7 @@ changes nothing about the decision.
 | `REFUSED` | A rights request that would widen a handle | `object` table, `Requested::resolve` returning `None` |
 | `REFUSED` | A limit refused a charge: tasks, memory, objects at a job's limit | `object/quota.rs`, the one refusal path per resource |
 | `REFUSED` | A device's pin budget refused (`DEVICE_LIMIT`): `ACCESS_DENIED` without `SET_LIMIT`, `BAD_STATE` under live pins, `NO_MEMORY` past the ceiling; the device, the limit, the old value and the one asked for. Recorded by the call in place of the generic rights record | `syscall/native.rs` `device_set_limit` |
+| `REFUSED` | A ticket refused or ended (`TICKET`, `docs/microkernel/K7.md`): an `ADOPT` of an id the other end of the channel did not issue or that has ended, an `END` of one with no live ticket (`BAD_STATE`), and every `END` done; the call, the op and the id's low word. Successful issues, adoptions and leaves are not recorded, one per request each (the consultant's answer to K7's Q5, ledger 2525) | `syscall/native.rs` `record_call` |
 | `GRANTED` | A job handle with `MANAGE` or `SET_LIMIT` given for a cgroup | `fs/cgroupfs.rs` `job_for_cgroup` (a load-ring caller; recorded through the item's call) |
 | `GRANTED` | A native process made, with its creator's ids (P0) | `syscall/native.rs` `process_create` |
 | `GRANTED` | `devmgr` started through the starter; the starter given to pid 1 | `devmgr.rs` `devmgr_start`, `init.rs` `next_bootstrap` |
