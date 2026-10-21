@@ -653,6 +653,20 @@ preference. The integrator shall not rely on the element to hold a power or
 thermal budget, and shall rely on no time figure that assumes a processor
 clock (MEMORY-AND-TIMING).
 
+### AoU-35 — a safety partition maps no pager-backed VMO it did not choose
+A pager-backed VMO (`docs/microkernel/K3.md`) has absent pages its pager
+supplies: a fault on one waits for that pager, up to the pager's bound of at
+most 30 s, and ends in `SIGBUS` if the pager fails, times out or closes
+(H.MEM.22). A native safety partition shall map no pager-backed VMO it did not
+choose: its description names every VMO it maps; it maps every VMO it was
+handed with `MAP_NO_PAGER` (L.object.231), which refuses a pager-backed one,
+unless the description names that VMO's pager as part of the same or a
+higher-level partition; and no pager it relies on is below its own
+criticality level (K17 (d) will make the last a kernel refusal). The bound
+keeps a pager from hanging a partition; a `SIGBUS` in a safety function is
+still a failure the partition must not accept from a component it did not
+choose.
+
 ### AoU-34 — a task's user and kernel time are accounting, not enforcement
 `/proc/<pid>/stat`'s `utime` and `stime` and `status`'s two switch counts
 (H.SCHED.14, L.sched.80-83, `docs/THREAD-TIMES.md`) are for profiling and
@@ -693,6 +707,7 @@ cause.
 | FM-8 | A partition is starved of processor time | ASR-8 violated | none at runtime; the `quota` boot line checks one job's share against another's | EEVDF eligibility, EDF admission; a job's share of a contended processor is its weight's, whatever its task count | no WCET, so no bound is provable (AoU-4) |
 | FM-9 | Kernel stack overflow | page fault at the instruction that overflowed | **guard page below every kernel stack**, and a boot check that the guard is unmapped | `vmap` reserves an unmapped page on each side of every allocation; no recursion in the element | the loader-provided boot stack is not guarded (early boot only) |
 | FM-10 | A processor stops answering a TLB shootdown (x86-64) or a grace period (every architecture) | none while the wait lasts: nothing is freed and no narrowed permission relied on until every processor answers; then the safe state (FX-0001, FX-0002, FX-0003) | `smp::wait_for` and `take_turn`: two bounds, each a wall-clock floor **and** a count of the waiter's own polls, which stretches with the emulator's slowness: past the late bound (1 s for a shootdown, 5 s for a grace period) the answer is waited for and counted late (the `late` line, `L.smp.33`); past the stuck bound (10 s, 40 s for the turn) the safe state | the count is in guest units, so a slow machine is not called stuck; a processor a host stops running answers late and is waited for (2026-10-07: 257 late answers of 1.0 to 3.6 s, every one answered); a stuck processor answers no count and is still found | availability: while a processor answers late its waiter's processor runs nothing else, since the shootdown turn disables preemption, and other shootdowns queue for the turn for up to 40 s (ASR-8, AoU-4); a host that starves a virtual processor for more than 10 s still ends the wait: availability lost, never integrity |
+| FM-12 | A thread blocked by a pager it maps: a pager that never supplies, or fails | the faulting thread waits, then `SIGBUS` (a program) or an error (a call); never the safe state | stage 9's `pager` line: a failed, a timed-out and a closed pager's fault each end, the bound held from below (H.MEM.22) | every wait bounded by its pager's bound, at most 30 s; a kill and the pager's close end it at once; the request's record and port room charged to the faulting job; a failure named by request ends that job's fault alone | a pager chooses its own bound up to 30 s; a mapping cannot lower it (K17's to ask); a kernel copy into a pager-backed page holding a sleeping lock holds that lock's waiters up to the bound (MEMORY-AND-TIMING §2.2t); AoU-35 |
 | FM-11 | Stored data is altered or lost: a torn commit, a write the device reordered, damage on the medium, a hostile image | ASR-9 violated: wrong bytes returned as a file's, or a volume that no longer mounts | a CRC-32C on every node and data sector, and each node's address and generation checked against its parent (`L.btrfs.31`, `L.btrfs.32`, `L.btrfs.70`, `L.btrfs.84`), its level and filesystem too, with no test of those two yet; the second copy read where the chunk keeps one | copy-on-write: nothing the last commit reaches is overwritten, and the superblock is written after a flush; a failed transaction is aborted and the volume reloaded read only at its last commit | deliberate alteration with matching checksums (AoU-15); a device that does not honour flush (AoU-16); log replay and orphan cleanup at mount are not measured against a full volume, and can still fail the mount there (`docs/BACKLOG.md`) |
 
 **FM-9 was recorded as the worst entry in this table and that was wrong.**

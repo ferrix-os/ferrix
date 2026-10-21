@@ -1568,6 +1568,38 @@ would have to be made is named.
 
 ---
 
+### 2.2t A pager's requests and its bounded wait (`object::pager`, K3)
+
+A fault on, or a kernel copy into, an absent page of a pager-backed VMO
+(`docs/microkernel/K3.md`) waits for the pager, and the item states the wait:
+
+* **The wait** is bounded by the pager's own bound, set at `pager_create`
+  between 1 ms and 30 s (`PAGER_WAIT_MAX_NS`): a thread waits for a pager
+  at most 30 s plus one scheduling latency, then the fault is `SIGBUS` or
+  the call's copy `FAULT` (H.MEM.22). It is a sleep on the request's wait
+  queue with the deadline on the run queue's timeline, so a waiting thread
+  holds no processor. The process's end ends it at once; a signal does not.
+* **The registry's lock** (`PagerCore::requests`, a spin lock) is held for
+  one walk of the pager's outstanding requests: at a fault's listing or
+  join, at a supply's, failure's, dirty answer's or detach's ending, and at
+  a waiter's leaving. Each task waits in at most one request, so the walk
+  is bounded by the tasks faulting on that pager's VMOs. Nothing allocates
+  under it: a request's record and its port room are had before, and the
+  list keeps room for one more, grown with the lock let go (the consultant's
+  2858 (2)). An ending takes at most 16 requests out per hold
+  (`END_BATCH`) and wakes them after.
+* **A supply** moves at most 256 pages (`SUPPLY_MAX_PAGES`); each object's
+  pages lock is held for one pass over the range, never two objects' locks
+  at once, and the aux VMO's mappers are shot down with no lock held.
+* **A copy under a sleeping lock.** A kernel copy waits for a pager only
+  where it may block, never under a spin lock (2858 (3)); where a sleeping
+  lock is held across the copy, its other waiters wait up to the pager's
+  bound with it, as Linux's `mmap_lock` holders do behind a slow
+  `filemap_fault`. Known: a tmpfs or page-cache inode's I/O lock across
+  `write(2)`'s copy-in from a buffer that is a pager mapping
+  (`ferrix_vfs::tmpfs`, §2.2l); `Process`'s heap lock where a call copies
+  under it. A `PAGER_VMO_NO_COPY_WAIT` VMO never makes a copy wait.
+
 ### 2.2r An RMRR's identity domain at bring-up (`iommu::bring_up_vtd`, K2)
 
 Before any program runs, once per VT-d unit whose RMRRs are honoured
