@@ -1189,11 +1189,14 @@ pub(super) fn check_spaces() {
         Err(problem) => fatal!(catalog::STAGE9_SPACES, "{problem}"),
     };
     println!(
-        "  space    {} maps, protects and unmaps by handle, {} refusals as specified;          w^x: 0 of {} user leaves writable and executable, {} executable",
+        "  space    {} maps, protects and unmaps by handle, {} refusals as specified; \
+         w^x: 0 of {} user leaves writable and executable, {} executable",
         report.changes, report.refusals, report.leaves, report.executable,
     );
     println!(
-        "           a page read in by handle charged {} KiB to the space's owner, none to          the caller; a pre-start READ handle read the running child; its text unmapped, it faulted",
+        "           a page read in by handle charged {} KiB to the space's owner, none to \
+         the caller; a pre-start READ handle read the running child; its text unmapped, \
+         it faulted",
         report.owner_bytes / 1024,
     );
 }

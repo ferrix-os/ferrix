@@ -2466,23 +2466,23 @@ src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
 
 ## FX-0916 — an address space reached by handle was not held to the handle's rights
 
-`object::space_check::run` (docs/microkernel/K2.md) drives the native calls
-that act on an address space by handle from a thread of a check's process,
-through the architecture's system call entry: `space_create`, `space_map`,
+`object::space_check::run` (docs/microkernel/K2.md) drives the native calls that
+act on an address space by handle from a thread of a check's process, through
+the architecture's system call entry: `space_create`, `space_map`,
 `space_protect`, `space_unmap`, `space_read`, `process_space` and
-`vmo_executable`. Each must be refused without its right, an executable
-mapping must need EXECUTE on the space handle and on the VMO handle, no
-mapping by handle may be writable and executable (ASR-2), a protection must
-stay within what the region's handle allowed, a process's space must be
-reachable only by its creator before it starts, a page a by-handle read
-faults in must be charged to the space's owner and never to the caller, and
-the W^X sweep of every user root the check reached must find no leaf
-writable and executable. The message names the case.
+`vmo_executable`. Each must be refused without its right, an executable mapping
+must need EXECUTE on the space handle and on the VMO handle, no mapping by
+handle may be writable and executable (ASR-2), a protection must stay within
+what the region's handle allowed, a process's space must be reachable only by
+its creator before it starts, a page a by-handle read faults in must be charged
+to the space's owner and never to the caller, and the W^X sweep of every user
+root the check reached must find no leaf writable and executable. The message
+names the case.
 
 1. `space_protection` in src/kernel/src/syscall/native.rs took a protection word
-   it          should refuse, or a call stopped asking for a right.
+   it should refuse, or a call stopped asking for a right.
 2. `Ceiling::admits` in src/kernel/src/user/space.rs stopped refusing writable
-   and          executable, or a ceiling recorded more than the handle carried.
+   and executable, or a ceiling recorded more than the handle carried.
 3. `process_space` answered without `Control`, without `MANAGE`, or after the
    start.
 4. `quota::charging_to` no longer moves the target-side half of a by-handle copy
