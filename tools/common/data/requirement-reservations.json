@@ -143,6 +143,13 @@
       "branch": "mk/smt-off",
       "date": "2026-10-19",
       "purpose": "M0 part B's smt=off (BUILD-FLAGS.md section 3.1 DF4; docs/microkernel/M0-B-PROPOSALS.md section 3.1): x86-64 topology from CPUID 0x1F/0xB with a fail-closed stop (183), siblings parked by the kernel after CR4.MCE, never counted online (184), stage 4's one-thread-a-core check with every sibling parked and CR4.MCE set (185); AArch64 (PPTT or cpu-map) and ARMv7-A (cpu-map): no two threads of one core online under smt=off; H.TRAP.19, their parent under O.ISOLATE: under smt=off no two hardware threads of one core run at once (consultant OK IF, ledger 2563)"
+    },
+    {
+      "ids": ["L.object.226"],
+      "owner": "ef-crash",
+      "branch": "ef-crash",
+      "date": "2026-10-21",
+      "purpose": "A process's processor time keeps the time of its threads that have ended, as Linux's signal_struct sums do: retire_task moves a leaving task's runtime, kernel time and switches into the process's retired sums under the task-list lock, and tasks_and_retired answers the live tasks and those sums under one hold, for CLOCK_PROCESS_CPUTIME_ID, times, getrusage(RUSAGE_SELF) and /proc/<pid>/stat (consultant OK IF, ledger 2715)"
     }
   ]
 }
