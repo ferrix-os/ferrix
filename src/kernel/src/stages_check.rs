@@ -1273,8 +1273,15 @@ pub(super) fn check_tickets() {
          {} pages and {} objects charged to the client, none to the server, and {} pages of \
          the server's own faults to the server; refused at the client's limit with no wait \
          and no kill; ended by either side and by a close; {} live at the bound; every \
-         counter back to zero",
-        report.refused, report.pages, report.objects, report.own_pages, report.bound,
+         counter back to zero; {} bytes of the server's own heap stayed the server's, and a \
+         native object's record is at most {} bytes",
+        report.refused,
+        report.pages,
+        report.objects,
+        report.own_pages,
+        report.bound,
+        report.server_heap,
+        report.largest_object,
     );
 }
 

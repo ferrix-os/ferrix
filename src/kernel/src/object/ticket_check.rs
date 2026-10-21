@@ -75,6 +75,15 @@ pub(crate) struct Report {
     pub(crate) own_pages: u64,
     /// Tickets live on one end at the bound.
     pub(crate) bound: usize,
+    /// Kernel heap the server's own job was charged for during the adopted
+    /// calls that made the client's objects: its own structures, a handle
+    /// table's room (K7.md §2.3).
+    pub(crate) server_heap: u64,
+    /// The most kernel heap one native object an adopted call can make takes
+    /// for its own record (a VMO, a channel, a port, a job), which no job is
+    /// charged for as heap: the client's object limit times this bounds the
+    /// heap K7 leaves unmoved (the consultant's 2925 (1)).
+    pub(crate) largest_object: usize,
 }
 
 /// One check's world: the jobs, the processes, the channels.
@@ -434,6 +443,7 @@ fn check_adopted_charges(
     );
     let frames = (pages(client), pages(server));
     let heap = used(client, Resource::Kernel);
+    let server_heap = used(server, Resource::Kernel);
     let vmo =
         commit(world, PAGES).map_err(|_| "an adopted commit within every limit was refused")?;
     let made = as_task_of(server, || -> Result<(), Errno> {
@@ -456,6 +466,8 @@ fn check_adopted_charges(
     }
     report.pages = PAGES;
     report.objects = 4;
+    report.server_heap = used(server, Resource::Kernel).saturating_sub(server_heap);
+    report.largest_object = largest_object_record();
 
     // The server's own fresh memory, which a `vmo_read` into it faults in:
     // its frames and their page tables are the server's.
@@ -524,6 +536,22 @@ fn check_adopted_charges(
     }
     close(&world.server, vmo);
     Ok(())
+}
+
+/// The most kernel heap one native object an adopted call can make takes
+/// for its own record: a VMO, a channel's two sides and ends, a port, a job,
+/// or a ticket.
+fn largest_object_record() -> usize {
+    [
+        ferrix_kmem::arc_footprint::<crate::user::vmo::Vmo>(),
+        super::channel::heap_footprint(),
+        ferrix_kmem::arc_footprint::<super::port::Port>(),
+        ferrix_kmem::arc_footprint::<Job>(),
+        ferrix_kmem::arc_footprint::<super::ticket::Ticket>(),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0)
 }
 
 /// Case 4: after the server's `END`, the client's `END` and the client's
@@ -599,12 +627,11 @@ fn check_the_bound(world: &World, ids: &mut Vec<u64>) -> Result<usize, &'static 
     .map_err(|_| "a client could not end a live ticket")?;
     live.push(issue(&world.client, &world.client_job, client_end)?);
     ids.extend(live);
+    // Closed: every ticket ends, and gives back its object, which the last
+    // case's count of every job at zero judges.
     close(&world.client, client_end);
     close(&world.other, client_end);
     close(&world.server, server_end);
-    if used(&world.client_job, Resource::Objects) != objects {
-        return Err("a closed channel's tickets were still charged to their issuer");
-    }
     Ok(MAX_TICKETS)
 }
 
