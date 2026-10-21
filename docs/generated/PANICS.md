@@ -100,6 +100,7 @@ Causes are listed most likely first.
 | [FX-0907](#fx-0907) | a process left its speculation domain where it may not wait |
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
+| [FX-0911](#fx-0911) | the waits on a user address failed their self-check |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2458,6 +2459,34 @@ none it should.
 
 See: src/kernel/src/discovery/smbios.rs;
 src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
+
+<a id="fx-0911"></a>
+
+## FX-0911 — the waits on a user address failed their self-check
+
+`user::address_wait_check::run` (docs/microkernel/K5.md §6) drives the native
+calls `address_wait`, `address_wake`, `address_requeue` and `address_wait_any`
+between processes it builds. A wait must sleep while its word holds the value
+given and be woken by a wake of the same word, through a private key in its own
+space or a shared key by VMO and offset, whichever process and address or handle
+names it; a wake must rouse at most its count, oldest first, by bitset; a
+requeue must move waiters to a word in another bucket; a wait on many words must
+answer which; a deadline must end a wait and never early; an ending process must
+end its waits; a wait must be charged to its job and refused at its limit; and a
+bucket must give its room back. Without these, a program's locks and condition
+variables lose wakes or sleep for ever.
+
+1. `user::address_wait::list` stopped reading the word under its bucket's lock,
+   so a wake that came between the read and the listing was lost.
+2. `Key::new` or `Key::in_object` keyed a shared word by its address rather than
+   by its VMO and offset.
+3. A wake, requeue or leaving in `user::address_wait` stopped looking in the
+   bucket an entry is recorded in.
+4. The waiter's charge was dropped or the deadline not passed to the sleep.
+
+See: src/kernel/src/user/address_wait.rs;
+src/kernel/src/user/address_wait_check.rs; src/kernel/src/syscall/native.rs
+address_wait; docs/microkernel/K5.md.
 
 <a id="fx-1001"></a>
 

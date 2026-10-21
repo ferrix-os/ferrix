@@ -1647,6 +1647,35 @@ pub(crate) static STAGE13_USER_DISPATCH: Explanation = Explanation {
           src/kernel/src/syscall/seccomp.rs check; docs/SECCOMP.md §13",
 };
 
+/// For `check_address_waits` in `stages_check.rs`, when
+/// `user::address_wait_check::run` fails.
+pub(crate) static STAGE9_ADDRESS_WAIT: Explanation = Explanation {
+    code: "FX-0911",
+    title: "the waits on a user address failed their self-check",
+    meaning: "`user::address_wait_check::run` (docs/microkernel/K5.md §6) drives the native \
+              calls `address_wait`, `address_wake`, `address_requeue` and `address_wait_any` \
+              between processes it builds. A wait must sleep while its word holds the value \
+              given and be woken by a wake of the same word, through a private key in its own \
+              space or a shared key by VMO and offset, whichever process and address or handle \
+              names it; a wake must rouse at most its count, oldest first, by bitset; a requeue \
+              must move waiters to a word in another bucket; a wait on many words must answer \
+              which; a deadline must end a wait and never early; an ending process must end its \
+              waits; a wait must be charged to its job and refused at its limit; and a bucket \
+              must give its room back. Without these, a program's locks and condition variables \
+              lose wakes or sleep for ever.",
+    causes: &[
+        "`user::address_wait::list` stopped reading the word under its bucket's lock, so a \
+         wake that came between the read and the listing was lost.",
+        "`Key::new` or `Key::in_object` keyed a shared word by its address rather than by its \
+         VMO and offset.",
+        "A wake, requeue or leaving in `user::address_wait` stopped looking in the bucket an \
+         entry is recorded in.",
+        "The waiter's charge was dropped or the deadline not passed to the sleep.",
+    ],
+    see: "src/kernel/src/user/address_wait.rs; src/kernel/src/user/address_wait_check.rs; \
+          src/kernel/src/syscall/native.rs address_wait; docs/microkernel/K5.md",
+};
+
 /// For `check_smbios` in `stages_check.rs`, when `discovery::smbios_check::run`
 /// fails.
 pub(crate) static SMBIOS: Explanation = Explanation {
@@ -3447,6 +3476,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &SPECULATION_DOMAIN_LEAVE_MAY_NOT_WAIT,
     &CHECK_HOOK_LEFT_ARMED,
     &SMBIOS,
+    &STAGE9_ADDRESS_WAIT,
     &STAGE10_PCI,
     &STAGE10_DEVICES,
     &STAGE10_IOMMU,

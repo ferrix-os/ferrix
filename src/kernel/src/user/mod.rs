@@ -6,6 +6,7 @@
 //! code it does not trust.
 
 pub(crate) mod address_wait;
+pub(crate) mod address_wait_check;
 pub(crate) mod alloc_check;
 pub(crate) mod cache;
 pub(crate) mod check;

@@ -109,6 +109,10 @@ pub(super) fn check_programs() {
     // driver.
     check_native_objects();
 
+    // K5's waits on a user address, on the native calls just proved
+    // (docs/microkernel/K5.md §6).
+    check_address_waits();
+
     // What the switch gives a program back after a blocking native call,
     // and the FS base kept in the task: programs on the native calls just
     // proved (x86-64; docs/OPAQUE-KERNEL.md §9.8, 3a and 3b).
@@ -1173,6 +1177,25 @@ pub(super) fn check_native_objects() {
         "  spawn    {} programs made from a VMO and started through a handle, their ends heard; \
          {} never started, ended with their last handle",
         report.spawned, report.abandoned,
+    );
+}
+
+/// Stage 9: the waits on a user address (K5), driven through the native
+/// calls between processes the check builds.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_address_waits() {
+    let report = match user::address_wait_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_ADDRESS_WAIT,
+            "address-wait self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  addrwait {} waits woken across {} processes, by mapping and by handle, \
+         {} refusals as specified, a wake's walk {} ns per entry",
+        report.woken, report.processes, report.refusals, report.walk_ns,
     );
 }
 
