@@ -208,6 +208,13 @@ the message. A reader reads it with `channel_read_attested`, and so can
 decide on it. The kernel's own messages are stamped zero and zero, which
 attest that the kernel wrote them, not that their content is its own.
 
+*Application note (K2, 2026-10-21).* An address space is such an object:
+`MAP` maps, unmaps and protects in it, `READ` copies out of it, `EXECUTE`
+permits an executable mapping, and that needs `EXECUTE` on the VMO handle as
+well. A process's own space is reached by handle only by its creator, only
+through a handle taken with `process_space` before the process started, and
+no wider than that handle's rights (`docs/microkernel/K2.md` §2.2).
+
 **FDP_IFC.1 / FDP_IFF.1** Subset information flow control. The TSF shall
 enforce the **Address Space Separation SFP**: information flows between two
 processes only through an object both hold a handle to. No implicit flow

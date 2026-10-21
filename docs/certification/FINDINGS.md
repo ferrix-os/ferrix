@@ -1589,6 +1589,14 @@ A second way a program gets such a mapping, since 2026-10-02: `shmat` with
 writable and executable, as Linux does (`syscall/shm.rs::shmat`); option 1
 would refuse that combination too.
 
+*Note, 2026-10-21 (K2, ledger 2845 (5)).* Every mapping made by handle
+refuses writable and executable together (`docs/microkernel/K2.md` §2.4), by
+the PO's rule of 2026-09-13 that ASR-2 holds on every space mapped by
+handle. Once `linuxd` maps a Linux program's memory by handle (MICROKERNEL.md
+M5), an RWX JIT mapping is refused there, which is option 1 for Linux
+programs, unless the customer decides otherwise before M5. The product owner
+puts that on the customer's list.
+
 ### F-47 — the Security Target had no SFR dependency rationale
 **Found and closed 2026-09-27** (found by the certification review of the
 audit slice 3b, which claimed FAU_GEN.2 and so FIA_UID.1's absence).

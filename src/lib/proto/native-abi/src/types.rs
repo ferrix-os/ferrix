@@ -100,6 +100,10 @@ impl TimerSpec {
 pub const MAP_READ: u32 = 1 << 0;
 /// `vmo_map`'s protection: the mapping may also be written.
 pub const MAP_WRITE: u32 = 1 << 1;
+/// `space_map`'s and `space_protect`'s protection: instructions may be
+/// fetched from the mapping. Never with [`MAP_WRITE`] (ASR-2), and only
+/// through handles that carry `EXECUTE`.
+pub const MAP_EXECUTE: u32 = 1 << 2;
 
 /// The address waits' flag for a shared key: a word in a shared mapping is
 /// keyed by its VMO and offset, the same word in every process mapping it.
