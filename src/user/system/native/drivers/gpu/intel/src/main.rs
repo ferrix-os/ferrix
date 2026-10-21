@@ -74,6 +74,7 @@ use ferrix_rt::native::handle::{Deadline, Object, OwnedHandle};
 use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::{Bootstrap, Kernel};
 
+mod arch;
 mod display;
 mod m2;
 mod platform;
