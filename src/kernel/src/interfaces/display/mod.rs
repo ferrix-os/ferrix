@@ -59,7 +59,7 @@ use crate::claim::StillServed;
 use crate::claim::{Claims, Numbers};
 use crate::device::{self, DeviceNode, DmaShape};
 use crate::hooks::Full;
-use crate::object::channel::{ChannelMessage, Endpoint, ReadError};
+use crate::object::channel::{ChannelMessage, Endpoint, ReadError, Sender};
 use crate::object::port::Port;
 use crate::object::process::Host;
 use crate::object::{Object, Transfer};
@@ -477,7 +477,7 @@ fn write_handing(
     let bytes = message.encode().as_bytes().to_vec();
     let count = handed.len();
     if control
-        .write(bytes, count, || Ok::<Vec<Transfer>, Infallible>(handed))
+        .write(Sender::KERNEL, bytes, count, || Ok::<_, Infallible>(handed))
         .is_err()
     {
         state.gone = true;
@@ -1276,7 +1276,7 @@ fn receive(control: &Endpoint, deadline: u64) -> Option<ChannelMessage> {
 
 fn refuse(control: &Endpoint, refusal: Refusal) {
     let bytes = Message::Refused(refusal).encode().as_bytes().to_vec();
-    let _ = control.write(bytes, 0, || Ok::<Vec<Transfer>, Infallible>(Vec::new()));
+    let _ = control.write(Sender::KERNEL, bytes, 0, || Ok::<_, Infallible>(Vec::new()));
 }
 
 /// Take a HELLO, refusing it or answering READY, and publish the card.
@@ -1408,7 +1408,7 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
     let handed = vec![(Object::Port(core_port), Rights::WRITE)];
     if start
         .control
-        .write(ready, 1, || Ok::<Vec<Transfer>, Infallible>(handed))
+        .write(Sender::KERNEL, ready, 1, || Ok::<_, Infallible>(handed))
         .is_err()
     {
         state.gone = true;

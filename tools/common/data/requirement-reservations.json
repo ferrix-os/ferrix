@@ -110,13 +110,6 @@
       "purpose": "The kernel's lines start with their time as Linux's do, [    1.234567] , on the port, in dmesg and in the pstore copy (the customer's request of 2026-10-18, with the boot-time analysis)"
     },
     {
-      "ids": ["H.OBJ.19", "L.object.197-202"],
-      "owner": "mk-k6",
-      "branch": "mk/k6",
-      "date": "2026-10-19",
-      "purpose": "MICROKERNEL.md §3 K6, kernel-attested sender identity on a channel message: every write stamped by the kernel with the writer's never-reused process id and its job id at the write, never from the body; process ids allocated once and never reused; channel_read_attested and object_id; the job at the write across moves; the fast path hands over no identity and channel_write_read reveals none (consultant pre-read, ledger 2458)"
-    },
-    {
       "ids": ["H.OBJ.20", "L.user.135-144", "L.object.203-206"],
       "owner": "mk-k5",
       "branch": "mk/k5",

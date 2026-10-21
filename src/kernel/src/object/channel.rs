@@ -40,6 +40,19 @@
 //! before the close and is freed with the rest, or is refused as written to a
 //! closed peer. None is left in a closed side's queue.
 //!
+//! # Every message says who wrote it
+//!
+//! A write is stamped with its writer's [`Sender`] under the peer's inbox
+//! lock, beside the message (`docs/microkernel/K6.md`): a program's write
+//! with its process id and its job at the write, the kernel's own with
+//! [`Sender::KERNEL`]. The stamp is the writer's, never anything the message
+//! carries, and travels with the message through the queue, the slot, a
+//! put-back and the transfer of the end it was written through. The kernel's
+//! stamp says the kernel wrote the message, not that its content is the
+//! kernel's own: a control ring may pass on bytes a program gave it.
+//! `channel_write_read` answers no sender, on either path; a reader that
+//! needs one reads with `channel_read_attested`.
+//!
 //! # No cycles
 //!
 //! Two endpoints each queued in the other's inbox would keep each other alive
@@ -86,6 +99,45 @@ const LIMITS: Limits = Limits {
 /// The most bytes a message kept in an inbox's slot carries: what
 /// `channel_write_read` carries in registers.
 pub(crate) const SMALL_BYTES: usize = ferrix_native_abi::nr::CHANNEL_WRITE_READ_BYTES;
+
+/// Who wrote a message, as the kernel stamped it at the write
+/// (`docs/microkernel/K6.md` §2): the writing process's id, never given to
+/// another process, and the id of the job it was in at the write; or zero
+/// and zero for the kernel. An identity, not credentials: a process keeps
+/// its id across `execve`, a set-id one included.
+///
+/// Made only by [`Sender::of`] and [`Sender::KERNEL`], and read only by the
+/// accessors: nothing outside this module builds one from numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Sender {
+    /// The process's id, or zero for the kernel.
+    process: u64,
+    /// The job's id at the write, or zero for the kernel.
+    job: u64,
+}
+
+impl Sender {
+    /// The kernel's own writes: zero is neither a process's id nor a job's.
+    pub(crate) const KERNEL: Sender = Sender { process: 0, job: 0 };
+
+    /// A write by `process`, from its own record: its id, and its job now.
+    pub(crate) fn of(process: &crate::object::process::Process) -> Sender {
+        Sender {
+            process: process.id(),
+            job: process.job_id(),
+        }
+    }
+
+    /// The writer's process id; zero for the kernel.
+    pub(crate) fn process(&self) -> u64 {
+        self.process
+    }
+
+    /// The writer's job id at the write; zero for the kernel.
+    pub(crate) fn job(&self) -> u64 {
+        self.job
+    }
+}
 
 /// A message of at most [`SMALL_BYTES`] and no handles, held in place.
 #[derive(Debug, Clone, Copy)]
@@ -140,12 +192,13 @@ impl Small {
 /// the slot and leaves the spare where it is.
 #[derive(Debug)]
 struct Inbox {
-    /// The slot, the head when it is full.
-    small: Option<Small>,
+    /// The slot, the head when it is full, with its writer's stamp: set and
+    /// taken whole, so a slot message without one cannot exist.
+    small: Option<(Small, Sender)>,
     /// Room for the slot's message, whenever the slot is full.
     spare: Vec<u8>,
     /// Everything after it.
-    queue: MessageQueue<Transfer>,
+    queue: MessageQueue<Transfer, Sender>,
     /// The park (`docs/OPAQUE-KERNEL.md` §9.7, part 2): the one task blocked
     /// in `channel_write_read` reading this side through the fast path,
     /// whose reply a fast writer may put in its reply cell. Set only while
@@ -190,9 +243,9 @@ impl Inbox {
         self.queue.accepts(bytes, handles)
     }
 
-    /// Hold `bytes` in the slot, if they fit, nothing is waiting, and the
-    /// spare has room for them or can be made to.
-    fn put_small(&mut self, bytes: &[u8]) -> bool {
+    /// Hold `bytes`, written by `sender`, in the slot, if they fit, nothing
+    /// is waiting, and the spare has room for them or can be made to.
+    fn put_small(&mut self, bytes: &[u8], sender: Sender) -> bool {
         if !self.is_empty() {
             return false;
         }
@@ -205,7 +258,7 @@ impl Inbox {
             };
             self.spare = spare;
         }
-        self.small = Some(small);
+        self.small = Some((small, sender));
         true
     }
 
@@ -243,7 +296,7 @@ impl Inbox {
         byte_capacity: usize,
         handle_capacity: usize,
     ) -> Result<ChannelMessage, ReceiveError> {
-        if let Some(small) = self.small {
+        if let Some((small, sender)) = self.small {
             if small.len > byte_capacity {
                 return Err(ReceiveError::TooSmall {
                     bytes: small.len,
@@ -255,6 +308,7 @@ impl Inbox {
             return Ok(Message {
                 bytes,
                 handles: Vec::new(),
+                sender,
             });
         }
         self.queue.pop_fitting(byte_capacity, handle_capacity)
@@ -262,8 +316,9 @@ impl Inbox {
 
     /// The oldest message, if it is small and carries no handles, held in
     /// place. A queued one is taken out of the queue and its buffer freed.
+    /// Its stamp goes with it: `channel_write_read` answers none.
     fn pop_small(&mut self) -> Result<Small, ReceiveError> {
-        if let Some(small) = self.small.take() {
+        if let Some((small, _)) = self.small.take() {
             return Ok(small);
         }
         let (bytes, handles) = self.queue.peek_sizes().ok_or(ReceiveError::Empty)?;
@@ -294,10 +349,11 @@ impl Inbox {
     /// the message was out; that message is younger, so it moves into the
     /// queue behind the one coming back.
     fn unpop(&mut self, message: ChannelMessage) -> Result<(), ChannelMessage> {
-        if let Some(small) = self.small {
+        if let Some((small, sender)) = self.small {
             let younger = Message {
                 bytes: self.take_spare(&small),
                 handles: Vec::new(),
+                sender,
             };
             if let Err(younger) = self.queue.unpop(younger) {
                 // Still the slot's, with its room back.
@@ -328,7 +384,7 @@ impl Inbox {
 const MAX_WALK: usize = 1024;
 
 /// A message as it sits in a queue.
-pub(crate) type ChannelMessage = Message<Transfer>;
+pub(crate) type ChannelMessage = Message<Transfer, Sender>;
 
 /// Why a write did not happen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -540,8 +596,8 @@ impl Endpoint {
         self.channel.half(self.side.other())
     }
 
-    /// Queue a message for the peer, taking its handles with `take` only once
-    /// the peer's queue has room for it.
+    /// Queue a message `sender` wrote for the peer, taking its handles with
+    /// `take` only once the peer's queue has room for it.
     ///
     /// `take` runs under the peer's queue lock. It is the caller's handle
     /// table removing the handles, and it must not take any lock a queue
@@ -553,6 +609,7 @@ impl Endpoint {
     /// and removed nothing.
     pub(crate) fn write<E>(
         &self,
+        sender: Sender,
         bytes: Vec<u8>,
         handle_count: usize,
         take: impl FnOnce() -> Result<Vec<Transfer>, E>,
@@ -576,8 +633,13 @@ impl Endpoint {
             // costs it nothing: the handles leave only if the write succeeds.
             inbox.reserve().map_err(|_| WriteFailure::NoMemory)?;
             let handles = take().map_err(WriteFailure::Take)?;
+            let message = Message {
+                bytes,
+                handles,
+                sender,
+            };
             // NOALLOC: the room `reserve` made above.
-            let refused = inbox.push(Message { bytes, handles }).err();
+            let refused = inbox.push(message).err();
             peer.note(&inbox);
             let fired = refused.is_none() && trigger(&mut peer.observers.lock(), Signals::READABLE);
             // A parked reader is woken whatever became of the write: one
@@ -687,8 +749,8 @@ impl Endpoint {
         }
     }
 
-    /// Send `bytes`, at most [`SMALL_BYTES`] and no handles, held in the
-    /// peer's slot when nothing is waiting there and queued otherwise, and
+    /// Send `bytes` as `sender`, at most [`SMALL_BYTES`] and no handles, held
+    /// in the peer's slot when nothing is waiting there and queued otherwise, and
     /// wake the reader onto this processor where it is free.
     ///
     /// `channel_write_read`'s write: the round trip's half that allocates
@@ -697,7 +759,7 @@ impl Endpoint {
     /// # Errors
     ///
     /// [`WriteFailure`], never `Take`.
-    pub(crate) fn write_small(&self, bytes: &[u8]) -> Result<(), WriteFailure<()>> {
+    pub(crate) fn write_small(&self, sender: Sender, bytes: &[u8]) -> Result<(), WriteFailure<()>> {
         let peer = self.peer();
         let (fired, parked) = {
             let mut inbox = peer.inbox.lock();
@@ -711,7 +773,7 @@ impl Endpoint {
             if inbox.is_full() {
                 return Err(WriteFailure::Full);
             }
-            if !inbox.put_small(bytes) {
+            if !inbox.put_small(bytes, sender) {
                 // FALLIBLE: the queue's room, as in `write`.
                 inbox.reserve().map_err(|_| WriteFailure::NoMemory)?;
                 let mut queued =
@@ -720,6 +782,7 @@ impl Endpoint {
                 let message = Message {
                     bytes: queued,
                     handles: Vec::new(),
+                    sender,
                 };
                 // NOALLOC: the room `reserve` made above.
                 inbox.push(message).map_err(|_| WriteFailure::NoMemory)?;

@@ -47,7 +47,7 @@ use ferrix_native_abi::nr;
 use ferrix_native_abi::rights::Rights;
 use ferrix_native_abi::status;
 
-use super::channel::{Endpoint, ReadError, WriteFailure};
+use super::channel::{Endpoint, ReadError, Sender, WriteFailure};
 use super::job::KILLED_STATUS;
 use super::{Object, Transfer};
 use crate::arch;
@@ -163,7 +163,7 @@ fn call(handle: Handle, count: usize, words: [u64; 3]) -> Answer {
 
 /// Write `bytes` on `end` as `channel_write` queues them: never into the slot.
 fn queue(end: &Endpoint, bytes: &[u8]) -> Result<(), &'static str> {
-    end.write(bytes.to_vec(), 0, || {
+    end.write(Sender::KERNEL, bytes.to_vec(), 0, || {
         Ok::<Vec<Transfer>, core::convert::Infallible>(Vec::new())
     })
     .map_err(|_| "the write_read check could not queue a message")
@@ -171,7 +171,7 @@ fn queue(end: &Endpoint, bytes: &[u8]) -> Result<(), &'static str> {
 
 /// Write `bytes` on `end` as `channel_write_read` writes them.
 fn write_small(end: &Endpoint, bytes: &[u8]) -> Result<(), &'static str> {
-    end.write_small(bytes)
+    end.write_small(Sender::KERNEL, bytes)
         .map_err(|_: WriteFailure<()>| "the write_read check could not write a small message")
 }
 
@@ -673,7 +673,7 @@ fn read_in_the_process(_argument: usize) {
 fn write_from_another_processor(_argument: usize) {
     let peer = SYNC_PEER.lock().clone();
     if let Some(peer) = peer {
-        let _ = peer.write_small(b"sync");
+        let _ = peer.write_small(Sender::KERNEL, b"sync");
     }
 }
 

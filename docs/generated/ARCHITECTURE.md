@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 141 packages, 7216 elements, 217 relations. Model digest `2cf9006ee52a7be3`.
+26 files, 142 packages, 7251 elements, 217 relations. Model digest `03411180ec520f42`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -279,8 +279,9 @@ Handles, rights and the objects they name: O.CAPABILITY and ASR-3 (FDP_ACC.1, FD
 | `H.OBJ.16` | The peer of a destroyed channel end shall observe PEER_CLOSED from the moment the close returns, and what the destroyed end held shall be freed. | After one end of a channel holding a queued VMO is closed, a read and a write on the survivor are refused PEER_CLOSED, 2 of 2, and 0 frames are leaked. | `O.CAPABILITY, O.QUOTA` |
 | `H.OBJ.17` | A port registration shall queue exactly one packet, with its key and the asserted signals it asked for, when one of them is first asserted, at once if one already is. | A registration does not fire before its signal, fires once on the message that asserts it and not on a second, fires at once for a state already true, and fires when the peer closes for PEER_CLOSED, each packet with its key. | `G.7, O.CAPABILITY` |
 | `H.OBJ.18` | Every result of channel_write_read answered by the fast path shall be a result the general path gives in the same circumstances, and the fast path shall bypass no filter, audit record or speculation barrier. x86-64 only, behind ferrix.fastpath. | ipc-equiv's transcripts with the fast path on and off are the same line for line, with trips taken on and no counter moved off (`cargo xtask test-ipc-equiv`); stage 9's fast path cases hold both boots to the general path's results (the `fastcase` line); a filtered call is refused with the filter's errno. | `G.7, O.CAPABILITY` |
+| `H.OBJ.19` | Every channel message shall carry the identity of the process that wrote it and of the job that process was in at the write, written by the kernel at the write and never taken from the message or the writer's arguments, and readable by its reader with the message; a process's identity shall never be given to another process while the kernel runs. A message the kernel writes shall carry zero and zero, which attest that the kernel wrote it, not that its content is the kernel's own. The identity is the writer's, not its credentials (docs/microkernel/K6.md, MICROKERNEL.md §3 K6). | Stage 9's `sender` line: messages read with channel_read_attested carry their writer's process and job ids, which object_id confirms, whatever the body says, through the slot, either end's transfer, the writer's end and a move between jobs; the kernel's read as zero and zero; every process made has an id above every earlier one; channel_write_read answers none. Stage 8's exec check: a process's id survives its execve. Each with its negative control (K6.md §7). | `G.7, O.CAPABILITY` |
 
-18 requirements.
+19 requirements.
 
 ### Scheduling
 
@@ -4032,6 +4033,12 @@ flowchart LR
 | `L.object.170` | `theWayOutsAreShared` | — | — | — |
 | `L.object.179` | `theFastPathLetsGoOfItsEndUnmasked` | — | — | — |
 | `L.object.180` | `cpuTimeIsKeptBackOnce` | — | — | — |
+| `L.object.197` | `everyWriteIsStamped` | — | — | — |
+| `L.object.198` | `aProcessIdIsGivenOnce` | — | — | — |
+| `L.object.199` | `aReadSaysWhoWrote` | — | — | — |
+| `L.object.200` | `anIdNamesAProcessOrAJob` | — | — | — |
+| `L.object.201` | `theJobIsTheJobAtTheWrite` | — | — | — |
+| `L.object.202` | `theRoundTripAnswersNoSender` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |

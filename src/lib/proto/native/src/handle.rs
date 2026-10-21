@@ -217,6 +217,23 @@ pub trait Object<S: Syscall> {
             .make(self.syscall());
         decode_unit(value)
     }
+
+    /// `object_id`: the id of the process or job this handle names, which a
+    /// sender's identity from `channel_read_attested` is compared with
+    /// (`docs/microkernel/K6.md`). A process's is never given to another
+    /// process, and is answered after it has ended too.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::WrongType`] for any other object; [`Error::BadHandle`].
+    fn object_id(&self) -> Result<u64, Error> {
+        let mut id = [0_u8; 8];
+        let value = Call::new(nr::OBJECT_ID)
+            .value(register(self.handle()))
+            .output(&mut id)
+            .make(self.syscall());
+        decode_unit(value).map(|()| u64::from_ne_bytes(id))
+    }
 }
 
 impl<S: Syscall> Object<S> for OwnedHandle<S> {
