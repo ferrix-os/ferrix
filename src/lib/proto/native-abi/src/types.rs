@@ -45,6 +45,57 @@ pub const PACKET_INTERRUPT: u32 = 2;
 /// makes one.
 pub const PORT_FD_CLOEXEC: u64 = 1;
 
+/// `timer_create`'s clock: the monotonic counter.
+pub const TIMER_CLOCK_MONOTONIC: u64 = 0;
+/// `timer_create`'s clock: time since boot, counting a suspend. The same
+/// counter as [`TIMER_CLOCK_MONOTONIC`] while nothing suspends; kept apart so
+/// that a suspend, if one comes, changes the kernel and not its callers.
+pub const TIMER_CLOCK_BOOT: u64 = 1;
+/// `timer_set`'s option: the spec's deadline is a delay from the call.
+pub const TIMER_RELATIVE: u64 = 1;
+
+/// What `timer_set` reads through its pointer: both words whole on every
+/// architecture, ARMv7-A's 32-bit registers included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(C)]
+pub struct TimerSpec {
+    /// The deadline on the timer's clock, in nanoseconds, or with
+    /// [`TIMER_RELATIVE`] the delay to it.
+    pub deadline: u64,
+    /// How long after the deadline it may fire, in nanoseconds.
+    pub slack: u64,
+}
+
+/// The bytes of a [`TimerSpec`].
+pub const TIMER_SPEC_BYTES: usize = 16;
+
+impl TimerSpec {
+    /// The spec in `bytes`, native-endian, or `None` for too few.
+    #[must_use]
+    pub fn from_bytes(bytes: &[u8]) -> Option<TimerSpec> {
+        let word = |at: usize| {
+            bytes
+                .get(at..at + 8)
+                .and_then(|slice| <[u8; 8]>::try_from(slice).ok())
+                .map(u64::from_ne_bytes)
+        };
+        Some(TimerSpec {
+            deadline: word(0)?,
+            slack: word(8)?,
+        })
+    }
+
+    /// The spec as bytes, native-endian.
+    #[must_use]
+    pub fn to_bytes(self) -> [u8; TIMER_SPEC_BYTES] {
+        let mut bytes = [0_u8; TIMER_SPEC_BYTES];
+        let (deadline, slack) = bytes.split_at_mut(8);
+        deadline.copy_from_slice(&self.deadline.to_ne_bytes());
+        slack.copy_from_slice(&self.slack.to_ne_bytes());
+        bytes
+    }
+}
+
 /// `vmo_map`'s protection: the mapping may be read. Every mapping asks for it.
 pub const MAP_READ: u32 = 1 << 0;
 /// `vmo_map`'s protection: the mapping may also be written.
