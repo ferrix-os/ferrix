@@ -395,20 +395,23 @@ impl Display {
                 if from + bytes > buffer.length || to + bytes > screen.len {
                     break;
                 }
-                let source = (buffer.base + from) as *const u32;
-                let target = (screen.base + to) as *mut u32;
-                for column in 0..area.columns {
-                    // SAFETY: `source` is inside the buffer's read-only
-                    // mapping, which lives until its DETACH takes it from
-                    // `self`, and `target` inside the lent window mapped for
-                    // this process; both bounds-checked for the whole row
-                    // above and four-byte aligned (whole-page mappings, a
-                    // stride ATTACH validated as a multiple of four, a pitch
-                    // of 64-byte units).
-                    let pixel = unsafe { ptr::read_volatile(source.wrapping_add(column)) };
-                    // SAFETY: as above, a pixel of the mapped window.
-                    unsafe { ptr::write_volatile(target.wrapping_add(column), pixel) };
-                }
+                let source = (buffer.base + from) as *const u8;
+                let target = (screen.base + to) as *mut u8;
+                // One row as one copy, not a volatile load and store a pixel:
+                // the window is write-combining memory, which takes whole
+                // lines best, and a pixel at a time held a 1920x1200 frame
+                // to about a gigabyte a second (9.5 ms of hyprix's frame on
+                // the N150). Linux's `memcpy_toio` is a plain `memcpy` on
+                // x86 for the same reason. The writes are not elided: the
+                // window is memory outside anything the compiler can see,
+                // and the barrier below drains them to it.
+                //
+                // SAFETY: `source` is inside the buffer's read-only mapping,
+                // which lives until its DETACH takes it from `self`, and
+                // `target` inside the lent window mapped for this process;
+                // both bounds-checked for the whole row above, and the two
+                // mappings are different memory, so they do not overlap.
+                unsafe { ptr::copy_nonoverlapping(source, target, bytes) };
             }
         }
         ferrix_rt::device_barrier();
