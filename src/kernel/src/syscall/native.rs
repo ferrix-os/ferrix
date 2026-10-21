@@ -3099,9 +3099,8 @@ fn space_map(
     if write {
         on_vmo = on_vmo | Rights::WRITE;
     }
-    if execute {
-        on_vmo = on_vmo | Rights::EXECUTE;
-    }
+    // `EXECUTE` on the VMO handle is the ceiling's to require: an executable
+    // mapping past it is refused by the space, `ACCESS_DENIED` as any right.
     let (vmo, held) = process.with_handles(|table| vmo_held(table, vmo, on_vmo))?;
     let offset = read_u64(process, offset_at)?;
     let flags = VmaFlags {
