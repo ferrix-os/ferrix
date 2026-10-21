@@ -12,11 +12,11 @@
   ],
   "reservations": [
     {
-      "ids": ["L.sched.86-89"],
+      "ids": ["L.sched.86-89", "H.SCHED.15"],
       "owner": "debug-s1",
       "branch": "debug-s1",
       "date": "2026-10-21",
-      "purpose": "docs/DEBUG.md S1: a view of a task that is not running, read without a fault from its kernel stack -- the system call it is blocked in (number, arguments, user stack and instruction pointer) or the trap it waits in, and its kernel call chain as link-time addresses -- for /proc/<pid>/task/<tid>/syscall, wchan and stack"
+      "purpose": "docs/DEBUG.md S1: a view of a task that is not running, read without a fault from its kernel stack -- the system call it is blocked in (number, arguments, user stack and instruction pointer) or the trap it waits in, and its kernel call chain as link-time addresses -- for /proc/<pid>/task/<tid>/syscall, wchan and stack; H.SCHED.15 their parent, a non-running task reportable from outside without fault or added work (consultant design OK IF, ledger 2831, condition 5)"
     },
     {
       "ids": ["L.console.46-48"],
