@@ -242,7 +242,9 @@ pub fn sync_signal<S: Syscall>(
 
 /// `chardev_sync_resolve`: the cookie of the fence the waiting program's
 /// descriptor `fd` names, if this control made it, and whether it is
-/// signalled.
+/// signalled. The kernel's own signalled fence, which no control made (what
+/// a dmabuf with an empty fence slot exports), resolves as signalled with
+/// cookie 0.
 ///
 /// # Errors
 ///

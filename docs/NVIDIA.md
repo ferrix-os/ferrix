@@ -871,8 +871,12 @@ before it commits the buffer, so hyprix receives finished frames.
      * `CHARDEV_SYNC_SIGNAL(control, cookie, status)` is asynchronous,
        made by the control and not tied to a request, and works once;
      * `CHARDEV_SYNC_RESOLVE(request, fd)` returns the cookie and state
-       only for a `sync_file` this same live control made. Anything else
-       gets `BAD_HANDLE`.
+       only for a `sync_file` this same live control made, and, since
+       2026-10-21, the kernel's own signalled fence as signalled with
+       cookie 0: no control made it, it is what a dmabuf with an empty
+       slot exports (K5), and Linux imports that stub into a syncobj as
+       any sync file. Anything else, another control's fence or a dead
+       one's included, gets `BAD_HANDLE`.
    * **State.** A `sync_file` is unsignalled, signalled, or signalled with
      an error (negative errno).
    * **Poll.** `POLLIN` once signalled, as Linux.

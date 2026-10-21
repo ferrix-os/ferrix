@@ -694,6 +694,27 @@ M1 and M2, without the box.
 
 ## 10. Where it stands
 
+**DRI3 and Present through yserver, and an empty slot's fence imported
+(2026-10-21).** yserver's card-less Wayland server gives X clients DRI3 on
+the render node `YSERVER_DRI_RENDER_NODE` names, while it renders on
+lavapipe, so anv presents with Mesa's DRI3 WSI rather than the software
+copy (`MESA_VK_WSI_DEBUG=sw`), and Present's completion events move the
+present ids: `d3d11-triangle` through DXVK on anv over the fake back end
+presented 2250 frames in 30 s at the Present clock's 75 Hz with neither
+`MESA_VK_WSI_DEBUG=sw` nor `dxgi.syncInterval = 0`, and `vkcube` its 300.
+Its first `vkAcquireNextImageKHR` had failed `VK_ERROR_UNKNOWN`: Mesa
+imports each image's implicit fence, `EXPORT_SYNC_FILE` of its dmabuf, into
+the acquire semaphore (`wsi_create_sync_for_dma_buf_wait`), and an empty
+slot exports the kernel's signalled fence, which `chardev_sync_resolve`
+refused as no fence of the driver's, so `SYNCOBJ_FD_TO_HANDLE` answered
+`EINVAL`. Resolve now answers that fence, and only it, as signalled with
+cookie 0 (`interfaces/chardev/sync.rs`, checked at boot in S9).
+`gem::SCANOUT` stays `false`: yserver copies a client's buffer into its own
+image, by lavapipe's import where the pitches agree and from a read-only
+mapping where they do not, and hands hyprix `wl_shm`, so no client buffer
+reaches a plane. It turns `true` when a buffer is handed to a plane, by
+hyprix's direct scan-out or by a Present flip.
+
 **M5's box run prepared: the launcher on lavapipe, only the game on anv
 (2026-10-21, `tools/common/n150/endfield/`).** On the box the GRYPHLINK
 launcher froze after its first frame on anv and works on lavapipe, so the
@@ -846,8 +867,8 @@ part has an LLC the GPU snoops (`gem::HAS_LLC`, which `GETPARAM`'s
 `HAS_LLC` reports; every Gen12 integrated part), the object is at the LLC's
 PAT index (`I915_CACHE_LLC`, index 0, a new object's), nothing can take an
 object to a display plane (`gem::SCANOUT` is `false`: the node is
-render-only, yserver has no DRI3, the N150's plane scans the firmware's
-framebuffer), and the object was never exported as a dmabuf. An object set
+render-only, yserver's DRI3 copies client buffers and never flips them
+(§10, 2026-10-21), the N150's plane scans the firmware's framebuffer), and the object was never exported as a dmabuf. An object set
 to `CACHING_NONE` or `CACHING_DISPLAY`, or exported, is mapped WC as asked,
 and K6's rule (one mode per object, the first) holds for it. An object
 served so keeps its PAT index: a later `SET_CACHING` to another level is

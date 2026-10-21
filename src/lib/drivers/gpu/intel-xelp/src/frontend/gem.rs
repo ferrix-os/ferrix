@@ -37,10 +37,13 @@ const PAT_WB: u8 = 0;
 pub const HAS_LLC: bool = true;
 
 /// Whether anything can hand an object of this driver to a display plane.
-/// Nothing can: the node is render-only (no KMS, no card node), yserver has
-/// no DRI3 to receive a buffer, and the N150's plane scans the firmware's
-/// framebuffer. When DRI3 or direct scan-out lands, this turns `true` (or
-/// becomes per object) and every object that may reach a plane is mapped
+/// Nothing can: the node is render-only (no KMS, no card node), yserver's
+/// DRI3 copies a client's buffer into its own image and hands the
+/// compositor `wl_shm`, never the buffer (`docs/INTEL-GPU.md` §10), and the
+/// N150's plane scans the firmware's framebuffer. When a buffer can reach a
+/// plane -- a card node, a linux-dmabuf hand-off to hyprix, hyprix's direct
+/// scan-out or a Present flip -- this turns `true` (or becomes per object)
+/// and every object that may reach a plane is mapped
 /// write-combining as asked: the display engine does not snoop the CPU's
 /// caches, so a write-back mapping's writes could stay in them.
 pub const SCANOUT: bool = false;

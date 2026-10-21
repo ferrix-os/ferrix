@@ -62,8 +62,11 @@
 //!   `ALREADY_BOUND`; install for an answered, an abandoned and an unknown
 //!   request is refused; `MAX_SYNC_FILES` fences through the product's
 //!   `make` and the next `LIMIT_REACHED`; resolve gives the cookie and
-//!   whether it is signalled, and refuses no descriptor, a dmabuf, another
-//!   driver's resolve and the next driver's; another driver's signal is
+//!   whether it is signalled, gives the kernel's own signalled fence (an
+//!   empty dmabuf slot's export) as signalled with cookie 0 (a fence of a
+//!   control that is gone, its last reference dropped, is never taken for
+//!   it), and refuses no
+//!   descriptor, a dmabuf, another driver's resolve and the next driver's; another driver's signal is
 //!   refused; one fence is signalled once with 0 and wakes its queue, one
 //!   past a short deadline reads `ETIMEDOUT` and refuses the late signal;
 //!   `SYNC_IOC_FILE_INFO` answers as Linux and `MERGE` is `ENOTTY`; `read`
@@ -314,6 +317,9 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     fenced_after_death(&program, &fenced, &mut report)?;
     after_death(&driver, first, &core, &program, &kept, &mut report)?;
     stale_fence_refused(&driver, first, &core, &program, fence, &mut report)?;
+    // The dead control's last reference goes; its fence keeps its maker.
+    drop(core);
+    gone_control_fence_has_a_maker(&program, fence)?;
     fence_outlived(&program, fence)?;
     outlived(&program, &kept)?;
     name_outlived(&program, kept_name, &mut report)?;
@@ -1852,6 +1858,7 @@ fn fences(
         return Err("a descriptor that is no fence resolved");
     }
     report.sync_refusals += 1;
+    kernel_fence_resolves(side, program, &resolve)?;
     signalled_once(program, once, &signal, &resolve, report)?;
     let late = timed_out(program, &install, &signal)?;
     report.sync_refusals += 1;
@@ -1871,6 +1878,38 @@ fn fences(
         return Err("a control counted other than one unsignalled fence");
     }
     Ok(kept)
+}
+
+/// The kernel's own signalled fence, what an empty dmabuf slot exports,
+/// resolves as signalled with cookie 0, as Linux imports its stub (S9).
+fn kernel_fence_resolves(
+    side: &Side,
+    program: &Side,
+    resolve: &dyn Fn(i32) -> Result<usize, Errno>,
+) -> Result<(), &'static str> {
+    let stub = super::sync::signalled().map_err(|_| "the kernel's signalled fence was not made")?;
+    let stub = super::sync::descriptor(&program.process, stub, true)
+        .map_err(|_| "the kernel's signalled fence got no descriptor")?;
+    side.put(BUFFER, &u64::MAX.to_ne_bytes())?;
+    let resolved = resolve(stub);
+    close_fd(&program.process, stub)?;
+    if resolved != Ok(1) || side.get(BUFFER, 8)? != 0u64.to_ne_bytes() {
+        return Err("the kernel's signalled fence did not resolve as signalled with cookie 0");
+    }
+    Ok(())
+}
+
+/// A fence whose control is gone, the control's last reference dropped,
+/// still has a maker: it is never taken for the kernel's own, which resolve
+/// answers for any control (S9).
+fn gone_control_fence_has_a_maker(program: &Side, fd: i32) -> Result<(), &'static str> {
+    let file = crate::syscall::fd::file(&program.process, crate::syscall::fd::arg(fd as u64))
+        .map_err(|_| "the dead control's fence has no descriptor")?;
+    let fence = super::sync::of(file.io()).ok_or("the dead control's descriptor is no fence")?;
+    if fence.made_by_none() {
+        return Err("a fence of a control that is gone read as the kernel's own");
+    }
+    Ok(())
 }
 
 /// A driver's deadline of 0 is the default, one past the maximum the

@@ -136,6 +136,14 @@ impl SyncFile {
         core::ptr::eq(self.control.as_ptr(), Arc::as_ptr(control))
     }
 
+    /// Whether no control made it: the kernel's own fence, signalled from
+    /// its making ([`signalled`]), which is what a dmabuf whose slot holds
+    /// nothing exports. A control that has gone is not this: its fences
+    /// keep a weak reference to it, never the empty one.
+    pub(super) fn made_by_none(&self) -> bool {
+        self.control.ptr_eq(&Weak::new())
+    }
+
     /// Its status at `now`: `None` while unsignalled, else 0 or a negative
     /// errno and when. A passed deadline is `ETIMEDOUT`, whether or not the
     /// thread has signalled it yet (S4).
@@ -484,6 +492,16 @@ fn take(control: &Control, which: impl Fn(u64, *const SyncFile) -> bool) -> Opti
 /// of the fence the waiting program's descriptor names, written to `cookie`
 /// in the driver, if this same control made it; answers 1 if it is
 /// signalled, 0 if not.
+///
+/// The kernel's own signalled fence, which no control made
+/// ([`SyncFile::made_by_none`]), resolves too: as signalled, with cookie 0.
+/// It is what `DMA_BUF_IOCTL_EXPORT_SYNC_FILE` gives for a dmabuf whose slot
+/// holds nothing, and Linux imports that stub into a syncobj as any other
+/// sync file. Mesa's WSI does exactly that at every `vkAcquireNextImageKHR`
+/// with a semaphore (`wsi_create_sync_for_dma_buf_wait`), so without it the
+/// first acquire of a DRI3 swapchain image failed `VK_ERROR_UNKNOWN`. It
+/// names no driver, no claim and nothing to wait for. Any other control's
+/// fence, live or of a control that has gone, is still refused.
 pub(crate) fn resolve(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, Errno> {
     let [handle, id, descriptor, out, ..] = *registers;
     let control = super::control_of(caller, handle)?;
@@ -491,12 +509,18 @@ pub(crate) fn resolve(caller: &dyn Host, registers: &[u64; 6]) -> Result<usize, 
     super::begin_copy(&request)?;
     let found = crate::syscall::fd::file(&request.client, crate::syscall::fd::arg(descriptor))
         .ok()
-        .and_then(|file| of(file.io()))
-        .filter(|fence| fence.made_by(&control));
+        .and_then(|file| of(file.io()));
     super::copy_done(&request);
     let fence = found.ok_or(status::BAD_HANDLE)?;
-    let signalled = fence.status(crate::timer::now_nanos()).is_some();
-    uaccess::copy_to_user(caller.core().space(), out, &fence.cookie().to_ne_bytes())
+    let now = crate::timer::now_nanos();
+    let (cookie, signalled) = if fence.made_by(&control) {
+        (fence.cookie(), fence.status(now).is_some())
+    } else if fence.made_by_none() && fence.status(now).is_some() {
+        (0, true)
+    } else {
+        return Err(status::BAD_HANDLE);
+    };
+    uaccess::copy_to_user(caller.core().space(), out, &cookie.to_ne_bytes())
         .map_err(|_| status::FAULT)?;
     Ok(usize::from(signalled))
 }

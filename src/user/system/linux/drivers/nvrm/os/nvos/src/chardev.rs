@@ -397,7 +397,9 @@ pub extern "C" fn nvos_chardev_sync_signal(cookie: u64, status: i32) -> i32 {
 
 /// The cookie of the fence the waiting program's descriptor `fd` names, for
 /// request `id`, into `cookie`, if this control made it: 1 if it is
-/// signalled, 0 if not, or a negative errno.
+/// signalled, 0 if not, or a negative errno. The kernel's own signalled
+/// fence (an empty dmabuf slot's export) answers 1 with cookie 0, which a
+/// caller takes as complete and never looks up.
 ///
 /// # Safety
 ///

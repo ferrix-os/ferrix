@@ -93,7 +93,9 @@ pub trait Host<M> {
     fn sync_install(&mut self, request: u64, fence: u64, cloexec: bool) -> Result<i32, Errno>;
 
     /// The cookie of the sync file the program's `fd` names, if this
-    /// driver made it, and whether it is signalled.
+    /// driver made it, and whether it is signalled. The kernel's own
+    /// signalled fence (an empty dmabuf slot's export) is signalled with
+    /// cookie 0.
     ///
     /// # Errors
     ///
