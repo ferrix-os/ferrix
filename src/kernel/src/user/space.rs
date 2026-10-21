@@ -680,9 +680,11 @@ fn file_placement(
 
 /// Copies of the native-object set and the file table a forked child
 /// inherits, made fallibly (finding F-23).
-fn inherited(
-    inner: &Inner,
-) -> Result<(BTreeMap<u64, Ceiling>, BTreeMap<u64, FileMapping>), fallible::AllocError> {
+/// What [`inherited`] copies: the ceilings of the native objects and the
+/// file table.
+type Inherited = (BTreeMap<u64, Ceiling>, BTreeMap<u64, FileMapping>);
+
+fn inherited(inner: &Inner) -> Result<Inherited, fallible::AllocError> {
     let mut native = BTreeMap::new();
     for (&id, &ceiling) in &inner.native {
         let _ = fallible::insert(&mut native, id, ceiling)?;
@@ -2986,6 +2988,28 @@ impl AddressSpace {
         Ok(at)
     }
 
+    /// [`AddressSpace::map_by_handle`] with the ceiling `flags` themselves
+    /// set and never executable: what `vmo_map`'s callers inside the kernel
+    /// map with, a chardev driver's shared VMO among them.
+    ///
+    /// # Errors
+    ///
+    /// As [`AddressSpace::map_by_handle`]: an executable mapping is refused.
+    pub(crate) fn map_object(
+        &self,
+        at: Option<u64>,
+        len: u64,
+        vmo: Arc<Vmo>,
+        offset: u64,
+        flags: VmaFlags,
+    ) -> Result<u64, SpaceError> {
+        let ceiling = Ceiling::Handle {
+            write: flags.write,
+            execute: false,
+        };
+        self.map_by_handle(at, len, vmo, offset, flags, ceiling)
+    }
+
     /// Map `len` bytes of `vmo`, from byte `offset`, at `at` or wherever there
     /// is room: what `vmo_map` and `space_map` do. `ceiling` is what the VMO's
     /// handle allowed (`docs/microkernel/K2.md` §2.3).
@@ -3014,7 +3038,7 @@ impl AddressSpace {
     /// pages, a range past the object's end, or one that overlaps a mapping;
     /// [`SpaceError::NotUserRange`] outside the user half; and
     /// [`SpaceError::OutOfMemory`] if no free range is long enough.
-    pub(crate) fn map_object(
+    pub(crate) fn map_by_handle(
         &self,
         at: Option<u64>,
         len: u64,

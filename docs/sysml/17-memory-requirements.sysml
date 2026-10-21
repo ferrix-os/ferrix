@@ -2560,8 +2560,8 @@ package FerrixMemoryRequirements {
                 vmo_map's regions keep refusing mprotect and mremap (the native
                 check's vmo_map case).";
             attribute :>> parent = "H.MEM.24";
-            attribute :>> unit = ("user::space::AddressSpace::map_object",
-                "user::space::Ceiling::admits");
+            attribute :>> unit = ("user::space::AddressSpace::map_by_handle",
+                "user::space::AddressSpace::map_object", "user::space::Ceiling::admits");
         }
         requirement <'L.user.159'> noRegionByHandleIsWritableAndExecutable : ItemLowLevel {
             attribute :>> statement = "The address space shall refuse, under its own
@@ -2575,7 +2575,7 @@ package FerrixMemoryRequirements {
                 execute is allowed; the user-root sweep counts L leaves, E > 0
                 executable, 0 both (the `space` line).";
             attribute :>> parent = ("H.MEM.24", "H.MEM.4");
-            attribute :>> unit = ("user::space::AddressSpace::map_object",
+            attribute :>> unit = ("user::space::AddressSpace::map_by_handle",
                 "user::space::AddressSpace::protect_by_handle",
                 "user::space::Ceiling::admits", "mm::check::sweep_user_root",
                 "user::space::AddressSpace::with_root_held");

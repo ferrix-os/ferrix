@@ -312,9 +312,7 @@ fn cases(setup: &Setup) -> Result<Report, &'static str> {
     protect_within_the_ceiling(&scratch, space, &spaces, &mut report)?;
     each_call_needs_its_right(&scratch, space, &mut report)?;
     let child_space = a_created_process(setup, &scratch, &mut report)?;
-    let mut roots = Vec::new();
-    roots.push(spaces);
-    roots.push(child_space);
+    let roots = vec![spaces, child_space];
     for swept in &roots {
         let wx = crate::mm::check::sweep_user_root(swept).map_err(
             |_| "space self-check failed: a by-handle space holds a leaf writable and executable",
@@ -514,7 +512,7 @@ fn write_and_execute_refused(
         ..VmaFlags::READ
     };
     if held
-        .map_object(
+        .map_by_handle(
             Some(AT_BOTH),
             PAGE_SIZE,
             Arc::clone(&vmo),
@@ -531,7 +529,7 @@ fn write_and_execute_refused(
     }
     report.refusals += 1;
     let _ = held
-        .map_object(
+        .map_by_handle(
             Some(AT_BOTH),
             PAGE_SIZE,
             vmo,
@@ -592,7 +590,7 @@ fn protect_within_the_ceiling(
         report,
     )?;
     for protection in [MAP_READ, MAP_READ | MAP_WRITE] {
-        protect(AT_RW, protection)
+        let _ = protect(AT_RW, protection)
             .map_err(|_| "space self-check failed: a protection within its ceiling was refused")?;
         report.changes += 1;
     }
@@ -668,7 +666,7 @@ fn each_call_needs_its_right(
     if read(space, edge, 16) != Ok(8) {
         return Err("space self-check failed: a read across a mapping's end was not short");
     }
-    call(nr::SPACE_UNMAP, &[reg(space), AT_RO, PAGE_SIZE])
+    let _ = call(nr::SPACE_UNMAP, &[reg(space), AT_RO, PAGE_SIZE])
         .map_err(|_| "space self-check failed: space_unmap failed")?;
     report.changes += 1;
     refused(
@@ -779,8 +777,22 @@ fn a_created_process(
 
     // Who pays: a page the by-handle read faults in is the owner's.
     owner_pays(setup, scratch, full, report)?;
+    after_the_start(scratch, child, reader, report)?;
+    let _ = call(nr::HANDLE_CLOSE, &[reg(watcher)]);
+    *CHILD.lock() = Some((child, full));
+    Ok(child_space)
+}
 
-    call(nr::PROCESS_START, &[reg(child), 0])
+/// Case 6 after the start: `process_space` is refused, and the `READ`-only
+/// handle from before it reads the running child and maps nothing.
+fn after_the_start(
+    scratch: &Scratch<'_>,
+    child: Handle,
+    reader: Handle,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let same = u64::from(SAME_RIGHTS);
+    let _ = call(nr::PROCESS_START, &[reg(child), 0])
         .map_err(|_| "space self-check failed: the child could not be started")?;
     refused(
         call(nr::PROCESS_SPACE, &[reg(child), same]),
@@ -810,11 +822,10 @@ fn a_created_process(
         "space self-check failed: a READ-only space handle mapped into a running child",
         report,
     )?;
-    for closing in [vmo, reader, watcher] {
+    for closing in [vmo, reader] {
         let _ = call(nr::HANDLE_CLOSE, &[reg(closing)]);
     }
-    *CHILD.lock() = Some((child, full));
-    Ok(child_space)
+    Ok(())
 }
 
 /// The child's process handle and its full space handle, from case 6 to
@@ -899,7 +910,7 @@ fn a_running_childs_text_unmapped(
         .take()
         .ok_or("space self-check failed: no child to unmap")?;
     let text = image::ENTRY & !(PAGE_SIZE - 1);
-    call(nr::SPACE_UNMAP, &[reg(full), text, PAGE_SIZE])
+    let _ = call(nr::SPACE_UNMAP, &[reg(full), text, PAGE_SIZE])
         .map_err(|_| "space self-check failed: a running child's text could not be unmapped")?;
     report.changes += 1;
     let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);

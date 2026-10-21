@@ -2956,7 +2956,7 @@ fn vmo_map(
     let at = (address != 0).then_some(address);
     let mapped = process
         .space()
-        .map_object(at, length, vmo, offset, flags, ceiling)
+        .map_by_handle(at, length, vmo, offset, flags, ceiling)
         .map_err(space_status)?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
 }
@@ -3117,7 +3117,7 @@ fn space_map(
     let _layout = target.space().layout();
     let mapped = target
         .space()
-        .map_object(at, length, vmo, offset, flags, ceiling)
+        .map_by_handle(at, length, vmo, offset, flags, ceiling)
         .map_err(space_status)?;
     usize::try_from(mapped).map_err(|_| status::INVALID_ARGS)
 }
