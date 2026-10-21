@@ -3283,7 +3283,7 @@ fn address_wait_any(caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
     if flags != 0 || count == 0 || count > ADDRESS_WAIT_ANY_MAX || words_at == 0 {
         return Err(status::INVALID_ARGS);
     }
-    let size = core::mem::size_of::<AddressWord>();
+    let size = size_of::<AddressWord>();
     let mut vector: Vec<u8> =
         fallible::try_filled(0, count * size).map_err(|_| status::NO_MEMORY)?;
     uaccess::copy_from_user(process.space(), words_at, &mut vector).map_err(fault)?;

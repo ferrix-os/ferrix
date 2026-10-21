@@ -74,7 +74,7 @@
 //!
 //! # Many words at once
 //!
-//! A waiter may sleep on up to [`WAIT_ANY_MAX`] words until any one of them
+//! A waiter may sleep on up to 128 words (its callers' bound) until any one of them
 //! is woken, and is answered which (`L.user.140`). It is one [`Sleeper`] with
 //! one entry per word -- its *slot* -- each listed in its own key's bucket.
 //! A word that no longer holds its value unlists every slot listed so far,
@@ -105,9 +105,6 @@ use crate::sync::SpinLock;
 use crate::syscall::uaccess;
 use crate::user::space::AddressSpace;
 use crate::user::vmo::Vmo;
-
-/// The most words one wait may sleep on: Linux's `FUTEX_WAITV_MAX`.
-pub(crate) const WAIT_ANY_MAX: usize = 128;
 
 /// A bitset that matches every waiter.
 pub(crate) const MATCH_ANY: u32 = 0xFFFF_FFFF;
