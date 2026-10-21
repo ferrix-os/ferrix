@@ -312,7 +312,7 @@ together with every job beneath it,** can use **simultaneously**.
 programs: their frames, and -- since 2026-09-26 (F-37) -- the kernel heap
 the Linux personality holds for them, counted in bytes against the same
 limit, as Linux counts kernel memory against a memory cgroup's. Kernel
-memory held once per task (a kernel stack, a futex waiter) is bounded through
+memory held once per task (a kernel stack) is bounded through
 the task quota, and a few tables the machine shares carry fixed bounds of
 their own (§9.7). "CPU time", which the claim named until 2026-09-26, is not quota'd as
 a maximum: the TSF shares a contended processor between jobs in proportion to

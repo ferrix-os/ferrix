@@ -2541,4 +2541,151 @@ package FerrixMemoryRequirements {
             attribute :>> unit = "user::space::AddressSpace::map_code_page";
         }
     }
+
+    package AddressWaits {
+        doc /* K5 of docs/MICROKERNEL.md section 3, docs/microkernel/K5.md:
+             * the core's one table of waits on a user address, which the
+             * native calls address_wait and its family and the load ring's
+             * futex both answer from. The consultant's OK IF (1)-(8), ledger
+             * line 2498. Checks: user::address_wait_check, stage 9's
+             * `addrwait` line; the load ring's futex checks stay as the
+             * regression gate for Linux. */
+
+        requirement <'L.user.135'> aWordIsKeyedByItsSpaceOrItsObject : ItemLowLevel {
+            attribute :>> statement = "Key::new shall key a word by its address space
+                and user address, unless shared is asked for and a shared region
+                holds the word, when it shall key it by the region's VMO and the
+                word's byte offset in it; Key::in_object shall key a word named by a
+                VMO and an offset by the same VMO and offset; and the bucket a key
+                is listed in shall be a hash of it under a key seed sets from the
+                boot's random bytes.";
+            attribute :>> criterion = "A wait through a shared mapping in one process
+                is found by a shared wake through another process's mapping at
+                another address, and by a wake by handle from a process with no
+                mapping, and not by a private wake (the `addrwait` line; controls C2
+                and C3, the shared key by address and the handle's key on another
+                offset, fail it).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::Key::new",
+                "user::address_wait::Key::in_object", "user::address_wait::Key::bucket",
+                "user::address_wait::seed");
+        }
+        requirement <'L.user.136'> noWakeIsLost : ItemLowLevel {
+            attribute :>> statement = "list shall read a wait's word and put the
+                waiter on the table under one hold of the lock of the key's bucket,
+                listing nothing when the word does not hold the value given; a wake
+                shall look under the same lock.";
+            attribute :>> criterion = "A wait on a changed word answers SHOULD_WAIT and
+                leaves nothing listed; a listed waiter is woken by one wake of its
+                word and answers 0 (the `addrwait` line; controls C1 and C4 fail
+                it).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::list",
+                "user::address_wait::wait_on");
+        }
+        requirement <'L.user.137'> theReadUnderTheLockNeverFaults : ItemLowLevel {
+            attribute :>> statement = "The read of a word under a bucket's lock shall
+                neither fault, fill nor commit a page: a page not there shall make
+                the caller let go of the lock, read the word with nothing held, and
+                read again; a page of a VMO never committed that has nothing to fill
+                it from shall read as zero and stay uncommitted.";
+            attribute :>> criterion = "A wait by handle on a word in a VMO page never
+                committed reads zero and leaves the VMO's committed pages as they
+                were (the `addrwait` line).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::read_word",
+                "user::address_wait::read_present_word");
+        }
+        requirement <'L.user.138'> aWakeTakesTheOldestByItsBitset : ItemLowLevel {
+            attribute :>> statement = "wake shall rouse at most its limit of waiters
+                on its key whose bitset shares a bit with its own, oldest first, none
+                for a limit of zero, take a stale entry of a waiter already woken off
+                without counting it, take entries off in rounds of at most 32 per
+                hold of the lock, and drop them after it.";
+            attribute :>> criterion = "Of three waiters, a wake of zero rouses none, a
+                wake of two the two oldest, a wake whose bitset shares no bit with
+                the third none and one that shares a bit the third; a wake over 1,024
+                dormant entries of one bucket rouses none and is timed (the
+                `addrwait` line).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::wake",
+                "user::address_wait::rouse", "user::address_wait::Sleeper::rouse");
+        }
+        requirement <'L.user.139'> aRequeueMovesAcrossBuckets : ItemLowLevel {
+            attribute :>> statement = "requeue shall take both buckets' locks, the
+                lower-numbered first; with a compared word, read it under both locks
+                and move nothing if it holds another value; make the room every
+                entry that may move needs before taking any off, letting go of both
+                locks to allocate it; and move each entry onto the target's bucket,
+                recording the bucket in its waiter.";
+            attribute :>> criterion = "Two waiters on a word are moved by a requeue
+                to a word in another bucket and woken there by a wake of two; a
+                compared requeue of a changed word answers SHOULD_WAIT and moves
+                none (the `addrwait` line; control C5 fails it).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::requeue",
+                "user::address_wait::take_and_move");
+        }
+        requirement <'L.user.140'> aWaitOnManyWordsAnswersWhich : ItemLowLevel {
+            attribute :>> statement = "wait_on shall list one entry per word, answer
+                the index of the word whose wake took the waiter, and take every
+                entry off the table before it returns, however it ends.";
+            attribute :>> criterion = "A wait on three words woken through the second
+                answers 1 and leaves no entry on any of the three (the `addrwait`
+                line).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::wait_on",
+                "user::address_wait::leave");
+        }
+        requirement <'L.user.141'> aDeadlineEndsAWaitNeverEarly : ItemLowLevel {
+            attribute :>> statement = "wait_on shall end a wait with TimedOut once its
+                absolute CLOCK_MONOTONIC deadline has passed and not before, sleeping
+                on the scheduler's own deadline and no timer of its own; a waiter
+                woken answers woken even when its deadline has also passed.";
+            attribute :>> criterion = "A wait whose deadline has passed answers
+                TIMED_OUT at once; a wait 5 ms long answers TIMED_OUT no sooner than
+                5 ms after it began (the `addrwait` line; control C7 fails it).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::wait_on",
+                "user::address_wait::sleep");
+        }
+        requirement <'L.user.142'> anEndingCallerLeaves : ItemLowLevel {
+            attribute :>> statement = "wait_on shall end a wait with Interrupted once
+                the caller's personality says it must leave, and leave nothing of it
+                on the table.";
+            attribute :>> criterion = "A waiter whose process is killed answers EINTR
+                and is not listed (the `addrwait` line).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = "user::address_wait::wait_on";
+        }
+        requirement <'L.user.143'> aWaitOutlivesItsMapping : ItemLowLevel {
+            attribute :>> statement = "A listed wait shall stay listed when the
+                mapping of its word is unmapped, its shared key holding its VMO; a
+                wait on an address no region maps shall answer Fault and list
+                nothing.";
+            attribute :>> criterion = "A waiter by mapping whose mapping is unmapped
+                stays listed and is woken by a wake by handle; a wait on the
+                unmapped address answers FAULT (the `addrwait` line).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = ("user::address_wait::Key::new",
+                "user::address_wait::read_word");
+        }
+        requirement <'L.user.144'> aWaiterIsChargedAndBucketsShrink : ItemLowLevel {
+            attribute :>> statement = "wait_on shall charge a waiter, its bucket
+                records and one entry's room per word to the payer's job before
+                anything is listed, refusing with NoMemory and listing nothing when
+                the job's limit refuses it, and give the charge back when the waiter
+                is dropped; a bucket shall grow and shrink only by a vector
+                allocated and freed with no bucket's lock held, and keep at most four
+                times its entries' room above MIN_ROOM.";
+            attribute :>> criterion = "A wait in a job with no memory to spare
+                answers NO_MEMORY while a sibling job's goes on; a sleeping waiter is
+                charged to its job and the charge is gone once it returns; a bucket
+                of 1,024 dormant entries gives its room back once they leave (the
+                `addrwait` line; control C6 fails it).";
+            attribute :>> parent = ("H.OBJ.20", "H.QUOTA.2");
+            attribute :>> unit = ("user::address_wait::wait_on",
+                "user::address_wait::grow", "user::address_wait::shrink");
+        }
+    }
 }

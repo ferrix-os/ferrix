@@ -192,7 +192,7 @@ impl Key {
     /// The key for the word `offset` bytes into `object`: the key a wait by
     /// address gets for the same byte through any shared mapping of it.
     pub(crate) fn in_object(object: Arc<Vmo>, offset: u64) -> Key {
-        Key::Shared { object, offset }
+        Key::Shared { offset, object }
     }
 
     /// The bucket of [`TABLE`] this key's waiters are listed in: the space or
@@ -325,7 +325,7 @@ type With = fn(&Entry) -> bool;
 
 /// [`With`] for a real wake.
 fn rouse_entry(entry: &Entry) -> bool {
-    entry.sleeper.rouse(entry.slot)
+    Sleeper::rouse(&entry.sleeper, entry.slot)
 }
 
 /// How long a wait sleeps between looks of its own: a second, since every

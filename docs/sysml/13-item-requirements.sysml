@@ -451,6 +451,23 @@ package FerrixItemRequirements {
                 line); a filtered call is refused with the filter's errno.";
             attribute :>> parent = ("G.7", "O.CAPABILITY");
         }
+        requirement <'H.OBJ.20'> aWaitOnAWordSleepsOnlyWhileItHolds : ItemHighLevel {
+            doc /* K5, docs/microkernel/K5.md; the consultant's condition (7):
+                 * a wake can come from any process that can read the word, so
+                 * a woken wait is allowed to find its word unchanged. */
+            attribute :>> statement = "A wait on a word of user memory shall sleep
+                only while the word holds the value its caller gave, shall end when
+                a wake of its word takes it, when its deadline passes or when its
+                caller must leave, and shall be charged to its caller's job; a wake
+                shall end at most the number of waits it names. A woken wait may
+                find its word unchanged.";
+            attribute :>> criterion = "Stage 9's address-wait check: waits by
+                mapping and by handle woken across processes, changed words
+                refused, counts, bitsets, a requeue, a wait on many words, a
+                deadline, an ended process and a job's limit (the `addrwait`
+                line).";
+            attribute :>> parent = ("G.7", "O.QUOTA");
+        }
     }
 
     package Scheduling {

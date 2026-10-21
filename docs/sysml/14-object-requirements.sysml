@@ -2082,4 +2082,57 @@ package FerrixObjectRequirements {
                 "object::quota::settle");
         }
     }
+
+    package AddressWaitCalls {
+        doc /* K5's native calls, 0x1068 to 0x106B (docs/microkernel/K5.md
+             * section 3): their decoding and refusals, over the core's table
+             * (L.user.135-144). */
+
+        requirement <'L.object.203'> addressWaitDecodes : ItemLowLevel {
+            attribute :>> statement = "address_wait shall refuse a flag other than
+                ADDRESS_SHARED and ADDRESS_BY_VMO, a zero bitset, a misaligned word
+                and a value or bitset wider than 32 bits with INVALID_ARGS; by handle,
+                need a VMO handle with READ and refuse an offset whose word passes
+                the VMO's end with INVALID_ARGS; and answer a wait's end as
+                SHOULD_WAIT, TIMED_OUT, EINTR, NO_MEMORY or FAULT.";
+            attribute :>> criterion = "The refusals of the `addrwait` line, each with
+                its status; a wait by mapping and by handle each woken.";
+            attribute :>> parent = ("H.OBJ.20", "H.OBJ.1", "H.OBJ.2");
+            attribute :>> unit = ("syscall::native::address_wait",
+                "syscall::native::address_word", "syscall::native::address_status",
+                "syscall::native::word_argument", "syscall::native::address_deadline");
+        }
+        requirement <'L.object.204'> addressWakeDecodes : ItemLowLevel {
+            attribute :>> statement = "address_wake shall take the same flags and
+                refusals as address_wait, wake at most its 32-bit count, and answer
+                how many it woke.";
+            attribute :>> criterion = "A wake of zero, two, and by bitset answer 0, 2
+                and 1; a wake with a handle without READ is ACCESS_DENIED (the
+                `addrwait` line).";
+            attribute :>> parent = ("H.OBJ.20", "H.OBJ.2");
+            attribute :>> unit = "syscall::native::address_wake";
+        }
+        requirement <'L.object.205'> addressRequeueDecodes : ItemLowLevel {
+            attribute :>> statement = "address_requeue shall take ADDRESS_SHARED and
+                ADDRESS_COMPARE and refuse ADDRESS_BY_VMO and any other flag, a
+                misaligned word and a count or value wider than 32 bits with
+                INVALID_ARGS, and answer how many it woke or moved.";
+            attribute :>> criterion = "A requeue by handle and a misaligned one are
+                INVALID_ARGS; a requeue of two answers 2 (the `addrwait` line).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = "syscall::native::address_requeue";
+        }
+        requirement <'L.object.206'> addressWaitAnyDecodes : ItemLowLevel {
+            attribute :>> statement = "address_wait_any shall refuse call flags, no
+                words, more than ADDRESS_WAIT_ANY_MAX words and a null vector with
+                INVALID_ARGS; read the vector of 16-byte AddressWord elements, each
+                word's flags ADDRESS_SHARED or none; and answer the index of the
+                word woken.";
+            attribute :>> criterion = "A wait on no words, on 129, with call flags or
+                with a word by handle is INVALID_ARGS; a wait on three answers 1 for
+                the second (the `addrwait` line).";
+            attribute :>> parent = "H.OBJ.20";
+            attribute :>> unit = "syscall::native::address_wait_any";
+        }
+    }
 }

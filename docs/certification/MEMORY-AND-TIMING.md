@@ -399,17 +399,15 @@ even for an instant, and a refused charge takes nothing.
   grows, to its object's job; a message in a socket's queue to its writer;
   a descriptor in flight stays its opener's. A refusal is `ENOMEM` from the
   call, before anything changed. The kinds, and what is argued rather than
-  charged, are in FINDINGS.md F-37: a kernel stack, a futex waiter and a
-  process's recorded arguments are one per task, which the task limit
-  bounds. A futex waiter is at most about 19 KiB on a 64-bit kernel since
-  `futex_waitv` (2026-10-15): up to 128 table entries of 48 bytes each,
-  with up to as much again of their buckets' growth slack (12 KiB), its
-  words' list (128 of 40 bytes, 5 KiB), one bucket record per word (1 KiB)
-  and its sleeper (56 bytes); the 3 KiB copy of the caller's vector is freed
-  before it sleeps. Argued through the task limit, not charged, as before.
-  A wake's walk under a bucket's spin lock is linear in that bucket's
-  entries, now up to 128 per waiting task; setting up and leaving take one
-  bucket's lock at a time, never two, and only a requeue holds two; 256 pseudoterminals, the neighbour and IP reassembly caches, the
+  charged, are in FINDINGS.md F-37: a kernel stack and a process's recorded
+  arguments are one per task, which the task limit bounds. A waiter on a
+  user address (a futex waiter, or a native `address_wait`'s) is charged
+  since K5 (§2.2r): its sleeper, one bucket record and one table entry's
+  room per word, to the job of the process that waits, refused with
+  `ENOMEM` (`NO_MEMORY`) at the limit. Its words' list (128 of 40 bytes at
+  most) and the copied vector are the call's own and freed when it returns.
+  What a bucket holds beyond its live entries is the machine's, bounded in
+  §2.2r. 256 pseudoterminals, the neighbour and IP reassembly caches, the
   routing tables, a btrfs transaction's changed nodes and the dentry cache's
   queue (made whole at boot and never grown) are the machine's, each with a
   fixed bound; the dentries that queue lets go of while their files hold
@@ -1516,6 +1514,65 @@ return (`L.sched.80`-`82`, `docs/THREAD-TIMES.md`).
   trip: `docs/THREAD-TIMES.md` §5.
 * **Where the counter is the HPET**, nothing is read: every stamp is a
   load of the boot's one flag and a branch.
+
+### 2.2s The address-wait table (`user::address_wait`, K5, 2026-10-21)
+
+The core's one table of waits on a user address, which Linux's `futex`
+and the native `address_wait` family share (`docs/microkernel/K5.md`,
+`L.user.135`-`144`). It is 256 buckets, each a spin lock over a vector of
+entries; a key's bucket is a multiply-fold hash of the key under a 128-bit
+key drawn from the boot's random generator before any wait can be listed
+(the consultant's condition 3, ledger 2498). §2.2r was taken by the thread
+times when this landed, hence §2.2s, which K5.md calls §2.2r.
+
+* **What runs under a bucket's lock.** Listing: one read of 4 bytes that
+  never faults, fills or commits (`copy_from_user_present` or
+  `Vmo::read_present`), and one push into room the bucket already has.
+  Leaving: a linear search of the bucket for the waiter's entry. A wake:
+  a linear walk of the bucket, taking at most 32 entries off per hold of
+  the lock (`ROUND`), then letting go to drop them and coming back. A
+  requeue: both buckets' locks, a count of the source's matching entries
+  and the moves. **Nothing allocates, frees, faults or sleeps under a
+  bucket's lock**, and no key's last VMO reference is dropped there:
+  growth and shrinking swap in a vector allocated with no lock held and
+  free the old one after (`grow`, `shrink`), a wake's entries go to an
+  array on the stack, and a requeue reserves its room before it locks.
+* **The bound on a walk.** n is the entries of one bucket. **Worst case:**
+  every entry listed machine-wide, at most 128 per waiting task (one wait
+  at a time per task, of at most 128 words) times the tasks, which
+  `PID_MAX` (32,768) and each job's task limit bound: a few million
+  entries, reached only if every key hashes to one bucket. **Expected,
+  under the boot's key:** n / 256 of the entries listed, since a program
+  does not know the key or the kernel addresses of its space and VMOs and
+  cannot aim its keys at one bucket. No per-bucket cap: a cap would let one
+  job's waits make another's answer `NO_MEMORY` (the consultant's condition
+  3). If a hard bound is ever required, a table per partition is for K17 or
+  T1 to decide.
+* **Measured** by stage 9's case 13 (`addrwait` line), a wake walking 1,024
+  dormant entries of one bucket that match none: 6 ns per entry on x86-64
+  under KVM on nazuna; the other architectures' figures are in the landing
+  message's boot lines (QEMU under TCG measures the emulator, 100 to 200 ns
+  per entry).
+* **Memory.** Charged to the waiting process's job (§1.6): the sleeper,
+  one bucket record per word and one entry's room per word. **Uncharged:**
+  a bucket's room beyond its live entries. A bucket doubles when full and
+  halves when under a quarter full, never below 4 entries' room, so a
+  bucket holds at most four times its live entries' room; the machine
+  holds at most 3 x (entries listed) x 48 bytes beyond the charged room,
+  plus 256 x 4 x 48 bytes (48 KiB) for the buckets' least room, on a
+  64-bit kernel. Case 13 checks that a bucket of 1,024 entries gives its
+  room back once they leave. A `BY_VMO` waiter keeps its VMO alive after
+  the VMO's last handle and mapping go, until it leaves (the consultant's
+  C2, for K12 and K16 to account for).
+
+Lock order: a bucket's lock, then, for a word read through its VMO
+(`BY_VMO`), that VMO's page lock as a leaf (`Vmo::read_present` takes it
+and nothing under it). A requeue takes the lower-numbered of its two
+buckets first. A space's lock is never taken under a bucket's lock: keys
+are made before any bucket's lock is taken. A wake takes the run queue's
+lock (`sched::wake`) under a bucket's lock, as before K5. A VMO's pages
+that need filling (and, after K3, a pager's) are filled with no bucket's
+lock held, and the read is done again.
 
 ### 2.3 What is missing, per standard
 

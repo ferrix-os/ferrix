@@ -78,6 +78,9 @@ const PATIENCE_NANOS: u64 = 10_000_000_000;
 const LISTED_NANOS: u64 = 5_000_000_000;
 /// The deadline of the timed case.
 const SHORT_NANOS: u64 = 5_000_000;
+/// How late past its deadline the timed case may come back: under the
+/// second a sleep with no deadline of its own takes to look again.
+const LATE_NANOS: u64 = 900_000_000;
 
 /// The most waiters at once.
 const SLOTS: usize = 4;
@@ -230,8 +233,11 @@ fn a_wait_is_woken_and_a_changed_word_refused(
     report: &mut Report,
 ) -> Result<(), &'static str> {
     set(a, WORD, 7)?;
+    // With a deadline already past, so that a wait which sleeps on a changed
+    // word comes back to be named rather than sleeping for ever.
+    let past = deadline_in(a, 1, 0)?;
     refused(
-        a.call(nr::ADDRESS_WAIT, &[WORD, 8, u64::from(u32::MAX), 0, 0, 0]),
+        a.call(nr::ADDRESS_WAIT, &[WORD, 8, u64::from(u32::MAX), 0, past, 0]),
         status::SHOULD_WAIT,
         "addrwait: a wait on a word that had changed slept",
         report,
@@ -285,10 +291,14 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
     // By mapping, across two processes at two addresses.
     let (at_a, at_b) = (MAPPED_A + SHARED_OFFSET, MAPPED_B + SHARED_OFFSET);
     set(a, at_a, 3)?;
-    let shared_key = Key::in_object(Arc::clone(&object), SHARED_OFFSET);
+    // The waiter's key as the call makes it, and its private key beside it,
+    // so that a shared word wrongly keyed by address is still seen listed
+    // and the failure named is the wake's.
+    let shared_key = Key::new(a.process.space(), at_a, true);
+    let listed = [shared_key.clone(), private(a, at_a)];
     let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
     start(0, a, nr::ADDRESS_WAIT, [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0])?;
-    until_listed(core::slice::from_ref(&shared_key), 1)?;
+    until_listed(&listed, 1)?;
     let private_wake = b
         .call(nr::ADDRESS_WAKE, &[at_b, 1, u64::from(u32::MAX), 0, 0, 0])
         .map_err(|_| "addrwait: a private wake was refused")?;
@@ -537,7 +547,7 @@ fn a_deadline_ends_a_wait_and_never_early(
     if took < SHORT_NANOS {
         return Err("addrwait: a wait answered TIMED_OUT before its deadline");
     }
-    if took > PATIENCE_NANOS {
+    if took > SHORT_NANOS + LATE_NANOS {
         return Err("addrwait: a wait outlived its deadline");
     }
     report.refusals += 1;

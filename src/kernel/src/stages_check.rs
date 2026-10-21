@@ -65,6 +65,12 @@ pub(super) fn check_programs() {
     // build that got it wrong would answer a program's `write` with `unlink`.
     // Finding that under the first user process, in the same commit as the
     // ring-3 transition, is a debugging session nobody wants.
+    // Stage 9's waits on a user address (K5, docs/microkernel/K5.md §6):
+    // the core's table, first, because stage 7's futex checks ride on the
+    // same table, and a table broken under them is named here by the core's
+    // own check rather than by the Linux personality's.
+    check_address_waits();
+
     check_syscalls();
     check_thread_times();
 
@@ -108,10 +114,6 @@ pub(super) fn check_programs() {
     // system rests on are cheaper to find broken at boot than inside a
     // driver.
     check_native_objects();
-
-    // K5's waits on a user address, on the native calls just proved
-    // (docs/microkernel/K5.md §6).
-    check_address_waits();
 
     // What the switch gives a program back after a blocking native call,
     // and the FS base kept in the task: programs on the native calls just

@@ -110,13 +110,6 @@
       "purpose": "MICROKERNEL.md §3 K6, kernel-attested sender identity on a channel message: every write stamped by the kernel with the writer's never-reused process id and its job id at the write, never from the body; process ids allocated once and never reused; channel_read_attested and object_id; the job at the write across moves; the fast path hands over no identity and channel_write_read reveals none (consultant pre-read, ledger 2458)"
     },
     {
-      "ids": ["H.OBJ.20", "L.user.135-144", "L.object.203-206"],
-      "owner": "mk-k5",
-      "branch": "mk/k5",
-      "date": "2026-10-19",
-      "purpose": "MICROKERNEL.md §3 K5, wait on a user address (docs/microkernel/K5.md): H.OBJ.20, a wait on a user word sleeps only while the word holds the value given and ends at a wake of its key, its deadline or its caller's leaving; L.user.135-144, the core's address-wait table (keys private by space and address, shared by VMO and offset, no lost wake, wake N oldest first, requeue, wait on any of up to 128 words, the deadline on the scheduler's one timer queue, interruption, unmap, waiters charged to the caller's job); L.object.203-206, the four native calls' decoding and refusals"
-    },
-    {
       "ids": ["L.object.207-212", "H.QUOTA.14"],
       "owner": "mk-k7",
       "branch": "mk/k7",
