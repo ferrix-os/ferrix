@@ -100,6 +100,7 @@ Causes are listed most likely first.
 | [FX-0907](#fx-0907) | a process left its speculation domain where it may not wait |
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
+| [FX-0916](#fx-0916) | an address space reached by handle was not held to the handle's rights |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2460,6 +2461,36 @@ none it should.
 
 See: src/kernel/src/discovery/smbios.rs;
 src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
+
+<a id="fx-0916"></a>
+
+## FX-0916 — an address space reached by handle was not held to the handle's rights
+
+`object::space_check::run` (docs/microkernel/K2.md) drives the native calls
+that act on an address space by handle from a thread of a check's process,
+through the architecture's system call entry: `space_create`, `space_map`,
+`space_protect`, `space_unmap`, `space_read`, `process_space` and
+`vmo_executable`. Each must be refused without its right, an executable
+mapping must need EXECUTE on the space handle and on the VMO handle, no
+mapping by handle may be writable and executable (ASR-2), a protection must
+stay within what the region's handle allowed, a process's space must be
+reachable only by its creator before it starts, a page a by-handle read
+faults in must be charged to the space's owner and never to the caller, and
+the W^X sweep of every user root the check reached must find no leaf
+writable and executable. The message names the case.
+
+1. `space_protection` in src/kernel/src/syscall/native.rs took a protection word
+   it          should refuse, or a call stopped asking for a right.
+2. `Ceiling::admits` in src/kernel/src/user/space.rs stopped refusing writable
+   and          executable, or a ceiling recorded more than the handle carried.
+3. `process_space` answered without `Control`, without `MANAGE`, or after the
+   start.
+4. `quota::charging_to` no longer moves the target-side half of a by-handle copy
+   to the space's owner.
+
+See: src/kernel/src/object/space_check.rs; src/kernel/src/object/space.rs;
+src/kernel/src/user/space.rs; src/kernel/src/syscall/native.rs;
+docs/microkernel/K2.md.
 
 <a id="fx-1001"></a>
 

@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs-write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 141 packages, 7216 elements, 217 relations. Model digest `2cf9006ee52a7be3`.
+26 files, 143 packages, 7272 elements, 217 relations. Model digest `d7b9b2d1f19ff115`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -250,10 +250,11 @@ Address spaces, the frames under them and the mappings that reach them: O.ISOLAT
 | `H.MEM.15` | A mapping the kernel makes in its own address space shall translate each page to the frame or register asked for, with the permissions and memory type asked for. | Each page of an 8-page arena range translates to a frame, none to its neighbour's; a page protected read-only reads back not writable in the descriptors and still translates; a device window at offset 0x40 translates to the register asked for, offset included, as device memory and not executable, and is gone once unmapped. | `O.ISOLATE, ASR-1` |
 | `H.MEM.16` | After a fork, a write by the child to a MAP_SHARED mapping shall be visible to the parent, and its write to a MAP_PRIVATE mapping shall not. | The `shared` program exits 62 (its MAP_SHARED write reached the parent and its MAP_PRIVATE write did not). | `O.ISOLATE, ASR-1` |
 | `H.MEM.17` | A frame taken out of a translation, of a user address space or of the kernel's, shall not return to the frame allocator until the TLB invalidation that covers it has been made on every processor that may hold the translation. | A frame an unmap, a decommit or a replace takes out of a translation that another processor has cached is still allocated until that processor's shootdown returns: 0 frames freed before it, on every architecture. | `O.ISOLATE, ASR-1` |
-| `H.MEM.18` | The kernel shall refuse to map a device window or a native VMO executable into a user address space, and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
+| `H.MEM.18` | The kernel shall refuse to map a device window executable into a user address space, and a native VMO executable except through space_map with EXECUTE on both the space handle and the VMO handle (H.MEM.24), and shall map the vDSO's data page read-only. | An executable device window and an executable vmo_map are each refused, 0 mapped; the vDSO's data page reads back not writable, and a write to it faults. | `O.WXN, O.ISOLATE` |
 | `H.MEM.19` | Once a grace period the kernel waits for has ended, no read-side section that was running on any processor when the wait began shall still be running. | A writer that replaces an object every other online processor is reading, waits a grace period and poisons the replaced one, 100 times over, leaves 0 reads of a poisoned object among more than 0 reads (the `grace` line). | `O.ISOLATE, ASR-1` |
+| `H.MEM.24` | An address space reached by handle shall be mapped, unmapped, protected and read only as that handle's rights allow; no mapping made by handle shall be both writable and executable; an executable mapping by handle shall need EXECUTE on the space handle and on the VMO handle; and a process's space shall be given by handle only to its creator, before it starts. | Stage 9's `space` line: every by-handle call refused without its right, an executable mapping refused without EXECUTE on either handle and made with both, a writable and executable protection refused by the decoder and by the space itself, process_space refused without MANAGE, for a process its handle cannot reach and after the start, and the sweep of every user root the check reached finding 0 leaves writable and executable and more than 0 executable. | `O.ISOLATE, O.WXN, O.CAPABILITY, ASR-2, ASR-3` |
 
-19 requirements.
+20 requirements.
 
 ### Objects
 
@@ -4032,6 +4033,13 @@ flowchart LR
 | `L.object.170` | `theWayOutsAreShared` | — | — | — |
 | `L.object.179` | `theFastPathLetsGoOfItsEndUnmasked` | — | — | — |
 | `L.object.180` | `cpuTimeIsKeptBackOnce` | — | — | — |
+| `L.object.232` | `aMadeSpaceIsEmptyAndItsMakers` | — | — | — |
+| `L.object.233` | `onlyTheCreatorBeforeTheStart` | — | — | — |
+| `L.object.234` | `anExecutableMappingNeedsBothHandles` | — | — | — |
+| `L.object.235` | `anUnmapByHandleNeedsMap` | — | — | — |
+| `L.object.236` | `aProtectionStaysWithinItsHandle` | — | — | — |
+| `L.object.238` | `aReadByHandleNeedsReadAndChargesTheOwner` | — | — | — |
+| `L.object.240` | `anExecutableVmoHandleCannotWrite` | — | — | — |
 | `L.sched.1` | `aDecisionWithinASlice` | — | — | — |
 | `L.sched.2` | `aLoneYieldAsksNothing` | — | — | — |
 | `L.sched.3` | `aThrottledTaskLeavesForAKill` | — | — | — |
@@ -4339,6 +4347,9 @@ flowchart LR
 | `L.user.104` | `aFaultIsResolvedWithNoPreemptionLockHeld` | — | — | — |
 | `L.user.105` | `anUnmapFreesNothingBeforeItsShootdown` | — | — | — |
 | `L.user.106` | `aCodePageIsReadAndRunAlone` | — | — | — |
+| `L.user.158` | `aRegionByHandleKeepsItsCeiling` | — | — | — |
+| `L.user.159` | `noRegionByHandleIsWritableAndExecutable` | — | — | — |
+| `L.user.162` | `anUnmapByHandleReachesARunningSpace` | — | — | — |
 | `L.x86_64.1` | `selectorsRing3MayHoldAreLoadable` | — | — | — |
 | `L.x86_64.2` | `compatUserSegmentsInGdt` | — | — | — |
 | `L.x86_64.3` | `istStacksPerProcessor` | — | — | — |
