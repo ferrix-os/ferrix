@@ -1702,3 +1702,20 @@ pub const USER_KERNEL_TIME_PROGRAM: &[u8] = &[
 
 // What `sched::inspect` reads of a task that is not running (`docs/DEBUG.md`).
 pub(crate) mod inspect;
+
+/// This processor's `MPIDR`, whole: for `smt`'s check, which reads its `MT`
+/// bit.
+pub(crate) fn mpidr() -> u64 {
+    u64::from(cpu::read_mpidr())
+}
+
+/// Stage 4's look at how many threads of a core run work: see
+/// [`super::arm_common::smt::check::check_arm_smt`].
+///
+/// # Errors
+///
+/// Under `smt=off`, a core listing two threads, a malformed table, or no
+/// table where `MPIDR.MT` is set.
+pub(crate) fn check_smt() -> Result<(), &'static str> {
+    super::arm_common::smt::check::check_arm_smt()
+}

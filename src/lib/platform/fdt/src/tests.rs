@@ -2792,3 +2792,136 @@ fn an_interrupt_map_to_anything_but_a_gic_is_not_followed() {
     let host = fdt.ecam_hosts().next().unwrap();
     assert_eq!(fdt.ecam_intx(&host, 0, 1, 0, 1), None, "not a GIC");
 }
+
+// ---------------------------------------------------------------------------
+// cpu-map
+// ---------------------------------------------------------------------------
+
+/// A `cpu-map` of one cluster with `cores`, each listing `threads` threads
+/// (none: the core names its processor itself).
+fn cpu_map_blob(cores: u32, threads: u32) -> Vec<u8> {
+    with_cpus(|builder| {
+        builder.begin("cpu-map");
+        builder.begin("cluster0");
+        for core in 0..cores {
+            builder.begin(&std::format!("core{core}"));
+            if threads == 0 {
+                builder.prop_u32("cpu", core + 1);
+            }
+            for thread in 0..threads {
+                builder.begin(&std::format!("thread{thread}"));
+                builder.prop_u32("cpu", core * threads + thread + 1);
+                builder.end();
+            }
+            builder.end();
+        }
+        builder.end();
+        builder.end();
+        cpu_node(builder, "cpu@0", Some(0), &[]);
+    })
+}
+
+/// The map of `blob`, `None` where the test's tree does not parse.
+fn cpu_map_of(blob: &[u8]) -> Option<Result<Option<CpuMap>, CpuMapError>> {
+    Fdt::parse(blob).ok().map(|tree| tree.cpu_map())
+}
+
+#[test]
+fn a_cpu_map_with_two_threads_a_core_says_so() {
+    assert_eq!(
+        cpu_map_of(&cpu_map_blob(2, 2)),
+        Some(Ok(Some(CpuMap {
+            cores: 2,
+            threads: 4,
+            most_a_core: 2
+        })))
+    );
+}
+
+#[test]
+fn a_cpu_map_of_cores_alone_names_no_thread() {
+    assert_eq!(
+        cpu_map_of(&cpu_map_blob(4, 0)),
+        Some(Ok(Some(CpuMap {
+            cores: 4,
+            threads: 0,
+            most_a_core: 0
+        })))
+    );
+}
+
+#[test]
+fn a_tree_without_a_cpu_map_has_none() {
+    let blob = with_cpus(|builder| cpu_node(builder, "cpu@0", Some(0), &[]));
+    assert_eq!(cpu_map_of(&blob), Some(Ok(None)));
+}
+
+#[test]
+fn a_thread_outside_a_core_is_refused() {
+    let blob = with_cpus(|builder| {
+        builder.begin("cpu-map");
+        builder.begin("cluster0");
+        builder.begin("thread0");
+        builder.prop_u32("cpu", 1);
+        builder.end();
+        builder.end();
+        builder.end();
+    });
+    assert_eq!(cpu_map_of(&blob), Some(Err(CpuMapError::ThreadOutsideCore)));
+}
+
+#[test]
+fn a_thread_below_a_cores_child_is_refused() {
+    let blob = with_cpus(|builder| {
+        builder.begin("cpu-map");
+        builder.begin("core0");
+        builder.begin("cluster0");
+        builder.begin("thread0");
+        builder.prop_u32("cpu", 1);
+        builder.end();
+        builder.end();
+        builder.end();
+        builder.end();
+    });
+    assert_eq!(cpu_map_of(&blob), Some(Err(CpuMapError::ThreadOutsideCore)));
+}
+
+#[test]
+fn a_thread_naming_no_processor_is_refused() {
+    let blob = with_cpus(|builder| {
+        builder.begin("cpu-map");
+        builder.begin("cluster0");
+        builder.begin("core0");
+        builder.begin("thread0");
+        builder.end();
+        builder.end();
+        builder.end();
+        builder.end();
+    });
+    assert_eq!(cpu_map_of(&blob), Some(Err(CpuMapError::ThreadWithoutCpu)));
+}
+
+#[test]
+fn threads_of_the_next_core_are_counted_apart() {
+    let blob = with_cpus(|builder| {
+        builder.begin("cpu-map");
+        builder.begin("cluster0");
+        for core in 0..2 {
+            builder.begin(&std::format!("core{core}"));
+            builder.begin("thread0");
+            builder.prop_u32("cpu", core + 1);
+            builder.end();
+            builder.end();
+        }
+        builder.end();
+        builder.end();
+    });
+    assert_eq!(
+        cpu_map_of(&blob),
+        Some(Ok(Some(CpuMap {
+            cores: 2,
+            threads: 2,
+            most_a_core: 1
+        })))
+    );
+}
