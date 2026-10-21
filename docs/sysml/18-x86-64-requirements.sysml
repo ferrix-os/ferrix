@@ -1299,6 +1299,60 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::has_machine_check",
                 "arch::x86_64::take_machine_check");
         }
+        requirement <'L.x86_64.183'> threadsOfACoreFromCpuid : ItemLowLevel {
+            attribute :>> statement = "topology::read shall take the SMT shift from
+                CPUID leaf 0x1F where it is reported, else leaf 0xB, as the SMT
+                level's EAX[4:0], zero where the leaf lists no SMT level or where
+                neither leaf is reported and CPUID.1:EDX.HTT is clear; and shall
+                refuse, stopping the boot, a processor that sets HTT and reports
+                neither leaf, or a leaf whose levels never end.";
+            attribute :>> criterion = "Stage 4's `smt` line names the cores and the
+                siblings by that shift on every x86-64 boot; with -smp 4,threads=2
+                under smt=off it reads 2 cores and 2 siblings parked, and each
+                online processor's own leaf names its MADT APIC ID (the `smt`
+                check fails by name otherwise).";
+            attribute :>> parent = "H.TRAP.19";
+            attribute :>> unit = ("arch::x86_64::smp::topology::read",
+                "arch::x86_64::smp::topology::discover",
+                "arch::x86_64::smp::topology::leaf",
+                "arch::x86_64::smp::topology::own_id",
+                "arch::x86_64::smp::to_park");
+        }
+        requirement <'L.x86_64.184'> siblingsParkedByTheKernel : ItemLowLevel {
+            attribute :>> statement = "Under smt=off, start_secondaries shall start
+                every thread whose number within its core is not zero only to park
+                it: park shall put its local APIC in the boot processor's mode with
+                every local vector masked as INIT left them, load the kernel's root,
+                the boot processor's CR4 without MCE, the IDT, its own record, GDT
+                and TSS, set CR4.MCE, report what it parked with and halt with
+                interrupts masked for good; its record shall be outside the
+                processors' records, so that nothing counts, lists, waits for or
+                schedules on it.";
+            attribute :>> criterion = "A -smp 4,threads=2 boot under smt=off reports
+                2 siblings parked by the kernel with CR4.MCE set and counts 2
+                processors everywhere else; a machine check injected into a parked
+                thread stops the machine as FX-9005 (test-mce under smt=off); with
+                the parked path's CR4.MCE set skipped, stage 4 fails by name.";
+            attribute :>> parent = "H.TRAP.19";
+            attribute :>> unit = ("arch::x86_64::smp::park",
+                "smp::parked_record", "smp::report_parked",
+                "smp::wait_until_parked", "smp::leak_records");
+        }
+        requirement <'L.x86_64.185'> oneThreadACoreRunsWork : ItemLowLevel {
+            attribute :>> statement = "check_smt shall, under smt=off, require that
+                no two online processors share a core number (their APIC ID shifted
+                right by the SMT shift), each online processor's own topology leaf
+                naming the APIC ID it was started by, and every parked thread to
+                have reported in with CR4.MCE set.";
+            attribute :>> criterion = "The `smt` line in stage 4; with smt=off's
+                thread test made to start one sibling for work, stage 4 fails with
+                two online processors share a core; with a parked thread's CR4.MCE
+                left clear, with a parked hardware thread reads CR4.MCE clear.";
+            attribute :>> parent = "H.TRAP.19";
+            attribute :>> unit = ("arch::x86_64::smp::topology::core_of",
+                "arch::x86_64::smp::topology::thread_of",
+                "arch::x86_64::smp::topology::shift");
+        }
         requirement <'L.x86_64.43'> nativeForgedFrameRefused : ItemLowLevel {
             attribute :>> statement = "restore_signal_frame shall refuse a 64-bit
                 frame whose RIP or RSP lies outside the user half, or that gives

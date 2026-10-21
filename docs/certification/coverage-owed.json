@@ -488,6 +488,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet. The evidence was carried (carry-coverage.py, no anchor dropped), not re-measured.",
       "what": "arch/x86_64/cpu.rs enable_machine_check, has_machine_check and machine_check_enabled; mod.rs take_machine_check (from init_traps) and check_machine_check_enabled; smp.rs CpuStarter::new's CR4 without MCE and secondary_start's set; and the check that reaches them (paranoid/check.rs check_machine_check_enabled, look_at_machine_check): measure them on the x86-64 coverage run (stage 4's mce line reaches them). Argued, not measured: enable_machine_check's early return and the check's refusal for a processor whose CPUID offers no machine-check exception, unreachable on the reference configurations (the gates' qemu64-based model, the coverage run's qemu64 and every x86-64 part offer it) -- other-configuration rows; init_traps's line for firmware that had left the bit set or clear, one arm per firmware (OVMF decides which)."
+    },
+    {
+      "landing": "mk/smt-off, M0 part B's smt=off: x86-64 siblings parked by the kernel, the Arm topology checks (L.x86_64.183-185, L.aarch64.65, L.armv7a.27, H.TRAP.19; consultant ledger 2563)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "new code; no coverage run has measured it yet.",
+      "what": "x86-64: arch/x86_64/smp/topology.rs read, discover, leaf, own_id, shift, thread_of, core_of; smp.rs to_park and park (park is reached only under smt=off with --smp-threads 2: measure it on that variant's boot); smp/check.rs check_smt. Generic: smp.rs leak_records, parked_record, report_parked, wait_until_parked and the parked loop of start_secondaries. Arm: aarch64 cpus_from_madt's PPTT arm and threads_in_tree, armv7a threads_in_tree, smp/threads.rs, smp/threads_check.rs check_arm_smt. Reached on every boot except park, the parked loop and report_parked (smt=off with siblings) and the Malformed arms (a malformed table; argued, with the host tests of ferrix-acpi's pptt and ferrix-fdt's cpu_map as their evidence)."
     }
   ]
 }

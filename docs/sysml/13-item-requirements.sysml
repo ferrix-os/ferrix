@@ -1038,6 +1038,27 @@ package FerrixItemRequirements {
                 decide one each way, on every architecture the suite boots.";
             attribute :>> parent = "O.ISOLATE";
         }
+        requirement <'H.TRAP.19'> oneThreadACoreUnderSmtOff : ItemHighLevel {
+            doc /* smt=off (BUILD-FLAGS.md section 3.1 DF4): siblings share a
+                core's predictors and buffers, so a build that claims one thread
+                a core keeps every other thread of a core out of kernel and
+                program code, and sets each up to take a machine check so a
+                broadcast does not shut the machine down (F-73). The
+                consultant's ledger 2563, condition (4). */
+            attribute :>> statement = "Under smt=off no two hardware threads of one
+                core shall run kernel or program code: each thread of a core but
+                one shall be parked by the kernel, set up to take a machine check,
+                or absent; and a topology the kernel cannot read shall stop the
+                boot rather than be read as one thread a core.";
+            attribute :>> criterion = "Stage 4's `smt` line under smt=off, on every
+                architecture: no two online processors of one core, every parked
+                thread reported with CR4.MCE set (x86-64), and no core of the PPTT
+                or cpu-map listing two threads of processors that run work (Arm);
+                with one sibling started for work, or a parked thread's CR4.MCE
+                left clear, or two threads a core in the Arm tables, it fails by
+                name.";
+            attribute :>> parent = "O.ISOLATE";
+        }
     }
 
     package Boot {

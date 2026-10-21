@@ -35,7 +35,7 @@ fn look_at_own_id(me: &'static crate::smp::PerCpu) {
 /// of one core under `smt=off`, or a parked thread that did not report in or
 /// reads `CR4.MCE` clear.
 ///
-/// Verifies: `L.x86_64.185`
+/// Verifies: `L.x86_64.183`, `L.x86_64.184`, `L.x86_64.185`, `H.TRAP.19`
 pub(crate) fn check_smt() -> Result<(), &'static str> {
     let found = crate::smp::topology().ok_or("the processors have not been discovered")?;
     ID_MISMATCH.store(0, Ordering::Relaxed);

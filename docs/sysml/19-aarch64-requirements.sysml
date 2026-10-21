@@ -887,5 +887,21 @@ package FerrixAarch64Requirements {
             attribute :>> unit = ("arch::aarch64::audit_arch",
                 "arch::aarch64::syscall_rollback_value");
         }
+        requirement <'L.aarch64.65'> noTwoThreadsOfACoreFromThePptt : ItemLowLevel {
+            attribute :>> statement = "Under smt=off, describe_cpus shall read the
+                PPTT on an ACPI boot, or the device tree's /cpus/cpu-map otherwise,
+                counting only the threads of processors the MADT enables, stop the
+                boot on a malformed table (a node out of the table, a parent that is
+                no processor node, a loop, a thread of no core), and stage 4 shall
+                require that no core lists two threads; with neither table, that
+                MPIDR_EL1.MT reads clear on every online processor.";
+            attribute :>> criterion = "Stage 4's `smt` line on every AArch64 boot;
+                under smt=off with -smp 4,cores=2,threads=2 it fails with a core
+                lists two threads; with the table withheld and MT read as set, with
+                no topology table, and a processor's MPIDR.MT is set.";
+            attribute :>> parent = "H.TRAP.19";
+            attribute :>> unit = ("arch::aarch64::smp::cpus_from_madt",
+                "arch::aarch64::smp::threads_in_tree");
+        }
     }
 }

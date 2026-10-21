@@ -1183,7 +1183,7 @@ fn cross_target_clippy() -> Result<()> {
     // build, and the kernel `mitigations=off` another in its own target
     // directory, so the two run at once (`docs/TEST-TIME.md`, C1).
     step(
-        "clippy (kernel, every architecture: each buildable profile, checks=off, mitigations=off)",
+        "clippy (kernel, every architecture: each buildable profile, checks=off, smt=off, mitigations=off)",
         kernel_clippy_every_build,
     )?;
     for arch in Arch::ALL {
@@ -2381,8 +2381,8 @@ fn python_captured(script: &str, arguments: &[&str], said: &mut Vec<u8>) -> Resu
 /// `cargo clippy` over the kernel for every architecture, once for each
 /// kernel build that can be made today, which is what `check` "builds"
 /// them with: every named profile that builds (`present`, `desktop`), and the
-/// two ad-hoc builds that must not rot (`docs/BUILD-FLAGS.md` §6):
-/// `checks=off` (BF7) and `mitigations=off`. A profile refused by `lands`
+/// ad-hoc builds that must not rot (`docs/BUILD-FLAGS.md` §6): `checks=off`
+/// (BF7), `smt=off` (DF4) and `mitigations=off`. A profile refused by `lands`
 /// (`max`, `fast` before M5) is reported as not yet buildable, not as a
 /// failure; one that does not resolve at all fails.
 ///
@@ -2427,6 +2427,9 @@ fn kernel_clippy_every_build() -> Result<()> {
             .map(|resolved| (format!("ad hoc, {flag}=off"), resolved))
     };
     builds.push(ad_hoc("checks")?);
+    // `smt=off`, which no profile that builds today carries (`max` waits
+    // for M5): linted here so its parking and checks cannot rot.
+    builds.push(ad_hoc("smt")?);
     let (_, off) = ad_hoc("mitigations")?;
 
     let configs: Vec<String> = Arch::ALL

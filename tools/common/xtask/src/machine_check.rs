@@ -78,8 +78,20 @@ pub(crate) fn test_mce(args: &Args) -> Result<()> {
             })?;
             let mut qmp = Qmp::connect(port, Instant::now() + Duration::from_secs(10))?;
             // The last processor first, so that the report comes from a
-            // secondary, which starts from a CR4 without the bit.
-            for cpu in (0..processors).rev() {
+            // secondary, which starts from a CR4 without the bit. With
+            // `--smp-threads`, the last of QEMU's processors alone: the last
+            // thread of the last core, which `smt=off` parks, so the report
+            // comes from a parked thread (the consultant's ledger 2563, (2)).
+            let targets: Vec<usize> = if qemu_args.smp_threads > 1 {
+                vec![
+                    usize::try_from(qemu_args.smp)
+                        .unwrap_or(1)
+                        .saturating_sub(1),
+                ]
+            } else {
+                (0..processors).rev().collect()
+            };
+            for cpu in targets {
                 let command = format!("mce {cpu} {ERROR}");
                 let arguments = format!(
                     "{{\"command-line\":{}}}",

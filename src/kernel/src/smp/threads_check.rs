@@ -34,7 +34,7 @@ fn look_at_mt(_me: &'static super::PerCpu) {
 /// Under `smt=off`: a core listing two threads, a malformed table, or no
 /// table and an online processor reading `MPIDR.MT` set.
 ///
-/// Verifies: `L.aarch64.65`, `L.armv7a.27`
+/// Verifies: `L.aarch64.65`, `L.armv7a.27`, `H.TRAP.19`
 pub(crate) fn check_arm_smt() -> Result<(), &'static str> {
     MT_SET.store(0, Ordering::Relaxed);
     LOOKED.store(0, Ordering::Relaxed);

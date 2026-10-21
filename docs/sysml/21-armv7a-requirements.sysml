@@ -307,5 +307,18 @@ package FerrixArmv7aRequirements {
                 "arch::armv7a::switch::restore_user_state",
                 "arch::armv7a::switch::turn_on");
         }
+        requirement <'L.armv7a.27'> noTwoThreadsOfACoreFromTheCpuMap : ItemLowLevel {
+            attribute :>> statement = "Under smt=off, describe_cpus shall read the
+                device tree's /cpus/cpu-map, stop the boot on a map with a thread
+                outside a core or naming no processor, and stage 4 shall require
+                that no core lists two threads; with no map, that MPIDR.MT reads
+                clear on every online processor.";
+            attribute :>> criterion = "Stage 4's `smt` line on every ARMv7-A boot;
+                under smt=off with -smp 4,cores=2,threads=2 it fails with a core
+                lists two threads.";
+            attribute :>> parent = "H.TRAP.19";
+            attribute :>> unit = ("arch::armv7a::smp::threads_in_tree",
+                "smp::threads::record", "smp::threads::found");
+        }
     }
 }

@@ -278,7 +278,10 @@ as unaffected by Spectre v2 (Cortex-A35, A53, A55), or firmware implementing
 SMCCC `ARCH_WORKAROUND_1`, `SSBS` or `ARCH_WORKAROUND_2`, and a core Arm lists as
 unaffected by Meltdown or reporting `CSV3`; on ARMv7-A, a core Arm lists as
 unaffected, or firmware that set `ACTLR.IBE` on one that is not. On an
-MDS-affected x86-64 part the integrator shall disable SMT. Partitions that
+MDS-affected x86-64 part the integrator shall disable SMT, in firmware or by
+building `smt=off`, under which the boot line `smt      off:` must say the
+siblings are parked by the kernel with `CR4.MCE` set, or that firmware runs
+one thread per core. Partitions that
 must not learn each other's cache access patterns shall not share a cache: no
 cache is partitioned (V-06). QEMU's TCG, on which CI's gates and every Arm gate run, offers no
 speculation controls and executes no speculation, so its log lines are not a
