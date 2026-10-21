@@ -148,8 +148,8 @@ impl Tickets {
 
     /// The live ticket `id` that side `issuer_side` issued.
     pub(crate) fn find(&self, issuer_side: usize, id: u64) -> Option<Arc<Ticket>> {
-        self.issued
-            .get(issuer_side)?
+        let issued = self.issued.get(issuer_side)?;
+        issued
             .iter()
             .find(|ticket| ticket.id == id && ticket.is_live())
             .map(Arc::clone)
