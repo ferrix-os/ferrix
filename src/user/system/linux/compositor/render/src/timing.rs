@@ -123,6 +123,104 @@ pub fn take() -> [u64; Phase::ALL.len()] {
     spent
 }
 
+/// How a window's pixels were put on the canvas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Path {
+    /// Copied, a row at a time: opaque and at its own size.
+    Copy,
+    /// Blended over what is under it, at its own size.
+    Blend,
+    /// Stretched, opaque.
+    Stretch,
+    /// Stretched and blended.
+    StretchBlend,
+}
+
+impl Path {
+    /// The word a report uses for it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Path::Copy => "copy",
+            Path::Blend => "blend",
+            Path::Stretch => "stretch",
+            Path::StretchBlend => "stretch-blend",
+        }
+    }
+}
+
+/// The largest window surface drawn since the last [`take_surface`]: what a
+/// slow `surface` term is about. Its width, height, whether it has alpha and
+/// its [`Path`], packed: zero is none.
+static LARGEST: AtomicU64 = AtomicU64::new(0);
+
+/// The largest window surface a frame drew, as [`drawn_surface`] heard it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Drawn {
+    /// Its buffer's width and height.
+    pub size: (u32, u32),
+    /// Whether its format has alpha.
+    pub alpha: bool,
+    /// How it was drawn.
+    pub path: Path,
+}
+
+impl Drawn {
+    /// As a report prints it: `1920x1200 xrgb copy`.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        format!(
+            "{}x{} {} {}",
+            self.size.0,
+            self.size.1,
+            if self.alpha { "argb" } else { "xrgb" },
+            self.path.name()
+        )
+    }
+}
+
+/// Note that a window surface `size` large, with `alpha` or not, was drawn
+/// by `path`; kept if it is the largest since the last [`take_surface`].
+pub fn drawn_surface(size: (u32, u32), alpha: bool, path: Path) {
+    let width = u64::from(size.0.min(0xFF_FFFF));
+    let height = u64::from(size.1.min(0xFF_FFFF));
+    let path = match path {
+        Path::Copy => 0,
+        Path::Blend => 1,
+        Path::Stretch => 2,
+        Path::StretchBlend => 3,
+    };
+    let packed = (width << 40) | (height << 16) | (u64::from(alpha) << 8) | path | 0x80;
+    let area = |packed: u64| (packed >> 40) * ((packed >> 16) & 0xFF_FFFF);
+    let _ = LARGEST.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |was| {
+        (area(packed) >= area(was)).then_some(packed)
+    });
+}
+
+/// The largest window surface drawn since the last call, and none again.
+#[must_use]
+pub fn take_surface() -> Option<Drawn> {
+    let packed = LARGEST.swap(0, Ordering::Relaxed);
+    if packed == 0 {
+        return None;
+    }
+    let size = (
+        u32::try_from(packed >> 40).unwrap_or(0),
+        u32::try_from((packed >> 16) & 0xFF_FFFF).unwrap_or(0),
+    );
+    let path = match packed & 0x7F {
+        0 => Path::Copy,
+        1 => Path::Blend,
+        2 => Path::Stretch,
+        _ => Path::StretchBlend,
+    };
+    Some(Drawn {
+        size,
+        alpha: packed & 0x100 != 0,
+        path,
+    })
+}
+
 /// `spent`, as a report prints it: each kind that took any time, by name.
 #[must_use]
 pub fn describe(spent: &[u64; Phase::ALL.len()]) -> String {

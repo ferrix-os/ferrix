@@ -609,15 +609,36 @@ pub fn render_onto<P: Painter>(
 ) -> Damage {
     let style = styles.base;
     let local = |rect: Rect| rect.translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+    // A fullscreen window that fills the screen with its own opaque pixels
+    // hides everything drawn before it: the background, the layer surfaces
+    // under the windows, the backdrop taken of them, and any window under
+    // it. None of that is drawn where it is, which for a full-screen game is
+    // all of the frame but the window itself.
+    let proved;
+    let surfaces = match timed(Phase::Surface, || {
+        proved_opaque(output, origin, styles, surfaces, damage)
+    }) {
+        Some(opaque) => {
+            proved = opaque;
+            &proved
+        }
+        None => surfaces,
+    };
+    let hidden = hiding(output, origin, styles, surfaces, layers, canvas.bounds());
+    let under = hidden.map_or_else(|| damage.clone(), |(_, rect)| damage.without(rect));
     timed(Phase::Behind, || {
-        behind_windows(canvas, origin, style, layers, damage);
+        behind_windows(canvas, origin, style, layers, &under);
     });
     // Everything behind the windows is drawn; that is the backdrop, and it
     // is taken now, before a window goes over it.
     if let Some(behind) = backdrop.as_deref_mut() {
-        timed(Phase::Backdrop, || canvas.keep_backdrop(behind, damage));
+        timed(Phase::Backdrop, || canvas.keep_backdrop(behind, &under));
     }
     for (at, placed) in output.windows.iter().enumerate() {
+        let damage = match hidden {
+            Some((top, _)) if at < top => &under,
+            _ => damage,
+        };
         if styles.of(placed.window).dim_around {
             dim_behind(canvas, style, damage);
         }
@@ -649,6 +670,136 @@ pub fn render_onto<P: Painter>(
         });
     }
     damage.clipped(canvas.bounds())
+}
+
+/// The fullscreen window that hides everything drawn before it, by where it
+/// is in `output`'s windows, and the part of the canvas it hides: the
+/// highest one that [`fills`] and covers the canvas whole.
+///
+/// Hyprland draws no decoration round a window in its fullscreen mode
+/// (`FSMODE_FULLSCREEN`), and an opaque one hides all of the workspace
+/// under it: what the screen shows is the game and whatever is above it, so
+/// nothing under it is drawn. A rule of fullscreen, not of a configuration.
+///
+/// `None` while a layer surface above the windows takes its blur from the
+/// backdrop (`layerrule = xray`): the backdrop is then read where the window
+/// is, and has to be kept there.
+fn hiding(
+    output: &MonitorLayout,
+    origin: (i64, i64),
+    styles: &Styles<'_>,
+    surfaces: &BTreeMap<WindowId, Surface<'_>>,
+    layers: &[LayerFrame<'_>],
+    bounds: Rect,
+) -> Option<(usize, Rect)> {
+    if layers
+        .iter()
+        .any(|layer| layer.above && layer.blur && layer.xray)
+    {
+        return None;
+    }
+    output
+        .windows
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(at, placed)| {
+            let rect = placed
+                .rect
+                .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+            (fullscreen(placed)
+                && fills(placed, styles, surfaces.get(&placed.window))
+                && intersect(rect, bounds) == Some(bounds))
+            .then_some((at, bounds))
+        })
+}
+
+/// `surfaces` with each fullscreen window's `ARGB8888` surface read as
+/// opaque where its pixels are: every one of them inside the damage has a
+/// full alpha. `None` when there is none such, which is every frame of a
+/// desktop that is not a fullscreen window.
+///
+/// A game on X has its window in a depth-32 visual as often as not, and its
+/// server hands over premultiplied `ARGB8888` whose alpha is full
+/// everywhere. Read as such it is blended a pixel at a time over a
+/// background, a backdrop and a shadow nobody can see; read as what it is,
+/// it is copied, and [`hiding`] takes all three out. The two frames are the
+/// same bytes: an opaque premultiplied pixel blended over anything is
+/// itself. A frame in which one pixel is not opaque is drawn as before.
+///
+/// Only at the surface's own size: a stretched one goes through the
+/// sampler, whose reads reach past any one rectangle.
+fn proved_opaque<'a>(
+    output: &MonitorLayout,
+    origin: (i64, i64),
+    styles: &Styles<'_>,
+    surfaces: &BTreeMap<WindowId, Surface<'a>>,
+    damage: &Damage,
+) -> Option<BTreeMap<WindowId, Surface<'a>>> {
+    let mut proved: Option<BTreeMap<WindowId, Surface<'a>>> = None;
+    for placed in output.windows.iter().filter(|placed| fullscreen(placed)) {
+        let Some(surface) = surfaces.get(&placed.window) else {
+            continue;
+        };
+        let own = styles.of(placed.window);
+        let opacity = own
+            .opacity
+            .unwrap_or_else(|| styles.base.opacity(placed.focused, placed.fullscreen));
+        let rect = placed
+            .rect
+            .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+        // A dmabuf a GPU renderer samples where it lies: its bytes here are
+        // a mapping that may be slow to read, and are not what is drawn.
+        if own.opaque
+            || surface.device().is_some()
+            || surface.format() != Format::Argb8888
+            || opacity < 1.0
+            || i64::from(surface.width()) != rect.width
+            || i64::from(surface.height()) != rect.height
+        {
+            continue;
+        }
+        let seen = damage.clipped(rect);
+        if seen.is_empty()
+            || !seen
+                .rects()
+                .iter()
+                .all(|&part| surface.opaque_within(part.translate(-rect.x, -rect.y)))
+        {
+            continue;
+        }
+        let _ = proved
+            .get_or_insert_with(|| surfaces.clone())
+            .insert(placed.window, surface.as_opaque());
+    }
+    proved
+}
+
+/// Whether `placed` is in the fullscreen mode, not maximized: the layout
+/// gives the first no border and the second the workspace's, which is how
+/// the two are told apart here. (Under `general:border_size = 0` a
+/// maximized window reads as fullscreen, the one case this reads wrongly.)
+const fn fullscreen(placed: &Placed) -> bool {
+    placed.fullscreen && placed.border <= 0
+}
+
+/// Whether `surface`, drawn as `placed`, writes every pixel of its
+/// rectangle with nothing under it showing through: square corners, full
+/// opacity, and a format with no alpha (or a rule reading it as one), at
+/// any size -- a stretched opaque surface fills its rectangle too.
+#[must_use]
+pub(crate) fn fills(placed: &Placed, styles: &Styles<'_>, surface: Option<&Surface<'_>>) -> bool {
+    let own = styles.of(placed.window);
+    let opacity = own
+        .opacity
+        .unwrap_or_else(|| styles.base.opacity(placed.focused, placed.fullscreen));
+    rounding_of(placed, styles).is_square()
+        && opacity >= 1.0
+        && surface.is_some_and(|surface| {
+            (own.opaque || surface.format() == Format::Xrgb8888)
+                && surface.width() > 0
+                && surface.height() > 0
+        })
 }
 
 /// Everything behind the windows: the background, and the layer surfaces
@@ -852,7 +1003,14 @@ fn window<P: Painter>(
     } else {
         damage
     };
-    if let Some(shadow) = style.shadow.as_ref().filter(|_| own.shadow && own.decorate) {
+    // A fullscreen window has no decoration at all, as in Hyprland: its
+    // shadow is off the screen but for what shows through its own alpha,
+    // and that is the workspace's place, not a shadow's.
+    if let Some(shadow) = style
+        .shadow
+        .as_ref()
+        .filter(|_| own.shadow && own.decorate && !fullscreen(placed))
+    {
         let _shadow = Timer::start(Phase::Shadow);
         canvas.shadow(
             Rect::new(
@@ -915,6 +1073,19 @@ fn window<P: Painter>(
         } else {
             *surface
         };
+        let exact =
+            i64::from(surface.width()) == rect.width && i64::from(surface.height()) == rect.height;
+        let opaque = surface.format() == Format::Xrgb8888 && opacity >= 1.0;
+        crate::timing::drawn_surface(
+            (surface.width(), surface.height()),
+            surface.format() == Format::Argb8888,
+            match (exact, opaque) {
+                (true, true) => crate::timing::Path::Copy,
+                (true, false) => crate::timing::Path::Blend,
+                (false, true) => crate::timing::Path::Stretch,
+                (false, false) => crate::timing::Path::StretchBlend,
+            },
+        );
         canvas.composite_scaled(&surface, rect, rounding, opacity, own.nearest, damage);
     }
     // `decoration:dim_inactive`: black over a window that is not focused, at
@@ -937,11 +1108,8 @@ fn rounding_of(placed: &Placed, styles: &Styles<'_>) -> Rounding {
     // neither rounds it (`renderdata.dontRound` in `renderWindow`) nor
     // draws its border, and a corner cut out of it is the wallpaper showing
     // in the four corners of a full-screen game. Fullscreen and not
-    // maximized, which keeps both: the layout gives the first no border
-    // and the second the workspace's, which is how the two are told apart
-    // here. (Under `general:border_size = 0` a maximized window is square
-    // too, the one case this reads wrongly.)
-    if placed.fullscreen && placed.border <= 0 {
+    // maximized, which keeps both ([`fullscreen`]).
+    if fullscreen(placed) {
         return Rounding::none();
     }
     // A rule's `rounding` and `rounding_power` each stand in for the

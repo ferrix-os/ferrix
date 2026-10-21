@@ -3880,6 +3880,12 @@ struct Asked {
     square_borders: usize,
     /// The rounding of each `composite_scaled`.
     composited: Vec<Rounding>,
+    /// The area, inside the screen, of every `clear`: the background.
+    cleared: i64,
+    /// How many shadows were asked for.
+    shadows: usize,
+    /// The area of every `keep_backdrop`.
+    kept: i64,
 }
 
 impl crate::Painter for Asked {
@@ -3888,7 +3894,9 @@ impl crate::Painter for Asked {
     fn bounds(&self) -> Rect {
         Rect::new(0, 0, 1920, 1080)
     }
-    fn clear(&mut self, _: Color, _: &Damage) {}
+    fn clear(&mut self, _: Color, damage: &Damage) {
+        self.cleared += damage.clipped(self.bounds()).area();
+    }
     fn fill(&mut self, _: Rect, _: Color, _: &Damage) {}
     fn fill_rounded(&mut self, _: Rect, _: Rounding, _: Color, _: &Damage) {}
     fn fill_rounded_gradient(&mut self, rect: Rect, _: Rounding, _: &Gradient, damage: &Damage) {
@@ -3899,7 +3907,9 @@ impl crate::Painter for Asked {
             self.square_borders += 1;
         }
     }
-    fn shadow(&mut self, _: Rect, _: &crate::Shadow, _: &Damage) {}
+    fn shadow(&mut self, _: Rect, _: &crate::Shadow, _: &Damage) {
+        self.shadows += 1;
+    }
     fn blur(&mut self, _: Rect, _: Rounding, _: &Blur, _: &Damage) {}
     fn composite(&mut self, _: &Surface<'_>, _: Rect, _: &Damage) {}
     fn composite_scaled(
@@ -3916,7 +3926,9 @@ impl crate::Painter for Asked {
     fn backdrop_fits(&self, (): &()) -> bool {
         false
     }
-    fn keep_backdrop(&mut self, (): &mut (), _: &Damage) {}
+    fn keep_backdrop(&mut self, (): &mut (), damage: &Damage) {
+        self.kept += damage.area();
+    }
     fn blur_backdrop(&mut self, (): &mut (), _: Rect, _: Rounding, _: &Blur, _: &Damage) {}
 }
 
@@ -4082,6 +4094,114 @@ fn a_fullscreen_window_is_square_and_a_maximized_one_is_not() {
         pixels(&canvas).iter().all(|pixel| *pixel == 0xFFFF_FFFF),
         "something other than the window shows on a screen it fills"
     );
+}
+
+/// What `style` asks a painter for to draw `layout`'s one window from a
+/// `size` buffer of opaque white read as `format` -- but for the pixel at
+/// `see_through`, half its alpha -- with a backdrop kept and `layers` drawn,
+/// the whole screen damaged.
+fn asked_with(
+    style: &Style,
+    layout: &MonitorLayout,
+    size: (u32, u32),
+    format: Format,
+    see_through: Option<(u32, u32)>,
+    layers: &[LayerFrame<'_>],
+) -> Asked {
+    let mut bytes = vec![0xFF; (size.0 * size.1 * 4) as usize];
+    if let Some((x, y)) = see_through {
+        bytes[((y * size.0 + x) * 4) as usize..][..4].copy_from_slice(&[0x80; 4]);
+    }
+    let surface = Surface::new(&bytes, size.0, size.1, size.0 * 4, format).unwrap();
+    let surfaces = BTreeMap::from([(WindowId(1), surface)]);
+    let mut asked = Asked::default();
+    let _ = render_onto(
+        &mut asked,
+        Some(&mut ()),
+        layout,
+        (0, 0),
+        &Styles::plain(style),
+        &surfaces,
+        layers,
+        &Damage::full(1920, 1080),
+    );
+    asked
+}
+
+/// A fullscreen window that fills the screen with opaque pixels is the
+/// whole frame: no background, no backdrop and no shadow are drawn under
+/// it, whether its buffer is the screen's size or stretched to it. A
+/// maximized one keeps all three, and so does a fullscreen one with a pixel
+/// that can be seen through -- but never a shadow.
+#[test]
+fn an_opaque_fullscreen_window_is_drawn_alone() {
+    let style = decorated_style();
+    let screen = 1920 * 1080;
+    let (full, _) = one_window(Rect::new(0, 0, 1920, 1080), 0, true);
+
+    let alone = asked_with(&style, &full, (1920, 1080), Format::Xrgb8888, None, &[]);
+    assert_eq!((alone.cleared, alone.kept, alone.shadows), (0, 0, 0));
+    assert_eq!(alone.composited.len(), 1, "the window itself is drawn");
+
+    let stretched = asked_with(&style, &full, (1280, 720), Format::Xrgb8888, None, &[]);
+    assert_eq!(
+        (stretched.cleared, stretched.kept, stretched.shadows),
+        (0, 0, 0)
+    );
+
+    // With alpha, opaque in every pixel: what an X game in a depth-32
+    // visual hands over. Read as opaque, and alone.
+    let argb = asked_with(&style, &full, (1920, 1080), Format::Argb8888, None, &[]);
+    assert_eq!((argb.cleared, argb.kept, argb.shadows), (0, 0, 0));
+
+    // One pixel that is not: the background shows through it, so it and
+    // the backdrop are drawn -- the shadow still not.
+    let hole = Some((1000, 700));
+    let see_through = asked_with(&style, &full, (1920, 1080), Format::Argb8888, hole, &[]);
+    assert_eq!(
+        (see_through.cleared, see_through.kept, see_through.shadows),
+        (screen, screen, 0)
+    );
+    // A pixel outside the damage is not drawn, and does not count.
+    let mut asked = Asked::default();
+    let mut bytes = vec![0xFF; 1920 * 1080 * 4];
+    bytes[(700 * 1920 + 1000) * 4..][..4].copy_from_slice(&[0x80; 4]);
+    let surface = Surface::new(&bytes, 1920, 1080, 7680, Format::Argb8888).unwrap();
+    let _ = render_onto(
+        &mut asked,
+        Some(&mut ()),
+        &full,
+        (0, 0),
+        &Styles::plain(&style),
+        &BTreeMap::from([(WindowId(1), surface)]),
+        &[],
+        &Damage::from(Rect::new(0, 0, 1920, 100)),
+    );
+    assert_eq!((asked.cleared, asked.kept), (0, 0));
+
+    let (maximized, _) = one_window(Rect::new(22, 22, 1876, 1036), 2, true);
+    let kept = asked_with(
+        &style,
+        &maximized,
+        (1876, 1036),
+        Format::Xrgb8888,
+        None,
+        &[],
+    );
+    assert_eq!((kept.cleared, kept.kept, kept.shadows), (screen, screen, 1));
+
+    // A bar above that blurs the backdrop reads it where the window is.
+    let bytes = vec![0x80; 1920 * 30 * 4];
+    let bar = LayerFrame {
+        rect: Rect::new(0, 0, 1920, 30),
+        above: true,
+        surface: Some(Surface::new(&bytes, 1920, 30, 1920 * 4, Format::Argb8888).unwrap()),
+        dim_around: false,
+        blur: true,
+        xray: true,
+    };
+    let read = asked_with(&style, &full, (1920, 1080), Format::Xrgb8888, None, &[bar]);
+    assert_eq!((read.cleared, read.kept, read.shadows), (screen, screen, 0));
 }
 
 /// What a compositor may stop telling a wallpaper about: a window whose

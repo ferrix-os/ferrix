@@ -701,10 +701,12 @@ impl Compositor<'_> {
         // time, which the report prints after it: a slow frame on a slow
         // machine is a question whose answer is one of these.
         let phases = compositor_render::timing::take();
+        let surface = compositor_render::timing::take_surface();
         if took >= self.tally.since {
             self.tally.since_phases = phases;
             self.tally.since_drew = drew.what;
             self.tally.since_from = drew.from;
+            self.tally.since_surface = surface;
         }
         // Every so many frames, say how long the slowest of them took.
         // The compositor does not end on a machine it is the session of,
@@ -722,7 +724,7 @@ impl Compositor<'_> {
         self.tally.counted = self.tally.counted.saturating_add(1);
         if self.tally.reported.elapsed() >= FRAME_REPORT {
             (self.report)(&format!(
-                "hyprix: frames {drawn} slowest of the last {counted} {} us, all of them {} us ({}; drew {} px in {} rects, showed {} px; from layout {} commits {} backdrop {} blurs {})",
+                "hyprix: frames {drawn} slowest of the last {counted} {} us, all of them {} us ({}; drew {} px in {} rects, showed {} px; from layout {} commits {} backdrop {} blurs {}{})",
                 self.tally.since.as_micros(),
                 self.tally.spent.as_micros(),
                 compositor_render::timing::describe(&self.tally.since_phases),
@@ -733,6 +735,10 @@ impl Compositor<'_> {
                 self.tally.since_from[1],
                 self.tally.since_from[2],
                 self.tally.since_from[3],
+                self.tally
+                    .since_surface
+                    .map(|drawn| format!("; largest surface {}", drawn.describe()))
+                    .unwrap_or_default(),
                 drawn = self.tally.drawn,
                 counted = self.tally.counted,
             ));

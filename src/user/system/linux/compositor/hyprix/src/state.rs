@@ -474,6 +474,8 @@ struct Tally {
     since_drew: (i64, usize, i64),
     /// Where the slowest of them drew from.
     since_from: [i64; 4],
+    /// The largest window surface the slowest of them drew, and how.
+    since_surface: Option<compositor_render::timing::Drawn>,
     /// When the last report was: the line is a second apart at most, and
     /// silent while nothing is drawn.
     reported: Instant,
@@ -608,6 +610,7 @@ impl<'r> Compositor<'r> {
                 since_phases: [0; compositor_render::timing::Phase::ALL.len()],
                 since_drew: (0, 0, 0),
                 since_from: [0; 4],
+                since_surface: None,
                 reported: Instant::now(),
             },
             config,

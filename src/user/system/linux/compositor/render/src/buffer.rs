@@ -221,6 +221,36 @@ impl<'a> Surface<'a> {
         self.data
     }
 
+    /// Whether every pixel of `part`, in the surface's own pixels, has a
+    /// full alpha: a premultiplied `ARGB8888` surface that is opaque there
+    /// draws exactly what the same bytes read as `XRGB8888` draw. A part
+    /// reaching outside the surface is not.
+    ///
+    /// One read of the part, with no early way out inside a row, so that
+    /// the loop is a wide AND of the alpha bytes: a millisecond for a
+    /// 1920x1200 surface, where blending it costs ten or more.
+    pub(crate) fn opaque_within(&self, part: crate::Rect) -> bool {
+        let fits = part.x >= 0
+            && part.y >= 0
+            && part.right() <= i64::from(self.width)
+            && part.bottom() <= i64::from(self.height);
+        if !fits {
+            return false;
+        }
+        let from = usize::try_from(part.x).unwrap_or(0) * 4;
+        let len = usize::try_from(part.width).unwrap_or(0) * 4;
+        (part.y..part.bottom()).all(|y| {
+            u32::try_from(y)
+                .ok()
+                .and_then(|y| self.row(y))
+                .and_then(|row| row.get(from..from + len))
+                .is_some_and(|row| {
+                    let (pixels, _) = row.as_chunks::<4>();
+                    pixels.iter().fold(0xFF_u8, |all, pixel| all & pixel[3]) == 0xFF
+                })
+        })
+    }
+
     /// Row `y`'s pixels, `width` × 4 bytes, without the padding.
     pub(crate) fn row(&self, y: u32) -> Option<&'a [u8]> {
         let start = usize::try_from(u64::from(y) * u64::from(self.stride)).ok()?;
