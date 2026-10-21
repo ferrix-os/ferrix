@@ -27,6 +27,7 @@ use ferrix_native_abi::types::{
     PIN_READ_ONLY, PortPacket,
 };
 
+use crate::address;
 use crate::call::{Raw, Syscall};
 use crate::channel::{self, Channel, ReadError, Received};
 use crate::chardev;
@@ -1160,6 +1161,14 @@ fn every_call_in_the_native_table_has_a_wrapper() {
     let _ = mapping.map_combining(None);
     let _ = device.pin(&vmo, 0, 1, PinAccess::ReadOnly);
     let _ = Pin::from_owned(handle()).addresses(&mut []);
+    let word = address::Word::At {
+        address: 0x1000,
+        shared: false,
+    };
+    let _ = address::wait(&sys, word, 0, address::MATCH_ANY, Deadline::Never);
+    let _ = address::wake(&sys, word, 1, address::MATCH_ANY);
+    let _ = address::requeue(&sys, (0x1000, 0x1004), (0, 1), false, None);
+    let _ = address::wait_any(&sys, &[types::AddressWord::default()], Deadline::Never);
 
     let wrapped: BTreeSet<usize> = sys.numbers().into_iter().collect();
     let table: BTreeSet<usize> = nr::ALL.iter().map(|&call| nr::number(call)).collect();
@@ -1192,4 +1201,61 @@ fn words_of_packs_every_length_as_one_copy_would() {
         channel::Words::of(&source[..channel::WRITE_READ_BYTES + 1]),
         None
     );
+}
+
+/// The address waits put each argument in its register: a word by address
+/// with its shared flag, a word by handle with its offset, the handle and
+/// `ADDRESS_BY_VMO`, a compared requeue with `ADDRESS_COMPARE` and its
+/// value, and a wait on many words its 16-byte vector and count; a wait on
+/// no words is refused before any call.
+#[test]
+fn the_address_waits_lay_out_their_registers() {
+    let sys = Recorder::default();
+    let shared = address::Word::At {
+        address: 0x2000,
+        shared: true,
+    };
+    let in_vmo = address::Word::InVmo {
+        vmo: Handle(7),
+        offset: 0x40,
+    };
+    let _ = address::wait(&sys, shared, 3, 0b10, Deadline::Never);
+    let _ = address::wake(&sys, in_vmo, 2, address::MATCH_ANY);
+    let _ = address::requeue(&sys, (0x2000, 0x2004), (1, 4), false, Some(9));
+    let words = [types::AddressWord {
+        address: 0x3000,
+        expected: 5,
+        flags: 0,
+    }];
+    let _ = address::wait_any(&sys, &words, Deadline::Never);
+    assert_eq!(
+        address::wait_any(&sys, &[], Deadline::Never),
+        Err(Error::InvalidArgs)
+    );
+    let calls = sys.calls.borrow();
+    assert_eq!(calls.len(), 4, "a wait on no words made a call");
+    assert_eq!(calls[0].number, nr::ADDRESS_WAIT);
+    assert_eq!(
+        calls[0].args[..4],
+        [0x2000, 3, 0b10, types::ADDRESS_SHARED as usize]
+    );
+    assert_eq!(calls[0].args[4], 0, "no deadline is a null pointer");
+    assert_eq!(calls[1].number, nr::ADDRESS_WAKE);
+    assert_eq!(
+        calls[1].args[..5],
+        [
+            0x40,
+            2,
+            u32::MAX as usize,
+            types::ADDRESS_BY_VMO as usize,
+            7
+        ]
+    );
+    assert_eq!(calls[2].number, nr::ADDRESS_REQUEUE);
+    assert_eq!(
+        calls[2].args,
+        [0x2000, 0x2004, 1, 4, types::ADDRESS_COMPARE as usize, 9]
+    );
+    assert_eq!(calls[3].number, nr::ADDRESS_WAIT_ANY);
+    assert_eq!(calls[3].args[1..3], [1, 0]);
 }

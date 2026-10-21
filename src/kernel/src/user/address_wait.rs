@@ -418,14 +418,16 @@ fn grow(index: usize, room: usize) -> Result<(), WaitError> {
     let mut fresh: Vec<Entry> =
         fallible::try_with_capacity(room).map_err(|_| WaitError::NoMemory)?;
     let mut table = bucket_lock(index).lock();
-    let old = if table.capacity() < room && fresh.capacity() >= table.len() {
+    // The vector given up -- the old one, or the fresh one if the bucket
+    // grew meanwhile -- freed after the lock either way.
+    let unused = if table.capacity() < room && fresh.capacity() >= table.len() {
         move_into(&mut table, &mut fresh);
-        Some(core::mem::replace(&mut *table, fresh))
+        core::mem::replace(&mut *table, fresh)
     } else {
-        None
+        fresh
     };
     drop(table);
-    drop(old);
+    drop(unused);
     Ok(())
 }
 
@@ -455,17 +457,17 @@ fn shrink(index: usize) {
         return;
     };
     let mut table = bucket_lock(index).lock();
-    let old = if table.len().saturating_mul(4) < table.capacity()
+    let unused = if table.len().saturating_mul(4) < table.capacity()
         && fresh.capacity() >= table.len()
         && fresh.capacity() < table.capacity()
     {
         move_into(&mut table, &mut fresh);
-        Some(core::mem::replace(&mut *table, fresh))
+        core::mem::replace(&mut *table, fresh)
     } else {
-        None
+        fresh
     };
     drop(table);
-    drop(old);
+    drop(unused);
 }
 
 /// Block until `sleeper` is woken, `interrupted` says the caller must leave,

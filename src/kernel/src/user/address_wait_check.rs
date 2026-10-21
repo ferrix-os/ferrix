@@ -270,6 +270,73 @@ fn a_wait_is_woken_and_a_changed_word_refused(
     Ok(())
 }
 
+/// What case 3, 4 and 10 share: one VMO mapped into `a` and `b` at two
+/// addresses, and two handles to it in `c`, one with `READ` and one without.
+struct SharedWord {
+    /// The VMO.
+    object: Arc<Vmo>,
+    /// The word's address in `a`.
+    at_a: u64,
+    /// And in `b`.
+    at_b: u64,
+    /// `c`'s handle with `READ`.
+    reader: Handle,
+    /// `c`'s handle with `MAP` only.
+    blind: Handle,
+    /// The key `a`'s shared wait gets.
+    key: Key,
+}
+
+/// Map a fresh VMO into `a` and `b` and give `c` two handles to it.
+fn shared_word(a: &Side, b: &Side, c: &Side) -> Result<SharedWord, &'static str> {
+    let vmo = a.handle(
+        nr::VMO_CREATE,
+        &[2 * PAGE_SIZE],
+        "addrwait: vmo_create failed",
+    )?;
+    let object = vmo_of(a, vmo)?;
+    let in_b = give(b, &object, Rights::READ | Rights::WRITE | Rights::MAP)?;
+    for (side, handle, at) in [(a, vmo, MAPPED_A), (b, in_b, MAPPED_B)] {
+        side.put(OFFSET_AT, &0_u64.to_ne_bytes())?;
+        let both = u64::from(MAP_READ | MAP_WRITE);
+        let _ = side
+            .call(nr::VMO_MAP, &[reg(handle), at, PAGE_SIZE, both, OFFSET_AT])
+            .map_err(|_| "addrwait: vmo_map failed")?;
+    }
+    let at_a = MAPPED_A + SHARED_OFFSET;
+    Ok(SharedWord {
+        reader: give(c, &object, Rights::READ)?,
+        blind: give(c, &object, Rights::MAP)?,
+        object,
+        at_a,
+        at_b: MAPPED_B + SHARED_OFFSET,
+        key: Key::new(a.process.space(), at_a, true),
+    })
+}
+
+/// A wake of one on the shared word, by `handle` in `c`.
+fn wake_by_handle(c: &Side, handle: Handle) -> Result<usize, Errno> {
+    let all = u64::from(u32::MAX);
+    c.call(
+        nr::ADDRESS_WAKE,
+        &[SHARED_OFFSET, 1, all, ADDRESS_BY_VMO, reg(handle), 0],
+    )
+}
+
+/// Start `a`'s shared wait on the word in slot 0, and wait for it to be
+/// listed under any of `keys`.
+fn shared_waiter(a: &Side, word: &SharedWord, keys: &[Key]) -> Result<(), &'static str> {
+    let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
+    let all = u64::from(u32::MAX);
+    start(
+        0,
+        a,
+        nr::ADDRESS_WAIT,
+        [word.at_a, 3, all, ADDRESS_SHARED, deadline, 0],
+    )?;
+    until_listed(keys, 1)
+}
+
 /// Case 3, 4 and 10: a shared word is one word in every process that maps
 /// its VMO, at whatever address, and the same word named by a handle and an
 /// offset with no mapping at all; a wait outlives the unmapping of its word;
@@ -283,159 +350,106 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
     c: &Side,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let vmo = a.handle(
-        nr::VMO_CREATE,
-        &[2 * PAGE_SIZE],
-        "addrwait: vmo_create failed",
-    )?;
-    let object = vmo_of(a, vmo)?;
-    a.put(OFFSET_AT, &0_u64.to_ne_bytes())?;
-    let both = u64::from(MAP_READ | MAP_WRITE);
-    let _ = a
-        .call(
-            nr::VMO_MAP,
-            &[reg(vmo), MAPPED_A, PAGE_SIZE, both, OFFSET_AT],
-        )
-        .map_err(|_| "addrwait: vmo_map failed")?;
-    let in_b = give(b, &object, Rights::READ | Rights::WRITE | Rights::MAP)?;
-    b.put(OFFSET_AT, &0_u64.to_ne_bytes())?;
-    let _ = b
-        .call(
-            nr::VMO_MAP,
-            &[reg(in_b), MAPPED_B, PAGE_SIZE, both, OFFSET_AT],
-        )
-        .map_err(|_| "addrwait: vmo_map in the second process failed")?;
-    let reader = give(c, &object, Rights::READ)?;
-    let blind = give(c, &object, Rights::MAP)?;
+    let word = shared_word(a, b, c)?;
+    set(a, word.at_a, 3)?;
+    by_mapping_across_processes(a, b, &word, report)?;
+    by_handle_without_a_mapping(a, c, &word, report)?;
+    after_its_mapping_is_gone(a, c, &word, report)
+}
 
-    // By mapping, across two processes at two addresses.
-    let (at_a, at_b) = (MAPPED_A + SHARED_OFFSET, MAPPED_B + SHARED_OFFSET);
-    set(a, at_a, 3)?;
-    // The waiter's key as the call makes it, and its private key beside it,
-    // so that a shared word wrongly keyed by address is still seen listed
-    // and the failure named is the wake's.
-    let shared_key = Key::new(a.process.space(), at_a, true);
-    let listed = [shared_key.clone(), private(a, at_a)];
-    let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
-    start(
-        0,
-        a,
-        nr::ADDRESS_WAIT,
-        [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0],
-    )?;
-    until_listed(&listed, 1)?;
+/// Case 3: a shared wait in `a` is found by a shared wake through `b`'s
+/// mapping at another address, and not by a private one. Its private key is
+/// watched beside its shared one, so that a shared word wrongly keyed by
+/// address is still seen listed and the failure named is the wake's.
+fn by_mapping_across_processes(
+    a: &Side,
+    b: &Side,
+    word: &SharedWord,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    shared_waiter(a, word, &[word.key.clone(), private(a, word.at_a)])?;
+    let all = u64::from(u32::MAX);
     let private_wake = b
-        .call(nr::ADDRESS_WAKE, &[at_b, 1, u64::from(u32::MAX), 0, 0, 0])
+        .call(nr::ADDRESS_WAKE, &[word.at_b, 1, all, 0, 0, 0])
         .map_err(|_| "addrwait: a private wake was refused")?;
     if private_wake != 0 {
         return Err("addrwait: a private wake in another process found a shared waiter");
     }
     let woken = b
-        .call(
-            nr::ADDRESS_WAKE,
-            &[at_b, 1, u64::from(u32::MAX), ADDRESS_SHARED, 0, 0],
-        )
+        .call(nr::ADDRESS_WAKE, &[word.at_b, 1, all, ADDRESS_SHARED, 0, 0])
         .map_err(|_| "addrwait: a shared wake was refused")?;
     if woken != 1 || answer(0, PATIENCE_NANOS) != Some(Ok(0)) {
         return Err("addrwait: a shared waiter was not found across processes");
     }
     report.woken += 1;
+    Ok(())
+}
 
-    // By handle, from a process with no mapping: the same key.
-    let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
-    start(
-        0,
-        a,
-        nr::ADDRESS_WAIT,
-        [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0],
-    )?;
-    until_listed(core::slice::from_ref(&shared_key), 1)?;
+/// Case 4: the same wait is found by a wake by handle from `c`, which has no
+/// mapping, and not through a handle without `READ`; a wait by handle on a
+/// page never committed reads zero and commits nothing.
+fn by_handle_without_a_mapping(
+    a: &Side,
+    c: &Side,
+    word: &SharedWord,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    shared_waiter(a, word, core::slice::from_ref(&word.key))?;
     refused(
-        c.call(
-            nr::ADDRESS_WAKE,
-            &[
-                SHARED_OFFSET,
-                1,
-                u64::from(u32::MAX),
-                ADDRESS_BY_VMO,
-                reg(blind),
-                0,
-            ],
-        ),
+        wake_by_handle(c, word.blind),
         status::ACCESS_DENIED,
         "addrwait: a wake by a handle without READ was let through",
         report,
     )?;
-    let woken = c
-        .call(
-            nr::ADDRESS_WAKE,
-            &[
-                SHARED_OFFSET,
-                1,
-                u64::from(u32::MAX),
-                ADDRESS_BY_VMO,
-                reg(reader),
-                0,
-            ],
-        )
-        .map_err(|_| "addrwait: a wake by handle was refused")?;
+    let woken =
+        wake_by_handle(c, word.reader).map_err(|_| "addrwait: a wake by handle was refused")?;
     if woken != 1 || answer(0, PATIENCE_NANOS) != Some(Ok(0)) {
         return Err("addrwait: a wake by handle did not find the waiter by mapping");
     }
     report.woken += 1;
 
-    // A word in the second page, never committed: reads as zero, and the
-    // wait does not commit it.
-    let committed = object.committed();
+    let committed = word.object.committed();
     let past = deadline_in(c, 1, 0)?;
+    let all = u64::from(u32::MAX);
     refused(
         c.call(
             nr::ADDRESS_WAIT,
             &[
                 PAGE_SIZE + 8,
                 0,
-                u64::from(u32::MAX),
+                all,
                 ADDRESS_BY_VMO,
                 past,
-                reg(reader),
+                reg(word.reader),
             ],
         ),
         status::TIMED_OUT,
         "addrwait: a wait on an uncommitted page did not read it as zero",
         report,
     )?;
-    if object.committed() != committed {
+    if word.object.committed() != committed {
         return Err("addrwait: a wait committed a page of its VMO");
     }
+    Ok(())
+}
 
-    // Unmapped while its waiter sleeps: still listed, and woken by handle.
-    let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
-    start(
-        0,
-        a,
-        nr::ADDRESS_WAIT,
-        [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0],
-    )?;
-    until_listed(core::slice::from_ref(&shared_key), 1)?;
+/// Case 10: a waiter whose word is unmapped while it sleeps stays listed and
+/// is woken by handle; a wait on the unmapped address faults.
+fn after_its_mapping_is_gone(
+    a: &Side,
+    c: &Side,
+    word: &SharedWord,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    shared_waiter(a, word, core::slice::from_ref(&word.key))?;
     a.process
         .space()
         .unmap(MAPPED_A, PAGE_SIZE)
         .map_err(|_| "addrwait: the unmap failed")?;
-    if address_wait::waiters_on(core::slice::from_ref(&shared_key)) != 1 {
+    if address_wait::waiters_on(core::slice::from_ref(&word.key)) != 1 {
         return Err("addrwait: an unmap took a sleeping waiter off the table");
     }
-    let woken = c
-        .call(
-            nr::ADDRESS_WAKE,
-            &[
-                SHARED_OFFSET,
-                1,
-                u64::from(u32::MAX),
-                ADDRESS_BY_VMO,
-                reg(reader),
-                0,
-            ],
-        )
+    let woken = wake_by_handle(c, word.reader)
         .map_err(|_| "addrwait: a wake by handle after an unmap was refused")?;
     if woken != 1 || answer(0, PATIENCE_NANOS) != Some(Ok(0)) {
         return Err("addrwait: a waiter whose word was unmapped was not woken by handle");
@@ -444,13 +458,12 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
     refused(
         a.call(
             nr::ADDRESS_WAIT,
-            &[at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, 0, 0],
+            &[word.at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, 0, 0],
         ),
         status::FAULT,
         "addrwait: a wait on an unmapped address did not fault",
         report,
-    )?;
-    Ok(())
+    )
 }
 
 /// The VMO a handle in `side` names.
@@ -589,8 +602,11 @@ fn a_wait_on_many_words_answers_which(a: &Side, report: &mut Report) -> Result<(
     let mut vector = [0_u8; 48];
     for (index, (&at, element)) in words.iter().zip(vector.chunks_exact_mut(16)).enumerate() {
         set(a, at, 20 + index as u32)?;
-        element[..8].copy_from_slice(&at.to_ne_bytes());
-        element[8..12].copy_from_slice(&(20 + index as u32).to_ne_bytes());
+        let (address, rest) = element.split_at_mut(8);
+        address.copy_from_slice(&at.to_ne_bytes());
+        if let Some(expected) = rest.get_mut(..4) {
+            expected.copy_from_slice(&(20 + index as u32).to_ne_bytes());
+        }
     }
     a.put(VECTOR, &vector)?;
     let keys = words.map(|at| private(a, at));
@@ -749,22 +765,15 @@ fn member_of(job: &Arc<Job>) -> Result<Side, &'static str> {
     Ok(side)
 }
 
-/// Case 12: what the calls refuse.
-///
-/// Verifies: L.object.203, L.object.204, L.object.205, L.object.206
-fn the_calls_refuse_what_the_abi_refuses(
-    a: &Side,
-    report: &mut Report,
-) -> Result<(), &'static str> {
+/// A call the ABI refuses: its number, registers, status and the sentence
+/// the check fails with if it is not refused so.
+type Refusal = (usize, [u64; 6], Errno, &'static str);
+
+/// What `address_wait` refuses, `vmo` a VMO handle of one page and
+/// `channel` a channel handle.
+fn wait_refusals(vmo: Handle, channel: Handle) -> [Refusal; 8] {
     let all = u64::from(u32::MAX);
-    let vmo = a.handle(nr::VMO_CREATE, &[PAGE_SIZE], "addrwait: vmo_create failed")?;
-    let (channel, _) = {
-        let _ = a
-            .call(nr::CHANNEL_CREATE, &[SCRATCH + 0xC00])
-            .map_err(|_| "addrwait: channel_create failed")?;
-        (Handle(a.get_u32(SCRATCH + 0xC00)?), ())
-    };
-    let cases: [(usize, [u64; 6], Errno, &'static str); 15] = [
+    [
         (
             nr::ADDRESS_WAIT,
             [WORD, 0, all, 1 << 3, 0, 0],
@@ -813,6 +822,13 @@ fn the_calls_refuse_what_the_abi_refuses(
             status::FAULT,
             "addrwait: a wait on an unmapped word did not fault",
         ),
+    ]
+}
+
+/// What the other three calls refuse.
+fn other_refusals() -> [Refusal; 7] {
+    let all = u64::from(u32::MAX);
+    [
         (
             nr::ADDRESS_WAKE,
             [WORD, 1, 0, 0, 0, 0],
@@ -855,8 +871,27 @@ fn the_calls_refuse_what_the_abi_refuses(
             status::INVALID_ARGS,
             "addrwait: a wait-any with call flags was accepted",
         ),
-    ];
-    for (number, args, wanted, what) in cases {
+    ]
+}
+
+/// Case 12: what the calls refuse.
+///
+/// Verifies: L.object.203, L.object.204, L.object.205, L.object.206
+fn the_calls_refuse_what_the_abi_refuses(
+    a: &Side,
+    report: &mut Report,
+) -> Result<(), &'static str> {
+    let vmo = a.handle(nr::VMO_CREATE, &[PAGE_SIZE], "addrwait: vmo_create failed")?;
+    let (channel, _) = {
+        let _ = a
+            .call(nr::CHANNEL_CREATE, &[SCRATCH + 0xC00])
+            .map_err(|_| "addrwait: channel_create failed")?;
+        (Handle(a.get_u32(SCRATCH + 0xC00)?), ())
+    };
+    for (number, args, wanted, what) in wait_refusals(vmo, channel)
+        .into_iter()
+        .chain(other_refusals())
+    {
         refused(a.call(number, &args), wanted, what, report)?;
     }
     // A vector word with a flag other than SHARED.

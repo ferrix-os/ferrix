@@ -38,6 +38,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod address;
 pub mod call;
 pub mod channel;
 pub mod chardev;
