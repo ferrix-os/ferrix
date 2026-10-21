@@ -219,7 +219,10 @@ fn give(side: &Side, object: Object, rights: Rights) -> Result<Handle, &'static 
 pub(crate) fn run_and_report() -> Result<(), &'static str> {
     let sender = run()?;
     crate::console::println!(
-        "  sender   {} messages read with their writer's process and job, stamped by the kernel          at the write: the writer not the body, the slot, a transfer either way, an ended          writer, a move between jobs, the kernel's own; channel_write_read answered none; {}          processes given fresh ids, plain, forked and made (a pid given again: {}); {} refusals",
+        "  sender   {} messages read with their writer's process and job, stamped by the kernel \
+         at the write: the writer not the body, the slot, a transfer either way, an ended \
+         writer, a move between jobs, the kernel's own; channel_write_read answered none; {} \
+         processes given fresh ids, plain, forked and made (a pid given again: {}); {} refusals",
         sender.read,
         sender.fresh,
         if sender.pid_reused { "yes" } else { "no" },
