@@ -265,10 +265,10 @@ fn every_case_names_a_different_stop_and_the_hang_none() {
         }
     }
     // A panic's case is the record's; a machine check's is test-mce-restart's
-    // (`docs/MACHINE-CHECK-RESTART.md` §5).
+    // (`docs/MACHINE-CHECK-RESTART.md` §5); a lockup has cases of its own.
     for stop in Stop::ALL
         .into_iter()
-        .filter(|stop| !matches!(stop, Stop::Panic | Stop::MachineCheck))
+        .filter(|stop| !matches!(stop, Stop::Panic | Stop::MachineCheck | Stop::Lockup))
     {
         assert!(
             CASES.iter().any(|case| case.ended == Ended::Stopped(stop)),
