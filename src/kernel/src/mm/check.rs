@@ -328,6 +328,7 @@ pub(crate) fn memory_check(stats: &mm::Stats) -> Result<(), &'static str> {
     check_stacks()?;
     check_only_ram_has_a_checked_alias()?;
     check_the_watermark(stats)?;
+    check_the_reservation_floors()?;
     Ok(())
 }
 
@@ -1108,4 +1109,167 @@ pub(crate) fn check_pstore_never_free() -> Result<(), &'static str> {
     }
     println!("  pstore   none of its {} frames is free", len / PAGE_SIZE);
     Ok(())
+}
+
+/// Frames a reservation of the floors check is admitted for.
+const PROMISED: u64 = 64;
+
+/// The reservations' floors (`mm::reservation`, `docs/microkernel/K12.md`
+/// §3 steps 1 to 4), at stage 2 for the reason [`check_the_watermark`] runs
+/// there: one processor, no program, so nothing else moves the free count.
+///
+/// A reservation bound by the check, not by a job, is refused more than the
+/// free frames beyond the watermark and the outstanding promise, and then
+/// admitted for [`PROMISED`] frames, the promise rising by exactly that.
+/// With most of memory taken as the largest blocks, a program's frames are
+/// taken until refused, which must be with the free count at the watermark
+/// beyond the promise; the kernel's own frames then until refused, which must
+/// be at the promise itself. Frames drawn from the reservation are then given
+/// below both, each tagged with it and the promise falling one for one to
+/// nothing, and the next is refused. Everything goes back: every tag clear,
+/// the promise whole again, then gone with the reservation, and the window
+/// closed on the count it opened at.
+///
+/// Its negative controls: the program's floor without the promise (a program
+/// takes a promised frame), the kernel's floor removed (a kernel frame is
+/// taken from the promise), admission without its test, and a free that
+/// credits nothing back.
+///
+/// Verifies: H.QUOTA.15
+/// Verifies: H.QUOTA.16
+/// Verifies: L.mm.76
+/// Verifies: L.mm.77
+/// Verifies: L.mm.78
+/// Verifies: L.mm.79
+/// Verifies: L.mm.80
+/// Verifies: L.mm.82
+fn check_the_reservation_floors() -> Result<(), &'static str> {
+    let floor = mm::watermark();
+    let before = super::reservation::outstanding();
+    let window = mm::FrameWindow::open();
+    let largest = 1u64 << ferrix_frame::MAX_ORDER;
+    let mut blocks = Chain::new();
+    while mm::free_frames() > floor + PROMISED + 2 * largest {
+        match mm::allocate_frames(ferrix_frame::MAX_ORDER) {
+            Some(block) => blocks.push(block),
+            None => break,
+        }
+    }
+    let entry = mm::reservation_bind().ok_or("no reservation was free to bind")?;
+    let mut programs = Chain::new();
+    let mut kernels = Chain::new();
+    let mut drawn = Chain::new();
+    let outcome = reservation_floors(
+        entry,
+        floor,
+        before,
+        &mut programs,
+        &mut kernels,
+        &mut drawn,
+    );
+    while let Some(frame) = drawn.pop() {
+        mm::deallocate_frames(frame, 0);
+    }
+    let whole = super::reservation::outstanding() == before + PROMISED;
+    let untagged = outcome.as_ref().map_or(true, |&(first, _)| {
+        (first..first + 1).all(|frame| mm::drawn_from(frame) == mm::NO_RESERVATION)
+    });
+    while let Some(frame) = kernels.pop() {
+        mm::deallocate_frames(frame, 0);
+    }
+    while let Some(frame) = programs.pop() {
+        let _ = mm::release_frame(frame);
+    }
+    while let Some(block) = blocks.pop() {
+        mm::deallocate_frames(block, ferrix_frame::MAX_ORDER);
+    }
+    mm::reservation_unbind(entry);
+    let (_, taken) = outcome?;
+    if !whole {
+        return Err("the promise did not come back as its frames were freed");
+    }
+    if !untagged {
+        return Err("a freed frame kept its reservation's tag");
+    }
+    if super::reservation::outstanding() != before {
+        return Err("an unbound reservation still promised frames");
+    }
+    if window.kept() != 0 {
+        window.report("reserve");
+        return Err("the reservation check did not give back every frame it took");
+    }
+    println!(
+        "  reserve  {} frames promised: programs held at the watermark beyond it, the kernel at \
+         it, its own frames drawn below both and tagged ({} frames taken and given back)",
+        PROMISED, taken,
+    );
+    Ok(())
+}
+
+/// [`check_the_reservation_floors`]'s steps, the frames each route gave held
+/// in its chain for the caller to give back: the first frame drawn, and how
+/// many frames the routes took.
+fn reservation_floors(
+    entry: mm::Reservation,
+    floor: u64,
+    before: u64,
+    programs: &mut Chain,
+    kernels: &mut Chain,
+    drawn: &mut Chain,
+) -> Result<(u64, u64), &'static str> {
+    // Admission: refused one past what the free frames cover, nothing
+    // changed; then admitted, the promise up by exactly its size.
+    let free = mm::free_frames();
+    let cover = free.saturating_sub(floor + before);
+    if mm::reservation_resize(entry, cover + 1).is_ok() {
+        return Err("a reservation past the free frames was admitted");
+    }
+    if super::reservation::outstanding() != before {
+        return Err("a refused reservation changed the promise");
+    }
+    mm::reservation_resize(entry, PROMISED)
+        .map_err(|_| "a reservation the free frames cover was refused")?;
+    let promise = before + PROMISED;
+    if super::reservation::outstanding() != promise {
+        return Err("an admitted reservation did not raise the promise by its size");
+    }
+    if mm::program_floor() != floor + promise {
+        return Err("the program floor is not the watermark beyond the promise");
+    }
+    // A program's frames, drawn from nothing: refused at the watermark
+    // beyond the promise.
+    while let Some(frame) = mm::allocate_user_frame() {
+        programs.push(frame);
+    }
+    if mm::free_frames() != floor + promise {
+        return Err("a program took a promised frame");
+    }
+    // The kernel's own: refused at the promise.
+    while let Some(frame) = mm::allocate_frames(0) {
+        kernels.push(frame);
+    }
+    if mm::free_frames() != promise {
+        return Err("a kernel frame was taken from the promise");
+    }
+    // Drawn from the reservation: given below both, each tagged, the promise
+    // falling one for one.
+    let mut first = None;
+    for left in (0..PROMISED).rev() {
+        let frame = super::take_frames(0, super::reservation::Floor::Program(entry))
+            .ok_or("a frame drawn from its reservation was refused")?;
+        drawn.push(frame);
+        let _ = first.get_or_insert(frame);
+        if mm::drawn_from(frame) != entry {
+            return Err("a drawn frame was not tagged with its reservation");
+        }
+        if super::reservation::outstanding() != before + left {
+            return Err("a drawn frame did not leave the promise");
+        }
+    }
+    if let Some(frame) = super::take_frames(0, super::reservation::Floor::Program(entry)) {
+        drawn.push(frame);
+        return Err("a frame past its reservation's size was drawn");
+    }
+    let taken = programs.len + kernels.len + drawn.len;
+    Ok((first.ok_or("nothing was drawn")?, taken))
 }

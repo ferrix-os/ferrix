@@ -340,7 +340,7 @@ fn write_reclaims_at_max() -> Result<u64, &'static str> {
     crate::sched::set_current_group(job.index());
     let read = read_pattern(CLEAN);
     let held = job.usage(Resource::Memory).used;
-    job.set_limit(Resource::Memory, held.saturating_add(HEADROOM));
+    let _ = job.set_limit(Resource::Memory, held.saturating_add(HEADROOM));
     let refused = job.usage(Resource::Memory).refused;
     let stolen = job.counted(Counter::Stolen);
     let wrote = match read {
@@ -442,7 +442,7 @@ fn fill_reclaims_until_room() -> Result<u64, &'static str> {
     crate::sched::set_current_group(job.index());
     let held = read_pattern(CLEAN);
     let used = job.usage(Resource::Memory).used;
-    job.set_limit(Resource::Memory, used.saturating_sub(OVER));
+    let _ = job.set_limit(Resource::Memory, used.saturating_sub(OVER));
     let stolen = job.counted(Counter::Stolen);
     let mut out = alloc::vec![0_u8; READ_PAGES * PAGE];
     let read = match held {

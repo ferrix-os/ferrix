@@ -510,6 +510,11 @@ impl Inode for Directory {
             return Err(Errno::EEXIST);
         }
         let text = core::str::from_utf8(name).map_err(|_| Errno::EINVAL)?;
+        // A reserved subtree is not the Linux partition's to fill
+        // (`docs/microkernel/K12.md` §2.6, ledger 2550 (2)).
+        if self.job.draws_from() != crate::mm::NO_RESERVATION {
+            return Err(Errno::EBUSY);
+        }
         // A cgroup made in a directory someone other than root may write is
         // a delegatee's own, and its refusals are charged to the audit
         // budget above it rather than starting one of their own.
@@ -1089,6 +1094,11 @@ fn move_process(job: &Arc<Job>, data: &[u8], opener: &Writer) -> Result<()> {
         return Err(Errno::ENOENT);
     }
     attach_permissions(&opener.who, &left, job, &opener.shared)?;
+    // Nothing from outside a reserved subtree moves into it
+    // (`docs/microkernel/K12.md` §2.6, ledger 2550 (2)).
+    if !job.admits_work_from(&left) {
+        return Err(Errno::EBUSY);
+    }
     // The move writes the process's freeze, which its threads read on their
     // way back to user mode: counted as a post from before that write until
     // `freeze_sync` has posted (`sched::work::audit`).
@@ -1117,7 +1127,10 @@ fn set_mark(job: &Job, kind: Kind, data: &[u8]) -> Result<()> {
         });
     // Not audited: the audit record names a limit that refuses charges, and
     // a mark refuses nothing.
-    let _ = job.set_mark(mark, value);
+    if !job.set_mark(mark, value) && job.usage(Resource::Memory).is_some() {
+        // A `memory.high` above a reserved job (`L.object.223`).
+        return Err(Errno::EBUSY);
+    }
     Ok(())
 }
 
@@ -1218,6 +1231,10 @@ fn write_to(job: &Arc<Job>, kind: Kind, data: &[u8], opener: &Writer) -> Result<
             });
             if job.set_limit(Resource::Memory, bytes) {
                 limit_set(job, Resource::Memory, bytes);
+            } else if job.usage(Resource::Memory).is_some() {
+                // Below the job's reservation, or above a reserved job
+                // (`L.object.223`).
+                return Err(Errno::EBUSY);
             }
         }
         Kind::MemoryHigh | Kind::MemoryLow | Kind::MemoryMin => set_mark(job, kind, data)?,

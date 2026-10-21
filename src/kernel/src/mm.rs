@@ -50,7 +50,7 @@
 
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
-use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 use ferrix_bootinfo::{BootView, MemKind, MemRegion, PAGE_SIZE, direct_map_runs};
 use ferrix_frame::{Frame, Frames, PageEntry};
@@ -62,8 +62,14 @@ use ferrix_sync::IrqSpinLock;
 use crate::fallible;
 
 pub(crate) mod check;
+mod reservation;
 mod reserve;
 mod unlinked;
+
+pub(crate) use reservation::{Entry as Reservation, Refused, drawn_from};
+
+/// No reservation: what a job that draws from none draws from.
+pub(crate) const NO_RESERVATION: Reservation = reservation::NONE;
 
 pub(crate) use reserve::{
     Reserved, bypass_heap_in_sections, fill_reserve, refuse_reserve_fills, reserve, reserve_counts,
@@ -248,6 +254,8 @@ pub(crate) fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
     // precisely so that change stays inside this function.
     let entries = Frames::entries_needed(lowest, highest);
     let bytes = (entries * size_of::<PageEntry>()) as u64;
+    // And one reservation tag a frame behind it (`mm::reservation`, K12).
+    let carved = bytes + entries as u64;
     if view.usable_ram() == 0 {
         return Err(MemoryError::NoUsableMemory);
     }
@@ -255,14 +263,16 @@ pub(crate) fn init(view: &BootView<'_>) -> Result<Stats, MemoryError> {
     // one: the array is zeroed through the direct map, and on a 32-bit board
     // with more RAM than that map holds the longest region can lie above it.
     let host = view
-        .page_array_host(bytes)
-        .ok_or(MemoryError::NoRoomForPageArray(bytes))?;
+        .page_array_host(carved)
+        .ok_or(MemoryError::NoRoomForPageArray(carved))?;
 
     let array = place_page_array(host.base, entries);
     let mut frames = Frames::new(array, lowest);
+    reservation::install(place_tags(host.base + bytes, entries), lowest);
 
-    // Everything firmware called usable, minus the part the array now occupies.
-    let array_end = host.base + bytes.next_multiple_of(PAGE_SIZE);
+    // Everything firmware called usable, minus the part the array and the
+    // tags now occupy.
+    let array_end = host.base + carved.next_multiple_of(PAGE_SIZE);
     for region in view.regions() {
         if region.kind.is_free_at_boot() {
             insert_region(&mut frames, region, host.base, array_end);
@@ -341,6 +351,21 @@ fn place_page_array(base: u64, entries: usize) -> &'static mut [PageEntry] {
     unsafe { core::slice::from_raw_parts_mut(virt, entries) }
 }
 
+/// Zero `entries` reservation tags at `base`, just behind the page array,
+/// and take them as a slice (`mm::reservation`).
+fn place_tags(base: u64, entries: usize) -> &'static [AtomicU8] {
+    let virt = physmap(base) as *mut AtomicU8;
+    // SAFETY: (KMEM) `base` is inside the run `BootView::page_array_host`
+    // chose for the page array and its tags together, which is mapped by the
+    // direct map, about to be excluded from the allocator, and referred to by
+    // nothing else.
+    unsafe { core::ptr::write_bytes(virt.cast::<u8>(), 0, entries) };
+    // SAFETY: (KMEM) the range was just zeroed, which is a valid `AtomicU8`
+    // each, lies inside that run, is never given back, and is only reached
+    // through shared references to atomics; a byte needs no alignment.
+    unsafe { core::slice::from_raw_parts(virt, entries) }
+}
+
 /// The lowest frame the allocator is ever given.
 ///
 /// Frame 0 stays `Reserved` on every architecture, because physical address 0
@@ -388,35 +413,101 @@ fn insert_region(frames: &mut Frames<'static>, region: &MemRegion, hole: u64, ho
 /// this task's allocations one at a time and this is the one
 /// (`fallible::frame_refused`), which reaches every caller's answer to an
 /// empty allocator without emptying it for the rest of the machine.
+///
+/// The kernel's own, so held above the reservations' outstanding promise
+/// (`L.mm.78`, `mm::reservation`): with no reservation that is nothing, and
+/// the kernel goes on to the last frame as before.
 pub(crate) fn allocate_frames(order: u8) -> Option<Frame> {
+    take_frames(order, reservation::Floor::Kernel)
+}
+
+/// Take `2^order` contiguous frames for `floor`, decided with the free count
+/// in the hold that takes them (`mm::reservation::take`), and counted against
+/// the reservation they are drawn from, if any, in that same hold.
+fn take_frames(order: u8, floor: reservation::Floor) -> Option<Frame> {
     if fallible::frame_refused() {
         return None;
     }
-    let frame = with_frames(|frames| frames.allocate(order))??;
-    count(Route::Allocated, 1 << order);
+    let watermark = WATERMARK.load(Ordering::Relaxed);
+    let n = 1u64 << order;
+    let frame = with_frames(|frames| {
+        let taking = reservation::take(floor, frames.free_frames(), n, watermark)?;
+        let frame = frames.allocate(order)?;
+        if let reservation::Taking::Drawn(entry) = taking {
+            reservation::drawn(entry, frame, n);
+        }
+        Some(frame)
+    })??;
+    count(Route::Allocated, n);
     Some(frame)
 }
 
-/// Take `2^order` contiguous frames for a program's memory or page tables:
-/// refused, as an empty allocator refuses, when taking them would leave
-/// fewer than [`WATERMARK`] frames free. The free count is read in the same
-/// hold of the allocator's lock as the frames are taken, so two processors
-/// cannot both pass the test on the last frames above it. Charging is the
-/// caller's, and stays outside the lock.
-fn allocate_program_frames(order: u8) -> Option<Frame> {
-    if fallible::frame_refused() {
-        return None;
+/// Take `2^order` contiguous frames for a program's memory or page tables,
+/// for the job whose quota slot is `owner`: drawn from its reservation while
+/// that has room (`L.mm.79`), and otherwise refused, as an empty allocator
+/// refuses, when taking them would leave fewer than [`WATERMARK`] frames
+/// free beyond the reservations' outstanding promise (`L.mm.77`). The free
+/// count is read in the same hold of the allocator's lock as the frames are
+/// taken, so two processors cannot both pass the test on the last frames
+/// above it. Charging is the caller's, and stays outside the lock.
+fn allocate_program_frames(order: u8, owner: u32) -> Option<Frame> {
+    take_frames(order, reservation::Floor::Program(reservation_for(owner)))
+}
+
+/// The reservation a program's frame for the job whose slot is `owner` is
+/// drawn from: that job's, unless this processor is servicing an interrupt,
+/// where nothing is ever drawn (`docs/microkernel/K12.md` §2.4, ledger 2550
+/// (1)).
+fn reservation_for(owner: u32) -> Reservation {
+    if crate::irq::in_interrupt() {
+        return reservation::NONE;
     }
-    let floor = WATERMARK.load(Ordering::Relaxed);
-    let frame = with_frames(|frames| {
-        let left = frames.free_frames().checked_sub(1 << order)?;
-        if left < floor {
-            return None;
-        }
-        frames.allocate(order)
-    })??;
-    count(Route::Allocated, 1 << order);
-    Some(frame)
+    crate::object::quota::reservation_of(owner)
+}
+
+/// Bind a free reservation, promising nothing yet, for a job's slot. `None`
+/// when every one is bound or still draining.
+pub(crate) fn reservation_bind() -> Option<Reservation> {
+    with_frames(|_| reservation::bind()).flatten()
+}
+
+/// Make `entry`'s size `frames` (`L.mm.76`): refused, with nothing changed
+/// and the shortfall answered, when growing it would leave fewer free than
+/// the watermark beyond the outstanding promise.
+///
+/// # Errors
+///
+/// [`Refused::Short`], with how many frames more were needed;
+/// [`Refused::Unbound`] for an entry not bound.
+pub(crate) fn reservation_resize(entry: Reservation, frames: u64) -> Result<(), Refused> {
+    let watermark = WATERMARK.load(Ordering::Relaxed);
+    with_frames(|all| reservation::resize(entry, frames, all.free_frames(), watermark))
+        .unwrap_or(Err(Refused::Unbound))
+}
+
+/// Unbind `entry` as its job's slot goes: it promises nothing more, and
+/// drains as its frames are freed (`L.object.225`).
+pub(crate) fn reservation_unbind(entry: Reservation) {
+    let _ = with_frames(|_| reservation::unbind(entry));
+}
+
+/// The outstanding promise: free frames that belong to a reservation.
+pub(crate) fn outstanding_promise() -> u64 {
+    reservation::outstanding()
+}
+
+/// A reservation's size and what is drawn from it, in frames.
+pub(crate) fn reservation_usage(entry: Reservation) -> (u64, u64) {
+    reservation::usage(entry)
+}
+
+/// The least free count a program's frame not drawn from a reservation is
+/// given at: the watermark beyond the outstanding promise (`L.mm.77`), which
+/// is what a reclaim for one has to lift the free count over (`L.mm.82`).
+pub(crate) fn program_floor() -> u64 {
+    WATERMARK
+        .load(Ordering::Relaxed)
+        .saturating_add(reservation::outstanding())
 }
 
 /// Take one frame of a program's memory, charged to the job the running task
@@ -430,7 +521,7 @@ fn allocate_program_frames(order: u8) -> Option<Frame> {
 pub(crate) fn allocate_user_frame() -> Option<Frame> {
     let owner = crate::sched::running_group();
     crate::object::quota::charge_frame(owner).ok()?;
-    let frame = allocate_program_frames(0).and_then(|frame| {
+    let frame = allocate_program_frames(0, owner).and_then(|frame| {
         with_frames(|frames| frames.set_owner(frame, owner))
             .and_then(Result::ok)
             .map(|()| frame)
@@ -467,7 +558,7 @@ pub(crate) fn allocate_user_run(order: u8) -> Option<Frame> {
         uncharge(charged);
         return None;
     }
-    let Some(block) = allocate_program_frames(order) else {
+    let Some(block) = allocate_program_frames(order, owner) else {
         uncharge(count);
         return None;
     };
@@ -498,12 +589,20 @@ pub(crate) fn allocate_user_run(order: u8) -> Option<Frame> {
 /// memory that has to be one run longer than a block: the first frame, each
 /// block given back or split on its own as one from [`allocate_frames`]
 /// would be (`ferrix_frame::Frames::allocate_run`).
+///
+/// The kernel's own, held above the outstanding promise as
+/// [`allocate_frames`] is (`L.mm.78`).
 pub(crate) fn allocate_frame_run(blocks: u64) -> Option<Frame> {
     if fallible::frame_refused() {
         return None;
     }
-    let frame = with_frames(|frames| frames.allocate_run(blocks))??;
-    count(Route::Allocated, blocks << ferrix_frame::MAX_ORDER);
+    let n = blocks.checked_shl(u32::from(ferrix_frame::MAX_ORDER))?;
+    let frame = with_frames(|frames| {
+        let _: reservation::Taking =
+            reservation::take(reservation::Floor::Kernel, frames.free_frames(), n, 0)?;
+        frames.allocate_run(blocks)
+    })??;
+    count(Route::Allocated, n);
     Some(frame)
 }
 
@@ -544,7 +643,11 @@ pub(crate) fn deallocate_frames(frame: Frame, order: u8) {
     count(Route::Freed, 1 << order);
     let owner = with_frames(|frames| {
         let owner = frames.owner(frame);
-        frames.deallocate(frame, order).map(|()| owner).ok()
+        frames.deallocate(frame, order).ok()?;
+        // In the hold that frees them: what they were drawn from takes them
+        // back into its promise (`L.mm.80`).
+        reservation::freed(frame, 1 << order);
+        Some(owner)
     });
     // After the allocator's lock: an uncharge is atomics, but nothing needs
     // the two held together.
@@ -574,7 +677,12 @@ pub(crate) fn release_frame(frame: Frame) -> bool {
     // the two mean different things -- a page table given back versus a frame.
     let freed = with_frames(|frames| {
         let owner = frames.owner(frame);
-        matches!(frames.release(frame), Ok(ferrix_frame::Released::Freed)).then_some(owner)
+        let freed = matches!(frames.release(frame), Ok(ferrix_frame::Released::Freed));
+        if freed {
+            // As `deallocate_frames` (`L.mm.80`).
+            reservation::freed(frame, 1);
+        }
+        freed.then_some(owner)
     })
     .flatten();
     if let Some(owner) = freed {
@@ -850,7 +958,7 @@ unsafe impl PhysMem for ChargedTables {
         // as its pages are, and zeroed for the reason
         // `KernelPhysMem::allocate_table` gives.
         let take = || {
-            allocate_program_frames(0).map(|frame| {
+            allocate_program_frames(0, self.owner).map(|frame| {
                 zero_frame(frame);
                 PhysAddr(frame * PAGE_SIZE)
             })

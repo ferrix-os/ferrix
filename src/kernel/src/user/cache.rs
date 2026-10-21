@@ -244,6 +244,13 @@ pub(crate) fn reclaim(scope: u32, want: u64) -> Reclaimed {
     }
     let (start, from) = hand_in(count);
     let mut stopped = None;
+    // Whose reservation the reclaim may take drawn frames of: the running
+    // task's own, never one in interrupt context (`L.user.145`).
+    let requester = if crate::irq::in_interrupt() {
+        mm::NO_RESERVATION
+    } else {
+        quota::reservation_of(crate::sched::running_group())
+    };
     // Once sparing what `memory.low` protects, then without; each pass once
     // round the list from the hand, the hand's own object last again from its
     // first page.
@@ -257,7 +264,7 @@ pub(crate) fn reclaim(scope: u32, want: u64) -> Reclaimed {
                 continue;
             };
             let first = if step == 0 { from } else { 0 };
-            let (more, next) = take_from(&vmo, scope, want - done.stolen, low, first);
+            let (more, next) = take_from(&vmo, scope, want - done.stolen, low, first, requester);
             done.scanned += more.scanned;
             done.stolen += more.stolen;
             stopped = Some(match next {
@@ -286,6 +293,16 @@ fn takes(owner: u32, scope: u32, low: bool) -> bool {
         return true;
     }
     owner != quota::NONE && quota::within(owner, scope) && !quota::protected(owner, scope, low)
+}
+
+/// Whether a reclaim for `requester` may take `frame` as far as the
+/// reservations go (`L.user.145`, `docs/microkernel/K12.md` §2.7): a frame
+/// drawn from a reservation only by a reclaim that draws from the same one.
+/// Another's would give the requester nothing: the frame goes back under the
+/// promise, where no program's floor reaches.
+pub(crate) fn spares(frame: u64, requester: mm::Reservation) -> bool {
+    let drawn = mm::drawn_from(frame);
+    drawn == mm::NO_RESERVATION || drawn == requester
 }
 
 /// Where in a list of `count` the hand points, and the page to start at
@@ -322,6 +339,7 @@ fn take_from(
     want: u64,
     low: bool,
     from: u64,
+    requester: mm::Reservation,
 ) -> (Reclaimed, Option<u64>) {
     let mut done = Reclaimed::default();
     if !vmo.reclaimable() {
@@ -337,7 +355,7 @@ fn take_from(
             .min(BATCH);
         let next = vmo.pick_pages(from, room, &mut picked, &mut |frame| {
             done.scanned += 1;
-            takes(mm::frame_owner(frame), scope, low)
+            takes(mm::frame_owner(frame), scope, low) && spares(frame, requester)
         });
         // Only the pages the source still holds clean, while it holds them
         // still: a writable file's written pages stay.

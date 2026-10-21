@@ -17,10 +17,10 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`init`](#init) | 3 | 14 | 14 | 1 |
 | [`console`](#console) | 3 | 6 | 7 | 4 |
 | [`main`](#main) | 3 | 6 | 4 | 1 |
-| [`mm`](#mm) | 1 | 1 | 4 | 1 |
 | [`smp`](#smp) | - | 4 | 4 | 1 |
 | [`vmap`](#vmap) | 2 | 2 | 4 | 1 |
 | [`early`](#early) | - | - | 3 | 1 |
+| [`mm`](#mm) | 1 | 1 | 3 | 1 |
 | [`sched`](#sched) | 2 | 3 | 3 | 2 |
 | [`arch/armv7a`](#archarmv7a) | - | - | 2 | 2 |
 | [`irq`](#irq) | 2 | - | 1 | 1 |
@@ -30,7 +30,7 @@ Counts are statements unreached by the whole suite on that architecture. A dash 
 | [`signal_frame`](#signal_frame) | - | - | 1 | 1 |
 | [`timer`](#timer) | - | - | 1 | 1 |
 | [`user`](#user) | - | - | 1 | 1 |
-| **Total** | **129** | **176** | **232** | 37 |
+| **Total** | **129** | **176** | **231** | 37 |
 
 ---
 
@@ -122,7 +122,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | `arch/x86_64/trap.rs` | `core` | 21 | - | - | 21 | 54-67, 70, 72, 77-81 |
 | `arch/x86_64/syscall.rs` | `core` | 5 | - | - | 5 | 496, 867, 870, 873, 881 |
 | `arch/x86_64/switch.rs` | `core` | 3 | - | - | 3 | 346, 908, 917 |
-| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1540-1541 |
+| `arch/x86_64/mod.rs` | `core` | 2 | - | - | 2 | 1542-1543 |
 | `arch/x86_64/signal/compat.rs` | `core` | 1 | - | - | 1 | 339 |
 
 ---
@@ -131,7 +131,7 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
-| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2449 |
+| `syscall/native.rs` | `item` | 12 | 6 | 8 | 1 | 2524 |
 | `syscall/program.rs` | `item` | 3 | 4 | 2 | 1 | 89 |
 
 ---
@@ -163,14 +163,6 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 
 ---
 
-## `mm`
-
-| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
-|---|---|---:|---:|---:|---:|---|
-| `mm.rs` | `core` | 1 | 1 | 4 | 1 | 872 |
-
----
-
 ## `smp`
 
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
@@ -192,6 +184,14 @@ Code changed after the last measurement, listed in `coverage-owed.json`. Its lin
 | File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
 |---|---|---:|---:|---:|---:|---|
 | `early.rs` | `core` | 0 | 0 | 3 | 0 | - |
+
+---
+
+## `mm`
+
+| File | Ring | x86_64 | aarch64 | armv7a | Everywhere | Lines unreached everywhere |
+|---|---|---:|---:|---:|---:|---|
+| `mm.rs` | `core` | 1 | 1 | 3 | 1 | 980 |
 
 ---
 

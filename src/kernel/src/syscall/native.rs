@@ -1620,6 +1620,15 @@ fn object_wait_one(
 
 /// The job a handle names, if it carries `needed`.
 fn job_in(process: &Process, job: Handle, needed: Rights) -> Result<Arc<Job>, Errno> {
+    job_and_rights_in(process, job, needed).map(|(job, _)| job)
+}
+
+/// [`job_in`], and the rights the handle carries.
+fn job_and_rights_in(
+    process: &Process,
+    job: Handle,
+    needed: Rights,
+) -> Result<(Arc<Job>, Rights), Errno> {
     process.with_handles(|table| {
         let (object, rights) = table.get(job).map_err(table_error)?;
         let Object::Job(job) = object else {
@@ -1628,8 +1637,21 @@ fn job_in(process: &Process, job: Handle, needed: Rights) -> Result<Arc<Job>, Er
         if !rights.contains(needed) {
             return Err(status::ACCESS_DENIED);
         }
-        Ok(Arc::clone(job))
+        Ok((Arc::clone(job), rights))
     })
+}
+
+/// Whether `process` may put work into `job` through a handle carrying
+/// `rights` (`docs/microkernel/K12.md` §2.6, ledger 2550 (2)): a job that
+/// draws from a reservation takes new processes and jobs only from inside
+/// the reserved subtree, or through a handle with [`Rights::RESERVE`], so
+/// nothing from outside draws from the promise.
+fn may_put_work(process: &Process, job: &Job, rights: Rights) -> Result<(), Errno> {
+    if rights.contains(Rights::RESERVE) || job.admits_work_from(&process.job()) {
+        Ok(())
+    } else {
+        Err(status::ACCESS_DENIED)
+    }
 }
 
 /// The calls on a job and on the processes made in one, which `dispatch`
@@ -1689,7 +1711,8 @@ fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, 
     // MANAGE on the parent is the authority both to make a job and to make
     // it one speculation domain (`docs/OPAQUE-KERNEL.md` §9.2): checked
     // before anything is made, so a refusal marks nothing.
-    let parent = job_in(process, parent, Rights::MANAGE)?;
+    let (parent, held) = job_and_rights_in(process, parent, Rights::MANAGE)?;
+    may_put_work(process, &parent, held)?;
     let domain = options & JOB_SPECULATION_DOMAIN != 0;
     let made = if domain {
         parent.new_child_domain()
@@ -1714,7 +1737,9 @@ fn job_create(process: &Process, parent: Handle, options: u64) -> Result<usize, 
             [parent_id as u32, (parent_id >> 32) as u32, domain as u32],
         );
     }
-    insert_new(process, Object::Job(child), Rights::JOB)
+    // `RESERVE` only from a handle that has it (`L.object.221`).
+    let rights = Rights(Rights::JOB.0 | (held.0 & Rights::RESERVE.0));
+    insert_new(process, Object::Job(child), rights)
 }
 
 /// `job_kill`.
@@ -1746,6 +1771,8 @@ enum Limited {
     Quota(Resource),
     /// `cpu.weight`.
     Weight,
+    /// The job's reservation (`docs/microkernel/K12.md`).
+    Reserve,
 }
 
 /// The resource a register names.
@@ -1755,6 +1782,7 @@ fn limited(resource: u64) -> Result<Limited, Errno> {
         types::JOB_OBJECTS => Ok(Limited::Quota(Resource::Objects)),
         types::JOB_TASKS => Ok(Limited::Quota(Resource::Tasks)),
         types::JOB_CPU_WEIGHT => Ok(Limited::Weight),
+        types::JOB_RESERVE => Ok(Limited::Reserve),
         _ => Err(status::INVALID_ARGS),
     }
 }
@@ -1763,12 +1791,15 @@ fn limited(resource: u64) -> Result<Limited, Errno> {
 /// [`Rights::MANAGE`], so a delegated cgroup's own limits stay its
 /// delegator's (`docs/CGROUPS.md` §5).
 fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Result<usize, Errno> {
+    let limited = limited(resource)?;
+    if let Limited::Reserve = limited {
+        return job_reserve(process, job, at);
+    }
     let job = job_in(process, job, Rights::SET_LIMIT)?;
     let limit = read_u64(process, at)?;
-    let limited = limited(resource)?;
     let number = match limited {
         Limited::Quota(resource) => audit::resource_number(resource),
-        Limited::Weight => ferrix_audit::resource::CPU_WEIGHT,
+        Limited::Weight | Limited::Reserve => ferrix_audit::resource::CPU_WEIGHT,
     };
     let set = match limited {
         Limited::Quota(Resource::Memory) => job.set_limit(
@@ -1781,6 +1812,7 @@ fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Resu
             },
         ),
         Limited::Quota(resource) => job.set_limit(resource, limit),
+        Limited::Reserve => false,
         Limited::Weight => {
             let weight = u32::try_from(limit)
                 .ok()
@@ -1802,11 +1834,53 @@ fn job_set_limit(process: &Process, job: Handle, resource: u64, at: u64) -> Resu
     Ok(0)
 }
 
+/// `job_set_limit` with `JOB_RESERVE`: the job's reservation, in whole
+/// pages, on a handle with [`Rights::RESERVE`] (`L.object.221`). Refused
+/// `BAD_STATE` by a rule of `docs/microkernel/K12.md` §2.6, `LIMIT_REACHED`
+/// with every reservation bound, and `NO_MEMORY` when the free frames do not
+/// cover it; each with nothing changed.
+fn job_reserve(process: &Process, job: Handle, at: u64) -> Result<usize, Errno> {
+    let job = job_in(process, job, Rights::RESERVE)?;
+    let bytes = read_u64(process, at)?;
+    if bytes == types::UNLIMITED {
+        return Err(status::INVALID_ARGS);
+    }
+    let bytes = bytes - bytes % PAGE_SIZE;
+    match job.set_reservation(bytes) {
+        Ok(()) => {
+            audit::limit_set(
+                audit::LIMIT_SET,
+                audit::Subject::of(process),
+                job.id(),
+                ferrix_audit::resource::RESERVE,
+                bytes,
+            );
+            Ok(0)
+        }
+        Err(quota::ReserveError::Rule) => Err(status::BAD_STATE),
+        Err(quota::ReserveError::NoEntry) => Err(status::LIMIT_REACHED),
+        Err(quota::ReserveError::Short(short)) => {
+            audit::reservation_refused(
+                audit::Subject::of(process),
+                job.id(),
+                bytes,
+                bytes.saturating_sub(short.saturating_mul(PAGE_SIZE)),
+            );
+            Err(status::NO_MEMORY)
+        }
+    }
+}
+
 /// `job_get_quota`.
 fn job_get_quota(process: &Process, job: Handle, resource: u64, out: u64) -> Result<usize, Errno> {
     let job = job_in(process, job, Rights::WAIT)?;
     let [used, limit, refused] = match limited(resource)? {
         Limited::Weight => [0, u64::from(job.cpu_weight()), 0],
+        // Its size, what is drawn from it, and the admissions refused it
+        // (`L.object.224`).
+        Limited::Reserve => job
+            .reservation()
+            .map_or([0, 0, 0], |usage| [usage.limit, usage.used, usage.refused]),
         Limited::Quota(resource) => {
             let usage = job.usage(resource).unwrap_or(Usage {
                 used: 0,
@@ -1929,7 +2003,8 @@ fn process_create(
     name: Buffer,
 ) -> Result<usize, Errno> {
     let process = caller.core();
-    let job = job_in(process, job, Rights::MANAGE)?;
+    let (job, held) = job_and_rights_in(process, job, Rights::MANAGE)?;
+    may_put_work(process, &job, held)?;
     let vmo = process.with_handles(|table| vmo_in(table, image, Rights::READ))?;
     let name_len = usize::try_from(name.count)
         .ok()

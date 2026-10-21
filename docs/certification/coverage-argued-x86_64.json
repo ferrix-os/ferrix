@@ -68,14 +68,14 @@
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1680, 1682",
+      "lines": "1682, 1684",
       "category": "defensive",
       "match": "for _ in 0..1000 {",
       "why": "The keyboard controller's reset pulse, tried only when the FADT's reset register did not reset the machine. q35's register resets it at once (`boot-reset`), so the wait for the 8042's input buffer never starts. What it defends against is firmware that names a reset register that does nothing, which Linux's reboot order also allows for."
     },
     {
       "file": "arch/x86_64/mod.rs",
-      "lines": "1743",
+      "lines": "1745",
       "category": "failure-path",
       "match": "cpu::hlt();",
       "why": "`halt`'s loop runs on a processor that stops for good: after a panic, on the stop IPI a panic sends, or on a boot that could not build a console. A passing boot ends through `shutdown`, whose `debug_exit` ends QEMU before `halt` is entered, and the suite's one deliberate panic (`test-shell`'s `ferrix.onexit=panic`) exits QEMU from the panic report without its trace showing this instruction run."
@@ -873,63 +873,56 @@
     },
     {
       "file": "mm.rs",
-      "lines": "374",
+      "lines": "399",
       "category": "defensive",
       "match": "frames.insert_free(start / PAGE_SIZE, (hole - start) / PAGE_SIZE);",
       "why": "The head of the host region in front of the per-frame array. `BootView::page_array_host` places the array at the front of the usable region it chooses, so on every machine the region has a tail after the array and no head before it; the branch keeps a later placement policy from silently losing the head. Reaching it would take the array placed other than where `init` puts it."
     },
     {
       "file": "mm.rs",
-      "lines": "506",
-      "category": "credited-elsewhere",
-      "match": "count(Route::Allocated, blocks << ferrix_frame::MAX_ORDER);",
-      "why": "Run by stage 6's edge check (`user/edge_check.rs`, `check_frame_runs_and_splits`), which takes a run of two blocks with `allocate_frame_run(2)` and requires both heads allocated. In the copy that check inlines, the call is one locked add of 2048 to the route counter, and the line table gives that instruction `count`'s own row (the `fetch_add` at mm.rs:1489, inside `core::sync::atomic`), not this line's. The line's only statement row is in the copy `display::commit_contiguous` inlines, for a scanout buffer larger than a block, which no gate on this architecture allocates."
-    },
-    {
-      "file": "mm.rs",
-      "lines": "634",
+      "lines": "742",
       "category": "failure-path",
       "match": "pub(crate) fn print_frame_delta(check: &str, leaked: i64) {",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "640",
+      "lines": "748",
       "category": "failure-path",
       "match": "leaked.unsigned_abs()",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "643",
+      "lines": "751",
       "category": "failure-path",
       "match": "}",
       "why": "Prints which way a frame window moved, and is called only by a self-check that has just found its count wrong and is about to return the error that stops the boot (`fatal!` in `main.rs`). A passing run never calls it; a run that did would be a failing boot."
     },
     {
       "file": "mm.rs",
-      "lines": "1329",
+      "lines": "1437",
       "category": "credited-elsewhere",
       "match": "if !pages.make_room(page_bound) || !tables.make_room(table_bound) {",
       "why": "The statement runs in every kernel unmap, and its refusal runs too: the allocation sweep's `stacks` scenario (`user/alloc_check.rs`) frees two stacks under one shootdown, whose table reservation spills past the eight inline slots, and on the run that fails that reservation the unmap goes on in pieces (seen with a print on the branch, `8 12`, and in `unmap_kernel_in_pieces`'s rows, which are reached). The line's only statement rows are on the other way the reservation fails -- the heap refusing after the injection let it through, which needs the size class out of slab pages at that moment -- inside the inlined `try_reserve`."
     },
     {
       "file": "mm.rs",
-      "lines": "1882-1884",
+      "lines": "1990-1992",
       "category": "failure-path",
       "match": "pub(crate) fn report(&self, check: &str) {",
       "why": "`FrameWindow::report`, called only by a self-check whose frame count came out wrong, just before it returns the error that stops the boot. A passing run never calls it."
     },
     {
       "file": "mm.rs",
-      "lines": "1900-1903",
+      "lines": "2008-2011",
       "category": "failure-path",
       "match": "let bytes = i64::try_from(now.heap_bytes).unwrap_or(i64::MAX)",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
     },
     {
       "file": "mm.rs",
-      "lines": "1913-1919",
+      "lines": "2021-2027",
       "category": "failure-path",
       "match": "routes(Route::Allocated),",
       "why": "The body of `FrameWindow::report_at`, which only `report` calls, only from a self-check about to fail the boot on its frame count."
@@ -1244,42 +1237,42 @@
     },
     {
       "file": "syscall/native.rs",
-      "lines": "1989",
+      "lines": "2064",
       "category": "defensive",
       "match": "}",
       "why": "The closing row of image_bytes is the drop of its buffer when a page of the image's VMO cannot be read: a VMO's pages up to its length always read, a decommitted one as zeros."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2055",
+      "lines": "2130",
       "category": "defensive",
       "match": "return Err(status::BAD_STATE);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2058",
+      "lines": "2133",
       "category": "defensive",
       "match": "return Err(status::NO_HANDLES);",
       "why": "A child whose table closed between the start's claim and the move -- killed in that window -- or one with no room: a child that has not run has an empty table with a limit of 4096, and a kill in the window is a race no check can place."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2068",
+      "lines": "2143",
       "category": "defensive",
       "match": ".map_err(|object| source.insert(object, rights))) // FALLIBL",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2074-2075",
+      "lines": "2149-2150",
       "category": "defensive",
       "match": "Err(Err(object)) => {",
       "why": "An insert into the target table that fails although room was checked and reserved under the same lock a statement earlier: the object is put back in the source, or freed if even that fails. The handle table's insert refuses only without room or memory, and both were settled under the held lock."
     },
     {
       "file": "syscall/native.rs",
-      "lines": "2563",
+      "lines": "2638",
       "category": "absent-hardware",
       "match": "return Err(status::INVALID_ARGS);",
       "why": "A coherent pin for a device that does not snoop the caches: the STM32MP15's peripherals. Every device QEMU presents is DMA-coherent (PCI on q35, and dma-coherent virtio-mmio on virt), so past_caches is false on every measured machine."
@@ -1293,56 +1286,56 @@
     },
     {
       "file": "trap.rs",
-      "lines": "142",
+      "lines": "149",
       "category": "failure-path",
       "match": "fatal(frame, why, &crate::panic::catalog::SYSTEM_CALL_TRAP);",
       "why": "The stop when the architecture cannot read a system call trap's registers. On x86-64 only `int $0x80` classifies as one, and its gate is not open to ring 3."
     },
     {
       "file": "trap.rs",
-      "lines": "145, 150-151",
+      "lines": "152, 157-158",
       "category": "failure-path",
       "match": "Trap::IllegalInstruction => fatal(",
       "why": "An invalid opcode or an unexpected exception taken in the kernel, which stops it. The same exceptions from a program are reached, by the stage 3 fault check, through the arm above these."
     },
     {
       "file": "trap.rs",
-      "lines": "513",
+      "lines": "520",
       "category": "defensive",
       "match": "None => Outcome::Return(Errno::ENOSYS.as_return_value()),",
       "why": "A system call with no dispatcher registered. `main.rs` registers the item's dispatcher before anything can enter user mode, and the first registration stands, so in this item every call finds one. The arm is what the core answers when built without a dispatcher above it, rather than a panic in a trap vector."
     },
     {
       "file": "trap.rs",
-      "lines": "642",
+      "lines": "649",
       "category": "failure-path",
       "match": "fatal(",
       "why": "A fault from user mode with no personality registered, which the kernel stops on; `main.rs` registers the Linux personality's return path before the first program."
     },
     {
       "file": "trap.rs",
-      "lines": "660",
+      "lines": "667",
       "category": "failure-path",
       "match": "FaultOutcome::NoProcess => fatal(",
       "why": "A fault from user mode that the personality finds no process for, which the kernel stops on: every task that enters ring 3 is a process's thread."
     },
     {
       "file": "trap.rs",
-      "lines": "697",
+      "lines": "704",
       "category": "defensive",
       "match": "return Err(None);",
       "why": "A fault from user mode on a task with no address space. `sched` gives a task made for a thread its process's space before it first runs, so this would be the kernel having entered ring 3 without recording who was running; it is reported as fatal rather than resolved."
     },
     {
       "file": "trap.rs",
-      "lines": "775, 777, 780-783",
+      "lines": "782, 784, 787-790",
       "category": "failure-path",
       "match": "report(",
       "why": "The report of a page fault the kernel could not resolve -- one in the kernel outside the demand window, or a user one with no program to blame -- printed as the kernel stops."
     },
     {
       "file": "trap.rs",
-      "lines": "797, 802, 812, 821-822, 824",
+      "lines": "804, 809, 819, 828-829, 831",
       "category": "failure-path",
       "match": "pub(crate) fn fatal(",
       "why": "`fatal` and `report`, the trap path's stop: the architecture's register dump, the abridged report for a second failure, and the panic's conclusion. Reached only when the kernel stops on a trap."

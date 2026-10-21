@@ -111,6 +111,7 @@ fn checks(side: &Side, report: &mut Report) -> Result<(), &'static str> {
     a_delivery_without_memory_is_kept(side, report)?;
     a_write_without_memory_keeps_its_handles(side, report)?;
     the_audit_record_is_read_by_its_handle_alone(side, report)?;
+    a_reservation_needs_reserve(side, report)?;
     Ok(())
 }
 
@@ -1032,4 +1033,88 @@ fn the_audit_record_is_read_by_its_handle_alone(
         "the audit record's handle was sent",
         report,
     )
+}
+
+/// A job's reservation through the calls (`docs/microkernel/K12.md` §2.6,
+/// ledger 2550 (2) and (7)): `job_set_limit` with `JOB_RESERVE` refused
+/// `ACCESS_DENIED` on a handle without `RESERVE`, and set on one with it;
+/// `job_get_quota` reading back its size; a duplicate that would add
+/// `RESERVE` refused; the job handles devmgr and cgroupfs hand out carrying
+/// none; a job made under the reserved one through a handle without
+/// `RESERVE`, from outside it, refused, and through one with it made with a
+/// handle that carries it.
+///
+/// Verifies: L.object.221
+/// Verifies: L.object.224
+fn a_reservation_needs_reserve(side: &Side, report: &mut Report) -> Result<(), &'static str> {
+    use ferrix_native_abi::types::JOB_RESERVE;
+    if Rights::JOB.contains(Rights::RESERVE) {
+        return Err("a new job's handle carries RESERVE");
+    }
+    let tree = Job::new_root().map_err(|_| "no memory for a job")?;
+    let made = tree.new_child().map_err(|_| "no memory for a job")?;
+    let plain = side
+        .process
+        .with_handles(|table| table.insert(Object::Job(Arc::clone(&made)), Rights::JOB))
+        .map_err(|_| "no room for a job")?;
+    let reserving = side
+        .process
+        .with_handles(|table| {
+            table.insert(
+                Object::Job(Arc::clone(&made)),
+                Rights::JOB | Rights::RESERVE,
+            )
+        })
+        .map_err(|_| "no room for a job")?;
+    let pages = 4 * PAGE_SIZE;
+    refused(
+        set_limit(side, plain, JOB_RESERVE, pages),
+        status::ACCESS_DENIED,
+        "a reservation was set without RESERVE",
+        report,
+    )?;
+    if side
+        .call(
+            nr::HANDLE_DUPLICATE,
+            &[reg(plain), u64::from((Rights::JOB | Rights::RESERVE).0)],
+        )
+        .is_ok()
+    {
+        return Err("a duplicate added RESERVE to a job handle");
+    }
+    refused(
+        set_limit(side, reserving, JOB_RESERVE, UNLIMITED),
+        status::INVALID_ARGS,
+        "an unlimited reservation was accepted",
+        report,
+    )?;
+    let _ = set_limit(side, reserving, JOB_RESERVE, pages + 1)
+        .map_err(|_| "a reservation with RESERVE was refused")?;
+    if quota(side, reserving, JOB_RESERVE)? != [pages, 0, 0] {
+        return Err("a reservation did not read back in whole pages");
+    }
+    refused(
+        side.call(nr::JOB_CREATE, &[reg(plain), 0]),
+        status::ACCESS_DENIED,
+        "a process outside a reserved job made a job beneath it",
+        report,
+    )?;
+    let child = side.handle(
+        nr::JOB_CREATE,
+        &[reg(reserving), 0],
+        "a job made with RESERVE was refused",
+    )?;
+    let carried = side
+        .process
+        .with_handles(|table| table.get(child).map(|(_, rights)| rights))
+        .map_err(|_| "the made job's handle is gone")?;
+    if !carried.contains(Rights::RESERVE) {
+        return Err("a job made through a handle with RESERVE did not carry it");
+    }
+    for handle in [child, reserving, plain] {
+        let _ = side
+            .call(nr::HANDLE_CLOSE, &[reg(handle)])
+            .map_err(|_| "could not close a job handle")?;
+    }
+    Ok(())
 }

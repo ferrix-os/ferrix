@@ -683,6 +683,25 @@ pub(crate) fn limit_refused(
     );
 }
 
+/// Record `subject`'s reservation of `asked` bytes for `job` refused for
+/// want of free memory, `free` bytes being free beyond the watermark and the
+/// outstanding promise (`docs/microkernel/K12.md` §2.6): [`LIMIT`] against
+/// `resource::RESERVE`.
+pub(crate) fn reservation_refused(subject: Subject, job: u64, asked: u64, free: u64) {
+    let target = Target {
+        kind: target::RESOURCE,
+        id: ferrix_audit::resource::RESERVE,
+    };
+    record(
+        LIMIT,
+        Outcome::Refused,
+        0,
+        subject,
+        target,
+        [saturated(asked), saturated(free), job as u32],
+    );
+}
+
 /// Record `subject` setting `job`'s limit on resource number `resource` to
 /// `limit`, as `event` says: through its handle ([`LIMIT_SET`]) or its
 /// cgroup's file ([`CGROUP_LIMIT`]).

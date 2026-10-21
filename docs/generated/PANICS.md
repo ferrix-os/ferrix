@@ -100,6 +100,7 @@ Causes are listed most likely first.
 | [FX-0907](#fx-0907) | a process left its speculation domain where it may not wait |
 | [FX-0908](#fx-0908) | a check's hook inside the item was still armed after stage 9 |
 | [FX-0909](#fx-0909) | the SMBIOS copy's acceptance took a forged copy, or refused a good one |
+| [FX-0914](#fx-0914) | a job's memory reservation did not hold what it promises |
 | [FX-1001](#fx-1001) | PCI enumeration failed its self-check |
 | [FX-1002](#fx-1002) | a device node handed out memory or an interrupt it does not have |
 | [FX-1003](#fx-1003) | an IOMMU domain gave a device the wrong addresses |
@@ -2458,6 +2459,33 @@ none it should.
 
 See: src/kernel/src/discovery/smbios.rs;
 src/kernel/src/discovery/smbios_check.rs; src/lib/platform/smbios; docs/DMI.md.
+
+<a id="fx-0914"></a>
+
+## FX-0914 — a job's memory reservation did not hold what it promises
+
+`object::reserve_check::run` reserves memory for a job in a tree of its own
+beside a QM sibling (`docs/microkernel/K12.md`). Its rules must refuse a
+reservation above the job's own limit, under a limit or `memory.high` above it,
+beneath another reservation and on a job that is not empty, and must refuse a
+limit or mark above a reserved job and a limit below its reservation. The job's
+frames must be drawn from its reservation and tagged with it up to its size and
+not past it, a frame taken while an interrupt is serviced must never be drawn, a
+reclaim for anyone else must spare a drawn frame, and once the tree is gone its
+reservation must promise nothing and every quota slot be given back. A kernel
+failing this lets a QM partition take the memory a certified one was promised.
+
+1. A rule of the reservation stopped being tested, or tested under the wrong
+   lock (`quota::Quota::set_reservation`, `quota::limit_allowed`).
+2. A frame route stopped asking `mm::reservation::take` with the job's
+   reservation, or asked it in interrupt context (`mm::reservation_for`).
+3. A free path stopped calling `mm::reservation::freed`, so the drawn count or
+   the promise did not come back.
+4. A slot was freed without unbinding its reservation, or a sub-job did not copy
+   it.
+
+See: src/kernel/src/mm/reservation.rs; src/kernel/src/object/quota.rs;
+src/kernel/src/object/reserve_check.rs; docs/microkernel/K12.md.
 
 <a id="fx-1001"></a>
 

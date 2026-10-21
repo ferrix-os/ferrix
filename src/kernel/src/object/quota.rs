@@ -50,7 +50,7 @@
 //! interrupt handlers.
 
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use ferrix_sched::NICE_0_WEIGHT;
 use ferrix_sync::Once;
@@ -243,6 +243,19 @@ struct Slot {
     /// a refusal can come from inside the heap. 0 until the job is made.
     job: AtomicU64,
     budget: AtomicU64,
+    /// The memory reservation its job and every job beneath it draw from
+    /// (`mm::reservation`, K12): its own, or the one its parent's was when it
+    /// was claimed, or none.
+    reservation: AtomicU8,
+    /// Whether [`Slot::reservation`] is its own, bound by its job and let go
+    /// as it is freed.
+    reserves: AtomicBool,
+    /// How many jobs strictly beneath it hold a reservation of their own: a
+    /// slot with any is an ancestor of a reserved job, and may carry no
+    /// memory limit or `memory.high` (`L.object.223`).
+    reserved_below: AtomicU32,
+    /// Reservations refused it for want of free memory.
+    reserve_refused: AtomicU64,
 }
 
 impl Slot {
@@ -272,6 +285,10 @@ impl Slot {
             contributed: AtomicI64::new(0),
             job: AtomicU64::new(0),
             budget: AtomicU64::new(0),
+            reservation: AtomicU8::new(crate::mm::NO_RESERVATION),
+            reserves: AtomicBool::new(false),
+            reserved_below: AtomicU32::new(0),
+            reserve_refused: AtomicU64::new(0),
         }
     }
 
@@ -372,6 +389,13 @@ fn claim(parent: u32) -> Result<u32, AllocError> {
     taken.budget.store(0, Ordering::Relaxed);
     taken.contributed.store(0, Ordering::Relaxed);
     taken.parent.store(parent, Ordering::Relaxed);
+    // A sub-job draws from what its parent draws from (`L.object.225`).
+    taken
+        .reservation
+        .store(reservation_of(parent), Ordering::Relaxed);
+    taken.reserves.store(false, Ordering::Relaxed);
+    taken.reserved_below.store(0, Ordering::Relaxed);
+    taken.reserve_refused.store(0, Ordering::Relaxed);
     if parent != NONE {
         hold(parent);
     }
@@ -425,9 +449,54 @@ fn release(index: u32) {
         if slot.holds.fetch_sub(1, Ordering::AcqRel) != 1 {
             return;
         }
+        if slot.reserves.swap(false, Ordering::AcqRel) {
+            // Its job's reservation promises nothing more and drains
+            // (`L.object.225`); nothing beneath it is left to draw from it.
+            crate::mm::reservation_unbind(slot.reservation.load(Ordering::Acquire));
+            above(parent, |above| {
+                let _ = above.reserved_below.fetch_sub(1, Ordering::AcqRel);
+            });
+        }
         let _ = LIVE.fetch_sub(1, Ordering::Relaxed);
         at = parent;
     }
+}
+
+/// Run `each` on `from` and every slot above it.
+fn above(from: u32, mut each: impl FnMut(&'static Slot)) {
+    let mut at = from;
+    while let Some(slot) = slot(at) {
+        each(slot);
+        at = slot.parent.load(Ordering::Acquire);
+    }
+}
+
+/// The reservation the job whose slot is `index` draws from, or
+/// `mm::NO_RESERVATION`: what a frame taken for it is drawn from
+/// (`mm::reservation`). Atomics only.
+pub(crate) fn reservation_of(index: u32) -> crate::mm::Reservation {
+    slot(index).map_or(crate::mm::NO_RESERVATION, |slot| {
+        slot.reservation.load(Ordering::Acquire)
+    })
+}
+
+/// Serialises a reservation's rules with the limits and marks they
+/// constrain, so that a limit and a reservation set at once cannot each pass
+/// the other's test.
+static RESERVING: SpinLock<()> = SpinLock::new(());
+
+/// Why a reservation was refused.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ReserveError {
+    /// One of its rules (`docs/microkernel/K12.md` §2.6): the job not empty
+    /// at its first one, a reservation above or beneath it, a limit or mark
+    /// above it, or its own limit below it.
+    Rule,
+    /// Every reservation the kernel can hold is bound or draining.
+    NoEntry,
+    /// The free frames, less the watermark and the outstanding promise, do
+    /// not cover it: how many frames more it needed.
+    Short(u64),
 }
 
 /// Charge `amount` of `resource` to `index` and every slot above it, if every
@@ -964,10 +1033,119 @@ impl Quota {
 
     /// Set its limit on `resource`. A limit below its use refuses every
     /// charge until the use falls under it, and takes nothing away.
-    pub(crate) fn set_limit(&self, resource: Resource, limit: u64) {
-        if let Some(held) = slot(self.index).and_then(|slot| slot.limit(resource)) {
+    ///
+    /// A memory limit is refused, with nothing changed, below the job's own
+    /// reservation, or at all on a job above a reserved one
+    /// (`L.object.223`): false then.
+    pub(crate) fn set_limit(&self, resource: Resource, limit: u64) -> bool {
+        let Some(slot) = slot(self.index) else {
+            return false;
+        };
+        let _rules = (resource == Resource::Memory).then(|| RESERVING.lock());
+        if resource == Resource::Memory && !limit_allowed(slot, limit) {
+            return false;
+        }
+        if let Some(held) = slot.limit(resource) {
             held.store(limit, Ordering::Release);
         }
+        true
+    }
+
+    /// Make its job's reservation `bytes`, in whole pages
+    /// (`docs/microkernel/K12.md` §2.6): the first time only on an empty job
+    /// with no reservation above or beneath it and no memory limit or
+    /// `memory.high` above it, and never above its own memory limit. Growing
+    /// it is admitted against the free frames (`mm::reservation_resize`).
+    ///
+    /// # Errors
+    ///
+    /// [`ReserveError`], with nothing changed.
+    pub(crate) fn set_reservation(&self, bytes: u64) -> Result<(), ReserveError> {
+        let slot = slot(self.index).ok_or(ReserveError::Rule)?;
+        let frames = bytes / FRAME_BYTES;
+        let _rules = RESERVING.lock();
+        let own = slot
+            .limit(Resource::Memory)
+            .map_or(UNLIMITED, |limit| limit.load(Ordering::Acquire));
+        if frames.saturating_mul(FRAME_BYTES) > own {
+            return Err(ReserveError::Rule);
+        }
+        if slot.reserves.load(Ordering::Acquire) {
+            let entry = slot.reservation.load(Ordering::Acquire);
+            return crate::mm::reservation_resize(entry, frames)
+                .map_err(|short| self.refused(short));
+        }
+        // The first: under the claiming lock too, so no child slot is
+        // claimed between the test that there is none and the reservation
+        // it would have copied (`L.object.222`).
+        let _claiming = CLAIMING.lock();
+        let empty = slot.holds.load(Ordering::Acquire) == 1;
+        let alone = slot.reservation.load(Ordering::Acquire) == crate::mm::NO_RESERVATION
+            && slot.reserved_below.load(Ordering::Acquire) == 0;
+        let mut clear = true;
+        above(slot.parent.load(Ordering::Acquire), |above| {
+            let limit = above
+                .limit(Resource::Memory)
+                .map_or(UNLIMITED, |limit| limit.load(Ordering::Acquire));
+            let high = above
+                .marks
+                .get(Mark::High.at())
+                .map_or(UNLIMITED, |high| high.load(Ordering::Acquire));
+            clear &= limit == UNLIMITED && high == UNLIMITED;
+        });
+        if !(empty && alone && clear) {
+            return Err(ReserveError::Rule);
+        }
+        let entry = crate::mm::reservation_bind().ok_or(ReserveError::NoEntry)?;
+        if let Err(short) = crate::mm::reservation_resize(entry, frames) {
+            crate::mm::reservation_unbind(entry);
+            return Err(self.refused(short));
+        }
+        slot.reservation.store(entry, Ordering::Release);
+        slot.reserves.store(true, Ordering::Release);
+        above(slot.parent.load(Ordering::Acquire), |above| {
+            let _ = above.reserved_below.fetch_add(1, Ordering::AcqRel);
+        });
+        Ok(())
+    }
+
+    /// Count a reservation refused for want of free memory.
+    fn refused(&self, refused: crate::mm::Refused) -> ReserveError {
+        let crate::mm::Refused::Short(short) = refused else {
+            return ReserveError::Rule;
+        };
+        if let Some(slot) = slot(self.index) {
+            let _ = slot.reserve_refused.fetch_add(1, Ordering::Relaxed);
+        }
+        ReserveError::Short(short)
+    }
+
+    /// Its job's reservation, if it holds one of its own: its size and what
+    /// is drawn from it, in bytes, and the reservations refused it for want
+    /// of free memory (`L.object.224`).
+    pub(crate) fn reservation(&self) -> Usage {
+        let Some(slot) = slot(self.index) else {
+            return Usage {
+                used: 0,
+                limit: 0,
+                refused: 0,
+            };
+        };
+        let (size, drawn) = if slot.reserves.load(Ordering::Acquire) {
+            crate::mm::reservation_usage(slot.reservation.load(Ordering::Acquire))
+        } else {
+            (0, 0)
+        };
+        Usage {
+            used: drawn.saturating_mul(FRAME_BYTES),
+            limit: size.saturating_mul(FRAME_BYTES),
+            refused: slot.reserve_refused.load(Ordering::Relaxed),
+        }
+    }
+
+    /// The reservation its job draws from, its own or an ancestor's.
+    pub(crate) fn draws_from(&self) -> crate::mm::Reservation {
+        reservation_of(self.index)
     }
 
     /// Its use of `resource`, its limit and its refusals.
@@ -991,11 +1169,23 @@ impl Quota {
             .map_or(0, |held| held.load(Ordering::Acquire))
     }
 
-    /// Set a mark.
-    pub(crate) fn set_mark(&self, mark: Mark, value: u64) {
-        if let Some(held) = slot(self.index).and_then(|slot| slot.marks.get(mark.at())) {
+    /// Set a mark. A `memory.high` is refused, with nothing changed, on a
+    /// job above a reserved one (`L.object.223`): false then.
+    pub(crate) fn set_mark(&self, mark: Mark, value: u64) -> bool {
+        let Some(slot) = slot(self.index) else {
+            return false;
+        };
+        let _rules = (mark == Mark::High).then(|| RESERVING.lock());
+        if mark == Mark::High
+            && value != UNLIMITED
+            && slot.reserved_below.load(Ordering::Acquire) != 0
+        {
+            return false;
+        }
+        if let Some(held) = slot.marks.get(mark.at()) {
             held.store(value, Ordering::Release);
         }
+        true
     }
 
     /// How many of `counter` were counted in it and beneath it.
@@ -1384,4 +1574,18 @@ fn pending_cases(parent: u32, child: u32) -> Result<(), &'static str> {
 /// nothing while idle. For a check.
 pub(crate) fn contributed(index: u32) -> i64 {
     slot(index).map_or(0, |slot| slot.contributed.load(Ordering::Acquire))
+}
+
+/// Whether `slot` may take memory limit `limit` (`L.object.223`): never
+/// below its job's own reservation, and none at all above a reserved job.
+/// Under [`RESERVING`].
+fn limit_allowed(slot: &Slot, limit: u64) -> bool {
+    if slot.reserved_below.load(Ordering::Acquire) != 0 && limit != UNLIMITED {
+        return false;
+    }
+    if !slot.reserves.load(Ordering::Acquire) {
+        return true;
+    }
+    let (size, _) = crate::mm::reservation_usage(slot.reservation.load(Ordering::Acquire));
+    limit >= size.saturating_mul(FRAME_BYTES)
 }

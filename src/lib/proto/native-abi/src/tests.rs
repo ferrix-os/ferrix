@@ -154,9 +154,14 @@ fn a_rights_request_with_an_unknown_bit_is_refused() {
         "every defined right"
     );
     assert_eq!(
-        Requested::from_register(0x100),
+        Requested::from_register(0x200),
         None,
-        "bit 8 is not a right"
+        "bit 9 is not a right"
+    );
+    assert_eq!(
+        Requested::from_register(0x100),
+        Some(Requested::Exactly(Rights::RESERVE)),
+        "bit 8 is RESERVE"
     );
     assert_eq!(
         Requested::from_register(u64::from(SAME_RIGHTS | 1)),
@@ -192,6 +197,20 @@ fn default_rights_are_defined_rights() {
         Rights::INTERRUPT.contains(Rights::TRANSFER),
         "devmgr hands it on"
     );
+    for rights in [
+        Rights::CHANNEL,
+        Rights::PORT,
+        Rights::VMO,
+        Rights::JOB,
+        Rights::INTERRUPT,
+        Rights::IO_MAPPING,
+        Rights::DEVICE,
+    ] {
+        assert!(
+            !rights.contains(Rights::RESERVE),
+            "{rights:?}: no new object carries RESERVE"
+        );
+    }
 }
 
 #[test]

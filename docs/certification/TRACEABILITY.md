@@ -14,17 +14,17 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
-| High (`H.*`) | 135 | 84 | 51 |
-| Low (`L.*`) | 963 | 700 | 263 |
+| High (`H.*`) | 138 | 87 | 51 |
+| Low (`L.*`) | 975 | 712 | 263 |
 
-2077 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2112 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2079 |
-| Accessors, covered by the requirement they serve | 975 |
+| Named by a low-level requirement | 2114 |
+| Accessors, covered by the requirement they serve | 989 |
 | Check code in a product file | 82 |
-| Named by none | 938 |
+| Named by none | 935 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -137,14 +137,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | G.4 | `H.OBJ.13`, `H.TRAP.10` |
 | G.5 | `H.SCHED.9`, `H.TRAP.8`, `H.TRAP.10`, `H.TRAP.14`, `H.TRAP.15` |
 | G.7 | `H.OBJ.11`, `H.OBJ.17`, `H.OBJ.18` |
-| G.8 | `H.OBJ.12`, `H.QUOTA.6`, `H.QUOTA.12`, `H.QUOTA.13` |
+| G.8 | `H.OBJ.12`, `H.QUOTA.6`, `H.QUOTA.12`, `H.QUOTA.13`, `H.QUOTA.15`, `H.QUOTA.16`, `H.QUOTA.17` |
 | O.AUDIT | `H.AUD.1`, `H.AUD.2`, `H.AUD.3`, `H.AUD.4`, `H.AUD.5`, `H.AUD.6`, `H.AUD.7`, `H.AUD.8`, `H.AUD.9`, `H.AUD.10`, `H.AUD.11`, `H.AUD.12`, `H.AUD.13` |
 | O.CAPABILITY | `H.OBJ.1`, `H.OBJ.2`, `H.OBJ.3`, `H.OBJ.4`, `H.OBJ.5`, `H.OBJ.6`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.11`, `H.OBJ.14`, `H.OBJ.15`, `H.OBJ.16`, `H.OBJ.17`, `H.OBJ.18`, `H.IRQ.1`, `H.IRQ.2`, `H.DMA.5`, `H.DEV.1` |
 | O.DMA | `H.DMA.1`, `H.DMA.2`, `H.DMA.6`, `H.DMA.7`, `H.DMA.3`, `H.DMA.8`, `H.DMA.9`, `H.DMA.4`, `H.DMA.5`, `H.DMA.10`, `H.DEV.2`, `H.DEV.4` |
 | O.FAILSAFE | `H.TRAP.6`, `H.BOOT.1`, `H.BOOT.2`, `H.BOOT.4`, `H.BOOT.5`, `H.BOOT.6`, `H.BOOT.7`, `H.BOOT.8`, `H.BOOT.15`, `H.BOOT.16`, `H.FAIL.1`, `H.FAIL.2`, `H.FAIL.3`, `H.FAIL.4`, `H.FAIL.5` |
 | O.ISOLATE | `H.MEM.1`, `H.MEM.2`, `H.MEM.3`, `H.MEM.7`, `H.MEM.8`, `H.MEM.10`, `H.MEM.12`, `H.MEM.14`, `H.MEM.15`, `H.MEM.16`, `H.MEM.17`, `H.MEM.18`, `H.MEM.19`, `H.OBJ.13`, `H.SCHED.6`, `H.SCHED.7`, `H.SCHED.8`, `H.SCHED.12`, `H.TRAP.3`, `H.TRAP.4`, `H.TRAP.5`, `H.TRAP.6`, `H.TRAP.7`, `H.TRAP.8`, `H.TRAP.13`, `H.TRAP.16`, `H.TRAP.17`, `H.BOOT.3`, `H.BOOT.9` |
 | O.MEDIA | `H.STORE.1`, `H.STORE.2` |
-| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.STORE.7` |
+| O.QUOTA | `H.MEM.9`, `H.MEM.11`, `H.OBJ.7`, `H.OBJ.8`, `H.OBJ.9`, `H.OBJ.10`, `H.OBJ.12`, `H.OBJ.16`, `H.SCHED.2`, `H.SCHED.3`, `H.SCHED.10`, `H.SCHED.11`, `H.IRQ.2`, `H.IRQ.3`, `H.DMA.4`, `H.QUOTA.1`, `H.QUOTA.2`, `H.QUOTA.3`, `H.QUOTA.4`, `H.QUOTA.5`, `H.QUOTA.6`, `H.QUOTA.7`, `H.QUOTA.8`, `H.QUOTA.9`, `H.QUOTA.10`, `H.QUOTA.11`, `H.QUOTA.12`, `H.QUOTA.13`, `H.QUOTA.15`, `H.QUOTA.16`, `H.QUOTA.17`, `H.STORE.7` |
 | O.SCRUB | `H.MEM.6` |
 | O.VALIDATE | `H.TRAP.1`, `H.TRAP.2`, `H.TRAP.3`, `H.TRAP.5`, `H.TRAP.7`, `H.TRAP.11`, `H.TRAP.12`, `H.TRAP.13`, `H.TRAP.16` |
 | O.WXN | `H.MEM.4`, `H.MEM.5`, `H.MEM.10`, `H.MEM.13`, `H.MEM.18` |
@@ -321,6 +321,9 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `H.QUOTA.11` | A process in a job, or beneath one, whose cgroup.freeze is set shall run no user code until the job is thawed or the process is killed; SIGCONT shall not thaw it, and cgroup.events shall say frozen only once every live process beneath has stopped. | A program of three threads in a frozen cgroup stops counting, cgroup.events says frozen 1 and wakes its poller, SIGCONT changes neither, and thawing restarts its futex wait (the `cgroups` line, freeze). | O.QUOTA | `src/kernel/src/fs/cgroupfs/freeze_check.rs::freeze_a_program` | not built | not built | not built |
 | `H.QUOTA.12` | A charge refused by a job's memory limit, and a program over its memory.high, shall first take back clean file cache charged to that job or beneath it, never a sibling's and never a child's at or under its memory.min, and read back as its source has it, before anything is killed. | A cgroup reading a file twice its memory.high is brought back to it, its sibling's cache untouched, every page read back as the source has it, and a read at memory.max kills nothing where its clean cache was room (the `cgroups` line, reclaim). | G.8, O.QUOTA | `src/kernel/src/fs/cgroupfs/reclaim_check.rs::high` | not built | not built | not built |
 | `H.QUOTA.13` | A frame for a program's memory or page tables shall be refused when taking it would leave fewer frames free than the kernel's watermark, whatever job the program is in, with nothing taken; the kernel's own allocations shall not be refused by it. | At stage 2, program frames taken until refused leave exactly the watermark free; at that count a program's page table is refused and a kernel frame and a fresh heap page are given; a run of two frames is given at two above it and refused at one above with a block of two free; every frame comes back (the `watermark` line). | G.8, O.QUOTA | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
+| `H.QUOTA.15` | A frame of a job's memory or page tables, taken in task context while the job holds fewer frames drawn from its reservation than the reservation's size, shall not be refused for want of free memory; no other job's frame and no frame of the kernel's own shall take a frame promised to a reservation. | At stage 2, with a reservation admitted, program frames are refused at the watermark beyond the promise and the kernel's own at the promise, and the reservation's own frames are then given below both up to its size (the `reserve` line of stage 2); at stage 9 a reserved job's frames are drawn from its reservation and one taken while an interrupt is serviced is not (the `reserve` line of stage 9). | G.8, O.QUOTA | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `H.QUOTA.16` | A reservation shall be admitted only while the frames free, less the watermark and every outstanding promise, cover it, and refused with nothing changed otherwise. | At stage 2 a reservation one frame past what the free frames cover is refused with the promise unchanged, and one they cover raises the promise by exactly its size (the `reserve` line of stage 2). | G.8, O.QUOTA | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `H.QUOTA.17` | No reclaim for another job, no limit or memory.high above a reserved job, and no process or job put into its subtree from outside without the RESERVE right shall take a frame drawn from its reservation or refuse a charge its reservation covers. | At stage 9 a limit and a memory.high above a reserved job are refused, a reclaim for another spares its drawn frame, and a job made beneath it from outside without RESERVE is refused (the `reserve` line of stage 9 and the native refusals). | G.8, O.QUOTA | `src/kernel/src/object/reserve_check.rs::run` | not built | not built | not built |
 
 ### Audit (`H.AUD`)
 
@@ -504,6 +507,16 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.object.62` | Quota::set_weight shall clamp the weight to 1 to 10000, and change a busy job's contribution to its parent's load at once. | A weight of 0 is stored as 1 and one of 20000 as 10000; setting a busy job's weight changes its parent's load by the difference of the scaled weights. | H.SCHED.3 | `object::quota::Quota::set_weight` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
 | `L.object.160` | quota::effective shall carry a task's weight up its jobs in 64-bit arithmetic (ferrix_sched::carried_weight), giving, before it clamps the answer, the value the same formula gives in 128-bit arithmetic, bit for bit, for every base and entity weight below 2^32 and every load. | ferrix-sched's host test compares the two over 50000 random and boundary bases, weights and loads at each job depth from 1 to 8, and at every weight 2^32 - 1, and finds no difference; with one division made in 32 bits, it finds one. | H.SCHED.3 | `object::quota::effective` | `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host test | host test | host test |
 | `L.object.161` | Every entity weight a job can be given, its cpu.weight clamped to 1 to 10000 and scaled to task units, shall be below 2^32, as every task's weight, a u32, is. | The kernel's build asserts that 10000 scaled to task units fits a u32; the quota check sets cpu.weight to 20000, reads 10000 back, and finds it scaled below 2^32. | H.SCHED.3 | `object::quota::Quota::set_weight`, `object::quota::Slot::entity_weight` | `src/kernel/src/object/quota_check.rs::check_the_weight` | reached | not reached | not reached |
+
+### JobReservations
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.object.221` | job_set_limit with JOB_RESERVE shall need a handle with the RESERVE right, which no new object's handle carries; job_create shall give the new job's handle RESERVE only when the parent's handle has it; and process_create and job_create into a job that draws from a reservation shall be refused ACCESS_DENIED to a caller whose job draws from another, unless the handle carries RESERVE. | Through the native calls, a reservation on a handle without RESERVE is refused ACCESS_DENIED, a duplicate adding RESERVE is refused, a job made beneath a reserved one through a handle without RESERVE from outside is refused, and one made through a handle with it carries it. | H.QUOTA.17 | `syscall::native::job_reserve`, `syscall::native::job_create`, `syscall::native::process_create`, `syscall::native::may_put_work`, `object::job::Job::admits_work_from` | `src/kernel/src/syscall/native_check.rs::a_reservation_needs_reserve` | not reached | not reached | not reached |
+| `L.object.222` | A job shall be reserved for the first time only while nothing but the job holds its slot, under the lock a child slot is claimed under, and never with a reservation above or beneath it. | At stage 9 a job beneath a reserved one and a job with a child are each refused a reservation. | H.QUOTA.17 | `object::quota::Quota::set_reservation`, `object::job::Job::set_reservation` | `src/kernel/src/object/reserve_check.rs::run` | not built | not built | not built |
+| `L.object.223` | A job's reservation shall never exceed its own memory limit; no job above a reserved job shall carry a memory limit or memory.high; and a change that would break either shall be refused with nothing changed, cgroupfs answering EBUSY. | At stage 9 a reservation above the job's own limit, under a memory limit and under a memory.high are each refused; once it is admitted, a limit and a memory.high above it and a limit below it are refused, and a limit at it is set. | H.QUOTA.17 | `object::quota::Quota::set_limit`, `object::quota::Quota::set_mark`, `object::quota::limit_allowed`, `object::quota::above` | `src/kernel/src/object/reserve_check.rs::run` | not built | not built | not built |
+| `L.object.224` | job_get_quota with JOB_RESERVE shall answer the reservation's size, what is drawn from it and the admissions refused it, in bytes; a set shall be audited LIMIT_SET and a refusal for want of memory LIMIT, both against resource 7. | Through the native calls, a reservation of four pages and a byte reads back as four pages, nothing drawn and nothing refused. | H.QUOTA.16 | `syscall::native::job_get_quota`, `object::quota::Quota::reservation`, `object::quota::Quota::refused`, `audit::reservation_refused` | `src/kernel/src/syscall/native_check.rs::a_reservation_needs_reserve` | not reached | not reached | not reached |
+| `L.object.225` | A slot claimed beneath a reserved job shall draw from its reservation, and a reserved job's slot, as its last hold goes, shall unbind its reservation. | At stage 9 a job made beneath a reserved one draws from its reservation, and once the tree is gone the promise is what it was before and every slot is given back. | H.QUOTA.15 | `object::quota::claim`, `object::quota::release`, `object::quota::reservation_of` | `src/kernel/src/object/reserve_check.rs::run` | not built | not built | not built |
 
 ### Jobs
 
@@ -829,6 +842,18 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.mm.72` | allocate_user_frame and allocate_user_run shall refuse frames that would leave fewer than the watermark free, deciding in the same hold of the frame allocator's lock as the frames are taken, and a refusal shall take back any charge made for them. | At stage 2, with no job charged, single frames taken until refused leave exactly the watermark free; a run of two is given at two above it and refused at one above it while a block of two is free; a single frame is given at one above it. | H.QUOTA.13 | `mm::allocate_program_frames`, `mm::allocate_user_frame`, `mm::allocate_user_run` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
 | `L.mm.73` | A page table for a user mapping shall be taken as a program's frame, refused at the watermark whether or not its job has a quota slot, and zeroed before it is used. | At stage 2, with exactly the watermark free, a program's page table with no job to charge is refused; with one frame more it is given, and the free count is the watermark again. | H.QUOTA.13 | `mm::ChargedTables::allocate_table`, `mm::map_in` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
 | `L.mm.74` | allocate_frames and the heap's page supply shall not be refused by the watermark. | At stage 2, with exactly the watermark free, a kernel frame is given, and then a 16 KiB heap allocation takes a fresh page; both are given back and the frame window closes on the count it opened at. | H.QUOTA.13 | `mm::allocate_frames`, `mm::KernelPages::allocate_pages` | `src/kernel/src/mm/check.rs::check_the_watermark` | not reached | not reached | not reached |
+
+### Reservations
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.mm.76` | A reservation's growth by d frames of promise shall be admitted in one hold of the frame allocator's lock only if F - d >= W + O, raising O by d; a refusal shall answer the shortfall and change nothing; a shrink shall always be admitted. | At stage 2 a reservation of F - W - O + 1 frames is refused with O unchanged, and one of 64 frames raises O by exactly 64. | H.QUOTA.16 | `mm::reservation::resize`, `mm::reservation_resize`, `mm::reservation::bind`, `mm::reservation_bind` | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `L.mm.77` | A frame, run or page table of a program's not drawn from a reservation shall be refused when taking its n frames would leave F - n < W + O. | At stage 2, with 64 frames promised, program frames taken until refused leave exactly W + 64 free. | H.QUOTA.15 | `mm::reservation::take`, `mm::take_frames`, `mm::allocate_program_frames`, `mm::program_floor` | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `L.mm.78` | allocate_frames, allocate_frame_run and the heap's page supply shall be refused when taking n frames would leave F - n < O. | At stage 2, with 64 frames promised and the programs stopped, kernel frames taken until refused leave exactly 64 free. | H.QUOTA.15 | `mm::allocate_frames`, `mm::allocate_frame_run`, `mm::reservation::take` | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `L.mm.79` | A program's frames for a job whose reservation is bound and has drawn + n <= size, in task context, shall be given while n frames are free, tagged with the reservation, drawn raised by n and O lowered by n, in the hold that takes them; in interrupt context none shall be drawn. | At stage 2, below both floors, 64 frames drawn from a 64-frame reservation are each given and tagged, O falling one for one to 0, and the 65th is refused; at stage 9 a reserved job's 16 frames are tagged, the 17th is not, and a frame taken while an interrupt is serviced is not. | H.QUOTA.15 | `mm::reservation::drawn`, `mm::reservation::room`, `mm::reservation_for`, `irq::in_interrupt`, `irq::serviced`, `irq::servicing`, `irq::dispatch`, `trap::service_interrupts` | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `L.mm.80` | A frame tagged with a reservation shall, in the hold that frees it, leave the reservation's drawn count, give O back what that makes outstanding again, and lose its tag; an unbound reservation shall promise nothing and be bound again only once nothing is drawn from it. | At stage 2 the 64 drawn frames freed bring O back to 64 and leave no tag, and the reservation unbound brings O back to what it was; at stage 9 a gone job's reservation promises nothing. | H.QUOTA.15 | `mm::reservation::freed`, `mm::reservation::adjust`, `mm::reservation::unbind`, `mm::deallocate_frames`, `mm::release_frame`, `mm::reservation::tag_of`, `mm::reservation::install`, `mm::place_tags` | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `L.mm.82` | program_floor shall answer W + O, the least free count a program's frame not drawn from a reservation is given at, which a machine-wide reclaim for a frame lifts the free count over (the load's fs::pages::reclaim_want). | At stage 2, with 64 frames promised, program_floor answers W + 64, and program frames taken until refused leave exactly that free; test-btrfs-pressure writes and deletes its GiBs with no ENOSPC. | H.QUOTA.15 | `mm::program_floor` | `src/kernel/src/mm/check.rs::check_the_reservation_floors` | not reached | not reached | not reached |
+| `L.user.145` | A reclaim shall not take a frame drawn from a reservation other than the one the running task's job draws from, nor any drawn frame in interrupt context. | At stage 9 a frame drawn from a job's reservation is spared for a reclaim drawing from none and taken for one drawing from it, and an undrawn frame is taken. | H.QUOTA.17 | `user::cache::spares`, `user::cache::reclaim`, `user::cache::take_from` | `src/kernel/src/object/reserve_check.rs::run` | not built | not built | not built |
 
 ### AllocationReserve
 
@@ -1976,6 +2001,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/mm/check.rs::check_pstore_never_free` | kernel | L.mm.75 |
 | `src/kernel/src/mm/check.rs::check_sealed_image` | kernel | H.MEM.5, L.mm.33 |
 | `src/kernel/src/mm/check.rs::check_stacks` | kernel | H.FAIL.2, L.mm.55 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | H.QUOTA.15 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | H.QUOTA.16 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | L.mm.76 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | L.mm.77 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | L.mm.78 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | L.mm.79 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | L.mm.80 |
+| `src/kernel/src/mm/check.rs::check_the_reservation_floors` | kernel | L.mm.82 |
 | `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | H.QUOTA.13 |
 | `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | L.mm.71 |
 | `src/kernel/src/mm/check.rs::check_the_watermark` | kernel | L.mm.72 |
@@ -2069,6 +2102,11 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/object/quota_check.rs::check_the_weight` | kernel | L.object.161 |
 | `src/kernel/src/object/quota_check.rs::check_the_weight` | kernel | L.object.62 |
 | `src/kernel/src/object/quota_check.rs::run` | kernel | L.object.53, H.QUOTA.4 |
+| `src/kernel/src/object/reserve_check.rs::run` | kernel | H.QUOTA.17 |
+| `src/kernel/src/object/reserve_check.rs::run` | kernel | L.object.222 |
+| `src/kernel/src/object/reserve_check.rs::run` | kernel | L.object.223 |
+| `src/kernel/src/object/reserve_check.rs::run` | kernel | L.object.225 |
+| `src/kernel/src/object/reserve_check.rs::run` | kernel | L.user.145 |
 | `src/kernel/src/object/write_read_check.rs::check_a_sync_wake_keeps_a_pinned_reader` | kernel | L.sched.8, H.SCHED.4 |
 | `src/kernel/src/object/write_read_check.rs::check_a_sync_wake_moves_the_reader` | kernel | L.sched.8 |
 | `src/kernel/src/object/write_read_check.rs::run` | kernel | L.object.128, L.object.129, L.object.130, L.object.131 |
@@ -2150,6 +2188,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/syscall/native_check.rs::a_clock_asked_for_badly_is_refused` | kernel | L.device.13 |
 | `src/kernel/src/syscall/native_check.rs::a_full_table_refuses_and_loses_nothing` | kernel | L.object.82, L.object.92, H.OBJ.7 |
 | `src/kernel/src/syscall/native_check.rs::a_log_reader_its_binding_does_not_allow_is_refused` | kernel | L.device.12 |
+| `src/kernel/src/syscall/native_check.rs::a_reservation_needs_reserve` | kernel | L.object.221 |
+| `src/kernel/src/syscall/native_check.rs::a_reservation_needs_reserve` | kernel | L.object.224 |
 | `src/kernel/src/syscall/native_check.rs::a_send_that_would_walk_too_far_is_refused` | kernel | L.object.26 |
 | `src/kernel/src/syscall/native_check.rs::the_audit_record_is_read_by_its_handle_alone` | kernel | H.AUD.9 |
 | `src/kernel/src/syscall/seccomp_check.rs::run` | kernel | H.TRAP.16, L.trap.7, L.trap.8, L.x86_64.124, L.x86_64.125, L.aarch64.51, L.armv7a.1, L.armv7a.2 |

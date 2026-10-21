@@ -1309,6 +1309,48 @@ package FerrixItemRequirements {
                 comes back (the `watermark` line).";
             attribute :>> parent = ("G.8", "O.QUOTA");
         }
+        // K12 (docs/microkernel/K12.md): a job's reservation beside its
+        // limit. H.QUOTA.15 holds frames and page tables here; K12b widens
+        // it by the kernel heap's pages (ledger 2550 (4)).
+        requirement <'H.QUOTA.15'> aReservationIsThere : ItemHighLevel {
+            attribute :>> statement = "A frame of a job's memory or page tables,
+                taken in task context while the job holds fewer frames drawn
+                from its reservation than the reservation's size, shall not be
+                refused for want of free memory; no other job's frame and no
+                frame of the kernel's own shall take a frame promised to a
+                reservation.";
+            attribute :>> criterion = "At stage 2, with a reservation admitted,
+                program frames are refused at the watermark beyond the promise
+                and the kernel's own at the promise, and the reservation's own
+                frames are then given below both up to its size (the `reserve`
+                line of stage 2); at stage 9 a reserved job's frames are drawn
+                from its reservation and one taken while an interrupt is
+                serviced is not (the `reserve` line of stage 9).";
+            attribute :>> parent = ("G.8", "O.QUOTA");
+        }
+        requirement <'H.QUOTA.16'> aReservationIsAdmittedFromFreeFrames : ItemHighLevel {
+            attribute :>> statement = "A reservation shall be admitted only while
+                the frames free, less the watermark and every outstanding
+                promise, cover it, and refused with nothing changed otherwise.";
+            attribute :>> criterion = "At stage 2 a reservation one frame past
+                what the free frames cover is refused with the promise
+                unchanged, and one they cover raises the promise by exactly its
+                size (the `reserve` line of stage 2).";
+            attribute :>> parent = ("G.8", "O.QUOTA");
+        }
+        requirement <'H.QUOTA.17'> nobodyElseTakesAReservation : ItemHighLevel {
+            attribute :>> statement = "No reclaim for another job, no limit or
+                memory.high above a reserved job, and no process or job put
+                into its subtree from outside without the RESERVE right shall
+                take a frame drawn from its reservation or refuse a charge its
+                reservation covers.";
+            attribute :>> criterion = "At stage 9 a limit and a memory.high
+                above a reserved job are refused, a reclaim for another spares
+                its drawn frame, and a job made beneath it from outside without
+                RESERVE is refused (the `reserve` line of stage 9 and the native
+                refusals).";
+            attribute :>> parent = ("G.8", "O.QUOTA");
+        }
     }
 
     package Audit {
