@@ -89,6 +89,10 @@ fn on_tick(_irq: u32) {
     // decision itself is made at interrupt exit, once the controller has been
     // acknowledged. Nothing happens here before the scheduler is up.
     crate::sched::timer_expired();
+    // Last, after the one-shot's disarm above: the heartbeat, whatever
+    // watches it, and the next watch tick (`watch`). One read of a flag
+    // until the watch starts.
+    crate::watch::tick();
 }
 
 /// The most processors whose one-shot this module remembers.

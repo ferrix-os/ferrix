@@ -946,6 +946,16 @@ to the faulting partition. The integrator:
 * knows that a ring-3 driver can be the victim (the Intel GPU driver's pins
   make it large) and is restarted by `devmgr` (T0), its clients' work lost.
 
+### AoU-41 — no `ferrix.check.*` option on an integrator's command line
+`ferrix.check.lockup=irqoff` masks a processor's interrupts on purpose and
+spins it for good (`src/kernel/src/lockup_check.rs`), for the gates that
+show the lockup detector catches it (`docs/POSTMORTEM.md` §6.5). Every
+`ferrix.check.*` option is verification's, and an integrator's command line
+(the ESP's `CMDLINE.TXT` or a slot's) never carries one. The reference
+configuration has none (`certification-item.json`, `check_lockup`).
+`ferrix.lockup=on`, the detector itself, is off in the reference
+configuration and a mitigation only when on (H.FAIL.6).
+
 ## 5. Element failure analysis
 
 The hazard analysis the element *can* do: not what harm the system causes —

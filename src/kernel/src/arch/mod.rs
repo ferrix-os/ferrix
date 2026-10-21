@@ -547,15 +547,15 @@ pub use x86_64::{
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::USER_RMAP_PROGRAM;
 #[cfg(target_arch = "aarch64")]
-pub(crate) use aarch64::{flush_tlb_page, send_ipi_to};
+pub(crate) use aarch64::{flush_tlb_page, send_ipi_to, send_lockup_nmi};
 #[cfg(target_arch = "arm")]
 pub use armv7a::USER_RMAP_PROGRAM;
 #[cfg(target_arch = "arm")]
-pub(crate) use armv7a::{flush_tlb_page, send_ipi_to};
+pub(crate) use armv7a::{flush_tlb_page, send_ipi_to, send_lockup_nmi};
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::USER_RMAP_PROGRAM;
 #[cfg(target_arch = "x86_64")]
-pub(crate) use x86_64::{flush_tlb_page, send_ipi_to};
+pub(crate) use x86_64::{flush_tlb_page, send_ipi_to, send_lockup_nmi};
 
 // Ordering memory a device reaches by DMA, and a register write after it (F-44).
 #[cfg(target_arch = "aarch64")]
