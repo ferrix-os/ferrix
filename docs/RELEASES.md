@@ -24,7 +24,97 @@ runners 418. Each pinned download that such a host serves names a mirror
 too, which is checked against the same pin. See the [discovery plan](marketing/PLAYBOOK.md#what-to-do-next-in-order)
 for how future releases should be presented.
 
+## v0.1.1 — 2026-10-21, features at 336e03bca
+
+The first release with its downloads: the x86-64 desktop as one zip,
+booted by a script with plain QEMU. v0.1.0 was tagged but built none of its
+assets (see below). Download `ferrix-x86_64-desktop.zip` below, unpack it,
+and run
+
+```
+sh ferrix-x86_64-desktop/run.sh                                                  # Linux, macOS
+powershell -ExecutionPolicy Bypass -File ferrix-x86_64-desktop\run.ps1           # Windows
+```
+
+The [install guide](https://github.com/ferrix-os/ferrix/blob/main/docs/INSTALL.md)
+walks through it step by step, with pictures, on Windows and Linux. The
+script uses KVM, WHPX or HVF where it can and QEMU's emulator otherwise,
+and finds the UEFI firmware QEMU or the distribution installed.
+
+Since v0.1.0:
+
+- **The release builds on GitHub's runners.** Every pinned download names a
+  mirror, checked against the same pin, and the workflow has a dry run that
+  builds all three assets for a commit before it is tagged; this tag's
+  commit passed one.
+- **Ferrix's own DHCP client.** `dhcpc`, in Rust, takes the address,
+  route and DNS servers and keeps the lease renewed, where busybox's
+  `udhcpc` and a shell script did; busybox itself is still in the image.
+- **Fixed:** a boot self-check of the character-device core (stage 10) that
+  failed about one boot in ten under load: it measured the queue's room
+  before earlier requests had left it.
+
+What it has:
+
+- **In the zip:** the hyprix Wayland compositor with a terminal running
+  zinc, the zsh-compatible shell; ferrousli's busybox; and the apps an
+  image carries by default, among them `btop`, `curl`, `git`, `foot`,
+  `fuzzel`, `waybar` and `ferrofetch`. The network is QEMU's own, so
+  `curl https://example.com` works from the first prompt.
+- **Linux programs:** Chrome, `rustc`, `git`, `curl` and Valve's
+  `steamcmd` run unpatched on Ferrix's own Rust kernel, 32-bit x86 programs
+  included; Steam signs in and starts a native game; Claude Code runs a
+  session on the desktop. Those that need a volume of their own are in a
+  build from source (`cargo xtask run-compositor --everything`), not in the
+  zip.
+- **Drivers outside the kernel:** disk, network, graphics, input, sound and
+  console drivers run as processes, behind the IOMMU on x86-64 and AArch64,
+  and are restarted when they crash.
+- **Users and storage:** passwords checked by `authd` as Argon2id hashes; a
+  btrfs root that keeps what is written to it, a command-line installer
+  (`ferrix-install`, to virtual disks so far: no graphical installer and no
+  live medium yet), and A/B system slots with a way back.
+- **Three architectures** in the boot tests, and Ferrix has booted on an
+  STM32MP157D-DK1 and a Pixel 7.
+- **Licences and sources:** `ferrix-v0.1.1-THIRD-PARTY-LICENSES.md` (also
+  in the zip) lists every part of the x86-64 image, the licence it is
+  shipped under and every licence text, and each Pixel 7 edition has its own
+  (`ferrix-pixel7-<edition>-THIRD-PARTY-LICENSES.md`). `ferrix-v0.1.1-sources.tar.gz`
+  holds the exact upstream source, build script, patches and config of
+  every GPL and LGPL program in these images -- busybox, git, alsa-utils,
+  alsa-lib -- and of what is linked into one, and the Debian package list
+  of the Pixel 7 Chromium volume with where each package's source is
+  ([docs/LICENSES.md](https://github.com/ferrix-os/ferrix/blob/main/docs/LICENSES.md)).
+
+Known limits:
+
+- The zip leaves out Chrome, Steam and the Rust toolchain, which run from
+  volumes of several gigabytes that a build fetches; `/` is in memory, so
+  nothing survives QEMU exiting; the screen is drawn in software, with no
+  host GPU; the keyboard layout is US; there is no sound card.
+- With released QEMU under WHPX the guest gets one processor: QEMU 11.1's
+  WHPX faults Ferrix's ring-3 drivers with more.
+  `tools/common/fetch/fetch-qemu-windows.sh` builds one that does not.
+- QEMU's window can open at 640x480 on Windows; make it bigger and the
+  desktop follows.
+- On an Apple Silicon Mac the x86-64 guest is emulated and slow.
+- The zip's desktop runs as root with no login. Ferrix is not ready to be
+  anybody's everyday OS: parts of authentication and process isolation are
+  unfinished.
+
+What to test:
+
+```
+sh ferrix-x86_64-desktop/run.sh --vnc 5        # no window: VNC on 127.0.0.1:5905
+cargo xtask run-compositor --arch x86_64        # the same desktop from source
+cargo xtask test-boot --arch all
+```
+
 ## v0.1.0 — 2026-10-20, features at fb56e0cd5
+
+Tagged, but published with no downloads: its release run built none of the
+three assets, because a host of one pinned download refuses GitHub's
+runners. v0.1.1 is the same system with the downloads.
 
 The first numbered release, and the first one anybody can boot without
 building it: the x86-64 desktop as one zip, booted by a script with plain
