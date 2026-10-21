@@ -149,6 +149,9 @@ pub(super) fn check_programs() {
     // K3: pager-backed VMOs, their faults forwarded to a pager over a port
     // and waited for, bounded (docs/microkernel/K3.md §6).
     check_pager();
+
+    // K12: a job's memory reservation, beside its limit.
+    check_reservations();
     check_kernel_memory();
 }
 
@@ -1410,6 +1413,27 @@ pub(super) fn check_a_give_up() {
         "  give-up  a close {} drops deep in place with no memory gave up {given_up} object, \
          counted, and the kernel ran on",
         object::IN_PLACE_DEPTH
+    );
+}
+
+/// K12: a job's memory reservation (`docs/microkernel/K12.md` §3): its
+/// rules, its frames drawn from it, an interrupt's never, a reclaim for
+/// anyone else sparing them, and nothing promised once its job is gone.
+///
+/// Halts rather than returning, as every other stage's check does.
+pub(super) fn check_reservations() {
+    let report = match object::reserve_check::run() {
+        Ok(report) => report,
+        Err(problem) => fatal!(
+            catalog::STAGE9_RESERVE,
+            "reservation self-check failed: {problem}"
+        ),
+    };
+    println!(
+        "  reserve  {} pages reserved for a job and drawn by its frames, an interrupt's never, \
+         and all {} interrupts so far marked; {} rules refused; a reclaim for another spared \
+         them; the promise back to {} pages and every slot given back",
+        report.reserved, report.interrupts, report.rules, report.promise,
     );
 }
 
