@@ -1517,6 +1517,22 @@ return (`L.sched.80`-`82`, `docs/THREAD-TIMES.md`).
 * **Where the counter is the HPET**, nothing is read: every stamp is a
   load of the boot's one flag and a branch.
 
+### 2.2s The check hooks' locks (`arch::speculation::LEAVE_HOOK`, `FORGET_HOOK`)
+
+Two leaf spin locks, each over an `Option<&'static CheckHook>` that only
+stage 9 sets (`docs/OPAQUE-KERNEL.md` §9.7 condition 11). Each is held only
+to store, clear or copy that `Option`: `leaving_domain`, and
+`run_forget_hook` for `forget_root`, copy it out and let the lock go before
+the hook runs, so no hook runs under either, and nothing else is locked or
+waited for under them. `LEAVE_HOOK` is taken once per leave of a
+speculation domain, from a context that may block. `FORGET_HOOK` is taken
+by production code on every successful compare-exchange in `forget_root`,
+that is once for each processor whose last root was the one being
+forgotten, in the contexts `prepare_user_root` is called from on all three
+architectures (a new address space's root, before it is ever installed),
+which may hold other locks or have interrupts masked; as a leaf, it adds
+no ordering to them. Since F-64's fix (2026-10-14).
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

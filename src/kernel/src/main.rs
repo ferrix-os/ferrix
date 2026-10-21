@@ -371,6 +371,12 @@ fn require_hooks_disarmed() {
             "a check's hook was still armed after stage 12: {check}, in user::vmo's reclaim of clean pages"
         );
     }
+    if let Some(check) = arch::forget_hook_armed_by() {
+        fatal!(
+            catalog::CHECK_HOOK_LEFT_ARMED,
+            "a check's hook was still armed after stage 9: {check}, in a forgotten root's clear"
+        );
+    }
 }
 
 /// The last line of boot before init: the success marker when every check

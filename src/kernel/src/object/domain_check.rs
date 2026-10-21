@@ -27,11 +27,16 @@
 //!    the leave returns;
 //! 9. a process that left before its birth stays out of its job's domain;
 //! 10. a child job of a marked job, a fork, a process moved in and its
-//!     fork, and a forgotten root;
+//!     fork, and a forgotten root, which a space installed again over it
+//!     does not inherit;
 //! 11. a processor that records the leaver's domain after the leave's scan
 //!     has passed it, as a processor that read the space's domain before the
 //!     leave could (the certification finding F-60), still issues the
 //!     barrier before the leave returns;
+//! 12. a processor that installs a member's space while another forgets the
+//!     root it last ran, between the forget's clear of that root and its
+//!     return, keeps the member's domain, so that the member's leave there
+//!     still issues the barrier (the certification finding F-64);
 //!
 //! And inside a domain, no invalidation and, on x86-64, the refill.
 
@@ -72,6 +77,8 @@ pub(crate) struct Report {
     pub(crate) elsewhere: bool,
     /// Whether case 11 ran, which it needs a second processor for.
     pub(crate) late: bool,
+    /// Whether case 12 ran, which it needs a second processor for.
+    pub(crate) raced: bool,
 }
 
 /// Run every case.
@@ -171,6 +178,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     check_routes(&first, &marked, &mut made, &mut report)?;
     report.elsewhere = check_leaving_at_once(&first, &marked, &mut made)?;
     report.late = check_recorded_after_the_scan(&first, &marked, &mut made)?;
+    report.raced = check_forget_racing_an_install(&marked, &mut made)?;
 
     for process in made {
         process.kill(job::KILLED_STATUS);
@@ -470,8 +478,8 @@ fn check_in_domain_path(first: &Process, second: &Process) -> Result<(), &'stati
 ///    the move (the consultant's F2).
 /// 10. A child job of a marked job is in no domain; a fork of a member is a
 ///     member; a process moved into a marked job is not, and nor is its
-///     fork's child; and a forgotten root takes its domain with it, so the
-///     next member installed after it decides the barrier.
+///     fork's child; and a forgotten root is no longer the one its processor
+///     last ran, so the space installed again over it decides the barrier.
 fn check_routes(
     first: &Arc<Process>,
     marked: &Arc<Job>,
@@ -538,11 +546,14 @@ fn check_routes(
         report,
     )?;
 
-    let again = born_in(marked)?;
-    made.push(Arc::clone(&again));
-    if after_a_forgotten_root(first, &again) != 1 {
+    // A forgotten root is no longer the one the processor last ran: the
+    // space installed again over it, as a new space given the freed root
+    // would be, decides the barrier, which the root's shortcut would skip.
+    // Only the root goes (F-64): the processor's domain stays the one it
+    // last ran, here none.
+    if after_a_forgotten_root(&early, &early) != 1 {
         return Err(
-            "case 10: a member installed after a forgotten member's root skipped the barrier",
+            "case 10: a space installed again after its root was forgotten skipped the barrier",
         );
     }
     Ok(())
@@ -556,8 +567,8 @@ fn fork_of(parent: &Arc<Process>) -> Result<Arc<Process>, &'static str> {
 }
 
 /// Install `forgotten`'s space and take it off again, forget its root as a
-/// new space's would be, then install `next`'s: answers how many barriers
-/// that install decided.
+/// new space's would be, then install `next`'s, which may be `forgotten`'s
+/// again: answers how many barriers that install decided.
 fn after_a_forgotten_root(forgotten: &Process, next: &Process) -> u64 {
     let saved = <arch::Irq as IrqControl>::disable();
     let cpu = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
@@ -872,4 +883,226 @@ fn check_recorded_after_the_scan(
         );
     }
     Ok(true)
+}
+
+/// The space whose root case 12 forgets: the other processor's task installs
+/// it first, so that its processor last ran it.
+static RACED_FORGOTTEN: crate::sync::SpinLock<Option<Arc<AddressSpace>>> =
+    crate::sync::SpinLock::new(None);
+/// The member's space the hook has a task on the other processor switch
+/// into: the leaver's, of the same domain as the forgotten one.
+static RACED_MEMBER: crate::sync::SpinLock<Option<Arc<AddressSpace>>> =
+    crate::sync::SpinLock::new(None);
+/// The task the hook starts in the member's space.
+static RACED_TASK: crate::sync::SpinLock<Option<Arc<crate::sched::Task>>> =
+    crate::sync::SpinLock::new(None);
+/// Set by the first task once its processor last ran the forgotten space.
+static RACED_READY: AtomicBool = AtomicBool::new(false);
+/// Set once, by the check, when the hook is to act: the hook does nothing
+/// in any other forget, even one a missing disarm let it see.
+static RACED_ARMED: AtomicBool = AtomicBool::new(false);
+/// Set by the hook's task once it runs in the member's space.
+static RACED_IN: AtomicBool = AtomicBool::new(false);
+/// Set by the hook when its task did not run in time.
+static RACED_TIMED_OUT: AtomicBool = AtomicBool::new(false);
+/// Set by the check to let the hook's task end.
+static RACED_RELEASED: AtomicBool = AtomicBool::new(false);
+/// The processor case 12's tasks run on.
+static RACED_CPU: AtomicUsize = AtomicUsize::new(0);
+/// That processor's barrier decisions as the hook began.
+static RACED_BEFORE: AtomicU64 = AtomicU64::new(0);
+/// Its decisions once the switch into the member's space was made.
+static RACED_AT_SWITCH: AtomicU64 = AtomicU64::new(0);
+
+/// Case 12's hook, which `forget_root` runs after it has cleared a
+/// processor's last root and before it returns.
+static RACED_HOOK: arch::CheckHook = arch::CheckHook {
+    armed_by: "the speculation domain check's case 12",
+    run: install_inside_the_forget,
+};
+
+/// The first task case 12 runs on the other processor: install the space
+/// whose root the check will forget and take it off again, with interrupts
+/// masked, so that the processor's last root is that space's and its last
+/// domain the member's.
+fn last_ran_the_forgotten(_: usize) {
+    let forgotten = RACED_FORGOTTEN.lock().clone();
+    if let Some(forgotten) = forgotten {
+        let saved = <arch::Irq as IrqControl>::disable();
+        // SAFETY: (TRANSLATE) as in `switch_and_back`: the check holds the
+        // space past this task's end, interrupts are masked, no user address
+        // is touched, and the processor is back to no user space after.
+        unsafe { forgotten.install(None) };
+        // SAFETY: (TRANSLATE) as above.
+        unsafe { forgotten.uninstall() };
+        <arch::Irq as IrqControl>::restore(saved);
+    }
+    RACED_READY.store(true, Ordering::SeqCst);
+}
+
+/// The hook: start a task in the member's space on the other processor,
+/// whose root `forget_root` has just cleared, and wait until the switch into
+/// it is made. That switch is the one the finding names: a processor in the
+/// middle of installing a member's space, inside the forget.
+fn install_inside_the_forget() {
+    if !RACED_ARMED.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let cpu = RACED_CPU.load(Ordering::SeqCst);
+    let member = RACED_MEMBER.lock().clone();
+    let mut only = CpuSet::empty();
+    if member.is_none() || only.insert(cpu).is_err() {
+        return;
+    }
+    RACED_BEFORE.store(arch::barrier_decisions_on(cpu), Ordering::SeqCst);
+    let Ok(task) = crate::sched::spawn_on_in(
+        "domain-raced",
+        run_in_the_member,
+        0,
+        NICE_0_WEIGHT,
+        cpu,
+        only,
+        member,
+    ) else {
+        return;
+    };
+    *RACED_TASK.lock() = Some(task);
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while !RACED_IN.load(Ordering::SeqCst) {
+        if crate::timer::now_nanos() > deadline {
+            RACED_TIMED_OUT.store(true, Ordering::SeqCst);
+            return;
+        }
+        core::hint::spin_loop();
+    }
+}
+
+/// The task the hook starts: it runs in the member's space, notes what its
+/// processor had decided by the switch, says so, and spins with interrupts
+/// on, so that it answers the leave's grace period, until released.
+fn run_in_the_member(_: usize) {
+    let cpu = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
+    RACED_AT_SWITCH.store(arch::barrier_decisions_on(cpu), Ordering::SeqCst);
+    RACED_IN.store(true, Ordering::SeqCst);
+    while !RACED_RELEASED.load(Ordering::SeqCst) {
+        core::hint::spin_loop();
+    }
+}
+
+/// Case 12, the certification finding F-64: `forget_root` clears a
+/// processor's last root, and must leave its last domain alone. The other
+/// processor last ran `forgotten`, a member; the check forgets that root,
+/// and in the forget, after the clear, the hook has that processor switch
+/// into `leaver`'s space, a member of the same domain, which skips the
+/// barrier inside the domain and records the domain. The leaver then leaves
+/// the domain while its task runs there, and that processor must decide the
+/// barrier before the leave returns. A second store of zero to the
+/// processor's last domain after the clear, as `forget_root` made before
+/// F-64's fix, erases the record, and then neither the leave's scan nor the
+/// processor's own answer finds a barrier owed. Answers whether it ran,
+/// which needs a second processor.
+fn check_forget_racing_an_install(
+    marked: &Arc<Job>,
+    made: &mut alloc::vec::Vec<Arc<Process>>,
+) -> Result<bool, &'static str> {
+    let me = crate::smp::this_cpu().map_or(0, |cpu| cpu.logical);
+    let Some(other) = crate::smp::topology().and_then(|topology| {
+        topology
+            .cpus()
+            .iter()
+            .find(|cpu| cpu.is_online() && cpu.logical != me)
+            .map(|cpu| cpu.logical)
+    }) else {
+        return Ok(false);
+    };
+    let forgotten = born_in(marked)?;
+    made.push(Arc::clone(&forgotten));
+    let leaver = born_in(marked)?;
+    made.push(Arc::clone(&leaver));
+    *RACED_FORGOTTEN.lock() = Some(Arc::clone(forgotten.core().space()));
+    *RACED_MEMBER.lock() = Some(Arc::clone(leaver.core().space()));
+    for flag in [
+        &RACED_READY,
+        &RACED_ARMED,
+        &RACED_IN,
+        &RACED_TIMED_OUT,
+        &RACED_RELEASED,
+    ] {
+        flag.store(false, Ordering::SeqCst);
+    }
+    RACED_CPU.store(other, Ordering::SeqCst);
+    let mut only = CpuSet::empty();
+    only.insert(other)
+        .map_err(|_| "case 12 names a processor out of range")?;
+    let first = crate::sched::spawn_on_in(
+        "domain-forgotten",
+        last_ran_the_forgotten,
+        0,
+        NICE_0_WEIGHT,
+        other,
+        only,
+        None,
+    )?;
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while !RACED_READY.load(Ordering::SeqCst) {
+        if crate::timer::now_nanos() > deadline {
+            return Err("case 12: the task on the other processor never ran");
+        }
+        crate::sched::yield_now();
+    }
+    crate::sched::wait_until_gone(&first, PATIENCE_NANOS)?;
+    if arch::last_domain_on(other) != marked.domain() {
+        return Err(
+            "case 12: the other processor's last domain was not the member's before the forget",
+        );
+    }
+
+    RACED_ARMED.store(true, Ordering::SeqCst);
+    arch::arm_forget_hook(&RACED_HOOK);
+    arch::forget_root(forgotten.core().space().root_table());
+    arch::disarm_forget_hook();
+    let acted = !RACED_ARMED.swap(false, Ordering::SeqCst);
+
+    let verdict = leave_after_the_race(other, acted, &leaver);
+    RACED_RELEASED.store(true, Ordering::SeqCst);
+    let task = RACED_TASK.lock().take();
+    if let Some(task) = task {
+        crate::sched::wait_until_gone(&task, PATIENCE_NANOS)?;
+    }
+    *RACED_FORGOTTEN.lock() = None;
+    *RACED_MEMBER.lock() = None;
+    verdict.map(|()| true)
+}
+
+/// Case 12's judgement, once the forget has returned: that the hook reached
+/// the window -- it ran, its task ran in the member's space before the
+/// forget returned, and the switch into it skipped the barrier inside the
+/// domain -- and that the leave then decided the barrier on processor
+/// `other`.
+fn leave_after_the_race(other: usize, acted: bool, leaver: &Process) -> Result<(), &'static str> {
+    if !acted {
+        return Err(
+            "case 12: the forget cleared no root on the other processor, so its hook never ran",
+        );
+    }
+    if RACED_TIMED_OUT.load(Ordering::SeqCst) || !RACED_IN.load(Ordering::SeqCst) {
+        return Err("case 12: the task the hook started never ran in the member's space");
+    }
+    if RACED_AT_SWITCH.load(Ordering::SeqCst) != RACED_BEFORE.load(Ordering::SeqCst) {
+        return Err(
+            "case 12: the switch into the member's space inside the forget decided the barrier, so the window was not reached",
+        );
+    }
+    let before = arch::barrier_decisions_on(other);
+    let recorded = arch::last_domain_on(other);
+    leaver.core().leave_speculation_domain();
+    if arch::barrier_decisions_on(other) <= before {
+        crate::console::println!(
+            "  domain   case 12: processor {other}'s last domain was {recorded} as the member left"
+        );
+        return Err(
+            "case 12: a member that left its domain where its space was installed inside a forget of that processor's root issued no barrier there",
+        );
+    }
+    Ok(())
 }

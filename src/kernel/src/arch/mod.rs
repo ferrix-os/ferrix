@@ -25,11 +25,11 @@ use aarch64::speculation as machine_speculation;
 #[cfg(target_arch = "arm")]
 use armv7a::speculation as machine_speculation;
 pub(crate) use speculation::{
-    CheckHook, HARDENED, answer_leaving, arm_leave_hook, barrier_decisions_on, disarm_leave_hook,
-    entering_space, forget_root, last_domain_on, leave_hook_armed_by, leaving_domain, left_space,
-    nospec_below, nospec_index, refill_wanted_in_domain, refills_in_domain_on,
-    report_exposure as report_speculation, serve_wanted_barrier, switch_barriers,
-    switch_barriers_on,
+    CheckHook, HARDENED, answer_leaving, arm_forget_hook, arm_leave_hook, barrier_decisions_on,
+    disarm_forget_hook, disarm_leave_hook, entering_space, forget_hook_armed_by, forget_root,
+    last_domain_on, leave_hook_armed_by, leaving_domain, left_space, nospec_below, nospec_index,
+    refill_wanted_in_domain, refills_in_domain_on, report_exposure as report_speculation,
+    serve_wanted_barrier, switch_barriers, switch_barriers_on,
 };
 pub(crate) use speculation_check::check as check_speculation;
 #[cfg(target_arch = "x86_64")]
