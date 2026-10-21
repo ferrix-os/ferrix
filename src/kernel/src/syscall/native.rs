@@ -3211,12 +3211,14 @@ fn space_allocate(
     protection: u64,
 ) -> Result<usize, Errno> {
     let (write, execute) = space_protection(protection)?;
-    let needed = if execute {
-        Rights::MAP | Rights::EXECUTE
+    // Private memory has no VMO handle to ask: the space handle's EXECUTE is
+    // the only right an executable allocation needs, and it is asked here.
+    let runnable = if execute {
+        Rights::EXECUTE
     } else {
-        Rights::MAP
+        Rights::NONE
     };
-    let target = space_in(process, space, needed)?;
+    let target = space_in(process, space, Rights::MAP | runnable)?;
     let flags = VmaFlags {
         write,
         execute,
