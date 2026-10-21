@@ -262,6 +262,29 @@ impl Ceiling {
     }
 }
 
+/// Whether every region `range` reaches was mapped by handle and admits
+/// `flags`: [`AddressSpace::protect_by_handle`]'s test, made before anything
+/// changes. A region no handle mapped is refused before one past its ceiling.
+fn within_ceilings(inner: &Inner, range: PageRange, flags: VmaFlags) -> Result<(), ProtectRefused> {
+    let mut verdict = Ok(());
+    let reached = inner
+        .map
+        .iter()
+        .filter(|region| region.range.start() < range.end() && range.start() < region.range.end());
+    for region in reached {
+        let ceiling = match region.backing {
+            Backing::Anonymous { id, .. } => inner.native.get(&id).copied(),
+            _ => None,
+        };
+        match ceiling {
+            None | Some(Ceiling::Kernel) => return Err(ProtectRefused::NotByHandle),
+            Some(ceiling) if !ceiling.admits(flags) => verdict = Err(ProtectRefused::Beyond),
+            Some(_) => {}
+        }
+    }
+    verdict
+}
+
 /// Why [`AddressSpace::protect_by_handle`] refused.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ProtectRefused {
@@ -3467,27 +3490,7 @@ impl AddressSpace {
         let mut pages = TlbPages::new();
         let cpus = {
             let mut inner = self.inner.lock();
-            let mut verdict = Ok(());
-            for region in inner.map.iter() {
-                if region.range.start() >= range.end() || range.start() >= region.range.end() {
-                    continue;
-                }
-                let ceiling = match region.backing {
-                    Backing::Anonymous { id, .. } => inner.native.get(&id).copied(),
-                    _ => None,
-                };
-                match ceiling {
-                    None | Some(Ceiling::Kernel) => {
-                        verdict = Err(ProtectRefused::NotByHandle);
-                        break;
-                    }
-                    Some(ceiling) if !ceiling.admits(flags) => {
-                        verdict = Err(ProtectRefused::Beyond);
-                    }
-                    Some(_) => {}
-                }
-            }
-            verdict?;
+            within_ceilings(&inner, range, flags)?;
             inner
                 .map
                 .protect(range, flags)

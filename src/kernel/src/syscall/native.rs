@@ -500,6 +500,19 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
             object_wait_async(process, handle(a[0]), handle(a[1]), a[2], a[3])
         }
         NativeCall::VmoMap => vmo_map(process, handle(a[0]), a[1], a[2], a[3], a[4]),
+        NativeCall::VmoExecutable
+        | NativeCall::ProcessSpace
+        | NativeCall::SpaceCreate
+        | NativeCall::SpaceMap
+        | NativeCall::SpaceUnmap
+        | NativeCall::SpaceProtect
+        | NativeCall::SpaceRead => space_call(call, process, &a),
+    }
+}
+
+/// The calls that act on an address space by handle (`docs/microkernel/K2.md`).
+fn space_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    match call {
         NativeCall::VmoExecutable => vmo_executable(process, handle(a[0]), a[1]),
         NativeCall::ProcessSpace => process_space(process, handle(a[0]), a[1]),
         NativeCall::SpaceCreate => space_create(process),
@@ -509,6 +522,7 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         NativeCall::SpaceUnmap => space_unmap(process, handle(a[0]), a[1], a[2]),
         NativeCall::SpaceProtect => space_protect(process, handle(a[0]), a[1], a[2], a[3]),
         NativeCall::SpaceRead => space_read(process, handle(a[0]), a[1], a[2], a[3]),
+        _ => Err(Errno::ENOSYS),
     }
 }
 
@@ -3203,16 +3217,28 @@ fn space_read(
     }
     let mut bounce =
         fallible::try_filled(0_u8, PAGE_SIZE as usize).map_err(|_| status::NO_MEMORY)?;
+    space_steps(address, length, |done, from, step| {
+        let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
+        target.charging_owner(|| read_target(target.space(), from, chunk))?;
+        let to = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
+        let chunk = bounce.get(..step).ok_or(status::FAULT)?;
+        uaccess::copy_to_user(process.space(), to, chunk).map_err(fault)
+    })
+}
+
+/// Run a by-handle copy of `length` bytes from `address` a page step at a
+/// time, `copy` taking each step's offset into the copy, its address in the
+/// target and its length. The bytes copied: short at the first step that
+/// fails, or that step's error if it is the first.
+fn space_steps(
+    address: u64,
+    length: usize,
+    mut copy: impl FnMut(usize, u64, usize) -> Result<(), Errno>,
+) -> Result<usize, Errno> {
     let mut done = 0_usize;
     while done < length {
-        let step = space_step(address, done, length).and_then(|(from, step)| {
-            let chunk = bounce.get_mut(..step).ok_or(status::FAULT)?;
-            target.charging_owner(|| read_target(target.space(), from, chunk))?;
-            let to = buffer.checked_add(done as u64).ok_or(status::FAULT)?;
-            let chunk = bounce.get(..step).ok_or(status::FAULT)?;
-            uaccess::copy_to_user(process.space(), to, chunk).map_err(fault)?;
-            Ok(step)
-        });
+        let step = space_step(address, done, length)
+            .and_then(|(at, step)| copy(done, at, step).map(|()| step));
         match step {
             Ok(step) => done += step,
             Err(why) if done == 0 => return Err(why),

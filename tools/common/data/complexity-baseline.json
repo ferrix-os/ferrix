@@ -85,13 +85,13 @@
       "recursive": false
     },
     "main.rs::start_scheduler": {
-      "complexity": 8,
-      "lines": 83,
+      "complexity": 5,
+      "lines": 71,
       "recursive": false
     },
     "smp.rs::invalidate_pages": {
-      "complexity": 21,
-      "lines": 82,
+      "complexity": 20,
+      "lines": 81,
       "recursive": false
     },
     "src/lib/fs/btrfs-write/src/chunks.rs::encode_item": {
@@ -310,8 +310,8 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 30,
-      "lines": 96,
+      "complexity": 31,
+      "lines": 86,
       "recursive": false
     },
     "syscall/native.rs::channel_read": {
@@ -326,7 +326,7 @@
     },
     "syscall/native.rs::vmo_pin": {
       "complexity": 20,
-      "lines": 31,
+      "lines": 28,
       "recursive": false
     },
     "trap.rs::handle_page_fault": {
@@ -345,8 +345,8 @@
       "recursive": false
     },
     "user/space.rs::fault_private_file": {
-      "complexity": 16,
-      "lines": 54,
+      "complexity": 15,
+      "lines": 53,
       "recursive": false
     },
     "user/space.rs::protect": {
