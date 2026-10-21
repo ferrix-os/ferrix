@@ -374,9 +374,7 @@ fn read_word(space: &AddressSpace, word: &Word) -> Result<u32, WaitError> {
                 .read_present(index, within, &mut bytes)
                 .map_err(|_| WaitError::Fault)?;
             if !present && object.sourced(index) {
-                object
-                    .fill_one_page(index)
-                    .map_err(|_| WaitError::Fault)?;
+                object.fill_one_page(index).map_err(|_| WaitError::Fault)?;
             }
         }
         (Place::Object, Key::Private { .. }) => return Err(WaitError::Fault),
@@ -492,6 +490,51 @@ fn cost(words: usize) -> usize {
         .saturating_add(ferrix_kmem::buffer_footprint::<Entry>(words))
 }
 
+/// A sleeper for a wait on `words` by the running task, charged to `payer`'s
+/// job before anything else is made.
+///
+/// # Errors
+///
+/// [`WaitError::NoMemory`] when the job's limit refuses the charge or memory
+/// refuses the sleeper.
+fn new_sleeper(words: &[Word], payer: u32) -> Result<Arc<Sleeper>, WaitError> {
+    let charge = Charge::to(payer, cost(words.len())).map_err(|_| WaitError::NoMemory)?;
+    let mut buckets = fallible::try_with_capacity(words.len()).map_err(|_| WaitError::NoMemory)?;
+    for word in words {
+        // NOALLOC: the room for every word was reserved just above.
+        let _ = fallible::push_within(&mut buckets, AtomicUsize::new(word.key.bucket()));
+    }
+    fallible::try_arc(Sleeper {
+        task: sched::current(),
+        woken: AtomicUsize::new(NOT_WOKEN),
+        buckets,
+        charge,
+    })
+    .map_err(|_| WaitError::NoMemory)
+}
+
+/// List `sleeper` on every one of `words`, in order; if one cannot be listed,
+/// take every slot listed before it off the table again and answer why.
+///
+/// # Errors
+///
+/// [`list`]'s.
+fn list_every(
+    space: &AddressSpace,
+    sleeper: &Arc<Sleeper>,
+    words: &[Word],
+) -> Result<(), WaitError> {
+    for (slot, word) in words.iter().enumerate() {
+        if let Err(error) = list(space, sleeper, slot, word) {
+            for listed in 0..slot {
+                leave(sleeper, listed);
+            }
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 /// Sleep on every one of `words` that still holds its value, until a wake of
 /// any of them, `interrupted` says the caller must leave, or `deadline`
 /// passes; answer the index of the word whose wake took it. `space` is the
@@ -518,33 +561,15 @@ pub(crate) fn wait_on(
     interrupted: &dyn Fn() -> bool,
     payer: u32,
 ) -> Result<usize, WaitError> {
-    let charge = Charge::to(payer, cost(words.len())).map_err(|_| WaitError::NoMemory)?;
-    let mut buckets = fallible::try_with_capacity(words.len()).map_err(|_| WaitError::NoMemory)?;
-    for word in words {
-        // NOALLOC: the room for every word was reserved just above.
-        let _ = fallible::push_within(&mut buckets, AtomicUsize::new(word.key.bucket()));
-    }
-    let sleeper = fallible::try_arc(Sleeper {
-        task: sched::current(),
-        woken: AtomicUsize::new(NOT_WOKEN),
-        buckets,
-        charge,
-    })
-    .map_err(|_| WaitError::NoMemory)?;
+    let sleeper = new_sleeper(words, payer)?;
     let deadline = deadline.unwrap_or(u64::MAX);
     loop {
-        for (slot, word) in words.iter().enumerate() {
-            if let Err(error) = list(space, &sleeper, slot, word) {
-                // Off the table, every slot listed before this one; one woken
-                // in between is the answer.
-                for listed in 0..slot {
-                    leave(&sleeper, listed);
-                }
-                return match sleeper.woken.load(Ordering::Acquire) {
-                    NOT_WOKEN => Err(error),
-                    woken => Ok(woken),
-                };
-            }
+        if let Err(error) = list_every(space, &sleeper, words) {
+            // One woken in between is the answer.
+            return match sleeper.woken.load(Ordering::Acquire) {
+                NOT_WOKEN => Err(error),
+                woken => Ok(woken),
+            };
         }
 
         sleep(&sleeper, interrupted, deadline);
@@ -739,52 +764,40 @@ pub(crate) fn requeue(
     let mut replaced: Vec<Key> = Vec::new();
     let mut gone: Vec<Entry> = Vec::new();
     loop {
-        if let Some(word) = compare {
-            let _ = read_word(space, word)?;
-        }
+        // The compared word faulted in with nothing held, read again below.
+        let _ = compare.map_or(Ok(0), |word| read_word(space, word))?;
         // Both buckets' locks, the lower-numbered first, so that two
         // requeues the opposite ways cannot each hold the lock the other
         // waits for; one lock when both keys hash to the same bucket.
         let mut first = bucket_lock(from_bucket.min(to_bucket)).lock();
         let mut second =
             (from_bucket != to_bucket).then(|| bucket_lock(from_bucket.max(to_bucket)).lock());
-        if let Some(word) = compare {
-            match read_present_word(space, word)? {
-                None => continue,
-                Some(value) if value != word.expected => return Err(WaitError::Changed),
-                Some(_) => {}
-            }
+        if !still_holds(space, compare)? {
+            continue;
         }
         let (source_table, target_table) = match second.as_mut() {
             None => (&mut *first, None),
             Some(higher) if from_bucket < to_bucket => (&mut *first, Some(&mut **higher)),
             Some(higher) => (&mut **higher, Some(&mut *first)),
         };
-        let movable = source_table
-            .iter()
-            .filter(|entry| entry.key == *source)
-            .count()
-            .min(most);
-        let target_room = target_table
-            .as_ref()
-            .map_or(0, |table| table.len().saturating_add(movable));
-        let target_short = target_table
-            .as_ref()
-            .is_some_and(|table| table.capacity() < target_room);
-        if target_short
-            || replaced.capacity() < movable
-            || gone.capacity() < movable
-        {
+        let (movable, target_short) =
+            room_needed(source_table, target_table.as_deref(), source, most);
+        if target_short.is_some() || replaced.capacity() < movable || gone.capacity() < movable {
             drop(second);
             drop(first);
-            if target_short {
-                grow(to_bucket, target_room)?;
-            }
-            fallible::try_reserve(&mut replaced, movable).map_err(|_| WaitError::NoMemory)?;
-            fallible::try_reserve(&mut gone, movable).map_err(|_| WaitError::NoMemory)?;
+            make_room(to_bucket, target_short, movable, (&mut replaced, &mut gone))?;
             continue;
         }
-        let taken = take_and_move(source_table, target_table, source, target, wake_count, most, to_bucket, (&mut replaced, &mut gone));
+        let taken = take_and_move(
+            source_table,
+            target_table,
+            source,
+            target,
+            wake_count,
+            most,
+            to_bucket,
+            (&mut replaced, &mut gone),
+        );
         drop(second);
         drop(first);
         drop(replaced);
@@ -794,12 +807,74 @@ pub(crate) fn requeue(
     }
 }
 
+/// With a requeue's buckets' locks held: whether its compared word, if it has
+/// one, still holds its value. `Ok(false)` when the word's page is not there
+/// to be read without a fault, which the caller answers by letting go and
+/// starting again.
+///
+/// # Errors
+///
+/// [`WaitError::Changed`] for another value, [`WaitError::Fault`].
+fn still_holds(space: &AddressSpace, compare: Option<&Word>) -> Result<bool, WaitError> {
+    let Some(word) = compare else {
+        return Ok(true);
+    };
+    match read_present_word(space, word)? {
+        None => Ok(false),
+        Some(value) if value != word.expected => Err(WaitError::Changed),
+        Some(_) => Ok(true),
+    }
+}
+
+/// With a requeue's buckets' locks held: how many entries on `source` it may
+/// take, at most `most`, and the room the target's bucket must have if it
+/// has less (`None` when it has enough, or is the same bucket).
+fn room_needed(
+    source_table: &[Entry],
+    target_table: Option<&Vec<Entry>>,
+    source: &Key,
+    most: usize,
+) -> (usize, Option<usize>) {
+    let movable = source_table
+        .iter()
+        .filter(|entry| entry.key == *source)
+        .count()
+        .min(most);
+    let short = target_table.and_then(|table| {
+        let room = table.len().saturating_add(movable);
+        (table.capacity() < room).then_some(room)
+    });
+    (movable, short)
+}
+
+/// With no lock held: grow the target's bucket to `target_room` if it was
+/// short, and make room for `movable` replaced keys and taken entries.
+///
+/// # Errors
+///
+/// [`WaitError::NoMemory`].
+fn make_room(
+    to_bucket: usize,
+    target_room: Option<usize>,
+    movable: usize,
+    (replaced, gone): (&mut Vec<Key>, &mut Vec<Entry>),
+) -> Result<(), WaitError> {
+    if let Some(room) = target_room {
+        grow(to_bucket, room)?;
+    }
+    fallible::try_reserve(replaced, movable).map_err(|_| WaitError::NoMemory)?;
+    fallible::try_reserve(gone, movable).map_err(|_| WaitError::NoMemory)
+}
+
 /// The body of [`requeue`] once both locks are held and the room is made:
 /// rouse up to `wake_count` waiters on `source`, move the rest up to `most`
 /// onto `target`'s bucket, and answer how many. Within one bucket (no
 /// `target_table`) a moved entry goes to the end of the same one; only the
 /// entries there when it began are looked at.
-#[allow(clippy::too_many_arguments, reason = "the locked tables of one requeue")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the locked tables of one requeue"
+)]
 fn take_and_move(
     source_table: &mut Vec<Entry>,
     mut target_table: Option<&mut Vec<Entry>>,
@@ -925,7 +1000,13 @@ pub(crate) mod sabotage {
         }
         for entry in table.iter_mut().filter(|entry| entry.key == *source) {
             // NOALLOC: reserved above.
-            drop(fallible::push_within(&mut gone, core::mem::replace(&mut entry.key, target.clone())).err());
+            drop(
+                fallible::push_within(
+                    &mut gone,
+                    core::mem::replace(&mut entry.key, target.clone()),
+                )
+                .err(),
+            );
         }
         drop(table);
         drop(gone);

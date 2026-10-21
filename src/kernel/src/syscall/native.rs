@@ -3263,7 +3263,12 @@ fn address_requeue(process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
         word_argument(expected)?,
     );
     let allowed = ADDRESS_SHARED | ADDRESS_COMPARE;
-    let source = address_word(process, (from, flags, 0), allowed, (expected, waits::MATCH_ANY))?;
+    let source = address_word(
+        process,
+        (from, flags, 0),
+        allowed,
+        (expected, waits::MATCH_ANY),
+    )?;
     let target = address_word(process, (to, flags, 0), allowed, (0, waits::MATCH_ANY))?;
     let counts = (
         usize::try_from(wake).unwrap_or(usize::MAX),
@@ -3300,7 +3305,11 @@ fn address_wait_any(caller: &dyn Host, a: &[u64; 6]) -> Result<usize, Errno> {
         field(12, &mut word_flags);
         let word = address_word(
             process,
-            (u64::from_ne_bytes(address), u64::from(u32::from_ne_bytes(word_flags)), 0),
+            (
+                u64::from_ne_bytes(address),
+                u64::from(u32::from_ne_bytes(word_flags)),
+                0,
+            ),
             ADDRESS_SHARED,
             (u32::from_ne_bytes(expected), waits::MATCH_ANY),
         )?;

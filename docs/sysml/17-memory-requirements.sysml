@@ -2568,6 +2568,7 @@ package FerrixMemoryRequirements {
             attribute :>> parent = "H.OBJ.20";
             attribute :>> unit = ("user::address_wait::Key::new",
                 "user::address_wait::Key::in_object", "user::address_wait::Key::bucket",
+                "user::address_wait::Key::eq", "user::address_wait::fold",
                 "user::address_wait::seed");
         }
         requirement <'L.user.136'> noWakeIsLost : ItemLowLevel {
@@ -2624,7 +2625,8 @@ package FerrixMemoryRequirements {
                 none (the `addrwait` line; control C5 fails it).";
             attribute :>> parent = "H.OBJ.20";
             attribute :>> unit = ("user::address_wait::requeue",
-                "user::address_wait::take_and_move");
+                "user::address_wait::take_and_move", "user::address_wait::still_holds",
+                "user::address_wait::room_needed", "user::address_wait::make_room");
         }
         requirement <'L.user.140'> aWaitOnManyWordsAnswersWhich : ItemLowLevel {
             attribute :>> statement = "wait_on shall list one entry per word, answer
@@ -2635,7 +2637,7 @@ package FerrixMemoryRequirements {
                 line).";
             attribute :>> parent = "H.OBJ.20";
             attribute :>> unit = ("user::address_wait::wait_on",
-                "user::address_wait::leave");
+                "user::address_wait::leave", "user::address_wait::list_every");
         }
         requirement <'L.user.141'> aDeadlineEndsAWaitNeverEarly : ItemLowLevel {
             attribute :>> statement = "wait_on shall end a wait with TimedOut once its
@@ -2684,8 +2686,9 @@ package FerrixMemoryRequirements {
                 of 1,024 dormant entries gives its room back once they leave (the
                 `addrwait` line; control C6 fails it).";
             attribute :>> parent = ("H.OBJ.20", "H.QUOTA.2");
-            attribute :>> unit = ("user::address_wait::wait_on",
-                "user::address_wait::grow", "user::address_wait::shrink");
+            attribute :>> unit = ("user::address_wait::new_sleeper",
+                "user::address_wait::cost", "user::address_wait::grow",
+                "user::address_wait::shrink", "user::address_wait::move_into");
         }
     }
 }

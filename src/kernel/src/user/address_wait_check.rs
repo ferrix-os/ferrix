@@ -237,7 +237,10 @@ fn a_wait_is_woken_and_a_changed_word_refused(
     // word comes back to be named rather than sleeping for ever.
     let past = deadline_in(a, 1, 0)?;
     refused(
-        a.call(nr::ADDRESS_WAIT, &[WORD, 8, u64::from(u32::MAX), 0, past, 0]),
+        a.call(
+            nr::ADDRESS_WAIT,
+            &[WORD, 8, u64::from(u32::MAX), 0, past, 0],
+        ),
         status::SHOULD_WAIT,
         "addrwait: a wait on a word that had changed slept",
         report,
@@ -246,14 +249,21 @@ fn a_wait_is_woken_and_a_changed_word_refused(
         return Err("addrwait: a refused wait was left on the table");
     }
     let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
-    start(0, a, nr::ADDRESS_WAIT, [WORD, 7, u64::from(u32::MAX), 0, deadline, 0])?;
+    start(
+        0,
+        a,
+        nr::ADDRESS_WAIT,
+        [WORD, 7, u64::from(u32::MAX), 0, deadline, 0],
+    )?;
     until_listed(&[private(a, WORD)], 1)?;
     let woken = a
         .call(nr::ADDRESS_WAKE, &[WORD, 1, u64::from(u32::MAX), 0, 0, 0])
         .map_err(|_| "addrwait: a wake was refused")?;
     match answer(0, PATIENCE_NANOS) {
         Some(Ok(0)) if woken == 1 => {}
-        Some(Err(status::TIMED_OUT)) => return Err("addrwait: a wake was lost: its waiter timed out"),
+        Some(Err(status::TIMED_OUT)) => {
+            return Err("addrwait: a wake was lost: its waiter timed out");
+        }
         _ => return Err("addrwait: a woken wait did not answer as woken"),
     }
     report.woken += 1;
@@ -273,17 +283,27 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
     c: &Side,
     report: &mut Report,
 ) -> Result<(), &'static str> {
-    let vmo = a.handle(nr::VMO_CREATE, &[2 * PAGE_SIZE], "addrwait: vmo_create failed")?;
+    let vmo = a.handle(
+        nr::VMO_CREATE,
+        &[2 * PAGE_SIZE],
+        "addrwait: vmo_create failed",
+    )?;
     let object = vmo_of(a, vmo)?;
     a.put(OFFSET_AT, &0_u64.to_ne_bytes())?;
     let both = u64::from(MAP_READ | MAP_WRITE);
     let _ = a
-        .call(nr::VMO_MAP, &[reg(vmo), MAPPED_A, PAGE_SIZE, both, OFFSET_AT])
+        .call(
+            nr::VMO_MAP,
+            &[reg(vmo), MAPPED_A, PAGE_SIZE, both, OFFSET_AT],
+        )
         .map_err(|_| "addrwait: vmo_map failed")?;
     let in_b = give(b, &object, Rights::READ | Rights::WRITE | Rights::MAP)?;
     b.put(OFFSET_AT, &0_u64.to_ne_bytes())?;
     let _ = b
-        .call(nr::VMO_MAP, &[reg(in_b), MAPPED_B, PAGE_SIZE, both, OFFSET_AT])
+        .call(
+            nr::VMO_MAP,
+            &[reg(in_b), MAPPED_B, PAGE_SIZE, both, OFFSET_AT],
+        )
         .map_err(|_| "addrwait: vmo_map in the second process failed")?;
     let reader = give(c, &object, Rights::READ)?;
     let blind = give(c, &object, Rights::MAP)?;
@@ -297,7 +317,12 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
     let shared_key = Key::new(a.process.space(), at_a, true);
     let listed = [shared_key.clone(), private(a, at_a)];
     let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
-    start(0, a, nr::ADDRESS_WAIT, [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0])?;
+    start(
+        0,
+        a,
+        nr::ADDRESS_WAIT,
+        [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0],
+    )?;
     until_listed(&listed, 1)?;
     let private_wake = b
         .call(nr::ADDRESS_WAKE, &[at_b, 1, u64::from(u32::MAX), 0, 0, 0])
@@ -306,7 +331,10 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
         return Err("addrwait: a private wake in another process found a shared waiter");
     }
     let woken = b
-        .call(nr::ADDRESS_WAKE, &[at_b, 1, u64::from(u32::MAX), ADDRESS_SHARED, 0, 0])
+        .call(
+            nr::ADDRESS_WAKE,
+            &[at_b, 1, u64::from(u32::MAX), ADDRESS_SHARED, 0, 0],
+        )
         .map_err(|_| "addrwait: a shared wake was refused")?;
     if woken != 1 || answer(0, PATIENCE_NANOS) != Some(Ok(0)) {
         return Err("addrwait: a shared waiter was not found across processes");
@@ -315,16 +343,41 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
 
     // By handle, from a process with no mapping: the same key.
     let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
-    start(0, a, nr::ADDRESS_WAIT, [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0])?;
+    start(
+        0,
+        a,
+        nr::ADDRESS_WAIT,
+        [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0],
+    )?;
     until_listed(core::slice::from_ref(&shared_key), 1)?;
     refused(
-        c.call(nr::ADDRESS_WAKE, &[SHARED_OFFSET, 1, u64::from(u32::MAX), ADDRESS_BY_VMO, reg(blind), 0]),
+        c.call(
+            nr::ADDRESS_WAKE,
+            &[
+                SHARED_OFFSET,
+                1,
+                u64::from(u32::MAX),
+                ADDRESS_BY_VMO,
+                reg(blind),
+                0,
+            ],
+        ),
         status::ACCESS_DENIED,
         "addrwait: a wake by a handle without READ was let through",
         report,
     )?;
     let woken = c
-        .call(nr::ADDRESS_WAKE, &[SHARED_OFFSET, 1, u64::from(u32::MAX), ADDRESS_BY_VMO, reg(reader), 0])
+        .call(
+            nr::ADDRESS_WAKE,
+            &[
+                SHARED_OFFSET,
+                1,
+                u64::from(u32::MAX),
+                ADDRESS_BY_VMO,
+                reg(reader),
+                0,
+            ],
+        )
         .map_err(|_| "addrwait: a wake by handle was refused")?;
     if woken != 1 || answer(0, PATIENCE_NANOS) != Some(Ok(0)) {
         return Err("addrwait: a wake by handle did not find the waiter by mapping");
@@ -336,7 +389,17 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
     let committed = object.committed();
     let past = deadline_in(c, 1, 0)?;
     refused(
-        c.call(nr::ADDRESS_WAIT, &[PAGE_SIZE + 8, 0, u64::from(u32::MAX), ADDRESS_BY_VMO, past, reg(reader)]),
+        c.call(
+            nr::ADDRESS_WAIT,
+            &[
+                PAGE_SIZE + 8,
+                0,
+                u64::from(u32::MAX),
+                ADDRESS_BY_VMO,
+                past,
+                reg(reader),
+            ],
+        ),
         status::TIMED_OUT,
         "addrwait: a wait on an uncommitted page did not read it as zero",
         report,
@@ -347,7 +410,12 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
 
     // Unmapped while its waiter sleeps: still listed, and woken by handle.
     let deadline = deadline_in(a, 0, PATIENCE_NANOS)?;
-    start(0, a, nr::ADDRESS_WAIT, [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0])?;
+    start(
+        0,
+        a,
+        nr::ADDRESS_WAIT,
+        [at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, deadline, 0],
+    )?;
     until_listed(core::slice::from_ref(&shared_key), 1)?;
     a.process
         .space()
@@ -357,14 +425,27 @@ fn a_shared_word_is_one_word_by_mapping_and_by_handle(
         return Err("addrwait: an unmap took a sleeping waiter off the table");
     }
     let woken = c
-        .call(nr::ADDRESS_WAKE, &[SHARED_OFFSET, 1, u64::from(u32::MAX), ADDRESS_BY_VMO, reg(reader), 0])
+        .call(
+            nr::ADDRESS_WAKE,
+            &[
+                SHARED_OFFSET,
+                1,
+                u64::from(u32::MAX),
+                ADDRESS_BY_VMO,
+                reg(reader),
+                0,
+            ],
+        )
         .map_err(|_| "addrwait: a wake by handle after an unmap was refused")?;
     if woken != 1 || answer(0, PATIENCE_NANOS) != Some(Ok(0)) {
         return Err("addrwait: a waiter whose word was unmapped was not woken by handle");
     }
     report.woken += 1;
     refused(
-        a.call(nr::ADDRESS_WAIT, &[at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, 0, 0]),
+        a.call(
+            nr::ADDRESS_WAIT,
+            &[at_a, 3, u64::from(u32::MAX), ADDRESS_SHARED, 0, 0],
+        ),
         status::FAULT,
         "addrwait: a wait on an unmapped address did not fault",
         report,
@@ -457,17 +538,28 @@ fn a_requeue_moves_waiters_across_buckets(
     let (from, to) = (private(a, source), private(a, target));
     for slot in 0..2 {
         let deadline = deadline_in(a, slot, PATIENCE_NANOS)?;
-        start(slot, a, nr::ADDRESS_WAIT, [source, 9, u64::from(u32::MAX), 0, deadline, 0])?;
+        start(
+            slot,
+            a,
+            nr::ADDRESS_WAIT,
+            [source, 9, u64::from(u32::MAX), 0, deadline, 0],
+        )?;
         until_listed(core::slice::from_ref(&from), slot + 1)?;
     }
     refused(
-        a.call(nr::ADDRESS_REQUEUE, &[source, target, 0, 2, ADDRESS_COMPARE, 10]),
+        a.call(
+            nr::ADDRESS_REQUEUE,
+            &[source, target, 0, 2, ADDRESS_COMPARE, 10],
+        ),
         status::SHOULD_WAIT,
         "addrwait: a compared requeue of a changed word moved waiters",
         report,
     )?;
     let moved = a
-        .call(nr::ADDRESS_REQUEUE, &[source, target, 0, 2, ADDRESS_COMPARE, 9])
+        .call(
+            nr::ADDRESS_REQUEUE,
+            &[source, target, 0, 2, ADDRESS_COMPARE, 9],
+        )
         .map_err(|_| "addrwait: a requeue was refused")?;
     if moved != 2
         || address_wait::waiters_on(core::slice::from_ref(&from)) != 0
@@ -492,10 +584,7 @@ fn a_requeue_moves_waiters_across_buckets(
 /// leaves no entry on any of them.
 ///
 /// Verifies: L.user.140, L.object.206
-fn a_wait_on_many_words_answers_which(
-    a: &Side,
-    report: &mut Report,
-) -> Result<(), &'static str> {
+fn a_wait_on_many_words_answers_which(a: &Side, report: &mut Report) -> Result<(), &'static str> {
     let words = [WORD, WORD_B, WORD_C];
     let mut vector = [0_u8; 48];
     for (index, (&at, element)) in words.iter().zip(vector.chunks_exact_mut(16)).enumerate() {
@@ -532,7 +621,10 @@ fn a_deadline_ends_a_wait_and_never_early(
     set(a, WORD, 1)?;
     let past = deadline_in(a, 1, 0)?;
     refused(
-        a.call(nr::ADDRESS_WAIT, &[WORD, 1, u64::from(u32::MAX), 0, past, 0]),
+        a.call(
+            nr::ADDRESS_WAIT,
+            &[WORD, 1, u64::from(u32::MAX), 0, past, 0],
+        ),
         status::TIMED_OUT,
         "addrwait: a wait whose deadline had passed did not answer TIMED_OUT",
         report,
@@ -563,7 +655,12 @@ fn an_ending_process_ends_its_wait(report: &mut Report) -> Result<(), &'static s
     report.processes += 1;
     set(&d, WORD, 4)?;
     let deadline = deadline_in(&d, 3, PATIENCE_NANOS)?;
-    start(3, &d, nr::ADDRESS_WAIT, [WORD, 4, u64::from(u32::MAX), 0, deadline, 0])?;
+    start(
+        3,
+        &d,
+        nr::ADDRESS_WAIT,
+        [WORD, 4, u64::from(u32::MAX), 0, deadline, 0],
+    )?;
     let key = private(&d, WORD);
     until_listed(core::slice::from_ref(&key), 1)?;
     process::kill(&d.process, KILLED_STATUS);
@@ -584,8 +681,12 @@ fn an_ending_process_ends_its_wait(report: &mut Report) -> Result<(), &'static s
 /// Verifies: L.user.144
 fn a_wait_beyond_its_jobs_limit_is_refused(report: &mut Report) -> Result<(), &'static str> {
     let tree = Job::new_root().map_err(|_| "addrwait: no memory for a job")?;
-    let full = tree.new_child().map_err(|_| "addrwait: a job refused a child")?;
-    let sibling = tree.new_child().map_err(|_| "addrwait: a job refused a child")?;
+    let full = tree
+        .new_child()
+        .map_err(|_| "addrwait: a job refused a child")?;
+    let sibling = tree
+        .new_child()
+        .map_err(|_| "addrwait: a job refused a child")?;
     let starved = member_of(&full)?;
     let fed = member_of(&sibling)?;
     report.processes += 2;
@@ -595,7 +696,10 @@ fn a_wait_beyond_its_jobs_limit_is_refused(report: &mut Report) -> Result<(), &'
     set(&fed, WORD, 2)?;
     let past = deadline_in(&starved, 1, 0)?;
     refused(
-        starved.call(nr::ADDRESS_WAIT, &[WORD, 2, u64::from(u32::MAX), 0, past, 0]),
+        starved.call(
+            nr::ADDRESS_WAIT,
+            &[WORD, 2, u64::from(u32::MAX), 0, past, 0],
+        ),
         status::NO_MEMORY,
         "addrwait: a wait beyond its job's memory limit was listed",
         report,
@@ -603,7 +707,10 @@ fn a_wait_beyond_its_jobs_limit_is_refused(report: &mut Report) -> Result<(), &'
     let before = used(&sibling);
     let past = deadline_in(&fed, 1, 0)?;
     refused(
-        fed.call(nr::ADDRESS_WAIT, &[WORD, 2, u64::from(u32::MAX), 0, past, 0]),
+        fed.call(
+            nr::ADDRESS_WAIT,
+            &[WORD, 2, u64::from(u32::MAX), 0, past, 0],
+        ),
         status::TIMED_OUT,
         "addrwait: a job at its limit held back its sibling's wait",
         report,
@@ -613,7 +720,12 @@ fn a_wait_beyond_its_jobs_limit_is_refused(report: &mut Report) -> Result<(), &'
     }
     // The charge is taken while the waiter sleeps.
     let deadline = deadline_in(&fed, 0, PATIENCE_NANOS)?;
-    start(0, &fed, nr::ADDRESS_WAIT, [WORD, 2, u64::from(u32::MAX), 0, deadline, 0])?;
+    start(
+        0,
+        &fed,
+        nr::ADDRESS_WAIT,
+        [WORD, 2, u64::from(u32::MAX), 0, deadline, 0],
+    )?;
     until_listed(&[private(&fed, WORD)], 1)?;
     let held = used(&sibling);
     let _ = fed.call(nr::ADDRESS_WAKE, &[WORD, 1, u64::from(u32::MAX), 0, 0, 0]);
@@ -653,21 +765,96 @@ fn the_calls_refuse_what_the_abi_refuses(
         (Handle(a.get_u32(SCRATCH + 0xC00)?), ())
     };
     let cases: [(usize, [u64; 6], Errno, &'static str); 15] = [
-        (nr::ADDRESS_WAIT, [WORD, 0, all, 1 << 3, 0, 0], status::INVALID_ARGS, "addrwait: a wait with K11's flag was accepted"),
-        (nr::ADDRESS_WAIT, [WORD, 0, 0, 0, 0, 0], status::INVALID_ARGS, "addrwait: a wait with a zero bitset was accepted"),
-        (nr::ADDRESS_WAIT, [WORD + 2, 0, all, 0, 0, 0], status::INVALID_ARGS, "addrwait: a misaligned wait was accepted"),
-        (nr::ADDRESS_WAIT, [WORD, 1 << 32, all, 0, 0, 0], status::INVALID_ARGS, "addrwait: a wait's 33-bit value was cut"),
-        (nr::ADDRESS_WAIT, [PAGE_SIZE - 2, 0, all, ADDRESS_BY_VMO, 0, reg(vmo)], status::INVALID_ARGS, "addrwait: a wait past its VMO's end was accepted"),
-        (nr::ADDRESS_WAIT, [0, 0, all, ADDRESS_BY_VMO, 0, reg(channel)], status::WRONG_TYPE, "addrwait: a wait by a handle to a channel was accepted"),
-        (nr::ADDRESS_WAIT, [0, 0, all, ADDRESS_BY_VMO, 0, 0x7FFF_0001], status::BAD_HANDLE, "addrwait: a wait by a dead handle was accepted"),
-        (nr::ADDRESS_WAIT, [0x10, 0, all, 0, 0, 0], status::FAULT, "addrwait: a wait on an unmapped word did not fault"),
-        (nr::ADDRESS_WAKE, [WORD, 1, 0, 0, 0, 0], status::INVALID_ARGS, "addrwait: a wake with a zero bitset was accepted"),
-        (nr::ADDRESS_WAKE, [WORD, 1, all, ADDRESS_COMPARE, 0, 0], status::INVALID_ARGS, "addrwait: a wake with requeue's flag was accepted"),
-        (nr::ADDRESS_REQUEUE, [WORD, WORD_B, 0, 1, ADDRESS_BY_VMO, 0], status::INVALID_ARGS, "addrwait: a requeue by handle was accepted"),
-        (nr::ADDRESS_REQUEUE, [WORD, WORD_B + 1, 0, 1, 0, 0], status::INVALID_ARGS, "addrwait: a misaligned requeue was accepted"),
-        (nr::ADDRESS_WAIT_ANY, [VECTOR, 0, 0, 0, 0, 0], status::INVALID_ARGS, "addrwait: a wait on no words was accepted"),
-        (nr::ADDRESS_WAIT_ANY, [VECTOR, 129, 0, 0, 0, 0], status::INVALID_ARGS, "addrwait: a wait on 129 words was accepted"),
-        (nr::ADDRESS_WAIT_ANY, [VECTOR, 1, ADDRESS_SHARED, 0, 0, 0], status::INVALID_ARGS, "addrwait: a wait-any with call flags was accepted"),
+        (
+            nr::ADDRESS_WAIT,
+            [WORD, 0, all, 1 << 3, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wait with K11's flag was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT,
+            [WORD, 0, 0, 0, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wait with a zero bitset was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT,
+            [WORD + 2, 0, all, 0, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a misaligned wait was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT,
+            [WORD, 1 << 32, all, 0, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wait's 33-bit value was cut",
+        ),
+        (
+            nr::ADDRESS_WAIT,
+            [PAGE_SIZE - 2, 0, all, ADDRESS_BY_VMO, 0, reg(vmo)],
+            status::INVALID_ARGS,
+            "addrwait: a wait past its VMO's end was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT,
+            [0, 0, all, ADDRESS_BY_VMO, 0, reg(channel)],
+            status::WRONG_TYPE,
+            "addrwait: a wait by a handle to a channel was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT,
+            [0, 0, all, ADDRESS_BY_VMO, 0, 0x7FFF_0001],
+            status::BAD_HANDLE,
+            "addrwait: a wait by a dead handle was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT,
+            [0x10, 0, all, 0, 0, 0],
+            status::FAULT,
+            "addrwait: a wait on an unmapped word did not fault",
+        ),
+        (
+            nr::ADDRESS_WAKE,
+            [WORD, 1, 0, 0, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wake with a zero bitset was accepted",
+        ),
+        (
+            nr::ADDRESS_WAKE,
+            [WORD, 1, all, ADDRESS_COMPARE, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wake with requeue's flag was accepted",
+        ),
+        (
+            nr::ADDRESS_REQUEUE,
+            [WORD, WORD_B, 0, 1, ADDRESS_BY_VMO, 0],
+            status::INVALID_ARGS,
+            "addrwait: a requeue by handle was accepted",
+        ),
+        (
+            nr::ADDRESS_REQUEUE,
+            [WORD, WORD_B + 1, 0, 1, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a misaligned requeue was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT_ANY,
+            [VECTOR, 0, 0, 0, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wait on no words was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT_ANY,
+            [VECTOR, 129, 0, 0, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wait on 129 words was accepted",
+        ),
+        (
+            nr::ADDRESS_WAIT_ANY,
+            [VECTOR, 1, ADDRESS_SHARED, 0, 0, 0],
+            status::INVALID_ARGS,
+            "addrwait: a wait-any with call flags was accepted",
+        ),
     ];
     for (number, args, wanted, what) in cases {
         refused(a.call(number, &args), wanted, what, report)?;
@@ -695,7 +882,8 @@ fn a_walk_is_measured_and_its_room_given_back(a: &Side) -> Result<u64, &'static 
     const ENTRIES: usize = 1024;
     let bucket = address_wait::bucket_of(&private(a, WORD));
     let mut stale = alloc::vec::Vec::new();
-    crate::fallible::try_reserve(&mut stale, ENTRIES).map_err(|_| "addrwait: no memory for the walk")?;
+    crate::fallible::try_reserve(&mut stale, ENTRIES)
+        .map_err(|_| "addrwait: no memory for the walk")?;
     let mut at = WORD;
     while stale.len() < ENTRIES {
         at = at.wrapping_add(4);

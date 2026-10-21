@@ -133,7 +133,11 @@ pub(crate) fn sys_futex(
         }
         FUTEX_WAKE => {
             let key = key(process.core(), address, shared)?;
-            Ok(address_wait::wake(&key, wake_limit(value as i32), MATCH_ANY))
+            Ok(address_wait::wake(
+                &key,
+                wake_limit(value as i32),
+                MATCH_ANY,
+            ))
         }
         FUTEX_WAKE_BITSET => {
             if value3 == 0 {
@@ -338,7 +342,11 @@ fn requeue(
 /// `FUTEX_PRIVATE_FLAG` on a word in shared memory is found too. Takes the
 /// space's lock.
 pub(crate) fn wake_address(space: &Arc<AddressSpace>, address: u64, count: i32) -> usize {
-    address_wait::wake(&Key::new(space, address, true), wake_limit(count), MATCH_ANY)
+    address_wait::wake(
+        &Key::new(space, address, true),
+        wake_limit(count),
+        MATCH_ANY,
+    )
 }
 
 /// Both keys a waiter on `address` in `space` can have, whether or not it

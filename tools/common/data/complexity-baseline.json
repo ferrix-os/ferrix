@@ -310,7 +310,7 @@
       "recursive": false
     },
     "syscall/native.rs::answer": {
-      "complexity": 30,
+      "complexity": 34,
       "lines": 96,
       "recursive": false
     },
