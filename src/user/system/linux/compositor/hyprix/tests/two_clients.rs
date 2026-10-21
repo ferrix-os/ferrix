@@ -847,6 +847,36 @@ fn a_window_behind_a_fullscreen_one_is_still_listed() {
     assert_eq!(json.matches("\"fullscreen\": 2").count(), 1, "{json}");
 }
 
+/// `hyprctl keyword` turns an option off at once, `getoption` says so, and
+/// `hyprctl reload` reads the file again: what a keyword set is gone, and
+/// the file's own value is back. On the N150 a reload answered `ok` and
+/// changed nothing, so an off switch appended to the file never took.
+#[test]
+fn a_reload_reads_the_file_again() {
+    let answers = answers_after(
+        "reload",
+        &[
+            "keyword decoration:blur:enabled false",
+            "getoption decoration:blur:enabled",
+            "reload",
+            "getoption decoration:blur:enabled",
+        ],
+    );
+    let [keyword, off, reloaded, back] = answers.as_slice() else {
+        panic!("four answers: {answers:?}");
+    };
+    assert_eq!(keyword.trim(), "ok", "{answers:?}");
+    assert!(
+        off.starts_with("int: 0\n"),
+        "the keyword did not take: {off}"
+    );
+    assert_eq!(reloaded.trim(), "ok", "{answers:?}");
+    assert!(
+        back.starts_with("int: 1\n"),
+        "the reload read nothing: {back}"
+    );
+}
+
 /// A request that arrives well after its connection is still heard.
 ///
 /// A client connects and then writes, and a guest that did not run

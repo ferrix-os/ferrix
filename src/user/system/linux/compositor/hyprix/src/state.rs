@@ -1437,6 +1437,32 @@ impl<'r> Compositor<'r> {
         }
     }
 
+    /// `hyprctl reload`: read the configuration file again and put its
+    /// options in force -- the decorations, the blur, the shadows, the gaps,
+    /// the borders and the animations -- as Hyprland's reload does. Whether
+    /// it was read; a file that cannot be read leaves everything as it was
+    /// and says why.
+    ///
+    /// The window and layer rules stay those the windows were mapped with,
+    /// and `exec-once` is not run again, as in Hyprland.
+    fn reload(&mut self) -> bool {
+        match read_config(self.options) {
+            Ok(config) => {
+                self.settings = Settings::from_config(&config);
+                self.style = Style::from_config(&config);
+                let _ = self.state.set_settings(self.settings);
+                self.animations = crate::animate::Animations::new(&config);
+                self.config = config;
+                (self.report)("hyprix: reloaded the configuration");
+                true
+            }
+            Err(why) => {
+                (self.report)(&format!("hyprix: reload: {why}; nothing changed"));
+                false
+            }
+        }
+    }
+
     /// What `hyprctl` and the plugins asked for this pass: dispatchers and
     /// keywords. Gives whether anything changed.
     fn run_asked(
@@ -1449,6 +1475,17 @@ impl<'r> Compositor<'r> {
         let mut pending = Vec::new();
         let forced_before = self.forced;
         for reply in asked {
+            // `hyprctl reload`: the file read again, and what it says in
+            // force from the next frame. The compositor's own, since only it
+            // knows where the file is.
+            if matches!(reply, compositor_ipc::Reply::Reload) {
+                changed |= self.reload();
+                continue;
+            }
+            let animated = matches!(
+                &reply,
+                compositor_ipc::Reply::Keyword { name, .. } if name.starts_with("animations")
+            );
             let mut around = crate::act::Around {
                 slots: &mut self.slots,
                 sources: &self.sources,
@@ -1483,6 +1520,11 @@ impl<'r> Compositor<'r> {
                 &mut around,
             ) {
                 changed = true;
+            }
+            // `hyprctl keyword animations:enabled false` and the curves:
+            // the animations are made from the configuration, so again.
+            if animated {
+                self.animations = crate::animate::Animations::new(&self.config);
             }
         }
         // `forceidle` changed how long the seat has been idle after the
