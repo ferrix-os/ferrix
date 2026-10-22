@@ -475,7 +475,10 @@ virgl driver submits (`VIRGL_MAX_CMDBUF_DWORDS`, 266,240 bytes). At 64 KiB
 a buffer that uploads pixels inline was refused `EINVAL`, Mesa dropped it
 with "got error from kernel - expect bad rendering", and GTK 4's windows
 under mutter showed white (`docs/GNOME.md`, gap 2); Linux's virtio-gpu
-takes any length. The work VMO grew to two megabytes, seven such slots,
+takes any length. `test-display --gl` shows the 266,240-byte buffer, and
+the render node's `DRM_CAP_PRIME`, on x86_64 only: the pool's AArch64 QEMU
+has no `virtio-gpu-gl-pci`, and AArch64 is owed by backlog p2-154
+(consultant ledger 3170). The work VMO grew to two megabytes, seven such slots,
 the driver's copied stream and its command area's large place to one
 slot, and its longest descriptor chain to 72 buffers (a stream of 65 pages
 no two of which lie side by side, the header and the response). The

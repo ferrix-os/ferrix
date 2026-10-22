@@ -43,7 +43,10 @@ small as possible.
   gnome-shell headless now shows GTK 4's GL gears on virgl at 59 fps with
   no shim (screenshot off-tree,
   `~/.local/share/ferrix/gnome-probe/shots/shell-gears-virgl-fixed.png`);
-  `test-display --gl` requires `long 266240`.
+  `test-display --gl` requires `long 266240`. Both are shown on x86_64 only: the pool's AArch64 QEMU has no
+  `virtio-gpu-gl-pci`, so `test-display --arch aarch64 --gl` cannot pass
+  (it fails the same way on main); AArch64 is owed by backlog p2-154
+  (the consultant's ledger 3170).
 * **G1 is built** (§5): `tools/common/fetch/fetch-gnome-apps.sh` pins 171
   Debian 13 packages by SHA-256 at one snapshot; `sessiond --session-bus`
   starts the session's D-Bus bus as the user in the session's scope;
