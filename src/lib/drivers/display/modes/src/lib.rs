@@ -101,7 +101,7 @@ impl ModeList {
 
     /// Add `timing`, preferred or not. Not added, and `false`: a timing that
     /// is not a mode a display can have, one of a size and refresh already
-    /// listed (the first one listed stays, so a display's own timing stays
+    /// listed (within 5 mHz) (the first one listed stays, so a display's own timing stays
     /// before a made-up one), or a list that is full. A preferred one takes
     /// the mark from any other, so a list has one.
     pub fn add(&mut self, timing: Timing, preferred: bool) -> bool {
@@ -112,9 +112,11 @@ impl ModeList {
         {
             return false;
         }
+        // The same size within 5 millihertz is the same mode: 59.94 Hz and
+        // 60 Hz, which a monitor lists both of, stay two.
         let same = |listed: &Listed| {
             (listed.timing.hdisplay, listed.timing.vdisplay) == (timing.hdisplay, timing.vdisplay)
-                && listed.timing.refresh_hz() == timing.refresh_hz()
+                && listed.timing.refresh_mhz().abs_diff(refresh) <= 5
         };
         if let Some(at) = self.as_slice().iter().position(same) {
             if preferred {
