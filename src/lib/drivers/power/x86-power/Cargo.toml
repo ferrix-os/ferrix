@@ -1,0 +1,14 @@
+[package]
+name = "ferrix-x86-power"
+description = "The x86-64 power driver's policy as pure functions: its boot words, the VR current step plan, the soft thermal back-off and the telemetry's decoding (docs/POWERCTL.md section 8)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrix-native-abi.workspace = true
+
+[lints]
+workspace = true

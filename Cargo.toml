@@ -21,6 +21,7 @@ members = [
     "src/lib/proto/chardevctl",
     "src/lib/proto/adb",
     "src/lib/proto/logctl",
+    "src/lib/drivers/power/x86-power",
     "src/lib/proto/audit",
     "src/lib/proto/bootinfo",
     "src/lib/proto/slots",
@@ -119,6 +120,7 @@ members = [
     "src/user/system/native/drivers/sound/virtio-snd",
     "src/user/system/native/drivers/usb/usbhid",
     "src/user/system/native/drivers/usb/usbdev",
+    "src/user/system/native/drivers/power/x86",
     "src/user/system/native/drivers/gpu/gc400",
     "src/user/system/native/drivers/gpu/intel",
     "src/user/system/native/drivers/gpu/intel-fake",
@@ -192,6 +194,7 @@ ferrix-usb-device = { path = "src/lib/drivers/usb/usb-device" }
 ferrix-dwc3 = { path = "src/lib/drivers/usb/dwc3" }
 ferrix-gc400 = { path = "src/lib/drivers/gpu/gc400" }
 ferrix-intel-xelp = { path = "src/lib/drivers/gpu/intel-xelp" }
+ferrix-x86-power = { path = "src/lib/drivers/power/x86-power" }
 ferrix-netwire = { path = "src/lib/network/netwire" }
 ferrix-nettcp = { path = "src/lib/network/nettcp" }
 ferrix-net = { path = "src/lib/network/net" }

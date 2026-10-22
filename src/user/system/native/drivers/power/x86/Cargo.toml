@@ -1,0 +1,24 @@
+[package]
+name = "ferrix-power-driver"
+description = "The x86-64 power driver process: claims the kernel's power core, steps the VR current limit by its boot words' plan, backs off before the kernel's backstop, and says what it reads (docs/POWERCTL.md), on ferrix-rt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "power"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+ferrix-blkring.workspace = true
+ferrix-linux-abi.workspace = true
+ferrix-native-abi.workspace = true
+ferrix-rt.workspace = true
+ferrix-x86-power.workspace = true
+
+[lints]
+workspace = true

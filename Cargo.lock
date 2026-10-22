@@ -595,6 +595,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-power-driver"
+version = "0.1.0"
+dependencies = [
+ "ferrix-blkring",
+ "ferrix-linux-abi",
+ "ferrix-native-abi",
+ "ferrix-rt",
+ "ferrix-x86-power",
+]
+
+[[package]]
 name = "ferrix-procfs"
 version = "0.1.0"
 
@@ -842,6 +853,13 @@ dependencies = [
  "ferrix-rt",
  "ferrix-virtio",
  "ferrix-virtio-console",
+]
+
+[[package]]
+name = "ferrix-x86-power"
+version = "0.1.0"
+dependencies = [
+ "ferrix-native-abi",
 ]
 
 [[package]]
