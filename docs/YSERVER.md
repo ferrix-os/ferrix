@@ -405,6 +405,17 @@ Still open:
 
 ## 9. Where it stands
 
+2026-10-22: **an Intel client's frame reaches hyprix without a copy.**
+`fetch-yserver.sh` pins the fork at ab63f4b1. The card-less Wayland
+server offers DRI3 (its Vulkan device's render node, or the machine's only
+one), and a whole-window DRI3 present goes to hyprix as the client's own
+buffer over `zwp_linux_dmabuf`, which hyprix offers beside an i915 node
+(8ac90e973). On the N150 a game went from 12.4 to 14.5 fps. Present's
+idle and complete go out without waiting for hyprix to release the
+buffer: a game that reuses an image early can show a torn frame, the
+exposure the mapped path already had. Every volume built over yserver's
+tree is made again for the pin.
+
 2026-10-15: **an X game's pointer lock** (§4.4). The fork's a1d0dcb3, on
 I1's e13992e3, asks hyprix for a locked pointer when a client hides the
 cursor and grabs or warps the pointer in its window, and moves X's pointer
