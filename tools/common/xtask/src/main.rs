@@ -164,6 +164,7 @@ mod pipe_bench;
 mod pkg;
 mod ports;
 mod postmortem;
+mod powerctl;
 mod powerfail;
 mod procfs;
 mod pty;
@@ -556,6 +557,7 @@ const TASKS: &[&[Task]] = &[
     ipc::TASKS,
     jobs::TASKS,
     machine_check::TASKS,
+    powerctl::TASKS,
     n150::TASKS,
     netboot::TASKS,
     nvidia::TASKS,

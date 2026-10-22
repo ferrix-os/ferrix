@@ -1003,5 +1003,54 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.BOOT.15";
             attribute :>> unit = "syscall::native::image_bytes";
         }
+        requirement <'L.device.51'> powerNodeOnlyWhereTheTableSays : ItemLowLevel {
+            attribute :>> statement = "Stage 10 shall publish the power node,
+                binding TREE_X86_POWER, only under ferrix.powerctl on an x86-64
+                processor the power core's model table names, in one package, whose
+                0x601 reads unlocked and not 0 and whose TjMax reads 80 to 110 C, or
+                under the test-only ferrix.powerctl.fake; it shall print one
+                refusal line and publish nothing otherwise, and without either word
+                read, publish and print nothing; a refusal shall not stop the
+                boot.";
+            attribute :>> criterion = "cargo xtask test-power: no power line and
+                no power driver without a word; one refusal line and no node on the
+                gate host's processor and on TCG answering as Intel 6/0xBE with a
+                0x601 of 0; the node and its driver under the fake.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = ("arch::x86_64::powerctl::probe",
+                "arch::x86_64::powerctl::identity",
+                "arch::x86_64::powerctl::package_shift",
+                "arch::x86_64::power_probe",
+                "discovery::powerctl::Power::new",
+                "discovery::powerctl::Power::find",
+                "device::DeviceNode::power");
+        }
+        requirement <'L.device.52'> powerClaimOneHolderNoCopy : ItemLowLevel {
+            attribute :>> statement = "power_control_create shall need MANAGE on
+                the power node and answer ACCESS_DENIED for any other node,
+                ALREADY_BOUND while a claim stands, BAD_STATE once the core is
+                latched off, NO_MEMORY without a task, and WRONG_TYPE on AArch64
+                and ARMv7-A; the claim shall come back with WAIT alone, so that
+                it can be neither sent nor copied.";
+            attribute :>> criterion = "cargo xtask test-power: the driver's second
+                claim is ALREADY_BOUND and its duplicate of the claim
+                ACCESS_DENIED.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = ("syscall::native::power_call",
+                "arch::x86_64::power_claim",
+                "arch::x86_64::powerctl::claim");
+        }
+        requirement <'L.device.53'> powerNodeHasNothingElse : ItemLowLevel {
+            attribute :>> statement = "The power node shall have no aperture,
+                vector or memory reach: a pin on it shall answer WRONG_TYPE, a
+                mapping ACCESS_DENIED and an interrupt INVALID_ARGS; a quiesce of
+                it shall answer BAD_STATE while a live holder has the claim.";
+            attribute :>> criterion = "cargo xtask test-power: the driver's pin,
+                mapping, interrupt and quiesce on its node answer so.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = ("device::DeviceNode::reaches_memory",
+                "arch::x86_64::power_unserved",
+                "arch::x86_64::powerctl::unserved");
+        }
     }
 }

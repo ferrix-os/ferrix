@@ -1633,6 +1633,28 @@ ledger 3062; design in `docs/SCHED-WAKE-AFFINE.md`.
   not how a queue serves it. The EEVDF bound of H.SCHED.2 is per queue and
   unchanged (`SAFETY-MANUAL.md` FM-8).
 
+### 2.2w The power core (`arch::x86_64::powerctl`, 2026-10-22)
+
+Present only under `ferrix.powerctl` on the N150 (`docs/POWERCTL.md`).
+**Memory:** a claim allocates a channel pair and one task, both fallibly
+(`NO_MEMORY` to the caller, nothing kept); nothing else. **Locks:**
+`STATE`, a spin lock, is held for one call's validation, at most one write
+of 0x601 (three reads, two writes of it, each a single `rdmsr`/`wrmsr`) and
+one restore, all bounded; the ended claim's kernel end is dropped after it
+is let go. No line is printed under it, nor inside the write's or a task
+restore's masked section, at most 13 and 6 accesses to atomics and the
+MSR. **Work:** the claim's
+task wakes once a second and reads at most three MSRs; `power_set` and
+`power_read` are the driver's own calls, charged to it, each a bounded
+number of MSR accesses (`power_read` eleven). **Lines:** the kernel prints
+one line per write taken, per restore and per latch; a write of the value in
+force writes and prints nothing, and a raise is taken at most once a second.
+**Time to act:** the backstop, the lease and a holder's death are seen at
+the task's next look, within one second of the condition plus the boot
+processor's scheduling latency, and acted on in that look; the lease itself
+is 5 s. Nothing here bounds the time to a restore if the scheduler stops
+running the task (V-16).
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

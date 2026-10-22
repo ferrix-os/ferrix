@@ -661,16 +661,25 @@ preference. The integrator shall not rely on the element to hold a power or
 thermal budget, and shall rely on no time figure that assumes a processor
 clock (MEMORY-AND-TIMING).
 
-The exception is the diagnostic boot word `ferrix.vrcurrent`
-(L.x86_64.190-193), authorised by the customer for the N150 alone. It
-raises `MSR_VR_CURRENT_CONFIG`'s current limit to at most 32 A, more
-current through the voltage regulator and more heat than firmware allowed,
-and the hazard is a processor or regulator run past what its cooling and
-board were sized for. Its guard writes firmware's value back at 90 C, at
-a thermal or PROCHOT bit, at a failed read and on power-off, reset and
-panic, but runs only while the scheduler runs its task (VULNERABILITY-
-ANALYSIS V-16). The integrator shall not set it on a system of which a
-claim is made.
+The exception is the power core (`docs/POWERCTL.md`, L.x86_64.194-207,
+L.device.51-53), present only under the boot word `ferrix.powerctl`, on
+the N150 alone (Intel family 6 model 0xBE, one package). Its driver may set
+`MSR_VR_CURRENT_CONFIG`'s current limit, through typed calls, between
+firmware's own value and the model table's ceiling: 32 A, at most 7 A above
+firmware's, constants of the source that no word, driver or call can widen.
+More current through the voltage regulator is more heat than firmware
+allowed, and the hazard is a processor or regulator run past what its
+cooling and board were sized for. The kernel writes firmware's value back
+when the driver dies or closes its claim, when the driver makes no call for
+5 s (a hung driver), at 90 C or a thermal, PROCHOT or critical bit or a
+failed read of them (its backstop, independent of the driver), when a write
+does not read back, and on power-off, reset and both ends of a panic; a
+backstop trip, a failed write or restore, or eight ended claims latch it off
+until reboot, and a value firmware changed is never written over. The
+backstop, the lease and the death watch run only while the scheduler runs
+the core's task; an unorderly reset (a watchdog, a triple fault, the reset
+button) writes nothing back (VULNERABILITY-ANALYSIS V-16). The integrator
+shall not set `ferrix.powerctl` on a system of which a claim is made.
 
 ### AoU-34 — a task's user and kernel time are accounting, not enforcement
 `/proc/<pid>/stat`'s `utime` and `stime` and `status`'s two switch counts

@@ -183,6 +183,12 @@ pub const CHARDEV_SYNC_SIGNAL: usize = 0x1063;
 pub const CHARDEV_SYNC_RESOLVE: usize = 0x1064;
 /// [`NativeCall::ChardevDmabufFence`].
 pub const CHARDEV_DMABUF_FENCE: usize = 0x1065;
+/// [`NativeCall::PowerControlCreate`].
+pub const POWER_CONTROL_CREATE: usize = 0x1066;
+/// [`NativeCall::PowerSet`].
+pub const POWER_SET: usize = 0x1067;
+/// [`NativeCall::PowerRead`].
+pub const POWER_READ: usize = 0x1068;
 /// The most records one [`NativeCall::AuditRead`] copies.
 pub const AUDIT_READ_MAX: u64 = 64;
 /// The largest name [`NativeCall::ProcessCreate`] takes, in bytes.
@@ -618,10 +624,29 @@ pub enum NativeCall {
     /// `LIMIT_REACHED` past the control's fences. Not tied to a request.
     /// Answered by the load ring.
     ChardevDmabufFence,
+    /// `(device)` → claim. Claim the x86-64 power core (`docs/POWERCTL.md`):
+    /// `MANAGE` on the power node (`TREE_X86_POWER`), `ACCESS_DENIED` for
+    /// any other node, `ALREADY_BOUND` while another claim stands,
+    /// `BAD_STATE` once the core is latched off, `WRONG_TYPE` where there is
+    /// none (AArch64, ARMv7-A). The claim is a channel end with `WAIT`
+    /// alone: it cannot be sent, copied, read or written, and it sees
+    /// `PEER_CLOSED` when the kernel ends the claim.
+    PowerControlCreate,
+    /// `(claim, eighths)` → the register as read back. Set the VR current
+    /// limit, `MSR_VR_CURRENT_CONFIG` bits 12:0, to `eighths` of an ampere
+    /// (firmware's own value is how a driver takes its raise back):
+    /// `INVALID_ARGS` outside firmware's own limit up to the model's
+    /// ceiling, `SHOULD_WAIT` for a raise within a second of the last,
+    /// `LIMIT_REACHED` for a raise while the kernel's backstop reads hot,
+    /// `BAD_STATE` latched off or the register left to firmware.
+    PowerSet,
+    /// `(claim, words: *[u64; POWER_READ_WORDS])`. The power core's
+    /// readings (`types::POWER_READ_*`), read only. Renews the lease.
+    PowerRead,
 }
 
 /// Every native call, in number order.
-pub const ALL: [NativeCall; 65] = [
+pub const ALL: [NativeCall; 68] = [
     NativeCall::HandleClose,
     NativeCall::HandleDuplicate,
     NativeCall::HandleReplace,
@@ -687,6 +712,9 @@ pub const ALL: [NativeCall; 65] = [
     NativeCall::ChardevSyncSignal,
     NativeCall::ChardevSyncResolve,
     NativeCall::ChardevDmabufFence,
+    NativeCall::PowerControlCreate,
+    NativeCall::PowerSet,
+    NativeCall::PowerRead,
 ];
 
 /// Whether `number` is in the native range at all.
@@ -767,6 +795,9 @@ pub const fn decode(number: usize) -> Option<NativeCall> {
         CHARDEV_SYNC_SIGNAL => NativeCall::ChardevSyncSignal,
         CHARDEV_SYNC_RESOLVE => NativeCall::ChardevSyncResolve,
         CHARDEV_DMABUF_FENCE => NativeCall::ChardevDmabufFence,
+        POWER_CONTROL_CREATE => NativeCall::PowerControlCreate,
+        POWER_SET => NativeCall::PowerSet,
+        POWER_READ => NativeCall::PowerRead,
         _ => return None,
     };
     Some(call)
@@ -841,5 +872,8 @@ pub const fn number(call: NativeCall) -> usize {
         NativeCall::ChardevSyncSignal => CHARDEV_SYNC_SIGNAL,
         NativeCall::ChardevSyncResolve => CHARDEV_SYNC_RESOLVE,
         NativeCall::ChardevDmabufFence => CHARDEV_DMABUF_FENCE,
+        NativeCall::PowerControlCreate => POWER_CONTROL_CREATE,
+        NativeCall::PowerSet => POWER_SET,
+        NativeCall::PowerRead => POWER_READ,
     }
 }

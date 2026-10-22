@@ -10,6 +10,10 @@
 //! `ferrix.epp`'s (`L.x86_64.182`): its values chosen from a table, and the
 //! one in force compared with the command line's.
 
+use core::arch::x86_64::__cpuid;
+
+use crate::console::println;
+
 use super::{
     Preference, choose_preference, has_hwp, hwp_processors, hwp_refused, hwp_request, preference,
 };
@@ -160,4 +164,49 @@ pub(crate) fn check_preference_read(value: Option<&str>) -> Result<(), &'static 
         return Err("the preference every processor asks for is not the one ferrix.epp chose");
     }
     Ok(())
+}
+
+/// An index in no range Intel, AMD, KVM or Hyper-V defines, below the
+/// hypervisors' `0x4000_0000`: KVM refuses a write to it with `#GP`.
+const ABSENT: u32 = 0x3fff_ffff;
+/// `CPUID.1:ECX[31]`: running under a hypervisor.
+const CPUID_HYPERVISOR: u32 = 1 << 31;
+/// `KVMKVMKVM\0\0\0`, leaf `4000_0000h`'s EBX, ECX and EDX under KVM.
+const KVM_SIGNATURE: [u32; 3] = [
+    u32::from_le_bytes(*b"KVMK"),
+    u32::from_le_bytes(*b"VMKV"),
+    u32::from_le_bytes(*b"M\0\0\0"),
+];
+
+/// Under KVM, a checked write of [`ABSENT`] is refused with exactly one
+/// `#GP` counted; under another hypervisor (TCG ignores it) the line says
+/// which path ran; on bare metal nothing is written.
+///
+/// Verifies: `L.x86_64.192`
+pub(in crate::arch::x86_64) fn checked_write() -> Result<(), &'static str> {
+    if __cpuid(1).ecx & CPUID_HYPERVISOR == 0 {
+        println!("  cpu      checked MSR write: not under a hypervisor, not exercised");
+        return Ok(());
+    }
+    let leaf = __cpuid(0x4000_0000);
+    let kvm = [leaf.ebx, leaf.ecx, leaf.edx] == KVM_SIGNATURE;
+    let before = super::checked_writes_refused();
+    // SAFETY: (SYSREG) under a hypervisor only: ABSENT is no register any
+    // hypervisor or processor defines, so the write is refused or ignored.
+    let written = unsafe { super::write_msr_checked(ABSENT, 0) };
+    let refused = super::checked_writes_refused() - before;
+    match (written, refused) {
+        (false, 1) => {
+            println!("  cpu      checked MSR write: #GP at {ABSENT:#x} resumed at its fixup");
+            Ok(())
+        }
+        (true, 0) if !kvm => {
+            println!(
+                "  cpu      checked MSR write: {ABSENT:#x} taken without #GP here; fixup not exercised"
+            );
+            Ok(())
+        }
+        (true, 0) => Err("KVM took a write of an absent MSR without #GP"),
+        _ => Err("a checked MSR write's result disagreed with its #GP count"),
+    }
 }

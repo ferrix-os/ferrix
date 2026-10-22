@@ -16,24 +16,28 @@ pub(crate) mod mmio;
 mod msi;
 mod msrlog;
 mod paranoid;
+mod powerctl;
 mod signal;
 mod smp;
 pub(super) mod speculation;
 pub(super) mod switch;
 mod syscall;
-mod vrcurrent;
 pub(crate) use syscall::check::{drive_native_words, drive_system_call};
 pub(super) mod trap;
 
 pub(crate) use cpu::hardware_random;
 pub(crate) use signal::{SIGNAL_RED_ZONE, UserContext, restore_signal_frame, setup_signal_frame};
 
+use alloc::sync::Arc;
+
 use ferrix_bootinfo::{Arch, BootView};
+use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::nr::{self, Syscall};
 use ferrix_linux_abi::types::{self, OpenFlagBits};
 
 use crate::early::{EarlyError, EarlyMemory};
 use crate::irq::Report;
+use crate::object::channel::Endpoint;
 use crate::sync::SpinLock;
 
 /// Name for log lines.
@@ -183,9 +187,12 @@ pub(crate) fn check_machine() -> Result<(), &'static str> {
     // And `ferrix.msrlog`'s checked MSR read, decoder and period
     // (`L.x86_64.187`-`189`).
     msrlog::check::run()?;
-    // And `ferrix.vrcurrent`'s plan, guard, value and checked write, none
-    // of which writes a register the processor has (`L.x86_64.190`-`193`).
-    vrcurrent::check::run()
+    // And the power core's decisions, its claims over a fake register file
+    // and every interleaving of a write with a restore, none of which
+    // writes a register the processor has (`L.x86_64.194`-`208`); and the
+    // checked write's fixup (`L.x86_64.192`).
+    powerctl::check::run()?;
+    cpu::check::checked_write()
 }
 
 /// Start `ferrix.msrlog`'s read-only MSR log if the word is given
@@ -194,16 +201,67 @@ pub(crate) fn start_msr_log(view: &BootView<'_>) {
     msrlog::start(view);
 }
 
-/// Start `ferrix.vrcurrent`'s run if the word is given (`L.x86_64.190`);
-/// nothing at all otherwise.
-pub(crate) fn start_vr_current(view: &BootView<'_>) {
-    vrcurrent::start(view);
+/// Stage 10's question for the power node (`L.device.51`).
+pub(crate) fn power_probe(view: &BootView<'_>) -> bool {
+    powerctl::probe(view)
 }
 
-/// Write the firmware's VR current limit back if `ferrix.vrcurrent` raised
-/// it (`L.x86_64.191`): on a power-off, a reset and a panic.
-pub(crate) fn restore_vr_current(what: &'static str) {
-    vrcurrent::restore(what);
+/// A status for a power call the core refused.
+fn power_status(why: powerctl::Refused) -> Errno {
+    use ferrix_native_abi::status;
+    match why {
+        powerctl::Refused::OutOfRange => status::INVALID_ARGS,
+        powerctl::Refused::Rate => status::SHOULD_WAIT,
+        powerctl::Refused::Hot => status::LIMIT_REACHED,
+        powerctl::Refused::Latched | powerctl::Refused::NotHeld => status::BAD_STATE,
+    }
+}
+
+/// `power_control_create`'s claim (`L.device.52`).
+///
+/// # Errors
+///
+/// `ALREADY_BOUND`, `BAD_STATE` latched off, `NO_MEMORY`.
+pub(crate) fn power_claim() -> Result<Arc<Endpoint>, Errno> {
+    use ferrix_native_abi::status;
+    powerctl::claim().map_err(|why| match why {
+        powerctl::ClaimError::InUse => status::ALREADY_BOUND,
+        powerctl::ClaimError::Latched => status::BAD_STATE,
+        powerctl::ClaimError::NoMemory => status::NO_MEMORY,
+    })
+}
+
+/// `power_set` (`L.x86_64.195`).
+///
+/// # Errors
+///
+/// As the core refused.
+pub(crate) fn power_set(claim: &Arc<Endpoint>, eighths: u64) -> Result<usize, Errno> {
+    powerctl::set(claim, eighths)
+        .map(|back| usize::try_from(back).unwrap_or(usize::MAX))
+        .map_err(power_status)
+}
+
+/// `power_read` (`L.x86_64.197`).
+///
+/// # Errors
+///
+/// `BAD_STATE` for a handle that is not the claim.
+pub(crate) fn power_read(
+    claim: &Arc<Endpoint>,
+) -> Result<[u64; ferrix_native_abi::types::POWER_READ_WORDS], Errno> {
+    powerctl::read(claim).map_err(power_status)
+}
+
+/// Whether no live holder has the power claim, for a quiesce.
+pub(crate) fn power_unserved() -> bool {
+    powerctl::unserved()
+}
+
+/// Firmware's VR current limit back if the power core raised it: on a
+/// power-off, a reset and both ends of a panic (`L.x86_64.206`).
+pub(crate) fn restore_power(what: &'static str) {
+    powerctl::restore(what);
 }
 
 /// The boot processor's machine check, set whatever firmware left in `CR4`
@@ -1684,7 +1742,7 @@ pub(crate) fn frame_pointer() -> u64 {
 /// QEMU's debug-exit device is the only way off, so QEMU's status is always 33
 /// for a power-off here; real hardware discards the write and is halted.
 pub(crate) fn shutdown() -> ! {
-    vrcurrent::restore("power-off");
+    powerctl::restore("power-off");
     crate::console::announce_power_off();
     crate::console::drain();
     cpu::debug_exit();
@@ -1713,7 +1771,7 @@ const KBC_PULSE_RESET: u8 = 0xFE;
 /// of the first two gets time to act, and one that returns is a machine that
 /// did not reset, so the next is tried. A triple fault cannot return.
 pub(crate) fn reset() -> ! {
-    vrcurrent::restore("reset");
+    powerctl::restore("reset");
     crate::console::drain();
     cpu::disable_interrupts();
 

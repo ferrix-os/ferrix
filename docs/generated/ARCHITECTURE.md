@@ -121,7 +121,7 @@ This is generated from the SysML v2 model in `docs/sysml/`, which is itself an i
 | `FerrixBtrfsRequirements` | `24-btrfs-requirements.sysml` | What each unit of the two btrfs crates in the item does, as `ItemLowLevel` requirements (part 13 defines the format, part 14 is the pilot this copies): `ferrix-btrfs` (src/lib/fs/btrfs/format), the reader, and `ferrix-btrfs-write` (src/lib/fs/btrfs/write), the write path. They joined the item on 2026-10-02 (the customer's decision; ITEM.md). Their interface below is the `Device` and `WriteDevice` traits, which the kernel's block layer answers; above, `Volume` and `WriteVolume`, which the VFS glue in the load (`ferrix-btrfs-vfs`, src/kernel/src/fs/btrfs\*.rs) calls. A unit is named from the crate's src/, led by the crate's name: `ferrix_btrfs::volume::Volume::read_node`. |
 | `FerrixInitRequirements` | `25-init-requirements.sysml` | What init does with what an image gives it to start as pid 1, as `ItemLowLevel` requirements in the pilot's format (part 13 defines it, part 14 is the pilot). Since 2026-10-04 the program init starts when nothing is named, the script for its `sh -c` and the list of commands are not compiled into the kernel: an image carries them in its initramfs under `.ferrix/init/`, and `fs::init` reads them where the archive is and hands them to `init::set_inputs` (docs/certification/ITEM.md section 2). The certification consultant's OK IF of 2026-10-04 (ledger lines 328 and 332) asked for these rows and their parent, H.BOOT.15 in part 13; that `ferrix-vfs`'s unpacker, in no ring, creates none of the inputs is SAFETY-MANUAL AoU-24 rather than a row (line 333), and L.init.4, reserved for it, is not written. |
 
-26 files, 142 packages, 7310 elements, 217 relations. Model digest `01370353f912ecff`.
+26 files, 142 packages, 7393 elements, 217 relations. Model digest `5bd77285df0c669e`.
 
 | Maturity | Elements | Meaning |
 | --- | ---: | --- |
@@ -4427,10 +4427,22 @@ flowchart LR
 | `L.x86_64.187` | `msrLogOnlyWhenAsked` | — | — | — |
 | `L.x86_64.188` | `checkedMsrReadResumesAtItsFixup` | — | — | — |
 | `L.x86_64.189` | `msrLogDecodesIntelLayouts` | — | — | — |
-| `L.x86_64.190` | `vrCurrentWordAndClamp` | — | — | — |
-| `L.x86_64.191` | `vrCurrentThermalGuardReverts` | — | — | — |
 | `L.x86_64.192` | `checkedMsrWriteResumesAtItsFixup` | — | — | — |
-| `L.x86_64.193` | `vrCurrentWritesBitsTwelveToZero` | — | — | — |
+| `L.x86_64.194` | `powerModelGateAndOnePackage` | — | — | — |
+| `L.x86_64.195` | `powerSetWithinTheRow` | — | — | — |
+| `L.x86_64.196` | `powerWriteChangesOnlyBitsTwelveToZero` | — | — | — |
+| `L.x86_64.197` | `powerReadIsReadOnlyAndMarksAbsence` | — | — | — |
+| `L.x86_64.198` | `powerRestoreSingleShotOnHolderGone` | — | — | — |
+| `L.x86_64.199` | `powerLeaseLapses` | — | — | — |
+| `L.x86_64.200` | `powerBackstopRestoresAtNinety` | — | — | — |
+| `L.x86_64.201` | `powerLatchesOffUntilReboot` | — | — | — |
+| `L.x86_64.202` | `powerFirmwareChangeIsLeftAlone` | — | — | — |
+| `L.x86_64.203` | `powerRaiseFloor` | — | — | — |
+| `L.x86_64.204` | `powerWriteAndRestoreInterleave` | — | — | — |
+| `L.x86_64.205` | `powerWriteIsReadBack` | — | — | — |
+| `L.x86_64.206` | `powerExitRestore` | — | — | — |
+| `L.x86_64.208` | `powerTaskRestoreIsMasked` | — | — | — |
+| `L.x86_64.207` | `powerFakeIsTestOnly` | — | — | — |
 | `L.x86_64.32` | `speculationPlanFollowsCpuid` | — | — | — |
 | `L.x86_64.33` | `speculationExposureReported` | — | — | — |
 | `L.x86_64.179` | `registerFileClearedWhereRfdsReaches` | — | — | — |
@@ -4675,6 +4687,9 @@ flowchart LR
 | `L.device.48` | `onlyTheLentIntelGpuCopies` | — | — | — |
 | `L.device.49` | `devmgrReadsPastAHeapBlock` | — | — | — |
 | `L.device.50` | `processCreateReadsPastAHeapBlock` | — | — | — |
+| `L.device.51` | `powerNodeOnlyWhereTheTableSays` | — | — | — |
+| `L.device.52` | `powerClaimOneHolderNoCopy` | — | — | — |
+| `L.device.53` | `powerNodeHasNothingElse` | — | — | — |
 | `L.armv7a.1` | `theFilterIsAskedFirstAtTheSvc` | — | — | — |
 | `L.armv7a.2` | `aRolledBackFrameReadsAsAtTheCall` | — | — | — |
 | `L.armv7a.3` | `nothingInsideADomain` | — | — | — |

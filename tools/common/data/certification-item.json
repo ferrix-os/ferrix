@@ -286,6 +286,7 @@
         "discovery/mod.rs",
         "discovery/pci.rs",
         "discovery/pci/**",
+        "discovery/powerctl.rs",
         "discovery/smbios.rs",
         "discovery/smbios_check.rs",
         "init.rs",

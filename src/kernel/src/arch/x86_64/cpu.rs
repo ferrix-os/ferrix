@@ -1002,8 +1002,8 @@ pub(crate) fn read_msr_checked(msr: u32) -> Option<u64> {
 /// address is resumed by `trap::ferrix_trap_entry` at
 /// `ferrix_wrmsr_checked_fault` ([`checked_write_resume`]). A refused
 /// `wrmsr` changes nothing, so the fault label only sets the return value.
-/// Its one caller is [`write_msr_checked`], whose one caller is
-/// `ferrix.vrcurrent` (check-device-access.py holds both).
+/// Its one caller is [`write_msr_checked`], whose one caller is the power
+/// core, `powerctl.rs` (check-device-access.py holds both).
 ///
 /// # Safety
 ///

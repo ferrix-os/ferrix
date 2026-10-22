@@ -2,7 +2,7 @@
 
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::nr;
-use ferrix_native_abi::types::CHANNEL_MAX_HANDLES;
+use ferrix_native_abi::types::{CHANNEL_MAX_HANDLES, POWER_READ_WORDS};
 
 use crate::call::{Call, Syscall};
 use crate::error::{Error, decode, decode_unit};
@@ -118,6 +118,45 @@ impl Words {
 }
 
 impl<S: Syscall> Channel<S> {
+    /// `power_set` on a power claim: the VR current limit to `eighths` of an
+    /// ampere; the register as the kernel read it back.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidArgs`] outside the model's bounds,
+    /// [`Error::ShouldWait`] for a raise within a second of the last,
+    /// [`Error::LimitReached`] for a raise while the kernel's backstop reads
+    /// hot, [`Error::BadState`] latched off, left to firmware or not the claim.
+    pub fn power_set(&self, eighths: u64) -> Result<u64, Error> {
+        let value = Call::new(nr::POWER_SET)
+            .value(register(self.handle()))
+            .value(usize::try_from(eighths).unwrap_or(usize::MAX))
+            .make(self.syscall());
+        decode(value).map(|back| back as u64)
+    }
+
+    /// `power_read` on a power claim: the kernel's readings
+    /// (`ferrix_native_abi::types::POWER_READ_*`). Renews the claim's lease.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::BadState`] for a handle that is not the claim.
+    pub fn power_read(&self) -> Result<[u64; POWER_READ_WORDS], Error> {
+        let mut bytes = [0_u8; 8 * POWER_READ_WORDS];
+        let value = Call::new(nr::POWER_READ)
+            .value(register(self.handle()))
+            .output(&mut bytes)
+            .make(self.syscall());
+        decode_unit(value)?;
+        let mut words = [0_u64; POWER_READ_WORDS];
+        for (word, chunk) in words.iter_mut().zip(bytes.chunks_exact(8)) {
+            let mut raw = [0_u8; 8];
+            raw.copy_from_slice(chunk);
+            *word = u64::from_ne_bytes(raw);
+        }
+        Ok(words)
+    }
+
     /// `channel_write_read`: send `send`, if given, at most
     /// [`WRITE_READ_BYTES`] and no handles, then wait for the next message on
     /// this end and receive it, both ways in registers. One call where a

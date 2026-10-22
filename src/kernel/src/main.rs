@@ -249,9 +249,6 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // processor that reads the power-limit MSRs, once every processor is up
     // and there is a scheduler to sleep in (`L.x86_64.187`).
     arch::start_msr_log(view);
-    // `ferrix.vrcurrent`, likewise: the VR current limit raised in steps
-    // under a thermal guard, from a task on this processor (`L.x86_64.190`).
-    arch::start_vr_current(view);
 
     // The console's transmit side, as a program's output goes out: from a
     // task, which the scheduler just made this, into the ring the port's
@@ -811,13 +808,23 @@ fn publish_devices(view: &BootView<'_>) -> (device::Report, device::Reserved) {
     // Last, so that the framebuffer it lends never takes an aperture from a
     // device: it adds a node only under `ferrix.efifb`.
     let mut framebuffer = firmware::FirmwareFramebuffer::new(view);
+    // The power node, only under `ferrix.powerctl` on a processor the power
+    // core's table names (`L.device.51`): no aperture, so its place is
+    // immaterial.
+    let mut power = discovery::powerctl::Power::new(view);
     // Before publishing, which yields the Intel integrated GPU unless the
     // command line lets it be driven (`L.device.44`).
     if view.flag(device::INTEL_GPU_OPTION) {
         device::allow_intel_gpu();
     }
     let reserved = device::Reserved::of(view, &[pci.reads(), tree.reads(), boards.reads()]);
-    let mut finders: [&mut dyn Finder; 4] = [&mut pci, &mut tree, &mut boards, &mut framebuffer];
+    let mut finders: [&mut dyn Finder; 5] = [
+        &mut pci,
+        &mut tree,
+        &mut boards,
+        &mut framebuffer,
+        &mut power,
+    ];
     let report = match device::publish(&mut finders, &reserved) {
         Ok(report) => report,
         // A failed walk halts the boot under its own entry, as it always has.

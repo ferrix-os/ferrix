@@ -61,8 +61,8 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::status;
 use ferrix_native_abi::types::{
     self, APERTURE_INFO_BYTES, ApertureInfo, CHANNEL_MAX_BYTES, CHANNEL_MAX_HANDLES,
-    DEVICE_INFO_BYTES, DeviceInfo, JOB_SPECULATION_DOMAIN, MAP_READ, MAP_WRITE, PortPacket,
-    ProcessStatus, ReadActual,
+    DEVICE_INFO_BYTES, DeviceInfo, JOB_SPECULATION_DOMAIN, MAP_READ, MAP_WRITE, POWER_READ_WORDS,
+    PortPacket, ProcessStatus, ReadActual, TREE_X86_POWER,
 };
 use ferrix_objects::message::Message;
 use ferrix_objects::reach::Reach;
@@ -393,7 +393,8 @@ fn record_call(
             | NativeCall::InputControlCreate
             | NativeCall::SoundControlCreate
             | NativeCall::LogControlCreate
-            | NativeCall::ChardevControlCreate,
+            | NativeCall::ChardevControlCreate
+            | NativeCall::PowerControlCreate,
             Ok(given),
         ) => (audit::CONTROL, named(*given as u64), [number, 0, 0]),
         _ => return,
@@ -489,7 +490,10 @@ fn answer(call: NativeCall, caller: &dyn Host, a: [u64; 6]) -> Result<usize, Err
         | NativeCall::DeviceClock
         | NativeCall::DeviceSetLimit
         | NativeCall::DeviceGetLimit
-        | NativeCall::DeviceIsolation => device_call(call, process, &a),
+        | NativeCall::DeviceIsolation
+        | NativeCall::PowerControlCreate
+        | NativeCall::PowerSet
+        | NativeCall::PowerRead => device_call(call, process, &a),
         NativeCall::VmoPin => vmo_pin(process, handle(a[0]), handle(a[1]), a[2], a[3], a[4]),
         NativeCall::VmoPinAddresses => vmo_pin_addresses(process, handle(a[0]), a[1], a[2]),
         NativeCall::PortCreate => port_create(process),
@@ -1677,7 +1681,7 @@ fn device_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usiz
         NativeCall::DeviceSetLimit => device_set_limit(process, device, second, third),
         NativeCall::DeviceGetLimit => device_get_limit(process, device, second),
         NativeCall::DeviceIsolation => device_isolation(process, device),
-        _ => Err(Errno::ENOSYS),
+        _ => power_call(call, process, a),
     }
 }
 
@@ -2313,6 +2317,41 @@ pub(crate) fn control_channel(
     insert_new(process, Object::Channel(driver_end), rights)
 }
 
+/// `power_control_create`, `power_set` and `power_read` (`docs/POWERCTL.md`
+/// §5, §6). The claim needs `MANAGE` on the power node, as every control
+/// channel's device does, and comes back with `WAIT` alone, so it can be
+/// neither sent nor copied (`L.device.52`); the two calls take any handle to
+/// a channel end, the core deciding whether it is the claim's.
+fn power_call(call: NativeCall, process: &Process, a: &[u64; 6]) -> Result<usize, Errno> {
+    if call == NativeCall::PowerControlCreate {
+        let node = device_in(process, handle(a[0]), Rights::MANAGE)?;
+        if node.tree_binding() != Some(TREE_X86_POWER) {
+            return Err(status::ACCESS_DENIED);
+        }
+        return insert_new(process, Object::Channel(arch::power_claim()?), Rights::WAIT);
+    }
+    let claim = process.with_handles(|table| {
+        let (object, _) = table.get(handle(a[0])).map_err(table_error)?;
+        let Object::Channel(end) = object else {
+            return Err(status::WRONG_TYPE);
+        };
+        Ok(Arc::clone(end))
+    })?;
+    match call {
+        NativeCall::PowerSet => arch::power_set(&claim, a[1]),
+        NativeCall::PowerRead => {
+            let words = arch::power_read(&claim)?;
+            let mut bytes = [0u8; 8 * POWER_READ_WORDS];
+            for (chunk, word) in bytes.chunks_exact_mut(8).zip(words) {
+                chunk.copy_from_slice(&word.to_ne_bytes());
+            }
+            uaccess::copy_to_user(process.space(), a[1], &bytes).map_err(fault)?;
+            Ok(0)
+        }
+        _ => Err(Errno::ENOSYS),
+    }
+}
+
 /// `device_info`.
 ///
 /// Any device handle will do: what enumeration found is not a capability, and
@@ -2470,6 +2509,12 @@ fn quiesce_while(node: &Arc<DeviceNode>, cancelled: &dyn Fn() -> bool) -> Result
     };
     for server in SERVERS.iter() {
         (server.wait_until_unserved)(node, cancelled).map_err(still_served)?;
+    }
+    // The power core's claim is the item's own, not a server's: a live
+    // holder refuses (H.DEV.2); the restore after a holder's death is the
+    // core's own and waits for nothing (`L.device.53`).
+    if node.tree_binding() == Some(TREE_X86_POWER) && !arch::power_unserved() {
+        return Err(status::BAD_STATE);
     }
     node.disable_dma().map_err(|_| status::BAD_STATE)?;
     // What the dead driver, or its device's firmware, may have rewritten
