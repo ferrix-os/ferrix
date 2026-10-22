@@ -1264,6 +1264,22 @@ where
     /// before the fault in the same call are returned first, and the fault on
     /// the next call, so none is lost.
     pub fn on_interrupt(&mut self, out: &mut [Event]) -> Result<Drained, DeviceError> {
+        self.on_interrupt_receiving(out, usize::MAX)
+    }
+
+    /// [`Driver::on_interrupt`], taking at most `receive_room` arrived
+    /// frames: the rest stay in the receive queue's used ring, in order,
+    /// for a later call, and the device holds further frames back rather
+    /// than the caller dropping them for want of somewhere to put them.
+    ///
+    /// # Errors
+    ///
+    /// As [`Driver::on_interrupt`].
+    pub fn on_interrupt_receiving(
+        &mut self,
+        out: &mut [Event],
+        receive_room: usize,
+    ) -> Result<Drained, DeviceError> {
         let isr = self.transport.acknowledge_interrupt();
         if let Some(fault) = self.fault {
             return Err(fault);
@@ -1273,7 +1289,9 @@ where
             return Err(DeviceError::NeedsReset);
         }
 
-        let (received, receive_fault) = self.drain(RECEIVE_QUEUE, out, 0);
+        let room = receive_room.min(out.len());
+        let (received, receive_fault) =
+            self.drain(RECEIVE_QUEUE, out.get_mut(..room).unwrap_or_default(), 0);
         let (sent, transmit_fault) = match receive_fault {
             Some(_) => (0, None),
             None => self.drain(TRANSMIT_QUEUE, out, received),

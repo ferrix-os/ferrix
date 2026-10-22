@@ -726,8 +726,10 @@ impl Nic for Adapter {
             .map_err(|_| DeviceError::NeedsReset)
     }
 
-    fn drain(&mut self, out: &mut [Event]) -> Result<usize, DeviceError> {
-        self.card.on_interrupt(out).map(|drained| drained.events)
+    fn drain(&mut self, out: &mut [Event], receive_room: usize) -> Result<usize, DeviceError> {
+        self.card
+            .on_interrupt_receiving(out, receive_room)
+            .map(|drained| drained.events)
     }
 
     fn write_transmit(&mut self, offset: u64, frame: &[u8]) {

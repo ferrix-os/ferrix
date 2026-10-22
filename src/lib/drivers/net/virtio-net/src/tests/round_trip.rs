@@ -208,6 +208,36 @@ fn several_frames_arrive_in_the_order_the_device_sent_them() {
     rig.assert_clean();
 }
 
+/// A receive room of two takes two frames and leaves the third in the used
+/// ring, in order, for the next call (2026-10-22: a caller that took and
+/// dropped it lost one frame in seventeen of a download).
+#[test]
+fn a_receive_room_takes_that_many_frames_and_leaves_the_rest_queued() {
+    let mut rig = Setup::new().build();
+    let frames: Vec<Vec<u8>> = (0..3).map(|seed| pattern(seed, 70)).collect();
+    for frame in &frames {
+        assert!(rig.deliver(frame));
+    }
+    let mut out = [Event::Sent { id: u64::MAX }; 8];
+    let first = rig
+        .driver
+        .on_interrupt_receiving(&mut out, 2)
+        .expect("no fault");
+    assert_eq!(first.events, 2);
+    assert!(first.more, "the third is still there");
+    let none = rig
+        .driver
+        .on_interrupt_receiving(&mut out, 0)
+        .expect("no fault");
+    assert_eq!(none.events, 0);
+    let rest = rig.drain();
+    assert_eq!(rest.len(), 1);
+    let &Event::Received { offset, len, .. } = &rest[0] else {
+        panic!("a frame, not {:?}", rest[0]);
+    };
+    assert_eq!(rig.receive.read(offset as usize, len as usize), frames[2]);
+}
+
 #[test]
 fn frames_go_out_and_come_in_over_and_over_without_leaking_a_descriptor() {
     let mut rig = Setup::new().build();

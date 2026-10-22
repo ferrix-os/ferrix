@@ -796,6 +796,35 @@ fn a_short_slice_takes_what_it_holds_and_leaves_the_rest() {
     assert_eq!(driver.counters().received, 5);
 }
 
+/// A caller with two slots takes two frames, and the third stays in the
+/// ring for when it has a slot, sent frames still taken meanwhile: holding
+/// is how a burst outruns the net ring without being dropped (2026-10-22).
+#[test]
+fn a_receive_room_takes_that_many_frames_and_leaves_the_rest_in_the_ring() {
+    let rig = Rig::new();
+    let mut driver = rig.up();
+    for index in 0..3 {
+        assert!(rig.model.borrow_mut().inject(&frame(80, index)));
+    }
+    let mut out = [Event::Sent { id: 0 }; 8];
+    assert_eq!(
+        driver.drain_receiving(&mut out, 2).expect("works").events,
+        2
+    );
+    assert_eq!(
+        driver.drain_receiving(&mut out, 0).expect("works").events,
+        0
+    );
+    let drained = driver.drain_receiving(&mut out, 5).expect("works").events;
+    assert_eq!(drained, 1);
+    let Event::Received { len, .. } = out[0] else {
+        panic!("a frame, not {:?}", out[0]);
+    };
+    assert_eq!(len, 80);
+    assert_eq!(driver.counters().received, 3);
+    assert_eq!(driver.counters().receive_dropped, 0);
+}
+
 #[test]
 fn write_backs_that_lie_are_dropped_and_their_buffers_lent_again() {
     for lie in [

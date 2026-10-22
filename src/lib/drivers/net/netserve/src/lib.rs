@@ -20,9 +20,19 @@
 //! **Receiving** cannot work that way. A frame arrives when it arrives, into a
 //! buffer the *device* chose, and the kernel's ring slot is picked afterwards.
 //! So the loop keeps the receive slots the kernel posted in a queue, and a
-//! frame that arrives takes the oldest. A frame that arrives with no slot
-//! waiting is dropped and counted -- there is nowhere to put it, and holding
-//! it would mean holding a device buffer the device needs back.
+//! frame that arrives takes the oldest. The loop takes from the device only
+//! as many arrived frames as it has slots for ([`Nic::drain`]'s
+//! `receive_room`); the rest stay in the device's own receive ring, in order,
+//! until the kernel posts more. The device's ring is then a second queue
+//! behind the net ring's, rather than a buffer emptied into the floor.
+//!
+//! That was the other way round until 2026-10-22: a frame with no slot
+//! waiting was taken, dropped and its buffer given back. With a sender
+//! allowed more than the kernel's posted half ring in flight (any real TCP
+//! sender once its window opens) about one frame in seventeen went that way
+//! on `x86_64` under KVM, and a 32 MiB download fell from 43 MB/s to 6 to
+//! 8 MB/s on the losses -- the N150 box's yt6801 download, 4.5 MB/s, was
+//! the same shape.
 //!
 //! # What is never done
 //!
@@ -83,12 +93,16 @@ pub trait Nic {
     /// A buffer that was not held.
     fn release(&mut self, buffer: u16) -> Result<(), DeviceError>;
 
-    /// Take what the device finished; see `Driver::on_interrupt`.
+    /// Take what the device finished; see `Driver::on_interrupt`: every
+    /// sent frame that fits in `out`, and at most `receive_room` arrived
+    /// ones. Arrived frames past `receive_room` stay with the device, in
+    /// order, for a later call: the loop has no slot to put them in, and a
+    /// frame left in the device's ring is one a later slot still carries.
     ///
     /// # Errors
     ///
     /// [`DeviceError`], which means reset.
-    fn drain(&mut self, out: &mut [Event]) -> Result<usize, DeviceError>;
+    fn drain(&mut self, out: &mut [Event], receive_room: usize) -> Result<usize, DeviceError>;
 
     /// Copy `frame` into the transmit region at `offset`.
     fn write_transmit(&mut self, offset: u64, frame: &[u8]);
@@ -144,7 +158,8 @@ pub struct Counters {
     pub sent: u64,
     /// Frames received.
     pub received: u64,
-    /// Frames dropped for want of a ring slot.
+    /// Frames dropped for want of a ring slot: none from a device that
+    /// keeps `receive_room`, which [`Nic::drain`] asks of it.
     pub dropped: u64,
     /// Frames the device refused because its queue was full.
     pub deferred: u64,
@@ -416,7 +431,11 @@ impl Serve {
         turn: &mut Turn,
     ) -> Result<(), Fault> {
         let mut events = [Event::Sent { id: 0 }; BATCH];
-        let count = nic.drain(&mut events).map_err(Fault::Device)?;
+        // No more arrived frames than there are slots to put them in: the
+        // rest wait in the device's ring for the kernel's next post.
+        let count = nic
+            .drain(&mut events, self.posted_len)
+            .map_err(Fault::Device)?;
         for event in events.iter().take(count) {
             turn.busy = true;
             match *event {

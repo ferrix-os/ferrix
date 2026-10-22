@@ -798,6 +798,22 @@ impl<R: Registers, C: Clock, M: Memory, B: Pages> Driver<R, C, M, B> {
     /// [`Error::BusError`] on a fatal bus error, after which the driver
     /// does nothing more; [`Error::Broken`] after a failure.
     pub fn drain(&mut self, out: &mut [Event]) -> Result<Drained, Error> {
+        self.drain_receiving(out, usize::MAX)
+    }
+
+    /// [`Driver::drain`], taking at most `receive_room` arrived frames: the
+    /// rest stay in the receive ring, in order, for a later call. A caller
+    /// with nowhere to put a frame leaves it to the core, whose ring and
+    /// FIFO hold it, rather than dropping it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Driver::drain`].
+    pub fn drain_receiving(
+        &mut self,
+        out: &mut [Event],
+        receive_room: usize,
+    ) -> Result<Drained, Error> {
         if self.broken {
             return Err(Error::Broken);
         }
@@ -813,7 +829,8 @@ impl<R: Registers, C: Clock, M: Memory, B: Pages> Driver<R, C, M, B> {
             self.counters.receive_unavailable += 1;
         }
         let mut events = self.take_sent(out);
-        events += self.take_received(out.get_mut(events..).unwrap_or_default());
+        let room = events.saturating_add(receive_room).min(out.len());
+        events += self.take_received(out.get_mut(events..room).unwrap_or_default());
         Ok(Drained { events, status })
     }
 

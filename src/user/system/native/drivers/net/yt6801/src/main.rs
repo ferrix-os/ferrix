@@ -641,12 +641,12 @@ impl Nic for Adapter {
             .map_err(|_| DeviceError::Bookkeeping)
     }
 
-    fn drain(&mut self, out: &mut [Event]) -> Result<usize, DeviceError> {
+    fn drain(&mut self, out: &mut [Event], receive_room: usize) -> Result<usize, DeviceError> {
         let mut core = [CoreEvent::Sent { id: 0 }; 32];
         let room = out.len().min(core.len());
         let drained = self
             .card
-            .drain(core.get_mut(..room).unwrap_or_default())
+            .drain_receiving(core.get_mut(..room).unwrap_or_default(), receive_room)
             .map_err(|_| DeviceError::NeedsReset)?;
         // After the drain, so that what the drain missed is announced:
         // `ferrix_yt6801::rearm`.
@@ -1002,7 +1002,7 @@ fn serve(
     // Looks in a row that found frames no interrupt announced.
     let mut misses = 0;
     let mut last_interrupt = 0;
-    let mut stats = Stats::new(now(), adapter.latched);
+    let mut stats = Stats::new(now(), adapter.seen(&serve));
     let mut next_link = 0;
     // Link polls the PHY did not answer in time.
     let mut link_misses: u64 = 0;
@@ -1051,7 +1051,7 @@ fn serve(
         polled = false;
         let at = now();
         if at.saturating_sub(stats.since) >= STATS_NANOS {
-            stats.say(at, adapter.latched, interrupted);
+            stats.say(at, adapter.seen(&serve), interrupted);
         }
         if let Some(bell) = ring.side.publish(&mut ring.ring) {
             let _ = ring
@@ -1136,13 +1136,40 @@ struct Stats {
     looks: u64,
     /// Of those, the ones that found frames.
     found: u64,
-    /// The adapter's latch count when the count began.
+    /// The adapter's and the loop's counts when the count began.
+    seen: Seen,
+}
+
+/// Counts that run for the driver's life, of which a line says the change.
+#[derive(Clone, Copy, Default)]
+struct Seen {
+    /// Drains after which the glue's latch was found set and cleared.
     latched: u64,
+    /// Frames the loop dropped for want of a ring slot.
+    dropped: u64,
+    /// Drains that found the core had run out of receive descriptors:
+    /// frames then wait in its FIFO, and past that are lost.
+    unavailable: u64,
+    /// Descriptors the core gave back with an error, lent again unread.
+    bad: u64,
+}
+
+impl Adapter {
+    /// The counts as they stand.
+    fn seen(&self, serve: &Serve) -> Seen {
+        let core = self.card.counters();
+        Seen {
+            latched: self.latched,
+            dropped: serve.counters().dropped,
+            unavailable: core.receive_unavailable,
+            bad: core.receive_dropped,
+        }
+    }
 }
 
 impl Stats {
     /// A count beginning at `since`.
-    const fn new(since: u64, latched: u64) -> Stats {
+    const fn new(since: u64, seen: Seen) -> Stats {
         Stats {
             since,
             interrupts: 0,
@@ -1150,7 +1177,7 @@ impl Stats {
             sent: 0,
             looks: 0,
             found: 0,
-            latched,
+            seen,
         }
     }
 
@@ -1172,7 +1199,7 @@ impl Stats {
     /// interrupts carrying the traffic there are a few frames per
     /// interrupt and few of the looks find any; with them silent the looks
     /// (a thousand a second) find the frames.
-    fn say(&mut self, at: u64, latched: u64, interrupted: bool) {
+    fn say(&mut self, at: u64, seen: Seen, interrupted: bool) {
         let elapsed = at.saturating_sub(self.since).max(1);
         if self.interrupts + self.received + self.sent > 0 {
             let per_second = |count: u64| count.saturating_mul(1_000_000_000) / elapsed;
@@ -1180,7 +1207,8 @@ impl Stats {
             let _ = writeln!(
                 Say,
                 "yt6801   {} ms: {} interrupts ({}/s), {} frames in ({}/s), {} out, {}.{} in per \
-                 interrupt; {} of {} looks found frames; latch cleared {} times; {}",
+                 interrupt; {} of {} looks found frames; latch cleared {} times; out of \
+                 receive descriptors {} times, {} dropped with no slot, {} bad; {}",
                 elapsed / 1_000_000,
                 self.interrupts,
                 per_second(self.interrupts),
@@ -1191,7 +1219,10 @@ impl Stats {
                 per_interrupt_tenths % 10,
                 self.found,
                 self.looks,
-                latched.saturating_sub(self.latched),
+                seen.latched.saturating_sub(self.seen.latched),
+                seen.unavailable.saturating_sub(self.seen.unavailable),
+                seen.dropped.saturating_sub(self.seen.dropped),
+                seen.bad.saturating_sub(self.seen.bad),
                 if interrupted {
                     "waking on interrupts"
                 } else {
@@ -1199,7 +1230,7 @@ impl Stats {
                 }
             );
         }
-        *self = Stats::new(at, latched);
+        *self = Stats::new(at, seen);
     }
 }
 

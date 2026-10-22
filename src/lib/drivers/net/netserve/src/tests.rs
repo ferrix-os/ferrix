@@ -93,7 +93,8 @@ impl FakeNic {
     fn new() -> FakeNic {
         FakeNic {
             transmit: vec![0; ENTRIES as usize * SLOT as usize],
-            receive: vec![0; ENTRIES as usize * SLOT as usize],
+            // More buffers than the ring has slots, as a device's ring has.
+            receive: vec![0; 64 * SLOT as usize],
             submitted: Vec::new(),
             events: VecDeque::new(),
             released: Vec::new(),
@@ -146,20 +147,32 @@ impl Nic for FakeNic {
         Ok(())
     }
 
-    fn drain(&mut self, out: &mut [Event]) -> Result<usize, DeviceError> {
+    fn drain(&mut self, out: &mut [Event], receive_room: usize) -> Result<usize, DeviceError> {
         if self.broken {
             return Err(DeviceError::NeedsReset);
         }
         let mut count = 0;
+        let mut received = 0;
+        let mut kept = VecDeque::new();
         while count < out.len() {
             let Some(event) = self.events.pop_front() else {
                 break;
             };
+            if let Event::Received { .. } = event {
+                if received >= receive_room || !kept.is_empty() {
+                    // Held in the device's ring, in order.
+                    kept.push_back(event);
+                    continue;
+                }
+                received += 1;
+            }
             if let Some(slot) = out.get_mut(count) {
                 *slot = event;
             }
             count += 1;
         }
+        kept.append(&mut self.events);
+        self.events = kept;
         Ok(count)
     }
 
@@ -344,18 +357,54 @@ fn the_device_gets_its_buffer_back_the_moment_the_bytes_are_copied() {
 }
 
 #[test]
-fn a_frame_with_no_slot_waiting_is_dropped_and_its_buffer_returned() {
+fn a_frame_with_no_slot_waiting_stays_with_the_device_until_one_is_posted() {
     let mut bench = Bench::new();
-    bench.nic.arrive(1, b"nowhere to go");
+    bench.nic.arrive(1, b"nowhere to go yet");
     let turn = bench.turn().expect("a turn");
-    assert_eq!(turn.dropped, 1);
-    assert_eq!(turn.received, 0);
-    assert_eq!(bench.serve.counters().dropped, 1);
-    assert_eq!(
-        bench.nic.released,
-        alloc::vec![1],
-        "a buffer the driver keeps is a frame the device cannot deliver"
+    assert_eq!((turn.received, turn.dropped), (0, 0));
+    assert!(
+        bench.nic.released.is_empty(),
+        "a frame with no slot is left in the device's ring, not thrown away"
     );
+    let slot = bench.post_receive();
+    let turn = bench.turn().expect("a turn");
+    assert_eq!((turn.received, turn.dropped), (1, 0));
+    assert_eq!(bench.nic.released, alloc::vec![1]);
+    let done = bench.drain();
+    assert_eq!(
+        done.first().map(|entry| (entry.slot, entry.length)),
+        Some((slot, 17))
+    );
+    assert_eq!(bench.slot_bytes(slot, 17), b"nowhere to go yet");
+}
+
+/// A burst far past the slots posted -- a TCP sender's window arriving at
+/// line rate -- loses nothing and keeps its order: the device holds what the
+/// ring has no room for (2026-10-22: dropping it cost a download 85 % of its
+/// rate).
+#[test]
+fn a_burst_past_the_posted_slots_waits_in_the_device_and_arrives_in_order() {
+    let mut bench = Bench::new();
+    for _ in 0..4 {
+        let _ = bench.post_receive();
+    }
+    for index in 0..40_u16 {
+        bench.nic.arrive(index, &[index as u8; 20]);
+    }
+    let mut landed = Vec::new();
+    for _ in 0..10 {
+        let turn = bench.turn().expect("a turn");
+        assert_eq!(turn.received, 4, "as many as there are slots");
+        for entry in bench.drain() {
+            landed.extend(bench.slot_bytes(entry.slot, 1));
+        }
+        for _ in 0..4 {
+            let _ = bench.post_receive();
+        }
+    }
+    assert_eq!(bench.serve.counters().dropped, 0);
+    assert_eq!(landed, (0..40_u8).collect::<Vec<_>>());
+    assert_eq!(bench.nic.released.len(), 40);
 }
 
 #[test]
