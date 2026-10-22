@@ -53,6 +53,33 @@ mod tests;
 
 use ferrix_dwmac::{Bus, Clock, Options, Registers, regs};
 
+/// How long the driver's look waits at first, and again as soon as a look
+/// moves a frame, while the chip's interrupts are not arriving: 1 ms.
+pub const POLL_NANOS: u64 = 1_000_000;
+
+/// The longest the look waits while looks move nothing: 8 ms, so an idle
+/// link wakes the driver 125 times a second rather than 1,000, and the
+/// first frame after a quiet spell waits at most that long (backlog p2-138).
+pub const POLL_IDLE_MAX_NANOS: u64 = 8_000_000;
+
+/// The look's next wait, after one of `prev` that `moved` frames or not:
+/// back to [`POLL_NANOS`] when it moved any, else twice as long up to
+/// [`POLL_IDLE_MAX_NANOS`]. The shape of the intel driver's `next_poll_ns`.
+#[must_use]
+pub const fn next_poll_nanos(prev: u64, moved: bool) -> u64 {
+    if moved {
+        return POLL_NANOS;
+    }
+    let doubled = prev.saturating_mul(2);
+    if doubled < POLL_NANOS {
+        POLL_NANOS
+    } else if doubled > POLL_IDLE_MAX_NANOS {
+        POLL_IDLE_MAX_NANOS
+    } else {
+        doubled
+    }
+}
+
 /// Motorcomm's PCI vendor id.
 pub const VENDOR: u16 = 0x1F0A;
 

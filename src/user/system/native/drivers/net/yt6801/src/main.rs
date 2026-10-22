@@ -103,9 +103,9 @@ const KEY_INTERRUPT: u64 = 3;
 /// The control channel becoming readable.
 const KEY_CONTROL: u64 = 4;
 
-/// How long to wait for an interrupt before looking anyway, until one has
-/// been seen.
-const POLL_UNSEEN_NANOS: u64 = 1_000_000;
+// How long to wait for an interrupt before looking anyway, until one has
+// been seen: `ferrix_yt6801::next_poll_nanos`, 1 ms while looks move frames,
+// backing off to 8 ms while they move none.
 
 /// How often the PHY is asked about the link.
 const LINK_POLL_NANOS: u64 = 250_000_000;
@@ -1006,6 +1006,7 @@ fn serve(
     let mut next_link = 0;
     // Link polls the PHY did not answer in time.
     let mut link_misses: u64 = 0;
+    let mut poll_every = ferrix_yt6801::POLL_NANOS;
     control
         .wait_async(
             &ring.port,
@@ -1025,10 +1026,12 @@ fn serve(
                 Step::Serve
             })?;
         stats.turn(&turn, polled);
+        poll_every = next_look(poll_every, &turn, polled);
         // Frames a deadline found that no interrupt announced, with none
         // for long before: the interrupts are not arriving after all, and
         // every frame would wait for the 250 ms look or for a send to ring
-        // the bell. Back to looking every millisecond, for good: interrupts
+        // the bell. Back to looking every millisecond (backing off to 8 ms while
+        // looks find nothing), for good: interrupts
         // that come only now and then (the N150 box's, before the glue's
         // latch was cleared: 209 in five minutes of downloading) would each
         // put the wait back to 250 ms until a look found frames again.
@@ -1041,7 +1044,7 @@ fn serve(
                 unreliable = true;
                 let _ = writeln!(
                     Say,
-                    "yt6801   frames no interrupt announced: polling every millisecond from now on"
+                    "yt6801   frames no interrupt announced: polling every 1 to 8 ms from now on"
                 );
             }
         }
@@ -1073,7 +1076,7 @@ fn serve(
         let deadline = if interrupted {
             next_link
         } else {
-            now().saturating_add(POLL_UNSEEN_NANOS).min(next_link)
+            now().saturating_add(poll_every).min(next_link)
         };
         let packet = ring.port.wait(Deadline::At(deadline));
         serve.woke(&mut ring.ring, &mut ring.side);
@@ -1104,6 +1107,18 @@ fn serve(
             // The kernel's bell: the next turn looks.
             _ => {}
         }
+    }
+}
+
+/// The look's next wait while interrupts are not trusted (p2-138): backed
+/// off only after a look that found nothing to do, and back to the fast look
+/// on anything moved, whatever woke the turn.
+fn next_look(every: u64, turn: &ferrix_netserve::Turn, polled: bool) -> u64 {
+    let moved = turn.sent > 0 || turn.received > 0 || turn.dropped > 0;
+    if moved || polled {
+        ferrix_yt6801::next_poll_nanos(every, moved)
+    } else {
+        every
     }
 }
 
@@ -1180,7 +1195,7 @@ impl Stats {
                 if interrupted {
                     "waking on interrupts"
                 } else {
-                    "polling every millisecond"
+                    "polling every 1 to 8 ms"
                 }
             );
         }

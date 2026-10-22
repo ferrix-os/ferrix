@@ -463,3 +463,24 @@ fn a_quiet_latch_costs_one_read() {
     assert_eq!(rearm(&mut rig.bar), 0);
     assert_eq!(rig.chip.borrow().writes.len(), writes);
 }
+
+/// The look backs off while it moves nothing and is back at 1 ms at once.
+#[test]
+fn the_look_backs_off_while_idle() {
+    use crate::{POLL_IDLE_MAX_NANOS, POLL_NANOS, next_poll_nanos};
+    assert_eq!(next_poll_nanos(POLL_NANOS, false), 2 * POLL_NANOS);
+    assert_eq!(next_poll_nanos(4 * POLL_NANOS, false), POLL_IDLE_MAX_NANOS);
+    assert_eq!(
+        next_poll_nanos(POLL_IDLE_MAX_NANOS, false),
+        POLL_IDLE_MAX_NANOS
+    );
+    assert_eq!(next_poll_nanos(POLL_IDLE_MAX_NANOS, true), POLL_NANOS);
+    assert_eq!(next_poll_nanos(0, false), POLL_NANOS);
+    let mut every = POLL_NANOS;
+    let mut steps = 0;
+    while every < POLL_IDLE_MAX_NANOS {
+        every = next_poll_nanos(every, false);
+        steps += 1;
+    }
+    assert_eq!(steps, 3);
+}
