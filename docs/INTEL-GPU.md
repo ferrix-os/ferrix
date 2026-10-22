@@ -1338,7 +1338,296 @@ The per-engine reset has been shown on the host model and on `intel-fake`
 only, which has no GT: the box run (§11.3, BACKLOG P1 `intel-restart-box`)
 is owed, and must show K2 taken, no DMAR fault after the restart, `done`
 for each inherited engine, and the stall measured. The opaque crash mode
-is a plan (§12).
+is a plan (§12, branch `gpu-opaque-design`), with the consultant's design
+verdict (§12.10), for the customer before any code.
+
+## 12. The opaque crash mode: a plan
+
+Version 1, 2026-10-22, a plan with no code (branch `gpu-opaque-design`),
+for the customer before anything is built. Asked for on 2026-10-22: "start
+all graphical apps from where they left off, without any lost data or info;
+they ideally shall not even know that the driver crashed", with "everything
+out of the kernel" -- "keep the kernel slim, we need that for
+certifications". §11 is the floor it builds on: the driver started again,
+its engines reset, every client told its device was lost.
+
+### 12.1 What it promises, and what it does not
+
+| What dies | What a program sees | Built on |
+|---|---|---|
+| The GT's driver code (a panic, a fault, `kill -9`, a hang of the driver itself) | A stall of the restart's length; every call answered; its memory, mappings, handles, contexts and fences intact; requests in flight run again | §12.3 to §12.5 |
+| A batch that hangs the GPU | That context's device lost (`-EIO`, Mesa's `DEVICE_LOST`), as Linux's i915 says of a guilty context; every other program a stall | Today's engine reset (§10), unchanged |
+| The keeper (§12.3): a bug in the uAPI's parsers | Its device lost, as in §11 | §11 |
+| A GPU the engine reset cannot recover (a reset refused, a bus that hangs) | Its device lost, or the machine stalls (FX-0001) | §11; the box shows which |
+
+The first row is the customer's ask and the one that changes. Nothing makes
+the second invisible on any system: a batch that hangs the GPU will hang it
+again if run again.
+
+### 12.2 Where others get to
+
+* **Windows (WDDM 2.x).** A GPU that stops answering for two seconds is
+  reset by TDR; the kernel-mode driver resets the engine or the adapter,
+  and the D3D runtime reports `DXGI_ERROR_DEVICE_REMOVED` or `_RESET` to
+  every device on it. Programs recreate their devices; only the display's
+  state is restored by the OS.
+* **Linux (i915, amdgpu).** An engine reset keeps everything: the guilty
+  context's request is completed `-EIO` and the context banned after
+  repeated hangs, and every innocent request that had not finished is
+  replayed from its head on its context's last saved image
+  (`__execlists_reset`, `lrc_update_regs`). Buffers live in the kernel and
+  are untouched. An unplug or a wedged GPU is `-ENODEV`/`-EIO` everywhere.
+  The driver itself never restarts: it is the kernel.
+* **QNX.** Drivers are processes; the High Availability Manager restarts a
+  dead one in stages, a client-recovery library re-establishes clients'
+  broken connections, and a published QNX Screen automotive design has the
+  restarted driver fetch its last state checkpoint from the HA manager
+  (qnx.com, `com.qnx.doc.ham`, `intro_SOFTWARE`).
+* **MINIX 3.** The reincarnation server restarts a dead or hung driver
+  (heartbeats). Disk and network are transparent -- requests resubmitted,
+  TCP recovers -- audio and printers are not (Herder et al., ;login: 2010).
+* **Fuchsia (Magma).** The GPU's system driver is a process its clients
+  reach over IPC; on a GPU fault it kills the offending context's
+  connection, and Intel's MSD resets the device when it is destroyed
+  because an unclean shutdown can corrupt memory. §11 is this level.
+* **seL4 Microkit and sDDF.** Restarting a protection domain from its
+  entry point is the designer's per-domain choice; the hardware and the
+  channels are reset, and stateful services need their state managed case
+  by case (the 2022 dynamic-systems report).
+
+None makes a GPU driver's death invisible to its clients. The closest are
+Linux's replay of innocent requests, which needs the objects to outlive the
+reset, and QNX's checkpoint held outside the driver plus a reconnect
+library. The plan below takes the first two ideas and does without the
+third: what clients hold belongs to a process that does not die with the
+code that drives the hardware, so no client ever loses its connection.
+
+### 12.3 Two processes: a keeper that holds what clients hold, a worker that drives the GT
+
+* **`intel`, the keeper**, is devmgr's driver for 00:02.0 and the only
+  process holding its device handle. It holds the chardev control
+  (`renderD128`), the display control (`card0`, the copying card of §10 and
+  its write-combining window), the MSI and every pin, and runs
+  `ferrix-intel-xelp`'s front end -- the uAPI and every client's handles,
+  objects, VMs, contexts, syncobjs, sync files and dmabufs -- over a back
+  end that is a **journal** (§12.4), not a GPU. It touches no GT register.
+* **`intel-gt`, the worker**, is the GT back end of today's `intel`
+  (`XelpBackend`): forcewake, workarounds, the GGTT window, the PPGTTs,
+  execlist submission, hang detection and engine reset, RPS and RC6. The
+  keeper starts it in a child job of the keeper's own job (a handle to
+  which devmgr hands the keeper at START, with the worker's image), so the
+  worker lives inside the job devmgr kills and waits out (§12.10 (1)), gives it BAR 0 as an `IoMapping` it makes and transfers
+  (minted with `TRANSFER | MAP`), and serves every page it asks for. It
+  holds no device handle, no control and no pin.
+
+The seam exists: the front end's `Backend` trait (`frontend/backend.rs`)
+is fourteen calls (`facts`, `create_memory`, `vm_create`/`destroy`,
+`bind`/`unbind`, `context_create`/`destroy`, `submit`, `service`,
+`next_deadline`, `completed`, `timestamp`, and three hints), and the
+serving loop (`intel/src/serve.rs`) is generic over it. The keeper's
+`RemoteBackend` implements it; the worker serves it over a channel.
+
+**Memory is the keeper's.** `create_memory` is a VMO the keeper makes and
+pins, with its pages' device addresses in a second VMO, as `platform.rs`'s
+`Memory` is today; the worker gets read-only duplicates of both for a bind.
+The worker's own objects -- rings, context images, status pages,
+page-table chunks -- are keeper memory too, asked for by size and freed by
+name. So a worker's death closes no pin, the kernel quarantines nothing,
+and every client mapping, dmabuf and GPU address stays valid.
+
+**When the worker dies** (`TERMINATED` on its process handle), or stops
+answering (a ping unanswered for two seconds, or a request in flight past
+the hang detection's limit plus a margin -- the keeper's TDR), the keeper:
+
+1. kills the worker's job, and serves on: calls that need no GPU are
+   answered as before, submissions are journalled, waits wait;
+2. starts a new worker, which resets every engine its predecessor left
+   pointed at a status page (§11.2) and brings the GT up on fresh objects;
+3. checks its `Facts` are the first worker's, word for word, or gives up;
+4. **replays the journal**: each live VM (its keeper id mapped to the new
+   worker's), each live binding in order, each live context with the
+   register state of its last saved image copied in, then every
+   submission that had not completed, in order per context;
+5. frees the dead worker's own objects only once the new worker has said
+   its engines were reset: the pin quarantine's rule, kept by a live
+   driver in ring 3 -- a page goes back only once no engine can reach it.
+
+Clients see a stall: their waits are answered when the replayed requests
+complete. hyprix sees nothing: `card0` never went, and the keeper's copies
+into the lit plane go on.
+
+**It gives up** -- completes every outstanding request `Hung` and exits,
+which is §11 -- after eight worker deaths in one keeper's life (§11's
+budget, kept by the keeper for its worker), or when a new worker's `Facts`
+differ.
+
+### 12.4 The journal
+
+The keeper answers every `Backend` call at once from its own state and
+sends it on, so the front end never waits on a process that may be dead:
+
+| Call | The keeper keeps | Sent to the worker |
+|---|---|---|
+| `vm_create` | a keeper id, live | `VM_CREATE id` |
+| `bind` / `unbind` | each live range: VM, address, memory, bytes, PAT | `BIND` / `UNBIND` |
+| `context_create` | a keeper id: VM, engine, ring size; the object holding its image, once the worker names it | `CONTEXT_CREATE id` |
+| `submit` | the request until its completion: context, batch, length, id | `SUBMIT` |
+| `completed` | each `COMPLETED id how` once: a completion for a request not in flight is dropped | -- |
+| `timestamp` | the last read and when, extrapolated while no worker answers | `TIMESTAMP` |
+| `service`, `next_deadline` | the keeper's wake for pings and restarts | `SERVICE` on each forwarded interrupt |
+
+One fixed-size message per call, in a new module `ferrix-intel-xelp::remote`,
+host-tested: round-trips; a journal that replays a dead worker's state into
+a fresh model GT (`model.rs`) and compares the GPU's view (page tables,
+images, completions) with a run that never died; completions counted once
+across a death; replay order; the give-up rules. Handles travel beside the
+bytes: the memory and address VMOs for `BIND`, the `IoMapping` and pages at
+start.
+
+**Context state.** A context's image holds its registers as of its last
+switch-out. At replay the new worker copies the old image's register state
+-- the LRC's state page past the ring registers -- into the new context's
+image before its first submission, as `__execlists_reset` restores an
+innocent context.
+
+### 12.5 What a death costs a program, honestly
+
+* **Replay runs a batch again.** One that had started runs again from its
+  start, as i915 replays an innocent active request. Rendering that
+  overwrites is unchanged; a batch whose result accumulates (blending onto
+  its own target, atomics, a query not reset in the batch) is applied
+  twice. Linux accepts the same for every engine reset.
+* **Register state not yet saved is lost**: what batches that completed
+  since the context's last switch-out set (lite restores keep a context
+  loaded). anv sets its device-wide state once, at device creation, so it
+  is in every image after the first switch-out; a batch in flight sets its
+  own again when replayed. Linux's replay has the same window.
+* **A stall.** The worker's start: the back end came up in 2 ms on the
+  fake and must be measured on the box with RPS and the default images;
+  the box run (§12.8) measures it. A frame or two at 60 Hz is the aim.
+* **The keeper is the front end.** A parser bug kills the keeper and every
+  client's device with it (§11). The parsers are host-tested and fuzzed
+  (§4.4), and the keeper has no GT code.
+
+### 12.6 Why no reconnect library in the client
+
+QNX reconnects clients because its driver held their connections. Here the
+keeper holds them -- the render node's files, card0's -- and does not die
+when the GT's code does, so a client has nothing to reconnect. A library in
+Mesa or in a libdrm shim would be needed only to survive the keeper's own
+death, and it would have to rebuild what anv keeps by handle and address
+(GEM handles, VM addresses, syncobjs, contexts) on a new file with the
+contents of every object recovered: in effect a second keeper inside every
+client, against Mesa's internals and on every Mesa update. Not proposed. If
+the keeper's death must be survived later, the step is to move the front
+end into the worker and keep only objects and a checkpoint of the handle
+tables in the keeper (QNX Screen's checkpoint), still ring 3.
+
+### 12.7 What the kernel gains: nothing
+
+| Need | How, with what the kernel has |
+|---|---|
+| Client objects outlive the code that drives the GPU | The keeper owns them and is the only process the kernel sees as the driver |
+| The worker reaches the registers | An `IoMapping` of BAR 0 (`Rights::IO_MAPPING`, `TRANSFER` included) |
+| The worker reaches memory | VMOs and their address VMOs, duplicated by the keeper |
+| Interrupts | The keeper's MSI, forwarded as a channel message; the worker's 1 ms poll stays |
+| A process for the worker | `process_create` in a child of the keeper's own job, from an image devmgr hands it at START |
+| A dead worker's pages | Kept by the keeper until the new worker reset its engines (§12.3, 5) |
+| A dead keeper | Unchanged: §11 |
+
+**Kernel lines added: 0, GPU-specific or not.** devmgr (ring 3) hands the
+keeper two more handles at START for this one driver, its own job and the
+worker's image, and waits until every process of the keeper's job tree has
+ended before it starts the next keeper (§12.10 (1)). If the box shows an engine reset does not stop a dead
+worker's DMA, the next step is a GT reset (`GRDOM_FULL`): still ring 3 and
+still no kernel line, but it touches the display, so it is the customer's
+to decide.
+
+### 12.8 Tests, size and order
+
+* **Host**: the `remote` module and the journal against the model GT
+  (§12.4).
+* **QEMU**: `test-restart --boot intel` runs the product keeper over a fake
+  worker (`intel-fake`'s back end as `intel-gt`); `vk-survive` killed under
+  twice must end `survived`, every round answered and its buffer intact
+  (the judge's `Expect::Survived`, already written and tested); a control
+  that kills the keeper instead must end `DEVICE_LOST`. `test-intel-uapi`
+  keeps Mesa's start-up; `test-compositor`'s direct-scanout boot keeps the
+  card.
+* **The box**: Endfield running, `kill -9` of `intel-gt`: the game goes on,
+  hyprix says nothing, the keeper says the stall's length; then a GPU hang
+  (M2's hanging batch) under the game: only that context lost.
+
+| Step | Points |
+|---|---|
+| `remote`: the protocol and the journal, host-tested against the model GT | 8 |
+| The keeper: `serve.rs` over `RemoteBackend`, memory service, worker start and watch, card0 moved in | 8 |
+| The worker: `XelpBackend` over keeper memory, the command loop, interrupts forwarded | 8 |
+| Context state copied at replay, host-tested | 4 |
+| devmgr: the job and image at START for `intel`, and the wait for the job tree to end | 2 |
+| The gate as `Expect::Survived`, its control, the fake worker | 3 |
+| The box run and what it finds | 4 |
+| **Total** | **37** |
+
+### 12.9 For the customer to decide
+
+1. The split of §12.3, keeper and worker, over a front end in the worker
+   with a checkpoint (§12.6): the plan proposes the split.
+2. Whether a hang the engine reset cannot clear may use a GT reset, which
+   blanks the display for a moment (§12.7).
+3. Whether the keeper's TDR waits two seconds, as Windows', or less.
+
+### 12.10 The consultant's design verdict (2026-10-22, ledger line 3156)
+
+**OK IF (1) to (9), at code review.** "0 kernel lines" holds:
+`Rights::IO_MAPPING` is `TRANSFER | MAP` and `io_mapping_map` needs only
+`MAP`, so a worker maps BAR 0 with today's rights; pins are made and held
+by the keeper, which has `MANAGE`; the kernel's "driver" stays one process,
+the keeper -- the one that maps the registers, whose death the quarantine
+runs on, and whose HELLOs are accepted. The conditions, binding on the code:
+
+1. **The worker's lifetime.** The kernel does not revoke an `IoMapping`
+   when a driver dies or at a quiesce, so a worker that outlived its keeper
+   would keep BAR 0 after the next keeper's HELLO released the quarantine.
+   The worker's job is a child of the keeper's devmgr job, not a job devmgr
+   hands over; devmgr waits until every process of that job tree has ended
+   before it starts the next keeper (`launch_again` kills and does not wait
+   today); a gate check kills the keeper while a worker runs, with its
+   negative control through `gate.sh --expect`. (§12.3 and §12.7 now say so.)
+2. **The ring-3 quarantine fails closed.** The keeper unpins nothing of a
+   dead worker's until the new worker reports every engine reset `done`; if
+   any is not, the keeper exits, so the kernel quarantines every pin. Host
+   test and negative control.
+3. **Budget headroom.** The keeper keeps room under the pin budget `B` for
+   two workers' objects at once, or this plan says that a replay refused
+   for the budget gives up to §11.
+4. **Least rights for the worker.** BAR 0's `IoMapping`, the address VMOs
+   read-only, its own objects read-write; client memory VMOs never reach
+   it; no device handle, interrupt or control channel. A check states the
+   worker's handle table.
+5. **Docs.** V-03's Intel paragraph and D4 (c), (d) name keeper and worker
+   together as "the driver"; `DEVMGR.md` says START carries an image (and
+   the job tree of (1)) for this one driver; the worker's image comes from
+   the same initramfs set, and the driver updater replaces keeper and worker
+   together or refuses; `SAFETY-MANUAL.md` gains the assumption that a
+   driver which hands out its `IoMapping` keeps the receiver inside its job.
+6. A GT reset (`GRDOM_FULL`, §12.9 question 2), if the customer chooses
+   it, comes back for review against K4 before any code.
+7. If the code needs any kernel line or item file after all, it stops and
+   comes back for a design review first.
+8. **Gates.** `test-restart --boot intel` with `Expect::Survived` and its
+   keeper-kill control; the check row with the `remote` and journal host
+   tests; `test-intel-uapi`; `test-compositor`'s direct-scanout boot; a
+   BACKLOG row for the box run.
+9. `gpu-restart`'s conditions (1) to (4) (ledger 3148) are met first, so
+   the worker starts with the same fail-closed engine reset. They are, on
+   that branch.
+
+No finding was filed. The kernel never revoking an `IoMapping` exists on
+`main` today and is contained by devmgr killing a driver's job before a
+restart; the consultant took it as a docs item (`next-batch.md`), with F-92
+the next free id should it be revisited.
+
 
 2026-10-23: the first box run (headless, no game) stopped the restarted
 driver at `Forcewake`, the dead driver's render and GT forcewake still
