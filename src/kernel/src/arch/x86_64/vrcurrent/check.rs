@@ -11,7 +11,7 @@ use super::logic::{self, Plan, Refusal, Temperatures, Trip};
 use crate::console::println;
 
 /// An index in no range Intel, AMD, KVM or Hyper-V defines, below the
-/// hypervisors' 0x4000_0000: KVM refuses a write to it with `#GP`.
+/// hypervisors' `0x4000_0000`: KVM refuses a write to it with `#GP`.
 const ABSENT: u32 = 0x3fff_ffff;
 /// `CPUID.1:ECX[31]`: running under a hypervisor.
 const CPUID_HYPERVISOR: u32 = 1 << 31;

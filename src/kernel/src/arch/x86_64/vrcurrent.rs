@@ -139,7 +139,7 @@ fn run(word: usize) {
             }
         };
         let amps = plan.step(step);
-        if elapsed % LOG_EVERY == 0 {
+        if elapsed.is_multiple_of(LOG_EVERY) {
             println!(
                 "msr: vrcurrent {amps} A, core {} C, package {} C",
                 temperatures.core, temperatures.package
