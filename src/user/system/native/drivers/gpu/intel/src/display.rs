@@ -15,9 +15,14 @@
 //! later steps.
 //!
 //! The protocol's handling follows efifb's (`efifb/src/main.rs`): ATTACH maps
-//! a buffer's VMO read-only, SCANOUT copies it whole, FLUSH copies the
-//! changed rectangle of the buffer on screen and answers FLIPPED at once
-//! (there is no blanking to wait for), DETACH forgets it. Every copy ends
+//! a buffer's VMO read-only, SCANOUT says which buffer is shown and copies
+//! nothing (the kernel follows it with a FLUSH of the whole buffer, and a
+//! copy at both put every page flip on the screen twice), FLUSH copies the
+//! changed rectangle of the buffer on screen -- all of it at the first FLUSH
+//! after a SCANOUT -- and answers FLIPPED at once (there is no blanking to
+//! wait for), DETACH forgets it. A buffer may be a client's own, which
+//! hyprix shows directly (`docs/DISPLAY.md` §8.2): the copy is then the
+//! frame's only one. Every copy ends
 //! with the device barrier that drains the write-combining buffers.
 
 use core::ptr;
@@ -49,8 +54,9 @@ pub(crate) const KEY_DISPLAY: u64 = 3;
 const PIXEL: usize = 4;
 /// A page.
 const PAGE: usize = 4096;
-/// Buffers known at once.
-const MAX_BUFFERS: usize = 8;
+/// Buffers known at once: a compositor's two, and a client's swap chain
+/// shown directly.
+const MAX_BUFFERS: usize = 16;
 /// The refresh the one timing is listed at.
 const REFRESH_HZ: u64 = 60;
 
@@ -81,6 +87,9 @@ pub(crate) struct Display {
     control: Channel<Kernel>,
     buffers: [Option<Buffer>; MAX_BUFFERS],
     shown: Option<(u32, Rect)>,
+    /// Whether a SCANOUT changed the buffer shown and no FLUSH has copied
+    /// it since: the next FLUSH of it copies all of it.
+    owed_whole: bool,
     /// Frames copied, for the first lines.
     flushes: u64,
 }
@@ -132,6 +141,7 @@ impl Display {
             control,
             buffers: [None; MAX_BUFFERS],
             shown: None,
+            owed_whole: false,
             flushes: 0,
         })
     }
@@ -302,9 +312,10 @@ impl Display {
             Message::Scanout { buffer, rect, .. } => {
                 if buffer == 0 || self.buffer(buffer).is_none() {
                     self.shown = None;
+                    self.owed_whole = false;
                 } else {
                     self.shown = Some((buffer, rect));
-                    self.copy(buffer, rect);
+                    self.owed_whole = true;
                 }
                 Ok(())
             }
@@ -313,8 +324,15 @@ impl Display {
                 sequence,
                 rect,
             } => {
-                if self.shown.is_some_and(|(id, _)| id == buffer) {
-                    self.copy(buffer, rect);
+                if let Some((id, whole)) = self.shown
+                    && id == buffer
+                {
+                    let changed = if core::mem::take(&mut self.owed_whole) {
+                        whole
+                    } else {
+                        rect
+                    };
+                    self.copy(buffer, changed);
                 }
                 self.reply(Message::Flipped {
                     sequence,

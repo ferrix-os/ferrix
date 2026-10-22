@@ -20,10 +20,14 @@
 //!    and has no cursor plane. READY answers it.
 //! 3. ATTACH brings a buffer's own VMO with `READ | MAP` and never `WRITE`;
 //!    its range is mapped read-only and the handle closed. There is nothing
-//!    to pin, and the kernel would refuse a pin of this node. SCANOUT shows a buffer, copying
-//!    all of it that fits; FLUSH copies the rectangle that changed when it is
-//!    of the buffer on screen, and FLIPPED answers it at once, since there is
-//!    no blanking to wait for. Every copy ends with a store fence, after
+//!    to pin, and the kernel would refuse a pin of this node. SCANOUT says which buffer is
+//!    shown and copies nothing, as virtio-gpu's `SET_SCANOUT` transfers
+//!    nothing: the kernel follows every SCANOUT with a FLUSH of the whole
+//!    buffer, and copying at both put every page flip on the screen twice.
+//!    FLUSH copies the rectangle that changed when it is of the buffer on
+//!    screen -- all of the buffer that fits at the first FLUSH after a
+//!    SCANOUT -- and FLIPPED answers it at once, since there is no blanking
+//!    to wait for. Every copy ends with a store fence, after
 //!    which, and not before, the frame counts as shown. DETACH forgets a buffer, taking it off the
 //!    screen first if it is there, and unmaps it.
 //! 4. STOP, or the core closing its end, ends the run. What was copied last
@@ -65,8 +69,10 @@ const PAGE: usize = 4096;
 /// Bytes a pixel, in the card's buffers and on the screen alike.
 const PIXEL: usize = 4;
 
-/// Buffers known at once: a compositor double- or triple-buffers.
-const MAX_BUFFERS: usize = 8;
+/// Buffers known at once: a compositor double- or triple-buffers, and a
+/// client's own buffers shown directly (hyprix's direct scanout) are a
+/// swap chain's three or four more.
+const MAX_BUFFERS: usize = 16;
 
 /// The port key the control channel's signals arrive under.
 const KEY_CONTROL: u64 = 1;
@@ -324,6 +330,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         _device: device,
         buffers: [None; MAX_BUFFERS],
         shown: None,
+        owed_whole: false,
     };
     let ended = serving.serve();
     if matches!(ended, Ok(true)) {
@@ -354,6 +361,9 @@ struct Serving {
     buffers: [Option<Buffer>; MAX_BUFFERS],
     /// The buffer on screen and the part of it shown, or `None`.
     shown: Option<(u32, Rect)>,
+    /// Whether a SCANOUT changed the buffer shown and no FLUSH has copied
+    /// it since: the next FLUSH of it copies all of it.
+    owed_whole: bool,
 }
 
 impl Serving {
@@ -438,8 +448,15 @@ impl Serving {
                 sequence,
                 rect,
             } => {
-                if self.shown.is_some_and(|(id, _)| id == buffer) {
-                    self.copy(buffer, rect);
+                if let Some((id, whole)) = self.shown
+                    && id == buffer
+                {
+                    let changed = if core::mem::take(&mut self.owed_whole) {
+                        whole
+                    } else {
+                        rect
+                    };
+                    self.copy(buffer, changed);
                 }
                 // Nothing to wait for: the copy is on the screen.
                 self.reply(Message::Flipped {
@@ -497,16 +514,18 @@ impl Serving {
             .copied()
     }
 
-    /// Show `rect` of a buffer from the screen's corner, copying all of it
-    /// now; buffer 0, or one not attached, shows nothing new. The core does
-    /// not wait for an answer to SCANOUT.
+    /// Show `rect` of a buffer from the screen's corner from the next FLUSH
+    /// on, which copies all of it; buffer 0, or one not attached, shows
+    /// nothing new. The core does not wait for an answer to SCANOUT, and
+    /// follows each one with a FLUSH of the whole buffer.
     fn scanout(&mut self, id: u32, rect: Rect) {
         if id == 0 || self.buffer(id).is_none() {
             self.shown = None;
+            self.owed_whole = false;
             return;
         }
         self.shown = Some((id, rect));
-        self.copy(id, rect);
+        self.owed_whole = true;
     }
 
     /// Forget a buffer, taking it off the screen first if it is there, and
