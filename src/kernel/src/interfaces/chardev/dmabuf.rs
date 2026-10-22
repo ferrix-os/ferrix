@@ -190,6 +190,16 @@ impl Dmabuf {
         self.cookie
     }
 
+    /// Its VMO, for one that has one: what card0 hands a copying display
+    /// driver `READ | MAP` when a program shows the buffer directly
+    /// (`docs/DISPLAY.md` §8.2). `None` for a name-only one.
+    pub(crate) fn vmo(&self) -> Option<&Arc<Vmo>> {
+        match &self.backing {
+            Backing::Vmo(vmo) => Some(vmo),
+            Backing::Name { .. } => None,
+        }
+    }
+
     /// Whether `control` made it.
     pub(crate) fn made_by(&self, control: &Arc<Control>) -> bool {
         core::ptr::eq(self.control.as_ptr(), Arc::as_ptr(control))

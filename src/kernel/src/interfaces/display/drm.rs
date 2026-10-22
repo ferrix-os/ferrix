@@ -206,6 +206,18 @@ struct Dumb {
     destroyed: bool,
 }
 
+/// A client's own buffer, imported to be shown directly: a chardev dmabuf
+/// over a VMO, on a card whose driver copies (`docs/DISPLAY.md` §8.2).
+#[derive(Debug)]
+struct Shared {
+    handle: u32,
+    dmabuf: Arc<crate::interfaces::chardev::dmabuf::Dmabuf>,
+    /// Whether an `ADDFB2` is attaching it now, outside the open's lock: a
+    /// second waits for nothing and is `EBUSY` (the consultant's condition
+    /// 5).
+    attaching: bool,
+}
+
 /// A framebuffer: a dumb buffer as `ADDFB` named it.
 #[derive(Clone, Copy, Debug)]
 struct Framebuffer {
@@ -228,6 +240,10 @@ struct OpenState {
     /// this open can show it, whatever the program does with the handle it
     /// drew through.
     imports: Vec<(u32, Arc<crate::interfaces::render::node::Object>)>,
+    /// The chardev dmabufs imported to be shown directly (`docs/DISPLAY.md`
+    /// §8.2), by handle. Their dumb entry's buffer is 0 until the first
+    /// `ADDFB2` gives the geometry the ATTACH needs.
+    shared: Vec<Shared>,
     framebuffers: Vec<Framebuffer>,
     next_handle: u32,
     next_framebuffer: u32,
@@ -298,8 +314,14 @@ impl Drop for CardFile {
     /// budget for good.
     fn drop(&mut self) {
         let state = self.state.get_mut();
-        self.card
-            .release(self.id, state.dumbs.iter().map(|dumb| dumb.buffer));
+        self.card.release(
+            self.id,
+            state
+                .dumbs
+                .iter()
+                .map(|dumb| dumb.buffer)
+                .filter(|&buffer| buffer != 0),
+        );
     }
 }
 
@@ -514,6 +536,7 @@ fn card_error(error: CardError) -> Errno {
         CardError::Busy => Errno::EBUSY,
         CardError::Gone => Errno::ENODEV,
         CardError::TimedOut => Errno::ETIMEDOUT,
+        CardError::Refused => Errno::EINVAL,
     }
 }
 
@@ -1167,8 +1190,10 @@ fn prime_fd_to_handle(process: &Process, file: &CardFile, arg: u64) -> Result<us
     let mut prime: PrimeHandle = read_arg(process, arg)?;
     let descriptor = crate::syscall::fd::file(process, crate::syscall::fd::arg(prime.fd as u64))
         .map_err(|_| Errno::EBADF)?;
-    let exported =
-        crate::interfaces::render::node::exported(descriptor.io()).ok_or(Errno::EINVAL)?;
+    let Some(exported) = crate::interfaces::render::node::exported(descriptor.io()) else {
+        prime.handle = import_shared(file, descriptor.io())?;
+        return write_arg(process, arg, &prime);
+    };
     let object = exported.object();
     let (id, width, height, stride) = object.shown();
     // One handle an object, as Linux gives one: a second import of the same
@@ -1218,6 +1243,136 @@ fn prime_fd_to_handle(process: &Process, file: &CardFile, arg: u64) -> Result<us
     write_arg(process, arg, &prime)
 }
 
+/// `PRIME_FD_TO_HANDLE` of a descriptor that is no render-node export: a
+/// chardev driver's dmabuf over a VMO -- a game's frame from the Intel or
+/// NVIDIA render node -- on a card whose driver copies, so that a program
+/// may show the buffer directly rather than copy it into a dumb buffer
+/// first (`docs/DISPLAY.md` §8.2; the consultant's design verdict, ledger
+/// line 3108).
+///
+/// The handle is made now and attached at its first `ADDFB2`, which has
+/// the geometry. One handle a dmabuf, as Linux gives one, looked for and
+/// made under one hold of the open's lock. Anything else is `EINVAL`, as
+/// before: a card that does not copy (its driver would pin another
+/// driver's memory), a descriptor that is no dmabuf, a name-only dmabuf, a
+/// VMO that is not plain anonymous memory (the consultant's condition 6).
+fn import_shared(file: &CardFile, io: &Arc<dyn Inode>) -> Result<u32, Errno> {
+    if !file.card.copies() {
+        return Err(Errno::EINVAL);
+    }
+    let dmabuf = crate::interfaces::chardev::dmabuf::of(io).ok_or(Errno::EINVAL)?;
+    if !dmabuf.vmo().is_some_and(|vmo| vmo.is_anonymous()) {
+        return Err(Errno::EINVAL);
+    }
+    let mut state = file.state.lock();
+    if let Some(held) = state
+        .shared
+        .iter()
+        .find(|held| Arc::ptr_eq(&held.dmabuf, &dmabuf))
+    {
+        return Ok(held.handle);
+    }
+    let handle = state.next_handle;
+    state.next_handle = handle.checked_add(1).ok_or(Errno::ENOMEM)?;
+    state.dumbs.push(Dumb {
+        handle,
+        buffer: 0,
+        mapped: false,
+        width: 0,
+        height: 0,
+        pitch: 0,
+        destroyed: false,
+    });
+    state.shared.push(Shared {
+        handle,
+        dmabuf,
+        attaching: false,
+    });
+    Ok(handle)
+}
+
+/// Attach the client's buffer `handle` names, at its first `ADDFB2`: its
+/// dmabuf's VMO from the start, `pitch` × `height` bytes rounded up to a
+/// page, which must lie inside the VMO or nothing is sent (the
+/// consultant's condition 1). The dumb entry then has the geometry, which a
+/// later `ADDFB2` is held to as a dumb buffer's is. A handle attached
+/// already, or no client's buffer, is left as it is.
+fn attach_shared(
+    file: &CardFile,
+    handle: u32,
+    width: u32,
+    height: u32,
+    pitch: u32,
+) -> Result<(), Errno> {
+    let dmabuf = {
+        let mut state = file.state.lock();
+        let unattached = state
+            .dumbs
+            .iter()
+            .any(|dumb| dumb.handle == handle && dumb.buffer == 0 && !dumb.destroyed);
+        let Some(held) = state.shared.iter_mut().find(|held| held.handle == handle) else {
+            return Ok(());
+        };
+        if !unattached {
+            return Ok(());
+        }
+        if held.attaching {
+            return Err(Errno::EBUSY);
+        }
+        held.attaching = true;
+        Arc::clone(&held.dmabuf)
+    };
+    let bytes = u64::from(pitch)
+        .checked_mul(u64::from(height))
+        .and_then(|bytes| bytes.checked_next_multiple_of(PAGE_SIZE));
+    let fits = width > 0
+        && height > 0
+        && u64::from(pitch) >= u64::from(width) * 4
+        && bytes.is_some_and(|bytes| {
+            bytes > 0 && dmabuf.vmo().is_some_and(|vmo| bytes <= vmo.len_bytes())
+        });
+    let attached = match bytes.filter(|_| fits) {
+        Some(bytes) => file
+            .card
+            .attach_shared(file.id, &dmabuf, bytes, width, height, pitch)
+            .map_err(card_error),
+        None => Err(Errno::EINVAL),
+    };
+    drop(dmabuf);
+    let mut orphan = None;
+    let result = {
+        let mut state = file.state.lock();
+        if let Some(held) = state.shared.iter_mut().find(|held| held.handle == handle) {
+            held.attaching = false;
+        }
+        match attached {
+            Ok((buffer, status)) => {
+                match state
+                    .dumbs
+                    .iter_mut()
+                    .find(|dumb| dumb.handle == handle && !dumb.destroyed)
+                {
+                    // Destroyed while it was attaching: let go of at once.
+                    None => orphan = Some(buffer),
+                    Some(dumb) if status == Status::Ok => {
+                        dumb.buffer = buffer;
+                        dumb.width = width;
+                        dumb.height = height;
+                        dumb.pitch = pitch;
+                    }
+                    Some(_) => orphan = Some(buffer),
+                }
+                status_error(status)
+            }
+            Err(errno) => Err(errno),
+        }
+    };
+    if let Some(buffer) = orphan {
+        file.card.let_go(&[buffer]);
+    }
+    result
+}
+
 fn add_fb(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Errno> {
     let mut command: FbCmd = read_arg(process, arg)?;
     if command.bpp != 32 || command.depth != 24 {
@@ -1244,6 +1399,7 @@ fn add_fb2(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Errno>
         return Err(Errno::EINVAL);
     }
     let [pitch, ..] = command.pitches;
+    attach_shared(file, handle, command.width, command.height, pitch)?;
     command.fb_id = add_framebuffer(file, handle, command.width, command.height, pitch)?;
     write_arg(process, arg, &command)
 }
@@ -1542,13 +1698,51 @@ fn create_dumb(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Er
     write_arg(process, arg, &create)
 }
 
+/// What [`forget`] took out of the open, for the caller to let go of with
+/// the open's lock released: the core's id (0 for a client's buffer never
+/// attached), and whatever import held its object, whose drop may take
+/// other locks (the consultant's C2, ledger line 3108).
+struct Forgotten {
+    buffer: u32,
+    shared: Option<Shared>,
+    import: Option<Arc<crate::interfaces::render::node::Object>>,
+}
+
+impl Forgotten {
+    /// Let go of it: the buffer detached, without waiting, and the holds
+    /// dropped. With no lock held.
+    fn let_go(self, card: &Card) {
+        if self.buffer != 0 {
+            card.let_go(&[self.buffer]);
+        }
+        drop(self.shared);
+        drop(self.import);
+    }
+}
+
 /// Take the dumb buffer at `at` of the open's list away, and its VMO with
-/// it: the core's id, for the caller to let go of. A mapping of it keeps the
-/// VMO, and only it, alive.
-fn forget(state: &mut OpenState, at: usize) -> u32 {
+/// it. A mapping of it keeps the VMO, and only it, alive. The object an
+/// import held goes with the handle, unless the program that drew it
+/// still has one of its own; a client's buffer shown directly is held on
+/// by its range until the driver has let go of it.
+fn forget(state: &mut OpenState, at: usize) -> Forgotten {
     let dumb = state.dumbs.remove(at);
     state.pages.retain(|(held, _)| *held != dumb.handle);
-    dumb.buffer
+    let shared = state
+        .shared
+        .iter()
+        .position(|held| held.handle == dumb.handle)
+        .map(|at| state.shared.remove(at));
+    let import = state
+        .imports
+        .iter()
+        .position(|(held, _)| *held == dumb.handle)
+        .map(|at| state.imports.remove(at).1);
+    Forgotten {
+        buffer: dumb.buffer,
+        shared,
+        import,
+    }
 }
 
 /// Take `handle` away. The buffer goes now, or with the last framebuffer
@@ -1571,14 +1765,8 @@ fn destroy_dumb(file: &CardFile, handle: u32) -> Result<(), Errno> {
             Some(forget(&mut state, at))
         }
     };
-    if let Some(buffer) = gone {
-        // The object an import held goes with the handle, unless the
-        // program that drew it still has one of its own.
-        file.state
-            .lock()
-            .imports
-            .retain(|(held, _)| *held != handle);
-        file.card.let_go(&[buffer]);
+    if let Some(forgotten) = gone {
+        forgotten.let_go(&file.card);
     }
     Ok(())
 }
@@ -1663,8 +1851,8 @@ fn remove_framebuffer(file: &CardFile, id: u32) -> Result<(), Errno> {
             .filter(|_| !still);
         at.map(|at| forget(&mut state, at))
     };
-    if let Some(buffer) = orphaned {
-        file.card.let_go(&[buffer]);
+    if let Some(forgotten) = orphaned {
+        forgotten.let_go(&file.card);
     }
     Ok(())
 }

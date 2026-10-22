@@ -147,6 +147,9 @@ pub(crate) enum CardError {
     Gone,
     /// The driver did not answer in time.
     TimedOut,
+    /// Not a buffer this card may be handed: a client's own buffer on a
+    /// card that does not copy, or one smaller than its rows.
+    Refused,
 }
 
 /// A control channel waiting for its task.
@@ -228,6 +231,73 @@ struct Range {
     owner: OpenId,
     /// Bytes a row, for cleaning the rows a flush names.
     stride: u32,
+    /// The dmabuf whose VMO this is, for a client's own buffer a program
+    /// shows directly (`docs/DISPLAY.md` §8.2): `None` for a buffer the core
+    /// made. Such a range is *shared*: the core allocated none of it, so it
+    /// takes none of [`CARD_BYTES`] and is never decommitted
+    /// ([`reclaim_plan`]); the dmabuf is held here until the range is
+    /// reclaimed after its DETACHED, so its driver cannot hear its release
+    /// and recycle the VMO while the display driver still maps it (the
+    /// consultant's condition 4, ledger line 3108).
+    shared: Option<Arc<crate::interfaces::chardev::dmabuf::Dmabuf>>,
+}
+
+impl Range {
+    /// Whether the core allocated none of it.
+    fn is_shared(&self) -> bool {
+        self.shared.is_some()
+    }
+}
+
+/// The bytes of [`CARD_BYTES`] a range of `bytes` takes: all of them for a
+/// buffer the core made, none for a shared one, whose memory is its
+/// dmabuf's (the consultant's condition 2).
+pub(crate) const fn budget_bytes(shared: bool, bytes: u64) -> u64 {
+    if shared { 0 } else { bytes }
+}
+
+/// What the budget holds: `taken` bytes in all, and of `ranges` -- each an
+/// owner, its bytes and whether it is shared -- what the opens that are not
+/// `master` hold. A shared range counts as one of their buffers and none of
+/// their bytes (the consultant's condition 2).
+pub(crate) fn tally(
+    taken: u64,
+    master: Option<OpenId>,
+    ranges: impl Iterator<Item = (OpenId, u64, bool)>,
+) -> Taken {
+    let mut tally = Taken {
+        bytes: taken,
+        ..Taken::default()
+    };
+    for (owner, bytes, shared) in ranges {
+        if Some(owner) != master {
+            tally.others = tally.others.saturating_add(budget_bytes(shared, bytes));
+            tally.others_buffers += 1;
+        }
+    }
+    tally
+}
+
+/// What taking a range back after its DETACHED does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct ReclaimPlan {
+    /// Decommit its pages, and keep it for good if any is still pinned.
+    pub(crate) decommit: bool,
+    /// Give its bytes back to the card's budget.
+    pub(crate) give_back: bool,
+}
+
+/// How a range is reclaimed: a buffer the core made is decommitted and its
+/// bytes given back; a shared one is neither -- its VMO is a dmabuf's,
+/// which other programs map and its GPU driver may legitimately pin, so
+/// decommitting it would let a program holding a read-only descriptor have
+/// the card zero memory it shares with others (the consultant's condition
+/// 3). It is only let go of.
+pub(crate) const fn reclaim_plan(shared: bool) -> ReclaimPlan {
+    ReclaimPlan {
+        decommit: !shared,
+        give_back: !shared,
+    }
 }
 
 /// A reply whose request stopped waiting for it, which the card's task drops.
@@ -285,17 +355,13 @@ impl State {
     /// is master *now*: walked over at most the session's 64 buffers, under
     /// the state lock (the consultant's condition 4, ledger 2327).
     fn taken_now(&self) -> Taken {
-        let mut taken = Taken {
-            bytes: self.taken,
-            ..Taken::default()
-        };
-        for range in &self.ranges {
-            if Some(range.owner) != self.master {
-                taken.others = taken.others.saturating_add(range.bytes);
-                taken.others_buffers += 1;
-            }
-        }
-        taken
+        tally(
+            self.taken,
+            self.master,
+            self.ranges
+                .iter()
+                .map(|range| (range.owner, range.bytes, range.is_shared())),
+        )
     }
 
     /// Take `bytes` of the card's budget for open `owner`, if its share has
@@ -699,7 +765,7 @@ impl Card {
         // An error leaves nothing taken unless the buffer was listed, which
         // only a write to a driver that has just gone can leave behind; its
         // bytes then come back with the card.
-        let buffer = self.send_attach(owner, &vmo, bytes, width, height, stride)?;
+        let buffer = self.send_attach(owner, &vmo, bytes, width, height, stride, None)?;
         let event = self.collect(
             |event| matches!(event, Event::Attached { buffer: b, .. } if *b == buffer),
             |state| state.orphans.push(buffer),
@@ -710,8 +776,62 @@ impl Card {
         }
     }
 
+    /// Show a client's own buffer: give the VMO of `dmabuf`, `bytes` of it
+    /// from its start, a buffer id, ATTACH it and wait for ATTACHED -- the id
+    /// and how the attach went (`docs/DISPLAY.md` §8.2).
+    ///
+    /// Only on a card whose driver copies, which is handed the VMO with
+    /// `READ | MAP` and never `WRITE`, and only for a dmabuf over a plain
+    /// anonymous VMO at least `bytes` long; anything else is
+    /// [`CardError::Refused`] with nothing sent (the consultant's
+    /// conditions 1 and 6). The range takes none of the card's bytes but
+    /// counts as one of an open's buffers.
+    pub(crate) fn attach_shared(
+        &self,
+        owner: OpenId,
+        dmabuf: &Arc<crate::interfaces::chardev::dmabuf::Dmabuf>,
+        bytes: u64,
+        width: u32,
+        height: u32,
+        stride: u32,
+    ) -> Result<(u32, Status), CardError> {
+        let vmo = dmabuf.vmo().ok_or(CardError::Refused)?;
+        if !self.copies
+            || !vmo.is_anonymous()
+            || bytes == 0
+            || !bytes.is_multiple_of(PAGE_SIZE)
+            || bytes > vmo.len_bytes()
+        {
+            return Err(CardError::Refused);
+        }
+        let vmo = Arc::clone(vmo);
+        let buffer = self.send_attach(
+            owner,
+            &vmo,
+            bytes,
+            width,
+            height,
+            stride,
+            Some(Arc::clone(dmabuf)),
+        )?;
+        let event = self.collect(
+            |event| matches!(event, Event::Attached { buffer: b, .. } if *b == buffer),
+            |state| state.orphans.push(buffer),
+        )?;
+        match event {
+            Event::Attached { status, .. } => Ok((buffer, status)),
+            _ => Err(CardError::Gone),
+        }
+    }
+
     /// Give `vmo` a buffer id and send its ATTACH, handing the driver the VMO:
     /// the id. With the state locked throughout, as [`Card::send`] has it.
+    /// `shared` is the dmabuf a client's own buffer is, whose range takes
+    /// none of the card's bytes.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one ATTACH's fields and the range's owner and dmabuf"
+    )]
     fn send_attach(
         &self,
         owner: OpenId,
@@ -720,6 +840,7 @@ impl Card {
         width: u32,
         height: u32,
         stride: u32,
+        shared: Option<Arc<crate::interfaces::chardev::dmabuf::Dmabuf>>,
     ) -> Result<u32, CardError> {
         let mut state = self.state.lock();
         if state.gone || self.control.peer_closed() {
@@ -742,14 +863,16 @@ impl Card {
             stride,
         };
         // The bytes are taken here, with the listing below and under the
-        // same hold of the lock: the share is the open's as it is now.
-        if !state.reserve(bytes, owner) {
+        // same hold of the lock: the share is the open's as it is now. A
+        // shared range takes none, but still counts as a buffer.
+        let charged = budget_bytes(shared.is_some(), bytes);
+        if !state.reserve(charged, owner) {
             return Err(CardError::NoRoom);
         }
         let message = match state.session.attach(attach) {
             Ok(message) => message,
             Err(error) => {
-                state.give_back(bytes);
+                state.give_back(charged);
                 return Err(CardError::Request(error));
             }
         };
@@ -760,6 +883,7 @@ impl Card {
             bytes,
             owner,
             stride,
+            shared,
         });
         let handed = vec![(
             Object::Vmo(Arc::clone(vmo)),
@@ -945,6 +1069,12 @@ impl Card {
             Event::Flipped { status, .. } => Ok(status),
             _ => Err(CardError::Gone),
         }
+    }
+
+    /// Whether the card's driver copies each frame with its processor, as
+    /// its HELLO said and the core allowed (§2.1).
+    pub(crate) fn copies(&self) -> bool {
+        self.copies
     }
 
     /// Whether the card has a cursor plane, as its driver's HELLO said.
@@ -1497,6 +1627,13 @@ fn announce(card: &Card, hello: &Hello) {
 ///
 /// Runs in the card's task with no lock held, which a decommit needs.
 fn reclaim(card: &Card, range: Range) {
+    let plan = reclaim_plan(range.is_shared());
+    if !plan.decommit {
+        // A client's own buffer: let go of, here with no lock held, which
+        // its dmabuf's release needs (the consultant's condition 4).
+        drop(range);
+        return;
+    }
     let pages = range.bytes / PAGE_SIZE;
     let _ = range.vmo.decommit_range(0, pages);
     if range.vmo.holds_any(0, pages) {
@@ -1510,7 +1647,9 @@ fn reclaim(card: &Card, range: Range) {
         card.state.lock().kept.push(range);
         return;
     }
-    card.state.lock().give_back(range.bytes);
+    if plan.give_back {
+        card.state.lock().give_back(range.bytes);
+    }
 }
 
 /// Serve the card until its driver goes.
