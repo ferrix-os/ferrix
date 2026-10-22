@@ -478,6 +478,18 @@ it: the session-end boot shows exactly that (`linger-scope: 0`). It is
 AUTH §6.4's E6, older than G1, kept the customer's decision
 (`KillUserProcesses=`); G1 adds no way to do it that a user did not have.
 
+**The consultant's L2 (ledger 3137), answered from init's code**
+(`src/lib/init/svc/src/manager/lifecycle.rs`, `scope`): a Scope call for
+a unit that is active, or perpetual, is refused "exists already", so
+nobody can join a running `session-N.scope`; an ended one's name can be
+used again. A user may make a scope of any name under its own
+`user-<uid>.slice` (`init/src/main.rs`, the caller's own processes only),
+`session-N.scope` included: one that takes the number `sessiond` will
+use next makes that session's scope call fail, and `sessiond` then starts
+no session -- the user's own next session denied, failing closed, nothing
+gained. Numbering sessions from a root-only counter that also skips names
+init already holds would close it; a row for the next `sessiond` change.
+
 **G2: GNOME Shell as a window on hyprix -- about 5 points more.** Works in
 the probe now, nested on Xwayland. It needs a system bus -- §3 shows the
 shell ends without one -- which puts it in gap 3 and 4's and B3's
