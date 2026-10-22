@@ -1,10 +1,11 @@
 # GNOME on Ferrix: what a probe found
 
-Asked by the customer on 2026-10-18 (session 025c420a): can GNOME run on
-Ferrix, and what would it take? That session assessed it from the tree and
-the certification consultant answered a GNOME port **not yet** (ledger line
-2289, blockers B1 to B5 below). The step agreed then, and done here on
-2026-10-22, was a feasibility probe: run Debian 13's own mutter and
+Asked by the customer on 2026-10-17: can GNOME run on Ferrix, and what
+would it take? The certification consultant answered a GNOME port **not
+yet** on 2026-10-17 (ledger line 2289, blockers B1 to B5 below) and
+recommended option A; session 025c420a carried the assessment on from the
+tree on 2026-10-18. The feasibility probe done here on 2026-10-22 was
+chosen afterwards: run Debian 13's own mutter and
 gnome-shell on a Ferrix guest and write down exactly how far they get and
 what stops them, before any design. This is an assessment, not a decision
 and not a stage.
@@ -45,9 +46,10 @@ and not a stage.
   is written down in §2, so nothing here needed the consultant's review
   as a change; the document itself was reviewed as a design (§6).
 * **Recommended**: stage G1, GTK 4 and libadwaita apps on hyprix, now
-  (§5). A full GNOME session waits on the customer's choice against the
-  consultant's B1 to B5, and is sized in §5 at roughly 60 to 80 points
-  before GDM.
+  (§5); the consultant's verdict is **OK IF** nine conditions (ledger 3100,
+  §6). A GNOME session on the screen (G3, 40 to 55 points before GDM) is
+  **NOT YET**: B1 is still open, and four of its gaps owe design reviews
+  before code.
 
 ---
 
@@ -107,7 +109,10 @@ and the user's artwork.
 
 Each gap: what was seen, why, where in Ferrix it would change, which ring
 of `tools/common/data/certification-item.json` that is, and a size in
-points. None was changed here: all but gaps 4, 5 and 8 are in the kernel.
+points. None was changed here. Gaps 1 and 3 are in the kernel's load
+ring, and gap 7 is in the kernel only in its way (b); gaps 4, 5, 6, 7 (a)
+and 9 are ring 3, gap 8 is unmeasured (card0, load ring, if anything),
+gap 2 is not yet placed, and gap 10 is decided.
 
 ### Gap 1: the render node refuses `DRM_CAP_PRIME` -- 1 point, kernel, load ring
 
@@ -183,6 +188,15 @@ the flag, cleared at `execve`), `PR_CAP_AMBIENT` at least for
 it changes how privilege is dropped, so it goes to the consultant as a
 change that touches the item's evidence of credentials.
 
+And `capset` (`syscall/credentials.rs`, `sys_capset`), which refuses any
+non-empty set from a process whose effective uid is not 0 in the first
+namespace, so libcap-ng's `capng_apply` after the uid change fails even
+with KEEPCAPS answered. In the first namespace no capability is effective
+for an effective uid other than 0 (`Credentials::holds`), so "Linux's
+semantics" cannot mean a non-root process holds what it kept. The 2 to 3
+points are the prctl half; the capset half waits on its design review
+(ledger 3100, G3-2).
+
 **The probe's workaround.** A copy of `system.conf` without the `<user>`
 line, so the system bus ran as root.
 
@@ -245,7 +259,7 @@ has a real DRM master that can be dropped and taken back
 top of it is ring-3 D-Bus work, not kernel work. It is the honest form of
 B2.
 
-### Gap 7: no udev database, no uevents -- 3 points ring 3, or 8 in the item
+### Gap 7: no udev database, no uevents -- 3 points ring 3, or about 8 in the kernel (item and load rings)
 
 **Seen.** `/sys/class/drm` and `/sys/class/input` enumerate, so libudev's
 enumeration works (headless mutter found `renderD128` through it). But
@@ -259,9 +273,11 @@ the kernel sends no uevents (`src/kernel/src/net/netlink/mod.rs` has none).
 **Two ways.** (a) A ring-3 writer of the udev database from what `devmgr`
 already knows, for the devices present at boot -- 3 points, no hotplug.
 (b) Real uevents: the kernel broadcasting `NETLINK_KOBJECT_UEVENT` and
-honouring writes to `uevent` -- about 8 points, and the consultant has
-already said it is a core `discovery/devmgr.rs` change through a hook the
-item defines (ledger 2289). (a) is enough for one seat with fixed devices.
+honouring writes to `uevent` -- about 8 points: the producer in
+`discovery/devmgr.rs`, which is in the item ring (ledger 2289 called it
+core; corrected in ledger 3100), reaching the load ring's `net/netlink`
+broadcast and the sysfs `uevent` files only through a hook the item
+defines. The consultant recommends (a) (ledger 3100, G3-4). (a) is enough for one seat with fixed devices.
 
 ### Gap 8: KMS for mutter -- not measured, 5 points to probe after gaps 6 and 7
 
@@ -312,8 +328,10 @@ adds to each:
 | B4 | gnome-session or `systemd --user` restarting a crashed shell, against "the session ends with its compositor" | gnome-session was not installed and the shell ran; a session without gnome-session is possible for the shell itself | 5 |
 | B5 | the security case redone for Debian's SOUP | 550 Debian packages under the shell, against Chrome's ~40 libraries today | all |
 
-Stage G1 below touches none of B1 to B4: its apps are clients of hyprix,
-which keeps the screen, the lock and the session.
+Stage G1 below touches none of B1 to B4 under the conditions of ledger
+3100: its apps are clients of hyprix, which keeps the screen, the lock and
+the session. It does bring Debian third-party software onto the volume, so
+B5 partly applies.
 
 ## 5. A staged plan
 
@@ -325,10 +343,13 @@ GTK 4, libadwaita and the apps wanted (GNOME Text Editor, Files, Calculator,
 it lands); a session bus for the user, started by `sessiond` with the
 compositor; the accessibility bus or `NO_AT_BRIDGE=1`. The portal
 (`xdg-desktop-portal-gtk`) for file choosers can follow. No credential, no
-device, no session change, so none of B1 to B4.
+device, no session change, so none of B1 to B4 under the conditions of
+ledger 3100 (§6); B5 partly, for the Debian packages it ships.
 
 **G2: GNOME Shell as a window on hyprix -- about 5 points more.** Works in
-the probe now, nested on Xwayland. Useful as a demonstration and for
+the probe now, nested on Xwayland. It needs a system bus -- §3 shows the
+shell ends without one -- which puts it in gap 3 and 4's and B3's
+territory, and outside the consultant's G1 verdict. Useful as a demonstration and for
 working on GNOME without leaving the Ferrix desktop; its lock is disabled
 and must stay so, which is what B1 wants anyway.
 
@@ -337,8 +358,11 @@ to 55 points.** In order: gap 3 (prctl) and gap 1, kernel, each reviewed;
 gap 4, a volume with owners and modes, and the decision on set-uid
 helpers on a data volume (B3, B5); gap 6, login1 on `sessiond` (B2);
 gap 7 (a); gap 8; gap 2; gap 5's units. `sessiond` starts gnome-shell
-directly in the session's scope, no gnome-session (B4), and the lock is
-hyprlock's or nothing until B1 is answered.
+directly in the session's scope, no gnome-session (B4). G3 needs a lock
+that unlocks only on `authd`'s grant (`docs/AUTH.md` §3.7) before it is
+offered to a user; whether hyprlock can lock a mutter session (it needs
+`ext-session-lock-v1`) is unchecked. Until then G3 is a test image only,
+and B1 is open.
 
 **G4: the full session -- unsized.** GDM through a PAM shim onto `authd`
 (`docs/AUTH.md` §4.3 already plans the shim for sudo and OpenSSH),
@@ -353,7 +377,53 @@ it brings GNOME's apps, not GNOME's session.
 
 ## 6. The certification consultant's review
 
-*(Recorded below once given.)*
+Design review on 2026-10-22 by this session's consultant subagent,
+recorded in the consultant's ledger
+(`~/.local/share/ferrix/cert-consultant/reviews.md`) at **line 3100**,
+conditions on lines 3101 to 3104. Internal review, not independent
+verification (F-27).
+
+* **(a) The record: OK IF (a1) to (a7)** -- seven corrections, all made in
+  this document: which gaps are in the kernel (§3's opening), gap 7's ring
+  (`devmgr.rs` is the item ring, not core as ledger 2289 said), `capset`
+  in gap 3, the dates in the opening, G3's lock, G1's "none of B1 to B4"
+  qualified, and G2's system bus.
+* **(b) G1: OK IF (1) to (9).** (1) A fetch script pins every `.deb` by
+  snapshot.debian.org URL and SHA-256, as `fetch-claude-desktop.sh` does,
+  the package list in the tree, no `apt-get` on a shipped image. (2) The
+  fetch fails on any set-uid or set-gid file or file capability, and on a
+  deny-list (polkit, accountsservice, gdm3, any `libpam-*`, udisks2,
+  `dbus-daemon-launch-helper` set-uid); the volume is mounted
+  `nosuid,nodev`. (3) No system bus and no `org.freedesktop.login1`. (4)
+  The session bus is started by `sessiond` only after `authd`'s grant, as
+  the user, in the session's scope, its socket in the user's 0700 runtime
+  directory; it ends with the session with everything it activated, nothing
+  restarts any of it, the session-end gate asserts nothing survives and the
+  lock gates stay green. (5) `sessiond`'s diff comes to the consultant
+  against AUTH §3.7 and §6.4 and hands out no new device. (6) No
+  gnome-keyring. (7) A portal, when added, says it is a same-uid file
+  chooser with no sandbox claim. (8) The vulnerability analysis and A.AUTH
+  name the Debian set as user-ring third-party software. (9) Gap 1, if
+  taken, gets its own load-ring review; otherwise G1 ships with software
+  GL.
+* **(b) G3: NOT YET.** B1 is still open (no lock on `authd`'s grant under
+  mutter), and gaps 3, 6, 7 (b) and the set-uid question each owe a design
+  review before code: G3-2 prctl and `capset` (fail closed: no capability
+  effective for a non-root process in the first namespace; ambient RAISE
+  and SET_SECUREBITS refused; reserved ids; a check with a control); G3-3
+  login1 on `sessiond` (`CreateSession` refused; `TakeControl` only for the
+  session leader `sessiond` started, identified by pidfd, never by cgroup
+  path; `TakeDevice` only the seat's devices to the active session; pausing
+  drops card0's master and revokes input, gated with a control; power
+  methods root-only or refused); G3-4 udev, way (a) acceptable and
+  recommended, way (b) a design review; **G3-5 set-uid helpers on a data
+  volume: NOT YET** -- data volumes stay `nosuid` and system services start
+  as init's declared services; G3-6 a lock on `authd`'s grant or G3 is
+  never offered to a user; G3-7 no gnome-session or `systemd --user`
+  restart; G3-8 each card0 change reviewed against E-02; G3-9 the B5 case
+  for the session's package set.
+* **G2 is not covered** by the verdict: it needs a system bus, which G1's
+  condition (3) forbids.
 
 ## 7. What was checked, and what was not
 
