@@ -1415,6 +1415,17 @@ pub(super) fn check_display_copies() {
             "stage 10 display self-check failed: {problem}"
         ),
     }
+    match display::check::modes() {
+        Ok(report) => println!(
+            "  display  mode lists: {} SETCRTC requests matched as listed or refused, \
+             {} pages taken or refused",
+            report.matched, report.pages
+        ),
+        Err(problem) => fatal!(
+            catalog::STAGE10_DISPLAY_MODES,
+            "stage 10 display mode-list self-check failed: {problem}"
+        ),
+    }
 }
 
 /// Stage 10's chardev core, from a fake driver given a PCI function and

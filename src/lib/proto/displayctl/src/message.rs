@@ -48,6 +48,12 @@
 //! MODES     driver -> core, 264 bytes, not answered
 //!   8 scanout 0: width u32, height u32, enabled u32   ... 16 of them, as HELLO's
 //!   200 scanout 0's refresh_mhz u32   ... 16 of them, as HELLO's
+//! `MODE_LIST` driver -> core, 696 bytes, not answered
+//!   8 scanout u32   12 total u32   16 first u32   20 count u32
+//!   24 entry 0: a timing as HELLO's (24 bytes), flags u32 (bit 0 preferred)
+//!       ... 24 of them, 28 bytes each, zero past count
+//! `SET_MODE`  core -> driver, 40 bytes, not answered
+//!   8 scanout u32   12 reserved   16 a timing as HELLO's (24 bytes)
 //! ```
 //!
 //! CURSOR shows a [`CURSOR_SIZE`]-square buffer as a scanout's cursor, and
@@ -108,6 +114,21 @@
 //! checks it as it checks a file `drm.edid_firmware` names, and a file
 //! named there wins over it, as it does on Linux.
 //!
+//! `MODE_LIST` (version 11) is every mode a scanout's display can be shown
+//! at, as the driver judges it: the display's EDID's modes within the
+//! driver's limits, and the sizes it shows by scaling. One message holds at
+//! most [`MODES_A_PAGE`] of them, so that HELLO stays the longest message,
+//! and a list of up to [`MAX_LISTED_MODES`] goes as pages in order: the
+//! page whose `first` is 0 starts the scanout's list, and the page that
+//! reaches `total` finishes it, which then replaces the one before whole.
+//! Exactly one entry of a finished list is preferred. `SET_MODE` names one
+//! entry of the scanout's last finished list, timing for timing, and is
+//! sent before the SCANOUT that first shows a buffer at that mode, only to
+//! a driver that sent a list; the driver shows the following SCANOUT at it,
+//! and a driver that cannot answers that FLUSH with a failed FLIPPED. A
+//! driver that never sends `MODE_LIST` is never sent `SET_MODE`
+//! (`docs/DISPLAY.md` §9).
+//!
 //! HELLO's timings are for a card that runs only the modes it can make a
 //! clock for -- a board's HDMI output, not a virtio-gpu, which shows any
 //! size and lists none. The first is the mode the scanout runs now and has
@@ -122,8 +143,9 @@ use ferrix_native_abi::rights::Rights;
 
 /// The protocol version this crate speaks. 5 added HELLO's timings, 6 MODES,
 /// 7 each scanout's refresh, 8 HELLO's flags, 9 a VMO a buffer, carried by
-/// its ATTACH, 10 each scanout's connector type and EDID.
-pub const VERSION: u16 = 10;
+/// its ATTACH, 10 each scanout's connector type and EDID, 11 `MODE_LIST` and
+/// `SET_MODE`.
+pub const VERSION: u16 = 11;
 
 /// HELLO's type.
 pub const HELLO: u32 = 1;
@@ -159,6 +181,28 @@ pub const MOVE: u32 = 15;
 pub const MODES: u32 = 16;
 /// EDID's type.
 pub const EDID: u32 = 17;
+/// `MODE_LIST`'s type.
+pub const MODE_LIST: u32 = 18;
+/// `SET_MODE`'s type.
+pub const SET_MODE: u32 = 19;
+
+/// The most modes one scanout lists: Linux's connectors list a few dozen,
+/// and a driver with more keeps the first of Linux's order (`docs/DISPLAY.md`
+/// §9.2).
+pub const MAX_LISTED_MODES: usize = 64;
+/// The most modes one `MODE_LIST` carries, so that `HELLO` stays the longest
+/// message.
+pub const MODES_A_PAGE: usize = 24;
+/// Bytes of one `MODE_LIST` entry: a timing and its flags.
+pub const LISTED_BYTES: usize = TIMING_BYTES + 4;
+/// A `MODE_LIST` entry's flag for the display's preferred mode.
+pub const LISTED_PREFERRED: u32 = 1;
+/// Where `MODE_LIST`'s entries start.
+const MODE_LIST_AT: usize = 24;
+/// Bytes of `MODE_LIST`.
+pub const MODE_LIST_BYTES: usize = MODE_LIST_AT + MODES_A_PAGE * LISTED_BYTES;
+/// Bytes of `SET_MODE`.
+pub const SET_MODE_BYTES: usize = 16 + TIMING_BYTES;
 
 /// The most bytes of EDID one EDID message carries: a base block and three
 /// extensions, which nearly every monitor's fits. More would make EDID the
@@ -206,7 +250,9 @@ pub const MODES_BYTES: usize = MODES_REFRESH_AT + MAX_SCANOUTS * REFRESH_BYTES;
 pub const MAX_BYTES: usize = HELLO_BYTES;
 
 const _: () = assert!(
-    EDID_MESSAGE_BYTES <= HELLO_BYTES,
+    EDID_MESSAGE_BYTES <= HELLO_BYTES
+        && MODE_LIST_BYTES <= HELLO_BYTES
+        && SET_MODE_BYTES <= HELLO_BYTES,
     "HELLO stays the longest message: messages live on kernel stacks"
 );
 
@@ -323,6 +369,17 @@ impl Timing {
             && u32::from(self.htotal) <= MAX_DIMENSION * 2
             && u32::from(self.hdisplay) <= MAX_DIMENSION
             && u32::from(self.vdisplay) <= MAX_DIMENSION
+    }
+
+    /// Frames a second in millihertz, rounded; 0 for a timing with no
+    /// frame.
+    #[must_use]
+    pub fn refresh_mhz(&self) -> u64 {
+        let frame = u64::from(self.htotal) * u64::from(self.vtotal);
+        if frame == 0 {
+            return 0;
+        }
+        (u64::from(self.clock_khz) * 1_000_000 + frame / 2) / frame
     }
 
     /// Frames a second, rounded.
@@ -906,6 +963,56 @@ pub enum Message {
         /// zero.
         modes: [ScanoutMode; MAX_SCANOUTS],
     },
+    /// Driver to core: one page of a scanout's mode list. Not answered.
+    ModeList(ModePage),
+    /// Core to driver: run `scanout` at `timing`, one of its listed modes.
+    /// Not answered.
+    SetMode {
+        /// The scanout.
+        scanout: u32,
+        /// The mode, exactly as the driver listed it.
+        timing: Timing,
+    },
+}
+
+/// One mode of a list: its timing, and whether it is the display's
+/// preferred one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct Listed {
+    /// The mode.
+    pub timing: Timing,
+    /// Whether it is the display's preferred mode.
+    pub preferred: bool,
+}
+
+/// `MODE_LIST`: entries `first..first + count` of a scanout's list of `total`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ModePage {
+    /// The scanout.
+    pub scanout: u32,
+    /// How many modes the whole list has, 1 to [`MAX_LISTED_MODES`].
+    pub total: u32,
+    /// The index of this page's first entry in the list.
+    pub first: u32,
+    /// How many of `entries` are modes, 1 to [`MODES_A_PAGE`].
+    pub count: u32,
+    /// The modes; entries past `count` are zero.
+    pub entries: [Listed; MODES_A_PAGE],
+}
+
+impl ModePage {
+    /// The page's modes.
+    #[must_use]
+    pub fn as_slice(&self) -> &[Listed] {
+        let count = usize::try_from(self.count).unwrap_or(usize::MAX);
+        self.entries.get(..count).unwrap_or(&self.entries)
+    }
+
+    /// Whether this page finishes its list.
+    #[must_use]
+    pub fn finishes(&self) -> bool {
+        self.first.checked_add(self.count) == Some(self.total)
+    }
 }
 
 /// EDID: the display's own EDID for a scanout, or none.
@@ -979,6 +1086,8 @@ impl Message {
             Self::Move { .. } => MOVE,
             Self::Modes { .. } => MODES,
             Self::Edid(_) => EDID,
+            Self::ModeList(_) => MODE_LIST,
+            Self::SetMode { .. } => SET_MODE,
         }
     }
 
@@ -998,6 +1107,8 @@ impl Message {
             STOP | STOPPED => HEADER_BYTES,
             MODES => MODES_BYTES,
             EDID => EDID_MESSAGE_BYTES,
+            MODE_LIST => MODE_LIST_BYTES,
+            SET_MODE => SET_MODE_BYTES,
             _ => return None,
         })
     }
@@ -1099,6 +1210,8 @@ impl Message {
                     into.copy_from_slice(&edid.bytes);
                 }
             }
+            Self::ModeList(page) => put_mode_list(bytes, &page),
+            Self::SetMode { scanout, timing } => put_set_mode(bytes, scanout, &timing),
         }
         out
     }
@@ -1189,8 +1302,46 @@ fn decode_body(kind: u32, bytes: &[u8]) -> Option<Message> {
             modes: get_refreshes(bytes, MODES_REFRESH_AT, get_modes(bytes, HEADER_BYTES)?)?,
         },
         EDID => decode_edid(bytes)?,
+        MODE_LIST => decode_mode_list(bytes)?,
+        SET_MODE => {
+            zero32(12)?;
+            Message::SetMode {
+                scanout: get32(bytes, 8)?,
+                timing: get_timing_at(bytes, 16)?,
+            }
+        }
         _ => return None,
     })
+}
+
+/// `MODE_LIST`, from `bytes`: `None` for a flag other than preferred, or an
+/// entry past `count` that is not zero. Whether the page fits its list is
+/// the session's to judge.
+fn decode_mode_list(bytes: &[u8]) -> Option<Message> {
+    let mut page = ModePage {
+        scanout: get32(bytes, 8)?,
+        total: get32(bytes, 12)?,
+        first: get32(bytes, 16)?,
+        count: get32(bytes, 20)?,
+        entries: [Listed::default(); MODES_A_PAGE],
+    };
+    let count = usize::try_from(page.count).ok()?;
+    for (index, listed) in page.entries.iter_mut().enumerate() {
+        let at = MODE_LIST_AT + index * LISTED_BYTES;
+        let flags = get32(bytes, at + TIMING_BYTES)?;
+        *listed = Listed {
+            timing: get_timing_at(bytes, at)?,
+            preferred: match flags {
+                0 => false,
+                LISTED_PREFERRED => true,
+                _ => return None,
+            },
+        };
+        if index >= count && *listed != Listed::default() {
+            return None;
+        }
+    }
+    Some(Message::ModeList(page))
 }
 
 /// [`decode_body`] for the cursor's two messages.
@@ -1237,23 +1388,7 @@ fn put_hello(bytes: &mut [u8], hello: &Hello) {
     put32(bytes, at + 12, u32::from(hello.cursor));
     put32(bytes, TIMINGS_AT, hello.timings.count);
     for (index, timing) in hello.timings.list.iter().enumerate() {
-        let at = TIMINGS_AT + 4 + index * TIMING_BYTES;
-        put32(bytes, at, timing.clock_khz);
-        let spans = [
-            timing.hdisplay,
-            timing.hsync_start,
-            timing.hsync_end,
-            timing.htotal,
-            timing.vdisplay,
-            timing.vsync_start,
-            timing.vsync_end,
-            timing.vtotal,
-        ];
-        for (slot, span) in spans.into_iter().enumerate() {
-            put16(bytes, at + 4 + slot * 2, span);
-        }
-        let flags = u32::from(timing.hsync_high) | (u32::from(timing.vsync_high) << 1);
-        put32(bytes, at + 20, flags);
+        put_timing(bytes, TIMINGS_AT + 4 + index * TIMING_BYTES, timing);
     }
     put_refreshes(bytes, HELLO_REFRESH_AT, &hello.modes);
     put32(
@@ -1266,10 +1401,58 @@ fn put_hello(bytes: &mut [u8], hello: &Hello) {
     }
 }
 
-/// HELLO's timing at `index`: `None` for flags other than the two sync
-/// polarities.
+/// `SET_MODE`'s fields, into `bytes`.
+fn put_set_mode(bytes: &mut [u8], scanout: u32, timing: &Timing) {
+    put32(bytes, 8, scanout);
+    put_timing(bytes, 16, timing);
+}
+
+/// `MODE_LIST`'s fields, into `bytes`.
+fn put_mode_list(bytes: &mut [u8], page: &ModePage) {
+    put32(bytes, 8, page.scanout);
+    put32(bytes, 12, page.total);
+    put32(bytes, 16, page.first);
+    put32(bytes, 20, page.count);
+    for (index, listed) in page.entries.iter().enumerate() {
+        let at = MODE_LIST_AT + index * LISTED_BYTES;
+        put_timing(bytes, at, &listed.timing);
+        let flags = if listed.preferred {
+            LISTED_PREFERRED
+        } else {
+            0
+        };
+        put32(bytes, at + TIMING_BYTES, flags);
+    }
+}
+
+/// A timing's 24 bytes at `at`: the clock, the eight spans, the flags.
+fn put_timing(bytes: &mut [u8], at: usize, timing: &Timing) {
+    put32(bytes, at, timing.clock_khz);
+    let spans = [
+        timing.hdisplay,
+        timing.hsync_start,
+        timing.hsync_end,
+        timing.htotal,
+        timing.vdisplay,
+        timing.vsync_start,
+        timing.vsync_end,
+        timing.vtotal,
+    ];
+    for (slot, span) in spans.into_iter().enumerate() {
+        put16(bytes, at + 4 + slot * 2, span);
+    }
+    let flags = u32::from(timing.hsync_high) | (u32::from(timing.vsync_high) << 1);
+    put32(bytes, at + 20, flags);
+}
+
+/// HELLO's timing at `index`.
 fn get_timing(bytes: &[u8], index: usize) -> Option<Timing> {
-    let at = TIMINGS_AT + 4 + index * TIMING_BYTES;
+    get_timing_at(bytes, TIMINGS_AT + 4 + index * TIMING_BYTES)
+}
+
+/// [`put_timing`]'s timing back: `None` for flags other than the two sync
+/// polarities.
+fn get_timing_at(bytes: &[u8], at: usize) -> Option<Timing> {
     let span = |slot: usize| get16(bytes, at + 4 + slot * 2);
     let flags = get32(bytes, at + 20).filter(|&flags| flags & !0x3 == 0)?;
     Some(Timing {

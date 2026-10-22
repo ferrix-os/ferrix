@@ -21,8 +21,9 @@
 
 use crate::message::AttachObject;
 use crate::message::{
-    Attach, AttachError, CURSOR_SIZE, Hello, MAX_SCANOUTS, Message, Rect, Refusal, ScanoutMode,
-    Status, validate_modes,
+    Attach, AttachError, CURSOR_SIZE, Hello, Listed, MAX_LISTED_MODES, MAX_REFRESH_MHZ,
+    MAX_SCANOUTS, MODES_A_PAGE, Message, ModePage, Rect, Refusal, ScanoutMode, Status, Timing,
+    validate_modes,
 };
 use ferrix_native_abi::rights::Rights;
 
@@ -56,6 +57,10 @@ pub enum RequestError {
     /// A cursor's buffer is not [`CURSOR_SIZE`] square, or its hotspot is
     /// outside it, or the card said it has no cursor plane.
     Cursor,
+    /// `SET_MODE` for a scanout with no finished list, with a list that is
+    /// not the one the driver sent, or with a timing that list does not
+    /// hold.
+    Mode,
 }
 
 /// What a driver's message meant, once accepted.
@@ -95,6 +100,69 @@ pub enum Event {
         /// The scanout.
         scanout: u32,
     },
+    /// A page of `scanout`'s mode list, which the message has: the first
+    /// of a new list when `starts`, and the last when `finishes`, after
+    /// which [`Session::set_mode`] takes the list the pages made.
+    ModeList {
+        /// The scanout.
+        scanout: u32,
+        /// Whether the page begins a list, discarding one half sent.
+        starts: bool,
+        /// Whether it finishes it.
+        finishes: bool,
+    },
+}
+
+/// A list being sent, page by page: where the next page starts, how long
+/// the list says it is, how many preferred entries it has had, and the
+/// hash of the entries so far.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Paging {
+    hash: u64,
+    next: u8,
+    total: u8,
+    preferred: u8,
+}
+
+/// The FNV-1a hash of a list's entries, so that the session can hold the
+/// glue to the list the driver sent without keeping 64 timings a scanout
+/// itself: [`Session`] lives on a kernel stack while it is made.
+const HASH_START: u64 = 0xcbf2_9ce4_8422_2325;
+
+fn hash_listed(hash: u64, listed: &Listed) -> u64 {
+    let timing = &listed.timing;
+    let words: [u32; 11] = [
+        timing.clock_khz,
+        u32::from(timing.hdisplay),
+        u32::from(timing.hsync_start),
+        u32::from(timing.hsync_end),
+        u32::from(timing.htotal),
+        u32::from(timing.vdisplay),
+        u32::from(timing.vsync_start),
+        u32::from(timing.vsync_end),
+        u32::from(timing.vtotal),
+        u32::from(timing.hsync_high) | u32::from(timing.vsync_high) << 1,
+        u32::from(listed.preferred),
+    ];
+    words
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .fold(hash, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+}
+
+/// The hash [`Session`] keeps of a finished list: what the glue's copy of
+/// it must hash to.
+#[must_use]
+pub fn list_hash(list: &[Listed]) -> u64 {
+    list.iter().fold(HASH_START, hash_listed)
+}
+
+/// Whether a listed timing is one a display can run: a mode, at a refresh
+/// of at most [`MAX_REFRESH_MHZ`].
+fn listable(timing: &Timing) -> bool {
+    timing.is_mode() && (1..=u64::from(MAX_REFRESH_MHZ)).contains(&timing.refresh_mhz())
 }
 
 /// What the session remembers of a buffer, whichever way it was made.
@@ -157,6 +225,16 @@ pub struct Session {
     next_sequence: u64,
     stopping: bool,
     broken: bool,
+    /// Each scanout's list being sent, if one is.
+    paging: [Option<Paging>; MAX_SCANOUTS],
+    /// Each scanout's last finished list's hash, `None` before its first.
+    lists: [Option<u64>; MAX_SCANOUTS],
+    /// The hash of the mode `SET_MODE` last told each scanout, `None` when
+    /// it is to be told again: before the first, after a new list, and
+    /// after the driver refused the flush that followed one. A hash rather
+    /// than the timing keeps the session small: it is made on a kernel
+    /// stack.
+    set: [Option<u64>; MAX_SCANOUTS],
 }
 
 impl Session {
@@ -185,7 +263,67 @@ impl Session {
             next_sequence: 1,
             stopping: false,
             broken: false,
+            paging: [None; MAX_SCANOUTS],
+            lists: [None; MAX_SCANOUTS],
+            set: [None; MAX_SCANOUTS],
         })
+    }
+
+    /// Whether `scanout` has a finished mode list: a driver that sent one
+    /// is the only kind told `SET_MODE`.
+    #[must_use]
+    pub fn has_list(&self, scanout: u32) -> bool {
+        self.lists
+            .get(scanout as usize)
+            .is_some_and(Option::is_some)
+    }
+
+    /// `SET_MODE` `scanout` to `timing`, which must be in `list`, the glue's
+    /// copy of the scanout's last finished list. `Ok(None)` when the
+    /// scanout runs that mode already, as far as it was told.
+    ///
+    /// # Errors
+    ///
+    /// [`RequestError::Mode`] for a scanout without a finished list, a
+    /// `list` that is not the one the driver sent, or a timing it does not
+    /// hold; the conversation is unchanged.
+    pub fn set_mode(
+        &mut self,
+        scanout: u32,
+        timing: Timing,
+        list: &[Listed],
+    ) -> Result<Option<Message>, RequestError> {
+        self.open()?;
+        let index = scanout as usize;
+        if index >= self.scanouts {
+            return Err(RequestError::NoSuchScanout);
+        }
+        let held = self.lists.get(index).copied().flatten();
+        if held != Some(list_hash(list)) || !list.iter().any(|listed| listed.timing == timing) {
+            return Err(RequestError::Mode);
+        }
+        let told = hash_listed(
+            HASH_START,
+            &Listed {
+                timing,
+                preferred: false,
+            },
+        );
+        let set = self.set.get_mut(index).ok_or(RequestError::NoSuchScanout)?;
+        if *set == Some(told) {
+            return Ok(None);
+        }
+        *set = Some(told);
+        Ok(Some(Message::SetMode { scanout, timing }))
+    }
+
+    /// Forget the mode `scanout` was last told, so that the next
+    /// [`Session::set_mode`] tells it again: the driver refused the flush
+    /// that followed it, and runs whatever it ran before.
+    pub fn mode_refused(&mut self, scanout: u32) {
+        if let Some(set) = self.set.get_mut(scanout as usize) {
+            *set = None;
+        }
     }
 
     /// The scanouts' preferred modes, as the driver reported them.
@@ -448,8 +586,91 @@ impl Session {
             Message::Edid(edid) if (edid.scanout as usize) < self.scanouts => Ok(Event::Edid {
                 scanout: edid.scanout,
             }),
+            Message::ModeList(page) => self.on_mode_list(&page),
             _ => Err(self.violation()),
         }
+    }
+
+    /// A page of a mode list, as `docs/DISPLAY.md` §9.2 has them: a scanout
+    /// the card has; a total of 1 to [`MAX_LISTED_MODES`]; 1 to
+    /// [`MODES_A_PAGE`] entries, each a mode at a refresh a display can
+    /// have; a first page at 0 -- which discards a list half sent -- and
+    /// every other where the last one ended, of the same total, and none
+    /// past it; and exactly one preferred entry once the list is finished.
+    fn on_mode_list(&mut self, page: &ModePage) -> Result<Event, Refusal> {
+        let index = page.scanout as usize;
+        let count = page.count as usize;
+        let fits = index < self.scanouts
+            && (1..=MAX_LISTED_MODES).contains(&(page.total as usize))
+            && (1..=MODES_A_PAGE).contains(&count)
+            && page
+                .first
+                .checked_add(page.count)
+                .is_some_and(|end| end <= page.total)
+            && page
+                .as_slice()
+                .iter()
+                .all(|listed| listable(&listed.timing));
+        if !fits {
+            return Err(self.violation());
+        }
+        let starts = page.first == 0;
+        // Both below 256: the checks above bound them by 64 and 24.
+        let (Ok(first), Ok(total), Ok(added)) = (
+            u8::try_from(page.first),
+            u8::try_from(page.total),
+            u8::try_from(page.count),
+        ) else {
+            return Err(self.violation());
+        };
+        let before = if starts {
+            Paging {
+                next: 0,
+                total,
+                preferred: 0,
+                hash: HASH_START,
+            }
+        } else {
+            match self.paging.get(index).copied().flatten() {
+                Some(paging) if paging.next == first && paging.total == total => paging,
+                _ => return Err(self.violation()),
+            }
+        };
+        let preferred = page
+            .as_slice()
+            .iter()
+            .filter(|listed| listed.preferred)
+            .count();
+        let paging = Paging {
+            next: first.saturating_add(added),
+            total,
+            preferred: before
+                .preferred
+                .saturating_add(u8::try_from(preferred).unwrap_or(u8::MAX)),
+            hash: page.as_slice().iter().fold(before.hash, hash_listed),
+        };
+        let finishes = page.finishes();
+        if paging.preferred > 1 || (finishes && paging.preferred != 1) {
+            return Err(self.violation());
+        }
+        if finishes {
+            if let Some(slot) = self.paging.get_mut(index) {
+                *slot = None;
+            }
+            if let Some(slot) = self.lists.get_mut(index) {
+                *slot = Some(paging.hash);
+            }
+            // A new list may not hold the mode last set, and the driver
+            // judges SET_MODE by its own list: tell it again.
+            self.mode_refused(page.scanout);
+        } else if let Some(slot) = self.paging.get_mut(index) {
+            *slot = Some(paging);
+        }
+        Ok(Event::ModeList {
+            scanout: page.scanout,
+            starts,
+            finishes,
+        })
     }
 
     fn on_modes(&mut self, modes: [ScanoutMode; MAX_SCANOUTS]) -> Result<Event, Refusal> {

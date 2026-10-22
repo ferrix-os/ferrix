@@ -635,6 +635,12 @@ fn listed_modes(width: u32, height: u32, refresh_mhz: u32) -> Vec<ModeInfo> {
     modes
 }
 
+/// A timing as DRM has a mode, not preferred: for the boot check's
+/// made-up `SETCRTC` requests.
+pub(crate) fn mode_info(timing: &Timing) -> ModeInfo {
+    mode_of(timing, false)
+}
+
 /// A mode a card listed, as DRM has it: its own timing, `preferred` for the
 /// one the card runs from the start.
 fn mode_of(timing: &Timing, preferred: bool) -> ModeInfo {
@@ -1539,6 +1545,20 @@ pub(crate) const fn connector_type(hdmi: bool) -> u32 {
 /// preferred size at its display's refresh and at the offered ones, and the
 /// standard sizes, on a virtual card, which shows any.
 fn modes_of(card: &Card, head: usize) -> Vec<ModeInfo> {
+    // A head whose driver listed its modes lists exactly those, the
+    // preferred one marked (`docs/DISPLAY.md` §9.3).
+    if card.has_list(head) {
+        let connected = card.modes().get(head).is_some_and(|mode| mode.enabled);
+        let mut list = Vec::new();
+        if !connected || !super::reserve_list(&mut list) {
+            return Vec::new();
+        }
+        card.list_into(head, &mut list);
+        return list
+            .iter()
+            .map(|listed| mode_of(&listed.timing, listed.preferred))
+            .collect();
+    }
     card.modes()
         .get(head)
         .copied()
@@ -1924,6 +1944,7 @@ fn set_crtc(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Errno
     let timings = file.card.timings();
     let size = (crtc.mode.hdisplay, crtc.mode.vdisplay);
     if head == 0
+        && !file.card.has_list(head)
         && !timings.is_empty()
         && !timings
             .iter()
@@ -1931,6 +1952,26 @@ fn set_crtc(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Errno
     {
         return Err(Errno::EINVAL);
     }
+    // A head whose driver sent its list: only a listed mode, and the listed
+    // timing is what the driver is told and `GETCRTC` reports, never the
+    // request's own numbers (`docs/DISPLAY.md` §9.3).
+    let mut mode = crtc.mode;
+    let mut list = Vec::new();
+    let listed = if file.card.has_list(head) {
+        if !super::reserve_list(&mut list) {
+            return Err(Errno::ENOMEM);
+        }
+        file.card.list_into(head, &mut list);
+        let timing =
+            ferrix_displayctl::modes::listed_match(&list, &crtc.mode).ok_or(Errno::EINVAL)?;
+        let preferred = list
+            .iter()
+            .any(|listed| listed.timing == timing && listed.preferred);
+        mode = mode_of(&timing, preferred);
+        Some(timing)
+    } else {
+        None
+    };
     let fb = if crtc.fb_id == u32::MAX {
         file.state
             .lock()
@@ -1941,9 +1982,33 @@ fn set_crtc(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Errno
     } else {
         crtc.fb_id
     };
-    // A new mode on the framebuffer already shown is set again.
-    show(file, head, fb, crtc.mode, true)?;
-    Ok(0)
+    let Some(timing) = listed else {
+        // A new mode on the framebuffer already shown is set again.
+        show(file, head, fb, mode, true)?;
+        return Ok(0);
+    };
+    let before = file.state.lock().shown.get(&head).copied();
+    let told = file
+        .card
+        .set_mode(head, timing, &list)
+        .map_err(card_error)?;
+    let shown = show(file, head, fb, mode, true);
+    if told && shown.is_err() {
+        // The driver runs what it ran before: it is told again next time,
+        // and `GETCRTC` keeps the mode it had (the consultant's condition 4,
+        // ledger 3117).
+        file.card.mode_refused(head);
+        let mut state = file.state.lock();
+        match before {
+            Some(was) => {
+                let _ = state.shown.insert(head, was);
+            }
+            None => {
+                let _ = state.shown.remove(&head);
+            }
+        }
+    }
+    shown.map(|()| 0)
 }
 
 /// The scanout number of a head, which is its index: the card's connectors

@@ -1142,6 +1142,23 @@ where
         }
     }
 
+    /// Copy the EDID a `GET_EDID` answered with -- `answer`, the outcome
+    /// [`Driver::take_done`] last handed back -- into `out`, and say how
+    /// many bytes it is: 0 for a refusal or an answer that is not an
+    /// EDID's. The bytes are the device's, read and never trusted; the
+    /// mode list made of them checks them (`ferrix_displayctl::edid::modes`).
+    #[must_use]
+    pub fn edid_bytes(&self, answer: &Result<Response, Refusal>, out: &mut [u8]) -> usize {
+        let Ok(Response::Edid { len }) = *answer else {
+            return 0;
+        };
+        let Some(bytes) = out.get_mut(..len.min(gpu::EDID_MAX_BYTES)) else {
+            return 0;
+        };
+        self.read_response(gpu::EDID_AT, bytes);
+        bytes.len()
+    }
+
     /// How many frames a second the display behind a `GET_EDID` shows, in
     /// millihertz, from `answer` -- the outcome [`Driver::take_done`] last
     /// handed back -- and the EDID it left in the response: what its
