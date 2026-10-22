@@ -127,6 +127,9 @@ pub(crate) fn address(pipe: &std::fs::File, patience: Duration) -> Option<String
         )]
         // SAFETY: as the reason says.
         let ready = unsafe { libc::poll(&raw mut polled, 1, millis) };
+        if ready < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
         if ready <= 0 {
             return None;
         }

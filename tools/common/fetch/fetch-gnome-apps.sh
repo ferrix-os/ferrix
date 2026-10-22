@@ -38,7 +38,7 @@
 # Writes $FERRIX_GNOME_APPS_VOLUME/tree, gnome-apps.img beside it and,
 # once both are whole, gnome-apps.stamp (default
 # ~/.local/share/ferrix/gnome-apps). Needs curl, sha256sum, dpkg-deb,
-# readelf, python3 and mkfs.btrfs; no root.
+# readelf, python3, cc, mkfs.btrfs and btrfs; no root.
 #
 # Usage: tools/common/fetch/fetch-gnome-apps.sh
 
@@ -255,7 +255,7 @@ debs=(
 
 say() { echo "fetch-gnome-apps: $*" >&2; }
 
-for tool in curl sha256sum dpkg-deb readelf python3 mkfs.btrfs glib-compile-schemas; do
+for tool in curl sha256sum dpkg-deb readelf python3 cc mkfs.btrfs btrfs glib-compile-schemas; do
     command -v "$tool" > /dev/null || { say "$tool is not installed"; exit 1; }
 done
 
@@ -440,6 +440,42 @@ size=$(( $(du -sm "$tree" | cut -f1) + 256 ))
 image="$out/gnome-apps.img"
 rm -f "$image"
 truncate -s "${size}M" "$image"
-mkfs.btrfs -q --rootdir "$tree" "$image"
+chmod 0755 "$tree"
+# Every file root's on the volume (the certification consultant's A1,
+# ledger line 3137): mkfs.btrfs --rootdir copies the owner it reads, which
+# is this machine's user -- uid 1000, the guest's `ferrix` -- and this
+# host refuses an unprivileged user namespace (`unshare -r`) and fakeroot
+# cannot reach glibc's own fstatat inside nftw. So mkfs.btrfs is given a
+# copy of each file's stat with uid and gid 0, by a preloaded nftw that
+# wraps its callback, and the image is then read back to prove it.
+shim=$(mktemp -d)
+trap 'rm -rf "$shim"' EXIT
+cat > "$shim/as-root.c" <<'C'
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <sys/stat.h>
+struct FTW;
+typedef int (*walker)(const char *, const struct stat *, int, struct FTW *);
+static walker user;
+static int as_root(const char *path, const struct stat *st, int flag, struct FTW *ftw) {
+    struct stat copy = *st;
+    copy.st_uid = 0;
+    copy.st_gid = 0;
+    return user(path, &copy, flag, ftw);
+}
+static int walk(const char *name, const char *dir, walker fn, int fds, int flags) {
+    int (*real)(const char *, walker, int, int) = (int (*)(const char *, walker, int, int))dlsym(RTLD_NEXT, name);
+    user = fn;
+    return real(dir, as_root, fds, flags);
+}
+int nftw(const char *dir, walker fn, int fds, int flags) { return walk("nftw", dir, fn, fds, flags); }
+int nftw64(const char *dir, walker fn, int fds, int flags) { return walk("nftw64", dir, fn, fds, flags); }
+C
+cc -shared -fPIC -O1 -o "$shim/as-root.so" "$shim/as-root.c" -ldl
+LD_PRELOAD="$shim/as-root.so" mkfs.btrfs -q --rootdir "$tree" "$image"
+owners=$(btrfs inspect-internal dump-tree -t fs "$image" 2> /dev/null \
+    | sed -n 's/.* uid \([0-9]*\) gid \([0-9]*\) .*/\1:\2/p' | sort | uniq -c)
+[ "$(echo "$owners" | awk '{ print $2 }')" = "0:0" ] \
+    || { say "the volume's files are not all root's: $owners"; rm -f "$image"; exit 1; }
 echo "${#debs[@]} packages, $SNAPSHOT_DEBIAN $SNAPSHOT_SECURITY" > "$out/gnome-apps.stamp"
 echo "gnome-apps volume: $image (${size} MiB, ${#debs[@]} Debian 13 packages), unpacked in $tree"

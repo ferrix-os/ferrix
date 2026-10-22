@@ -167,8 +167,11 @@ leaves the desktop running as root.
   (`docs/GNOME.md`, stage G1). `sessiond --session-bus` starts the
   session's bus as the account, beside the compositor in
   `session-N.scope` and under the same E1 and E2 rules (§6.4): the bus and
-  every service it starts are the user's own code, inside the session's
-  scope, and end with it. Like any program of the user's, a service can
+  every service it starts are the user's own code, and what stays in the
+  session's scope ends with it. A program of the user's, a bus-started
+  service included, may move itself into a scope of its own under its
+  slice and outlive the session, as any program of the user's may (§6.4,
+  *What it leaves*, E6). Like any program of the user's, a service can
   speak for the user to the others on the bus; nothing here defends one
   of the user's programs from another, and the bus holds no credential and
   reaches no seat device. There is no system bus.

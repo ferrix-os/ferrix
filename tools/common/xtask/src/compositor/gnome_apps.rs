@@ -36,6 +36,8 @@
 //!   `unix:path=/run/user/1000/bus`, and the socket being `ferrix`'s there;
 //! * `dbus-daemon` running as `ferrix` on that address and no
 //!   `--system` one, and no system bus socket;
+//! * the volume's files root's: its `dbus-daemon` `0 0 755`, and a write to
+//!   it by `ferrix` refused;
 //! * the app running as `ferrix`, connected to the bus -- a connection the
 //!   bus says is `ferrix`'s and the app's pid -- and its window -- class
 //!   `org.gnome.Adwaita1.Demo` -- drawn: [`DRAWN_COLOURS`] colours or more
@@ -104,6 +106,12 @@ done
 for p in $(named adwaita-1-demo); do say "process adwaita-1-demo uid $(uid_of $p) pid $p"; done
 say "bus socket: $(stat -c '%u %F' $XDG_RUNTIME_DIR/bus 2>&1) at $XDG_RUNTIME_DIR/bus"
 say "system bus socket: $(ls /run/dbus/system_bus_socket 2>&1)"
+say "daemon file: $(stat -c '%u %g %a' /data/usr/bin/dbus-daemon)"
+if ( : >> /data/usr/bin/dbus-daemon ) 2>/dev/null; then
+    say "write by ferrix: allowed"
+else
+    say "write by ferrix: refused"
+fi
 names=$(/data/usr/bin/dbus-send --session --print-reply --dest=org.freedesktop.DBus / \
     org.freedesktop.DBus.ListNames 2>&1 | grep -o '"[^"]*"' | tr '\n' ' ')
 say "bus names: $names"
@@ -430,6 +438,20 @@ fn wrong_before_end(lines: &[String]) -> Option<String> {
             ));
         }
     }
+    // The volume's files root's (the consultant's A1, ledger 3137): the
+    // daemon root's and `ferrix` refused a write to it.
+    match said(lines, "daemon file: ") {
+        Some("0 0 755") => {}
+        other => {
+            return Some(format!(
+                "the volume's dbus-daemon is not root's 0755: {}",
+                other.unwrap_or("not said")
+            ));
+        }
+    }
+    if said(lines, "write by ferrix: ") != Some("refused") {
+        return Some("ferrix could write the volume's dbus-daemon".to_owned());
+    }
     match said(lines, "system bus socket: ") {
         Some(answer) if answer.contains("No such file") => {}
         other => {
@@ -573,6 +595,8 @@ mod tests {
   9.0 | gnome-gate: process adwaita-1-demo uid 1000 pid 45
   9.0 | gnome-gate: bus socket: 1000 socket at /run/user/1000/bus
   9.0 | gnome-gate: system bus socket: ls: /run/dbus/system_bus_socket: No such file or directory
+  9.0 | gnome-gate: daemon file: 0 0 755
+  9.0 | gnome-gate: write by ferrix: refused
   9.0 | gnome-gate: bus names: \"org.freedesktop.DBus\" \":1.0\" \":1.1\"
   9.0 | gnome-gate: bus connection :1.0 uid 1000 pid 45
   9.0 | gnome-gate: bus connection :1.1 uid  pid
@@ -599,6 +623,8 @@ mod tests {
                 "process adwaita-1-demo uid 0",
             ),
             ("bus socket: 1000 socket", "bus socket: 0 socket"),
+            ("daemon file: 0 0 755", "daemon file: 1000 1000 755"),
+            ("write by ferrix: refused", "write by ferrix: allowed"),
             (
                 "ls: /run/dbus/system_bus_socket: No such file or directory",
                 "/run/dbus/system_bus_socket",

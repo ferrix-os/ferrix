@@ -473,10 +473,13 @@ fn gated(
 /// the init refuses is not a session (§6.4): none is started, so the
 /// session's end may rely on the scope.
 ///
-/// The bus is forked first, before the compositor's descriptors exist, and
-/// let exec first; its address is read before the compositor is let exec,
-/// for at most [`bus::ADDRESS_PATIENCE`]. A bus whose fork fails, or that
-/// prints no address, is said, and the session goes on without one.
+/// The bus is forked first and let exec first. The compositor's two
+/// socket pairs exist by then (`run` makes them), close-on-exec like every
+/// descriptor `sessiond` holds, so the bus's exec drops them; only its
+/// address pipe is moved to a place that survives it. Its address is read
+/// before the compositor is let exec, for at most
+/// [`bus::ADDRESS_PATIENCE`]. A bus whose fork fails, or that prints no
+/// address, is said, and the session goes on without one.
 fn start(
     account: &Account,
     program: &[String],

@@ -434,7 +434,13 @@ conditions of ledger lines 3100 and 3123:
   listing or in the tree, any file capability, `dbus-daemon-launch-helper`
   anywhere, and any maintainer script that would set one; it writes GLib's
   schemas, gdk-pixbuf's loader list and the MIME database as the triggers
-  would. A volume of its own, with its own glibc; merging it into
+  would. Every file on the volume is root's: `mkfs.btrfs --rootdir` copies
+  the owner it reads -- this machine's user, uid 1000, the guest's
+  `ferrix` (Chrome's volume has the same, the consultant's L3) -- so it
+  is given each file's stat as root's through a preloaded `nftw`, and the
+  image is read back with `btrfs inspect-internal dump-tree` to prove
+  4865 of 4865 inodes `0:0` (the consultant's A1, ledger 3137). A volume
+  of its own, with its own glibc; merging it into
   `--everything` is the next step and needs no change of rule.
 * **`/data` `nosuid,nodev`.** `data-nosuid.service`, a root oneshot,
   remounts it and fails unless `/proc/mounts` says both; the compositor's
@@ -453,9 +459,11 @@ conditions of ledger lines 3100 and 3123:
   `ferrix`, the volume at `/data`; required: `/data` `nosuid,nodev`, the bus
   `ferrix`'s at its socket and no system bus, `adwaita-1-demo` `ferrix`'s
   and on the bus, its window drawn, and after the compositor is killed
-  neither the bus nor the app left. Its GL is Mesa's software rasterizer:
-  QEMU cannot screendump a virgl scanout, and GL on virgl is
-  `test-display --gl`'s. `test-compositor --boot session-end` starts a
+  neither the bus nor the app left; the volume's files root's
+  (`dbus-daemon` `0 0 755`, a write by `ferrix` refused). It boots without
+  the 3D card, so GTK draws with Mesa's software rasterizer: QEMU cannot
+  screendump a virgl scanout. GTK on virgl with the session bus is shown
+  only by the manual run of §2; `test-display --gl` carries gaps 1 and 2. `test-compositor --boot session-end` starts a
   stand-in bus on every architecture and requires it `ferrix`'s, with only
   its address pipe, beating until the session's end and not after.
 * **Not yet**: the apps a person wants (GNOME Text Editor, Files,
