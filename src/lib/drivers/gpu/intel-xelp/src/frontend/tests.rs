@@ -174,6 +174,8 @@ struct FakeBackend {
     vms: Vec<u32>,
     destroyed_vms: Vec<u32>,
     binds: Vec<(u32, u64, u32, u64)>,
+    /// The PAT index of each of [`FakeBackend::binds`], in order.
+    bind_pats: Vec<u8>,
     unbinds: Vec<(u32, u64, u64)>,
     contexts: Vec<(u32, u32, Engine)>,
     destroyed_contexts: Vec<u32>,
@@ -247,6 +249,7 @@ impl Backend for FakeBackend {
             }
         }
         self.binds.push((vm.0, address, memory.id, bytes));
+        self.bind_pats.push(pat_index);
         Ok(())
     }
 
@@ -1243,6 +1246,41 @@ fn execbuffer_binds_and_submits() {
             1,
             "one hardware context"
         );
+    });
+}
+
+/// The GPU's caching of an object is i915's on an LLC part: a new object is
+/// `I915_CACHE_LLC` (`i915_gem_shmem.c`'s `shmem_object_init`, `HAS_LLC`),
+/// bound at `TGL_CACHELEVEL`'s PAT index 0 (WB, through the LLC, coherent
+/// with the CPU's write-back mapping), and `SET_CACHING` `NONE` binds at 3
+/// (UC), `DISPLAY` at 2 (WT).
+#[test]
+fn execbuffer_binds_at_the_objects_pat_index() {
+    big(|| {
+        let mut rig = Rig::new();
+        let cached = rig.create(4096);
+        let uncached = rig.create(4096);
+        let display = rig.create(4096);
+        assert_eq!(set_caching(&mut rig, uncached, gem::CACHING_NONE), 0);
+        assert_eq!(set_caching(&mut rig, display, gem::CACHING_DISPLAY), 0);
+        let objects = [
+            (cached, 0x10_0000, PINNED),
+            (uncached, 0x20_0000, PINNED),
+            (display, 0x30_0000, PINNED),
+        ];
+        let (status, _) = rig.exec(ioctl::GEM_EXECBUFFER2, &objects, 0, &[], 0);
+        assert_eq!(status, 0);
+        let backend = &rig.frontend.backend;
+        let pat_at = |address: u64| {
+            backend
+                .binds
+                .iter()
+                .position(|bind| bind.1 == address)
+                .map(|i| backend.bind_pats[i])
+        };
+        assert_eq!(pat_at(0x10_0000), Some(0));
+        assert_eq!(pat_at(0x20_0000), Some(3));
+        assert_eq!(pat_at(0x30_0000), Some(2));
     });
 }
 
