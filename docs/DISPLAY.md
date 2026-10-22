@@ -1681,7 +1681,8 @@ entry a request names, and sends that entry back.
   page at 0 (which discards a list half sent) and each later one where the
   last ended, one preferred entry in a finished list -- and keeps, a
   scanout, where the next page starts and a hash of the finished list, not
-  the list: a `Session` is made on a kernel stack (1,008 bytes before this,
+  the list -- so `SET_MODE` is held to the caller's copy of the list by that
+  hash, which refuses a replaced list but is not a proof of equality: a `Session` is made on a kernel stack (1,008 bytes before this,
   1,904 after; `size_of::<Message>()` 736 before and after).
 * **Where a list lives.** Half-finished pages collect in the card task's
   own vectors, outside every lock, each reserved to 64 entries with
@@ -1842,5 +1843,10 @@ countermeasure. The certification consultant reviewed the design before any
 kernel code: **OK IF (1)-(10)**, ledger line 3117 (conditions 3118, rulings
 3119, lesser points 3120), and ruled that no requirement ids are needed
 (the load ring's display evidence carries no `Verifies` tags; ledger 3108(a)
-the same for the scanout branch). The final review of the branch is
-recorded below when it is given.
+the same for the scanout branch). Its final check of the branch
+(831ee7037): **OK IF (1)-(3)**, ledger line 3167 -- the negative controls
+through `fleet/gate.sh control` (the by-hand runs are not citable), a rebase
+onto `main` with the coverage carried and FX-1015 checked free there, and a
+take message naming 3117, 3167, the customer's order, the rows and the
+controls' INDEX lines. The slim-kernel move and the two touches of the item
+(the catalog entry, stage 10's one more call) were accepted.
