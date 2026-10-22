@@ -160,6 +160,8 @@ others.
 | `MOVE` | core → driver | scanout, place; nothing answers it; the same | — |
 | `MODES` | driver → core | each scanout's preferred mode and refresh, as `HELLO` gives them, in `HELLO`'s place; sent unasked when the device's displays change, and nothing answers it (protocol version 6, 2026-09-26; the refresh since 7) | — |
 | `EDID` | driver → core | a scanout, a length (0: none) and up to 512 bytes, so that HELLO stays the longest message: the display's own EDID as the driver read it; nothing answers it, and a file `drm.edid_firmware` names wins over it (protocol version 10, 2026-10-17, §7) | — |
+| `MODE_LIST` | driver → core | a scanout, the list's total (up to 64), the page's first index and count (up to 24) and that many timings, each with a preferred flag; nothing answers it (protocol version 11, 2026-10-22, §9.2) | — |
+| `SET_MODE` | core → driver | a scanout and one timing of its last list, before the `SCANOUT` that first shows at it; nothing answers it (protocol version 11, 2026-10-22, §9.2) | — |
 
 **Each message maps to device commands:**
 
@@ -248,7 +250,7 @@ source is committed this time.
 | `DRM_IOCTL_SET_CLIENT_CAP` | `UNIVERSAL_PLANES` takes 0 or 1 (E4) and changes only what `GETPLANERESOURCES` lists; `ATOMIC` refused with `EOPNOTSUPP`, so clients fall back to legacy; the rest `EINVAL` |
 | `DRM_IOCTL_SET_MASTER`, `DROP_MASTER` | as Linux's: the master asking again 0; another master `EBUSY`; with none, root or an open that was master before takes it, anyone else `EACCES`; `DROP_MASTER` by a non-master `EINVAL` (§2.5) |
 | `MODE_GETRESOURCES` | a CRTC, an encoder and a connector per scanout the driver reported, and the framebuffer ids |
-| `MODE_GETCONNECTOR` | `Virtual-<n>`, connected when the scanout is enabled, the preferred mode from `HELLO` at the refresh the driver reported (60 Hz when it reported none), the same size at 60, 120 and 144 Hz where not listed already, then the standard sizes at 60 Hz; each mode's `clock` is what its refresh takes over its totals and its `vrefresh` what that clock gives |
+| `MODE_GETCONNECTOR` | the connector type the driver named (`Virtual-<n>` where it named none), connected when the scanout is enabled, and since version 11 exactly the modes the driver's `MODE_LIST` gave, its preferred one marked (§9.3); before a list, HELLO's timings or the one size the driver prefers. Until 2026-10-22 the core made up a virtual card's list (the preferred size at 60, 120 and 144 Hz and the standard sizes); virtio-gpu lists those itself now |
 | `MODE_GETENCODER`, `MODE_GETCRTC` | the head's own, each encoder driving the one CRTC of its head |
 | `MODE_CREATE_DUMB`, `MODE_MAP_DUMB`, `MODE_DESTROY_DUMB` | §2.1; `bpp` 32 only |
 | `MODE_ADDFB`, `MODE_ADDFB2`, `MODE_RMFB` | `XRGB8888` only, offsets 0; a framebuffer names one dumb buffer, or one imported buffer; the first `ADDFB2` of a client's buffer attaches it (§8.2) |
@@ -1590,6 +1592,10 @@ a `monitor = , 1280x720@60, auto, 1` line found no such mode and stayed at
   in the core knows which driver it is.
 * **The core lists exactly that** in `GETCONNECTOR`, the preferred one
   flagged as Linux flags it, and lets `SETCRTC` set only a listed mode.
+  It parses no EDID and makes no timing for it: the customer, 2026-10-22,
+  "keep the kernel slim, we need that for certifications". Making the list
+  is the ring-3 drivers' alone (`src/lib/drivers/display/modes`,
+  `ferrix-display-modes`, which the kernel does not link).
 * **hyprix changes modes while it runs**: on `hyprctl reload` when a
   `monitor =` line now asks for another mode, on `hyprctl keyword monitor`,
   and lists `availableModes` in `hyprctl monitors`, as Hyprland does.
@@ -1598,6 +1604,14 @@ a `monitor = , 1280x720@60, auto, 1` line found no such mode and stayed at
   scaling, which is what Hyprland's Xwayland does (§9.6).
 
 ### 9.2 The protocol (displayctl version 11)
+
+A driver's EDID and `drm.edid_firmware` (§7): the file a command line names
+still wins for the connector's `EDID` property, as on Linux, but a driver
+makes its mode list from the display's own EDID or from its own knowledge
+(NVKMS's validated modes), so with an override the property and the list
+can disagree where Linux would take the modes from the file. That is kept on
+purpose -- the kernel does not read modes out of a file -- and said here
+(the consultant's lesser point 1, ledger 3117).
 
 ```text
 MODE_LIST  driver -> core, 696 bytes, not answered
@@ -1627,7 +1641,8 @@ SET_MODE   core -> driver, 40 bytes, not answered
 * **What the driver puts in it.** Every mode it can show on that display:
   the modes in the display's EDID (detailed timings, established timings,
   standard timings, the Established Timings III descriptor and the CTA-861
-  extension's video and detailed timings), filtered by the driver's own
+  extension's video and detailed timings, and `DisplayID` type I timings),
+  timed as Linux's `drm_edid.c` times them, filtered by the driver's own
   limits (pixel clock, the engine's size limits, what the display's range
   limits say), plus modes it can show without the display ever running them
   -- *scaled* modes, below. The display's preferred mode is flagged
@@ -1657,127 +1672,175 @@ SET_MODE   core -> driver, 40 bytes, not answered
 
 ### 9.3 The core (`src/kernel/src/interfaces/display`)
 
-* `Card` keeps each head's finished list (`listed: SpinLock<Vec<...>>`, one
-  `Vec` a head, built outside the lock and swapped in), and the timing it
-  last sent each head (`set: [Option<Timing>; MAX_SCANOUTS]`). The session
-  (`ferrix_displayctl::session`, pure and host-tested) checks every page as
-  §9.2 says and tracks which page each scanout expects next, in a fixed
-  array: it allocates nothing.
-* `GETCONNECTOR` on a head with a list lists exactly it, each entry as
-  `mode_of` already turns a HELLO timing into a `drm_mode_modeinfo`, the
-  preferred one `DRM_MODE_TYPE_PREFERRED`. A head without one is answered as
-  before: HELLO's timings on head 0, or the virtual card's sizes. The
-  connector counts as changed (`EVENT_FERRIX_CONNECTORS`) when a list takes
-  effect, as after `MODES`.
-* `SETCRTC` on a head with a list takes the first listed timing equal to the
-  request's -- the size, then the clock, totals, sync spans and sync
-  polarity -- else the first listed of the same size whose `vrefresh` is
-  the request's; a mode it does not list is `EINVAL`, as on a board's HDMI
-  output today (Linux's `mode_valid` refuses in the same place). Then
-  `SET_MODE` if the head's mode changes, then `SCANOUT` and `FLUSH` as
-  before. All of it under the card's modeset lock, which the master check
-  already holds (§2.5): `SET_MODE` is in the master's class with `SETCRTC`,
-  and no other call sends it. `PAGE_FLIP` never changes the mode.
-* The boot log gains one line a list: `display  card0 scanout 0: 23 modes
-  listed, 1920x1080 at 60.000 Hz preferred`.
-* What the core does not do: parse an EDID for modes (the driver's job:
-  only it knows its limits), or let a program set a timing nobody listed.
+What the kernel does with a list, and nothing more: it holds it, finds the
+entry a request names, and sends that entry back.
+
+* **The pages.** `ferrix_displayctl::session` (pure, host-tested, fuzzed)
+  checks every page as §9.2 says -- a scanout the card has, a total of 1 to
+  64, 1 to 24 entries each a mode at a refresh no faster than 1 kHz, a first
+  page at 0 (which discards a list half sent) and each later one where the
+  last ended, one preferred entry in a finished list -- and keeps, a
+  scanout, where the next page starts and a hash of the finished list, not
+  the list: a `Session` is made on a kernel stack (1,008 bytes before this,
+  1,904 after; `size_of::<Message>()` 736 before and after).
+* **Where a list lives.** Half-finished pages collect in the card task's
+  own vectors, outside every lock, each reserved to 64 entries with
+  `try_reserve` (no memory stops the card, never a panic). A finished list
+  is swapped into the card's state under its spin lock with `mem::swap`;
+  the vector it replaces comes back to the task and is cleared there. A
+  reader copies a list out into a vector it reserved before taking the
+  lock. Nothing is allocated or freed under the lock; at most 64 entries of
+  28 bytes a head, twice while the next is built, and 16 heads a card
+  (`docs/certification/MEMORY-AND-TIMING.md`).
+* **`GETCONNECTOR`** on a head with a list lists exactly it, each entry as
+  `mode_of` turns a timing into a `drm_mode_modeinfo`, the preferred one
+  `DRM_MODE_TYPE_PREFERRED`. A head without one lists HELLO's timings (the
+  DK1's LTDC, head 0) or the one size its driver prefers. The made-up
+  virtual list the kernel had (`STANDARD_SIZES`, `OFFERED_REFRESHES_HZ`,
+  §2.3) is gone: virtio-gpu lists those sizes itself. A finished list counts
+  as a connector change (`EVENT_FERRIX_CONNECTORS`).
+* **`SETCRTC`** on a head with a list takes the entry
+  `ferrix_displayctl::listed::listed_match` finds -- one equal to the request
+  in size, clock, totals, sync spans and polarity, else the first of its
+  size whose rounded refresh is the request's `vrefresh` -- and is `EINVAL`
+  for none, as Linux's `mode_valid` refuses. The listed entry, never the
+  request's bytes, is what `SET_MODE` carries and `GETCRTC` reports. All of
+  it under the card's modeset lock, which the master check holds already
+  (§2.5): only the master's `SETCRTC` sends `SET_MODE`.
+* **A refused mode.** The session remembers the mode it last told each
+  scanout and sends `SET_MODE` only when it changes. When the `FLUSH` after
+  a `SET_MODE` comes back failed, `SETCRTC` is `EIO`, `GETCRTC` keeps the
+  mode it had, and the session forgets what it told, so the next `SETCRTC`
+  tells the driver again; a new list and a new HELLO forget it too (the
+  consultant's condition 4).
+* **A race that is harmless.** The card's task takes no modeset lock, so a
+  new `MODE_LIST` can replace the list between `SETCRTC`'s match and its
+  `SET_MODE`. The session then refuses the `SET_MODE` (its hash is of the
+  new list) and `SETCRTC` is `EINVAL`; and a driver judges a `SET_MODE`
+  against its own list anyway.
+* **The boot line**: `display  card0 scanout 0: 27 modes listed, 1024x768
+  at 74.993 Hz preferred` (QEMU at `xres=1024`).
+* **Stage 10's check** (`display::check::modes`, its line `display  mode
+  lists: 4 SETCRTC requests matched as listed or refused, 3 pages taken or
+  refused`, FX-1015 when it fails): the match against a made-up list (an
+  exact entry taken, a listed size and refresh with other numbers taken as
+  the listed entry, a listed size at another refresh refused, an unlisted
+  size refused), a list in two pages taken, and a list with two preferred
+  entries refused.
+
+**Kernel lines (the customer's figure, against `main` 08b0e1380).** `git
+diff --numstat` over `src/kernel`: 412 added, 71 removed, 341 net, about a
+fifth of them comments. Each change and why:
+
+| File | + / - | What, and why it is the kernel's |
+|---|---|---|
+| `interfaces/display/mod.rs` | 165 / 3 | Holding each head's list (`State::lists`), taking pages in the card task, `SET_MODE` under the modeset lock, the refused-mode reset, the boot line: card0 is the one place a program's request meets the driver, so carrying the list and the chosen entry has to be here |
+| `interfaces/display/drm.rs` | 74 / 68 | `GETCONNECTOR` lists the driver's list; `SETCRTC` accepts only a listed entry and restores `GETCRTC` on a refusal; the made-up virtual list removed (-60) |
+| `interfaces/display/check.rs` | 140 / 0 | The stage 10 self-check the consultant required (condition 6) |
+| `panic/catalog.rs`, `stages_check.rs` | 33 / 0 | FX-1015 and the check's line |
+
+`ferrix-displayctl`, which the kernel links, gains the two messages and
+their strict decoding (`message.rs`, 206 added), the session's page checks
+(`session.rs`, 223) and `listed.rs` (54), each with host tests; the EDID
+parser, CVT and the tables went to `ferrix-display-modes`, which only the
+drivers link.
 
 ### 9.4 The drivers
 
-* **virtio-gpu.** Its list: the display-info size at the EDID's refresh,
-  preferred; every mode of QEMU's EDID (`ferrix_displayctl::edid::modes`,
-  §9.2's sources); then, since a virtio-gpu shows any size it is given a
-  scanout of, what the core listed for it before (§2.3): the preferred size
-  at 60, 120 and 144 Hz and the standard sizes at 60. Sent after READY and
-  after every `MODES`. `SET_MODE` is checked against the list and kept:
-  `SET_SCANOUT`'s rectangle already makes QEMU's console that size.
-* **NVIDIA (`nvrm`, the RTX 3060).** NVKMS validates every mode of the
-  monitor (`getDisplayMode`, `valid`), as nvidia-drm's connector does on
-  Linux; `kms.c` hands all valid ones (up to 64, the running one first),
-  and nvos sends them as `MODE_LIST` with NVKMS's preferred one flagged.
-  `SET_MODE` is a new event for C: `kms.c` finds the NVKMS mode with that
-  timing, makes a VRAM surface of the new size, applies the mode set
-  (validate, then commit, as `kms_light` does), and frees the old surface;
-  a failure keeps the old mode and makes the next `FLIPPED` say so. The
-  connector type and EDID are as before (displayctl v10).
-* **Intel (the N150).** The display engine is still the firmware's
-  (`docs/INTEL-GPU.md` §4.3): the driver cannot retime the pipe, so its
-  list is the lit plane's mode, preferred, and every standard size smaller
-  than it, scaled. Its connector is named by what drives pipe A:
-  `TRANS_DDI_FUNC_CTL_A`'s mode select (HDMI, DVI, DP), with DP on a panel
-  whose power sequencer is on (`PP_CONTROL`) taken as eDP -- read only, no
-  register written. So the box's monitor is `HDMI-A-1` (or `DP-1`, `eDP-1`)
-  instead of `Virtual-1`. Its EDID (GMBUS or DP AUX) is not read yet.
-* **efifb.** The same scaled list as Intel's, from the same helper: it is
-  the one copying card QEMU can run, so `test-compositor`'s firmware-screen
-  boot is where the scaled path is checked before the N150 runs it.
+* **virtio-gpu.** Its list: every mode of QEMU's EDID (`GET_EDID`) a
+  buffer of `MAX_BUFFER_PAGES` holds (5120x2160 and 4096x2160 do not), then
+  what the core listed for it before: the display-info size at the EDID's
+  refresh, preferred unless the EDID named that size so, at 60, 120 and 144
+  Hz, and the standard sizes at 60. Sent after READY and after every
+  `MODES`. `SET_MODE` needs no device command: `SET_SCANOUT`'s rectangle
+  makes QEMU's console that size. At `xres=1024` it is 27 modes.
+* **NVIDIA (`nvrm`, the RTX 3060).** `kms.c` lists every mode NVKMS
+  validates for the monitor (`getDisplayMode`, `valid`), as nvidia-drm's
+  connector does, the running one first and NVKMS's preferred one marked, at
+  most 64; nvos sends them as `MODE_LIST`. `SET_MODE` is
+  `NVOS_DISPLAY_MODE`: `kms_relight` makes a VRAM surface of the mode's
+  size, applies the mode set (validate, then commit), and only then lets
+  the old surface go; a failure keeps the old one and answers the next
+  `FLUSH` failed. The connector type and EDID are as before (v10).
+* **Intel (the N150).** The pipe stays the firmware's: the list is the lit
+  plane's mode, preferred, and every size of `SCALED_SIZES` inside it, shown
+  by scaling each copied frame into the plane. The connector is named by
+  `TRANS_DDI_FUNC_CTL_A`'s mode select (HDMI, DVI, DisplayPort) and the PCH
+  panel power sequencer's `PP_STATUS` (a panel on makes DisplayPort eDP),
+  read once while pipe A is lit: `HDMI-A-1` and not `Virtual-1`
+  (`docs/INTEL-GPU.md` §4.3). The monitor's EDID is not read yet.
+* **efifb.** The same scaled list and copy as Intel's: the one copying card
+  QEMU runs, so the scaled path is seen there first. By hand, `monitor = ,
+  1024x600@60` on the firmware-screen boot showed the desktop at 1024x600
+  letterboxed on the 1024x768 VGA.
 * **The DK1's LTDC**: unchanged, HELLO's timings (§6).
 
 ### 9.5 hyprix
 
-* `Backend::resize(size)` becomes `set_mode(size, refresh)`: a listed mode
-  by size and nearest refresh, as `Plan::take` chooses at start; new
-  buffers, set, then the old ones let go, as a resize does now (§3).
+* `Backend::resize` takes a refresh, and a screen lists its modes;
+  `compositor_drm::Plan::take` picks the listed mode of a size nearest the
+  refresh asked, to the millihertz.
 * `hyprctl reload` and `hyprctl keyword monitor <rule>` read the monitor
-  rules again (the file's, then the keywords' since, the last that names a
-  monitor winning, `MonitorRule::for_monitor`) and apply what changed:
-  the mode (`preferred` follows the card's preferred mode, `WxH@R` the
-  listed mode nearest it, a mode not listed is said and left alone, as
-  Hyprland falls back), the scale and the position; then the monitors are
-  laid out again, the pointer's bounds and every client's `wl_output` sent
-  again -- what following a resized window already does. Turning a monitor
-  (`transform`) or disabling one still takes a restart, and says so.
-* `hyprctl monitors` lists `availableModes` as Hyprland does
-  (`availableModesForOutput`): `WxH@R.RRHz`, two decimals, the connector's
-  order, space-separated in text and a JSON array.
-* wlr-output-management (`wlr-randr --mode`) sets a listed mode the same
-  way instead of refusing it.
-* Nothing in the frame or scanout path changes: another branch works on
-  direct scanout there (`.claude/worktrees/scanout`).
+  rules again (the file's, then the keywords'; a reload drops the keywords,
+  as Hyprland's does) and apply them to running screens: the mode
+  (`preferred` the card's preferred mode at its refresh, `WxH@R` the listed
+  mode nearest it, `highres` and `highrr` chosen among the listed ones as
+  Hyprland's `applyMonitorRule` chooses), the scale and the position, then
+  the pointer's bounds and every client's `wl_output`. A mode the connector
+  does not list is said and left alone; turning or disabling a monitor
+  still takes a restart, and says so.
+* `hyprctl monitors` prints `availableModes` as `availableModesForOutput`
+  does: `WxH@R.RRHz`, two decimals, space-separated in text, a JSON array.
+* wlr-output-management (`wlr-randr --mode`) still refuses a mode change:
+  not in this landing.
+* Nothing in the frame or scanout path changes (the direct-scanout branch,
+  `.claude/worktrees/scanout`, works there).
 
 ### 9.6 X clients (yserver) and exclusive fullscreen
 
 Hyprland never changes a monitor's mode for an X client. Xwayland lists the
-output's current mode plus a set of smaller *emulated* modes
+output's current mode plus smaller *emulated* modes
 (`xwl_output_get_emulated_modes`), and when a client sets one -- what Wine
-does for a game's exclusive fullscreen -- reports it as the current mode
-and scales the client's fullscreen window to the monitor through
-`wp_viewporter` (`xwl_window_should_enable_viewport`); the compositor's mode
-is untouched. Proton does the same inside Wine (its fullscreen hack), which
-is the path Endfield runs on. So yserver keeps its one RandR mode, the
-compositor's, which now follows the monitor's mode when hyprix changes it,
-and the emulated modes are yserver's to add (a viewport-scaled root window)
-in its own repository: not in this landing, filed as a backlog row. A game
-asking for a mode the monitor really runs gets it from the person's
-`monitor =` line, not from the game.
+does for a game's exclusive fullscreen -- reports it as current and scales
+the client's fullscreen window to the monitor through `wp_viewporter`; the
+compositor's mode is untouched. Proton does the same inside Wine (its
+fullscreen hack), which is the path Endfield runs on. So yserver keeps its
+one RandR output, `WAYLAND-1`, at the compositor's mode, which follows the
+monitor's mode when hyprix changes it; emulated modes are yserver's to add
+in its own repository (backlog row p2-150). A game that wants the monitor
+itself at another mode gets it from the person's `monitor =` line.
 
 ### 9.7 How it is checked
 
-* `ferrix_displayctl`: the pages (order, totals, the preferred count, each
-  refusal), `SET_MODE`'s encoding, `edid::modes` against QEMU's generated
-  EDIDs and two real monitors' (the DELL EDIDs §6's tests already hold),
-  the standard and CVT timings, and the scaled copy's rectangles and pixel
-  map (an integer ratio exact, edges, bars).
-* The kernel's `display::check` (stage 8's boot check, which already
-  exercises the card's pure rules): a list's mode accepted by the `SETCRTC`
-  match and an unlisted one refused.
-* QEMU: `cargo xtask test-display` and `test-boot` on every architecture;
-  `test-compositor` (its `mode` boot asks for 1920x1080 of a card that
-  prefers 1024x768, now from the driver's list); a new `test-compositor
-  --boot modes`: a virtio-gpu with `edid=on`, hyprix started at one mode,
-  then `hyprctl keyword monitor` and `hyprctl reload` each switch it, judged
-  by QMP screendumps of the new size and `hyprctl monitors`'
-  `availableModes`; the firmware-screen boot switched to a scaled mode.
-* By hand: `foot` against the switched desktop (the real-client probe).
-* Hardware (the customer runs these): the N150 box (connector name, the
-  list, a scaled 1280x720 and back) and the RTX 3060 (NVKMS's list and a
-  real mode switch).
+* Host tests: `ferrix-displayctl` (the messages, the session's pages and
+  `SET_MODE`, `listed_match`), `ferrix-display-modes` (QEMU's generated
+  EDIDs at 1920x1080@75 and 5120x2160@60 mode by mode, CVT against VESA's
+  own timings, the list, its sort and pages, the scaling arithmetic), the
+  Intel output decode, nvos's pages, hyprix's `pick_mode`, the IPC's
+  `availableModes`, the config's `highres` and `highrr`.
+* Fuzz: the displayctl target round-trips the new messages, drives the
+  session with arbitrary pages and checks `SET_MODE` only for the list
+  taken, and holds `edid_modes` to at most 64 modes, each a mode, at most
+  one preferred.
+* Boots: `test-display`, `test-boot`, `test-compositor --boot mode`,
+  `--boot modes` (1024x768, then 1920x1080 by `hyprctl keyword monitor`,
+  both judged pixel for pixel, then back by `hyprctl reload`, judged by
+  hyprix's line; `availableModes` must list QEMU's EDID's modes), and
+  `--boot firmware-screen`.
+* Not judged yet: a third picture after the reload. Two windows resized at
+  once a second time show the first window's pixels in the second's place,
+  with or without a mode change (p2-149); the boot gets its picture back
+  when that is fixed.
+* Hardware, the customer's: the N150 (connector name, the list, a scaled
+  1280x720 and back) and the RTX 3060 (NVKMS's list and a real switch).
 
 ### 9.8 Certification
 
-`src/kernel/src/interfaces/display` is in the load ring
-(`certification-item.json`, `load_modules`), and the change adds no
-`unsafe` and no countermeasure. The design went to the certification
-consultant before any kernel code was written; its verdict and conditions
-are recorded below and in its ledger.
+`src/kernel/src/interfaces/display` is in the load ring, which carries no
+assurance claim; the change adds no `unsafe`, no syscall and no
+countermeasure. The certification consultant reviewed the design before any
+kernel code: **OK IF (1)-(10)**, ledger line 3117 (conditions 3118, rulings
+3119, lesser points 3120), and ruled that no requirement ids are needed
+(the load ring's display evidence carries no `Verifies` tags; ledger 3108(a)
+the same for the scanout branch). The final review of the branch is
+recorded below when it is given.
