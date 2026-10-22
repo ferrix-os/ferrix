@@ -1807,7 +1807,7 @@ compositor's mode is untouched. Proton does the same inside Wine (its
 fullscreen hack), which is the path Endfield runs on. So yserver keeps its
 one RandR output, `WAYLAND-1`, at the compositor's mode, which follows the
 monitor's mode when hyprix changes it; emulated modes are yserver's to add
-in its own repository (backlog row p2-150). A game that wants the monitor
+in its own repository (backlog row p2-156). A game that wants the monitor
 itself at another mode gets it from the person's `monitor =` line.
 
 ### 9.7 How it is checked
@@ -1829,7 +1829,7 @@ itself at another mode gets it from the person's `monitor =` line.
   `--boot firmware-screen`.
 * Not judged yet: a third picture after the reload. Two windows resized at
   once a second time show the first window's pixels in the second's place,
-  with or without a mode change (p2-149); the boot gets its picture back
+  with or without a mode change (p2-155); the boot gets its picture back
   when that is fixed.
 * Hardware, the customer's: the N150 (connector name, the list, a scaled
   1280x720 and back) and the RTX 3060 (NVKMS's list and a real switch).

@@ -78,6 +78,13 @@ name = "ferrix-cpio"
 version = "0.1.0"
 
 [[package]]
+name = "ferrix-display-modes"
+version = "0.1.0"
+dependencies = [
+ "ferrix-displayctl",
+]
+
+[[package]]
 name = "ferrix-displayctl"
 version = "0.1.0"
 dependencies = [
@@ -118,6 +125,7 @@ dependencies = [
  "ferrix-btrfs",
  "ferrix-cgroupfs",
  "ferrix-cpio",
+ "ferrix-display-modes",
  "ferrix-displayctl",
  "ferrix-elf",
  "ferrix-fdt",
