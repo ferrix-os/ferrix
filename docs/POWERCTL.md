@@ -45,19 +45,27 @@ hangs, or the kernel's own backstop trips.
 
 This design gives the driver no register `ferrix.vrcurrent` did not
 already write, on no processor it did not write it on, and no higher
-value: 0x601 bits 12:0 on Intel family 6 model 0xBE, at most 32 A and 7 A
-above firmware's, the customer's authorisation for `ferrix.vrcurrent`.
+value -- before this branch's last commit: 0x601 bits 12:0 on Intel family
+6 model 0xBE, at most 32 A and 7 A above firmware's, the customer's
+authorisation for `ferrix.vrcurrent`. The last commit raises the ceiling
+to 48 A and 23 A above firmware's, which (a) below needs.
 Two things the consultant found it does add (ledger 3130, condition 1),
 which need the customer's own words, with their date, here and in the take
 message before it lands:
 
 * **(c) a standing interface** rather than "one N150 run": the word
   `ferrix.powerctl` and its driver stay in the tree;
-* **(a) a higher ceiling**, if the customer wants the 44 A step of §12:
-  48 A absolute and 23 A above firmware's is one constant in the model
-  table (`logic::TABLE`). Until those words are on record the table stays
-  at 32 A / 7 A; the last commit of the branch that raises it is separate,
-  so it can be dropped.
+* **(a) a higher ceiling**, for the 44 A step of §12: 48 A absolute and
+  23 A above firmware's is one constant in the model table
+  (`logic::TABLE`), the branch's last commit alone.
+
+**The customer's words, 2026-10-23**, asked "Power limits (consultant OK
+IF): accept about +500 kernel lines? also retire msrlog (−321 lines)? your
+dated words for a standing interface and for 48 A.", answered verbatim:
+"power limits are ok". They are the authority for both (c) the standing
+interface and (a) the 48 A / 23 A row, so the last commit lands
+(re-review, ledger 3180, condition 1). They say nothing about `ferrix.msrlog`,
+which stays (§11).
 
 Version 1's package power limits (0x610, condition 1 (b)) are not in
 version 2: the box is held by amps, not by PL1/PL2, and the slim kernel
@@ -322,9 +330,8 @@ out, and is offered, not done: the customer asked to keep it.
 ## 12. The box procedure (the customer's)
 
 1. Build from this branch. Boot with `ferrix.powerctl ferrix.msrlog
-   ferrix.power.vr=30,32@60` (the 32 A ceiling), or, once the customer's
-   words for 48 A are in §3 and the last commit is kept,
-   `ferrix.power.vr=30,34,37,40,44@60`. Expect `power: node:`, the
+   ferrix.power.vr=30,34,37,40,44@60` (the 48 A row, the customer's words
+   of 2026-10-23 in §3). Expect `power: node:`, the
    driver's `power: claimed`, then `msr: vrcurrent set 30.000 A (was
    25.000 A)` with the kernel's `power: set 0x601 0xf0 (was 0xc8)`, and one
    step a minute.
@@ -371,4 +378,17 @@ rebase, keeping `Kind::Engine` and `Kind::Power` both in devmgr's
 the rows through `fleet/gate.sh` on the landing hash; coverage carried
 after the final rebase, vrcurrent's dropped anchors listed; this
 section's residual in V-16 (done). The ids were reserved on
-branch `powerctl-reserve` (8180cb1d2), which must land on `main` first.
+branch `powerctl-reserve`, landed on `main` as bb243e114 first.
+2026-10-23, meeting ledger 3180's conditions: (1) the customer's words
+"power limits are ok" (2026-10-23) are in §3 and
+`docs/backlog/DECISIONS.md`, for the standing interface and the 48 A /
+23 A row, which stays; `ferrix.msrlog` is not retired. (2) The branch is
+rebased onto bb243e114; devmgr's `launch_again` list holds `Kind::Engine`
+and `Kind::Power`, and `restarted()` has no `Power`. (3)/(4) the 19
+controls and the rows ran through `fleet/gate.sh` on the landing hash
+(the tags and verdicts are in the take message,
+`fleet/landing-messages/powerctl.txt`). (5) carry-coverage.py: every anchor
+carried, 0 dropped (vrcurrent's files held none); the justification is
+current. (6) V-16 and §7 name the unacknowledged stop. Still open: the
+N150 run (with the warm reset, 3130 (14)) and suspend, as the flakes.md
+rows they are.

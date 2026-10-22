@@ -7,6 +7,16 @@ Moved out of [`docs/BACKLOG.md`](../BACKLOG.md) on 2026-10-16. A decision is rec
 Dated, newest first. A decision here is final until the customer says
 otherwise; one a later decision replaced is deleted, and the history keeps it.
 
+* **2026-10-23 (customer, through the coordinator)** **The power core
+  (`docs/POWERCTL.md`) is a standing interface, with a 48 A / 23 A row.**
+  Asked "Power limits (consultant OK IF): accept about +500 kernel lines?
+  also retire msrlog (−321 lines)? your dated words for a standing
+  interface and for 48 A.", the customer answered "power limits are ok":
+  `ferrix.powerctl` and its driver stay in the tree, and the N150's model
+  row allows 48 A and at most 23 A above firmware's (the consultant's
+  ledger 3130 condition 1 (a) and (c), ledger 3180 condition 1). No answer
+  on `ferrix.msrlog`, which stays.
+
 * **2026-10-21 (customer, through the coordinator os-22)** **ptrace is out
   of the certified `present` profile** (docs/DEBUG.md S2; the consultant's
   design review, ledger 2937, condition D2). The facility is compiled out of

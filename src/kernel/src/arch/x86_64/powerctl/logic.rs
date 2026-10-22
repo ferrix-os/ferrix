@@ -38,14 +38,15 @@ pub(in crate::arch::x86_64) struct Row {
 }
 
 /// The model table (§5.3): the N150, Intel family 6 model 0xBE (Alder
-/// Lake-N), single-package. The ceiling is the one the customer authorised
-/// for `ferrix.vrcurrent`, 32 A and at most 7 A above firmware's, until
-/// the customer's words for more are on record (ledger 3130, condition 1).
+/// Lake-N), single-package. The ceiling, 48 A and at most 23 A above
+/// firmware's 25 A, is the customer's for the 44 A step: "power limits are
+/// ok" (2026-10-23), quoted in `docs/POWERCTL.md` §3 (ledger 3130,
+/// condition 1 (a); ledger 3180, condition 1).
 pub(in crate::arch::x86_64) const TABLE: [Row; 1] = [Row {
     family: 6,
     model: 0xbe,
-    ceiling: 32 * 8,
-    raise: 7 * 8,
+    ceiling: 48 * 8,
+    raise: 23 * 8,
     hot: 90,
 }];
 
