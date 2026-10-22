@@ -570,70 +570,9 @@ fn write_ids(process: &Process, at: u64, capacity: u32, ids: &[u32]) -> Result<(
     uaccess::copy_to_user(process.space(), at, &bytes).map_err(|_| Errno::EFAULT)
 }
 
-/// The sizes a connected connector offers beside the one the device prefers.
-///
-/// A virtio-gpu shows whatever size it is handed a scanout of, so the
-/// device's own mode is a preference and not a limit -- and under a window
-/// the preference is the *window's* size, which for a window QEMU has just
-/// opened is 640x480 whatever `xres` and `yres` said. Linux's `virtio_gpu`
-/// lists the standard sizes beside the preferred one for the same reason
-/// (`drm_add_modes_noedid` in `virtio_gpu_conn_get_modes`), and a
-/// `monitor = , 1920x1080, ...` line is how somebody picks one.
-const STANDARD_SIZES: [(u32, u32); 10] = [
-    (3840, 2160),
-    (2560, 1440),
-    (1920, 1200),
-    (1920, 1080),
-    (1680, 1050),
-    (1600, 900),
-    (1280, 1024),
-    (1280, 720),
-    (1024, 768),
-    (800, 600),
-];
-
-/// The refreshes a connector lists its preferred size at beside the one its
-/// display reports, in hertz: the 60 every monitor has, and the two rates
-/// fast monitors are sold at, so that a `monitor = , WxH@120, ...` line can
-/// ask for a desktop faster than its host's window shows. A virtio-gpu
-/// takes a flush whenever it is sent one, so nothing about the card stops a
-/// compositor pacing to any of them.
-const OFFERED_REFRESHES_HZ: [u32; 3] = [60, 120, 144];
-
 /// The refresh a display that reported none is listed at, in millihertz:
 /// the 60 Hz every virtual card was listed at before its driver could say.
 const UNKNOWN_REFRESH_MHZ: u32 = 60_000;
-
-/// What a connector whose device prefers `width` by `height` at
-/// `refresh_mhz` (0 when it does not know) lists: that size first, at that
-/// refresh and marked preferred; then the same size at each of
-/// [`OFFERED_REFRESHES_HZ`] it is not listed at already; then every standard
-/// size that is not it, at 60 Hz.
-fn listed_modes(width: u32, height: u32, refresh_mhz: u32) -> Vec<ModeInfo> {
-    let reported = if refresh_mhz == 0 {
-        UNKNOWN_REFRESH_MHZ
-    } else {
-        refresh_mhz
-    };
-    let mut modes = vec![mode_at(width, height, reported)];
-    for hertz in OFFERED_REFRESHES_HZ {
-        if modes.iter().all(|mode| mode.vrefresh != hertz) {
-            let mut mode = mode_at(width, height, hertz * 1000);
-            mode.r#type = drm::MODE_TYPE_DRIVER;
-            modes.push(mode);
-        }
-    }
-    let standard = STANDARD_SIZES
-        .iter()
-        .filter(|&&size| size != (width, height))
-        .map(|&(wide, tall)| {
-            let mut mode = mode_for(wide, tall);
-            mode.r#type = drm::MODE_TYPE_DRIVER;
-            mode
-        });
-    modes.extend(standard);
-    modes
-}
 
 /// A timing as DRM has a mode, not preferred: for the boot check's
 /// made-up `SETCRTC` requests.
@@ -1540,10 +1479,9 @@ pub(crate) const fn connector_type(hdmi: bool) -> u32 {
 }
 
 /// The modes head `head` of `card` lists: none while nothing is connected;
-/// on a board's HDMI output the modes its driver can make a pixel clock for,
-/// the one it chose first, or the one it runs where it said no more; the
-/// preferred size at its display's refresh and at the offered ones, and the
-/// standard sizes, on a virtual card, which shows any.
+/// the driver's own list where it sent one (`MODE_LIST`); on a board's HDMI
+/// output the modes its driver can make a pixel clock for, the one it chose
+/// first; and otherwise the one size the driver prefers.
 fn modes_of(card: &Card, head: usize) -> Vec<ModeInfo> {
     // A head whose driver listed its modes lists exactly those, the
     // preferred one marked (`docs/DISPLAY.md` §9.3).
@@ -1570,10 +1508,13 @@ fn modes_of(card: &Card, head: usize) -> Vec<ModeInfo> {
                     .enumerate()
                     .map(|(index, timing)| mode_of(timing, index == 0))
                     .collect()
-            } else if card.hdmi {
+            } else if card.hdmi || mode.refresh_mhz == 0 {
                 vec![mode_for(mode.width, mode.height)]
             } else {
-                listed_modes(mode.width, mode.height, mode.refresh_mhz)
+                // A driver that lists its modes lists them all (`MODE_LIST`,
+                // `docs/DISPLAY.md` §9); until its list arrives, the size it
+                // prefers is all the core can say.
+                vec![mode_at(mode.width, mode.height, mode.refresh_mhz)]
             }
         })
         .unwrap_or_default()
@@ -1963,7 +1904,7 @@ fn set_crtc(process: &Process, file: &CardFile, arg: u64) -> Result<usize, Errno
         }
         file.card.list_into(head, &mut list);
         let timing =
-            ferrix_displayctl::modes::listed_match(&list, &crtc.mode).ok_or(Errno::EINVAL)?;
+            ferrix_displayctl::listed::listed_match(&list, &crtc.mode).ok_or(Errno::EINVAL)?;
         let preferred = list
             .iter()
             .any(|listed| listed.timing == timing && listed.preferred);

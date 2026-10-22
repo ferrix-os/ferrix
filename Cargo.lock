@@ -207,6 +207,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrix-display-modes"
+version = "0.1.0"
+dependencies = [
+ "ferrix-displayctl",
+]
+
+[[package]]
 name = "ferrix-displayctl"
 version = "0.1.0"
 dependencies = [
@@ -311,6 +318,7 @@ name = "ferrix-gpu"
 version = "0.1.0"
 dependencies = [
  "ferrix-blkring",
+ "ferrix-display-modes",
  "ferrix-displayctl",
  "ferrix-native-abi",
  "ferrix-renderctl",

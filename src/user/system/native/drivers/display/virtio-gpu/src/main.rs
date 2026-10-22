@@ -37,7 +37,7 @@ use ferrix_displayctl::message::{
     Attach, Hello, MAX_BUFFER_PAGES as MAX_PAGES, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message,
     PORT_RIGHTS, ScanoutMode, Timings, VERSION,
 };
-use ferrix_displayctl::modes::{ModeList, add_virtual};
+use ferrix_display_modes::{ModeList, add_virtual, edid_modes};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Requested;
 use ferrix_native_abi::signals::Signals;
@@ -1581,7 +1581,7 @@ fn send_lists(
             let mut edid = [0_u8; gpu::EDID_MAX_BYTES];
             let len = driver.edid_bytes(&answer, &mut edid);
             let mut named = ModeList::new();
-            ferrix_displayctl::edid::modes(edid.get(..len).unwrap_or_default(), &mut named);
+            edid_modes(edid.get(..len).unwrap_or_default(), &mut named);
             for listed in named.as_slice() {
                 let pixels = u64::from(listed.timing.hdisplay) * u64::from(listed.timing.vdisplay);
                 if pixels * 4 <= MAX_PAGES * 4096 {

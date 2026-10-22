@@ -1,0 +1,14 @@
+[package]
+name = "ferrix-display-modes"
+description = "The mode list a ring-3 display driver makes: an EDID's modes, CVT, the virtual and scaled lists, and the scaling arithmetic"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license.workspace = true
+publish = false
+
+[dependencies]
+ferrix-displayctl = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,4 +1,5 @@
-//! A scanout's mode list, as a driver makes it (`docs/DISPLAY.md` §9).
+//! A scanout's mode list, as a ring-3 display driver makes it
+//! (`docs/DISPLAY.md` §9).
 //!
 //! A driver lists every mode it can show a display at in `MODE_LIST`, and is
 //! told one of them by `SET_MODE`. What goes in the list is the driver's to
@@ -18,11 +19,26 @@
 //! * [`add_scaled`]: the smaller sizes a card shows by scaling a buffer to
 //!   the one mode its display runs.
 //!
-//! Nothing here allocates: a list is a fixed array, and this crate is the
-//! kernel's as well as the drivers'.
+//! [`scale`] is the arithmetic of showing a buffer smaller than the screen,
+//! scaled, for a driver that cannot retime its display.
+//!
+//! Drivers' alone: the kernel never parses an EDID or makes a timing for a
+//! mode list (the customer, 2026-10-22: "keep the kernel slim"); it carries
+//! the list a driver sends (`ferrix_displayctl`) and passes a chosen entry
+//! back. Nothing here allocates: a list is a fixed array, and the native
+//! drivers have no allocator.
+
+#![no_std]
+#![forbid(unsafe_code)]
+
+mod edid_tables;
+pub mod scale;
+
+#[cfg(test)]
+mod tests;
 
 use crate::edid_tables::{CTA, DMT, ESTABLISHED, ESTABLISHED3};
-use crate::message::{
+use ferrix_displayctl::message::{
     Listed, MAX_DIMENSION, MAX_LISTED_MODES, MAX_REFRESH_MHZ, MODES_A_PAGE, Message, ModePage,
     Timing,
 };
@@ -692,50 +708,4 @@ fn displayid_timing(timing: &[u8]) -> Option<(Timing, bool)> {
         word(16)? & 0x8000 != 0,
     )?;
     Some((made, options & 0x80 != 0))
-}
-
-/// The listed timing a `SETCRTC`'s mode asks for (`docs/DISPLAY.md` §9.3):
-/// the first entry equal to it in size, clock, totals, sync spans and sync
-/// polarity; else the first of its size whose rounded refresh is the
-/// request's `vrefresh`; else `None`, which the core answers `EINVAL`. What
-/// is sent the driver is always the listed entry, never the request's
-/// bytes (the consultant's condition 3, ledger 3117).
-#[must_use]
-pub fn listed_match(list: &[Listed], wanted: &ferrix_linux_abi::drm::ModeInfo) -> Option<Timing> {
-    use ferrix_linux_abi::drm::{MODE_FLAG_PHSYNC, MODE_FLAG_PVSYNC};
-    let exact = |timing: &Timing| {
-        timing.clock_khz == wanted.clock
-            && [
-                timing.hdisplay,
-                timing.hsync_start,
-                timing.hsync_end,
-                timing.htotal,
-                timing.vdisplay,
-                timing.vsync_start,
-                timing.vsync_end,
-                timing.vtotal,
-            ] == [
-                wanted.hdisplay,
-                wanted.hsync_start,
-                wanted.hsync_end,
-                wanted.htotal,
-                wanted.vdisplay,
-                wanted.vsync_start,
-                wanted.vsync_end,
-                wanted.vtotal,
-            ]
-            && timing.hsync_high == (wanted.flags & MODE_FLAG_PHSYNC != 0)
-            && timing.vsync_high == (wanted.flags & MODE_FLAG_PVSYNC != 0)
-    };
-    let sized =
-        |timing: &&Timing| (timing.hdisplay, timing.vdisplay) == (wanted.hdisplay, wanted.vdisplay);
-    let timings = || list.iter().map(|listed| &listed.timing);
-    timings()
-        .find(|timing| exact(timing))
-        .or_else(|| {
-            timings()
-                .filter(sized)
-                .find(|timing| timing.refresh_hz() == wanted.vrefresh)
-        })
-        .copied()
 }

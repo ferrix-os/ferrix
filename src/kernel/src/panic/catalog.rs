@@ -2008,12 +2008,12 @@ pub(crate) static STAGE10_DISPLAY_MODES: Explanation = Explanation {
               a listed size at a refresh nobody listed and a size nobody listed, a list sent in two \
               pages to be taken, and a list with two preferred modes to be refused.",
     causes: &[
-        "`ferrix_displayctl::modes::listed_match` was widened to take a size or refresh no \
+        "`ferrix_displayctl::listed::listed_match` was widened to take a size or refresh no \
          entry has.",
         "The session's page checks (`Session::receive` of MODE_LIST) stopped counting \
          preferred entries or tracking the page order.",
     ],
-    see: "src/kernel/src/interfaces/display/check.rs; src/lib/proto/displayctl/src/modes.rs; \
+    see: "src/kernel/src/interfaces/display/check.rs; src/lib/proto/displayctl/src/listed.rs; \
           src/lib/proto/displayctl/src/session.rs; docs/DISPLAY.md section 9",
 };
 

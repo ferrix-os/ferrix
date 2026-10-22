@@ -120,21 +120,37 @@ pub(crate) struct ModesReport {
 /// What was not true.
 pub(crate) fn modes() -> Result<ModesReport, &'static str> {
     use ferrix_displayctl::message::{
-        Hello, Listed, MAX_SCANOUTS, MODES_A_PAGE, Message, ModePage, Refusal, ScanoutMode,
+        Hello, Listed, MAX_SCANOUTS, MODES_A_PAGE, Message, ModePage, Refusal, ScanoutMode, Timing,
         Timings, VERSION,
     };
-    use ferrix_displayctl::modes::{listed_match, synthetic};
+    use ferrix_displayctl::listed::listed_match;
     use ferrix_displayctl::session::{Event, Session};
 
     let mut report = ModesReport::default();
-    let at = |width: u32, height: u32, refresh: u32, preferred: bool| Listed {
-        timing: synthetic(width, height, refresh),
+    // Made-up entries, as a driver lists them: a mode of `width` by
+    // `height` with 160 pixels and 23 lines of blanking at `clock_khz`. The core makes
+    // no timing of its own; these are only something to match against.
+    let at = |width: u16, height: u16, clock_khz: u32, preferred: bool| Listed {
+        timing: Timing {
+            clock_khz,
+            hdisplay: width,
+            hsync_start: width + 16,
+            hsync_end: width + 48,
+            htotal: width + 160,
+            vdisplay: height,
+            vsync_start: height + 3,
+            vsync_end: height + 9,
+            vtotal: height + 23,
+            hsync_high: false,
+            vsync_high: false,
+        },
         preferred,
     };
+    // 1920x1080 and 1280x720 at 60 Hz, and 1280x720 at 120.
     let list = [
-        at(1920, 1080, 60_000, true),
-        at(1280, 720, 60_000, false),
-        at(1280, 720, 120_000, false),
+        at(1920, 1080, 137_652, true),
+        at(1280, 720, 64_195, false),
+        at(1280, 720, 128_390, false),
     ];
     let small = list.get(1).ok_or("the made-up list")?.timing;
     let mut wanted = super::drm::mode_info(&small);
@@ -152,7 +168,7 @@ pub(crate) fn modes() -> Result<ModesReport, &'static str> {
         return Err("SETCRTC took a listed size at a refresh nobody listed");
     }
     report.matched += 1;
-    if listed_match(&list, &super::drm::mode_info(&synthetic(800, 600, 60_000))).is_some() {
+    if listed_match(&list, &super::drm::mode_info(&at(800, 600, 35_000, false).timing)).is_some() {
         return Err("SETCRTC took a size nobody listed");
     }
     report.matched += 1;
@@ -184,7 +200,7 @@ pub(crate) fn modes() -> Result<ModesReport, &'static str> {
         let mut entries = [Listed::default(); MODES_A_PAGE];
         for (index, entry) in entries.iter_mut().take(count as usize).enumerate() {
             let line = first + u32::try_from(index).unwrap_or(0);
-            *entry = at(640, 400 + line, 60_000, line == 0);
+            *entry = at(640, 400 + u16::try_from(line).unwrap_or(0), 23_000, line == 0);
         }
         ModePage {
             scanout: 0,

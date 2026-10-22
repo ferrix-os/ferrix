@@ -16,11 +16,11 @@
 //! The fixed timings an EDID names by number rather than spelling out:
 //! VESA's established timings, the Established Timings III descriptor's
 //! bits, VESA's Display Monitor Timings, and CTA-861's video codes. Made
-//! by `tools/common/gen/gen-displayctl-edid-tables.py` from Linux's tables, one entry a line, so that a reader can
+//! by `tools/common/gen/gen-display-modes-edid-tables.py` from Linux's tables, one entry a line, so that a reader can
 //! hold each against its source; interlaced, doubled-clock and
 //! doubled-line modes are left out, as no driver here lists them.
 
-use crate::message::Timing;
+use ferrix_displayctl::message::Timing;
 
 /// One timing: the clock in kHz, the four horizontal and four vertical
 /// spans, and whether each sync is active high.

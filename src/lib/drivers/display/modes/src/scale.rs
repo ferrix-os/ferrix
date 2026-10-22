@@ -10,7 +10,7 @@
 //! that read it. The copy itself, which writes the screen, is the
 //! driver's; this is only which pixel goes where.
 
-use crate::message::Rect;
+use ferrix_displayctl::message::Rect;
 
 /// One buffer size shown on one screen size.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

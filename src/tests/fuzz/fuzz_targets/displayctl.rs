@@ -34,7 +34,7 @@ use ferrix_displayctl::message::{
     Status, Timings, VERSION,
 };
 use ferrix_displayctl::message::{Listed, MAX_LISTED_MODES, MODES_A_PAGE, ModePage};
-use ferrix_displayctl::modes::{ModeList, synthetic};
+use ferrix_display_modes::{ModeList, edid_modes, synthetic};
 use ferrix_displayctl::session::{Event, Session, list_hash};
 use libfuzzer_sys::fuzz_target;
 
@@ -67,7 +67,7 @@ fuzz_target!(|bytes: &[u8]| {
 
     // 4.
     let mut named = ModeList::new();
-    ferrix_displayctl::edid::modes(bytes, &mut named);
+    edid_modes(bytes, &mut named);
     assert!(named.len() <= MAX_LISTED_MODES);
     assert!(named.as_slice().iter().all(|listed| listed.timing.is_mode()));
     assert!(named.as_slice().iter().filter(|listed| listed.preferred).count() <= 1);
