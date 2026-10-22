@@ -5,7 +5,8 @@ use crate::inet::{
     self, InetAddress, SOCKADDR_IN_SIZE, SOCKADDR_IN6_RFC2133_SIZE, SOCKADDR_IN6_SIZE,
     SOCKADDR_STORAGE_SIZE,
 };
-use crate::socket::{self, AddressError};
+use crate::inet::{InetTunables, TunableError, TunableValue};
+use crate::socket::{self, AddressError, Linger};
 
 #[test]
 fn protocols_levels_and_ipv4_options_match_the_headers() {
@@ -48,6 +49,8 @@ fn protocols_levels_and_ipv4_options_match_the_headers() {
         (inet::IP_PMTUDISC_WANT, 1, "IP_PMTUDISC_WANT"),
         (inet::IP_PMTUDISC_DO, 2, "IP_PMTUDISC_DO"),
         (inet::IP_PMTUDISC_PROBE, 3, "IP_PMTUDISC_PROBE"),
+        (inet::IP_PMTUDISC_INTERFACE, 4, "IP_PMTUDISC_INTERFACE"),
+        (inet::IP_PMTUDISC_OMIT, 5, "IP_PMTUDISC_OMIT"),
     ] {
         assert_eq!(value, expected, "{name}");
     }
@@ -82,6 +85,7 @@ fn ipv6_and_tcp_options_match_the_headers() {
         (inet::IPV6_PKTINFO, 50, "IPV6_PKTINFO"),
         (inet::IPV6_RECVHOPLIMIT, 51, "IPV6_RECVHOPLIMIT"),
         (inet::IPV6_HOPLIMIT, 52, "IPV6_HOPLIMIT"),
+        (inet::IPV6_DONTFRAG, 62, "IPV6_DONTFRAG"),
         (inet::IPV6_RECVTCLASS, 66, "IPV6_RECVTCLASS"),
         (inet::IPV6_TCLASS, 67, "IPV6_TCLASS"),
         (inet::TCP_NODELAY, 1, "TCP_NODELAY"),
@@ -226,4 +230,193 @@ fn an_inet_address_encodes_to_the_bytes_it_was_read_from() {
     let mut short = [0xaa_u8; SOCKADDR_IN6_SIZE - 1];
     assert_eq!(v6.map(|a| a.encode(&mut short)), Ok(None));
     assert_eq!(short, [0xaa; SOCKADDR_IN6_SIZE - 1], "nothing written");
+}
+
+/// `n` as the bytes of the `int` a program passes.
+fn int(n: i32) -> [u8; 4] {
+    n.to_le_bytes()
+}
+
+#[test]
+fn tunables_read_as_linux_defaults_them() {
+    let tunables = InetTunables::default();
+    let read = |level, name, v6| tunables.read(level, name, v6);
+    assert_eq!(
+        read(socket::SOL_SOCKET, socket::SO_LINGER, false),
+        Some(TunableValue::Linger(Linger {
+            onoff: 0,
+            linger: 0
+        }))
+    );
+    assert_eq!(
+        read(socket::SOL_SOCKET, socket::SO_OOBINLINE, true),
+        Some(TunableValue::Int(0))
+    );
+    assert_eq!(
+        read(inet::SOL_TCP, inet::TCP_KEEPIDLE, false),
+        Some(TunableValue::Int(7_200))
+    );
+    assert_eq!(
+        read(inet::SOL_TCP, inet::TCP_KEEPINTVL, false),
+        Some(TunableValue::Int(75))
+    );
+    assert_eq!(
+        read(inet::SOL_TCP, inet::TCP_KEEPCNT, false),
+        Some(TunableValue::Int(9))
+    );
+    assert_eq!(
+        read(inet::SOL_TCP, inet::TCP_SYNCNT, false),
+        Some(TunableValue::Int(6))
+    );
+    assert_eq!(
+        read(inet::SOL_IP, inet::IP_MTU_DISCOVER, true),
+        Some(TunableValue::Int(inet::IP_PMTUDISC_WANT))
+    );
+    assert_eq!(
+        read(inet::SOL_IPV6, inet::IPV6_MTU_DISCOVER, true),
+        Some(TunableValue::Int(1))
+    );
+    assert_eq!(
+        read(inet::SOL_IPV6, inet::IPV6_DONTFRAG, true),
+        Some(TunableValue::Int(0))
+    );
+    // An IPv4 socket has no IPv6 options, and nothing else is a tunable.
+    assert_eq!(read(inet::SOL_IPV6, inet::IPV6_MTU_DISCOVER, false), None);
+    assert_eq!(read(inet::SOL_IPV6, inet::IPV6_DONTFRAG, false), None);
+    assert_eq!(read(inet::SOL_TCP, inet::TCP_NODELAY, false), None);
+    assert_eq!(read(socket::SOL_SOCKET, socket::SO_KEEPALIVE, false), None);
+}
+
+#[test]
+fn tunables_give_back_what_was_set() {
+    let mut tunables = InetTunables::default();
+    for (level, name, value) in [
+        (socket::SOL_SOCKET, socket::SO_OOBINLINE, 5),
+        (inet::SOL_TCP, inet::TCP_KEEPIDLE, 30),
+        (inet::SOL_TCP, inet::TCP_KEEPINTVL, inet::MAX_TCP_KEEPINTVL),
+        (inet::SOL_TCP, inet::TCP_KEEPCNT, 1),
+        (inet::SOL_TCP, inet::TCP_SYNCNT, 4),
+        (inet::SOL_IP, inet::IP_MTU_DISCOVER, inet::IP_PMTUDISC_DO),
+        (
+            inet::SOL_IPV6,
+            inet::IPV6_MTU_DISCOVER,
+            inet::IP_PMTUDISC_OMIT,
+        ),
+        (inet::SOL_IPV6, inet::IPV6_DONTFRAG, 1),
+    ] {
+        assert_eq!(
+            tunables.write(level, name, &int(value), true),
+            Some(Ok(())),
+            "{name}"
+        );
+        // Booleans read back as 0 or 1, as `valbool` makes them.
+        let expected = if (level, name) == (socket::SOL_SOCKET, socket::SO_OOBINLINE) {
+            1
+        } else {
+            value
+        };
+        assert_eq!(
+            tunables.read(level, name, true),
+            Some(TunableValue::Int(expected)),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn tunables_refuse_what_linux_refuses() {
+    let mut tunables = InetTunables::default();
+    let before = tunables;
+    for (level, name, value) in [
+        (inet::SOL_TCP, inet::TCP_KEEPIDLE, 0),
+        (
+            inet::SOL_TCP,
+            inet::TCP_KEEPIDLE,
+            inet::MAX_TCP_KEEPIDLE + 1,
+        ),
+        (inet::SOL_TCP, inet::TCP_KEEPINTVL, -1),
+        (inet::SOL_TCP, inet::TCP_KEEPCNT, inet::MAX_TCP_KEEPCNT + 1),
+        (inet::SOL_TCP, inet::TCP_SYNCNT, 0),
+        (
+            inet::SOL_IP,
+            inet::IP_MTU_DISCOVER,
+            inet::IP_PMTUDISC_OMIT + 1,
+        ),
+        (inet::SOL_IPV6, inet::IPV6_MTU_DISCOVER, -1),
+    ] {
+        assert_eq!(
+            tunables.write(level, name, &int(value), true),
+            Some(Err(TunableError::Invalid)),
+            "{name} {value}"
+        );
+    }
+    // Shorter than an int.
+    assert_eq!(
+        tunables.write(inet::SOL_TCP, inet::TCP_KEEPCNT, &[1, 0], true),
+        Some(Err(TunableError::Invalid))
+    );
+    // The IPv6 options on an IPv4 socket.
+    assert_eq!(
+        tunables.write(inet::SOL_IPV6, inet::IPV6_DONTFRAG, &int(1), false),
+        Some(Err(TunableError::NoOption))
+    );
+    assert_eq!(tunables, before, "a refused value changed nothing");
+    assert_eq!(
+        tunables.write(inet::SOL_TCP, inet::TCP_NODELAY, &int(1), false),
+        None
+    );
+}
+
+#[test]
+fn linger_is_kept_as_sk_setsockopt_keeps_it() {
+    let mut tunables = InetTunables::default();
+    let linger = |onoff, seconds| {
+        Linger {
+            onoff,
+            linger: seconds,
+        }
+        .to_bytes()
+    };
+    let read =
+        |tunables: &InetTunables| tunables.read(socket::SOL_SOCKET, socket::SO_LINGER, false);
+    assert_eq!(
+        tunables.write(socket::SOL_SOCKET, socket::SO_LINGER, &linger(7, 30), false),
+        Some(Ok(()))
+    );
+    assert_eq!(
+        read(&tunables),
+        Some(TunableValue::Linger(Linger {
+            onoff: 1,
+            linger: 30
+        }))
+    );
+    // Off keeps the time.
+    assert_eq!(
+        tunables.write(socket::SOL_SOCKET, socket::SO_LINGER, &linger(0, 99), false),
+        Some(Ok(()))
+    );
+    assert_eq!(
+        read(&tunables),
+        Some(TunableValue::Linger(Linger {
+            onoff: 0,
+            linger: 30
+        }))
+    );
+    // A time too long to hold is the longest.
+    assert_eq!(
+        tunables.write(socket::SOL_SOCKET, socket::SO_LINGER, &linger(1, -1), false),
+        Some(Ok(()))
+    );
+    assert_eq!(
+        read(&tunables),
+        Some(TunableValue::Linger(Linger {
+            onoff: 1,
+            linger: i32::MAX
+        }))
+    );
+    // Shorter than the structure.
+    assert_eq!(
+        tunables.write(socket::SOL_SOCKET, socket::SO_LINGER, &int(1), false),
+        Some(Err(TunableError::Invalid))
+    );
 }

@@ -209,6 +209,7 @@ mod waybar;
 mod window;
 mod wine;
 mod wine_dispatch;
+mod wine_socket;
 mod wine_sync;
 mod workspace;
 mod wsl;
@@ -582,6 +583,7 @@ const TASKS: &[&[Task]] = &[
     uutils::TASKS,
     wallpaper::TASKS,
     wine_dispatch::TASKS,
+    wine_socket::TASKS,
     wine_sync::TASKS,
     yserver::TASKS,
 ];

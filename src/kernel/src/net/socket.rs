@@ -25,8 +25,8 @@ use ferrix_linux_abi::errno::Errno;
 use ferrix_linux_abi::inet::{
     ICMP_FILTER, ICMPV6_FILTER, IP_HDRINCL, IP_TOS, IP_TTL, IPPROTO_ICMP, IPPROTO_ICMPV6,
     IPPROTO_TCP, IPPROTO_UDP, IPV6_2292HOPLIMIT, IPV6_CHECKSUM, IPV6_HOPLIMIT, IPV6_RECVHOPLIMIT,
-    IPV6_UNICAST_HOPS, IPV6_V6ONLY, InetAddress, SOCKADDR_STORAGE_SIZE, SOL_ICMPV6, SOL_IP,
-    SOL_IPV6, SOL_RAW, SOL_TCP, TCP_MAXSEG, TCP_NODELAY,
+    IPV6_UNICAST_HOPS, IPV6_V6ONLY, InetAddress, InetTunables, SOCKADDR_STORAGE_SIZE, SOL_ICMPV6,
+    SOL_IP, SOL_IPV6, SOL_RAW, SOL_TCP, TCP_MAXSEG, TCP_NODELAY, TunableError, TunableValue,
 };
 use ferrix_linux_abi::socket::{
     AF_INET, AF_INET6, MSG_DONTWAIT, MSG_PEEK, SHUT_RD, SHUT_RDWR, SHUT_WR, SO_ACCEPTCONN,
@@ -105,6 +105,9 @@ struct Options {
     hop_limit_messages: bool,
     /// `IPV6_2292HOPLIMIT`: the same, in RFC 2292's type.
     hop_limit_messages_2292: bool,
+    /// The options kept only to be read back: lingering, out-of-band data
+    /// inline, keep-alive timing, SYN retries, path MTU discovery.
+    tunables: InetTunables,
 }
 
 /// An `AF_INET` or `AF_INET6` socket.
@@ -262,6 +265,7 @@ impl InetSocket {
                 keepalive: false,
                 hop_limit_messages: false,
                 hop_limit_messages_2292: false,
+                tunables: InetTunables::default(),
             }),
             _charge: charge,
         });
@@ -645,6 +649,13 @@ impl InetSocket {
             }
             (SOL_ICMPV6, ICMPV6_FILTER) => self
                 .icmp6_filter(|filter| filter.iter().flat_map(|word| word.to_ne_bytes()).collect()),
+            _ if self.has_tunable(level) => {
+                match options.tunables.read(level, name, self.is_v6()) {
+                    Some(TunableValue::Int(value)) => Ok(value.to_le_bytes().to_vec()),
+                    Some(TunableValue::Linger(linger)) => Ok(linger.to_bytes().to_vec()),
+                    None => Ok(self.option_value(level, name)?.to_le_bytes().to_vec()),
+                }
+            }
             _ => Ok(self.option_value(level, name)?.to_le_bytes().to_vec()),
         }
     }
@@ -733,6 +744,15 @@ impl InetSocket {
         if (level, name) == (SOL_ICMPV6, ICMPV6_FILTER) {
             return self.set_icmp6_filter(value);
         }
+        if self.has_tunable(level) {
+            let v6 = self.is_v6();
+            if let Some(done) = self.options.lock().tunables.write(level, name, value, v6) {
+                return done.map_err(|error| match error {
+                    TunableError::Invalid => Errno::EINVAL,
+                    TunableError::NoOption => Errno::ENOPROTOOPT,
+                });
+            }
+        }
         let number = read_int(value)?;
         match (level, name) {
             (SOL_SOCKET, SO_SNDBUF) => {
@@ -799,6 +819,18 @@ impl InetSocket {
             (SOL_SOCKET | SOL_IP | SOL_IPV6 | SOL_TCP, _) => Ok(()),
             _ => Err(Errno::ENOPROTOOPT),
         }
+    }
+
+    /// Whether this socket has [`InetTunables`] at `level`: TCP's are a
+    /// stream socket's alone, as `udp_getsockopt` and `raw_getsockopt` hand
+    /// `SOL_TCP` to `ip_getsockopt`, which has nothing there.
+    fn has_tunable(&self, level: i32) -> bool {
+        level != SOL_TCP || self.kind.is_stream()
+    }
+
+    /// Whether it was opened `AF_INET6`.
+    const fn is_v6(&self) -> bool {
+        matches!(self.family, Family::V6)
     }
 
     /// The options the stack keeps for this socket.

@@ -22,6 +22,11 @@
 //!   `EADDRINUSE` both, though both set `SO_REUSEADDR` -- as Linux keeps a
 //!   listener's port, so a second listener cannot take its connections;
 //! * the same over IPv6, so that the second family is not a claim;
+//! * the options Wine reads for a Windows program -- `SO_LINGER`,
+//!   `SO_OOBINLINE`, TCP's keep-alive timing, path MTU discovery -- read
+//!   back, as Linux's defaults and then as set, on a dual-stack socket: an
+//!   `ENOPROTOOPT` there is `WSAEINVAL` to the program, which .NET takes for a
+//!   failed connection;
 //! * a raw ICMP socket reads the echo it sent and the reply to it, each with
 //!   its IPv4 header, and one filtering replies with `ICMP_FILTER` reads the
 //!   request and not the reply; and an `IPPROTO_RAW` socket's packet, whose
@@ -132,6 +137,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         7_785,
     )?;
     listeners_keep_their_port(&mut report, 7_783)?;
+    options_read_back(&mut report)?;
     raw_icmp(&mut report)?;
     raw_icmpv6(&mut report)?;
     raw_header_included(&mut report, 7_782)?;
@@ -371,6 +377,68 @@ fn listeners_keep_their_port(report: &mut Report, port: u16) -> Result<(), &'sta
     let second = reusing()?;
     if second.bind(&encode(loopback, port)) != Err(Errno::EADDRINUSE) {
         return Err("a second socket bound a port a wildcard listener holds");
+    }
+    report.refusals += 1;
+    Ok(())
+}
+
+/// The options a program sets and reads back on a dual-stack stream socket
+/// read as Linux's defaults, then as set; one out of range is `EINVAL`, and
+/// the IPv6 ones on an IPv4 socket are `ENOPROTOOPT`.
+fn options_read_back(report: &mut Report) -> Result<(), &'static str> {
+    use ferrix_linux_abi::inet::{
+        IP_MTU_DISCOVER, IP_PMTUDISC_DO, IPV6_DONTFRAG, IPV6_MTU_DISCOVER, SOL_IP, SOL_IPV6,
+        SOL_TCP, TCP_KEEPCNT, TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_SYNCNT,
+    };
+    use ferrix_linux_abi::socket::{Linger, SO_LINGER, SO_OOBINLINE, SOL_SOCKET, Width};
+    let dual = socket(Family::V6, InetKind::Stream)?;
+    let read = |level, name| {
+        dual.get_option(level, name, Width::Bits64)
+            .ok()
+            .and_then(|bytes| {
+                bytes
+                    .first_chunk::<4>()
+                    .map(|four| i32::from_le_bytes(*four))
+            })
+    };
+    for (level, name, default) in [
+        (SOL_SOCKET, SO_OOBINLINE, 0),
+        (SOL_TCP, TCP_KEEPIDLE, 7_200),
+        (SOL_TCP, TCP_KEEPINTVL, 75),
+        (SOL_TCP, TCP_KEEPCNT, 9),
+        (SOL_TCP, TCP_SYNCNT, 6),
+        (SOL_IP, IP_MTU_DISCOVER, 1),
+        (SOL_IPV6, IPV6_MTU_DISCOVER, 1),
+        (SOL_IPV6, IPV6_DONTFRAG, 0),
+    ] {
+        if read(level, name) != Some(default) {
+            return Err("an option Wine reads did not read as Linux's default");
+        }
+    }
+    let set = |level, name, value: &[u8]| dual.set_option(level, name, value, Width::Bits64);
+    let linger = Linger {
+        onoff: 1,
+        linger: 3,
+    }
+    .to_bytes();
+    set(SOL_SOCKET, SO_LINGER, &linger).map_err(|_| "SO_LINGER was refused")?;
+    set(SOL_TCP, TCP_KEEPIDLE, &30_i32.to_le_bytes()).map_err(|_| "TCP_KEEPIDLE was refused")?;
+    set(SOL_IP, IP_MTU_DISCOVER, &IP_PMTUDISC_DO.to_le_bytes())
+        .map_err(|_| "IP_MTU_DISCOVER was refused")?;
+    let lingered = dual.get_option(SOL_SOCKET, SO_LINGER, Width::Bits64);
+    if lingered.ok().as_deref() != Some(&linger[..])
+        || read(SOL_TCP, TCP_KEEPIDLE) != Some(30)
+        || read(SOL_IP, IP_MTU_DISCOVER) != Some(IP_PMTUDISC_DO)
+    {
+        return Err("an option set did not read back as set");
+    }
+    if set(SOL_TCP, TCP_KEEPCNT, &0_i32.to_le_bytes()) != Err(Errno::EINVAL) {
+        return Err("TCP_KEEPCNT of zero was not EINVAL");
+    }
+    report.refusals += 1;
+    let four = socket(Family::V4, InetKind::Stream)?;
+    if four.get_option(SOL_IPV6, IPV6_DONTFRAG, Width::Bits64) != Err(Errno::ENOPROTOOPT) {
+        return Err("an IPv4 socket read an IPv6 option");
     }
     report.refusals += 1;
     Ok(())
