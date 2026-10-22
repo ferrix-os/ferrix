@@ -52,7 +52,10 @@ use ferrix_rt::native::pin::{Pin, PinAccess, device_address};
 use ferrix_rt::native::port::{self, Port};
 use ferrix_rt::native::vmo::{self, Vmo};
 use ferrix_rt::{Bootstrap, Kernel};
-use ferrix_usb_host::bus::{Bus, DiskChange, MAX_FUNCTIONS, Note, Output};
+use ferrix_usb_host::bus::{
+    Bus, DiskChange, MAX_FUNCTIONS, Note, Output, SERVICE_POLL, SERVICE_POLL_IDLE_MAX,
+    next_service_poll,
+};
 use ferrix_usb_host::hid::Kind;
 use ferrix_usb_host::host::{self, Host as Controller};
 use ferrix_usb_host::{Clock, Dma, MILLISECOND, Parts, Registers, ehci, xhci};
@@ -78,10 +81,6 @@ const KEY_FIRST_CONTROL: u64 = 16;
 /// What the bootstrap channel is told once the first enumeration settled:
 /// devmgr reads only that something came.
 const SETTLED: &[u8] = b"settled";
-
-/// How often the controller's events are taken while its interrupt has not
-/// been seen: a low-speed keyboard's 8 ms interval, so no report waits.
-const SERVICE_POLL: u64 = 8 * MILLISECOND;
 
 /// How long the core has to answer a HELLO.
 const READY_PATIENCE: u64 = 2_000_000_000;
@@ -592,22 +591,27 @@ impl<H: Controller<Clock = Time>> Driver<H> {
             let _ = self.port.wait(Deadline::At(until));
         }
         self.bus.poll();
-        self.forward();
+        let _ = self.forward();
         let _ = boot.write(SETTLED);
         // Until the controller's interrupt has been seen to arrive, its
         // events are also taken every SERVICE_POLL: on the N150 box no MSI
         // came, the eight queued interrupt requests filled, and the keyboard
         // reset itself after ten reports it could not deliver.
+        // The service backs off from 8 ms to 32 ms while it finds nothing,
+        // and is back at 8 ms as soon as anything moves (p2-138).
         let mut interrupted = false;
         let mut said = false;
+        let mut service_every = SERVICE_POLL;
         loop {
-            self.forward();
+            if self.forward() {
+                service_every = SERVICE_POLL;
+            }
             let now = ferrix_rt::linux::monotonic_nanos().unwrap_or(0);
             let next_poll = self.bus.next_poll();
             let deadline = if interrupted {
                 next_poll
             } else {
-                next_poll.min(now.saturating_add(SERVICE_POLL))
+                next_poll.min(now.saturating_add(service_every))
             };
             match self.port.wait(Deadline::At(deadline)) {
                 Ok(packet) if packet.kind == PACKET_INTERRUPT && packet.key == KEY_INTERRUPT => {
@@ -622,13 +626,17 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                     if !said {
                         said = true;
                         say(format_args!(
-                            "usbhid: no interrupt from the controller yet: its events are taken every {} ms until one comes",
-                            SERVICE_POLL / 1_000_000
+                            "usbhid: no interrupt from the controller yet: its events are taken every {} to {} ms until one comes",
+                            SERVICE_POLL / 1_000_000,
+                            SERVICE_POLL_IDLE_MAX / 1_000_000
                         ));
                     }
                     if self.bus.on_interrupt().is_err() {
                         return Err(Step::Faulted);
                     }
+                    // Doubled here; the next forward puts it back at 8 ms
+                    // if this service found anything.
+                    service_every = next_service_poll(service_every, false);
                     if ferrix_rt::linux::monotonic_nanos().unwrap_or(0) >= next_poll {
                         self.bus.poll();
                     }
@@ -645,15 +653,20 @@ impl<H: Controller<Clock = Time>> Driver<H> {
         }
     }
 
-    /// Hand on everything the bus has, and say what it found.
-    fn forward(&mut self) {
+    /// Hand on everything the bus has, and say what it found. Answers
+    /// whether there was anything.
+    fn forward(&mut self) -> bool {
+        let mut moved = false;
         while let Some(note) = self.bus.next_note() {
+            moved = true;
             tell(note);
         }
         while let Some(change) = self.bus.next_disk_change() {
+            moved = true;
             self.tell_disk(change);
         }
         while let Some(output) = self.bus.next_output() {
+            moved = true;
             match output {
                 Output::Attached(function) => self.introduce(function),
                 Output::Events(function) => {
@@ -672,6 +685,7 @@ impl<H: Controller<Clock = Time>> Driver<H> {
                 }
             }
         }
+        moved
     }
 
     /// Say what a disk that came is, with its first block read as proof the

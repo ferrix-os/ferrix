@@ -354,3 +354,21 @@ fn a_port_status_says_speed_and_changes() {
         Speed::Full
     );
 }
+
+/// The unannounced service backs off while it finds nothing and is back at
+/// 8 ms as soon as something moves.
+#[test]
+fn the_service_poll_backs_off_while_idle() {
+    use crate::bus::{SERVICE_POLL, SERVICE_POLL_IDLE_MAX, next_service_poll};
+    assert_eq!(next_service_poll(SERVICE_POLL, false), 2 * SERVICE_POLL);
+    assert_eq!(
+        next_service_poll(2 * SERVICE_POLL, false),
+        SERVICE_POLL_IDLE_MAX
+    );
+    assert_eq!(
+        next_service_poll(SERVICE_POLL_IDLE_MAX, false),
+        SERVICE_POLL_IDLE_MAX
+    );
+    assert_eq!(next_service_poll(SERVICE_POLL_IDLE_MAX, true), SERVICE_POLL);
+    assert_eq!(next_service_poll(0, false), SERVICE_POLL);
+}

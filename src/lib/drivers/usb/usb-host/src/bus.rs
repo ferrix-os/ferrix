@@ -49,6 +49,35 @@ const SUPER_MAX_PACKET: u16 = 512;
 
 /// How often the ports are polled.
 pub const POLL_INTERVAL: u64 = 250 * MILLISECOND;
+
+/// How often a driver whose controller interrupt has not been seen takes
+/// the controller's events, at first and again as soon as any moved: a
+/// low-speed keyboard's 8 ms interval, so no report waits.
+pub const SERVICE_POLL: u64 = 8 * MILLISECOND;
+
+/// The longest that service waits while it finds nothing: 32 ms, at most
+/// four of a keyboard's 8 ms reports, short of the eight interrupt
+/// requests a function keeps queued (backlog p2-138).
+pub const SERVICE_POLL_IDLE_MAX: u64 = 32 * MILLISECOND;
+
+/// The service's next wait, after one of `prev` that `moved` something or
+/// not: back to [`SERVICE_POLL`] when it did, else twice as long up to
+/// [`SERVICE_POLL_IDLE_MAX`]. The shape of the intel driver's
+/// `next_poll_ns`.
+#[must_use]
+pub const fn next_service_poll(prev: u64, moved: bool) -> u64 {
+    if moved {
+        return SERVICE_POLL;
+    }
+    let doubled = prev.saturating_mul(2);
+    if doubled < SERVICE_POLL {
+        SERVICE_POLL
+    } else if doubled > SERVICE_POLL_IDLE_MAX {
+        SERVICE_POLL_IDLE_MAX
+    } else {
+        doubled
+    }
+}
 /// The most devices, hubs included.
 pub const MAX_DEVICES: usize = 16;
 /// The most keyboards and mice at once: the kernel's
