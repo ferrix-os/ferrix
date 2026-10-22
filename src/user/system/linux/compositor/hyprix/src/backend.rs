@@ -605,7 +605,13 @@ impl Drm {
     /// same size, so nothing laid out on it moves. `None` while the card is
     /// not there yet, or is there with no such connector or mode.
     fn reopened(&self) -> Option<Self> {
-        let index = self.card.name().strip_prefix("card")?.parse().ok()?;
+        let index: u32 = self.card.name().strip_prefix("card")?.parse().ok()?;
+        // Not asked for until the node is there: under sessiond each open
+        // is a request it answers, and a card whose driver is down would
+        // be asked for four times a second until it is back.
+        if !Path::new(&format!("/dev/dri/card{index}")).exists() {
+            return None;
+        }
         let card = std::rc::Rc::new(compositor_drm::Card::open_index(index).ok()?);
         let mut plans = compositor_drm::plans(&card).ok()?;
         let at = plans

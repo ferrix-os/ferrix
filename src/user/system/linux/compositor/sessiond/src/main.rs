@@ -661,6 +661,7 @@ fn serve(
         .map_err(|error| format!("the lock channel: {error}"))?;
     let mut lock = Some(lock);
     let mut said = Vec::new();
+    let mut refusals = Refusals::default();
     let mut relay = Relay::new(uid);
     let mut asked = Instant::now();
     loop {
@@ -694,7 +695,7 @@ fn serve(
         let ready = wait_any(fds, Duration::from_millis(200));
         if ready[0]
             && let Some(open) = connection.as_mut()
-            && !answer_devices(open)
+            && !answer_devices(open, &mut refusals)
         {
             connection = None;
         }
@@ -794,9 +795,57 @@ fn read_lines(stream: &mut UnixStream, said: &mut Vec<u8>) -> Option<Vec<String>
     Some(lines)
 }
 
+/// What [`answer_devices`] has refused, so that a request refused again and
+/// again is said once and counted: a compositor whose card's driver died
+/// asks for `card0` four times a second until it is back (2026-10-22, the
+/// N150: 105 lines in half a minute while the Intel driver was down).
+#[derive(Debug, Default)]
+struct Refusals {
+    /// The last request refused, with what it was answered.
+    last: Option<(String, String)>,
+    /// How many times since it was said.
+    again: u32,
+}
+
+impl Refusals {
+    /// Note `line`'s answer `said`, and return what is to be said of it: a
+    /// refusal the first time, nothing for the same refusal again, and once
+    /// anything else is answered, how many times the last one was refused
+    /// since it was said, before what this one says.
+    fn note(&mut self, line: &str, said: &str) -> Vec<String> {
+        let refused = said != "ok\n";
+        if refused
+            && self
+                .last
+                .as_ref()
+                .is_some_and(|(was, answered)| was == line && answered == said)
+        {
+            self.again = self.again.saturating_add(1);
+            return Vec::new();
+        }
+        let mut lines = Vec::new();
+        if let Some((was, answered)) = self.last.take()
+            && self.again > 0
+        {
+            lines.push(format!(
+                "refused `{was}` {} more time{}: {}",
+                self.again,
+                if self.again == 1 { "" } else { "s" },
+                answered.trim_end()
+            ));
+        }
+        self.again = 0;
+        if refused {
+            lines.push(format!("refused `{line}`: {}", said.trim_end()));
+            self.last = Some((line.to_owned(), said.to_owned()));
+        }
+        lines
+    }
+}
+
 /// Answer the device requests waiting on the compositor's channel; false
 /// once it has gone.
-fn answer_devices(open: &mut Connection) -> bool {
+fn answer_devices(open: &mut Connection, refusals: &mut Refusals) -> bool {
     match open.receive() {
         Ok(_) | Err(RecvError::WouldBlock) => {}
         Err(RecvError::Closed) => return false,
@@ -809,8 +858,8 @@ fn answer_devices(open: &mut Connection) -> bool {
         let line = String::from_utf8_lossy(open.bytes().get(..end).unwrap_or(&[])).into_owned();
         open.consume(end + 1, 0);
         let (said, fd) = compositor_seat::serve(&line);
-        if said != "ok\n" {
-            say(&format!("refused `{line}`: {}", said.trim_end()));
+        for told in refusals.note(&line, &said) {
+            say(&told);
         }
         let fds: Vec<Fd> = fd.iter().map(|fd| Fd(fd.as_raw_fd())).collect();
         if let Err(error) = open.send(said.as_bytes(), &fds) {
@@ -849,6 +898,36 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_repeated_is_said_once_and_counted() {
+        let mut refusals = Refusals::default();
+        let card = "open 2 /dev/dri/card0";
+        assert_eq!(
+            refusals.note(card, "err 2\n"),
+            vec!["refused `open 2 /dev/dri/card0`: err 2".to_owned()]
+        );
+        for _ in 0..104 {
+            assert!(refusals.note(card, "err 2\n").is_empty());
+        }
+        // The card is back: the count is said, and the open is not.
+        assert_eq!(
+            refusals.note(card, "ok\n"),
+            vec!["refused `open 2 /dev/dri/card0` 104 more times: err 2".to_owned()]
+        );
+        assert!(refusals.note(card, "ok\n").is_empty());
+        // A new refusal after that is said again.
+        assert_eq!(refusals.note(card, "err 2\n").len(), 1);
+        // And a different one is said at once, after the count of the last.
+        assert_eq!(refusals.note(card, "err 2\n"), Vec::<String>::new());
+        assert_eq!(
+            refusals.note("open 2 /dev/input/event3", "err 13\n"),
+            vec![
+                "refused `open 2 /dev/dri/card0` 1 more time: err 2".to_owned(),
+                "refused `open 2 /dev/input/event3`: err 13".to_owned()
+            ]
+        );
+    }
 
     const PASSWD: &str =
         "root:x:0:0:root:/:/bin/sh\nferrix:x:1000:1000:ferrix:/home/ferrix:/bin/zsh\n";
