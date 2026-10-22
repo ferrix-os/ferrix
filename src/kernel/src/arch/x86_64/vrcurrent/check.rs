@@ -48,7 +48,7 @@ fn plan(amps: &[u32], seconds: u32) -> Plan {
     plan
 }
 
-/// The word's grammar and the 25..32 A clamp, the processor gate, the
+/// The word's grammar and the 25..36 A clamp, the processor gate, the
 /// register's refusals, and the plan's packing.
 ///
 /// Verifies: `L.x86_64.190`
@@ -61,11 +61,11 @@ fn plans_parsed() -> Result<(), &'static str> {
     }
     for (word, why) in [
         ("24@60", Refusal::OutOfRange(24)),
-        ("27,33@60", Refusal::OutOfRange(33)),
+        ("27,37@60", Refusal::OutOfRange(37)),
         ("27,0@60", Refusal::OutOfRange(0)),
     ] {
         if logic::parse(word) != Err(why) {
-            return Err("a ferrix.vrcurrent step outside 25..32 A was not refused");
+            return Err("a ferrix.vrcurrent step outside 25..36 A was not refused");
         }
     }
     for word in [
@@ -100,17 +100,17 @@ fn plans_parsed() -> Result<(), &'static str> {
         return Err("the ferrix.vrcurrent processor gate let another processor through");
     }
     // The register's refusals: locked, no firmware limit, a step more than
-    // 7 A above it (24 A firmware, 32 A asked).
-    let steps = plan(&[27, 29, 32], 60);
+    // 11 A above it (24 A firmware, 36 A asked).
+    let steps = plan(&[27, 29, 36], 60);
     if logic::admit(&steps, 0xc8) != Ok(())
         || logic::admit(&steps, 0x8000_00c8) != Err(Refusal::Locked)
         || logic::admit(&steps, 0x1_0000_0000) != Err(Refusal::NoFirmwareLimit)
-        || logic::admit(&steps, 0xc0) != Err(Refusal::BeyondReach(32))
+        || logic::admit(&steps, 0xc0) != Err(Refusal::BeyondReach(36))
     {
         return Err("a ferrix.vrcurrent register refusal was not made");
     }
     let word = logic::pack(&steps);
-    if logic::unpack(word) != Some(plan(&[27, 29, 32], 60))
+    if logic::unpack(word) != Some(plan(&[27, 29, 36], 60))
         || logic::unpack(logic::pack(&plan(&[32; 8], 3600))) != Some(plan(&[32; 8], 3600))
         || logic::unpack(0).is_some()
     {

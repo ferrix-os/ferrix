@@ -1,5 +1,5 @@
 //! `ferrix.vrcurrent`'s decisions, pure functions of their inputs and no
-//! register's: the boot word's plan and its 25..32 A clamp
+//! register's: the boot word's plan and its 25..36 A clamp
 //! (`L.x86_64.190`), the value written -- only `MSR_VR_CURRENT_CONFIG` bits
 //! 12:0 changed (`L.x86_64.193`) -- and the thermal guard's verdict
 //! (`L.x86_64.191`). Stage 3 checks each on fixed values (`super::check`).
@@ -9,7 +9,7 @@
 pub(in crate::arch::x86_64) const MIN_AMPS: u32 = 25;
 /// The highest current the word may ask, in amperes (the customer's ceiling,
 /// 2026-10-22). Above it the word is refused.
-pub(in crate::arch::x86_64) const MAX_AMPS: u32 = 32;
+pub(in crate::arch::x86_64) const MAX_AMPS: u32 = 36;
 /// The most steps one word may name.
 pub(in crate::arch::x86_64) const MAX_STEPS: usize = 8;
 /// The longest step, in seconds: an hour.
@@ -32,7 +32,7 @@ const READOUT_VALID: u32 = 31;
 /// computed from it.
 pub(in crate::arch::x86_64) const TJMAX_RANGE: (u32, u32) = (80, 110);
 /// The most a step may ask above the firmware's own limit, in amperes.
-pub(in crate::arch::x86_64) const MAX_RAISE_AMPS: u64 = 7;
+pub(in crate::arch::x86_64) const MAX_RAISE_AMPS: u64 = 11;
 /// The one processor the run is authorised on: Intel family 6 model 0xBE,
 /// Alder Lake-N (the N150), as `CPUID.1:EAX` gives family and model.
 const AUTHORISED_FAMILY: u32 = 6;

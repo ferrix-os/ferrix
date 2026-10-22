@@ -215,7 +215,7 @@ fn raise(firmware: u64, was: u64, amps: u32) -> bool {
     let value = logic::compose(firmware, amps);
     IN_FORCE.store(true, Ordering::SeqCst);
     // SAFETY: (SYSREG) VR_CURRENT_CONFIG on the authorised processor, its lock
-    // clear, bits 12:0 within 25..32 A and 7 A of the firmware's, every other
+    // clear, bits 12:0 within 25..36 A and 11 A of the firmware's, every other
     // bit as firmware left it; the guard reverts it (L.x86_64.191).
     if !unsafe { cpu::write_msr_checked(VR_CURRENT_CONFIG, value) } {
         println!("msr: vrcurrent write of {amps} A refused (#GP)");
