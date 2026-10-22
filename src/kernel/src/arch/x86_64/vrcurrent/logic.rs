@@ -250,20 +250,20 @@ pub(in crate::arch::x86_64) const fn step_at(plan: &Plan, elapsed: u64) -> usize
 }
 
 /// A plan as one word, for the task's argument: each step less
-/// [`MIN_AMPS`] in three bits from bit 0, the count in four bits from 24,
-/// the seconds in twelve from 28.
+/// [`MIN_AMPS`] in four bits from bit 0, the count in four bits from 32,
+/// the seconds in twelve from 36.
 pub(in crate::arch::x86_64) fn pack(plan: &Plan) -> usize {
     let mut word = 0usize;
     for (index, &amps) in plan.amps.iter().take(plan.count).enumerate() {
-        word |= ((amps.saturating_sub(MIN_AMPS) & 0x7) as usize) << (3 * index);
+        word |= ((amps.saturating_sub(MIN_AMPS) & 0xf) as usize) << (4 * index);
     }
-    word | ((plan.count & 0xf) << 24) | (((plan.seconds & 0xfff) as usize) << 28)
+    word | ((plan.count & 0xf) << 32) | (((plan.seconds & 0xfff) as usize) << 36)
 }
 
 /// [`pack`]'s word as the plan again; `None` for a word no plan packs to.
 pub(in crate::arch::x86_64) fn unpack(word: usize) -> Option<Plan> {
-    let count = (word >> 24) & 0xf;
-    let seconds = ((word >> 28) & 0xfff) as u32;
+    let count = (word >> 32) & 0xf;
+    let seconds = ((word >> 36) & 0xfff) as u32;
     if count == 0 || count > MAX_STEPS || seconds == 0 || seconds > MAX_SECONDS {
         return None;
     }
@@ -273,7 +273,7 @@ pub(in crate::arch::x86_64) fn unpack(word: usize) -> Option<Plan> {
         seconds,
     };
     for (index, slot) in plan.amps.iter_mut().take(count).enumerate() {
-        *slot = MIN_AMPS + ((word >> (3 * index)) & 0x7) as u32;
+        *slot = MIN_AMPS + ((word >> (4 * index)) & 0xf) as u32;
     }
     Some(plan)
 }
