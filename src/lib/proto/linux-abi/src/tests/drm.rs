@@ -114,6 +114,8 @@ fn values() -> Vec<(&'static str, u64)> {
         ),
         ("DRM_CAP_DUMB_PREFER_SHADOW", drm::CAP_DUMB_PREFER_SHADOW),
         ("DRM_CAP_PRIME", drm::CAP_PRIME),
+        ("DRM_PRIME_CAP_IMPORT", drm::PRIME_CAP_IMPORT),
+        ("DRM_PRIME_CAP_EXPORT", drm::PRIME_CAP_EXPORT),
         ("DRM_CAP_TIMESTAMP_MONOTONIC", drm::CAP_TIMESTAMP_MONOTONIC),
         ("DRM_CAP_ASYNC_PAGE_FLIP", drm::CAP_ASYNC_PAGE_FLIP),
         ("DRM_CAP_CURSOR_WIDTH", drm::CAP_CURSOR_WIDTH),

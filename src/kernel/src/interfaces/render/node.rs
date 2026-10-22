@@ -878,15 +878,30 @@ fn resource_create_blob(
     Ok(0)
 }
 
-/// `DRM_IOCTL_GET_CAP` on a render node: that there are no sync objects,
-/// which is how Venus learns to make its own on fence descriptors. Every
-/// other capability is the card's to answer, and is `EINVAL` here.
+/// `DRM_IOCTL_GET_CAP` on the render core's node, for two things.
+///
+/// * That there are no sync objects, which is how Venus learns to make its
+///   own on fence descriptors.
+/// * `DRM_CAP_PRIME`: import and export, because this file implements both
+///   calls -- [`export`] for `PRIME_HANDLE_TO_FD` and [`import`] for
+///   `PRIME_FD_TO_HANDLE`, which takes only this renderer's own exports.
+///   Linux's `drm_getcap` answers the same for a driver with PRIME, and
+///   since 6.6 for every driver. Mesa's Wayland platform asks the
+///   compositor's device for it and, told nothing, takes a software path
+///   that with the virgl driver loaded calls a null hook (`docs/GNOME.md`,
+///   gap 1). The answer grants nothing: both calls work for any opener of
+///   the node whatever it says.
+///
+/// Every other capability is the card's to answer, and is `EINVAL` here.
+/// This is the render core's node only: a node a chardev driver serves
+/// answers for itself.
 fn get_cap(process: &Process, arg: u64) -> Result<usize, Errno> {
     let mut bytes = vec![0u8; GetCap::SIZE];
     uaccess::copy_from_user(process.space(), arg, &mut bytes).map_err(|_| Errno::EFAULT)?;
     let mut cap = GetCap::read(&bytes).ok_or(Errno::EFAULT)?;
     cap.value = match cap.capability {
         drm::CAP_SYNCOBJ | drm::CAP_SYNCOBJ_TIMELINE => 0,
+        drm::CAP_PRIME => drm::PRIME_CAP_IMPORT | drm::PRIME_CAP_EXPORT,
         _ => return Err(Errno::EINVAL),
     };
     cap.write(&mut bytes).ok_or(Errno::EFAULT)?;

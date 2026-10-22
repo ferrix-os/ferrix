@@ -20,7 +20,7 @@ use std::ffi::CStr;
 use std::io;
 use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 
-use ferrix_linux_abi::drm::{self, GemClose, PrimeHandle, Version};
+use ferrix_linux_abi::drm::{self, GemClose, GetCap, PrimeHandle, Version};
 use ferrix_linux_abi::socket::Width;
 use ferrix_linux_abi::virtgpu::{
     self, ContextInit, ContextSetParam, ExecBuffer, Field, GetCaps, GetParam, Layout, Map,
@@ -498,6 +498,20 @@ impl Render {
         self.ioctl(virtgpu::IOCTL_WAIT, &mut request)
     }
 
+    /// What the node answers `DRM_IOCTL_GET_CAP` for `capability`.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the node said; `EINVAL` for a capability it does not answer.
+    pub fn cap(&self, capability: u64) -> io::Result<u64> {
+        let mut request = GetCap {
+            capability,
+            ..GetCap::ZERO
+        };
+        self.ioctl(drm::IOCTL_GET_CAP, &mut request)?;
+        Ok(request.value)
+    }
+
     /// Let go of object `handle`: `DRM_IOCTL_GEM_CLOSE`.
     ///
     /// # Errors
@@ -641,14 +655,26 @@ pub fn probe() -> String {
     let three_d = node.param(virtgpu::PARAM_3D_FEATURES).unwrap_or(0);
     let capsets = node.param(virtgpu::PARAM_SUPPORTED_CAPSET_IDS).unwrap_or(0);
     format!(
-        "{MARKER} renderD128 {driver} 3d {three_d} capsets 0x{capsets:x} {} {} {} {} {} {}",
+        "{MARKER} renderD128 {driver} 3d {three_d} capsets 0x{capsets:x} {} {} {} {} {} {} {}",
         object(&node),
         caps(&node, capsets),
         moved(&node),
         drew(&node),
         blob(capsets),
         read(&node),
+        prime(&node),
     )
+}
+
+/// What the node says of PRIME: `prime <value>`, which is 3 for import and
+/// export, or `prime none <why>`. Mesa's Wayland platform asks this of the
+/// compositor's device before it shares a buffer as a dmabuf
+/// (`docs/GNOME.md`, gap 1).
+fn prime(node: &Render) -> String {
+    match node.cap(drm::CAP_PRIME) {
+        Ok(value) => format!("prime {value}"),
+        Err(error) => format!("prime none {}", reason(&error)),
+    }
 }
 
 /// What a read of the node said with no event queued: `read EAGAIN`, or

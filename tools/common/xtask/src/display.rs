@@ -520,6 +520,19 @@ const BLOB: &str = "4096";
 /// What the program prints about the render node, before its own marker.
 pub(crate) const RENDER: &str = "render:";
 
+/// What the render node must answer `DRM_CAP_PRIME`: import and export
+/// (`DRM_PRIME_CAP_IMPORT | DRM_PRIME_CAP_EXPORT`), which Mesa's Wayland
+/// platform asks of a compositor's device before it shares a buffer as a
+/// dmabuf (`docs/GNOME.md`, gap 1).
+const PRIME: &str = "3";
+
+/// Whether the render line says the node answered `DRM_CAP_PRIME` with
+/// [`PRIME`] exactly: a node that answers only one of the two, or nothing,
+/// is not one Mesa will share buffers through.
+pub(crate) fn render_prime_ok(line: &str) -> bool {
+    render_did(line, "prime") == Some(PRIME)
+}
+
 /// The driver the render line names, if it found a node: the line is
 /// `render: renderD128 <driver> 3d <n> capsets 0x<mask> object <h>/<r> of <n>
 /// bytes`, and `render: none <why>` when there was none. Read from the marker
@@ -653,6 +666,14 @@ fn judge_render(arch: Arch, gl: bool, venus: bool, lines: &[String]) -> Result<(
                 )));
             }
             println!("  {arch}: the render node: read EAGAIN");
+            // And PRIME, import and export, as Linux's `drm_getcap`
+            // answers for a driver that has both calls.
+            if !render_prime_ok(render) {
+                return Err(Error::new(format!(
+                    "{arch}: the render node did not answer DRM_CAP_PRIME with {PRIME}: `{render}`"
+                )));
+            }
+            println!("  {arch}: the render node: prime {PRIME}");
             // With Venus on the card, a blob of host memory made in a
             // Venus context and mapped through the device's window: every
             // byte written there reads back (`docs/GPU.md` §6.1).
@@ -839,6 +860,19 @@ pub(crate) fn test_display(args: &Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The render line's PRIME word passes only as import and export, and
+    /// fails as an error, as one half, or when it is missing.
+    #[test]
+    fn render_prime_needs_import_and_export() {
+        let line = "[  1.0] render: renderD128 virtio_gpu 3d 1 capsets 0x6 \
+                    object 1/1073741824 caps 1024 bytes v2 read EAGAIN";
+        assert!(render_prime_ok(&format!("{line} prime 3")));
+        assert!(!render_prime_ok(&format!("{line} prime none EINVAL")));
+        assert!(!render_prime_ok(&format!("{line} prime 1")));
+        assert!(!render_prime_ok(line));
+        assert!(!render_prime_ok("render: none no node"));
+    }
 
     fn ppm(width: usize, height: usize, fill: [u8; 3]) -> Vec<u8> {
         let mut bytes = format!("P6\n# QEMU\n{width} {height}\n255\n").into_bytes();

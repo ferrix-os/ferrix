@@ -4,8 +4,9 @@
 //! This is the subset `docs/DISPLAY.md` §2.3 answers: the legacy
 //! mode-setting calls, dumb buffers, page flips and the event records read
 //! back from the card in iteration 1, and the plane and property queries
-//! Smithay's legacy path makes in iteration 2 (E4). Atomic commit, setting
-//! properties, property blobs, GEM names, PRIME and render nodes are later.
+//! Smithay's legacy path makes in iteration 2 (E4), and the PRIME calls and
+//! capability the render node answers (`docs/GPU.md` §3.13). Atomic commit,
+//! setting properties, property blobs and GEM names are later.
 //!
 //! # Where the numbers come from
 //!
@@ -124,8 +125,13 @@ pub const CAP_VBLANK_HIGH_CRTC: u64 = 0x2;
 pub const CAP_DUMB_PREFERRED_DEPTH: u64 = 0x3;
 /// `DRM_CAP_DUMB_PREFER_SHADOW`.
 pub const CAP_DUMB_PREFER_SHADOW: u64 = 0x4;
-/// `DRM_CAP_PRIME`.
+/// `DRM_CAP_PRIME`: which of [`PRIME_CAP_IMPORT`] and [`PRIME_CAP_EXPORT`]
+/// a node does.
 pub const CAP_PRIME: u64 = 0x5;
+/// `DRM_PRIME_CAP_IMPORT`: `DRM_IOCTL_PRIME_FD_TO_HANDLE` works.
+pub const PRIME_CAP_IMPORT: u64 = 0x1;
+/// `DRM_PRIME_CAP_EXPORT`: `DRM_IOCTL_PRIME_HANDLE_TO_FD` works.
+pub const PRIME_CAP_EXPORT: u64 = 0x2;
 /// `DRM_CAP_TIMESTAMP_MONOTONIC`: event timestamps are `CLOCK_MONOTONIC`.
 pub const CAP_TIMESTAMP_MONOTONIC: u64 = 0x6;
 /// `DRM_CAP_ASYNC_PAGE_FLIP`.
