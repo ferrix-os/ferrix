@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 136 | 85 | 51 |
-| Low (`L.*`) | 972 | 709 | 263 |
+| Low (`L.*`) | 973 | 710 | 263 |
 
-2105 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2106 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2107 |
+| Named by a low-level requirement | 2108 |
 | Accessors, covered by the requirement they serve | 981 |
 | Check code in a product file | 82 |
-| Named by none | 937 |
+| Named by none | 936 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -1437,6 +1437,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
 |---|---|---|---|---|---|---|---|---|
 | `L.device.49` | devmgr's start shall read /sbin/devmgr and each driver its manifest names whole, up to the read limit, whatever the heap's largest block; a driver it cannot read shall be named on the console and the start refused. | Stage 8's check reads a file of 4 MiB, three pages and 17 bytes through devmgr's reader, whole and byte for byte. With the reader copying into the heap, the boot panics. | H.BOOT.15 | `discovery::devmgr::read_files` | `src/kernel/src/fs/check.rs::check_devmgr_reads_past_a_heap_block` | not reached | not reached | not reached |
+| `L.device.50` | process_create shall read an image VMO whole, up to MAX_IMAGE_BYTES, whatever the heap's largest block, and load it. | Stage 7's check reads a VMO of 1027 pages -- a small ELF, then a pattern -- through image_bytes, whole and byte for byte, and loads it as a native process. With image_bytes copying into the heap, the boot panics. | H.BOOT.15 | `syscall::native::image_bytes` | `src/kernel/src/syscall/check.rs::check_process_create_reads_an_image_past_a_heap_block` | not reached | not reached | not reached |
 
 ### Switch
 
@@ -2154,6 +2155,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/syscall/check.rs::check_mprotect_takes_write_away` | kernel | L.user.86 |
 | `src/kernel/src/syscall/check.rs::check_mremap_moves_the_contents_and_shrinks_in_place` | kernel | L.user.30, L.user.73 |
 | `src/kernel/src/syscall/check.rs::check_nothing_is_mapped_near_page_zero` | kernel | L.user.45 |
+| `src/kernel/src/syscall/check.rs::check_process_create_reads_an_image_past_a_heap_block` | kernel | L.device.50 |
 | `src/kernel/src/syscall/check.rs::check_switches_are_counted` | kernel | L.sched.83 |
 | `src/kernel/src/syscall/check.rs::check_system_calls_are_kernel_time` | kernel | L.sched.81 |
 | `src/kernel/src/syscall/check.rs::check_the_loader_refuses_what_it_cannot_run` | kernel | L.x86_64.74 |

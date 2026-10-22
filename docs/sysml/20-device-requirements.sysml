@@ -991,5 +991,17 @@ package FerrixDeviceRequirements {
             attribute :>> parent = "H.BOOT.15";
             attribute :>> unit = "discovery::devmgr::read_files";
         }
+
+        requirement <'L.device.50'> processCreateReadsPastAHeapBlock : ItemLowLevel {
+            attribute :>> statement = "process_create shall read an image VMO
+                whole, up to MAX_IMAGE_BYTES, whatever the heap's largest block,
+                and load it.";
+            attribute :>> criterion = "Stage 7's check reads a VMO of 1027 pages
+                -- a small ELF, then a pattern -- through image_bytes, whole and
+                byte for byte, and loads it as a native process. With
+                image_bytes copying into the heap, the boot panics.";
+            attribute :>> parent = "H.BOOT.15";
+            attribute :>> unit = "syscall::native::image_bytes";
+        }
     }
 }

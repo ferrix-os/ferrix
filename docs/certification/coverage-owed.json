@@ -498,6 +498,16 @@
       ],
       "dropped": "none. New and changed code no coverage run has measured; the evidence was carried (carry-coverage.py, every anchor carried), not re-measured.",
       "what": "discovery/devmgr.rs read_files' new Err arm (a driver the manifest names that cannot be read: the console line naming it and errno, then the refusal); fs/mod.rs read_from_root (resolve, then read_location into a vmap::Buffer); fs/check.rs check_devmgr_reads_past_a_heap_block and its error arms (stage 8's check, run on every checked boot). read_from_root and the check's success path are reached on every test-boot and test-init; the Err arm only by a driver that cannot be read, which no gate boot carries."
+    },
+    {
+      "landing": "spawn-4m: process_create reads its image into a vmap::Buffer, so a native program or driver past the heap's largest block (4 MiB) still starts (the N150 box's Intel GPU driver, 4,270,752 bytes, 2026-10-22; the certification consultant's OK IF, ledger 3045, condition 5; L.device.50)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "none. New and changed code no coverage run has measured; the evidence was carried (carry-coverage.py, every anchor carried), not re-measured.",
+      "what": "syscall/native.rs image_bytes (vmap::Buffer::zeroed in place of the heap copy, and its NO_MEMORY arm); syscall/check.rs check_process_create_reads_an_image_past_a_heap_block, large_image_byte and the check's error arms (stage 7's check, run on every checked boot). image_bytes's success path and the check's are reached on every test-boot and test-init; the NO_MEMORY arm only when frames or vmap addresses run out, which no gate boot does."
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "b81de7a57903d01e4f829947c5fcca3793a76e9a4366950ba8091746dec7317a",
+  "digest": "9892cae87ac3868d784f7d3e44945e5d39f35219993705507d3bbdaead3ae99e",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 142,
-    "elements": 7250,
+    "elements": 7255,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -70235,6 +70235,63 @@
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 992
+                  }
+                }
+              ]
+            },
+            {
+              "name": "processCreateReadsPastAHeapBlock",
+              "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::processCreateReadsPastAHeapBlock",
+              "kind": "requirement",
+              "shortName": "L.device.50",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 995
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::processCreateReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"process_create shall read an image VMO whole, up to MAX_IMAGE_BYTES, whatever the heap's largest block, and load it.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 998
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::processCreateReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 7's check reads a VMO of 1027 pages -- a small ELF, then a pattern -- through image_bytes, whole and byte for byte, and loads it as a native process. With image_bytes copying into the heap, the boot panics.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1002
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::processCreateReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.BOOT.15\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1003
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::processCreateReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"syscall::native::image_bytes\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 1004
                   }
                 }
               ]

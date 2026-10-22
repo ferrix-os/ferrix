@@ -1975,13 +1975,19 @@ fn process_create(
 }
 
 /// Every byte of a VMO, for `process_create` to load.
-fn image_bytes(vmo: &Vmo) -> Result<Vec<u8>, Errno> {
+///
+/// Into a [`crate::vmap::Buffer`], not a heap `Vec`: the heap serves nothing past
+/// one buddy block (4 MiB), so an image one byte larger failed with
+/// `NO_MEMORY` however much memory was free -- the N150 box's Intel GPU
+/// driver, 4,270,752 bytes, "could not be started" (2026-10-22). The buffer
+/// is limited by free frames and by [`MAX_IMAGE_BYTES`] instead.
+pub(crate) fn image_bytes(vmo: &Vmo) -> Result<crate::vmap::Buffer, Errno> {
     let len = vmo.len_bytes();
     if len > MAX_IMAGE_BYTES {
         return Err(status::TOO_BIG);
     }
     let len = usize::try_from(len).map_err(|_| status::TOO_BIG)?;
-    let mut bytes = fallible::try_filled(0_u8, len).map_err(|_| status::NO_MEMORY)?;
+    let mut bytes = crate::vmap::Buffer::zeroed(len).map_err(|_| status::NO_MEMORY)?;
     for (index, page) in bytes.chunks_mut(PAGE_SIZE as usize).enumerate() {
         vmo.read_page(index as u64, 0, page).map_err(vmo_error)?;
     }

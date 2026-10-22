@@ -802,6 +802,7 @@ fn check_handlers(output: Output) -> Result<u64, &'static str> {
     check_no_new_privs_crosses_a_fork()?;
     check_a_change_of_ids_ends_dumpability()?;
     check_no_new_privs_reaches_a_native_child()?;
+    check_process_create_reads_an_image_past_a_heap_block()?;
     check_uname_names_the_system(&process)?;
     check_poll_reports_ready_invalid_and_skipped(&process)?;
     check_select_answers_with_the_sets_that_are_ready(&process)?;
@@ -1763,6 +1764,75 @@ fn check_no_new_privs_reaches_a_native_child() -> Result<(), &'static str> {
     process::kill(&child, 137);
     process::kill(&before, 137);
     outcome
+}
+
+/// Pages of the image [`check_process_create_reads_an_image_past_a_heap_block`]
+/// loads: past the heap's largest block (4 MiB, 1024 pages), as the N150
+/// box's Intel GPU driver was at 4,270,752 bytes when `devmgr` said it
+/// "could not be started".
+const LARGE_IMAGE_PAGES: u64 = 1024 + 3;
+
+/// `process_create` reads an image larger than the heap's largest block out
+/// of its VMO, whole and byte for byte, and loads it: a small ELF in the
+/// first pages, a pattern in the rest, as an unstripped driver carries its
+/// debug sections after the code it loads.
+///
+/// Verifies: L.device.50
+fn check_process_create_reads_an_image_past_a_heap_block() -> Result<(), &'static str> {
+    use crate::object::process::{Host, downcast};
+    use crate::user::vmo::Vmo;
+    let file = image::build_with(
+        class_of_this_build(),
+        arch::ARCH.elf_machine(),
+        image::Shape::Good,
+        arch::USER_ARGUMENT_PROGRAM,
+    );
+    let page = PAGE_SIZE as usize;
+    let head_pages = file.len().div_ceil(page) as u64;
+    let vmo = Vmo::new_anonymous(LARGE_IMAGE_PAGES)
+        .map_err(|_| "no memory for a large native image's VMO")?;
+    for (index, chunk) in file.chunks(page).enumerate() {
+        vmo.write_page(index as u64, 0, chunk)
+            .map_err(|_| "a small ELF did not fit a large VMO")?;
+    }
+    let mut chunk = [0_u8; PAGE_SIZE as usize];
+    for index in head_pages..LARGE_IMAGE_PAGES {
+        for (offset, byte) in chunk.iter_mut().enumerate() {
+            *byte = large_image_byte(index as usize * page + offset);
+        }
+        vmo.write_page(index, 0, &chunk)
+            .map_err(|_| "a page of a large native image could not be written")?;
+    }
+    let bytes = crate::syscall::native::image_bytes(&vmo).map_err(
+        |_| "process_create could not read an image past the heap's largest block out of its VMO",
+    )?;
+    let head = head_pages as usize * page;
+    if bytes.len() != LARGE_IMAGE_PAGES as usize * page
+        || bytes.get(..file.len()) != Some(file.as_slice())
+        || bytes
+            .iter()
+            .enumerate()
+            .skip(head)
+            .any(|(at, &byte)| byte != large_image_byte(at))
+    {
+        return Err("process_create read an image past the heap's largest block back different");
+    }
+    let creator = process::new_for_check()
+        .map_err(|_| "could not make a process for the large native image check")?;
+    let child =
+        crate::syscall::launch::load_native(Some(&*creator as &dyn Host), &bytes, b"/large-image")
+            .ok()
+            .and_then(downcast::<Process>)
+            .ok_or("a native image past the heap's largest block did not load")?;
+    // Never started: ended here, as the other checks end theirs.
+    process::kill(&child, 137);
+    Ok(())
+}
+
+/// A byte of the pattern [`check_process_create_reads_an_image_past_a_heap_block`]
+/// writes past its ELF, by its offset in the image.
+fn large_image_byte(at: usize) -> u8 {
+    (at.wrapping_mul(31) ^ (at >> 12)) as u8
 }
 
 /// `uname` fills all six fields, NUL-terminates each within its 65 bytes, and
