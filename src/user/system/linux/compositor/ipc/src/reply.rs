@@ -1128,13 +1128,13 @@ fn monitors(flags: Flags, monitors: &[Monitor]) -> String {
             out.boolean("disabled", false);
             out.string("currentFormat", "XRGB8888");
             out.string("mirrorOf", "none");
-            out.bare(
-                "availableModes",
-                &format!(
-                    "[\"{}x{}@{:.5}Hz\"]",
-                    monitor.width, monitor.height, monitor.refresh
-                ),
-            );
+            // Hyprland's `availableModesForOutput`: each listed mode as
+            // `WxH@R.RRHz`, two decimals, in the connector's order.
+            let modes: Vec<String> = available_modes(monitor)
+                .iter()
+                .map(|mode| format!("\"{mode}\""))
+                .collect();
+            out.bare("availableModes", &format!("[{}]", modes.join(",")));
             out.end('}');
         }
         out.end(']');
@@ -1144,7 +1144,7 @@ fn monitors(flags: Flags, monitors: &[Monitor]) -> String {
     for monitor in monitors {
         let _ = writeln!(
             text,
-            "Monitor {} (ID {}):\n\t{}x{}@{:.5} at {}x{}\n\tdescription: {}\n\tmake: {}\n\tmodel: {}\n\tserial: {}\n\tactive workspace: {} ({})\n\tspecial workspace: {} ({})\n\treserved: {} {} {} {}\n\tscale: {:.2}\n\ttransform: {}\n\tfocused: {}\n\tdpmsStatus: {}\n\tvrr: false\n\tactivelyTearing: false\n\tdisabled: false\n\tcurrentFormat: XRGB8888\n\tmirrorOf: none\n",
+            "Monitor {} (ID {}):\n\t{}x{}@{:.5} at {}x{}\n\tdescription: {}\n\tmake: {}\n\tmodel: {}\n\tserial: {}\n\tactive workspace: {} ({})\n\tspecial workspace: {} ({})\n\treserved: {} {} {} {}\n\tscale: {:.2}\n\ttransform: {}\n\tfocused: {}\n\tdpmsStatus: {}\n\tvrr: false\n\tactivelyTearing: false\n\tdisabled: false\n\tcurrentFormat: XRGB8888\n\tmirrorOf: none\n\tavailableModes: {}\n",
             monitor.name,
             monitor.id,
             monitor.width,
@@ -1171,6 +1171,11 @@ fn monitors(flags: Flags, monitors: &[Monitor]) -> String {
             monitor.transform.value(),
             if monitor.focused { "yes" } else { "no" },
             monitor.dpms,
+            // Hyprland's text form ends each mode with a space.
+            available_modes(monitor)
+                .iter()
+                .map(|mode| format!("{mode} "))
+                .collect::<String>(),
         );
     }
     text
@@ -1433,4 +1438,20 @@ fn finish(out: Json, flags: Flags) -> String {
         text.push('\n');
     }
     text
+}
+
+/// A monitor's listed modes as Hyprland prints them, `WxH@R.RRHz`: its own
+/// mode alone where its connector said none.
+fn available_modes(monitor: &Monitor) -> Vec<String> {
+    if monitor.modes.is_empty() {
+        return vec![format!(
+            "{}x{}@{:.2}Hz",
+            monitor.width, monitor.height, monitor.refresh
+        )];
+    }
+    monitor
+        .modes
+        .iter()
+        .map(|(width, height, hertz)| format!("{width}x{height}@{hertz:.2}Hz"))
+        .collect()
 }

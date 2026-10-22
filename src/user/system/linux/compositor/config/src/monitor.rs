@@ -135,9 +135,15 @@ impl Transform {
 /// The resolution field.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Mode {
-    /// `preferred`, `highres`, `highrr`: whatever the connector says is
-    /// best, which for virtio-gpu is its only mode.
+    /// `preferred` (and `maxwidth`, which Hyprland treats so): the mode the
+    /// connector marks preferred.
     Preferred,
+    /// `highres`: the listed mode with the most pixels, the fastest of
+    /// them.
+    HighRes,
+    /// `highrr`: the listed mode with the fastest refresh, the largest of
+    /// them.
+    HighRr,
     /// `WIDTHxHEIGHT[@REFRESH]`.
     Fixed {
         /// In pixels.
@@ -423,14 +429,13 @@ impl MonitorRule {
 
 /// The resolution field, which is a size or a word.
 fn parse_mode(text: &str) -> Result<Mode, String> {
-    // Hyprland's words for "let the connector decide". `highres` and
-    // `highrr` choose between modes, and virtio-gpu has one, so all three
-    // mean the same thing here.
-    if matches!(
-        text.to_ascii_lowercase().as_str(),
-        "" | "preferred" | "highres" | "highrr" | "maxwidth"
-    ) {
-        return Ok(Mode::Preferred);
+    // Hyprland's words for "let the connector decide", and the two that
+    // choose among the modes it lists (`CMonitor::applyMonitorRule`).
+    match text.to_ascii_lowercase().as_str() {
+        "" | "preferred" | "maxwidth" => return Ok(Mode::Preferred),
+        "highres" => return Ok(Mode::HighRes),
+        "highrr" => return Ok(Mode::HighRr),
+        _ => {}
     }
     let (size, refresh) = match text.split_once('@') {
         Some((size, rate)) => {

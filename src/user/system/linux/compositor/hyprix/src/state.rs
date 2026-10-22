@@ -416,10 +416,12 @@ struct Compositor<'r> {
 }
 
 /// What the compositor settled on as it started, which nothing changes
-/// after.
+/// after but the monitor rules.
 struct Fixed {
     /// The `monitor =` lines, which say where a monitor goes, how it is
-    /// scaled, which of its modes it is set to and whether it is used at all.
+    /// scaled, which of its modes it is set to and whether it is used at
+    /// all: the file's at start, read again at `hyprctl reload` and
+    /// `hyprctl keyword monitor` (`Hyprix::apply_monitor_rules`).
     monitor_rules: Vec<MonitorRule>,
     /// `layerrule = <rule>, <namespace>`: what a bar, a wallpaper or a
     /// notification is drawn with. The `zwlr_layer_shell_v1` half of
@@ -835,17 +837,44 @@ impl<'r> Compositor<'r> {
             &mut self.state,
             self.report,
         ) {
-            let (x, y, width, height) = Screen::desktop(&self.screens);
-            self.seat.resize(width, height);
-            self.seat.place_at(x, y);
-            let outputs: Vec<compositor_server::Output> =
-                self.screens.iter().map(Screen::output).collect();
-            for slot in &mut self.slots {
-                slot.client_mut().set_outputs(outputs.clone());
-                slot.client_mut().publish_outputs(&outputs);
-            }
-            self.owed = true;
+            self.screens_moved();
         }
+    }
+
+    /// `hyprctl reload` or `hyprctl keyword monitor`: the `monitor =` lines
+    /// read again -- the file's, then the keywords' since -- and put in
+    /// force on the screens that run (`docs/DISPLAY.md` §9.5).
+    fn apply_monitor_rules(&mut self) {
+        let (rules, refused) =
+            MonitorRule::read_all(self.config.monitors.iter().map(|raw| raw.value.as_str()));
+        for (value, why) in refused {
+            (self.report)(&format!("hyprix: monitor = {value}: {why}"));
+        }
+        self.fixed.monitor_rules = rules;
+        if apply_monitor_rules(
+            &mut self.screens,
+            &self.fixed.monitor_rules,
+            self.options.renderer,
+            &mut self.state,
+            self.report,
+        ) {
+            self.screens_moved();
+        }
+    }
+
+    /// What follows a screen changing its mode, scale or place: the
+    /// pointer's bounds, and every client's `wl_output`, sent again.
+    fn screens_moved(&mut self) {
+        let (x, y, width, height) = Screen::desktop(&self.screens);
+        self.seat.resize(width, height);
+        self.seat.place_at(x, y);
+        let outputs: Vec<compositor_server::Output> =
+            self.screens.iter().map(Screen::output).collect();
+        for slot in &mut self.slots {
+            slot.client_mut().set_outputs(outputs.clone());
+            slot.client_mut().publish_outputs(&outputs);
+        }
+        self.owed = true;
     }
 
     /// New connections. Gives where they start in the slots: a connection
@@ -930,6 +959,12 @@ impl<'r> Compositor<'r> {
                 .find(|screen| screen.name == monitor.name)
             {
                 monitor.refresh = f64::from(screen.output().refresh) / 1000.0;
+                monitor.modes = screen
+                    .backend
+                    .modes()
+                    .into_iter()
+                    .map(|(width, height, mhz)| (width, height, f64::from(mhz) / 1000.0))
+                    .collect();
             }
         }
         snapshot
@@ -1474,14 +1509,23 @@ impl<'r> Compositor<'r> {
         let mut changed = false;
         let mut pending = Vec::new();
         let forced_before = self.forced;
+        let mut monitors = false;
         for reply in asked {
             // `hyprctl reload`: the file read again, and what it says in
             // force from the next frame. The compositor's own, since only it
             // knows where the file is.
             if matches!(reply, compositor_ipc::Reply::Reload) {
-                changed |= self.reload();
+                let read = self.reload();
+                changed |= read;
+                monitors |= read;
                 continue;
             }
+            // `hyprctl keyword monitor <rule>`: a line added to the file's,
+            // put in force with them once the requests are done.
+            monitors |= matches!(
+                &reply,
+                compositor_ipc::Reply::Keyword { name, .. } if name == "monitor"
+            );
             let animated = matches!(
                 &reply,
                 compositor_ipc::Reply::Keyword { name, .. } if name.starts_with("animations")
@@ -1537,6 +1581,10 @@ impl<'r> Compositor<'r> {
         }
         if !pending.is_empty() {
             let _done = self.deliver(&pending, now);
+            changed = true;
+        }
+        if monitors {
+            self.apply_monitor_rules();
             changed = true;
         }
         changed
@@ -3118,6 +3166,7 @@ impl Screen {
     fn resize(
         &mut self,
         size: (u32, u32),
+        refresh: Option<f64>,
         renderer: crate::options::Renderer,
         report: &mut dyn FnMut(&str),
     ) -> Result<(), String> {
@@ -3126,7 +3175,7 @@ impl Screen {
         let backdrop = compositor_render::Backdrop::new(width, height)
             .map_err(|error| format!("a backdrop: {error:?}"))?;
         self.backend
-            .resize(size)
+            .resize(size, refresh)
             .map_err(|error| error.to_string())?;
         self.canvas = canvas;
         self.backdrop = backdrop;
@@ -4840,18 +4889,14 @@ fn follow_modes(
         if preferred == was || screen.backend.lost() {
             continue;
         }
-        if let Some(MonitorRule {
-            mode: compositor_config::Mode::Fixed { .. },
-            ..
-        }) = rule(screen)
-        {
+        if rule(screen).is_some_and(|rule| rule.mode != compositor_config::Mode::Preferred) {
             report(&format!(
                 "hyprix: {} now prefers {}x{}; its `monitor =` line names a mode, which it keeps",
                 screen.name, preferred.0, preferred.1
             ));
             continue;
         }
-        match screen.resize(preferred, renderer, report) {
+        match screen.resize(preferred, None, renderer, report) {
             Ok(()) => {
                 report(&format!(
                     "hyprix: {} is {}x{} now, as its monitor prefers (was {}x{})",
@@ -4868,11 +4913,19 @@ fn follow_modes(
     if !changed {
         return false;
     }
-    // `auto` is to the right of the monitors already placed, as when the
-    // screens were first laid out ([`Screen::all`]).
+    place_screens(screens, rules, state);
+    true
+}
+
+/// Lay the screens out again by their rules: `auto` to the right of the
+/// monitors already placed, as when the screens were first laid out
+/// ([`Screen::all`]), and each one's size in its logical pixels.
+fn place_screens(screens: &mut [Screen], rules: &[MonitorRule], state: &mut State) {
     let mut x = 0i64;
     for screen in screens.iter_mut() {
-        let at = match rule(screen).map(|rule| rule.position) {
+        let at = match MonitorRule::for_monitor(rules, &screen.name, &screen.description)
+            .map(|rule| rule.position)
+        {
             Some(Position::At(at_x, at_y)) => (at_x, at_y),
             _ => (x, 0),
         };
@@ -4880,7 +4933,107 @@ fn follow_modes(
         x = at.0.saturating_add(screen.rect.width);
         let _ = state.move_monitor(screen.monitor, screen.rect, screen.scale);
     }
-    true
+}
+
+/// Put the `monitor =` lines in force on screens that run already
+/// (`hyprctl reload`, `hyprctl keyword monitor`; `docs/DISPLAY.md` §9.5),
+/// as Hyprland's monitor reload does: each screen's mode -- `preferred`
+/// the card's preferred one, a size the listed mode nearest its refresh,
+/// `highres` and `highrr` chosen among the listed ones -- and its scale,
+/// then every screen placed again. A mode the connector does not list is
+/// said and the screen keeps its own, as Hyprland falls back; turning a
+/// monitor or disabling one takes a restart and says so. Gives whether any
+/// screen changed.
+fn apply_monitor_rules(
+    screens: &mut [Screen],
+    rules: &[MonitorRule],
+    renderer: crate::options::Renderer,
+    state: &mut State,
+    report: &mut dyn FnMut(&str),
+) -> bool {
+    let mut changed = false;
+    for screen in screens.iter_mut() {
+        if screen.backend.lost() {
+            continue;
+        }
+        let Some(rule) = MonitorRule::for_monitor(rules, &screen.name, &screen.description) else {
+            continue;
+        };
+        if rule.disabled {
+            report(&format!(
+                "hyprix: {}: disabling a monitor takes a restart; it stays on",
+                screen.name
+            ));
+            continue;
+        }
+        if rule.transform != screen.transform {
+            report(&format!(
+                "hyprix: {}: turning a monitor takes a restart; it stays as it is",
+                screen.name
+            ));
+        }
+        let wanted = match rule.mode {
+            compositor_config::Mode::Preferred => screen
+                .backend
+                .preferred()
+                .map(|size| (size, screen.backend.preferred_refresh())),
+            mode => crate::backend::pick_mode(mode, &screen.backend.modes()),
+        };
+        let was = screen.backend.size();
+        let was_mhz = screen.backend.refresh_mhz();
+        if let Some((size, refresh)) = wanted {
+            let other_rate = refresh.is_some_and(|hertz| {
+                (hertz - f64::from(was_mhz) / 1000.0).abs() > 0.5
+                    && screen.backend.modes().iter().any(|&(w, h, mhz)| {
+                        (w, h) == size && (f64::from(mhz) / 1000.0 - hertz).abs() < 0.5
+                    })
+            });
+            if size != was || other_rate {
+                match screen.resize(size, refresh, renderer, report) {
+                    Ok(()) => {
+                        let now = screen.backend.refresh_mhz();
+                        report(&format!(
+                            "hyprix: {} is {}x{}@{}.{:03} now, as its monitor rule asks (was {}x{}@{}.{:03})",
+                            screen.name,
+                            size.0,
+                            size.1,
+                            now / 1000,
+                            now % 1000,
+                            was.0,
+                            was.1,
+                            was_mhz / 1000,
+                            was_mhz % 1000
+                        ));
+                        changed = true;
+                    }
+                    Err(why) => report(&format!(
+                        "hyprix: {}: its monitor rule asks for {}x{}, which it cannot run ({why}); it stays {}x{}",
+                        screen.name, size.0, size.1, was.0, was.1
+                    )),
+                }
+            }
+        }
+        let scale = rule.scale_factor();
+        if (scale - screen.scale).abs() > f64::EPSILON {
+            screen.scale = scale;
+            changed = true;
+        }
+        // The logical size follows the mode and the scale.
+        let (width, height) = screen.transform.size(screen.backend.size());
+        let rect = Rect::new(
+            screen.rect.x,
+            screen.rect.y,
+            logical(width, screen.scale),
+            logical(height, screen.scale),
+        );
+        changed |= rect != screen.rect;
+        screen.rect = rect;
+    }
+    // A position may have changed with nothing else: place them anyway.
+    let before: Vec<Rect> = screens.iter().map(|screen| screen.rect).collect();
+    place_screens(screens, rules, state);
+    changed |= screens.iter().map(|screen| screen.rect).ne(before);
+    changed
 }
 
 /// Move and scale the screens one arrangement names.

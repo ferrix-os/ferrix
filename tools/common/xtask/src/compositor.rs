@@ -112,7 +112,7 @@ use drawn_here::{test_caption, test_waybar, test_waybar_volume};
 use effects::{test_bar_menu, test_drag, test_drag_precise, test_screenshot_unshared};
 use layout::{test_dispatchers, test_groups, test_plugins, test_rules, test_submap, test_twin};
 use machine::{test_desktop, test_driver_restart};
-use monitors::{test_edid, test_mode, test_monitors, test_scale, test_transform};
+use monitors::{test_edid, test_mode, test_modes, test_monitors, test_scale, test_transform};
 use pointer::{test_cursor, test_pointer};
 use protocols::{
     test_bar, test_clipboard, test_lock, test_menu, test_screenshot, test_taskbar, test_typing,
@@ -670,7 +670,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 46] = [
+const BOOTS: [(&str, Boot); 47] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -700,6 +700,7 @@ const BOOTS: [(&str, Boot); 46] = [
     ("pointer", test_pointer),
     ("cursor", test_cursor),
     ("mode", test_mode),
+    ("modes", test_modes),
     ("transform", test_transform),
     ("typing", test_typing),
     ("edid", test_edid),
