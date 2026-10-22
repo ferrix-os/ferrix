@@ -402,6 +402,18 @@ design keeps its intent. Under `ferrix.intelgpu`:
   screen keeps its write-combining hold on the same pages (`DISPLAY.md` §8
   step 3).
 
+**Modes (2026-10-22, `docs/DISPLAY.md` §9.4).** The pipe stays the
+firmware's: the driver lists the plane's mode, preferred, and every smaller
+standard size, and shows a smaller one by scaling each frame into the plane
+in its copy, aspect kept and centred with black bars, as Linux's panel fitter
+would (the hardware pipe scaler is a later step; it means writing the
+display engine). The connector is named from what drives pipe A:
+`TRANS_DDI_FUNC_CTL_A`'s mode select (HDMI, DVI, DisplayPort), DisplayPort
+taken as eDP when the PCH panel power sequencer's `PP_STATUS` says a panel
+is on. Both registers are only read, and only while the firmware has pipe A
+lit, which is when its power well is on (the consultant's lesser point 3,
+ledger 3117); nothing reads the monitor's EDID yet (GMBUS or DP AUX).
+
 Before K4 lands, M1 to M3 run with neither option. The boot console stays
 the screen's (`ferrix.fbcon`), the driver touches no GGTT entry it did not
 allocate, and the box is reached over ssh (`fx.sh`).

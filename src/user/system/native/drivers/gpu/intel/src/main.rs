@@ -898,6 +898,17 @@ fn say_plane_and_ggtt(
         time.now_us().saturating_sub(started),
         first_present.unwrap_or(0)
     ));
+    // What drives the lit picture to its socket, read only while pipe A
+    // is lit (its power well on), to name the connector as Linux would.
+    let output = lit.enabled().then(|| plane::read_output(bar));
+    if let Some(output) = output {
+        say(format_args!(
+            "intel: pipe A out through TRANS_DDI_FUNC_CTL_A {:#010x}, PP_STATUS {:#010x}: DRM connector type {}",
+            output.ddi_func_ctl,
+            output.pp_status,
+            output.drm_connector()
+        ));
+    }
     let screen = lit.enabled().then(|| {
         let (width, height) = lit.dimensions();
         m2::ScreenPlane {
@@ -906,6 +917,7 @@ fn say_plane_and_ggtt(
             ctl: lit.ctl,
             width,
             height,
+            connector: output.map_or(0, |output| output.drm_connector()),
         }
     });
     Ok((

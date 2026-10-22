@@ -338,6 +338,10 @@ pub(crate) struct ScreenPlane {
     pub(crate) width: u32,
     /// Rows.
     pub(crate) height: u32,
+    /// DRM's connector type for the socket pipe A drives, from
+    /// `TRANS_DDI_FUNC_CTL_A` and the panel power sequencer, 0 for unknown
+    /// (`ferrix_intel_xelp::plane::Output`).
+    pub(crate) connector: u32,
 }
 
 impl ScreenPlane {
