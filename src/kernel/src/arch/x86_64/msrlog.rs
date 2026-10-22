@@ -145,6 +145,10 @@ fn read(msr: u32, name: &str) -> Option<u64> {
 /// One read of every register, and the decoded fields.
 fn log_once(round: u64) {
     println!("msr: round {round}");
+    // Box run only: the ratio registers, raw (overclocking headroom).
+    let _ = read(0xce, "PLATFORM_INFO");
+    let _ = read(0x1ad, "TURBO_RATIO_LIMIT");
+    let _ = read(0x194, "FLEX_RATIO");
     let units = read(RAPL_POWER_UNIT, "RAPL_POWER_UNIT").map(Units::from_raw);
     if let Some(units) = units {
         println!(
