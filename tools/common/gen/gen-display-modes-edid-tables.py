@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Print the tables of src/lib/proto/displayctl/src/edid_tables.rs from a
+"""Print the tables of src/lib/drivers/display/modes/src/edid_tables.rs from a
 Linux tree's drivers/gpu/drm/drm_edid.c (v6.18 was used): the established
 timings, Established Timings III, DMT and CTA-861 video codes, interlaced,
 doubled-clock and doubled-line modes left out.
 
-Usage: gen-displayctl-edid-tables.py <linux>/drivers/gpu/drm/drm_edid.c
+Usage: gen-display-modes-edid-tables.py <linux>/drivers/gpu/drm/drm_edid.c
 The output is the file's part after its header, each table marked
 #[rustfmt::skip]."""
 import re, sys

@@ -32,6 +32,7 @@ ferrix-btrfs = { path = "../../lib/fs/btrfs/format" }
 ferrix-block = { path = "../../lib/fs/common/block", features = ["model"] }
 ferrix-blkring = { path = "../../lib/proto/blkring" }
 ferrix-virtio = { path = "../../lib/drivers/virtio" }
+ferrix-display-modes = { path = "../../lib/drivers/display/modes" }
 ferrix-displayctl = { path = "../../lib/proto/displayctl" }
 ferrix-renderctl = { path = "../../lib/proto/renderctl" }
 ferrix-inputctl = { path = "../../lib/proto/inputctl" }

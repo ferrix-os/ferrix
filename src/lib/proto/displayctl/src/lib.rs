@@ -18,10 +18,10 @@
 //! `drm.edid_firmware=` names for it, checked, and how the property calls
 //! answer for it.
 //!
-//! [`modes`] is how a driver makes the mode list it sends a scanout's
-//! display with (version 11, `docs/DISPLAY.md` §9): the modes an EDID
-//! names, timed as Linux times them, and what a virtual or a scaling card
-//! adds; [`scale`] is the arithmetic of showing a buffer scaled.
+//! [`listed`] is the core's share of a driver's mode list (version 11,
+//! `docs/DISPLAY.md` §9): which listed entry a `SETCRTC` names. Making the
+//! list -- an EDID's modes, timings -- is the drivers' alone
+//! (`ferrix-display-modes`).
 //!
 //! [`card`] is who may do what on the card itself: the DRM master's rules,
 //! which ioctls only the master may make, and the budget each kind of open
@@ -34,15 +34,13 @@
 
 pub mod card;
 pub mod edid;
-mod edid_tables;
+pub mod listed;
 pub mod message;
-pub mod modes;
-pub mod scale;
 pub mod session;
 
 #[cfg(test)]
 mod edid_tests;
 #[cfg(test)]
-mod modes_tests;
+mod listed_tests;
 #[cfg(test)]
 mod tests;

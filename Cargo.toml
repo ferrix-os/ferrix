@@ -53,6 +53,7 @@ members = [
     "src/lib/proto/native-abi",
     "src/lib/proto/native",
     "src/lib/kernel/objects",
+    "src/lib/drivers/display/modes",
     "src/lib/drivers/display/stm32-display",
     "src/lib/drivers/usb/usb-host",
     "src/lib/drivers/usb/usb-device",
@@ -150,6 +151,7 @@ ferrix-devmgr-proto = { path = "src/lib/proto/devmgr-proto" }
 ferrix-drvupdate-proto = { path = "src/lib/proto/drvupdate-proto" }
 ferrix-svc-proto = { path = "src/lib/init/svc-proto" }
 ferrix-auth-proto = { path = "src/lib/proto/auth-proto" }
+ferrix-display-modes = { path = "src/lib/drivers/display/modes" }
 ferrix-displayctl = { path = "src/lib/proto/displayctl" }
 ferrix-renderctl = { path = "src/lib/proto/renderctl" }
 ferrix-inputctl = { path = "src/lib/proto/inputctl" }

@@ -232,9 +232,32 @@ fn every_message() -> Vec<Message> {
         Message::ModeList(page_of(&[(1920, 1080, true), (1280, 720, false)], 0, 2)),
         Message::SetMode {
             scanout: 0,
-            timing: crate::modes::synthetic(1280, 720, 60_000),
+            timing: synthetic(1280, 720, 60_000),
         },
     ]
+}
+
+/// A made-up timing for a size at `refresh_mhz`, as drivers make one
+/// (`ferrix-display-modes`'s `synthetic`): the tests' own, since the core
+/// makes none.
+pub(crate) fn synthetic(width: u32, height: u32, refresh_mhz: u32) -> Timing {
+    let clamp = |value: u32| u16::try_from(value).unwrap_or(u16::MAX);
+    let mut timing = Timing {
+        clock_khz: 0,
+        hdisplay: clamp(width),
+        hsync_start: clamp(width + 16),
+        hsync_end: clamp(width + 48),
+        htotal: clamp(width + 160),
+        vdisplay: clamp(height),
+        vsync_start: clamp(height + 3),
+        vsync_end: clamp(height + 9),
+        vtotal: clamp(height + 23),
+        hsync_high: false,
+        vsync_high: false,
+    };
+    let total = u64::from(timing.htotal) * u64::from(timing.vtotal);
+    timing.clock_khz = u32::try_from(total * u64::from(refresh_mhz) / 1_000_000).unwrap_or(0);
+    timing
 }
 
 /// A `MODE_LIST` page of `sizes` (at 60 Hz, preferred as marked), as
@@ -243,7 +266,7 @@ pub(crate) fn page_of(sizes: &[(u32, u32, bool)], first: u32, total: u32) -> Mod
     let mut entries = [Listed::default(); MODES_A_PAGE];
     for (into, &(width, height, preferred)) in entries.iter_mut().zip(sizes) {
         *into = Listed {
-            timing: crate::modes::synthetic(width, height, 60_000),
+            timing: synthetic(width, height, 60_000),
             preferred,
         };
     }

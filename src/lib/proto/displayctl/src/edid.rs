@@ -578,10 +578,3 @@ pub fn answer_blob(request: &mut GetBlob, len: usize) -> bool {
     request.length = len;
     copy
 }
-
-/// Every mode `bytes`, an EDID, names, into `list`, timed as Linux times
-/// them ([`crate::modes::edid_modes`]): what a driver lists for a display
-/// before its own limits are applied.
-pub fn modes(bytes: &[u8], list: &mut crate::modes::ModeList) {
-    crate::modes::edid_modes(bytes, list);
-}
