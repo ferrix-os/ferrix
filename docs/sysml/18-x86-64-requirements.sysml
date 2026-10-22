@@ -887,8 +887,7 @@ package FerrixX8664Requirements {
                 "arch::x86_64::msrlog::log_once",
                 "arch::x86_64::msrlog::say_limit",
                 "arch::x86_64::msrlog::say_reasons",
-                "arch::x86_64::msrlog::names",
-                "arch::x86_64::msrlog::Names::add",
+                "arch::x86_64::msrlog::ReasonNames::fmt",
                 "arch::x86_64::start_msr_log");
         }
         requirement <'L.x86_64.188'> checkedMsrReadResumesAtItsFixup : ItemLowLevel {

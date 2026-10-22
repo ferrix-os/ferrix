@@ -128,7 +128,12 @@ fn decoded() -> Result<(), &'static str> {
         return Err("MSR_PKG_POWER_INFO decoded wrongly");
     }
     let reasons = decode::reasons(0x0100_0900);
-    if (reasons.now, reasons.log) != (0x0900, 0x0100) || decode::NAMED_REASONS != 0x3f73 {
+    if (reasons.now, reasons.log) != (0x0900, 0x0100)
+        || decode::NAMED_REASONS
+            != decode::REASON_NAMES
+                .iter()
+                .fold(0, |mask, (bit, _)| mask | (1 << bit))
+    {
         return Err("a limit-reasons word decoded wrongly");
     }
     // Ratio 0x1c; 0x1800 / 8192 V = 0.75 V.

@@ -227,56 +227,34 @@ fn say_limit(name: &str, limit: Limit, units: Units) {
 
 /// The reasons now and the sticky log, by name.
 fn say_reasons(reasons: Reasons) {
-    println!("msr:   limited now: {}", names(reasons.now).as_str());
-    println!(
-        "msr:   limited since cleared: {}",
-        names(reasons.log).as_str()
-    );
+    println!("msr:   limited now: {}", ReasonNames(reasons.now));
+    println!("msr:   limited since cleared: {}", ReasonNames(reasons.log));
 }
 
-/// The named bits of a reason word, space-separated, in a fixed buffer.
-fn names(bits: u16) -> Names {
-    let mut names = Names {
-        bytes: [0; 160],
-        len: 0,
-    };
-    for (bit, name) in decode::REASON_NAMES {
-        if bits & (1 << bit) != 0 {
-            names.add(name);
-        }
-    }
-    let unnamed = bits & !decode::NAMED_REASONS;
-    if unnamed != 0 {
-        names.add("other");
-    }
-    if names.len == 0 {
-        names.add("none");
-    }
-    names
-}
+/// A reason word printed as its named bits, space-separated; `other` for a
+/// bit without a name, `none` for no bit.
+struct ReasonNames(u16);
 
-/// A short line of names, without allocating.
-struct Names {
-    bytes: [u8; 160],
-    len: usize,
-}
-
-impl Names {
-    fn add(&mut self, name: &str) {
-        let separator = usize::from(self.len != 0);
-        if self.len + separator + name.len() > self.bytes.len() {
-            return;
+impl core::fmt::Display for ReasonNames {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut first = true;
+        let mut word = |f: &mut core::fmt::Formatter<'_>, name: &str| {
+            let separator = if first { "" } else { " " };
+            first = false;
+            write!(f, "{separator}{name}")
+        };
+        for (bit, name) in decode::REASON_NAMES {
+            if self.0 & (1 << bit) != 0 {
+                word(f, name)?;
+            }
         }
-        if separator == 1 {
-            self.bytes[self.len] = b' ';
+        if self.0 & !decode::NAMED_REASONS != 0 {
+            word(f, "other")?;
         }
-        let start = self.len + separator;
-        self.bytes[start..start + name.len()].copy_from_slice(name.as_bytes());
-        self.len = start + name.len();
-    }
-
-    fn as_str(&self) -> &str {
-        core::str::from_utf8(&self.bytes[..self.len]).unwrap_or("?")
+        if self.0 == 0 {
+            word(f, "none")?;
+        }
+        Ok(())
     }
 }
 

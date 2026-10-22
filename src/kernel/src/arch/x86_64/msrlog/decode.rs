@@ -141,16 +141,9 @@ pub(in crate::arch::x86_64) const REASON_NAMES: [(u32, &str); 11] = [
     (13, "transitions"),
 ];
 
-/// The bits [`REASON_NAMES`] names.
-pub(in crate::arch::x86_64) const NAMED_REASONS: u16 = {
-    let mut mask = 0u16;
-    let mut i = 0;
-    while i < REASON_NAMES.len() {
-        mask |= 1 << REASON_NAMES[i].0;
-        i += 1;
-    }
-    mask
-};
+/// The bits [`REASON_NAMES`] names: 0, 1, 4-6 and 8-13 (the boot check
+/// folds the table and compares).
+pub(in crate::arch::x86_64) const NAMED_REASONS: u16 = 0x3f73;
 
 /// `IA32_PERF_STATUS`: the ratio (bits 15:8) and the core voltage (bits
 /// 47:32 in 1/8192 V) in microvolts.
