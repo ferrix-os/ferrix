@@ -45,6 +45,10 @@ fn main() {
     if arguments.iter().any(|word| word == "--dmabuf") {
         compositor_pattern::present_through_dmabuf();
     }
+    // `--busy`: the window drawn again every frame, as a game's is.
+    if arguments.iter().any(|word| word == "--busy") {
+        compositor_pattern::draw_every_frame();
+    }
     if let Some(at) = arguments.iter().position(|word| word == "--after") {
         let Some(other) = arguments.get(at + 1) else {
             say("pattern: --after takes the title of the window to wait for");

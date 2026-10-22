@@ -81,6 +81,14 @@ pub struct Output<'a> {
     /// window copied straight into the buffer leaves the canvas without it
     /// (`direct`), and the next frame drawn on the canvas is drawn whole.
     pub stale: bool,
+    /// What this frame showed directly, a client's own buffer the card was
+    /// handed ([`scanned_out`]), said once when it starts; `None` for a
+    /// frame drawn here.
+    pub scanned: Option<String>,
+    /// Why this frame was not a client's buffer shown directly, when it was
+    /// one window alone: what a person reading the log looks for when the
+    /// game's frame is still copied.
+    pub not_scanned: Option<String>,
 }
 
 /// A frame drawn on a GPU: the canvas, and what is kept behind the windows.
@@ -454,6 +462,33 @@ fn direct(
         return false;
     };
     let (width, height) = target.backend.size();
+    // The window's buffer itself, when the card can be handed it: no copy
+    // at all.
+    match scanned_out(target, output, clients, sources, rect, &surface) {
+        Ok(what) => {
+            compositor_render::timing::drawn_surface(
+                (surface.width(), surface.height()),
+                false,
+                compositor_render::timing::Path::Scanout,
+            );
+            crate::dmabuf::note_scanout();
+            target.flip = Some(Damage::from(Rect::new(
+                0,
+                0,
+                i64::from(width),
+                i64::from(height),
+            )));
+            target.stale = true;
+            target.scanned = Some(what);
+            return true;
+        }
+        Err(why) => target.not_scanned = Some(why),
+    }
+    // Back from a client's buffer: this screen's own holds none of the
+    // frames the card showed meanwhile, so all of it is owed.
+    if target.backend.scanning_out() {
+        target.present = Damage::from(Rect::new(0, 0, i64::from(width), i64::from(height)));
+    }
     let stride = target.backend.stride();
     let Ok(mut screen) = Target::new(target.backend.buffer(), width, height, stride) else {
         return false;
@@ -495,6 +530,83 @@ fn direct(
     target.flip = Some(target.present.clone());
     target.stale = true;
     true
+}
+
+/// Hand the card the client's own buffer of the window drawn alone at
+/// `rect` -- `surface` its pixels -- to show as this frame (direct scanout,
+/// `docs/DISPLAY.md` §8.2): what it showed, or why it could not.
+///
+/// The conditions are wlroots' and Hyprland's for direct scanout, as far as
+/// a screen with no overlay planes has them: one opaque window covering the
+/// screen exactly and nothing over it ([`compositor_render::alone`], which
+/// the caller has asked, with no counter, drag, night-light, turn or scale);
+/// no pointer drawn into the frame, which a card without a cursor plane
+/// would have to be shown; and the window's buffer a client's dmabuf of the
+/// screen's size, uncropped, from its first byte. Anything else, and every
+/// refusal of the card's, is a frame drawn as before.
+fn scanned_out(
+    target: &mut Output<'_>,
+    output: &MonitorLayout,
+    clients: &[Slot],
+    sources: &BTreeMap<WindowId, Source>,
+    rect: Rect,
+    surface: &Surface<'_>,
+) -> Result<String, String> {
+    let (width, height) = target.backend.size();
+    if !crate::knobs::direct_scanout() {
+        return Err("HYPRIX_DIRECT_SCANOUT=0".to_owned());
+    }
+    if target.cursor.is_some_and(|cursor| cursor.shown) {
+        return Err("the pointer is drawn into the frame".to_owned());
+    }
+    if rect != Rect::new(0, 0, i64::from(width), i64::from(height)) {
+        return Err("the window is not the screen".to_owned());
+    }
+    let placed = output.windows.last().ok_or("no window")?;
+    let source = sources.get(&placed.window).ok_or("no window")?;
+    let slot = clients.get(source.client).ok_or("no client")?;
+    let client = slot.client();
+    let buffer = client
+        .surface(source.surface)
+        .and_then(|state| state.current.buffer)
+        .and_then(|buffer| client.buffer(buffer))
+        .ok_or("no buffer")?;
+    if !buffer.dmabuf {
+        return Err("the window's buffer is shared memory, not a dmabuf".to_owned());
+    }
+    let imported = slot
+        .dmabufs()
+        .get(&buffer.pool)
+        .ok_or("the dmabuf is not imported")?;
+    let (start, _) = buffer.range().ok_or("the buffer has no rows")?;
+    let size = (
+        u32::try_from(buffer.width).unwrap_or(0),
+        u32::try_from(buffer.height).unwrap_or(0),
+    );
+    if start != 0
+        || size != (width, height)
+        || (surface.width(), surface.height()) != (width, height)
+    {
+        return Err(format!(
+            "the buffer is {}x{} from byte {start}, not the screen's {width}x{height}",
+            size.0, size.1
+        ));
+    }
+    let stride = u32::try_from(buffer.stride).map_err(|_| "a negative stride")?;
+    target
+        .backend
+        .scan_out(&crate::backend::Scanout {
+            fd: imported.fd(),
+            width,
+            height,
+            stride,
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(format!(
+        "client {}'s surface {} ({width}x{height})",
+        slot.pid(),
+        source.surface.0
+    ))
 }
 
 /// Draw `scene` with `painter`: the windows and the layer surfaces, then

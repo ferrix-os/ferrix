@@ -3,6 +3,21 @@
 use std::io;
 use std::path::Path;
 
+/// A client's own buffer, to be shown as it is ([`Backend::scan_out`]):
+/// linear `XRGB8888` (or `ARGB8888` read as opaque) from the dmabuf's first
+/// byte, the screen's size.
+#[derive(Debug, Clone, Copy)]
+pub struct Scanout<'a> {
+    /// The dmabuf.
+    pub fd: std::os::fd::BorrowedFd<'a>,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// Bytes from one row's start to the next.
+    pub stride: u32,
+}
+
 /// A place a frame can be put.
 ///
 /// `Debug` so a caller holding one can derive it; a backend's own debug
@@ -21,11 +36,39 @@ pub trait Backend: core::fmt::Debug {
     /// Bytes of an `XRGB8888` buffer of that size, to draw into.
     fn buffer(&mut self) -> &mut [u8];
 
-    /// The bytes just drawn, to read back.
+    /// The bytes just shown, to read back: a client's own buffer while the
+    /// screen shows one directly ([`Backend::scan_out`]).
     fn drawn(&self) -> &[u8];
 
-    /// Bytes from one row's start to the next.
+    /// Bytes from one row's start to the next of [`Backend::buffer`].
     fn stride(&self) -> u32;
+
+    /// Bytes from one row's start to the next of [`Backend::drawn`].
+    fn drawn_stride(&self) -> u32 {
+        self.stride()
+    }
+
+    /// Show a client's own buffer as the next frame, rather than one drawn
+    /// into [`Backend::buffer`]: direct scanout (`docs/DISPLAY.md` §8.2),
+    /// which [`Backend::present`] then flips to, whatever damage it is
+    /// given. Called again each frame the screen should go on showing a
+    /// client's buffer; a frame drawn into this backend's buffer after it is
+    /// shown instead, the whole of it owed ([`Backend::scanning_out`]).
+    ///
+    /// # Errors
+    ///
+    /// A screen or card that cannot show it; the frame is then drawn as
+    /// before.
+    fn scan_out(&mut self, buffer: &Scanout<'_>) -> io::Result<()> {
+        let _ = buffer;
+        Err(io::Error::other("this screen shows only its own buffer"))
+    }
+
+    /// Whether the card shows a client's own buffer now: the next frame
+    /// drawn into this backend's buffer owes all of it.
+    fn scanning_out(&self) -> bool {
+        false
+    }
 
     /// Show what was drawn.
     ///
@@ -341,7 +384,53 @@ pub struct Drm {
     /// flush (`crate::flush`): the loop does not wait for the host to show
     /// a frame.
     flushing: Option<crate::flush::FlushThread>,
+    /// Clients' own buffers the card has a framebuffer for, to show them
+    /// directly ([`Backend::scan_out`]): a game's swap chain, at most
+    /// [`DIRECT_KEPT`].
+    direct: Vec<Direct>,
+    /// The handle of the one of them the next present shows.
+    direct_next: Option<u32>,
+    /// The handle of the one the card shows now.
+    direct_shown: Option<u32>,
+    /// Why the card would not take a client's buffer, once it would not:
+    /// asked no more, since every frame would be refused the same way.
+    direct_refused: Option<String>,
 }
+
+/// A client's buffer the card can show: its framebuffer, and its pixels
+/// mapped for a screenshot of a frame that was it.
+#[cfg(target_os = "linux")]
+struct Direct {
+    imported: compositor_drm::Imported,
+    mapping: compositor_drm::Mapping,
+    size: (u32, u32),
+    stride: u32,
+    /// The frame it was last asked for in.
+    used: u32,
+}
+
+#[cfg(target_os = "linux")]
+impl core::fmt::Debug for Direct {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Direct")
+            .field("imported", &self.imported)
+            .field("size", &self.size)
+            .field("used", &self.used)
+            .finish_non_exhaustive()
+    }
+}
+
+/// How many clients' buffers a screen keeps framebuffers for: a swap
+/// chain's three or four, each a buffer of its card driver's too.
+#[cfg(target_os = "linux")]
+const DIRECT_KEPT: usize = 4;
+
+/// Frames drawn by the compositor after which the clients' buffers it kept
+/// are let go of: a game that shows a menu for a second keeps its
+/// framebuffers, one that has gone gives them back.
+#[cfg(target_os = "linux")]
+const DIRECT_IDLE_FRAMES: u32 = 120;
 
 /// How often a lost screen's card is looked for.
 #[cfg(target_os = "linux")]
@@ -453,7 +542,52 @@ impl Drm {
             next_cursor: 0,
             modes_changed: false,
             flushing: None,
+            direct: Vec::new(),
+            direct_next: None,
+            direct_shown: None,
+            direct_refused: None,
         })
+    }
+
+    /// Let go of the clients' buffers kept to be shown directly that the
+    /// card does not show, or all of them when `all` -- once the card shows
+    /// a buffer of this screen's own, since a framebuffer that goes takes
+    /// the screen with it.
+    fn let_go_direct(&mut self, all: bool) {
+        let shown = if all { None } else { self.direct_shown };
+        let mut kept = Vec::new();
+        for direct in self.direct.drain(..) {
+            if Some(direct.imported.handle()) == shown {
+                kept.push(direct);
+            } else {
+                let _ = direct.imported.release(&self.card);
+            }
+        }
+        self.direct = kept;
+        self.direct_next = None;
+    }
+
+    /// Flip to the client's buffer `handle` names.
+    fn show_direct(&mut self, handle: u32) -> io::Result<()> {
+        let Some(direct) = self
+            .direct
+            .iter()
+            .find(|direct| direct.imported.handle() == handle)
+        else {
+            return Err(io::Error::other("a client's buffer that is not kept"));
+        };
+        match self.card.page_flip(&self.plan, &direct.imported) {
+            Ok(()) => {
+                self.direct_shown = Some(handle);
+                self.frames = self.frames.saturating_add(1);
+                Ok(())
+            }
+            Err(error) if gone(&error) => {
+                self.lose();
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// This screen's connector as the card describes it now, named as it
@@ -503,6 +637,10 @@ impl Drm {
     /// from the next frame on.
     fn lose(&mut self) {
         self.flushing = None;
+        // The card's handles went with its driver's open.
+        self.direct.clear();
+        self.direct_next = None;
+        self.direct_shown = None;
         self.lost = Some(
             std::time::Instant::now()
                 .checked_sub(RETRY)
@@ -550,6 +688,13 @@ impl Backend for Drm {
     }
 
     fn drawn(&self) -> &[u8] {
+        // A client's own buffer, while the card shows one.
+        if let Some(direct) = self
+            .direct_shown
+            .and_then(|handle| self.direct.iter().find(|d| d.imported.handle() == handle))
+        {
+            return direct.mapping.bytes();
+        }
         // The buffer just drawn into, which `present` has not yet swapped
         // away from.
         match self.buffers.get(self.back) {
@@ -562,6 +707,95 @@ impl Backend for Drm {
         self.buffers
             .get(self.back)
             .map_or_else(|| self.width.saturating_mul(4), |buffer| buffer.pitch)
+    }
+
+    fn drawn_stride(&self) -> u32 {
+        self.direct_shown
+            .and_then(|handle| self.direct.iter().find(|d| d.imported.handle() == handle))
+            .map_or_else(|| self.stride(), |direct| direct.stride)
+    }
+
+    fn scan_out(&mut self, buffer: &Scanout<'_>) -> io::Result<()> {
+        if self.lost.is_some() || self.adopted.is_some() {
+            return Err(io::Error::other("the screen shows what the GPU drew"));
+        }
+        if let Some(why) = self.direct_refused.as_ref() {
+            return Err(io::Error::other(why.clone()));
+        }
+        if (buffer.width, buffer.height) != (self.width, self.height) {
+            return Err(io::Error::other("not the screen's size"));
+        }
+        let handle = match compositor_drm::Imported::handle_of(&self.card, buffer.fd) {
+            Ok(handle) => handle,
+            // The card's word for a buffer it will not show: one whose
+            // driver does not copy, or a kernel without the import.
+            Err(error) if error.raw_os_error() == Some(libc::EINVAL) => {
+                let why = format!("the card will not show a client's buffer ({error})");
+                self.direct_refused = Some(why.clone());
+                return Err(io::Error::other(why));
+            }
+            Err(error) => return Err(error),
+        };
+        let frame = self.frames;
+        if let Some(direct) = self
+            .direct
+            .iter_mut()
+            .find(|direct| direct.imported.handle() == handle)
+        {
+            if direct.size != (buffer.width, buffer.height) || direct.stride != buffer.stride {
+                return Err(io::Error::other("a kept buffer of another shape"));
+            }
+            direct.used = frame;
+            self.direct_next = Some(handle);
+            return Ok(());
+        }
+        let imported = match compositor_drm::Imported::with_handle(
+            &self.card,
+            handle,
+            buffer.width,
+            buffer.height,
+            buffer.stride,
+        ) {
+            Ok(imported) => imported,
+            Err(error) => {
+                let _ = compositor_drm::Imported::forget_handle(&self.card, handle);
+                return Err(error);
+            }
+        };
+        let mapping = match compositor_drm::Mapping::of_dmabuf(buffer.fd) {
+            Ok(mapping) => mapping,
+            Err(error) => {
+                let _ = imported.release(&self.card);
+                return Err(error);
+            }
+        };
+        // Room for it: the longest unused that the card is not showing.
+        while self.direct.len() >= DIRECT_KEPT {
+            let Some(at) = self
+                .direct
+                .iter()
+                .enumerate()
+                .filter(|(_, direct)| Some(direct.imported.handle()) != self.direct_shown)
+                .min_by_key(|(_, direct)| direct.used)
+                .map(|(at, _)| at)
+            else {
+                break;
+            };
+            let _ = self.direct.remove(at).imported.release(&self.card);
+        }
+        self.direct.push(Direct {
+            imported,
+            mapping,
+            size: (buffer.width, buffer.height),
+            stride: buffer.stride,
+            used: frame,
+        });
+        self.direct_next = Some(handle);
+        Ok(())
+    }
+
+    fn scanning_out(&self) -> bool {
+        self.direct_shown.is_some()
     }
 
     fn adopt(
@@ -664,6 +898,43 @@ impl Backend for Drm {
     fn present(&mut self, drawn: &compositor_render::Damage) -> io::Result<()> {
         if self.lost.is_some() {
             return Ok(());
+        }
+        // A client's own buffer, shown directly: the card copies it, or
+        // points its plane at it, and nothing of this screen's buffers is
+        // read.
+        if let Some(handle) = self.direct_next.take() {
+            return self.show_direct(handle);
+        }
+        // Back from a client's buffer to this screen's own: a flip, which
+        // the frame drawn whole into it is shown by, then the clients'
+        // buffers let go of once none is shown.
+        if self.direct_shown.is_some() && self.adopted.is_none() {
+            let Some(buffer) = self.buffers.get(self.back) else {
+                return Ok(());
+            };
+            return match self.card.page_flip(&self.plan, buffer) {
+                Ok(()) => {
+                    self.direct_shown = None;
+                    if !self.copied {
+                        self.back = 1 - self.back;
+                    }
+                    self.frames = self.frames.saturating_add(1);
+                    Ok(())
+                }
+                Err(error) if gone(&error) => {
+                    self.lose();
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            };
+        }
+        if !self.direct.is_empty()
+            && self
+                .direct
+                .iter()
+                .all(|direct| self.frames.wrapping_sub(direct.used) > DIRECT_IDLE_FRAMES)
+        {
+            self.let_go_direct(true);
         }
         // What the GPU drew is one texture, shown where it lies: there is no
         // second buffer to flip to and nothing to copy into it, so every
@@ -792,6 +1063,8 @@ impl Backend for Drm {
         // buffer that is gone, the GPU's adopted one included.
         let _ = self.card.set_mode(&plan, &first)?;
         self.adopted = None;
+        self.direct_shown = None;
+        self.let_go_direct(true);
         self.buffers = [first, second];
         self.back = usize::from(!self.copied);
         self.plan = plan;
@@ -878,7 +1151,7 @@ impl Backend for Drm {
 pub fn write_ppm(backend: &dyn Backend, path: &Path) -> io::Result<()> {
     use std::io::Write;
     let (width, height) = backend.size();
-    let stride = backend.stride() as usize;
+    let stride = backend.drawn_stride() as usize;
     let bytes = backend.drawn();
     let mut out = Vec::with_capacity(width as usize * height as usize * 3 + 32);
     write!(out, "P6\n{width} {height}\n255\n")?;

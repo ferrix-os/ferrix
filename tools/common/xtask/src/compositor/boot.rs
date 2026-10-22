@@ -515,6 +515,11 @@ pub(super) fn build_parts(
     if args.nvidia {
         natives.push(crate::nvidia::nvrm_native()?);
     }
+    // The Intel stand-in: its render node from `intel-fake`, as
+    // `test-intel-uapi` has it (`compositor::direct_scanout`).
+    if args.intel_gpu_standin {
+        crate::intel_uapi::use_fake(&mut natives, arch, args.release)?;
+    }
     let read = |path: &Path| -> Result<Vec<u8>> {
         std::fs::read(path)
             .map_err(|error| Error::new(format!("reading {}: {error}", path.display())))

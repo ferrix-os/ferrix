@@ -45,6 +45,10 @@ thread_local! {
     static READ: Cell<bool> = const { Cell::new(false) };
     /// Frames drawn from a client's dmabuf since [`take_frames`].
     static FRAMES: Cell<u64> = const { Cell::new(0) };
+    /// The frame being drawn is a client's buffer shown directly.
+    static SCANOUT: Cell<bool> = const { Cell::new(false) };
+    /// Frames that were, since [`take_scanouts`].
+    static SCANOUTS: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Note that a client's dmabuf was read for the frame being drawn.
@@ -57,6 +61,20 @@ pub fn end_frame() {
     if READ.with(|read| read.replace(false)) {
         FRAMES.with(|frames| frames.set(frames.get() + 1));
     }
+    if SCANOUT.with(|scanout| scanout.replace(false)) {
+        SCANOUTS.with(|frames| frames.set(frames.get() + 1));
+    }
+}
+
+/// Note that the frame being drawn is a client's buffer shown directly.
+pub fn note_scanout() {
+    SCANOUT.with(|scanout| scanout.set(true));
+}
+
+/// The frames that showed a client's buffer directly since asked last.
+#[must_use]
+pub fn take_scanouts() -> u64 {
+    SCANOUTS.with(|frames| frames.replace(0))
 }
 
 /// The frames drawn from a client's dmabuf since asked last.
@@ -171,6 +189,13 @@ impl Imported {
     #[must_use]
     pub fn device_fd(&self) -> Option<BorrowedFd<'_>> {
         self.node.as_ref().map(|_| self.fd.as_fd())
+    }
+
+    /// The dmabuf itself, whoever imported it: what a card is handed to
+    /// show the buffer directly (`crate::backend::Backend::scan_out`).
+    #[must_use]
+    pub fn fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
     }
 
     /// The buffer's backing: what a screen drawn in software reads.

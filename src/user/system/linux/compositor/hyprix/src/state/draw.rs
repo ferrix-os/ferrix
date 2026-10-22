@@ -631,6 +631,8 @@ impl Compositor<'_> {
             overlay_took: Duration::ZERO,
             flip: None,
             stale: screen.stale,
+            scanned: None,
+            not_scanned: None,
         };
         let result = if dark {
             crate::frame::draw_dark(&mut target, &frame.canvas)
@@ -651,10 +653,46 @@ impl Compositor<'_> {
         };
         let overlay_took = target.overlay_took;
         let stale = target.stale;
+        let (scanned, not_scanned) = (target.scanned.take(), target.not_scanned.take());
         if let Some(damage) = target.flip.take() {
             drew.flips.push((which, damage));
         }
         screen.stale = stale;
+        // Said when a client's buffer starts being shown directly and when
+        // it stops, with why: what the box's log is read for.
+        match (&screen.scanning, scanned) {
+            (None, Some(what)) => {
+                (self.report)(&format!(
+                    "hyprix: {}: scanning out {what} directly",
+                    screen.name
+                ));
+                screen.scanning = Some(what);
+                screen.said_not_scanned = None;
+            }
+            (Some(_), None) => {
+                (self.report)(&format!(
+                    "hyprix: {}: compositing again: {}",
+                    screen.name,
+                    not_scanned
+                        .as_deref()
+                        .unwrap_or("not one fullscreen window drawn alone")
+                ));
+                screen.scanning = None;
+            }
+            (Some(was), Some(what)) if *was != what => screen.scanning = Some(what),
+            _ => {}
+        }
+        if screen.scanning.is_none()
+            && let Some(why) = not_scanned
+            && screen.said_not_scanned.as_deref() != Some(why.as_str())
+        {
+            // Once a reason, while one window is drawn alone and copied.
+            (self.report)(&format!(
+                "hyprix: {}: copying the fullscreen window: {why}",
+                screen.name
+            ));
+            screen.said_not_scanned = Some(why);
+        }
         if with.overlay_on {
             self.overlay
                 .rendered(&screen.name, screen_began.elapsed(), overlay_took);
@@ -730,6 +768,15 @@ impl Compositor<'_> {
             // The frames drawn straight from a client's buffer, with no
             // copy before the composite (`crate::dmabuf`): silent when none.
             let zero_copy = crate::dmabuf::take_frames();
+            // And those shown as the client's buffer itself, no copy here
+            // at all (`crate::frame::scanned_out`).
+            let scanned = crate::dmabuf::take_scanouts();
+            if scanned > 0 {
+                (self.report)(&format!(
+                    "hyprix: direct scanout frames {scanned} of the last {}",
+                    self.tally.counted
+                ));
+            }
             if zero_copy > 0 {
                 (self.report)(&format!(
                     "hyprix: zero-copy frames {zero_copy} of the last {}",

@@ -13,6 +13,11 @@
 //! its own: a pipe is no dmabuf, its own export imports as its own handle,
 //! and a buffer imported, let go of and imported again is imported again.
 //! A boot requires every line (the consultant's C3 of 2026-10-07).
+//!
+//! Beside an Intel render node the buffers are GEM objects instead
+//! (`crate::i915`), as a game's swap chain is on the N150: what hyprix
+//! shows directly when one fills the screen (`docs/DISPLAY.md` §8.2). The
+//! virgl import checks above are that node's and are not made there.
 
 use std::os::fd::{AsFd, OwnedFd};
 
@@ -26,9 +31,9 @@ const EINVAL: i32 = 22;
 /// The GPU side of a client that presents dmabufs.
 #[derive(Debug)]
 pub(crate) struct Gpu {
-    device: Device,
+    device: Maker,
     /// The buffers, one a `wl_buffer`, in the order the client fills them.
-    bos: Vec<Bo>,
+    bos: Vec<Made>,
     /// The descriptors handed over with the last buffers made. A message
     /// carrying one is sent when the client flushes, which copies it, so
     /// each is kept until the next buffers are made.
@@ -37,11 +42,73 @@ pub(crate) struct Gpu {
     checked: bool,
 }
 
+/// What makes the buffers: virgl's node through `compositor-gbm`, or an
+/// Intel node by hand.
+#[derive(Debug)]
+enum Maker {
+    Gbm(Device),
+    I915(crate::i915::I915),
+}
+
+/// One buffer, of either.
+#[derive(Debug)]
+enum Made {
+    Gbm(Bo),
+    I915(crate::i915::Bo),
+}
+
+impl Made {
+    fn export(&self) -> std::io::Result<OwnedFd> {
+        match self {
+            Made::Gbm(bo) => bo.export(),
+            Made::I915(bo) => bo.export(),
+        }
+    }
+
+    fn modifier(&self) -> u64 {
+        match self {
+            Made::Gbm(bo) => bo.modifier(),
+            Made::I915(_) => compositor_gbm::MOD_LINEAR,
+        }
+    }
+
+    fn offset(&self) -> u32 {
+        match self {
+            Made::Gbm(bo) => bo.offset(),
+            Made::I915(_) => 0,
+        }
+    }
+
+    fn stride(&self) -> u32 {
+        match self {
+            Made::Gbm(bo) => bo.stride(),
+            Made::I915(bo) => bo.stride(),
+        }
+    }
+
+    fn write(&mut self, pixels: &[u8]) -> std::io::Result<()> {
+        match self {
+            Made::Gbm(bo) => bo.write(pixels),
+            Made::I915(bo) => bo.write(pixels),
+        }
+    }
+}
+
 impl Gpu {
-    /// Open the render node.
+    /// Open the render node: an Intel one if there is one, virgl's
+    /// otherwise.
     pub(crate) fn open() -> Result<Self, String> {
+        let device = match crate::i915::I915::open() {
+            Ok(i915) => {
+                say("pattern: GEM buffers on an i915 render node");
+                Maker::I915(i915)
+            }
+            Err(_) => {
+                Maker::Gbm(Device::open().map_err(|error| format!("the render node: {error}"))?)
+            }
+        };
         Ok(Self {
-            device: Device::open().map_err(|error| format!("the render node: {error}"))?,
+            device,
             bos: Vec::new(),
             handed: Vec::new(),
             checked: false,
@@ -60,21 +127,26 @@ impl Gpu {
         format: Format,
     ) -> Result<(), String> {
         if !self.checked {
-            self.check()?;
+            if let Maker::Gbm(device) = &self.device {
+                Self::check(device)?;
+            }
             self.checked = true;
         }
         self.bos.clear();
         self.handed.clear();
         for &(params, buffer) in ids {
-            let bo = self
-                .device
-                .create(
-                    width,
-                    height,
-                    format,
-                    Usage::RENDERING.and(Usage::WRITE).and(Usage::LINEAR),
-                )
-                .map_err(|error| format!("a GPU buffer of {width}x{height}: {error}"))?;
+            let bo = match &self.device {
+                Maker::Gbm(device) => device
+                    .create(
+                        width,
+                        height,
+                        format,
+                        Usage::RENDERING.and(Usage::WRITE).and(Usage::LINEAR),
+                    )
+                    .map(Made::Gbm),
+                Maker::I915(i915) => i915.create(width, height).map(Made::I915),
+            }
+            .map_err(|error| format!("a GPU buffer of {width}x{height}: {error}"))?;
             let fd = bo
                 .export()
                 .map_err(|error| format!("exporting a GPU buffer: {error}"))?;
@@ -153,11 +225,10 @@ impl Gpu {
     }
 
     /// Check the node's import on a second open of it, and say so.
-    fn check(&self) -> Result<(), String> {
-        let node = self.device.node();
+    fn check(device: &Device) -> Result<(), String> {
+        let node = device.node();
         let other = Device::open().map_err(|error| format!("a second render node: {error}"))?;
-        let mut probe = self
-            .device
+        let mut probe = device
             .create(1, 1, Format::Argb8888, Usage::LINEAR)
             .map_err(|error| format!("a GPU buffer: {error}"))?;
         let fd = probe

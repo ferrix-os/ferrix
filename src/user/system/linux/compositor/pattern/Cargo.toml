@@ -21,6 +21,8 @@ compositor-render = { path = "../render" }
 compositor-shm = { path = "../shm" }
 # GPU buffers, for a window presented through `zwp_linux_dmabuf_v1`.
 compositor-gbm = { path = "../gbm" }
+# An Intel render node's buffers, made by hand (`src/i915.rs`).
+compositor-drm = { path = "../drm" }
 compositor-socket = { path = "../socket" }
 compositor-wire = { path = "../wire" }
 # Declarations only: `memfd_create` and `mmap` for the shared buffer.

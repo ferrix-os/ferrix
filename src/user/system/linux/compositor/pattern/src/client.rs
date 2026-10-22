@@ -90,6 +90,19 @@ pub fn present_through_dmabuf() {
     let _ = DMABUF.set(());
 }
 
+/// Whether the program said `--busy`: draw the window again every frame
+/// the compositor allows, as a game does, so that its frame times can be
+/// measured (`docs/DISPLAY.md` §8.2).
+static BUSY: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+/// How often a busy window draws at most: a 60 Hz screen's frame.
+const BUSY_PERIOD: Duration = Duration::from_millis(16);
+
+/// Draw every frame from now on, paced by the compositor's frame callbacks.
+pub fn draw_every_frame() {
+    let _ = BUSY.set(());
+}
+
 /// The buffers a client may keep, in the order it fills them.
 const BUFFERS: [ObjectId; 2] = [id::BUFFER, id::BUFFER_TWO];
 
@@ -798,6 +811,7 @@ fn run_with(
     // client to ask.
     let period = match &shown {
         Shown::Moving(movie) => Some(movie.period()),
+        _ if BUSY.get().is_some() => Some(BUSY_PERIOD),
         _ => None,
     };
     let mut state = Client {
@@ -2358,7 +2372,9 @@ impl Client {
         // where to announce that it has been drawn (`announce_when_drawn`,
         // `run_announced_on`): otherwise the answer would never be read.
         let announcing = self.drawn == 0 && self.announce.is_some();
-        if (matches!(self.shown, Shown::Moving(_)) || announcing) && !self.awaiting {
+        if (matches!(self.shown, Shown::Moving(_)) || BUSY.get().is_some() || announcing)
+            && !self.awaiting
+        {
             request(
                 out,
                 id::SURFACE,

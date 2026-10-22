@@ -1244,6 +1244,22 @@ fn one_client_left_after_the_other_closed_matches_the_expected_image() {
     golden::check("one-client-alone", WIDTH, HEIGHT, canvas.data());
 }
 
+/// One checkerboard window fullscreen, nothing else: what the screen shows
+/// when hyprix hands the card the client's own buffer (`docs/DISPLAY.md`
+/// §8.2). `cargo xtask test-compositor --boot direct-scanout` requires it,
+/// and it is the client's pixels alone, opaque, so a frame the compositor
+/// copied and one it did not are the same picture.
+#[test]
+fn a_fullscreen_checkerboard_matches_the_expected_image() {
+    let mut pixels = Pattern::Checkerboard.draw(WIDTH, HEIGHT);
+    for pixel in pixels.chunks_exact_mut(4) {
+        if let Some(alpha) = pixel.get_mut(3) {
+            *alpha = 0xff;
+        }
+    }
+    golden::check("fullscreen-checkerboard", WIDTH, HEIGHT, &pixels);
+}
+
 /// `movefocus l`: the same two windows in the same places, with the active
 /// border on the other one.
 ///

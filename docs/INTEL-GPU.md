@@ -694,6 +694,21 @@ M1 and M2, without the box.
 
 ## 10. Where it stands
 
+**A game's frame shown from its own buffer (2026-10-22, branch
+`scanout`).** A fullscreen game's frame still cost two processor copies
+after the one below: hyprix's of the client's buffer into its dumb buffer
+(the frame line's `surface`, about 5 ms on the box) and this driver's card
+copy into the lit plane's window (`flip`, about 5 ms). Now hyprix hands
+`card0` the client's dmabuf itself (`PRIME_FD_TO_HANDLE`, `ADDFB2`,
+`PAGE_FLIP`) when it is the only thing on the screen, and this driver's
+card copies straight from it: one copy a frame (`docs/DISPLAY.md` §8.2;
+the consultant's verdict, ledger line 3108). The card also no longer
+copies a flipped frame twice (SCANOUT then FLUSH). hyprix says `hyprix:
+Virtual-1: scanning out client <pid>'s surface <id> (1920x1080)
+directly` when it starts, and why when it does not. `gem::SCANOUT` stays
+`false`: the buffer is read by the processor through the LLC and no plane
+scans it. Pointing the plane at the object itself is the next step.
+
 **A game's frame composited from its own buffer (2026-10-22, branch
 `zc-intel`).** With DRI3 on, a frame still took four CPU passes after anv
 drew it: yserver filled its pixmap from the client's buffer, copied the

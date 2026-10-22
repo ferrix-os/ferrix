@@ -53,6 +53,12 @@ impl core::fmt::Debug for Render {
     }
 }
 
+impl std::os::fd::AsRawFd for Render {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.fd
+    }
+}
+
 impl Drop for Render {
     fn drop(&mut self) {
         // SAFETY: the descriptor is this object's own and is open.

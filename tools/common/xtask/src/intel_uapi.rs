@@ -191,7 +191,7 @@ fn volume() -> Result<PathBuf> {
 }
 
 /// Refuse a QEMU without 0006's properties, by name.
-fn refuse_unpatched_qemu() -> Result<()> {
+pub(crate) fn refuse_unpatched_qemu() -> Result<()> {
     let qemu = paths::which("qemu-system-x86_64")
         .ok_or_else(|| Error::new("no qemu-system-x86_64 to boot the stand-in on"))?;
     let help = Command::new(&qemu)
@@ -220,8 +220,10 @@ const FAKE: Program = Program {
 pub(crate) const FAKE_MARKER: &str = "every batch completes at once, nothing runs";
 
 /// Put `intel-fake` in `natives` under the name `intel`, which devmgr starts
-/// for ADL-N. This image's alone.
-fn use_fake(natives: &mut [Built], arch: Arch, release: bool) -> Result<()> {
+/// for ADL-N: this gate's image, and test-compositor's direct-scanout boot,
+/// both on the QEMU stand-in alone (`Args::intel_gpu_standin`), never on a
+/// machine with a GPU.
+pub(crate) fn use_fake(natives: &mut [Built], arch: Arch, release: bool) -> Result<()> {
     let fake = native::build_one(arch, release, &paths::target_dir(), &FAKE)?;
     let slot = natives
         .iter_mut()

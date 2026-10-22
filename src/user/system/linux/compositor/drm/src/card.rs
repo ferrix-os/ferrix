@@ -5,9 +5,10 @@ use std::io;
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd};
 
 use ferrix_linux_abi::drm::{
-    self, CardRes, ClipRect, CreateDumb, Crtc, CrtcPageFlip, FbCmd2, FbDirtyCmd, Field, GetBlob,
-    GetCap, GetConnector, GetEncoder, GetPlane, GetPlaneRes, GetProperty, Layout, MapDumb,
-    ModeCursor2, ModeInfo, ObjGetProperties, PrimeHandle, PropertyEnum, SetClientCap, Version,
+    self, CardRes, ClipRect, CreateDumb, Crtc, CrtcPageFlip, DestroyDumb, FbCmd2, FbDirtyCmd,
+    Field, GetBlob, GetCap, GetConnector, GetEncoder, GetPlane, GetPlaneRes, GetProperty, Layout,
+    MapDumb, ModeCursor2, ModeInfo, ObjGetProperties, PrimeHandle, PropertyEnum, SetClientCap,
+    Version,
 };
 use ferrix_linux_abi::socket::Width;
 
@@ -876,6 +877,89 @@ impl Imported {
     #[must_use]
     pub const fn handle(&self) -> u32 {
         self.handle
+    }
+
+    /// The handle `fd` has on `card`: the card gives one handle a buffer,
+    /// so a buffer imported before answers the handle it was given then,
+    /// which is how a caller keeping [`Imported`]s finds the one it has.
+    /// A buffer imported now for the asking is the caller's to make an
+    /// [`Imported`] of, or to let go of.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the card said; `EINVAL` for a descriptor the card will not
+    /// show.
+    pub fn handle_of(card: &Card, fd: BorrowedFd<'_>) -> io::Result<u32> {
+        let mut prime = PrimeHandle {
+            handle: 0,
+            flags: 0,
+            fd: fd.as_raw_fd(),
+        };
+        card.ioctl(drm::IOCTL_PRIME_FD_TO_HANDLE, &mut prime)?;
+        Ok(prime.handle)
+    }
+
+    /// The handle `handle` already has, given a framebuffer of `width` ×
+    /// `height` rows `pitch` bytes apart.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the card said.
+    pub fn with_handle(
+        card: &Card,
+        handle: u32,
+        width: u32,
+        height: u32,
+        pitch: u32,
+    ) -> io::Result<Self> {
+        let mut framebuffer = FbCmd2 {
+            width,
+            height,
+            pixel_format: drm::FORMAT_XRGB8888,
+            handles: [handle, 0, 0, 0],
+            pitches: [pitch, 0, 0, 0],
+            ..FbCmd2::ZERO
+        };
+        card.ioctl(drm::IOCTL_MODE_ADDFB2, &mut framebuffer)?;
+        Ok(Self {
+            framebuffer: framebuffer.fb_id,
+            handle,
+        })
+    }
+
+    /// Let go of it: its framebuffer removed -- which takes it off any
+    /// screen showing it, so show another first -- then its handle.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the card said; the handle is let go of either way.
+    pub fn release(self, card: &Card) -> io::Result<()> {
+        let mut framebuffer = self.framebuffer;
+        // SAFETY: `DRM_IOCTL_MODE_RMFB`'s argument is one `unsigned int`,
+        // which `framebuffer` is, live for the call.
+        let removed = unsafe {
+            libc::ioctl(
+                card.raw_fd(),
+                drm::IOCTL_MODE_RMFB as _,
+                core::ptr::from_mut(&mut framebuffer),
+            )
+        };
+        let removed = if removed < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        };
+        Self::forget_handle(card, self.handle).and(removed)
+    }
+
+    /// Let go of a handle no framebuffer was made for.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the card said.
+    pub fn forget_handle(card: &Card, handle: u32) -> io::Result<()> {
+        let mut destroy = DestroyDumb { handle };
+        card.ioctl(drm::IOCTL_MODE_DESTROY_DUMB, &mut destroy)
     }
 }
 

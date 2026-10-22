@@ -137,6 +137,9 @@ pub enum Path {
     /// Copied straight into the screen's buffer, the frame drawn nowhere
     /// else: a window drawn alone (`crate::alone`).
     Direct,
+    /// Not copied by the compositor at all: the card shown the client's own
+    /// buffer (direct scanout).
+    Scanout,
 }
 
 impl Path {
@@ -149,6 +152,7 @@ impl Path {
             Path::Stretch => "stretch",
             Path::StretchBlend => "stretch-blend",
             Path::Direct => "direct",
+            Path::Scanout => "scanout",
         }
     }
 }
@@ -194,6 +198,7 @@ pub fn drawn_surface(size: (u32, u32), alpha: bool, path: Path) {
         Path::Stretch => 2,
         Path::StretchBlend => 3,
         Path::Direct => 4,
+        Path::Scanout => 5,
     };
     let packed = (width << 40) | (height << 16) | (u64::from(alpha) << 8) | path | 0x80;
     let area = |packed: u64| (packed >> 40) * ((packed >> 16) & 0xFF_FFFF);
@@ -218,7 +223,8 @@ pub fn take_surface() -> Option<Drawn> {
         1 => Path::Blend,
         2 => Path::Stretch,
         3 => Path::StretchBlend,
-        _ => Path::Direct,
+        4 => Path::Direct,
+        _ => Path::Scanout,
     };
     Some(Drawn {
         size,

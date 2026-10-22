@@ -223,6 +223,7 @@ dependencies = [
 name = "compositor-pattern"
 version = "0.1.0"
 dependencies = [
+ "compositor-drm",
  "compositor-gbm",
  "compositor-protocol",
  "compositor-render",

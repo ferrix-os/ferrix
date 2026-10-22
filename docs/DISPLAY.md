@@ -251,7 +251,8 @@ source is committed this time.
 | `MODE_GETCONNECTOR` | `Virtual-<n>`, connected when the scanout is enabled, the preferred mode from `HELLO` at the refresh the driver reported (60 Hz when it reported none), the same size at 60, 120 and 144 Hz where not listed already, then the standard sizes at 60 Hz; each mode's `clock` is what its refresh takes over its totals and its `vrefresh` what that clock gives |
 | `MODE_GETENCODER`, `MODE_GETCRTC` | the head's own, each encoder driving the one CRTC of its head |
 | `MODE_CREATE_DUMB`, `MODE_MAP_DUMB`, `MODE_DESTROY_DUMB` | §2.1; `bpp` 32 only |
-| `MODE_ADDFB`, `MODE_ADDFB2`, `MODE_RMFB` | `XRGB8888` only; a framebuffer names one dumb buffer |
+| `MODE_ADDFB`, `MODE_ADDFB2`, `MODE_RMFB` | `XRGB8888` only, offsets 0; a framebuffer names one dumb buffer, or one imported buffer; the first `ADDFB2` of a client's buffer attaches it (§8.2) |
+| `PRIME_FD_TO_HANDLE` | a render-node export (`docs/GPU.md` §3.5 piece 6), `ATTACH_OBJ`; on a card whose driver copies, also a chardev dmabuf over a plain anonymous VMO, attached at its first `ADDFB2` (§8.2); one handle a buffer; anything else `EINVAL`; `DESTROY_DUMB` lets either go |
 | `MODE_SETCRTC` | `SCANOUT` then `FLUSH` of the whole buffer |
 | `MODE_PAGE_FLIP` | `SCANOUT` if the buffer changed, then `FLUSH`; `DRM_MODE_PAGE_FLIP_EVENT` queues a `drm_event_vblank` when `FLIPPED` arrives |
 | `MODE_DIRTYFB` | `FLUSH` of the clip rectangles |
@@ -1196,8 +1197,9 @@ vertical blanking, no GPU.
    VMO `READ | MAP` and never `WRITE`; efifb maps it read-only. Every boot's
    `display::check` holds the rule: a made-up tree node and every published
    node but this one and NVIDIA's are refused the copying card. `ATTACH`
-   records a buffer's range, pinning nothing; `SCANOUT` copies the whole
-   buffer to the screen; `FLUSH` copies the changed rectangle when it is of
+   records a buffer's range, pinning nothing; `SCANOUT` says which buffer
+   is shown, and the first `FLUSH` after it copies the whole buffer to the
+   screen (§8.2); a later `FLUSH` copies the changed rectangle when it is of
    the buffer on screen, then answers `FLIPPED` at once, since there is no
    blanking to wait for. An `RGBX` screen gets red and blue exchanged on the
    way. The connector is `Virtual-1`, which is DRM's word for what firmware
@@ -1426,3 +1428,125 @@ plane, and the GGTT entries behind it, as firmware set them. The kernel
 cannot check that, so it does not claim it. A quiesce still turns the
 function's bus mastering off, as for every function. The plane then stops
 scanning out until the next driver's first pin turns it back on.
+
+### 8.2 A client's own buffer shown directly (direct scanout, 2026-10-22)
+
+**Why.** On the N150 a game's frame cost two processor copies of 8.3 MB
+after anv drew it: hyprix copied the client's dmabuf into its dumb buffer
+(the frame line's `surface`, about 5 ms), and the Intel driver copied the
+dumb buffer into the lit plane's window (`flip`, about 5 ms). wlroots and
+Hyprland skip the first for a fullscreen client ("direct scanout"): the
+client's buffer is the frame. A copying card can do the same with no
+display engine at all -- it copies from the client's buffer instead -- so
+each frame is one copy, the card's.
+
+**The kernel (load ring; the certification consultant's design verdict
+OK IF (1)-(8), ledger line 3108).**
+
+* `PRIME_FD_TO_HANDLE` on a card whose driver copies (§2.1: efifb, the
+  Intel card, nvrm's) also takes a chardev dmabuf
+  (`interfaces/chardev/dmabuf.rs`) over a plain anonymous VMO: a buffer of
+  the Intel or NVIDIA render node. A name-only dmabuf, another VMO, a
+  descriptor that is no dmabuf and any card that does not copy stay
+  `EINVAL`: a DMA card's driver would pin another driver's memory. One
+  handle a dmabuf an open, looked for and made under one hold of the open's
+  lock. The open holds the dmabuf.
+* The first `ADDFB2` of the handle attaches it, with its geometry: an
+  ordinary ATTACH of the dmabuf's VMO from offset 0, `pitch` × `height`
+  rounded up to a page, refused `EINVAL` with nothing sent when that is
+  longer than the VMO (condition 1), handed `READ | MAP` and never `WRITE`
+  (`Ready::card_rights(true)`, condition 6). A second `ADDFB2` racing the
+  first is `EBUSY` (condition 5). The driver sees an ATTACH like any other;
+  no protocol change.
+* The range is *shared* (`Range::shared`, condition 2): it takes none of
+  `CARD_BYTES` but counts as one of an open's buffers against
+  `NON_MASTER_BUFFERS`. After its DETACHED it is neither decommitted nor
+  given back (`reclaim_plan`, condition 3): its pages are the client's, other
+  programs map them and the GPU driver may pin them, and a program holding
+  a read-only descriptor must not be able to have the card zero them. The
+  range holds the dmabuf until it is reclaimed in the card's task with no
+  lock held (condition 4), so the GPU driver hears the dmabuf's release only
+  after the display driver let go of it. A refused DETACH keeps it, as any
+  range.
+* Every boot's `display::check` (condition 7) holds the arithmetic: a
+  made-up shared range takes 0 bytes but is one buffer, a made one takes its
+  bytes, and `reclaim_plan` neither decommits nor gives back a shared one
+  and does both for a made one. Negative controls: `reclaim_plan`
+  decommitting shared ranges, and a shared range counted in the bytes, each
+  stop the boot with the check's line.
+* **What it leaves (residual risk).** A display driver that keeps its
+  mapping of a shared VMO after DETACH can read that buffer until the VMO
+  dies; the core cannot decommit it as it does a dumb buffer (E-02). The
+  driver is a copying one, already trusted with what is on the screen, and
+  gets `READ | MAP` only; condition 4 keeps the GPU driver from recycling
+  the pages meanwhile. `docs/certification/VULNERABILITY-ANALYSIS.md`
+  lists it beside E-02.
+* Cache policy (the consultant's C3): the Intel front end's objects are
+  write-back on the LLC, which the GPU snoops (`docs/INTEL-GPU.md` §10,
+  `gem::wc_served_cached`), and `intel-fake`'s are plain memory; a copying
+  driver reads either through a write-back mapping, so it reads what the
+  GPU wrote. A buffer a plane scanned without copying would need it written
+  past the LLC first: not done here.
+
+**The drivers.** efifb and the Intel card copy on FLUSH only. A SCANOUT
+says which buffer is shown and copies nothing, as virtio-gpu's
+`SET_SCANOUT` transfers nothing; the first FLUSH after it copies the whole
+shown buffer. The kernel follows every SCANOUT with a FLUSH of the whole
+buffer (`show`), so before this every page flip and every `SETCRTC` was put
+on the screen twice. Each keeps 16 buffers, room for a compositor's two and
+a client's swap chain.
+
+**hyprix.** In software, a frame that is one window alone
+(`compositor_render::alone`: fullscreen, opaque, on top, nothing over it,
+no dimming), with no counter, drag icon, night-light, turn or scale, is
+shown by handing the card the window's own buffer
+(`frame::scanned_out`) when, further, no pointer is drawn into the frame
+(card0 over a lit plane has no cursor plane) and the buffer is a client's
+dmabuf of the screen's size, uncropped, from its first byte. The backend
+imports it (`PRIME_FD_TO_HANDLE`, one `ADDFB2` a buffer, kept for up to four
+buffers, a swap chain, and let go of after 120 frames composited), and the
+flip is a `PAGE_FLIP` to it. Anything else, and the first refusal of the
+card's (which is then not asked again), is the frame drawn as before; the
+first frame after is drawn whole into hyprix's own buffer and flipped back
+to. A screenshot of such a frame reads the client's buffer.
+`HYPRIX_DIRECT_SCANOUT=0` turns it off. Hyprland's `render:direct_scanout`
+is its option for a KMS plane, default 0, and is not read.
+
+What it says (the box's log is read for these):
+
+* `hyprix: Virtual-1: scanning out client <pid>'s surface <id> (<w>x<h>)
+  directly` when it starts;
+* `hyprix: Virtual-1: compositing again: <why>` when it stops, and
+  `hyprix: Virtual-1: copying the fullscreen window: <why>` once a reason
+  while one window is alone but copied (`the pointer is drawn into the
+  frame`, `the card will not show a client's buffer (...)`, ...);
+* `hyprix: direct scanout frames N of the last M` once a second, and the
+  frame line's `largest surface WxH xrgb scanout` with no `surface` phase.
+
+**The test.** `cargo xtask test-compositor --boot direct-scanout`, x86-64:
+the firmware-screen machine (efifb's copying card) with the Intel stand-in
+(`intel_uapi::STANDIN`) driven by `intel-fake` under `ferrix.intelgpu`. One
+`pattern checkerboard --dmabuf --busy` makes GEM buffers on the i915 render
+node by hand (`pattern/src/i915.rs`), fills them, exports them and draws
+every frame, fullscreen by a window rule. The boot requires hyprix's
+scanning-out line and the VGA's screendump equal to
+`fullscreen-checkerboard.xrle` in every pixel, and prints the frame lines.
+Negative control (condition 8): the kernel's accept branch removed, the
+picture is the same (hyprix copies) and the boot fails on the missing line,
+hyprix saying `the card will not show a client's buffer (Invalid argument
+...)`.
+
+**Measured in QEMU** (KVM, 1024x768, 29 one-second reports each; QEMU's
+memory says nothing about the N150's): all of hyprix's frame took 472 us a
+frame copying the window and 401 us showing it directly; the slowest
+frame's `surface` phase went from about 107 us to none, and its `flip`
+(efifb's one copy) stayed at 0.6 ms. On the N150 the `surface` phase is the
+5 ms the frame line showed.
+
+**Next.** The Intel driver could point the lit plane at its own GEM object
+instead of copying (an ATTACH whose VMO is one of its objects): no copy at
+all. It needs the plane's surface register written at a vertical blank, a
+GGTT mapping of the object, the buffer written past the LLC, and a client
+buffer released only after the next flip; and the K4 conditions on the lit
+plane (`docs/INTEL-GPU.md` §5.1) reviewed again.
+

@@ -2853,6 +2853,12 @@ struct Screen {
     /// fullscreen window were copied straight into the buffer
     /// (`crate::frame::Output::stale`), and the canvas holds none of them.
     stale: bool,
+    /// What the card shows directly, a client's own buffer, since it began
+    /// to (`crate::frame::scanned_out`): `None` while frames are drawn here.
+    scanning: Option<String>,
+    /// The last reason said for copying a fullscreen window rather than
+    /// showing its buffer directly, so that each is said once.
+    said_not_scanned: Option<String>,
     /// Frames the GPU failed in a row: [`GPU_TRIES`] of them give it up.
     gpu_failures: u32,
     /// When a screen that gave its GPU up looks for one again, and how long
@@ -3093,6 +3099,8 @@ impl Screen {
                 said_gone: false,
                 said_dropped: false,
                 stale: false,
+                scanning: None,
+                said_not_scanned: None,
                 hidden: Vec::new(),
                 gpu_failures: 0,
                 gpu_again: None,
@@ -4288,7 +4296,7 @@ fn copy_screen(
     let (from, stride, (left, top)) = if screen.gpu.is_some() || screen.stale {
         (
             screen.backend.drawn(),
-            screen.backend.stride() as usize,
+            screen.backend.drawn_stride() as usize,
             (placed.x.max(0) as usize * 4, placed.y.max(0) as usize),
         )
     } else {

@@ -6,6 +6,11 @@
 //! * `HYPRIX_INPUT_TRACE=1`: a line for each pass that read a device and for
 //!   each relative motion carried out, so a boot can count the motions in
 //!   and out.
+//! * `HYPRIX_DIRECT_SCANOUT=0`: a fullscreen client's buffer is copied as
+//!   before, never handed to the card (`crate::frame::scanned_out`): the
+//!   way back on a machine where showing it directly misbehaves, and the
+//!   "before" of a measurement. Hyprland's own `render:direct_scanout`
+//!   stays its KMS-plane option with its default of 0, which this is not.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -20,6 +25,13 @@ pub(crate) fn hold_frame() -> Option<Duration> {
             .filter(|millis| *millis > 0)
             .map(Duration::from_millis)
     })
+}
+
+/// Whether a client's buffer may be handed to the card (on unless
+/// `HYPRIX_DIRECT_SCANOUT=0`).
+pub(crate) fn direct_scanout() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("HYPRIX_DIRECT_SCANOUT").map_or(true, |value| value != "0"))
 }
 
 /// Whether input is traced.
