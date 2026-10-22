@@ -164,6 +164,13 @@
       "branch": "mk/k4",
       "date": "2026-10-21",
       "purpose": "MICROKERNEL.md §3 K4, exception channels (docs/microkernel/K4.md): a user-mode fault the address space does not resolve goes to the faulting process's exception channel, then up its jobs' channels, before the personality's signal; the faulting thread's wait is bounded, with the no-supervisor path as the default action; verdicts are resume (the context checked as sigreturn's I2a/I2b rules require, per architecture), kill or hand on; nested faults and detaching; the SUPERVISE right on process and job handles (H.TRAP.20 is the parent)"
+    },
+    {
+      "ids": ["H.DEV.5-6", "L.x86_64.194-209", "L.device.51-53"],
+      "owner": "powerctl",
+      "branch": "powerctl",
+      "date": "2026-10-22",
+      "purpose": "docs/POWERCTL.md, processor power limits from a ring-3 driver (the consultant's design review OK IF (1)-(16), ledger line 3130): H.DEV.5, power limits changed only through the kernel's typed operations within the model's limits; H.DEV.6, firmware's limits back when the holder goes, hangs or breaks the protocol, the backstop trips, or the machine stops; L.x86_64.194-209, the power core (model gate, validation, compose, unit conversion, telemetry, restores, lease, backstop, latches, firmware compares, rate, the write's masked section, the protocol, the test-only fake); L.device.51-53, the node, the claim call and the node's refusals"
     }
   ]
 }
