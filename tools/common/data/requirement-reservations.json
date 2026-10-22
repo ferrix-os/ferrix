@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.device.49"],
+      "owner": "initrd-limit-land",
+      "branch": "initrd-limit",
+      "date": "2026-10-22",
+      "purpose": "devmgr's start reads /sbin/devmgr and each manifest driver whole up to the read limit, independent of the heap's largest block; a driver it cannot read is named on the console and the start refused (consultant OK IF, ledger 3034, condition 3; parent H.BOOT.15)"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
