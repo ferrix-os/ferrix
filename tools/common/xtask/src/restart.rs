@@ -547,10 +547,16 @@ fn prepare(
 }
 
 /// Start [`BLANK`] in the background and wait for its buffer on the screen.
+///
+/// Its stdin is `/dev/null`: before it shows anything, its master check
+/// (`compositor_drm::master`) says `compositor: master-blank` and reads a
+/// line on stdin while test-display reads the blank screen. A background
+/// job reading the console is stopped by `SIGTTIN` and never shows its
+/// buffer; end of file lets the check go on at once (red-014).
 fn hold_the_card(watching: &mut qemu::Watching<'_>) -> std::result::Result<(), String> {
     let before = watching.after().len();
     watching
-        .type_in(format!("{BLANK} &\n").as_bytes())
+        .type_in(format!("{BLANK} </dev/null &\n").as_bytes())
         .map_err(|error| error.to_string())?;
     let shown = watching
         .read_more(Instant::now() + PATIENCE, |lines| {
