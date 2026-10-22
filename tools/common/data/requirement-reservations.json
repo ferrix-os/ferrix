@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.x86_64.190-193"],
+      "owner": "vrcurrent",
+      "branch": "vrcurrent",
+      "date": "2026-10-22",
+      "purpose": "ferrix.vrcurrent (the customer's explicit authorisation, 2026-10-22): the boot word's values, the 25..32 A clamp and the stepping; a write of VR_CURRENT_CONFIG bits 12:0 only, through a #GP-checked wrmsr; the thermal guard that writes the firmware value back; 0x601 decoded as a current in 1/8 A"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
