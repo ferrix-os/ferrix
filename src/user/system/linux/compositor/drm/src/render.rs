@@ -655,7 +655,7 @@ pub fn probe() -> String {
     let three_d = node.param(virtgpu::PARAM_3D_FEATURES).unwrap_or(0);
     let capsets = node.param(virtgpu::PARAM_SUPPORTED_CAPSET_IDS).unwrap_or(0);
     format!(
-        "{MARKER} renderD128 {driver} 3d {three_d} capsets 0x{capsets:x} {} {} {} {} {} {} {}",
+        "{MARKER} renderD128 {driver} 3d {three_d} capsets 0x{capsets:x} {} {} {} {} {} {} {} {}",
         object(&node),
         caps(&node, capsets),
         moved(&node),
@@ -663,7 +663,25 @@ pub fn probe() -> String {
         blob(capsets),
         read(&node),
         prime(&node),
+        long(&node),
     )
+}
+
+/// The longest command buffer Mesa's virgl driver submits:
+/// `VIRGL_MAX_CMDBUF_DWORDS`, `64 * 1024 + 1024` words (`virgl_winsys.h`).
+const LONGEST_STREAM_WORDS: usize = 64 * 1024 + 1024;
+
+/// What submitting a command buffer as long as Mesa's longest said: `long
+/// <bytes>`, or `long none <why>`. Every word is virgl's `NOP` (a header of
+/// 0: command 0, no payload), so the device has nothing to do but read it.
+/// A node that took only shorter ones dropped GTK 4's uploads under mutter
+/// (`docs/GNOME.md`, gap 2).
+fn long(node: &Render) -> String {
+    let stream = vec![0_u32; LONGEST_STREAM_WORDS];
+    match node.exec(&stream) {
+        Ok(()) => format!("long {}", size_of_val(stream.as_slice())),
+        Err(error) => format!("long none {}", reason(&error)),
+    }
 }
 
 /// What the node says of PRIME: `prime <value>`, which is 3 for import and

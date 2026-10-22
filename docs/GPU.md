@@ -156,7 +156,7 @@ describes:
 hundred lines in `src/user/system/native/drivers/display/virtio-gpu`: the adapter a second GPU replaces.
 
 **READY carries the work VMO**, as `Ready::HANDLE_RIGHTS` always said it
-would: a megabyte the core owns, handed over `READ | TRANSFER` with the
+would: two megabytes the core owns (one until 2026-10-22, see below), handed over `READ | TRANSFER` with the
 core's port beside it. An object's description and a command buffer are
 ranges of it, and the core writes neither.
 
@@ -469,6 +469,16 @@ GPU's texture has. `SUBMIT` was already in the protocol: the node copies a
 stream into a 64 KiB slot of the work VMO and the driver copies it on into
 the command area. The driver runs each to completion in the device's one
 command slot, between the display's commands, as it did a `MAKE_OBJ`.
+
+**A slot is 65 pages since 2026-10-22**, the longest command buffer Mesa's
+virgl driver submits (`VIRGL_MAX_CMDBUF_DWORDS`, 266,240 bytes). At 64 KiB
+a buffer that uploads pixels inline was refused `EINVAL`, Mesa dropped it
+with "got error from kernel - expect bad rendering", and GTK 4's windows
+under mutter showed white (`docs/GNOME.md`, gap 2); Linux's virtio-gpu
+takes any length. The work VMO grew to two megabytes, seven such slots,
+the driver's copied stream and its command area's large place to one
+slot, and its longest descriptor chain to 72 buffers (a stream of 65 pages
+no two of which lie side by side, the header and the response).
 
 **What `WAIT` does not do.** The driver offers no fences, so nothing says
 when the GPU has *finished* a stream rather than taken it. A transfer from

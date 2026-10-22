@@ -148,8 +148,11 @@ pub const SLOT_AREA_BYTES: usize = CONTROL_SLOTS * SLOT_BYTES;
 /// Where the large command is in the table of what is in flight.
 const LARGE: usize = CONTROL_SLOTS;
 
-/// The most buffers one chain is made of.
-const MAX_CHAIN: usize = 64;
+/// The most buffers one chain is made of: a request, a stream of 65 pages
+/// (the render core's longest command buffer) of which no two are side by
+/// side, one more for a stream that starts part way into a page, and the
+/// response -- 68, rounded up.
+const MAX_CHAIN: usize = 72;
 
 /// Cursor commands the cursor queue may hold at once: its size, and the
 /// slots of the cursor area.

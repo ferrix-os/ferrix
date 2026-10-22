@@ -84,9 +84,10 @@ pub(crate) mod node;
 /// How much work VMO one renderer gets: command buffers and object
 /// descriptions on their way to the device.
 ///
-/// A frame's worth of virgl is tens of kilobytes; a megabyte is room for
-/// many in flight without being memory a guest notices.
-pub(crate) const WORK_BYTES: u64 = 1024 * 1024;
+/// Two megabytes: the descriptions, and room for seven of the longest
+/// command buffers [`COMMAND_BYTES`] allows in flight at once -- far more
+/// than a frame needs, without being memory a guest notices.
+pub(crate) const WORK_BYTES: u64 = 2 * 1024 * 1024;
 
 /// How many words an object's description is: the ten `src/user/system/native/drivers/display/virtio-gpu` reads back
 /// -- target, format, bind, width, height, depth, array size, last level,
@@ -104,11 +105,18 @@ pub(crate) const DESCRIBE_BYTES: u64 = 64;
 /// How many bytes one command buffer's slot is, and so the longest command
 /// buffer one submission carries.
 ///
-/// A frame of virgl is state and draws -- pixels go by `TRANSFER`, not
-/// inline -- so tens of kilobytes is a great many windows. The driver has the
-/// device read it where it lies, and its command area, which a submission is
-/// copied into whole when the work VMO could not be pinned, has room for it.
-pub(crate) const COMMAND_BYTES: u64 = 64 * 1024;
+/// Mesa's virgl driver fills a command buffer up to
+/// `VIRGL_MAX_CMDBUF_DWORDS` before it submits, `(64 * 1024 + 1024)` words
+/// (`virgl_winsys.h`): 266,240 bytes, 65 pages. Most frames are tens of
+/// kilobytes of state and draws, but a buffer that uploads pixels inline
+/// (`RESOURCE_INLINE_WRITE`) fills to the end, and GTK 4 does that under
+/// mutter -- with 64 KiB here such a submission was `EINVAL`, Mesa printed
+/// "got error from kernel - expect bad rendering" and dropped it, and
+/// mutter showed the window white (`docs/GNOME.md`, gap 2). Linux's
+/// virtio-gpu takes any length. The driver has the device read it where
+/// it lies, and its command area, which a submission is copied into whole
+/// when the work VMO could not be pinned, has room for it.
+pub(crate) const COMMAND_BYTES: u64 = 65 * 4096;
 
 /// How many command buffers can be on their way at once: what is left of
 /// the work VMO after the descriptions, in slots.

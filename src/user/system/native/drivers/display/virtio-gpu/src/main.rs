@@ -80,14 +80,21 @@ const ATTACH_BACKING_HEADER: usize = 32;
 const ENTRY_BYTES: usize = 16;
 
 /// Pages of command area: the slots, then the large place, whose largest
-/// request is a backing list of one entry per page, with the response after
-/// it. Sized for the worst case, pages no two of which the device sees side
-/// by side, so no ATTACH the protocol allows is too large to submit.
-const AREA_PAGES: usize = (SLOT_AREA_BYTES
-    + ATTACH_BACKING_HEADER
-    + MAX_BUFFER_PAGES * ENTRY_BYTES
-    + ferrix_virtio_gpu::RESPONSE_BYTES)
-    .div_ceil(PAGE);
+/// request is a backing list of one entry per page, or a command buffer
+/// copied in whole for a card whose work VMO could not be pinned, with the
+/// response after it. Sized for the worst case, pages no two of which the
+/// device sees side by side, so no ATTACH the protocol allows and no
+/// stream the core sends is too large to submit.
+const AREA_PAGES: usize =
+    (SLOT_AREA_BYTES + large_request() + ferrix_virtio_gpu::RESPONSE_BYTES).div_ceil(PAGE);
+
+/// The longest request the large place holds: the longer of a whole
+/// backing list and a whole copied stream.
+const fn large_request() -> usize {
+    let attach = ATTACH_BACKING_HEADER + MAX_BUFFER_PAGES * ENTRY_BYTES;
+    let stream = SUBMIT_HEADER + STREAM_BYTES;
+    if attach > stream { attach } else { stream }
+}
 
 /// Buffers pinned at once.
 const MAX_PINS: usize = 32;
@@ -745,12 +752,17 @@ const MAX_BACKINGS: usize = ferrix_renderctl::session::MAX_OBJECTS;
 const MAX_CAPSETS: u32 = 8;
 
 /// The longest command buffer one `SUBMIT` may name, which is the core's
-/// slot and fits the command area beside its header and the response.
-const STREAM_BYTES: usize = 64 * 1024;
+/// slot -- Mesa virgl's longest, `VIRGL_MAX_CMDBUF_DWORDS` words, 65 pages
+/// -- and fits the command area beside its header and the response.
+const STREAM_BYTES: usize = 65 * 4096;
+
+/// Bytes of `SUBMIT_3D` before its stream: the header and the size word,
+/// padded.
+const SUBMIT_HEADER: usize = 32;
 
 /// Pages of the largest work VMO pinned for the device: the render core's
-/// is a megabyte.
-const WORK_PAGES: usize = 256;
+/// is two megabytes.
+const WORK_PAGES: usize = 512;
 
 /// The most runs of device-consecutive pages one command buffer covers: a
 /// page each, and one more for a buffer that starts part way into one.

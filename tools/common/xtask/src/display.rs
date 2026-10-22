@@ -526,6 +526,16 @@ pub(crate) const RENDER: &str = "render:";
 /// dmabuf (`docs/GNOME.md`, gap 1).
 const PRIME: &str = "3";
 
+/// How long a command buffer the render node must take, in bytes: Mesa
+/// virgl's longest, `VIRGL_MAX_CMDBUF_DWORDS` words (`docs/GNOME.md`, gap 2).
+const LONG: &str = "266240";
+
+/// Whether the render line says the node took a command buffer of [`LONG`]
+/// bytes.
+pub(crate) fn render_long_ok(line: &str) -> bool {
+    render_did(line, "long") == Some(LONG)
+}
+
 /// Whether the render line says the node answered `DRM_CAP_PRIME` with
 /// [`PRIME`] exactly: a node that answers only one of the two, or nothing,
 /// is not one Mesa will share buffers through.
@@ -674,6 +684,13 @@ fn judge_render(arch: Arch, gl: bool, venus: bool, lines: &[String]) -> Result<(
                 )));
             }
             println!("  {arch}: the render node: prime {PRIME}");
+            // And a command buffer as long as Mesa's longest.
+            if !render_long_ok(render) {
+                return Err(Error::new(format!(
+                    "{arch}: the render node did not take a command buffer of {LONG} bytes: `{render}`"
+                )));
+            }
+            println!("  {arch}: the render node: a command buffer of {LONG} bytes");
             // With Venus on the card, a blob of host memory made in a
             // Venus context and mapped through the device's window: every
             // byte written there reads back (`docs/GPU.md` §6.1).
@@ -872,6 +889,16 @@ mod tests {
         assert!(!render_prime_ok(&format!("{line} prime 1")));
         assert!(!render_prime_ok(line));
         assert!(!render_prime_ok("render: none no node"));
+    }
+
+    /// The render line's long command buffer passes only at Mesa's longest.
+    #[test]
+    fn render_long_needs_mesas_longest() {
+        let line = "render: renderD128 virtio_gpu 3d 1 read EAGAIN prime 3";
+        assert!(render_long_ok(&format!("{line} long 266240")));
+        assert!(!render_long_ok(&format!("{line} long none EINVAL")));
+        assert!(!render_long_ok(&format!("{line} long 65536")));
+        assert!(!render_long_ok(line));
     }
 
     fn ppm(width: usize, height: usize, fill: [u8; 3]) -> Vec<u8> {
