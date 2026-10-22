@@ -365,6 +365,86 @@ impl Placement {
 }
 
 // ---------------------------------------------------------------------------
+// Wake-affine placement
+// ---------------------------------------------------------------------------
+
+/// How often a task's flip count is halved, in nanoseconds: once a second,
+/// as Linux's `record_wakee` halves at most once per `HZ` jiffies.
+pub const FLIP_DECAY_NS: u64 = 1_000_000_000;
+
+/// A waker's flip count and the time it was last halved, after it wakes a
+/// task at `now`; `changed` when that task is not the one it woke last
+/// (L.sched.91).
+///
+/// Linux's `record_wakee`: the count is halved first when more than
+/// [`FLIP_DECAY_NS`] has passed since the last halving (once, however long
+/// it was), and a change of wakee adds one. A task that wakes the same
+/// partner every time keeps a count near zero; one that wakes many keeps a
+/// high one.
+#[must_use]
+pub const fn flip(flips: u32, halved_at: u64, now: u64, changed: bool) -> (u32, u64) {
+    let (mut flips, halved_at) = if now.saturating_sub(halved_at) > FLIP_DECAY_NS {
+        (flips >> 1, now)
+    } else {
+        (flips, halved_at)
+    };
+    if changed {
+        flips = flips.saturating_add(1);
+    }
+    (flips, halved_at)
+}
+
+/// Whether a wake between tasks with these flip counts is wide, one of
+/// many partners on either side, so that pulling the wakee onto its
+/// waker's processor would pile a 1:N relationship onto one processor
+/// (L.sched.91).
+///
+/// Linux's `wake_wide`: the smaller count must reach `factor` and the
+/// larger must be `factor` times the smaller. `factor` is the number of
+/// processors sharing a cache, which for Ferrix is the domain's.
+#[must_use]
+pub const fn wake_wide(waker_flips: u32, wakee_flips: u32, factor: u32) -> bool {
+    let (master, slave) = if waker_flips < wakee_flips {
+        (wakee_flips, waker_flips)
+    } else {
+        (waker_flips, wakee_flips)
+    };
+    slave >= factor && master as u64 >= slave as u64 * factor as u64
+}
+
+/// Whether a wakee whose own load is `task` may be pulled onto its waker's
+/// processor, of load average `here`, from its home of load average `home`
+/// (L.sched.90). All three in units of [`LOAD_SCALE`].
+///
+/// Linux's `wake_affine_weight` with `WA_BIAS` and an `imbalance_pct` of
+/// 117: the wakee's load is added to the waker's side and taken from the
+/// home's, and the home's side is weighed at 108%, half the imbalance, so
+/// that the waker's processor wins only with some margin. With a spinner on
+/// each side, a wakee busy more than about 8% of the time stays home.
+#[must_use]
+pub const fn pull_fits(here: u64, home: u64, task: u64) -> bool {
+    let this = here as u128 + task as u128;
+    let prev = home.saturating_sub(task) as u128;
+    this * 100 < prev * 108
+}
+
+/// How long a task was busy over a window, in units of [`LOAD_SCALE`]: its
+/// runtime over the window's wall time, at most one whole processor
+/// (L.sched.90). `None` for an empty window.
+#[must_use]
+pub const fn utilisation(ran_ns: u64, window_ns: u64) -> Option<u64> {
+    if window_ns == 0 {
+        return None;
+    }
+    let share = (ran_ns as u128 * LOAD_SCALE as u128) / window_ns as u128;
+    Some(if share > LOAD_SCALE as u128 {
+        LOAD_SCALE
+    } else {
+        share as u64
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Balancing what is already placed
 // ---------------------------------------------------------------------------
 

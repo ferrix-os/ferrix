@@ -57,6 +57,49 @@ pub(crate) const BLOCKED: u8 = 1;
 /// Dead: it has returned or exited, and its stack is waiting to be freed.
 pub(crate) const DEAD: u8 = 2;
 
+/// A waker's record of its wakees, for `ferrix_sched::wake_wide`
+/// (L.sched.91): written only by the task itself while it runs.
+#[derive(Debug)]
+struct Wakees {
+    /// The last task it woke from a call, by id.
+    last: AtomicU64,
+    /// How often it changed wakee, halved once a second (`ferrix_sched::flip`).
+    flips: AtomicU32,
+    /// When `flips` was last halved, in nanoseconds.
+    halved_at: AtomicU64,
+    /// When its busy share was last sampled, in nanoseconds; 0 for never
+    /// (L.sched.90). The busy words are written only under the lock of the
+    /// queue that owns it, by a pull's `wake_onto`.
+    sampled_at: AtomicU64,
+    /// Its runtime at that sample.
+    sampled_ran: AtomicU64,
+    /// Its busy share over the last whole window, in `LOAD_SCALE` units, or
+    /// [`UNMEASURED`] before one has passed.
+    busy: AtomicU64,
+}
+
+/// A busy share not yet measured: a pull is refused until one is.
+const UNMEASURED: u64 = u64::MAX;
+
+/// The shortest window a busy share is measured over, in nanoseconds: a
+/// load half-life, about.
+const BUSY_WINDOW_NS: u64 = 32_000_000;
+
+impl Wakees {
+    /// Nobody woken yet, and a busy window open since `now`, its making (0
+    /// for a task adopted before the clock: its first look opens one).
+    const fn new(now: u64) -> Wakees {
+        Wakees {
+            last: AtomicU64::new(0),
+            flips: AtomicU32::new(0),
+            halved_at: AtomicU64::new(0),
+            sampled_at: AtomicU64::new(now),
+            sampled_ran: AtomicU64::new(0),
+            busy: AtomicU64::new(UNMEASURED),
+        }
+    }
+}
+
 /// One kernel thread.
 #[derive(Debug)]
 pub(crate) struct Task {
@@ -106,6 +149,8 @@ pub(crate) struct Task {
     /// Whether it is inside a system call, as the processor running it last
     /// had it (`crate::sched::IN_CALL`): kept here while it does not run.
     in_call: AtomicBool,
+    /// Whom it woke last and how often it changed wakee (L.sched.91).
+    wakees: Wakees,
     /// Whether it may be moved to another CPU.
     /// The processors it may run on.
     affinity: CpuSet,
@@ -268,6 +313,32 @@ const REPLY_FULL: u64 = 1 << 63;
 /// The node a queue, a sleeper set or the reaper holds a task in.
 pub(crate) type TaskSlot = Slot<Arc<Task>>;
 
+/// A user task's register state, `user_state` or a fresh one, and its
+/// process's core; neither for a kernel thread (no `thread`).
+#[expect(
+    clippy::type_complexity,
+    reason = "private, one caller, which destructures the pair at once"
+)]
+fn user_parts(
+    thread: Option<&Arc<dyn UserThread>>,
+    user_state: Option<arch::UserState>,
+) -> Result<
+    (
+        Option<Box<UnsafeCell<arch::UserState>>>,
+        Option<Arc<crate::object::process::Process>>,
+    ),
+    AllocError,
+> {
+    let user = match thread {
+        Some(_) => Some(fallible::try_box(UnsafeCell::new(
+            user_state.unwrap_or_else(arch::UserState::new),
+        ))?),
+        None => None,
+    };
+    let core = thread.map(|thread| Arc::clone(thread.process().core_arc()));
+    Ok((user, core))
+}
+
 /// The two slots a task needs, allocated together.
 fn slots() -> Result<(TaskSlot, TaskSlot), AllocError> {
     Ok((Slot::new()?, Slot::new()?))
@@ -383,16 +454,8 @@ impl Task {
             thread,
             user_state,
         } = new;
-        let user = match thread.as_ref() {
-            Some(_) => Some(fallible::try_box(UnsafeCell::new(
-                user_state.unwrap_or_else(arch::UserState::new),
-            ))?),
-            None => None,
-        };
+        let (user, core) = user_parts(thread.as_ref(), user_state)?;
         let (run_slot, sleep_slot) = slots()?;
-        let core = thread
-            .as_ref()
-            .map(|thread| Arc::clone(thread.process().core_arc()));
         Ok(Task {
             id,
             name,
@@ -403,6 +466,7 @@ impl Task {
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
+            wakees: Wakees::new(crate::timer::now_nanos()),
             affinity,
             address_space,
             thread,
@@ -454,6 +518,7 @@ impl Task {
             cpu: AtomicU64::new(cpu as u64),
             queued: AtomicBool::new(false),
             in_call: AtomicBool::new(false),
+            wakees: Wakees::new(0),
             // An adopted context — the boot task, or a processor's idle task —
             // is the one thing that genuinely cannot move: it *is* that
             // processor's context. An affinity of exactly its own processor
@@ -826,6 +891,69 @@ impl Task {
         let was = self.in_call.load(Ordering::Relaxed);
         self.in_call.store(in_call, Ordering::Relaxed);
         was
+    }
+
+    /// Record, as the waker, that it woke `wakee`, and answer its flip count
+    /// after (Linux's `record_wakee`, L.sched.91). `now` is read only when
+    /// the count can change: a new wakee, or a count above zero that may be
+    /// due its halving. A pair that wakes each other keeps a count of zero
+    /// and never reads the clock here.
+    ///
+    /// Only the task itself calls this, while it runs, so the loads and
+    /// stores are its own and need no ordering beyond program order; a
+    /// reader of another task's count (`wakee_flips`) reads a value that
+    /// task wrote, possibly a wake stale, which is all a heuristic needs.
+    pub(crate) fn record_wakee(&self, wakee: TaskId, now: impl FnOnce() -> u64) -> u32 {
+        let changed = self.wakees.last.load(Ordering::Relaxed) != wakee;
+        let flips = self.wakees.flips.load(Ordering::Relaxed);
+        if !changed && flips == 0 {
+            return 0;
+        }
+        if changed {
+            self.wakees.last.store(wakee, Ordering::Relaxed);
+        }
+        let (flips, halved_at) = ferrix_sched::flip(
+            flips,
+            self.wakees.halved_at.load(Ordering::Relaxed),
+            now(),
+            changed,
+        );
+        self.wakees.flips.store(flips, Ordering::Relaxed);
+        self.wakees.halved_at.store(halved_at, Ordering::Relaxed);
+        flips
+    }
+
+    /// Its busy share at `now`, in `LOAD_SCALE` units, over the last whole
+    /// window of at least [`BUSY_WINDOW_NS`] between two looks; `None` until
+    /// one has passed (L.sched.90). A look after a window has passed closes
+    /// it and opens the next. Under the lock of the queue that owns it.
+    pub(crate) fn busy_share(&self, now: u64) -> Option<u64> {
+        let ran = self.runtime();
+        let at = self.wakees.sampled_at.load(Ordering::Relaxed);
+        let window = now.saturating_sub(at);
+        if at == 0 || window >= BUSY_WINDOW_NS {
+            if at != 0 {
+                let since = ran.saturating_sub(self.wakees.sampled_ran.load(Ordering::Relaxed));
+                let share = ferrix_sched::utilisation(since, window).unwrap_or(UNMEASURED);
+                self.wakees.busy.store(share, Ordering::Relaxed);
+            }
+            self.wakees.sampled_at.store(now.max(1), Ordering::Relaxed);
+            self.wakees.sampled_ran.store(ran, Ordering::Relaxed);
+        }
+        let share = self.wakees.busy.load(Ordering::Relaxed);
+        (share != UNMEASURED).then_some(share)
+    }
+
+    /// Its flip count as it last wrote it: see [`Task::record_wakee`].
+    pub(crate) fn wakee_flips(&self) -> u32 {
+        self.wakees.flips.load(Ordering::Relaxed)
+    }
+
+    /// Set its flip count, for stage 5's wide-wake case (L.sched.91): the
+    /// count a server of many clients would have built up, at `now`.
+    pub(crate) fn set_wakee_flips(&self, flips: u32, now: u64) {
+        self.wakees.flips.store(flips, Ordering::Relaxed);
+        self.wakees.halved_at.store(now, Ordering::Relaxed);
     }
 
     /// What it carries between queues.

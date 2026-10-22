@@ -84,8 +84,9 @@ use alloc::boxed::Box;
 use core::fmt;
 
 pub use balance::{
-    BALANCE_THRESHOLD, Balance, CpuLoad, LOAD_PERIOD_NS, LOAD_SCALE, Load, Placement, busiest,
-    imbalance, place, quietest, slice_for,
+    BALANCE_THRESHOLD, Balance, CpuLoad, FLIP_DECAY_NS, LOAD_PERIOD_NS, LOAD_SCALE, Load,
+    Placement, busiest, flip, imbalance, place, pull_fits, quietest, slice_for, utilisation,
+    wake_wide,
 };
 pub use domain::{Class, CpuSet, Domain, MAX_CPUS, Mode, check_partition};
 pub use timeline::Timeline;

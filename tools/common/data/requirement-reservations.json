@@ -164,13 +164,6 @@
       "branch": "mk/k4",
       "date": "2026-10-21",
       "purpose": "MICROKERNEL.md §3 K4, exception channels (docs/microkernel/K4.md): a user-mode fault the address space does not resolve goes to the faulting process's exception channel, then up its jobs' channels, before the personality's signal; the faulting thread's wait is bounded, with the no-supervisor path as the default action; verdicts are resume (the context checked as sigreturn's I2a/I2b rules require, per architecture), kill or hand on; nested faults and detaching; the SUPERVISE right on process and job handles (H.TRAP.20 is the parent)"
-    },
-    {
-      "ids": ["L.sched.90-93"],
-      "owner": "wake-affine",
-      "branch": "wake-affine",
-      "date": "2026-10-22",
-      "purpose": "docs/SCHED-WAKE-AFFINE.md: L.sched.90, a task woken from a call is moved onto its waker's processor (throughput domain, never pinned, home idle first, load bound 108%, state 2 only through wake_onto); L.sched.91, no such move when the wake is wide (Linux wake_wide, flips per task); L.sched.92, a new task's weight is charged to its processor's load average at its first enqueue, so a burst of creations spreads; L.sched.93 spare"
     }
   ]
 }

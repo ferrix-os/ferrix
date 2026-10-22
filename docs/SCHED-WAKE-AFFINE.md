@@ -149,7 +149,7 @@ spread them.
 The arithmetic (`wake_wide`, `flip`) lives in `ferrix-sched` and is
 host-tested.
 
-## 4. Rule C: a new task charges the processor it is placed on
+## 4. Rule C: a new task charges the processor it is placed on (withdrawn, §8)
 
 `choose_cpu` is unchanged: idle first, then fewest runnable, then lowest
 average, and `prefer` on a tie. What changes is that the first enqueue of
@@ -228,3 +228,90 @@ The questions as asked:
    balancer's input too (§4)?
 3. Is the bound for IPC the earlier one (channel round trip within
    ±5% of main at `--smp 1` and `--smp 4`)?
+
+## 8. Outcome, 2026-10-22 (branch `wake-affine`)
+
+**Built:** Rules A and B, L.sched.90 and L.sched.91. Rule C was built,
+measured and withdrawn, so L.sched.92 and L.sched.93 are released unused.
+
+**Rule A gained a wakee-load term** (Q1's heavy-wakee case). Without one,
+a hand-over pair that works 1 ms per hop was stacked on one processor.
+Each task now keeps a busy share: its runtime over a window of at least
+32 ms between two looks, the first window opened when the task was made.
+`pull_fits` adds that load to the waker's side and takes it from the
+home's, as `wake_affine_weight` does. A share not yet measured refuses the
+pull. In the 1 ms pong variant (`efsched6h`), 3 of 2,124 and 258 of 2,211
+futex wakes then ran on the partner's processor, against 2,189 of 2,254
+before.
+
+**Why Rule C was withdrawn.**
+
+- *IPC.* With the charge, `bench-ipc --alternate origin/main` at x86_64
+  kvm `--smp 4` measured domain-call 1.106 and call 1.058 (rounds up to
+  1.24): the charge put the bench's two processes on different
+  processors. With the charge disabled in the same tree, the figures were
+  1.008 and 1.015.
+- *Latency.* Spreading the pollers raised the light-wake p99 (§1): the
+  heavy phase measured 438 to 784 us against main's 235 to 396 us, over
+  three rotated rounds.
+
+Spreading new tasks needs the pull and a blocked-load term to keep
+communicating tasks together, as Linux has. That is p2-151.
+
+**Measured on 72beb403b.** Each figure is a per-run value: the noisy phase
+first, then the heavy phase. Three rotated rounds of `efsched6` under
+`fleet/bench.lock`, 4 vCPUs pinned 7-10, host load 2 to 4. Throughput was
+3.84 to 3.88 processors on all three, and the light-wake p50 was 8.6 us on
+Ferrix and 11.4 to 19.4 us on Linux 7.0.
+
+| | main 48fc08e3b | branch | Linux 7.0 |
+|---|---|---|---|
+| spinner preemptions a second, mean (noisy) | 1,573 / 1,930 / 1,971 | 1,577 / 1,645 / 1,660 | 1,235 / 656 / 1,061 |
+| the same (heavy) | 1,950 / 1,754 / 2,072 | 1,910 / 1,795 / 1,757 | 1,186 / 1,196 / 1,197 |
+| light-wake p99, us (noisy) | 223 / 223 / 230 | 223 / 437 / 267 | 20 / 95 / 45 |
+| the same (heavy) | 277 / 231 / 230 | 223 / 230 / 383 | 332 / 233 / 307 |
+
+On 7378d6d2a, the same rule without the masked-path precheck, six rounds
+gave these figures:
+
+- noisy preemptions: main 1,875 on average, branch 1,597 (-15%);
+- heavy preemptions: main 1,909, branch 1,701 (-11%);
+- noisy p99: main 223 to 230 us, branch 226 to 230 us, and 313 us once;
+- heavy p99: main 223 to 573 us, branch 231 to 628 us.
+
+**Where the p99 tail comes from.** The tail is quantised at multiples of
+the pollers' 214 us phase spacing, plus the 8.6 us p50 (223, 437). So a
+late poller runs at the next timer event on its processor, not when it
+became runnable. That is the EEVDF wake-up decision of the lag design note
+(§2 there): a woken task that is not eligible, or not first by deadline,
+waits for the next decision. The pull puts the hand-over pair on one
+processor, which is often the one holding most pollers. That processor
+then has more such waits. Linux makes the same placement (7,608 of 7,609)
+and has a p99 of 20 to 95 us, because DELAY_ZERO returns a sleeper at zero
+lag. The tail belongs to the lag stream, not to the placement. This p99 excess is the lag stream's acceptance case (docs/backlog/p2.md p2-149). It is re-measured with the same harness when zero-lag return lands (consultant, ledger 3093).
+
+**Layout sensitivity.** Two findings make the benchmarks noisier than
+they look:
+
+- *efsched poller layout.* Builds of this tree in which the pull was
+  switched off at run time still spread the pollers over three
+  processors, where main's builds kept them on one or two (six boots
+  against nine).
+- *aarch64 TCG round trips.* `bench-ipc` on aarch64 TCG with `--smp 2`
+  moves by up to ±25% with code layout alone. Main plus one `println!`
+  in the end-of-run report measured 0.796 against main. The same source
+  as this branch gave 0.791 with one extra `println!`, and 1.197 without
+  it.
+
+The aarch64 TCG ratio therefore does not measure this change. x86_64
+under KVM does:
+
+| `bench-ipc --alternate origin/main`, median of 5 | domain-call p50 | call p50 |
+|---|---|---|
+| x86_64 kvm `--smp 1` | 0.985 | 0.997 |
+| x86_64 kvm `--smp 4` | 1.000 | 1.006 |
+| aarch64 tcg `--smp 2` | 1.197 | 1.19 |
+
+The `--smp 4` run had one round in five at 1.21. Main showed no such round
+in ten. That round is a placement of the bench's pair across processors.
+

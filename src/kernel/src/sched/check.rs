@@ -231,6 +231,7 @@ pub(crate) fn run(topology: &Topology) -> Result<Report, &'static str> {
     mark!(7);
     slice_scaling(&mut report)?;
     a_woken_task_is_placed_on_an_idle_processor(topology)?;
+    a_wakee_is_pulled_onto_its_wakers_processor(topology)?;
     super::borrow_check::run(topology)?;
     mark!(8);
     // The last `mark!` advances `at` for a phase that never comes; reading it
@@ -1984,6 +1985,13 @@ static PLACED_RAN_ON: AtomicUsize = AtomicUsize::new(0);
 /// Block until woken, directly or by a sleep's end (`argument` 1: a sleep of
 /// [`PLACED_SLEEP_NANOS`]), then note the processor this runs on and finish.
 fn placed_runner(argument: usize) {
+    if argument == 2 {
+        // Busy first, for the wake-affine case of a busy wakee.
+        let until = crate::timer::now_nanos().saturating_add(PULL_BUSY_NANOS);
+        while crate::timer::now_nanos() < until {
+            core::hint::spin_loop();
+        }
+    }
     if argument == 1 {
         super::sleep_for(PLACED_SLEEP_NANOS);
     } else if let Some(me) = super::current() {
@@ -2143,3 +2151,217 @@ fn placed_once(case: &str, argument: usize, a: usize, b: usize) -> Result<(), &'
     }
     Ok(())
 }
+
+/// The ways [`pulled_once`] wakes its task.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pull {
+    /// Allowed here and at home, home busy: pulled (L.sched.90).
+    Pulled,
+    /// Pinned at home: stays (L.sched.90).
+    Pinned,
+    /// Home idle: stays (L.sched.90).
+    HomeIdle,
+    /// Woken by its sleep's end, not by a call: stays (L.sched.90).
+    Timer,
+    /// The waker's flips wide: stays (L.sched.91).
+    Wide,
+    /// Busy for a large share of its life: stays (L.sched.90).
+    Busy,
+}
+
+/// How long the busy wakee of [`pulled_once`] runs before it blocks: over a
+/// quarter of its life by the time it is woken.
+const PULL_BUSY_NANOS: u64 = 40_000_000;
+
+/// A task woken by a call made on this processor, homed on a busy one and
+/// allowed on both, with nothing idle that it may run on, runs here, the
+/// waker's processor; pinned, with its home idle, or woken by its sleep's
+/// end, or busy for over a quarter of its life, it runs at home
+/// (L.sched.90); and with the waker's flips wide it runs at home
+/// (L.sched.91). Needs three processors and a domain that
+/// steals work, as L.sched.85's case.
+/// Verifies: L.sched.90, L.sched.91
+fn a_wakee_is_pulled_onto_its_wakers_processor(topology: &Topology) -> Result<(), &'static str> {
+    let online = topology.online();
+    let steals = super::DOMAIN
+        .get()
+        .is_some_and(|domain| domain.mode().steals_work());
+    if online < 3 || !steals {
+        crate::console::println!(
+            "  sched    wake-affine not checked: {online} processor(s), {} domain",
+            if steals {
+                "a stealing"
+            } else {
+                "a partitioned"
+            }
+        );
+        return Ok(());
+    }
+    let here = super::current()
+        .ok_or("the checking task is not running")?
+        .cpu();
+    let home = (here + 1) % online;
+    for (case, how) in [
+        ("pulled", Pull::Pulled),
+        ("pinned", Pull::Pinned),
+        ("home idle", Pull::HomeIdle),
+        ("a sleep's end", Pull::Timer),
+        ("wide", Pull::Wide),
+        ("busy", Pull::Busy),
+    ] {
+        let mut last = Ok(());
+        for _attempt in 0..3 {
+            last = pulled_once(case, how, here, home);
+            if last.is_ok() {
+                break;
+            }
+        }
+        last?;
+    }
+    crate::console::println!(
+        "  sched    wake-affine: a task woken from a call ran on its waker's processor; pinned, home idle, a sleep's end, a wide wake and a busy task stayed home"
+    );
+    Ok(())
+}
+
+/// One run of a case of [`a_wakee_is_pulled_onto_its_wakers_processor`]:
+/// the task is homed on `home`, the waker runs on `here`.
+fn pulled_once(case: &str, how: Pull, here: usize, home: usize) -> Result<(), &'static str> {
+    let allocations = crate::vmap::usage().allocations;
+    STOP.store(false, Ordering::Release);
+    SPINNING.store(0, Ordering::Release);
+    DONE.store(0, Ordering::Release);
+    PLACED_RAN_ON.store(0, Ordering::Release);
+    let mut affinity = CpuSet::of(home);
+    if how != Pull::Pinned {
+        affinity
+            .insert(here)
+            .map_err(|_| "a processor outside the set's range")?;
+    }
+    // Blocked, or asleep, at home while home is idle.
+    let argument = match how {
+        Pull::Timer => 1,
+        Pull::Busy => 2,
+        _ => 0,
+    };
+    let woken = super::spawn_on(
+        "check-pulled",
+        placed_runner,
+        argument,
+        NICE_0_WEIGHT,
+        home,
+        affinity,
+    )?;
+    if !spin_until(|| woken.state() == BLOCKED && !woken.is_queued()) {
+        return Err("wake-affine: the task to be woken never went to sleep");
+    }
+    // Home runs a spinner, so that its load average is high; for the
+    // home-idle case the spinner stops just before the wake, so that home
+    // is idle while its average would still let the load alone pull.
+    let spin = super::spawn_on(
+        "check-pulled-spin",
+        spinner,
+        0,
+        NICE_0_WEIGHT,
+        home,
+        CpuSet::of(home),
+    )?;
+    wait_for(
+        || SPINNING.load(Ordering::Acquire) >= 1,
+        "wake-affine: the spinner never started",
+    )?;
+    let pulls = super::pulls();
+    if how == Pull::Timer {
+        // Busy here throughout, so that no processor it may run on is idle
+        // when its time comes and L.sched.85 has nowhere to place it.
+    } else {
+        settle(how);
+        if how == Pull::HomeIdle {
+            STOP.store(true, Ordering::Release);
+            wait_for(
+                || DONE.load(Ordering::Acquire) >= 1 && !spin.is_queued(),
+                "wake-affine: the spinner never stopped",
+            )?;
+        }
+        let now = crate::timer::now_nanos();
+        if how == Pull::Wide {
+            let domain_cpus = super::DOMAIN.get().map_or(1, |domain| domain.cpus().len());
+            let factor = u32::try_from(domain_cpus).unwrap_or(u32::MAX);
+            woken.set_wakee_flips(factor, now);
+            let _ = super::with_current(|me| {
+                me.set_wakee_flips(factor.saturating_mul(factor).saturating_add(1), now);
+            });
+        }
+        // A call's wake, as a futex's or a pipe's is.
+        super::call_entered();
+        super::wake(&woken);
+        super::call_left();
+        if how == Pull::Wide {
+            let _ = super::with_current(|me| me.set_wakee_flips(0, now));
+        }
+    }
+    let ran = spin_until(|| PLACED_RAN_ON.load(Ordering::Acquire) != 0);
+    STOP.store(true, Ordering::Release);
+    notify();
+    let finished = 2;
+    wait_for(
+        || DONE.load(Ordering::Acquire) >= finished,
+        "wake-affine: the woken task or the spinner never finished",
+    )?;
+    let ran_on = PLACED_RAN_ON.load(Ordering::Acquire).wrapping_sub(1);
+    let pulled = super::pulls() != pulls;
+    if !ran {
+        return Err("wake-affine: a woken task did not run within its patience");
+    }
+    let expected = if how == Pull::Pulled { here } else { home };
+    if ran_on != expected {
+        crate::console::println!(
+            "  sched    wake-affine, {case}: ran on processor {ran_on}, waker on {here}, home {home}, pulls counted {pulled}"
+        );
+        return Err(pull_sentence(how));
+    }
+    if pulled != (how == Pull::Pulled) {
+        crate::console::println!("  sched    wake-affine, {case}: pulls counted {pulled}");
+        return Err("wake-affine: the pull count does not match where the task ran");
+    }
+    reap_to(
+        allocations,
+        "a woken task pulled onto its waker's processor",
+    )?;
+    drop((woken, spin));
+    Ok(())
+}
+
+/// Wait [`PULL_SETTLE_NANOS`] before a case of [`pulled_once`] wakes its
+/// task, long enough for home's average to show the spinner. Asleep here,
+/// so this processor's average falls below it and the load alone would
+/// pull; busy here for the busy wakee, so that both come near one task's
+/// and the wakee's own load is what keeps it home.
+fn settle(how: Pull) {
+    if how == Pull::Busy {
+        let settled = crate::timer::now_nanos().saturating_add(PULL_SETTLE_NANOS);
+        while crate::timer::now_nanos() < settled {
+            core::hint::spin_loop();
+        }
+    } else {
+        super::sleep_for(PULL_SETTLE_NANOS);
+    }
+}
+
+/// The sentence a case of [`pulled_once`] fails with when its task ran on
+/// the wrong processor.
+fn pull_sentence(how: Pull) -> &'static str {
+    match how {
+        Pull::Pulled => {
+            "a task woken from a call, home busy and nothing idle, was not pulled onto its waker's processor"
+        }
+        Pull::Pinned => "a pinned task was pulled onto its waker's processor",
+        Pull::HomeIdle => "a task whose home was idle was pulled onto its waker's processor",
+        Pull::Timer => "a task woken by its sleep's end was pulled onto another processor",
+        Pull::Wide => "a wide wake pulled its task onto the waker's processor",
+        Pull::Busy => "a busy task was pulled onto its waker's processor",
+    }
+}
+
+/// How long [`pulled_once`] lets the spinner run before it wakes its task.
+const PULL_SETTLE_NANOS: u64 = 100_000_000;

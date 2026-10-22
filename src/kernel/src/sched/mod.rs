@@ -1822,7 +1822,7 @@ enum Placed {
 pub(crate) fn wake_with(task: &Arc<Task>, how: Wake) {
     if how == Wake::Sync {
         let saved = <arch::Irq as IrqControl>::disable();
-        let placed = this_cpu().map(|here| wake_onto(task, here));
+        let placed = this_cpu().map(|here| wake_onto(task, here, Onto::Sync));
         <arch::Irq as IrqControl>::restore(saved);
         if matches!(placed, Some(Placed::Moved | Placed::NotBlocked)) {
             return;
@@ -1856,10 +1856,24 @@ fn asleep_at_home(task: &Arc<Task>, home: &mut CpuQueue) -> bool {
     task.holds_slots()
 }
 
+/// Which wake moves a task onto the waker's processor ([`wake_onto`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Onto {
+    /// [`Wake::Sync`]: only where nothing waits on the waker's processor,
+    /// the decision deferred to the waker's block.
+    Sync,
+    /// [`wake`]'s pull (L.sched.90): only where the home runs a task and the
+    /// waker's processor's load average is below 108% of the home's, the
+    /// decision made now, as for a wake at home made there.
+    Pull,
+}
+
 /// Move `task` onto `here`, this processor, if [`wake_with`]'s conditions
-/// hold, and make it runnable there. With interrupts masked.
-fn wake_onto(task: &Arc<Task>, here: usize) -> Placed {
-    let Some(mine) = queue_of(here).filter(|_| may_place(task, here)) else {
+/// hold, or [`wake`]'s with [`Onto::Pull`], and make it runnable there. With
+/// interrupts masked.
+fn wake_onto(task: &Arc<Task>, here: usize, how: Onto) -> Placed {
+    // A pull's affinity and pinning were decided by `may_pull`.
+    let Some(mine) = queue_of(here).filter(|_| how == Onto::Pull || may_place(task, here)) else {
         return Placed::Declined;
     };
     loop {
@@ -1890,7 +1904,7 @@ fn wake_onto(task: &Arc<Task>, here: usize) -> Placed {
         if task.state() != task::BLOCKED {
             return Placed::NotBlocked;
         }
-        if here_queue.waiting() != 0 || !asleep_at_home(task, home_queue) {
+        if refuses(how, here_queue, home_queue, task) || !asleep_at_home(task, home_queue) {
             return Placed::Declined;
         }
         // Whatever sleep it meant is over, as the wake at home ends it.
@@ -1900,6 +1914,19 @@ fn wake_onto(task: &Arc<Task>, here: usize) -> Placed {
         // NOALLOC: `CpuQueue::insert` queues the task in its own run slot,
         // which `asleep_at_home` saw it hold.
         here_queue.insert(task);
+        if how == Onto::Pull {
+            // Nothing says the waker blocks next: decided now, as a wake at
+            // home made on its own processor is (`kick_after_wake`,
+            // undeferred).
+            let decide = kick_after_wake(here_queue, here, false).is_some();
+            count_pulled(here);
+            drop(first_queue);
+            drop(second_queue);
+            if decide {
+                resched_here(here);
+            }
+            return Placed::Moved;
+        }
         // The waker's block is the decision: see `wake_at_home`'s `defer`.
         // Idle here, as for an interrupt's waker, there is no block coming.
         if here_queue.is_running_idle() {
@@ -1913,26 +1940,160 @@ fn wake_onto(task: &Arc<Task>, here: usize) -> Placed {
     }
 }
 
-/// Make `task` runnable, wherever it is.
+/// Whether [`wake_onto`] declines to move `task`, `how` it moves it, with
+/// `here` and `home` the two queues, both locked: for Sync, anything waiting
+/// here; for a pull, an idle home, which wakes the task there with no
+/// preemption and a warm cache (Linux's `wake_affine_idle`), a busy share
+/// not yet measured, or this processor's load average with the task's load
+/// added at 108% of the home's with it taken away or more
+/// (`ferrix_sched::pull_fits`, Linux's `wake_affine_weight`).
+fn refuses(how: Onto, here: &CpuQueue, home: &CpuQueue, task: &Task) -> bool {
+    match how {
+        Onto::Sync => here.waiting() != 0,
+        Onto::Pull => {
+            if home.is_running_idle() {
+                return true;
+            }
+            let Some(busy) = task.busy_share(crate::timer::now_nanos()) else {
+                return true;
+            };
+            let load =
+                busy.saturating_mul(u64::from(task.base_weight())) / u64::from(NICE_0_WEIGHT);
+            !ferrix_sched::pull_fits(here.load_average(), home.load_average(), load)
+        }
+    }
+}
+
+/// Make `task` runnable: on the waker's processor when [`pull_target`]
+/// allows it and [`wake_onto`] finds it asleep at home (L.sched.90), and
+/// otherwise where it is, with L.sched.85's idle placement after.
+///
+/// # Moving a blocked task
+///
+/// Re-placing a task at wake-up was tried twice before and withdrawn both
+/// times: "blocked" covered several states the code did not tell apart, and
+/// a waker that reasoned about one of them moved or unfiled a task that
+/// something else still believed it owned. [`wake_with`] names the three
+/// states: part-way into `block` (still its home's `current`), asleep at
+/// home, and filed elsewhere. The pull adds no move of its own. It is
+/// [`wake_onto`]'s, which moves a task only in the second state, decided
+/// under both queues' locks taken lower processor first, with the task's
+/// processor read again once they are held; in the first and third states it
+/// declines, and the wake is the wake at home as before.
 pub(crate) fn wake(task: &Arc<Task>) {
-    // **Not re-placed here, and not detached from its sleeper set here
-    // either.** Both were tried and both were withdrawn.
-    //
-    // Choosing a new processor at wake-up is what Linux does and is the
-    // better policy. Taking a woken task out of its processor's sleeper set
-    // looks like plain hygiene. Each was reverted after making an
-    // already-flaky machine reliably worse — the second one wedged every one
-    // of five runs, where the first had wedged three.
-    //
-    // The reason both are harder than they look is the same: a blocked task
-    // is not an unattached one, and "blocked" covers several states this code
-    // does not currently distinguish. A task can be on a wait queue, in a
-    // sleeper set, part-way into `block` and in neither yet, or on both. A
-    // waker that reasons about only one of them moves or unfiles a task that
-    // something else still believes it owns, and the task is lost rather than
-    // run. Getting it right means giving those states names and an order,
-    // which is a change of its own and not a corollary of five others.
+    if pull_onto_waker(task) {
+        return;
+    }
     wake_at_home(task, false);
+}
+
+/// [`wake`]'s pull: whether `task` was moved onto this processor and made
+/// runnable here, or found already woken; `false` when the wake at home is
+/// still to be made.
+fn pull_onto_waker(task: &Arc<Task>) -> bool {
+    // An interrupt handler runs masked and is never a waker that pulls, and
+    // a waker outside a call never pulls. Read before anything is masked,
+    // so that a wake that cannot pull costs a few loads; `pull_target`
+    // reads them again masked.
+    if !arch::interrupts_enabled() || !in_call_here() {
+        return false;
+    }
+    let saved = <arch::Irq as IrqControl>::disable();
+    let placed = pull_target(task).map(|here| wake_onto(task, here, Onto::Pull));
+    <arch::Irq as IrqControl>::restore(saved);
+    matches!(placed, Some(Placed::Moved | Placed::NotBlocked))
+}
+
+/// The processor a wake of `task` may pull it onto, the waker's, or `None`
+/// (L.sched.90, L.sched.91). With interrupts masked.
+///
+/// The waker is the task running here inside a system call (`IN_CALL`): a
+/// timer's or a sleeper's wake, an interrupt's, and a kernel thread's are
+/// never pulls. It records the wakee whatever the answer, as Linux's
+/// `record_wakee` does on every wake. Then the domain must steal work and
+/// hold both processors, the task must not be pinned and must be allowed
+/// here, the wake must not be wide (`ferrix_sched::wake_wide`, with the
+/// domain's processor count as the factor), and no processor the task may
+/// run on other than its home may be idle: an idle one is L.sched.85's to
+/// take, as Linux's `select_idle_sibling` comes before stacking on the
+/// waker. An idle home is refused under its lock (`refuses`).
+fn pull_target(task: &Arc<Task>) -> Option<usize> {
+    let here = this_cpu()?;
+    if !IN_CALL.get(here)?.load(Ordering::Relaxed) {
+        return None;
+    }
+    let (waker, waker_flips) = with_current(|waker| {
+        (
+            waker.id,
+            waker.record_wakee(task.id, crate::timer::now_nanos),
+        )
+    })?;
+    let domain = DOMAIN.get()?;
+    if waker == task.id || !may_pull(task, domain, here) {
+        return None;
+    }
+    let factor = u32::try_from(domain.cpus().len()).unwrap_or(u32::MAX);
+    if ferrix_sched::wake_wide(waker_flips, task.wakee_flips(), factor) {
+        return None;
+    }
+    if idle_allowed(task, domain) {
+        return None;
+    }
+    Some(here)
+}
+
+/// Whether `task` may be pulled onto `here` at all: `domain` steals work and
+/// holds both `here` and the task's home, which is another processor, and
+/// the task is not pinned and may run here (L.sched.90).
+fn may_pull(task: &Task, domain: &Domain, here: usize) -> bool {
+    let home = task.cpu();
+    domain.mode().steals_work()
+        && domain.cpus().contains(here)
+        && domain.cpus().contains(home)
+        && home != here
+        && !task.is_pinned()
+        && may_place(task, here)
+}
+
+/// Whether a processor of `domain` other than its home that `task` may run
+/// on is idle (`IDLE`): then the pull is not tried, and L.sched.85 takes it.
+/// An idle home is `refuses`'s, under the home's lock.
+fn idle_allowed(task: &Task, domain: &Domain) -> bool {
+    let home = task.cpu();
+    let home_bit = u32::try_from(home)
+        .ok()
+        .and_then(|bit| 1_u64.checked_shl(bit));
+    let mut idle = IDLE.load(Ordering::SeqCst) & !home_bit.unwrap_or(0);
+    while idle != 0 {
+        let cpu = idle.trailing_zeros() as usize;
+        idle &= idle - 1;
+        if task.may_run_on(cpu) && domain.cpus().contains(cpu) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Pulls made, by the processor pulled onto: see [`pulls`].
+static PULLED: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
+
+/// Count a pull onto `here`, whose queue lock the caller holds: a load and
+/// a store, as only holders write it.
+fn count_pulled(here: usize) {
+    if let Some(count) = PULLED.get(here) {
+        count.store(
+            count.load(Ordering::Relaxed).wrapping_add(1),
+            Ordering::Relaxed,
+        );
+    }
+}
+
+/// Every pull made so far ([`wake`], L.sched.90), on all processors.
+pub(crate) fn pulls() -> u64 {
+    PULLED
+        .iter()
+        .map(|count| count.load(Ordering::Relaxed))
+        .fold(0, u64::wrapping_add)
 }
 
 /// The processor a wake that made a task runnable on `queue`, processor

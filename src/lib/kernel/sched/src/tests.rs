@@ -2054,3 +2054,100 @@ fn a_fold_settles_by_the_net_or_in_the_general_order() {
         }
     );
 }
+
+// ---------------------------------------------------------------------------
+// Wake-affine placement and the creation charge
+// ---------------------------------------------------------------------------
+
+/// A wake is wide only when the smaller flip count reaches the factor and
+/// the larger is the factor times it, either way round.
+/// Verifies: L.sched.91
+#[test]
+fn a_wake_is_wide_only_between_many_partners() {
+    use crate::wake_wide;
+    // A pair that wakes each other: no flips, never wide.
+    assert!(!wake_wide(0, 0, 4));
+    assert!(!wake_wide(1, 1, 4));
+    // A server of many and a client that flips at least `factor` times.
+    assert!(wake_wide(16, 4, 4));
+    assert!(wake_wide(4, 16, 4), "symmetric in waker and wakee");
+    // One short of either bound.
+    assert!(!wake_wide(15, 4, 4));
+    assert!(!wake_wide(100, 3, 4));
+    // The factor is the domain's processor count: two processors make the
+    // same counts wide that four do not.
+    assert!(wake_wide(6, 3, 2));
+    assert!(!wake_wide(6, 3, 4));
+    assert!(
+        wake_wide(u32::MAX, u32::MAX / 2, 2),
+        "no overflow at the top"
+    );
+}
+
+/// The flip count is halved once when more than a second has passed since
+/// the last halving, and a change of wakee adds one.
+/// Verifies: L.sched.91
+#[test]
+fn flips_halve_after_a_second_and_count_changes() {
+    use crate::{FLIP_DECAY_NS, flip};
+    assert_eq!(flip(0, 0, 10, true), (1, 0));
+    assert_eq!(flip(5, 0, 10, false), (5, 0), "the same wakee adds nothing");
+    assert_eq!(
+        flip(8, 0, FLIP_DECAY_NS, false),
+        (8, 0),
+        "a second exactly is not more"
+    );
+    assert_eq!(flip(8, 0, FLIP_DECAY_NS + 1, false), (4, FLIP_DECAY_NS + 1));
+    // Once however long the gap.
+    assert_eq!(
+        flip(8, 0, 100 * FLIP_DECAY_NS, true),
+        (5, 100 * FLIP_DECAY_NS)
+    );
+    assert_eq!(flip(u32::MAX, 0, 1, true), (u32::MAX, 0), "saturates");
+}
+
+/// The pull is allowed while the waker's side, the wakee's load added,
+/// reads below 108% of the home's, the wakee's load taken away; a wakee
+/// busy more than about 8% of the time stays home between two spinners.
+/// Verifies: L.sched.90
+#[test]
+fn the_pull_weighs_the_home_at_108_percent() {
+    use crate::pull_fits;
+    assert!(
+        pull_fits(1024, 1024, 0),
+        "equal loads: the waker's side wins"
+    );
+    assert!(pull_fits(1105, 1024, 0));
+    assert!(!pull_fits(1106, 1024, 0), "110,600 is not below 110,592");
+    assert!(!pull_fits(0, 0, 0), "two idle averages: no reason to move");
+    assert!(pull_fits(0, 1, 0));
+    // A spinner each side and the wakee's own load on top.
+    assert!(pull_fits(1024, 1024 + 30, 30), "3% busy: pulled");
+    assert!(!pull_fits(1024, 1024 + 92, 92), "9% busy: stays");
+    assert!(!pull_fits(1024, 1024 + 600, 600), "a wakee busy 60% stays");
+    assert!(
+        !pull_fits(0, 10, 20),
+        "more than home carries: the home side is zero"
+    );
+    assert!(
+        !pull_fits(u64::MAX, u64::MAX / 2, u64::MAX),
+        "no overflow at the top"
+    );
+}
+
+/// A task's busy share is its runtime over the window, capped at one
+/// processor, with no answer for an empty window.
+/// Verifies: L.sched.90
+#[test]
+fn utilisation_is_runtime_over_the_window() {
+    use crate::utilisation;
+    assert_eq!(utilisation(0, 0), None);
+    assert_eq!(utilisation(1_000, 1_000), Some(LOAD_SCALE));
+    assert_eq!(utilisation(30_000, 1_000_000), Some(30));
+    assert_eq!(
+        utilisation(5_000_000, 1_000_000),
+        Some(LOAD_SCALE),
+        "capped"
+    );
+    assert_eq!(utilisation(u64::MAX, 1), Some(LOAD_SCALE));
+}

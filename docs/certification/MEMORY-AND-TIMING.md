@@ -1604,6 +1604,32 @@ the view only reads, at a `/proc` open.
   A failed try costs that one candidate and nothing else. No check asserts
   the steal's order for two queue locks.
 
+### 2.2v A woken task pulled onto its waker's processor (`sched::pull_onto_waker`, 2026-10-22)
+
+`L.sched.90` and `L.sched.91`; the certification consultant's design review,
+ledger 3062; design in `docs/SCHED-WAKE-AFFINE.md`.
+
+* **Memory.** None allocated. Three words a task (`last_wakee`,
+  `wakee_flips`, `flips_halved_at`), written only by the task itself while
+  it runs; one counter a processor (`PULLED`). A pulled task moves into the
+  waker's queue in its own run slot (`CpuQueue::insert`).
+* **Time, a wake from a call** (`wake`, interrupts masked for the
+  decision): at most one clock read, three loads and three stores to the
+  waker's own words (`record_wakee`, Rule B: no lock; the clock is read
+  only when the wakee changed or the flip count is above zero), the domain and
+  affinity tests, one load of `IDLE` and a walk of its set bits (at most
+  the online processors). When it is tried, the pull is `wake_onto`'s: the
+  two run-queue locks, the waker's and the home's, taken lower processor
+  first as `steal_from` takes them and as Wake::Sync already took them,
+  each waited for; under them one clock read and at most three loads and
+  three stores for the wakee's busy share (`Task::busy_share`), two load
+  averages compared, `asleep_at_home`, one `insert` and `kick_after_wake`. O(1) under the locks, O(processors)
+  before them. The same lock pair and order as the Sync wake on main, so
+  no new nesting.
+* **The per-task bound.** Placement decides which queue a task waits on,
+  not how a queue serves it. The EEVDF bound of H.SCHED.2 is per queue and
+  unchanged (`SAFETY-MANUAL.md` FM-8).
+
 ### 2.3 What is missing, per standard
 
 * **DO-178C DAL C** does not require WCET as such, but does require that

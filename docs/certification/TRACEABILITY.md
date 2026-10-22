@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 136 | 85 | 51 |
-| Low (`L.*`) | 982 | 719 | 263 |
+| Low (`L.*`) | 984 | 721 | 263 |
 
-2171 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2181 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2173 |
-| Accessors, covered by the requirement they serve | 986 |
+| Named by a low-level requirement | 2183 |
+| Accessors, covered by the requirement they serve | 987 |
 | Check code in a product file | 82 |
-| Named by none | 935 |
+| Named by none | 937 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -698,6 +698,8 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.sched.88` | A word of kernel memory read for the view shall be translated through the kernel's page tables under their lock and read through the direct map, so that a word of a stack that has been freed answers nothing and the read does not fault. | The task view case at boot: a stack from vmap, read while mapped, then freed and read again, answers nothing; with the read made through the address itself, the boot stops on a kernel page fault. | H.SCHED.15 | `mm::read_kernel_word`, `sched::inspect::word_at` | `src/kernel/src/sched/inspect_check.rs::a_freed_stack_reads_as_nothing` | not built | not built | not built |
 | `L.sched.89` | A word of kernel memory read for the view whose translation names a frame that is not RAM shall answer nothing, without the read being made. | The task view case at boot: a page of vmap mapped onto a physical address that is no RAM answers nothing; with the RAM test taken out, the boot stops on a kernel page fault on x86_64, where the direct map has no such address. | H.SCHED.15 | `mm::read_kernel_word` | `src/kernel/src/sched/inspect_check.rs::a_device_window_reads_as_nothing` | not built | not built | not built |
 | `L.sched.85` | A task made runnable on a processor that runs a task -- woken from another processor, or a sleeper whose time came on that processor -- shall be queued on an idle processor of the same work-stealing domain that it may run on, whose queue, under its own lock, runs its idle task with nothing waiting, and that processor shall be told to decide, the running task keeping its processor; where no such queue's lock can be had without waiting, the task shall be queued on the first processor as before. A pinned task, or one in a domain that does not steal work, is never so placed. | Stage 5's placement case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on an idle one, woken from a third processor and, in a second case, at its sleep's end, runs on the idle processor within a second and the spinner counts no involuntary switch (three attempts each); with no candidate taken, with the target not told, with the sleeper path placing nothing, or with affinity ignored, the boot fails with the case's own sentence or stage 5's affinity check's. | H.SCHED.1 | `sched::place_on_idle`, `sched::move_onto`, `sched::placed_on_wake`, `sched::wake_sleepers_placing`, `sched::queue::CpuQueue::wake_sleepers` | `src/kernel/src/sched/check.rs::a_woken_task_is_placed_on_an_idle_processor` | not reached | not reached | not reached |
+| `L.sched.90` | A task made runnable by a wake (not a synchronous one) that a task running inside a system call makes, with interrupts enabled, on a processor of a work-stealing domain, shall be moved onto that processor and queued there only when: the task is not pinned and may run there; its home is another processor of the domain; the wake is not wide (L.sched.91); no processor it may run on but its home is idle; and, under both queues' locks taken lower processor first, its home runs a task, it is asleep at home, its busy share (its runtime over a window of at least 32 ms between two such looks, the first opened when it was made) has been measured, and the waker's processor's load average with the task's load (that share times its weight) added, times 100, is below its home's with that load taken away, times 108. Otherwise it shall be made runnable at home as before, an idle processor then taken by L.sched.85. A task moved shall be decided for at once, as a wake at home made on its own processor is. A wake by a sleep's end, an interrupt or a task outside a system call never moves a task so. | Stage 5's wake-affine case, with three processors or more and a stealing domain: a task homed on a processor that runs a pinned spinner, allowed there and on the checking processor, woken from a call made there, runs there; the same task pinned at home, with its home idle, woken by its sleep's end, or busy for 40 ms of its life before it blocked, runs at home (three attempts each); ferrix-sched's host tests hold the load comparison; with the pull removed from the wake, with the pinned and affinity tests dropped, or with the task's load left out, the boot fails with the case's own sentence. | H.SCHED.4, H.SCHED.1 | `sched::wake`, `sched::pull_onto_waker`, `sched::pull_target`, `sched::idle_allowed`, `sched::wake_onto`, `sched::count_pulled`, `sched::may_pull`, `sched::refuses`, `sched::task::Task::busy_share` | `src/kernel/src/sched/check.rs::a_wakee_is_pulled_onto_its_wakers_processor`, `src/lib/kernel/sched/src/tests.rs::the_pull_weighs_the_home_at_108_percent`, `src/lib/kernel/sched/src/tests.rs::utilisation_is_runtime_over_the_window` | not reached | not reached | not reached |
+| `L.sched.91` | Each task that wakes another from a system call with interrupts enabled shall record it as its last wakee, its flip count halved first when more than a second has passed since it was last halved and raised by one when the wakee is not the last one; and a wake shall move nothing under L.sched.90 when the smaller of the waker's and the wakee's flip counts is at least the domain's processor count and the larger is at least that count times the smaller. | Stage 5's wake-affine case: with the waker's flips set wide and the wakee's at the domain's processor count, the wake that is pulled otherwise runs the task at home (three attempts); ferrix-sched's host tests hold the bound and the halving; with the refusal ignored, the boot fails with the case's own sentence. | H.SCHED.1 | `sched::task::Task::record_wakee`, `sched::task::Task::wakee_flips` | `src/kernel/src/sched/check.rs::a_wakee_is_pulled_onto_its_wakers_processor`, `src/lib/kernel/sched/src/tests.rs::a_wake_is_wide_only_between_many_partners`, `src/lib/kernel/sched/src/tests.rs::flips_halve_after_a_second_and_count_changes` | not reached | not reached | not reached |
 
 ### Discovery
 
@@ -2118,6 +2120,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/sched/check.rs::a_drained_waiter_survives_its_last_look` | kernel | L.sched.71 |
 | `src/kernel/src/sched/check.rs::a_running_processor_is_not_idle_across_switches` | kernel | L.sched.50 |
 | `src/kernel/src/sched/check.rs::a_waiter_drained_as_it_is_listed_is_woken` | kernel | L.sched.73 |
+| `src/kernel/src/sched/check.rs::a_wakee_is_pulled_onto_its_wakers_processor` | kernel | L.sched.90, L.sched.91 |
 | `src/kernel/src/sched/check.rs::a_woken_task_is_placed_on_an_idle_processor` | kernel | L.sched.85 |
 | `src/kernel/src/sched/check.rs::made_runnable_here_runs_without_another_interrupt` | kernel | L.sched.52 |
 | `src/kernel/src/sched/check.rs::many_tasks` | kernel | L.x86_64.17 |
@@ -2409,10 +2412,14 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_queue_registers_name_slots_of_sixteen_bytes` | host | L.iommu.47 |
 | `src/lib/kernel/paging/src/vtd/tests.rs::the_widest_walk_offered_is_taken` | host | L.iommu.60 |
 | `src/lib/kernel/sched/src/tests.rs::a_slot_taken_apart_and_put_together_serves_a_queue` | host | L.sched.63 |
+| `src/lib/kernel/sched/src/tests.rs::a_wake_is_wide_only_between_many_partners` | host | L.sched.91 |
+| `src/lib/kernel/sched/src/tests.rs::flips_halve_after_a_second_and_count_changes` | host | L.sched.91 |
 | `src/lib/kernel/sched/src/tests.rs::hand_over_is_the_general_sequence` | host | L.sched.55, H.SCHED.13 |
 | `src/lib/kernel/sched/src/tests.rs::something_waiting_is_decided_on_within_a_slice` | host | L.sched.1 |
 | `src/lib/kernel/sched/src/tests.rs::the_carried_weight_is_the_wide_formula` | host | L.object.160 |
 | `src/lib/kernel/sched/src/tests.rs::the_direct_switch_folds_its_job_loads_as_the_general_sequence_leaves_them` | host | L.sched.66 |
+| `src/lib/kernel/sched/src/tests.rs::the_pull_weighs_the_home_at_108_percent` | host | L.sched.90 |
+| `src/lib/kernel/sched/src/tests.rs::utilisation_is_runtime_over_the_window` | host | L.sched.90 |
 | `src/lib/kernel/sched/src/tests.rs::yielding_alone_leaves_the_request_as_it_was` | host | L.sched.2 |
 | `src/lib/kernel/vdso/src/tests.rs::counter_nanos_is_the_wide_formula_exactly` | host | L.sched.6 |
 | `src/lib/platform/acpi/src/tests.rs::a_malformed_or_cut_rmrr_is_never_read_as_no_rmrr` | host | L.iommu.67 |

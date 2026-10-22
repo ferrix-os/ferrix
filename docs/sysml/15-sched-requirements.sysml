@@ -929,5 +929,59 @@ package FerrixSchedRequirements {
                 "sched::placed_on_wake", "sched::wake_sleepers_placing",
                 "sched::queue::CpuQueue::wake_sleepers");
         }
+        requirement <'L.sched.90'> aWakeeIsPulledOntoItsWakersProcessor : ItemLowLevel {
+            attribute :>> statement = "A task made runnable by a wake (not a
+                synchronous one) that a task running inside a system call makes,
+                with interrupts enabled, on a processor of a work-stealing domain,
+                shall be moved onto that processor and queued there only when:
+                the task is not pinned and may run there; its home is another
+                processor of the domain; the wake is not wide (L.sched.91); no
+                processor it may run on but its home is idle; and, under both queues' locks
+                taken lower processor first, its home runs a task, it is asleep
+                at home, its busy share (its runtime over a window of at least
+                32 ms between two such looks, the first opened when it was made)
+                has been measured, and the waker's processor's load average with
+                the task's load (that share times its weight) added, times 100,
+                is below its home's with that load taken away, times 108.
+                Otherwise it shall be made runnable
+                at home as before, an idle processor then taken by L.sched.85. A
+                task moved shall be decided for at once, as a wake at home made on
+                its own processor is. A wake by a sleep's end, an interrupt or a
+                task outside a system call never moves a task so.";
+            attribute :>> criterion = "Stage 5's wake-affine case, with three
+                processors or more and a stealing domain: a task homed on a
+                processor that runs a pinned spinner, allowed there and on the
+                checking processor, woken from a call made there, runs there; the
+                same task pinned at home, with its home idle, woken by its
+                sleep's end, or busy for 40 ms of its life before it blocked,
+                runs at home (three attempts each); ferrix-sched's host tests
+                hold the load comparison; with the pull removed from the wake,
+                with the pinned and affinity tests dropped, or with the task's
+                load left out, the boot fails with the case's own sentence.";
+            attribute :>> parent = ("H.SCHED.4", "H.SCHED.1");
+            attribute :>> unit = ("sched::wake", "sched::pull_onto_waker",
+                "sched::pull_target", "sched::idle_allowed", "sched::wake_onto",
+                "sched::count_pulled", "sched::may_pull", "sched::refuses",
+                "sched::task::Task::busy_share");
+        }
+        requirement <'L.sched.91'> aWideWakePullsNothing : ItemLowLevel {
+            attribute :>> statement = "Each task that wakes another from a system
+                call with interrupts enabled shall record it as its last wakee, its flip count halved
+                first when more than a second has passed since it was last halved
+                and raised by one when the wakee is not the last one; and a wake
+                shall move nothing under L.sched.90 when the smaller of the
+                waker's and the wakee's flip counts is at least the domain's
+                processor count and the larger is at least that count times the
+                smaller.";
+            attribute :>> criterion = "Stage 5's wake-affine case: with the waker's
+                flips set wide and the wakee's at the domain's processor count, the
+                wake that is pulled otherwise runs the task at home (three
+                attempts); ferrix-sched's host tests hold the bound and the
+                halving; with the refusal ignored, the boot fails with the case's
+                own sentence.";
+            attribute :>> parent = "H.SCHED.1";
+            attribute :>> unit = ("sched::task::Task::record_wakee",
+                "sched::task::Task::wakee_flips");
+        }
     }
 }
