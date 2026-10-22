@@ -15,6 +15,7 @@ bench = false
 
 [dependencies]
 ferrix-blkring.workspace = true
+ferrix-display-modes.workspace = true
 ferrix-displayctl.workspace = true
 ferrix-native-abi.workspace = true
 ferrix-rt.workspace = true

@@ -26,7 +26,13 @@
 //!    no blanking to wait for. Every copy ends with a store fence, after
 //!    which, and not before, the frame counts as shown. DETACH forgets a buffer, taking it off the
 //!    screen first if it is there, and unmaps it.
-//! 4. STOP, or the core closing its end, ends the run. What was copied last
+//! 4. After READY, `MODE_LIST` (displayctl v11, `docs/DISPLAY.md` §9.4):
+//!    the firmware's mode, preferred, and every standard size inside it,
+//!    which this driver shows by scaling -- the aspect kept, centred, black
+//!    bars, each screen pixel the nearest buffer pixel -- since firmware
+//!    left nothing that could retime the screen. `SET_MODE` picks one: the
+//!    screen is cleared and every copy after it is scaled.
+//! 5. STOP, or the core closing its end, ends the run. What was copied last
 //!    stays on the screen, and a panic is drawn over it by the kernel.
 //!
 //! The exit status names the step that failed ([`Step`]), 0 a clean STOP.
@@ -38,6 +44,8 @@ use core::fmt::{self, Write as _};
 use core::ptr;
 
 use ferrix_blkring::control::{Message as StartMessage, START_BYTES, Start};
+use ferrix_display_modes::scale::Scaler;
+use ferrix_display_modes::{ModeList, add_scaled};
 use ferrix_displayctl::message::{
     Attach, Hello, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message, PORT_RIGHTS, Rect, ScanoutMode,
     Status, Timing, Timings, VERSION,
@@ -312,6 +320,18 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
     let port = port::create(Kernel).map_err(|_| Step::Events)?;
     say(format_args!("efifb: window mapped write-combining"));
     introduce(&control, &port, start.location, &screen)?;
+    let mut list = ModeList::new();
+    add_scaled(&mut list, screen.timing());
+    list.sort();
+    for page in list.pages(0) {
+        control
+            .write(page.encode().as_bytes())
+            .map_err(|_| Step::Control)?;
+    }
+    say(format_args!(
+        "efifb: {} modes listed, smaller ones shown scaled",
+        list.len()
+    ));
     time_frames(&screen);
     control
         .wait_async(&port, Signals::READABLE | Signals::PEER_CLOSED, KEY_CONTROL)
@@ -324,6 +344,7 @@ fn run(boot: &Channel<Kernel>) -> Result<(), Step> {
         _device: device,
         buffers: [None; MAX_BUFFERS],
         shown: None,
+        scaler: None,
     };
     let ended = serving.serve();
     if matches!(ended, Ok(true)) {
@@ -354,6 +375,9 @@ struct Serving {
     buffers: [Option<Buffer>; MAX_BUFFERS],
     /// The buffer on screen and the part of it shown, or `None`.
     shown: Option<(u32, Rect)>,
+    /// How a mode smaller than the screen is shown on it, since `SET_MODE`
+    /// chose one; `None` at the firmware's own.
+    scaler: Option<Scaler>,
 }
 
 impl Serving {
@@ -451,6 +475,28 @@ impl Serving {
                 let status = self.detach(buffer);
                 self.reply(Message::Detached { buffer, status })
             }
+            // A mode of the list: the firmware's own, or a smaller one
+            // shown scaled. Nothing answers it.
+            Message::SetMode { timing, .. } => {
+                let size = (u32::from(timing.hdisplay), u32::from(timing.vdisplay));
+                let screen = (self.screen.width as u32, self.screen.height as u32);
+                if size.0 > screen.0 || size.1 > screen.1 || !timing.is_mode() {
+                    return Err(Step::Control);
+                }
+                self.scaler = Scaler::new(size, screen).filter(|scaler| !scaler.is_identity());
+                self.clear();
+                say(format_args!(
+                    "efifb: mode {}x{}{}",
+                    size.0,
+                    size.1,
+                    if self.scaler.is_some() {
+                        ", scaled to the screen"
+                    } else {
+                        ""
+                    }
+                ));
+                Ok(())
+            }
             // No cursor plane was offered, so neither can come; and nothing
             // else is the core's to send now.
             _ => Err(Step::Control),
@@ -542,8 +588,71 @@ impl Serving {
         shown();
     }
 
+    /// Black on every pixel of the screen, with the fence: the bars a
+    /// scaled mode leaves, and nothing of the mode before.
+    fn clear(&self) {
+        let screen = &self.screen;
+        for row in 0..screen.height {
+            let target = (screen.base + row * screen.pitch) as *mut u32;
+            for column in 0..screen.width {
+                // SAFETY: `target` is the start of a line of the mapped
+                // window, which holds `width` pixels of four bytes from it
+                // (checked against the window's length at the map), and is
+                // four-byte aligned.
+                unsafe { ptr::write_volatile(target.wrapping_add(column), 0) };
+            }
+        }
+        shown();
+    }
+
+    /// [`Serving::copy`]'s stores for a scaled mode: the screen pixels
+    /// whose nearest buffer pixel lies in `changed`, each read from there.
+    fn copy_scaled(&self, scaler: &Scaler, buffer: &Buffer, shown: Rect, changed: Rect) {
+        let in_shown = Rect {
+            x: changed.x.saturating_sub(shown.x),
+            y: changed.y.saturating_sub(shown.y),
+            ..changed
+        };
+        let Some(area) = scaler.damaged(in_shown) else {
+            return;
+        };
+        let screen = &self.screen;
+        for y in area.y..area.y + area.height {
+            let source_y = (scaler.source_y(y - scaler.area.y) + shown.y) as usize;
+            let line = (y as usize) * screen.pitch;
+            for x in area.x..area.x + area.width {
+                let source_x = (scaler.source_x(x - scaler.area.x) + shown.x) as usize;
+                let from = source_y * buffer.stride + source_x * PIXEL;
+                let to = line + (x as usize) * PIXEL;
+                if source_x >= buffer.width
+                    || source_y >= buffer.height
+                    || from + PIXEL > buffer.length
+                    || to + PIXEL > screen.len
+                {
+                    continue;
+                }
+                // SAFETY: `from` is a pixel inside the buffer's read-only
+                // mapping and `to` one inside the mapped window, both
+                // bounds-checked just above and four-byte aligned (the
+                // buffer's stride and the screen's pitch are multiples of
+                // four, and both mappings start on a page).
+                let pixel = unsafe { ptr::read_volatile((buffer.base + from) as *const u32) };
+                // SAFETY: as above.
+                unsafe {
+                    ptr::write_volatile((screen.base + to) as *mut u32, turned(pixel, screen.rgbx));
+                };
+            }
+        }
+    }
+
     /// [`Serving::copy`]'s stores, without the fence.
     fn copy_rows(&self, id: u32, changed: Rect) {
+        if let (Some(scaler), Some(buffer), Some((_, shown))) =
+            (self.scaler, self.buffer(id), self.shown)
+        {
+            self.copy_scaled(&scaler, &buffer, shown, changed);
+            return;
+        }
         let (Some(buffer), Some((_, shown))) = (self.buffer(id), self.shown) else {
             return;
         };
