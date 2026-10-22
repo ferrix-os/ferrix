@@ -274,6 +274,10 @@ fn files() -> Vec<File> {
 ///
 /// When the volume is missing, the image cannot be built, the boot fails,
 /// or any requirement in the module's header is not met.
+/// What `sessiond` says when the session's bus was not ended with the
+/// session's scope.
+const BUS_OUTLIVED: &str = "the session's bus was still running after the session's end";
+
 pub(crate) fn test_gnome_apps(args: &Args) -> Result<()> {
     let arch = Arch::X86_64;
     if args.arches()?.iter().any(|&asked| asked != arch) {
@@ -561,27 +565,58 @@ fn watch(arch: Arch, watching: &mut Watching<'_>, qmp: &mut Qmp, shots: &Path) -
         .chain(watching.after())
         .cloned()
         .collect();
-    match said(&lines, "after the end:") {
-        Some("none") if ended => {
+    match wrong_after_end(&lines, ended) {
+        None => {
             println!(
                 "  {arch}: the compositor killed, the session ended, and neither its bus nor the \
                  app was left"
             );
             Ok(())
         }
-        other => Err(with_the_transcript(
-            &Error::new(format!(
-                "{arch}: after the session's end: {}",
-                other.unwrap_or("the watcher never said")
-            )),
+        Some(why) => Err(with_the_transcript(
+            &Error::new(format!("{arch}: after the session's end: {why}")),
             watching,
         )),
+    }
+}
+
+/// What is wrong after the session's end, if anything: the bus must go with
+/// the scope, not after it -- `sessiond` says when it was still running once
+/// the scope ended, even if it was gone by the time the watcher looked (the
+/// control g1-ctl-bus-out-of-scope) -- and the watcher must find nothing.
+fn wrong_after_end(lines: &[String], ended: bool) -> Option<String> {
+    if lines.iter().any(|line| line.contains(BUS_OUTLIVED)) {
+        return Some(BUS_OUTLIVED.to_owned());
+    }
+    match said(lines, "after the end:") {
+        Some("none") if ended => None,
+        other => Some(other.unwrap_or("the watcher never said").to_owned()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bus_that_outlived_the_scope_fails_the_end() {
+        let clean = lines("  35.2 | gnome-gate: after the end: none");
+        assert_eq!(wrong_after_end(&clean, true), None);
+        assert!(wrong_after_end(&clean, false).is_some());
+        let outlived = lines(
+            "  34.3 | sessiond: the session's bus was still running after the session's end\n  \
+             35.2 | gnome-gate: after the end: none",
+        );
+        assert_eq!(
+            wrong_after_end(&outlived, true).as_deref(),
+            Some(BUS_OUTLIVED)
+        );
+        let left = lines("  35.2 | gnome-gate: after the end: dbus-daemon:40");
+        assert_eq!(
+            wrong_after_end(&left, true).as_deref(),
+            Some("dbus-daemon:40")
+        );
+    }
 
     fn lines(text: &str) -> Vec<String> {
         text.lines().map(str::to_owned).collect()
