@@ -76,6 +76,7 @@ pub(crate) fn run(built: &Built) -> Result<Report, &'static str> {
     };
     check_tmp_is_its_own_mount()?;
     check_tmpfs_io_sleeps()?;
+    check_devmgr_reads_past_a_heap_block()?;
 
     // Twice, measured on the second, for the reason `syscall::check` gives:
     // the heap keeps the last page of a size class it has used, and a single
@@ -212,6 +213,61 @@ fn check_tmp_is_its_own_mount() -> Result<(), &'static str> {
     }
     if tmp.metadata.permissions != 0o1777 {
         return Err("/tmp is not sticky and world-writable");
+    }
+    Ok(())
+}
+
+/// Bytes of the file [`check_devmgr_reads_past_a_heap_block`] reads: past
+/// the heap's largest block (4 MiB), and ending part-way into a page, as the
+/// N150 box's Intel GPU driver did when it grew to 4,197,840 bytes and
+/// `devmgr` stopped starting.
+const LARGE_DRIVER_BYTES: usize = 4 * 1024 * 1024 + 3 * 4096 + 17;
+
+/// `devmgr`'s reader (`read_from_root`, which reads its program and every
+/// driver) reads a file larger than the heap's largest block, whole and
+/// byte for byte.
+///
+/// Verifies: L.device.49
+fn check_devmgr_reads_past_a_heap_block() -> Result<(), &'static str> {
+    const PATH: &[u8] = b"/tmp/stage8-large-driver";
+    let ns = fs::namespace();
+    let ctx = ns.context();
+    let create = OpenFlags {
+        read: true,
+        write: true,
+        create: true,
+        exclusive: true,
+        ..OpenFlags::default()
+    };
+    let file = ns
+        .open(&ctx, None, PATH, &create, 0o600)
+        .map_err(|_| "a file could not be created under /tmp")?;
+    let mut chunk = [0_u8; 4096];
+    let mut at = 0;
+    while at < LARGE_DRIVER_BYTES {
+        let len = chunk.len().min(LARGE_DRIVER_BYTES - at);
+        for (offset, byte) in chunk.iter_mut().enumerate() {
+            *byte = pattern(at + offset);
+        }
+        let piece = chunk.get(..len).ok_or("a chunk is shorter than itself")?;
+        if file.write(piece) != Ok(len) {
+            return Err("a write to a tmpfs file came back short");
+        }
+        at += len;
+    }
+    drop(file);
+    let read = super::read_from_root(PATH);
+    let _ = ns.unlink(&ctx, None, PATH);
+    let bytes = read.map_err(|_| {
+        "devmgr's reader could not read a file past the heap's largest block, as it reads a driver"
+    })?;
+    if bytes.len() != LARGE_DRIVER_BYTES
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(at, &byte)| byte != pattern(at))
+    {
+        return Err("devmgr's reader read a file past the heap's largest block back different");
     }
     Ok(())
 }

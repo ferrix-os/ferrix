@@ -488,6 +488,16 @@
       ],
       "dropped": "new code; no coverage run has measured it yet. The evidence was carried (carry-coverage.py, no anchor dropped), not re-measured.",
       "what": "arch/x86_64/cpu.rs enable_machine_check, has_machine_check and machine_check_enabled; mod.rs take_machine_check (from init_traps) and check_machine_check_enabled; smp.rs CpuStarter::new's CR4 without MCE and secondary_start's set; and the check that reaches them (paranoid/check.rs check_machine_check_enabled, look_at_machine_check): measure them on the x86-64 coverage run (stage 4's mce line reaches them). Argued, not measured: enable_machine_check's early return and the check's refusal for a processor whose CPUID offers no machine-check exception, unreachable on the reference configurations (the gates' qemu64-based model, the coverage run's qemu64 and every x86-64 part offer it) -- other-configuration rows; init_traps's line for firmware that had left the bit set or clear, one arm per firmware (OVMF decides which)."
+    },
+    {
+      "landing": "initrd-limit: devmgr reads its program and drivers into a vmap::Buffer, so a driver past the heap's largest block (4 MiB) still starts (the N150 box, 2026-10-22; the certification consultant's OK IF, ledger 3034, condition 4; L.device.49)",
+      "architectures": [
+        "x86_64",
+        "aarch64",
+        "armv7a"
+      ],
+      "dropped": "none. New and changed code no coverage run has measured; the evidence was carried (carry-coverage.py, every anchor carried), not re-measured.",
+      "what": "discovery/devmgr.rs read_files' new Err arm (a driver the manifest names that cannot be read: the console line naming it and errno, then the refusal); fs/mod.rs read_from_root (resolve, then read_location into a vmap::Buffer); fs/check.rs check_devmgr_reads_past_a_heap_block and its error arms (stage 8's check, run on every checked boot). read_from_root and the check's success path are reached on every test-boot and test-init; the Err arm only by a driver that cannot be read, which no gate boot carries."
     }
   ]
 }

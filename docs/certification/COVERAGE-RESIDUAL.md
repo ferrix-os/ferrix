@@ -6,9 +6,9 @@ The statements in the certified item that the measured suite did not reach, on e
 
 | Architecture | Profile | Unreached | Argued | Hardware absent | Needs a test |
 |---|---|---:|---:|---:|---:|
-| x86_64 | debug | 665 | 398 | 138 | **129** |
-| aarch64 | debug | 649 | 315 | 158 | **176** |
-| armv7a | debug | 1002 | 418 | 352 | **232** |
+| x86_64 | debug | 664 | 397 | 138 | **129** |
+| aarch64 | debug | 648 | 314 | 158 | **176** |
+| armv7a | debug | 1001 | 417 | 352 | **232** |
 
 *Argued* is the first four categories below; *hardware absent* is a statement about which machine was measured rather than an argument; *needs a test* is the gap.
 
@@ -16,13 +16,13 @@ The statements in the certified item that the measured suite did not reach, on e
 
 ## x86_64
 
-**665** unreached statements, debug profile.
+**664** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 178 | 27% |
 | Reached only when the kernel is stopping | 138 | 21% |
-| Reached only when something has already failed | 73 | 11% |
+| Reached only when something has already failed | 72 | 11% |
 | Run, and credited to another line | 9 | 1% |
 | Hardware the measured machine does not have | 138 | 21% |
 | Needs a test | 129 | 19% |
@@ -66,14 +66,14 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### x86_64: Reached only when something has already failed — 73 statements
+### x86_64: Reached only when something has already failed — 72 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
 | Statements | Ring | File |
 |---:|---|---|
 | 10 | `item` | `syscall/native.rs` |
-| 9 | `item` | `discovery/devmgr.rs` |
+| 8 | `item` | `discovery/devmgr.rs` |
 | 8 | `core` | `iommu.rs` |
 | 8 | `core` | `user/space.rs` |
 | 6 | `core` | `object/port.rs` |
@@ -162,7 +162,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `claim.rs` |
 | 1 | `core` | `mm.rs` |
 
-### x86_64: argued line by line — 293 statements
+### x86_64: argued line by line — 292 statements
 
 From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -206,15 +206,15 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 | `console/output.rs` | 170 | Hardware the measured machine does not have | The ring full when a writer that may not wait queues a byte: the oldest byte is polled out to make room. Only a port slower than its writers fills the ring, and an emulated port sends instantly. |
 | `console/output.rs` | 208 | Reached only when something has already failed | Bytes that have waited a tenth of a second with nothing sent: the transmit interrupt stopped coming. console::output::check requires the stall count to stay where it was, and a working port never takes it. |
 | `console/output.rs` | 489 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
-| `discovery/devmgr.rs` | 104-106 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
-| `discovery/devmgr.rs` | 380-382 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
-| `discovery/devmgr.rs` | 385 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
-| `discovery/devmgr.rs` | 448 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
-| `discovery/devmgr.rs` | 977 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
-| `discovery/devmgr.rs` | 1033 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `discovery/devmgr.rs` | 1037 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `discovery/devmgr.rs` | 1048 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `discovery/devmgr.rs` | 1104 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
+| `discovery/devmgr.rs` | 112-113 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
+| `discovery/devmgr.rs` | 387-389 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
+| `discovery/devmgr.rs` | 392 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
+| `discovery/devmgr.rs` | 455 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
+| `discovery/devmgr.rs` | 997 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
+| `discovery/devmgr.rs` | 1053 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `discovery/devmgr.rs` | 1057 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `discovery/devmgr.rs` | 1068 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `discovery/devmgr.rs` | 1124 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
 | `discovery/smbios.rs` | 41, 46 | Reached only when the kernel is stopping | `Refusal::text` runs only for the boot line of a table the kernel refused (main.rs: `smbios refused: ...`). Every x86-64 machine the suite boots hands over a table the kernel accepts, 2.8 by default and 3.0 with smbios-entry-point-type=64 (DMI.md section 3.4; d1-boot-kvm-3, d1-boot-kvm-ep64-2), so a passing run never prints a refusal. The refusals themselves are driven by `discovery::smbios_check` by variant, without their words; the loader handing nothing is shown by control d1-ctl2-k1b (FIRED: `smbios none handed over`). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B)). |
 | `discovery/smbios.rs` | 148 | Hardware the measured machine does not have | `Shown` writes `-` only for a vendor or product string the table does not have. xtask gives every QEMU boot both through -smbios (tools/common/xtask/src/smbios.rs), and test-boot fails unless the kernel's line names exactly that vendor and product, so no measured run has a table lacking either. The crate's host tests cover a table without the strings (ferrix-smbios: index past the set, count 0). Measured by d1-coverage-2 on 19cb0f3df (consultant ledger line 1809 (B)). |
 | `early.rs` | 183 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
@@ -383,13 +383,13 @@ From `coverage-argued-x86_64.json`. Each row is one argument, for the lines it n
 
 ## aarch64
 
-**649** unreached statements, debug profile.
+**648** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 104 | 16% |
-| Reached only when the kernel is stopping | 120 | 18% |
-| Reached only when something has already failed | 81 | 12% |
+| Reached only when the kernel is stopping | 120 | 19% |
+| Reached only when something has already failed | 80 | 12% |
 | Run, and credited to another line | 10 | 2% |
 | Hardware the measured machine does not have | 158 | 24% |
 | Needs a test | 176 | 27% |
@@ -427,13 +427,13 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### aarch64: Reached only when something has already failed — 81 statements
+### aarch64: Reached only when something has already failed — 80 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
 | Statements | Ring | File |
 |---:|---|---|
-| 9 | `item` | `discovery/devmgr.rs` |
+| 8 | `item` | `discovery/devmgr.rs` |
 | 8 | `core` | `iommu.rs` |
 | 8 | `item` | `syscall/native.rs` |
 | 7 | `core` | `iommu/smmuv3.rs` |
@@ -524,7 +524,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/pin.rs` |
 | 1 | `core` | `object/quota.rs` |
 
-### aarch64: argued line by line — 284 statements
+### aarch64: argued line by line — 283 statements
 
 From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -593,15 +593,15 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 | `console/output.rs` | 336 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
 | `console/output.rs` | 345 | Hardware the measured machine does not have | A task's write that found no room in the transmit ring and waits for it, woken when the ring drains. An emulated port sends instantly and never leaves the ring full, so on QEMU every chunk fits at once. |
 | `console/output.rs` | 489 | Hardware the measured machine does not have | A port with no transmit interrupt, where everything is polled: every machine the suite boots gives its console one. |
-| `discovery/devmgr.rs` | 104-106 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
-| `discovery/devmgr.rs` | 380-382 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
-| `discovery/devmgr.rs` | 385 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
-| `discovery/devmgr.rs` | 448 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
-| `discovery/devmgr.rs` | 977 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
-| `discovery/devmgr.rs` | 1033 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `discovery/devmgr.rs` | 1037 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `discovery/devmgr.rs` | 1048 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
-| `discovery/devmgr.rs` | 1104 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
+| `discovery/devmgr.rs` | 112-113 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
+| `discovery/devmgr.rs` | 387-389 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
+| `discovery/devmgr.rs` | 392 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
+| `discovery/devmgr.rs` | 455 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
+| `discovery/devmgr.rs` | 997 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
+| `discovery/devmgr.rs` | 1053 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `discovery/devmgr.rs` | 1057 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `discovery/devmgr.rs` | 1068 | Reached only when the kernel is stopping | A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it. |
+| `discovery/devmgr.rs` | 1124 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
 | `early.rs` | 183 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |
 | `hooks.rs` | 57 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
 | `hooks.rs` | 59 | Run, and credited to another line | Run by every registration the boot makes -- board bindings, flushes, the quiesce servers -- and by the service check's list of two, which takes two and refuses a third. The loop over the slots is unrolled, and the first slots' call_once is inlined with its closure, under line 48's and 50's rows, which are reached; these lines' rows are only in the out-of-line call of the unrolled tail of Hooks<BoardBinding, 8>, for a slot past the ones the boards fill. |
@@ -751,13 +751,13 @@ From `coverage-argued-aarch64.json`. Each row is one argument, for the lines it 
 
 ## armv7a
 
-**1002** unreached statements, debug profile.
+**1001** unreached statements, debug profile.
 
 | Category | Statements | Share |
 |---|---:|---:|
 | Unreachable on the measured architecture | 157 | 16% |
 | Reached only when the kernel is stopping | 174 | 17% |
-| Reached only when something has already failed | 68 | 7% |
+| Reached only when something has already failed | 67 | 7% |
 | Run, and credited to another line | 19 | 2% |
 | Hardware the measured machine does not have | 352 | 35% |
 | Needs a test | 232 | 23% |
@@ -796,14 +796,14 @@ Justified. The panic report, its catalogue and the backtrace walker run when the
 | 1 | `core` | `sched/wait.rs` |
 | 1 | `core` | `vmap.rs` |
 
-### armv7a: Reached only when something has already failed — 68 statements
+### armv7a: Reached only when something has already failed — 67 statements
 
 Justified, line by line. Each of these runs only when hardware misbehaves or an invariant the rest of the kernel keeps has broken: a counter that never advances, a reset that did not reset, a table that lost an entry it was just given. A passing run cannot show one without first breaking what it defends against, and removing it would leave the failure unhandled. Each argument below says what would have to go wrong.
 
 | Statements | Ring | File |
 |---:|---|---|
 | 10 | `core` | `user/space.rs` |
-| 9 | `item` | `discovery/devmgr.rs` |
+| 8 | `item` | `discovery/devmgr.rs` |
 | 8 | `item` | `syscall/native.rs` |
 | 6 | `core` | `iommu.rs` |
 | 6 | `core` | `object/port.rs` |
@@ -895,7 +895,7 @@ Justified, line by line. The statement runs, and a test shows what it does, but 
 | 1 | `core` | `object/quota.rs` |
 | 4 | | *and 4 more files* |
 
-### armv7a: argued line by line — 370 statements
+### armv7a: argued line by line — 369 statements
 
 From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it names and no others; the category is the one it is counted in above.
 
@@ -971,12 +971,12 @@ From `coverage-argued-armv7a.json`. Each row is one argument, for the lines it n
 | `console/screen.rs` | 302 | Hardware the measured machine does not have | A byte drawn on the boot console: ARMv7-A's virt has no framebuffer for it. |
 | `console/screen.rs` | 323 | Hardware the measured machine does not have | Stopping a boot console that is drawing: ARMv7-A's virt has no framebuffer for one to draw on. |
 | `console/screen.rs` | 325 | Hardware the measured machine does not have | Stopping a boot console that is drawing: ARMv7-A's virt has no framebuffer for one to draw on. |
-| `discovery/devmgr.rs` | 104-106 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
-| `discovery/devmgr.rs` | 380-382 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
-| `discovery/devmgr.rs` | 385 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
-| `discovery/devmgr.rs` | 448 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
-| `discovery/devmgr.rs` | 977 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
-| `discovery/devmgr.rs` | 1104 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
+| `discovery/devmgr.rs` | 112-113 | Reached only when something has already failed | The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called. |
+| `discovery/devmgr.rs` | 387-389 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
+| `discovery/devmgr.rs` | 392 | Reached only when something has already failed | devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it. |
+| `discovery/devmgr.rs` | 455 | Hardware the measured machine does not have | An image with no /sbin/devmgr: every image xtask builds carries it. |
+| `discovery/devmgr.rs` | 997 | Reached only when something has already failed | A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare. |
+| `discovery/devmgr.rs` | 1124 | Reached only when something has already failed | The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel. |
 | `early.rs` | 123 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
 | `early.rs` | 126 | Run, and credited to another line | `EarlyMemory::translate` runs at every boot: stage 1's `check_early_mapper` and `check_no_early_window_wraps` (main.rs) call it, inlined, and its body's rows there are reached. Its opening and closing lines have their only statement rows in the out-of-line copy, which on this machine no caller uses. |
 | `early.rs` | 183 | Reached only when something has already failed | A device window firmware describes over the kernel's own image. Refused so that a console or framebuffer whose address the device tree or the loader got wrong cannot open a writable window onto the kernel's text. Every machine measured describes its UART and framebuffer apart from the image, and the image is placed by the loader, not by firmware; reaching it needs firmware to describe a device where the kernel was loaded. |

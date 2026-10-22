@@ -145,8 +145,12 @@ pub(crate) fn install() -> Result<(), Full> {
 }
 
 /// Read the file at `path` in the root the initramfs was unpacked into.
-fn read_from_root(path: &[u8]) -> Result<Vec<u8>, Errno> {
-    read_file(&namespace().context(), None, path)
+///
+/// Into a [`vmap::Buffer`] and no further: [`read_file`]'s copy into a `Vec`
+/// is refused by the heap past 4 MiB, and drivers are larger than that.
+fn read_from_root(path: &[u8]) -> Result<vmap::Buffer, Errno> {
+    let at = namespace().resolve(&namespace().context(), None, path, true)?;
+    read_location(at)
 }
 
 /// The next anonymous device minor, for filesystems with no device behind

@@ -47,7 +47,7 @@ use crate::sched::WaitQueue;
 use crate::sync::SpinLock;
 use crate::syscall::native::{self, StartRefused};
 use crate::user::vmo::Vmo;
-use crate::{device, sched, timer};
+use crate::{device, sched, timer, vmap};
 
 /// The program.
 const PROGRAM: &[u8] = b"/sbin/devmgr";
@@ -88,7 +88,14 @@ const KEPT_DEVICE_RIGHTS: Rights = Rights(GIVEN_DEVICE_RIGHTS.0 | Rights::DUPLIC
 ///
 /// The filesystem's to answer and the load ring's to register, which it does
 /// from `main.rs` before [`start`] runs.
-pub(crate) type ReadFile = fn(&[u8]) -> Result<Vec<u8>, Errno>;
+///
+/// The bytes come back in a [`vmap::Buffer`], not a heap `Vec`: a driver's
+/// image is megabytes, and the heap serves nothing past one buddy block
+/// (4 MiB). Read into a `Vec`, a driver one byte over that failed the whole
+/// `devmgr` start with `NO_MEMORY`, and a machine whose disk and network
+/// drivers `devmgr` starts came up with neither (the N150 box, 2026-10-22,
+/// when its Intel GPU driver grew past 4 MiB).
+pub(crate) type ReadFile = fn(&[u8]) -> Result<vmap::Buffer, Errno>;
 
 /// The registered [`ReadFile`].
 static READ_FILE: Once<ReadFile> = Once::new();
@@ -101,7 +108,7 @@ pub(crate) fn register_reader(read: ReadFile) {
 /// The [`ReadFile`] of a kernel whose filesystem registered none, which has
 /// no `/sbin/devmgr` to start. `main.rs` checks that a boot of this kernel is
 /// not one.
-fn no_files(_path: &[u8]) -> Result<Vec<u8>, Errno> {
+fn no_files(_path: &[u8]) -> Result<vmap::Buffer, Errno> {
     Err(Errno::ENOENT)
 }
 
@@ -432,7 +439,7 @@ pub(crate) fn start() -> Result<Option<Report>, &'static str> {
 /// manifest names, by name and in a VMO of its own.
 struct Files {
     /// `/sbin/devmgr`.
-    image: Vec<u8>,
+    image: vmap::Buffer,
     /// The manifest's names, in its order.
     names: Vec<[u8; NAME_BYTES]>,
     /// Each named driver's image, in the same order.
@@ -465,7 +472,20 @@ fn read_files() -> Result<Option<Files>, &'static str> {
         path.push(b'/');
         // NOALLOC: the room for all three was had just above.
         path.extend_from_slice(name_bytes(name));
-        let bytes = read(&path).map_err(|_| "a driver the manifest names is not in the image")?;
+        let bytes = match read(&path) {
+            Ok(bytes) => bytes,
+            Err(errno) => {
+                // Said here, because the start fails as `NO_MEMORY` and the
+                // caller -- pid 1, often on a machine with no console anyone
+                // reads -- learns nothing more than that.
+                crate::console::println!(
+                    "  devmgr   {} could not be read whole (err=-{}): devmgr is not started",
+                    core::str::from_utf8(&path).unwrap_or("a driver"),
+                    errno.0
+                );
+                return Err("a driver the manifest names could not be read");
+            }
+        };
         let _ = fallible::push_within(&mut images, vmo_of(&bytes)?);
     }
     Ok(Some(Files {

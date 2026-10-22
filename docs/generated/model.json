@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "8fddfc53131a80c465af4b31cfcba0be22d8230ef24933e32da5fbb2a2aa3f2b",
+  "digest": "b81de7a57903d01e4f829947c5fcca3793a76e9a4366950ba8091746dec7317a",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -108,8 +108,8 @@
     }
   ],
   "summary": {
-    "packages": 141,
-    "elements": 7244,
+    "packages": 142,
+    "elements": 7250,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -70166,6 +70166,75 @@
                   "source": {
                     "file": "docs/sysml/20-device-requirements.sysml",
                     "line": 972
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "DevmgrStart",
+          "qualifiedName": "FerrixDeviceRequirements::DevmgrStart",
+          "kind": "package",
+          "doc": "The kernel's half of starting devmgr (src/kernel/src/discovery/ devmgr.rs): reading its program and the drivers its manifest names. Added by initrd-limit (consultant OK IF, ledger 3034, condition 3) after the N150 box's Intel GPU driver grew past the heap's largest block and devmgr stopped starting.",
+          "source": {
+            "file": "docs/sysml/20-device-requirements.sysml",
+            "line": 976
+          },
+          "children": [
+            {
+              "name": "devmgrReadsPastAHeapBlock",
+              "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::devmgrReadsPastAHeapBlock",
+              "kind": "requirement",
+              "shortName": "L.device.49",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/20-device-requirements.sysml",
+                "line": 983
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::devmgrReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"devmgr's start shall read /sbin/devmgr and each driver its manifest names whole, up to the read limit, whatever the heap's largest block; a driver it cannot read shall be named on the console and the start refused.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 987
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::devmgrReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"Stage 8's check reads a file of 4 MiB, three pages and 17 bytes through devmgr's reader, whole and byte for byte. With the reader copying into the heap, the boot panics.\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 990
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::devmgrReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.BOOT.15\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 991
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixDeviceRequirements::DevmgrStart::devmgrReadsPastAHeapBlock",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "\"discovery::devmgr::read_files\"",
+                  "source": {
+                    "file": "docs/sysml/20-device-requirements.sysml",
+                    "line": 992
                   }
                 }
               ]

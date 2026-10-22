@@ -278,63 +278,63 @@
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "104-106",
+      "lines": "112-113",
       "category": "defensive",
-      "match": "fn no_files(_path: &[u8]) -> Result<Vec<u8>, Errno> {",
+      "match": "Err(Errno::ENOENT)",
       "why": "The reader of a kernel whose filesystem registered none. Every build registers one before devmgr starts, and register_load refuses to boot without it (LOAD_REGISTRATION), so it is never the one called."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "380-382",
+      "lines": "387-389",
       "category": "defensive",
       "match": "for (_, answer) in PENDING.lock().iter_mut() {",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "385",
+      "lines": "392",
       "category": "defensive",
       "match": "ANSWERED.wake_all();",
       "why": "devmgr has gone: its channel closed. devmgr is the driver supervisor and does not exit in a running system; its end is a failure the listener reports, and no gate kills it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "448",
+      "lines": "455",
       "category": "absent-hardware",
       "match": "return Ok(None);",
       "why": "An image with no /sbin/devmgr: every image xtask builds carries it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "977",
+      "lines": "997",
       "category": "defensive",
       "match": ".or_else(|_| root.new_child())",
       "why": "A second devmgr start finding the drivers' job name taken, or no memory for a named job: a boot starts devmgr once, before any program, with memory to spare."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1033",
+      "lines": "1053",
       "category": "failure-path",
       "match": "_ => return Err(\"devmgr said something other than REPORT fir",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1037",
+      "lines": "1057",
       "category": "failure-path",
       "match": "Err(_) => return Err(\"devmgr closed its channel before repor",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1048",
+      "lines": "1068",
       "category": "failure-path",
       "match": "return Err(\"devmgr reported nothing within the patience\");",
       "why": "A failure return of the boot self-check `devmgr::start's wait for REPORT`: taken only when the property its sentence names is broken, and main.rs then stops the machine with FERRIX-PANIC. A passing boot never takes it."
     },
     {
       "file": "discovery/devmgr.rs",
-      "lines": "1104",
+      "lines": "1124",
       "category": "defensive",
       "match": "}",
       "why": "The listener's end when devmgr's channel closes: devmgr does not exit in a running system, so the loop never meets a closed channel."

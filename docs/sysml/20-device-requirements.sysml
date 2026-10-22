@@ -972,4 +972,24 @@ package FerrixDeviceRequirements {
             attribute :>> unit = "device::DeviceNode::may_copy_lent";
         }
     }
+
+    package DevmgrStart {
+        doc /* The kernel's half of starting devmgr (src/kernel/src/discovery/
+             * devmgr.rs): reading its program and the drivers its manifest
+             * names. Added by initrd-limit (consultant OK IF, ledger 3034,
+             * condition 3) after the N150 box's Intel GPU driver grew past the
+             * heap's largest block and devmgr stopped starting. */
+
+        requirement <'L.device.49'> devmgrReadsPastAHeapBlock : ItemLowLevel {
+            attribute :>> statement = "devmgr's start shall read /sbin/devmgr and
+                each driver its manifest names whole, up to the read limit,
+                whatever the heap's largest block; a driver it cannot read shall
+                be named on the console and the start refused.";
+            attribute :>> criterion = "Stage 8's check reads a file of 4 MiB,
+                three pages and 17 bytes through devmgr's reader, whole and byte
+                for byte. With the reader copying into the heap, the boot panics.";
+            attribute :>> parent = "H.BOOT.15";
+            attribute :>> unit = "discovery::devmgr::read_files";
+        }
+    }
 }

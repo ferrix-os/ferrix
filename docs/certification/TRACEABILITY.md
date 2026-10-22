@@ -15,16 +15,16 @@ Coverage evidence recording the checks: x86-64, AArch64, ARMv7-A.
 | Level | Written | Named by a check | Unverified, in the baseline |
 |---|---:|---:|---:|
 | High (`H.*`) | 136 | 85 | 51 |
-| Low (`L.*`) | 971 | 708 | 263 |
+| Low (`L.*`) | 972 | 709 | 263 |
 
-2104 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
+2105 functions of the item are named as a low-level requirement's unit. Of the item's product functions, the gate counts those a requirement names, the *accessors* -- one statement or one expression, no branch point and no `unsafe`, whose behaviour is the requirement of the function they serve -- the check code that still lives in product files (listed below), and the rest, which no requirement names. That last list changes with every function written, so it is printed by `--report`, not kept here; in a subsystem whose low-level requirements are complete it must be empty, and the gate fails otherwise.
 
 | Product functions | Count |
 |---|---:|
-| Named by a low-level requirement | 2106 |
+| Named by a low-level requirement | 2107 |
 | Accessors, covered by the requirement they serve | 981 |
 | Check code in a product file | 82 |
-| Named by none | 938 |
+| Named by none | 937 |
 
 Subsystems whose low-level requirements are complete: `arch::aarch64`, `arch::x86_64`, `claim`, `console`, `device`, `early`, `iommu`, `mm`, `object`, `smp`, `trap`, `user`, `vmap`.
 
@@ -1432,6 +1432,12 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `L.device.47` | While a PCI function holds the lent firmware framebuffer, every well-formed device_config_write to it shall be refused ACCESS_DENIED, whatever register it names; a malformed one shall be refused as for any other function. | Stage 10's check: the made-up Intel GPU lent the framebuffer refuses a well-formed configuration write as Denied. With the refusal dropped, the boot panics. | H.DMA.10, H.DEV.2 | `device::DeviceNode::config_write`, `device::DeviceNode::holds_lent_framebuffer` | `src/kernel/src/device/check.rs::check_lending_intel` | not reached | not built | not built |
 | `L.device.48` | DeviceNode::may_copy_lent shall answer true, so that the node's driver may be handed a copying card over the lent framebuffer, exactly when the node is the Intel integrated GPU and holds the lent framebuffer. | Stage 10's check: the made-up Intel GPU lent the framebuffer may copy; another vendor's display function at 00:02.0 may not, without the aperture or with it. With the identity test dropped, the boot panics. | H.DMA.10, H.DMA.5 | `device::DeviceNode::may_copy_lent` | `src/kernel/src/device/check.rs::check_lending_intel` | not reached | not built | not built |
 
+### DevmgrStart
+
+| Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
+|---|---|---|---|---|---|---|---|---|
+| `L.device.49` | devmgr's start shall read /sbin/devmgr and each driver its manifest names whole, up to the read limit, whatever the heap's largest block; a driver it cannot read shall be named on the console and the start refused. | Stage 8's check reads a file of 4 MiB, three pages and 17 bytes through devmgr's reader, whole and byte for byte. With the reader copying into the heap, the boot panics. | H.BOOT.15 | `discovery::devmgr::read_files` | `src/kernel/src/fs/check.rs::check_devmgr_reads_past_a_heap_block` | not reached | not reached | not reached |
+
 ### Switch
 
 | Id | Statement | Criterion | Parent | Unit | Verified by | x86-64 | AArch64 | ARMv7-A |
@@ -1928,6 +1934,7 @@ Each system-level requirement, and the high-level requirements that name it as t
 | `src/kernel/src/fs/cgroupfs/oom_check.rs::run_watched` | kernel | L.sched.35, L.syscall.20 |
 | `src/kernel/src/fs/cgroupfs/reclaim_check.rs::high` | kernel | L.object.108, L.object.109, L.object.111, L.object.112, H.QUOTA.12 |
 | `src/kernel/src/fs/cgroupfs/reclaim_check.rs::hot_and_cold` | kernel | L.object.191 |
+| `src/kernel/src/fs/check.rs::check_devmgr_reads_past_a_heap_block` | kernel | L.device.49 |
 | `src/kernel/src/fs/check.rs::check_tmpfs_stores_pages` | kernel | L.user.41, L.object.190 |
 | `src/kernel/src/fs/check.rs::fault_in_from_source` | kernel | L.user.37 |
 | `src/kernel/src/fs/kmem_check.rs::run` | kernel | L.object.56, H.QUOTA.7 |
