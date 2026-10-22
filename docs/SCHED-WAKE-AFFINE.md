@@ -191,13 +191,13 @@ the new task went to sleep at once.
 
 ## 6. Requirements (reserved, `tools/common/data/requirement-reservations.json`)
 
-- **L.sched.86** (parent H.SCHED.1): Rule A, the affine pull with its
+- **L.sched.90** (parent H.SCHED.1): Rule A, the affine pull with its
   conditions, idle first, weight bound, and state 2 only.
-- **L.sched.87** (parent H.SCHED.1): Rule B, no pull when the wake is
+- **L.sched.91** (parent H.SCHED.1): Rule B, no pull when the wake is
   wide.
-- **L.sched.88** (parent H.SCHED.1): Rule C, a new task's weight charged
+- **L.sched.92** (parent H.SCHED.1): Rule C, a new task's weight charged
   to its processor's load average at its first enqueue.
-- L.sched.89 is spare. It is released if unused.
+- L.sched.93 is spare. It is released if unused.
 
 Each gets a stage 5 self-check with three attempts:
 
@@ -215,7 +215,7 @@ and `Load::charge`.
 ## 7. Review
 
 The consultant's verdict is **OK IF (1)-(12)** (ledger line 3062,
-2026-10-22). Q1: yes, with L.sched.86 stating the rule as built and a
+2026-10-22). Q1: yes, with L.sched.90 stating the rule as built and a
 heavy-wakee case. Q2: yes, with the charge made after `account_load` and
 read by no real-time path. Q3: at or under 1.05 (below). The idle-first
 order in §2.2 is condition (2). Wake::Sync keeps its own path, which is
