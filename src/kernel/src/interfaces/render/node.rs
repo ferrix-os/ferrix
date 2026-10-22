@@ -519,6 +519,16 @@ pub(crate) fn ioctl(
     }
 }
 
+/// A command buffer at `address` in `process`, read a chunk at a time as
+/// [`Renderer::submit`] asks for it: `false` for an address that faults.
+fn from_user(process: &Process, address: u64) -> impl FnMut(usize, &mut [u8]) -> bool + '_ {
+    move |offset, chunk| {
+        address
+            .checked_add(offset as u64)
+            .is_some_and(|at| uaccess::copy_from_user(process.space(), at, chunk).is_ok())
+    }
+}
+
 /// What a failed request answers a program.
 fn errno_of(error: RenderError) -> Errno {
     match error {
@@ -534,6 +544,7 @@ fn errno_of(error: RenderError) -> Errno {
         RenderError::Busy => Errno::EBUSY,
         RenderError::Gone => Errno::ENODEV,
         RenderError::TimedOut => Errno::ETIMEDOUT,
+        RenderError::Fault => Errno::EFAULT,
     }
 }
 
@@ -687,9 +698,6 @@ fn exec_buffer(process: &Process, file: &RenderFile, arg: u64) -> Result<usize, 
     if exec.size == 0 || !exec.size.is_multiple_of(4) || u64::from(exec.size) > COMMAND_BYTES {
         return Err(Errno::EINVAL);
     }
-    let mut commands = vec![0u8; exec.size as usize];
-    uaccess::copy_from_user(process.space(), exec.command, &mut commands)
-        .map_err(|_| Errno::EFAULT)?;
     let context = file.context()?;
     let rings = file.context.lock().map_or(0, |(_, rings)| rings);
     let named = exec.flags & virtgpu::EXECBUF_RING_IDX != 0;
@@ -707,7 +715,12 @@ fn exec_buffer(process: &Process, file: &RenderFile, arg: u64) -> Result<usize, 
     }
     let fence = file
         .renderer
-        .submit(context, ring, &commands)
+        .submit(
+            context,
+            ring,
+            exec.size as usize,
+            &mut from_user(process, exec.command),
+        )
         .map_err(errno_of)?;
     if fenced {
         let open = super::fence::open(Arc::clone(&file.renderer), fence)?;
@@ -841,12 +854,14 @@ fn resource_create_blob(
         if !create.cmd_size.is_multiple_of(4) || u64::from(create.cmd_size) > COMMAND_BYTES {
             return Err(Errno::EINVAL);
         }
-        let mut commands = vec![0u8; create.cmd_size as usize];
-        uaccess::copy_from_user(process.space(), create.cmd, &mut commands)
-            .map_err(|_| Errno::EFAULT)?;
         let _ = file
             .renderer
-            .submit(context, NO_RING, &commands)
+            .submit(
+                context,
+                NO_RING,
+                create.cmd_size as usize,
+                &mut from_user(process, create.cmd),
+            )
             .map_err(errno_of)?;
     }
     let (object, placed) = file

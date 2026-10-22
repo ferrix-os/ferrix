@@ -175,6 +175,8 @@ pub(crate) enum RenderError {
     Gone,
     /// The driver did not answer in time.
     TimedOut,
+    /// What was to be sent could not be read from the program.
+    Fault,
 }
 
 /// A device whose render channel has been made, waiting for its task.
@@ -1332,8 +1334,8 @@ impl Renderer {
         }
     }
 
-    /// Run `commands` in `context`: send them, and return the fence the
-    /// driver will answer. On a `ring` other than
+    /// Run a command buffer of `len` bytes in `context`: send it, and return
+    /// the fence the driver will answer. On a `ring` other than
     /// [`ferrix_renderctl::message::NO_RING`], the answer comes when the work
     /// has finished, which is what [`Renderer::fence_done`] then says.
     ///
@@ -1343,17 +1345,27 @@ impl Renderer {
     /// because until then the device may still be reading it; with every
     /// slot held, this waits for an answer.
     ///
+    /// `fill(offset, chunk)` writes the stream's bytes from `offset` into
+    /// `chunk`, a page or the last part of one, and says `false` when it
+    /// cannot (a program's address that faults). It is asked page by page
+    /// once the slot is in hand, through one page of heap, so no buffer as
+    /// long as the stream is ever made: a slot is 65 pages, and a block that
+    /// size from the kernel's heap is 128 contiguous pages charged to
+    /// nobody (the certification consultant's B1, ledger line 3121).
+    ///
     /// # Errors
     ///
     /// [`RenderError`]; [`RequestError::Work`] for a command buffer of no
-    /// bytes or more than [`COMMAND_BYTES`].
+    /// bytes or more than [`COMMAND_BYTES`], and [`RenderError::Fault`] when
+    /// `fill` could not read it.
     pub(crate) fn submit(
         &self,
         context: u32,
         ring: u32,
-        commands: &[u8],
+        len: usize,
+        fill: &mut dyn FnMut(usize, &mut [u8]) -> bool,
     ) -> Result<u64, RenderError> {
-        if commands.is_empty() || commands.len() as u64 > COMMAND_BYTES {
+        if len == 0 || len as u64 > COMMAND_BYTES {
             return Err(RenderError::Request(RequestError::Work));
         }
         let deadline = timer::now_nanos().saturating_add(REPLY_PATIENCE_NANOS);
@@ -1370,7 +1382,7 @@ impl Renderer {
             };
             self.wait_for_reply(seen, deadline)?;
         };
-        let sent = self.write_and_send(context, ring, commands, slot, deadline);
+        let sent = self.write_and_send(context, ring, len, fill, slot, deadline);
         // A sent submission's slot is given back with its reply.
         if sent.is_err() {
             self.state.lock().give_command(slot);
@@ -1383,12 +1395,21 @@ impl Renderer {
         &self,
         context: u32,
         ring: u32,
-        commands: &[u8],
+        len: usize,
+        fill: &mut dyn FnMut(usize, &mut [u8]) -> bool,
         slot: usize,
         deadline: u64,
     ) -> Result<u64, RenderError> {
         let at = DESCRIBE_REGION + slot as u64 * COMMAND_BYTES;
-        for (index, chunk) in commands.chunks(PAGE_SIZE as usize).enumerate() {
+        let page = PAGE_SIZE as usize;
+        let mut buffer = vec![0u8; page];
+        for (index, offset) in (0..len).step_by(page).enumerate() {
+            let chunk = buffer
+                .get_mut(..page.min(len - offset))
+                .ok_or(RenderError::Request(RequestError::Work))?;
+            if !fill(offset, chunk) {
+                return Err(RenderError::Fault);
+            }
             // A slot starts on a page boundary, so a chunk is a page's.
             self.work
                 .write_page(at / PAGE_SIZE + index as u64, 0, chunk)
@@ -1396,7 +1417,7 @@ impl Renderer {
         }
         let range = Work {
             at: u32::try_from(at).map_err(|_| RenderError::Request(RequestError::Work))?,
-            len: commands.len() as u32,
+            len: u32::try_from(len).map_err(|_| RenderError::Request(RequestError::Work))?,
         };
         loop {
             let seen = self.replies();
