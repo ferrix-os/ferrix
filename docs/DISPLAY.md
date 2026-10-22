@@ -1729,15 +1729,16 @@ entry a request names, and sends that entry back.
   size refused), a list in two pages taken, and a list with two preferred
   entries refused.
 
-**Kernel lines (the customer's figure, against `main` 08b0e1380).** `git
-diff --numstat` over `src/kernel`: 412 added, 71 removed, 341 net, about a
-fifth of them comments. Each change and why:
+**Kernel lines (the customer's figure, against `main` 43d6df9f1, the same
+as against 08b0e1380 before the rebase).** `git diff --numstat` over
+`src/kernel`: 456 added, 87 removed, 369 net, about a sixth of them
+comments. Each change and why:
 
 | File | + / - | What, and why it is the kernel's |
 |---|---|---|
-| `interfaces/display/mod.rs` | 165 / 3 | Holding each head's list (`State::lists`), taking pages in the card task, `SET_MODE` under the modeset lock, the refused-mode reset, the boot line: card0 is the one place a program's request meets the driver, so carrying the list and the chosen entry has to be here |
+| `interfaces/display/mod.rs` | 187 / 19 | Holding each head's list (`State::lists`), taking pages in the card task, `SET_MODE` under the modeset lock, the refused-mode reset, the boot line: card0 is the one place a program's request meets the driver, so carrying the list and the chosen entry has to be here |
 | `interfaces/display/drm.rs` | 74 / 68 | `GETCONNECTOR` lists the driver's list; `SETCRTC` accepts only a listed entry and restores `GETCRTC` on a refusal; the made-up virtual list removed (-60) |
-| `interfaces/display/check.rs` | 140 / 0 | The stage 10 self-check the consultant required (condition 6) |
+| `interfaces/display/check.rs` | 162 / 0 | The stage 10 self-check the consultant required (condition 6) |
 | `panic/catalog.rs`, `stages_check.rs` | 33 / 0 | FX-1015 and the check's line |
 
 `ferrix-displayctl`, which the kernel links, gains the two messages and
