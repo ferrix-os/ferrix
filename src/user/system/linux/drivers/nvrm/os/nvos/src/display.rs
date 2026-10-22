@@ -19,8 +19,8 @@
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use ferrix_displayctl::message::{
-    EDID_BYTES, Edid, Hello, MAX_BYTES, MAX_SCANOUTS, MAX_TIMINGS, Message, PORT_RIGHTS, Rect,
-    ScanoutMode, Status, Timing, Timings, VERSION,
+    EDID_BYTES, Edid, Hello, Listed, MAX_BYTES, MAX_LISTED_MODES, MAX_SCANOUTS, MODES_A_PAGE,
+    Message, ModePage, PORT_RIGHTS, Rect, ScanoutMode, Status, Timing, Timings, VERSION,
 };
 use ferrix_linux_abi::drm;
 use ferrix_native::channel::{Channel, ReadError};
@@ -139,8 +139,11 @@ pub struct CHello {
     pub refresh_mhz: u32,
     /// How many of `timings` are set, the running one first.
     pub count: u32,
-    /// The timings.
-    pub timings: [CTiming; MAX_TIMINGS],
+    /// Every mode NVKMS validated for the display (displayctl v11's
+    /// `MODE_LIST`, `docs/DISPLAY.md` §9.4), the running one first.
+    pub timings: [CTiming; MAX_LISTED_MODES],
+    /// Which of `timings` NVKMS called preferred.
+    pub preferred: u32,
     /// The lit display's connector, as NVKMS names its type
     /// (`NvKmsConnectorType`).
     pub connector: u32,
@@ -201,6 +204,8 @@ pub struct Event {
     pub w: u32,
     /// .
     pub h: u32,
+    /// SET_MODE: the mode, as C listed it.
+    pub timing: CTiming,
 }
 
 /// ATTACH, checked.
@@ -219,6 +224,8 @@ pub const EVENT_MOVE: u32 = 6;
 pub const EVENT_STOP: u32 = 7;
 /// The core closed its end.
 pub const EVENT_CLOSED: u32 = 8;
+/// SET_MODE: run `timing`, one of the list `nvos_display_start` sent.
+pub const EVENT_MODE: u32 = 9;
 
 /// The control channel, borrowed for one call.
 fn control() -> Option<core::mem::ManuallyDrop<Channel<Kernel>>> {
@@ -259,11 +266,14 @@ fn hello(c: &CHello) -> Hello {
             refresh_mhz: c.refresh_mhz,
         };
     }
+    // HELLO lists only the running mode; the whole list goes as
+    // MODE_LIST after READY (`mode_pages`).
     let mut timings = Timings::NONE;
-    let count = usize::try_from(c.count).unwrap_or(0).min(MAX_TIMINGS);
-    for (slot, each) in timings.list.iter_mut().zip(c.timings.iter().take(count)) {
-        *slot = timing(each);
-        timings.count += 1;
+    if c.count > 0
+        && let (Some(slot), Some(first)) = (timings.list.first_mut(), c.timings.first())
+    {
+        *slot = timing(first);
+        timings.count = 1;
     }
     Hello {
         version: VERSION,
@@ -284,6 +294,39 @@ fn hello(c: &CHello) -> Hello {
             connectors
         },
     }
+}
+
+/// The `MODE_LIST` pages for C's list: every mode NVKMS validated, at most
+/// [`MAX_LISTED_MODES`], the one NVKMS prefers marked. A list without a
+/// valid preferred index marks the running one.
+fn mode_pages(c: &CHello) -> impl Iterator<Item = Message> + '_ {
+    let count = usize::try_from(c.count).unwrap_or(0).min(MAX_LISTED_MODES);
+    let preferred = usize::try_from(c.preferred)
+        .ok()
+        .filter(|&at| at < count)
+        .unwrap_or(0);
+    let total = u32::try_from(count).unwrap_or(0);
+    c.timings
+        .get(..count)
+        .unwrap_or(&[])
+        .chunks(MODES_A_PAGE)
+        .enumerate()
+        .map(move |(page, chunk)| {
+            let mut entries = [Listed::default(); MODES_A_PAGE];
+            for (index, (into, from)) in entries.iter_mut().zip(chunk).enumerate() {
+                *into = Listed {
+                    timing: timing(from),
+                    preferred: page * MODES_A_PAGE + index == preferred,
+                };
+            }
+            Message::ModeList(ModePage {
+                scanout: 0,
+                total,
+                first: u32::try_from(page * MODES_A_PAGE).unwrap_or(u32::MAX),
+                count: u32::try_from(chunk.len()).unwrap_or(0),
+                entries,
+            })
+        })
 }
 
 /// The EDID message for C's display: what NVKMS read, or none for one the
@@ -389,6 +432,14 @@ pub unsafe extern "C" fn nvos_display_start(described: *const CHello) -> NvStatu
     // keeps a file drm.edid_firmware names over it.
     if let Err(why) = channel.write(Message::Edid(edid(described)).encode().as_bytes()) {
         say!("display: the EDID not written: {why:?}");
+    }
+    // Every mode NVKMS validated, which the core lists and lets a program
+    // set (displayctl v11).
+    for page in mode_pages(described) {
+        if let Err(why) = channel.write(page.encode().as_bytes()) {
+            say!("display: the mode list not written: {why:?}");
+            break;
+        }
     }
     say!(
         "display: card{} ready, its buffers up to {} MiB, each mapped read-only at ATTACH",
@@ -505,6 +556,21 @@ fn event_of(message: Message, vmo: Option<Vmo<Kernel>>) -> Option<Event> {
             event.y = y;
         }
         Message::Stop => event.kind = EVENT_STOP,
+        Message::SetMode { timing, .. } => {
+            event.kind = EVENT_MODE;
+            event.timing = CTiming {
+                clock_khz: timing.clock_khz,
+                hdisplay: timing.hdisplay,
+                hsync_start: timing.hsync_start,
+                hsync_end: timing.hsync_end,
+                htotal: timing.htotal,
+                vdisplay: timing.vdisplay,
+                vsync_start: timing.vsync_start,
+                vsync_end: timing.vsync_end,
+                vtotal: timing.vtotal,
+                flags: u32::from(timing.hsync_high) | u32::from(timing.vsync_high) << 1,
+            };
+        }
         other => {
             say!("display: a message a driver is not sent: {other:?}");
             return None;
@@ -620,11 +686,14 @@ pub extern "C" fn nvos_display_stopped() {
 }
 
 // The protocol's version this bridge was written against.
-const _: () = assert!(VERSION == 10);
+const _: () = assert!(VERSION == 11);
 
 #[cfg(test)]
 mod tests {
-    use super::{CHello, CTiming, MAX_TIMINGS, NVKMS_EDID_BYTES, drm, drm_connector, edid, hello};
+    use super::{
+        CHello, CTiming, MAX_LISTED_MODES, Message, NVKMS_EDID_BYTES, drm, drm_connector, edid,
+        hello, mode_pages,
+    };
 
     fn described(connector: u32, edid_bytes: u32) -> CHello {
         let mut c = CHello {
@@ -632,7 +701,8 @@ mod tests {
             height: 600,
             refresh_mhz: 59_821,
             count: 0,
-            timings: [CTiming::default(); MAX_TIMINGS],
+            timings: [CTiming::default(); MAX_LISTED_MODES],
+            preferred: 0,
             connector,
             edid_bytes,
             edid: [0; NVKMS_EDID_BYTES],
@@ -668,5 +738,43 @@ mod tests {
         // One the message cannot carry is none; none is none.
         assert_eq!(edid(&described(6, 1024)).length, 0);
         assert_eq!(edid(&described(6, 0)).length, 0);
+    }
+
+    #[test]
+    fn every_mode_nvkms_validated_goes_as_mode_list_pages() {
+        let mut c = described(6, 0);
+        c.count = 30;
+        c.preferred = 3;
+        for (index, timing) in c.timings.iter_mut().take(30).enumerate() {
+            let width = 640 + u16::try_from(index).unwrap_or(0) * 8;
+            *timing = CTiming {
+                clock_khz: 25_175,
+                hdisplay: width,
+                hsync_start: width + 16,
+                hsync_end: width + 112,
+                htotal: width + 160,
+                vdisplay: 480,
+                vsync_start: 490,
+                vsync_end: 492,
+                vtotal: 525,
+                flags: 0,
+            };
+        }
+        let pages: Vec<Message> = mode_pages(&c).collect();
+        assert_eq!(pages.len(), 2);
+        let mut preferred = 0;
+        for message in &pages {
+            let Message::ModeList(page) = message else {
+                panic!("a page");
+            };
+            assert_eq!(page.total, 30);
+            preferred += page.as_slice().iter().filter(|l| l.preferred).count();
+            if page.first == 0 {
+                assert!(page.entries[3].preferred);
+            }
+        }
+        assert_eq!(preferred, 1);
+        // HELLO lists the running mode alone.
+        assert_eq!(hello(&c).timings.count, 1);
     }
 }

@@ -175,8 +175,12 @@ fn a_list_keeps_one_of_each_mode_and_one_preferred() {
     let mut list = ModeList::new();
     assert!(list.add(synthetic(1024, 768, 60_000), false));
     assert!(
-        !list.add(synthetic(1024, 768, 60_400), false),
+        !list.add(synthetic(1024, 768, 60_000), false),
         "60 Hz again"
+    );
+    assert!(
+        list.add(synthetic(1024, 768, 59_940), false),
+        "59.94 Hz is another"
     );
     assert!(list.add(synthetic(1024, 768, 75_000), true));
     assert!(

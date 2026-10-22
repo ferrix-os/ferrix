@@ -154,10 +154,13 @@ struct nvos_display_timing {
     NvU16 vdisplay, vsync_start, vsync_end, vtotal;
     NvU32 flags;        /* bit 0 hsync positive, bit 1 vsync positive */
 };
+/* displayctl's MAX_LISTED_MODES: every mode NVKMS validated, sent as MODE_LIST. */
+#define NVOS_DISPLAY_MODES 64
 struct nvos_display_hello {
     NvU32 width, height, refresh_mhz;
     NvU32 count;        /* timings set, the running one first */
-    struct nvos_display_timing timings[16];
+    struct nvos_display_timing timings[NVOS_DISPLAY_MODES];
+    NvU32 preferred;    /* which of timings NVKMS prefers */
     NvU32 connector;    /* the display's NvKmsConnectorType */
     NvU32 edid_bytes;   /* of edid, the display's own */
     NvU8 edid[2048];
@@ -170,6 +173,7 @@ struct nvos_display_event {
     NvU64 sequence;     /* FLUSH and CURSOR */
     NvS32 x, y;         /* SCANOUT and FLUSH: the rectangle */
     NvU32 w, h;
+    struct nvos_display_timing timing;  /* MODE: one of the listed modes */
 };
 #define NVOS_DISPLAY_ATTACH   1
 #define NVOS_DISPLAY_SCANOUT  2
@@ -179,6 +183,7 @@ struct nvos_display_event {
 #define NVOS_DISPLAY_MOVE     6
 #define NVOS_DISPLAY_STOP     7
 #define NVOS_DISPLAY_CLOSED   8
+#define NVOS_DISPLAY_MODE     9
 /* ferrix_displayctl::message::Status. */
 #define NVOS_DISPLAY_OK       0
 #define NVOS_DISPLAY_INVALID  4

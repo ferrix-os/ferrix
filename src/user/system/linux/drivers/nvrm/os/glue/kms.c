@@ -213,12 +213,20 @@ struct kms_head {
     NvU32 connector;    /* NvKmsConnectorType */
     NvU32 edid_bytes;
     NvU8 edid[NVKMS_KAPI_EDID_BUFFER_SIZE];
+    /* What the first light found, for a light at another mode. */
+    NvU32 pitch_align;
+    NvBool video_memory;
+    /* Every mode NVKMS validated for the display, the running one first,
+     * as the card lists them (displayctl v11, docs/DISPLAY.md section 9.4). */
+    struct NvKmsKapiDisplayMode modes[NVOS_DISPLAY_MODES];
+    NvU32 mode_count;
+    NvU32 preferred;
 };
 
 /* What is on screen, kept so that it stays there. */
 static struct kms_head kms_lit[NV_MAX_GPUS];
 
-static int kms_light(struct kms_head *lit, const struct NvKmsKapiDeviceResourcesInfo *res)
+static int kms_light(struct kms_head *lit, NvBool pattern)
 {
     struct NvKmsKapiDevice *device = lit->device;
     struct NvKmsKapiAllocateMemoryParams alloc;
@@ -229,7 +237,7 @@ static int kms_light(struct kms_head *lit, const struct NvKmsKapiDeviceResources
     struct NvKmsKapiLayerRequestedConfig *layer;
     NvU32 width = lit->mode.timings.hVisible;
     NvU32 height = lit->mode.timings.vVisible;
-    NvU32 align = res->caps.pitchAlignment ? res->caps.pitchAlignment : 256;
+    NvU32 align = lit->pitch_align ? lit->pitch_align : 256;
     NvU8 compressible = 0;
     NvBool ok;
 
@@ -239,7 +247,7 @@ static int kms_light(struct kms_head *lit, const struct NvKmsKapiDeviceResources
     alloc.layout = NvKmsSurfaceMemoryLayoutPitch;
     alloc.type = NVKMS_KAPI_ALLOCATION_TYPE_SCANOUT;
     alloc.size = (NvU64)lit->pitch * height;
-    alloc.useVideoMemory = res->caps.hasVideoMemory != 0;
+    alloc.useVideoMemory = lit->video_memory;
     alloc.compressible = &compressible;
     lit->memory = kapi.allocateMemory(device, &alloc);
     if (lit->memory == NULL)
@@ -254,9 +262,19 @@ static int kms_light(struct kms_head *lit, const struct NvKmsKapiDeviceResources
         kms_say("mapMemory failed\n");
         return -EIO;
     }
-    kms_pattern(lit->mapped, width, height, lit->pitch);
-    kms_say("%ux%u surface, pitch %u, filled with the test pattern\n", width, height,
-            lit->pitch);
+    if (pattern)
+    {
+        kms_pattern(lit->mapped, width, height, lit->pitch);
+        kms_say("%ux%u surface, pitch %u, filled with the test pattern\n", width, height,
+                lit->pitch);
+    }
+    else
+    {
+        /* A mode a program set: black until its first frame is copied. */
+        NvU32 row;
+        for (row = 0; row < height; row++)
+            memset((NvU8 *)lit->mapped + (NvU64)row * lit->pitch, 0, (size_t)width * 4);
+    }
 
     memset(&surf, 0, sizeof(surf));
     surf.planes[0].memory = lit->memory;
@@ -367,6 +385,104 @@ static NvBool kms_preferred_mode(struct NvKmsKapiDevice *device, NvKmsKapiDispla
     return found;
 }
 
+/* Whether two NVKMS modes are the same timing. */
+static NvBool kms_same_mode(const struct NvKmsKapiDisplayMode *one,
+                            const struct NvKmsKapiDisplayMode *other)
+{
+    const struct NvKmsKapiDisplayModeTimings *a = &one->timings, *b = &other->timings;
+
+    return a->pixelClockHz == b->pixelClockHz && a->hVisible == b->hVisible &&
+           a->hSyncStart == b->hSyncStart && a->hSyncEnd == b->hSyncEnd &&
+           a->hTotal == b->hTotal && a->vVisible == b->vVisible &&
+           a->vSyncStart == b->vSyncStart && a->vSyncEnd == b->vSyncEnd &&
+           a->vTotal == b->vTotal && a->flags.hSyncPos == b->flags.hSyncPos &&
+           a->flags.vSyncPos == b->flags.vSyncPos;
+}
+
+/*
+ * Every mode NVKMS validates for the lit display, as nvidia-drm's connector
+ * lists them on Linux: the running one (lit->mode) first, then the rest in
+ * NVKMS's order, at most NVOS_DISPLAY_MODES; `preferred` is the one NVKMS
+ * calls preferred.
+ */
+static void kms_list_modes(struct kms_head *lit)
+{
+    struct NvKmsKapiDisplayMode mode;
+    NvBool valid, preferred;
+    NvU32 index, at;
+    int ret;
+
+    lit->modes[0] = lit->mode;
+    lit->mode_count = 1;
+    lit->preferred = 0;
+    for (index = 0; index < 512 && lit->mode_count < NVOS_DISPLAY_MODES; index++)
+    {
+        valid = preferred = NV_FALSE;
+        ret = kapi.getDisplayMode(lit->device, lit->display, index, &mode, &valid, &preferred);
+        if (ret <= 0)
+            break;
+        if (!valid)
+            continue;
+        for (at = 0; at < lit->mode_count; at++)
+            if (kms_same_mode(&lit->modes[at], &mode))
+                break;
+        if (at == lit->mode_count)
+            lit->modes[lit->mode_count++] = mode;
+        if (preferred)
+            lit->preferred = at;
+    }
+    kms_say("%u modes listed, %ux%u preferred\n", lit->mode_count,
+            lit->modes[lit->preferred].timings.hVisible,
+            lit->modes[lit->preferred].timings.vVisible);
+}
+
+/*
+ * Run the lit head at `mode`, one of lit->modes: a VRAM surface of its size
+ * made, the mode set on it (validated, then committed, as the first light),
+ * and the surface before it let go. 0, or why not, with the head as it was.
+ */
+static int kms_relight(struct kms_head *lit, const struct NvKmsKapiDisplayMode *mode)
+{
+    struct NvKmsKapiDevice *device = lit->device;
+    struct NvKmsKapiDisplayMode was = lit->mode;
+    struct NvKmsKapiMemory *old_memory = lit->memory;
+    struct NvKmsKapiSurface *old_surface = lit->surface;
+    void *old_mapped = lit->mapped;
+    NvU32 old_pitch = lit->pitch;
+    int ret;
+
+    lit->mode = *mode;
+    lit->memory = NULL;
+    lit->surface = NULL;
+    lit->mapped = NULL;
+    ret = kms_light(lit, NV_FALSE);
+    if (ret != 0)
+    {
+        /* What the failed light made goes; the old surface is still shown. */
+        if (lit->surface != NULL)
+            kapi.destroySurface(device, lit->surface);
+        if (lit->mapped != NULL)
+            kapi.unmapMemory(device, lit->memory, NVKMS_KAPI_MAPPING_TYPE_KERNEL, lit->mapped);
+        if (lit->memory != NULL)
+            kapi.freeMemory(device, lit->memory);
+        lit->mode = was;
+        lit->memory = old_memory;
+        lit->surface = old_surface;
+        lit->mapped = old_mapped;
+        lit->pitch = old_pitch;
+        kms_say("mode %ux%u not set (%d); the head stays %ux%u\n", mode->timings.hVisible,
+                mode->timings.vVisible, ret, was.timings.hVisible, was.timings.vVisible);
+        return ret;
+    }
+    kapi.destroySurface(device, old_surface);
+    kapi.unmapMemory(device, old_memory, NVKMS_KAPI_MAPPING_TYPE_KERNEL, old_mapped);
+    kapi.freeMemory(device, old_memory);
+    kms_say("head %u is %ux%u@%u.%03u Hz now\n", lit->head, mode->timings.hVisible,
+            mode->timings.vVisible, mode->timings.refreshRate / 1000,
+            mode->timings.refreshRate % 1000);
+    return 0;
+}
+
 /*
  * One look at every display: light the first connected one. 0 once one is
  * lit, -ENODEV while none is connected, or why lighting failed. `verbose`
@@ -416,7 +532,10 @@ static int kms_scan(struct kms_head *lit, const struct NvKmsKapiDeviceResourcesI
         }
         lit->edid_bytes = dyn->edid.bufferSize <= sizeof(lit->edid) ? dyn->edid.bufferSize : 0;
         memcpy(lit->edid, dyn->edid.buffer, lit->edid_bytes);
-        return kms_light(lit, res);
+        lit->pitch_align = res->caps.pitchAlignment;
+        lit->video_memory = res->caps.hasVideoMemory != 0;
+        kms_list_modes(lit);
+        return kms_light(lit, NV_TRUE);
     }
     return -ENODEV;
 }
@@ -514,8 +633,8 @@ out:
  * The card (N6): nvrm as the kernel display core's driver for the head lit
  * above. Each FLUSH copies the flushed rectangle of the buffer it names
  * from the buffer's mapping, which nvos makes read-only at ATTACH, into the VRAM surface the
- * head scans out, and is answered at once: the copy is the flip. Only the
- * running mode is offered, so the compositor never asks for another.
+ * head scans out, and is answered at once: the copy is the flip. Every mode
+ * NVKMS validated is offered, and SET_MODE sets one (kms_relight).
  * ---------------------------------------------------------------------- */
 
 #define KMS_BUFFERS 64
@@ -529,6 +648,8 @@ struct kms_buffer {
 struct kms_card {
     struct kms_head *lit;
     struct kms_buffer buffers[KMS_BUFFERS];
+    /* A SET_MODE that could not be set, which the next FLUSH answers. */
+    NvBool mode_failed;
     NvU32 shown;
     NvU64 flushes;
     NvU64 copy_usec;
@@ -645,8 +766,40 @@ static void kms_serve(void *argument)
                         (unsigned long long)(card->copy_usec / 300));
                 card->copy_usec = 0;
             }
-            nvos_display_flipped(event.sequence,
-                                 buffer != NULL ? NVOS_DISPLAY_OK : NVOS_DISPLAY_INVALID);
+            nvos_display_flipped(event.sequence, buffer != NULL && !card->mode_failed
+                                                     ? NVOS_DISPLAY_OK
+                                                     : NVOS_DISPLAY_INVALID);
+            card->mode_failed = NV_FALSE;
+            break;
+        }
+        case NVOS_DISPLAY_MODE:
+        {
+            /* One of the listed modes: find it, and set it unless it runs. */
+            struct kms_head *lit = card->lit;
+            const struct nvos_display_timing *t = &event.timing;
+            NvU32 i;
+
+            for (i = 0; i < lit->mode_count; i++)
+            {
+                const struct NvKmsKapiDisplayModeTimings *m = &lit->modes[i].timings;
+                if (m->hVisible == t->hdisplay && m->vVisible == t->vdisplay &&
+                    m->hTotal == t->htotal && m->vTotal == t->vtotal &&
+                    m->hSyncStart == t->hsync_start && m->hSyncEnd == t->hsync_end &&
+                    m->vSyncStart == t->vsync_start && m->vSyncEnd == t->vsync_end &&
+                    m->pixelClockHz / 1000 == t->clock_khz)
+                    break;
+            }
+            if (i == lit->mode_count)
+            {
+                kms_say("SET_MODE for %ux%u, which is not listed\n", t->hdisplay, t->vdisplay);
+                card->mode_failed = NV_TRUE;
+            }
+            else if (!kms_same_mode(&lit->modes[i], &lit->mode) &&
+                     kms_relight(lit, &lit->modes[i]) != 0)
+            {
+                card->mode_failed = NV_TRUE;
+            }
+            /* The old surface is gone: the next SCANOUT copies afresh. */
             break;
         }
         case NVOS_DISPLAY_DETACH:
@@ -685,20 +838,28 @@ static int kms_card_start(struct kms_head *lit)
     hello.width = t->hVisible;
     hello.height = t->vVisible;
     hello.refresh_mhz = t->refreshRate;
-    hello.count = 1;
     hello.connector = lit->connector;
     hello.edid_bytes = lit->edid_bytes;
     memcpy(hello.edid, lit->edid, lit->edid_bytes);
-    hello.timings[0].clock_khz = t->pixelClockHz / 1000;
-    hello.timings[0].hdisplay = (NvU16)t->hVisible;
-    hello.timings[0].hsync_start = (NvU16)t->hSyncStart;
-    hello.timings[0].hsync_end = (NvU16)t->hSyncEnd;
-    hello.timings[0].htotal = (NvU16)t->hTotal;
-    hello.timings[0].vdisplay = (NvU16)t->vVisible;
-    hello.timings[0].vsync_start = (NvU16)t->vSyncStart;
-    hello.timings[0].vsync_end = (NvU16)t->vSyncEnd;
-    hello.timings[0].vtotal = (NvU16)t->vTotal;
-    hello.timings[0].flags = (t->flags.hSyncPos ? 1u : 0u) | (t->flags.vSyncPos ? 2u : 0u);
+    /* Every mode NVKMS validated, the running one first (kms_list_modes). */
+    for (NvU32 i = 0; i < lit->mode_count && i < NVOS_DISPLAY_MODES; i++)
+    {
+        const struct NvKmsKapiDisplayModeTimings *m = &lit->modes[i].timings;
+        struct nvos_display_timing *into = &hello.timings[i];
+
+        into->clock_khz = m->pixelClockHz / 1000;
+        into->hdisplay = (NvU16)m->hVisible;
+        into->hsync_start = (NvU16)m->hSyncStart;
+        into->hsync_end = (NvU16)m->hSyncEnd;
+        into->htotal = (NvU16)m->hTotal;
+        into->vdisplay = (NvU16)m->vVisible;
+        into->vsync_start = (NvU16)m->vSyncStart;
+        into->vsync_end = (NvU16)m->vSyncEnd;
+        into->vtotal = (NvU16)m->vTotal;
+        into->flags = (m->flags.hSyncPos ? 1u : 0u) | (m->flags.vSyncPos ? 2u : 0u);
+        hello.count = i + 1;
+    }
+    hello.preferred = lit->preferred;
 
     status = nvos_display_start(&hello);
     if (status != NV_OK)
