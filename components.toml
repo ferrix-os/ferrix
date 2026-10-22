@@ -18,7 +18,7 @@ commit = "6d364107073e9f6adf6d28584b085249104ae648"
 [zinc]
 path = "src/user/system/linux/zinc"
 repo = "https://github.com/ferrix-os/zinc"
-commit = "e6b2d7ba74e4d1c51aa677d3fedaa447e3a66fbc"
+commit = "2581e6f88a1b7d29814b26a3abfa87af44cf3423"
 
 # The Pixel 7's desktop build, release packaging, monitor and Android app.
 [pixel7]
