@@ -1164,7 +1164,7 @@ fn the_ring_frequency_table_is_written_as_i915_writes_it() {
 #[test]
 fn an_engine_a_dead_driver_left_running_is_reset_before_bring_up() {
     let cold = backend();
-    assert_eq!(cold.inherited(), &[None, None]);
+    assert!(cold.inherited().iter().all(Option::is_none));
     let mut cold = cold;
     assert_eq!(cold.platform().gpu.resets, 0, "a cold GT is not reset");
 
@@ -1194,4 +1194,32 @@ fn an_engine_a_dead_driver_left_running_is_reset_before_bring_up() {
     // driver's own status page.
     assert_eq!(be.platform().gpu.resets, 2);
     assert_eq!(be.platform().gpu.read32(pga), HWSP);
+}
+
+/// Fail closed: an inherited engine that never gets ready to reset refuses
+/// the bring-up, so the driver sends no HELLO and the kernel keeps the dead
+/// driver's pins quarantined.
+#[test]
+fn an_inherited_engine_that_cannot_be_reset_refuses_the_bring_up() {
+    let mut model = Model::new();
+    let pga = crate::gt::hws_pga_offset(ENGINES[0].mmio_base);
+    model.gpu.write32(pga, 0x0bad_0000);
+    model.gpu.never_ready = true;
+    let refused = XelpBackend::new(
+        model,
+        0b11,
+        &ENGINES[..4],
+        1,
+        Identity {
+            device_id: 0x46d4,
+            revision: 0,
+            ggtt_bytes: 4 << 30,
+            system_memory_bytes: 16 << 30,
+        },
+    );
+    assert!(
+        matches!(refused, Err(Error::Inherited)),
+        "{:?}",
+        refused.as_ref().err()
+    );
 }

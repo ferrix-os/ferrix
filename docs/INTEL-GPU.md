@@ -1230,10 +1230,25 @@ nothing after it. Each piece:
   i915's `intel_gt_sanitize` by engine, never `GRDOM_FULL`, which keeps the
   display (§4.3, `reset.rs`). A cold boot reads 0 and resets nothing, so
   the first start is unchanged. The driver says `intel: rcs0 was a previous
-  driver's (status page 0x…); reset alone before bring-up: done`. The
-  first pin re-enables bus mastering, the HELLOs publish `renderD128` and
-  `card0` again, and the chardev core's accepted HELLO gives the dead
-  driver's quarantined pins back.
+  driver's (status page 0x…); reset alone before bring-up: done`. Every
+  engine is looked at, not only the two this driver runs; a video engine
+  has no reset domain here and was never this driver's, which the line
+  says. **It fails closed** (the consultant's condition 1, ledger 3148): an
+  inherited engine whose reset fails stops the bring-up before anything
+  else, the driver says `an engine a dead driver left running could not be
+  reset` and exits with status 14 (`Step::Inherited`), so no HELLO is sent,
+  the kernel keeps the dead driver's pins quarantined, and devmgr's budget
+  counts the try. Otherwise the first pin re-enables bus mastering, the
+  HELLOs publish `renderD128` and `card0` again, and the chardev core's
+  accepted HELLO gives the dead driver's quarantined pins back.
+* **The dead driver's GGTT entries** (condition 2): `GgttSpace` does not
+  clear the window, so entries the dead driver wrote and the new one has
+  not yet rewritten point at frames given back at that HELLO. Nothing
+  reaches them: Gen12 user batches run from their PPGTT and cannot address
+  the GGTT, the engines that ran the dead driver's contexts were reset, the
+  new driver's own objects are bound at entries it writes before it uses
+  them, and the lit plane is the firmware's, outside the window. Under K2
+  the IOMMU would stop a late access anyway.
 * **Clients** of the old node get `ENODEV` on every call and Mesa reports
   `VK_ERROR_DEVICE_LOST` at the next submit or wait. A program that opens
   the node again gets the new driver. hyprix finds `card0` again as it does
@@ -1258,7 +1273,8 @@ to recreate their device (DXVK and browsers are) do.
 
 ### 11.3 The box run
 
-Under `ferrix.intelgpu` with the fallback (§11.2), Endfield running:
+Under `ferrix.intelgpu` with K2 taken (dmar0's line says it translates)
+and the fallback (§11.2), Endfield running:
 
 ```
 grep -l '^intel$' /proc/[0-9]*/comm     # /proc/<pid>/comm: the driver's pid
@@ -1269,7 +1285,9 @@ The kernel log wants, in order: `devmgr   the driver of 0x00000010 ended
 with status 137; the device is quiesced`; `devmgr   the driver of
 0x00000010 was started again and published (restart 1)`; `intel: rcs0 was
 a previous driver's (status page 0x…); reset alone before bring-up: done`
-(and `bcs0` likewise if it ran); `intel: back end up in … ms`; `intel:
+(and `bcs0` likewise if it ran; `NOT reset` cannot appear: such an engine
+stops the driver with `could not be reset` and status 14, and devmgr tries
+again up to eight times); `intel: back end up in … ms`; `intel:
 render node published (1 node)`; `display  card0 is gone` and then `intel:
 card0 published: copies frames into the lit …`; then hyprix's
 `Virtual-1: the card is back; drawing on it again` (the name is the
@@ -1277,16 +1295,21 @@ screen's), and sessiond at most one `refused` line and its count. Endfield is ex
 lost and either recreate it (DXVK does for `DXGI_ERROR_DEVICE_REMOVED` if
 the game handles it) or exit. Before the kill and 30 s after it, `cat
 /proc/loadavg` and one `top -b -n1` (or `/proc/[0-9]*/stat`'s utime and
-stime twice, 5 s apart) say what, if anything, spins (§11.1). What only the
-box can show: that an engine reset stops a dead driver's contexts (`NOT
-reset` in the line above means it did not), that the plane comes back once
+stime twice, 5 s apart) say what, if anything, spins (§11.1). No `DMAR`
+fault line may follow the restart. What only the box can show: that an
+engine reset stops a dead driver's contexts, that the plane comes back once
 bus mastering is on again, and how long the stall is.
 
 ### 11.4 Where it stands
 
 2026-10-22, branch `gpu-restart`: §11.2 built and gated on QEMU
-(`test-restart --boot intel` passed); no kernel line changed. The box run
-(§11.3) is owed. The opaque crash mode is a plan (§12).
+(`test-restart --boot intel` passed); no kernel line changed. The
+consultant's verdict is OK IF (1) to (6), ledger 3148, folded in above.
+The per-engine reset has been shown on the host model and on `intel-fake`
+only, which has no GT: the box run (§11.3, BACKLOG P1 `intel-restart-box`)
+is owed, and must show K2 taken, no DMAR fault after the restart, `done`
+for each inherited engine, and the stall measured. The opaque crash mode
+is a plan (§12).
 
 ## Appendix A: the probe that printed the numbers
 

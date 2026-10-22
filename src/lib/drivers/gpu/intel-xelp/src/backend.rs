@@ -99,6 +99,10 @@ pub enum Error {
     Banned,
     /// The GT could not be brought up; the step that failed.
     Init(&'static str),
+    /// An engine a previous driver left running could not be reset
+    /// ([`XelpBackend::new`]): nothing may be brought up, and no HELLO
+    /// sent, while it may still run the dead driver's contexts.
+    Inherited,
 }
 
 /// A buffer of the driver's own in the GGTT: pages contiguous in the
@@ -374,9 +378,9 @@ pub struct XelpBackend<P: Platform> {
     watched: bool,
     /// What [`XelpBackend::new`] found of a driver before this one: each
     /// engine that was pointed at a status page and so reset alone before
-    /// bring-up, with how its reset went (`docs/INTEL-GPU.md` §10, a driver
-    /// started again).
-    inherited: [Option<Inherited>; MAX_ENGINES],
+    /// bring-up, with how its reset went (`docs/INTEL-GPU.md` §11, a driver
+    /// started again), in [`ENGINES`]' order.
+    inherited: [Option<Inherited>; ENGINES.len()],
 }
 
 /// An engine a previous driver had brought up, found at [`XelpBackend::new`]
@@ -499,7 +503,18 @@ impl<P: Platform> XelpBackend<P> {
         identity: Identity,
     ) -> Result<Self, Error> {
         let platform = RefCell::new(platform);
-        let inherited = Self::reset_inherited(&platform, engines);
+        let inherited = Self::reset_inherited(&platform);
+        // Fail closed: an engine this driver can reset that did not reset
+        // may still run the dead driver's contexts, whose pages the kernel
+        // gives back at this driver's HELLO. So no HELLO: the caller exits,
+        // the kernel keeps the quarantine, and devmgr's budget applies.
+        if inherited
+            .iter()
+            .flatten()
+            .any(|found| found.report.is_some_and(|report| !report.is_reset()))
+        {
+            return Err(Error::Inherited);
+        }
         {
             let mut regs = Regs(&platform);
             gt::setup_private_pat(&mut regs);
@@ -567,30 +582,32 @@ impl<P: Platform> XelpBackend<P> {
         Ok(backend)
     }
 
-    /// Each of the first `engines` engines a previous driver left pointed at
-    /// a status page, reset by its domain alone (`intel_engine_reset`), as
-    /// i915's `intel_gt_sanitize` resets what a previous driver left running
-    /// before it takes the GT -- but by engine, never `GRDOM_FULL`, so the
-    /// display keeps its plane. An engine at a cold boot has `RING_HWS_PGA`
-    /// 0 and is not touched, so the first start is as it was.
-    fn reset_inherited(platform: &RefCell<P>, engines: usize) -> [Option<Inherited>; MAX_ENGINES] {
-        let mut inherited = [None; MAX_ENGINES];
-        for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
+    /// Each engine a previous driver left pointed at a status page, reset by
+    /// its domain alone (`intel_engine_reset`), as i915's
+    /// `intel_gt_sanitize` resets what a previous driver left running before
+    /// it takes the GT -- but by engine, never `GRDOM_FULL`, so the display
+    /// keeps its plane. Every engine of [`ENGINES`] is looked at, not only
+    /// those this boot brings up. An engine at a cold boot has
+    /// `RING_HWS_PGA` 0 and is not touched, so the first start is as it
+    /// was. One with no reset domain here (a video engine) has no report:
+    /// this driver never brings one up, so no predecessor of its ran
+    /// contexts there.
+    fn reset_inherited(platform: &RefCell<P>) -> [Option<Inherited>; ENGINES.len()] {
+        let mut inherited = [None; ENGINES.len()];
+        for (slot, info) in inherited.iter_mut().zip(ENGINES.iter()) {
             let hws_pga = Regs(platform).read32(gt::hws_pga_offset(info.mmio_base));
             if hws_pga == 0 {
                 continue;
             }
             let report = reset::intel_engine_reset(&mut Regs(platform), &mut Time(platform), info);
-            if let Some(entry) = inherited.get_mut(slot) {
-                *entry = Some(Inherited { hws_pga, report });
-            }
+            *slot = Some(Inherited { hws_pga, report });
         }
         inherited
     }
 
     /// What [`XelpBackend::new`] found of a previous driver, per engine.
     #[must_use]
-    pub const fn inherited(&self) -> &[Option<Inherited>; MAX_ENGINES] {
+    pub const fn inherited(&self) -> &[Option<Inherited>; ENGINES.len()] {
         &self.inherited
     }
 
@@ -1381,7 +1398,7 @@ pub const fn errno(error: Error) -> ferrix_linux_abi::errno::Errno {
         Error::NoMemory => Errno::ENOMEM,
         Error::Quota => Errno::EDQUOT,
         Error::Invalid => Errno::EINVAL,
-        Error::Banned | Error::Init(_) => Errno::EIO,
+        Error::Banned | Error::Init(_) | Error::Inherited => Errno::EIO,
     }
 }
 

@@ -318,7 +318,14 @@ the element's.
 
 A dead driver's pins on a translated domain are not given back until its
 device's next driver has reset it and been accepted; until then they stay
-mapped, their frames held and charged to no job. devmgr starts no driver again
+mapped, their frames held and charged to no job. For the Intel integrated
+GPU (`00:02.0` under `ferrix.intelgpu`), whose display must not be reset,
+"reset it" means that the next driver resets by its domain alone each
+engine a predecessor left pointed at a status page (`RING_HWS_PGA` not 0),
+never the GT (`GRDOM_FULL`) and never the function (FLR, which the kernel
+refuses there, K4), and sends no HELLO if any such reset fails
+(`docs/INTEL-GPU.md` §11.2); that is the driver's property, outside the
+element. devmgr starts no driver again
 after one that died before publishing, or once a device's restart budget is
 spent, so a device keeps at most two drivers' pins that way. An explicit rebind
 of a device whose drivers die before publishing keeps one more driver's pins

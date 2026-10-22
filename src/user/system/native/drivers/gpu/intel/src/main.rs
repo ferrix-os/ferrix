@@ -123,6 +123,11 @@ pub(crate) enum Step {
     Backend = 12,
     /// M3: the render node was refused or serving stopped (said).
     Serve = 13,
+    /// An engine a dead driver left running could not be reset. Unlike every
+    /// other step after the device, an exit status: no HELLO may be sent, so
+    /// the kernel keeps the dead driver's pins quarantined, and devmgr's
+    /// restart budget counts the try (`docs/INTEL-GPU.md` §11.2).
+    Inherited = 14,
 }
 
 impl From<steps::Stopped> for Step {
@@ -431,9 +436,37 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     }
     match serve_gpu(&device, info.location, info.device_id, done, &steps) {
         Ok(never) => match never {},
+        Err(Step::Inherited) => Err(Step::Inherited),
         Err(step) => {
             stopped(step);
             stay(&time)
+        }
+    }
+}
+
+/// Say each engine a previous driver had brought up, and whether its reset
+/// before this driver's bring-up worked (`XelpBackend::new`; one that did
+/// not refuses the bring-up, so only `done` and `no reset domain` reach
+/// here).
+fn say_inherited(inherited: &[Option<ferrix_intel_xelp::backend::Inherited>]) {
+    for (info, found) in ENGINES.iter().zip(inherited) {
+        if let Some(found) = found {
+            let name = match info.id {
+                engine::RCS0 => "rcs0",
+                engine::BCS0 => "bcs0",
+                engine::VCS0 => "vcs0",
+                engine::VCS2 => "vcs2",
+                _ => "vecs0",
+            };
+            say(format_args!(
+                "intel: {name} was a previous driver's (status page {:#x}); reset alone before bring-up: {}",
+                found.hws_pga,
+                match found.report {
+                    Some(report) if report.is_reset() => "done",
+                    Some(_) => "NOT reset",
+                    None => "no reset domain here, never this driver's",
+                }
+            ));
         }
     }
 }
@@ -528,24 +561,18 @@ fn serve_gpu(
         identity,
     )
     .map_err(|error| {
+        if error == ferrix_intel_xelp::backend::Error::Inherited {
+            say(format_args!(
+                "intel: an engine a dead driver left running could not be reset: no render node and no card, and the driver exits so the kernel keeps the dead driver's pins"
+            ));
+            return Step::Inherited;
+        }
         say(format_args!(
             "intel: the back end did not come up: {error:?}"
         ));
         Step::Backend
     })?;
-    for (engine, found) in ["rcs0", "bcs0"].iter().zip(backend.inherited()) {
-        if let Some(found) = found {
-            say(format_args!(
-                "intel: {engine} was a previous driver's (status page {:#x}); reset alone before bring-up: {}",
-                found.hws_pga,
-                if found.report.is_some_and(|report| report.is_reset()) {
-                    "done"
-                } else {
-                    "NOT reset"
-                }
-            ));
-        }
-    }
+    say_inherited(backend.inherited());
     let facts = *backend.facts();
     say(format_args!(
         "intel: back end up in {} ms: GGTT window {start:#x}, {} engines, {} EUs, {} MiB of system memory",
