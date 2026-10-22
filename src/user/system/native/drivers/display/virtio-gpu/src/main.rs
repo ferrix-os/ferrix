@@ -33,11 +33,11 @@ use core::ptr;
 use core::sync::atomic::{Ordering, fence};
 
 use ferrix_blkring::control::{Block as StartBlock, Message as StartMessage, START_BYTES, Start};
+use ferrix_display_modes::{ModeList, add_virtual, edid_modes};
 use ferrix_displayctl::message::{
     Attach, Hello, MAX_BUFFER_PAGES as MAX_PAGES, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message,
     PORT_RIGHTS, ScanoutMode, Timings, VERSION,
 };
-use ferrix_display_modes::{ModeList, add_virtual, edid_modes};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Requested;
 use ferrix_native_abi::signals::Signals;

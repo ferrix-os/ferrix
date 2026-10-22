@@ -85,11 +85,11 @@ pub(crate) struct ModesReport {
 ///
 /// What was not true.
 pub(crate) fn modes() -> Result<ModesReport, &'static str> {
+    use ferrix_displayctl::listed::listed_match;
     use ferrix_displayctl::message::{
         Hello, Listed, MAX_SCANOUTS, MODES_A_PAGE, Message, ModePage, Refusal, ScanoutMode, Timing,
         Timings, VERSION,
     };
-    use ferrix_displayctl::listed::listed_match;
     use ferrix_displayctl::session::{Event, Session};
 
     let mut report = ModesReport::default();
@@ -134,7 +134,12 @@ pub(crate) fn modes() -> Result<ModesReport, &'static str> {
         return Err("SETCRTC took a listed size at a refresh nobody listed");
     }
     report.matched += 1;
-    if listed_match(&list, &super::drm::mode_info(&at(800, 600, 35_000, false).timing)).is_some() {
+    if listed_match(
+        &list,
+        &super::drm::mode_info(&at(800, 600, 35_000, false).timing),
+    )
+    .is_some()
+    {
         return Err("SETCRTC took a size nobody listed");
     }
     report.matched += 1;
@@ -166,7 +171,12 @@ pub(crate) fn modes() -> Result<ModesReport, &'static str> {
         let mut entries = [Listed::default(); MODES_A_PAGE];
         for (index, entry) in entries.iter_mut().take(count as usize).enumerate() {
             let line = first + u32::try_from(index).unwrap_or(0);
-            *entry = at(640, 400 + u16::try_from(line).unwrap_or(0), 23_000, line == 0);
+            *entry = at(
+                640,
+                400 + u16::try_from(line).unwrap_or(0),
+                23_000,
+                line == 0,
+            );
         }
         ModePage {
             scanout: 0,
