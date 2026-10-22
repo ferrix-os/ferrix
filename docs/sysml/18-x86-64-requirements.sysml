@@ -991,10 +991,10 @@ package FerrixX8664Requirements {
             attribute :>> statement = "power_set shall refuse with INVALID_ARGS and write nothing an
                 eighths value below firmware's own 0x601 bits 12:0 or above the
                 lower of the row's ceiling and firmware's plus the row's raise;
-                for the N150's row the ceiling is 32 A and the raise 7 A.";
-            attribute :>> criterion = "Stage 3: over firmware's 25 A, 25 and 32 A are admitted, 24.875
-                and 32.125 A refused; the highest over 31.25 A is 32 A, over 12.5
-                A 19.5 A. Negative control: the ceiling removed panics stage 3.";
+                for the N150's row the ceiling is 48 A and the raise 23 A.";
+            attribute :>> criterion = "Stage 3: over firmware's 25 A, 25 and 48 A are admitted, 24.875
+                and 48.125 A refused; the highest over 31.25 A is 48 A, over 12.5
+                A 35.5 A. Negative control: the ceiling removed panics stage 3.";
             attribute :>> parent = "H.DEV.5";
             attribute :>> unit = ("arch::x86_64::powerctl::logic::admitted",
                 "arch::x86_64::powerctl::logic::highest",

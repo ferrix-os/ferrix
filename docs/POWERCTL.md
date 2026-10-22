@@ -45,8 +45,10 @@ hangs, or the kernel's own backstop trips.
 
 This design gives the driver no register `ferrix.vrcurrent` did not
 already write, on no processor it did not write it on, and no higher
-value: 0x601 bits 12:0 on Intel family 6 model 0xBE, at most 32 A and 7 A
-above firmware's, the customer's authorisation for `ferrix.vrcurrent`.
+value -- before this branch's last commit: 0x601 bits 12:0 on Intel family
+6 model 0xBE, at most 32 A and 7 A above firmware's, the customer's
+authorisation for `ferrix.vrcurrent`. The last commit raises the ceiling
+to 48 A and 23 A above firmware's, which (a) below needs.
 Two things the consultant found it does add (ledger 3130, condition 1),
 which need the customer's own words, with their date, here and in the take
 message before it lands:
@@ -55,9 +57,9 @@ message before it lands:
   `ferrix.powerctl` and its driver stay in the tree;
 * **(a) a higher ceiling**, if the customer wants the 44 A step of §12:
   48 A absolute and 23 A above firmware's is one constant in the model
-  table (`logic::TABLE`). Until those words are on record the table stays
-  at 32 A / 7 A; the last commit of the branch that raises it is separate,
-  so it can be dropped.
+  table (`logic::TABLE`). The branch's last commit is that raise, alone,
+  so that it can be dropped: without the customer's words the branch lands
+  without it, at 32 A / 7 A.
 
 Version 1's package power limits (0x610, condition 1 (b)) are not in
 version 2: the box is held by amps, not by PL1/PL2, and the slim kernel

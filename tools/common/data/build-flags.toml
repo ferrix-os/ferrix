@@ -217,7 +217,7 @@ why = "seconds between ferrix.msrlog's reads, 0 to 3600, 0 for once; 5 without i
 
 [boot_options."ferrix.powerctl"]
 kind = "flag"
-why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150, one package), ignored on aarch64 and armv7a: publishes the power node, whose driver may set a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, through typed calls the kernel bounds by its model table (firmware's own limit up to 32 A, at most 7 A above firmware's), with firmware's value restored when the holder goes, its lease lapses, its backstop trips at 90 C or a thermal/PROCHOT/critical bit, a write does not read back, and on power-off, reset and panic (arch/x86_64/powerctl.rs, docs/POWERCTL.md, L.x86_64.194-209, L.device.51-53); never in a configuration a claim is made of"
+why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150, one package), ignored on aarch64 and armv7a: publishes the power node, whose driver may set a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, through typed calls the kernel bounds by its model table (firmware's own limit up to 48 A, at most 23 A above firmware's), with firmware's value restored when the holder goes, its lease lapses, its backstop trips at 90 C or a thermal/PROCHOT/critical bit, a write does not read back, and on power-off, reset and panic (arch/x86_64/powerctl.rs, docs/POWERCTL.md, L.x86_64.194-209, L.device.51-53); never in a configuration a claim is made of"
 
 [boot_options."ferrix.powerctl.fake"]
 kind = "flag"

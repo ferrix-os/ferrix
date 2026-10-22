@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "5bd77285df0c669e4452c90152a6013e6a31c1c7a0c9806cd26a06580ec9d9e2",
+  "digest": "441752f62e65269356b623bb46c48eaa13543e1445d0131e7848481cb242ca03",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -56643,7 +56643,7 @@
                   "qualifiedName": "FerrixX8664Requirements::Speculation::powerSetWithinTheRow",
                   "kind": "attribute",
                   "redefines": "statement",
-                  "value": "\"power_set shall refuse with INVALID_ARGS and write nothing an eighths value below firmware's own 0x601 bits 12:0 or above the lower of the row's ceiling and firmware's plus the row's raise; for the N150's row the ceiling is 32 A and the raise 7 A.\"",
+                  "value": "\"power_set shall refuse with INVALID_ARGS and write nothing an eighths value below firmware's own 0x601 bits 12:0 or above the lower of the row's ceiling and firmware's plus the row's raise; for the N150's row the ceiling is 48 A and the raise 23 A.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 994
@@ -56654,7 +56654,7 @@
                   "qualifiedName": "FerrixX8664Requirements::Speculation::powerSetWithinTheRow",
                   "kind": "attribute",
                   "redefines": "criterion",
-                  "value": "\"Stage 3: over firmware's 25 A, 25 and 32 A are admitted, 24.875 and 32.125 A refused; the highest over 31.25 A is 32 A, over 12.5 A 19.5 A. Negative control: the ceiling removed panics stage 3.\"",
+                  "value": "\"Stage 3: over firmware's 25 A, 25 and 48 A are admitted, 24.875 and 48.125 A refused; the highest over 31.25 A is 48 A, over 12.5 A 35.5 A. Negative control: the ceiling removed panics stage 3.\"",
                   "source": {
                     "file": "docs/sysml/18-x86-64-requirements.sysml",
                     "line": 997

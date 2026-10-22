@@ -658,7 +658,7 @@ The exception is the power core (`docs/POWERCTL.md`, L.x86_64.194-207,
 L.device.51-53), present only under the boot word `ferrix.powerctl`, on
 the N150 alone (Intel family 6 model 0xBE, one package). Its driver may set
 `MSR_VR_CURRENT_CONFIG`'s current limit, through typed calls, between
-firmware's own value and the model table's ceiling: 32 A, at most 7 A above
+firmware's own value and the model table's ceiling: 48 A, at most 23 A above
 firmware's, constants of the source that no word, driver or call can widen.
 More current through the voltage regulator is more heat than firmware
 allowed, and the hazard is a processor or regulator run past what its

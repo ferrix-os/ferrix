@@ -95,11 +95,11 @@ fn decided() -> Result<(), &'static str> {
         return Err("the power probe published where it should have refused");
     }
     if !logic::admitted(row(), 0xc8, 200)
-        || !logic::admitted(row(), 0xc8, 256)
-        || logic::admitted(row(), 0xc8, 257)
+        || !logic::admitted(row(), 0xc8, 384)
+        || logic::admitted(row(), 0xc8, 385)
         || logic::admitted(row(), 0xc8, 199)
-        || logic::highest(row(), 250) != 256
-        || logic::highest(row(), 100) != 156
+        || logic::highest(row(), 250) != 384
+        || logic::highest(row(), 100) != 284
     {
         return Err("a power request outside the row was admitted");
     }
@@ -395,7 +395,7 @@ fn measured() -> Result<(), &'static str> {
     let all = (1 << abi::POWER_READ_VR) | (((1 << 9) - 1) << abi::POWER_READ_FIRST);
     if words[abi::POWER_READ_PRESENT] != all
         || words[abi::POWER_READ_FIRMWARE] != 0xc8
-        || words[abi::POWER_READ_CEILING] != 256
+        || words[abi::POWER_READ_CEILING] != 384
         || words[abi::POWER_READ_VR] != 0xc8
         || words[abi::POWER_READ_FIRST] != 105 << 16
     {
