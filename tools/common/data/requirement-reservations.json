@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.device.50"],
+      "owner": "spawn-4m",
+      "branch": "spawn-4m",
+      "date": "2026-10-22",
+      "purpose": "process_create reads an image VMO whole, up to MAX_IMAGE_BYTES, whatever the heap's largest block, and loads it (consultant OK IF, ledger 3045, condition 1; parent H.BOOT.15)"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
