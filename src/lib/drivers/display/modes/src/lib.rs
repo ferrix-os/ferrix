@@ -295,13 +295,36 @@ pub fn add_virtual(list: &mut ModeList, width: u32, height: u32, refresh_mhz: u3
     }
 }
 
+/// The sizes a card that cannot retime its display offers below its own,
+/// shown scaled: the common desktop sizes of 4:3, 5:4, 16:10 and 16:9 down
+/// to VGA's, as Linux's `drm_add_modes_noedid` offers a panel the DMT
+/// sizes that fit it.
+pub const SCALED_SIZES: [(u32, u32); 16] = [
+    (3840, 2160),
+    (2560, 1600),
+    (2560, 1440),
+    (1920, 1200),
+    (1920, 1080),
+    (1680, 1050),
+    (1600, 900),
+    (1440, 900),
+    (1366, 768),
+    (1280, 1024),
+    (1280, 800),
+    (1280, 720),
+    (1024, 768),
+    (1024, 600),
+    (800, 600),
+    (640, 480),
+];
+
 /// What a card that cannot retime its display lists: the mode it runs,
-/// preferred, and each of [`STANDARD_SIZES`] that fits inside it, at the
+/// preferred, and each of [`SCALED_SIZES`] that fits inside it, at the
 /// same refresh, which it shows by scaling (`docs/DISPLAY.md` §9.2).
 pub fn add_scaled(list: &mut ModeList, running: Timing) {
     let _ = list.add(running, true);
     let refresh = u32::try_from(running.refresh_mhz()).unwrap_or(60_000);
-    for (wide, tall) in STANDARD_SIZES {
+    for (wide, tall) in SCALED_SIZES {
         let inside = wide <= u32::from(running.hdisplay)
             && tall <= u32::from(running.vdisplay)
             && (wide, tall) != (u32::from(running.hdisplay), u32::from(running.vdisplay));
