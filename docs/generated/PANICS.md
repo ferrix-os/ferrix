@@ -2956,13 +2956,13 @@ refresh, to refuse a listed size at a refresh nobody listed and a size nobody
 listed, a list sent in two pages to be taken, and a list with two preferred
 modes to be refused.
 
-1. `ferrix_displayctl::modes::listed_match` was widened to take a size or
+1. `ferrix_displayctl::listed::listed_match` was widened to take a size or
    refresh no entry has.
 2. The session's page checks (`Session::receive` of MODE_LIST) stopped counting
    preferred entries or tracking the page order.
 
 See: src/kernel/src/interfaces/display/check.rs;
-src/lib/proto/displayctl/src/modes.rs; src/lib/proto/displayctl/src/session.rs;
+src/lib/proto/displayctl/src/listed.rs; src/lib/proto/displayctl/src/session.rs;
 docs/DISPLAY.md section 9.
 
 <a id="fx-1101"></a>
