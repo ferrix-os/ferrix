@@ -358,6 +358,28 @@ struct State {
 pub(crate) const MAX_OPENS: usize = 8;
 
 impl State {
+    /// A new card's state: `session` from its HELLO, `heads` connectors,
+    /// nothing attached, shown or listed yet.
+    fn new(session: Session, heads: usize) -> Self {
+        Self {
+            session,
+            events: Vec::new(),
+            gone: false,
+            next_buffer: 1,
+            taken: 0,
+            ranges: Vec::new(),
+            kept: Vec::new(),
+            orphans: Vec::new(),
+            unwanted: Vec::new(),
+            scanout_off: false,
+            moves: [None; MAX_SCANOUTS],
+            master: None,
+            opens: 0,
+            next_open: 1,
+            lists: vec![Vec::new(); heads],
+        }
+    }
+
     /// What the budget holds now, each buffer counted by whether its open
     /// is master *now*: walked over at most the session's 64 buffers, under
     /// the state lock (the consultant's condition 4, ledger 2327).
@@ -1554,23 +1576,7 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
         modes_changed: AtomicU64::new(0),
         scanouts: usize::from(hello.scanouts),
         control: Arc::clone(&start.control),
-        state: SpinLock::new(State {
-            session,
-            events: Vec::new(),
-            gone: false,
-            next_buffer: 1,
-            taken: 0,
-            ranges: Vec::new(),
-            kept: Vec::new(),
-            orphans: Vec::new(),
-            unwanted: Vec::new(),
-            scanout_off: false,
-            moves: [None; MAX_SCANOUTS],
-            master: None,
-            opens: 0,
-            next_open: 1,
-            lists: vec![Vec::new(); heads],
-        }),
+        state: SpinLock::new(State::new(session, heads)),
         changed: Arc::new(WaitQueue::new()),
         modeset: SleepLock::new((), &SchedParker),
         dma: start.device.dma_shape(),

@@ -120,11 +120,7 @@ pub(crate) struct ModesReport {
 /// What was not true.
 pub(crate) fn modes() -> Result<ModesReport, &'static str> {
     use ferrix_displayctl::listed::listed_match;
-    use ferrix_displayctl::message::{
-        Hello, Listed, MAX_SCANOUTS, MODES_A_PAGE, Message, ModePage, Refusal, ScanoutMode, Timing,
-        Timings, VERSION,
-    };
-    use ferrix_displayctl::session::{Event, Session};
+    use ferrix_displayctl::message::{Listed, Timing};
 
     let mut report = ModesReport::default();
     // Made-up entries, as a driver lists them: a mode of `width` by
@@ -178,6 +174,22 @@ pub(crate) fn modes() -> Result<ModesReport, &'static str> {
     }
     report.matched += 1;
 
+    report.pages = pages(&at)?;
+    Ok(report)
+}
+
+/// [`modes`]'s session half: a list in two pages taken, and a finished list
+/// with two preferred entries refused. How many pages were judged.
+fn pages(
+    at: &dyn Fn(u16, u16, u32, bool) -> ferrix_displayctl::message::Listed,
+) -> Result<usize, &'static str> {
+    use ferrix_displayctl::message::{
+        Hello, Listed, MAX_SCANOUTS, MODES_A_PAGE, Message, ModePage, Refusal, ScanoutMode,
+        Timings, VERSION,
+    };
+    use ferrix_displayctl::session::{Event, Session};
+
+    let mut report = ModesReport::default();
     let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
     if let Some(first) = modes.first_mut() {
         *first = ScanoutMode {
@@ -247,5 +259,5 @@ pub(crate) fn modes() -> Result<ModesReport, &'static str> {
         return Err("a list with two preferred modes was taken");
     }
     report.pages += 1;
-    Ok(report)
+    Ok(report.pages)
 }
