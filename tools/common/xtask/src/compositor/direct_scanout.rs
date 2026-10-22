@@ -19,7 +19,10 @@
 //! The negative control (the consultant's condition 8, ledger line 3108)
 //! removes the kernel's accept branch for a chardev dmabuf: the picture is
 //! the same, since hyprix then copies the window, and the boot fails on the
-//! missing line, with hyprix saying why it copies.
+//! missing line, with hyprix saying why it does not show the buffer
+//! directly. The second boot has the window floating at the screen's size
+//! with rounded corners configured, as an X game is on the N150: hyprix
+//! draws it as legacy fullscreen and shows its buffer the same way.
 
 use super::boot::{Wanted, boot_and_dump_carrying};
 use super::{Carried, Programs};
@@ -37,6 +40,21 @@ const EXPECTED: [(&str, &str); 1] = [(
 const CONFIG: &str = "\
 # Carried into the initramfs by `cargo xtask test-compositor`.
 windowrule = fullscreen, match:class ^(rocks.magical.pattern)$
+exec-once = /bin/pattern checkerboard scanout --dmabuf --busy
+";
+
+/// The configuration of the second boot: the same client floating at the
+/// screen's size and place, as an X game is on the N150 (yserver passes no
+/// `_NET_WM_STATE_FULLSCREEN` on), with rounded corners and shadows that a
+/// window drawn as legacy fullscreen does not have.
+const FLOATING_CONFIG: &str = "\
+# Carried into the initramfs by `cargo xtask test-compositor`.
+decoration {
+    rounding = 10
+}
+windowrule = float, match:class ^(rocks.magical.pattern)$
+windowrule = size 1024 768, match:class ^(rocks.magical.pattern)$
+windowrule = move 0 0, match:class ^(rocks.magical.pattern)$
 exec-once = /bin/pattern checkerboard scanout --dmabuf --busy
 ";
 
@@ -76,6 +94,27 @@ const SAID: [(&str, &str); 5] = [
 ];
 
 pub(super) fn test_direct_scanout(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    run(arch, programs, args, CONFIG, "fullscreen")
+}
+
+/// The same with the window floating at the screen's size: hyprix draws it
+/// as legacy fullscreen (`state::draw::legacy_fullscreen`) and shows its
+/// buffer directly all the same.
+pub(super) fn test_direct_scanout_floating(
+    arch: Arch,
+    programs: &Programs,
+    args: &Args,
+) -> Result<()> {
+    run(
+        arch,
+        programs,
+        args,
+        FLOATING_CONFIG,
+        "floating at the screen's size",
+    )
+}
+
+fn run(arch: Arch, programs: &Programs, args: &Args, config: &str, how: &str) -> Result<()> {
     if arch != Arch::X86_64 {
         println!("  {arch}: the firmware framebuffer is lent on x86-64 alone; skipped");
         return Ok(());
@@ -87,7 +126,7 @@ pub(super) fn test_direct_scanout(arch: Arch, programs: &Programs, args: &Args) 
     let (screens, said) = boot_and_dump_carrying(
         arch,
         programs,
-        CONFIG,
+        config,
         (Carried::none(), Some(OPTION)),
         &Wanted {
             states: &EXPECTED,
@@ -107,7 +146,7 @@ pub(super) fn test_direct_scanout(arch: Arch, programs: &Programs, args: &Args) 
         )));
     };
     for said in said.iter().filter(|said| {
-        said.contains("hyprix: Virtual-1: copying the fullscreen window")
+        said.contains("hyprix: Virtual-1: not scanning out directly")
             || said.contains("hyprix: Virtual-1: compositing again")
             || said.contains("hyprix: direct scanout frames")
             || said.contains("hyprix: frames ")
@@ -124,8 +163,8 @@ pub(super) fn test_direct_scanout(arch: Arch, programs: &Programs, args: &Args) 
         }
     }
     println!(
-        "  {arch}: a client's own buffer shown directly on a copying card, every one of {} \
-         pixels the client's",
+        "  {arch}: a client's own buffer, {how}, shown directly on a copying card, every one \
+         of {} pixels the client's",
         screen.width * screen.height
     );
     Ok(())

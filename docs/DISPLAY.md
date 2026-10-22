@@ -1517,11 +1517,27 @@ What it says (the box's log is read for these):
 * `hyprix: Virtual-1: scanning out client <pid>'s surface <id> (<w>x<h>)
   directly` when it starts;
 * `hyprix: Virtual-1: compositing again: <why>` when it stops, and
-  `hyprix: Virtual-1: copying the fullscreen window: <why>` once a reason
-  while one window is alone but copied (`the pointer is drawn into the
-  frame`, `the card will not show a client's buffer (...)`, ...);
+  `hyprix: Virtual-1: not scanning out directly: <why>` while it does not,
+  when the reason changes and again every minute it stands (the box's ring
+  is short): `no window covers the screen (...)`, `the window covering the
+  screen (...) is not fullscreen (...)`, `N window(s) over the fullscreen
+  one (...)`, `the fullscreen window's corners are rounded`, `the pointer is
+  drawn into the frame`, `the window's buffer is shared memory, not a
+  dmabuf`, `the card will not show a client's buffer (...)`, ...;
 * `hyprix: direct scanout frames N of the last M` once a second, and the
   frame line's `largest surface WxH xrgb scanout` with no `surface` phase.
+
+**Legacy fullscreen (2026-10-23).** On the box it never engaged: Endfield's
+window was floating at 0,0 1920x1080, not fullscreen, because yserver does
+not pass `_NET_WM_STATE_FULLSCREEN` on as `xdg_toplevel.set_fullscreen`, so
+the window had the configuration's rounding, border and shadow and
+`compositor_render::alone` refused it. hyprix now draws a floating window
+whose client area is exactly the screen as a fullscreen one -- no border, no
+rounding, no shadow, nothing under it drawn -- as Mutter does for an X
+window sized to its monitor ("legacy fullscreen"); the layout, the input
+and `hyprctl` still call it floating (`state::draw::legacy_fullscreen`).
+Passing the state on in yserver is the proper fix, and Hyprland has it
+through XWayland.
 
 **The test.** `cargo xtask test-compositor --boot direct-scanout`, x86-64:
 the firmware-screen machine (efifb's copying card) with the Intel stand-in
@@ -1534,7 +1550,11 @@ scanning-out line and the VGA's screendump equal to
 Negative control (condition 8): the kernel's accept branch removed, the
 picture is the same (hyprix copies) and the boot fails on the missing line,
 hyprix saying `the card will not show a client's buffer (Invalid argument
-...)`.
+...)`. Its second boot, `direct-scanout-floating`, has the window floating
+at the screen's size by window rules, with `decoration:rounding = 10`, and
+requires the same line and picture; with legacy fullscreen taken out it
+fails, hyprix saying the covering window `is not fullscreen (floating,
+border ...)`.
 
 **Measured in QEMU** (KVM, 1024x768, 29 one-second reports each; QEMU's
 memory says nothing about the N150's): all of hyprix's frame took 472 us a

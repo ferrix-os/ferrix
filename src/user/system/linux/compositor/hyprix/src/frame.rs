@@ -421,13 +421,23 @@ fn direct(
     layers: &[Placed],
     damage: &Damage,
 ) -> bool {
-    if target.gpu.is_some()
-        || target.transform != Transform::Normal
-        || (target.scale - 1.0).abs() > f64::EPSILON
-        || target.gamma.is_some()
-        || target.overlay.is_some()
-        || target.drag_icon.is_some()
-    {
+    let refused = if target.gpu.is_some() {
+        Some("the frame is drawn on a GPU")
+    } else if target.transform != Transform::Normal {
+        Some("the monitor is turned")
+    } else if (target.scale - 1.0).abs() > f64::EPSILON {
+        Some("the monitor is scaled")
+    } else if target.gamma.is_some() {
+        Some("a night-light's ramps are applied")
+    } else if target.overlay.is_some() {
+        Some("debug:overlay is drawn")
+    } else if target.drag_icon.is_some() {
+        Some("a drag is carried")
+    } else {
+        None
+    };
+    if let Some(why) = refused {
+        target.not_scanned = Some(why.to_owned());
         return false;
     }
     let scene = Scene {
@@ -459,6 +469,15 @@ fn direct(
         &target.present,
         target.canvas.bounds(),
     ) else {
+        target.not_scanned = compositor_render::why_not_alone(
+            output,
+            target.origin,
+            &styles,
+            &surfaces,
+            &drawn,
+            &target.present,
+            target.canvas.bounds(),
+        );
         return false;
     };
     let (width, height) = target.backend.size();

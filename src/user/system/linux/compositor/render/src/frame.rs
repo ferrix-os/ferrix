@@ -910,6 +910,112 @@ pub fn alone<'a>(
         .then_some((rect, surface))
 }
 
+/// Why [`alone`] found no window alone on this frame, in words a log line
+/// can carry: what a person reading a machine's log needs when a game's
+/// frame is still drawn rather than shown directly. The same tests in the
+/// same order as [`alone`] and [`hiding`]; `None` when the frame is alone.
+#[must_use]
+pub fn why_not_alone(
+    output: &MonitorLayout,
+    origin: (i64, i64),
+    styles: &Styles<'_>,
+    surfaces: &BTreeMap<WindowId, Surface<'_>>,
+    layers: &[LayerFrame<'_>],
+    damage: &Damage,
+    bounds: Rect,
+) -> Option<String> {
+    let at = |placed: &Placed| {
+        let rect = placed
+            .rect
+            .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+        format!("{}x{} at {},{}", rect.width, rect.height, rect.x, rect.y)
+    };
+    if layers.iter().any(|layer| layer.above) {
+        return Some("a layer surface is over the windows".to_owned());
+    }
+    let proved = proved_opaque(output, origin, styles, surfaces, damage);
+    let surfaces = proved.as_ref().unwrap_or(surfaces);
+    let covering = output.windows.iter().enumerate().rev().find(|(_, placed)| {
+        let rect = placed
+            .rect
+            .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+        intersect(rect, bounds) == Some(bounds)
+    });
+    let Some((index, placed)) = covering else {
+        return Some(match output.windows.last() {
+            None => "no window".to_owned(),
+            Some(top) => format!(
+                "no window covers the screen (the top one is {}, {})",
+                at(top),
+                if top.floating { "floating" } else { "tiled" }
+            ),
+        });
+    };
+    if !fullscreen(placed) {
+        return Some(format!(
+            "the window covering the screen ({}) is not fullscreen ({}, border {})",
+            at(placed),
+            if placed.fullscreen {
+                "maximized"
+            } else if placed.floating {
+                "floating"
+            } else {
+                "tiled"
+            },
+            placed.border
+        ));
+    }
+    let own = styles.of(placed.window);
+    let opacity = own
+        .opacity
+        .unwrap_or_else(|| styles.base.opacity(placed.focused, placed.fullscreen));
+    let surface = surfaces.get(&placed.window);
+    if !rounding_of(placed, styles).is_square() {
+        return Some("the fullscreen window's corners are rounded".to_owned());
+    }
+    if opacity < 1.0 {
+        return Some(format!(
+            "the fullscreen window is drawn at opacity {opacity}"
+        ));
+    }
+    match surface {
+        None => return Some("the fullscreen window has no buffer".to_owned()),
+        Some(surface) if !own.opaque && surface.format() != Format::Xrgb8888 => {
+            return Some(
+                "the fullscreen window's buffer has alpha that is not all opaque".to_owned(),
+            );
+        }
+        Some(_) => {}
+    }
+    let over = output.windows.len().saturating_sub(index.saturating_add(1));
+    if over > 0 {
+        return Some(format!(
+            "{over} window(s) over the fullscreen one (the top one is {})",
+            output.windows.last().map(at).unwrap_or_default()
+        ));
+    }
+    if (styles.base.dim > 0.0 && !placed.focused && own.dim) || own.dim_around {
+        return Some("the fullscreen window is dimmed".to_owned());
+    }
+    if let Some(surface) = surface {
+        let rect = placed
+            .rect
+            .translate(origin.0.saturating_neg(), origin.1.saturating_neg());
+        if i64::from(surface.width()) != rect.width || i64::from(surface.height()) != rect.height {
+            return Some(format!(
+                "the fullscreen window's buffer is {}x{}, stretched to {}x{}",
+                surface.width(),
+                surface.height(),
+                rect.width,
+                rect.height
+            ));
+        }
+    }
+    alone(output, origin, styles, surfaces, layers, damage, bounds)
+        .is_none()
+        .then(|| "not one window alone".to_owned())
+}
+
 /// Whether `placed` is in the fullscreen mode, not maximized: the layout
 /// gives the first no border and the second the workspace's, which is how
 /// the two are told apart here. (Under `general:border_size = 0` a

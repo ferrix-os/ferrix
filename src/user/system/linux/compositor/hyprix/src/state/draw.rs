@@ -429,7 +429,7 @@ impl Compositor<'_> {
         }
         // Where each window *is*, rather than where the tiling put
         // it.
-        let output = &self.animations.follow(output, with.millis);
+        let output = &legacy_fullscreen(self.animations.follow(output, with.millis), screen.rect);
         let Some(planned) = self.plan_screen(which, output, with, screen_began) else {
             return Ok(());
         };
@@ -659,7 +659,10 @@ impl Compositor<'_> {
         }
         screen.stale = stale;
         // Said when a client's buffer starts being shown directly and when
-        // it stops, with why: what the box's log is read for.
+        // it stops, with why; and, while it is not, why not, each time the
+        // reason changes and again every `RESAY` while it stands: what the
+        // box's log is read for, and its ring is short.
+        let now = Instant::now();
         match (&screen.scanning, scanned) {
             (None, Some(what)) => {
                 (self.report)(&format!(
@@ -670,28 +673,30 @@ impl Compositor<'_> {
                 screen.said_not_scanned = None;
             }
             (Some(_), None) => {
+                let why = not_scanned.unwrap_or_else(|| "nothing to show".to_owned());
                 (self.report)(&format!(
-                    "hyprix: {}: compositing again: {}",
-                    screen.name,
-                    not_scanned
-                        .as_deref()
-                        .unwrap_or("not one fullscreen window drawn alone")
+                    "hyprix: {}: compositing again: {why}",
+                    screen.name
                 ));
                 screen.scanning = None;
+                screen.said_not_scanned = Some((why, now));
             }
             (Some(was), Some(what)) if *was != what => screen.scanning = Some(what),
-            _ => {}
-        }
-        if screen.scanning.is_none()
-            && let Some(why) = not_scanned
-            && screen.said_not_scanned.as_deref() != Some(why.as_str())
-        {
-            // Once a reason, while one window is drawn alone and copied.
-            (self.report)(&format!(
-                "hyprix: {}: copying the fullscreen window: {why}",
-                screen.name
-            ));
-            screen.said_not_scanned = Some(why);
+            (None, None) => {
+                let why = not_scanned.unwrap_or_else(|| "nothing to show".to_owned());
+                let due = screen
+                    .said_not_scanned
+                    .as_ref()
+                    .is_none_or(|(said, at)| *said != why || now.duration_since(*at) >= RESAY);
+                if due {
+                    (self.report)(&format!(
+                        "hyprix: {}: not scanning out directly: {why}",
+                        screen.name
+                    ));
+                    screen.said_not_scanned = Some((why, now));
+                }
+            }
+            (Some(_), Some(_)) => {}
         }
         if with.overlay_on {
             self.overlay
@@ -811,6 +816,37 @@ impl Compositor<'_> {
         }
     }
 }
+
+/// `output` with every floating window whose client area is exactly the
+/// screen drawn as a fullscreen one: no border, no rounding, no shadow, and
+/// nothing under it drawn.
+///
+/// An X client goes fullscreen by setting `_NET_WM_STATE_FULLSCREEN`, which
+/// yserver does not pass on as `xdg_toplevel.set_fullscreen`, or by sizing
+/// an undecorated window to the monitor; either way the window hyprix gets
+/// is a floating one the size of the screen, and a game drawn with rounded
+/// corners, a shadow and the desktop under it is neither what it asked for
+/// nor what it costs to draw. Mutter calls this "legacy fullscreen" and
+/// does the same; Hyprland, which hears `_NET_WM_STATE_FULLSCREEN` through
+/// `XWayland`, has no need to. Only the drawing changes: the layout, the
+/// input and `hyprctl` still say floating. It is what lets a game's own
+/// buffer be shown directly (`crate::frame::scanned_out`).
+fn legacy_fullscreen(
+    mut output: compositor_layout::MonitorLayout,
+    screen: Rect,
+) -> compositor_layout::MonitorLayout {
+    for placed in &mut output.windows {
+        if placed.floating && !placed.fullscreen && placed.rect == screen {
+            placed.fullscreen = true;
+            placed.border = 0;
+        }
+    }
+    output
+}
+
+/// How often a reason for not showing a client's buffer directly is said
+/// again while it stands.
+const RESAY: Duration = Duration::from_secs(60);
 
 /// What every screen of one frame is drawn with.
 struct Drawing<'a> {

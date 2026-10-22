@@ -2856,9 +2856,9 @@ struct Screen {
     /// What the card shows directly, a client's own buffer, since it began
     /// to (`crate::frame::scanned_out`): `None` while frames are drawn here.
     scanning: Option<String>,
-    /// The last reason said for copying a fullscreen window rather than
-    /// showing its buffer directly, so that each is said once.
-    said_not_scanned: Option<String>,
+    /// The last reason said for not showing a client's buffer directly,
+    /// and when: each is said when it changes and every minute it stands.
+    said_not_scanned: Option<(String, Instant)>,
     /// Frames the GPU failed in a row: [`GPU_TRIES`] of them give it up.
     gpu_failures: u32,
     /// When a screen that gave its GPU up looks for one again, and how long

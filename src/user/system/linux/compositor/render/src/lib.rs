@@ -127,6 +127,7 @@ pub use damage::{Damage, intersect};
 pub use frame::{
     LayerFrame, Style, Styles, WindowStyle, alone, covers, damage_between, damage_between_parts,
     damage_between_styled, outer, reads_backdrop, render, render_onto, render_with_layers, scaled,
+    why_not_alone,
 };
 pub use gradient::Gradient;
 pub use paint::Painter;
