@@ -153,7 +153,7 @@ fn main(bootstrap: Bootstrap) -> i32 {
 pub(crate) fn say(arguments: fmt::Arguments<'_>) {
     let mut line = Line::default();
     let _ = line.write_fmt(arguments);
-    let _ = line.write_str("\n");
+    line.end();
     let _ = ferrix_rt::linux::write(2, line.as_bytes());
 }
 
@@ -173,6 +173,20 @@ impl Default for Line {
 }
 
 impl Line {
+    /// End the line with a newline, overwriting the last byte of a
+    /// truncated one so it still ends the line.
+    fn end(&mut self) {
+        if self.len >= self.bytes.len() {
+            self.len = self.bytes.len();
+            if let Some(last) = self.bytes.last_mut() {
+                *last = b'\n';
+            }
+        } else if let Some(slot) = self.bytes.get_mut(self.len) {
+            *slot = b'\n';
+            self.len += 1;
+        }
+    }
+
     fn as_bytes(&self) -> &[u8] {
         self.bytes.get(..self.len).unwrap_or(&[])
     }
