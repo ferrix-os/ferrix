@@ -207,6 +207,7 @@ Done; removed from the backlog on 2026-10-16.
 | Item | Owner | Stage |
 |---|---|---|
 | **Open (2026-10-15, h6-wc).** The N150 run of H6's write-combining window (`docs/DISPLAY.md` §8; the consultant's ledger 1303, condition 9), the two things no emulator can show: (1) the figure, `efifb: full-frame copy 1920x1080: median N us over 8 (write-combining)`, which must be under one 60 Hz frame (16.7 ms); (2) a panic forced under `ferrix.efifb`, drawn visibly over efifb's last frame (the `sfence` before the halt). The boot's `display  firmware framebuffer ... its MTRR type ...` line is recorded with them. Netboot with `--kernel-option ferrix.efifb` and a desktop image; using the board follows the PO's hardware rules | h6-wc, then the PO | 10 |
+| **Open (2026-10-22, vrcurrent).** The N150 run of `ferrix.vrcurrent` (L.x86_64.190-193; the consultant's ledger 3086, conditions 8 and 13), the hardware evidence no emulator can give: boot with `ferrix.msrlog ferrix.msrlog.period=5 ferrix.vrcurrent=27,29,32@<S>` under the BOX-HOLDER protocol and keep the log: the `msr: vrcurrent firmware 25.000 A` line, three `set N A (was M A)` lines, msrlog's `VR current limit` lines following them, the 5 s temperature lines, and either a `reverted to 25.000 A: <reason>` line or the power-off/reset restore line; before the box is used for anything else, see that restore line or power-cycle it. Tie the log to the landing hash | vrcurrent, then the PO | 3 |
 
 ### fl-032
 
