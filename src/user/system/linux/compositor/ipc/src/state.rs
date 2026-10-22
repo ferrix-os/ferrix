@@ -145,6 +145,10 @@ pub struct Monitor {
     pub reserved: (i32, i32, i32, i32),
     /// Whether `dpms` has it on.
     pub dpms: bool,
+    /// Every mode its connector lists, `(width, height, refresh in
+    /// hertz)`, in the connector's order: `availableModes`. Empty for a
+    /// monitor that cannot say, which then lists its own mode.
+    pub modes: Vec<(u32, u32, f64)>,
 }
 
 /// Everything an answer is written from.

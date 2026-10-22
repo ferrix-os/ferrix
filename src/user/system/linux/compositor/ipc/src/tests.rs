@@ -272,6 +272,7 @@ fn snapshot() -> Snapshot {
             serial: String::new(),
             reserved: (0, 0, 0, 0),
             dpms: true,
+            modes: Vec::new(),
         }],
         workspaces: vec![Workspace {
             id: 1,
@@ -2433,4 +2434,37 @@ fn every_window_the_focus_went_to_in_one_pass_is_said() {
         .collect();
     assert_eq!(focused, [Some(1), Some(2)]);
     assert!(watcher.changed_through(&both, &[Some(2)]).is_empty());
+}
+
+#[test]
+fn monitors_list_every_mode_the_connector_has_as_hyprland_prints_them() {
+    let mut listed = snapshot();
+    listed.monitors[0].modes = vec![(1920, 1080, 60.0), (1280, 720, 59.94), (1024, 768, 75.0)];
+    let request = Request::parse("j/monitors");
+    let Reply::Text(answered) = answer(&request, &listed, Version::default()) else {
+        panic!("text");
+    };
+    let value = parse::parse(&answered).expect("JSON");
+    let modes: Vec<&str> = value.items()[0]
+        .get("availableModes")
+        .map(parse::Value::items)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(parse::Value::text)
+        .collect();
+    assert_eq!(
+        modes,
+        ["1920x1080@60.00Hz", "1280x720@59.94Hz", "1024x768@75.00Hz"]
+    );
+    let request = Request::parse("monitors");
+    let Reply::Text(printed) = answer(&request, &listed, Version::default()) else {
+        panic!("text");
+    };
+    assert!(
+        printed
+            .contains("\n\tavailableModes: 1920x1080@60.00Hz 1280x720@59.94Hz 1024x768@75.00Hz \n"),
+        "{printed}"
+    );
+    // A monitor that cannot say lists its own mode.
+    assert!(text("monitors").contains("\tavailableModes: 1024x768@60.00Hz \n"));
 }

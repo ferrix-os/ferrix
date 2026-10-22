@@ -947,14 +947,19 @@ fn a_monitor_line_is_a_name_a_mode_a_place_and_a_scale() {
     assert_eq!(placed.scale, Scale::Auto);
     assert!((placed.scale_factor() - 1.0).abs() < f64::EPSILON);
 
-    // `highres` and `highrr` choose between the modes a connector has, and
-    // virtio-gpu has one: all three words are the preferred mode here.
-    for word in ["preferred", "highres", "highrr"] {
+    // `highres` and `highrr` choose between the modes a connector lists
+    // (`docs/DISPLAY.md` §9.5); `maxwidth` is Hyprland's preferred.
+    for (word, mode) in [
+        ("preferred", Mode::Preferred),
+        ("maxwidth", Mode::Preferred),
+        ("highres", Mode::HighRes),
+        ("highrr", Mode::HighRr),
+    ] {
         assert_eq!(
             MonitorRule::parse(&format!("Virtual-1, {word}, auto, 1"))
                 .unwrap()
                 .mode,
-            Mode::Preferred
+            mode
         );
     }
 }

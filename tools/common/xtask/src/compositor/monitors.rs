@@ -346,6 +346,104 @@ pub(super) fn test_mode(arch: Arch, programs: &Programs, args: &Args) -> Result<
     Ok(())
 }
 
+/// The pictures the modes boot requires, in turn: the card's preferred
+/// 1024x768, then 1920x1080 once `hyprctl keyword monitor` asks for it.
+///
+/// No third picture after the reload: two windows resized at once a second
+/// time show the first window's pixels in the second's place, with or
+/// without a mode change (`docs/BACKLOG.md`, the row filed with this boot),
+/// so the reload's switch is judged by its lines until that is fixed.
+const MODES_EXPECTED: [(&str, &str); 2] = [
+    (
+        "tiled on the card's preferred 1024x768",
+        "src/user/system/linux/compositor/render/tests/data/dwindle-two-clients.xrle",
+    ),
+    (
+        "tiled again on 1920x1080, which `hyprctl keyword monitor` asked for while it ran",
+        "src/user/system/linux/compositor/render/tests/data/dwindle-two-clients-1920x1080.xrle",
+    ),
+];
+
+/// The modes boot's configuration: the card's preferred mode, a key for
+/// `hyprctl keyword monitor`, and the transcript key every boot presses at
+/// the end made to reload first, which reads the file (`preferred`) and
+/// drops the keyword, as Hyprland's reload does.
+const MODES_CONFIG: &str = "\
+# Carried into the initramfs by `cargo xtask test-compositor --boot modes`.
+monitor = , preferred, auto, 1
+exec-once = /bin/pattern checkerboard one
+exec-once = /bin/pattern gradient two --after one
+bind = SUPER, F, exec, /bin/hyprctl keyword monitor ,1920x1080@60,auto,1
+bind = SUPER, C, exec, /bin/hyprctl --batch reload ; monitors ; clients
+bind = SUPER, W, exec, /bin/hyprctl activewindow
+";
+
+/// The key the modes boot presses before its second picture.
+const MODES_BINDS: [(&str, &[&str]); 1] = [("SUPER F", &["meta_l", "f"])];
+
+/// A boot for switching modes while the desktop runs (`docs/DISPLAY.md`
+/// §9): the card lists the modes of QEMU's EDID (displayctl v11's
+/// `MODE_LIST`), `hyprctl keyword monitor` sets one of them, and `hyprctl
+/// reload` sets the file's again. Each picture is the renderer's own for
+/// that screen size, every pixel, so a mode set without the layout
+/// following -- or a layout without the mode -- fails it. `hyprctl
+/// monitors` must list `availableModes` as Hyprland does, the 1920x1080 the
+/// keyword took among them, and hyprix must have said each switch.
+pub(super) fn test_modes(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let (screens, said) = boot_and_dump(
+        arch,
+        programs,
+        MODES_CONFIG,
+        &Wanted {
+            states: &MODES_EXPECTED,
+            others: &[],
+            moving: None,
+            pointer: None,
+            awaiting: &["availableModes:", "is 1024x768@"],
+        },
+        &MODES_BINDS,
+        args,
+    )?;
+    if screens.len() != MODES_EXPECTED.len() {
+        return Err(Error::new(format!(
+            "{arch}: {} of {} pictures were taken",
+            screens.len(),
+            MODES_EXPECTED.len()
+        )));
+    }
+    let has = |wanted: &str| said.iter().any(|line| line.contains(wanted));
+    for (wanted, what) in [
+        (
+            "modes listed, 1024x768",
+            "the kernel's line for the driver's mode list",
+        ),
+        ("is 1920x1080@", "hyprix's line for the keyword's switch"),
+        ("is 1024x768@", "hyprix's line for the reload's switch"),
+        (
+            "1920x1080@60.00Hz",
+            "`availableModes` listing the 1920x1080 the keyword took",
+        ),
+    ] {
+        if !has(wanted) {
+            return Err(Error::new(format!("{arch}: {what}: no `{wanted}`")));
+        }
+    }
+    let listed = said
+        .iter()
+        .find(|line| line.contains("availableModes:"))
+        .map_or(0, |line| line.matches("Hz").count());
+    if listed < 10 {
+        return Err(Error::new(format!(
+            "{arch}: `hyprctl monitors` listed {listed} available modes, not the EDID's"
+        )));
+    }
+    println!(
+        "  {arch}: the desktop switched 1024x768 -> 1920x1080 by keyword and back by reload \
+         while it ran, and `hyprctl monitors` listed {listed} modes"
+    );
+    Ok(())
+}
+
 /// A boot for `monitor = , preferred, auto, 1, transform, N`: a monitor
 /// stood on its edge, twice -- turned one way, then the other.
 ///

@@ -201,7 +201,9 @@ impl Plan {
             .iter()
             .filter(|mode| (u32::from(mode.hdisplay), u32::from(mode.vdisplay)) == (width, height))
             .min_by(|one, other| {
-                let off = |mode: &ModeInfo| (f64::from(mode.vrefresh) - wanted).abs();
+                let off = |mode: &ModeInfo| {
+                    (f64::from(modeset::refresh_mhz(mode)) / 1000.0 - wanted).abs()
+                };
                 off(one).total_cmp(&off(other))
             })
             .copied();

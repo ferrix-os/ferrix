@@ -206,7 +206,14 @@ pub trait Backend: core::fmt::Debug {
         None
     }
 
-    /// Run the screen at another of its modes, `size`, with buffers made
+    /// The refresh, in hertz, of the mode the screen prefers now: `None`
+    /// for a screen that cannot say.
+    fn preferred_refresh(&self) -> Option<f64> {
+        None
+    }
+
+    /// Run the screen at another of its modes, `size` at the listed
+    /// refresh nearest `refresh` hertz (60 when `None`), with buffers made
     /// afresh. A frame the GPU drew is no longer shown: the renderer's
     /// target is the old size, and has to be made again and adopted.
     ///
@@ -214,9 +221,18 @@ pub trait Backend: core::fmt::Debug {
     ///
     /// A screen that has no such mode or cannot change, and whatever the
     /// card said; the screen is then as it was.
-    fn resize(&mut self, size: (u32, u32)) -> io::Result<()> {
-        let _ = size;
+    fn resize(&mut self, size: (u32, u32), refresh: Option<f64>) -> io::Result<()> {
+        let _ = (size, refresh);
         Err(io::Error::other("this screen has one size"))
+    }
+
+    /// Every mode the connector lists, as `(width, height, refresh in
+    /// millihertz)`, in the connector's order: what `hyprctl monitors`
+    /// prints as `availableModes`. The running mode alone for a screen that
+    /// cannot say.
+    fn modes(&self) -> Vec<(u32, u32, i32)> {
+        let (width, height) = self.size();
+        vec![(width, height, self.refresh_mhz())]
     }
 
     /// What to say about this backend in the compositor's log line.
@@ -324,6 +340,44 @@ impl Backend for Headless {
         // Hyprland's headless backend gives its outputs this description,
         // and a configuration written for one matches on it.
         "Headless output 1".to_owned()
+    }
+}
+
+/// A mode a connector lists: width, height and refresh in millihertz.
+pub type ListedMode = (u32, u32, i32);
+
+/// The mode a `monitor =` line's resolution field picks among `listed`,
+/// `(width, height, refresh in millihertz)`: a size and refresh to take,
+/// or `None` for `preferred`, which is the connector's to say. `highres` is
+/// the most pixels, the fastest of them; `highrr` the fastest, the largest
+/// of them (Hyprland's `CMonitor::applyMonitorRule`).
+#[must_use]
+pub fn pick_mode(
+    mode: compositor_config::Mode,
+    listed: &[ListedMode],
+) -> Option<((u32, u32), Option<f64>)> {
+    let chosen = |key: &dyn Fn(&ListedMode) -> (u64, i64)| {
+        listed
+            .iter()
+            .max_by_key(|mode| key(mode))
+            .map(|&(width, height, mhz)| ((width, height), Some(f64::from(mhz) / 1000.0)))
+    };
+    match mode {
+        compositor_config::Mode::Preferred => None,
+        compositor_config::Mode::Fixed {
+            width,
+            height,
+            refresh,
+        } => Some(((width, height), refresh)),
+        compositor_config::Mode::HighRes => {
+            chosen(&|&(width, height, mhz)| (u64::from(width) * u64::from(height), i64::from(mhz)))
+        }
+        compositor_config::Mode::HighRr => chosen(&|&(width, height, mhz)| {
+            (
+                u64::try_from(mhz).unwrap_or(0),
+                i64::from(width) * i64::from(height),
+            )
+        }),
     }
 }
 
@@ -499,13 +553,19 @@ impl Drm {
                 .unwrap_or_default();
             // The rule for this monitor, as everywhere else.
             let rule = compositor_config::MonitorRule::for_monitor(rules, &plan.name, &description);
-            if let Some(compositor_config::Mode::Fixed {
-                width,
-                height,
-                refresh,
-            }) = rule.map(|rule| rule.mode)
-            {
-                let _ = plan.take((width, height), refresh);
+            let listed: Vec<(u32, u32, i32)> = plan
+                .modes
+                .iter()
+                .map(|mode| {
+                    (
+                        u32::from(mode.hdisplay),
+                        u32::from(mode.vdisplay),
+                        compositor_drm::modeset::refresh_mhz(mode),
+                    )
+                })
+                .collect();
+            if let Some((size, refresh)) = rule.and_then(|rule| pick_mode(rule.mode, &listed)) {
+                let _ = plan.take(size, refresh);
             }
             if let Ok(screen) = Self::on(card, plan) {
                 screens.push(screen);
@@ -671,17 +731,7 @@ impl Backend for Drm {
     /// exact where `vrefresh` is rounded (59.94 Hz is 60 there), or
     /// `vrefresh` for a mode without timings.
     fn refresh_mhz(&self) -> i32 {
-        let mode = &self.plan.mode;
-        let total = u64::from(mode.htotal) * u64::from(mode.vtotal);
-        let mhz = if total > 0 && mode.clock > 0 {
-            u64::from(mode.clock) * 1_000_000 / total
-        } else {
-            u64::from(mode.vrefresh) * 1000
-        };
-        match i32::try_from(mhz) {
-            Ok(0) | Err(_) => 60_000,
-            Ok(mhz) => mhz,
-        }
+        compositor_drm::modeset::refresh_mhz(&self.plan.mode)
     }
 
     fn buffer(&mut self) -> &mut [u8] {
@@ -1041,6 +1091,12 @@ impl Backend for Drm {
         }
         let news = self.card.news();
         self.modes_changed |= news.connectors;
+        // What `hyprctl monitors` lists follows the connector.
+        if news.connectors
+            && let Ok(plan) = self.replanned()
+        {
+            self.plan.modes = plan.modes;
+        }
         if !news.gone {
             return false;
         }
@@ -1056,12 +1112,37 @@ impl Backend for Drm {
         self.replanned().ok().map(|plan| plan.size())
     }
 
-    fn resize(&mut self, (width, height): (u32, u32)) -> io::Result<()> {
+    fn preferred_refresh(&self) -> Option<f64> {
+        self.replanned()
+            .ok()
+            .map(|plan| f64::from(compositor_drm::modeset::refresh_mhz(&plan.mode)) / 1000.0)
+    }
+
+    fn modes(&self) -> Vec<(u32, u32, i32)> {
+        self.plan
+            .modes
+            .iter()
+            .map(|mode| {
+                (
+                    u32::from(mode.hdisplay),
+                    u32::from(mode.vdisplay),
+                    compositor_drm::modeset::refresh_mhz(mode),
+                )
+            })
+            .collect()
+    }
+
+    fn resize(&mut self, (width, height): (u32, u32), refresh: Option<f64>) -> io::Result<()> {
         let mut plan = self.replanned()?;
-        if !plan.take((width, height), None) || plan.size() != (width, height) {
+        if !plan.take((width, height), refresh) || plan.size() != (width, height) {
             return Err(io::Error::other(format!(
                 "the connector has no {width}x{height} mode"
             )));
+        }
+        if plan.mode == self.plan.mode {
+            // The mode it runs: nothing to set.
+            self.plan.modes = plan.modes;
+            return Ok(());
         }
         let first = compositor_drm::Dumb::new(&self.card, width, height)?;
         let second = compositor_drm::Dumb::new(&self.card, width, height)?;
@@ -1173,4 +1254,41 @@ pub fn write_ppm(backend: &dyn Backend, path: &Path) -> io::Result<()> {
         }
     }
     std::fs::write(path, out)
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::pick_mode;
+    use compositor_config::Mode;
+
+    #[test]
+    fn a_rule_picks_among_the_listed_modes_as_hyprland_does() {
+        let listed = [
+            (1920, 1080, 60_000),
+            (1920, 1080, 144_000),
+            (2560, 1440, 59_951),
+            (1280, 720, 240_000),
+        ];
+        assert_eq!(pick_mode(Mode::Preferred, &listed), None);
+        assert_eq!(
+            pick_mode(Mode::HighRes, &listed),
+            Some(((2560, 1440), Some(59.951)))
+        );
+        assert_eq!(
+            pick_mode(Mode::HighRr, &listed),
+            Some(((1280, 720), Some(240.0)))
+        );
+        assert_eq!(
+            pick_mode(
+                Mode::Fixed {
+                    width: 1920,
+                    height: 1080,
+                    refresh: Some(144.0)
+                },
+                &listed
+            ),
+            Some(((1920, 1080), Some(144.0)))
+        );
+        assert_eq!(pick_mode(Mode::HighRes, &[]), None);
+    }
 }

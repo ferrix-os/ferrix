@@ -54,6 +54,23 @@ pub fn fill(
     }
 }
 
+/// A mode's refresh in millihertz: its pixel clock over its total pixels,
+/// which is exact where `vrefresh` is rounded (59.94 Hz is 60 there), or
+/// `vrefresh` for a mode without timings, and 60 Hz for one with neither.
+#[must_use]
+pub fn refresh_mhz(mode: &ModeInfo) -> i32 {
+    let total = u64::from(mode.htotal) * u64::from(mode.vtotal);
+    let mhz = if total > 0 && mode.clock > 0 {
+        u64::from(mode.clock) * 1_000_000 / total
+    } else {
+        u64::from(mode.vrefresh) * 1000
+    };
+    match i32::try_from(mhz) {
+        Ok(0) | Err(_) => 60_000,
+        Ok(mhz) => mhz,
+    }
+}
+
 /// A mode's name, up to its NUL.
 pub fn mode_name(mode: &ModeInfo) -> String {
     c_name(&mode.name)

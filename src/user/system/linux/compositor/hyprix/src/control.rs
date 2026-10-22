@@ -614,6 +614,8 @@ pub fn describe_all(
             // `dpms` is the compositor's, not the layout's; the snapshot
             // that has it fills it in.
             dpms: true,
+            // The screen's, which the snapshot that has it fills in.
+            modes: Vec::new(),
         });
     }
 
