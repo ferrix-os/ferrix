@@ -10,7 +10,57 @@ gnome-shell on a Ferrix guest and write down exactly how far they get and
 what stops them, before any design. This is an assessment, not a decision
 and not a stage.
 
-## Where it stands, 2026-10-22
+## Where it stands, 2026-10-22 (evening): G1 built, gaps 1 and 2 fixed
+
+Branch `gnome-probe`, not landed (no landing lock was taken). The customer
+asked for the gaps to be fixed ("start gnome agent to fix the issues"), and
+on the same day: *keep the kernel slim, we need that for certifications* --
+ring-3 answers for every gap, kernel changes only where unavoidable and as
+small as possible.
+
+| Gap | State | Where | Commits | Consultant |
+|---|---|---|---|---|
+| 1 `DRM_CAP_PRIME` | **fixed** | kernel, load (`interfaces/render`) | dc07c52c5 | OK IF, ledger 3112 |
+| 2 white virgl frames under mutter | **root-caused and fixed**: a 64 KiB command-buffer limit, not dmabufs | kernel, load (`interfaces/render`), virtio-gpu driver and lib (ring 3) | e4867eeed, a8b5c562d, 8acf91f88 | NOT YET 3121 (B1, a 512 KiB heap block), B1 closed, OK IF 3126 |
+| 3 `prctl`/`capset` | design only (§8.1): ring 3 first, no kernel change for the system bus | -- | -- | design sent |
+| 4 set-uid helpers | **answered for G1**: none shipped, refused by the fetch; for G3 NOT YET (G3-5) | ring 3 | 774d9f09b | 3100, 3123 |
+| 5 session plumbing | **what G1 needs is built**: the session bus (sessiond), `XDG_RUNTIME_DIR`, fonts, XKB, schemas, MIME, `GTK_A11Y=none`; Xwayland's `/tmp/.X11-unix` and the a11y bus are G2/G3's | ring 3 | 4fc0770d4 | 3123 |
+| 6 login1 | design only (§8.2), on `sessiond`, ring 3 | -- | -- | design sent |
+| 7 udev | design only (§8.3): way (a), a ring-3 writer of the database; no kernel uevents | -- | -- | design sent |
+| 8 KMS for mutter | not reached (after 6 and 7) | -- | -- | G3-8 |
+| 9 PipeWire | not started | ring 3 | -- | -- |
+| 10 `ptrace` | decided: debug builds only (customer, 2026-10-21) | -- | -- | -- |
+
+* **Gap 1** (§3): the render node answers `DRM_CAP_PRIME` with import and
+  export, so Mesa's Wayland platform shares GL buffers as dmabufs under
+  mutter; `test-display --gl` requires `prime 3`.
+* **Gap 2** (§3): mutter was never at fault. GTK 4's client sent one
+  262,176-byte `EXECBUFFER`, the render core's slot was 64 KiB, the call
+  was `EINVAL`, and Mesa dropped the stream ("got error from kernel -
+  expect bad rendering"). The slot is now 65 pages, Mesa virgl's longest
+  (`VIRGL_MAX_CMDBUF_DWORDS`), copied in a page at a time once the slot is
+  taken (the consultant's B1: no 512 KiB contiguous heap block). Debian's
+  gnome-shell headless now shows GTK 4's GL gears on virgl at 59 fps with
+  no shim (screenshot off-tree,
+  `~/.local/share/ferrix/gnome-probe/shots/shell-gears-virgl-fixed.png`);
+  `test-display --gl` requires `long 266240`.
+* **G1 is built** (§5): `tools/common/fetch/fetch-gnome-apps.sh` pins 171
+  Debian 13 packages by SHA-256 at one snapshot; `sessiond --session-bus`
+  starts the session's D-Bus bus as the user in the session's scope;
+  `data-nosuid.service` remounts `/data` `nosuid,nodev` before any session;
+  `cargo xtask test-gnome-apps` boots it and requires libadwaita's demo on
+  hyprix as `ferrix`, on the bus, and gone with the session
+  (`~/.local/share/ferrix/gnome-probe/shots/g1-test-gnome-apps.png`).
+* **Kernel lines**: 95 added and 28 removed, all in the load ring's
+  `interfaces/render` -- 40 added and 16 removed are code, the rest the
+  comments that say why. Gap 1 is one match arm; gap 2 is the slot size,
+  the work VMO's size and the page-at-a-time copy. Nothing else in G1
+  touches the kernel.
+* **What G2 and G3 still need**: a system bus (G2 and G3), and for G3 the
+  lock on `authd`'s grant (B1), login1 on `sessiond`, the udev database,
+  KMS on card0 and the session units -- §5 and §8.
+
+## The probe, 2026-10-22
 
 * **gnome-shell 48.7 runs on Ferrix**, unmodified Debian 13 binaries on
   Ferrix's kernel, in two ways:
@@ -114,7 +164,7 @@ ring, and gap 7 is in the kernel only in its way (b); gaps 4, 5, 6, 7 (a)
 and 9 are ring 3, gap 8 is unmeasured (card0, load ring, if anything),
 gap 2 is not yet placed, and gap 10 is decided.
 
-### Gap 1: the render node refuses `DRM_CAP_PRIME` -- 1 point, kernel, load ring
+### Gap 1: the render node refuses `DRM_CAP_PRIME` -- 1 point, kernel, load ring -- FIXED (dc07c52c5, ledger 3112)
 
 **Seen.** Under headless mutter, every GL client crashed:
 `gtk4-widget-factory` and `gtk4-demo --run=gears` with `SIGSEGV` at
@@ -142,7 +192,15 @@ under mutter with `LIBGL_ALWAYS_SOFTWARE=1` or GTK's cairo renderer.
 and a line in `test-display`'s render checks. The Mesa null call is
 upstream's, and worth a report.
 
-### Gap 2: mutter composites a virgl client's dmabuf blank -- not yet sized
+**Done (dc07c52c5, ledger 3112).** `get_cap` answers
+`PRIME_CAP_IMPORT | PRIME_CAP_EXPORT`, the constants taken from the UAPI
+probe; the card's `get_cap` is unchanged; the render probe prints
+`prime <value>` and `test-display --gl` requires `prime 3`. No requirement
+is owed: the render node is load-ring code, outside the claim (3112).
+Without a shim, Mesa no longer says *"display does not support prime"*
+under mutter.
+
+### Gap 2: mutter composites a virgl client's dmabuf blank -- FIXED (e4867eeed, a8b5c562d, 8acf91f88; ledger 3121, 3126)
 
 **Seen.** With gap 1 shimmed, GTK 4's gears and widget factory run on
 virgl under gnome-shell, and the shell's screenshot shows their windows
@@ -165,6 +223,32 @@ synchronisation, which Ferrix's dmabufs do not carry (`docs/GPU.md`
 flags. A day's investigation (3 points) before it can be sized. Until then
 GNOME's own GL path is software, and its clients' GL must be too
 (`LIBGL_ALWAYS_SOFTWARE=1`) -- workable, and how the probe ran.
+
+**Root cause, found 2026-10-22.** An `LD_PRELOAD` trace of the
+render-node ioctls of mutter and of the client showed nothing wrong with
+the dmabuf path -- three `PRIME_FD_TO_HANDLE`s, attached, cached -- and one
+failure in the client: a `DRM_IOCTL_VIRTGPU_EXECBUFFER` of 262,176 bytes
+answered `EINVAL`, after which Mesa printed *"got error from kernel -
+expect bad rendering 22"* and dropped the stream. Mesa's virgl driver
+fills a command buffer up to `VIRGL_MAX_CMDBUF_DWORDS`, `64 * 1024 + 1024`
+words (266,240 bytes), before it submits, and a buffer that uploads pixels
+inline (`RESOURCE_INLINE_WRITE`) fills to the end; GTK 4 sends one under
+mutter, and none under hyprix. The render core's slot was 64 KiB; Linux's
+virtio-gpu takes any length. So the white window was everything the
+client drew after its first upload, never sent.
+
+**The fix.** `COMMAND_BYTES` is 65 pages and the work VMO two megabytes
+(seven slots); the virtio-gpu driver's copied stream, its command area and
+its longest descriptor chain (72) grew to match (e4867eeed). The
+consultant's review (ledger 3121) found the node copied the whole stream
+into one kernel heap block first -- 512 KiB contiguous at the new size,
+charged to nobody, held while every slot was busy -- and asked for it to
+go (B1): the stream is now read from the program a page at a time into
+its slot once the slot is taken (a8b5c562d). The cost, said in `submit`'s
+comment and `docs/GPU.md` (A7, 8acf91f88): a slot is held while the
+program's buffer faults in. `test-display --gl` submits 266,240 bytes of
+virgl `NOP`s and requires `long 266240`; with the old slot it reads `long
+none EINVAL`, the negative control the consultant asked for (A2).
 
 ### Gap 3: `prctl`'s capability options are `EINVAL` -- 2 to 3 points, kernel, load ring
 
@@ -200,7 +284,7 @@ points are the prctl half; the capset half waits on its design review
 **The probe's workaround.** A copy of `system.conf` without the `<user>`
 line, so the system bus ran as root.
 
-### Gap 4: the volume lost its set-uid helpers -- 2 points, ring 3 (xtask, fetch)
+### Gap 4: the volume lost its set-uid helpers -- 2 points, ring 3 (xtask, fetch) -- for G1: none shipped
 
 **Seen.** Every activated system service: *"The permission of the setuid
 helper is not correct"* (`dbus-daemon-launch-helper`), so polkit,
@@ -214,7 +298,7 @@ from a user namespace), and an answer to whether a set-uid binary on a
 data volume is honoured at all. That second point is a security
 decision, not a packaging one: B3 and B5.
 
-### Gap 5: session plumbing -- 2 points, ring 3
+### Gap 5: session plumbing -- 2 points, ring 3 -- G1's part built
 
 Each of these warned or stopped one piece, none was a wall, and each is
 work a session start does on Linux through systemd and tmpfiles:
@@ -335,16 +419,56 @@ B5 partly applies.
 
 ## 5. A staged plan
 
-**G1: GTK 4 and libadwaita apps on hyprix -- about 8 points.** Works in
-the probe now. What it takes: a fetch script that pins a Debian tree of
-GTK 4, libadwaita and the apps wanted (GNOME Text Editor, Files, Calculator,
-...) as `fetch-claude-desktop.sh` pins its packages, merged into the
-`--everything` volume; their GL on virgl through gap 1 (or software until
-it lands); a session bus for the user, started by `sessiond` with the
-compositor; the accessibility bus or `NO_AT_BRIDGE=1`. The portal
-(`xdg-desktop-portal-gtk`) for file choosers can follow. No credential, no
-device, no session change, so none of B1 to B4 under the conditions of
-ledger 3100 (§6); B5 partly, for the Debian packages it ships.
+**G1: GTK 4 and libadwaita apps on hyprix -- about 8 points; built
+2026-10-22 (774d9f09b, 4fc0770d4), not landed.** To the consultant's
+conditions of ledger lines 3100 and 3123:
+
+* **The volume.** `tools/common/fetch/fetch-gnome-apps.sh`: 171 Debian 13
+  packages -- the dependency closure of GTK 4, libadwaita, their demos,
+  Mesa, `dbus-daemon` and the session bus's configuration, fonts, icons
+  and schemas -- pinned by pool path and SHA-256 and fetched from
+  snapshot.debian.org at one time each for trixie and trixie-security. The
+  script checks that the list is the whole closure, refuses a deny-list
+  (system bus, systemd, PAM, polkit, pkexec, gvfs, accountsservice, GDM,
+  gnome-keyring, udisks2, portals), any set-id mode in an archive's
+  listing or in the tree, any file capability, `dbus-daemon-launch-helper`
+  anywhere, and any maintainer script that would set one; it writes GLib's
+  schemas, gdk-pixbuf's loader list and the MIME database as the triggers
+  would. A volume of its own, with its own glibc; merging it into
+  `--everything` is the next step and needs no change of rule.
+* **`/data` `nosuid,nodev`.** `data-nosuid.service`, a root oneshot,
+  remounts it and fails unless `/proc/mounts` says both; the compositor's
+  unit `Requires=` it, so a failed remount is no session. The kernel's own
+  default for every data disk is backlog row p2-153.
+* **The session bus.** `sessiond --session-bus DAEMON CONFIG`: the volume's
+  `dbus-daemon`, as the user, forked before the compositor and put in the
+  same `session-N.scope` by the same init call before either execs, its
+  descriptors 0 to 2 and its address pipe, its socket
+  `/run/user/<uid>/bus`. It ends with the scope; nothing restarts it. Its
+  configuration is Ferrix's own (`/etc/ferrix/session-bus.conf`):
+  `EXTERNAL` only, one `unix:runtime=yes` listen, the volume's service
+  directory, no eavesdropping, no include. No system bus, no login1, no
+  gnome-keyring, no portal.
+* **Gates.** `cargo xtask test-gnome-apps` (x86_64): the session as
+  `ferrix`, the volume at `/data`; required: `/data` `nosuid,nodev`, the bus
+  `ferrix`'s at its socket and no system bus, `adwaita-1-demo` `ferrix`'s
+  and on the bus, its window drawn, and after the compositor is killed
+  neither the bus nor the app left. Its GL is Mesa's software rasterizer:
+  QEMU cannot screendump a virgl scanout, and GL on virgl is
+  `test-display --gl`'s. `test-compositor --boot session-end` starts a
+  stand-in bus on every architecture and requires it `ferrix`'s, with only
+  its address pipe, beating until the session's end and not after.
+* **Not yet**: the apps a person wants (GNOME Text Editor, Files,
+  Calculator) beside the demos, the launcher's entries, the `--everything`
+  merge, and the portal for file choosers (said as a same-uid file
+  chooser, with no sandbox claim, condition 7).
+
+**What G1 does not answer (the consultant's C1).** A program of the
+user's, a service the bus started included, may move itself into a scope
+of its own under `user-<uid>.slice` before the session ends and so outlive
+it: the session-end boot shows exactly that (`linger-scope: 0`). It is
+AUTH §6.4's E6, older than G1, kept the customer's decision
+(`KillUserProcesses=`); G1 adds no way to do it that a user did not have.
 
 **G2: GNOME Shell as a window on hyprix -- about 5 points more.** Works in
 the probe now, nested on Xwayland. It needs a system bus -- §3 shows the
@@ -435,3 +559,136 @@ verification (F-27).
   and Nautilus; memory use; how long any of it stays up.
 * The sizes are estimates against this tree's own past landings, not
   measurements.
+
+## 8. Designs for G3's gaps, before code (2026-10-22)
+
+The consultant's G3 verdict (ledger 3100) asks a design review before any
+code for gaps 3, 6 and 7 (b). The customer said on 2026-10-22: *keep the
+kernel slim, we need that for certifications* -- ring-3 answers wherever
+one exists, a kernel change only where none does, and the smallest one.
+So each design below starts with the ring-3 way and names the kernel lines
+it would cost otherwise. None of this is built; each waits for its verdict,
+and G3 as a whole stays NOT YET while B1 (a lock on `authd`'s grant under
+mutter) is open.
+
+### 8.1 Gap 3: the system bus as `messagebus`, without `prctl`
+
+**What needs it.** Only programs that drop root themselves with
+libcap-ng: `dbus-daemon --system` (its `<user>messagebus</user>`), and
+later polkitd, accountsservice and NetworkManager, which G3 does not
+take (B3). GNOME Shell needs a system bus to start (§3, *What was missing*),
+nothing on it.
+
+**The ring-3 way (proposed): init drops privilege, the daemon never does.**
+The system bus is a unit, `dbus-system.service`, with `User=messagebus`
+and `Group=messagebus` -- init's own drop, which exists (`svc`'s
+`User=`) -- and a configuration of Ferrix's own with **no `<user>`
+element**: `dbus-daemon` calls libcap-ng's `capng_change_id` only to obey
+that element, so it never asks `PR_SET_KEEPCAPS` and the kernel needs
+nothing new. `/run/dbus` is made `0755 messagebus` by a root
+`ExecStartPre=`. The bus activates nothing through
+`dbus-daemon-launch-helper` (absent, G3-5): every system service is one of
+init's declared units with its own `User=`, started by init, and the
+configuration names no `<servicedir>` for the system bus. EXTERNAL
+authentication only, its socket `/run/dbus/system_bus_socket` `0666` as on
+Linux, and a policy that lets nobody own a name the image does not
+declare. Kernel lines: 0.
+
+**The kernel way, only if a service turns out to need it** (G3-2's rules,
+fail closed): `PR_SET_KEEPCAPS`/`PR_GET_KEEPCAPS` as a per-process flag,
+kept over `fork`, cleared at `execve` and by `setresuid` per Linux's rule,
+changing nothing but what `capget` reports -- in the first namespace no
+capability is effective for an effective uid other than 0
+(`Credentials::holds`), and that stays; `PR_GET_SECUREBITS` answering 0
+and `PR_SET_SECUREBITS` refused; `PR_CAP_AMBIENT` `IS_SET` 0, `LOWER` and
+`CLEAR_ALL` accepted as no-ops, `RAISE` refused `EPERM`; `capset` from a
+non-root process unchanged (an empty set accepted, any other refused),
+which is what libcap-ng sends after a change of id with no capability
+kept. About 30 lines in `syscall/attributes.rs`, two requirement ids
+reserved first, and a check that a non-root process with KEEPCAPS and a
+`capset` cannot make a root-only call, with a control (`holds()`
+honouring a kept capability, FIRED). Not proposed now: no program G2 or
+G3 needs asks for it once the bus runs as the ring-3 way does.
+
+### 8.2 Gap 6: `org.freedesktop.login1` on `sessiond`, ring 3
+
+**What mutter asks** (§3, gap 6): the manager's `GetSession`,
+`GetSessionByPID`, `ListSessions`; the session's `TakeControl`,
+`ReleaseControl`, `TakeDevice`, `ReleaseDevice`, `PauseDeviceComplete`,
+`Activate`, `SetType`, the `PauseDevice` and `ResumeDevice` signals and
+the `Active`, `Seat`, `Type`, `Class`, `State` properties; the seat's
+`ActiveSession` and `CanGraphical`; and `sd_pid_get_session`, which
+libsystemd reads from `/proc/self/cgroup`'s `session-N.scope`, which
+`sessiond` already makes.
+
+**Where.** `sessiond` is root and already logind's device half: it owns
+seat0, opens each card, render node and `event*` node `O_CLOEXEC`, hands
+them over `SCM_RIGHTS`, and since 2026-10-18 card0 has a DRM master that
+can be dropped and taken back and input has `EVIOCREVOKE`. The front is a
+connection of `sessiond`'s to the system bus (§8.1) owning
+`org.freedesktop.login1`, a small D-Bus server in Rust beside the seat
+channel it has. No kernel change. Its rules, G3-3's:
+
+* `CreateSession`, `CreateSessionWithPIDFD` and `ReleaseSession` are
+  refused: sessions come only from `sessiond` itself, after `authd`'s
+  grant or decision 8's automatic login, as today.
+* **Who controls the session.** `TakeControl` succeeds only for the
+  session leader `sessiond` started, identified by a pidfd `sessiond`
+  holds from the fork, compared with the caller's pid as the bus reports
+  it (`GetConnectionUnixProcessID`, which works on Ferrix: the G1 gate
+  reads the app's pid through it) and then re-checked through the pidfd,
+  so a reused pid is not the leader. Never by the caller's cgroup path: a
+  user may make scopes under its own slice (AUTH §1).
+* `TakeDevice` answers only seat0's nodes -- card0, the render node,
+  `event*` -- and only to the controlling connection of the active
+  session; anything else, or a second controller, is refused. A device is
+  opened by `sessiond` and sent as a unix fd, as the seat channel does.
+* **Pausing.** Before another session becomes active, `sessiond` drops
+  card0's master on the paused session's descriptor and `EVIOCREVOKE`s its
+  input descriptors, then sends `PauseDevice`; `ResumeDevice` gives fresh
+  descriptors. A gate shows a paused session can neither scan out nor read
+  a key, with a control that skips the revoke (FIRED).
+* Power methods (`PowerOff`, `Reboot`, `Suspend`, `Inhibit`) are refused
+  to everyone but root: there is no polkit.
+* The session ends with its compositor (§6.4 of AUTH, unchanged): the
+  login1 session object goes with the scope.
+
+Size: 8 to 13 points. It needs the system bus of §8.1 and is G3's, so it
+waits for B1 as well.
+
+### 8.3 Gap 7: the udev database, written by a root program, no uevents
+
+**Way (a), proposed (the consultant's recommendation, G3-4).** `udevdb`,
+a root oneshot unit ordered after the device manager has published the
+boot's devices, writes what libudev reads, from `/sys/class/drm`,
+`/sys/class/input` and `/sys/class/sound`, which Ferrix already
+enumerates:
+
+* `/run/udev/data/c<major>:<minor>` per device: `E:ID_SEAT=seat0` (and the
+  `seat` tag), `E:ID_INPUT=1` with `ID_INPUT_KEYBOARD`, `ID_INPUT_MOUSE`,
+  `ID_INPUT_TABLET` or `ID_INPUT_TOUCHSCREEN` from the event node's
+  capability bits in sysfs (`capabilities/key`, `rel`, `abs`), `ID_PATH`
+  from the device path, and for card0 the `master-of-seat` tag;
+* `/run/udev/tags/seat/c<major>:<minor>`, so seat enumeration finds them;
+* `/run/udev` root's, `0755`, each file `0644` and written to a
+  temporary name then renamed.
+
+Seat0 and the devices present at boot only, said in the unit and in this
+document: **no hotplug**. A device that comes later -- a driver restarted
+by its supervisor republishes the same node -- keeps its record; a new
+device has none until the unit runs again. libudev's monitor hears
+nothing, which libinput and mutter tolerate with a fixed set. Kernel lines:
+0, and `NETLINK_KOBJECT_UEVENT` keeps hearing nothing. Size: 3 points.
+
+**Way (b), kernel uevents: not proposed** (customer, 2026-10-22). It
+would put a producer in the item's `discovery/devmgr.rs`, a broadcast in
+the load ring's netlink and writable `uevent` files, about 8 points, all
+of it kernel.
+
+### 8.4 What these need from each other
+
+G2 (the shell nested on hyprix) needs §8.1 alone. G3 needs §8.1, §8.2,
+§8.3, card0's KMS for mutter (gap 8, each card0 change reviewed against
+E-02, G3-8), the session's own units (gap 5's rest: `/tmp/.X11-unix`,
+the accessibility bus) and, before it is offered to anyone, a lock that
+unlocks only on `authd`'s grant under mutter (B1, G3-6).

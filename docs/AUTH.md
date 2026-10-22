@@ -163,6 +163,15 @@ leaves the desktop running as root.
   Only a trusted path, a key combination the compositor alone answers, can
   fix that, and even that only helps people who use it. §6.5 leaves room for
   one.
+* **Same-uid code inside the session, its D-Bus session bus included**
+  (`docs/GNOME.md`, stage G1). `sessiond --session-bus` starts the
+  session's bus as the account, beside the compositor in
+  `session-N.scope` and under the same E1 and E2 rules (§6.4): the bus and
+  every service it starts are the user's own code, inside the session's
+  scope, and end with it. Like any program of the user's, a service can
+  speak for the user to the others on the bus; nothing here defends one
+  of the user's programs from another, and the bus holds no credential and
+  reaches no seat device. There is no system bus.
 * **Root.** Nothing on a Unix defends against root. This design keeps root
   rare, and its audit log is only as trustworthy as root is.
 * **Disk encryption, secure boot and measured boot.** `A.FIRMWARE` and

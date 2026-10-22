@@ -142,7 +142,7 @@ driver answering the TOE's reads with bytes of its choosing.
 | A.HARDWARE | The MMU, IOMMU and interrupt controller behave as their specifications state. |
 | A.STORAGE | The storage device under the TOE's `WriteDevice` keeps its flush and FUA promises: every write that returned before a flush is durable when the flush returns ([SAFETY-MANUAL.md](SAFETY-MANUAL.md) AoU-16). |
 | A.PROCESSOR | The processor offers the speculation controls [SPECULATION.md](SPECULATION.md) builds on, and they behave as the vendor states: SAFETY-MANUAL AoU-11, checkable from the boot log. |
-| A.AUTH | The authentication service of [docs/AUTH.md](../AUTH.md), `authd`, and the programs that act on its verdict (`login`, `su`, `sessiond`, `hyprlock`, the compositor) are competently built, as A.ADMIN has image composition. They rely on the TOE for O.ISOLATE, O.CAPABILITY and O.SCRUB, and on the Linux personality's uid model and its `SO_PEERCRED`, both in the uncertified load ring. |
+| A.AUTH | The authentication service of [docs/AUTH.md](../AUTH.md), `authd`, and the programs that act on its verdict (`login`, `su`, `sessiond`, `hyprlock`, the compositor) are competently built, as A.ADMIN has image composition. `sessiond` also starts the session's D-Bus session bus as the session's user, in the session's scope, ending with it ([docs/GNOME.md](../GNOME.md), G1; AUTH §2.3). They rely on the TOE for O.ISOLATE, O.CAPABILITY and O.SCRUB, and on the Linux personality's uid model and its `SO_PEERCRED`, both in the uncertified load ring. |
 
 ### 3.4 Organisational security policies
 
