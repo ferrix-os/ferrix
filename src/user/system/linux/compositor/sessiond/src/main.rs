@@ -21,6 +21,11 @@
 //! lock ([`relay`]). Init gives the seat channel's bootstrap to this
 //! process, the unit's own; the compositor cannot take it.
 //!
+//! With `--session-bus DAEMON CONFIG` the session has a D-Bus session bus,
+//! started as the account beside the compositor, in the same scope and
+//! under the same rules, and ending with it ([`bus`]; `docs/GNOME.md`,
+//! stage G1).
+//!
 //! The session ends with its compositor (§6.4): this exits with the
 //! compositor's status, and init's stop of the unit ends whatever the
 //! session left running. An image that logs a named user in at once
@@ -51,6 +56,7 @@ use crate::authd::{Authd, Heard};
 use crate::relay::{Act, Relay};
 
 mod authd;
+mod bus;
 mod gate;
 mod relay;
 mod scope;
@@ -58,14 +64,18 @@ mod scope;
 /// How often a seat channel that went is asked for again.
 const ASK_AGAIN: Duration = Duration::from_secs(5);
 
-const USAGE: &str = "usage: sessiond --user NAME [--headless WxH [--display-wait SECONDS]] -- PROGRAM [ARGUMENT...]\n\
+const USAGE: &str = "usage: sessiond --user NAME [--headless WxH [--display-wait SECONDS]]\n\
+    [--session-bus DAEMON CONFIG [--session-env NAME=VALUE]...] -- PROGRAM [ARGUMENT...]\n\
     \n\
     Start PROGRAM, the session's compositor, as the account NAME, and hand it\n\
     seat0's card, render node and input nodes when it asks.\n\
     \n\
     With --headless, wait for /dev/dri/card0; when none appears within\n\
     SECONDS (60) but a render node is there, the GPU has no display (no\n\
-    monitor at boot), and PROGRAM is started with `--headless WxH`.\n";
+    monitor at boot), and PROGRAM is started with `--headless WxH`.\n\
+    \n\
+    With --session-bus, start DAEMON (dbus-daemon) as the account with\n\
+    CONFIG, listening on $XDG_RUNTIME_DIR/bus, in the session's scope.\n";
 
 /// Where the screen is published, and the render nodes' directory.
 const CARD: &str = "/dev/dri/card0";
@@ -309,6 +319,7 @@ fn seed(
 
 fn run(args: &[String]) -> Result<i32, String> {
     let (headless, args) = split_headless(args)?;
+    let (bus, args) = bus::split(&args)?;
     let (name, mut program) = parse(&args).ok_or_else(|| USAGE.to_owned())?;
     if let Some(headless) = &headless {
         program = choose_display(headless, program);
@@ -349,7 +360,17 @@ fn run(args: &[String]) -> Result<i32, String> {
     let (ours, theirs) = UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
     let (lock_ours, lock_theirs) =
         UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
-    let (child, scope) = start(&account, &program, &runtime, theirs, lock_theirs)?;
+    let Started {
+        child,
+        bus: mut bus_child,
+        scope,
+    } = start(
+        &account,
+        &program,
+        &runtime,
+        (theirs, lock_theirs),
+        bus.as_ref(),
+    )?;
     say(&format!(
         "seat0's session for {} (uid {}): {}, pid {}, in user-{}.slice/{scope}",
         account.name,
@@ -369,33 +390,128 @@ fn run(args: &[String]) -> Result<i32, String> {
         let _ = child.kill();
         let _ = child.wait();
     }
-    scope::end(account.uid, &scope)?;
+    let ended = scope::end(account.uid, &scope);
+    // The bus was in the scope, and went with it: reaped here, and said if
+    // it had not gone, which the scope's end would then have said too.
+    if let Some(bus) = bus_child.as_mut()
+        && !bus::reap(bus, Duration::from_secs(5))
+    {
+        say("the session's bus was still running after the session's end");
+    }
+    ended?;
     served
 }
 
+/// What [`start`] started: the compositor, the session's bus when it was
+/// asked for and its fork worked, and the scope's unit.
+struct Started {
+    child: std::process::Child,
+    bus: Option<std::process::Child>,
+    scope: String,
+}
+
+/// A gated child: its spawn running on a thread of its own, since `spawn`
+/// returns only once the child has exec'd, and it execs only once the scope
+/// is answered; the pipe its pid comes on; the pipe its answer goes down.
+struct Gated {
+    spawning: std::thread::JoinHandle<std::io::Result<std::process::Child>>,
+    told: std::fs::File,
+    hear: std::fs::File,
+}
+
+/// Spawn `command`, as the account `ids` with `moves` (descriptor, place)
+/// put in place, gated on the scope: forked now, exec'd once [`gate::answer`]
+/// says so. `keep` is held until the spawn returns, so a descriptor a move
+/// names stays open until the fork has its copy.
+fn gated(
+    mut command: Command,
+    moves: [(i32, i32); 2],
+    ids: (u32, u32, Vec<u32>),
+    keep: Vec<OwnedFd>,
+) -> Result<Gated, String> {
+    let (told, tell) = gate::pipe().map_err(|error| format!("pipe: {error}"))?;
+    let (heard, hear) = gate::pipe().map_err(|error| format!("pipe: {error}"))?;
+    let gates = (tell.as_raw_fd(), heard.as_raw_fd());
+    #[expect(
+        unsafe_code,
+        reason = "AUDIT: pre_exec runs between fork and exec; the closure makes only async-signal-safe calls (getpid, write, read, fcntl, dup2, close, setgroups, setgid, setuid, getuid)"
+    )]
+    // SAFETY: the closure allocates nothing and calls only the system calls
+    // the reason names, each on values captured before the fork.
+    unsafe {
+        let _ = command.pre_exec(move || {
+            gate::wait_for_scope(gates)?;
+            become_account(moves, &ids)
+        });
+    }
+    let spawning = std::thread::spawn(move || {
+        let spawned = command.spawn();
+        // The child's copies are its own now: with these gone, a child that
+        // died before it wrote is an end of file to the reader, not a wait
+        // for ever.
+        drop(tell);
+        drop(heard);
+        drop(keep);
+        spawned
+    });
+    Ok(Gated {
+        spawning,
+        told,
+        hear,
+    })
+}
+
 /// Start the compositor as `account`, with `theirs` as its descriptor 3 and
-/// `lock` as its descriptor 4, in its session's scope: the child and the
-/// scope's unit.
+/// `lock` as its descriptor 4, in its session's scope -- and with `bus`, the
+/// session's bus beside it in the same scope ([`bus`]).
 ///
-/// The compositor is in `session-<n>.scope` before it execs, so nothing it
-/// starts can be outside it (the certification consultant's E1). Between
-/// fork and exec the child writes its pid down one pipe and waits on
-/// another; a thread here asks the init for the scope with that pid and
-/// writes `y`, or `n` when the init refused, and an `n`, or nothing, stops
-/// the exec. A scope the init refuses is not a session (§6.4): none is
-/// started, so the session's end may rely on the scope.
+/// Both are in `session-<n>.scope` before either execs, so nothing either
+/// starts can be outside it (the certification consultant's E1). Each is
+/// forked and then waits, between fork and exec, for an answer down a pipe
+/// after writing its pid down another ([`gate`]); one call to the init makes
+/// the scope with both pids, and anything but yes stops both execs. A scope
+/// the init refuses is not a session (§6.4): none is started, so the
+/// session's end may rely on the scope.
+///
+/// The bus is forked first, before the compositor's descriptors exist, and
+/// let exec first; its address is read before the compositor is let exec,
+/// for at most [`bus::ADDRESS_PATIENCE`]. A bus whose fork fails, or that
+/// prints no address, is said, and the session goes on without one.
 fn start(
     account: &Account,
     program: &[String],
     runtime: &str,
-    theirs: UnixStream,
-    lock: UnixStream,
-) -> Result<(std::process::Child, String), String> {
+    (theirs, lock): (UnixStream, UnixStream),
+    bus: Option<&bus::Bus>,
+) -> Result<Started, String> {
     let (first, rest) = program.split_first().ok_or_else(|| USAGE.to_owned())?;
+    let ids = (account.uid, account.gid, account.groups.clone());
+    let none = (-1, -1);
+    let bus_side = match bus {
+        Some(bus) => {
+            let (read, write) = gate::pipe().map_err(|error| format!("pipe: {error}"))?;
+            let write = OwnedFd::from(write);
+            let mut command = Command::new(&bus.daemon);
+            let _ = command
+                .args(bus::arguments(bus, runtime))
+                .current_dir(&account.home)
+                .env_clear()
+                .env("HOME", &account.home)
+                .env("USER", &account.name)
+                .env("LOGNAME", &account.name)
+                .env("SHELL", &account.shell)
+                .env("PATH", "/usr/bin:/bin")
+                .env("XDG_RUNTIME_DIR", runtime)
+                .envs(bus.env.iter().map(|(name, value)| (name, value)));
+            let moves = [(write.as_raw_fd(), bus::ADDRESS_FD), none];
+            let gated = gated(command, moves, ids.clone(), vec![write])?;
+            let pid = gate::read_pid(&gated.told);
+            Some((gated, pid, read))
+        }
+        None => None,
+    };
     let channel = OwnedFd::from(theirs);
     let lock = OwnedFd::from(lock);
-    let raws = (channel.as_raw_fd(), lock.as_raw_fd());
-    let ids = (account.uid, account.gid, account.groups.clone());
     let mut command = Command::new(first);
     let _ = command
         .args(rest)
@@ -410,54 +526,85 @@ fn start(
             compositor_seat::CHANNEL_FD.to_string(),
         )
         .env(LOCK_FD_VARIABLE, LOCK_FD.to_string());
-    let (told, tell) = gate::pipe().map_err(|error| format!("pipe: {error}"))?;
-    let (heard, hear) = gate::pipe().map_err(|error| format!("pipe: {error}"))?;
-    let gates = (tell.as_raw_fd(), heard.as_raw_fd());
-    let uid = account.uid;
-    let asker = std::thread::spawn(move || gate::ask_for_scope(&told, &hear, uid));
-    #[expect(
-        unsafe_code,
-        reason = "AUDIT: pre_exec runs between fork and exec; the closure makes only async-signal-safe calls (getpid, write, read, fcntl, dup2, close, setgroups, setgid, setuid, getuid)"
-    )]
-    // SAFETY: the closure allocates nothing and calls only the system calls
-    // the reason names, each on values captured before the fork.
-    unsafe {
-        let _ = command.pre_exec(move || {
-            gate::wait_for_scope(gates)?;
-            become_account(raws, &ids)
-        });
+    let moves = [
+        (channel.as_raw_fd(), compositor_seat::CHANNEL_FD),
+        (lock.as_raw_fd(), LOCK_FD),
+    ];
+    let compositor = gated(command, moves, ids, vec![channel, lock])?;
+    let compositor_pid = gate::read_pid(&compositor.told);
+    let bus_pid = bus_side.as_ref().and_then(|(_, pid, _)| *pid);
+    let pids: Vec<u32> = compositor_pid
+        .iter()
+        .chain(bus_pid.iter())
+        .copied()
+        .collect();
+    let scope = match compositor_pid {
+        Some(_) => scope::join(account.uid, &pids),
+        None => Err("the compositor never said its pid".to_owned()),
+    };
+    // The bus first, and its address, then the compositor.
+    let mut bus_child = None;
+    if let Some((gated, pid, read)) = bus_side {
+        gate::answer(&gated.hear, scope.is_ok());
+        if scope.is_ok() && pid.is_some() {
+            match bus::address(&read, bus::ADDRESS_PATIENCE) {
+                Some(address) => say(&format!("the session's bus is up: {address}")),
+                None => say(&format!(
+                    "the session's bus printed no address within {} s; the session goes on                      without waiting for it, and nothing starts it again",
+                    bus::ADDRESS_PATIENCE.as_secs()
+                )),
+            }
+        }
+        drop(read);
+        match gated.spawning.join() {
+            Ok(Ok(child)) => bus_child = Some(child),
+            Ok(Err(error)) => say(&format!("the session's bus did not start: {error}")),
+            Err(_) => say("the session's bus's thread panicked"),
+        }
     }
-    let spawned = command.spawn();
-    // The child's copies are its own now: with these gone, a child that died
-    // before it wrote is an end of file to the thread, not a wait for ever.
-    drop(tell);
-    drop(heard);
-    drop(channel);
-    drop(lock);
-    let scope = asker
+    gate::answer(&compositor.hear, scope.is_ok());
+    let spawned = compositor
+        .spawning
         .join()
-        .unwrap_or_else(|_| Err("the scope's thread panicked".to_owned()));
-    match (spawned, scope) {
-        (Ok(child), Ok(scope)) => Ok((child, scope)),
-        (Ok(mut child), Err(why)) => {
+        .unwrap_or_else(|_| Err(std::io::Error::other("the spawning thread panicked")));
+    let stop = |child: Option<std::process::Child>| {
+        if let Some(mut child) = child {
             let _ = child.kill();
             let _ = child.wait();
+        }
+    };
+    match (spawned, scope) {
+        (Ok(child), Ok(scope)) => Ok(Started {
+            child,
+            bus: bus_child,
+            scope,
+        }),
+        (Ok(child), Err(why)) => {
+            stop(Some(child));
+            stop(bus_child);
             Err(format!(
                 "no session scope: {why}; the session was not started"
             ))
         }
-        (Err(_), Err(why)) => Err(format!(
-            "no session scope: {why}; the session was not started"
-        )),
-        (Err(error), Ok(_)) => Err(format!("starting {first}: {error}")),
+        (Err(_), Err(why)) => {
+            stop(bus_child);
+            Err(format!(
+                "no session scope: {why}; the session was not started"
+            ))
+        }
+        (Err(error), Ok(scope)) => {
+            stop(bus_child);
+            let _ = scope::end(account.uid, &scope);
+            Err(format!("starting {first}: {error}"))
+        }
     }
 }
 
-/// In the child, before `exec`: the device channel at descriptor 3 and the
-/// lock channel at 4, neither close-on-exec, then the account's groups, gid
-/// and uid, in that order, checked.
+/// In the child, before `exec`: each of `moves`' descriptors put at its
+/// place, not close-on-exec (a place of -1 is no move), then the account's
+/// groups, gid and uid, in that order, checked.
 fn become_account(
-    (channel, lock): (i32, i32),
+    moves: [(i32, i32); 2],
     (uid, gid, groups): &(u32, u32, Vec<u32>),
 ) -> std::io::Result<()> {
     let check = |result: libc::c_int| {
@@ -469,15 +616,20 @@ fn become_account(
     };
     // Each first above 4, so that putting one at 3 or 4 cannot close the
     // other where it was; `dup2` then gives copies without close-on-exec.
-    // SAFETY: fcntl on descriptors this process holds, with constants.
-    let channel = check(unsafe { libc::fcntl(channel, libc::F_DUPFD, 5) })?;
-    // SAFETY: as above.
-    let lock = check(unsafe { libc::fcntl(lock, libc::F_DUPFD, 5) })?;
-    for (from, to) in [(channel, compositor_seat::CHANNEL_FD), (lock, LOCK_FD)] {
-        // SAFETY: dup2 and close of descriptors this process holds.
-        let _ = check(unsafe { libc::dup2(from, to) })?;
-        // SAFETY: as above.
-        let _ = check(unsafe { libc::close(from) })?;
+    let mut high = [-1; 2];
+    for (slot, (from, to)) in high.iter_mut().zip(moves) {
+        if to >= 0 {
+            // SAFETY: fcntl on a descriptor this process holds, with constants.
+            *slot = check(unsafe { libc::fcntl(from, libc::F_DUPFD, 5) })?;
+        }
+    }
+    for (from, (_, to)) in high.into_iter().zip(moves) {
+        if to >= 0 {
+            // SAFETY: dup2 and close of descriptors this process holds.
+            let _ = check(unsafe { libc::dup2(from, to) })?;
+            // SAFETY: as above.
+            let _ = check(unsafe { libc::close(from) })?;
+        }
     }
     // SAFETY: the pointer and length are the vector's own, read only.
     let _ = check(unsafe { libc::setgroups(groups.len(), groups.as_ptr()) })?;

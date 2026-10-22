@@ -633,21 +633,57 @@ fn console_getty(session: bool, shell: bool) -> Vec<File> {
 
 /// The compositor's command: itself, or under `sessiond` for `session_user`,
 /// which waits for card0 and goes headless when the GPU has no display.
-fn compositor_command(session_user: Option<&str>) -> Vec<String> {
+fn compositor_command(
+    session_user: Option<&str>,
+    bus: Option<&crate::session::Bus>,
+) -> Vec<String> {
     match session_user {
-        Some(user) => vec![
-            "/bin/sessiond".to_owned(),
-            "--user".to_owned(),
-            exec_word(user),
-            "--headless".to_owned(),
-            HEADLESS_SIZE.to_owned(),
-            "--display-wait".to_owned(),
-            DISPLAY_WAIT.to_string(),
-            "--".to_owned(),
-            "/bin/hyprix".to_owned(),
-        ],
+        Some(user) => {
+            let mut words = vec![
+                "/bin/sessiond".to_owned(),
+                "--user".to_owned(),
+                exec_word(user),
+                "--headless".to_owned(),
+                HEADLESS_SIZE.to_owned(),
+                "--display-wait".to_owned(),
+                DISPLAY_WAIT.to_string(),
+            ];
+            if let Some(bus) = bus {
+                words.extend(bus.words().iter().map(|word| exec_word(word)));
+            }
+            words.extend(["--".to_owned(), "/bin/hyprix".to_owned()]);
+            words
+        }
         None => vec!["/bin/hyprix".to_owned()],
     }
+}
+
+/// The compositor unit's lines for `data-nosuid.service`, when the image
+/// has it: required, so a failed remount means no session.
+fn data_nosuid_lines(data_nosuid: bool) -> &'static str {
+    if data_nosuid {
+        "# /data nosuid,nodev first, or no compositor (docs/GNOME.md, G1).\n\
+         Requires=data-nosuid.service\nAfter=data-nosuid.service\n"
+    } else {
+        ""
+    }
+}
+
+/// What a session's bus and `data-nosuid.service` add to the image: the
+/// unit and its script, and the bus's configuration (`crate::session`).
+fn session_files(bus: Option<&crate::session::Bus>, data_nosuid: bool) -> Vec<File> {
+    let mut files = Vec::new();
+    if data_nosuid {
+        files.extend(crate::session::data_nosuid());
+    }
+    if bus.is_some() {
+        files.push(File {
+            path: crate::session::SESSION_BUS_CONF_PATH.to_owned(),
+            mode: 0o644,
+            content: Content::Bytes(crate::session::SESSION_BUS_CONF.as_bytes().to_vec()),
+        });
+    }
+    files
 }
 
 /// The compositor unit's device lines: card0's device unit without a
@@ -694,6 +730,7 @@ pub(crate) fn desktop_files(
     shell: bool,
     pulsed: Option<&[u8]>,
     session_user: Option<&str>,
+    (bus, data_nosuid): (Option<&crate::session::Bus>, bool),
 ) -> Result<Vec<File>> {
     let mut files = carried(arch)?;
     if files.is_empty() {
@@ -702,7 +739,7 @@ pub(crate) fn desktop_files(
     // With a session user, `sessiond` starts the compositor as that user
     // and hands it seat0's devices (`crate::session`); it sets the user's
     // own `HOME`.
-    let mut command = compositor_command(session_user);
+    let mut command = compositor_command(session_user, bus);
     command.extend(arguments.iter().map(|word| exec_word(word)));
     let home = if session_user.is_some() {
         // sessiond, the unit's own process, takes the seat channel and arms
@@ -714,7 +751,11 @@ pub(crate) fn desktop_files(
          # no User= is not given; the clients find ~/.config through it.\n\
          Environment=HOME=/\n"
     };
-    let device = unit_device(session_user.is_some());
+    let device = format!(
+        "{}{}",
+        unit_device(session_user.is_some()),
+        data_nosuid_lines(data_nosuid)
+    );
     let restart = restart_line(session_user.is_some());
     let unit = format!(
         "# The compositor, a service of graphical.target (docs/INIT.md, L10).\n\
@@ -764,6 +805,7 @@ pub(crate) fn desktop_files(
         "/lib/ferrix/units/graphical.target",
     ));
     files.extend(console_getty(session_user.is_some(), shell));
+    files.extend(session_files(bus, data_nosuid));
     if let Some(pulsed) = pulsed {
         files.push(File {
             path: "bin/pulsed".to_owned(),
@@ -3214,11 +3256,11 @@ mod tests {
     #[test]
     fn a_session_compositor_goes_headless_without_card0() {
         assert_eq!(
-            compositor_command(Some("ferrix")).join(" "),
+            compositor_command(Some("ferrix"), None).join(" "),
             "/bin/sessiond --user ferrix --headless 1920x1200 --display-wait 60 -- /bin/hyprix"
         );
         assert!(!unit_device(true).contains("Requires="));
-        assert_eq!(compositor_command(None), ["/bin/hyprix"]);
+        assert_eq!(compositor_command(None, None), ["/bin/hyprix"]);
         assert_eq!(
             unit_device(false),
             "Requires=dev-dri-card0.device\nAfter=dev-dri-card0.device\n"

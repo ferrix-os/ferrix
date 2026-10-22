@@ -38,20 +38,17 @@ fn owned(fd: i32) -> OwnedFd {
     }
 }
 
-/// The thread's half: the child's pid from `told`, the scope asked for,
-/// the answer down `hear`. The scope's unit, or why there is none.
-pub(crate) fn ask_for_scope(
-    mut told: &std::fs::File,
-    mut hear: &std::fs::File,
-    uid: u32,
-) -> Result<String, String> {
+/// The pid a gated child wrote down `told`, or `None` when it never did:
+/// its fork failed, or it died first, and the pipe closed.
+pub(crate) fn read_pid(mut told: &std::fs::File) -> Option<u32> {
     let mut pid = [0_u8; 4];
-    told.read_exact(&mut pid)
-        .map_err(|error| format!("the compositor never said its pid: {error}"))?;
-    let scope = crate::scope::join(uid, u32::from_ne_bytes(pid));
-    let answer: &[u8] = if scope.is_ok() { b"y" } else { b"n" };
-    let _ = hear.write_all(answer);
-    scope
+    told.read_exact(&mut pid).ok()?;
+    Some(u32::from_ne_bytes(pid))
+}
+
+/// Answer a gated child down `hear`: `y` lets it exec, `n` stops it.
+pub(crate) fn answer(mut hear: &std::fs::File, go: bool) {
+    let _ = hear.write_all(if go { b"y" } else { b"n" });
 }
 
 /// The child's half, between fork and exec: its pid down the first pipe,

@@ -19,15 +19,16 @@ use ferrix_svc_proto::control::{Answer, Call, Framer, SOCKET};
 /// Where the count is kept, `login`'s directory.
 const DIRECTORY: &str = "/run/ferrix/login";
 
-/// Put `pid`, the compositor, in a new session scope of `uid`'s: the
-/// scope's unit name, or why not.
-pub(crate) fn join(uid: u32, pid: u32) -> Result<String, String> {
+/// Put `pids` -- the compositor, and the session's bus when it has one --
+/// in a new session scope of `uid`'s, in one call: the scope's unit name,
+/// or why not.
+pub(crate) fn join(uid: u32, pids: &[u32]) -> Result<String, String> {
     let n = next().map_err(|error| format!("{DIRECTORY}: {error}"))?;
     let unit = format!("session-{n}.scope");
     ask(&Call::Scope {
         unit: unit.clone(),
         slice: Some(format!("user-{uid}.slice")),
-        pids: vec![pid],
+        pids: pids.to_vec(),
     })?;
     Ok(unit)
 }

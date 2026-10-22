@@ -381,7 +381,8 @@ pub(super) fn test_hyprlock_session(arch: Arch, programs: &Programs, args: &Args
     let mut steps: Vec<&Step> = SESSION_STEPS.iter().collect();
     // The last step's password, typed once its lock is up.
     steps.push(&password);
-    let Some(said) = session_boot(arch, programs, args, SESSION_CONFIG, ATTACK, &steps)? else {
+    let Some(said) = session_boot(arch, programs, args, (SESSION_CONFIG, ATTACK), &steps, None)?
+    else {
         return Ok(());
     };
     judge_still_running(arch, &said)?;
@@ -412,9 +413,9 @@ fn session_boot(
     arch: Arch,
     programs: &Programs,
     args: &Args,
-    config: &str,
-    script: &str,
+    (config, script): (&str, &str),
     steps: &[&Step],
+    bus: Option<crate::session::Bus>,
 ) -> Result<Option<Vec<String>>> {
     let Some(busybox) = crate::busybox::installed_program(arch) else {
         println!("  {arch}: no busybox on this machine for the boot's keys; skipped");
@@ -426,6 +427,13 @@ fn session_boot(
         mode: 0o755,
         content: crate::ports::Content::Bytes(script.as_bytes().to_vec()),
     });
+    if bus.is_some() {
+        ports.push(crate::ports::File {
+            path: FAKE_BUS_PATH.to_owned(),
+            mode: 0o755,
+            content: crate::ports::Content::Bytes(FAKE_BUS.as_bytes().to_vec()),
+        });
+    }
     let lock = build(arch, "compositor-lock", "lock")?;
     ports.push(crate::ports::File {
         path: "bin/lock".to_owned(),
@@ -442,6 +450,7 @@ fn session_boot(
     };
     let session = Args {
         session_user: Some(crate::session::USER.to_owned()),
+        session_bus: bus,
         ..args.clone()
     };
     let (image, kernel) = judged_image(arch, programs, config, carried, None, &session)?;
@@ -531,6 +540,89 @@ fn drive_session(
         .chain(watching.after())
         .cloned()
         .collect())
+}
+
+/// The session-end boot's stand-in for a session bus (`docs/GNOME.md`, G1;
+/// the certification consultant's condition 6 (i), ledger line 3123):
+/// `sessiond --session-bus` starts it as it would `dbus-daemon`, and it says
+/// its uid and each of its descriptors, prints an address on descriptor 3,
+/// closes it, and beats once a second until the session's end stops it.
+const FAKE_BUS: &str = r#"#!/bin/sh
+echo "fakebus: uid $(id -u) gid $(id -g)"
+# Listed by a child of its own with no redirection here: busybox's shell
+# makes a redirection, and a command substitution's pipe, in this process.
+/bin/sh -c 'ls -l /proc/$PPID/fd | while read -r _ _ _ _ _ _ _ _ fd _ target; do
+    [ -n "$fd" ] && echo "fakebus: fd $fd $target"
+done'
+echo "unix:path=$XDG_RUNTIME_DIR/bus,guid=fakebus" >&3
+exec 3>&-
+while :; do echo bus-heartbeat; sleep 1; done
+"#;
+
+/// Where [`FAKE_BUS`] is in the image.
+const FAKE_BUS_PATH: &str = "bin/fakebus";
+
+/// The stand-in as `sessiond` is told of it.
+fn fake_bus() -> crate::session::Bus {
+    crate::session::Bus {
+        daemon: format!("/{FAKE_BUS_PATH}"),
+        config: format!("/{}", crate::session::SESSION_BUS_CONF_PATH),
+        env: Vec::new(),
+    }
+}
+
+/// What the stand-in bus's lines in `said` show wrong, if anything: its
+/// uid must be the session's, its descriptors 0 to 2 and the address pipe
+/// at 3 (or its own script, which the shell reads it from), and `sessiond`
+/// must have read its address.
+fn fake_bus_wrong(said: &[String]) -> Option<String> {
+    let after = |line: &String, word: &str| {
+        line.split_once(word)
+            .map(|(_, rest)| rest.trim().to_owned())
+    };
+    if !said.iter().any(|line| {
+        line.contains(
+            "sessiond: the session's bus is up: unix:path=/run/user/1000/bus,guid=fakebus",
+        )
+    }) {
+        return Some("sessiond never read the stand-in bus's address".to_owned());
+    }
+    let uid = said.iter().find_map(|line| after(line, "fakebus: uid "));
+    if uid
+        .as_deref()
+        .is_none_or(|ids| !ids.starts_with("1000 gid 1000"))
+    {
+        return Some(format!(
+            "the stand-in bus ran as {}, not ferrix (1000)",
+            uid.unwrap_or_else(|| "nobody it said".to_owned())
+        ));
+    }
+    let fds: Vec<String> = said
+        .iter()
+        .filter_map(|line| after(line, "fakebus: fd "))
+        .collect();
+    let mut seen = Vec::new();
+    for fd in &fds {
+        let (number, target) = fd.split_once(' ').unwrap_or((fd.as_str(), ""));
+        let fine = match number {
+            "0" | "1" | "2" => true,
+            "3" => target.starts_with("pipe:"),
+            _ => target == format!("/{FAKE_BUS_PATH}"),
+        };
+        if !fine {
+            return Some(format!("the stand-in bus held descriptor {fd}"));
+        }
+        seen.push(number.to_owned());
+    }
+    for wanted in ["0", "1", "2", "3"] {
+        if !seen.iter().any(|number| number == wanted) {
+            return Some(format!(
+                "the stand-in bus had no descriptor {wanted}: {}",
+                fds.join(", ")
+            ));
+        }
+    }
+    None
 }
 
 /// P2.7's boot's configuration: hyprlock on a `bindl`, and the
@@ -641,7 +733,15 @@ const END_STEPS: [Step; 6] = [
 /// a fresh desktop. The certification consultant's E2 to E4.
 pub(super) fn test_session_end(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
     let steps: Vec<&Step> = END_STEPS.iter().collect();
-    let Some(said) = session_boot(arch, programs, args, END_CONFIG, END_SCRIPT, &steps)? else {
+    let Some(said) = session_boot(
+        arch,
+        programs,
+        args,
+        (END_CONFIG, END_SCRIPT),
+        &steps,
+        Some(fake_bus()),
+    )?
+    else {
         return Ok(());
     };
     let Some(end) = said
@@ -678,6 +778,27 @@ pub(super) fn test_session_end(arch: Arch, programs: &Programs, args: &Args) -> 
             line.trim()
         )));
     }
+    // The session's bus (G1): the account's, with only its address pipe,
+    // beating until the end and not after it.
+    if let Some(wrong) = fake_bus_wrong(&said) {
+        return Err(Error::new(format!("{arch}: {wrong}")));
+    }
+    if !said
+        .get(..end)
+        .unwrap_or_default()
+        .iter()
+        .any(|line| line.contains("bus-heartbeat"))
+    {
+        return Err(Error::new(format!(
+            "{arch}: the stand-in session bus never beat before the session's end"
+        )));
+    }
+    if let Some(line) = after.iter().find(|line| line.contains("bus-heartbeat")) {
+        return Err(Error::new(format!(
+            "{arch}: the session's bus outlived its end: {}",
+            line.trim()
+        )));
+    }
     // E4: the end shown, not only said.
     if let Some(line) = after.iter().find(|line| line.contains("heartbeat")) {
         return Err(Error::new(format!(
@@ -688,7 +809,8 @@ pub(super) fn test_session_end(arch: Arch, programs: &Programs, args: &Args) -> 
     println!(
         "  {arch}: as ferrix, a refused lock unlocked nothing, the store stayed closed, and \
          killing the compositor ended the session at the console's login, no process of it left \
-         and nothing of ferrix's able to start it again"
+         -- its session bus, ferrix's with only its address pipe, among them -- and nothing of \
+         ferrix's able to start it again"
     );
     Ok(())
 }

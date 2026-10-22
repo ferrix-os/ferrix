@@ -66,6 +66,7 @@ pub(crate) mod claude_desktop;
 mod desktop;
 mod direct_scanout;
 mod drawing;
+mod gnome_apps;
 mod drawn_here;
 pub(crate) mod dxvk;
 mod effects;
@@ -100,6 +101,7 @@ pub(crate) use boot::{absolute, button_event, client_image, press};
 pub(crate) use browser::{test_chrome_audio, test_chrome_window};
 pub(crate) use claude_desktop::test_claude_desktop;
 pub(crate) use drawing::test_video;
+pub(crate) use gnome_apps::test_gnome_apps;
 pub(crate) use latency::test_xlatency;
 use run::release_image;
 pub(crate) use run::{board_files, run_compositor};
@@ -184,6 +186,17 @@ pub(crate) const TASKS: &[Task] = &[
             "              (docs/CLAUDE-CODE.md §7.8, x86_64)",
         ],
         run: |_, args| test_claude_desktop(args),
+    },
+    Task {
+        name: "test-gnome-apps",
+        help_at: 685,
+        help: &[
+            "test-gnome-apps  Debian 13's GTK 4 and libadwaita, which tools/common/fetch/fetch-gnome-apps.sh pins, as",
+            "              clients of hyprix in a session of ferrix with sessiond's session bus: require /data nosuid,nodev,",
+            "              the bus ferrix's and no system bus, adwaita-1-demo's window drawn and its name on the bus, and",
+            "              neither left after the session's end (docs/GNOME.md, G1; x86_64)",
+        ],
+        run: |_, args| test_gnome_apps(args),
     },
     Task {
         name: "test-frames",

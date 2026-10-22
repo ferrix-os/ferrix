@@ -183,6 +183,121 @@ fn unit(name: &str, kind: &str, description: &str, command: &str) -> [File; 2] {
     ]
 }
 
+/// The session's D-Bus session bus, which `sessiond` starts beside the
+/// compositor (`docs/GNOME.md`, stage G1): the daemon, its configuration
+/// and `NAME=VALUE` pairs for its environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Bus {
+    pub(crate) daemon: String,
+    pub(crate) config: String,
+    pub(crate) env: Vec<(String, String)>,
+}
+
+impl Bus {
+    /// `sessiond`'s words for it, before its `--`.
+    pub(crate) fn words(&self) -> Vec<String> {
+        let mut words = vec![
+            "--session-bus".to_owned(),
+            self.daemon.clone(),
+            self.config.clone(),
+        ];
+        for (name, value) in &self.env {
+            words.push("--session-env".to_owned());
+            words.push(format!("{name}={value}"));
+        }
+        words
+    }
+}
+
+/// Where [`SESSION_BUS_CONF`] goes: in the image, root's, not on the volume
+/// the daemon comes from.
+pub(crate) const SESSION_BUS_CONF_PATH: &str = "etc/ferrix/session-bus.conf";
+
+/// The session bus's configuration (the certification consultant's G1
+/// condition 5, ledger line 3123): Debian's `session.conf` less what G1
+/// does not allow. One `<listen>`, `unix:runtime=yes`, the socket `bus` in
+/// the account's `0700` runtime directory -- the address `sessiond` gives
+/// the daemon too, which replaces it, and the daemon refuses a
+/// configuration with none -- `EXTERNAL`
+/// authentication alone, so no anonymous or cookie client and no TCP, the
+/// services the volume ships as the only ones it starts, no eavesdropping,
+/// and no `<include>` of any other file. Debian's limits are kept.
+pub(crate) const SESSION_BUS_CONF: &str = r#"<!-- The session's bus on Ferrix (docs/GNOME.md, G1; tools/common/xtask/src/session.rs). -->
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <keep_umask/>
+  <listen>unix:runtime=yes</listen>
+  <auth>EXTERNAL</auth>
+  <servicedir>/data/usr/share/dbus-1/services</servicedir>
+  <policy context="default">
+    <allow send_destination="*"/>
+    <allow receive_sender="*"/>
+    <allow own="*"/>
+  </policy>
+  <limit name="max_incoming_bytes">1000000000</limit>
+  <limit name="max_incoming_unix_fds">250000000</limit>
+  <limit name="max_outgoing_bytes">1000000000</limit>
+  <limit name="max_outgoing_unix_fds">250000000</limit>
+  <limit name="max_message_size">1000000000</limit>
+  <limit name="service_start_timeout">120000</limit>
+  <limit name="auth_timeout">240000</limit>
+  <limit name="pending_fd_timeout">150000</limit>
+  <limit name="max_completed_connections">100000</limit>
+  <limit name="max_incomplete_connections">10000</limit>
+  <limit name="max_connections_per_user">100000</limit>
+  <limit name="max_pending_service_starts">10000</limit>
+  <limit name="max_names_per_connection">50000</limit>
+  <limit name="max_match_rules_per_connection">50000</limit>
+  <limit name="max_replies_per_connection">50000</limit>
+</busconfig>
+"#;
+
+/// The script `data-nosuid.service` runs: `/data` remounted `nosuid,nodev`,
+/// and its line said; any other outcome fails the unit, and the compositor's
+/// unit, which requires it, does not start (the certification consultant's
+/// G1 condition 3, ledger line 3123).
+const DATA_NOSUID: &str = r#"#!/bin/sh
+# /data nosuid,nodev before anything runs from it (docs/GNOME.md, G1).
+mount -o remount,nosuid,nodev /data || exit 1
+line=$(grep ' /data ' /proc/mounts)
+echo "data-nosuid: $line"
+flags=",$(echo "$line" | cut -d' ' -f4),"
+case $flags in
+*,nosuid,*) ;;
+*) echo 'data-nosuid: /data is not nosuid'; exit 1 ;;
+esac
+case $flags in
+*,nodev,*) ;;
+*) echo 'data-nosuid: /data is not nodev'; exit 1 ;;
+esac
+exit 0
+"#;
+
+/// Where [`DATA_NOSUID`] goes.
+const DATA_NOSUID_PATH: &str = "etc/ferrix/data-nosuid.sh";
+
+/// What `data-nosuid.service` prints before `/data`'s line.
+pub(crate) const DATA_NOSUID_SAID: &str = "data-nosuid: ";
+
+/// `data-nosuid.service`, its script and its link: a oneshot of
+/// `graphical.target` before the compositor's unit, which requires it.
+pub(crate) fn data_nosuid() -> Vec<File> {
+    let mut files = vec![File {
+        path: DATA_NOSUID_PATH.to_owned(),
+        mode: 0o755,
+        content: Content::Bytes(DATA_NOSUID.as_bytes().to_vec()),
+    }];
+    files.extend(unit(
+        "data-nosuid",
+        "oneshot",
+        "The data volume, nosuid and nodev",
+        &format!("/bin/busybox sh /{DATA_NOSUID_PATH}"),
+    ));
+    files
+}
+
 /// The waybar configuration's members that are lengths in pixels.
 const BAR_LENGTHS: [&str; 4] = ["height", "width", "spacing", "icon-size"];
 

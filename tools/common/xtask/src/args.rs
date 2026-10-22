@@ -223,6 +223,13 @@ pub(crate) struct Args {
     /// `run-compositor --everything` (`crate::session`), and `None` for a
     /// compositor that runs as root, as every judged desktop does.
     pub(crate) session_user: Option<String>,
+    /// The session's D-Bus session bus, which `sessiond` starts beside the
+    /// compositor (`crate::session::Bus`): `test-gnome-apps` and the
+    /// session-end boot's stand-in.
+    pub(crate) session_bus: Option<crate::session::Bus>,
+    /// Whether the compositor's unit requires `data-nosuid.service`, which
+    /// remounts `/data` `nosuid,nodev` first (`crate::session::data_nosuid`).
+    pub(crate) data_nosuid: bool,
     /// `--seeds`, how many power failures `test-powerfail` makes.
     pub(crate) seeds: u64,
     /// `--accel`, which QEMU accelerator to boot under. `None` means `tcg`,
