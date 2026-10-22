@@ -85,10 +85,10 @@ pub(in crate::arch::x86_64) const fn platform_limits(raw: u64) -> (Limit, Limit)
     (limit(raw, 0, 17), limit(raw, 32, 17))
 }
 
-/// `MSR_VR_CURRENT_CONFIG`: PL4 in bits 12:0 in power units, as Linux's
-/// `intel_rapl` reads it, and the lock in bit 31.
-pub(in crate::arch::x86_64) const fn pl4(raw: u64) -> (u64, bool) {
-    (raw & 0x1fff, bit(raw, 31))
+/// `MSR_VR_CURRENT_CONFIG`: the VR current limit, bits 12:0 in 1/8 A, in
+/// milliamperes, and the lock in bit 31.
+pub(in crate::arch::x86_64) const fn vr_current(raw: u64) -> (u64, bool) {
+    ((raw & 0x1fff) * 125, bit(raw, 31))
 }
 
 /// `MSR_PKG_POWER_INFO`: TDP, minimum and maximum, in power units.

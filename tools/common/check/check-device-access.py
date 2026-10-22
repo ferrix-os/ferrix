@@ -175,7 +175,7 @@ def check(measured: dict[str, int], policy: dict) -> list[str]:
 # helper or by the instruction. Comments included, so a write cannot hide
 # behind a doc line either.
 READ_ONLY_MSR_FILES = ("src/kernel/src/arch/x86_64/msrlog.rs", "src/kernel/src/arch/x86_64/msrlog/")
-MSR_WRITE = re.compile(r"\bwrite_msr\b|\bwrmsr\b|\bwrmsrns\b")
+MSR_WRITE = re.compile(r"\bwrite_msr\w*|\bwrmsr\b|\bwrmsrns\b")
 
 
 def read_only_msr_problems(root: pathlib.Path) -> list[str]:
@@ -187,6 +187,60 @@ def read_only_msr_problems(root: pathlib.Path) -> list[str]:
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if MSR_WRITE.search(line):
                 problems.append(f"{path.relative_to(root)}:{number}: ferrix.msrlog writes an MSR; it must only read (L.x86_64.187)")
+    return problems
+
+
+# ferrix.vrcurrent writes one register (L.x86_64.192, the consultant's
+# condition 4 of ledger line 3086): the kernel's one checked MSR write,
+# `cpu::write_msr_checked`, is called only from vrcurrent.rs, with the
+# constant VR_CURRENT_CONFIG defined there once as 0x601, and from its boot
+# check, with only its absent-index constant ABSENT. Neither file writes an MSR
+# any other way, and cpu.rs's checked write holds exactly one `wrmsr`, at its
+# fixup label; cpu.rs's other `wrmsr`, the unchecked write_msr, is the only
+# other in that file.
+KERNEL = "src/kernel/src"
+CPU_FILE = "src/kernel/src/arch/x86_64/cpu.rs"
+VR_FILE = "src/kernel/src/arch/x86_64/vrcurrent.rs"
+VR_CHECK_FILE = "src/kernel/src/arch/x86_64/vrcurrent/check.rs"
+VR_DIR = "src/kernel/src/arch/x86_64/vrcurrent/"
+CHECKED_WRITE_CALL = re.compile(r"\bwrite_msr_checked\b(\s*\(\s*([A-Za-z0-9_:]*))?")
+CHECKED_WRITE_ARGUMENT = {VR_FILE: "VR_CURRENT_CONFIG", VR_CHECK_FILE: "ABSENT"}
+OTHER_MSR_WRITE = re.compile(r"\bwrite_msr\b|\bwrmsr\b|\bwrmsrns\b")
+ASM_WRMSR = re.compile(r'"wrmsr"')
+
+
+def checked_write_problems(root: pathlib.Path) -> list[str]:
+    problems = []
+    for path in sorted((root / KERNEL).rglob("*.rs")):
+        relative = path.relative_to(root).as_posix()
+        if relative == CPU_FILE:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for match in CHECKED_WRITE_CALL.finditer(line):
+                wanted = CHECKED_WRITE_ARGUMENT.get(relative)
+                if wanted is None:
+                    problems.append(f"{relative}:{number}: write_msr_checked outside ferrix.vrcurrent (L.x86_64.192)")
+                elif match.group(2) != wanted:
+                    problems.append(f"{relative}:{number}: write_msr_checked of {match.group(2) or 'no register'}, not {wanted} (L.x86_64.192)")
+    vr_files = [root / VR_FILE, *sorted((root / VR_DIR).glob("*.rs"))]
+    for path in vr_files:
+        if not path.exists():
+            continue
+        relative = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), 1):
+            if OTHER_MSR_WRITE.search(line):
+                problems.append(f"{relative}:{number}: ferrix.vrcurrent writes an MSR other than through write_msr_checked (L.x86_64.192)")
+        if relative == VR_FILE:
+            defined = re.findall(r"const VR_CURRENT_CONFIG: u32 = (\w+);", text)
+            if defined != ["0x601"]:
+                problems.append(f"{relative}: VR_CURRENT_CONFIG must be defined once, as 0x601 (L.x86_64.192)")
+    cpu = (root / CPU_FILE).read_text(encoding="utf-8")
+    body = re.search(r"fn ferrix_wrmsr_checked\(.*?\n}\n", cpu, re.S)
+    if body is None or len(ASM_WRMSR.findall(body.group(0))) != 1 or not re.search(r'"ferrix_wrmsr_checked_insn:",\s*"wrmsr",', body.group(0)):
+        problems.append(f"{CPU_FILE}: ferrix_wrmsr_checked must hold exactly one wrmsr, at ferrix_wrmsr_checked_insn (L.x86_64.192)")
+    if len(ASM_WRMSR.findall(cpu)) != 2:
+        problems.append(f"{CPU_FILE}: {len(ASM_WRMSR.findall(cpu))} wrmsr; only write_msr's and the checked write's (L.x86_64.192)")
     return problems
 
 
@@ -202,7 +256,7 @@ def main() -> int:
     allowed = {entry["file"]: entry for entry in policy["files"]}
 
     measured = survey(root)
-    problems = check(measured, policy) + read_only_msr_problems(root)
+    problems = check(measured, policy) + read_only_msr_problems(root) + checked_write_problems(root)
 
     by_kind = {kind: 0 for kind in KINDS}
     for relative, count in measured.items():

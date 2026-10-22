@@ -994,6 +994,88 @@ pub(crate) fn read_msr_checked(msr: u32) -> Option<u64> {
     (read == 1).then_some(value)
 }
 
+/// `wrmsr` of `ecx = msr` with `value`, returning 1; or, where the processor
+/// refuses the write with `#GP`, 0 (`L.x86_64.192`).
+///
+/// [`ferrix_rdmsr_checked`]'s pair for writing: the one `wrmsr` sits at
+/// `ferrix_wrmsr_checked_insn`, and a `#GP` taken from ring 0 at exactly that
+/// address is resumed by `trap::ferrix_trap_entry` at
+/// `ferrix_wrmsr_checked_fault` ([`checked_write_resume`]). A refused
+/// `wrmsr` changes nothing, so the fault label only sets the return value.
+/// Its one caller is [`write_msr_checked`], whose one caller is
+/// `ferrix.vrcurrent` (check-device-access.py holds both).
+///
+/// # Safety
+///
+/// (SYSREG) a write the processor accepts changes how it behaves: `msr` and
+/// `value` must be ones the caller has argued safe to write.
+// SAFETY: (SYSREG) the body is the whole function: it keeps the SysV ABI
+// toward its caller -- `msr` in edi, `value` in rsi, the result in eax, only
+// the caller-saved rcx, rdx and rax touched -- and either path returns.
+#[unsafe(naked)]
+unsafe extern "C" fn ferrix_wrmsr_checked(msr: u32, value: u64) -> u32 {
+    core::arch::naked_asm!(
+        ".globl ferrix_wrmsr_checked_insn, ferrix_wrmsr_checked_fault",
+        ".hidden ferrix_wrmsr_checked_insn, ferrix_wrmsr_checked_fault",
+        "mov ecx, edi",
+        "mov eax, esi",
+        "mov rdx, rsi",
+        "shr rdx, 32",
+        "ferrix_wrmsr_checked_insn:",
+        "wrmsr",
+        "mov eax, 1",
+        "ret",
+        "ferrix_wrmsr_checked_fault:",
+        "xor eax, eax",
+        "ret",
+    );
+}
+
+unsafe extern "C" {
+    /// The address of [`ferrix_wrmsr_checked`]'s `wrmsr`. Only its address is
+    /// taken; it is code, never read as data.
+    static ferrix_wrmsr_checked_insn: u8;
+    /// Where a `#GP` at that `wrmsr` resumes. Address only, as above.
+    static ferrix_wrmsr_checked_fault: u8;
+}
+
+/// `#GP`s that [`checked_write_resume`] resumed: one per checked write the
+/// processor refused.
+static CHECKED_WRITES_REFUSED: AtomicU64 = AtomicU64::new(0);
+
+/// How many checked writes the processor has refused with `#GP` since boot.
+pub(crate) fn checked_writes_refused() -> u64 {
+    CHECKED_WRITES_REFUSED.load(Ordering::Relaxed)
+}
+
+/// Where a ring-0 `#GP` at `rip` resumes, if `rip` is exactly
+/// [`ferrix_wrmsr_checked`]'s `wrmsr`; `None` for every other address
+/// (`L.x86_64.192`). No range: one address.
+pub(super) fn checked_write_resume(rip: u64) -> Option<u64> {
+    let insn = (&raw const ferrix_wrmsr_checked_insn) as u64;
+    if rip != insn {
+        return None;
+    }
+    let _ = CHECKED_WRITES_REFUSED.fetch_add(1, Ordering::Relaxed);
+    Some((&raw const ferrix_wrmsr_checked_fault) as u64)
+}
+
+/// Write a model-specific register that may refuse the write: `false` where
+/// the processor raises `#GP`, instead of the fatal fault [`write_msr`]
+/// takes (`L.x86_64.192`).
+///
+/// # Safety
+///
+/// (SYSREG) a write the processor accepts changes how it behaves: the caller
+/// must have argued `msr` and `value` safe to write.
+pub(super) unsafe fn write_msr_checked(msr: u32, value: u64) -> bool {
+    // SAFETY: (SYSREG) `wrmsr` of any index and value is either a write the
+    // caller argued safe or a `#GP`, which `checked_write_resume` turns into
+    // a return of 0 at the fault label with nothing written.
+    let written = unsafe { ferrix_wrmsr_checked(msr, value) };
+    written == 1
+}
+
 /// Control register 0: protection, paging, write protection, caching.
 pub(crate) fn read_cr0() -> u64 {
     let value: u64;

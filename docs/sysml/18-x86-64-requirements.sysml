@@ -919,7 +919,8 @@ package FerrixX8664Requirements {
                 values: the RAPL power, energy and time units (0x606 bits 3:0,
                 12:8, 19:16); PL1 and PL2 of 0x610 (15-bit power, enable, clamp,
                 7-bit window, from bits 0 and 32; lock bit 63) and of 0x65c (17-bit
-                power fields); PL4 of 0x601 (bits 12:0, lock bit 31); TDP, minimum
+                power fields); the VR current limit of 0x601 (bits 12:0 in 1/8 A,
+                as milliamperes; lock bit 31); TDP, minimum
                 and maximum of 0x614; the limit reasons now and logged (bits 15:0,
                 31:16) with turbostat's names; the ratio and voltage of 0x198; TjMax
                 of 0x1a2; and the status, log, readout and valid bit of 0x19c and
@@ -936,12 +937,135 @@ package FerrixX8664Requirements {
                 "arch::x86_64::msrlog::decode::limit",
                 "arch::x86_64::msrlog::decode::package_limits",
                 "arch::x86_64::msrlog::decode::platform_limits",
-                "arch::x86_64::msrlog::decode::pl4",
+                "arch::x86_64::msrlog::decode::vr_current",
                 "arch::x86_64::msrlog::decode::power_info",
                 "arch::x86_64::msrlog::decode::reasons",
                 "arch::x86_64::msrlog::decode::perf_status",
                 "arch::x86_64::msrlog::decode::tjmax",
                 "arch::x86_64::msrlog::decode::thermal");
+        }
+        requirement <'L.x86_64.190'> vrCurrentWordAndClamp : ItemLowLevel {
+            attribute :>> statement = "The x86-64 kernel shall read, write and
+                print nothing for ferrix.vrcurrent unless the option
+                ferrix.vrcurrent=A1,...,An@S is on the loader's command line (a
+                bare ferrix.vrcurrent prints one line and writes nothing). The
+                value shall be one to eight steps of one or two ASCII digits,
+                comma-separated, each from 25 to 32 A, then @ and one to four
+                ASCII digits of seconds from 1 to 3600; any other value, and any
+                step outside 25 to 32 A, shall be refused with a line and nothing
+                written. From a task pinned to the boot processor it shall refuse,
+                with a line and nothing written, unless CPUID names an Intel family
+                6 model 0xBE processor, a checked read of 0x601 succeeds, its lock
+                bit 31 is clear, its bits 12:0 are not 0, and no step is more than
+                7 A above them.";
+            attribute :>> criterion = "Stage 3 parses fixed words: 27,29,32@60,
+                25@1 and eight 32s @3600 give their plans; 24, 33 and 0 A are
+                refused as out of range; the empty word, no @, no seconds, 0 and
+                3601 s, five-digit seconds, an empty step, three-digit, decimal,
+                signed and spaced steps and nine steps are refused as malformed.
+                The processor gate passes only Intel 6/0xBE; locked, 0 and
+                7-A-exceeded registers are refused; the plan survives its packing
+                into the task's argument. The x86_64:kvm rows with
+                ferrix.vrcurrent=27,29,32@2, =27,40@2 and =27,29 each print one
+                refusal line and no set line; the rows without the word print no
+                vrcurrent line. Negative controls: the clamp and the processor
+                gate removed each panic stage 3.";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::vrcurrent::start",
+                "arch::x86_64::vrcurrent::processor",
+                "arch::x86_64::vrcurrent::ready",
+                "arch::x86_64::vrcurrent::Why::fmt",
+                "arch::x86_64::vrcurrent::logic::decimal",
+                "arch::x86_64::vrcurrent::logic::parse",
+                "arch::x86_64::vrcurrent::logic::authorised",
+                "arch::x86_64::vrcurrent::logic::admit",
+                "arch::x86_64::vrcurrent::logic::pack",
+                "arch::x86_64::vrcurrent::logic::unpack",
+                "arch::x86_64::start_vr_current");
+        }
+        requirement <'L.x86_64.191'> vrCurrentThermalGuardReverts : ItemLowLevel {
+            attribute :>> statement = "While ferrix.vrcurrent has raised the VR
+                current limit, the kernel shall read IA32_THERM_STATUS (0x19c) on
+                the boot processor and IA32_PACKAGE_THERM_STATUS (0x1b1) once
+                before the first write and then every second, and shall write
+                0x601's firmware value back, print a line beginning msr:
+                vrcurrent reverted to and the reason, and write no further step,
+                when either read fails, 0x19c's valid bit 31 is clear, any of bits
+                0 to 5 (thermal, PROCHOT and critical status and their logs) is
+                set in either, or TjMax less either readout (bits 22:16) is 90 C or
+                more; TjMax shall be read from 0x1a2 before the first write and
+                refused outside 80 to 110 C. It shall write the firmware value back
+                likewise on a power-off, a reset and at both ends of a panic, from
+                any processor, without a lock; of all these only the first shall
+                write. It shall print the temperatures every 5 s.";
+            attribute :>> criterion = "Stage 3 runs the verdict over fixed
+                readings: 35 and 37 C pass, 89 C passes, 90 C on the core or the
+                package trips, each of bits 0 to 5 on either register trips and
+                bits 6 to 15 do not, an invalid core readout trips; TjMax 0, 79 and
+                111 are refused and 80, 105 and 110 believed. Negative control: the
+                temperature limit removed panics stage 3. The revert on hardware
+                is the N150 run's log (BACKLOG row until that run).";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::vrcurrent::run",
+                "arch::x86_64::vrcurrent::guard",
+                "arch::x86_64::vrcurrent::revert",
+                "arch::x86_64::vrcurrent::restore",
+                "arch::x86_64::vrcurrent::Reason::fmt",
+                "arch::x86_64::vrcurrent::logic::verdict",
+                "arch::x86_64::vrcurrent::logic::celsius",
+                "arch::x86_64::vrcurrent::logic::tjmax_believed",
+                "arch::x86_64::restore_vr_current");
+        }
+        requirement <'L.x86_64.192'> checkedMsrWriteResumesAtItsFixup : ItemLowLevel {
+            attribute :>> statement = "write_msr_checked shall return true after
+                a wrmsr the processor accepts and false for one it refuses with
+                #GP: the trap entry shall resume a #GP taken from ring 0 whose
+                saved instruction pointer is exactly the checked write's one wrmsr
+                instruction at that write's fault label, which returns failure.
+                The match shall be that one address, vector 13 and ring 0, with no
+                range, beside the checked read's. Outside cpu.rs only
+                ferrix.vrcurrent shall call it, with 0x601, and its boot check,
+                with an absent index.";
+            attribute :>> criterion = "Stage 3, under a hypervisor only: a checked
+                write of 0x3fffffff is refused with exactly one #GP counted under
+                KVM, which panics otherwise; under another hypervisor (TCG) the
+                line says which path ran; on bare metal it is not run. The gate's
+                check row holds the call sites, the register and the single wrmsr
+                (check-device-access.py), with controls planting a checked write in
+                msrlog.rs and one of 0x610 in vrcurrent.rs. Negative control: the
+                write's address removed from the trap entry, the x86_64:kvm boot
+                stops in stage 3 with a general protection fault.";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::cpu::ferrix_wrmsr_checked",
+                "arch::x86_64::cpu::write_msr_checked",
+                "arch::x86_64::cpu::checked_write_resume",
+                "arch::x86_64::cpu::checked_writes_refused",
+                "arch::x86_64::trap::ferrix_trap_entry");
+        }
+        requirement <'L.x86_64.193'> vrCurrentWritesBitsTwelveToZero : ItemLowLevel {
+            attribute :>> statement = "Each ferrix.vrcurrent step shall write
+                0x601 as its firmware value with bits 12:0 replaced by the step's
+                amperes times 8 and every other bit as read, print msr: vrcurrent
+                set N A (was M A), and read it back; a read-back whose bits 12:0
+                differ, or a write refused with #GP, shall revert as L.x86_64.191
+                and end the run. The first step shall be written after the checks
+                of L.x86_64.190 and the guard's first good verdict, and step k
+                (counting from 0) in force from k times S seconds after it, the
+                last kept.";
+            attribute :>> criterion = "Stage 3 composes over fixed firmware
+                values (every other bit set, the N150's 200 eighths, 0) and
+                compares the whole word; the step in force at 0, 59, 60, 119, 120
+                and 100000 s of a 60 s plan is 0, 0, 1, 1, 2, 2. Negative control:
+                compose not masking panics stage 3. The write on hardware is the
+                N150 run's log.";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::vrcurrent::raise",
+                "arch::x86_64::vrcurrent::Amps::fmt",
+                "arch::x86_64::vrcurrent::logic::compose",
+                "arch::x86_64::vrcurrent::logic::eighths",
+                "arch::x86_64::vrcurrent::logic::locked",
+                "arch::x86_64::vrcurrent::logic::step_at",
+                "arch::x86_64::vrcurrent::logic::Plan::step");
         }
         requirement <'L.x86_64.32'> speculationPlanFollowsCpuid : ItemLowLevel {
             attribute :>> statement = "Plan::for_processor shall choose enhanced

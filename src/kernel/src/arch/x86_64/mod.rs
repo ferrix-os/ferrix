@@ -21,6 +21,7 @@ mod smp;
 pub(super) mod speculation;
 pub(super) mod switch;
 mod syscall;
+mod vrcurrent;
 pub(crate) use syscall::check::{drive_native_words, drive_system_call};
 pub(super) mod trap;
 
@@ -181,13 +182,28 @@ pub(crate) fn check_machine() -> Result<(), &'static str> {
     cpu::check::run()?;
     // And `ferrix.msrlog`'s checked MSR read, decoder and period
     // (`L.x86_64.187`-`189`).
-    msrlog::check::run()
+    msrlog::check::run()?;
+    // And `ferrix.vrcurrent`'s plan, guard, value and checked write, none
+    // of which writes a register the processor has (`L.x86_64.190`-`193`).
+    vrcurrent::check::run()
 }
 
 /// Start `ferrix.msrlog`'s read-only MSR log if the word is given
 /// (`L.x86_64.187`); nothing at all otherwise.
 pub(crate) fn start_msr_log(view: &BootView<'_>) {
     msrlog::start(view);
+}
+
+/// Start `ferrix.vrcurrent`'s run if the word is given (`L.x86_64.190`);
+/// nothing at all otherwise.
+pub(crate) fn start_vr_current(view: &BootView<'_>) {
+    vrcurrent::start(view);
+}
+
+/// Write the firmware's VR current limit back if `ferrix.vrcurrent` raised
+/// it (`L.x86_64.191`): on a power-off, a reset and a panic.
+pub(crate) fn restore_vr_current(what: &'static str) {
+    vrcurrent::restore(what);
 }
 
 /// The boot processor's machine check, set whatever firmware left in `CR4`
@@ -1668,6 +1684,7 @@ pub(crate) fn frame_pointer() -> u64 {
 /// QEMU's debug-exit device is the only way off, so QEMU's status is always 33
 /// for a power-off here; real hardware discards the write and is halted.
 pub(crate) fn shutdown() -> ! {
+    vrcurrent::restore("power-off");
     crate::console::announce_power_off();
     crate::console::drain();
     cpu::debug_exit();
@@ -1696,6 +1713,7 @@ const KBC_PULSE_RESET: u8 = 0xFE;
 /// of the first two gets time to act, and one that returns is a machine that
 /// did not reset, so the next is tried. A triple fault cannot return.
 pub(crate) fn reset() -> ! {
+    vrcurrent::restore("reset");
     crate::console::drain();
     cpu::disable_interrupts();
 

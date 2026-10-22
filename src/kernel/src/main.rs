@@ -249,6 +249,9 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // processor that reads the power-limit MSRs, once every processor is up
     // and there is a scheduler to sleep in (`L.x86_64.187`).
     arch::start_msr_log(view);
+    // `ferrix.vrcurrent`, likewise: the VR current limit raised in steps
+    // under a thermal guard, from a task on this processor (`L.x86_64.190`).
+    arch::start_vr_current(view);
 
     // The console's transmit side, as a program's output goes out: from a
     // task, which the scheduler just made this, into the ring the port's

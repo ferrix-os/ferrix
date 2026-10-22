@@ -646,12 +646,24 @@ On an Intel processor with hardware P-states each core asks for its whole
 performance range with the energy and performance preference `ferrix.epp`
 chooses, performance (0) unless the command line names another
 (L.x86_64.177, L.x86_64.182). The element writes no power-limit, RAPL,
-`IA32_PERF_CTL` or `IA32_HWP_REQUEST_PKG` register: the package's power
+`IA32_PERF_CTL` or `IA32_HWP_REQUEST_PKG` register -- save the one
+exception below, which no certified configuration sets: the package's power
 limits and its thermal protection are the platform firmware's, and the
 integrator's to set, and the processor keeps within them whatever the
 preference. The integrator shall not rely on the element to hold a power or
 thermal budget, and shall rely on no time figure that assumes a processor
 clock (MEMORY-AND-TIMING).
+
+The exception is the diagnostic boot word `ferrix.vrcurrent`
+(L.x86_64.190-193), authorised by the customer for the N150 alone. It
+raises `MSR_VR_CURRENT_CONFIG`'s current limit to at most 32 A, more
+current through the voltage regulator and more heat than firmware allowed,
+and the hazard is a processor or regulator run past what its cooling and
+board were sized for. Its guard writes firmware's value back at 90 C, at
+a thermal or PROCHOT bit, at a failed read and on power-off, reset and
+panic, but runs only while the scheduler runs its task (VULNERABILITY-
+ANALYSIS V-16). The integrator shall not set it on a system of which a
+claim is made.
 
 ### AoU-34 — a task's user and kernel time are accounting, not enforcement
 `/proc/<pid>/stat`'s `utime` and `stime` and `status`'s two switch counts

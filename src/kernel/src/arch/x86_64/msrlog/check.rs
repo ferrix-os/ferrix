@@ -120,7 +120,10 @@ fn decoded() -> Result<(), &'static str> {
     {
         return Err("MSR_PLATFORM_POWER_LIMIT decoded wrongly");
     }
-    if decode::pl4(0x8000_e0f0) != (0xf0, true) || decode::pl4(0x1fff) != (0x1fff, false) {
+    // 200 eighths is the N150's 25 A; 0x1fff the field's largest, 1023.875 A.
+    if decode::vr_current(0x8000_e0c8) != (25_000, true)
+        || decode::vr_current(0x1fff) != (1_023_875, false)
+    {
         return Err("MSR_VR_CURRENT_CONFIG decoded wrongly");
     }
     let info = decode::power_info((0x7fff_u64 << 32) | (0x18 << 16) | 0x30 | (1 << 15));

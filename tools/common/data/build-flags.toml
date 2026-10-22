@@ -215,6 +215,10 @@ why = "x86-64 only, ignored on aarch64 and armv7a: a read-only log of the RAPL p
 values = ["*"]
 why = "seconds between ferrix.msrlog's reads, 0 to 3600, 0 for once; 5 without it or for a value not understood, which the log says (L.x86_64.187)"
 
+[boot_options."ferrix.vrcurrent"]
+values = ["*"]
+why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150), ignored on aarch64 and armv7a: raises a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, in steps A1,...,An@SECONDS of 25 to 32 A, at most 7 A above firmware's, under a thermal guard that writes firmware's value back at 90 C, at any thermal/PROCHOT/critical bit, at a failed read, and on power-off, reset and panic (arch/x86_64/vrcurrent.rs, L.x86_64.190-193). Authorised by the customer for one N150 run (2026-10-22); a diagnostic, never in a configuration a claim is made of"
+
 [boot_options."ferrix.panic"]
 values = ["halt", "reset"]
 why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the reference; reset, a stop-gap for the N150 box set by no loader, outside the reference configuration (SAFETY-MANUAL AoU-32, certification-item.json `panic`)"

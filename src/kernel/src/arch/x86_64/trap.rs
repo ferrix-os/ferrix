@@ -524,12 +524,15 @@ extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
     if frame.vector == DEBUG as u64 {
         let _ = super::paranoid::take_debug_status();
     }
-    // A checked MSR read the processor refused (`L.x86_64.188`): a `#GP`
-    // from ring 0 at exactly `cpu::ferrix_rdmsr_checked`'s `rdmsr` resumes
-    // at its fault label. Every other `#GP` goes on to dispatch, as before.
+    // A checked MSR read the processor refused (`L.x86_64.188`), or the
+    // checked MSR write (`L.x86_64.192`): a `#GP` from ring 0 at exactly
+    // `cpu::ferrix_rdmsr_checked`'s `rdmsr` or `cpu::ferrix_wrmsr_checked`'s
+    // `wrmsr` resumes at that one's fault label. Every other `#GP` goes on
+    // to dispatch, as before.
     if frame.vector == GENERAL_PROTECTION
         && !frame.came_from_user()
-        && let Some(resume) = cpu::checked_read_resume(frame.rip)
+        && let Some(resume) =
+            cpu::checked_read_resume(frame.rip).or_else(|| cpu::checked_write_resume(frame.rip))
     {
         frame.rip = resume;
         return;

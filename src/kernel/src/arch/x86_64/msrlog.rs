@@ -40,7 +40,7 @@ const RAPL_POWER_UNIT: u32 = 0x606;
 const PKG_POWER_LIMIT: u32 = 0x610;
 /// `MSR_PKG_POWER_INFO`: TDP and the package's power range.
 const PKG_POWER_INFO: u32 = 0x614;
-/// `MSR_VR_CURRENT_CONFIG`: PL4, the peak limit.
+/// `MSR_VR_CURRENT_CONFIG`: the VR current limit (PL4), in 1/8 A.
 const VR_CURRENT_CONFIG: u32 = 0x601;
 /// `MSR_PLATFORM_POWER_LIMIT`: the platform (Psys) PL1 and PL2.
 const PLATFORM_POWER_LIMIT: u32 = 0x65c;
@@ -172,10 +172,11 @@ fn log_once(round: u64) {
         );
     }
     if let Some(raw) = read(VR_CURRENT_CONFIG, "VR_CURRENT_CONFIG") {
-        let (pl4, locked) = decode::pl4(raw);
+        let (milliamps, locked) = decode::vr_current(raw);
         println!(
-            "msr:   PL4 {} ({pl4} power units), locked {locked}",
-            Milliwatts(units.milliwatts(pl4))
+            "msr:   VR current limit {}.{:03} A, locked {locked}",
+            milliamps / 1000,
+            milliamps % 1000
         );
     }
     if let Some(raw) = read(PLATFORM_POWER_LIMIT, "PLATFORM_POWER_LIMIT") {

@@ -136,6 +136,19 @@ pub(crate) use x86_64::start_msr_log;
 #[cfg(not(target_arch = "x86_64"))]
 pub(crate) const fn start_msr_log(_view: &ferrix_bootinfo::BootView<'_>) {}
 
+// `ferrix.vrcurrent`, x86-64's VR current limit raised under a thermal
+// guard (`L.x86_64.190`, `L.x86_64.191`); none on Arm.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::{restore_vr_current, start_vr_current};
+
+/// No VR current limit: the Arm kernels have no such run.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn start_vr_current(_view: &ferrix_bootinfo::BootView<'_>) {}
+
+/// Nothing raised on Arm, so nothing to restore.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn restore_vr_current(_what: &'static str) {}
+
 // The boot options an architecture's bring-up reads before its traps are
 // installed, and stage 3's check of what it chose: x86-64's `ferrix.epp`
 // (`L.x86_64.182`); none on Arm.
