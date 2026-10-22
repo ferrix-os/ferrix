@@ -29,7 +29,17 @@
 //!    (objects, mmaps, a context, execbuffer and its fence) answered;
 //! 4. iris as the surfaceless EGL renderer on the same device, and `eglinfo`
 //!    exiting 0. GBM's platform needs a card node, which a render-only driver
-//!    has not, so it is not asked for.
+//!    has not, so it is not asked for;
+//! 5. anv's shader cache kept between two programs: `vk-shader-cache`
+//!    (`nvrm/test/vk-shader-cache.c`, 32 compute pipelines) run twice on one
+//!    `MESA_SHADER_CACHE_DIR`, the first missing in Mesa's disk cache and the
+//!    second missing nothing. Everything the cache key holds that comes from
+//!    the driver -- the PCI id, and the topology `QUERY` answers for anv's
+//!    compiler -- must be the same in the second program as in the first,
+//!    and Mesa's database (`flock`, `ftruncate`, stdio over `O_RDWR`) must
+//!    read back what it wrote. Endfield on the N150 compiled its shaders
+//!    for 45 minutes on every start (2026-10-22); this rules out the driver
+//!    and the kernel under Mesa's cache as the cause on QEMU.
 //!
 //! Every `intel: unserved …` line is printed: what Mesa asked that the front
 //! end does not serve, to be added as M3 to M5 find them (§8, risk 4).
@@ -116,6 +126,13 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABL
 echo "intel-uapi-gate: vulkaninfo exited $?"
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DISABLE=1     /bin/vk-offscreen 2>&1
 echo "intel-uapi-gate: vk-offscreen exited $?"
+for run in 1 2; do
+    VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.json MESA_SHADER_CACHE_DIR=/tmp/anv-cache \
+        MESA_SHADER_CACHE_SHOW_STATS=1 /bin/vk-shader-cache > /tmp/shader-cache$run.txt 2>&1
+    echo "intel-uapi-gate: vk-shader-cache run $run exited $?"
+    sed "s/^/intel-uapi-gate: run $run: /" /tmp/shader-cache$run.txt
+    # between the runs
+done
 MESA_SHADER_CACHE_DISABLE=1 /data/usr/bin/eglinfo -B -p surfaceless 2>&1
 echo "intel-uapi-gate: eglinfo exited $?"
 exit 0
@@ -148,6 +165,10 @@ const ANV: &str = "DRIVER_ID_INTEL_OPEN_SOURCE_MESA";
 const READ_BACK: &[&str] = &["pixels wrong on", "pixels cleared to"];
 /// Where `vk-offscreen` is in the image.
 const OFFSCREEN_PATH: &str = "bin/vk-offscreen";
+/// Where `vk-shader-cache` is in the image.
+const SHADER_CACHE_PATH: &str = "bin/vk-shader-cache";
+/// The pipelines `vk-shader-cache` creates (its `PIPELINES`).
+const PIPELINES: u32 = 32;
 /// `eglinfo -B`'s renderer line, whose value names the device iris drives.
 const RENDERER: &str = "OpenGL core profile renderer: ";
 
@@ -271,6 +292,11 @@ pub(crate) fn test_intel_uapi(args: &Args) -> Result<()> {
         content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-offscreen")?),
     });
     files.push(crate::ports::File {
+        path: SHADER_CACHE_PATH.to_owned(),
+        mode: 0o755,
+        content: crate::ports::Content::Bytes(crate::nvidia::vk_test(&dir, "vk-shader-cache")?),
+    });
+    files.push(crate::ports::File {
         path: RUN_PATH.to_owned(),
         mode: 0o755,
         content: crate::ports::Content::Bytes(RUN.as_bytes().to_vec()),
@@ -356,6 +382,51 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     {
         return Err("eglinfo did not exit 0".to_owned());
     }
+    shader_cache(lines)
+}
+
+/// Mesa's disk cache statistics for `vk-shader-cache`'s run `number`:
+/// `(hits, misses)` from its `disk shader cache:  hits = H, misses = M`.
+fn cache_stats(lines: &[String], number: u32) -> Option<(u32, u32)> {
+    let prefix = format!("intel-uapi-gate: run {number}: ");
+    lines.iter().find_map(|line| {
+        let (_, said) = line.split_once(prefix.as_str())?;
+        let stats = said.split_once("disk shader cache:")?.1;
+        let numbers: Vec<u32> = stats
+            .split(|c: char| !c.is_ascii_digit())
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        match numbers.as_slice() {
+            [hits, misses] => Some((*hits, *misses)),
+            _ => None,
+        }
+    })
+}
+
+/// The second `vk-shader-cache` found every pipeline the first compiled.
+fn shader_cache(lines: &[String]) -> std::result::Result<(), String> {
+    for number in [1, 2] {
+        let exited = format!("intel-uapi-gate: vk-shader-cache run {number} exited 0");
+        if !lines.iter().any(|line| line.contains(&exited)) {
+            return Err(format!("vk-shader-cache's run {number} did not exit 0"));
+        }
+    }
+    let (Some((_, first_misses)), Some((hits, misses))) =
+        (cache_stats(lines, 1), cache_stats(lines, 2))
+    else {
+        return Err("vk-shader-cache's runs printed no disk shader cache statistics".to_owned());
+    };
+    if first_misses == 0 {
+        return Err(
+            "vk-shader-cache's first run missed nothing in an empty shader cache".to_owned(),
+        );
+    }
+    if misses != 0 || hits < PIPELINES {
+        return Err(format!(
+            "anv's shader cache lost what the first run compiled: the second run's \
+             hits = {hits}, misses = {misses}, where Linux has {PIPELINES} hits and none missed"
+        ));
+    }
     Ok(())
 }
 
@@ -378,6 +449,12 @@ mod tests {
   3.6 | intel-uapi-gate: vk-offscreen exited 1
   4.0 | OpenGL core profile renderer: Mesa Intel(R) Graphics (ADL-N)
   4.1 | intel-uapi-gate: eglinfo exited 0
+  4.2 | intel-uapi-gate: vk-shader-cache run 1 exited 0
+  4.2 | intel-uapi-gate: run 1: vk-shader-cache: 32 pipelines on Intel(R) Graphics (ADL-N) in 174 ms
+  4.2 | intel-uapi-gate: run 1: disk shader cache:  hits = 0, misses = 64
+  4.3 | intel-uapi-gate: vk-shader-cache run 2 exited 0
+  4.3 | intel-uapi-gate: run 2: vk-shader-cache: 32 pipelines on Intel(R) Graphics (ADL-N) in 4 ms
+  4.3 | intel-uapi-gate: run 2: disk shader cache:  hits = 32, misses = 0
   5.0 | init     the shell exited with 17";
 
     #[test]
@@ -406,6 +483,22 @@ mod tests {
                 "{gone}: {verdict:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_shader_cache_that_missed_again_fails() {
+        let text: Vec<String> = lines(GOOD)
+            .into_iter()
+            .map(|line| line.replace("hits = 32, misses = 0", "hits = 0, misses = 64"))
+            .collect();
+        assert!(
+            judge(&text).is_err_and(|error| error.contains("lost what the first run compiled"))
+        );
+        let text: Vec<String> = lines(GOOD)
+            .into_iter()
+            .filter(|line| !line.contains("disk shader cache"))
+            .collect();
+        assert!(judge(&text).is_err_and(|error| error.contains("no disk shader cache")));
     }
 
     #[test]
