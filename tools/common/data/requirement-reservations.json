@@ -12,6 +12,13 @@
   ],
   "reservations": [
     {
+      "ids": ["L.x86_64.187-189"],
+      "owner": "pl4-msr",
+      "branch": "pl4-msr",
+      "date": "2026-10-22",
+      "purpose": "ferrix.msrlog: a read-only, boot-word-gated log of the RAPL and limit-reason MSRs on the boot processor (the N150's GT held at 450 MHz under pl4); a #GP-checked rdmsr whose one fixup resumes only its own instruction; the RAPL decode"
+    },
+    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",
