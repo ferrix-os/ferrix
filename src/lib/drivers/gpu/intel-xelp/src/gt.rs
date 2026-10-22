@@ -80,6 +80,14 @@ pub struct ResumeReport {
     pub still_in_error: u32,
 }
 
+/// `RING_HWS_PGA`'s offset for the engine at `base`: where an engine is told
+/// its status page, so a value other than 0 means a driver brought it up
+/// since the last reset.
+#[must_use]
+pub const fn hws_pga_offset(base: u32) -> u32 {
+    ring_hws_pga(base).offset()
+}
+
 /// `intel_engine_resume` -> `execlists_resume` for an engine at `base`
 /// whose status page is at `hws_ggtt` in the GGTT: its workarounds, its
 /// whitelist, (global MOCS needs nothing per engine), then
@@ -104,7 +112,7 @@ pub fn intel_engine_resume<M: Mmio + ?Sized>(
         masked_bit_enable(GEN11_GFX_DISABLE_LEGACY_MODE),
     );
     mmio.write32(ring_mi_mode(base).offset(), masked_bit_disable(STOP_RING));
-    mmio.write32(ring_hws_pga(base).offset(), hws_ggtt);
+    mmio.write32(hws_pga_offset(base), hws_ggtt);
     let _posting = mmio.read32(ring_hws_pga(base).offset());
     // enable_error_interrupt
     mmio.write32(ring_emr(base).offset(), !0);

@@ -372,6 +372,26 @@ pub struct XelpBackend<P: Platform> {
     progressed: bool,
     /// A kernel fence is still to be signalled (`Backend::set_watched`).
     watched: bool,
+    /// What [`XelpBackend::new`] found of a driver before this one: each
+    /// engine that was pointed at a status page and so reset alone before
+    /// bring-up, with how its reset went (`docs/INTEL-GPU.md` §10, a driver
+    /// started again).
+    inherited: [Option<Inherited>; MAX_ENGINES],
+}
+
+/// An engine a previous driver had brought up, found at [`XelpBackend::new`]
+/// and reset by its domain alone before anything else is written: the dead
+/// driver's contexts may still be running on it, reading and writing pages
+/// the kernel gives back once this driver's render node is accepted
+/// (`object::pin`'s quarantine). Never the whole GT, so the screen the
+/// firmware lit stays (`reset`'s module note).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Inherited {
+    /// The engine's `RING_HWS_PGA` as found: the status page the previous
+    /// driver gave it.
+    pub hws_pga: u32,
+    /// How the reset went; `None` for an engine with no reset domain here.
+    pub report: Option<reset::ResetReport>,
 }
 
 /// The per-second log's state: when the next line is due, and the last
@@ -479,6 +499,7 @@ impl<P: Platform> XelpBackend<P> {
         identity: Identity,
     ) -> Result<Self, Error> {
         let platform = RefCell::new(platform);
+        let inherited = Self::reset_inherited(&platform, engines);
         {
             let mut regs = Regs(&platform);
             gt::setup_private_pat(&mut regs);
@@ -531,6 +552,7 @@ impl<P: Platform> XelpBackend<P> {
             poll_ns: POLL_NS,
             progressed: false,
             watched: false,
+            inherited,
         };
         for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
             backend.engine_up(slot, *info)?;
@@ -543,6 +565,33 @@ impl<P: Platform> XelpBackend<P> {
             regs.write32(GEN11_GFX_MSTR_IRQ.offset(), GEN11_MASTER_IRQ);
         }
         Ok(backend)
+    }
+
+    /// Each of the first `engines` engines a previous driver left pointed at
+    /// a status page, reset by its domain alone (`intel_engine_reset`), as
+    /// i915's `intel_gt_sanitize` resets what a previous driver left running
+    /// before it takes the GT -- but by engine, never `GRDOM_FULL`, so the
+    /// display keeps its plane. An engine at a cold boot has `RING_HWS_PGA`
+    /// 0 and is not touched, so the first start is as it was.
+    fn reset_inherited(platform: &RefCell<P>, engines: usize) -> [Option<Inherited>; MAX_ENGINES] {
+        let mut inherited = [None; MAX_ENGINES];
+        for (slot, info) in ENGINES.iter().take(engines.min(MAX_ENGINES)).enumerate() {
+            let hws_pga = Regs(platform).read32(gt::hws_pga_offset(info.mmio_base));
+            if hws_pga == 0 {
+                continue;
+            }
+            let report = reset::intel_engine_reset(&mut Regs(platform), &mut Time(platform), info);
+            if let Some(entry) = inherited.get_mut(slot) {
+                *entry = Some(Inherited { hws_pga, report });
+            }
+        }
+        inherited
+    }
+
+    /// What [`XelpBackend::new`] found of a previous driver, per engine.
+    #[must_use]
+    pub const fn inherited(&self) -> &[Option<Inherited>; MAX_ENGINES] {
+        &self.inherited
     }
 
     /// The facts the uAPI answers from.

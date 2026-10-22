@@ -533,6 +533,19 @@ fn serve_gpu(
         ));
         Step::Backend
     })?;
+    for (engine, found) in ["rcs0", "bcs0"].iter().zip(backend.inherited()) {
+        if let Some(found) = found {
+            say(format_args!(
+                "intel: {engine} was a previous driver's (status page {:#x}); reset alone before bring-up: {}",
+                found.hws_pga,
+                if found.report.is_some_and(|report| report.is_reset()) {
+                    "done"
+                } else {
+                    "NOT reset"
+                }
+            ));
+        }
+    }
     let facts = *backend.facts();
     say(format_args!(
         "intel: back end up in {} ms: GGTT window {start:#x}, {} engines, {} EUs, {} MiB of system memory",

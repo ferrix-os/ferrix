@@ -1157,3 +1157,41 @@ fn the_ring_frequency_table_is_written_as_i915_writes_it() {
     );
     assert_eq!(pcu.requests.len(), n);
 }
+
+/// A driver started again finds RCS0 pointed at its predecessor's status
+/// page and resets it alone before bring-up; a cold GT is not reset at all,
+/// so the first start writes no `GEN6_GDRST`.
+#[test]
+fn an_engine_a_dead_driver_left_running_is_reset_before_bring_up() {
+    let cold = backend();
+    assert_eq!(cold.inherited(), &[None, None]);
+    let mut cold = cold;
+    assert_eq!(cold.platform().gpu.resets, 0, "a cold GT is not reset");
+
+    let mut model = Model::new();
+    let pga = crate::gt::hws_pga_offset(ENGINES[0].mmio_base);
+    model.gpu.write32(pga, 0x0bad_0000);
+    let mut be = XelpBackend::new(
+        model,
+        0b11,
+        &ENGINES[..4],
+        1,
+        Identity {
+            device_id: 0x46d4,
+            revision: 0,
+            ggtt_bytes: 4 << 30,
+            system_memory_bytes: 16 << 30,
+        },
+    )
+    .expect("the GT comes up after a dead driver");
+    let found = be.inherited()[0].expect("RCS0 was inherited");
+    assert_eq!(found.hws_pga, 0x0bad_0000);
+    assert!(
+        found.report.is_some_and(|report| report.is_reset()),
+        "{found:?}"
+    );
+    // Reset by its domain (twice below 12.70), then brought up on this
+    // driver's own status page.
+    assert_eq!(be.platform().gpu.resets, 2);
+    assert_eq!(be.platform().gpu.read32(pga), HWSP);
+}

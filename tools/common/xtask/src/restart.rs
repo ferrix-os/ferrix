@@ -31,6 +31,8 @@
 //!   `nvme` driver killed: the controller is left enabled with its queues
 //!   in memory the kernel quarantines, and the next driver must reset it,
 //!   take the parked disk up and serve the requests the kernel kept.
+//! * `intel`: the Intel GPU's driver on the QEMU stand-in for ADL-N, under
+//!   a running Vulkan program, with an image of its own ([`intel`]).
 //! * `all`: each of gpu, input, net and blk, one boot each.
 //!
 //! The drivers it kills are looked up afresh each round, and must be ones it
@@ -55,6 +57,7 @@ use crate::task::Task;
 use crate::{Error, Result, btrfs_check, btrfs_disk, cargo, fat, initramfs, native, ports, qemu};
 use crate::{uutils, zinc};
 
+mod intel;
 mod update;
 mod usb;
 
@@ -64,7 +67,7 @@ pub(crate) const TASKS: &[Task] = &[
         name: "test-restart",
         help_at: 470,
         help: &[
-            "test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|usb|nvme|all; gpu if not given)",
+            "test-restart  Boot a shell beside a device, kill -9 its driver twice, and require it started again each time (--boot gpu|input|net|blk|usb|nvme|intel|all; gpu if not given)",
         ],
         run,
     },
@@ -164,7 +167,7 @@ impl Kind {
             Some("all") => vec![Kind::Gpu, Kind::Input, Kind::Net, Kind::Blk],
             Some(other) => {
                 return Err(Error::new(format!(
-                    "test-restart --boot takes gpu, input, net, blk, usb, nvme or all, not `{other}`"
+                    "test-restart --boot takes gpu, input, net, blk, usb, nvme, intel or all, not `{other}`"
                 )));
             }
         })
@@ -220,6 +223,11 @@ fn test_restart(args: &Args) -> Result<()> {
             "test-restart runs on x86-64 only: `kill` comes from uutils, which is built \
              for x86-64 alone (docs/UUTILS.md D3)",
         ));
+    }
+    // The Intel GPU's driver has an image of its own: the stand-in, the
+    // fake back end and Mesa's volume (`intel`'s module documentation).
+    if args.boot.as_deref() == Some("intel") {
+        return intel::test(args);
     }
     let kinds = Kind::asked(args.boot.as_deref())?;
     if args.update && kinds != [Kind::Gpu] {

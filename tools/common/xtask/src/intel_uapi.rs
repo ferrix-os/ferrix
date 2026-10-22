@@ -77,10 +77,10 @@ pub(crate) const STANDIN: &str =
 pub(crate) const VOLUME: &str = "1";
 
 /// The kernel option under which devmgr drives the Intel GPU.
-const OPTION: &str = "ferrix.intelgpu";
+pub(crate) const OPTION: &str = "ferrix.intelgpu";
 
 /// Guest RAM, in MiB: Mesa's heaps and the fake's objects.
-const MEMORY: u32 = 4096;
+pub(crate) const MEMORY: u32 = 4096;
 
 /// Seconds the boot may take unless `--timeout` says otherwise.
 const TIMEOUT: u64 = 300;
@@ -173,7 +173,7 @@ const PIPELINES: u32 = 32;
 const RENDERER: &str = "OpenGL core profile renderer: ";
 
 /// Where `fetch-intel-uapi.sh` writes the volume.
-fn volume() -> Result<PathBuf> {
+pub(crate) fn volume() -> Result<PathBuf> {
     let root = match std::env::var_os("FERRIX_INTEL_UAPI") {
         Some(root) => PathBuf::from(root),
         None => PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
@@ -220,9 +220,9 @@ const FAKE: Program = Program {
 pub(crate) const FAKE_MARKER: &str = "every batch completes at once, nothing runs";
 
 /// Put `intel-fake` in `natives` under the name `intel`, which devmgr starts
-/// for ADL-N: this gate's image, and test-compositor's direct-scanout boot,
-/// both on the QEMU stand-in alone (`Args::intel_gpu_standin`), never on a
-/// machine with a GPU.
+/// for ADL-N: this gate's image, test-compositor's direct-scanout boot and
+/// `test-restart --boot intel`'s, all on the QEMU stand-in alone
+/// (`Args::intel_gpu_standin`), never on a machine with a GPU.
 pub(crate) fn use_fake(natives: &mut [Built], arch: Arch, release: bool) -> Result<()> {
     let fake = native::build_one(arch, release, &paths::target_dir(), &FAKE)?;
     let slot = natives

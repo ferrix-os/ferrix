@@ -384,11 +384,22 @@ fn died_status(exit: Exit) -> i32 {
 /// input core waits for every one of the dead driver's claims and takes its
 /// keyboards and mice back as the new driver finds them. A board's host is
 /// not, until that has been tried on the board.
+///
+/// So is a GPU engine on PCI -- the Intel integrated GPU's `intel`
+/// (`docs/INTEL-GPU.md` §10, a driver started again): the chardev and
+/// display cores wait out the dead driver's claims as any core does, the
+/// new driver resets every engine its predecessor left pointed at a status
+/// page before it brings the GT up and sends HELLO, and only then is the
+/// dead driver's quarantine given back. Its clients' files of the old
+/// render node answer `ENODEV` for good, which Mesa reports as
+/// `VK_ERROR_DEVICE_LOST` at the next submit, and the new `renderD128` and
+/// `card0` are published afresh. The DK1's GC400 is not, until that has
+/// been tried on the board.
 const fn restarted(kind: Kind, location: u32) -> bool {
     matches!(
         kind,
         Kind::Display | Kind::Sound | Kind::Net | Kind::Input | Kind::Block
-    ) || (matches!(kind, Kind::Host) && location != DEVICE_NOT_PCI)
+    ) || (matches!(kind, Kind::Host | Kind::Engine) && location != DEVICE_NOT_PCI)
 }
 
 /// A driver devmgr started, and what it keeps of it.
@@ -1628,7 +1639,7 @@ fn launch_again(
     entry.quiesced = false;
     let awaited = if matches!(
         entry.kind,
-        Kind::Port | Kind::Host | Kind::Gadget | Kind::Gpu
+        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu
     ) {
         Awaited {
             published: true,

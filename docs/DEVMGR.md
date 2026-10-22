@@ -397,9 +397,14 @@ the device (`object::pin::quarantine_release`). A bus host on PCI, an xHCI
 controller's `usbhid`, is started again as well ([XHCI.md](XHCI.md) §5): its
 driver resets the controller as it starts, the input core waits out every
 claim the dead one held, and its keyboards and mice come back as the new
-driver finds them (`cargo xtask test-usb`). Every other kind is not
-started again: the serial port (`vport`) has no core to wait for, and a
-board's USB host (`usbhid` on a tree node), the GPU engine (`gc400`), the
+driver finds them (`cargo xtask test-usb`). So is a GPU engine on PCI,
+the Intel integrated GPU's `intel` ([INTEL-GPU.md](INTEL-GPU.md) §11): the
+chardev and display cores wait out its claims, the next driver resets every
+engine its predecessor left pointed at a status page before it brings the
+GT up and sends HELLO, and its clients' old files answer `ENODEV`, which
+Mesa reports as `VK_ERROR_DEVICE_LOST` (`cargo xtask test-restart --boot
+intel`). Every other kind is not started again: the serial port (`vport`) has no core to wait for, and a
+board's USB host (`usbhid` on a tree node), the DK1's GPU engine (`gc400`), the
 gadget (`usbdev`) and a GPU under `nvrm` (§3.2) stay quiesced after their
 driver dies. `devmgr` itself stays fatal until the
 kernel can offer a new `devmgr` the devices again (`docs/INIT.md` L12).

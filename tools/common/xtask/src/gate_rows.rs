@@ -84,6 +84,25 @@ const PRESSURED: &[&str] = &[
     "src/kernel/src/object/quota.rs",
 ];
 
+/// The Intel GPU's restart row (`docs/BACKLOG.md`, *What a landing runs*;
+/// `docs/INTEL-GPU.md` §11): its driver killed twice under a running Vulkan
+/// program on the QEMU stand-in, and Mesa's start-up on the node it serves.
+const TEST_GPU_RESTART: &[&str] = &["test-restart --boot intel", "test-intel-uapi"];
+
+/// What asks for [`TEST_GPU_RESTART`]: the Intel driver, its fake and its
+/// library, devmgr, which starts it again, the chardev core its clients
+/// reach it through, and the gate's own program and judge.
+const GPU_RESTARTED: &[&str] = &[
+    "src/user/system/native/drivers/gpu/intel/",
+    "src/user/system/native/drivers/gpu/intel-fake/",
+    "src/lib/drivers/gpu/intel-xelp/",
+    "src/user/system/native/devmgr/",
+    "src/kernel/src/interfaces/chardev/",
+    "src/user/system/linux/drivers/nvrm/test/vk-survive.c",
+    "tools/common/xtask/src/restart/intel.rs",
+    "tools/common/xtask/src/intel_uapi.rs",
+];
+
 /// The table's image row: anything the image contains, and the default.
 /// Both `x86_64` accelerators are named, so the row means the same thing on
 /// every host (`docs/BACKLOG.md`, *Name the accelerator*).
@@ -237,12 +256,28 @@ fn rows_for(path: &str, image_crates: &BTreeSet<String>, rows: &mut Rows) {
              you know better, and say why",
         );
     }
+    area_rows(path, rows);
+}
+
+/// The rows an area of the tree adds to whatever its kind of path asked:
+/// the memory-pressure row and the Intel GPU's restart row.
+fn area_rows(path: &str, rows: &mut Rows) {
+    let under = |prefix: &str| path.starts_with(prefix);
+    let reason = |rows: &mut Rows, why: &str| rows.reasons.push(format!("{path}: {why}"));
     if PRESSURED.iter().any(|prefix| under(prefix)) {
         rows.add(&[TEST_BTRFS_PRESSURE]);
         reason(
             rows,
             "the page cache, reclaim, the frame allocator, btrfs or the memory charge: \
              test-btrfs-pressure (docs/BTRFS-PRESSURE.md)",
+        );
+    }
+    if GPU_RESTARTED.iter().any(|prefix| under(prefix)) {
+        rows.add(TEST_GPU_RESTART);
+        reason(
+            rows,
+            "the Intel GPU's driver, its restart or its clients' path: test-restart --boot intel \
+             and test-intel-uapi (docs/INTEL-GPU.md §11)",
         );
     }
 }
@@ -572,6 +607,24 @@ mod tests {
         }
         let rows = rows_of(&["src/kernel/src/main.rs"]);
         assert!(!rows.commands.iter().any(|c| c == TEST_BTRFS_PRESSURE));
+    }
+
+    #[test]
+    fn the_intel_driver_and_its_restart_path_add_the_gpu_restart_row() {
+        for path in [
+            "src/user/system/native/drivers/gpu/intel/src/main.rs",
+            "src/lib/drivers/gpu/intel-xelp/src/backend.rs",
+            "src/user/system/native/devmgr/src/main.rs",
+            "src/kernel/src/interfaces/chardev/mod.rs",
+            "tools/common/xtask/src/restart/intel.rs",
+        ] {
+            let rows = rows_of(&[path]);
+            for row in TEST_GPU_RESTART {
+                assert!(rows.commands.iter().any(|c| c == row), "{path}: {row}");
+            }
+        }
+        let rows = rows_of(&["src/kernel/src/main.rs"]);
+        assert!(!rows.commands.iter().any(|c| c == TEST_GPU_RESTART[0]));
     }
 
     #[test]
