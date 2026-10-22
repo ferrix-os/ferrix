@@ -11,7 +11,7 @@
 use ferrix_linux_abi::errno::Errno;
 
 use super::fence::{self, Hold};
-use super::objects::{Context, File};
+use super::objects::{Context, File, Tables};
 use super::{Answer, Backend, Frontend, Host, gem, getparam, query, syncobj, vm};
 use crate::uapi::{
     self, DRM_COMMAND_BASE, DRM_COMMAND_END, DRM_IOCTL_BASE, GetCap, IOC_READ, IOC_WRITE, Version,
@@ -323,6 +323,7 @@ impl<B: Backend> Frontend<B> {
             out_size,
             cmd,
         };
+        self.state.why = "";
         let outcome = self.handle(host, &call, &mut kdata);
         let status = match outcome {
             Ok(Some(hold)) => {
@@ -333,6 +334,12 @@ impl<B: Backend> Frontend<B> {
                 if held.is_err() && self.state.waits.sweep_abandoned(host) > 0 {
                     held = self.state.waits.hold(&call, &kdata, hold, host.now_ns());
                 }
+                // A table full of live waits: Linux has none, so the call
+                // is interrupted, as a signal would, and libdrm calls again
+                // (`drmIoctl`, `intel_ioctl`); the deadline is absolute
+                // for a syncobj wait and nothing elapsed for a GEM wait.
+                // ENOMEM here was Mesa's VK_ERROR_UNKNOWN: the device lost.
+                let held = held.map_err(|_| self.state.refuse("wait table full", Errno::EINTR));
                 match held {
                     Ok(()) => {
                         if self.state.trace {
@@ -349,6 +356,9 @@ impl<B: Backend> Frontend<B> {
             Ok(None) => 0,
             Err(errno) => -i32::from(errno.0),
         };
+        if status != 0 && status != -i32::from(super::ETIME.0) {
+            say_refused(&mut self.state, host, cmd, status);
+        }
         // A failure only: every success would flood the console at a
         // frame's worth of ioctls, and a poll's ETIME is no failure.
         if self.state.trace && status != 0 && status != -i32::from(super::ETIME.0) {
@@ -605,4 +615,60 @@ pub const fn default_context(file: u8, vm: u16, finalized: bool) -> Context {
         closed: false,
         in_flight: 0,
     }
+}
+
+/// `intel: uapi refused <ioctl> <errno> <reason>`, rate-limited, for an
+/// error from the ioctls whose failure Mesa takes for a lost device: an
+/// execbuffer (anv retries only EINTR, EAGAIN and ENOMEM) and the syncobj
+/// waits (ETIME is a timeout, EINTR and EAGAIN are called again).
+fn say_refused<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H, cmd: u32, status: i32) {
+    let name = match ioc_nr(cmd) {
+        number if number == DRM_COMMAND_BASE + nr::GEM_EXECBUFFER2 => {
+            if ioc_dir(cmd) & IOC_READ != 0 {
+                "EXECBUFFER2_WR"
+            } else {
+                "EXECBUFFER2"
+            }
+        }
+        core_nr::SYNCOBJ_WAIT => "SYNCOBJ_WAIT",
+        core_nr::SYNCOBJ_TIMELINE_WAIT => "SYNCOBJ_TIMELINE_WAIT",
+        _ => return,
+    };
+    if !state.refusals.allow(host.now_ns()) {
+        return;
+    }
+    let quiet = core::mem::take(&mut state.refusals.quiet);
+    let why = if state.why.is_empty() { "-" } else { state.why };
+    host.say(format_args!(
+        "intel: uapi refused {name} {} {why} ({quiet} not said before it)",
+        errno_name(-status)
+    ));
+}
+
+/// An errno's name, for the refusal line.
+fn errno_name(errno: i32) -> &'static str {
+    let known = [
+        (Errno::EPERM, "EPERM"),
+        (Errno::ENOENT, "ENOENT"),
+        (Errno::EINTR, "EINTR"),
+        (Errno::EIO, "EIO"),
+        (Errno::E2BIG, "E2BIG"),
+        (Errno::EBADF, "EBADF"),
+        (Errno::EAGAIN, "EAGAIN"),
+        (Errno::ENOMEM, "ENOMEM"),
+        (Errno::EACCES, "EACCES"),
+        (Errno::EFAULT, "EFAULT"),
+        (Errno::EBUSY, "EBUSY"),
+        (Errno::ENODEV, "ENODEV"),
+        (Errno::EINVAL, "EINVAL"),
+        (Errno::ENOSPC, "ENOSPC"),
+        (Errno::EDQUOT, "EDQUOT"),
+        (Errno::EOPNOTSUPP, "EOPNOTSUPP"),
+        (Errno::ENOTTY, "ENOTTY"),
+        (Errno::EDEADLK, "EDEADLK"),
+    ];
+    known
+        .iter()
+        .find(|(known, _)| i32::from(known.0) == errno)
+        .map_or("errno?", |(_, name)| name)
 }

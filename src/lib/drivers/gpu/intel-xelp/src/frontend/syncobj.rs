@@ -701,7 +701,11 @@ pub fn wait<B: Backend, H: Host<B::Memory>>(
                 }
             }
             Err(_) if submit => {}
-            Err(errno) => return Err(errno),
+            Err(errno) => {
+                return Err(frontend
+                    .state
+                    .refuse("a point not submitted, no WAIT_FOR_SUBMIT", errno));
+            }
         }
     }
     for index in 0..found {

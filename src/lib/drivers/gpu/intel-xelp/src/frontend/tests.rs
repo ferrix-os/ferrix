@@ -1268,6 +1268,14 @@ fn execbuffer_refusals() {
             EINVAL,
             "relocations"
         );
+        // Each refusal is said, for the box's log.
+        assert!(
+            rig.host.lines.iter().any(
+                |line| line.starts_with("intel: uapi refused EXECBUFFER2 EINVAL - (0 not said")
+            ),
+            "{:?}",
+            rig.host.lines
+        );
         relocs.clear();
         assert_eq!(
             rig.exec(ioctl::GEM_EXECBUFFER2, &[(batch, 0x1000, 0)], 0, &[], 0)
@@ -1509,7 +1517,9 @@ fn abandoned_waits_do_not_fill_the_table() {
         rig.frontend.service(&mut rig.host, true);
         assert_eq!(rig.host.replies[&live], 0);
         assert_eq!(rig.host.replies[&again], 0);
-        // A table full of live waits still refuses, as before.
+        // A table full of live waits interrupts the call (libdrm calls
+        // again), never ENOMEM, which Mesa takes for a lost device; and
+        // the refusal is said.
         rig.host.abandoned.clear();
         assert_eq!(
             rig.exec(
@@ -1525,7 +1535,16 @@ fn abandoned_waits_do_not_fill_the_table() {
         for _ in 0..limits::WAITS {
             assert!(matches!(wait(&mut rig), Status::Held(_)));
         }
-        assert_eq!(wait(&mut rig), Status::Done(-12));
+        assert_eq!(wait(&mut rig), Status::Done(-4));
+        assert!(
+            rig.host
+                .lines
+                .iter()
+                .any(|line| line
+                    .starts_with("intel: uapi refused SYNCOBJ_WAIT EINTR wait table full")),
+            "{:?}",
+            rig.host.lines
+        );
     });
 }
 

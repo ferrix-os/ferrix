@@ -78,6 +78,7 @@ pub mod pcode;
 pub mod plane;
 pub mod power;
 pub mod ppgtt;
+pub mod pt_pool;
 pub mod rc6;
 pub mod reg;
 pub mod request;

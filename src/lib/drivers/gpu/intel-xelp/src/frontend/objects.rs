@@ -11,6 +11,7 @@
 use super::backend::{Engine, HwContext, VmId};
 use super::limits;
 use super::{RequestId, fence::Waits};
+use ferrix_linux_abi::errno::Errno;
 
 /// A fixed-size table of `N` optional `T`s.
 pub struct Slab<T, const N: usize> {
@@ -686,6 +687,43 @@ pub struct Tables<M> {
     /// Say each failed ioctl, the held waits, their answers, and a wait
     /// held unanswered too long (`ferrix.intelgpu.uapitrace`).
     pub trace: bool,
+    /// Why the ioctl being handled was refused, when the refusing site
+    /// said; for the `intel: uapi refused` line.
+    pub why: &'static str,
+    /// The `intel: uapi refused` lines' rate limit.
+    pub refusals: Refusals,
+}
+
+/// The `intel: uapi refused` lines' rate limit: [`Refusals::BURST`] a
+/// second, and how many went unsaid.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Refusals {
+    /// When the current second began.
+    pub window_ns: u64,
+    /// Lines said in it.
+    pub said: u32,
+    /// Lines not said since the last one.
+    pub quiet: u32,
+}
+
+impl Refusals {
+    /// Lines a second.
+    pub const BURST: u32 = 8;
+
+    /// Whether a line may be said at `now`; counts it either way.
+    pub fn allow(&mut self, now: u64) -> bool {
+        if now.saturating_sub(self.window_ns) >= 1_000_000_000 {
+            self.window_ns = now;
+            self.said = 0;
+        }
+        if self.said < Self::BURST {
+            self.said += 1;
+            true
+        } else {
+            self.quiet = self.quiet.saturating_add(1);
+            false
+        }
+    }
 }
 
 impl<M> Tables<M> {
@@ -708,7 +746,19 @@ impl<M> Tables<M> {
             next_cookie: 1,
             said: Said { bits: 0 },
             trace: false,
+            why: "",
+            refusals: Refusals {
+                window_ns: 0,
+                said: 0,
+                quiet: 0,
+            },
         }
+    }
+
+    /// Refuse with `errno`, saying `why` in the `intel: uapi refused` line.
+    pub fn refuse(&mut self, why: &'static str, errno: Errno) -> Errno {
+        self.why = why;
+        errno
     }
 
     /// The slot of the file the chardev core calls `id`.

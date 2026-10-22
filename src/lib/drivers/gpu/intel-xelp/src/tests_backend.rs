@@ -288,6 +288,26 @@ fn refusals() {
     assert_eq!(be.context_create(vm, copy, 16 << 10), Err(Error::Invalid));
 }
 
+/// No page for a table is i915's ENOMEM (`alloc_pt_dma`), not EINVAL: anv
+/// retries an execbuffer's ENOMEM and takes EINVAL for a lost device, which
+/// is how Endfield's world load lost the N150's device.
+#[test]
+fn no_page_for_a_table_is_no_memory() {
+    let mut be = backend();
+    let vm = be.vm_create().expect("vm");
+    let memory = be.platform().create_memory(4 << 20).expect("memory");
+    let live = be.platform().gpu.tables.pages.len();
+    be.platform().gpu.tables.limit = Some(live);
+    let refused = be.bind(vm, 0x40_0000_0000, &memory, 4 << 20, 0);
+    assert_eq!(refused, Err(Error::NoMemory));
+    assert_eq!(
+        crate::backend::errno(Error::NoMemory),
+        ferrix_linux_abi::errno::Errno::ENOMEM
+    );
+    be.platform().gpu.tables.limit = None;
+    assert_eq!(be.bind(vm, 0x40_0000_0000, &memory, 4 << 20, 0), Ok(()));
+}
+
 #[test]
 fn a_stalled_request_is_reset_hung_and_its_context_banned() {
     let mut be = backend();

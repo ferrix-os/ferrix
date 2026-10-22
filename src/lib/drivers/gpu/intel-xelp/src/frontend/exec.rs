@@ -126,10 +126,12 @@ fn execute<B: Backend, H: Host<B::Memory>>(
     // Room for every kernel fence this execbuffer makes.
     let out = usize::from(args.flags & exec::FENCE_OUT != 0);
     if frontend.state.kernel_fences.len() + shared + out > limits::KERNEL_FENCES {
-        return Err(Errno::ENOMEM);
+        return Err(frontend
+            .state
+            .refuse("kernel fence table full", Errno::ENOMEM));
     }
     if !frontend.state.requests.has_room() {
-        return Err(Errno::EAGAIN);
+        return Err(frontend.state.refuse("request ring full", Errno::EAGAIN));
     }
     each_object(host, call, args.buffers_ptr, count, &mut |_, _, entry| {
         let object = gem::lookup(&frontend.state, call.file, entry.handle)?;
@@ -169,7 +171,11 @@ fn execute<B: Backend, H: Host<B::Memory>>(
         }
         Ok(())
     })?;
-    let id = frontend.state.requests.push(request).ok_or(Errno::EAGAIN)?;
+    let id = frontend
+        .state
+        .requests
+        .push(request)
+        .ok_or_else(|| frontend.state.refuse("request ring full", Errno::EAGAIN))?;
     if let Some(entry) = frontend.state.contexts.get_mut(usize::from(context_slot)) {
         entry.in_flight += 1;
     }
@@ -532,7 +538,7 @@ fn bind<B: Backend>(
                 .status(FenceRef::Request(other.last_use))
                 .is_none()
         {
-            return Err(Errno::EAGAIN);
+            return Err(state.refuse("a busy binding in the way", Errno::EAGAIN));
         }
         if let Some(vm) = state
             .vms
@@ -546,13 +552,17 @@ fn bind<B: Backend>(
             owner.bindings = owner.bindings.saturating_sub(1);
         }
     }
-    let vm = vm::backend_vm(&mut frontend.backend, state, vm_slot)?;
+    let vm = vm::backend_vm(&mut frontend.backend, state, vm_slot)
+        .map_err(|errno| state.refuse("no backend VM", errno))?;
     let memory = &state
         .objects
         .get(usize::from(object))
         .ok_or(Errno::ENOENT)?
         .memory;
-    frontend.backend.bind(vm, address, memory, size, pat)?;
+    if let Err(errno) = frontend.backend.bind(vm, address, memory, size, pat) {
+        // ENOMEM: no page for a table; EDQUOT: the GPU's pin budget.
+        return Err(state.refuse("bind failed", errno));
+    }
     if !state.bindings.insert(Binding {
         key,
         size: reserved,
@@ -560,7 +570,7 @@ fn bind<B: Backend>(
         last_use: 0,
     }) {
         frontend.backend.unbind(vm, address, size);
-        return Err(Errno::ENOMEM);
+        return Err(state.refuse("binding table full", Errno::ENOMEM));
     }
     if let Some(owner) = state.objects.get_mut(usize::from(object)) {
         owner.bindings += 1;

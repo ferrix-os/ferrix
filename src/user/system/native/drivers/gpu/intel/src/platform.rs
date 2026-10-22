@@ -14,6 +14,7 @@ use ferrix_intel_xelp::backend::{Error, FrequencyReport, KernelObject, Platform}
 use ferrix_intel_xelp::ggtt_space::{GgttSpace, Range};
 use ferrix_intel_xelp::io::{Clock, Mmio};
 use ferrix_intel_xelp::ppgtt::PtMemory;
+use ferrix_intel_xelp::pt_pool::{CHUNK_PAGES, ChunkStore, PtPool};
 use ferrix_intel_xelp::uncore::{AutoForcewake, ForcewakeDomains, FwDomains};
 use ferrix_rt::Kernel;
 use ferrix_rt::native::device::{Device, Interrupt};
@@ -21,13 +22,13 @@ use ferrix_rt::native::pending::Protection;
 use ferrix_rt::native::pin::{DeviceAddress, Pin, PinAccess, device_address};
 use ferrix_rt::native::vmo::{self, Vmo};
 
-use crate::m2::Pool;
 use crate::serve::AsVmo;
 use crate::{Bar0, Time};
 
-/// Page-table pages: 4 MiB, the tables of a few VMs with their bindings
-/// spread over 48 bits.
-pub(crate) const TABLE_PAGES: usize = 1024;
+/// Page-table chunks at most, 4 MiB each (`pt_pool::CHUNK_PAGES`): 64 of
+/// them hold the tables for about 64 GiB bound at once, every VM's
+/// together. The first is made at start, the others as binds need them.
+const TABLE_CHUNKS: usize = 64;
 /// The driver's own objects at once: two per context on two engines, the
 /// status pages and the default images.
 const MAX_OBJECTS: usize = 256;
@@ -77,7 +78,7 @@ pub(crate) struct Real<'a> {
     bar: Bar0,
     time: Time,
     device: &'a Device<Kernel>,
-    tables: Pool<TABLE_PAGES>,
+    tables: PtPool<Chunks<'a>, TABLE_CHUNKS>,
     ggtt: GgttSpace,
     objects: [Option<Object>; MAX_OBJECTS],
     interrupt: Option<Interrupt<Kernel>>,
@@ -103,7 +104,11 @@ impl<'a> Real<'a> {
             bar,
             time,
             device,
-            tables: Pool::new(device)?,
+            tables: PtPool::new(Chunks {
+                device,
+                chunks: [const { None }; TABLE_CHUNKS],
+            })
+            .ok_or(crate::Step::Memory)?,
             ggtt,
             objects: [const { None }; MAX_OBJECTS],
             interrupt,
@@ -204,6 +209,82 @@ impl Clock for Real<'_> {
 
     fn delay_us(&mut self, us: u32) {
         self.time.delay_us(us);
+    }
+}
+
+/// One chunk of page-table pages: pinned into the device's domain and
+/// mapped write-back here.
+struct ChunkMemory {
+    _pin: Pin<Kernel>,
+    _vmo: Vmo<Kernel>,
+    base: usize,
+}
+
+/// The page-table chunks' memory.
+pub(crate) struct Chunks<'a> {
+    device: &'a Device<Kernel>,
+    chunks: [Option<ChunkMemory>; TABLE_CHUNKS],
+}
+
+impl Chunks<'_> {
+    /// The address of word `word` of page `page` of chunk `chunk`.
+    fn at(&self, chunk: usize, page: usize, word: usize) -> Option<usize> {
+        let memory = self.chunks.get(chunk)?.as_ref()?;
+        (page < CHUNK_PAGES && word < 512).then(|| memory.base + page * PAGE + word * 8)
+    }
+}
+
+impl ChunkStore for Chunks<'_> {
+    fn grow(&mut self, chunk: usize, device: &mut [u64; CHUNK_PAGES]) -> bool {
+        let Some(cell) = self.chunks.get_mut(chunk) else {
+            return false;
+        };
+        let bytes = CHUNK_PAGES * PAGE;
+        let Ok(vmo) = vmo::create(Kernel, bytes) else {
+            return false;
+        };
+        let Ok(pin) = self.device.pin(&vmo, 0, bytes, PinAccess::ReadWrite) else {
+            return false;
+        };
+        let mut raw = [[0_u8; 8]; CHUNK_PAGES];
+        let Ok(got) = pin.addresses(&mut raw) else {
+            return false;
+        };
+        if !got.is_complete() || got.pages != CHUNK_PAGES {
+            return false;
+        }
+        for (slot, bytes) in device.iter_mut().zip(raw) {
+            *slot = device_address(bytes);
+        }
+        let Ok(base) = vmo.map(None, bytes, Protection::ReadWrite, 0) else {
+            return false;
+        };
+        *cell = Some(ChunkMemory {
+            _pin: pin,
+            _vmo: vmo,
+            base,
+        });
+        true
+    }
+
+    fn read(&mut self, chunk: usize, page: usize, word: usize) -> u64 {
+        let Some(address) = self.at(chunk, page, word) else {
+            return 0;
+        };
+        // SAFETY: inside chunk `chunk`'s mapping (`at` checked the page and
+        // word), which this process made read-write and `ChunkMemory`
+        // keeps; eight-byte aligned; volatile, as the GPU reads it.
+        unsafe { ptr::read_volatile(address as *const u64) }
+    }
+
+    fn write(&mut self, chunk: usize, page: usize, word: usize, value: u64) {
+        if let Some(address) = self.at(chunk, page, word) {
+            // SAFETY: as for `read`; one store, so the GPU's walk never sees
+            // half an entry. The GPU snoops the LLC on this part, so no
+            // clflush is needed (i915's `drm_clflush_virt_range` is a no-op
+            // on LLC for coherent PT objects).
+            unsafe { ptr::write_volatile(address as *mut u64, value) }
+        }
     }
 }
 

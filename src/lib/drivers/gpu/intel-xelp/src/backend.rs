@@ -693,9 +693,12 @@ impl<P: Platform> XelpBackend<P> {
         }
         let ppgtt = self.vms.get(vm).copied().flatten().ok_or(Error::Invalid)?;
         let mut platform = self.platform.borrow_mut();
+        // No page for a table is i915's `-ENOMEM` from `alloc_pt_dma`, not a
+        // bad range: anv retries an execbuffer's ENOMEM and marks the
+        // device lost on EINVAL.
         ppgtt
             .alloc_va_range(&mut *platform, address, bytes)
-            .map_err(|_| Error::Invalid)?;
+            .map_err(ppgtt_error)?;
         for page in 0..bytes / 4096 {
             let device = platform.memory_page(memory, page)?;
             ppgtt
@@ -705,7 +708,7 @@ impl<P: Platform> XelpBackend<P> {
                     address + page * 4096,
                     u32::from(pat_index),
                 )
-                .map_err(|_| Error::Invalid)?;
+                .map_err(ppgtt_error)?;
         }
         Ok(())
     }
@@ -1240,6 +1243,14 @@ fn push_done(
             true
         }
         None => false,
+    }
+}
+
+/// A PPGTT failure as the back end's error.
+const fn ppgtt_error(error: crate::ppgtt::PpgttError) -> Error {
+    match error {
+        crate::ppgtt::PpgttError::NoMemory => Error::NoMemory,
+        _ => Error::Invalid,
     }
 }
 

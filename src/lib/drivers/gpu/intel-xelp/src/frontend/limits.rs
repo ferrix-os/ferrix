@@ -35,7 +35,10 @@ pub const WAIT_HANDLES: usize = 64;
 /// Kernel fences (sync files and dmabuf slots) not yet signalled.
 pub const KERNEL_FENCES: usize = 2048;
 /// Exec objects one execbuffer may list.
-pub const EXEC_OBJECTS: usize = 4096;
+/// No table is sized by it: as many as a file can have handles. anv lists
+/// every buffer object a device has in each execbuffer (about 4,000 for
+/// Endfield at its world load), and i915 allows `INT_MAX / sizeof(vma)`.
+pub const EXEC_OBJECTS: usize = HANDLES;
 /// Fences one execbuffer may name.
 pub const EXEC_FENCES: usize = 256;
 /// The read fences one object keeps apart; older ones are merged.
