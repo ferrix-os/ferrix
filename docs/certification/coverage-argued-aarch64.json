@@ -1219,14 +1219,14 @@
     },
     {
       "file": "sched/wait.rs",
-      "lines": "757",
+      "lines": "772",
       "category": "credited-elsewhere",
       "match": "core::hint::spin_loop();",
       "why": "Run by stage 5's sched::check::before_start, which waits on a queue before the scheduler starts and requires the wait to last until its deadline. In that monomorph the ready closure is `|| false`, folded into the loop, and the spin carries no row of its own; the rows of this line are in the monomorphs whose waits all run with the scheduler up."
     },
     {
       "file": "sched/wait.rs",
-      "lines": "1060",
+      "lines": "1077",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a sleeping lock taken where a task may not block. The condition runs on every sleeping-lock acquisition under another row."

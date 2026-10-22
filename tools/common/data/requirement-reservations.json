@@ -12,13 +12,6 @@
   ],
   "reservations": [
     {
-      "ids": ["L.object.247"],
-      "owner": "driver-polls",
-      "branch": "driver-polls",
-      "date": "2026-10-22",
-      "purpose": "backlog p2-138 (consultant ledger 3056): port_wait's wait trusts its wakes -- no recheck while listed, ended by a queued packet, its process's end or execve (END, L.sched.40) and its deadline"
-    },
-    {
       "ids": ["H.DEBUG.1", "L.debug.1-14"],
       "owner": "debug-s2",
       "branch": "debug-s2",

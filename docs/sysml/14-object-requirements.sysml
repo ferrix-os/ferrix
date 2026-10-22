@@ -1900,6 +1900,30 @@ package FerrixObjectRequirements {
                 "sched::wait::WaitQueue::wait_trusting", "sched::wait::WaitQueue::wait_sliced",
                 "object::channel::Endpoint::drop");
         }
+        requirement <'L.object.247'> aPortWaitTrustsItsWakes : ItemLowLevel {
+            attribute :>> statement = "port_wait's wait shall file no recheck
+                while it is listed on its port's queue, and shall end on each of
+                what it waits for: a packet queued on the port by queue_user,
+                queue_signal, queue_interrupt, put_back or an interrupt's fire,
+                each of which wakes the queue after its push; its process's end
+                or another thread's execve, read from the task's END bit under
+                the SeqCst fence pair with wake_posted (L.sched.40), answering
+                EINTR; and its deadline, answering TIMED_OUT. A task there was
+                no memory to list shall recheck every 5 ms whatever its
+                deadline.";
+            attribute :>> criterion = "A thread blocked in port_wait with a
+                two-minute deadline is woken within 10 s by a packet its
+                registration queues twenty milliseconds later (object::check); a thread blocked in
+                port_wait with no deadline and listed on its port's queue is
+                ended by its process's kill within 10 s, and its thread ends (the
+                `wrread` line).";
+            attribute :>> parent = "H.OBJ.11";
+            attribute :>> unit = ("sched::wait::WaitQueue::wait_trusting_until",
+                "sched::wait::WaitQueue::wait_sliced", "syscall::native::port_wait",
+                "object::port::Port::queue_user", "object::port::Port::queue_signal",
+                "object::port::Port::queue_interrupt", "object::port::Port::put_back",
+                "object::interrupt::Line::fire");
+        }
         requirement <'L.object.140'> anEndsWordIsItsInbox : ItemLowLevel {
             attribute :>> statement = "Under a channel end's inbox lock, its state
                 word's NONEMPTY shall be set exactly when the inbox holds a message,

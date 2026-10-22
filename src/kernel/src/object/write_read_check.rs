@@ -31,6 +31,10 @@
 //! files no recheck, so nothing but those wakes ends it: a wake that is
 //! missing leaves the thread blocked past the bound, and the check says which.
 //!
+//! `port_wait`'s wait trusts its wakes too (backlog p2-138): a thread blocked
+//! in it with no deadline is ended by its process's kill within the same
+//! bound, and its thread ends.
+//!
 //! The Sync wake (at two processors or more): a reader blocked in the call
 //! on one processor and woken by a writer on another is moved onto the
 //! writer's processor, where its affinity allows, and answers there; one
@@ -104,6 +108,7 @@ type Answer = (isize, [u64; 3]);
 ///
 /// Verifies: L.object.128, L.object.129, L.object.130, L.object.131
 /// Verifies: L.object.132
+/// Verifies: L.object.247
 /// Verifies: `L.object.141`, `L.sched.40`
 pub(crate) fn run() -> Result<Report, &'static str> {
     let mut report = Report {
@@ -116,6 +121,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
         check_a_wait_is_ended_by(ending)?;
         report.woken += 1;
     }
+    check_a_port_wait_is_ended_by_a_kill()?;
     if crate::smp::count() >= 2 {
         report.moved = check_a_sync_wake_moves_the_reader()?;
         check_a_sync_wake_keeps_a_pinned_reader()?;
@@ -632,6 +638,64 @@ fn check_a_wait_is_ended_by(ending: Ending) -> Result<(), &'static str> {
         }
     }
     drop(peer);
+    Ok(())
+}
+
+/// Handed to the port waiter: the port it waits on.
+static PORT_WAITER: SpinLock<Option<Handle>> = SpinLock::new(None);
+/// What the port waiter's call answered, when it came back to it.
+static PORT_WAITED: SpinLock<Option<isize>> = SpinLock::new(None);
+
+/// The port waiter: one `port_wait` with no deadline, then the end of its
+/// process. Its packet address is never written: only a kill ends the wait.
+fn port_wait_in_the_process(_argument: usize) {
+    let handle = PORT_WAITER.lock().take();
+    if let Some(handle) = handle {
+        let (answer, _) =
+            arch::drive_native_words(nr::PORT_WAIT, [u64::from(handle.0), 0, 0, 0, 0, 0]);
+        *PORT_WAITED.lock() = Some(answer);
+    }
+    process::exit_current(0)
+}
+
+/// A thread blocked in `port_wait` with no deadline, listed on its port's
+/// queue, is ended by its process's kill within the bound, and its thread
+/// ends. `port_wait` files no recheck while listed (backlog p2-138), so only
+/// the kill's wake ends it: read from `END` (`sched::work::own_end`).
+///
+/// Verifies: L.object.247
+fn check_a_port_wait_is_ended_by_a_kill() -> Result<(), &'static str> {
+    let process: Arc<Process> =
+        process::new_for_check().map_err(|_| "no process for the port wait check's waiter")?;
+    let port = super::port::Port::new().map_err(|_| "no memory for the port wait check's port")?;
+    let handle = process
+        .with_handles(|table| table.insert(Object::Port(Arc::clone(&port)), Rights::PORT))
+        .map_err(|_| "no room in the port wait check's table")?;
+    *PORT_WAITED.lock() = None;
+    *PORT_WAITER.lock() = Some(handle);
+    let task = spawn_in(&process, "port waiter", port_wait_in_the_process, None)?;
+    let deadline = crate::timer::now_nanos().saturating_add(PATIENCE_NANOS);
+    while port.waiters().listed() == 0 {
+        if task.is_dead() || crate::timer::now_nanos() >= deadline {
+            return Err("port wait: the check's waiter never waited");
+        }
+        crate::sched::sleep_for(POLL_NANOS);
+    }
+    process::kill(&process, KILLED_STATUS);
+    let bound = crate::timer::now_nanos().saturating_add(WOKEN_WITHIN_NANOS);
+    wait_dead(
+        &task,
+        bound,
+        "port wait: a thread blocked in port_wait with no deadline was not woken by its \
+         process's kill within 10 s",
+    )?;
+    if PORT_WAITED
+        .lock()
+        .take()
+        .is_some_and(|value| value != Errno::EINTR.as_return_value())
+    {
+        return Err("port wait: a thread woken by its process's kill did not answer EINTR");
+    }
     Ok(())
 }
 

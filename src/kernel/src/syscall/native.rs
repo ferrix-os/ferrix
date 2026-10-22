@@ -3016,10 +3016,28 @@ fn port_wait(
         read_u64(process, deadline_at)?
     };
     let packet = loop {
-        let _ = port
-            .waiters()
-            .wait_until_deadline(|| !port.is_empty() || must_leave(caller), deadline);
-        if must_leave(caller) {
+        // Trusting the queue, as `channel_write_read` does: no recheck, so a
+        // driver waiting here with nothing to do is not woken 200 times a
+        // second (backlog p2-138). No wake is missed:
+        // - **A packet.** Every path that queues one (`Port::queue_user`,
+        //   `queue_signal`, `queue_interrupt`, `put_back`, and an interrupt
+        //   handler's `queue_from_interrupt` followed by `fire`'s wake)
+        //   pushes under the port's queue lock and then wakes this queue,
+        //   which takes its waiter lock. The wait lists the task and marks it
+        //   blocked under that waiter lock, and only then reads the queue
+        //   under its lock (`is_empty`). A push whose wake drains the list
+        //   before the listing is seen by that read, through the two locks; a
+        //   wake after the listing finds the task blocked and wakes it.
+        // - **A kill and another thread's `execve`**, the `END` the core
+        //   posts for every case `must_leave` answers true, read by
+        //   `own_end` under `wait_trusting`'s fence pair with
+        //   `sched::work::wake_posted`.
+        // A task there was no memory to list still rechecks (F-23).
+        let _ = port.waiters().wait_trusting_until(
+            || !port.is_empty() || crate::sched::work::own_end() || must_leave(caller),
+            deadline,
+        );
+        if must_leave(caller) || crate::sched::work::own_end() {
             return Err(Errno::EINTR);
         }
         // Another waiter on the same port may have taken the packet that

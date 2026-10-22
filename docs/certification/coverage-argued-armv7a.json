@@ -1590,21 +1590,21 @@
     },
     {
       "file": "sched/wait.rs",
-      "lines": "742",
+      "lines": "757",
       "category": "credited-elsewhere",
       "match": "loop {",
       "why": "Run by every wait on a queue. In the ARMv7-A image the loop's head keeps a row only in the render core's monomorph, which ARMv7-A's virt, with no render device, never calls; the others carry it under the first statement's row."
     },
     {
       "file": "sched/wait.rs",
-      "lines": "894",
+      "lines": "911",
       "category": "credited-elsewhere",
       "match": "core::hint::spin_loop();",
       "why": "Run by stage 5's sched::check::before_start, which waits on two queues before the scheduler starts and requires the wait to last until its deadline. In that monomorph the ready closure is `|| false`, folded into the loop, and the spin carries no row of its own; this line's rows are in monomorphs whose waits all run with the scheduler up."
     },
     {
       "file": "sched/wait.rs",
-      "lines": "1060",
+      "lines": "1077",
       "category": "failure-path",
       "match": "debug_assert!(",
       "why": "The debug assertion's own row is its panic call: a sleeping lock taken where a task may not block. The condition runs on every sleeping-lock acquisition under another row."

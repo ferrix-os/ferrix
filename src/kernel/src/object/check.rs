@@ -3560,9 +3560,17 @@ fn check_port_refusals(
     )
 }
 
+/// How long after the write the port wait of
+/// [`check_a_port_wait_is_woken_by_a_message`] may come back: far past a
+/// wake on a loaded host, far short of its deadline.
+const PORT_WOKEN_WITHIN_NANOS: u64 = 10_000_000_000;
+
 /// A `port_wait` with a two-minute deadline is woken by a message a kernel
 /// thread writes twenty milliseconds later, through the registration that
 /// message fires: the whole chain from a channel write to a woken port.
+/// The wait files no recheck (backlog p2-138), so only that wake ends it.
+///
+/// Verifies: L.object.247
 fn check_a_port_wait_is_woken_by_a_message(counter: &mut Counter) -> Result<(), &'static str> {
     let side = Side::new()?;
     let (near, far) = side.channel()?;
@@ -3593,6 +3601,14 @@ fn check_a_port_wait_is_woken_by_a_message(counter: &mut Counter) -> Result<(), 
     }
     if !came_back_after_the_write(returned) {
         return Err("a port wait returned before anything had been written");
+    }
+    // The wait files no recheck, so only the packet's wake ends it in time:
+    // one that is missing leaves it to its two-minute deadline, where it
+    // still finds the packet and would otherwise pass.
+    if returned.saturating_sub(WRITTEN_AT.load(Ordering::Acquire)) > PORT_WOKEN_WITHIN_NANOS {
+        return Err(
+            "a port wait was not woken by the message its registration watched within 10 s",
+        );
     }
     if read_packet(&side)?.0 != 21 {
         return Err("a woken port wait took the wrong packet");

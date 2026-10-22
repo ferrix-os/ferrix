@@ -728,6 +728,21 @@ impl WaitQueue {
         self.wait_sliced(ready, u64::MAX, None)
     }
 
+    /// [`WaitQueue::wait_trusting`] until `deadline`: no recheck while the
+    /// task is listed, only the deadline's own sleep. Answers whether `ready`
+    /// was the reason.
+    ///
+    /// For a wait whose every change wakes this queue, under the same rule
+    /// [`WaitQueue::wait_trusting`] gives, but which a caller may also bound:
+    /// `port_wait`'s. A driver idles there with no deadline, and a 5 ms
+    /// recheck woke every one of them 200 times a second for nothing
+    /// (backlog p2-138). A task there was no memory to list rechecks every
+    /// [`RECHECK_NANOS`] as every wait does (finding F-23), whatever the
+    /// deadline.
+    pub(crate) fn wait_trusting_until(&self, ready: impl FnMut() -> bool, deadline: u64) -> bool {
+        self.wait_sliced(ready, deadline, None)
+    }
+
     /// [`WaitQueue::wait_until_deadline`], looking again every `recheck`
     /// nanoseconds, or only when woken for `None`.
     fn wait_sliced(
@@ -804,10 +819,12 @@ impl WaitQueue {
                 let mut waiters = self.waiters.lock();
                 let listed = fallible::try_push(&mut waiters, Arc::clone(&task)).is_ok();
                 self.count.store(waiters.len(), Ordering::Release);
-                let wake_at = if listed || wake_at != u64::MAX {
+                // Unlisted, it rechecks whatever its deadline: a trusting
+                // wait with a far deadline would otherwise sleep to it.
+                let wake_at = if listed {
                     wake_at
                 } else {
-                    crate::timer::now_nanos().saturating_add(RECHECK_NANOS)
+                    wake_at.min(crate::timer::now_nanos().saturating_add(RECHECK_NANOS))
                 };
                 if wake_at != u64::MAX {
                     task.set_sleep_deadline(wake_at);

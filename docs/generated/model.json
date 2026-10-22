@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "digest": "531a6f7eb03ff38c12a48bc51e5f1b2b905371f98618e09b1cbb60338a26482c",
+  "digest": "2a8bbb67a20940c92e66926dadca14a7683d0a03cbb3b197eff2a216ee8ea244",
   "files": [
     {
       "path": "docs/sysml/00-lifecycle.sysml",
@@ -109,7 +109,7 @@
   ],
   "summary": {
     "packages": 142,
-    "elements": 7260,
+    "elements": 7265,
     "maturity": {
       "implemented": 282,
       "inProgress": 28,
@@ -34629,6 +34629,63 @@
               ]
             },
             {
+              "name": "aPortWaitTrustsItsWakes",
+              "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aPortWaitTrustsItsWakes",
+              "kind": "requirement",
+              "shortName": "L.object.247",
+              "type": "ItemLowLevel",
+              "source": {
+                "file": "docs/sysml/14-object-requirements.sysml",
+                "line": 1903
+              },
+              "children": [
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aPortWaitTrustsItsWakes",
+                  "kind": "attribute",
+                  "redefines": "statement",
+                  "value": "\"port_wait's wait shall file no recheck while it is listed on its port's queue, and shall end on each of what it waits for: a packet queued on the port by queue_user, queue_signal, queue_interrupt, put_back or an interrupt's fire, each of which wakes the queue after its push; its process's end or another thread's execve, read from the task's END bit under the SeqCst fence pair with wake_posted (L.sched.40), answering EINTR; and its deadline, answering TIMED_OUT. A task there was no memory to list shall recheck every 5 ms whatever its deadline.\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1913
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aPortWaitTrustsItsWakes",
+                  "kind": "attribute",
+                  "redefines": "criterion",
+                  "value": "\"A thread blocked in port_wait with a two-minute deadline is woken within 10 s by a packet its registration queues twenty milliseconds later (object::check); a thread blocked in port_wait with no deadline and listed on its port's queue is ended by its process's kill within 10 s, and its thread ends (the `wrread` line).\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1919
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aPortWaitTrustsItsWakes",
+                  "kind": "attribute",
+                  "redefines": "parent",
+                  "value": "\"H.OBJ.11\"",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1920
+                  }
+                },
+                {
+                  "name": "",
+                  "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::aPortWaitTrustsItsWakes",
+                  "kind": "attribute",
+                  "redefines": "unit",
+                  "value": "(\"sched::wait::WaitQueue::wait_trusting_until\", \"sched::wait::WaitQueue::wait_sliced\", \"syscall::native::port_wait\", \"object::port::Port::queue_user\", \"object::port::Port::queue_signal\", \"object::port::Port::queue_interrupt\", \"object::port::Port::put_back\", \"object::interrupt::Line::fire\")",
+                  "source": {
+                    "file": "docs/sysml/14-object-requirements.sysml",
+                    "line": 1925
+                  }
+                }
+              ]
+            },
+            {
               "name": "anEndsWordIsItsInbox",
               "qualifiedName": "FerrixObjectRequirements::ChannelWriteRead::anEndsWordIsItsInbox",
               "kind": "requirement",
@@ -34636,7 +34693,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1903
+                "line": 1927
               },
               "children": [
                 {
@@ -34647,7 +34704,7 @@
                   "value": "\"Under a channel end's inbox lock, its state word's NONEMPTY shall be set exactly when the inbox holds a message, after every operation that changes that -- a write, a small write, a read, a small read, a put-back and the close's drain -- and its PEER_CLOSED shall be set once the peer has closed, after the peer's closed and before the end's waiters are woken.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1909
+                    "line": 1933
                   }
                 },
                 {
@@ -34658,7 +34715,7 @@
                   "value": "\"4096 writes, small writes, reads, small reads and put-backs in a pseudo-random order on one pair leave each end's word equal to its inbox after every one, each operation having crossed the empty boundary once first, and a close is marked in the survivor's (the `chword` line); with the put-back's update removed the check fails after a put-back into an empty inbox.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1915
+                    "line": 1939
                   }
                 },
                 {
@@ -34669,7 +34726,7 @@
                   "value": "\"H.OBJ.11\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1916
+                    "line": 1940
                   }
                 },
                 {
@@ -34680,7 +34737,7 @@
                   "value": "(\"object::channel::Half::note\", \"object::channel::Half::note_peer_closed\", \"object::channel::Half::word\", \"object::channel::Endpoint::read\", \"object::channel::Endpoint::read_small\", \"object::channel::Endpoint::write\", \"object::channel::Endpoint::write_small\", \"object::channel::Endpoint::unread\", \"object::channel::Endpoint::take_unread\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1921
+                    "line": 1945
                   }
                 }
               ]
@@ -34693,7 +34750,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1923
+                "line": 1947
               },
               "children": [
                 {
@@ -34704,7 +34761,7 @@
                   "value": "\"channel_write_read's wait shall read readiness with one load of its end's state word and one of the caller's END bit, without the inbox lock or the personality; and a writer, a put-back and a closer shall make a SeqCst fence after the word's store and before their wake reads a waiter's state, paired with the wait's fence after it stores BLOCKED, so that a waiter listed and not yet blocked either is found blocked or reads the word.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1930
+                    "line": 1954
                   }
                 },
                 {
@@ -34715,7 +34772,7 @@
                   "value": "\"The `wrread` line's message and close cases; with the close's mark removed, the close case's waiter stays blocked and the check fails by name. The loom model of a waiter listed and not yet blocked against a writer, a closer, both, and an end finds no lost wake, and its two controls, the writer without its fence and the closer marking after its wake, each find one (`cargo xtask loom`, src/tests/loom).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1937
+                    "line": 1961
                   }
                 },
                 {
@@ -34726,7 +34783,7 @@
                   "value": "\"H.OBJ.11\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1938
+                    "line": 1962
                   }
                 },
                 {
@@ -34737,7 +34794,7 @@
                   "value": "(\"object::channel::Endpoint::readable_or_closed\", \"syscall::native::receive_words\", \"sched::work::own_end\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1940
+                    "line": 1964
                   }
                 }
               ]
@@ -34751,7 +34808,7 @@
           "doc": "src/kernel/src/object/channel.rs and src/kernel/src/syscall/native.rs: channel_write_read's fast path, its park and its continuation (docs/OPAQUE-KERNEL.md §9.7, parts 2 and 3). x86-64 only.",
           "source": {
             "file": "docs/sysml/14-object-requirements.sysml",
-            "line": 1944
+            "line": 1968
           },
           "children": [
             {
@@ -34762,7 +34819,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1949
+                "line": 1973
               },
               "children": [
                 {
@@ -34773,7 +34830,7 @@
                   "value": "\"A park record shall be set only while its side's inbox is empty, nothing else is parked there and the peer has not closed, with its task set blocked in the same hold of the inbox lock; the receive half then makes a SeqCst fence and looks at END before it blocks.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1954
+                    "line": 1978
                   }
                 },
                 {
@@ -34784,7 +34841,7 @@
                   "value": "\"Case 4's two readers are both answered (the `fastcase` line); the loom model park.rs and its controls.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1956
+                    "line": 1980
                   }
                 },
                 {
@@ -34795,7 +34852,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1957
+                    "line": 1981
                   }
                 },
                 {
@@ -34806,7 +34863,7 @@
                   "value": "(\"object::channel::Endpoint::park\", \"syscall::native::park_for_reply\", \"sched::direct::block_parked\", \"sched::direct::set_blocked\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1960
+                    "line": 1984
                   }
                 }
               ]
@@ -34819,7 +34876,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1962
+                "line": 1986
               },
               "children": [
                 {
@@ -34830,7 +34887,7 @@
                   "value": "\"A write, write_small, unread or close that changes an inbox shall take its park record under the inbox lock and wake the parked task after letting the lock go, counting the wait as ended by a wake.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1966
+                    "line": 1990
                   }
                 },
                 {
@@ -34841,7 +34898,7 @@
                   "value": "\"write_read_check's waits and the continuation's message and close cases end within the bound with the fast path on; with the take left out the loom control strands a reader.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1969
+                    "line": 1993
                   }
                 },
                 {
@@ -34852,7 +34909,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1970
+                    "line": 1994
                   }
                 },
                 {
@@ -34863,7 +34920,7 @@
                   "value": "(\"object::channel::Inbox::take_parked\", \"object::channel::wake_parked\", \"sched::wait::WaitQueue::note_ended_by_a_wake\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1972
+                    "line": 1996
                   }
                 }
               ]
@@ -34876,7 +34933,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1974
+                "line": 1998
               },
               "children": [
                 {
@@ -34887,7 +34944,7 @@
                   "value": "\"send_direct shall take the two halves' inbox locks only if free, the first side's before the second's, held under the entry's interrupt mask and counted as locks on the preemption word that A3 checks at the switch, decline unless the caller's inbox is empty (T6), nothing is parked on its side (T7), its peer is open (T8), a reader is parked on the peer's side (T9) and the peer's side has no observers and no waiters (T10), stop the machine with FX-0531 for a record beside a message or on a closed end (A2), and otherwise fill the reader's reply cell, park the caller and hand the processor over.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1984
+                    "line": 2008
                   }
                 },
                 {
@@ -34898,7 +34955,7 @@
                   "value": "\"ipc-equiv's cases 3, 5, 8 and 12, and stage 9's case 4, reach T6 to T10 with the fast path on and get the general path's results; each test's control fails its case.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1987
+                    "line": 2011
                   }
                 },
                 {
@@ -34909,7 +34966,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1988
+                    "line": 2012
                   }
                 },
                 {
@@ -34920,7 +34977,7 @@
                   "value": "(\"object::channel::Endpoint::send_direct\", \"object::channel::sendable\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1990
+                    "line": 2014
                   }
                 }
               ]
@@ -34933,7 +34990,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 1992
+                "line": 2016
               },
               "children": [
                 {
@@ -34944,7 +35001,7 @@
                   "value": "\"The words a commit hands over shall be the count's bytes of the sent words, the bytes past the count zero.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1994
+                    "line": 2018
                   }
                 },
                 {
@@ -34955,7 +35012,7 @@
                   "value": "\"ipc-equiv's case 1 with the fast path on, and stage 9's reply-words case, which holds the commit's words to the general write then read for every count (the `fastcase` line); with the mask past the count left out its control fails it.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1998
+                    "line": 2022
                   }
                 },
                 {
@@ -34966,7 +35023,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 1999
+                    "line": 2023
                   }
                 },
                 {
@@ -34977,7 +35034,7 @@
                   "value": "(\"syscall::native::reply_words\", \"syscall::native::words_of\", \"syscall::native::sent_bytes\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2001
+                    "line": 2025
                   }
                 }
               ]
@@ -34990,7 +35047,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2003
+                "line": 2027
               },
               "children": [
                 {
@@ -35001,7 +35058,7 @@
                   "value": "\"A caller the fast path parked and woken without a reply shall open interrupts, stop with FX-0533 if it may not block, leave its record, answer EINTR if END is posted or carry on as receive_words does, write the call's audit record as dispatch_write_read does, let go of its endpoint reference before it masks interrupts again, and run regroup_current and call_left.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2009
+                    "line": 2033
                   }
                 },
                 {
@@ -35012,7 +35069,7 @@
                   "value": "\"The continuation's cases by a message, its peer's close and its kill answer the message, PEER_CLOSED and EINTR (the `fastcase` line); case 16's continuation variant closes its end with interrupts open (F-65).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2013
+                    "line": 2037
                   }
                 },
                 {
@@ -35023,7 +35080,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2014
+                    "line": 2038
                   }
                 },
                 {
@@ -35034,7 +35091,7 @@
                   "value": "(\"syscall::native::continue_general\", \"object::channel::Endpoint::unpark\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2016
+                    "line": 2040
                   }
                 }
               ]
@@ -35047,7 +35104,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2018
+                "line": 2042
               },
               "children": [
                 {
@@ -35058,7 +35115,7 @@
                   "value": "\"fast_write_read shall decline, having changed nothing but its counts, unless the filter would let the call through unlooked at (T2), it sends at most 24 bytes (T3), and the handle table's lock is free and channel_in finds an endpoint with READ and WRITE (T4, T5).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2023
+                    "line": 2047
                   }
                 },
                 {
@@ -35069,7 +35126,7 @@
                   "value": "\"Stage 9's case 11 is refused with the filter's errno with the fast path on, and comes back with IN_CALL down whether refused or allowed; ipc-equiv's case 12 answers every refusal as the general path does, with its audit records; every stage 9 echo's task names, as its cached core process, the one its thread's process holds.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2029
+                    "line": 2053
                   }
                 },
                 {
@@ -35080,7 +35137,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2030
+                    "line": 2054
                   }
                 },
                 {
@@ -35091,7 +35148,7 @@
                   "value": "(\"syscall::native::fast_write_read\", \"object::process::Process::try_with_handles_masked\", \"sched::task::Task::core_process\", \"trap::filter_quiet\", \"trap::set_quiet_syscall_filter\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2034
+                    "line": 2058
                   }
                 }
               ]
@@ -35104,7 +35161,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2036
+                "line": 2060
               },
               "children": [
                 {
@@ -35115,7 +35172,7 @@
                   "value": "\"channel_write_read's answer shall go into the program's registers through write_read_outcome on the general path, the frame tail and the continuation alike.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2039
+                    "line": 2063
                   }
                 },
                 {
@@ -35126,7 +35183,7 @@
                   "value": "\"ipc-equiv's transcripts are the same on both boots.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2041
+                    "line": 2065
                   }
                 },
                 {
@@ -35137,7 +35194,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2042
+                    "line": 2066
                   }
                 },
                 {
@@ -35148,7 +35205,7 @@
                   "value": "\"syscall::write_read_outcome\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2043
+                    "line": 2067
                   }
                 }
               ]
@@ -35161,7 +35218,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2045
+                "line": 2069
               },
               "children": [
                 {
@@ -35172,7 +35229,7 @@
                   "value": "\"fast_write_read shall let go of its reference to the caller's endpoint only with interrupts open, on the frame tail's return, the general continuation and a decline after the lookup alike, and a channel end closed with interrupts masked shall stop the machine with FX-0535 (F-65).\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2050
+                    "line": 2074
                   }
                 },
                 {
@@ -35183,7 +35240,7 @@
                   "value": "\"Stage 9's case 16: a caller parked by the fast path whose handle another thread closes, resumed by the frame tail and by the continuation, answers 'r' and 'm', its sink sees PEER_CLOSED, and the boot does not stop with FX-0535; the frame tail's variant counts only when the sink's reply was handed over directly too. The decline's release is argued (it goes through the same release_unmasked), not driven.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2057
+                    "line": 2081
                   }
                 },
                 {
@@ -35194,7 +35251,7 @@
                   "value": "\"H.OBJ.18\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2058
+                    "line": 2082
                   }
                 },
                 {
@@ -35205,7 +35262,7 @@
                   "value": "(\"syscall::native::release_unmasked\", \"object::channel::Endpoint::drop\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2060
+                    "line": 2084
                   }
                 }
               ]
@@ -35218,7 +35275,7 @@
               "type": "ItemLowLevel",
               "source": {
                 "file": "docs/sysml/14-object-requirements.sysml",
-                "line": 2062
+                "line": 2086
               },
               "children": [
                 {
@@ -35229,7 +35286,7 @@
                   "value": "\"A run queue's charge of processor time to a job shall be kept back in the queue's Pending record, holding the job's slot, and moved into the slots of the job and every job above it and into the machine's exactly once: when the queue charges another job, when it switches to a task of another job or to its idle task, when its running task leaves its job, and when every processor's running task is charged up to now (sched::charge_running: a read of cpu.stat, or of another thread's processor time through /proc's stat, CLOCK_PROCESS_CPUTIME_ID, times or getrusage's RUSAGE_SELF); after the move it shall hold no slot it no longer charges.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2073
+                    "line": 2097
                   }
                 },
                 {
@@ -35240,7 +35297,7 @@
                   "value": "\"On records of its own, two charges to a child job stay pending and hold its slot; a charge to the parent moves the first into both slots and the machine once; flushes to no job settle child 1000 20, parent 1000 320, machine 1000 320, leave nothing pending and give back both holds. A running task moved into a job and charged has that time in the job's cpu.stat once charge_running has run, with nothing switched; moved back, it leaves its queue keeping nothing for that job, and the job gone, its slot is free.\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2082
+                    "line": 2106
                   }
                 },
                 {
@@ -35251,7 +35308,7 @@
                   "value": "\"H.QUOTA.10\"",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2083
+                    "line": 2107
                   }
                 },
                 {
@@ -35262,7 +35319,7 @@
                   "value": "(\"object::quota::add_cpu_time\", \"object::quota::Pending::charge\", \"object::quota::Pending::flush\", \"object::quota::switched\", \"object::quota::leaving\", \"object::quota::settle\")",
                   "source": {
                     "file": "docs/sysml/14-object-requirements.sysml",
-                    "line": 2087
+                    "line": 2111
                   }
                 }
               ]
