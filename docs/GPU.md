@@ -478,7 +478,15 @@ under mutter showed white (`docs/GNOME.md`, gap 2); Linux's virtio-gpu
 takes any length. The work VMO grew to two megabytes, seven such slots,
 the driver's copied stream and its command area's large place to one
 slot, and its longest descriptor chain to 72 buffers (a stream of 65 pages
-no two of which lie side by side, the header and the response).
+no two of which lie side by side, the header and the response). The
+node copies a program's stream into its slot a page at a time once the
+slot is taken, through one page of heap, never as one block of the
+stream's length (the certification consultant's B1, ledger lines 3121 and
+3126). So a slot is held while the program's buffer faults in: seven
+callers whose buffers are slow to fault (a pager's VMO, a file mapping on a
+stalled disk) make the renderer's other openers wait up to the reply
+patience and then answer `ETIMEDOUT`, a liveness limit of one device, as
+long GPU work already is.
 
 **What `WAIT` does not do.** The driver offers no fences, so nothing says
 when the GPU has *finished* a stream rather than taken it. A transfer from

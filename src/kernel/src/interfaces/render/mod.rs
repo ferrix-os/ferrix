@@ -1353,6 +1353,14 @@ impl Renderer {
     /// size from the kernel's heap is 128 contiguous pages charged to
     /// nobody (the certification consultant's B1, ledger line 3121).
     ///
+    /// The slot is held while the program's buffer faults in, which the
+    /// whole-stream copy before the slot did not do: a caller whose buffer
+    /// is slow to fault -- a pager's VMO, a file mapping on a stalled disk --
+    /// holds a slot until the fault finishes, and seven such callers make
+    /// every other opener of the renderer wait up to the reply patience and
+    /// then answer `ETIMEDOUT`. A liveness limit of one device in the load
+    /// ring, as long GPU work already is (ledger line 3126, A7).
+    ///
     /// # Errors
     ///
     /// [`RenderError`]; [`RequestError::Work`] for a command buffer of no
