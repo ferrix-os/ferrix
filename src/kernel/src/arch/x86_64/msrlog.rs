@@ -107,6 +107,7 @@ pub(crate) fn start(view: &BootView<'_>) {
         return;
     };
     let mut only = CpuSet::empty();
+    // NOALLOC: a CpuSet is a fixed bitmap; insert sets a bit.
     if only.insert(here).is_err() {
         println!("msr: processor {here} out of range; nothing read");
         return;
@@ -241,15 +242,15 @@ fn names(bits: u16) -> Names {
     };
     for (bit, name) in decode::REASON_NAMES {
         if bits & (1 << bit) != 0 {
-            names.push(name);
+            names.add(name);
         }
     }
     let unnamed = bits & !decode::NAMED_REASONS;
     if unnamed != 0 {
-        names.push("other");
+        names.add("other");
     }
     if names.len == 0 {
-        names.push("none");
+        names.add("none");
     }
     names
 }
@@ -261,7 +262,7 @@ struct Names {
 }
 
 impl Names {
-    fn push(&mut self, name: &str) {
+    fn add(&mut self, name: &str) {
         let separator = usize::from(self.len != 0);
         if self.len + separator + name.len() > self.bytes.len() {
             return;
