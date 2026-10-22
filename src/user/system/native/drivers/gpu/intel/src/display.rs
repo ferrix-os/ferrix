@@ -19,9 +19,19 @@
 //! changed rectangle of the buffer on screen and answers FLIPPED at once
 //! (there is no blanking to wait for), DETACH forgets it. Every copy ends
 //! with the device barrier that drains the write-combining buffers.
+//!
+//! Its modes (displayctl v11, `docs/DISPLAY.md` §9.4): the plane's own,
+//! preferred, and every smaller standard size, shown scaled -- the pipe is
+//! the firmware's and nothing here retimes it, so a smaller mode is the
+//! buffer scaled into the plane by the copy, aspect kept, centred, black
+//! bars, as Linux's panel fitter shows one. The connector is named by what
+//! drives pipe A (`ferrix_intel_xelp::plane::Output`), so the box's
+//! monitor is `HDMI-A-1` and not `Virtual-1`.
 
 use core::ptr;
 
+use ferrix_display_modes::scale::Scaler;
+use ferrix_display_modes::{ModeList, add_scaled};
 use ferrix_displayctl::message::{
     Attach, Hello, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message, PORT_RIGHTS, Rect, ScanoutMode,
     Status, Timing, Timings, VERSION,
@@ -81,6 +91,9 @@ pub(crate) struct Display {
     control: Channel<Kernel>,
     buffers: [Option<Buffer>; MAX_BUFFERS],
     shown: Option<(u32, Rect)>,
+    /// How a mode smaller than the plane is shown on it, since `SET_MODE`
+    /// chose one; `None` at the plane's own.
+    scaler: Option<Scaler>,
     /// Frames copied, for the first lines.
     flushes: u64,
 }
@@ -111,7 +124,7 @@ impl Display {
                 ));
             })
             .ok()?;
-        if let Err(why) = introduce(&control, port, location, &screen) {
+        if let Err(why) = introduce(&control, port, location, &screen, plane.connector) {
             say(format_args!("intel: no card0: {why}"));
             return None;
         }
@@ -132,6 +145,7 @@ impl Display {
             control,
             buffers: [None; MAX_BUFFERS],
             shown: None,
+            scaler: None,
             flushes: 0,
         })
     }
@@ -325,6 +339,28 @@ impl Display {
                 let status = self.detach(buffer);
                 self.reply(Message::Detached { buffer, status })
             }
+            // A mode of the list: the plane's own, or a smaller one shown
+            // scaled. Nothing answers it.
+            Message::SetMode { timing, .. } => {
+                let size = (u32::from(timing.hdisplay), u32::from(timing.vdisplay));
+                let plane = (self.screen.width as u32, self.screen.height as u32);
+                if size.0 > plane.0 || size.1 > plane.1 || !timing.is_mode() {
+                    return Err("SET_MODE for a mode larger than the plane");
+                }
+                self.scaler = Scaler::new(size, plane).filter(|scaler| !scaler.is_identity());
+                self.clear();
+                say(format_args!(
+                    "intel: card0: mode {}x{}{}",
+                    size.0,
+                    size.1,
+                    if self.scaler.is_some() {
+                        ", scaled to the plane"
+                    } else {
+                        ""
+                    }
+                ));
+                Ok(())
+            }
             _ => Err("a message a copying card without a cursor takes no part in"),
         }
     }
@@ -380,13 +416,69 @@ impl Display {
         Status::Ok
     }
 
+    /// Black on every pixel of the plane, then the barrier: the bars a
+    /// scaled mode leaves, and nothing of the mode before.
+    fn clear(&self) {
+        let screen = &self.screen;
+        for row in 0..screen.height {
+            let target = (screen.base + row * screen.pitch) as *mut u32;
+            for column in 0..screen.width {
+                // SAFETY: `target` starts a line of the lent window mapped
+                // for this process, which holds `width` four-byte pixels
+                // from there (`map_screen` checked pitch times height
+                // against the window), and is four-byte aligned.
+                unsafe { ptr::write_volatile(target.wrapping_add(column), 0) };
+            }
+        }
+        ferrix_rt::device_barrier();
+    }
+
+    /// The scaled copy: each plane pixel whose nearest buffer pixel lies in
+    /// `changed` is read from there (efifb's `copy_scaled`).
+    fn copy_scaled(&self, scaler: &Scaler, buffer: &Buffer, shown: Rect, changed: Rect) {
+        let in_shown = Rect {
+            x: changed.x.saturating_sub(shown.x),
+            y: changed.y.saturating_sub(shown.y),
+            ..changed
+        };
+        let Some(area) = scaler.damaged(in_shown) else {
+            return;
+        };
+        let screen = &self.screen;
+        for y in area.y..area.y + area.height {
+            let source_y = (scaler.source_y(y - scaler.area.y) + shown.y) as usize;
+            let line = (y as usize) * screen.pitch;
+            for x in area.x..area.x + area.width {
+                let source_x = (scaler.source_x(x - scaler.area.x) + shown.x) as usize;
+                let from = source_y * buffer.stride + source_x * PIXEL;
+                let to = line + (x as usize) * PIXEL;
+                if source_x >= buffer.width
+                    || source_y >= buffer.height
+                    || from + PIXEL > buffer.length
+                    || to + PIXEL > screen.len
+                {
+                    continue;
+                }
+                // SAFETY: `from` is a pixel inside the buffer's read-only
+                // mapping, which lives until its DETACH takes it from
+                // `self`, and `to` one inside the lent window; both
+                // bounds-checked just above and four-byte aligned.
+                let pixel = unsafe { ptr::read_volatile((buffer.base + from) as *const u32) };
+                // SAFETY: as above.
+                unsafe { ptr::write_volatile((screen.base + to) as *mut u32, pixel) };
+            }
+        }
+    }
+
     /// `changed` of buffer `id`, clipped as efifb clips it, copied into the
     /// window, then the barrier that makes it shown.
     fn copy(&mut self, id: u32, changed: Rect) {
         let (Some(buffer), Some((_, shown))) = (self.buffer(id), self.shown) else {
             return;
         };
-        if let Some(area) = area(&buffer, shown, changed, &self.screen) {
+        if let Some(scaler) = self.scaler {
+            self.copy_scaled(&scaler, &buffer, shown, changed);
+        } else if let Some(area) = area(&buffer, shown, changed, &self.screen) {
             let screen = &self.screen;
             for row in 0..area.rows {
                 let from = (area.source_y + row) * buffer.stride + area.source_x * PIXEL;
@@ -424,12 +516,14 @@ impl Display {
     }
 }
 
-/// HELLO for the one scanout at the plane's size, and READY taken.
+/// HELLO for the one scanout at the plane's size, READY taken, and the
+/// scanout's mode list sent.
 fn introduce(
     control: &Channel<Kernel>,
     port: &Port<Kernel>,
     location: u32,
     screen: &Screen,
+    connector: u32,
 ) -> Result<(), &'static str> {
     let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
     if let Some(first) = modes.first_mut() {
@@ -457,7 +551,13 @@ fn introduce(
         cursor: false,
         timings,
         copies: true,
-        connectors: [0; MAX_SCANOUTS],
+        connectors: {
+            let mut connectors = [0; MAX_SCANOUTS];
+            if let Some(first) = connectors.first_mut() {
+                *first = connector;
+            }
+            connectors
+        },
     };
     let share = port
         .as_owned()
@@ -478,10 +578,23 @@ fn introduce(
         drop(OwnedHandle::from_raw(Kernel, *handle));
     }
     match Message::decode(bytes.get(..received.bytes).unwrap_or_default()) {
-        Ok(Message::Ready(_)) if received.handles == 1 => Ok(()),
-        Ok(Message::Refused(_)) => Err("the display core refused the card"),
-        _ => Err("the display core did not answer READY"),
+        Ok(Message::Ready(_)) if received.handles == 1 => {}
+        Ok(Message::Refused(_)) => return Err("the display core refused the card"),
+        _ => return Err("the display core did not answer READY"),
     }
+    let mut list = ModeList::new();
+    add_scaled(&mut list, timing(screen.width as u16, screen.height as u16));
+    list.sort();
+    for page in list.pages(0) {
+        control
+            .write(page.encode().as_bytes())
+            .map_err(|_| "the mode list could not be written")?;
+    }
+    say(format_args!(
+        "intel: card0: {} modes listed, the smaller ones shown scaled",
+        list.len()
+    ));
+    Ok(())
 }
 
 /// The one timing listed: the plane's size at 60 Hz with reduced blanking,
