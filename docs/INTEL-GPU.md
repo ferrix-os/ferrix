@@ -1163,6 +1163,131 @@ v7.0 tag, sparse: `drivers/gpu/drm/{i915,xe}`, `include/uapi/drm`,
 `include/drm/intel`, 37 MB). Mesa 26.1.0-devel is in
 `~/aosp17/external/mesa3d`.
 
+## 11. A driver started again
+
+Version 1, 2026-10-22, asked for by the customer after `kill -9` of `intel`
+under Endfield on the N150: "get the driver back up after a crash". The
+customer's order (2026-10-22): first the quick fix, at the level Fuchsia's
+Magma reaches -- the driver started again, the GPU reset before the new one
+takes it, every client told its device was lost, nothing hanging -- built
+here (branch `gpu-restart`); then a plan, with no code, for the opaque
+crash mode, in which a driver's death is all but invisible and everything
+stays out of the kernel (§12, branch `gpu-opaque-design`).
+
+### 11.1 What the box showed, and why
+
+On main 48d0efdc5, `kill -9 4` (pid 4 was `intel`) printed `devmgr   the
+driver of 0x00000010 ended with status 137; the device is quiesced` and
+nothing after it. Each piece:
+
+* **No restart.** devmgr's table makes the Intel GPU's driver a
+  `Kind::Engine`, and `restarted` (`devmgr/src/main.rs`) named only display,
+  sound, network, input, disk and a PCI bus host. The policy was
+  `Restart=no` and the device stayed quiesced, its bus mastering off.
+* **card0 and renderD128 gone.** Both are the driver's: the render node
+  through the chardev core, card0 through the display core as a copying
+  card (§10, `xelp-card`). Each core unpublishes its nodes when the
+  driver's control channel closes, as for every driver.
+* **The game's calls.** The chardev core answers every file of a dead
+  driver `ENODEV`, for good, and wakes every waiter with it (its N9). Mesa
+  turns that into whatever the call returns on failure: a failed
+  `GEM_CREATE` is `VK_ERROR_OUT_OF_DEVICE_MEMORY` (the `vk result -2` the
+  box printed for image creation), a failed `SYNCOBJ_RESET`
+  `VK_ERROR_UNKNOWN`, and a failed execbuffer or wait
+  `VK_ERROR_DEVICE_LOST` (`vk_queue_set_lost`). Linux answers an unplugged
+  card the same way. Nothing in the kernel hangs: `test-restart --boot
+  intel` shows a waiting `vkWaitForFences` woken with `DEVICE_LOST`.
+* **sessiond's 105 lines.** hyprix looks for a lost card every 250 ms
+  (`backend.rs`, `RETRY`), and under sessiond each look is a request that
+  sessiond refused with `ENOENT` and logged. Not a spin, but a log line
+  four times a second for as long as the card is gone.
+* **The sluggish box and the ssh timeout.** Not reproduced on QEMU. What
+  was found: hyprix wakes at the screen's refresh while its card is gone
+  (`owed` stays set by `drew.waiting`), which is cheap; the dead driver's
+  pins stay quarantined, charged to nobody, until a next HELLO that never
+  came, which on the box held Endfield's GPU memory (up to `2B`, half the
+  RAM above the watermark, `object::pin`) while the game's own mappings
+  held the same frames; and every console line is drawn under
+  `ferrix.fbcon` before its write returns (§10), so a client that logs each
+  failed call (DXVK does) slows every writer. The box run in §11.3 measures
+  which it was.
+* **The hardware.** With no driver, 00:02.0's bus mastering stays off
+  (devmgr's quiesce), so the display engine stops fetching the plane the
+  firmware lit. A new driver must also find the GT as the dead one left
+  it: RCS0 and BCS0 pointed at its status pages, perhaps still running its
+  contexts, whose pages the kernel gives back at the new HELLO.
+
+### 11.2 The fallback, built: started again, `DEVICE_LOST`, never a hang
+
+* devmgr starts a **PCI engine's driver again** as it does a PCI bus
+  host's, with the same budget of eight and no delay (`restarted`), and
+  takes it at its word on a restart as at boot. The DK1's GC400 is not,
+  until that is tried on the board.
+* The new driver **resets every engine it inherits**: `XelpBackend::new`
+  reads each engine's `RING_HWS_PGA` first, and one that is not 0 was
+  brought up by a driver since the last reset, so it is reset by its
+  domain alone (`intel_engine_reset`) before anything is written. That is
+  i915's `intel_gt_sanitize` by engine, never `GRDOM_FULL`, which keeps the
+  display (§4.3, `reset.rs`). A cold boot reads 0 and resets nothing, so
+  the first start is unchanged. The driver says `intel: rcs0 was a previous
+  driver's (status page 0x…); reset alone before bring-up: done`. The
+  first pin re-enables bus mastering, the HELLOs publish `renderD128` and
+  `card0` again, and the chardev core's accepted HELLO gives the dead
+  driver's quarantined pins back.
+* **Clients** of the old node get `ENODEV` on every call and Mesa reports
+  `VK_ERROR_DEVICE_LOST` at the next submit or wait. A program that opens
+  the node again gets the new driver. hyprix finds `card0` again as it does
+  after any card driver's restart (`test-compositor --boot restart`), and
+  now looks for the node before asking sessiond for it; sessiond says a
+  repeated refusal once and then its count.
+* **The gate** is `cargo xtask test-restart --boot intel`: `test-intel-uapi`'s
+  image (the QEMU stand-in for ADL-N, `intel-fake` as `intel`, Debian 13's
+  Mesa), an init that kills the driver twice under `vk-survive`
+  (`nvrm/test/vk-survive.c`, a submit and wait every 2 ms and a mapped
+  buffer checked between them), and a judge that wants DIED, RESTARTED with
+  `restart 1` and `restart 2`, the back end up again, `vk-survive` ending on
+  `VK_ERROR_DEVICE_LOST` with status 2 (a hang is ended after 60 s and
+  named), and a fresh `vk-offscreen` reading back on the new node.
+  `gate-rows` asks it, with `test-intel-uapi`, of any change to the driver,
+  `intel-xelp`, devmgr or the chardev core.
+
+That is Linux's floor for an unplugged GPU and Windows' for a TDR that
+removed the device, and Fuchsia's Magma's, which resets the GPU when its
+driver goes: every program learns the device was lost, and the ones written
+to recreate their device (DXVK and browsers are) do.
+
+### 11.3 The box run
+
+Under `ferrix.intelgpu` with the fallback (§11.2), Endfield running:
+
+```
+grep -l '^intel$' /proc/[0-9]*/comm     # /proc/<pid>/comm: the driver's pid
+kill -9 <that pid>
+```
+
+The kernel log wants, in order: `devmgr   the driver of 0x00000010 ended
+with status 137; the device is quiesced`; `devmgr   the driver of
+0x00000010 was started again and published (restart 1)`; `intel: rcs0 was
+a previous driver's (status page 0x…); reset alone before bring-up: done`
+(and `bcs0` likewise if it ran); `intel: back end up in … ms`; `intel:
+render node published (1 node)`; `display  card0 is gone` and then `intel:
+card0 published: copies frames into the lit …`; then hyprix's
+`Virtual-1: the card is back; drawing on it again` (the name is the
+screen's), and sessiond at most one `refused` line and its count. Endfield is expected to report its device
+lost and either recreate it (DXVK does for `DXGI_ERROR_DEVICE_REMOVED` if
+the game handles it) or exit. Before the kill and 30 s after it, `cat
+/proc/loadavg` and one `top -b -n1` (or `/proc/[0-9]*/stat`'s utime and
+stime twice, 5 s apart) say what, if anything, spins (§11.1). What only the
+box can show: that an engine reset stops a dead driver's contexts (`NOT
+reset` in the line above means it did not), that the plane comes back once
+bus mastering is on again, and how long the stall is.
+
+### 11.4 Where it stands
+
+2026-10-22, branch `gpu-restart`: §11.2 built and gated on QEMU
+(`test-restart --boot intel` passed); no kernel line changed. The box run
+(§11.3) is owed. The opaque crash mode is a plan (§12).
+
 ## Appendix A: the probe that printed the numbers
 
 Compiled on nazuna against Linux 7.0's UAPI headers, run once, and kept out
