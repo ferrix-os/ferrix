@@ -32,7 +32,7 @@ use ferrix_native_abi::signals::Signals;
 use ferrix_native_abi::types::{
     CHANNEL_MAX_HANDLES, DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceInfo,
     PROCESS_EXITED, PROCESS_KILLED, ProcessStatus, TREE_FIRMWARE_FB, TREE_GS201_DWC3,
-    TREE_STM32_GPU, TREE_STM32_HDMI, TREE_STM32_SDMMC, TREE_STM32_USBH,
+    TREE_STM32_GPU, TREE_STM32_HDMI, TREE_STM32_SDMMC, TREE_STM32_USBH, TREE_X86_POWER,
 };
 use ferrix_netring::control::{
     CONTROL_RIGHTS as NET_CONTROL_RIGHTS, DEVICE_RIGHTS as NET_DEVICE_RIGHTS, MAX_MESSAGE,
@@ -228,6 +228,13 @@ enum Kind {
     /// is taken at its word, and it is not started again when it dies until
     /// `nvrm` can tear down a GSP it did not boot (N2).
     Gpu,
+    /// `docs/POWERCTL.md`: the x86-64 power node, driven by `power`. Handed
+    /// its device and START as a port's driver is; it claims the power core
+    /// with `power_control_create` and publishes nothing, so it is taken at
+    /// its word. Never started again when it dies: the kernel has put
+    /// firmware's limit back, the safe state, and a driver that dies on
+    /// every start is not retried into the register.
+    Power,
 }
 
 /// A driver about to be started: its kind, carrying what only that kind
@@ -258,6 +265,8 @@ enum Plan {
     Gadget,
     /// A GPU, driven by the program named.
     Gpu(&'static str),
+    /// The x86-64 power node.
+    Power,
 }
 
 /// The table: which driver, by name in the initramfs, drives which device,
@@ -291,13 +300,18 @@ const DRIVERS: [(u16, &[u16], &[u8], Kind); 6] = [
 ///
 /// The firmware's framebuffer, which the kernel publishes as a node only
 /// under `ferrix.efifb`, is a card, driven by `efifb` (`docs/DISPLAY.md` §8).
-const TREE_DRIVERS: [(u16, &[u8], Kind); 6] = [
+///
+/// The x86-64 power node, which the kernel publishes only under
+/// `ferrix.powerctl` on a processor its table names, is driven by `power`
+/// (`docs/POWERCTL.md`).
+const TREE_DRIVERS: [(u16, &[u8], Kind); 7] = [
     (TREE_STM32_HDMI, b"ltdc", Kind::Display),
     (TREE_STM32_USBH, b"usbhid", Kind::Host),
     (TREE_STM32_GPU, b"gc400", Kind::Engine),
     (TREE_GS201_DWC3, b"usbdev", Kind::Gadget),
     (TREE_STM32_SDMMC, b"sdmmc", Kind::Block),
     (TREE_FIRMWARE_FB, b"efifb", Kind::Display),
+    (TREE_X86_POWER, b"power", Kind::Power),
 ];
 
 /// Where devmgr gave up, as the exit status.
@@ -632,7 +646,7 @@ fn settle(
 ) -> bool {
     matches!(
         kind,
-        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu
+        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu | Kind::Power
     ) || await_boot(channel, port, location, key, inbox)
 }
 
@@ -795,6 +809,7 @@ fn plan_for(kind: Kind, info: &DeviceInfo, disks: &mut u32) -> Option<Plan> {
         Kind::Engine => Plan::Engine(engine_program(info)),
         Kind::Gadget => Plan::Gadget,
         Kind::Gpu => Plan::Gpu(gpu_program(info)),
+        Kind::Power => Plan::Power,
     })
 }
 
@@ -1639,7 +1654,7 @@ fn launch_again(
     entry.quiesced = false;
     let awaited = if matches!(
         entry.kind,
-        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu
+        Kind::Port | Kind::Host | Kind::Engine | Kind::Gadget | Kind::Gpu | Kind::Power
     ) {
         Awaited {
             published: true,
@@ -1753,6 +1768,7 @@ fn start(
         Plan::Engine(program) => start_plain(job, device, image, info, port, key, program),
         Plan::Gadget => start_plain(job, device, image, info, port, key, "usbdev"),
         Plan::Gpu(program) => start_plain(job, device, image, info, port, key, program),
+        Plan::Power => start_plain(job, device, image, info, port, key, "power"),
     }
 }
 

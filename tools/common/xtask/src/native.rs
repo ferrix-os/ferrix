@@ -129,6 +129,11 @@ pub(crate) const PROGRAMS: &[Program] = &[
         directory: DRIVERS,
     },
     Program {
+        package: "ferrix-power-driver",
+        binary: "power",
+        directory: DRIVERS,
+    },
+    Program {
         package: "ferrix-gc400-driver",
         binary: "gc400",
         directory: DRIVERS,
