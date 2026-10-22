@@ -170,6 +170,26 @@ def check(measured: dict[str, int], policy: dict) -> list[str]:
     return problems
 
 
+# ferrix.msrlog is read-only (L.x86_64.187, the consultant's condition 5 of
+# ledger line 3075): no line of its files may write an MSR, by the kernel's
+# helper or by the instruction. Comments included, so a write cannot hide
+# behind a doc line either.
+READ_ONLY_MSR_FILES = ("src/kernel/src/arch/x86_64/msrlog.rs", "src/kernel/src/arch/x86_64/msrlog/")
+MSR_WRITE = re.compile(r"\bwrite_msr\b|\bwrmsr\b|\bwrmsrns\b")
+
+
+def read_only_msr_problems(root: pathlib.Path) -> list[str]:
+    problems = []
+    files = [root / READ_ONLY_MSR_FILES[0], *sorted((root / READ_ONLY_MSR_FILES[1]).glob("*.rs"))]
+    for path in files:
+        if not path.exists():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if MSR_WRITE.search(line):
+                problems.append(f"{path.relative_to(root)}:{number}: ferrix.msrlog writes an MSR; it must only read (L.x86_64.187)")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     _ = parser.add_argument("--json", action="store_true", help="machine-readable report")
@@ -182,7 +202,7 @@ def main() -> int:
     allowed = {entry["file"]: entry for entry in policy["files"]}
 
     measured = survey(root)
-    problems = check(measured, policy)
+    problems = check(measured, policy) + read_only_msr_problems(root)
 
     by_kind = {kind: 0 for kind in KINDS}
     for relative, count in measured.items():

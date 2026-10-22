@@ -41,6 +41,9 @@ const NMI: usize = 2;
 const DOUBLE_FAULT: usize = 8;
 /// `#MC`: the processor found its own hardware in error.
 const MACHINE_CHECK: usize = 18;
+/// `#GP`: a general protection fault, which `rdmsr` of a register the
+/// processor does not implement raises.
+const GENERAL_PROTECTION: u64 = 13;
 
 /// The register state at the point a trap was taken.
 ///
@@ -520,6 +523,16 @@ extern "C" fn ferrix_trap_entry(frame: &mut TrapFrame) {
     // entry. `DR6` is sticky, so it is cleared for the next one to read.
     if frame.vector == DEBUG as u64 {
         let _ = super::paranoid::take_debug_status();
+    }
+    // A checked MSR read the processor refused (`L.x86_64.188`): a `#GP`
+    // from ring 0 at exactly `cpu::ferrix_rdmsr_checked`'s `rdmsr` resumes
+    // at its fault label. Every other `#GP` goes on to dispatch, as before.
+    if frame.vector == GENERAL_PROTECTION
+        && !frame.came_from_user()
+        && let Some(resume) = cpu::checked_read_resume(frame.rip)
+    {
+        frame.rip = resume;
+        return;
     }
     crate::trap::dispatch(frame);
 }

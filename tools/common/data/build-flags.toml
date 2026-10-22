@@ -207,6 +207,14 @@ why = "x86-64: the local APICs' mode where firmware neither locked nor left x2AP
 values = ["performance", "balance_performance", "balance_power", "power", "*"]
 why = "x86-64 only, ignored on aarch64 and armv7a: the energy and performance preference every processor's IA32_HWP_REQUEST asks for (arch/x86_64/cpu.rs, L.x86_64.182): one of four names, performance 0x00, balance_performance 0x80, balance_power 0xc0 and power 0xff, or a decimal 0 to 255 of one to three digits; no option, and anything else, which the cpu line says, is performance (0). The processor's own clock choice within the firmware's power and thermal limits, which no register Ferrix writes changes; a certified profile permits the four names"
 
+[boot_options."ferrix.msrlog"]
+kind = "flag"
+why = "x86-64 only, ignored on aarch64 and armv7a: a read-only log of the RAPL power-limit (PL1/PL2/PL4, Psys), limit-reason, perf-status and thermal MSRs on the boot processor, `msr:` lines, for the N150's GT held under pl4 (arch/x86_64/msrlog.rs, L.x86_64.187); each read #GP-checked (L.x86_64.188), no register written; a diagnostic, never in a configuration a claim is made of"
+
+[boot_options."ferrix.msrlog.period"]
+values = ["*"]
+why = "seconds between ferrix.msrlog's reads, 0 to 3600, 0 for once; 5 without it or for a value not understood, which the log says (L.x86_64.187)"
+
 [boot_options."ferrix.panic"]
 values = ["halt", "reset"]
 why = "what a panic does after its report (panic/reset.rs, H.FAIL.5): halt, the reference; reset, a stop-gap for the N150 box set by no loader, outside the reference configuration (SAFETY-MANUAL AoU-32, certification-item.json `panic`)"

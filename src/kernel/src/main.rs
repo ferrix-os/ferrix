@@ -245,6 +245,10 @@ fn kmain(view: &BootView<'_>, memory: &mut EarlyMemory) -> ! {
     // takes and gives back are mappings the sweep below has to see settled.
     start_scheduler(cpus);
     console::screen::milestone(9);
+    // `ferrix.msrlog`, x86-64 only and off without the word: a task on this
+    // processor that reads the power-limit MSRs, once every processor is up
+    // and there is a scheduler to sleep in (`L.x86_64.187`).
+    arch::start_msr_log(view);
 
     // The console's transmit side, as a program's output goes out: from a
     // task, which the scheduler just made this, into the ring the port's

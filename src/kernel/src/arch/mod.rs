@@ -128,6 +128,14 @@ pub(crate) const fn write_combining_processors() -> Option<usize> {
     None
 }
 
+// `ferrix.msrlog`, x86-64's read-only MSR log (`L.x86_64.187`); none on Arm.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use x86_64::start_msr_log;
+
+/// No MSRs: the Arm kernels have no such log.
+#[cfg(not(target_arch = "x86_64"))]
+pub(crate) const fn start_msr_log(_view: &ferrix_bootinfo::BootView<'_>) {}
+
 // The boot options an architecture's bring-up reads before its traps are
 // installed, and stage 3's check of what it chose: x86-64's `ferrix.epp`
 // (`L.x86_64.182`); none on Arm.

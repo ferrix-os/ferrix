@@ -911,6 +911,89 @@ pub(crate) unsafe fn read_msr(msr: u32) -> u64 {
     (u64::from(high) << 32) | u64::from(low)
 }
 
+/// `rdmsr` of `ecx = msr` into `*out`, returning 1; or, where the processor
+/// refuses the register with `#GP`, 0 with `*out` unwritten
+/// (`L.x86_64.188`).
+///
+/// The one `rdmsr` sits at `ferrix_rdmsr_checked_insn`. A `#GP` taken from
+/// ring 0 at exactly that address is resumed by `trap::ferrix_trap_entry` at
+/// `ferrix_rdmsr_checked_fault` ([`checked_read_resume`]), which sets its own
+/// return value and reads neither EDX nor EAX: a one-entry exception table.
+/// A naked function rather than a `global_asm!` symbol, so the
+/// position-independent kernel calls it directly (as `switch.rs`); the labels
+/// are hidden, so their addresses are taken without the GOT. Nothing here
+/// writes a register of the processor's: the feature it serves is read-only.
+///
+/// # Safety
+///
+/// (SYSREG) `out` must be valid for an 8-byte write, and `msr` a register
+/// whose read changes no state.
+// SAFETY: (SYSREG) the body is the whole function: it keeps the SysV ABI
+// toward its caller -- `msr` in edi, `out` in rsi, the result in eax, only
+// the caller-saved rcx, rdx and rax touched -- and either path returns.
+#[unsafe(naked)]
+unsafe extern "C" fn ferrix_rdmsr_checked(msr: u32, out: *mut u64) -> u32 {
+    core::arch::naked_asm!(
+        ".globl ferrix_rdmsr_checked_insn, ferrix_rdmsr_checked_fault",
+        ".hidden ferrix_rdmsr_checked_insn, ferrix_rdmsr_checked_fault",
+        "mov ecx, edi",
+        "ferrix_rdmsr_checked_insn:",
+        "rdmsr",
+        "mov dword ptr [rsi], eax",
+        "mov dword ptr [rsi + 4], edx",
+        "mov eax, 1",
+        "ret",
+        "ferrix_rdmsr_checked_fault:",
+        "xor eax, eax",
+        "ret",
+    );
+}
+
+unsafe extern "C" {
+    /// The address of [`ferrix_rdmsr_checked`]'s `rdmsr`. Only its address is
+    /// taken; it is code, never read as data.
+    static ferrix_rdmsr_checked_insn: u8;
+    /// Where a `#GP` at that `rdmsr` resumes. Address only, as above.
+    static ferrix_rdmsr_checked_fault: u8;
+}
+
+/// `#GP`s that [`checked_read_resume`] resumed: one per checked read the
+/// processor refused, counted so the boot check can tell the fixup ran
+/// through the trap path rather than the read returning something.
+static CHECKED_READS_REFUSED: AtomicU64 = AtomicU64::new(0);
+
+/// How many checked reads the processor has refused with `#GP` since boot.
+pub(crate) fn checked_reads_refused() -> u64 {
+    CHECKED_READS_REFUSED.load(Ordering::Relaxed)
+}
+
+/// Where a ring-0 `#GP` at `rip` resumes, if `rip` is exactly
+/// [`ferrix_rdmsr_checked`]'s `rdmsr`; `None` for every other address, whose
+/// `#GP` stays as fatal as it was (`L.x86_64.188`). No range: one address.
+pub(super) fn checked_read_resume(rip: u64) -> Option<u64> {
+    let insn = (&raw const ferrix_rdmsr_checked_insn) as u64;
+    if rip != insn {
+        return None;
+    }
+    let _ = CHECKED_READS_REFUSED.fetch_add(1, Ordering::Relaxed);
+    Some((&raw const ferrix_rdmsr_checked_fault) as u64)
+}
+
+/// Read a model-specific register that may not exist: `None` where the
+/// processor refuses it with `#GP`, instead of the fatal fault
+/// [`read_msr`] takes (`L.x86_64.188`). Reads only; a register whose read has
+/// side effects must not be passed.
+pub(crate) fn read_msr_checked(msr: u32) -> Option<u64> {
+    let mut value = 0u64;
+    // SAFETY: (SYSREG) `value` is a local, valid for the 8-byte write. `rdmsr`
+    // of any index is either a read of a register this processor implements
+    // or a `#GP`, which `checked_read_resume` turns into a return of 0 at the
+    // fault label, `value` untouched. The callers pass only registers whose
+    // read changes no state.
+    let read = unsafe { ferrix_rdmsr_checked(msr, &raw mut value) };
+    (read == 1).then_some(value)
+}
+
 /// Control register 0: protection, paging, write protection, caching.
 pub(crate) fn read_cr0() -> u64 {
     let value: u64;

@@ -858,6 +858,92 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::Preference::epp",
                 "arch::x86_64::read_boot_options");
         }
+        requirement <'L.x86_64.187'> msrLogOnlyWhenAsked : ItemLowLevel {
+            attribute :>> statement = "The x86-64 kernel shall read the power-limit,
+                limit-reason, performance and thermal MSRs of ferrix.msrlog (0x606,
+                0x610, 0x614, 0x601, 0x65c, 0x64f, 0x6b0, 0x198, 0x1a2, 0x19c,
+                0x1b1) only when the bare word ferrix.msrlog is on the loader's
+                command line: then from one task pinned to the boot processor,
+                started after the scheduler, once and again every
+                ferrix.msrlog.period seconds (0 to 3600 of one to four ASCII
+                digits, 0 for once; 5 without the option or for any other value,
+                which a line says), each read through the checked read of
+                L.x86_64.188, printing each raw value or absent and the decoded
+                fields on lines beginning msr:. It shall write no MSR. Without
+                the word it shall read no MSR, start no task and print no line.";
+            attribute :>> criterion = "Stage 3 runs the period chooser over a table:
+                no option, 0, 1, 0005 and 3600 choose their seconds; the empty
+                value, 3601, 10000, -1, +1, 0x5, a leading space and 5s are
+                refused. The gate's check row finds no wrmsr in msrlog.rs or its
+                modules. A KVM boot with ferrix.msrlog and ferrix.msrlog.period=2
+                prints msr: rounds 2 s apart with present and absent registers;
+                the boots without the word print no msr: line.";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::msrlog::start",
+                "arch::x86_64::msrlog::choose_period",
+                "arch::x86_64::msrlog::intel",
+                "arch::x86_64::msrlog::run",
+                "arch::x86_64::msrlog::read",
+                "arch::x86_64::msrlog::log_once",
+                "arch::x86_64::msrlog::say_limit",
+                "arch::x86_64::msrlog::say_reasons",
+                "arch::x86_64::msrlog::names",
+                "arch::x86_64::msrlog::Names::push",
+                "arch::x86_64::start_msr_log");
+        }
+        requirement <'L.x86_64.188'> checkedMsrReadResumesAtItsFixup : ItemLowLevel {
+            attribute :>> statement = "read_msr_checked shall return the value
+                rdmsr reads for a register the processor implements and None for
+                one it refuses with #GP: the trap entry shall resume a #GP taken
+                from ring 0 whose saved instruction pointer is exactly the
+                checked read's one rdmsr instruction at that read's fault label,
+                which returns failure without reading EDX:EAX. The match shall be
+                that one address, vector 13 and ring 0, with no range.";
+            attribute :>> criterion = "Stage 3 on every x86-64 boot: the checked
+                read of IA32_APIC_BASE equals rdmsr's with no #GP counted; the
+                checked read of 0x3fffffff is None with exactly one #GP counted,
+                or, where the machine answers unknown registers without #GP (TCG,
+                KVM with ignore_msrs), a value with none counted; the cpu line
+                says which. The x86_64:kvm gate row requires the #GP line.
+                Negative control: the trap entry's rewrite of the instruction
+                pointer removed, the x86_64:kvm boot stops in stage 3 with a
+                general protection fault.";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::cpu::ferrix_rdmsr_checked",
+                "arch::x86_64::cpu::read_msr_checked",
+                "arch::x86_64::cpu::checked_read_resume",
+                "arch::x86_64::cpu::checked_reads_refused",
+                "arch::x86_64::trap::ferrix_trap_entry");
+        }
+        requirement <'L.x86_64.189'> msrLogDecodesIntelLayouts : ItemLowLevel {
+            attribute :>> statement = "ferrix.msrlog's decoder shall take, from raw
+                values: the RAPL power, energy and time units (0x606 bits 3:0,
+                12:8, 19:16); PL1 and PL2 of 0x610 (15-bit power, enable, clamp,
+                7-bit window, from bits 0 and 32; lock bit 63) and of 0x65c (17-bit
+                power fields); PL4 of 0x601 (bits 12:0, lock bit 31); TDP, minimum
+                and maximum of 0x614; the limit reasons now and logged (bits 15:0,
+                31:16) with turbostat's names; the ratio and voltage of 0x198; TjMax
+                of 0x1a2; and the status, log, readout and valid bit of 0x19c and
+                0x1b1; and convert power units to milliwatts and windows to
+                milliseconds, rounding down.";
+            attribute :>> criterion = "Stage 3 decodes fixed values of each
+                register and compares every field; any difference panics the
+                boot.";
+            attribute :>> parent = "H.BOOT.5";
+            attribute :>> unit = ("arch::x86_64::msrlog::decode::Units::from_raw",
+                "arch::x86_64::msrlog::decode::Units::milliwatts",
+                "arch::x86_64::msrlog::decode::Units::window_millis",
+                "arch::x86_64::msrlog::decode::bit",
+                "arch::x86_64::msrlog::decode::limit",
+                "arch::x86_64::msrlog::decode::package_limits",
+                "arch::x86_64::msrlog::decode::platform_limits",
+                "arch::x86_64::msrlog::decode::pl4",
+                "arch::x86_64::msrlog::decode::power_info",
+                "arch::x86_64::msrlog::decode::reasons",
+                "arch::x86_64::msrlog::decode::perf_status",
+                "arch::x86_64::msrlog::decode::tjmax",
+                "arch::x86_64::msrlog::decode::thermal");
+        }
         requirement <'L.x86_64.32'> speculationPlanFollowsCpuid : ItemLowLevel {
             attribute :>> statement = "Plan::for_processor shall choose enhanced
                 IBRS where IA32_ARCH_CAPABILITIES offers it, else AutoIBRS, else

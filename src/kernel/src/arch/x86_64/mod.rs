@@ -14,6 +14,7 @@ pub(crate) use cpu::{gs_xadd, read_gs_at};
 mod gdt;
 pub(crate) mod mmio;
 mod msi;
+mod msrlog;
 mod paranoid;
 mod signal;
 mod smp;
@@ -177,7 +178,16 @@ pub(crate) use trap::{
 pub(crate) fn check_machine() -> Result<(), &'static str> {
     clock::check::run()?;
     // And the hardware P-state request's composition (`L.x86_64.177`).
-    cpu::check::run()
+    cpu::check::run()?;
+    // And `ferrix.msrlog`'s checked MSR read, decoder and period
+    // (`L.x86_64.187`-`189`).
+    msrlog::check::run()
+}
+
+/// Start `ferrix.msrlog`'s read-only MSR log if the word is given
+/// (`L.x86_64.187`); nothing at all otherwise.
+pub(crate) fn start_msr_log(view: &BootView<'_>) {
+    msrlog::start(view);
 }
 
 /// The boot processor's machine check, set whatever firmware left in `CR4`
