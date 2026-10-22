@@ -282,6 +282,37 @@ pub const TREE_STM32_SDMMC: u16 = 5;
 /// copying (displayctl's `copies`), and maps the window as device memory, the
 /// type the kernel holds it at.
 pub const TREE_FIRMWARE_FB: u16 = 6;
+/// [`DeviceInfo::device_id`] of the x86-64 power node (`docs/POWERCTL.md`
+/// §4.1): published only under `ferrix.powerctl` on a processor the
+/// kernel's model table names, or under the test-only
+/// `ferrix.powerctl.fake`. No window, no vector, nothing that reaches
+/// memory: its one use is `power_control_create`.
+pub const TREE_X86_POWER: u16 = 7;
+/// Words `power_read` writes.
+pub const POWER_READ_WORDS: usize = 16;
+/// Bit `n` set: word `n` was read; a register that faulted is absent, not 0.
+pub const POWER_READ_PRESENT: usize = 0;
+/// `CPUID.1:EAX`.
+pub const POWER_READ_SIGNATURE: usize = 1;
+/// Firmware's `MSR_VR_CURRENT_CONFIG`, as the kernel read it at boot.
+pub const POWER_READ_FIRMWARE: usize = 2;
+/// The highest VR current limit the kernel admits, eighths of an ampere.
+pub const POWER_READ_CEILING: usize = 3;
+/// Bit 0: the kernel latched the power core off until reboot; bit 1: it
+/// left the register to firmware, which changed it.
+pub const POWER_READ_FLAGS: usize = 4;
+/// `MSR_VR_CURRENT_CONFIG` as it reads now.
+pub const POWER_READ_VR: usize = 6;
+/// From here, read-only, in order: `MSR_TEMPERATURE_TARGET`,
+/// `IA32_THERM_STATUS` (the boot processor's), `IA32_PACKAGE_THERM_STATUS`,
+/// `IA32_PERF_STATUS`, `CORE_PERF_LIMIT_REASONS`,
+/// `GRAPHICS_PERF_LIMIT_REASONS`, `PKG_ENERGY_STATUS`, `RAPL_POWER_UNIT`,
+/// `MSR_PKG_POWER_LIMIT`.
+pub const POWER_READ_FIRST: usize = 7;
+/// The kernel's lease, in milliseconds: a claim with no `power_set`,
+/// `power_read` or `power_restore` for this long is ended and its raise
+/// taken back.
+pub const POWER_LEASE_MS: u64 = 5000;
 /// The firmware framebuffer's pixels are blue, green, red, unused in memory
 /// order: DRM's `XRGB8888`.
 pub const FRAMEBUFFER_BGRX: u16 = 0;

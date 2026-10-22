@@ -290,6 +290,10 @@ pub(crate) struct Args {
     /// kernel option no flag here names: `ferrix.fbcon`, which the Pixel 7's
     /// loader passes, is one a QEMU boot has to be able to ask for too.
     pub(crate) kernel_options: Vec<String>,
+    /// Not a flag: set by `test-power` for its row whose processor answers
+    /// as Intel family 6 model 0xBE under TCG; the QEMU `-cpu` model, in
+    /// place of [`crate::qemu::x86_cpu`]'s.
+    pub(crate) x86_cpu: Option<String>,
     /// Not a flag: set by `test-compositor` for every boot of an architecture
     /// after its first, whose images then carry `ferrix.checks=skip`. The
     /// first boot runs the self-checks on the compositor's machine, and

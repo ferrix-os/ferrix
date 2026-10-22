@@ -2620,7 +2620,10 @@ fn qemu_command(
                 // Under a hypervisor, the speculation controls as well, and
                 // under KVM an invariant TSC; see `x86_cpu`.
                 "-cpu",
-                &x86_cpu_for(&binary, &accelerator),
+                &args
+                    .x86_cpu
+                    .clone()
+                    .unwrap_or_else(|| x86_cpu_for(&binary, &accelerator)),
                 // A controlled way for the guest to end the test: writing 0x10
                 // to port 0xF4 exits QEMU with status 33.
                 "-device",

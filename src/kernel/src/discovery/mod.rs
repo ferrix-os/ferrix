@@ -47,6 +47,7 @@ pub(crate) mod fdt;
 pub(crate) mod finder;
 pub(crate) mod firmware;
 pub(crate) mod pci;
+pub(crate) mod powerctl;
 pub(crate) mod smbios;
 pub(crate) mod smbios_check;
 pub(crate) mod tree;

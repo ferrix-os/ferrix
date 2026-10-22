@@ -190,22 +190,26 @@ def read_only_msr_problems(root: pathlib.Path) -> list[str]:
     return problems
 
 
-# ferrix.vrcurrent writes one register (L.x86_64.192, the consultant's
-# condition 4 of ledger line 3086): the kernel's one checked MSR write,
-# `cpu::write_msr_checked`, is called only from vrcurrent.rs, with the
-# constant VR_CURRENT_CONFIG defined there once as 0x601, and from its boot
-# check, with only its absent-index constant ABSENT. Neither file writes an MSR
-# any other way, and cpu.rs's checked write holds exactly one `wrmsr`, at its
-# fixup label; cpu.rs's other `wrmsr`, the unchecked write_msr, is the only
-# other in that file.
+# The power core writes one register (L.x86_64.192, the consultant's
+# condition 11 of ledger line 3130; docs/POWERCTL.md): the kernel's one
+# checked MSR write, `cpu::write_msr_checked`, is called only from
+# powerctl.rs, with the constant VR_CURRENT_CONFIG defined there once as
+# 0x601, and from the write's boot check in cpu/check.rs, with only its
+# absent-index constant ABSENT. In cpu.rs nothing but its definition names it
+# with an argument list (ledger 3090, C2). powerctl.rs writes an MSR no other
+# way, and the files under powerctl/ -- the decisions, the fake register file
+# and the checks -- reach no MSR at all, read or write. cpu.rs's checked write
+# holds exactly one `wrmsr`, at its fixup label; cpu.rs's other `wrmsr`, the
+# unchecked write_msr, is the only other in that file.
 KERNEL = "src/kernel/src"
 CPU_FILE = "src/kernel/src/arch/x86_64/cpu.rs"
-VR_FILE = "src/kernel/src/arch/x86_64/vrcurrent.rs"
-VR_CHECK_FILE = "src/kernel/src/arch/x86_64/vrcurrent/check.rs"
-VR_DIR = "src/kernel/src/arch/x86_64/vrcurrent/"
+POWER_FILE = "src/kernel/src/arch/x86_64/powerctl.rs"
+POWER_DIR = "src/kernel/src/arch/x86_64/powerctl/"
+CHECK_FILE = "src/kernel/src/arch/x86_64/cpu/check.rs"
 CHECKED_WRITE_CALL = re.compile(r"\bwrite_msr_checked\b(\s*\(\s*([A-Za-z0-9_:]*))?")
-CHECKED_WRITE_ARGUMENT = {VR_FILE: "VR_CURRENT_CONFIG", VR_CHECK_FILE: "ABSENT"}
+CHECKED_WRITE_ARGUMENT = {POWER_FILE: "VR_CURRENT_CONFIG", CHECK_FILE: "ABSENT"}
 OTHER_MSR_WRITE = re.compile(r"\bwrite_msr\b|\bwrmsr\b|\bwrmsrns\b")
+ANY_MSR_ACCESS = re.compile(r"\b(read|write)_msr\w*|\brdmsr\b|\bwrmsr\w*\b")
 ASM_WRMSR = re.compile(r'"wrmsr"')
 
 
@@ -213,28 +217,30 @@ def checked_write_problems(root: pathlib.Path) -> list[str]:
     problems = []
     for path in sorted((root / KERNEL).rglob("*.rs")):
         relative = path.relative_to(root).as_posix()
-        if relative == CPU_FILE:
-            continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for match in CHECKED_WRITE_CALL.finditer(line):
+                if relative == CPU_FILE:
+                    if match.group(1) and not re.search(r"\bfn write_msr_checked\(", line):
+                        problems.append(f"{relative}:{number}: write_msr_checked called inside cpu.rs (L.x86_64.192)")
+                    continue
                 wanted = CHECKED_WRITE_ARGUMENT.get(relative)
                 if wanted is None:
-                    problems.append(f"{relative}:{number}: write_msr_checked outside ferrix.vrcurrent (L.x86_64.192)")
+                    problems.append(f"{relative}:{number}: write_msr_checked outside the power core (L.x86_64.192)")
                 elif match.group(2) != wanted:
                     problems.append(f"{relative}:{number}: write_msr_checked of {match.group(2) or 'no register'}, not {wanted} (L.x86_64.192)")
-    vr_files = [root / VR_FILE, *sorted((root / VR_DIR).glob("*.rs"))]
-    for path in vr_files:
-        if not path.exists():
-            continue
-        relative = path.relative_to(root).as_posix()
-        text = path.read_text(encoding="utf-8")
+    power = root / POWER_FILE
+    if power.exists():
+        text = power.read_text(encoding="utf-8")
         for number, line in enumerate(text.splitlines(), 1):
             if OTHER_MSR_WRITE.search(line):
-                problems.append(f"{relative}:{number}: ferrix.vrcurrent writes an MSR other than through write_msr_checked (L.x86_64.192)")
-        if relative == VR_FILE:
-            defined = re.findall(r"const VR_CURRENT_CONFIG: u32 = (\w+);", text)
-            if defined != ["0x601"]:
-                problems.append(f"{relative}: VR_CURRENT_CONFIG must be defined once, as 0x601 (L.x86_64.192)")
+                problems.append(f"{POWER_FILE}:{number}: the power core writes an MSR other than through write_msr_checked (L.x86_64.192)")
+        if re.findall(r"const VR_CURRENT_CONFIG: u32 = (\w+);", text) != ["0x601"]:
+            problems.append(f"{POWER_FILE}: VR_CURRENT_CONFIG must be defined once, as 0x601 (L.x86_64.192)")
+    for path in sorted((root / POWER_DIR).glob("*.rs")):
+        relative = path.relative_to(root).as_posix()
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if ANY_MSR_ACCESS.search(line):
+                problems.append(f"{relative}:{number}: the power core's decisions, fake or checks reach an MSR (L.x86_64.207)")
     cpu = (root / CPU_FILE).read_text(encoding="utf-8")
     body = re.search(r"fn ferrix_wrmsr_checked\(.*?\n}\n", cpu, re.S)
     if body is None or len(ASM_WRMSR.findall(body.group(0))) != 1 or not re.search(r'"ferrix_wrmsr_checked_insn:",\s*"wrmsr",', body.group(0)):

@@ -846,6 +846,27 @@ package FerrixItemRequirements {
                 again (`xtask test-restart`).";
             attribute :>> parent = "P.2";
         }
+        requirement <'H.DEV.5'> powerLimitsOnlyThroughTypedCalls : ItemHighLevel {
+            attribute :>> statement = "A program shall change the processor's VR
+                current limit only through the kernel's typed calls on the power
+                claim, which only the driver of the power node can make, and only
+                within the bounds the kernel holds for the processor's model.";
+            attribute :>> criterion = "cargo xtask test-power: no node without
+                the word or on a processor the table does not name; on the fake,
+                the driver's writes are the kernel's typed ones, a second claim
+                and a copy of the claim are refused.";
+            attribute :>> parent = ("O.CAPABILITY", "ASR-3");
+        }
+        requirement <'H.DEV.6'> firmwareLimitsComeBack : ItemHighLevel {
+            attribute :>> statement = "The kernel shall put firmware's VR current
+                limit back when the claim's holder goes, its lease lapses, the
+                kernel's thermal backstop trips, a write does not read back, and
+                at a power-off, a reset and a panic.";
+            attribute :>> criterion = "cargo xtask test-power: the fake's raise
+                is restored after the driver stops renewing and after it exits;
+                stage 3 drives every other cause on the fake.";
+            attribute :>> parent = ("O.FAILSAFE", "ASR-6");
+        }
     }
 
     package Traps {

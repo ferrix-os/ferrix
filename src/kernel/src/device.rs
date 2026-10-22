@@ -96,7 +96,7 @@ use ferrix_fdt::{GicInterrupt, Trigger as TreeTrigger};
 use ferrix_native_abi::types::{
     APERTURE_BAR_64, APERTURE_NOT_BAR, APERTURE_PREFETCHABLE, APERTURE_WHOLE_PAGES, ApertureInfo,
     DEVICE_NOT_PCI, DEVICE_TREE_BLOCKS, DEVICE_VIRTIO_PCI, DeviceBlock, DeviceInfo, PCI_CLASS_XHCI,
-    TREE_FIRMWARE_FB, TREE_GS201_DWC3, TREE_STM32_USBH, USB_INPUT_FUNCTIONS,
+    TREE_FIRMWARE_FB, TREE_GS201_DWC3, TREE_STM32_USBH, TREE_X86_POWER, USB_INPUT_FUNCTIONS,
 };
 use ferrix_pci::Address;
 use ferrix_pci::ConfigSpace as _;
@@ -1375,6 +1375,18 @@ impl DeviceNode {
         Ok(node)
     }
 
+    /// The x86-64 power node (`docs/POWERCTL.md` §4.1, `L.device.51`): no
+    /// aperture, no vector, no configuration space and nothing that reaches
+    /// memory ([`DeviceNode::reaches_memory`] names it), so a pin, a mapping
+    /// and an interrupt on it are refused (`L.device.53`); its one use is
+    /// `power_control_create`. At `Location::Tree(0)`, which no other x86-64
+    /// node has: the firmware framebuffer's is at its framebuffer.
+    pub(crate) fn power() -> Self {
+        let mut node = DeviceNode::empty(Location::Tree(0));
+        node.binding = TREE_X86_POWER;
+        node
+    }
+
     /// Lend the firmware's framebuffer to this node, the Intel integrated GPU
     /// whose memory holds it, rather than to a node of its own (K4 of
     /// `docs/INTEL-GPU.md` §5; the consultant's K4 (1), ledger 2352): the same
@@ -1518,7 +1530,8 @@ impl DeviceNode {
     /// pages for it means anything: every device but the firmware
     /// framebuffer's node, which is memory itself, and whose driver copies.
     pub(crate) const fn reaches_memory(&self) -> bool {
-        !(matches!(self.location, Location::Tree(_)) && self.binding == TREE_FIRMWARE_FB)
+        !(matches!(self.location, Location::Tree(_))
+            && (self.binding == TREE_FIRMWARE_FB || self.binding == TREE_X86_POWER))
     }
 
     /// Whether the node is the Intel integrated GPU: the PCI function at

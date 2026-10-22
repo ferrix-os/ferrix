@@ -378,6 +378,19 @@ impl<S: Syscall> Device<S> {
         self.ring(nr::LOG_CONTROL_CREATE)
     }
 
+    /// `power_control_create`: the x86-64 power core's claim, a channel end
+    /// with `WAIT` alone, which sees `PEER_CLOSED` when the kernel ends the
+    /// claim (`docs/POWERCTL.md`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::AccessDenied`] for a node that is not the power node,
+    /// [`Error::AlreadyBound`] while another claim stands,
+    /// [`Error::BadState`] once the kernel latched the core off.
+    pub fn power_control(&self) -> Result<Channel<S>, Error> {
+        self.ring(nr::POWER_CONTROL_CREATE)
+    }
+
     /// The body every control channel shares: one call, one handle back.
     fn ring(&self, number: usize) -> Result<Channel<S>, Error> {
         let value = Call::new(number)

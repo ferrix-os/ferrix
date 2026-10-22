@@ -215,9 +215,14 @@ why = "x86-64 only, ignored on aarch64 and armv7a: a read-only log of the RAPL p
 values = ["*"]
 why = "seconds between ferrix.msrlog's reads, 0 to 3600, 0 for once; 5 without it or for a value not understood, which the log says (L.x86_64.187)"
 
-[boot_options."ferrix.vrcurrent"]
-values = ["*"]
-why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150), ignored on aarch64 and armv7a: raises a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, in steps A1,...,An@SECONDS of 25 to 32 A, at most 7 A above firmware's, under a thermal guard that writes firmware's value back at 90 C, at any thermal/PROCHOT/critical bit, at a failed read, and on power-off, reset and panic (arch/x86_64/vrcurrent.rs, L.x86_64.190-193). Authorised by the customer for one N150 run (2026-10-22); a diagnostic, never in a configuration a claim is made of"
+[boot_options."ferrix.powerctl"]
+kind = "flag"
+why = "x86-64 Alder Lake-N only (Intel family 6 model 0xBE, the N150, one package), ignored on aarch64 and armv7a: publishes the power node, whose driver may set a hardware current limit, MSR_VR_CURRENT_CONFIG bits 12:0, through typed calls the kernel bounds by its model table (firmware's own limit up to 32 A, at most 7 A above firmware's), with firmware's value restored when the holder goes, its lease lapses, its backstop trips at 90 C or a thermal/PROCHOT/critical bit, a write does not read back, and on power-off, reset and panic (arch/x86_64/powerctl.rs, docs/POWERCTL.md, L.x86_64.194-209, L.device.51-53); never in a configuration a claim is made of"
+
+[boot_options."ferrix.powerctl.fake"]
+kind = "flag"
+test_only = true
+why = "the power node over a fake register file on any x86-64 processor, reaching no MSR, every kernel line marked (fake): cargo xtask test-power's lease and holder-death rows (L.x86_64.207); test-only, never in a certified profile"
 
 [boot_options."ferrix.panic"]
 values = ["halt", "reset"]

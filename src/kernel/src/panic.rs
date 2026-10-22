@@ -203,8 +203,8 @@ pub(crate) fn begin_report() -> bool {
 /// fault, on exactly the machine that has nobody at it.
 pub(crate) fn abridged() -> ! {
     println!("  stopped   during another report, so this one is abridged");
-    // `ferrix.vrcurrent`'s raised limit back to firmware's (`L.x86_64.191`).
-    arch::restore_vr_current("panic");
+    // The power core's raised limit back to firmware's (`L.x86_64.206`).
+    arch::restore_power("panic");
     console::drain();
     if reset::resetting_here() {
         reset::wait_then_reset()
@@ -241,9 +241,9 @@ pub(crate) fn conclude(entry: Option<&Explanation>) -> ! {
     if let Some(entry) = entry {
         report_explanation(entry);
     }
-    // `ferrix.vrcurrent`'s raised limit back to firmware's, before the last
-    // line (`L.x86_64.191`).
-    arch::restore_vr_current("panic");
+    // The power core's raised limit back to firmware's, before the last
+    // line (`L.x86_64.206`).
+    arch::restore_power("panic");
     // Every line written is not every line sent: let the port finish, so the
     // report is whole on the wire before anything else can go wrong.
     console::drain();

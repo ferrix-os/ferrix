@@ -944,97 +944,26 @@ package FerrixX8664Requirements {
                 "arch::x86_64::msrlog::decode::tjmax",
                 "arch::x86_64::msrlog::decode::thermal");
         }
-        requirement <'L.x86_64.190'> vrCurrentWordAndClamp : ItemLowLevel {
-            attribute :>> statement = "The x86-64 kernel shall read, write and
-                print nothing for ferrix.vrcurrent unless the option
-                ferrix.vrcurrent=A1,...,An@S is on the loader's command line (a
-                bare ferrix.vrcurrent prints one line and writes nothing). The
-                value shall be one to eight steps of one or two ASCII digits,
-                comma-separated, each from 25 to 32 A, then @ and one to four
-                ASCII digits of seconds from 1 to 3600; any other value, and any
-                step outside 25 to 32 A, shall be refused with a line and nothing
-                written. From a task pinned to the boot processor it shall refuse,
-                with a line and nothing written, unless CPUID names an Intel family
-                6 model 0xBE processor, a checked read of 0x601 succeeds, its lock
-                bit 31 is clear, its bits 12:0 are not 0, and no step is more than
-                7 A above them.";
-            attribute :>> criterion = "Stage 3 parses fixed words: 27,29,32@60,
-                25@1 and eight 32s @3600 give their plans; 24, 33 and 0 A are
-                refused as out of range; the empty word, no @, no seconds, 0 and
-                3601 s, five-digit seconds, an empty step, three-digit, decimal,
-                signed and spaced steps and nine steps are refused as malformed.
-                The processor gate passes only Intel 6/0xBE; locked, 0 and
-                7-A-exceeded registers are refused; the plan survives its packing
-                into the task's argument. The x86_64:kvm rows with
-                ferrix.vrcurrent=27,29,32@2, =27,40@2 and =27,29 each print one
-                refusal line and no set line; the rows without the word print no
-                vrcurrent line. Negative controls: the clamp and the processor
-                gate removed each panic stage 3.";
-            attribute :>> parent = "H.BOOT.5";
-            attribute :>> unit = ("arch::x86_64::vrcurrent::start",
-                "arch::x86_64::vrcurrent::processor",
-                "arch::x86_64::vrcurrent::ready",
-                "arch::x86_64::vrcurrent::Why::fmt",
-                "arch::x86_64::vrcurrent::logic::decimal",
-                "arch::x86_64::vrcurrent::logic::parse",
-                "arch::x86_64::vrcurrent::logic::authorised",
-                "arch::x86_64::vrcurrent::logic::admit",
-                "arch::x86_64::vrcurrent::logic::pack",
-                "arch::x86_64::vrcurrent::logic::unpack",
-                "arch::x86_64::start_vr_current");
-        }
-        requirement <'L.x86_64.191'> vrCurrentThermalGuardReverts : ItemLowLevel {
-            attribute :>> statement = "While ferrix.vrcurrent has raised the VR
-                current limit, the kernel shall read IA32_THERM_STATUS (0x19c) on
-                the boot processor and IA32_PACKAGE_THERM_STATUS (0x1b1) once
-                before the first write and then every second, and shall write
-                0x601's firmware value back, print a line beginning msr:
-                vrcurrent reverted to and the reason, and write no further step,
-                when either read fails, 0x19c's valid bit 31 is clear, any of bits
-                0 to 5 (thermal, PROCHOT and critical status and their logs) is
-                set in either, or TjMax less either readout (bits 22:16) is 90 C or
-                more; TjMax shall be read from 0x1a2 before the first write and
-                refused outside 80 to 110 C. It shall write the firmware value back
-                likewise on a power-off, a reset and at both ends of a panic, from
-                any processor, without a lock; of all these only the first shall
-                write. It shall print the temperatures every 5 s.";
-            attribute :>> criterion = "Stage 3 runs the verdict over fixed
-                readings: 35 and 37 C pass, 89 C passes, 90 C on the core or the
-                package trips, each of bits 0 to 5 on either register trips and
-                bits 6 to 15 do not, an invalid core readout trips; TjMax 0, 79 and
-                111 are refused and 80, 105 and 110 believed. Negative control: the
-                temperature limit removed panics stage 3. The revert on hardware
-                is the N150 run's log (BACKLOG row until that run).";
-            attribute :>> parent = "H.BOOT.5";
-            attribute :>> unit = ("arch::x86_64::vrcurrent::run",
-                "arch::x86_64::vrcurrent::guard",
-                "arch::x86_64::vrcurrent::revert",
-                "arch::x86_64::vrcurrent::restore",
-                "arch::x86_64::vrcurrent::Reason::fmt",
-                "arch::x86_64::vrcurrent::logic::verdict",
-                "arch::x86_64::vrcurrent::logic::celsius",
-                "arch::x86_64::vrcurrent::logic::tjmax_believed",
-                "arch::x86_64::restore_vr_current");
-        }
         requirement <'L.x86_64.192'> checkedMsrWriteResumesAtItsFixup : ItemLowLevel {
-            attribute :>> statement = "write_msr_checked shall return true after
-                a wrmsr the processor accepts and false for one it refuses with
-                #GP: the trap entry shall resume a #GP taken from ring 0 whose
-                saved instruction pointer is exactly the checked write's one wrmsr
-                instruction at that write's fault label, which returns failure.
-                The match shall be that one address, vector 13 and ring 0, with no
-                range, beside the checked read's. Outside cpu.rs only
-                ferrix.vrcurrent shall call it, with 0x601, and its boot check,
-                with an absent index.";
-            attribute :>> criterion = "Stage 3, under a hypervisor only: a checked
-                write of 0x3fffffff is refused with exactly one #GP counted under
-                KVM, which panics otherwise; under another hypervisor (TCG) the
-                line says which path ran; on bare metal it is not run. The gate's
-                check row holds the call sites, the register and the single wrmsr
-                (check-device-access.py), with controls planting a checked write in
-                msrlog.rs and one of 0x610 in vrcurrent.rs. Negative control: the
-                write's address removed from the trap entry, the x86_64:kvm boot
-                stops in stage 3 with a general protection fault.";
+            attribute :>> statement = "write_msr_checked shall return true after a wrmsr the processor
+                accepts and false for one it refuses with #GP: the trap entry
+                shall resume a #GP taken from ring 0 whose saved instruction
+                pointer is exactly the checked write's one wrmsr instruction at
+                that write's fault label, which returns failure. The match shall
+                be that one address, vector 13 and ring 0, with no range, beside
+                the checked read's. Outside cpu.rs only the power core,
+                powerctl.rs, shall call it, with 0x601, and its boot check, with
+                an absent index; inside cpu.rs nothing but its definition.";
+            attribute :>> criterion = "Stage 3, under a hypervisor only: a checked write of 0x3fffffff is
+                refused with exactly one #GP counted under KVM, which panics
+                otherwise; under another hypervisor (TCG) the line says which path
+                ran; on bare metal it is not run. The gate's check row holds the
+                call sites, the register and the single wrmsr (check-device-
+                access.py), with controls planting a checked write in msrlog.rs,
+                one of 0x1a0 in powerctl.rs and one in powerctl/fake_check.rs.
+                Negative control: the write's address removed from the trap entry,
+                the x86_64:kvm boot stops in stage 3 with a general protection
+                fault.";
             attribute :>> parent = "H.BOOT.5";
             attribute :>> unit = ("arch::x86_64::cpu::ferrix_wrmsr_checked",
                 "arch::x86_64::cpu::write_msr_checked",
@@ -1042,30 +971,231 @@ package FerrixX8664Requirements {
                 "arch::x86_64::cpu::checked_writes_refused",
                 "arch::x86_64::trap::ferrix_trap_entry");
         }
-        requirement <'L.x86_64.193'> vrCurrentWritesBitsTwelveToZero : ItemLowLevel {
-            attribute :>> statement = "Each ferrix.vrcurrent step shall write
-                0x601 as its firmware value with bits 12:0 replaced by the step's
-                amperes times 8 and every other bit as read, print msr: vrcurrent
-                set N A (was M A), and read it back; a read-back whose bits 12:0
-                differ, or a write refused with #GP, shall revert as L.x86_64.191
-                and end the run. The first step shall be written after the checks
-                of L.x86_64.190 and the guard's first good verdict, and step k
-                (counting from 0) in force from k times S seconds after it, the
-                last kept.";
-            attribute :>> criterion = "Stage 3 composes over fixed firmware
-                values (every other bit set, the N150's 200 eighths, 0) and
-                compares the whole word; the step in force at 0, 59, 60, 119, 120
-                and 100000 s of a 60 s plan is 0, 0, 1, 1, 2, 2. Negative control:
-                compose not masking panics stage 3. The write on hardware is the
-                N150 run's log.";
-            attribute :>> parent = "H.BOOT.5";
-            attribute :>> unit = ("arch::x86_64::vrcurrent::raise",
-                "arch::x86_64::vrcurrent::Amps::fmt",
-                "arch::x86_64::vrcurrent::logic::compose",
-                "arch::x86_64::vrcurrent::logic::eighths",
-                "arch::x86_64::vrcurrent::logic::locked",
-                "arch::x86_64::vrcurrent::logic::step_at",
-                "arch::x86_64::vrcurrent::logic::Plan::step");
+        requirement <'L.x86_64.194'> powerModelGateAndOnePackage : ItemLowLevel {
+            attribute :>> statement = "logic::row shall name a row of the power core's model table only
+                for a GenuineIntel processor whose CPUID.1:EAX family and model,
+                extended model included, are a row's: family 6 model 0xBE alone;
+                logic::packages shall count the processors' packages by their
+                x2APIC ids shifted by the package shift, and the probe shall
+                refuse unless it is exactly one.";
+            attribute :>> criterion = "Stage 3: Intel 6/0xBE passes; AMD 6/0xBE, Intel 6/0xBF, 6/0xAE,
+                15/0xBE and the gate host's 0x60fb1 do not; four ids under one
+                shift are one package, two packages are two, none is none.
+                Negative control: the gate's vendor test removed panics stage 3.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = ("arch::x86_64::powerctl::logic::row",
+                "arch::x86_64::powerctl::logic::packages",
+                "arch::x86_64::powerctl::logic::refusal");
+        }
+        requirement <'L.x86_64.195'> powerSetWithinTheRow : ItemLowLevel {
+            attribute :>> statement = "power_set shall refuse with INVALID_ARGS and write nothing an
+                eighths value below firmware's own 0x601 bits 12:0 or above the
+                lower of the row's ceiling and firmware's plus the row's raise;
+                for the N150's row the ceiling is 32 A and the raise 7 A.";
+            attribute :>> criterion = "Stage 3: over firmware's 25 A, 25 and 32 A are admitted, 24.875
+                and 32.125 A refused; the highest over 31.25 A is 32 A, over 12.5
+                A 19.5 A. Negative control: the ceiling removed panics stage 3.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = ("arch::x86_64::powerctl::logic::admitted",
+                "arch::x86_64::powerctl::logic::highest",
+                "arch::x86_64::powerctl::State::set",
+                "arch::x86_64::powerctl::State::admit",
+                "arch::x86_64::powerctl::set",
+                "arch::x86_64::power_set",
+                "arch::x86_64::power_status");
+        }
+        requirement <'L.x86_64.196'> powerWriteChangesOnlyBitsTwelveToZero : ItemLowLevel {
+            attribute :>> statement = "A power write shall write 0x601 as the register read just before
+                it with bits 12:0 replaced by the eighths asked and every other
+                bit as read.";
+            attribute :>> criterion = "Stage 3 composes over a word with every other bit set and compares
+                the whole word; a field past 13 bits writes nothing outside it.
+                Negative control: compose not masking panics stage 3.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = ("arch::x86_64::powerctl::logic::compose",
+                "arch::x86_64::powerctl::write",
+                "arch::x86_64::powerctl::Msr::write");
+        }
+        requirement <'L.x86_64.197'> powerReadIsReadOnlyAndMarksAbsence : ItemLowLevel {
+            attribute :>> statement = "power_read shall write POWER_READ_WORDS words: firmware's 0x601,
+                the ceiling, the signature, the latch flags, 0x601 as it reads,
+                and the fixed read-only list 0x1a2, 0x19c, 0x1b1, 0x198, 0x64f,
+                0x6b0, 0x611, 0x606, 0x610, each marked present in word 0 only if
+                its read did not fault, and shall renew the claim's lease; it
+                shall write no register.";
+            attribute :>> criterion = "Stage 3 on the fake: every word read and marked; with the thermal
+                readings faulting, their bits clear.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = ("arch::x86_64::powerctl::read",
+                "arch::x86_64::powerctl::readings",
+                "arch::x86_64::powerctl::Msr::reading",
+                "arch::x86_64::powerctl::held",
+                "arch::x86_64::powerctl::State::renew",
+                "arch::x86_64::power_read");
+        }
+        requirement <'L.x86_64.198'> powerRestoreSingleShotOnHolderGone : ItemLowLevel {
+            attribute :>> statement = "A restore shall write firmware's 0x601 bits 12:0 back only if a
+                value the core wrote may be in force, taking it out of force so
+                that of every caller only one writes, and the watch task shall
+                restore and end the claim within a second of the holder's end
+                closing; a second claim shall be refused while one stands; the
+                kernel's end of a claim shall be the claim's own, dropped only
+                after it ends and outside the core's lock, and a watch shall look
+                only at the claim it was started for.";
+            attribute :>> criterion = "Stage 3 on the fake: a raise is written, firmware's value is set
+                again, the holder gone restores 25 A and does not latch, a second
+                restore finds nothing in force, a second claim is refused; a claim
+                ended and a new one made, the first claim's watch serves no more
+                and the new claim's end is kept. Negative controls: the holder's
+                death not restoring, and the watch serving any claim, each panic
+                stage 3.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = ("arch::x86_64::powerctl::Restorer::new",
+                "arch::x86_64::powerctl::Restorer::step",
+                "arch::x86_64::powerctl::Restorer::run",
+                "arch::x86_64::powerctl::Restore::confirmed",
+                "arch::x86_64::powerctl::State::claim",
+                "arch::x86_64::powerctl::State::tick",
+                "arch::x86_64::powerctl::State::restore_once",
+                "arch::x86_64::powerctl::watch",
+                "arch::x86_64::powerctl::State::serves",
+                "arch::x86_64::powerctl::State::release",
+                "arch::x86_64::powerctl::State::gone",
+                "arch::x86_64::powerctl::unserved");
+        }
+        requirement <'L.x86_64.199'> powerLeaseLapses : ItemLowLevel {
+            attribute :>> statement = "The power core shall end a claim and restore firmware's 0x601 when
+                no power_set or power_read was made on it for 5 s, looked at once
+                a second; a claim so ended shall not latch the core.";
+            attribute :>> criterion = "Stage 3 on the fake: a claim renewed at 4 s holds at 8 s and is
+                restored at 9 s, and a new claim follows. Negative control: the
+                lease never lapsing panics stage 3. cargo xtask test-power:
+                restored on Lease after the driver stops renewing.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = "arch::x86_64::powerctl::logic::lapsed";
+        }
+        requirement <'L.x86_64.200'> powerBackstopRestoresAtNinety : ItemLowLevel {
+            attribute :>> statement = "While a raise is in force the watch task shall read 0x1a2, 0x19c
+                and 0x1b1 once a second and end the claim and restore when a read
+                faults, 0x19c's valid bit 31 is clear, any of bits 0 to 5 is set
+                in either status, or TjMax less the nearer readout is 90 C or
+                more; power_set shall refuse a raise with LIMIT_REACHED while that
+                verdict is bad, and not a lowering.";
+            attribute :>> criterion = "Stage 3: 89 C passes, 90 C on either sensor trips, each of bits 0
+                to 5 trips on either register and 6 to 15 do not, an invalid
+                readout trips; on the fake, 90 C and a faulting read restore, a
+                raise under a set PROCHOT bit is refused and a lowering written.
+                Negative control: the limit removed panics stage 3.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = ("arch::x86_64::powerctl::logic::verdict",
+                "arch::x86_64::powerctl::State::backstop");
+        }
+        requirement <'L.x86_64.201'> powerLatchesOffUntilReboot : ItemLowLevel {
+            attribute :>> statement = "A backstop trip, a write that faults, reads back otherwise or
+                meets a stop, a restore not confirmed, and the eighth claim ended
+                in a boot shall latch the power core off until reboot: every later
+                claim refused with BAD_STATE. A holder gone or a lease lapsed
+                alone shall not.";
+            attribute :>> criterion = "Stage 3 on the fake: a trip, an unconfirmed restore and eight
+                ended claims each latch; a latched core refuses a claim. Negative
+                control: the latch not set panics stage 3.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = ("arch::x86_64::powerctl::State::end",
+                "arch::x86_64::powerctl::Cause::latches");
+        }
+        requirement <'L.x86_64.202'> powerFirmwareChangeIsLeftAlone : ItemLowLevel {
+            attribute :>> statement = "Firmware's 0x601 shall be read once, at the probe. A claim, a
+                write and a restore shall each compare the register with the last
+                value the core wrote, or firmware's before any write, and write
+                nothing over a value that differs; the register shall then be left
+                to firmware until reboot. A restore shall write firmware's bits
+                12:0 over the register as it reads, every other bit kept.";
+            attribute :>> criterion = "Stage 3 on the fake: a register changed before a claim, before a
+                write and while in force is written no more; a restore keeps a bit
+                set outside the field. Negative control: the write's compare
+                removed panics stage 3.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = ("arch::x86_64::powerctl::write",
+                "arch::x86_64::powerctl::State::claim");
+        }
+        requirement <'L.x86_64.203'> powerRaiseFloor : ItemLowLevel {
+            attribute :>> statement = "power_set shall refuse with SHOULD_WAIT a raise less than a second
+                after the last raise, whichever claim made it, and shall take a
+                lowering at once.";
+            attribute :>> criterion = "Stage 3 on the fake: a raise half a second after one is refused, a
+                lowering then written, a raise a second after written; a new claim
+                does not reset the floor. Negative controls: the floor removed,
+                and the floor reset per claim, each panic stage 3.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = "arch::x86_64::powerctl::logic::raise_due";
+        }
+        requirement <'L.x86_64.204'> powerWriteAndRestoreInterleave : ItemLowLevel {
+            attribute :>> statement = "A power write shall run with interrupts masked on its processor,
+                and shall write firmware's bits 12:0 back itself when a power-off,
+                reset or panic restore has stopped the core before its last check,
+                so that no interleaving of a write's accesses with such a
+                restore's steps leaves a raised value in force.";
+            attribute :>> criterion = "Stage 3 runs every interleaving of a raise's 13 accesses with an
+                exit restore's 6 steps, from firmware's value and from a raise in
+                force, on the fake: every one ends with firmware's field and
+                nothing in force. Negative control: the write's own revert removed
+                panics stage 3.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = "arch::x86_64::powerctl::Msr::masked";
+        }
+        requirement <'L.x86_64.205'> powerWriteIsReadBack : ItemLowLevel {
+            attribute :>> statement = "A power write shall read 0x601 back; a back whose bits 12:0 are
+                not those asked, a write the processor refused with #GP, or a read
+                that faulted shall end the claim, and the restore shall write
+                firmware's bits 12:0 over the value read back.";
+            attribute :>> criterion = "Stage 3 on the fake: a write read back with a bit flipped ends the
+                claim with firmware's value in the register, and a faulted write
+                ends it with firmware's value in the register. Negative control:
+                the read-back value not taken as the last written panics stage 3.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = "arch::x86_64::powerctl::State::set";
+        }
+        requirement <'L.x86_64.206'> powerExitRestore : ItemLowLevel {
+            attribute :>> statement = "restore shall, on an orderly power-off, a reset and both ends of a
+                panic, from any processor, with no lock and no allocation, stop
+                the power core and write firmware's 0x601 bits 12:0 back if a
+                raise may be in force, and print a line saying so; no raise shall
+                follow it.";
+            attribute :>> criterion = "Stage 3 on the fake: after a raise the exit restore confirms
+                firmware's value, and a write after it writes nothing. cargo xtask
+                test-power's lease row run without --init shows the power-off
+                restore.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = ("arch::x86_64::powerctl::restore",
+                "arch::x86_64::restore_power",
+                "arch::x86_64::shutdown",
+                "arch::x86_64::reset");
+        }
+        requirement <'L.x86_64.208'> powerTaskRestoreIsMasked : ItemLowLevel {
+            attribute :>> statement = "A task restore -- the holder gone, the lease, the backstop, a
+                write that did not read back -- shall run with interrupts masked
+                on its processor, so that no interleaving of its steps with a
+                power-off, reset or panic restore on another processor leaves a
+                raised value with nothing in force.";
+            attribute :>> criterion = "Stage 3 runs every interleaving of a task restore's 6 steps with
+                an exit restore's 6, from a raise in force, on the fake, whose
+                stop halts a processor that is not masked: every one ends with
+                firmware's field and nothing in force. Negative control: the task
+                restore unmasked panics stage 3.";
+            attribute :>> parent = "H.DEV.6";
+            attribute :>> unit = "arch::x86_64::powerctl::State::restore_once";
+        }
+        requirement <'L.x86_64.207'> powerFakeIsTestOnly : ItemLowLevel {
+            attribute :>> statement = "Under ferrix.powerctl.fake alone the power node shall stand on
+                fake_check's register file on any x86-64 processor: the backend
+                chosen once at the probe, no file under powerctl/ reaching an MSR,
+                and every kernel power line saying (fake); the word shall be
+                test_only in build-flags.toml.";
+            attribute :>> criterion = "cargo xtask test-power's fake rows: every kernel power line says
+                (fake). check-device-access.py: no MSR access under powerctl/,
+                with a planted one as its control.";
+            attribute :>> parent = "H.DEV.5";
+            attribute :>> unit = "arch::x86_64::powerctl::say";
         }
         requirement <'L.x86_64.32'> speculationPlanFollowsCpuid : ItemLowLevel {
             attribute :>> statement = "Plan::for_processor shall choose enhanced
