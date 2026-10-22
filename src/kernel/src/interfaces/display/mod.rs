@@ -42,8 +42,8 @@ use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use ferrix_blkring::identity::Location;
 use ferrix_bootinfo::PAGE_SIZE;
 use ferrix_displayctl::message::{
-    Attach, AttachObject, FORMAT, Hello, MAX_BUFFER_PAGES, MAX_BYTES, MAX_SCANOUTS, Message, Ready,
-    Rect, Refusal, ScanoutMode, Status, Timing, Timings,
+    Attach, AttachObject, FORMAT, Hello, Listed, MAX_BUFFER_PAGES, MAX_BYTES, MAX_LISTED_MODES,
+    MAX_SCANOUTS, Message, Ready, Rect, Refusal, ScanoutMode, Status, Timing, Timings,
 };
 use ferrix_displayctl::session::{Event, RequestError, Session};
 use ferrix_linux_abi::errno::Errno;
@@ -275,6 +275,13 @@ struct State {
     opens: usize,
     /// The number the next open is given.
     next_open: OpenId,
+    /// Each head's last finished mode list (`MODE_LIST`, `docs/DISPLAY.md`
+    /// §9.3), empty for a head whose driver sent none. Swapped in whole by
+    /// the card's task, which built it outside the lock, and copied out
+    /// into a vector its reader reserved first: nothing is allocated or
+    /// freed under the lock. At most [`MAX_LISTED_MODES`] entries of 28
+    /// bytes a head.
+    lists: Vec<Vec<Listed>>,
 }
 
 /// The most opens one card may have at once.
@@ -401,7 +408,7 @@ impl State {
             }
             // Nobody waits for either: [`serve`] ends at STOPPED and takes
             // MODES's modes itself.
-            Event::Stopped | Event::Modes | Event::Edid { .. } => false,
+            Event::Stopped | Event::Modes | Event::Edid { .. } | Event::ModeList { .. } => false,
         };
         if wanted {
             if self.events.len() >= MAX_EVENTS {
@@ -526,6 +533,75 @@ impl Card {
     /// a card that shows any size.
     pub(crate) fn timings(&self) -> &[Timing] {
         self.timings.as_slice()
+    }
+
+    /// Whether `head` has a mode list from its driver (`MODE_LIST`), which
+    /// its connector then lists instead of anything the core makes up.
+    pub(crate) fn has_list(&self, head: usize) -> bool {
+        u32::try_from(head).is_ok_and(|scanout| self.state.lock().session.has_list(scanout))
+    }
+
+    /// Copy `head`'s mode list into `into`, cleared first. `into` must
+    /// hold [`MAX_LISTED_MODES`] already (`reserve_list`), so that the copy
+    /// under the state lock allocates nothing; a vector short of that is
+    /// left empty.
+    pub(crate) fn list_into(&self, head: usize, into: &mut Vec<Listed>) {
+        into.clear();
+        let state = self.state.lock();
+        if let Some(list) = state.lists.get(head)
+            && list.len() <= into.capacity()
+        {
+            into.extend_from_slice(list);
+        }
+    }
+
+    /// Tell `head`'s driver to run `timing`, one of `list` -- the caller's
+    /// copy of the head's list, which the session holds it to -- unless it
+    /// was told already. Whether a `SET_MODE` went.
+    pub(crate) fn set_mode(
+        &self,
+        head: usize,
+        timing: Timing,
+        list: &[Listed],
+    ) -> Result<bool, CardError> {
+        let scanout = u32::try_from(head).map_err(|_| CardError::Request(RequestError::Mode))?;
+        let mut state = self.state.lock();
+        if state.gone || self.control.peer_closed() {
+            return Err(CardError::Gone);
+        }
+        if !self.control.peer_has_room() {
+            return Err(CardError::Busy);
+        }
+        let Some(message) = state
+            .session
+            .set_mode(scanout, timing, list)
+            .map_err(CardError::Request)?
+        else {
+            return Ok(false);
+        };
+        write(&self.control, &mut state, &message)?;
+        Ok(true)
+    }
+
+    /// The driver refused the flush after a `SET_MODE` to `head`: it runs
+    /// what it ran before, and the next `SETCRTC` tells it again.
+    pub(crate) fn mode_refused(&self, head: usize) {
+        if let Ok(scanout) = u32::try_from(head) {
+            self.state.lock().session.mode_refused(scanout);
+        }
+    }
+
+    /// Take a finished list for `head` that the card's task built in
+    /// `built`, which gets the list it replaces back, to be cleared and
+    /// built into again outside the lock.
+    fn list_from_driver(&self, head: usize, built: &mut Vec<Listed>) {
+        {
+            let mut state = self.state.lock();
+            if let Some(list) = state.lists.get_mut(head) {
+                core::mem::swap(list, built);
+            }
+        }
+        let _ = self.modes_changed.fetch_add(1, Ordering::AcqRel);
     }
 
     /// Whether `head`'s connector was given an EDID, connected or not: the
@@ -1363,6 +1439,7 @@ fn accept(start: &Start, message: &ChannelMessage) -> Result<Arc<Card>, Refusal>
             master: None,
             opens: 0,
             next_open: 1,
+            lists: vec![Vec::new(); heads],
         }),
         changed: Arc::new(WaitQueue::new()),
         modeset: SleepLock::new((), &SchedParker),
@@ -1513,8 +1590,78 @@ fn reclaim(card: &Card, range: Range) {
     card.state.lock().give_back(range.bytes);
 }
 
+/// Reserve room for a whole mode list in `list`, so that nothing is
+/// allocated while a lock is held over it. `false` when there is no memory.
+pub(crate) fn reserve_list(list: &mut Vec<Listed>) -> bool {
+    list.try_reserve(MAX_LISTED_MODES.saturating_sub(list.len()))
+        .is_ok()
+}
+
+/// A page of `scanout`'s mode list, which the session accepted: collected
+/// in the card task's own `pending`, outside every lock, and taken by the
+/// card when it finishes the list. `false` when no memory could be
+/// reserved for it, which stops the card rather than panic (the
+/// consultant's condition 2, ledger 3117).
+fn take_page(
+    card: &Card,
+    pending: &mut [Vec<Listed>],
+    message: &Message,
+    event: (u32, bool, bool),
+) -> bool {
+    let (scanout, starts, finishes) = event;
+    let (Message::ModeList(page), Some(built)) = (message, pending.get_mut(scanout as usize))
+    else {
+        return true;
+    };
+    if starts {
+        built.clear();
+    }
+    if !reserve_list(built) {
+        return false;
+    }
+    let room = MAX_LISTED_MODES.saturating_sub(built.len());
+    built.extend(page.as_slice().iter().take(room).copied());
+    if finishes {
+        card.list_from_driver(scanout as usize, built);
+        built.clear();
+        announce_list(card, scanout as usize);
+    }
+    true
+}
+
+/// The boot line for a head's new list: how many modes, and the preferred.
+fn announce_list(card: &Card, head: usize) {
+    let mut list = Vec::new();
+    if !reserve_list(&mut list) {
+        return;
+    }
+    card.list_into(head, &mut list);
+    if let Some(preferred) = list.iter().find(|listed| listed.preferred) {
+        let mhz = preferred.timing.refresh_mhz();
+        crate::console::println!(
+            "  display  card{} scanout {head}: {} modes listed, {}x{} at {}.{:03} Hz preferred",
+            card.index,
+            list.len(),
+            preferred.timing.hdisplay,
+            preferred.timing.vdisplay,
+            mhz / 1000,
+            mhz % 1000
+        );
+    }
+}
+
 /// Serve the card until its driver goes.
 fn serve(card: &Card) {
+    // Each head's mode list being sent, page by page: the card task's own,
+    // under no lock (`docs/DISPLAY.md` §9.3).
+    let mut pending: Vec<Vec<Listed>> = Vec::new();
+    if pending.try_reserve(card.scanouts).is_err() {
+        refuse(&card.control, Refusal::Protocol);
+        card.state.lock().gone = true;
+        card.changed.wake_all();
+        return;
+    }
+    pending.resize_with(card.scanouts, Vec::new);
     loop {
         if card.state.lock().gone {
             break;
@@ -1550,6 +1697,21 @@ fn serve(card: &Card) {
             Ok(Event::Edid { scanout }) => {
                 if let Message::Edid(edid) = &decoded {
                     card.edid_from_driver(scanout as usize, edid.as_bytes());
+                }
+                card.changed.wake_all();
+            }
+            Ok(Event::ModeList {
+                scanout,
+                starts,
+                finishes,
+            }) => {
+                if !take_page(card, &mut pending, &decoded, (scanout, starts, finishes)) {
+                    crate::console::println!(
+                        "  display  card{}: no memory for a mode list; the card stops",
+                        card.index
+                    );
+                    refuse(&card.control, Refusal::Protocol);
+                    break;
                 }
                 card.changed.wake_all();
             }

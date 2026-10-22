@@ -1997,6 +1997,27 @@ pub(crate) static STAGE10_CHARDEV: Explanation = Explanation {
 };
 
 /// For `check_display_copies` in `stages_check.rs`, when
+/// `display::check::modes` fails.
+pub(crate) static STAGE10_DISPLAY_MODES: Explanation = Explanation {
+    code: "FX-1015",
+    title: "the display core would set a mode its driver did not list",
+    meaning: "A display driver lists every mode it can show in MODE_LIST, and `SETCRTC` may set \
+              only one of them; the core tells the driver the listed timing in SET_MODE \
+              (`docs/DISPLAY.md` section 9). `display::check::modes` requires the match to take a \
+              mode exactly as listed and the listed timing of a listed size and refresh, to refuse \
+              a listed size at a refresh nobody listed and a size nobody listed, a list sent in two \
+              pages to be taken, and a list with two preferred modes to be refused.",
+    causes: &[
+        "`ferrix_displayctl::modes::listed_match` was widened to take a size or refresh no \
+         entry has.",
+        "The session's page checks (`Session::receive` of MODE_LIST) stopped counting \
+         preferred entries or tracking the page order.",
+    ],
+    see: "src/kernel/src/interfaces/display/check.rs; src/lib/proto/displayctl/src/modes.rs; \
+          src/lib/proto/displayctl/src/session.rs; docs/DISPLAY.md section 9",
+};
+
+/// For `check_display_copies` in `stages_check.rs`, when
 /// `display::check::run` fails.
 pub(crate) static STAGE10_DISPLAY_COPIES: Explanation = Explanation {
     code: "FX-1014",
@@ -3480,6 +3501,7 @@ pub(crate) static ALL: &[&Explanation] = &[
     &STAGE10_REMAP,
     &STAGE10_CHARDEV,
     &STAGE10_DISPLAY_COPIES,
+    &STAGE10_DISPLAY_MODES,
     &STAGE11_MOUNT,
     &NET_CORE,
     &NET_RING,

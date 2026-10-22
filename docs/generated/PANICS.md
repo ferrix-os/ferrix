@@ -115,6 +115,7 @@ Causes are listed most likely first.
 | [FX-1012](#fx-1012) | interrupt remapping could not come up as specified |
 | [FX-1013](#fx-1013) | the chardev core answered a driver or a program wrongly |
 | [FX-1014](#fx-1014) | the display core would let the wrong driver copy |
+| [FX-1015](#fx-1015) | the display core would set a mode its driver did not list |
 | [FX-1101](#fx-1101) | the btrfs disk did not mount and read back as the host wrote it |
 | [FX-1150](#fx-1150) | the net core did not carry a packet round its own loopback |
 | [FX-1151](#fx-1151) | the net ring did not carry a frame between the kernel and a driver |
@@ -2942,6 +2943,27 @@ and never `WRITE`.
 
 See: src/kernel/src/interfaces/display/mod.rs may_copy;
 src/kernel/src/interfaces/display/check.rs; docs/DISPLAY.md section 8.
+
+<a id="fx-1015"></a>
+
+## FX-1015 — the display core would set a mode its driver did not list
+
+A display driver lists every mode it can show in MODE_LIST, and `SETCRTC` may
+set only one of them; the core tells the driver the listed timing in SET_MODE
+(`docs/DISPLAY.md` section 9). `display::check::modes` requires the match to
+take a mode exactly as listed and the listed timing of a listed size and
+refresh, to refuse a listed size at a refresh nobody listed and a size nobody
+listed, a list sent in two pages to be taken, and a list with two preferred
+modes to be refused.
+
+1. `ferrix_displayctl::modes::listed_match` was widened to take a size or
+   refresh no entry has.
+2. The session's page checks (`Session::receive` of MODE_LIST) stopped counting
+   preferred entries or tracking the page order.
+
+See: src/kernel/src/interfaces/display/check.rs;
+src/lib/proto/displayctl/src/modes.rs; src/lib/proto/displayctl/src/session.rs;
+docs/DISPLAY.md section 9.
 
 <a id="fx-1101"></a>
 

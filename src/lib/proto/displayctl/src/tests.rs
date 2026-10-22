@@ -18,7 +18,7 @@ fn u64_at(bytes: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(bytes[at..at + 8].try_into().expect("eight bytes"))
 }
 
-fn hello() -> Hello {
+pub(crate) fn hello() -> Hello {
     let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
     modes[0] = ScanoutMode {
         width: 1280,
@@ -229,7 +229,31 @@ fn every_message() -> Vec<Message> {
             y: i32::MAX,
         },
         Message::Modes { modes: resized() },
+        Message::ModeList(page_of(&[(1920, 1080, true), (1280, 720, false)], 0, 2)),
+        Message::SetMode {
+            scanout: 0,
+            timing: crate::modes::synthetic(1280, 720, 60_000),
+        },
     ]
+}
+
+/// A `MODE_LIST` page of `sizes` (at 60 Hz, preferred as marked), as
+/// entries `first..` of a list of `total`.
+pub(crate) fn page_of(sizes: &[(u32, u32, bool)], first: u32, total: u32) -> ModePage {
+    let mut entries = [Listed::default(); MODES_A_PAGE];
+    for (into, &(width, height, preferred)) in entries.iter_mut().zip(sizes) {
+        *into = Listed {
+            timing: crate::modes::synthetic(width, height, 60_000),
+            preferred,
+        };
+    }
+    ModePage {
+        scanout: 0,
+        total,
+        first,
+        count: u32::try_from(sizes.len()).expect("a count"),
+        entries,
+    }
 }
 
 /// Scanout 0 at a window's new size, scanout 1 unplugged.
@@ -323,7 +347,7 @@ fn fields_lie_where_the_specification_puts_them() {
     // scanout's refresh, 4 for the flags, and 16 x 4 for each scanout's
     // connector type.
     assert_eq!(bytes.len(), 744);
-    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 10, "VERSION");
+    assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 11, "VERSION");
     assert_eq!(u32_at(bytes, 612), 74_998, "scanout 0's refresh");
     assert!(bytes[616..].iter().all(|&byte| byte == 0));
     assert_eq!(u16::from_le_bytes([bytes[10], bytes[11]]), 1);

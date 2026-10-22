@@ -18,6 +18,11 @@
 //! `drm.edid_firmware=` names for it, checked, and how the property calls
 //! answer for it.
 //!
+//! [`modes`] is how a driver makes the mode list it sends a scanout's
+//! display with (version 11, `docs/DISPLAY.md` §9): the modes an EDID
+//! names, timed as Linux times them, and what a virtual or a scaling card
+//! adds; [`scale`] is the arithmetic of showing a buffer scaled.
+//!
 //! [`card`] is who may do what on the card itself: the DRM master's rules,
 //! which ioctls only the master may make, and the budget each kind of open
 //! may take.
@@ -29,10 +34,15 @@
 
 pub mod card;
 pub mod edid;
+mod edid_tables;
 pub mod message;
+pub mod modes;
+pub mod scale;
 pub mod session;
 
 #[cfg(test)]
 mod edid_tests;
+#[cfg(test)]
+mod modes_tests;
 #[cfg(test)]
 mod tests;

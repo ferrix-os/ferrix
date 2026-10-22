@@ -37,6 +37,7 @@ use ferrix_displayctl::message::{
     Attach, Hello, MAX_BUFFER_PAGES as MAX_PAGES, MAX_BYTES, MAX_DIMENSION, MAX_SCANOUTS, Message,
     PORT_RIGHTS, ScanoutMode, Timings, VERSION,
 };
+use ferrix_displayctl::modes::{ModeList, add_virtual};
 use ferrix_native_abi::handle::Handle;
 use ferrix_native_abi::rights::Requested;
 use ferrix_native_abi::signals::Signals;
@@ -1541,6 +1542,53 @@ fn display_modes(
     Ok(modes)
 }
 
+/// Every mode each enabled scanout can be shown at, sent to the core as
+/// `MODE_LIST` pages (displayctl v11, `docs/DISPLAY.md` §9.4): the modes of
+/// the display's EDID where the device gives one, each one a buffer of
+/// [`MAX_PAGES`] can hold, then what a virtual card lists beside them --
+/// the display-info size at the EDID's refresh, preferred unless the EDID
+/// named that size so, at 60, 120 and 144 Hz, and the standard sizes. A
+/// virtio-gpu shows any size it is handed a scanout of, so every one of
+/// them is a mode it can drive. One scanout's list at a time, so that only
+/// one is on this driver's stack.
+fn send_lists(
+    driver: &mut Gpu,
+    port: &Port<Kernel>,
+    control: &Channel<Kernel>,
+    modes: &[ScanoutMode; MAX_SCANOUTS],
+) -> Result<(), Step> {
+    let count = (driver.info().config.num_scanouts as usize).min(MAX_SCANOUTS);
+    for (index, mode) in modes.iter().enumerate().take(count) {
+        if !mode.enabled {
+            continue;
+        }
+        let scanout = u32::try_from(index).map_err(|_| Step::Device)?;
+        let mut list = ModeList::new();
+        if driver.info().features & gpu::FEATURE_EDID != 0 {
+            let answer = run_command(driver, port, &Command::GetEdid { scanout })?;
+            let mut edid = [0_u8; gpu::EDID_MAX_BYTES];
+            let len = driver.edid_bytes(&answer, &mut edid);
+            let mut named = ModeList::new();
+            ferrix_displayctl::edid::modes(edid.get(..len).unwrap_or_default(), &mut named);
+            for listed in named.as_slice() {
+                let pixels = u64::from(listed.timing.hdisplay) * u64::from(listed.timing.vdisplay);
+                if pixels * 4 <= MAX_PAGES * 4096 {
+                    let _ = list.add(listed.timing, listed.preferred);
+                }
+            }
+        }
+        add_virtual(&mut list, mode.width, mode.height, mode.refresh_mhz);
+        list.ensure_preferred();
+        list.sort();
+        for page in list.pages(scanout) {
+            control
+                .write(page.encode().as_bytes())
+                .map_err(|_| Step::Control)?;
+        }
+    }
+    Ok(())
+}
+
 /// HELLO from what `GET_DISPLAY_INFO` said.
 fn hello(driver: &mut Gpu, port: &Port<Kernel>, location: u32) -> Result<Hello, Step> {
     let modes = display_modes(driver, port)?;
@@ -1648,6 +1696,7 @@ fn introduce(
         .write_with(Message::Hello(hello).encode().as_bytes(), [port_share])
         .map_err(|_| Step::Hello)?;
     ready(control)?;
+    send_lists(driver, port, control, &hello.modes)?;
     // The wait is armed by `run`, once every conversation's blocking setup
     // commands are done. A command waiting on the device takes packets off
     // the port and drops the ones that are not its interrupt, and an armed
@@ -2021,7 +2070,8 @@ impl Serving {
         let modes = display_modes(&mut self.driver, &self.port)?;
         self.control
             .write(Message::Modes { modes }.encode().as_bytes())
-            .map_err(|_| Step::Control)
+            .map_err(|_| Step::Control)?;
+        send_lists(&mut self.driver, &self.port, &self.control, &modes)
     }
 
     /// Take the device's completions and hand each to whoever posted it,
@@ -2379,6 +2429,15 @@ impl Serving {
                 }
                 Err(_) => return Err(Step::Control),
             };
+            // A mode the core chose from the list: a virtio-gpu shows any
+            // size, and `SET_SCANOUT`'s rectangle, which follows, is what
+            // makes the host's console that size. Nothing to send.
+            if let Message::SetMode { timing, .. } = message {
+                if !timing.is_mode() {
+                    return Err(Step::Control);
+                }
+                continue;
+            }
             // A pointer moving waits for nothing, least of all the GPU.
             if let Message::Move { scanout, x, y } = message {
                 self.driver
