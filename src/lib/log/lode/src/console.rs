@@ -24,6 +24,8 @@ pub struct Said {
     pub unit: Option<String>,
     /// A `lode mark` line's text.
     pub mark: Option<Vec<u8>>,
+    /// The level the line itself says, where it says one.
+    pub level: Option<u8>,
     /// The message: the line without what was read off it.
     pub message: Vec<u8>,
 }
@@ -31,9 +33,12 @@ pub struct Said {
 /// What `lode mark TEXT` writes to the kernel log, before the text.
 pub const MARK_PREFIX: &[u8] = b"lode-mark: ";
 
-/// Read `line`, a kernel record's text.
+/// Read `raw`, a kernel record's text: ANSI colour sequences taken out
+/// first, since a terminal's colours are not the message.
 #[must_use]
-pub fn read(line: &[u8]) -> Said {
+pub fn read(raw: &[u8]) -> Said {
+    let cleaned = strip_ansi(raw);
+    let line = cleaned.as_slice();
     if let Some(mark) = line.strip_prefix(MARK_PREFIX) {
         return Said {
             identifier: Some(String::from("lode-mark")),
@@ -41,6 +46,9 @@ pub fn read(line: &[u8]) -> Said {
             message: Vec::from(line),
             ..Said::default()
         };
+    }
+    if let Some(said) = tracing_line(line) {
+        return said;
     }
     if let Some((word, rest)) = padded_word(line) {
         if word == "init"
@@ -69,15 +77,81 @@ pub fn read(line: &[u8]) -> Said {
     }
 }
 
-/// `  word   rest`: two spaces, a word, at least one space.
+/// `bytes` without ANSI escape sequences (`ESC [ ... letter`, and a lone
+/// `ESC` with the byte after it).
+#[must_use]
+pub fn strip_ansi(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        if byte != 0x1b {
+            out.push(byte);
+            at += 1;
+        } else if bytes.get(at + 1) == Some(&b'[') {
+            // `ESC [`, parameters, and the letter that ends it.
+            let rest = bytes.get(at + 2..).unwrap_or_default();
+            at += 2 + rest
+                .iter()
+                .position(u8::is_ascii_alphabetic)
+                .map_or(rest.len(), |end| end + 1);
+        } else {
+            at += 2;
+        }
+    }
+    out
+}
+
+/// A `tracing` line, as Rust programs write them to standard error:
+/// `2026-10-23T17:21:51.786662Z  WARN crate::module: message`. The level is
+/// the program's own, and the identifier the crate.
+fn tracing_line(line: &[u8]) -> Option<Said> {
+    let text = core::str::from_utf8(line).ok()?;
+    let (stamp, rest) = text.split_once(' ')?;
+    if stamp.len() < 20 || !stamp.ends_with('Z') || stamp.as_bytes().get(10) != Some(&b'T') {
+        return None;
+    }
+    let rest = rest.trim_start();
+    let (level, rest) = rest.split_once(' ')?;
+    let level = match level {
+        "ERROR" => 3,
+        "WARN" => 4,
+        "INFO" => 6,
+        "DEBUG" | "TRACE" => 7,
+        _ => return None,
+    };
+    let (target, message) = rest.trim_start().split_once(": ")?;
+    let crate_name = target.split("::").next().filter(|name| !name.is_empty())?;
+    Some(Said {
+        identifier: Some(String::from(crate_name)),
+        level: Some(level),
+        message: Vec::from(message.as_bytes()),
+        ..Said::default()
+    })
+}
+
+/// `word   rest`: a word of a letter and then letters, digits, `_`, `-` or
+/// `.`, padded with spaces to the kernel's column (nine) or by two or more,
+/// with or without the two spaces the kernel's own lines begin with --
+/// `  devmgr   started`, `devmgr   intel ... started` from `devmgr`'s
+/// standard error.
 fn padded_word(line: &[u8]) -> Option<(&str, &[u8])> {
-    let body = line.strip_prefix(b"  ")?;
+    let lead = line.iter().position(|&byte| byte != b' ')?;
+    let body = line.get(lead..)?;
     let end = body.iter().position(|&byte| !is_word(byte))?;
-    if end == 0 || body.get(end) != Some(&b' ') {
+    if end == 0 || end > 16 || !body.first()?.is_ascii_alphabetic() {
+        return None;
+    }
+    let spaces = body
+        .get(end..)?
+        .iter()
+        .take_while(|&&byte| byte == b' ')
+        .count();
+    let rest = body.get(end + spaces..)?;
+    if spaces == 0 || rest.is_empty() || (spaces < 2 && end + spaces < 9) {
         return None;
     }
     let word = core::str::from_utf8(body.get(..end)?).ok()?;
-    Some((word, trim_start(body.get(end..)?)))
+    Some((word, rest))
 }
 
 /// `NAME[PID]: TEXT`, init's line for a unit.
@@ -103,18 +177,42 @@ fn unit_line(rest: &[u8]) -> Option<Said> {
         pid: Some(pid),
         unit: Some(String::from(name)),
         mark: None,
+        level: None,
         message: Vec::from(text.strip_prefix(b" ").unwrap_or(text)),
     })
 }
 
-/// `word: rest`, a word of at most 32 bytes.
+/// `word: rest`, a word of at most 32 bytes beginning with a letter. A
+/// word with digits glued before it (`0usbhid`, `0xusbhid`: the tail of a
+/// number another writer left on the console with no newline) is read
+/// without them.
 fn colon_word(line: &[u8]) -> Option<(&str, &[u8])> {
     let end = line.iter().position(|&byte| !is_word(byte))?;
     if end == 0 || end > 32 || line.get(end) != Some(&b':') || line.get(end + 1) != Some(&b' ') {
         return None;
     }
     let word = core::str::from_utf8(line.get(..end)?).ok()?;
-    Some((word, line.get(end + 1..)?))
+    let start = word.find(|c: char| c.is_ascii_alphabetic())?;
+    let glued = word.get(..start)?;
+    let word = if glued.is_empty() {
+        word
+    } else if glued.bytes().all(|byte| byte.is_ascii_digit()) {
+        word.get(start..)?
+    } else {
+        return None;
+    };
+    let word = word
+        .strip_prefix('x')
+        .filter(|_| glued == "0")
+        .unwrap_or(word);
+    // `error: ...` and `WARNING: ...` name a level, not a program.
+    let level_word = [
+        "error", "warning", "warn", "info", "debug", "note", "fatal", "panic",
+    ]
+    .iter()
+    .any(|level| word.eq_ignore_ascii_case(level));
+    (word.len() >= 2 && word.starts_with(|c: char| c.is_ascii_alphabetic()) && !level_word)
+        .then_some((word, line.get(end + 1..)?))
 }
 
 /// Bytes a subsystem or program name is made of.

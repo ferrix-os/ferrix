@@ -249,6 +249,8 @@ struct Source {
     last: Option<Record>,
     /// Repeats of it folded since.
     repeats: Held,
+    /// The last of them, when their numbers differed from the first's.
+    varied: Option<Vec<u8>>,
 }
 
 /// One rule's state.
@@ -271,6 +273,10 @@ pub struct Limiter {
     rule_state: Vec<RuleState>,
     /// Each source's state.
     sources: BTreeMap<Vec<u8>, Source>,
+    /// Blank lines from the console, not stored.
+    blank: Held,
+    /// When the first of them came.
+    blank_since: u64,
 }
 
 impl Limiter {
@@ -282,6 +288,8 @@ impl Limiter {
             rules,
             rule_state,
             sources: BTreeMap::new(),
+            blank: Held::default(),
+            blank_since: 0,
         }
     }
 
@@ -289,34 +297,55 @@ impl Limiter {
     /// be stored -- records that say what was held back, then the record
     /// itself if it passes -- is pushed to `out`.
     pub fn admit(&mut self, record: Record, now: u64, out: &mut Vec<Record>) {
+        if record
+            .get("_TRANSPORT")
+            .is_some_and(|transport| transport == b"kernel" || transport == b"console")
+            && record.message().iter().all(u8::is_ascii_whitespace)
+        {
+            if self.blank.count == 0 {
+                self.blank_since = now;
+            }
+            self.blank.add(&record);
+            return;
+        }
         if is_kernel(&record) {
             out.push(record);
             return;
         }
-        let mut fold_window = WINDOW_US;
+        let mut fold_window: Option<u64> = None;
         let mut limit: Option<(u32, u64)> = None;
-        let matched = self
-            .rules
-            .iter()
-            .position(|rule| rule.filter.matches(&record));
-        if let Some(index) = matched
-            && let (Some(rule), Some(state)) =
-                (self.rules.get(index), self.rule_state.get_mut(index))
-        {
-            state.seen += 1;
+        // Each kind of rule is read on its own, the first that matches
+        // deciding: the first `fold` sets the fold window, the first
+        // `limit` the limit, and the first rule that holds records
+        // (`drop`, `sample`, `level`) whether this one is held. So a fold
+        // rule and a limit rule both apply to the same line.
+        let mut decided = false;
+        for (rule, state) in self.rules.iter().zip(self.rule_state.iter_mut()) {
+            if !rule.filter.matches(&record) {
+                continue;
+            }
             let hold = match rule.action {
-                Action::Drop => true,
-                Action::Sample(n) => (state.seen - 1) % u64::from(n) != 0,
-                Action::Level(most) => record.priority > most,
                 Action::Fold(span) => {
-                    fold_window = span;
-                    false
+                    let _ = fold_window.get_or_insert(span);
+                    continue;
                 }
                 Action::Limit(burst, span) => {
-                    limit = Some((burst, span));
-                    false
+                    let _ = limit.get_or_insert((burst, span));
+                    continue;
+                }
+                _ if decided => continue,
+                Action::Drop => true,
+                Action::Sample(n) => {
+                    state.seen += 1;
+                    (state.seen - 1) % u64::from(n) != 0
+                }
+                // A line with no level is not known to be below `most`:
+                // it is kept.
+                Action::Level(most) => {
+                    record.priority > most && record.priority != crate::record::UNSPECIFIED
                 }
             };
+            decided = true;
             if hold {
                 if state.held.count == 0 {
                     state.start = now;
@@ -332,10 +361,15 @@ impl Limiter {
             close_window(&key, source, now, out);
         }
         if let Some(last) = &source.last
-            && last.message() == record.message()
             && last.priority == record.priority
-            && now.saturating_sub(last.monotonic_us) < fold_window
+            && now.saturating_sub(last.monotonic_us) < fold_window.unwrap_or(WINDOW_US)
+            && similar(last.message(), record.message())
+            // A mark is a point in time someone asked for: never folded.
+            && record.get("MARK").is_none()
         {
+            if last.message() != record.message() {
+                source.varied = Some(Vec::from(record.message()));
+            }
             source.repeats.add(&record);
             return;
         }
@@ -352,6 +386,9 @@ impl Limiter {
         *count += 1;
         if *count > burst {
             held.add(&record);
+            // A held line breaks the run: what comes next is not a repeat
+            // of the last line stored, which may lie far behind it.
+            source.last = None;
             return;
         }
         source.last = Some(record.clone());
@@ -391,6 +428,9 @@ impl Limiter {
                 state.held = Held::default();
             }
         }
+        if self.blank.count > 0 && now.saturating_sub(self.blank_since) >= RULE_WINDOW_US {
+            self.say_blank(now, out);
+        }
         self.sources.retain(|_, source| {
             source.last.is_some() || source.counts.iter().any(|&count| count > 0)
         });
@@ -398,6 +438,22 @@ impl Limiter {
 }
 
 impl Limiter {
+    /// Say the blank lines held back.
+    fn say_blank(&mut self, now: u64, out: &mut Vec<Record>) {
+        let mut record = said(
+            now,
+            7,
+            MESSAGE_ID_SUPPRESSED,
+            &alloc::format!(
+                "{} blank line(s) from the console not stored",
+                self.blank.count
+            ),
+        );
+        self.blank.stamp(&mut record, "N_BLANK");
+        out.push(record);
+        self.blank = Held::default();
+    }
+
     /// Say now everything held back so far -- every source's window and run
     /// of repeats, every rule's count -- as `lode rotate` asks, so that a
     /// `lode verify` after it finds every gap said.
@@ -409,6 +465,9 @@ impl Limiter {
         }
         for state in &mut self.rule_state {
             state.start = 0;
+        }
+        if self.blank.count > 0 {
+            self.say_blank(now, out);
         }
         self.tick(now.max(RULE_WINDOW_US), out);
     }
@@ -463,16 +522,24 @@ fn end_repeats(source: &mut Source, out: &mut Vec<Record>) {
             "MESSAGE" | "_KERNEL_SEQNUM" | "_SOURCE_MONOTONIC_TIMESTAMP" | "MESSAGE_ID"
         )
     });
+    let numbers = if source.varied.is_some() {
+        ", numbers varying"
+    } else {
+        ""
+    };
     record.push(
         "MESSAGE",
         alloc::format!(
-            "message repeated {} time(s): {}",
+            "message repeated {} time(s){numbers}: {}",
             source.repeats.count,
             String::from_utf8_lossy(last.message())
         )
         .as_bytes(),
     );
     record.push("MESSAGE_ID", MESSAGE_ID_REPEATED.as_bytes());
+    if let Some(varied) = source.varied.take() {
+        record.push("LAST_MESSAGE", &varied);
+    }
     source.repeats.stamp(&mut record, "REPEATED");
     out.push(record);
     source.repeats = Held::default();
@@ -486,4 +553,28 @@ fn said(now: u64, priority: u8, id: &str, message: &str) -> Record {
     record.push("SYSLOG_IDENTIFIER", b"lode");
     record.push("_TRANSPORT", b"lode");
     record
+}
+
+/// Whether two messages are the same but for their numbers: every run of
+/// digits read as one, so a line a program writes every frame with a
+/// changing size or place folds as an identical one does.
+#[must_use]
+pub fn similar(a: &[u8], b: &[u8]) -> bool {
+    let mut left = a.iter().peekable();
+    let mut right = b.iter().peekable();
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return true,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                while left.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+                    let _ = left.next();
+                }
+                while right.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+                    let _ = right.next();
+                }
+            }
+            (Some(x), Some(y)) if x == y => {}
+            _ => return false,
+        }
+    }
 }

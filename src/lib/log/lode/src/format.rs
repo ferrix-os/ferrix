@@ -10,12 +10,13 @@
 //! ```
 
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::cursor;
-use crate::record::Record;
+use crate::record::{LEVEL_FIELD, Record, UNSPECIFIED};
 use crate::segment::push_hex;
-use crate::time::{Civil, Zone, month_name};
+use crate::time::{Civil, Zone, days, month_name, weekday};
 
 /// An output format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,8 @@ pub enum Output {
     Json,
     /// The Journal Export Format.
     Export,
+    /// journald's `verbose`: a time line, then every field on its own.
+    Verbose,
 }
 
 impl Output {
@@ -57,6 +60,7 @@ impl Output {
             "cat" => Output::Cat,
             "json" => Output::Json,
             "export" => Output::Export,
+            "verbose" => Output::Verbose,
             _ => return None,
         })
     }
@@ -73,7 +77,8 @@ pub fn level_letter(level: u8) -> char {
         4 => 'W',
         5 => 'N',
         6 => 'I',
-        _ => 'D',
+        7 => 'D',
+        _ => '?',
     }
 }
 
@@ -151,6 +156,53 @@ pub fn write(record: &Record, output: Output, zone: &Zone, out: &mut Vec<u8>) {
         Output::Cat => message(record, out),
         Output::Json => json(record, out),
         Output::Export => export(record, out),
+        Output::Verbose => verbose(record, &when, out),
+    }
+}
+
+/// journald's `verbose`: `Fri 2026-10-23 14:01:02.123456 +00:00
+/// [i=..;b=..]`, then each field indented on its own line, a value that is
+/// not UTF-8 shown as its length.
+fn verbose(record: &Record, when: &Civil, out: &mut Vec<u8>) {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let day = DAYS
+        .get(weekday(days(when.year, when.month, when.day)) as usize)
+        .copied()
+        .unwrap_or("???");
+    push(
+        out,
+        &alloc::format!(
+            "{day} {:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06} {} [{}]\n",
+            when.year,
+            when.month,
+            when.day,
+            when.hour,
+            when.minute,
+            when.second,
+            when.micros,
+            when.offset(),
+            cursor::of(record)
+        ),
+    );
+    let field = |out: &mut Vec<u8>, name: &str, value: &[u8]| {
+        push(out, "    ");
+        push(out, name);
+        out.push(b'=');
+        if core::str::from_utf8(value).is_ok() {
+            printable(value, out);
+        } else {
+            push(out, &alloc::format!("[{} bytes blob data]", value.len()));
+        }
+        out.push(b'\n');
+    };
+    for (name, value) in own_fields(record).iter().skip(5) {
+        field(out, name, value.as_bytes());
+    }
+    if record.get("_HOSTNAME").is_none() && !record.host.is_empty() {
+        field(out, "_HOSTNAME", record.host.as_bytes());
+    }
+    for each in &record.fields {
+        field(out, &each.name, &each.value);
     }
 }
 
@@ -219,11 +271,13 @@ fn push(out: &mut Vec<u8>, text: &str) {
     out.extend_from_slice(text.as_bytes());
 }
 
-/// The store's own fields, as `json` and `export` begin with them.
-fn own_fields(record: &Record) -> [(&'static str, String); 6] {
+/// The store's own fields, as `json` and `export` begin with them:
+/// `PRIORITY` only for a known level, as journald writes it, and
+/// [`LEVEL_FIELD`] always, so a reader never has to infer one.
+fn own_fields(record: &Record) -> Vec<(&'static str, String)> {
     let mut boot = String::new();
     push_hex(&mut boot, &record.boot_id);
-    [
+    let mut fields = vec![
         ("__CURSOR", cursor::of(record)),
         (
             "__REALTIME_TIMESTAMP",
@@ -235,8 +289,12 @@ fn own_fields(record: &Record) -> [(&'static str, String); 6] {
         ),
         ("__SEQNUM", alloc::format!("{}", record.seqnum)),
         ("_BOOT_ID", boot),
-        ("PRIORITY", alloc::format!("{}", record.priority)),
-    ]
+    ];
+    if record.priority != UNSPECIFIED {
+        fields.push(("PRIORITY", alloc::format!("{}", record.priority)));
+    }
+    fields.push((LEVEL_FIELD, record.level_text()));
+    fields
 }
 
 /// One JSON object, journald's: every value a string, a value that is not
@@ -318,4 +376,56 @@ fn export(record: &Record, out: &mut Vec<u8>) {
         field(out, &each.name, &each.value);
     }
     out.push(b'\n');
+}
+
+/// `lode levels`: for each source -- `SYSLOG_IDENTIFIER`, else `UNIT`, else
+/// `_TRANSPORT` -- its records, how many have no level, and how many a
+/// level read from their words; the sources with most unspecified first.
+/// Where levels are still missing, so the writers can be fixed.
+#[must_use]
+pub fn level_table(records: &[Record]) -> Vec<u8> {
+    let mut sources: alloc::collections::BTreeMap<String, [u64; 3]> =
+        alloc::collections::BTreeMap::new();
+    for record in records {
+        let name = ["SYSLOG_IDENTIFIER", "UNIT", "_TRANSPORT"]
+            .iter()
+            .find_map(|field| record.get(field))
+            .map_or_else(
+                || String::from("-"),
+                |value| String::from_utf8_lossy(value).into_owned(),
+            );
+        let counts = sources.entry(name).or_default();
+        counts[0] += 1;
+        if record.priority == UNSPECIFIED {
+            counts[1] += 1;
+        }
+        if record.get(crate::record::LEVEL_SOURCE) == Some(b"derived") {
+            counts[2] += 1;
+        }
+    }
+    let mut rows: Vec<(String, [u64; 3])> = sources.into_iter().collect();
+    rows.sort_by(|a, b| {
+        b.1[1]
+            .cmp(&a.1[1])
+            .then(b.1[0].cmp(&a.1[0]))
+            .then(a.0.cmp(&b.0))
+    });
+    let mut out = Vec::new();
+    push(
+        &mut out,
+        &alloc::format!(
+            "{:<24} {:>8} {:>12} {:>8}\n",
+            "SOURCE",
+            "RECORDS",
+            "UNSPECIFIED",
+            "DERIVED"
+        ),
+    );
+    for (name, [total, unspecified, derived]) in rows {
+        push(
+            &mut out,
+            &alloc::format!("{name:<24} {total:>8} {unspecified:>12} {derived:>8}\n"),
+        );
+    }
+    out
 }

@@ -448,6 +448,13 @@ fn formats() {
     let export = show(Output::Export);
     assert!(export.contains("\nMESSAGE=it \"broke\"\n"));
     assert!(export.ends_with("\n\n"));
+    assert_eq!(
+        show(Output::Verbose),
+        "Thu 2025-10-23 14:01:02.123456 +00:00 [i=9;b=00000000000000000000000000000000]\n    \
+         PRIORITY=3\n    FERRIX_LEVEL=3\n    _HOSTNAME=box\n    MESSAGE=it \"broke\"\n    \
+         SYSLOG_IDENTIFIER=hyprix\n    SYSLOG_PID=812\n"
+    );
+    assert_eq!(Output::named("verbose"), Some(Output::Verbose));
 }
 
 #[test]
@@ -499,7 +506,15 @@ mod held_back {
         let mut out = Vec::new();
         for n in 0..1500_u64 {
             limiter.admit(
-                line("noisy.service", 6, &alloc::format!("tick {n}"), n, n),
+                // Alternating words, so the folder (which reads numbers
+                // as one) does not take them for one line repeated.
+                line(
+                    "noisy.service",
+                    6,
+                    &alloc::format!("{} {n}", if n % 2 == 0 { "tick" } else { "tock" }),
+                    n,
+                    n,
+                ),
                 n,
                 &mut out,
             );
@@ -645,6 +660,10 @@ mod held_back {
         );
         assert!(limit::parse_rules("explode where unit = x").is_err());
         assert!(limit::parse_rules("drop").is_err());
+        assert_eq!(
+            limit::parse_rules("fold 0s where message ~ \"lode flood\"").unwrap()[0].action,
+            Action::Fold(0)
+        );
         assert!(limit::parse_rules("sample 1/0 where unit = x").is_err());
     }
 
@@ -828,8 +847,12 @@ mod protocols {
         assert_eq!(bare.priority, 3);
         assert_eq!(bare.get_str("SYSLOG_IDENTIFIER"), Some("logger"));
         assert_eq!(bare.message(), b"no time");
+        // No `<PRI>`: no level, and user's facility.
         let plain = protocols::syslog(b"just text, no tag", 1, 2);
-        assert_eq!(plain.priority, 5);
+        assert_eq!(plain.priority, crate::record::UNSPECIFIED);
+        assert_eq!(plain.get_str("FERRIX_PRIORITY_SOURCE"), Some("unspecified"));
+        assert_eq!(plain.get_str("SYSLOG_FACILITY"), Some("1"));
+        assert_eq!(bare.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
         assert_eq!(plain.get("SYSLOG_IDENTIFIER"), None);
         assert_eq!(plain.message(), b"just text, no tag");
     }
@@ -864,8 +887,17 @@ mod protocols {
         datagram.extend_from_slice(b"a\nb\0c\n");
         let record = protocols::native(&datagram, 1, 2).unwrap();
         assert_eq!(record.priority, 3);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
         assert_eq!(record.message(), b"hello");
         assert_eq!(record.get("_PID"), None);
+        let unsaid =
+            protocols::native(b"MESSAGE=hi\nFERRIX_PRIORITY_SOURCE=stated\n", 1, 2).unwrap();
+        assert_eq!(unsaid.priority, crate::record::UNSPECIFIED);
+        // The sender's own claim is dropped; lode says what it found.
+        assert_eq!(
+            unsaid.get_str("FERRIX_PRIORITY_SOURCE"),
+            Some("unspecified")
+        );
         assert_eq!(record.get_str("CODE_LINE"), Some("12"));
         assert_eq!(record.get("BLOB"), Some(&b"a\nb\0c"[..]));
         assert_eq!(record.get_str("_TRANSPORT"), Some("journal"));
@@ -881,7 +913,8 @@ mod protocols {
             StreamHeader {
                 identifier: "myapp".into(),
                 unit: "my.service".into(),
-                priority: 6,
+                // Info is every stream's default: it says nothing.
+                priority: crate::record::UNSPECIFIED,
                 level_prefix: true
             }
         );
@@ -890,6 +923,9 @@ mod protocols {
         assert_eq!(broke.message(), b"broke");
         assert_eq!(broke.get_str("SYSLOG_IDENTIFIER"), Some("myapp"));
         assert_eq!(&bytes[used..used + 8], b"<3>broke");
+        let fine = protocols::stream_line(&header, b"fine", 1, 2);
+        assert_eq!(fine.priority, crate::record::UNSPECIFIED);
+        assert_eq!(fine.get_str("FERRIX_PRIORITY_SOURCE"), Some("unspecified"));
         assert!(protocols::stream_header(b"half\nheader\n").is_none());
     }
 }
@@ -939,5 +975,352 @@ mod summaries {
         assert!(summary.overlaps(Some(1001), None));
         assert!(!summary.overlaps(Some(2000), None));
         assert!(!summary.overlaps(None, Some(999)));
+    }
+}
+
+/// What the first records from a real machine (the N150, 2026-10-23)
+/// showed lode reading wrong.
+mod field_quality {
+    use alloc::vec::Vec;
+
+    use crate::console;
+    use crate::ingest::{self, Now};
+    use crate::kmsg::KernelRecord;
+    use crate::limit::{self, Limiter, MESSAGE_ID_REPEATED, MESSAGE_ID_SUPPRESSED, WINDOW_US};
+    use crate::record::{Record, UNSPECIFIED};
+
+    fn kernel(facility: u8, text: &[u8]) -> KernelRecord {
+        KernelRecord {
+            facility,
+            level: 6,
+            seq: 1,
+            usec: 1,
+            text: Vec::from(text),
+        }
+    }
+
+    const NOW: Now = Now {
+        realtime_us: 1_700_000_000_000_000,
+        monotonic_us: 1_000_000,
+    };
+
+    #[test]
+    fn digits_glued_before_a_name_are_not_the_name() {
+        for line in [
+            &b"0usbhid: keyboard on port 3"[..],
+            b"00usbhid: keyboard on port 3",
+            b"0xusbhid: keyboard on port 3",
+        ] {
+            let said = console::read(line);
+            assert_eq!(said.identifier.as_deref(), Some("usbhid"), "{line:?}");
+            assert_eq!(said.message, b"keyboard on port 3");
+        }
+        assert_eq!(console::read(b"0x1f: a value").identifier, None);
+        assert_eq!(console::read(b"9: a count").identifier, None);
+    }
+
+    #[test]
+    fn a_tracing_line_gives_its_crate_and_level() {
+        let said = console::read(
+            b"\x1b[2m2026-10-23T17:21:51.786662Z\x1b[0m \x1b[33m WARN\x1b[0m \
+              \x1b[2mrussh::server\x1b[0m\x1b[2m:\x1b[0m client went away",
+        );
+        assert_eq!(said.identifier.as_deref(), Some("russh"));
+        assert_eq!(said.level, Some(4));
+        assert_eq!(said.message, b"client went away");
+    }
+
+    #[test]
+    fn a_programs_padded_name_without_the_kernels_indent() {
+        let said = console::read(b"devmgr   intel-gt started as pid 41");
+        assert_eq!(said.identifier.as_deref(), Some("devmgr"));
+        assert_eq!(said.subsystem.as_deref(), Some("devmgr"));
+        assert_eq!(console::read(b"a sentence with words").identifier, None);
+    }
+
+    #[test]
+    fn levels_from_the_words_and_where_they_came_from() {
+        let record = ingest::from_kernel(&kernel(1, b"ahci: port 2 failed to spin up"), NOW);
+        assert_eq!(record.priority, 3);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_WORD"), Some("failed"));
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("derived"));
+        let record = ingest::from_kernel(&kernel(1, b"sshd: connection refused"), NOW);
+        assert_eq!(record.priority, 4);
+        let record = ingest::from_kernel(&kernel(1, b"gpu: table written: 0 rows refused"), NOW);
+        assert_eq!(record.priority, UNSPECIFIED);
+        let record = ingest::from_kernel(&kernel(1, b"net: 0 dropped, 0 lost"), NOW);
+        assert_eq!(record.priority, UNSPECIFIED);
+        assert_eq!(
+            record.get_str("FERRIX_PRIORITY_SOURCE"),
+            Some("unspecified")
+        );
+        assert_eq!(record.get_str("FERRIX_PRIORITY_WORD"), None);
+        // The kernel's boot checks say what they refused on purpose.
+        let record = ingest::from_kernel(&kernel(0, b"check: a bad pointer was refused"), NOW);
+        assert_eq!(record.priority, UNSPECIFIED);
+        let record = ingest::from_kernel(&kernel(0, b"WARNING: a lock held too long"), NOW);
+        assert_eq!(record.priority, 4);
+        let record = ingest::from_kernel(&kernel(0, b"pci: could not map BAR 2"), NOW);
+        assert_eq!(record.priority, 3);
+        // A level a program wrote is its own, not a guess.
+        let record = ingest::from_kernel(
+            &kernel(1, b"2026-10-23T17:21:51.786662Z ERROR app::x: it failed"),
+            NOW,
+        );
+        assert_eq!(record.priority, 3);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_WORD"), None);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
+        // And a level the kernel was given stands.
+        let mut quiet = kernel(1, b"x: failed on purpose");
+        quiet.level = 7;
+        let record = ingest::from_kernel(&quiet, NOW);
+        assert_eq!(record.priority, 7);
+        assert_eq!(record.get_str("FERRIX_PRIORITY_SOURCE"), Some("kernel"));
+    }
+
+    #[test]
+    fn every_line_that_says_who_wrote_it_has_a_subsystem() {
+        let subsystem = |facility, text: &[u8]| {
+            String::from(
+                ingest::from_kernel(&kernel(facility, text), NOW)
+                    .get_str("FERRIX_SUBSYSTEM")
+                    .unwrap_or("-"),
+            )
+        };
+        assert_eq!(subsystem(1, b"usbhid: keyboard"), "usbhid");
+        assert_eq!(subsystem(1, b"  init     sshd.service[9]: up"), "init");
+        assert_eq!(subsystem(0, b"0x606 RAPL_POWER_UNIT 0xa0e03"), "kernel");
+        assert_eq!(subsystem(1, b"words alone"), "-");
+    }
+
+    use alloc::string::String;
+
+    fn line(message: &[u8], seq: u64) -> Record {
+        let mut record = Record::new(6, seq, seq);
+        record.push("MESSAGE", message);
+        record.push("UNIT", b"hyprix.service");
+        record.push("_TRANSPORT", b"console");
+        record.push("_KERNEL_SEQNUM", alloc::format!("{seq}").as_bytes());
+        record
+    }
+
+    #[test]
+    fn lines_that_differ_only_in_numbers_fold() {
+        assert!(limit::similar(b"839x497 at 181,99", b"12x4 at 0,1000"));
+        assert!(!limit::similar(
+            b"839x497 at 181,99",
+            b"839x497 at 181,99 tiled"
+        ));
+        assert!(!limit::similar(b"port 1 up", b"port 1 down"));
+        let mut limiter = Limiter::new(Vec::new());
+        let mut out = Vec::new();
+        for n in 0..50_u64 {
+            let text = alloc::format!(
+                "DVI-D-1: not scanning out directly: no window covers the screen \
+                 (the top one is {}x497 at {},99, tiled)",
+                800 + n,
+                100 + n
+            );
+            limiter.admit(line(text.as_bytes(), n), n, &mut out);
+        }
+        limiter.admit(line(b"frame done", 50), 50, &mut out);
+        assert_eq!(out.len(), 3);
+        let folded = &out[1];
+        assert_eq!(folded.get_str("MESSAGE_ID"), Some(MESSAGE_ID_REPEATED));
+        assert_eq!(folded.get_str("REPEATED"), Some("49"));
+        assert!(
+            folded
+                .get_str("MESSAGE")
+                .unwrap()
+                .starts_with("message repeated 49 time(s), numbers varying: DVI-D-1:")
+        );
+        assert!(
+            folded
+                .get_str("LAST_MESSAGE")
+                .unwrap()
+                .contains("849x497 at 149,99")
+        );
+        let refs: Vec<&Record> = out.iter().collect();
+        assert!(ingest::kernel_gaps(&refs).unsaid.is_empty());
+        // Marks alike but for a number are each kept.
+        let mut out = Vec::new();
+        for n in 0..2_u64 {
+            let mut mark = line(
+                alloc::format!("lode-mark: capture me {n}").as_bytes(),
+                60 + n,
+            );
+            mark.push("MARK", alloc::format!("capture me {n}").as_bytes());
+            limiter.admit(mark, 60 + n, &mut out);
+        }
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn a_blank_console_line_is_counted_not_stored() {
+        let mut limiter = Limiter::new(Vec::new());
+        let mut out = Vec::new();
+        limiter.admit(line(b"", 1), 1, &mut out);
+        limiter.admit(line(b"  ", 2), 2, &mut out);
+        assert!(out.is_empty());
+        limiter.flush(10, &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].get_str("MESSAGE_ID"), Some(MESSAGE_ID_SUPPRESSED));
+        assert_eq!(out[0].get_str("N_BLANK"), Some("2"));
+        let refs: Vec<&Record> = out.iter().collect();
+        assert!(ingest::kernel_gaps(&refs).unsaid.is_empty());
+    }
+
+    #[test]
+    fn each_kind_of_rule_is_read_on_its_own() {
+        let rules = limit::parse_rules(
+            "fold 0s where unit = \"hyprix*\"\n\
+             level warning where unit = hyprix.service\n\
+             drop where unit = hyprix.service\n",
+        )
+        .unwrap();
+        let mut limiter = Limiter::new(rules);
+        let mut out = Vec::new();
+        // `level` holds the info lines, before `drop` is read.
+        limiter.admit(line(b"tick 1", 1), 1, &mut out);
+        let mut warn = line(b"tick 2", 2);
+        warn.priority = 4;
+        limiter.admit(warn.clone(), 2, &mut out);
+        // `fold 0s` matched too: the same warning again is not folded.
+        warn.seqnum = 3;
+        limiter.admit(line_at(warn, 3), 3, &mut out);
+        assert_eq!(
+            out.len(),
+            2,
+            "{:?}",
+            out.iter().map(Record::message).collect::<Vec<_>>()
+        );
+        limiter.flush(WINDOW_US + 10, &mut out);
+        let refs: Vec<&Record> = out.iter().collect();
+        assert!(ingest::kernel_gaps(&refs).unsaid.is_empty());
+    }
+
+    #[test]
+    fn the_first_limit_that_matches_is_the_one() {
+        let rules = limit::parse_rules(
+            "limit 2/10s where unit = hyprix.service\n\
+             limit 1000/30s where transport = console\n",
+        )
+        .unwrap();
+        let mut limiter = Limiter::new(rules);
+        let mut out = Vec::new();
+        for (n, word) in ["one", "two", "three", "four"].iter().enumerate() {
+            let n = n as u64;
+            limiter.admit(line(word.as_bytes(), n), n, &mut out);
+        }
+        assert_eq!(out.len(), 2);
+    }
+
+    fn line_at(mut record: Record, seq: u64) -> Record {
+        record.monotonic_us = seq;
+        record.fields.retain(|field| field.name != "_KERNEL_SEQNUM");
+        record.push("_KERNEL_SEQNUM", alloc::format!("{seq}").as_bytes());
+        record
+    }
+}
+
+/// Unspecified is a level of its own (`docs/LOGGING.md` §4.1).
+mod unspecified {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use crate::filter::{self, priority_range};
+    use crate::format::{Output, level_table, write};
+    use crate::record::{LevelSource, Record, UNSPECIFIED};
+    use crate::time::Zone;
+
+    fn at(level: u8, id: &str) -> Record {
+        let mut record = Record::new(level, 1_761_228_062_000_000, 1);
+        record.set_level(level, LevelSource::Stated);
+        record.push("MESSAGE", b"m");
+        record.push("SYSLOG_IDENTIFIER", id.as_bytes());
+        record
+    }
+
+    #[test]
+    fn ranges_leave_it_out_and_it_can_be_asked_for() {
+        let none = at(UNSPECIFIED, "a");
+        let err = at(3, "a");
+        let info = at(6, "a");
+        let err_only = priority_range("err").unwrap();
+        assert!(err_only.matches(&err));
+        assert!(!err_only.matches(&none));
+        assert!(!priority_range("0..7").unwrap().matches(&none));
+        let both = priority_range("err,unspecified").unwrap();
+        assert!(both.matches(&err) && both.matches(&none) && !both.matches(&info));
+        assert!(priority_range("unspecified").unwrap().matches(&none));
+        assert!(priority_range("err..unspecified").is_err());
+        assert!(priority_range("loud").is_err());
+        let parsed = |text| filter::parse(text).unwrap();
+        assert!(parsed("level = unspecified").matches(&none));
+        assert!(!parsed("level = unspecified").matches(&info));
+        assert!(!parsed("priority > warning").matches(&none));
+        assert!(parsed("priority != err").matches(&none));
+    }
+
+    #[test]
+    fn every_format_shows_it_and_none_calls_it_info() {
+        let zone = Zone::utc();
+        let show = |record: &Record, output| {
+            let mut out = Vec::new();
+            write(record, output, &zone, &mut out);
+            String::from_utf8(out).unwrap()
+        };
+        let none = at(UNSPECIFIED, "a");
+        assert!(show(&none, Output::Human).contains(" ? a: m"));
+        let json = show(&none, Output::Json);
+        assert!(!json.contains("\"PRIORITY\""), "{json}");
+        assert!(json.contains("\"FERRIX_LEVEL\":\"unspecified\""));
+        assert!(json.contains("\"FERRIX_PRIORITY_SOURCE\":\"unspecified\""));
+        let export = show(&none, Output::Export);
+        assert!(!export.contains("\nPRIORITY="));
+        assert!(export.contains("\nFERRIX_LEVEL=unspecified\n"));
+        let known = show(&at(3, "a"), Output::Json);
+        assert!(known.contains("\"PRIORITY\":\"3\"") && known.contains("\"FERRIX_LEVEL\":\"3\""));
+    }
+
+    #[test]
+    fn the_level_table_puts_the_most_unspecified_first() {
+        let mut derived = at(3, "b");
+        derived.set_level(3, LevelSource::Derived);
+        let records = [
+            at(6, "a"),
+            at(UNSPECIFIED, "b"),
+            at(UNSPECIFIED, "b"),
+            derived,
+            at(UNSPECIFIED, "c"),
+        ];
+        let table = String::from_utf8(level_table(&records)).unwrap();
+        let rows: Vec<Vec<&str>> = table
+            .lines()
+            .map(|line| line.split_whitespace().collect())
+            .collect();
+        assert_eq!(rows[0], ["SOURCE", "RECORDS", "UNSPECIFIED", "DERIVED"]);
+        assert_eq!(rows[1], ["b", "3", "2", "1"]);
+        assert_eq!(rows[2], ["c", "1", "1", "0"]);
+        assert_eq!(rows[3], ["a", "1", "0", "0"]);
+    }
+
+    #[test]
+    fn a_stored_record_always_says_where_its_level_came_from() {
+        let mut own = Record::new(5, 0, 0);
+        own.stamp_level_source();
+        assert_eq!(own.get_str("FERRIX_PRIORITY_SOURCE"), Some("stated"));
+        let mut none = Record::new(UNSPECIFIED, 0, 0);
+        none.stamp_level_source();
+        assert_eq!(none.get_str("FERRIX_PRIORITY_SOURCE"), Some("unspecified"));
+        none.set_level(UNSPECIFIED, LevelSource::Derived);
+        assert_eq!(none.get_str("FERRIX_PRIORITY_SOURCE"), Some("unspecified"));
+        assert_eq!(
+            none.fields
+                .iter()
+                .filter(|field| field.name == "FERRIX_PRIORITY_SOURCE")
+                .count(),
+            1
+        );
     }
 }

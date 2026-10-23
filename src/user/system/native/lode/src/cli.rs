@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use ferrix_lode_core::filter::{self, Expr, Op, Test};
 use ferrix_lode_core::format::{self, Output};
 use ferrix_lode_core::ingest;
-use ferrix_lode_core::record::{Record, level};
+use ferrix_lode_core::record::{Record, UNSPECIFIED, level};
 use ferrix_lode_core::segment::{self, Header};
 use ferrix_lode_core::summary::Summary;
 use ferrix_lode_core::time::{self, Civil, Zone};
@@ -33,6 +33,7 @@ COMMAND | lode cat [-t ID] [-p PRIO] [--journal]
 lode bench RECORDS [DIR]             time a unit's last 50 lines with and without summaries
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
+lode levels [-b ...] [filters]       records with no level, and with a guessed one, per source
 
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
       --list-boots       the boots the store holds
@@ -40,7 +41,8 @@ lode delete --where EXPR [-b ...]    remove the matching records (root's)
   -u, --unit UNIT        a unit's records (globs; 'name' is name.service)
   -t, --identifier ID    a program's records;  -T ID leaves one out
   -s, --session ID       a session's records
-  -p, --priority P[..Q]  at most P (a level's name or number), or P to Q
+  -p, --priority P[..Q]  at most P (a level's name or number), or P to Q; never a
+                         record with no level unless asked: -p err,unspecified
   -g, --grep TEXT        records whose message has TEXT (globs; any case if lower case)
   -S, --since TIME       -U, --until TIME (now, today, -5min, 2026-10-23 14:01, @EPOCH)
       --since-mark TEXT  --until-mark TEXT: between the latest `lode mark`s that match
@@ -49,7 +51,7 @@ lode delete --where EXPR [-b ...]    remove the matching records (root's)
   -n, --lines N          the last N;  -r, --reverse newest first
   -f, --follow           go on printing what is stored after
   -o, --output FORMAT    human short short-iso short-iso-precise short-precise
-                         short-monotonic with-unit cat json export
+                         short-monotonic with-unit cat json export verbose
       --after-cursor C   after the record C names;  --show-cursor prints the last's
   -D, --directory DIR    read DIR instead of /var/log/journal and /run/log/journal
       --utc              times in UTC
@@ -96,6 +98,8 @@ struct Options {
     utc: bool,
     /// `verify --kernel`.
     kernel_gaps: bool,
+    /// `lode levels`: the level table instead of the records.
+    levels: bool,
 }
 
 /// Run the reader; the exit status.
@@ -109,6 +113,17 @@ pub(crate) fn run() -> i32 {
         Some("cat") => return cat(rest.get(1..).unwrap_or_default()),
         Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
+        Some("levels") => {
+            return match parse(rest.get(1..).unwrap_or_default()) {
+                Ok(mut options) => {
+                    options.levels = true;
+                    options.lines = None;
+                    options.follow = false;
+                    show(&options)
+                }
+                Err(why) => usage(&why),
+            };
+        }
         Some("delete") => {
             return match parse(rest.get(1..).unwrap_or_default()) {
                 Ok(options) => delete(&options),
@@ -295,7 +310,7 @@ fn selection(
         }
         "-p" | "--priority" => add(
             &mut options.expr,
-            priority_expr(&value(flag, inline, words, "a priority")?)?,
+            filter::priority_range(&value(flag, inline, words, "a priority")?)?,
         ),
         "-g" | "--grep" => {
             options.grep = Some(value(flag, inline, words, "a pattern")?.into_bytes());
@@ -392,27 +407,6 @@ fn unit_expr(unit: &str) -> Expr {
     }
     let service = alloc::format!("{unit}.service");
     exact.or(Expr::Test(Test::field("unit", Op::Eq, service.as_bytes())))
-}
-
-/// `-p P` (0 to P) or `-p P..Q`.
-fn priority_expr(range: &str) -> Result<Expr, String> {
-    let bad = || alloc::format!("{range}: not a priority");
-    let (low, high) = match range.split_once("..") {
-        Some((from, to)) => (level(from).ok_or_else(bad)?, level(to).ok_or_else(bad)?),
-        None => (0, level(range).ok_or_else(bad)?),
-    };
-    let (low, high) = (low.min(high), low.max(high));
-    let at_least = Expr::Test(Test::field(
-        "priority",
-        Op::Ge,
-        alloc::format!("{low}").as_bytes(),
-    ));
-    let at_most = Expr::Test(Test::field(
-        "priority",
-        Op::Le,
-        alloc::format!("{high}").as_bytes(),
-    ));
-    Ok(at_least.and(at_most))
 }
 
 /// `30s`, `2min`, `1h`, `500ms`, a bare number of seconds: microseconds.
@@ -652,7 +646,14 @@ fn field_group(group: &[(String, Vec<u8>)], record: &Record) -> bool {
         group
             .iter()
             .filter(|(each, _)| each == name)
-            .any(|(_, value)| record.get(name) == Some(value.as_slice()))
+            .any(|(_, value)| match *name {
+                // Not stored as fields: the level is the record's own.
+                "PRIORITY" | "FERRIX_LEVEL" => {
+                    let known = record.priority != UNSPECIFIED || *name == "FERRIX_LEVEL";
+                    known && record.level_text().as_bytes() == value.as_slice()
+                }
+                _ => record.get(name) == Some(value.as_slice()),
+            })
     })
 }
 
@@ -770,6 +771,10 @@ fn show(options: &Options) -> i32 {
             (records, all.last().map_or(0, |record| record.seqnum))
         }
     };
+    if options.levels {
+        out(&format::level_table(&records));
+        return 0;
+    }
     let mut last = last;
     if options.reverse {
         records.reverse();
@@ -1317,7 +1322,8 @@ fn provide_stub(words: &[String]) -> i32 {
 /// sends it, or with `--journal` a native-protocol datagram a line.
 fn cat(words: &[String]) -> i32 {
     let mut identifier = String::from("lode-cat");
-    let mut priority = 6_u8;
+    // No `-p`: no level, which the log shows as unspecified.
+    let mut priority: Option<u8> = None;
     let mut journal = false;
     let mut at = 0;
     while let Some(word) = words.get(at) {
@@ -1331,11 +1337,11 @@ fn cat(words: &[String]) -> i32 {
                 None => return usage("cat -t needs an identifier"),
             },
             "-p" | "--priority" => match words.get(at).and_then(|value| level(value)) {
-                Some(value) => {
-                    priority = value;
+                Some(value) if value != UNSPECIFIED => {
+                    priority = Some(value);
                     at += 1;
                 }
-                None => return usage("cat -p needs a priority"),
+                _ => return usage("cat -p needs a priority"),
             },
             "--journal" => journal = true,
             other => {
@@ -1367,7 +1373,9 @@ fn cat(words: &[String]) -> i32 {
         }
     };
     if !journal {
-        let header = alloc::format!("{identifier}\n\n{priority}\n1\n0\n0\n0\n");
+        // A stream's info is every unit's default and reads as no level,
+        // so `-p info` is said on each line instead (`<6>`).
+        let header = alloc::format!("{identifier}\n\n{}\n1\n0\n0\n0\n", priority.unwrap_or(6));
         if sys::write_all(fd, header.as_bytes()).is_err() {
             return 1;
         }
@@ -1389,7 +1397,7 @@ fn cat(words: &[String]) -> i32 {
                     .rposition(|&byte| byte == b'\n')
                     .map_or(0, |end| end + 1)
             };
-            let send: Vec<u8> = held.drain(..take).collect();
+            let send = info_said(priority, held.drain(..take).collect());
             if !send.is_empty() && sys::write_all(fd, &send).is_err() {
                 return 1;
             }
@@ -1416,10 +1424,27 @@ fn cat(words: &[String]) -> i32 {
     0
 }
 
+/// A stream's `chunk` of whole lines, each begun `<6>` when `-p info` was
+/// asked for: a stream's own info is its default, and reads as no level.
+fn info_said(priority: Option<u8>, chunk: Vec<u8>) -> Vec<u8> {
+    if priority != Some(6) {
+        return chunk;
+    }
+    let mut said = Vec::with_capacity(chunk.len() + 16);
+    for line in chunk.split_inclusive(|&byte| byte == b'\n') {
+        said.extend_from_slice(b"<6>");
+        said.extend_from_slice(line);
+    }
+    said
+}
+
 /// One line as a native-protocol datagram on the connected `fd`.
-fn send_native(fd: usize, identifier: &str, priority: u8, line: &[u8]) {
-    let mut datagram =
-        alloc::format!("PRIORITY={priority}\nSYSLOG_IDENTIFIER={identifier}\n").into_bytes();
+fn send_native(fd: usize, identifier: &str, priority: Option<u8>, line: &[u8]) {
+    let mut datagram = Vec::new();
+    if let Some(priority) = priority {
+        datagram.extend_from_slice(alloc::format!("PRIORITY={priority}\n").as_bytes());
+    }
+    datagram.extend_from_slice(alloc::format!("SYSLOG_IDENTIFIER={identifier}\n").as_bytes());
     if line.contains(&b'\n') {
         datagram.extend_from_slice(b"MESSAGE\n");
         datagram.extend_from_slice(&u64::try_from(line.len()).unwrap_or(0).to_le_bytes());

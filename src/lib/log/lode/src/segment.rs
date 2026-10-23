@@ -10,7 +10,7 @@
 //!
 //! entry    0  u32 length (the whole entry, trailer included)
 //!          4  u32 CRC-32C of bytes 8 .. length
-//!          8  u8 kind (1, a record)    9  u8 priority   10  u16 zero
+//!          8  u8 kind (1, a record)    9  u8 priority (8: none)   10  u16 zero
 //!         12  u32 field count         16  u64 sequence number
 //!         24  u64 realtime us         32  u64 monotonic us
 //!         40  i32 UTC offset s        44  u32 zero
@@ -117,7 +117,7 @@ pub fn encode_record(record: &Record, out: &mut Vec<u8>) {
     let start = out.len();
     out.extend_from_slice(&[0; 8]);
     out.push(KIND_RECORD);
-    out.push(record.priority.min(7));
+    out.push(record.priority.min(crate::record::UNSPECIFIED));
     out.extend_from_slice(&[0; 2]);
     let fields: Vec<&Field> = record
         .fields

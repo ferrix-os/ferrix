@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use crate::console;
 use crate::kmsg::KernelRecord;
-use crate::record::Record;
+use crate::record::{LevelSource, Record, UNSPECIFIED};
 
 /// `MESSAGE_ID` of a record saying kernel records were lost.
 pub const MESSAGE_ID_LOST: &str = "5b3c2a4e0d6f4a1b9c8e7f6a5d4c3b2a";
@@ -53,11 +53,30 @@ pub fn from_kernel(kernel: &KernelRecord, now: Now) -> Record {
     let seq = alloc::format!("{}", kernel.seq);
     let usec = alloc::format!("{}", kernel.usec);
     record.push("MESSAGE", &said.message);
+    // The kernel's own lines and programs' console output all come at
+    // info, which says nothing: a level the kernel was handed (a
+    // `/dev/kmsg` write's `<3>`) is the kernel's; otherwise the level the
+    // line says (a `tracing` WARN), else the one its wording says, marked
+    // derived with the words; else none (`docs/LOGGING.md` §4.1).
+    if kernel.level != 6 {
+        record.set_level(kernel.level, LevelSource::Kernel);
+    } else if let Some(level) = said.level {
+        record.set_level(level, LevelSource::Stated);
+    } else if let Some((level, word)) = guess_level(&said.message, kernel.facility == 0) {
+        record.set_level(level, LevelSource::Derived);
+        record.push("FERRIX_PRIORITY_WORD", word.as_bytes());
+    } else {
+        record.set_level(UNSPECIFIED, LevelSource::Unspecified);
+    }
     if kernel.facility == 0 {
         record.push("SYSLOG_IDENTIFIER", b"kernel");
         record.push("_TRANSPORT", b"kernel");
         if let Some(crash) = console::crash(&kernel.text) {
-            record.priority = 3;
+            record.set_level(3, LevelSource::Derived);
+            record
+                .fields
+                .retain(|field| field.name != "FERRIX_PRIORITY_WORD");
+            record.push("FERRIX_PRIORITY_WORD", b"signal");
             record.push("MESSAGE_ID", MESSAGE_ID_CRASH.as_bytes());
             record.push("CRASH_PID", alloc::format!("{}", crash.pid).as_bytes());
             record.push("CRASH_SIGNAL", crash.signal.as_bytes());
@@ -86,7 +105,14 @@ pub fn from_kernel(kernel: &KernelRecord, now: Now) -> Record {
         }
         record.push("_TRANSPORT", b"console");
     }
-    if let Some(subsystem) = &said.subsystem {
+    // The subsystem a line names, else the program that wrote it: every
+    // line that says who wrote it has one, so a viewer can group by it.
+    let subsystem = said
+        .subsystem
+        .as_deref()
+        .or(said.identifier.as_deref())
+        .or((kernel.facility == 0).then_some("kernel"));
+    if let Some(subsystem) = subsystem {
         record.push("FERRIX_SUBSYSTEM", subsystem.as_bytes());
     }
     record.push("SYSLOG_FACILITY", facility.as_bytes());
@@ -245,4 +271,61 @@ pub struct KernelGaps {
     pub said_lost: u64,
     /// Gaps, `from..to`, no record accounts for.
     pub unsaid: Vec<(u64, u64)>,
+}
+
+/// The level a line's wording says, and the words that said it: `failed`,
+/// `could not`, `cannot`, `unable` and `error:` an error; `refused`,
+/// `denied`, `lost`, `dropped`, `timed out` and `warning` a warning --
+/// none of them after `0` or `no`, which is a count of nothing
+/// (`0 refused`); `FERRIX-PANIC` critical. The kernel's own lines report
+/// what its boot checks refused on purpose, so for `kernel` only the error
+/// words and an upper-case `WARNING:` count.
+#[must_use]
+pub fn guess_level(message: &[u8], kernel: bool) -> Option<(u8, &'static str)> {
+    let text = core::str::from_utf8(message).ok()?;
+    if text.contains("FERRIX-PANIC") {
+        return Some((2, "FERRIX-PANIC"));
+    }
+    let shouted = text.contains("WARNING:");
+    let lower = text.to_ascii_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == ':'))
+        .filter(|word| !word.is_empty())
+        .collect();
+    // `0 lost`, `no packets dropped`, `0 rows refused`: a count of none,
+    // one or two words before.
+    let counted = |index: usize| {
+        (1..=2).any(|back| {
+            index
+                .checked_sub(back)
+                .and_then(|before| words.get(before))
+                .is_some_and(|before| *before == "0" || *before == "no")
+        })
+    };
+    let mut found: Option<(u8, &'static str)> = None;
+    for (index, word) in words.iter().enumerate() {
+        let next = words.get(index + 1).copied().unwrap_or_default();
+        let hit: Option<(u8, &'static str)> = match (*word, next) {
+            ("failed" | "failed:", _) => Some((3, "failed")),
+            ("could", "not") => Some((3, "could not")),
+            ("cannot", _) => Some((3, "cannot")),
+            ("unable", _) => Some((3, "unable")),
+            ("error:", _) => Some((3, "error")),
+            ("refused" | "refused:", _) => Some((4, "refused")),
+            ("denied", _) => Some((4, "denied")),
+            ("lost", _) => Some((4, "lost")),
+            ("dropped", _) => Some((4, "dropped")),
+            ("timed", "out") => Some((4, "timed out")),
+            ("warning" | "warning:", _) => Some((4, "warning")),
+            _ => None,
+        };
+        let hit = hit.filter(|(level, _)| !kernel || *level <= 3);
+        if let Some(hit) = hit
+            && !counted(index)
+            && found.is_none_or(|(level, _)| hit.0 < level)
+        {
+            found = Some(hit);
+        }
+    }
+    found.or_else(|| shouted.then_some((4, "WARNING:")))
 }

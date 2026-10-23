@@ -14,8 +14,10 @@
 //!
 //! `=` and `!=` match a glob (`*`, `?`, `[...]`, `[!...]`) against the whole
 //! value; `~` and `!~` look for it anywhere in the value (a regular
-//! expression's place, which a later step fills). `priority` compares levels
-//! by number or name (`priority <= err`). The short names `unit`, `id`,
+//! expression's place, which a later step fills). `priority` (or `level`)
+//! compares levels by number or name (`priority <= err`); `unspecified`, a
+//! record with no level, is outside every range and matches only `=` and
+//! `!=` (`level = unspecified`). The short names `unit`, `id`,
 //! `message`, `pid`, `transport`, `subsystem`, `mark`, `crash`, `rule` and `session` stand for the
 //! fields they mean; any other name is a field's own, upper case. A test on
 //! a field the record does not have is false for `=`, `<`, `>` and `~`, and
@@ -25,7 +27,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::record::{Record, level};
+use crate::record::{Record, UNSPECIFIED, level};
 
 /// A parsed expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +133,15 @@ impl Test {
                 let Some(wanted) = core::str::from_utf8(&self.value).ok().and_then(level) else {
                     return false;
                 };
+                // Unspecified is a level of its own, outside every range:
+                // only `=` and `!=` compare with it.
+                if record.priority == UNSPECIFIED || wanted == UNSPECIFIED {
+                    return match self.op {
+                        Op::Eq | Op::Has => record.priority == wanted,
+                        Op::Ne | Op::HasNot => record.priority != wanted,
+                        _ => false,
+                    };
+                }
                 compare(self.op, record.priority.cmp(&wanted), || {
                     record.priority == wanted
                 })
@@ -182,7 +193,9 @@ fn order(left: &[u8], right: &[u8]) -> core::cmp::Ordering {
 /// What a name in an expression reads.
 fn selector(name: &str) -> Selector {
     let names: &[&str] = match name {
-        "priority" | "PRIORITY" | "prio" => return Selector::Priority,
+        "priority" | "PRIORITY" | "prio" | "level" | "FERRIX_LEVEL" => {
+            return Selector::Priority;
+        }
         "unit" => &["_SYSTEMD_UNIT", "UNIT"],
         "id" | "identifier" => &["SYSLOG_IDENTIFIER"],
         "message" | "msg" => &["MESSAGE"],
@@ -501,4 +514,47 @@ impl Parser {
         let name = String::from_utf8_lossy(&name).into_owned();
         Ok(Expr::Test(Test::field(&name, op, &value)))
     }
+}
+
+/// What `-p` takes: `P` (0 to P), `P..Q`, `unspecified`, or several of them
+/// joined by commas (`-p err,unspecified`). A range never holds
+/// `unspecified`: a record with no level is shown only when asked for.
+///
+/// # Errors
+///
+/// A word that names no level.
+pub fn priority_range(text: &str) -> Result<Expr, String> {
+    let bad = |word: &str| alloc::format!("{word}: not a priority");
+    let mut all: Option<Expr> = None;
+    for part in text.split(',').map(str::trim) {
+        let test = |op, level: u8| {
+            Expr::Test(Test::field(
+                "priority",
+                op,
+                crate::record::level_name_or_number(level).as_bytes(),
+            ))
+        };
+        let expr = if level(part) == Some(UNSPECIFIED) {
+            test(Op::Eq, UNSPECIFIED)
+        } else {
+            let (low, high) = match part.split_once("..") {
+                Some((from, to)) => (
+                    level(from)
+                        .filter(|&l| l != UNSPECIFIED)
+                        .ok_or_else(|| bad(part))?,
+                    level(to)
+                        .filter(|&l| l != UNSPECIFIED)
+                        .ok_or_else(|| bad(part))?,
+                ),
+                None => (0, level(part).ok_or_else(|| bad(part))?),
+            };
+            let (low, high) = (low.min(high), low.max(high));
+            test(Op::Ge, low).and(test(Op::Le, high))
+        };
+        all = Some(match all {
+            Some(before) => before.or(expr),
+            None => expr,
+        });
+    }
+    all.ok_or_else(|| bad(text))
 }

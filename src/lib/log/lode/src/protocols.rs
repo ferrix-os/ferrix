@@ -10,7 +10,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::record::{Record, valid_name};
+use crate::record::{LevelSource, Record, UNSPECIFIED, valid_name};
 
 /// A syslog datagram, RFC 5424 when it begins `<PRI>1 `, otherwise RFC 3164
 /// read leniently, as journald's `syslog_parse_identifier` reads it:
@@ -20,9 +20,14 @@ use crate::record::{Record, valid_name};
 pub fn syslog(datagram: &[u8], realtime_us: u64, monotonic_us: u64) -> Record {
     let datagram = datagram.strip_suffix(b"\n").unwrap_or(datagram);
     let (priority, rest) = pri(datagram);
-    let level = u8::try_from(priority & 7).unwrap_or(6);
-    let facility = priority >> 3;
-    let mut record = Record::new(level, realtime_us, monotonic_us);
+    let mut record = Record::new(UNSPECIFIED, realtime_us, monotonic_us);
+    // A datagram without `<PRI>` says no level: user's facility, as
+    // journald takes it, and an unspecified level.
+    let facility = priority.map_or(1, |priority| priority >> 3);
+    let level = priority.map_or(UNSPECIFIED, |priority| {
+        u8::try_from(priority & 7).unwrap_or(UNSPECIFIED)
+    });
+    record.set_level(level, LevelSource::Stated);
     if let Some(rest) = rest.strip_prefix(b"1 ") {
         rfc5424(rest, &mut record);
     } else {
@@ -33,8 +38,8 @@ pub fn syslog(datagram: &[u8], realtime_us: u64, monotonic_us: u64) -> Record {
     record
 }
 
-/// `<PRI>` and what follows; `<13>` (user.notice) where there is none.
-fn pri(bytes: &[u8]) -> (u32, &[u8]) {
+/// `<PRI>` and what follows; `None` where there is none.
+fn pri(bytes: &[u8]) -> (Option<u32>, &[u8]) {
     if let Some(rest) = bytes.strip_prefix(b"<")
         && let Some(end) = rest.iter().position(|&byte| byte == b'>')
         && end <= 3
@@ -43,9 +48,9 @@ fn pri(bytes: &[u8]) -> (u32, &[u8]) {
             .and_then(|text| text.parse::<u32>().ok())
         && number <= 191
     {
-        return (number, rest.get(end + 1..).unwrap_or_default());
+        return (Some(number), rest.get(end + 1..).unwrap_or_default());
     }
-    (13, bytes)
+    (None, bytes)
 }
 
 /// RFC 3164: an optional timestamp, then `ident[pid]: message`.
@@ -165,7 +170,7 @@ fn structured(tail: &[u8]) -> (Option<&[u8]>, &[u8]) {
 /// level.
 #[must_use]
 pub fn native(datagram: &[u8], realtime_us: u64, monotonic_us: u64) -> Option<Record> {
-    let mut record = Record::new(6, realtime_us, monotonic_us);
+    let mut record = Record::new(UNSPECIFIED, realtime_us, monotonic_us);
     let mut at = 0;
     while at < datagram.len() {
         let rest = datagram.get(at..)?;
@@ -193,6 +198,7 @@ pub fn native(datagram: &[u8], realtime_us: u64, monotonic_us: u64) -> Option<Re
             }
         }
     }
+    record.stamp_level_source();
     record.push("_TRANSPORT", b"journal");
     Some(record)
 }
@@ -206,7 +212,7 @@ fn take(record: &mut Record, name: &str, value: &[u8]) {
             .and_then(|text| text.trim().parse::<u8>().ok())
             .filter(|&level| level <= 7)
         {
-            record.priority = level;
+            record.set_level(level, LevelSource::Stated);
         }
         return;
     }
@@ -223,7 +229,9 @@ pub struct StreamHeader {
     pub identifier: String,
     /// The unit the sender says it is, kept as `UNIT` (untrusted).
     pub unit: String,
-    /// The level a line is at unless it says otherwise.
+    /// The level a line is at unless it says otherwise; [`UNSPECIFIED`]
+    /// for info, the level every unit's stream is given unless its unit
+    /// says another (`docs/LOGGING.md` §4.1).
     pub priority: u8,
     /// Whether a line's `<N>` prefix sets its level.
     pub level_prefix: bool,
@@ -251,7 +259,9 @@ pub fn stream_header(bytes: &[u8]) -> Option<(StreamHeader, usize)> {
         StreamHeader {
             identifier: String::from(*lines.first()?),
             unit: String::from(*lines.get(1)?),
-            priority: number(2).filter(|&level| level <= 7).unwrap_or(6),
+            priority: number(2)
+                .filter(|&level| level <= 7 && level != 6)
+                .unwrap_or(UNSPECIFIED),
             level_prefix: number(3) == Some(1),
         },
         at,
@@ -275,7 +285,8 @@ pub fn stream_line(
         priority = (digit - b'0').min(7);
         text = rest.get(2..).unwrap_or_default();
     }
-    let mut record = Record::new(priority, realtime_us, monotonic_us);
+    let mut record = Record::new(UNSPECIFIED, realtime_us, monotonic_us);
+    record.set_level(priority, LevelSource::Stated);
     record.push_untrusted("MESSAGE", text);
     if !header.identifier.is_empty() {
         record.push_untrusted("SYSLOG_IDENTIFIER", header.identifier.as_bytes());

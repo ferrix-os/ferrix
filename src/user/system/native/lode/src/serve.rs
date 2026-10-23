@@ -631,6 +631,8 @@ impl Store {
         }
         let mut bytes: Vec<(u64, Vec<u8>)> = self.classes.iter().map(|_| (0, Vec::new())).collect();
         for mut record in records {
+            // Every stored record says where its level came from.
+            record.stamp_level_source();
             record.seqnum = self.next;
             seqnums.push(self.next);
             record.utc_offset_s = zone.offset_at(record.realtime_us);

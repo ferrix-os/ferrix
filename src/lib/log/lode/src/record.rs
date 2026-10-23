@@ -19,6 +19,44 @@ pub const VALUE_MAX: usize = 64 * 1024;
 /// The longest `MESSAGE` lode keeps; the rest is cut and `_TRUNCATED=1` added.
 pub const MESSAGE_MAX: usize = 256 * 1024;
 
+/// The level of a record that does not say one: a level of its own, never
+/// read as info (`docs/LOGGING.md` §4.1). journald's records may lack
+/// `PRIORITY`; this is lode's name for that.
+pub const UNSPECIFIED: u8 = 8;
+
+/// The field that says where a record's level came from.
+pub const LEVEL_SOURCE: &str = "FERRIX_PRIORITY_SOURCE";
+
+/// The level every record shows in `json`, `export` and `verbose`, a
+/// number 0 to 7 or `unspecified`; made from the record, never stored.
+pub const LEVEL_FIELD: &str = "FERRIX_LEVEL";
+
+/// Where a record's level came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LevelSource {
+    /// The writer said it: `PRIORITY=`, `<N>`, a `tracing` level, lode's own.
+    Stated,
+    /// The kernel was given it with the line (a `/dev/kmsg` write's `<N>`).
+    Kernel,
+    /// Read from the line's wording (`failed`, `refused`): a guess, marked.
+    Derived,
+    /// Nobody said one.
+    Unspecified,
+}
+
+impl LevelSource {
+    /// Its value in [`LEVEL_SOURCE`].
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LevelSource::Stated => "stated",
+            LevelSource::Kernel => "kernel",
+            LevelSource::Derived => "derived",
+            LevelSource::Unspecified => "unspecified",
+        }
+    }
+}
+
 /// One field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
@@ -39,7 +77,7 @@ pub struct Record {
     pub monotonic_us: u64,
     /// The UTC offset in force when it was stored, in seconds.
     pub utc_offset_s: i32,
-    /// Its level, 0 (emerg) to 7 (debug).
+    /// Its level, 0 (emerg) to 7 (debug), or [`UNSPECIFIED`].
     pub priority: u8,
     /// The boot it belongs to: its segment's, not an entry's own.
     pub boot_id: [u8; 16],
@@ -58,7 +96,7 @@ impl Record {
             realtime_us,
             monotonic_us,
             utc_offset_s: 0,
-            priority: priority.min(7),
+            priority: priority.min(UNSPECIFIED),
             boot_id: [0; 16],
             host: Rc::from(""),
             fields: Vec::new(),
@@ -89,10 +127,44 @@ impl Record {
         }
     }
 
+    /// Set the level and say where it came from, in [`LEVEL_SOURCE`]: an
+    /// unspecified level is always [`LevelSource::Unspecified`].
+    pub fn set_level(&mut self, level: u8, source: LevelSource) {
+        self.priority = level.min(UNSPECIFIED);
+        let source = if self.priority == UNSPECIFIED {
+            LevelSource::Unspecified
+        } else {
+            source
+        };
+        self.fields.retain(|field| field.name != LEVEL_SOURCE);
+        self.push(LEVEL_SOURCE, source.as_str().as_bytes());
+    }
+
+    /// Say where the level came from if nothing has: `stated` for a known
+    /// level (lode's own records, set where they are made), `unspecified`
+    /// otherwise. The store calls this on every record it writes.
+    pub fn stamp_level_source(&mut self) {
+        if self.get(LEVEL_SOURCE).is_none() {
+            let source = if self.priority == UNSPECIFIED {
+                LevelSource::Unspecified
+            } else {
+                LevelSource::Stated
+            };
+            self.push(LEVEL_SOURCE, source.as_str().as_bytes());
+        }
+    }
+
+    /// The level as [`LEVEL_FIELD`] shows it.
+    #[must_use]
+    pub fn level_text(&self) -> String {
+        level_name_or_number(self.priority)
+    }
+
     /// Add a field a sender gave: one whose name begins with `_` is
-    /// dropped, as journald drops it, since only lode writes those.
+    /// dropped, as journald drops it, since only lode writes those; so are
+    /// [`LEVEL_SOURCE`] and [`LEVEL_FIELD`], which say what lode found.
     pub fn push_untrusted(&mut self, name: &str, value: &[u8]) {
-        if !name.starts_with('_') {
+        if !name.starts_with('_') && name != LEVEL_SOURCE && name != LEVEL_FIELD {
             self.push(name, value);
         }
     }
@@ -157,7 +229,17 @@ pub const LEVELS: [&str; 8] = [
     "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug",
 ];
 
-/// The level `word` names: a number 0 to 7 or a name (`warn` and `error`
+/// A level as [`LEVEL_FIELD`] spells it: its number, or `unspecified`.
+#[must_use]
+pub fn level_name_or_number(level: u8) -> String {
+    if level == UNSPECIFIED {
+        String::from("unspecified")
+    } else {
+        alloc::format!("{level}")
+    }
+}
+
+/// The level `word` names: `unspecified`, a number 0 to 7 or a name (`warn` and `error`
 /// as well, as syslog's tools take them).
 #[must_use]
 pub fn level(word: &str) -> Option<u8> {
@@ -168,6 +250,7 @@ pub fn level(word: &str) -> Option<u8> {
         "warn" => "warning",
         "error" => "err",
         "panic" => "emerg",
+        "unspecified" => return Some(UNSPECIFIED),
         other => other,
     };
     LEVELS

@@ -69,12 +69,15 @@ ExecStart=/bin/busybox sh /lib/lode-test.sh
 ";
 
 /// The rules the flood's image carries: `noisy` is limited over two
-/// seconds and `dropme` dropped; every other console line, the flood's
+/// seconds and `dropme` dropped; `noisy`'s lines and the flood's differ
+/// only in their numbers, so folding is off for them (`fold 0s`); every other console line, the flood's
 /// included, is not limited, so the row counts the flood whole -- even a
 /// line the kernel cut short, which no rule naming its text would match.
 const TEST_RULES: &str = "\
 # test-log's rules (tools/common/xtask/src/lode.rs).
 limit 100/2s where id = noisy
+fold 0s where id = noisy
+fold 0s where message ~ \"lode flood\"
 drop where id = dropme
 limit 100000/30s where transport = console
 ";
@@ -100,10 +103,20 @@ i=0; while [ $i -lt 20 ]; do echo "<14>dropme: line $i" > /dev/kmsg; i=$((i+1));
 echo "<11>erring: an error" > /dev/kmsg
 echo "<14>deleteme: one" > /dev/kmsg
 echo "<14>deleteme: two" > /dev/kmsg
+# Field quality: lines alike but for their numbers folded, a name with a
+# number's tail glued on, a line with no level, one with a level read from
+# its words.
+i=0; while [ $i -lt 20 ]; do echo "<14>similar: frame $i at $((i*3)),99" > /dev/kmsg; i=$((i+1)); done
+echo "<14>similar: done" > /dev/kmsg
+echo "0usbhid: glued" > /dev/kmsg
+echo "<14>levelless: just words" > /dev/kmsg
+echo "<14>guessy: port 2 failed to start" > /dev/kmsg
 $bb sleep 11
 say "folded: $(/bin/lode -b -t folder -o cat | $bb grep -c '^the same line$') $(/bin/lode -b -t folder -o json | $bb grep -c '"REPEATED":"49"')"
 say "limited: $(/bin/lode -b -t noisy -o cat | $bb grep -c '^line ') $(/bin/lode -b -t lode -o json | $bb grep '"SUPPRESSED_SOURCE":"noisy"' | $bb sed 's/.*"N_SUPPRESSED":"\([0-9]*\)".*/\1/' | $bb head -n 1)"
 say "dropped: $(/bin/lode -b -t dropme -o cat | $bb wc -l) $(/bin/lode -b --where 'rule = "drop*"' -o json | $bb grep -c '"N_DROPPED":"20"')"
+say "fields: $(/bin/lode -b -t similar -o json | $bb grep -c '"REPEATED":"19"') $(/bin/lode -b -t similar -o json | $bb grep -c '"LAST_MESSAGE":"frame 19 at 57,99"') $(/bin/lode -b -t usbhid -o cat | $bb grep -c '^glued$')"
+say "levels: $(/bin/lode -b -t levelless -o json | $bb grep -c '"FERRIX_LEVEL":"unspecified"') $(/bin/lode -b -t levelless -o json | $bb grep -c '"PRIORITY"') $(/bin/lode -b -t levelless -p err -o cat | $bb wc -l) $(/bin/lode -b -t levelless -p err,unspecified -o cat | $bb wc -l) $(/bin/lode -b -t levelless | $bb grep -c ' ? levelless: just words') $(/bin/lode -b -t levelless -o verbose | $bb grep -c '^    FERRIX_LEVEL=unspecified$') $(/bin/lode -b -t guessy -p err -o json | $bb grep -c '"FERRIX_PRIORITY_SOURCE":"derived"') $(/bin/lode levels -b | $bb grep -c '^levelless ')"
 say "classes: $($bb ls /var/log/journal | $bb grep -c '^errors@') $(/bin/lode -b -t erring -o cat | $bb wc -l)"
 say "delete: $(/bin/lode delete --where 'id = deleteme')"
 say "deleted: $(/bin/lode -b -t deleteme -o cat | $bb wc -l) $(/bin/lode -b -t lode-delete -o cat | $bb grep -c 'removed 2 record')"
@@ -386,6 +399,18 @@ fn held(lines: &[String]) -> std::result::Result<(), String> {
             "50 repeats were not one line and one `repeated 49` record",
         ),
         (
+            "lode-test: fields:",
+            "1 1 1",
+            "lines alike but for their numbers were not folded with the last one kept, or a glued \
+             number's tail was not taken off a name",
+        ),
+        (
+            "lode-test: levels:",
+            "1 0 0 1 1 1 1 1",
+            "a line with no level was not shown as unspecified everywhere (json, human, verbose, \
+             -p, lode levels), or a level read from words was not marked derived",
+        ),
+        (
             "lode-test: dropped:",
             "0 1",
             "a dropped source was stored, or its drop not said",
@@ -452,6 +477,8 @@ lode-test: kernel records: 300
 lode-test: folded: 1 1
 lode-test: limited: 100 200
 lode-test: dropped: 0 1
+lode-test: fields: 1 1 1
+lode-test: levels: 1 0 0 1 1 1 1 1
 lode-test: classes: 1 1
 lode-test: deleted: 0 1
 lode-test: session: 2 0 1

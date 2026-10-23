@@ -242,11 +242,44 @@ anything journald accepts round-trips.
 | `_HOSTNAME` | `lode` | `uname`'s nodename |
 | `_SOURCE_REALTIME_TIMESTAMP`, `_SOURCE_MONOTONIC_TIMESTAMP` | `lode` | the kernel's stamp for kernel records (`usec` in `/dev/kmsg`), init's receive time for unit lines it buffered, the sender's for native-protocol records that carry one |
 | `_KERNEL_SEQNUM` | `lode` | `/dev/kmsg`'s sequence number (Ferrix's): how a restarted `lode` knows where it stopped (§11.3) |
-| `REPEATED`, `N_SUPPRESSED`, `N_DROPPED` | `lode` | on the records that say what a rule folded or dropped (§7) |
+| `REPEATED`, `LAST_MESSAGE`, `N_SUPPRESSED`, `N_DROPPED`, `N_BLANK` | `lode` | on the records that say what a rule folded or dropped (§7) |
+| `FERRIX_PRIORITY_SOURCE`, `FERRIX_PRIORITY_WORD` | `lode` | where the level came from, and the words a derived one was read from (below) |
 | `__REALTIME_TIMESTAMP`, `__MONOTONIC_TIMESTAMP`, `__UTC_OFFSET`, `__SEQNUM`, `__CURSOR` | the store | when `lode` stored it; the UTC offset in force then (USER-WISHES theme 8; journald keeps none, #6589); the store's own sequence; a cursor in journald's text shape |
 
 A sender that writes a field beginning with `_` has it dropped, as
 journald drops it. `_CMDLINE` is not recorded by default (§12.3).
+
+**Every record has a level, and `unspecified` is one of its own** (the
+customer, 2026-10-23). A record nobody gave a level is never shown as info:
+
+* The store keeps a level on every record, 0 to 7 or `unspecified` (8 in
+  the entry's priority byte), and `FERRIX_PRIORITY_SOURCE` says where it
+  came from: `stated` (the writer said it: `PRIORITY=`, a `<PRI>` or `<N>`
+  prefix, a `tracing` line's `WARN`, lode's own records), `kernel` (a level
+  other than info the kernel was handed with the line, a `/dev/kmsg`
+  write's `<3>`), `derived` (read from the line's words, `failed` or
+  `refused`, with the words in `FERRIX_PRIORITY_WORD`), or `unspecified`.
+  A sender's own `FERRIX_PRIORITY_SOURCE` or `FERRIX_LEVEL` is dropped.
+* Info that arrives with no word from the writer says nothing and is
+  stored as unspecified: the kernel's own lines and programs' console
+  output all come at info, as does every unit's stdout stream unless its
+  header says another level; `lode cat` without `-p` sends none, and `-p
+  info` puts `<6>` on each line. A syslog datagram without `<PRI>` and a
+  native datagram without `PRIORITY` are unspecified too.
+* **`FERRIX_LEVEL`** is the explicit level every output that shows fields
+  carries (`json`, `export`, `verbose`): `0` to `7` or `unspecified`, made
+  from the record, never stored, so a viewer never infers one. journald's
+  `PRIORITY` is written only for a known level, as journald's own records
+  may lack it. `-o human` shows `?` for unspecified, never `I`.
+* Filters: `-p err` and every range leave unspecified out; `-p
+  err,unspecified` (commas join ranges) or `--where 'level = unspecified'`
+  asks for it; in the filter language it matches only `=` and `!=`. A
+  `level` rule never holds an unspecified record. `PRIORITY=3` as a
+  journalctl match compares the level, and matches no unspecified record,
+  as journalctl's does no record without the field.
+* `lode levels [-b ...] [filters]` counts per source (`SYSLOG_IDENTIFIER`,
+  else `UNIT`, else `_TRANSPORT`) the records, the unspecified and the
+  derived, most unspecified first: where writers still need to say levels.
 
 ### 4.2 Attribution
 
@@ -714,7 +747,9 @@ invocation's own last lines rather than a hint to run another command.
 * **Byte-compatible with journald** where journald defines it, because
   scripts parse it: `-o short`, `short-iso`, `short-iso-precise`,
   `short-precise`, `short-monotonic`, `with-unit`, `cat`, `json`,
-  `json-pretty`, `json-seq`, `export`, `verbose`. `-o json` is one object a
+  `json-pretty`, `json-seq`, `export`, `verbose` (journald's: a time line
+  with the cursor, then each field indented; built in the field-quality
+  landing). `-o json` is one object a
   line, every field a string, binary values as arrays of numbers; `-o
   export` is the Journal Export Format.
 * **Templates** (#3449): `--format '{time:iso} {unit} {priority:letter}
@@ -724,8 +759,9 @@ invocation's own last lines rather than a hint to run another command.
   `~/.config/ferrix/lode/formats.conf`.
 * **Ferrix's default, `-o human`**, when no `-o` is given:
   `2026-10-23 14:01:02.123 +02:00 E hyprix[812]: message` -- the year and
-  the zone (theme 8), the priority as a letter (`E W N I D`, and colour on
-  a terminal; #39281), the identifier and pid, the message whole.
+  the zone (theme 8), the priority as a letter (`E W N I D`, `?` for a
+  record with no level (§4.1), and colour on a terminal; #39281), the
+  identifier and pid, the message whole.
 
 ### 9.4 Defaults
 
@@ -1504,6 +1540,51 @@ Queries that stay fast as the store grows (USER-WISHES top item 2, §8.4).
   the same answer and no slower, and `-u lode-test -n 3` on its own store.
 * Not yet: the field indexes inside a sealed segment and its sparse time
   index (a segment that may match is read whole); compression.
+
+### Field quality, as built (the N150's first records, 2026-10-23)
+
+What the first 1,907 records from a real machine showed lode reading
+wrong, fixed in one landing before step 6:
+
+* **Names.** A name with a number's tail glued before it (`0usbhid`,
+  `00usbhid`, `0xusbhid`: another writer left digits on the console with
+  no newline) is read without them. ANSI colour is taken out before a
+  line is read. A Rust `tracing` line (`2026-...Z  WARN russh::server:
+  text`) gives its crate as the identifier and its own level. A program's
+  padded name without the kernel's two-space indent (`devmgr   intel-gt
+  started`) is read as the kernel's are. `error:` and `WARNING:` name a
+  level, never a program. The 49 records with no `SYSLOG_IDENTIFIER` were
+  these.
+* **Levels** (1,906 of 1,907 were info): §4.1. A level is stated, the
+  kernel's, derived from the words -- `failed`, `could not`, `cannot`,
+  `unable`, `error:` an error; `refused`, `denied`, `lost`, `dropped`,
+  `timed out`, `warning` a warning; none of them after `0` or `no` one or
+  two words before (`0 rows refused`); for the kernel's own lines only the
+  error words and an upper-case `WARNING:`, since its boot checks report
+  what they refused on purpose -- or unspecified.
+* **`FERRIX_SUBSYSTEM`** (on 155 of 1,907): the subsystem a line names,
+  else the program that wrote it, else `kernel` for the kernel's own lines.
+  Every line that says who wrote it now has one.
+* **The empty `MESSAGE`** (record 2) was a blank console line: blank
+  kernel and console lines are no longer stored, and a record says how many
+  there were (`N_BLANK`, with their kernel sequence range, so `verify
+  --kernel` still accounts for every one).
+* **Floods alike but for their numbers** fold: two messages are the same
+  when they differ only in runs of digits (hyprix's `not scanning out
+  directly ... the top one is 839x497 at 181,99` every frame). The record
+  that says so reads `message repeated N time(s), numbers varying: <the
+  first>` and carries `LAST_MESSAGE`, the last of them. A line the
+  limiter held breaks a run, and a mark is never folded. Each kind of rule is now read on its own,
+  the first match deciding: the first matching `fold` sets the fold
+  window, the first `limit` the limit, and the first `drop`, `sample` or
+  `level` whether the line is held -- so a fold rule and a limit rule both
+  apply to one line. `fold 0s where ...` turns folding off for lines
+  that must each be kept (test-log's flood).
+* **`-o verbose`**, journald's.
+* test-log checks each on all three architectures: a similar flood folded
+  with its last line, a glued name read, and a line with no level shown as
+  unspecified in json, human and verbose, left out by `-p err`, brought in
+  by `-p err,unspecified`, and counted by `lode levels`.
 
 ### Known issues
 
