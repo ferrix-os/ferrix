@@ -1042,6 +1042,16 @@ more.
   of Rust; now 2,552 of markup and 2,982 of Rust), the geometry kept
   exact and the state handed over property by property. 84 host tests
   in tole.
-* Next: the customer's items for the viewer (the record pane's names,
-  a Crashes page, saved queries kept by hand), a `test-compositor` row
-  that opens a tole demo, then U9, the new Settings.
+* **After U8** (2026-10-24), the customer's items for the viewer, on
+  tole: errors and warnings drawn as blocks in the table's strip and the
+  swim lanes, not a ladder of dashes; the record pane naming its fields
+  from lode's own table (`ferrix_lode_core::fields`), grouped, whole,
+  each copied with a press; a Crashes page, crashes grouped by program,
+  place and signal, with the screenshot lode kept and the log around;
+  saved queries named, renamed, deleted with Undo, moved, and kept in
+  order. What tole gained for them: `Image` and `Painter::image` (a
+  picture scaled into a rectangle), the ComboBox's chevron and the
+  CheckBox's tick drawn as shapes (IBM Plex has neither glyph), and the
+  Theme's `accentInv`. `test-compositor --boot tole-demo` boots tole's
+  controls demo in a window on Ferrix and checks the screen shows it.
+* Next: U9, the new Settings (the customer's design), its plan first.

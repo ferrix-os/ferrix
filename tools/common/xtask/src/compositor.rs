@@ -90,6 +90,7 @@ mod run;
 mod settings;
 mod steam_store;
 pub(crate) mod steam_window;
+mod tole_demo;
 pub(crate) mod unity;
 mod user_desktop;
 pub(crate) mod wine;
@@ -574,6 +575,9 @@ fn build_ahead(arch: Arch, args: &Args) -> Result<()> {
     if asked(&["lode-viewer", "lode-viewer-ssh"]) {
         lode_viewer::build_ahead(arch)?;
     }
+    if asked(&["tole-demo"]) {
+        tole_demo::build_ahead(arch)?;
+    }
     if asked(&["locked", "locked-held"]) {
         let _ = build(arch, "compositor-vptr", "vlock")?;
     }
@@ -700,7 +704,7 @@ fn gates_busybox(arch: Arch) -> Option<String> {
 /// each takes minutes under emulation and there are twenty of them, so a
 /// change to one is otherwise an hour a try.
 type Boot = fn(Arch, &Programs, &Args) -> Result<()>;
-const BOOTS: [(&str, Boot); 52] = [
+const BOOTS: [(&str, Boot); 53] = [
     ("restart", test_driver_restart),
     ("dispatchers", test_dispatchers),
     ("bar", test_bar),
@@ -747,6 +751,7 @@ const BOOTS: [(&str, Boot); 52] = [
     ("settings", settings::test_settings),
     ("lode-viewer", lode_viewer::test_lode_viewer),
     ("lode-viewer-ssh", lode_viewer::test_lode_viewer_ssh),
+    ("tole-demo", tole_demo::test_tole_demo),
     ("locked", locked::test_locked),
     ("locked-held", locked::test_locked_held),
     ("firmware-screen", firmware_screen::test_firmware_screen),
