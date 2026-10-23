@@ -52,6 +52,8 @@
 //! * [`uc`]: whether `GuC` locked the `WOPCM` since the last reset;
 //! * [`uapi`]: the i915 ioctl numbers and argument layouts;
 //! * [`frontend`]: the i915 uAPI served on the render node, over a back end;
+//! * [`remote`]: the front end's back end in a keeper process, over a
+//!   worker process that drives the GT and may die (the opaque crash mode);
 //! * [`workarounds`]: the GT, engine, context and whitelist lists.
 
 #![no_std]
@@ -81,6 +83,7 @@ pub mod ppgtt;
 pub mod pt_pool;
 pub mod rc6;
 pub mod reg;
+pub mod remote;
 pub mod request;
 pub mod reset;
 pub mod ring;

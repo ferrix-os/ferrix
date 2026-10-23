@@ -22,8 +22,8 @@ const HWSP: u32 = 0x10_0000;
 /// The model as a platform: GGTT objects from `0x20_0000` up (the first page
 /// asked for is the engine's status page the model watches), client memory
 /// as model pages, and time that runs the engine whenever it passes.
-struct Model {
-    gpu: Gpu,
+pub(crate) struct Model {
+    pub(crate) gpu: Gpu,
     reports: Vec<crate::backend::FrequencyReport>,
     next_ggtt: u32,
     hwsp_given: bool,
@@ -32,7 +32,7 @@ struct Model {
 }
 
 impl Model {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Model {
             gpu: Gpu::new(&ENGINES[0], HWSP),
             reports: Vec::new(),
@@ -141,7 +141,7 @@ impl Platform for Model {
     }
 }
 
-const RENDER: UapiEngine = UapiEngine {
+pub(crate) const RENDER: UapiEngine = UapiEngine {
     class: 0,
     instance: 0,
 };

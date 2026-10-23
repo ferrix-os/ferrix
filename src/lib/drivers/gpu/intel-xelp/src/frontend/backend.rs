@@ -199,4 +199,10 @@ pub trait Backend {
     fn boost(&mut self, request: RequestId) {
         let _ = request;
     }
+
+    /// The serving loop is about to wait: send anything the back end has
+    /// gathered for another process (the keeper's back end batches its
+    /// calls to the worker, `crate::remote`). Nothing for a back end that
+    /// drives the GT itself.
+    fn flush(&mut self) {}
 }

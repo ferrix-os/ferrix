@@ -1889,3 +1889,13 @@ impl<P: Platform> XelpBackend<P> {
         self.vm_destroy(load.vm);
     }
 }
+
+#[cfg(test)]
+impl<P: Platform> XelpBackend<P> {
+    /// The device address `address` reaches in VM `vm`: what the GPU's walk
+    /// finds, for a test comparing two back ends' views.
+    pub(crate) fn translate(&mut self, vm: usize, address: u64) -> Option<u64> {
+        let ppgtt = self.vms.get(vm).copied().flatten()?;
+        ppgtt.translate(self.platform.get_mut(), address)
+    }
+}
