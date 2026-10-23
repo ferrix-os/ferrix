@@ -46,6 +46,33 @@ pub(crate) const KEY_INTERRUPT: u64 = 2;
 /// deadline does. The display card's is 3.
 pub(crate) const KEY_BACKEND: u64 = 4;
 
+/// The key a wake-up asked for through [`WAKE_AT`] arrives under: 'HP', the
+/// display card's hotplug poll (`docs/DESKTOP.md` §3.4), clear of every
+/// other key.
+pub(crate) const KEY_WAKE: u64 = 0x4850;
+
+/// A wake-up the display card asks for, at this `CLOCK_MONOTONIC` time in
+/// nanoseconds; 0 for none. The loop holds no reference to the card, so
+/// the card sets this and the loop queues a packet under [`KEY_WAKE`] when
+/// it is due, which reaches the card as its other packets do.
+pub(crate) static WAKE_AT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// `deadline` with [`WAKE_AT`] folded in: the earlier of the two, and the
+/// wake-up queued on `port` once it is due.
+fn with_wake(port: &Port<Kernel>, deadline: Option<u64>) -> Option<u64> {
+    use core::sync::atomic::Ordering;
+    let due = WAKE_AT.load(Ordering::Relaxed);
+    if due == 0 {
+        return deadline;
+    }
+    if ferrix_rt::linux::monotonic_nanos().unwrap_or(0) >= due {
+        WAKE_AT.store(0, Ordering::Relaxed);
+        let _ = port.queue(KEY_WAKE, [0, 0]);
+        return deadline;
+    }
+    Some(deadline.map_or(due, |deadline| deadline.min(due)))
+}
+
 /// A line on standard error, which a native process has open on the
 /// console.
 pub(crate) fn say(arguments: fmt::Arguments<'_>) {
@@ -293,9 +320,8 @@ where
     arm(host)?;
     loop {
         frontend.backend.flush();
-        let deadline = frontend
-            .next_deadline()
-            .map_or(Deadline::Never, Deadline::At);
+        let deadline =
+            with_wake(port, frontend.next_deadline()).map_or(Deadline::Never, Deadline::At);
         match port.wait(deadline) {
             Ok(packet) if packet.key == KEY_CONTROL => {
                 if Signals(packet.signals).intersects(Signals::PEER_CLOSED) {

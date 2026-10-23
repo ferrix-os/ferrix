@@ -63,6 +63,7 @@ pub mod backend;
 pub mod clock;
 pub mod commands;
 pub mod device_info;
+pub mod display;
 pub mod engine;
 pub mod engine_cs;
 pub mod execlists;

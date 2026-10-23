@@ -1304,9 +1304,9 @@ where
     let apertures = device.info().map_or(0, |info| info.apertures);
     let mut card = display::Display::publish(device, apertures, location, plane, port);
     let mut on_display = |key: u64, port: &Port<Kernel>| {
-        if key == display::KEY_DISPLAY
+        if display::ours(key)
             && let Some(display) = card.as_mut()
-            && !display.on_packet(port)
+            && !display.on_key(key, port)
         {
             card = None;
         }

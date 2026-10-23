@@ -34,6 +34,7 @@
 //! monitor is `HDMI-A-1` and not `Virtual-1`.
 
 use core::ptr;
+use core::sync::atomic::Ordering;
 
 use ferrix_display_modes::scale::Scaler;
 use ferrix_display_modes::{ModeList, add_scaled};
@@ -57,9 +58,22 @@ use ferrix_rt::native::vmo::Vmo;
 use crate::m2::ScreenPlane;
 use crate::say;
 
+mod hotplug;
+mod regs;
+
 /// The port key the display control's signals arrive under, beside
 /// `serve::KEY_CONTROL` (1) and `serve::KEY_INTERRUPT` (2).
 pub(crate) const KEY_DISPLAY: u64 = 3;
+
+/// The port key the hotplug poll arrives under: the serving loop's wake-up
+/// (`crate::serve::WAKE_AT`), which the card sets (`docs/DESKTOP.md` §3.4).
+pub(crate) const KEY_HOTPLUG: u64 = crate::serve::KEY_WAKE;
+
+/// Whether `key` is one of the card's: its control channel's, or the
+/// hotplug poll's.
+pub(crate) const fn ours(key: u64) -> bool {
+    key == KEY_DISPLAY || key == KEY_HOTPLUG
+}
 /// Bytes a pixel.
 const PIXEL: usize = 4;
 /// A page.
@@ -105,6 +119,8 @@ pub(crate) struct Display {
     scaler: Option<Scaler>,
     /// Frames copied, for the first lines.
     flushes: u64,
+    /// The lit port's hot-plug state, where it can be followed.
+    hotplug: Option<hotplug::Watch>,
 }
 
 impl Display {
@@ -149,6 +165,16 @@ impl Display {
         say(format_args!(
             "intel: card0 published: copies frames into the lit {width}x{height} plane at {phys:#x} ({pitch} bytes a line, write-combining)"
         ));
+        let hotplug = match regs::Regs::map(device, apertures) {
+            Ok(regs) => hotplug::Watch::start(regs),
+            Err(why) => {
+                say(format_args!("intel: card0: no hotplug: {why}"));
+                None
+            }
+        };
+        if hotplug.is_some() {
+            schedule(now_ms());
+        }
         Some(Display {
             screen,
             control,
@@ -157,6 +183,7 @@ impl Display {
             owed_whole: false,
             scaler: None,
             flushes: 0,
+            hotplug,
         })
     }
 }
@@ -247,7 +274,46 @@ fn map_screen(
     ))
 }
 
+/// Milliseconds of `CLOCK_MONOTONIC`.
+fn now_ms() -> u64 {
+    ferrix_rt::linux::monotonic_nanos().unwrap_or(0) / 1_000_000
+}
+
+/// The hotplug poll due at `at_ms`.
+fn schedule(at_ms: u64) {
+    crate::serve::WAKE_AT.store(at_ms.saturating_mul(1_000_000).max(1), Ordering::Relaxed);
+}
+
 impl Display {
+    /// A packet under one of the card's keys ([`ours`]): the hotplug poll,
+    /// or the control channel's. `false` when the card is gone.
+    pub(crate) fn on_key(&mut self, key: u64, port: &Port<Kernel>) -> bool {
+        if key == KEY_HOTPLUG {
+            return self.poll_hotplug();
+        }
+        self.on_packet(port)
+    }
+
+    /// Read the lit port's hot-plug state, tell the core of a settled
+    /// change, and set the next poll. `false` when the core cannot be told.
+    fn poll_hotplug(&mut self) -> bool {
+        let Some(watch) = self.hotplug.as_mut() else {
+            return true;
+        };
+        let (changed, next) = watch.poll(now_ms());
+        schedule(next);
+        let Some(connected) = changed else {
+            return true;
+        };
+        match tell_connected(&self.control, &self.screen, connected) {
+            Ok(()) => true,
+            Err(why) => {
+                say(format_args!("intel: card0 stopped: {why}"));
+                false
+            }
+        }
+    }
+
     /// A packet under [`KEY_DISPLAY`]: every message taken and answered, the
     /// wait armed again. `false` when the core closed its end or sent what
     /// this card cannot act on; the card is then gone, the render node not.
@@ -534,6 +600,51 @@ impl Display {
     }
 }
 
+/// Tell the core the monitor on the lit port is there or not, as
+/// virtio-gpu does when its host window comes or goes: `MODES` with the
+/// scanout enabled or not, and on a plug the mode list again, which the
+/// core counts as the connector's change.
+fn tell_connected(
+    control: &Channel<Kernel>,
+    screen: &Screen,
+    connected: bool,
+) -> Result<(), &'static str> {
+    let mut modes = [ScanoutMode::default(); MAX_SCANOUTS];
+    if let Some(first) = modes.first_mut() {
+        *first = ScanoutMode {
+            width: screen.width as u32,
+            height: screen.height as u32,
+            enabled: connected,
+            refresh_mhz: 0,
+        };
+    }
+    control
+        .write(Message::Modes { modes }.encode().as_bytes())
+        .map_err(|_| "MODES could not be written")?;
+    if connected {
+        send_list(control, screen)?;
+    }
+    Ok(())
+}
+
+/// The scanout's mode list: the plane's mode and every smaller one shown
+/// scaled.
+fn send_list(control: &Channel<Kernel>, screen: &Screen) -> Result<(), &'static str> {
+    let mut list = ModeList::new();
+    add_scaled(&mut list, timing(screen.width as u16, screen.height as u16));
+    list.sort();
+    for page in list.pages(0) {
+        control
+            .write(page.encode().as_bytes())
+            .map_err(|_| "the mode list could not be written")?;
+    }
+    say(format_args!(
+        "intel: card0: {} modes listed, the smaller ones shown scaled",
+        list.len()
+    ));
+    Ok(())
+}
+
 /// HELLO for the one scanout at the plane's size, READY taken, and the
 /// scanout's mode list sent.
 fn introduce(
@@ -600,19 +711,7 @@ fn introduce(
         Ok(Message::Refused(_)) => return Err("the display core refused the card"),
         _ => return Err("the display core did not answer READY"),
     }
-    let mut list = ModeList::new();
-    add_scaled(&mut list, timing(screen.width as u16, screen.height as u16));
-    list.sort();
-    for page in list.pages(0) {
-        control
-            .write(page.encode().as_bytes())
-            .map_err(|_| "the mode list could not be written")?;
-    }
-    say(format_args!(
-        "intel: card0: {} modes listed, the smaller ones shown scaled",
-        list.len()
-    ));
-    Ok(())
+    send_list(control, screen)
 }
 
 /// The one timing listed: the plane's size at 60 Hz with reduced blanking,
