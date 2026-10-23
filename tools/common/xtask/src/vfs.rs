@@ -401,8 +401,60 @@ pub(crate) const APPLETS: &[Command] = &[
             "removed",
         ]),
     },
+    // `ETXTBSY` (`ferrix_vfs::writers`): a running program's file refuses
+    // a write and a truncation and stays whole, and a file open for writing
+    // does not run; each is allowed again once the program ended or the file
+    // was closed, which is the row's own negative control.
+    Command {
+        argv: &["sh", "-c", ETXTBSY_SCRIPT],
+        status: 7,
+        expect: Expect::Lines(&[
+            "overwrite: Text file busy",
+            "truncate: Text file busy",
+            "still whole",
+            "overwrite allowed once it ended",
+            "exec: Text file busy",
+            "ran once closed",
+        ]),
+    },
     // `mount -t proc` and `mount -t devtmpfs` go here once mount takes them.
 ];
+
+/// A copy of busybox runs `sleep` from `/tmp`; while it runs, a shell's
+/// `>` and busybox's `truncate` are refused with `ETXTBSY` and leave it
+/// whole, and once it has been killed and reaped the same `>` works. Then a
+/// copy held open for appending on descriptor 3 does not run, and does once
+/// the descriptor is closed. The wait for the program's start is a wait for
+/// a process whose `/proc/<pid>/exe` names the copy -- the shell's job may be
+/// a subshell that forks it -- with a five-second deadline that fails loudly. Errors are matched by their text, which busybox's shell, zinc
+/// and busybox's applets all take from `strerror`.
+const ETXTBSY_SCRIPT: &str = r#"mkdir -p /tmp/tx && cp /bin/busybox /tmp/tx/busybox && cp /bin/busybox /tmp/tx/true || exit 1
+/tmp/tx/busybox sleep 30 &
+p=$!
+q=
+i=0
+while [ -z "$q" ]; do
+  for d in /proc/[0-9]*; do
+    [ "$(readlink $d/exe 2>/dev/null)" = /tmp/tx/busybox ] && q=${d#/proc/}
+  done
+  i=$((i+1)); [ -z "$q" ] && [ $i -gt 100 ] && exit 2
+  [ -z "$q" ] && usleep 50000
+done
+( echo x > /tmp/tx/busybox ) 2>/tmp/tx/err && echo "overwrite allowed while it runs"
+grep -qi "text file busy" /tmp/tx/err && echo "overwrite: Text file busy"
+/bin/busybox truncate -s 0 /tmp/tx/busybox 2>/tmp/tx/err && echo "truncate allowed while it runs"
+grep -qi "text file busy" /tmp/tx/err && echo "truncate: Text file busy"
+[ "$(wc -c < /tmp/tx/busybox)" = "$(wc -c < /bin/busybox)" ] && echo "still whole"
+kill $q; wait $p
+( echo x > /tmp/tx/busybox ) && echo "overwrite allowed once it ended"
+/bin/busybox sh -c 'exec 3>>/tmp/tx/true
+/tmp/tx/true 2>/tmp/tx/err && echo "ran while open for writing"
+grep -qi "text file busy" /tmp/tx/err && echo "exec: Text file busy"
+exec 3>&-
+/tmp/tx/true && echo "ran once closed"'
+rm -r /tmp/tx
+exit 7
+"#;
 
 /// busybox's own `dd`, by path, since uutils has a `dd` too: a plain copy
 /// from `/dev/zero` to `/dev/null`, one that seeks both, and one that seeks

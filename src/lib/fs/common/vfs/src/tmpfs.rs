@@ -824,6 +824,8 @@ impl fmt::Debug for Node {
 struct FileIo {
     io: ferrix_sync::SleepLock<()>,
     pages: Box<dyn Pages>,
+    /// Who writes it and who runs it: [`crate::writers`].
+    writers: core::sync::atomic::AtomicIsize,
 }
 
 impl fmt::Debug for FileIo {
@@ -1057,6 +1059,7 @@ impl Node {
             file: pages.map(|pages| FileIo {
                 io: ferrix_sync::SleepLock::new((), shared.storage.parker()),
                 pages,
+                writers: crate::writers::new_count(),
             }),
             state: SpinLock::new(State {
                 seals: SEAL_SEAL,
@@ -1332,6 +1335,10 @@ impl Node {
 }
 
 impl Inode for Node {
+    fn writers(&self) -> Option<&core::sync::atomic::AtomicIsize> {
+        self.file.as_ref().map(|file| &file.writers)
+    }
+
     fn metadata(&self) -> Metadata {
         let state = self.state.lock();
         let (kind, size, blocks, rdev) = match &state.body {

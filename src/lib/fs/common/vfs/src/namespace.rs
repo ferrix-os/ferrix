@@ -1292,10 +1292,20 @@ impl Namespace {
                 walked.found.require_writable()?;
             }
         }
-        if flags.truncate && flags.write && kind == FileType::Regular {
+        // The write is taken before the cut, as Linux's `do_open` takes it
+        // before `handle_truncate`: a program running from the file refuses
+        // both (`ETXTBSY`), and never loses its pages to the cut. Held until
+        // the open file holds its own.
+        let held = if flags.truncate && flags.write && kind == FileType::Regular {
+            let held = crate::writers::get_write_access(&inode)?;
             inode.set_len(0)?;
-        }
-        OpenFile::new(walked.found, flags)
+            held
+        } else {
+            None
+        };
+        let file = OpenFile::new(walked.found, flags);
+        drop(held);
+        file
     }
 
     // -- Changing the tree --------------------------------------------------
@@ -1634,12 +1644,15 @@ impl Namespace {
     /// # Errors
     ///
     /// `EISDIR` for a directory, `EINVAL` for anything else not a regular
-    /// file.
+    /// file, `ETXTBSY` for one a program is running from.
     pub fn truncate(&self, at: &Location, len: u64) -> Result<()> {
         let inode = at.inode()?;
         match inode.metadata().kind {
             FileType::Regular => {
                 at.require_writable()?;
+                // Linux's `vfs_truncate`: a write for as long as the cut takes,
+                // refused while a program runs from the file.
+                let _held = crate::writers::get_write_access(&inode)?;
                 inode.set_len(len)
             }
             FileType::Directory => Err(Errno::EISDIR),

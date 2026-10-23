@@ -27,6 +27,7 @@ use ferrix_linux_abi::types::{
 };
 use ferrix_ustack::{Spec, Width};
 use ferrix_vfs::access::MAY_EXEC;
+use ferrix_vfs::writers::{DenyWrite, deny_write_access};
 use ferrix_vfs::{Access, Context, FileType, OpenFile, OpenFlags};
 
 use crate::fs::SetIds;
@@ -756,13 +757,13 @@ fn execve_at(
     // `cd` resolves from there, and its identity, which the walk and the
     // execute check are made as. Cloned out: never walk with the lock held.
     let context = crate::syscall::path::context(process);
-    let (mut image, mut exe, mut set_ids) = if path_bytes.is_empty() {
+    let (mut _denied, mut image, mut exe, mut set_ids) = if path_bytes.is_empty() {
         let file = fd::file(process, dirfd)?;
         let image = open_descriptor(&file, &context.who)?;
         let set_ids = crate::fs::set_ids_on(file.location(), &file.inode().metadata());
         let exe = crate::fs::namespace().path_of(file.location(), &context.root);
         path_bytes = descriptor_path(dirfd, &[]);
-        (image, exe, set_ids)
+        (deny_writes(&image)?, image, exe, set_ids)
     } else {
         let start = fd::start_for(process, dirfd, &path_bytes)?;
         if flags & AT_SYMLINK_NOFOLLOW != 0 {
@@ -772,7 +773,7 @@ fn execve_at(
                 return Err(Errno::ELOOP.into());
             }
         }
-        let (image, exe, set_ids) = crate::fs::open_program(&context, start.as_ref(), &path_bytes)?;
+        let (image, exe, set_ids, denied) = open_running(&context, start.as_ref(), &path_bytes)?;
         // What a script's interpreter is handed as the script's name, and
         // what `AT_EXECFN` names: the path itself when it means the same
         // thing from anywhere, and a name through the directory descriptor
@@ -780,7 +781,7 @@ fn execve_at(
         if start.is_some() {
             path_bytes = descriptor_path(dirfd, &path_bytes);
         }
-        (image, exe, set_ids)
+        (denied, image, exe, set_ids)
     };
     // The filename as asked for, which a script keeps: `AT_EXECFN` is the
     // script's name even though the interpreter is what runs.
@@ -803,7 +804,7 @@ fn execve_at(
         // The interpreter is the file actually loaded, so it is the exe -- and
         // its set-id bits are the ones that count, which is why a set-user-id
         // script gives nothing away here, as it gives nothing away on Linux.
-        (image, exe, set_ids) = crate::fs::open_program(&context, None, &interpreter)?;
+        (image, exe, set_ids, _denied) = open_running(&context, None, &interpreter)?;
         if image.head().starts_with(b"#!") {
             return Err(Errno::ENOEXEC.into());
         }
@@ -811,7 +812,7 @@ fn execve_at(
     // Before the point of no return: the linker is opened here so that a program
     // naming one that is missing or unreadable is an `execve` that fails, with
     // the caller still running the program it had.
-    let linker = linker_for(&context, Source::File(&image))?;
+    let (linker, _linker_denied) = linker_denied(&context, &image)?;
     load::check(Source::File(&image), linker.as_ref().map(Source::File)).map_err(refused)?;
 
     let arg_slices: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
@@ -886,6 +887,39 @@ fn execve_at(
     unsafe { arch::reset_user_state() };
 
     Ok((startup.entry, startup.stack, startup.abi))
+}
+
+/// Deny writes on the file `image` was opened from for as long as the answer
+/// is held: `ETXTBSY` for a file open for writing (`ferrix_vfs::writers`).
+///
+/// `execve` denies each file it opens to run while it holds it, as Linux's
+/// `do_open_execat` does. The program's own denial is the process's from the
+/// point of no return on (`Process::record_program`); a script's is given
+/// back when its interpreter is opened, and the linker's when the call ends,
+/// as on Linux.
+fn deny_writes(image: &ProgramFile) -> Result<Option<DenyWrite>, Errno> {
+    deny_write_access(image.file().inode())
+}
+
+/// [`crate::fs::open_program`], and [`deny_writes`] on what it opened.
+fn open_running(
+    ctx: &Context,
+    start: Option<&ferrix_vfs::Location>,
+    path: &[u8],
+) -> Result<(ProgramFile, Vec<u8>, SetIds, Option<DenyWrite>), Errno> {
+    let (image, exe, set_ids) = crate::fs::open_program(ctx, start, path)?;
+    let denied = deny_writes(&image)?;
+    Ok((image, exe, set_ids, denied))
+}
+
+/// [`linker_for`] `image`, and [`deny_writes`] on the linker.
+fn linker_denied(
+    ctx: &Context,
+    image: &ProgramFile,
+) -> Result<(Option<ProgramFile>, Option<DenyWrite>), Errno> {
+    let linker = linker_for(ctx, Source::File(image))?;
+    let denied = linker.as_ref().map(deny_writes).transpose()?.flatten();
+    Ok((linker, denied))
 }
 
 /// What `execve` answers for an image the loader refuses before the point of

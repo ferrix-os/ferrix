@@ -43,6 +43,7 @@ use crate::Result;
 use crate::SpinLock;
 use crate::namespace::Location;
 use crate::node::{DirEntry, FIRST_CURSOR, FileType, Inode, Readiness};
+use crate::writers::WriteAccess;
 
 /// What `open` was asked for, decoded from the architecture's `O_*` bits.
 ///
@@ -118,6 +119,10 @@ pub struct OpenFile {
     /// The file position, or a directory's cursor. Held across the I/O it
     /// positions, which may sleep; see the module documentation.
     offset: SleepLock<u64>,
+    /// Its write on a regular file opened for writing, which keeps the file
+    /// from being run while it is open and is refused while it runs
+    /// (`ETXTBSY`, [`crate::writers`]).
+    writing: Option<WriteAccess>,
     /// The kernel heap it holds, charged to the job that opened it for as
     /// long as it is open anywhere -- a descriptor table, another process's
     /// after a `fork`, a socket's queue in flight (F-37).
@@ -150,6 +155,11 @@ impl OpenFile {
     pub fn new(location: Location, flags: &OpenFlags) -> Result<Arc<OpenFile>> {
         let inode = location.inode()?;
         let kind = inode.metadata().kind;
+        let writing = if flags.write && !flags.path && kind == FileType::Regular {
+            crate::writers::get_write_access(&inode)?
+        } else {
+            None
+        };
         let io = if flags.path {
             Arc::clone(&inode)
         } else {
@@ -170,6 +180,7 @@ impl OpenFile {
                 nonblock: flags.nonblock,
             }),
             offset,
+            writing,
             _charge: charge,
         }))
     }
@@ -200,6 +211,7 @@ impl OpenFile {
             path_only: self.path_only,
             status: SpinLock::new(self.status()),
             offset: SleepLock::new(0, self.location.mount.parker().as_ref()),
+            writing: self.writing.clone(),
             _charge: charge,
         }))
     }

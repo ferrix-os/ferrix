@@ -336,6 +336,17 @@ const APPLETS_ON_X86_64: &[(usize, &[&str])] = &[
             "removed",
         ],
     ),
+    (
+        25,
+        &[
+            "overwrite: Text file busy",
+            "truncate: Text file busy",
+            "still whole",
+            "overwrite allowed once it ended",
+            "exec: Text file busy",
+            "ran once closed",
+        ],
+    ),
 ];
 
 /// A log of the applets alone, numbered after the criterion's commands, each
