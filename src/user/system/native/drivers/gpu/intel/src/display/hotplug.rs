@@ -96,6 +96,11 @@ impl Watch {
         })
     }
 
+    /// The port watched.
+    pub(crate) const fn port(&self) -> Port {
+        self.port
+    }
+
     /// The monitor's EDID, read over GMBUS on the port's DDC pins (step
     /// 3g): the base block and its first extension. `None`, said, when
     /// nothing answers.

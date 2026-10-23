@@ -1,6 +1,7 @@
 //! Lighting a port the firmware did not light (`docs/DESKTOP.md` §3.5):
-//! the monitor on the second combo port (port B, transcoder and pipe B),
-//! showing a surface of its own, `card0`'s second scanout.
+//! the monitor on the combo port the firmware left dark -- B where it lit
+//! A, A where it lit B -- on transcoder and pipe B, showing a surface of
+//! its own, `card0`'s second scanout.
 //!
 //! `ferrix.intelgpu.modeset=dry` (h1) prints every step and writes none;
 //! `ferrix.intelgpu.modeset=on` (h2) checks the display is as the steps
@@ -49,16 +50,17 @@ pub(crate) fn asked() -> Asked {
     }
 }
 
-/// Print the steps that would light port B, writing none
+/// Print the steps that would light `port`, writing none
 /// (`ferrix.intelgpu.modeset=dry`).
-pub(crate) fn dry(regs: &mut Regs) {
+pub(crate) fn dry(regs: &mut Regs, port: Port) {
     let tag = "modeset dry";
-    let Some(light) = plan(regs, tag, 0) else {
+    let Some(light) = plan(regs, tag, port, 0) else {
         return;
     };
     if let Err(why) = light::preflight(regs, &light) {
         say(format_args!(
-            "intel: {tag}: port B would not be lit: {why:?}"
+            "intel: {tag}: port {} would not be lit: {why:?}",
+            port.name()
         ));
         return;
     }
@@ -71,15 +73,16 @@ pub(crate) fn dry(regs: &mut Regs) {
     say(format_args!("intel: {tag}: {taken} steps, none taken"));
 }
 
-/// Light port B on pipe B showing the surface at GGTT `surface`
+/// Light `port` on pipe B showing the surface at GGTT `surface`
 /// (`ferrix.intelgpu.modeset=on`): its mode, once lit; `None`, said, when
 /// it is not.
-pub(crate) fn light_port_b(regs: &mut Regs, surface: u32) -> Option<Mode> {
+pub(crate) fn light_port(regs: &mut Regs, port: Port, surface: u32) -> Option<Mode> {
     let tag = "modeset";
-    let light = plan(regs, tag, surface)?;
+    let light = plan(regs, tag, port, surface)?;
     if let Err(why) = light::preflight(regs, &light) {
         say(format_args!(
-            "intel: {tag}: port B is not lit: {why:?} (nothing written)"
+            "intel: {tag}: port {} is not lit: {why:?} (nothing written)",
+            port.name()
         ));
         return None;
     }
@@ -93,8 +96,10 @@ pub(crate) fn light_port_b(regs: &mut Regs, surface: u32) -> Option<Mode> {
     });
     if all {
         say(format_args!(
-            "intel: modeset: port B lit, {}x{} on pipe B ({taken} steps)",
-            light.mode.h[0], light.mode.v[0]
+            "intel: modeset: port {} lit, {}x{} on pipe B ({taken} steps)",
+            port.name(),
+            light.mode.h[0],
+            light.mode.v[0]
         ));
         Some(light.mode)
     } else {
@@ -170,14 +175,13 @@ fn show(tag: &str, step: Step, result: Option<Result<u32, u32>>) {
     }
 }
 
-/// What lighting port B takes, read from the display: its sink and EDID,
+/// What lighting `port` takes, read from the display: its sink and EDID,
 /// the mode (the preferred one, else the first listed at most 148.5 MHz),
 /// whether it is HDMI, a free PLL, the reference clock, and `surface`,
 /// the second surface's GGTT offset. `None`, having said why, when there is no sink, no
 /// reference clock or no free PLL.
-fn plan(regs: &mut Regs, tag: &str, surface: u32) -> Option<Light> {
-    const PORT: Port = Port::Combo(1);
-    let live = PORT
+fn plan(regs: &mut Regs, tag: &str, port: Port, surface: u32) -> Option<Light> {
+    let live = port
         .live_bit()
         .is_some_and(|bit| regs.read32(SDEISR) & bit != 0);
     let dssm = regs.read32(SKL_DSSM);
@@ -189,11 +193,12 @@ fn plan(regs: &mut Regs, tag: &str, surface: u32) -> Option<Light> {
     };
     if !live {
         say(format_args!(
-            "intel: {tag}: port B has no sink (SDEISR); nothing done"
+            "intel: {tag}: port {} has no sink (SDEISR); nothing done",
+            port.name()
         ));
         return None;
     }
-    let (mode, hdmi) = sink_mode(regs, tag);
+    let (mode, hdmi) = sink_mode(regs, tag, port);
     let Some(pll) = light::free_pll(regs) else {
         say(format_args!(
             "intel: {tag}: both combo PLLs are in use; nothing done"
@@ -201,7 +206,7 @@ fn plan(regs: &mut Regs, tag: &str, surface: u32) -> Option<Light> {
         return None;
     };
     let light = Light {
-        port: PORT,
+        port,
         pipe: 1,
         mode,
         hdmi,
@@ -228,16 +233,15 @@ fn plan(regs: &mut Regs, tag: &str, surface: u32) -> Option<Light> {
     Some(light)
 }
 
-/// Port B's mode and whether its sink is HDMI, from its EDID: the preferred
+/// `port`'s mode and whether its sink is HDMI, from its EDID: the preferred
 /// mode, else the first listed at most 148.5 MHz; CEA 1080p60 as DVI where
 /// no EDID answers.
-fn sink_mode(regs: &mut Regs, tag: &str) -> (Mode, bool) {
-    const PORT: Port = Port::Combo(1);
+fn sink_mode(regs: &mut Regs, tag: &str, port: Port) -> (Mode, bool) {
     let mut edid = [0_u8; 2 * gmbus::EDID_BLOCK];
     match gmbus::read_edid(
         regs,
         &mut super::hotplug::Monotonic,
-        gmbus::pin_of(PORT),
+        gmbus::pin_of(port),
         &mut edid,
     ) {
         Ok(length) => {
@@ -256,7 +260,8 @@ fn sink_mode(regs: &mut Regs, tag: &str) -> (Mode, bool) {
                 })
                 .map(|listed| listed.timing);
             say(format_args!(
-                "intel: {tag}: port B's EDID, {length} bytes, {} modes, {}",
+                "intel: {tag}: port {}'s EDID, {length} bytes, {} modes, {}",
+                port.name(),
                 list.len(),
                 if light::is_hdmi(bytes) { "HDMI" } else { "DVI" }
             ));
@@ -283,7 +288,8 @@ fn sink_mode(regs: &mut Regs, tag: &str) -> (Mode, bool) {
         }
         Err(why) => {
             say(format_args!(
-                "intel: {tag}: no EDID on port B ({why:?}); CEA 1920x1080@60 as DVI"
+                "intel: {tag}: no EDID on port {} ({why:?}); CEA 1920x1080@60 as DVI",
+                port.name()
             ));
             (Mode::CEA_1080P60, false)
         }

@@ -17,6 +17,8 @@
 //!
 //! # What is here
 //!
+//! * [`cpuinfo`] — `/proc/cpuinfo`, and Linux's names for processor
+//!   features.
 //! * [`maps`] — `/proc/<pid>/maps`, and the parser the kernel's boot check
 //!   reads its own output back with.
 //! * [`meminfo`] — `/proc/meminfo`.
@@ -39,6 +41,7 @@
 
 extern crate alloc;
 
+pub mod cpuinfo;
 pub mod filesystems;
 pub mod kstat;
 pub mod loadavg;

@@ -1532,6 +1532,28 @@ pub(crate) fn user_hwcaps() -> (u64, u64) {
     (u64::from(core::arch::x86_64::__cpuid(1).edx), 0)
 }
 
+/// `CPUID` with `leaf` and `subleaf`, on the processor this runs on:
+/// `EAX`, `EBX`, `ECX` and `EDX`. What `/proc/cpuinfo` decodes; an
+/// instruction ring 3 may run itself, so it tells a reader nothing it could
+/// not ask.
+pub(crate) fn cpuid(leaf: u32, subleaf: u32) -> Option<[u32; 4]> {
+    Some(cpuid_registers(core::arch::x86_64::__cpuid_count(
+        leaf, subleaf,
+    )))
+}
+
+/// A `CPUID` answer's four registers, in their order.
+const fn cpuid_registers(answer: core::arch::x86_64::CpuidResult) -> [u32; 4] {
+    [answer.eax, answer.ebx, answer.ecx, answer.edx]
+}
+
+/// The state components `XCR0` enables for programs, which says which of
+/// the vector extensions the processor has a program may use: zero where
+/// nothing is saved with `XSAVE`.
+pub(crate) fn user_extended_state() -> u64 {
+    cpu::extended_state_components()
+}
+
 /// `AT_PLATFORM` for a program started on this machine.
 ///
 /// `arch/x86/include/asm/elf.h` defines `ELF_PLATFORM` as `utsname()->machine`,

@@ -149,11 +149,13 @@ them would block every promotion until the fleet signs.
 `.github/workflows/promote.yml` runs on every push to `develop`, when a
 promotion's CI ends, and every 15 minutes as a fallback:
 
-1. If a promotion pull request is open, it does nothing. The next promotion
-   takes everything that lands in the meantime. There is one exception: if
-   the open promotion went red (CI failed, or the verdict is NOT-YET) and
-   `develop` has moved past it, the workflow closes it, so the fix that
-   landed next is promoted instead of waiting behind it.
+1. If a promotion pull request is open and its CI is still running, it
+   does nothing: the next promotion takes everything that lands in the
+   meantime. Once that run has ended and the promotion is still open (red,
+   its verdict waiting, or blocked for any other reason) and `develop` has
+   moved past it, the workflow closes it and promotes the new tip instead.
+   A promotion never holds back what landed after it, and a landing never
+   cancels a run halfway through.
 2. Otherwise, if `develop` has commits that `main` lacks, it cuts
    `promote/<sha>` at `develop`'s tip and opens a pull request to `main`. It
    posts that commit's `flow/lane` (owner lane) and its
@@ -162,6 +164,12 @@ promotion's CI ends, and every 15 minutes as a fallback:
    stays an ancestor of `main`, and the next promotion is always a clean
    merge. A rebase or squash merge would give `main` new hashes for the same
    commits, and the two branches would drift apart.
+
+A run started by dispatch is not counted by the pull request's checks:
+GitHub leaves `workflow_dispatch` check suites out of them. So CI's last
+job also posts its verdict as the commit status `CI result`, with the
+workflow's token, which is the GitHub Actions app the ruleset names as the
+source (promotion #4 sat green and blocked until this, 2026-10-23).
 
 Everything in the workflow uses its own token. A pull request opened with
 that token starts no `pull_request` workflows, and the merge it makes
@@ -415,6 +423,31 @@ refs/archive/2026-10-23/<old-name>:refs/heads/<old-name>`, or `git branch
 `refs/archive/*` in its interface. `git ls-remote origin 'refs/archive/*'`
 lists them. The earlier sweep of 2026-10-10 lives beside them, under
 `refs/archive/2026-10-10/`.
+
+**Second sweep, the same day** (customer: GitHub down to about a hundred
+branches). Map: [`docs/repo-flow/branch-map-2026-10-23b.tsv`](repo-flow/branch-map-2026-10-23b.tsv);
+archive refs under `refs/archive/2026-10-23b/`, all pushed to origin (a
+local branch whose tip differs from origin's under `.../local/<name>`).
+
+* Archived without a backlog line: the 2026-09-24 "before switching PCs"
+  `wip/` snapshots and every branch whose commits say "not for landing",
+  "never lands", "measurement only" or "diag" (50 on origin, 48 local).
+* Archived after one "idea:" line each in `docs/backlog/branches.md`
+  (br-006, landed first as ff517bef8): every `feature/`, `wip/`, `mk/`
+  and `chore/` branch with no commit for seven days that no running agent
+  uses (102 on origin, 89 local).
+* Deleted, all on `develop`: 3 on origin, 2 local.
+* Prefixed: the stragglers (`mk/*`, `xelp-*`, `fs-traits`,
+  `lockup-s4a-wip`, `codex/posix-stdlib`, ...) became `feature/...` (18 on
+  origin, 25 local).
+* Kept: `park/*` (75), `main`, `develop`, `promote/*`, and the active
+  agents' branches and every branch checked out in a worktree.
+
+Origin by prefix, before and after: feature 124 -> 23 (the renamed
+stragglers included), park 75 -> 75, chore 20 -> 6, mk 13 -> 0, wip 11 ->
+0, docs 2 -> 2, promote 2 -> 2, unprefixed 14 -> 2 (`main`, `develop`),
+other groups 3 -> 0; 265 -> 110, of which 75 are parked, not counting
+branches pushed since.
 
 **Left for later.** Of the 116 branches checked out in worktrees, 37 are
 fully landed and 9 are unlanded and older than 14 days. Their worktrees

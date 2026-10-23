@@ -58,8 +58,16 @@ whose processor controls are real under KVM and absent under TCG -- carries
 an older control whose commit says TCG passes `--accel tcg` (certification
 consultant, 2026-10-01).
 
-**Landing on `main`.** There is one landing branch, `main`; `develop` has
-not been used since 2026-09-15 and nothing lands on it. `main` moves only
+**Landing on `develop`.** Since the switch of 2026-10-23 (customer;
+`docs/REPO-FLOW.md`) the landing branch is `develop`, and `main` moves only
+by promotion pull requests that merge themselves when CI and the
+certification verdict pass. In the rules below, and wherever a landing step
+says `main` -- rebase onto it, fast-forward it, boot it, push it -- read
+`develop`; `fleet/land-branch` holds the branch `land.sh` and `batch.sh`
+use. Before `batch.sh join`, a branch that touches the certified item runs
+`tools/common/release/cert-verdict.py develop..<branch>`: every such commit
+names its review or carries a `Certification:` line, or its promotion
+waits. `develop` moves only
 under the fleet landing lock, `~/.local/share/ferrix/fleet/land.sh`
 (`queue`, `take`, `release`; `status` shows the queue), held by the fleet
 coordinator's rules (customer, 2026-09-26):
@@ -99,7 +107,9 @@ coordinator's rules (customer, 2026-09-26):
   seen by the one who made it; then pushes `main` to the gate host
   (`git push example-wg:Documents/projects/os/ferrix main:main`), so no
   worktree there is made from a stale `main`. A push to `origin` needs the
-  customer's word, given in the session that pushes.
+  customer's word, given in the session that pushes; pushing `develop` after
+  a landing has it standing (2026-10-23), and the Promote workflow carries
+  it on to `main`.
 
 **Re-verifying after `main` moved.** When the commits that moved it touch
 none of the files the change touches, the gate still stands: say so in the
@@ -700,6 +710,7 @@ listed below, and three needed a human call, also below.
 * **`clipboard-vdagent`**: diverged: origin landed a `user/vport` clipboard agent, local built a `compositor/vdagent` crate, kept as `wip/clipboard-vdagent-compositor-approach`. Left: decide which approach stands, or whether `vport` covers it. [more](backlog/branches.md#br-003)
 * **`stage13-timens` (worktree `timens`)**: time namespaces mostly staged, blocked on a merge conflict in `panic/catalog.rs` (FX-0907, FX-0910). Left: take both entries, regenerate `docs/generated/PANICS.md` and two certification coverage JSONs, then commit. [more](backlog/branches.md#br-004)
 * **Detached worktree `display-show` (`d9c5658ed`)**: one uncommitted line changes `compositor/blank/src/modeset.rs`'s `BACKGROUND` to pure blue while the comment says dark slate; looks like a debug probe. Left: confirm and discard, or finish and fix the comment. [more](backlog/branches.md#br-005)
+* **102 idle branches archived (2026-10-23, second sweep)**: every `feature/`, `wip/`, `mk/` and `chore/` branch idle for seven days, one "idea:" line each with its archive ref `refs/archive/2026-10-23b/<name>`, grouped by stream. Pick one up by restoring its ref. [more](backlog/branches.md#br-006)
 
 Seven pieces of real, uncommitted work were found and committed today, each
 pushed rather than left only on this disk:

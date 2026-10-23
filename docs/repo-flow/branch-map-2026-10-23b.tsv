@@ -1,0 +1,623 @@
+# Second branch sweep of 2026-10-23 (docs/REPO-FLOW.md, "Branch clean-up of 2026-10-23").
+# Restore: git push origin <archive_ref>:refs/heads/<old_name>
+where	old_name	action	new_name	archive_ref	sha	last_commit	unlanded_commits
+origin	bs-a-s3b	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/bs-a-s3b	166cdb0e55e08ea2c552da12fb60d3095de6c9bf	2026-10-15	4
+origin	btrfs-enospc	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/btrfs-enospc	3491d9c86341e4a972483afba9e84d6fe17be904	2026-10-14	1
+origin	chore/g24-i1-pre-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/g24-i1-pre-rebase	38f3f0a85e9db80853c980a12fb899d3d029c170	2026-10-15	1
+origin	chore/land-devd0-r	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-devd0-r	487768adce3e5c3769c400839f5b295dbe3ad8a0	2026-10-11	1
+origin	chore/land-f46-controls	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-f46-controls	f283aa0b66be253c920f6427ef66686828351d8f	2026-10-11	1
+origin	chore/land-pins-r	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-pins-r	ad7801bd176426b0dd910c58362216806d51659e	2026-10-11	1
+origin	chore/land-pipe-p2-replay	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-pipe-p2-replay	a2ee7190c500db9e36e9368deb3d042217d79016	2026-10-11	10
+origin	chore/repo-flow	in-use			6bec32e7e78e35ae5bdd6e96f775f4fc34d12c20	2026-10-23	0
+origin	chore/s13f-seccomp/pre-rebase-4cd46c706	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/s13f-seccomp/pre-rebase-4cd46c706	4cd46c706d0357c0f93a6a9186c02ab577a8106f	2026-10-14	1
+origin	chore/s13f-seccomp/pre-rebase-b2090d734	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/s13f-seccomp/pre-rebase-b2090d734	b2090d7340fb86c69bc394be364e664ab383c7d1	2026-10-11	1
+origin	chore/s13fx-pre-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/s13fx-pre-rebase	9d219a0995625979f28498b9597250250386f3d4	2026-10-12	9
+origin	chore/vtd-n150-pre-rebase-4f51c357d	keep			4f51c357d8254ee8146d5a32d4d717c7ecbdba08	2026-10-19	1
+origin	chore/vtd-n150-pre-rebase-661d039aa	keep			661d039aa9ba30dda41c210b3c2cb690f6401d30	2026-10-17	1
+origin	chore/vtd-n150-pre-rebase-abc06603d	keep			abc06603d8a0edc8d702f7c9fe0bd7d63d8b8d1a	2026-10-18	1
+origin	chore/vtd-n150-pre-rebase-e82191e12	keep			e82191e12f52e977736998e24926c4f662e8ea76	2026-10-20	1
+origin	chore/win/land-ahci-1	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/win/land-ahci-1	5fe416ad69f0239fdd24700527fd62f629bee94f	2026-10-16	1
+origin	chore/win/land-ahci-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/win/land-ahci-2	a05e458c413b9d167de5ac910e58efcbbb09bbd7	2026-10-16	1
+origin	chore/win/land-ahci-3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/win/land-ahci-3	4a0db8a97407f22d1f97b28a57be6dbd9c10122f	2026-10-16	2
+origin	chore/wine-m1-before-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/wine-m1-before-rebase	9e0522d620acb96e99aa7ed35eab8cf20424efbb	2026-10-10	2
+origin	chore/wine-vnc-input-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/wine-vnc-input-rebase	47ab10108034302a7812f2a26055fbd434a542ca	2026-10-13	5
+origin	chore/xelp-m2-gate/trace	keep			2b681bd58216925ca1aa9ddd25bfc39da2ef8a8f	2026-10-20	1
+origin	chore/yserver-rebase-pin	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/yserver-rebase-pin	ab9f7278ad9aa6cf576b40b63b09bb7de56adf5d	2026-10-13	1
+origin	claude-desktop-assess	delete (landed on develop)		refs/archive/2026-10-23b/claude-desktop-assess	e27e974940c5c5c1d89284bcea7829bfab15581a	2026-10-14	0
+origin	codex/posix-stdlib	rename	feature/codex/posix-stdlib	refs/archive/2026-10-23b/codex/posix-stdlib	f52a689662e8815b01eb9f25a124d284975be51b	2026-10-01	1
+origin	develop	keep			998e6e4805795bb270e5c6880ddad3f833056aaa	2026-10-23	0
+origin	docs/cc-lol-docs	keep			57ec62e6eb36289f177c94089a3b0bb105162eaa	2026-10-19	1
+origin	docs/enclave-design	keep			1c0740d0334ef28662b82811f0fa9232b7b48d54	2026-10-10	1
+origin	endfield-install	delete (landed on develop)		refs/archive/2026-10-23b/endfield-install	4655f8be1c12a53d912e6fa68908fba8e9153739	2026-10-14	0
+origin	feature/ab-boot	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ab-boot	c0a5f0b6c20ed0b5133c4cc875f6e239b2688016	2026-10-11	1
+origin	feature/ab-sys-wip-backup	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ab-sys-wip-backup	bce5593444014b21b5f98bf6d907739ba0e7449a	2026-10-11	3
+origin	feature/ahci	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ahci	a013115f63716904c162139962d4483b6705b4e0	2026-10-16	2
+origin	feature/ahci-n150-kernel	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ahci-n150-kernel	a013115f63716904c162139962d4483b6705b4e0	2026-10-16	2
+origin	feature/backup/2026-09-11/lilith-ferrix	keep			b369e808087efdfcb80d62822e0eb4e0a1d6d4c2	2026-10-18	1
+origin	feature/backup/2026-09-11/lilith-ferrix-work	keep			d627e3de37c6742f52232712e20e96641e82721d	2026-10-18	1
+origin	feature/baremetal-hang	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/baremetal-hang	db6f3070680e674ad18c9242d5fa17d4ad74495b	2026-10-11	2
+origin	feature/blockring-n150-ctl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/blockring-n150-ctl	4cbeed0ebbd31de051e9a862b3730907c7430de3	2026-10-17	1
+origin	feature/bm-h4-reserve	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-h4-reserve	0b7693a4850230a8ccdc3b9acd40a3566bb0ae98	2026-10-13	1
+origin	feature/bm-h4-usb-storage	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-h4-usb-storage	766da17e1e37dad0fedd752d4c8f6fe22f930ed5	2026-10-13	1
+origin	feature/bm-h6-gop	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-h6-gop	5a6de33e5a35fac37c52cd50c10881f83c90994d	2026-10-13	2
+origin	feature/bm-nvme-panic	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-panic	c5de8d8f9ecd19f7e2f3aef849cca9cb642229b0	2026-10-13	1
+origin	feature/bm-nvme-parts	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-parts	75964762e7d6930c531a3ef136df188c63691f4f	2026-10-13	1
+origin	feature/bm-nvme-reserve	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-reserve	0026de02fbc279c6e07f8b2ad09c4e4c8284e206	2026-10-13	1
+origin	feature/bm-nvme-stop	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-stop	0c9360aed65251dd0f3c50a405fec1f586a738b5	2026-10-13	1
+origin	feature/bs-a-s3b-pre-rebase4	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-pre-rebase4	67d5fedbaa6df1a44839ba3dc61d8d94a01cab75	2026-10-15	3
+origin	feature/bs-a-s3b-wip-1	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-wip-1	459d4380ab6fb83779bb8264216998e0bfdfd75f	2026-10-15	18
+origin	feature/bs-a-s3b-wip-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-wip-2	0d6526cc1533d27e4d1578c1b801993d99b74755	2026-10-15	5
+origin	feature/bs-a-s3b-wip-3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-wip-3	9ddc6182655f1ec37c8daa151cfbe131cb9a1ec9	2026-10-15	4
+origin	feature/build-speed-3-ctl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/build-speed-3-ctl	724f6bcb0ed64c0188be938d6044be92b32caccb	2026-10-12	1
+origin	feature/cc-lol-l1	keep			d7e46eaf9c9a5938a92b28e1486fbc557176af2d	2026-10-19	3
+origin	feature/cm-cd-stack	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/cm-cd-stack	e2ab71bfb1485b6e5525b908393be5334e06bda8	2026-10-15	1
+origin	feature/compositor-rate	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/compositor-rate	69321c8a257ffb7e646dbf65ca580fbf7b681bf5	2026-10-10	46
+origin	feature/ef-night	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ef-night	6db201fc1918f1b1d17e02c65314be8e7b47b86c	2026-10-15	3
+origin	feature/ef-night2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ef-night2	f6b22336aa7c4ef71fdd2047f457039871dc678b	2026-10-15	4
+origin	feature/ef-sys-sched-wip	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ef-sys-sched-wip	c8fef00e22bb5216e1f2041150bfa456b9072497	2026-10-20	1
+origin	feature/endfield-card	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/endfield-card	b78c0f77ef1fdbf7896081f569ebc600594fa0d6	2026-10-13	9
+origin	feature/endfield-s3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/endfield-s3	f61dea0a7d3994d6693fd8cb973b3cea080e5121	2026-10-13	1
+origin	feature/endfield-s4	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/endfield-s4	899a95d7d416e478b9018434904c13aad08701ff	2026-10-13	10
+origin	feature/ep-dl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ep-dl	09c9225833c55076c27c8f97f297431d3c7af64b	2026-10-15	5
+origin	feature/ep-rig	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ep-rig	e1b1e597b21b8e364452875268e3436b2330f59a	2026-10-15	6
+origin	feature/ep-wine	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ep-wine	9346303d4148bcab06114b93cf100b34e0351b18	2026-10-15	7
+origin	feature/everything-preinstall	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/everything-preinstall	ddec538b34525ff1281b0fd073d12e91c2f81de1	2026-10-11	1
+origin	feature/everything-try	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/everything-try	c644abf43e93eef162987abbba9d817499a3a31c	2026-10-11	1
+origin	feature/ex-repro	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ex-repro	65e9983934c97cd964dff7801ecebfed2a31e673	2026-10-15	1
+origin	feature/fbwc-ctl-c-base	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/fbwc-ctl-c-base	65c6d3ca08930db0426dc2b590039638ddd570bf	2026-10-17	1
+origin	feature/fl-cg-diag	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/fl-cg-diag	326f6d2b548af18e55570758e46063c095655ffc	2026-10-16	5
+origin	feature/fl-cg-exp	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/fl-cg-exp	416eccdc0ef18b6eb56e521ea73e4dc1864bb2e7	2026-10-16	4
+origin	feature/floor-repro-main	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/floor-repro-main	8e96fb7d5c2a188ec9ebe9f3eff4c047e964acf4	2026-10-15	1
+origin	feature/fx1012-stack	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/fx1012-stack	515793a7ff870dd01e41880f5e39ca21afef0a6e	2026-10-12	1
+origin	feature/g24-i1-wip	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/g24-i1-wip	a4438e93b891d044e1d4c4dc4aa005447ac59726	2026-10-14	3
+origin	feature/gap-gone-checks	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-gone-checks	8649d4a7a5a97bf9936b5d8090ee7976852c19c7	2026-10-12	1
+origin	feature/gap-gone-checks-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-gone-checks-2	a4e7030ff9fa692113d52009127281844bd887b5	2026-10-12	1
+origin	feature/gap-sigpaths-e2e	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-sigpaths-e2e	d6d0a8db4f1fbe0440050e8a9634eb98c1bda104	2026-10-12	2
+origin	feature/gap-sigpaths-e2e-diag	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/gap-sigpaths-e2e-diag	f1c0b5d6a6f1eaefe6aa5200e92c7a7468301c0c	2026-10-12	2
+origin	feature/gap-zinc-su-status	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-zinc-su-status	5e684a6e73347dccf8fc6a355070c7a707a44243	2026-10-12	1
+origin	feature/intel-uapi	keep			bec525525f817b60ea2a37070bfa7e1786d03401	2026-10-18	8
+origin	feature/mm-pcache	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/mm-pcache	c0a4dd7522fd39c8d476667e6f94fd98f2dbfc37	2026-10-14	1
+origin	feature/n150-wc	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/n150-wc	f3c166742ddbb5e61ae0e99b6bfeb72dcee4d695	2026-10-16	1
+origin	feature/n3b-gbm	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/n3b-gbm	ee75c7254beae3742eeecae9bff019b2f19d33ae	2026-10-10	12
+origin	feature/nv-cardvm	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-cardvm	135349850b9944ad7ce137358f150f34f2b81ce1	2026-10-10	7
+origin	feature/nv-dri3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-dri3	fb09ef337ff556b77f49821a50120a3224b5def5	2026-10-10	10
+origin	feature/nv-mapslots	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-mapslots	8cd850d389cf6b45cd87bc5038305567db83d087	2026-10-10	7
+origin	feature/nv-modifiers	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-modifiers	e890811747e5a5e4f08f748eb805916230db66c4	2026-10-10	41
+origin	feature/nv-next	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-next	a9a47e6e9bb7440e66e43ef871f18a4a41e3051d	2026-10-10	44
+origin	feature/nv-next-stall	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/nv-next-stall	521222ed736da4433a04ee4580898a66c742d55f	2026-10-10	45
+origin	feature/nv-present	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/nv-present	cfa7fb8d95d9efdc91830b02b6638d9cedc79711	2026-10-10	48
+origin	feature/nv-quiesce	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-quiesce	16d234d7421dc4cd40eecc2d3b7bb1228ab0f8fc	2026-10-10	9
+origin	feature/nv-trip	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/nv-trip	38d05454e424d19494a98e1fec5782e6e84bdac2	2026-10-11	53
+origin	feature/nv-vram-dmabuf	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-vram-dmabuf	83dabfcd027beefc010a7c5bb8e1dc23db77c4d7	2026-10-10	8
+origin	feature/nv-wallpaper	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-wallpaper	2572dc696b0d04e1dffd14adbae63111cf326506	2026-10-10	7
+origin	feature/nv-zerocopy	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-zerocopy	7188641338c35f980a237a33202ac9eb409103af	2026-10-10	13
+origin	feature/nvidia-n3b	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nvidia-n3b	6ebf9f172f743b177f6ae6962676e800613fbc53	2026-10-10	3
+origin	feature/pc-diag	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag	b7b237233879927695df70e25ed6b226e99b1760	2026-10-14	2
+origin	feature/pc-diag-base	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-base	b7b237233879927695df70e25ed6b226e99b1760	2026-10-14	2
+origin	feature/pc-diag-c	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-c	602be315aab9d4434b66d275759867dc0b69428c	2026-10-14	3
+origin	feature/pc-diag-ch	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-ch	eddf5d0e9ec0c02c1e2de05028369aec24cec816	2026-10-14	3
+origin	feature/pc-diag-cw	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-cw	f3d620f342cb11cba5051ed5376f38adede31ce1	2026-10-14	3
+origin	feature/pc-diag3-all	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag3-all	9989b176d5453554fe95c3cd54f437ff8e4ac3c3	2026-10-14	2
+origin	feature/pc-diag3-cw	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag3-cw	7aeed1160b9023d9568623b25a03336a72047d0a	2026-10-14	3
+origin	feature/pc2-dd-after	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc2-dd-after	f9ce691301e96aa48af1f1d04a9bc23b2cdfd216	2026-10-15	1
+origin	feature/pc2-dd-before	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc2-dd-before	42ccf0ad138d4e9ff9f6f02a0eeded75c4eae35e	2026-10-15	1
+origin	feature/pl2-ctl-commit	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pl2-ctl-commit	f32b7991b93b3f9cd77af0c36b3095fa4b509e03	2026-10-15	1
+origin	feature/postmortem	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/postmortem	925ff2b0598c5c0e84df32676e70e1ae725df717	2026-10-11	1
+origin	feature/r1/before-squash	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/r1/before-squash	430cc2d7bd1ba55c74073149918e484f4c2e1ba1	2026-10-14	4
+origin	feature/r1/frames-pinned	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/r1/frames-pinned	ef48a98347cbc1beff2fff56d53890be9b6e16e3	2026-10-14	4
+origin	feature/r1/frames-yclock	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/r1/frames-yclock	40963355a322cbb73e115771c3ad8477403a97dd	2026-10-14	3
+origin	feature/rfds-bhi-forced-measure	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/rfds-bhi-forced-measure	8ddede092a6e5c80652830cf2cbf9ff465904c58	2026-10-17	2
+origin	feature/rn/run-nazuna	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/rn/run-nazuna	a93b2f9ee2f8c1e3e38dc0d1e6236cfc4e1e528e	2026-10-13	1
+origin	feature/rootless-series-check	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/rootless-series-check	e2310d8f2c24dbea3e6e1346158caf920f26ad25	2026-10-13	1
+origin	feature/run-nazuna	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/run-nazuna	f3490ee25d6bbf30797dddb2417ceb6370b2835e	2026-10-13	10
+origin	feature/s13f-timens/pre-reservation-9be83c667	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/s13f-timens/pre-reservation-9be83c667	9be83c66712ada22879d069832f5f13fa52a3167	2026-10-14	3
+origin	feature/s4port-pre-squash	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/s4port-pre-squash	798ee8a13d98d8247d6181ff3118b1474103b5b5	2026-10-11	6
+origin	feature/s4port-pre-squash2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/s4port-pre-squash2	191d76c3097f5137cdf59192bbd5085056312e1b	2026-10-11	1
+origin	feature/serial-tx-fallback-capctl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/serial-tx-fallback-capctl	4c5a372e6080e0ebaa74f488e9e4205c35045b0b	2026-10-17	1
+origin	feature/softgl-gap	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/softgl-gap	55e237f7490fd88d5d0cd1603d1368842603bd43	2026-10-10	7
+origin	feature/stage13-exit	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/stage13-exit	9d219a0995625979f28498b9597250250386f3d4	2026-10-12	9
+origin	feature/steam-nvdesk	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/steam-nvdesk	c005c91ea392e9759f28cc0fb641263158a5fb80	2026-10-10	2
+origin	feature/steam-stall-wakeop	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/steam-stall-wakeop	2a983419fbc0c2e9aa428907204a0bb1befade64	2026-10-10	1
+origin	feature/tv-teeworlds	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/tv-teeworlds	547dedc41ed25dcf6b2bd3b43207d00a3c8b8138	2026-10-10	8
+origin	feature/win/ebs-1	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-1	898144cfdfac79c62af8d5b251c7458a37bbf89b	2026-10-15	1
+origin	feature/win/ebs-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-2	7caf78952224139ff18323bfe6448e0867884474	2026-10-15	1
+origin	feature/win/ebs-3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-3	351d03b5a2729e5dbbbde91a194747a5b2689ea1	2026-10-15	1
+origin	feature/win/ebs-4	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-4	cf5757f9ce4853e0734f67fad57b445decfd9d87	2026-10-15	1
+origin	feature/win/fbcon-2s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-2s	bc9a70b17ad30b73e3743686ae559cb40b841619	2026-10-15	1
+origin	feature/win/fbcon-5s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-5s	e467b1a0b44018335a389a2abef0a7a7317e5c3c	2026-10-15	1
+origin	feature/win/fbcon-6	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/fbcon-6	688249aff39203ffc7489d229dfab6bb8d9cbb59	2026-10-15	1
+origin	feature/win/fbcon-7s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-7s	e9b346aab2006a76f9cc0b370b02258e841cdd56	2026-10-15	2
+origin	feature/win/fbcon-8s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-8s	82e4b7e16b387149d7ec5d9a9def35910b00ff22	2026-10-15	2
+origin	feature/win/n150-esp-20261015-220620	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-220620	1f8ea47b4507c20fa98c067dc86402ede140df51	2026-10-15	1
+origin	feature/win/n150-esp-20261015-221632	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-221632	688249aff39203ffc7489d229dfab6bb8d9cbb59	2026-10-15	1
+origin	feature/win/n150-esp-20261015-223137	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223137	f768f0f4eab2608ede66039a2c3952d8437ea36c	2026-10-15	1
+origin	feature/win/n150-esp-20261015-223234	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223234	b8c90b71f03caf36501d9e0b7d6b027b6f54e302	2026-10-15	1
+origin	feature/win/n150-esp-20261015-223310	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223310	d8544b0982a92bee4f5ea37b8b51a203f96aaccc	2026-10-15	1
+origin	feature/win/n150-esp-20261015-223437	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223437	65107c0c42d3e1225b221f904d66dc2d4ca00bd3	2026-10-15	1
+origin	feature/win/n150-esp-20261015-223801	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223801	1938e760f5d508d8bcf59faa456bed651c713f25	2026-10-15	1
+origin	feature/win/n150-esp-20261015-223906	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223906	1938e760f5d508d8bcf59faa456bed651c713f25	2026-10-15	1
+origin	feature/win/n150-esp-20261015-224218	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-224218	898144cfdfac79c62af8d5b251c7458a37bbf89b	2026-10-15	1
+origin	feature/win/n150-esp-20261015-224436	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-224436	6149011908c535461edf085b5dda879a4af8d1e0	2026-10-15	1
+origin	feature/win/n150-esp-20261015-225729	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-225729	351d03b5a2729e5dbbbde91a194747a5b2689ea1	2026-10-15	1
+origin	feature/win/n150-esp-20261015-230142	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-230142	cf5757f9ce4853e0734f67fad57b445decfd9d87	2026-10-15	1
+origin	feature/win/n150-esp-20261015-231152	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-231152	c1fa334934dc34fbbaab4ab33327cd8339e38d2d	2026-10-15	1
+origin	feature/win/n150-esp-20261015-233339	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-233339	5b7edf79f90105a52c5e195693657f4f7e42a0ac	2026-10-15	1
+origin	feature/win/n150-esp-20261015-234710	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-234710	a50564ab2ccafa3f73a442295da8570b60d8f57d	2026-10-15	1
+origin	feature/win/n150-esp-20261016-000108	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261016-000108	9194c11acf71f5c2349e98c187254b9c26d658bf	2026-10-16	1
+origin	feature/win/n150-esp-20261016-001009	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261016-001009	5fe416ad69f0239fdd24700527fd62f629bee94f	2026-10-16	1
+origin	feature/win/x2apic-10	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/x2apic-10	1f8ea47b4507c20fa98c067dc86402ede140df51	2026-10-15	1
+origin	feature/win/x2apic-3-prefer	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/x2apic-3-prefer	ddb186d9842415228b245265f10015c957635a95	2026-10-15	1
+origin	feature/win/x2apic-4-sabotage	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/x2apic-4-sabotage	5e5a8163d69b3e3fc238100bee3063a8c4a44913	2026-10-15	1
+origin	feature/wine-vnc-input	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/wine-vnc-input	7179c55580a24417c57da8d757d283844d333091	2026-10-13	6
+origin	feature/xelp-m2-box/cp1	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/xelp-m2-box/cp1	5c5e60a751df8264aefad9c2a21057a1694bc965	2026-10-18	1
+origin	feature/xelp-m2-box/cp2	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/xelp-m2-box/cp2	4648e4a83aac688738d4a0e3b08e0e31abc8ce2c	2026-10-18	1
+origin	feature/xelp-m2-box/cp3	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/xelp-m2-box/cp3	56ddfca91b502516c756f019bbe9a03d6b0a9d11	2026-10-18	1
+origin	feature/yt6801-rx64	keep			2dbefaab71fa20d8a0b4ff6daf0a2e4a198d8ec3	2026-10-17	1
+origin	fs-traits	rename	feature/fs-traits	refs/archive/2026-10-23b/fs-traits	9766c5852eeffe8ccb592e4682c5e6023d9f3ba8	2026-10-21	1
+origin	lockup-s4a-wip	rename	feature/lockup-s4a-wip	refs/archive/2026-10-23b/lockup-s4a-wip	17af4231218beaa4389a5d61857b9a75e2bf82e0	2026-10-21	1
+origin	main	keep			7d8c1acdb569a92bd326e68838ac6130275ea996	2026-10-23	0
+origin	mk/k10	rename	feature/mk/k10	refs/archive/2026-10-23b/mk/k10	8c28ebecfc7fe5b17316dcba89cefbc0a5c47d97	2026-10-21	1
+origin	mk/k12	rename	feature/mk/k12	refs/archive/2026-10-23b/mk/k12	77b485977a8932ca818c8ca46ab145222b693c3e	2026-10-21	2
+origin	mk/k12-bench-b	archive (never to land / snapshot)		refs/archive/2026-10-23b/mk/k12-bench-b	caad6ec6e28dc2e08f90c7c1dc73f746505c4346	2026-10-21	3
+origin	mk/k12b	rename	feature/mk/k12b	refs/archive/2026-10-23b/mk/k12b	85b5f45567042a2eed1e1d1c1f98ec1d7ccbb772	2026-10-21	3
+origin	mk/k2	rename	feature/mk/k2	refs/archive/2026-10-23b/mk/k2	5a57ce2a61bcf7c8fbdbd07f43ad547ec74114af	2026-10-21	11
+origin	mk/k2b	rename	feature/mk/k2b	refs/archive/2026-10-23b/mk/k2b	b5857299ae254c6665940fc4910a37f50f5f361c	2026-10-21	14
+origin	mk/k3	rename	feature/mk/k3	refs/archive/2026-10-23b/mk/k3	d9ed165ca0d99a67bcc14673cb4eb4370c785a3a	2026-10-21	10
+origin	mk/k4	rename	feature/mk/k4	refs/archive/2026-10-23b/mk/k4	6249cf7f8ca658e00def2fd8304c83f3daaa69b4	2026-10-21	4
+origin	mk/k5	rename	feature/mk/k5	refs/archive/2026-10-23b/mk/k5	8412046ef47df672c09524071db35525e0c3e443	2026-10-21	12
+origin	mk/k6	rename	feature/mk/k6	refs/archive/2026-10-23b/mk/k6	e1ad04170ae8e4ba7e721bf5966fdb5ae82c2100	2026-10-21	1
+origin	mk/k7	rename	feature/mk/k7	refs/archive/2026-10-23b/mk/k7	6d008d19edb119ba50aaa6942a347ed1df6ac79e	2026-10-21	15
+origin	mk/oom-uncharge	rename	feature/mk/oom-uncharge	refs/archive/2026-10-23b/mk/oom-uncharge	2e0eb7b5affaf0ae03905d65fd7f7835014d054c	2026-10-21	1
+origin	mk/smt-off	rename	feature/mk/smt-off	refs/archive/2026-10-23b/mk/smt-off	f52e191929649b9ca9ae85818a09d4ac24c82782	2026-10-21	1
+origin	n3c-vtest	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/n3c-vtest	5696ead970ff87fe2b45edf41fcd939c591d5970	2026-10-10	7
+origin	park/audit-2	keep			33aef0ec19bcf12848ff07a79b2573b708e3fada	2026-10-01	1
+origin	park/boot-21b	keep			71f60913e4653d30a3107d0a6e9844f6363ba445	2026-09-27	1
+origin	park/btrfs-write	keep			b7b81fc80b2bb0b74a36c4fadcb450f00c1fc68c	2026-09-21	7
+origin	park/clipboard-vdagent	keep			c7d7b93fe331369e408e13fe11cfa1d799c7e715	2026-09-27	1
+origin	park/display-design	keep			fdd665dad3f28b013b48af0243d3607efafb138e	2026-10-01	1
+origin	park/f46-power-off	keep			40438d5d25ad54f75cdc7b3dce53f115e25681eb	2026-09-27	1
+origin	park/ferrousli-math	keep			762074eb53228396a9287a312a690bcb42265330	2026-09-13	2
+origin	park/ferrousli-misc	keep			e95d1e99b13bdbc5fdf2fade1dfb09b637a0a0ed	2026-09-13	1
+origin	park/ferrousli-netcore	keep			a3b2152e9df3e08ae0281f7fe39b2463ce2893fe	2026-10-01	1
+origin	park/ferrousli-netdb	keep			28dcc727d9526b5e436bf93532fa38e75397ccc2	2026-10-01	2
+origin	park/ferrousli-threads	keep			4db12e28655ddd6c20a370da567a91878f8f6207	2026-09-13	1
+origin	park/frame-budget	keep			fb60427a17b8f67d20d55682adae908e45305a2f	2026-09-27	2
+origin	park/guest-frame-time	keep			c1534cfaaf50f28d836f60f0fcf3c3f6995a0f5b	2026-09-18	6
+origin	park/hyprlock	keep			06c3f6d411a4096d009863b97057896e0719f68a	2026-09-27	4
+origin	park/init/l4	keep			1f5f72870111f9945be6eca7f9f393f929d6662e	2026-10-01	1
+origin	park/nvidia-c3k	keep			e53ed77332b9ebd897638c2c55aee581d2c774fd	2026-10-02	1
+origin	park/nvidia-c3k-wip	keep			362915048dea755cc9b4b45b0413850ff8aa5219	2026-10-02	2
+origin	park/nvidia-n0-probe	keep			114438a978936f9b5388ffa6ac14bccc99258b3d	2026-10-02	1
+origin	park/nvidia-n1c	keep			77a7e90e67cf6f8cd833e0de2cd5558c02811809	2026-10-03	1
+origin	park/nvidia-n1c-wip-backup	keep			9e08db49beb0cdb7f171f0430b3ebd4d64399af9	2026-10-03	15
+origin	park/nvidia-n2	keep			dbb23fd6fb935a97f758a71f55fbd1787e15845b	2026-10-04	17
+origin	park/nvidia-probe-wip	keep			73a7a3b02ebf65a2468cdb195f6ecfb4f258f57a	2026-10-02	1
+origin	park/os-12/ports-autobuild	keep			1dd0e503eae42aa0c8cad265d0d9ac09e0b0b073	2026-09-17	3
+origin	park/os-35/ipc-lazytlb	keep			065e3cb3e7e043160a32dfd23acdcac396373ba3	2026-09-30	1
+origin	park/os-35/ipc-lazytlb-on-ef206bb2	keep			b10f3c7e56b39190bf72e0b6c9b9a4c20a2ce5fa	2026-10-01	1
+origin	park/os-35/ipc-ring	keep			7c52861e59332f1798871e7f34e09c026d5cb070	2026-10-01	1
+origin	park/os-35/ipc-wake	keep			dbd392808f8ccb969f55dbfd40064c5f1fee4029	2026-10-01	2
+origin	park/os-ipc/prof	keep			41bdef2ca985c17be1cbdae4a0a62543b4fbeb6f	2026-10-01	4
+origin	park/os-ipc/prof2	keep			4b5be585c6de0224ac1af31ec5e86ee2f68f7a4c	2026-10-01	7
+origin	park/os-ipc/zircon-trip	keep			a1379b25b8ca403321b806ced8ef2752d6672a7a	2026-10-01	5
+origin	park/os07/asid	keep			f693926460f7dd226eb4d803f22a9edbc96c3beb	2026-10-08	23
+origin	park/os07/b5-posix	keep			6c4353768ec9a643c6f3886e3e571504d1c11267	2026-10-08	3
+origin	park/os5d/gate-rows	keep			e98d519a013db394e7b968e25d2419d1a0ce06d1	2026-10-01	1
+origin	park/os76/fastpath-v2	keep			b2a8f20c2f05ee0dcb96cb69a8f1e6d33099c198	2026-10-08	4
+origin	park/os76/p0-measure	keep			712cec7223bb1d31558587a614df5a7aba1ba45a	2026-10-07	1
+origin	park/os76/unwind-abl	keep			9b8d04556b1f89bb89dc5a01eda925d85e8b427a	2026-10-07	1
+origin	park/os76/unwind-abl-long	keep			98529a096fab8faa3d79cc0f82b052aad32fec01	2026-10-07	2
+origin	park/po10-cgctl/cgctl	keep			2f39e12c1a3c53c956afdfa67aa5eb9fa87d0294	2026-10-07	2
+origin	park/po10-flakes/entropy-diag	keep			bf046e9ef30148335d89ef37750134881de47d2a	2026-10-07	1
+origin	park/po10-pipe/bench	keep			a2a2700b494902de5de95062d6cc93ab4435a828	2026-10-08	13
+origin	park/po10-pipe/side-tip	keep			a2a2700b494902de5de95062d6cc93ab4435a828	2026-10-08	13
+origin	park/po10-quick/probe	keep			47afa304fcf01729d37c93077c1f2bb5b5260b22	2026-10-07	2
+origin	park/po10-quick/q1	keep			ba00276a8275dbd26bafd3d34584df22957d89f9	2026-10-07	7
+origin	park/po10-quick/q4	keep			68753957501193c273ad0e28650d7648633bb35f	2026-10-07	9
+origin	park/po10-quick/q8	keep			056b1bebd35dfd0255eaa14624715fab0f9983e5	2026-10-07	6
+origin	park/po10-selfhost/diag	keep			654c185f59612440a2d436f3cf7a893240f06251	2026-10-07	1
+origin	park/po10-term/cursor	keep			c25ca56514f372ce7ff6a747885d23071d99e03e	2026-10-07	1
+origin	park/po10/endpoint-drop	keep			51629d17fc3c5909d1adfff3a2abc6dcf4f029cd	2026-10-07	1
+origin	park/po10/f65-k3	keep			87291a257a5f7413795adfbadf5d6e1ba8509d36	2026-10-07	1
+origin	park/po10/f65-wip	keep			f9a755b447b4c2578418c6f2416ab6fa0780c8fe	2026-10-07	3
+origin	park/po10/obj3-abl	keep			f0d0116c5a7600bee17667627709f93f403ab46a	2026-10-07	2
+origin	park/po10/obj3-wip	keep			bac953fbd66eeea36e8ac42a783c69964a9cceaf	2026-10-07	5
+origin	park/po10/sched-k	keep			9eeee95d2379f6d2756afa13b4459a00a293491e	2026-10-08	1
+origin	park/po11/slots-trim	keep			eb45763c0d67847cb03de38122cd1a09103dd103	2026-10-08	4
+origin	park/po5/sigterm	keep			70aaf7e9c5878177bf4220c49df5fba32bc04705	2026-10-05	1
+origin	park/po6-ipcB/wip	keep			4a8b8dfee85c24e56b7f00c819756b7a7b5f81d1	2026-10-05	1
+origin	park/po6/bwrap-user	keep			09e9c9c745cec5b3b56d0db5e2b618cb7163fe82	2026-10-05	14
+origin	park/po6/cgctl	keep			69fe7b51cb02e4f8ea8585f89390eb50d1f80d16	2026-10-05	4
+origin	park/po6/cgctl-n6	keep			c4e2b8f9dd3887cbf79a184e6a9f60396570aaf4	2026-10-05	5
+origin	park/po6/n5	keep			511c1bdafa377612751de540c448b88983fd64d5	2026-10-05	11
+origin	park/po6/step3	keep			4a8b8dfee85c24e56b7f00c819756b7a7b5f81d1	2026-10-05	1
+origin	park/po7/linux-floors	keep			ff1c1df8a334355111809729a1a5599e209b7a86	2026-10-06	2
+origin	park/po7/paper	keep			bca6e0600791e8f0beb65213e1da90bc82047a2e	2026-10-07	7
+origin	park/po7/paper-pandoc-wip	keep			42a52e8ad6ad55612ee0bf998d4b9eecf30d20cc	2026-10-06	6
+origin	park/po9/obj2	keep			6183ac96a9cb0c9020f8c1d7013daaf9a8bcde13	2026-10-07	1
+origin	park/stage11-kernel-mount-design	keep			101dcd2058efe233ec6dca722e85cc485c21f8da	2026-09-13	1
+origin	park/stage13-cgctl	keep			670b4c49a8a98fb5a65fc0a449a9e4adb2b7e061	2026-10-01	3
+origin	park/stage13-fdinfo	keep			225eb241085ba9742890a604fa7416c6bbc840e7	2026-10-01	6
+origin	park/stage13-netns	keep			4cc2ab39d27bdcaf56ada9c4894c73106e26a0f4	2026-10-01	3
+origin	park/stage13-s3	keep			d196063001a9a9d46f1625c13e75f9af1d6555ae	2026-10-01	1
+origin	park/stage13-timens	keep			88b073c3a6e40d9dc38e2285d971d565c9c2de61	2026-10-01	4
+origin	park/steam-y5-wip	keep			313567decc3985cb2971c26f594c049ae636d06c	2026-09-28	1
+origin	park/vmo-map-wip	keep			c7c346939b0486ebf5cffbac1c8772d7482aeb63	2026-09-13	2
+origin	park/w8-armv7a	keep			f2bc3779b2b3e295ed194afdc2acd1742def44c7	2026-09-27	1
+origin	park/worktree-agent-a33c10946b6721065	keep			5690f0ef03859bdce9470c93bcac9f16dd8ce776	2026-09-13	1
+origin	po10-quick/q1-v2	archive (never to land / snapshot)		refs/archive/2026-10-23b/po10-quick/q1-v2	dc97f19d1f9eb586cca09b506a261cdba40d8721	2026-10-08	1
+origin	po9/user-exp	archive (never to land / snapshot)		refs/archive/2026-10-23b/po9/user-exp	19c0147838dc5464b9abdc582a2cbc7d786dda03	2026-10-07	1
+origin	promote/6f1cecf56	keep			6f1cecf56fa1135b6fc5fc21830182d8e96f4d97	2026-10-23	0
+origin	promote/7f57053f5	keep			7f57053f5ab0d7d5b1c2afe9586f4f9af9691ba6	2026-10-23	0
+origin	steam-e2e	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/steam-e2e	32670fbc2c8ca8de29d5b7e9f809cdfa2687f261	2026-09-29	1
+origin	steam-userns	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/steam-userns	bd56085932aa67bac3d850f52c56bc5c92dda778	2026-09-29	1
+origin	wip/clipboard	archive (never to land / snapshot)		refs/archive/2026-10-23b/wip/clipboard	cec8bcdc484eecab34512f218db7fbc9172765e3	2026-09-24	1
+origin	wip/clipboard-vdagent-compositor-approach	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/wip/clipboard-vdagent-compositor-approach	cdf2e9b4ba971b8ad9a9e96dd5b23e131bcf1a68	2026-10-01	1
+origin	wip/codex-posix-assert	archive (never to land / snapshot)		refs/archive/2026-10-23b/wip/codex-posix-assert	bf2459a94f1dcc7f40f323b7ccdb52e9678e5ecf	2026-09-24	1
+origin	wip/display-design	archive (never to land / snapshot)		refs/archive/2026-10-23b/wip/display-design	17f5fa6288df181b9e8908ce5f03e480fba76a28	2026-09-24	1
+origin	wip/display-show	archive (never to land / snapshot)		refs/archive/2026-10-23b/wip/display-show	1e4c8f692600ef6c07281e8aeedba3e6558eafc6	2026-09-24	1
+origin	wip/ferrousli-netcore	archive (never to land / snapshot)		refs/archive/2026-10-23b/wip/ferrousli-netcore	f866d112e740b6ab4f7df22737d88e17490156ae	2026-09-24	1
+origin	wip/ferrousli-netdb	archive (never to land / snapshot)		refs/archive/2026-10-23b/wip/ferrousli-netdb	e39e31c6e36dfcbb4e8db7ae038e01466005391c	2026-09-24	1
+origin	wip/init-l4	archive (never to land / snapshot)		refs/archive/2026-10-23b/wip/init-l4	1469f9ac1149a83fe79de8d609705674f2f73cde	2026-09-24	1
+origin	wip/steam-e2e	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/wip/steam-e2e	7c146735f77c2a8ce2a8e78f6509616b19f8246b	2026-09-29	2
+origin	wip/steam-userns	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/wip/steam-userns	7a939447d5496953819a501ed9e8509d78b8ffed	2026-09-29	2
+origin	wip/steam-y6	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/wip/steam-y6	fe0c762b67f1191d17bdbfe2407758be5116b875	2026-09-29	1
+origin	worktree-agent-a293f44fe214785df	delete (landed on develop)		refs/archive/2026-10-23b/worktree-agent-a293f44fe214785df	093510751c843bde05b1d29d08050108750dfea3	2026-09-13	0
+origin	xelp-freq2	rename	feature/xelp-freq2	refs/archive/2026-10-23b/xelp-freq2	2b681bd58216925ca1aa9ddd25bfc39da2ef8a8f	2026-10-20	1
+origin	xelp-hwsp	rename	feature/xelp-hwsp	refs/archive/2026-10-23b/xelp-hwsp	faf70a9e68f1bc27c40cfebeb7cda3962de81cc6	2026-10-21	2
+origin	xelp-m2-gate/uapitrace	rename	feature/xelp-m2-gate/uapitrace	refs/archive/2026-10-23b/xelp-m2-gate/uapitrace	33f80f69d49600fee5f15e3eb700241bff7815f3	2026-10-21	3
+local	backlog-n150-dhcp	in-use			153cffb2d483f0f30e57f95646336dc2f65e3ff3	2026-10-18	0
+local	backlog-sshdt-slots	in-use			1e1c2b50f69ac33a462ab4fc6adb16872639e13d	2026-10-18	0
+local	backup/modes-pre-rebase	rename	feature/backup/modes-pre-rebase	refs/archive/2026-10-23b/local/backup/modes-pre-rebase	cd0b621c7e7d2879b8bde4cb599114d9597ec314	2026-10-22	1
+local	banner-profiling-gaps	in-use			588ff16251acc0930a2aaf827a84e8aa9d161400	2026-10-18	0
+local	blockring-n150	in-use			961f9c110d17b1122086b7809b4843e6a6785af2	2026-10-17	0
+local	boot-time	in-use			58690b11a7b14ce4ed6c3c7bbd76ae2689b5a517	2026-10-18	1
+local	box-test-scanout	in-use			93eba5ccf84f4765e3d9090a0fa21f582f9bf13c	2026-10-22	4
+local	bs-a-s3b	in-use			166cdb0e55e08ea2c552da12fb60d3095de6c9bf	2026-10-15	4
+local	bs-c-side	in-use			4e976f5b14aa19539d23aca7dd6e69aa4bee8a6b	2026-10-15	0
+local	btrfs-enospc	in-use			3491d9c86341e4a972483afba9e84d6fe17be904	2026-10-14	1
+local	btrfs-mtime	in-use			22b1fe83edc33d82da9815725190b7ce93d76f31	2026-10-18	1
+local	bugfix/two-clients-deterministic	in-use			998e6e4805795bb270e5c6880ddad3f833056aaa	2026-10-23	0
+local	cc-aarch64	in-use			fca8af92b843c558f6d5dda827a28bc53cbe3960	2026-10-15	0
+local	chore/g24-i1-pre-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/g24-i1-pre-rebase	38f3f0a85e9db80853c980a12fb899d3d029c170	2026-10-15	1
+local	chore/land-devd0-r	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-devd0-r	487768adce3e5c3769c400839f5b295dbe3ad8a0	2026-10-11	1
+local	chore/land-f46-controls	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-f46-controls	f283aa0b66be253c920f6427ef66686828351d8f	2026-10-11	1
+local	chore/land-pins-r	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-pins-r	ad7801bd176426b0dd910c58362216806d51659e	2026-10-11	1
+local	chore/land-pipe-p2-replay	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/land-pipe-p2-replay	a2ee7190c500db9e36e9368deb3d042217d79016	2026-10-11	10
+local	chore/repo-flow	in-use			6bec32e7e78e35ae5bdd6e96f775f4fc34d12c20	2026-10-23	0
+local	chore/s13f-seccomp/pre-rebase-4cd46c706	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/s13f-seccomp/pre-rebase-4cd46c706	4cd46c706d0357c0f93a6a9186c02ab577a8106f	2026-10-14	1
+local	chore/s13f-seccomp/pre-rebase-b2090d734	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/s13f-seccomp/pre-rebase-b2090d734	b2090d7340fb86c69bc394be364e664ab383c7d1	2026-10-11	1
+local	chore/s13fx-pre-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/s13fx-pre-rebase	9d219a0995625979f28498b9597250250386f3d4	2026-10-12	9
+local	chore/vtd-n150-pre-rebase-4f51c357d	keep			4f51c357d8254ee8146d5a32d4d717c7ecbdba08	2026-10-19	1
+local	chore/vtd-n150-pre-rebase-661d039aa	keep			661d039aa9ba30dda41c210b3c2cb690f6401d30	2026-10-17	1
+local	chore/vtd-n150-pre-rebase-abc06603d	keep			abc06603d8a0edc8d702f7c9fe0bd7d63d8b8d1a	2026-10-18	1
+local	chore/vtd-n150-pre-rebase-e82191e12	keep			e82191e12f52e977736998e24926c4f662e8ea76	2026-10-20	1
+local	chore/win/land-ahci-1	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/win/land-ahci-1	5fe416ad69f0239fdd24700527fd62f629bee94f	2026-10-16	1
+local	chore/win/land-ahci-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/win/land-ahci-2	a05e458c413b9d167de5ac910e58efcbbb09bbd7	2026-10-16	1
+local	chore/win/land-ahci-3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/win/land-ahci-3	4a0db8a97407f22d1f97b28a57be6dbd9c10122f	2026-10-16	2
+local	chore/wine-m1-before-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/wine-m1-before-rebase	9e0522d620acb96e99aa7ed35eab8cf20424efbb	2026-10-10	2
+local	chore/wine-vnc-input-rebase	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/wine-vnc-input-rebase	47ab10108034302a7812f2a26055fbd434a542ca	2026-10-13	5
+local	chore/xelp-m2-gate/trace	keep			2b681bd58216925ca1aa9ddd25bfc39da2ef8a8f	2026-10-20	1
+local	chore/yserver-rebase-pin	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/chore/yserver-rebase-pin	ab9f7278ad9aa6cf576b40b63b09bb7de56adf5d	2026-10-13	1
+local	claude-desktop-assess	in-use			e27e974940c5c5c1d89284bcea7829bfab15581a	2026-10-14	0
+local	cmount-flake	in-use			cc1c1288ac7cb5724ef48203d4568418c07bf76e	2026-10-15	1
+local	codex/ferrix-marketing-seo	in-use			d60c54b5e7cc1bee3c740934092a0e0647324d17	2026-09-27	0
+local	codex/marketing-brand-kit	delete (landed on develop)		refs/archive/2026-10-23b/local/codex/marketing-brand-kit	c61c2e8f1b9a28a9c02a49f90eb9574f0ab6451c	2026-09-27	0
+local	cpuinfo-model	in-use			6f1cecf56fa1135b6fc5fc21830182d8e96f4d97	2026-10-23	0
+local	cpuinfo-pin	in-use			94a53b55346cef1d22be52d60562e9705a64b75b	2026-10-23	0
+local	cpuinfo-reserve	in-use			161f63f64e9cc80af38fa8d34873b4179bd68d02	2026-10-23	0
+local	cr0-ne	in-use			241b704d572381dbcf39afc99db6dd986116e0a5	2026-10-17	0
+local	debug-s2-wip	rename	feature/debug-s2-wip	refs/archive/2026-10-23b/local/debug-s2-wip	230c30df869b6e02d7c69294b5440da2ce6c396a	2026-10-21	4
+local	develop	keep			998e6e4805795bb270e5c6880ddad3f833056aaa	2026-10-23	0
+local	docs-1015	in-use			2b1aaa3871f707f761c5720edc598250758711e7	2026-10-15	0
+local	docs-1015b	in-use			484a973620a50c5ff24bd209812dcbccfd19c9d4	2026-10-15	0
+local	docs-gen-fix	in-use			42f31a1d60a7bb105ade1309d4a1e9a251491110	2026-10-15	0
+local	docs/enclave-design	keep			1c0740d0334ef28662b82811f0fa9232b7b48d54	2026-10-10	1
+local	eevdf-a	in-use			0a5712512ec5d36809c2a7c4c986bc0957768a1c	2026-10-22	1
+local	eevdf-coalesce	in-use			dca5522896c61385cdcf2b79da80ed0d010ba781	2026-10-22	1
+local	eevdf-proto	in-use			88377ba7ac73af0e74594af705e680302e668378	2026-10-22	1
+local	ef-crash/g1	rename	feature/ef-crash/g1	refs/archive/2026-10-23b/local/ef-crash/g1	825452b8258a7aa34ca5a06f3628e49305804317	2026-10-21	1
+local	ef-crash/ids	rename	feature/ef-crash/ids	refs/archive/2026-10-23b/local/ef-crash/ids	7180f870c93c64b81732e9484a700874cd631401	2026-10-21	1
+local	ef-crash/wip	rename	feature/ef-crash/wip	refs/archive/2026-10-23b/local/ef-crash/wip	3a74573ce8d89afd85aba7a3bd095ebd487c4f38	2026-10-21	1
+local	ef-night3	in-use			3cda39cd10d5ac06d0ba6c6f513bd6a86bc30a7e	2026-10-15	4
+local	ef-perf-ra	in-use			cc29bc684498202da4fadf84e02b21b9ad02b7c8	2026-10-15	0
+local	ef-perf-video	in-use			0ab1f2011e13f72ab5f953d4734ec42cfeb496fa	2026-10-15	0
+local	endfield-esync	in-use			4afd3b31699656a3fe22e8bdd33adcf885354668	2026-10-15	0
+local	endfield-game	in-use			0644c3636a907a9b8e7b5c937fc6b942ac20b754	2026-10-17	1
+local	endfield-install	in-use			4655f8be1c12a53d912e6fa68908fba8e9153739	2026-10-14	0
+local	endfield-mmsg	in-use			8bf69f225d16201ad862fff2d0f9e8fa28cc4339	2026-10-13	0
+local	endfield-proton	in-use			9837788be6c7b99bc927c10efc3ba82aa55c5a96	2026-10-13	4
+local	endfield-ptrace-design	in-use			ab29a6f3521c5831c1ea4822839d65f99913776c	2026-10-13	0
+local	endfield-wow64-window	in-use			af91b1f8727b8f5ee0d6800228a807ef48840658	2026-10-15	0
+local	feature/ab-boot	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ab-boot	c0a5f0b6c20ed0b5133c4cc875f6e239b2688016	2026-10-11	1
+local	feature/ab-sys-wip-backup	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ab-sys-wip-backup	bce5593444014b21b5f98bf6d907739ba0e7449a	2026-10-11	3
+local	feature/ahci	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ahci	a013115f63716904c162139962d4483b6705b4e0	2026-10-16	2
+local	feature/ahci-n150-kernel	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ahci-n150-kernel	a013115f63716904c162139962d4483b6705b4e0	2026-10-16	2
+local	feature/baremetal-hang	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/baremetal-hang	db6f3070680e674ad18c9242d5fa17d4ad74495b	2026-10-11	2
+local	feature/blockring-n150-ctl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/blockring-n150-ctl	4cbeed0ebbd31de051e9a862b3730907c7430de3	2026-10-17	1
+local	feature/bm-h4-reserve	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-h4-reserve	0b7693a4850230a8ccdc3b9acd40a3566bb0ae98	2026-10-13	1
+local	feature/bm-h4-usb-storage	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-h4-usb-storage	766da17e1e37dad0fedd752d4c8f6fe22f930ed5	2026-10-13	1
+local	feature/bm-nvme-panic	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-panic	c5de8d8f9ecd19f7e2f3aef849cca9cb642229b0	2026-10-13	1
+local	feature/bm-nvme-parts	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-parts	75964762e7d6930c531a3ef136df188c63691f4f	2026-10-13	1
+local	feature/bm-nvme-reserve	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-reserve	0026de02fbc279c6e07f8b2ad09c4e4c8284e206	2026-10-13	1
+local	feature/bm-nvme-stop	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bm-nvme-stop	0c9360aed65251dd0f3c50a405fec1f586a738b5	2026-10-13	1
+local	feature/bs-a-s3b-pre-rebase4	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-pre-rebase4	67d5fedbaa6df1a44839ba3dc61d8d94a01cab75	2026-10-15	3
+local	feature/bs-a-s3b-wip-1	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-wip-1	459d4380ab6fb83779bb8264216998e0bfdfd75f	2026-10-15	18
+local	feature/bs-a-s3b-wip-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-wip-2	0d6526cc1533d27e4d1578c1b801993d99b74755	2026-10-15	5
+local	feature/bs-a-s3b-wip-3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/bs-a-s3b-wip-3	9ddc6182655f1ec37c8daa151cfbe131cb9a1ec9	2026-10-15	4
+local	feature/build-speed-3-ctl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/build-speed-3-ctl	724f6bcb0ed64c0188be938d6044be92b32caccb	2026-10-12	1
+local	feature/cm-cd-stack	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/cm-cd-stack	e2ab71bfb1485b6e5525b908393be5334e06bda8	2026-10-15	1
+local	feature/compositor-rate	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/compositor-rate	69321c8a257ffb7e646dbf65ca580fbf7b681bf5	2026-10-10	46
+local	feature/ef-night	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ef-night	6db201fc1918f1b1d17e02c65314be8e7b47b86c	2026-10-15	3
+local	feature/ef-night2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/ef-night2	f6b22336aa7c4ef71fdd2047f457039871dc678b	2026-10-15	4
+local	feature/ef-sys-sched-wip	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ef-sys-sched-wip	c8fef00e22bb5216e1f2041150bfa456b9072497	2026-10-20	1
+local	feature/endfield-card	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/endfield-card	b78c0f77ef1fdbf7896081f569ebc600594fa0d6	2026-10-13	9
+local	feature/endfield-s3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/endfield-s3	f61dea0a7d3994d6693fd8cb973b3cea080e5121	2026-10-13	1
+local	feature/endfield-s4	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/endfield-s4	899a95d7d416e478b9018434904c13aad08701ff	2026-10-13	10
+local	feature/ep-dl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ep-dl	09c9225833c55076c27c8f97f297431d3c7af64b	2026-10-15	5
+local	feature/ep-rig	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ep-rig	e1b1e597b21b8e364452875268e3436b2330f59a	2026-10-15	6
+local	feature/ep-wine	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ep-wine	9346303d4148bcab06114b93cf100b34e0351b18	2026-10-15	7
+local	feature/etxtbsy-kmsg-dmesg	in-use			ccb38e26e98f16cfe76a121b0a9b21a680a8e1f2	2026-10-23	1
+local	feature/everything-preinstall	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/everything-preinstall	ddec538b34525ff1281b0fd073d12e91c2f81de1	2026-10-11	1
+local	feature/everything-try	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/everything-try	c644abf43e93eef162987abbba9d817499a3a31c	2026-10-11	1
+local	feature/ex-repro	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/ex-repro	65e9983934c97cd964dff7801ecebfed2a31e673	2026-10-15	1
+local	feature/fbwc-ctl-c-base	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/fbwc-ctl-c-base	65c6d3ca08930db0426dc2b590039638ddd570bf	2026-10-17	1
+local	feature/fl-cg-diag	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/fl-cg-diag	326f6d2b548af18e55570758e46063c095655ffc	2026-10-16	5
+local	feature/fl-cg-exp	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/fl-cg-exp	416eccdc0ef18b6eb56e521ea73e4dc1864bb2e7	2026-10-16	4
+local	feature/floor-repro-main	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/floor-repro-main	8e96fb7d5c2a188ec9ebe9f3eff4c047e964acf4	2026-10-15	1
+local	feature/fx1012-stack	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/fx1012-stack	515793a7ff870dd01e41880f5e39ca21afef0a6e	2026-10-12	1
+local	feature/g24-i1-wip	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/g24-i1-wip	a4438e93b891d044e1d4c4dc4aa005447ac59726	2026-10-14	3
+local	feature/gap-gone-checks	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-gone-checks	8649d4a7a5a97bf9936b5d8090ee7976852c19c7	2026-10-12	1
+local	feature/gap-gone-checks-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-gone-checks-2	a4e7030ff9fa692113d52009127281844bd887b5	2026-10-12	1
+local	feature/gap-sigpaths-e2e	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-sigpaths-e2e	d6d0a8db4f1fbe0440050e8a9634eb98c1bda104	2026-10-12	2
+local	feature/gap-sigpaths-e2e-diag	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/gap-sigpaths-e2e-diag	f1c0b5d6a6f1eaefe6aa5200e92c7a7468301c0c	2026-10-12	2
+local	feature/gap-zinc-su-status	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/gap-zinc-su-status	5e684a6e73347dccf8fc6a355070c7a707a44243	2026-10-12	1
+local	feature/intel-uapi	keep			bec525525f817b60ea2a37070bfa7e1786d03401	2026-10-18	8
+local	feature/kernel-split-s3	in-use			5841bfa448a1dd48dc4aed7a02b3ed265f136c00	2026-10-23	2
+local	feature/n3b-gbm	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/n3b-gbm	ee75c7254beae3742eeecae9bff019b2f19d33ae	2026-10-10	12
+local	feature/nv-cardvm	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-cardvm	135349850b9944ad7ce137358f150f34f2b81ce1	2026-10-10	7
+local	feature/nv-dri3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-dri3	fb09ef337ff556b77f49821a50120a3224b5def5	2026-10-10	10
+local	feature/nv-mapslots	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-mapslots	8cd850d389cf6b45cd87bc5038305567db83d087	2026-10-10	7
+local	feature/nv-modifiers	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-modifiers	e890811747e5a5e4f08f748eb805916230db66c4	2026-10-10	41
+local	feature/nv-next	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-next	a9a47e6e9bb7440e66e43ef871f18a4a41e3051d	2026-10-10	44
+local	feature/nv-next-stall	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/nv-next-stall	521222ed736da4433a04ee4580898a66c742d55f	2026-10-10	45
+local	feature/nv-present	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/nv-present	cfa7fb8d95d9efdc91830b02b6638d9cedc79711	2026-10-10	48
+local	feature/nv-quiesce	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-quiesce	16d234d7421dc4cd40eecc2d3b7bb1228ab0f8fc	2026-10-10	9
+local	feature/nv-trip	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/nv-trip	38d05454e424d19494a98e1fec5782e6e84bdac2	2026-10-11	53
+local	feature/nv-vram-dmabuf	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-vram-dmabuf	83dabfcd027beefc010a7c5bb8e1dc23db77c4d7	2026-10-10	8
+local	feature/nv-wallpaper	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-wallpaper	2572dc696b0d04e1dffd14adbae63111cf326506	2026-10-10	7
+local	feature/nv-zerocopy	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nv-zerocopy	7188641338c35f980a237a33202ac9eb409103af	2026-10-10	13
+local	feature/nvidia-n3b	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/nvidia-n3b	6ebf9f172f743b177f6ae6962676e800613fbc53	2026-10-10	3
+local	feature/pc-diag	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag	b7b237233879927695df70e25ed6b226e99b1760	2026-10-14	2
+local	feature/pc-diag-base	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-base	b7b237233879927695df70e25ed6b226e99b1760	2026-10-14	2
+local	feature/pc-diag-c	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-c	602be315aab9d4434b66d275759867dc0b69428c	2026-10-14	3
+local	feature/pc-diag-ch	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-ch	eddf5d0e9ec0c02c1e2de05028369aec24cec816	2026-10-14	3
+local	feature/pc-diag-cw	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag-cw	f3d620f342cb11cba5051ed5376f38adede31ce1	2026-10-14	3
+local	feature/pc-diag3-all	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag3-all	9989b176d5453554fe95c3cd54f437ff8e4ac3c3	2026-10-14	2
+local	feature/pc-diag3-cw	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc-diag3-cw	7aeed1160b9023d9568623b25a03336a72047d0a	2026-10-14	3
+local	feature/pc2-dd-after	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc2-dd-after	f9ce691301e96aa48af1f1d04a9bc23b2cdfd216	2026-10-15	1
+local	feature/pc2-dd-before	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pc2-dd-before	42ccf0ad138d4e9ff9f6f02a0eeded75c4eae35e	2026-10-15	1
+local	feature/pl2-ctl-commit	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/pl2-ctl-commit	f32b7991b93b3f9cd77af0c36b3095fa4b509e03	2026-10-15	1
+local	feature/postmortem	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/postmortem	925ff2b0598c5c0e84df32676e70e1ae725df717	2026-10-11	1
+local	feature/r1/before-squash	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/r1/before-squash	430cc2d7bd1ba55c74073149918e484f4c2e1ba1	2026-10-14	4
+local	feature/r1/frames-pinned	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/r1/frames-pinned	ef48a98347cbc1beff2fff56d53890be9b6e16e3	2026-10-14	4
+local	feature/r1/frames-yclock	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/r1/frames-yclock	40963355a322cbb73e115771c3ad8477403a97dd	2026-10-14	3
+local	feature/rfds-bhi-forced-measure	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/rfds-bhi-forced-measure	8ddede092a6e5c80652830cf2cbf9ff465904c58	2026-10-17	2
+local	feature/rn/run-nazuna	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/rn/run-nazuna	a93b2f9ee2f8c1e3e38dc0d1e6236cfc4e1e528e	2026-10-13	1
+local	feature/rootless-series-check	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/rootless-series-check	e2310d8f2c24dbea3e6e1346158caf920f26ad25	2026-10-13	1
+local	feature/s13f-timens/pre-reservation-9be83c667	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/s13f-timens/pre-reservation-9be83c667	9be83c66712ada22879d069832f5f13fa52a3167	2026-10-14	3
+local	feature/s4port-pre-squash	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/s4port-pre-squash	798ee8a13d98d8247d6181ff3118b1474103b5b5	2026-10-11	6
+local	feature/s4port-pre-squash2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/s4port-pre-squash2	191d76c3097f5137cdf59192bbd5085056312e1b	2026-10-11	1
+local	feature/serial-tx-fallback-capctl	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/serial-tx-fallback-capctl	4c5a372e6080e0ebaa74f488e9e4205c35045b0b	2026-10-17	1
+local	feature/softgl-gap	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/softgl-gap	55e237f7490fd88d5d0cd1603d1368842603bd43	2026-10-10	7
+local	feature/stage13-exit	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/stage13-exit	9d219a0995625979f28498b9597250250386f3d4	2026-10-12	9
+local	feature/steam-nvdesk	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/steam-nvdesk	c005c91ea392e9759f28cc0fb641263158a5fb80	2026-10-10	2
+local	feature/steam-stall-wakeop	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/steam-stall-wakeop	2a983419fbc0c2e9aa428907204a0bb1befade64	2026-10-10	1
+local	feature/tv-teeworlds	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/tv-teeworlds	547dedc41ed25dcf6b2bd3b43207d00a3c8b8138	2026-10-10	8
+local	feature/win/ebs-1	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-1	898144cfdfac79c62af8d5b251c7458a37bbf89b	2026-10-15	1
+local	feature/win/ebs-2	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-2	7caf78952224139ff18323bfe6448e0867884474	2026-10-15	1
+local	feature/win/ebs-3	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-3	351d03b5a2729e5dbbbde91a194747a5b2689ea1	2026-10-15	1
+local	feature/win/ebs-4	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/ebs-4	cf5757f9ce4853e0734f67fad57b445decfd9d87	2026-10-15	1
+local	feature/win/fbcon-2s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-2s	bc9a70b17ad30b73e3743686ae559cb40b841619	2026-10-15	1
+local	feature/win/fbcon-5s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-5s	e467b1a0b44018335a389a2abef0a7a7317e5c3c	2026-10-15	1
+local	feature/win/fbcon-6	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/fbcon-6	688249aff39203ffc7489d229dfab6bb8d9cbb59	2026-10-15	1
+local	feature/win/fbcon-7s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-7s	e9b346aab2006a76f9cc0b370b02258e841cdd56	2026-10-15	2
+local	feature/win/fbcon-8s	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/fbcon-8s	82e4b7e16b387149d7ec5d9a9def35910b00ff22	2026-10-15	2
+local	feature/win/n150-esp-20261015-220620	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-220620	1f8ea47b4507c20fa98c067dc86402ede140df51	2026-10-15	1
+local	feature/win/n150-esp-20261015-221632	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-221632	688249aff39203ffc7489d229dfab6bb8d9cbb59	2026-10-15	1
+local	feature/win/n150-esp-20261015-223137	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223137	f768f0f4eab2608ede66039a2c3952d8437ea36c	2026-10-15	1
+local	feature/win/n150-esp-20261015-223234	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223234	b8c90b71f03caf36501d9e0b7d6b027b6f54e302	2026-10-15	1
+local	feature/win/n150-esp-20261015-223310	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223310	d8544b0982a92bee4f5ea37b8b51a203f96aaccc	2026-10-15	1
+local	feature/win/n150-esp-20261015-223437	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223437	65107c0c42d3e1225b221f904d66dc2d4ca00bd3	2026-10-15	1
+local	feature/win/n150-esp-20261015-223801	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223801	1938e760f5d508d8bcf59faa456bed651c713f25	2026-10-15	1
+local	feature/win/n150-esp-20261015-223906	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-223906	1938e760f5d508d8bcf59faa456bed651c713f25	2026-10-15	1
+local	feature/win/n150-esp-20261015-224218	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-224218	898144cfdfac79c62af8d5b251c7458a37bbf89b	2026-10-15	1
+local	feature/win/n150-esp-20261015-224436	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-224436	6149011908c535461edf085b5dda879a4af8d1e0	2026-10-15	1
+local	feature/win/n150-esp-20261015-225729	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-225729	351d03b5a2729e5dbbbde91a194747a5b2689ea1	2026-10-15	1
+local	feature/win/n150-esp-20261015-230142	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-230142	cf5757f9ce4853e0734f67fad57b445decfd9d87	2026-10-15	1
+local	feature/win/n150-esp-20261015-231152	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-231152	c1fa334934dc34fbbaab4ab33327cd8339e38d2d	2026-10-15	1
+local	feature/win/n150-esp-20261015-233339	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-233339	5b7edf79f90105a52c5e195693657f4f7e42a0ac	2026-10-15	1
+local	feature/win/n150-esp-20261015-234710	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261015-234710	a50564ab2ccafa3f73a442295da8570b60d8f57d	2026-10-15	1
+local	feature/win/n150-esp-20261016-000108	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261016-000108	9194c11acf71f5c2349e98c187254b9c26d658bf	2026-10-16	1
+local	feature/win/n150-esp-20261016-001009	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/n150-esp-20261016-001009	5fe416ad69f0239fdd24700527fd62f629bee94f	2026-10-16	1
+local	feature/win/x2apic-10	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/win/x2apic-10	1f8ea47b4507c20fa98c067dc86402ede140df51	2026-10-15	1
+local	feature/win/x2apic-3-prefer	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/x2apic-3-prefer	ddb186d9842415228b245265f10015c957635a95	2026-10-15	1
+local	feature/win/x2apic-4-sabotage	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/win/x2apic-4-sabotage	5e5a8163d69b3e3fc238100bee3063a8c4a44913	2026-10-15	1
+local	feature/wine-vnc-input	archive (idea line in backlog br-006)		refs/archive/2026-10-23b/feature/wine-vnc-input	7179c55580a24417c57da8d757d283844d333091	2026-10-13	6
+local	feature/xelp-m2-box/cp1	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/xelp-m2-box/cp1	5c5e60a751df8264aefad9c2a21057a1694bc965	2026-10-18	1
+local	feature/xelp-m2-box/cp2	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/xelp-m2-box/cp2	4648e4a83aac688738d4a0e3b08e0e31abc8ce2c	2026-10-18	1
+local	feature/xelp-m2-box/cp3	archive (never to land / snapshot)		refs/archive/2026-10-23b/feature/xelp-m2-box/cp3	56ddfca91b502516c756f019bbe9a03d6b0a9d11	2026-10-18	1
+local	feature/yt6801-rx64	keep			2dbefaab71fa20d8a0b4ff6daf0a2e4a198d8ec3	2026-10-17	1
+local	fx1006	in-use			ee066cd2e927809d45aae635f0fd2be5399022a4	2026-10-17	0
+local	g24-i1	in-use			bbaa3c56a06c59ea2f07cef9bfbf05e4a576b178	2026-10-15	0
+local	game-r1	in-use			909b14fd033d8929e2195c6e7d8c2c34b243ba92	2026-10-14	0
+local	game-r2	in-use			b458362e3ea8a16f0664c083d6dc819d709656d6	2026-10-14	0
+local	game-r3	in-use			656879479d782964bb3e97f60c84c3ceb010300b	2026-10-14	0
+local	gate-throughput-1015	in-use			249faf1b8d5c80501c9df02f1c7090fa70bec746	2026-10-15	0
+local	gnome-probe	in-use			43d6df9f1c981f035c66ef02dd3cc9619626ef4f	2026-10-22	0
+local	gpu-opaque-2	in-use			22c5119332376e8d12858eb2859892c87e34cd15	2026-10-23	8
+local	gpu-opaque-design	in-use			5d6dd5f15ed43c20806a659c1c1e962d5af99e02	2026-10-22	0
+local	gpu-restart	in-use			02204a8efc64ac7ea658586de2325cc22556d6cd	2026-10-22	0
+local	h6-wc-id	in-use			cfaacc5fd7b19efa28a4e54a817a3ea5887e7f22	2026-10-15	0
+local	hwp-turbo	in-use			134cf560f5d7cfcfe2b939131da68ffa790468f4	2026-10-17	0
+local	hyprix-gnome	in-use			05ddd9615c1de4ca7e77d29bccac0a93f1585abf	2026-10-23	0
+local	intel-fw-reset	in-use			d228b05882ec3007decb57067e3e957fe73cdb1a	2026-10-23	0
+local	intel-gpu-design	in-use			88596627bb647db676cc93473fee1e3f8f5f0450	2026-10-18	0
+local	intel-k4	in-use			a1c40849cc41bee3838de635dbe513af55b41db1	2026-10-18	0
+local	intel-pl4log	in-use			53de35fd2eddd55684a8be77e8dc3a223fc92664	2026-10-22	1
+local	intel-xelp	in-use			030666bbed633c69098a1ced4c74ff42d8ff9e48	2026-10-18	0
+local	land-repoflow-a	in-use			7d8c1acdb569a92bd326e68838ac6130275ea996	2026-10-23	0
+local	land-repoflow-b	in-use			7f57053f5ab0d7d5b1c2afe9586f4f9af9691ba6	2026-10-23	0
+local	land-seccomp-s4	in-use			b2090d7340fb86c69bc394be364e664ab383c7d1	2026-10-11	1
+local	linux-abi-native-cut-experiment	archive (never to land / snapshot)		refs/archive/2026-10-23b/local/linux-abi-native-cut-experiment	2e420d6252f8dba352f32a943d4fd9d96957f79a	2026-10-23	1
+local	linux-abi-off	in-use			3a4a45e88ae10205e04d1663fada73c37e5f1d84	2026-10-23	0
+local	linux-abi-separation	in-use			83eda884f232a5d26c06167ef7c6910f984b21cf	2026-10-23	0
+local	linux-abi-strip-experiment	archive (never to land / snapshot)		refs/archive/2026-10-23b/local/linux-abi-strip-experiment	c33730632dd27b4315804981a82169da2141cab4	2026-10-23	2
+local	lockup	in-use			17af4231218beaa4389a5d61857b9a75e2bf82e0	2026-10-21	1
+local	m0-baselines	in-use			64d48cb46e3f30a22dd7748938fe343a32f73b29	2026-10-14	8
+local	m0-f64	in-use			114eb2a85a666d2c7c447f9d85dec884fa9ead23	2026-10-14	0
+local	m0-f73	in-use			c0c37760159ae519626d20eb7bd6adc6dce30612	2026-10-14	0
+local	m0-flags	in-use			7c2286f05e34f201ba11d4f11b05109e3bb7b377	2026-10-15	0
+local	m0-flags-land	in-use			b91a853115afe1c85520793ee4a4184b151cc557	2026-10-17	0
+local	main	keep			7d8c1acdb569a92bd326e68838ac6130275ea996	2026-10-23	0
+local	mk-m0rest/smt-off	rename	feature/mk-m0rest/smt-off	refs/archive/2026-10-23b/local/mk-m0rest/smt-off	f52e191929649b9ca9ae85818a09d4ac24c82782	2026-10-21	1
+local	mk-m0rest/smt-wip	rename	feature/mk-m0rest/smt-wip	refs/archive/2026-10-23b/local/mk-m0rest/smt-wip	b332da31bd7d28264e381b19fefa38737f9879c2	2026-10-21	2
+local	mk/k10	rename	feature/mk/k10	refs/archive/2026-10-23b/mk/k10	8c28ebecfc7fe5b17316dcba89cefbc0a5c47d97	2026-10-21	1
+local	mk/k12	rename	feature/mk/k12	refs/archive/2026-10-23b/mk/k12	77b485977a8932ca818c8ca46ab145222b693c3e	2026-10-21	2
+local	mk/k12-bench-a	archive (never to land / snapshot)		refs/archive/2026-10-23b/local/mk/k12-bench-a	4b97c86b2b86ec9c51488c5e8ee088e31a321e94	2026-10-21	1
+local	mk/k12-bench-b	archive (never to land / snapshot)		refs/archive/2026-10-23b/mk/k12-bench-b	caad6ec6e28dc2e08f90c7c1dc73f746505c4346	2026-10-21	3
+local	mk/k12b	rename	feature/mk/k12b	refs/archive/2026-10-23b/mk/k12b	85b5f45567042a2eed1e1d1c1f98ec1d7ccbb772	2026-10-21	3
+local	mk/k2	rename	feature/mk/k2	refs/archive/2026-10-23b/mk/k2	5a57ce2a61bcf7c8fbdbd07f43ad547ec74114af	2026-10-21	11
+local	mk/k2b	rename	feature/mk/k2b	refs/archive/2026-10-23b/mk/k2b	b5857299ae254c6665940fc4910a37f50f5f361c	2026-10-21	14
+local	mk/k3	rename	feature/mk/k3	refs/archive/2026-10-23b/mk/k3	d9ed165ca0d99a67bcc14673cb4eb4370c785a3a	2026-10-21	10
+local	mk/k4	rename	feature/mk/k4	refs/archive/2026-10-23b/mk/k4	6249cf7f8ca658e00def2fd8304c83f3daaa69b4	2026-10-21	4
+local	mk/k5	rename	feature/mk/k5	refs/archive/2026-10-23b/mk/k5	8412046ef47df672c09524071db35525e0c3e443	2026-10-21	12
+local	mk/k6	rename	feature/mk/k6	refs/archive/2026-10-23b/mk/k6	e1ad04170ae8e4ba7e721bf5966fdb5ae82c2100	2026-10-21	1
+local	mk/k6-r	rename	feature/mk/k6-r	refs/archive/2026-10-23b/local/mk/k6-r	5946a882561c6d3e588effe6ceef8d5910fa117e	2026-10-21	1
+local	mk/k7	rename	feature/mk/k7	refs/archive/2026-10-23b/mk/k7	6d008d19edb119ba50aaa6942a347ed1df6ac79e	2026-10-21	15
+local	mk/oom-uncharge	rename	feature/mk/oom-uncharge	refs/archive/2026-10-23b/mk/oom-uncharge	2e0eb7b5affaf0ae03905d65fd7f7835014d054c	2026-10-21	1
+local	modes	in-use			2da99dea52dbb3e593cd7613df313d1865e8843b	2026-10-23	0
+local	n150-endfield	in-use			2c650710dd0ae1179d93d5f40df80880366da522	2026-10-15	0
+local	n3c-vtest	in-use			5696ead970ff87fe2b45edf41fcd939c591d5970	2026-10-10	7
+local	net-gw	in-use			70c2004768eeb78f85be8dc1cdf69f4679597c77	2026-10-15	0
+local	net-rx	in-use			a6608cf47102eeeb87f489207b277b97c1647fe0	2026-10-22	0
+local	nvme-driver	in-use		refs/archive/2026-10-23b/local/nvme-driver	a6f67482e3c31d05632b1567ab736bd3005f95d3	2026-10-11	0
+local	os-af/fs-traits	rename	feature/os-af/fs-traits	refs/archive/2026-10-23b/local/os-af/fs-traits	9766c5852eeffe8ccb592e4682c5e6023d9f3ba8	2026-10-21	1
+local	pagecache-evict	in-use			edf7a87221bb12c1ca1718e042b4c49cc5e92725	2026-10-18	0
+local	panic-eventlog	in-use			87523cede373344db3c7a41bc914a834cf74b4f6	2026-10-17	0
+local	panic-reboot-r5	in-use			e0e779a5ad7c6f9b0bcbede4a111075563edb7a5	2026-10-17	1
+local	panic-reboot-reserve	in-use			e953b647f192af17d3eeb7bf09918fb49cf75ddb	2026-10-17	0
+local	park/boot-21b	keep			71f60913e4653d30a3107d0a6e9844f6363ba445	2026-09-27	1
+local	park/clipboard-vdagent	keep			c7d7b93fe331369e408e13fe11cfa1d799c7e715	2026-09-27	1
+local	park/f46-power-off	keep			40438d5d25ad54f75cdc7b3dce53f115e25681eb	2026-09-27	1
+local	park/ferrousli-math	keep			762074eb53228396a9287a312a690bcb42265330	2026-09-13	2
+local	park/ferrousli-misc	keep			e95d1e99b13bdbc5fdf2fade1dfb09b637a0a0ed	2026-09-13	1
+local	park/ferrousli-threads	keep			4db12e28655ddd6c20a370da567a91878f8f6207	2026-09-13	1
+local	park/frame-budget	keep			fb60427a17b8f67d20d55682adae908e45305a2f	2026-09-27	2
+local	park/hyprlock	keep			06c3f6d411a4096d009863b97057896e0719f68a	2026-09-27	4
+local	park/nvidia-c3k	keep			e53ed77332b9ebd897638c2c55aee581d2c774fd	2026-10-02	1
+local	park/nvidia-c3k-wip	keep			362915048dea755cc9b4b45b0413850ff8aa5219	2026-10-02	2
+local	park/nvidia-n0-probe	keep			114438a978936f9b5388ffa6ac14bccc99258b3d	2026-10-02	1
+local	park/nvidia-n1c-wip-backup	keep			9e08db49beb0cdb7f171f0430b3ebd4d64399af9	2026-10-03	15
+local	park/nvidia-n2	keep			dbb23fd6fb935a97f758a71f55fbd1787e15845b	2026-10-04	17
+local	park/nvidia-probe-wip	keep			73a7a3b02ebf65a2468cdb195f6ecfb4f258f57a	2026-10-02	1
+local	park/os-12/ports-autobuild	keep			1dd0e503eae42aa0c8cad265d0d9ac09e0b0b073	2026-09-17	3
+local	park/os-35/ipc-lazytlb	keep			065e3cb3e7e043160a32dfd23acdcac396373ba3	2026-09-30	1
+local	park/os-35/ipc-lazytlb-on-ef206bb2	keep			b10f3c7e56b39190bf72e0b6c9b9a4c20a2ce5fa	2026-10-01	1
+local	park/os-35/ipc-wake	keep			dbd392808f8ccb969f55dbfd40064c5f1fee4029	2026-10-01	2
+local	park/os-ipc/prof	keep			41bdef2ca985c17be1cbdae4a0a62543b4fbeb6f	2026-10-01	4
+local	park/os-ipc/prof2	keep			4b5be585c6de0224ac1af31ec5e86ee2f68f7a4c	2026-10-01	7
+local	park/os-ipc/zircon-trip	keep			a1379b25b8ca403321b806ced8ef2752d6672a7a	2026-10-01	5
+local	park/os07/asid	keep			f693926460f7dd226eb4d803f22a9edbc96c3beb	2026-10-08	23
+local	park/os76/p0-measure	keep			712cec7223bb1d31558587a614df5a7aba1ba45a	2026-10-07	1
+local	park/os76/unwind-abl	keep			9b8d04556b1f89bb89dc5a01eda925d85e8b427a	2026-10-07	1
+local	park/os76/unwind-abl-long	keep			98529a096fab8faa3d79cc0f82b052aad32fec01	2026-10-07	2
+local	park/po10-cgctl/cgctl	keep			2f39e12c1a3c53c956afdfa67aa5eb9fa87d0294	2026-10-07	2
+local	park/po10-flakes/entropy-diag	keep			bf046e9ef30148335d89ef37750134881de47d2a	2026-10-07	1
+local	park/po10-pipe/side-tip	keep			a2a2700b494902de5de95062d6cc93ab4435a828	2026-10-08	13
+local	park/po10-quick/probe	keep			47afa304fcf01729d37c93077c1f2bb5b5260b22	2026-10-07	2
+local	park/po10-quick/q1	keep			ba00276a8275dbd26bafd3d34584df22957d89f9	2026-10-07	7
+local	park/po10-quick/q4	keep			68753957501193c273ad0e28650d7648633bb35f	2026-10-07	9
+local	park/po10-quick/q8	keep			056b1bebd35dfd0255eaa14624715fab0f9983e5	2026-10-07	6
+local	park/po10-selfhost/diag	keep			654c185f59612440a2d436f3cf7a893240f06251	2026-10-07	1
+local	park/po10-term/cursor	keep			c25ca56514f372ce7ff6a747885d23071d99e03e	2026-10-07	1
+local	park/po10/endpoint-drop	keep			51629d17fc3c5909d1adfff3a2abc6dcf4f029cd	2026-10-07	1
+local	park/po10/f65-k3	keep			87291a257a5f7413795adfbadf5d6e1ba8509d36	2026-10-07	1
+local	park/po10/f65-wip	keep			f9a755b447b4c2578418c6f2416ab6fa0780c8fe	2026-10-07	3
+local	park/po10/obj3-abl	keep			f0d0116c5a7600bee17667627709f93f403ab46a	2026-10-07	2
+local	park/po10/obj3-wip	keep			bac953fbd66eeea36e8ac42a783c69964a9cceaf	2026-10-07	5
+local	park/po10/sched-k	keep			9eeee95d2379f6d2756afa13b4459a00a293491e	2026-10-08	1
+local	park/po11/slots-trim	keep			eb45763c0d67847cb03de38122cd1a09103dd103	2026-10-08	4
+local	park/po5/sigterm	keep			70aaf7e9c5878177bf4220c49df5fba32bc04705	2026-10-05	1
+local	park/po6-ipcB/wip	keep			4a8b8dfee85c24e56b7f00c819756b7a7b5f81d1	2026-10-05	1
+local	park/po6/bwrap-user	keep			09e9c9c745cec5b3b56d0db5e2b618cb7163fe82	2026-10-05	14
+local	park/po6/cgctl	keep			69fe7b51cb02e4f8ea8585f89390eb50d1f80d16	2026-10-05	4
+local	park/po6/cgctl-n6	keep			c4e2b8f9dd3887cbf79a184e6a9f60396570aaf4	2026-10-05	5
+local	park/po6/n5	keep			511c1bdafa377612751de540c448b88983fd64d5	2026-10-05	11
+local	park/po7/linux-floors	keep			ff1c1df8a334355111809729a1a5599e209b7a86	2026-10-06	2
+local	park/po7/paper	keep			bca6e0600791e8f0beb65213e1da90bc82047a2e	2026-10-07	7
+local	park/po7/paper-pandoc-wip	keep			42a52e8ad6ad55612ee0bf998d4b9eecf30d20cc	2026-10-06	6
+local	park/po9/obj2	keep			6183ac96a9cb0c9020f8c1d7013daaf9a8bcde13	2026-10-07	1
+local	park/stage11-kernel-mount-design	keep			101dcd2058efe233ec6dca722e85cc485c21f8da	2026-09-13	1
+local	park/stage13-netns	keep			4cc2ab39d27bdcaf56ada9c4894c73106e26a0f4	2026-10-01	3
+local	park/steam-y5-wip	keep			313567decc3985cb2971c26f594c049ae636d06c	2026-09-28	1
+local	park/vmo-map-wip	keep			c7c346939b0486ebf5cffbac1c8772d7482aeb63	2026-09-13	2
+local	park/w8-armv7a	keep			f2bc3779b2b3e295ed194afdc2acd1742def44c7	2026-09-27	1
+local	park/worktree-agent-a33c10946b6721065	keep			5690f0ef03859bdce9470c93bcac9f16dd8ce776	2026-09-13	1
+local	pl2-data-commit	in-use			35dbeff012b5591ae3ab23b00e003d61aee2cbd9	2026-10-15	0
+local	pl2-harness	in-use			05de82f87730bda059f55139155e918c1be75e3f	2026-10-15	9
+local	po10-quick/q1-v2	in-use			dc97f19d1f9eb586cca09b506a261cdba40d8721	2026-10-08	1
+local	po10-quick/q8-exp	in-use			08984c2db2e148eb22ac21cd6654046aefb10e77	2026-10-07	0
+local	po9/sched-diag	in-use			112a12b63848beb679f36a66ba2e5cfb1214ef33	2026-10-07	0
+local	po9/user-exp	in-use			19c0147838dc5464b9abdc582a2cbc7d786dda03	2026-10-07	1
+local	pointer-lock	in-use			3878c529eb9dd0b6b3af2862aec4a10bf052c5de	2026-10-15	0
+local	powerctl	in-use			ab2fd7d9434c4c81c1c4366a82b340917967f5d2	2026-10-23	0
+local	powerctl-pre-rebase-c1d3ffea9	rename	feature/powerctl-pre-rebase-c1d3ffea9	refs/archive/2026-10-23b/local/powerctl-pre-rebase-c1d3ffea9	c1d3ffea93929d649ebe9aa99fdbb12ea0437a1a	2026-10-23	1
+local	powerctl-reserve	in-use			bb243e114a2092405904bcfcb7893bd3dc9ece26	2026-10-23	0
+local	r1-yclock	in-use			c0bded3c7b0a6cf26a2cf88007194d1c9e420b83	2026-10-14	0
+local	r1-ypin	in-use			1379d3d36e8a7ebe77e225b67f27fbb519e6adca	2026-10-14	0
+local	rc6	in-use			9f6c1ee959e8f8acd728b6f032b0491855448ae6	2026-10-22	1
+local	readme-website-2026-10-23	in-use			f924333d47de738acf3b28b56e9ad9977e157f42	2026-10-23	0
+local	rfds-bhi	in-use			c8d1fb00887825403063785f63199a5e87629452	2026-10-17	0
+local	rig-fu	in-use			9c8218cb6af473c497d7c47f2781f7dbd7ead87f	2026-10-14	0
+local	rig-fu2	in-use			d19dceb7f46618abfef2c03481948053aebff527	2026-10-15	0
+local	rig-fu3	in-use			9a9d8f80928d8091751573d30c92cf4655329321	2026-10-15	0
+local	s13f/close	in-use			a352a50aca646ad7c004a3f2b79ce9da9af0abc8	2026-10-14	2
+local	s13f/cpuio	in-use			4af9af4313d1b2522e3e4572ce46f361663795d1	2026-10-14	1
+local	s13f/ctnfam	in-use			a731e741dd17993d6abf3c5ac5698e55a42f4b5d	2026-10-14	1
+local	s13f/memcg	in-use			3dc73851fed4ee832d30d668e989b1ec61958772	2026-10-14	3
+local	s13f/seccomp	in-use			6b18798790ddba9526483814e2bd5486c5af69d6	2026-10-14	1
+local	s13f/timens	in-use			f96486c76110a8323e95f56441e3294b612c7a4b	2026-10-14	4
+local	scanout	in-use			140f521a4eae8e56ddb546d5d7456a6c54bcb167	2026-10-22	0
+local	sched-l73	in-use			5475f01b7c016de4039a95c7fda06b748e005452	2026-10-23	4
+local	sched-l73-measure	in-use			69960757a950e6141e6fcbfeea4e052c8c5081cd	2026-10-23	2
+local	sched-l73-proto	in-use			1d4cf4872e2682ad3823cbfa46c8c067d2a0cfe5	2026-10-23	4
+local	scratch/intel-long	archive (never to land / snapshot)		refs/archive/2026-10-23b/local/scratch/intel-long	ad91bc7e3c18581cac3d609553027f40decd5953	2026-10-21	7
+local	scratch/intel-long-lat	archive (never to land / snapshot)		refs/archive/2026-10-23b/local/scratch/intel-long-lat	99ce7b4d5e0948779a0a66301071057596bb94a1	2026-10-21	11
+local	sealed-job	in-use			1b2040006c9ac2eaf2c5ad538a4943719f0e576d	2026-10-23	0
+local	stage10-pci	in-use			95e49aaffcc153019d16d7dd392e251a124bd737	2026-10-17	0
+local	steam-e2e	in-use			32670fbc2c8ca8de29d5b7e9f809cdfa2687f261	2026-09-29	1
+local	steam-procfs-fd	in-use			bd55c92e7f198ef990e4118d14814c8d6fdeca8a	2026-09-29	0
+local	steam-userns	in-use			bd56085932aa67bac3d850f52c56bc5c92dda778	2026-09-29	1
+local	steam-y6	in-use			26cb218a09ce97ae6fc35e0f336378fa5146b139	2026-09-29	0
+local	stutter-tooling	in-use			a91ef77e699c7cbf972c057677c9201971d52594	2026-10-22	2
+local	syncwake	in-use			637c50b94b8e8edf0dc278cc488e772f01b9632d	2026-10-17	2
+local	syncwake-reserve	in-use			5e8efeb3f2b71065251827fecc6348b1437ee079	2026-10-17	0
+local	term-cursor	in-use			a6d863da333e5014b5cec2c64e53b9574cc396f2	2026-10-11	0
+local	vdso-wine	in-use			bf33c4cf9dd0151152bafb5c28d2944851c490bc	2026-10-17	0
+local	vr36	archive (never to land / snapshot)		refs/archive/2026-10-23b/local/vr36	1336b9222fdb369e54ac071fa28de79bcb709652	2026-10-22	3
+local	vtd-n150	in-use			1a43a6aca319a6d2a45c33cc3de81de8551b627d	2026-10-20	0
+local	vtd-n150-reserve	in-use			9a5a5be176d171b94517428a0c60761ecfb16842	2026-10-18	0
+local	wake-affine	in-use			002de9fdce366f17d9887662bd23641f2d7a0ed6	2026-10-22	0
+local	worktree-agent-a293f44fe214785df	in-use			093510751c843bde05b1d29d08050108750dfea3	2026-09-13	0
+local	worktree-bridge-cse_01Vd2nYTGkRNAzZYYhZENVyN	in-use			c1f1db0d34b8fed16ec8019abaa604163a921a51	2026-10-16	0
+local	xelp-freq2	rename	feature/xelp-freq2	refs/archive/2026-10-23b/local/xelp-freq2	e76018250400ace7eaef48af7ca87fcaca4e1bce	2026-10-21	3
+local	xelp-freq3	in-use			bd48582d93e0f89a11dc36164306c2ae2152858d	2026-10-21	0
+local	xelp-hwsp	rename	feature/xelp-hwsp	refs/archive/2026-10-23b/local/xelp-hwsp	d548919919c43951ebc0f9223ec3184600a8ec0d	2026-10-21	2
+local	xelp-m2-gate/uapitrace	rename	feature/xelp-m2-gate/uapitrace	refs/archive/2026-10-23b/xelp-m2-gate/uapitrace	33f80f69d49600fee5f15e3eb700241bff7815f3	2026-10-21	3
+local	xelp-m2-gate/uapitrace2	rename	feature/xelp-m2-gate/uapitrace2	refs/archive/2026-10-23b/local/xelp-m2-gate/uapitrace2	e76018250400ace7eaef48af7ca87fcaca4e1bce	2026-10-21	3
+local	yserver-rebase-check	in-use			afb4085ec6d2fb699c5016d6cf9cf6dbbd3927a3	2026-10-18	0
+local	yt6801-irq	in-use			f01e0771555ebfc7519f1ab89851e63faace65da	2026-10-17	0
+local	zc-intel-scratch	archive (never to land / snapshot)		refs/archive/2026-10-23b/local/zc-intel-scratch	ab27767321d2658b5a00b33f760a722caf614791	2026-10-22	3
+local	zinc-printf	in-use			f16c98ae776a91daae6951c6d5ef14d4674ee3e5	2026-10-17	0
+local	zinc-sh	in-use			b8b8871d6e12206be808e5d6280258a14aac9784	2026-10-23	0

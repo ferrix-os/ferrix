@@ -26,3 +26,26 @@ pub(crate) fn flush_line(address: usize) {
     #[cfg(not(target_arch = "x86_64"))]
     let _ = address;
 }
+
+/// `clflush` every cache line of `[address, address + len)`, then one
+/// fence: memory the processor wrote that a device reads past the caches
+/// (`drm_clflush_virt_range`), the second scanout's surface. One fence for
+/// the lot, as i915 fences once around the range.
+pub(crate) fn flush_range(address: usize, len: usize) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let start = address & !63;
+        let end = address.saturating_add(len);
+        let mut line = start;
+        while line < end {
+            // SAFETY: `line` is in a mapping this process holds (the caller's
+            // range, rounded down to its cache line); `clflush` only evicts.
+            unsafe { core::arch::x86_64::_mm_clflush(line as *const u8) };
+            line += 64;
+        }
+        // SAFETY: `mfence` only orders; SSE2 is in every x86-64 part.
+        unsafe { core::arch::x86_64::_mm_mfence() };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = (address, len);
+}

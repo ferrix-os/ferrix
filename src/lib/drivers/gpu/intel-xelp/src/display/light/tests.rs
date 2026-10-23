@@ -10,8 +10,9 @@ use std::vec::Vec;
 
 use super::{
     DBUF_CTL_S3_S4, DDI_BUF_CTL_A, DPCLKA_CFGCR0, DPLL_ENABLE, FUSE_STATUS, Light, MBUS_CTL,
-    PWR_WELL_CTL_DDI2, PWR_WELL_CTL2, Refusal, Running, SURFACE_BYTES, Step, TRANSCONF_A, free_pll,
-    is_hdmi, preflight, repoint, running, steps, surface_place, take,
+    PWR_WELL_CTL_DDI2, PWR_WELL_CTL2, Placed, Refusal, Running, SURFACE_BYTES, SURFACE_GGTT_LIMIT,
+    Step, TRANSCONF_A, free_pll, is_hdmi, place, preflight, repoint, running, scanned, steps,
+    surface_place, take,
 };
 use crate::display::hotplug::Port;
 use crate::display::modeset::Mode;
@@ -43,6 +44,8 @@ impl Display {
                 let _ = regs.insert(phy + 0x800 + ln * 0x100 + 0x4, 0x1C00_0004);
             }
             let _ = regs.insert(phy + 0x28, 0x0003_00F0);
+            // Initialised by the firmware: COMP_INIT, as the dump has it.
+            let _ = regs.insert(phy + 0x100, 0x8000_5F27);
         }
         Self {
             regs,
@@ -309,12 +312,23 @@ fn what_is_refused() {
         refused(&|d| d.write32(DPLL_ENABLE[1], 1 << 31), &small),
         Err(Refusal::NoPll)
     );
+    assert_eq!(
+        refused(&|d| d.write32(0x6_C100, 0), &small),
+        Err(Refusal::PhyNotReady)
+    );
+    assert_eq!(
+        refused(&|d| d.write32(0x6_4C04, 1 << 23), &small),
+        Err(Refusal::PhyNotReady)
+    );
     let mut fast = small;
     fast.mode.clock_khz = 241_500;
     assert_eq!(refused(&|_| {}, &fast), Err(Refusal::Clock));
     let mut other = small;
-    other.port = Port::Combo(0);
+    other.port = Port::TypeC(1);
     assert_eq!(refused(&|_| {}, &other), Err(Refusal::Unsupported));
+    let mut pipe_c = small;
+    pipe_c.pipe = 2;
+    assert_eq!(refused(&|_| {}, &pipe_c), Err(Refusal::Unsupported));
 }
 
 /// The free PLL is the one the lit port does not take its clock from.
@@ -411,4 +425,132 @@ fn a_cloned_pipe_gets_its_own_surface() {
         display.writes.last().map(|(offset, _)| *offset),
         Some(0x7_119C)
     );
+}
+
+/// The box's other boot: the firmware lit port B (the 1024x600 monitor) on
+/// pipe A from DPLL0 and left port A, the TV, dark. The TV is lit on port A,
+/// pipe B, from DPLL1, and every value is the one Linux wrote for the TV on
+/// the same port and pipe (the dump: pipe B on DDI A), the PLL's words at
+/// DPLL1's address.
+#[test]
+fn the_tv_is_lit_on_port_a_when_the_firmware_lit_b() {
+    let mut display = Display::firmware();
+    // Port B on and from DPLL0; port A gated.
+    let _ = display.regs.insert(DDI_BUF_CTL_A, 0);
+    let _ = display.regs.insert(DDI_BUF_CTL_A + 0x100, 0x8000_0000);
+    let _ = display.regs.insert(DPCLKA_CFGCR0, 0x01E0_7400);
+    let tv = Light {
+        port: Port::Combo(0),
+        ..light(Mode::CEA_1080P60, true)
+    };
+    assert_eq!(free_pll(&mut display), Some(1));
+    preflight(&mut display, &tv).expect("port A can be lit");
+    let mut clock = Instant(0);
+    assert!(steps(&tv, &mut |step| take(&mut display, &mut clock, step)
+        .is_ok()));
+    // DPLL1 at the TV's clock: the dump's DPLL0 words.
+    assert_eq!(display.value(0x16_428C), 0x0010_01D0);
+    assert_eq!(display.value(0x16_4290), 0x0000_0E84);
+    // Port A from DPLL1 and ungated; port B still from DPLL0, on.
+    let clocks = display.value(DPCLKA_CFGCR0);
+    assert_eq!(clocks & 3, 1);
+    assert_eq!(clocks & (1 << 10), 0);
+    assert_eq!((clocks >> 2) & 3, 0);
+    assert_eq!(clocks & (1 << 11), 0);
+    // DDI A's I/O well; transcoder B's clock from port A.
+    assert_eq!(display.value(PWR_WELL_CTL_DDI2) & 0b11, 0b11);
+    assert_eq!(display.value(0x4_6144), 0x1000_0000);
+    // Transcoder B: the dump's words exactly.
+    for (offset, want) in [
+        (0x6_1000, 0x0897_077F),
+        (0x6_1004, 0x0897_077F),
+        (0x6_1008, 0x0803_07D7),
+        (0x6_100C, 0x0464_0437),
+        (0x6_1010, 0x0464_0000),
+        (0x6_1014, 0x0440_043B),
+        (0x6_101C, 0x077F_0437),
+        (0x6_1400, 0x8803_0000),
+        (0x7_1030, 0x0080_0100),
+        (0x7_1180, 0x9400_0000),
+        (0x7_1188, 0x78),
+        (0x7_1190, 0x0437_077F),
+        (0x7_127C, 0x07DB_0000),
+    ] {
+        assert_eq!(display.value(offset), want, "{offset:#x}");
+    }
+    // PHY A's lanes: the dump's.
+    for ln in 0..4 {
+        let lane = 0x16_2000 + 0x880 + ln * 0x100;
+        assert_eq!(display.value(lane + 0x8) & 0xB8FF, 0x9098);
+        assert_eq!(display.value(lane + 0x1C), 0x6000_0000);
+    }
+    assert_eq!(display.value(DDI_BUF_CTL_A), 0x8000_0000);
+    // Port B's buffer and PHY were not written.
+    assert!(
+        display
+            .writes
+            .iter()
+            .all(|(offset, _)| *offset != DDI_BUF_CTL_A + 0x100
+                && !(0x6_C000..0x6_D000).contains(offset)),
+        "port B untouched"
+    );
+}
+
+/// The box's GGTT on 2026-10-23: the firmware kept entries far past its
+/// lit 1024x600 framebuffer (present from 0 to 0x22FFF, with holes). The
+/// surface goes in the first free aligned run; where there is none below
+/// the driver's window, on the first range no plane scans out, reclaimed.
+#[test]
+fn the_surface_finds_room_in_a_firmware_ggtt() {
+    // Every page below 64 MiB present but a hole of 12 MiB at 100 MiB.
+    let mut box_ggtt = |page: u64| {
+        page < (64 << 20) / 4096
+            || !((100 << 20) / 4096..(112 << 20) / 4096).contains(&page) && page < 0x23000
+    };
+    let lit = [(0, 1024 * 600 * 4)];
+    assert_eq!(
+        place(&mut box_ggtt, &lit, SURFACE_GGTT_LIMIT),
+        Some(Placed {
+            at: 100 << 20,
+            reclaimed: false
+        })
+    );
+    // No hole at all: the first range past the lit plane, reclaimed.
+    let mut full = |_: u64| true;
+    assert_eq!(
+        place(&mut full, &lit, SURFACE_GGTT_LIMIT),
+        Some(Placed {
+            at: 4 << 20,
+            reclaimed: true
+        })
+    );
+    // A second plane the firmware scans out at 4 MiB pushes it past.
+    let both = [(0, 1024 * 600 * 4), (4 << 20, (4 << 20) + 1920 * 1080 * 4)];
+    assert_eq!(
+        place(&mut full, &both, SURFACE_GGTT_LIMIT).map(|placed| placed.at),
+        Some(12 << 20)
+    );
+}
+
+/// What the planes scan out is read from their registers: pipe A's plane
+/// 1 lit, pipe B's cloned onto the same surface, a cursor on pipe A.
+#[test]
+fn the_scanned_ranges_are_every_enabled_planes() {
+    let mut display = Display::firmware();
+    display.write32(0x7_0180, 0x9400_0000);
+    display.write32(0x7_0188, 0x40);
+    display.write32(0x7_0190, (599 << 16) | 1023);
+    display.write32(0x7_019C, 0);
+    display.write32(0x7_1180, 0x9400_0000);
+    display.write32(0x7_1188, 0x40);
+    display.write32(0x7_1190, (599 << 16) | 1023);
+    display.write32(0x7_119C, 0);
+    display.write32(0x7_0080, 0x27);
+    display.write32(0x7_0084, 0x0100_0000);
+    let mut out = [(0, 0); 24];
+    let count = scanned(&mut display, &mut out);
+    assert_eq!(count, 3);
+    assert_eq!(out[0], (0, 0x40 * 64 * 600));
+    assert_eq!(out[1], (0x0100_0000, 0x0100_0000 + (256 << 10)));
+    assert_eq!(out[2], (0, 0x40 * 64 * 600));
 }

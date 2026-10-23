@@ -122,6 +122,7 @@ pub(crate) fn run() -> Result<Report, &'static str> {
     let blocks = fs::devfs::check::run()?;
     // In the boot task: `/proc/stat` describes the machine, not the reader.
     let (stat_cpus, stat_ticks) = check_stat(fs::namespace())?;
+    check_cpuinfo(fs::namespace())?;
     check_thread_times()?;
     check_thread_names()?;
 
@@ -321,6 +322,58 @@ fn check_seeks_to_zero(device: &OpenFile) -> Result<(), &'static str> {
     let plain_write = device.write(b"x");
     if device.read_at(1000, &mut buf) != Ok(read) || device.write_at(1000, b"x") != plain_write {
         return Err("pread or pwrite on a /dev memory device did not do what read and write do");
+    }
+    Ok(())
+}
+
+/// `/proc/cpuinfo`: a block per online processor, numbered in order as
+/// `/proc/stat` numbers them, each with its architecture's identification:
+/// on x86-64 a `model name` and a `flags` line that names `fpu`, which every
+/// x86-64 processor has; on the Arm pair a `Features` line and `CPU
+/// architecture`. Read 64 bytes at a time, so a block that straddles reads
+/// comes back whole.
+fn check_cpuinfo(ns: &Namespace) -> Result<(), &'static str> {
+    let text = read_all(ns, &ns.context(), b"/proc/cpuinfo", 64)?;
+    let text = core::str::from_utf8(&text).map_err(|_| "/proc/cpuinfo is not text")?;
+    let online = smp::topology().map_or_else(
+        || vec![0],
+        |topology| {
+            topology
+                .cpus()
+                .iter()
+                .filter(|cpu| cpu.is_online())
+                .map(|cpu| cpu.logical)
+                .collect()
+        },
+    );
+    let blocks: Vec<&str> = text
+        .split("\n\n")
+        .filter(|block| !block.is_empty())
+        .collect();
+    if blocks.len() != online.len() {
+        return Err("/proc/cpuinfo does not have one block per online processor");
+    }
+    let wanted: &[&str] = match crate::arch::ARCH {
+        ferrix_bootinfo::Arch::X86_64 => &["model name\t: ", "flags\t\t: fpu "],
+        ferrix_bootinfo::Arch::AArch64 | ferrix_bootinfo::Arch::Armv7a => {
+            &["Features\t:", "CPU architecture: "]
+        }
+    };
+    for (block, logical) in blocks.iter().zip(online) {
+        let first = block.lines().next().unwrap_or_default();
+        if first
+            .strip_prefix("processor\t: ")
+            .and_then(|n| n.parse::<usize>().ok())
+            != Some(logical)
+        {
+            return Err("a /proc/cpuinfo block does not start with its processor's number");
+        }
+        if wanted
+            .iter()
+            .any(|label| !block.lines().any(|line| line.starts_with(label)))
+        {
+            return Err("a /proc/cpuinfo block lacks its architecture's identification");
+        }
     }
     Ok(())
 }
