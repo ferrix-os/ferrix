@@ -171,6 +171,13 @@
       "branch": "powerctl",
       "date": "2026-10-22",
       "purpose": "Retired, never to be reused: ferrix.vrcurrent's word and clamp, its thermal guard, and its step's write (ledger lines 3086 and 3090), replaced by the power core of docs/POWERCTL.md, whose design review is ledger line 3130 (condition 12). L.x86_64.192, the checked write, stays."
+    },
+    {
+      "ids": ["L.x86_64.209-210"],
+      "owner": "int3-bp",
+      "branch": "int3-bp-dpl3",
+      "date": "2026-10-23",
+      "purpose": "A ring-3 int3 is #BP, not #GP: vectors 3 and 4 get DPL-3 gates as Linux's system gates; L.x86_64.209 a 64-bit program's int3 is SIGTRAP with si_code SI_KERNEL, trapno 3 and rip past the 0xCC; L.x86_64.210 an i386 program's into with OF set is SIGSEGV with trapno 4"
     }
   ]
 }
