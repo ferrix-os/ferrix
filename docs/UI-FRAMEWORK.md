@@ -965,6 +965,22 @@ more.
   offsets, not Qt's UTF-16 indices; no undo, no input methods, and the
   caret does not blink yet; a `TextArea` grows with its text or scrolls
   by the wheel, but does not yet follow the caret. 73 host tests.
-* Next: U6c, `Popup`, `Menu`, `ComboBox`, `ScrollBar`, `SplitView` and
-  a file chooser. The window gets a `test-compositor` row with the
-  viewer's port (U8), where it first runs on Ferrix.
+* **U6c built** (2026-10-23): the rest of U6. `Popup`, drawn over
+  everything after the scene and hit first while shown, outside any cut
+  around it; Qt's `CloseOnPressOutside` (the press is the popup's, so
+  it clicks nothing under it) and `CloseOnEscape`, and
+  `CloseOnReleaseInside`, tole's own, which a `Menu` sets; a `modal`
+  one dims the window and takes every press. `SplitView`, placing as a
+  `RowLayout` does with each child filling across, its handles dragging
+  the first child's `Layout.preferredWidth`. `FolderListModel`, a
+  folder as a `model<FileEntry>`. On them `ComboBox`, `Menu`,
+  `MenuItem`, `MenuSeparator`, `ScrollBar` and `FileDialog`, an in-app
+  modal chooser. Departures: popups stay inside the window rather than
+  in `xdg_popup` surfaces (the plan's first cut); the file chooser is
+  in-app, since Ferrix has no XDG portal; a `ScrollBar` is bound to what
+  it scrolls by its user and says `moved`, rather than Qt's attached
+  `ScrollBar.vertical`; a `SplitView`'s `orientation` is chosen once,
+  when it is made. 77 host tests.
+* Next: U7, `Shape` and `Canvas` with Rust painters and a chart demo;
+  then U8, the lode viewer ported, with the window's `test-compositor`
+  row where it first runs on Ferrix.
