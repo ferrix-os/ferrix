@@ -274,6 +274,18 @@ pub(crate) fn test_server(arch: crate::paths::Arch) -> Result<(Vec<File>, String
     Ok((files, exec))
 }
 
+/// The private key a client on this machine logs in to a test boot's
+/// guest with (`test_server`'s), made the first time.
+///
+/// # Errors
+///
+/// No home directory, or a key `ssh-keygen` could not make.
+pub(crate) fn test_client_key() -> Result<PathBuf> {
+    let home = std::env::home_dir()
+        .ok_or_else(|| Error::new("no home directory to find the guest's keys in"))?;
+    client_key(&guest_dir(&home)).map(|(path, _)| path)
+}
+
 /// The guest's host key, made with `ssh-keygen` the first time.
 fn host_key(dir: &Path) -> Result<Vec<u8>> {
     let path = dir.join("ssh_host_ed25519_key");

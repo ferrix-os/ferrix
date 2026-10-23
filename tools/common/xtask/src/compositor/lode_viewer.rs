@@ -18,6 +18,15 @@
 //!
 //! The screen after step 2 is kept in the build directory as
 //! `lode-viewer.ppm`.
+//!
+//! `lode-viewer-ssh` is the other side: the viewer on this machine following
+//! a Ferrix guest's lode over ssh, as its Machines page does for a box. The
+//! guest runs `sshdt`, its port 22 forwarded to a free port here, and the
+//! viewer's `--pull` (the link the Machines page starts, with no window)
+//! logs in with the test boots' client key and keeps what comes in a
+//! store of its own. Required: records kept, among them lode's own "lode
+//! started for this boot"; then a second pull resumes from the store's last
+//! record, so the store holds the two pulls' records once each.
 
 use std::time::{Duration, Instant};
 
@@ -73,6 +82,200 @@ fn carried(arch: Arch) -> Result<Carried> {
 /// Build what the boot carries ahead of the first boot (`build_ahead`).
 pub(super) fn build_ahead(arch: Arch) -> Result<()> {
     let _ = crate::apps::program(arch, "lode-viewer", "lode-viewer")?;
+    let _ = crate::apps::program(Arch::X86_64, "lode-viewer", "lode-viewer")?;
+    Ok(())
+}
+
+/// The ssh boot's `hyprland.conf`: an address from the gateway, as
+/// run-compositor's network takes one, and sshdt on every address, port 22.
+fn ssh_config(exec: &str) -> String {
+    format!(
+        "# Carried into the initramfs by `cargo xtask test-compositor --boot lode-viewer-ssh`.\n\
+         exec-once = /bin/dhcpc -i eth0 -n -t 5 -T 2\n\
+         exec-once = {exec} -b 0.0.0.0 -p 22\n"
+    )
+}
+
+/// The viewer on this machine following the guest over ssh.
+pub(super) fn test_lode_viewer_ssh(arch: Arch, programs: &Programs, args: &Args) -> Result<()> {
+    let (mut files, exec) = crate::ssh::test_server(arch)?;
+    files.extend(crate::dhcp::carried(arch)?);
+    // sshdt runs a command with /bin/sh: busybox's, as a person's image has.
+    let busybox = crate::busybox::installed_program(arch).ok_or_else(|| {
+        Error::new(format!(
+            "{arch}: no busybox for sshdt's /bin/sh: `cargo xtask busybox` builds one"
+        ))
+    })?;
+    let carried = Carried {
+        ports: files,
+        busybox: Some(busybox),
+        ..Carried::none()
+    };
+    let (image, kernel) = judged_image(arch, programs, &ssh_config(&exec), carried, None, args)?;
+    // The viewer runs here, so it is this machine's build: a static x86-64
+    // program, whatever the guest's architecture.
+    let viewer = crate::apps::program(Arch::X86_64, "lode-viewer", "lode-viewer")?;
+    let key = crate::ssh::test_client_key()?;
+    let port = free_port()?;
+    let mut qemu_args = args.clone();
+    qemu_args.display = true;
+    qemu_args.net = true;
+    qemu_args.forwards.push(crate::gateway::Forward {
+        host: port,
+        guest: crate::ssh::GUEST_PORT,
+    });
+    let work = paths::build_dir(arch).join("lode-viewer-ssh");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work)
+        .map_err(|error| Error::new(format!("{}: {error}", work.display())))?;
+    let mut pulls = Vec::new();
+    let hook = |watching: &mut Watching<'_>| -> Result<()> {
+        watching.stop_when_done();
+        let up = watching.read_more(Instant::now() + SETTLE, |lines| {
+            lines.iter().any(|line| line.contains("sshdt is ready"))
+                && lines.iter().any(|line| line.contains("10.0.2.15"))
+        })?;
+        if !up {
+            return Err(with_the_transcript(
+                &Error::new(format!(
+                    "{arch}: sshdt never said it was ready, or the guest took no address"
+                )),
+                watching,
+            ));
+        }
+        say_the_marker(watching, arch);
+        for round in 1..=2 {
+            // The guest's console is read while the pull runs: a console
+            // nobody reads stops the guest that writes to it.
+            let (viewer, key, work) = (viewer.clone(), key.clone(), work.clone());
+            let running = std::thread::spawn(move || pull(&viewer, &key, port, &work));
+            while !running.is_finished() {
+                let _ =
+                    watching.read_more(Instant::now() + Duration::from_millis(500), |_| false)?;
+            }
+            let said = running
+                .join()
+                .map_err(|_| Error::new("the pull's thread panicked"))??;
+            println!(
+                "  {arch}: pull {round}: {}",
+                said.lines().last().unwrap_or("nothing")
+            );
+            pulls.push(said);
+        }
+        Ok(())
+    };
+    let _ = crate::qemu::watch_then(arch, &image, &kernel, &qemu_args, EITHER, hook)?;
+    let counted = count_store(&viewer, &work)?;
+    judge_ssh(arch, &pulls, counted)?;
+    println!(
+        "  {arch}: the viewer followed the guest's lode over ssh into a store of its own, \
+         and a second pull went on from where the first stopped"
+    );
+    Ok(())
+}
+
+/// One `--pull` of the guest, its output.
+fn pull(
+    viewer: &std::path::Path,
+    key: &std::path::Path,
+    port: u16,
+    work: &std::path::Path,
+) -> Result<String> {
+    let output = std::process::Command::new(viewer)
+        .args(["--pull", &format!("root@127.0.0.1:{port}"), "--key"])
+        .arg(key)
+        .arg("--into")
+        .arg(work.join("root"))
+        .args(["--seconds", "15"])
+        .env("LODE_VIEWER_KNOWN_HOSTS", work.join("known_hosts"))
+        .output()
+        .map_err(|error| Error::new(format!("{}: {error}", viewer.display())))?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// How many records the store the pulls made holds, and whether lode's
+/// start is among them: the viewer's own reading of it.
+fn count_store(viewer: &std::path::Path, work: &std::path::Path) -> Result<(usize, bool)> {
+    let root = work.join("root");
+    let dir = std::fs::read_dir(&root)
+        .map_err(|error| Error::new(format!("{}: {error}", root.display())))?
+        .flatten()
+        .map(|item| item.path())
+        .find(|path| {
+            path.is_dir()
+                && !path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+        })
+        .ok_or_else(|| Error::new(format!("{}: the pulls kept no store", root.display())))?;
+    let output = std::process::Command::new(viewer)
+        .arg("-D")
+        .arg(&dir)
+        .args(["--no-remotes", "--render"])
+        .arg(work.join("frame.png"))
+        .output()
+        .map_err(|error| Error::new(format!("{}: {error}", viewer.display())))?;
+    let all = String::from_utf8_lossy(&output.stdout).into_owned();
+    let records = all
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("lode-viewer: read ")?
+                .split(' ')
+                .next()?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0);
+    let started = std::fs::read_dir(&dir)
+        .map_err(|error| Error::new(format!("{}: {error}", dir.display())))?
+        .flatten()
+        .filter(|item| item.file_name().to_string_lossy().ends_with(".fxj"))
+        .any(|item| {
+            std::fs::read(item.path()).is_ok_and(|bytes| {
+                bytes
+                    .windows(26)
+                    .any(|window| window == b"lode started for this boot")
+            })
+        });
+    Ok((records, started))
+}
+
+/// The number at `kept` in a pull's last line: `pull …: N records kept in …`.
+fn kept(said: &str) -> Option<usize> {
+    let line = said
+        .lines()
+        .rev()
+        .find(|line| line.contains(" records kept in "))?;
+    let before = line.split(" records kept in ").next()?;
+    before.rsplit(' ').next()?.parse().ok()
+}
+
+/// What the ssh boot requires.
+fn judge_ssh(arch: Arch, pulls: &[String], (stored, started): (usize, bool)) -> Result<()> {
+    let refuse = |why: String| Err(Error::new(format!("{arch}: {why}")));
+    let (Some(first), Some(second)) = (
+        pulls.first().and_then(|said| kept(said)),
+        pulls.get(1).and_then(|said| kept(said)),
+    ) else {
+        return refuse(format!("a pull did not say what it kept: {pulls:?}"));
+    };
+    if first == 0 {
+        return refuse(format!(
+            "the first pull kept no record: {}",
+            pulls.first().map_or("", String::as_str)
+        ));
+    }
+    if !started {
+        return refuse(
+            "the store has no \"lode started for this boot\": the pull did not start at the boot"
+                .to_owned(),
+        );
+    }
+    if stored != first + second {
+        return refuse(format!(
+            "the store holds {stored} records, and the pulls kept {first} and {second}: the second did not go on from where the first stopped"
+        ));
+    }
     Ok(())
 }
 
@@ -247,6 +450,22 @@ mod tests {
             .chain(["lode-viewer: err: no font was found".to_owned()])
             .collect();
         assert!(refusal(&complained).contains("complained"));
+    }
+
+    #[test]
+    fn a_second_pull_must_go_on_where_the_first_stopped() {
+        use super::judge_ssh;
+        let pulls = vec![
+            "lode-viewer: pull root@127.0.0.1:5555: 175 records kept in /x/host-ferrix\n"
+                .to_owned(),
+            "lode-viewer: pull root@127.0.0.1:5555: 2 records kept in /x/host-ferrix\n".to_owned(),
+        ];
+        assert!(judge_ssh(Arch::X86_64, &pulls, (177, true)).is_ok());
+        let again = judge_ssh(Arch::X86_64, &pulls, (352, true)).expect_err("repeated");
+        assert!(again.to_string().contains("did not go on"), "{again}");
+        assert!(judge_ssh(Arch::X86_64, &pulls, (177, false)).is_err());
+        let none = vec![pulls[0].replace("175", "0"), pulls[1].clone()];
+        assert!(judge_ssh(Arch::X86_64, &none, (2, true)).is_err());
     }
 
     #[test]
