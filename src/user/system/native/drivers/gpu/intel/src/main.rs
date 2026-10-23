@@ -11,7 +11,9 @@
 //!    the GGTT's entries in its upper 8 MiB (`gen6_gttadr_offset`).
 //! 3. The configuration space read, never written: the GGTT's size
 //!    (`GMCH_CTRL`) and stolen memory's base (`BSM`).
-//! 4. Forcewake of the render and GT domains, as i915 takes it.
+//! 4. Forcewake of the render and GT domains, as i915 takes it, after
+//!    releasing any a previous driver died holding (i915's
+//!    `forcewake_early_sanitize`).
 //! 5. Whether `GuC` has locked the `WOPCM` since the last reset
 //!    (`uc_is_wopcm_locked`): an execlists driver cannot start then, and
 //!    says so (M0 found it on every warm boot from the inspection Linux).
@@ -412,12 +414,15 @@ fn run(boot: &Channel<Kernel>) -> Result<core::convert::Infallible, Step> {
     let stopped = |step: Step| {
         if !matches!(step, Step::Stopped) {
             // Exiting would have devmgr quiesce the function, and a quiesce
-            // turns its bus mastering off (`device_quiesce`), under the
+            // turns its bus mastering off (`device_quiesce`), under any
             // plane the firmware lit and the display engine still scans
             // out of memory. i915 never does that with a lit plane: it
-            // turns the display off before `pci_disable_device`.
+            // turns the display off before `pci_disable_device`. Whether a
+            // plane is lit is not known yet at most steps, and after a
+            // restart the death's quiesce already turned bus mastering off,
+            // so the line says neither. Staying sends no HELLO either way.
             say(format_args!(
-                "intel: stopped at {step:?}; the driver stays, so 00:02.0's bus mastering stays on under the lit screen"
+                "intel: stopped at {step:?}; the driver stays and sends no HELLO, so devmgr does not quiesce 00:02.0 under any plane the firmware lit"
             ));
         }
     };
@@ -469,6 +474,34 @@ fn say_inherited(inherited: &[Option<ferrix_intel_xelp::backend::Inherited>]) {
             ));
         }
     }
+}
+
+/// Render and GT forcewake for M1, after releasing whatever a previous
+/// driver died holding.
+fn take_forcewake(bar: &mut Bar0, time: &mut Time, platform: &Platform) -> Result<(), Step> {
+    let domains = uncore::fw_domains_init(platform.platform_engine_mask);
+    let wanted = uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT;
+    // i915's forcewake_early_sanitize: a driver that died holding forcewake
+    // left its requests and acks set, and the get below would wait for an
+    // ack that never clears (the N150, 2026-10-23). Fail closed: an ack that
+    // stays set stops the driver before it touches the GT or sends a HELLO.
+    match uncore::fw_domains_sanitize(bar, time, &domains) {
+        Ok(0) => {}
+        Ok(held) => say(format_args!(
+            "intel: forcewake {held:#x} was held by a previous driver; released (requests cleared, acks clear)"
+        )),
+        Err(error) => {
+            say(format_args!(
+                "intel: forcewake a previous holder left could not be released: {error:?}"
+            ));
+            return Err(Step::Forcewake);
+        }
+    }
+    if let Err(error) = uncore::fw_domains_get(bar, time, &domains, wanted) {
+        say(format_args!("intel: forcewake failed: {error:?}"));
+        return Err(Step::Forcewake);
+    }
+    Ok(())
 }
 
 /// What M1 leaves for the rest: BAR 0 under render and GT forcewake, and
@@ -704,13 +737,8 @@ fn m1(
             "forcewake render and GT: acks 0xd84 0x130044 clear, write 0xa278 0xa188, acks set"
         ),
     )?;
-    let domains = uncore::fw_domains_init(platform.platform_engine_mask);
-    let wanted = uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT;
     let started = time.now_us();
-    if let Err(error) = uncore::fw_domains_get(&mut bar, time, &domains, wanted) {
-        say(format_args!("intel: forcewake failed: {error:?}"));
-        return Err(Step::Forcewake);
-    }
+    take_forcewake(&mut bar, time, platform)?;
     say(format_args!(
         "intel: forcewake render and GT acknowledged in {} us",
         time.now_us().saturating_sub(started)

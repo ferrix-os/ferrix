@@ -310,6 +310,46 @@ pub fn fw_domains_reset<M: Mmio + ?Sized>(
     }
 }
 
+/// `forcewake_early_sanitize`'s `intel_uncore_forcewake_reset`, then the
+/// wait the first `fw_domains_get` would make: every present domain's
+/// request bits are cleared ([`fw_domains_reset`]), whoever set them, and
+/// each ack must then read clear, with the fallback kick if one is lost.
+/// i915 does this at every load, before its first forcewake.
+///
+/// A driver that died holding forcewake leaves the request and its ack set:
+/// the hardware keeps them, and nothing in the kernel's quiesce touches
+/// them. Without this, the next driver's first [`fw_domains_get`] waits for
+/// that ack to clear and fails with [`ForcewakeError::AckNotCleared`] (the
+/// N150, 2026-10-23, after `kill -9` of `intel`).
+///
+/// Returns the domains whose kernel ack was found set, so the caller can say
+/// it released a predecessor's forcewake. An ack that never clears is the
+/// error, and the caller must stop: the GT may still be held by something
+/// this driver does not know.
+pub fn fw_domains_sanitize<M: Mmio + ?Sized, C: Clock + ?Sized>(
+    mmio: &mut M,
+    clock: &mut C,
+    domains: &FwDomains,
+) -> Result<ForcewakeDomains, ForcewakeError> {
+    let mut held = 0;
+    for domain in domains.masked(domains.mask()) {
+        let ack = mmio.read32(domain.reg_ack.offset());
+        if ack == u32::MAX {
+            return Err(ForcewakeError::MmioUnreliable {
+                domain: domain.mask,
+            });
+        }
+        if ack & FORCEWAKE_KERNEL != 0 {
+            held |= domain.mask;
+        }
+    }
+    fw_domains_reset(mmio, domains, domains.mask());
+    for domain in domains.masked(domains.mask()) {
+        fw_domain_wait_ack_clear_fallback(mmio, clock, domain)?;
+    }
+    Ok(held)
+}
+
 /// `__wait_for_ack`.
 fn wait_ack<M: Mmio + ?Sized, C: Clock + ?Sized>(
     mmio: &mut M,

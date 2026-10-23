@@ -173,6 +173,73 @@ fn forcewake_get_and_put() {
     assert_eq!(model.read32(0x0013_0044) & 1, 0);
 }
 
+/// A driver that died holding render and GT forcewake: the requests and
+/// acks are still set. The sanitize clears every request bit but bit 12,
+/// waits for the acks to clear, names what it found, and the next get works
+/// (the N150 after `kill -9` of `intel`, 2026-10-23).
+#[test]
+fn forcewake_held_by_a_dead_driver_is_released() {
+    let mut model = FwModel::new();
+    let domains = uncore::fw_domains_init(device_info::ADL_N_INFO.platform_engine_mask);
+    let both = uncore::FORCEWAKE_RENDER | uncore::FORCEWAKE_GT;
+    let mut clock = FwModel::new();
+    uncore::fw_domains_get(&mut model, &mut clock, &domains, both).expect("the dead driver's");
+    // Without the sanitize, the next driver's get fails as on the box.
+    let mut stale = FwModel::new();
+    stale.regs = model.regs.clone();
+    assert_eq!(
+        uncore::fw_domains_get(&mut stale, &mut clock, &domains, both),
+        Err(uncore::ForcewakeError::AckNotCleared {
+            domain: uncore::FORCEWAKE_RENDER,
+            ack: 1
+        })
+    );
+    model.writes.clear();
+    let held = uncore::fw_domains_sanitize(&mut model, &mut clock, &domains);
+    assert_eq!(held, Ok(both));
+    assert!(
+        model.writes.contains(&(0xa278, 0xefff_0000)),
+        "{:x?}",
+        model.writes
+    );
+    assert!(
+        model.writes.contains(&(0xa188, 0xefff_0000)),
+        "{:x?}",
+        model.writes
+    );
+    uncore::fw_domains_get(&mut model, &mut clock, &domains, both).expect("woken again");
+}
+
+/// A cold GT: the sanitize finds nothing held and changes no ack.
+#[test]
+fn forcewake_sanitize_of_a_cold_gt_finds_nothing() {
+    let mut model = FwModel::new();
+    let domains = uncore::fw_domains_init(device_info::ADL_N_INFO.platform_engine_mask);
+    let mut clock = FwModel::new();
+    assert_eq!(
+        uncore::fw_domains_sanitize(&mut model, &mut clock, &domains),
+        Ok(0)
+    );
+}
+
+/// Fail closed: an ack that stays set whatever is written (something other
+/// than this driver holds the domain) is the sanitize's error.
+#[test]
+fn forcewake_ack_that_never_clears_refuses() {
+    let mut model = FwModel::new();
+    let _ = model.acks.remove(&0xa278);
+    let _ = model.regs.insert(0xd84, 1);
+    let domains = uncore::fw_domains_init(device_info::ADL_N_INFO.platform_engine_mask);
+    let mut clock = FwModel::new();
+    assert_eq!(
+        uncore::fw_domains_sanitize(&mut model, &mut clock, &domains),
+        Err(uncore::ForcewakeError::AckNotCleared {
+            domain: uncore::FORCEWAKE_RENDER,
+            ack: 1
+        })
+    );
+}
+
 #[test]
 fn forcewake_never_acked_times_out() {
     let mut model = FwModel::new();

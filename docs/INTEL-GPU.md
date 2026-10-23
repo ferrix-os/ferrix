@@ -1235,6 +1235,21 @@ nothing after it. Each piece:
   host's, with the same budget of eight and no delay (`restarted`), and
   takes it at its word on a restart as at boot. The DK1's GC400 is not,
   until that is tried on the board.
+* The new driver **first releases any forcewake it inherits** (M1's step
+  4, `uncore::fw_domains_sanitize`): a driver killed while it held render
+  and GT forcewake leaves the requests and their acks set, because the
+  hardware keeps them and the death's quiesce does not touch them, and the
+  next driver's first get waited for an ack that never cleared (the N150,
+  2026-10-23: `forcewake failed: AckNotCleared { domain: 1, ack: 1 }`,
+  then no render node). As i915's `forcewake_early_sanitize` does at every
+  load, every present domain's request bits but bit 12 are cleared
+  (`fw_domains_reset`, `WaRsClearFWBitsAtReset`) and each ack must read
+  clear, with the fallback kick, before the first get. One found set is
+  said: `intel: forcewake 0x… was held by a previous driver; released`.
+  **It fails closed**: an ack that never clears stops the driver at
+  `Forcewake` before it touches the GT, so no HELLO is sent and the dead
+  driver's pins stay quarantined. A cold GT reads every ack clear, and the
+  write changes nothing.
 * The new driver **resets every engine it inherits**: `XelpBackend::new`
   reads each engine's `RING_HWS_PGA` first, and one that is not 0 was
   brought up by a driver since the last reset, so it is reset by its
@@ -1295,7 +1310,9 @@ kill -9 <that pid>
 
 The kernel log wants, in order: `devmgr   the driver of 0x00000010 ended
 with status 137; the device is quiesced`; `devmgr   the driver of
-0x00000010 was started again and published (restart 1)`; `intel: rcs0 was
+0x00000010 was started again and published (restart 1)`; `intel:
+forcewake 0x3 was held by a previous driver; released (requests cleared,
+acks clear)` (or another mask; never `forcewake failed`); `intel: rcs0 was
 a previous driver's (status page 0x…); reset alone before bring-up: done`
 (and `bcs0` likewise if it ran; `NOT reset` cannot appear: such an engine
 stops the driver with `could not be reset` and status 14, and devmgr tries
@@ -1322,6 +1339,13 @@ only, which has no GT: the box run (§11.3, BACKLOG P1 `intel-restart-box`)
 is owed, and must show K2 taken, no DMAR fault after the restart, `done`
 for each inherited engine, and the stall measured. The opaque crash mode
 is a plan (§12).
+
+2026-10-23: the first box run (headless, no game) stopped the restarted
+driver at `Forcewake`, the dead driver's render and GT forcewake still
+acknowledged. Branch `intel-fw-reset` releases it first, as i915 does
+(§11.2), shown on the host model only: neither QEMU stand-in has the
+forcewake registers (`intel-fake` touches none). The box run is owed
+again, and must show the `was held by a previous driver; released` line.
 
 ## Appendix A: the probe that printed the numbers
 
