@@ -12,10 +12,44 @@ missing, the order, the points) and its "where it stands".
 
 ## Where it stands, 2026-10-23
 
-Branch `hyprix-gnome`, not landed. Design written; part 1 (floating mode)
-being built: 1a (the floating layout) and 1b (snapping, maximize, drag to
-an edge with a tile preview) built and host-tested. Kernel lines for all four parts: **0** (each part's section
-says why).
+Branch `hyprix-gnome`, not landed. Kernel lines for all four parts: **0**
+(each part's section says why). Nothing touches the certified item, so no
+consultant review is owed.
+
+**Part 1 is built** (18 points estimated), with 2b brought forward so it
+can be seen:
+
+| Step | Commit | What |
+|---|---|---|
+| 1a | f6584da2c | `general:layout = floating` and `workspace = N, layout:floating`; new windows choose their size, centred and cascaded in the work area; floating windows told no tiled edge |
+| 1b | 20d4e496b | `snapwindow max\|left\|right\|restore\|toggle`; `set_maximized` and the taskbar's maximize on floating windows; drag to a top edge maximizes, to a side halves, with a tile preview; a snapped window dragged away takes its old size under the pointer |
+| 2b | 521897720 | `hyprix/themes/ferrix-light.conf`; `hyprix:own_frames` (no compositor border round a window that draws its own frame, nothing round a maximized one); GTK 4's identity viewport no longer stops the window-geometry crop |
+| 1c | 7459f3c01 | minimize: `set_minimized`, the taskbar's request, `minimize`; focusing brings it back |
+| 1d | 76ef1a29b | the overview: `overview toggle`, SUPER alone; a grid of the shown workspace's windows, a strip of the other workspaces in miniature, click to pick, Escape to close |
+
+Gates on 76ef1a29b: `check` PASSED (`hyprix-gnome-check`) and
+`test-compositor` PASSED (`hyprix-gnome-compositor`). After a rebase onto
+a622d2266 with no conflict, on 88654b7cc: `build --arch all --release`
+(`hg-p1-release`), `test-boot` x86_64 KVM (`hg-p1-boot-kvm`) and TCG
+(`hg-p1-boot-tcg`), aarch64 (`hg-p1-boot-aarch64`), armv7a
+(`hg-p1-boot-armv7a`) and armv7a `--smp 2` (`hg-p1-boot-armv7a-smp2`), all
+PASSED. Logs in `~/.local/share/ferrix/logs/queue/`. Host tests: layout 199, hyprix lib
+141, `two_clients` 33 (one new: the floating workspace), `theme` 1. foot
+against the compositor printed no missing protocol. Screenshots, headless
+runs with zenity (GTK 4) and pattern clients:
+`~/.local/share/ferrix/hyprix-gnome/shots/`.
+
+What part 1 leaves, each small: the tile preview is drawn over the
+dragged window rather than under it; the overview has no box behind each
+workspace miniature, no search and no drag onto a miniature; the
+foreign-toplevel `maximized`/`minimized` flags a bar reads are still
+always false; a window opens tiled for the moment before its first commit
+floats it, which on a floating workspace with tiled windows reflows them
+once. Seen on the way, not this branch's: on this host foot's text did not
+reach the headless dumps in the tiled layout either.
+
+Next in order: 2a (title bars), 2c (top bar), 3b, 3a, 3f, 3g, 3h, 3c, 3d,
+4a to 4d; 3e on the 3060.
 
 ## 1. Floating mode
 
