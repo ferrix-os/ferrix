@@ -116,15 +116,30 @@ jobs:
             git log --no-merges --format='%h %s' origin/main..origin/develop | head -100
             echo '```'
           } > "$RUNNER_TEMP/body.md"
+          # The title says what is promoted: the landing's own subject, or with
+          # several the first ones and how many more, cut to fit a line. The
+          # merge commit on main takes the same words (--subject below).
+          title=$(git log --reverse --no-merges --format='%s' origin/main..origin/develop | python3 -c '
+          import sys
+          s = [l.strip() for l in sys.stdin if l.strip()]
+          t = s[0] if s else "Promote develop"
+          for i, x in enumerate(s[1:], 1):
+              more = len(s) - i
+              cand = t + "; " + x
+              if len(cand) + len(f" (+{more - 1} more)") > 120:
+                  t += f" (+{more} more)"
+                  break
+              t = cand
+          print(t[:250])')
           url=$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
-                  --title "Promote develop $short ($ahead commits)" --body-file "$RUNNER_TEMP/body.md")
+                  --title "$title" --body-file "$RUNNER_TEMP/body.md")
           num=${url##*/}
           gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$tip" -f state=success \
              -f context=flow/lane -f "description=owner lane: promotion of develop"
           python3 tools/common/release/cert-verdict.py "origin/main..$tip" --lane owner --post "$tip"
           base=$(git merge-base origin/main "$tip")
           gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch" -f "base=$base"
-          gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --merge
+          gh pr merge "$num" --repo "$GITHUB_REPOSITORY" --auto --merge --subject "$title (#$num)"
           echo "opened $url"
 
       - name: Drop merged promotion branches
