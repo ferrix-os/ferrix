@@ -556,7 +556,8 @@ done alone.
 
 ### 11.4 How the flag is wired
 
-* **Name and values.** A new flag, `abi = native | linux | both`, in
+* **Name and values.** (Superseded by §11.6: the flag is `linux-abi =
+  on | off`.) A new flag, `abi = native | linux | both`, in
   `tools/common/data/build-flags.toml`, turned by xtask into
   `--cfg ferrix_abi="..."`. That follows the existing rule: a `--cfg`,
   never a Cargo feature (`kernel_cargo_features` stays 0); every value
@@ -638,3 +639,29 @@ of it is on MICROKERNEL's path anyway. Add `linux` as a build value only
 if a customer needs a kernel that *cannot* be configured to give apps the
 native ABI. Then it is `both` with the grant hard-wired to the drivers
 job, about 5 more points.
+
+### 11.6 The flag's name: `linux-abi = on | off` (the customer, 2026-10-23)
+
+The customer, on §11.5: "when we didn't have support for Linux only we
+could just name the flag something like Linux-Support or linux-abi". The
+native ABI is in every kernel, so the flag says only whether the Linux ABI
+is there as well:
+
+| `linux-abi` | Was in §11.1–11.5 | Ring 0 | Points |
+|---|---|---|---|
+| `on` (default) | `both` | the item plus the Linux load, under today's exception until M5 | ~10 on top of `off`'s rows (one process model, per-personality fault outcome, the native right for apps) |
+| `off` | `native` | the item only, no QM code | ~85 (65–120); ~5 to only build |
+
+* There is no Linux-only value. §11.2's "drivers only" right is not a
+  build value but part of `on`: Linux programs get no native calls unless
+  granted (devmgr, the drivers job, init, authd, sessiond, nvrm).
+* `--cfg ferrix_linux_abi` when `on`, nothing when `off`; declared for
+  `--check-cfg`. `personality` gains `none`, which requires
+  `linux-abi=off`; `linux-abi=on` requires `personality=kernel|user`.
+* Everything else in §11.4 holds with `both` read as `on` and `native` as
+  `off`: the profiles keep `on`; `xtask check` builds both values on all
+  three architectures; the item gate reports a file set per value; the
+  flag, the native right and the per-process fault outcome need the
+  consultant's review before landing.
+* The estimate stays about **100 points** (§11.5) less the 5 a `linux`
+  value would have cost.
