@@ -224,6 +224,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "compositor-notifyd"
+version = "0.1.0"
+dependencies = [
+ "compositor-dbus",
+ "compositor-text",
+ "compositor-toolkit",
+]
+
+[[package]]
 name = "compositor-pattern"
 version = "0.1.0"
 dependencies = [

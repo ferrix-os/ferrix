@@ -196,6 +196,13 @@ names the part of Hyprland or hyprlang it follows.
   requests a click on a taskbar entry makes. Named after Leon Henrik
   Plickat's program of the same name, and there for the same reason `clip`
   is: it is the part of a bar that can be tested with no screen.
+* **`notifyd`** is the desktop's notification server
+  (`docs/DESKTOP.md` §4): `org.freedesktop.Notifications` on the session
+  bus through **`dbus`**, the crate's own D-Bus subset, and `devmgr`'s
+  driver deaths and restarts read from `\0ferrix.devmgr.events`, one banner
+  per device with a count. Banners are a fixed-size overlay layer surface
+  at the top centre whose input region is only the cards; `notifyd
+  --toggle-list` (the bar's clock) opens the list of recent ones.
 * **`shot`** is `grim` without the file format: it binds
   `zwlr_screencopy_manager_v1` and a `wl_output`, makes the `wl_shm` buffer
   the compositor says to make, hands it over, and prints the size and an FNV

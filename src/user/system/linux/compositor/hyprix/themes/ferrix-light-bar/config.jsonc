@@ -18,7 +18,8 @@
     "clock": {
         "format": "{:%a %e %b  %H:%M}",
         "tooltip-format": "{:%A, %e %B %Y}",
-        "interval": 30
+        "interval": 30,
+        "on-click": "notifyd --toggle-list"
     },
     "network": {
         "format-wifi": "wifi {essid}",

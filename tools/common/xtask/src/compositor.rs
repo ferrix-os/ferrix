@@ -347,6 +347,7 @@ const SHOT_PATH: &str = "bin/shot";
 const LOCK_PATH: &str = "bin/lock";
 const VKBD_PATH: &str = "bin/vkbd";
 const VDAGENT_PATH: &str = "bin/vdagent";
+const NOTIFYD_PATH: &str = "bin/notifyd";
 
 /// Where `sessiond` goes: seat0's owner, which starts the `--everything`
 /// desktop as its user (`crate::session`).
@@ -393,6 +394,9 @@ struct Programs {
     vdagent: PathBuf,
     /// `sessiond`, which starts a session as its user (`crate::session`).
     sessiond: PathBuf,
+    /// `notifyd`, the notifications and devmgr's driver events
+    /// (docs/DESKTOP.md §4), which the Ferrix light theme starts.
+    notifyd: PathBuf,
 }
 
 impl Programs {
@@ -414,11 +418,12 @@ impl Programs {
             reboot: build(arch, "compositor-reboot", "reboot")?,
             vdagent: build(arch, "compositor-vdagent", "vdagent")?,
             sessiond: build(arch, "compositor-sessiond", "sessiond")?,
+            notifyd: build(arch, "compositor-notifyd", "notifyd")?,
         })
     }
 
     /// The ones the initramfs carries, each with the path it goes at.
-    fn carried(&self) -> [(&'static str, &Path); 14] {
+    fn carried(&self) -> [(&'static str, &Path); 15] {
         [
             (CLIENT_PATH, self.client.as_path()),
             (CTL_PATH, self.ctl.as_path()),
@@ -434,6 +439,7 @@ impl Programs {
             (REBOOT_PATH, self.reboot.as_path()),
             (VDAGENT_PATH, self.vdagent.as_path()),
             (SESSIOND_PATH, self.sessiond.as_path()),
+            (NOTIFYD_PATH, self.notifyd.as_path()),
         ]
     }
 }
