@@ -625,6 +625,38 @@ impl Rig {
     }
 }
 
+impl Rig {
+    /// An `EXECBUFFER2` of `objects` (handle, address, flags), the last the
+    /// batch, that must be held; its request.
+    fn exec_held(&mut self, objects: &[(u32, u64, u64)], fences: &[(u32, u32)]) -> u64 {
+        assert!(fences.is_empty(), "no fence array here");
+        let mut list = Vec::new();
+        for (handle, offset, flags) in objects {
+            list.extend_from_slice(
+                &ExecObject2 {
+                    handle: *handle,
+                    offset: *offset,
+                    flags: *flags,
+                    ..Default::default()
+                }
+                .to_bytes(),
+            );
+        }
+        let buffers_ptr = self.host.alloc(&list);
+        let mut args = Execbuffer2 {
+            buffers_ptr,
+            buffer_count: objects.len() as u32,
+            flags: exec::NO_RELOC | exec::HANDLE_LUT,
+            ..Default::default()
+        }
+        .to_bytes();
+        match self.ioctl_on(1, ioctl::GEM_EXECBUFFER2, &mut args) {
+            Status::Held(request) => request,
+            Status::Done(status) => panic!("answered {status}, not held"),
+        }
+    }
+}
+
 /// Run `test` on a thread with room for the tables.
 fn big(test: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
@@ -1987,8 +2019,9 @@ fn release_frees_everything_when_idle() {
     });
 }
 
-/// A binding over one still in use answers `EAGAIN`; over an idle one, the
-/// idle one is unbound first (i915 evicts it).
+/// A binding over one still in use holds the execbuffer until that one's
+/// request finishes, then runs it, never `EAGAIN` (i915 sleeps and evicts);
+/// over an idle one, the idle one is unbound first (i915 evicts it).
 #[test]
 fn overlapping_bindings() {
     big(|| {
@@ -2014,30 +2047,12 @@ fn overlapping_bindings() {
         }
         .to_bytes();
         assert_eq!(rig.ioctl(ioctl::GEM_CLOSE, &mut close), 0);
-        assert_eq!(
-            rig.exec(
-                ioctl::GEM_EXECBUFFER2,
-                &[(second, 0x11000, PINNED), (batch, 0x1000, PINNED)],
-                0,
-                &[],
-                0
-            )
-            .0,
-            -11
-        );
+        let held = rig.exec_held(&[(second, 0x11000, PINNED), (batch, 0x1000, PINNED)], &[]);
+        assert_eq!(rig.frontend.backend.submits.len(), 1, "not run while held");
         rig.frontend.backend.finish(Completion::Ok);
         rig.frontend.service(&mut rig.host, true);
-        assert_eq!(
-            rig.exec(
-                ioctl::GEM_EXECBUFFER2,
-                &[(second, 0x11000, PINNED), (batch, 0x1000, PINNED)],
-                0,
-                &[],
-                0
-            )
-            .0,
-            0
-        );
+        assert_eq!(rig.host.replies.get(&held), Some(&0), "run once idle");
+        assert_eq!(rig.frontend.backend.submits.len(), 2);
         assert!(
             rig.frontend
                 .backend
@@ -2045,6 +2060,159 @@ fn overlapping_bindings() {
                 .iter()
                 .any(|(_, address, _)| *address == 0x10000)
         );
+        assert!(
+            !rig.host.lines.iter().any(|line| line.contains("EAGAIN")),
+            "no refusal said: {:?}",
+            rig.host.lines
+        );
+    });
+}
+
+/// Endfield's hang at the end of loading (N150, 2026-10-23): a present
+/// thread waits with `WAIT_FOR_SUBMIT` for a timeline point that an
+/// execbuffer with a busy binding in its way signals. The execbuffer is
+/// held, not refused; once the binding's request finishes it runs, its
+/// point is made, and the waiter is answered when the GPU finishes it.
+#[test]
+fn busy_binding_then_timeline_wait() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.backend.hold = true;
+        let old = rig.create(8192);
+        let new = rig.create(4096);
+        let batch = rig.create(4096);
+        assert_eq!(
+            rig.exec(
+                ioctl::GEM_EXECBUFFER2,
+                &[(old, 0x20000, PINNED), (batch, 0x1000, PINNED)],
+                0,
+                &[],
+                0
+            )
+            .0,
+            0
+        );
+        let mut close = GemClose {
+            handle: old,
+            pad: 0,
+        }
+        .to_bytes();
+        assert_eq!(rig.ioctl(ioctl::GEM_CLOSE, &mut close), 0);
+        // The present thread waits for point 5, not yet submitted.
+        let timeline = rig.syncobj(false);
+        let handles = rig.host.alloc(&timeline.to_le_bytes());
+        let five = rig.host.alloc(&5_u64.to_le_bytes());
+        let mut wait = SyncobjTimelineWait {
+            handles,
+            points: five,
+            timeout_nsec: i64::MAX,
+            count_handles: 1,
+            flags: drm::SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT,
+            ..Default::default()
+        }
+        .to_bytes();
+        let Status::Held(waiter) = rig.ioctl_on(1, ioctl::SYNCOBJ_TIMELINE_WAIT, &mut wait) else {
+            panic!("not held");
+        };
+        // The frame's submit signals point 5, over the busy binding.
+        let fence = rig.host.alloc(
+            &ExecFence {
+                handle: timeline,
+                flags: exec::FENCE_SIGNAL,
+            }
+            .to_bytes(),
+        );
+        let values = rig.host.alloc(&5_u64.to_le_bytes());
+        let ext = ExecbufferExtTimelineFences {
+            next_extension: 0,
+            name: exec::EXT_TIMELINE_FENCES,
+            flags: 0,
+            fence_count: 1,
+            handles_ptr: fence,
+            values_ptr: values,
+        };
+        let ext_at = rig.host.alloc(&ext.to_bytes());
+        let mut list = Vec::new();
+        for (handle, offset) in [(new, 0x21000), (batch, 0x1000)] {
+            list.extend_from_slice(
+                &ExecObject2 {
+                    handle,
+                    offset,
+                    flags: PINNED,
+                    ..Default::default()
+                }
+                .to_bytes(),
+            );
+        }
+        let list = rig.host.alloc(&list);
+        let mut args = Execbuffer2 {
+            buffers_ptr: list,
+            buffer_count: 2,
+            cliprects_ptr: ext_at,
+            flags: exec::USE_EXTENSIONS,
+            ..Default::default()
+        }
+        .to_bytes();
+        let Status::Held(submit) = rig.ioctl_on(1, ioctl::GEM_EXECBUFFER2, &mut args) else {
+            panic!("a busy binding in the way refused the submit");
+        };
+        assert!(!rig.host.replies.contains_key(&waiter));
+        // The old request finishes: the submit runs and makes point 5.
+        rig.frontend.backend.finish(Completion::Ok);
+        rig.frontend.service(&mut rig.host, true);
+        assert_eq!(rig.host.replies.get(&submit), Some(&0));
+        let out = rig.host.alloc(&[0; 8]);
+        let mut query = SyncobjTimelineArray {
+            handles,
+            points: out,
+            count_handles: 1,
+            flags: drm::SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED,
+        }
+        .to_bytes();
+        assert_eq!(rig.ioctl(ioctl::SYNCOBJ_QUERY, &mut query), 0);
+        assert_eq!(rig.host.read(out, 8), 5_u64.to_le_bytes(), "point made");
+        assert!(!rig.host.replies.contains_key(&waiter), "not yet done");
+        // The GPU finishes the frame: the waiter is answered.
+        rig.frontend.backend.finish(Completion::Ok);
+        rig.frontend.service(&mut rig.host, true);
+        assert_eq!(rig.host.replies.get(&waiter), Some(&0));
+    });
+}
+
+/// A held execbuffer whose program gave up on it (a signal: Wine's
+/// `SuspendThread`) is not run when it could be: the core refuses its
+/// copies, so nothing is submitted twice when the program calls again.
+#[test]
+fn an_abandoned_held_execbuffer_is_not_run() {
+    big(|| {
+        let mut rig = Rig::new();
+        rig.frontend.backend.hold = true;
+        let old = rig.create(4096);
+        let new = rig.create(4096);
+        let batch = rig.create(4096);
+        assert_eq!(
+            rig.exec(
+                ioctl::GEM_EXECBUFFER2,
+                &[(old, 0x30000, PINNED), (batch, 0x1000, PINNED)],
+                0,
+                &[],
+                0
+            )
+            .0,
+            0
+        );
+        let mut close = GemClose {
+            handle: old,
+            pad: 0,
+        }
+        .to_bytes();
+        assert_eq!(rig.ioctl(ioctl::GEM_CLOSE, &mut close), 0);
+        let held = rig.exec_held(&[(new, 0x30000, PINNED), (batch, 0x1000, PINNED)], &[]);
+        rig.host.abandoned.push(held);
+        rig.frontend.backend.finish(Completion::Ok);
+        rig.frontend.service(&mut rig.host, true);
+        assert_eq!(rig.frontend.backend.submits.len(), 1, "never run");
+        assert_eq!(rig.frontend.state.waits.len(), 0, "and gone");
     });
 }
 

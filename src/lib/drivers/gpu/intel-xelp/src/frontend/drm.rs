@@ -278,6 +278,21 @@ impl<B: Backend> Frontend<B> {
         fence::settle(self, host);
     }
 
+    /// Run a held [`fence::WaitKind::Retry`] call again from the start, as
+    /// the program's own call; answered unless held once more.
+    pub(super) fn run_again<H: Host<B::Memory>>(&mut self, host: &mut H, wait: &fence::Wait) {
+        if self.state.trace {
+            host.say(format_args!(
+                "intel: trace: held request {} runs again",
+                wait.request
+            ));
+        }
+        let answer = self.dispatch(host, wait.request, wait.file, wait.cmd, wait.arg);
+        if let Answer::Now(status) = answer {
+            host.reply(wait.request, status);
+        }
+    }
+
     /// `drm_ioctl`, then the handler.
     fn dispatch<H: Host<B::Memory>>(
         &mut self,
@@ -444,7 +459,7 @@ impl<B: Backend> Frontend<B> {
             nr::GEM_WAIT => gem::wait(self, host, call, data),
             nr::GEM_GET_APERTURE => gem::get_aperture(self, data).map(|()| None),
             nr::GEM_THROTTLE => Ok(None),
-            nr::GEM_EXECBUFFER2 => super::exec::execbuffer2(self, host, call, data).map(|()| None),
+            nr::GEM_EXECBUFFER2 => super::exec::execbuffer2(self, host, call, data),
             nr::GEM_CONTEXT_CREATE => vm::context_create(self, host, call, data).map(|()| None),
             nr::GEM_CONTEXT_DESTROY => vm::context_destroy(self, call, data).map(|()| None),
             nr::GEM_CONTEXT_GETPARAM => vm::context_getparam(self, call, data).map(|()| None),

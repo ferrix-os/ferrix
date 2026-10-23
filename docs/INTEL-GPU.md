@@ -1048,7 +1048,9 @@ next. The box check is `tools/common/n150/intel-card-checkpoint.sh`.
   too). A syncobj cannot be exported as an opaque descriptor, because the
   chardev core has no object for one; that would be a kernel interface, so
   it answers `EOPNOTSUPP` and says so once. A binding over one still in use
-  answers `EAGAIN` instead of sleeping. Userptr (K7), the legacy mmap,
+  holds the execbuffer, as i915 sleeps, until that one's request finishes,
+  then runs it again (until 2026-10-24 it answered `EAGAIN`, which Mesa
+  retried at once). Userptr (K7), the legacy mmap,
   pread, pwrite and perf answer `ENODEV`. Every unserved call is said once a
   boot, by name.
 * **`cargo xtask test-intel-uapi`** boots `intel-fake`

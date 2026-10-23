@@ -39,6 +39,15 @@ pub enum WaitKind {
     },
     /// `SYNCOBJ_WAIT` or `SYNCOBJ_TIMELINE_WAIT`.
     Syncobjs(syncobj::SyncWait),
+    /// An ioctl to run again from the start once `fence` signals: an
+    /// `EXECBUFFER2` whose binding has a busy one in its way, or that found
+    /// the request ring full. i915 sleeps in the ioctl there
+    /// (`i915_gem_evict_for_node`, then `i915_vma_unbind`'s wait) and never
+    /// fails it; so does this, without a thread, by holding the call.
+    Retry {
+        /// What it waits for.
+        fence: FenceRef,
+    },
 }
 
 /// What a handler asks to hold: its deadline (monotonic ns; `None` for
@@ -56,6 +65,8 @@ pub struct Hold {
 pub struct Wait {
     /// The chardev request.
     pub request: u64,
+    /// The ioctl's command, to run a [`WaitKind::Retry`] again.
+    pub cmd: u32,
     /// The file's slot.
     pub file: u8,
     /// The program's address of the argument.
@@ -106,6 +117,7 @@ impl Waits {
         self.slots
             .insert(Wait {
                 request: call.request,
+                cmd: call.cmd,
                 file: call.file,
                 arg: call.arg,
                 out_size: u8::try_from(length).unwrap_or(0),
@@ -408,6 +420,34 @@ fn submit_one<B: Backend>(
 /// Take completions and submit until neither moves, then retire, free what
 /// is idle, signal the kernel's fences and answer the waits that settled.
 pub fn settle<B: Backend, H: Host<B::Memory>>(frontend: &mut Frontend<B>, host: &mut H) {
+    // Each held call whose fence signalled runs again, oldest first, after
+    // the round that signalled it, and its request is then pumped in the
+    // next. Bounded, since a call run again may be held again.
+    for _ in 0..=limits::WAITS {
+        settle_once(frontend, host);
+        let Some(wait) = take_ready_retry(&mut frontend.state) else {
+            break;
+        };
+        frontend.run_again(host, &wait);
+    }
+}
+
+/// The oldest held [`WaitKind::Retry`] whose fence has signalled, out of
+/// the table.
+fn take_ready_retry<M>(state: &mut Tables<M>) -> Option<Wait> {
+    let mut oldest: Option<(usize, u64)> = None;
+    for (index, wait) in state.waits.slots.iter() {
+        if let WaitKind::Retry { fence } = wait.kind
+            && state.requests.status(fence).is_some()
+            && oldest.is_none_or(|(_, since)| wait.since < since)
+        {
+            oldest = Some((index, wait.since));
+        }
+    }
+    state.waits.slots.remove(oldest?.0)
+}
+
+fn settle_once<B: Backend, H: Host<B::Memory>>(frontend: &mut Frontend<B>, host: &mut H) {
     let Frontend { backend, state } = frontend;
     for _ in 0..limits::REQUESTS {
         let mut moved = false;
@@ -463,6 +503,7 @@ fn boost_waits<B: Backend>(backend: &mut B, state: &Tables<B::Memory>) {
                     boost(*fence);
                 }
             }
+            WaitKind::Retry { fence } => boost(*fence),
         }
     }
 }
@@ -556,6 +597,8 @@ fn answer_waits<M, H: Host<M>>(state: &mut Tables<M>, host: &mut H) {
             WaitKind::Syncobjs(sync) => {
                 syncobj::evaluate_wait(state, sync, &mut wait.data, expired)
             }
+            // Run again by `settle`, never answered here.
+            WaitKind::Retry { .. } => None,
         };
         if result.is_none()
             && state.trace
@@ -614,6 +657,13 @@ fn say_stuck<M, H: Host<M>>(state: &Tables<M>, host: &mut H, wait: &Wait, now: u
         WaitKind::Object { object, .. } => {
             host.say(format_args!(
                 "intel: trace:   GEM_WAIT on object slot {object}"
+            ));
+        }
+        WaitKind::Retry { fence } => {
+            host.say(format_args!(
+                "intel: trace:   ioctl {:#x} to run again after fence {fence:?} status {:?}",
+                wait.cmd,
+                requests.status(*fence)
             ));
         }
         WaitKind::Syncobjs(sync) => {
