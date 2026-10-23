@@ -7848,6 +7848,15 @@ pub(crate) fn start(
     // The command's own `NAME=value` words, after those: in `sh` they are
     // this one program's, over whatever it would otherwise inherit.
     let _ = child.envs(assigned);
+    // Its output to the log under its own name (`events.conf`'s
+    // session-streams), and on to hyprix's own as before.
+    if let Some(stream) =
+        crate::lode_events::stream(&crate::lode_events::identifier(program, arguments))
+        && let Ok(copy) = stream.try_clone()
+    {
+        let _ = child.stdout(std::process::Stdio::from(stream));
+        let _ = child.stderr(std::process::Stdio::from(copy));
+    }
     let pid = child.spawn().map(|child| child.id()).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             crate::command::NotStarted::Missing {

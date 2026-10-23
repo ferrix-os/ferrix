@@ -44,10 +44,14 @@ const KEPT_US: u64 = 10_000_000;
 struct Known {
     /// The pid.
     pid: u32,
-    /// When it was read.
+    /// When it was last used.
     at: u64,
     /// `comm`.
     comm: Option<Vec<u8>>,
+    /// The path it was started from, ` (deleted)` kept.
+    exe: Option<Vec<u8>>,
+    /// Its arguments, joined by spaces.
+    cmdline: Option<Vec<u8>>,
     /// The cgroup's path.
     cgroup: Option<String>,
 }
@@ -222,6 +226,15 @@ impl Front {
         record.push("_PID", alloc::format!("{pid}").as_bytes());
         record.push("_UID", alloc::format!("{uid}").as_bytes());
         record.push("_GID", alloc::format!("{gid}").as_bytes());
+        self.name(record, pid, now, true);
+    }
+
+    /// Give `record`, from process `pid`, its `_COMM`, `_EXE` and
+    /// `_CMDLINE` -- and with `units` its cgroup and unit -- read from
+    /// `/proc` the first time the pid is seen, while it is writing and so
+    /// alive, and kept 10 s after its last record, so the last lines of a
+    /// process that has ended carry its names, not a reused pid's.
+    pub(crate) fn name(&mut self, record: &mut Record, pid: u32, now: Now, units: bool) {
         self.known
             .retain(|known| now.monotonic_us.saturating_sub(known.at) < KEPT_US);
         let found = self.known.iter().position(|known| known.pid == pid);
@@ -230,6 +243,18 @@ impl Front {
         } else {
             let comm = sys::read_small(alloc::format!("/proc/{pid}/comm").as_bytes())
                 .map(|comm| Vec::from(comm.strip_suffix(b"\n").unwrap_or(&comm)));
+            let exe = sys::read_link(alloc::format!("/proc/{pid}/exe").as_bytes());
+            let cmdline =
+                sys::read_small(alloc::format!("/proc/{pid}/cmdline").as_bytes()).map(|args| {
+                    let mut line: Vec<u8> = args
+                        .iter()
+                        .map(|&byte| if byte == 0 { b' ' } else { byte })
+                        .collect();
+                    while line.last() == Some(&b' ') {
+                        let _ = line.pop();
+                    }
+                    line
+                });
             let cgroup =
                 sys::read_small(alloc::format!("/proc/{pid}/cgroup").as_bytes()).and_then(|text| {
                     String::from_utf8_lossy(&text)
@@ -240,15 +265,29 @@ impl Front {
                 pid,
                 at: now.monotonic_us,
                 comm,
+                exe,
+                cmdline,
                 cgroup,
             });
             self.known.len() - 1
         };
-        let Some(known) = self.known.get(index) else {
+        let Some(known) = self.known.get_mut(index) else {
             return;
         };
-        if let Some(comm) = &known.comm {
-            record.push("_COMM", comm);
+        known.at = now.monotonic_us;
+        for (name, value) in [
+            ("_COMM", &known.comm),
+            ("_EXE", &known.exe),
+            ("_CMDLINE", &known.cmdline),
+        ] {
+            if let Some(value) = value
+                && record.get(name).is_none()
+            {
+                record.push(name, value);
+            }
+        }
+        if !units {
+            return;
         }
         if let Some(cgroup) = &known.cgroup {
             record.push("_SYSTEMD_CGROUP", cgroup.as_bytes());

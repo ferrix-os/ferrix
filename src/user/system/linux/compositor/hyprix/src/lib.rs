@@ -40,6 +40,7 @@ pub mod grants;
 pub mod keymap;
 mod knobs;
 pub mod layouts;
+pub mod lode_events;
 pub mod lodeshot;
 pub mod options;
 pub mod overlay;

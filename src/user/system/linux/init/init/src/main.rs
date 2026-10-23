@@ -819,6 +819,11 @@ impl Init {
                 if spec.service_type == ServiceType::Forking && spec.role == Role::Main {
                     let _ = self.forking.insert(pid, unit);
                 }
+                if !logs.is_empty() {
+                    // Which program the pid runs, for every record of its
+                    // lines: lode cannot read another user's /proc/<pid>/exe.
+                    self.lode.send(&lode::program(pid, prepared.program()));
+                }
                 for (stream, log) in logs {
                     let whose = Whose {
                         unit,

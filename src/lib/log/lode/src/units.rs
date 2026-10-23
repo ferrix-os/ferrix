@@ -12,6 +12,7 @@
 //!
 //! ```text
 //! L <unit> <invocation, 32 hex digits, or -> <pid> <uid> <gid> <out|err> <monotonic µs> <text>\n
+//! P <pid> <path of the program it runs>\n                    (once, when it starts)
 //! ```
 //!
 //! init also goes on writing every line to the console as before (`  init
@@ -153,6 +154,20 @@ pub fn decode(line: &[u8]) -> Option<UnitLine> {
         monotonic_us,
         text: Vec::from(rest),
     })
+}
+
+/// `P <pid> <path>`: which program a pid init started runs, said once when
+/// it starts, since lode cannot read another user's `/proc/<pid>/exe`.
+#[must_use]
+pub fn decode_program(line: &[u8]) -> Option<(u32, Vec<u8>)> {
+    let rest = line.strip_prefix(b"P ")?;
+    let space = rest.iter().position(|&byte| byte == b' ')?;
+    let pid = core::str::from_utf8(rest.get(..space)?)
+        .ok()?
+        .parse()
+        .ok()?;
+    let path = rest.get(space + 1..)?;
+    (!path.is_empty()).then(|| (pid, Vec::from(path)))
 }
 
 /// What init writes to the console for `line`: `  init     NAME[PID]: TEXT`.
@@ -308,5 +323,66 @@ impl Pairing {
     #[must_use]
     pub fn is_waiting(&self) -> bool {
         !self.waiting.is_empty()
+    }
+}
+
+/// Lines a program wrote to a stream that it also wrote to its standard
+/// output -- `lode cat --echo` under hyprix, which keeps the console as it
+/// was -- waiting for that copy, which comes back as a unit's line. The
+/// stream's record names the program; the unit's names only who started it.
+/// They are kept as one: the stream's, with the unit line's kernel sequence
+/// number, so `verify --kernel` still finds no gap.
+#[derive(Debug, Default)]
+pub struct Echoes {
+    /// Echoed stream records not yet matched, with when they arrived.
+    waiting: VecDeque<(Record, u64)>,
+}
+
+impl Echoes {
+    /// An echoed stream record, arrived at `now`; the oldest waiting one
+    /// goes into `out` when too many wait.
+    pub fn echoed(&mut self, record: Record, now: u64, out: &mut Vec<Record>) {
+        if self.waiting.len() >= HELD_MAX
+            && let Some((oldest, _)) = self.waiting.pop_front()
+        {
+            out.push(oldest);
+        }
+        self.waiting.push_back((record, now));
+    }
+
+    /// A unit's line: the echoed stream record it copies, given its kernel
+    /// sequence number, or the line itself when none waits.
+    pub fn unit_line(&mut self, record: Record) -> Record {
+        if self.waiting.is_empty() || record.get("UNIT").is_none() {
+            return record;
+        }
+        let message = record.message();
+        let Some(at) = self
+            .waiting
+            .iter()
+            .position(|(echoed, _)| crate::console::strip_ansi(echoed.message()) == message)
+        else {
+            return record;
+        };
+        let Some((mut echoed, _)) = self.waiting.remove(at) else {
+            return record;
+        };
+        if let Some(seq) = record.get("_KERNEL_SEQNUM") {
+            echoed.push("_KERNEL_SEQNUM", seq);
+        }
+        echoed
+    }
+
+    /// Echoed records that waited [`PAIR_US`]: stored as they are.
+    pub fn expire(&mut self, now: u64, out: &mut Vec<Record>) {
+        while self
+            .waiting
+            .front()
+            .is_some_and(|(_, at)| now.saturating_sub(*at) >= PAIR_US)
+        {
+            if let Some((record, _)) = self.waiting.pop_front() {
+                out.push(record);
+            }
+        }
     }
 }

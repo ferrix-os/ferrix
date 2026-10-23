@@ -208,6 +208,7 @@ fn selector(name: &str) -> Selector {
         "session" => &["SESSION_ID"],
         "driver" => &["_FERRIX_DRIVER"],
         "invocation" => &["_SYSTEMD_INVOCATION_ID"],
+        "event" => &["FERRIX_EVENT"],
         "stream" => &["_STREAM"],
         "uid" => &["_UID"],
         other => {

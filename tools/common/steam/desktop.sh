@@ -5,8 +5,8 @@
 # X server, gives the volume's home and Steam's tree to uid 1000, and runs
 # client.sh as that user, as `run-steam` does. The client installs itself
 # from the bootstrap on the first start, which takes minutes, and then opens
-# its sign-in window. Its output goes to the serial console, as the
-# desktop's other programs' does, and to /tmp/steam.log.
+# its sign-in window. Its output goes to the log under `steam` and to
+# /tmp/steam.log (docs/LOGGING.md §18).
 export PATH=/bin:/data/usr/bin HOME=/data/home USER=root LANG=C.UTF-8
 waited=0
 while [ ! -S /tmp/.X11-unix/X0 ] && [ $waited -lt 120 ]; do sleep 1; waited=$((waited + 1)); done
@@ -18,7 +18,7 @@ fi
 # and init's data-home.service has already given the volume's home and
 # Steam's tree to it: the client runs as it is.
 if [ "$(id -u)" != 0 ]; then
-    /bin/busybox sh /steam/client.sh 2>&1 | tee /tmp/steam.log
+    /bin/busybox sh /steam/client.sh 2>&1 | /bin/lode cat -t steam --tee /tmp/steam.log
     exit
 fi
 # fuzzel's Steam entry runs this again after the client was closed; by then
@@ -27,4 +27,4 @@ fi
 if [ "$(stat -c %u /data/steam)" != 1000 ] || [ "$(stat -c %u /data/home)" != 1000 ]; then
     chown -R 1000:1000 /data/home /data/steam
 fi
-su -s /bin/sh ferrix -c '/bin/busybox sh /steam/client.sh' 2>&1 | tee /tmp/steam.log
+su -s /bin/sh ferrix -c '/bin/busybox sh /steam/client.sh' 2>&1 | /bin/lode cat -t steam --tee /tmp/steam.log

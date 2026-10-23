@@ -177,6 +177,11 @@ pub(crate) struct Prepared {
 }
 
 impl Prepared {
+    /// The program it runs, as found on the search path.
+    pub(crate) fn program(&self) -> &std::ffi::CStr {
+        &self.path
+    }
+
     /// The uid and gid the process runs as.
     pub(crate) fn ids(&self) -> (u32, u32) {
         self.user

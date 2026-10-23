@@ -26,9 +26,20 @@ pub(crate) struct Units {
     connections: Vec<(usize, Vec<u8>)>,
     /// Trusted lines and console copies, paired.
     pub(crate) pairing: Pairing,
+    /// The program each pid init started runs, newest last.
+    programs: alloc::collections::VecDeque<(u32, Vec<u8>)>,
 }
 
 impl Units {
+    /// The program init said `pid` runs.
+    pub(crate) fn program(&self, pid: u32) -> Option<&[u8]> {
+        self.programs
+            .iter()
+            .rev()
+            .find(|(known, _)| *known == pid)
+            .map(|(_, path)| path.as_slice())
+    }
+
     /// Make the socket (as root).
     pub(crate) fn open() -> Units {
         let listener = sys::listen_at(units::SOCKET.as_bytes()).ok();
@@ -39,6 +50,7 @@ impl Units {
             listener,
             connections: Vec::new(),
             pairing: Pairing::default(),
+            programs: alloc::collections::VecDeque::new(),
         }
     }
 
@@ -84,7 +96,9 @@ impl Units {
                 .and_then(|rest| rest.iter().position(|&byte| byte == b'\n'))
             {
                 let line = pending.get(used..used + end).unwrap_or_default();
-                if let Some(said) = units::decode(line) {
+                if let Some((pid, path)) = units::decode_program(line) {
+                    remember(&mut self.programs, pid, path);
+                } else if let Some(said) = units::decode(line) {
                     let record = units::record(&said, now);
                     self.pairing.trusted(record, now.monotonic_us, out);
                 }
@@ -99,4 +113,13 @@ impl Units {
         }
         self.connections = keep;
     }
+}
+
+/// Keep `pid`'s program, the oldest forgotten past 1,024.
+fn remember(programs: &mut alloc::collections::VecDeque<(u32, Vec<u8>)>, pid: u32, path: Vec<u8>) {
+    programs.retain(|(known, _)| *known != pid);
+    if programs.len() >= 1024 {
+        let _ = programs.pop_front();
+    }
+    programs.push_back((pid, path));
 }

@@ -2035,6 +2035,66 @@ process was gone and its pid could be reused.
   kernel's own fault checks (`pid 258 is mprotect exe /mprotect at ?
   cmdline /mprotect`, AArch64).
 
+### Session programs, names and event kinds, as built (2026-10-23)
+
+The customer's gap items after tonight's Endfield start failures: what a
+desktop program, the X server, Steam and Proton said was in files on
+tmpfs or nowhere, records named no program, and an error dialog left no
+trace.
+
+* **`lode cat --tee FILE --echo`.** `--tee` also writes everything to FILE,
+  made afresh as `>` makes it, so a script's log file stays where its
+  readers look; `--echo` also to standard output. Without a lode, or when
+  it goes away, the lines go to standard output instead and the command's
+  output keeps being read: nothing waits, nothing is lost.
+* **Scripts**: the desktop's `/etc/yserver.sh` (`yserver`, and
+  `/tmp/yserver.log` as before), Steam's `desktop.sh` (`steam`,
+  `/tmp/steam.log`), the N150's `ef-player-anv.sh` (`proton`,
+  `plog/proton.out`, Proton's exit status kept) pipe into `lode cat`.
+* **hyprix's programs** (`exec`, `exec-once`, keybinds, fuzzel's) write to
+  `lode cat -t NAME --echo`, NAME the program's file name or a shell
+  script's (`sh /etc/yserver.sh` is `yserver`); the echo keeps the console,
+  and every gate that reads it, as it was. The echo's copy comes back as
+  hyprix's unit's line, and lode keeps the two as one: an echoed stream's
+  line (`FERRIX_ECHOED=1`, the stream header's seventh line) waits up to
+  2 s for its copy and takes the copy's kernel sequence number
+  (`units::Echoes`). `session-streams off` in `events.conf` turns it off.
+* **Names on every record with a pid** (`process-names`): `_COMM` and
+  `_CMDLINE` from `/proc` when the pid is first seen, while it writes, kept
+  10 s after its last record; `_EXE` from `/proc/<pid>/exe` where lode may
+  read it, and for a unit's processes from init, which says once a spawn
+  which program it runs (`P <pid> <path>` on `/run/lode/units`), since
+  lode's user may not read another user's `exe`. `_CMDLINE` is recorded by
+  default now (the customer's order; §12.3 said it was not): the same
+  privacy note as for crash records applies.
+* **App errors and windows** (hyprix, `lode_events.rs`): when a window
+  first maps, a window whose class is Windows' dialog class `#32770` or
+  whose title or class says error, failed, failure, fatal, exception or
+  crash is an `app-error` record (native protocol: `FERRIX_EVENT=app-error`,
+  `WINDOW_TITLE`, `WINDOW_CLASS`, `WINDOW_PID`, `WINDOW_COMM`, `WINDOW_EXE`,
+  `WINDOW_DIALOG` for a modal or child window, at warning); any other
+  window a `window-opened` record when that kind is on (off by default).
+  lode takes a screenshot of an app error as of a crash (§19), and desktop
+  images ship `Capture=yes`.
+* **`events.conf`** (`/etc/ferrix/lode.d/`, a person's
+  `~/.config/ferrix/lode/events.conf` over it for their session's kinds):
+  `KIND on|off [LEVEL]` for `window-opened` (off), `app-error`,
+  `session-streams`, `crash-names`, `process-names`, `capture` (on).
+  `lode events` lists them with where each was set; which records of a
+  kind are kept is the rules' (`drop where event = window-opened and id =
+  waybar`; `event` is `FERRIX_EVENT` in the filter language). hyprix reads
+  the files each time it would make an event; **`lode reload`** (root's,
+  on the control socket) has lode read its rules, alerts and events again.
+* `test-log` ("streams", "names" rows): `--tee` keeps the file and the
+  record, an echoed line is one record with its kernel sequence number,
+  `lode events` and `lode reload` answer, a stream's record has its
+  writer's `_CMDLINE` and a unit's line its program's `_EXE`. Host tests:
+  `events.conf`, echoes, hyprix's dialog test, switches and identifiers.
+* Not yet: a hang snapshot (`lode snapshot PID`); "not responding" as a
+  capture trigger; file sources for the game's `Player.log` and CrashSight;
+  the image and command line on lode's boot record; the window's process
+  through yserver for X clients (`WINDOW_PID` is yserver's).
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`

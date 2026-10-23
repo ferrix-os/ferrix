@@ -712,6 +712,29 @@ pub(crate) fn send_with(fd: usize, data: &[u8], passed: Option<usize>) -> Result
     }
 }
 
+/// Send all of `data` on the connected `fd`, waiting while the peer is
+/// slow, without `SIGPIPE` when it has gone (`EPIPE` instead).
+pub(crate) fn send_all(fd: usize, mut data: &[u8]) -> Result<(), Errno> {
+    const MSG_NOSIGNAL: usize = 0x4000;
+    while !data.is_empty() {
+        // SAFETY: `data` is read for the call; no address, no flags but
+        // MSG_NOSIGNAL.
+        let sent = unsafe {
+            call(
+                numbers::SENDTO,
+                [fd, data.as_ptr() as usize, data.len(), MSG_NOSIGNAL, 0, 0],
+            )
+        };
+        match sent {
+            Ok(0) => return Err(Errno(EPIPE)),
+            Ok(count) => data = data.get(count..).unwrap_or_default(),
+            Err(error) if error.0 == EINTR => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 /// Receive one message into `buf`, waiting for it, with at most one passed
 /// descriptor (any more are closed).
 pub(crate) fn receive_waiting(fd: usize, buf: &mut [u8]) -> Option<Received> {
@@ -800,4 +823,28 @@ pub(crate) fn fault_now() -> ! {
     // the process with SIGSEGV before anything reads the value.
     let _ = unsafe { core::ptr::read_volatile(core::ptr::null::<u8>()) };
     ferrix_rt::exit(1)
+}
+
+/// Where the link `path` points, or none.
+pub(crate) fn read_link(path: &[u8]) -> Option<Vec<u8>> {
+    let path = c_path(path);
+    let mut buf = alloc::vec![0_u8; 4096];
+    // SAFETY: `path` is NUL-terminated and `buf` writable for its length,
+    // both for the call.
+    let length = unsafe {
+        call(
+            numbers::READLINKAT,
+            [
+                AT_FDCWD,
+                path.as_ptr() as usize,
+                buf.as_mut_ptr() as usize,
+                buf.len(),
+                0,
+                0,
+            ],
+        )
+    }
+    .ok()?;
+    buf.truncate(length);
+    Some(buf)
 }

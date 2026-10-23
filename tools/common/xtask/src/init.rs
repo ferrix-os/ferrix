@@ -807,8 +807,11 @@ pub(crate) fn desktop_files(
         "/lib/ferrix/units/graphical.target",
     ));
     files.extend(console_getty(session_user.is_some(), shell));
-    // The desktop keeps its log (docs/LOGGING.md): lode with basic.target.
+    // The desktop keeps its log (docs/LOGGING.md): lode with basic.target,
+    // crash and app-error screenshots on (§19, the customer, 2026-10-23),
+    // and the event kinds at their defaults, written out to be changed.
     files.push(crate::lode::enabled());
+    files.extend(crate::lode::desktop_settings());
     // And can send it on (docs/LOGGING.md §10.2): `lode-upload`, which runs
     // when `/etc/ferrix/lode-upload.conf` names a collector and the unit is
     // enabled (`lode-receive pair` says how).

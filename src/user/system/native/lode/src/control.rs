@@ -3,7 +3,7 @@
 //!
 //! Made by lode while it is still root and left root's, mode 0600, so only
 //! root asks; lode also refuses a peer whose uid is not 0. A request is one
-//! line, `SYNC`, `FLUSH` or `ROTATE`; lode answers `OK` or `ERR <why>` once
+//! line, `SYNC`, `FLUSH`, `ROTATE` or `RELOAD`; lode answers `OK` or `ERR <why>` once
 //! it is done, and closes. A request that does not come within a few
 //! seconds of the connection is dropped, so a client cannot hold lode.
 
@@ -27,6 +27,8 @@ pub(crate) enum Request {
     Flush,
     /// Seal every segment and begin new ones.
     Rotate,
+    /// Read the rules, alerts and events again.
+    Reload,
 }
 
 impl Request {
@@ -36,6 +38,7 @@ impl Request {
             Request::Sync => b"SYNC\n",
             Request::Flush => b"FLUSH\n",
             Request::Rotate => b"ROTATE\n",
+            Request::Reload => b"RELOAD\n",
         }
     }
 
@@ -45,6 +48,7 @@ impl Request {
             b"SYNC" => Request::Sync,
             b"FLUSH" => Request::Flush,
             b"ROTATE" => Request::Rotate,
+            b"RELOAD" => Request::Reload,
             _ => return None,
         })
     }

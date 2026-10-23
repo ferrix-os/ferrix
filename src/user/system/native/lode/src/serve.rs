@@ -22,6 +22,7 @@ use alloc::vec::Vec;
 
 use ferrix_lode_core::alert::{self, Alert, Alerts};
 use ferrix_lode_core::compress::{self, Compressor};
+use ferrix_lode_core::events::Events;
 use ferrix_lode_core::ingest::{self, KernelSequence, Now, Taken};
 use ferrix_lode_core::limit::{self, Limiter, Rule};
 use ferrix_lode_core::record::Record;
@@ -178,7 +179,12 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let zone = zone::local();
     let now = clocks();
     let mut said: Vec<Record> = Vec::new();
-    let (rules, classes, alerts) = configuration(&mut said, now);
+    let Configuration {
+        rules,
+        classes,
+        alerts,
+        events,
+    } = configuration(&mut said, now);
     let mut store = Store {
         persistent: persistent.map(|dir| dir.fd),
         volatile: volatile.fd,
@@ -236,6 +242,8 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         handout,
         control,
         alerts: Alerts::new(alerts),
+        events,
+        echoes: units::Echoes::default(),
         alerting,
         identities: alloc::collections::VecDeque::new(),
     };
@@ -268,6 +276,10 @@ struct Service {
     control: Control,
     /// The alerts, and what each has counted.
     alerts: Alerts,
+    /// Which kinds of event are on (`events.conf`).
+    events: Events,
+    /// Echoed stream lines waiting for their copies as units' lines.
+    echoes: units::Echoes,
     /// Their actions.
     alerting: Alerting,
     /// Who the processes a fault ended were, as the kernel said, until
@@ -275,14 +287,32 @@ struct Service {
     identities: alloc::collections::VecDeque<console::Identity>,
 }
 
-/// The rules and the retention classes, with a record for each file that
-/// did not read.
-fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>, Vec<Alert>) {
+/// What `/etc/ferrix/lode.d` says.
+struct Configuration {
+    /// The limiter's rules.
+    rules: Vec<Rule>,
+    /// The retention classes.
+    classes: Vec<Class>,
+    /// The alerts.
+    alerts: Vec<Alert>,
+    /// Which kinds of event are on.
+    events: Events,
+}
+
+/// The rules, the retention classes, the alerts and the events, with a
+/// record for each file that did not read.
+fn configuration(said: &mut Vec<Record>, now: Now) -> Configuration {
     let mut rules = Vec::new();
     let mut alerts = Vec::new();
     let mut classes = retention::defaults();
+    let mut events = Events::default();
     let Ok(dir) = Dir::open(CONFIG) else {
-        return (rules, classes, alerts);
+        return Configuration {
+            rules,
+            classes,
+            alerts,
+            events,
+        };
     };
     let mut names = sys::list_dir(dir.fd).unwrap_or_default();
     names.sort();
@@ -302,6 +332,8 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>, Ve
                 .err()
         } else if name == b"retention.conf" {
             retention::parse(&text).map(|read| classes = read).err()
+        } else if name == b"events.conf" {
+            events.apply(&text, "/etc/ferrix/lode.d/events.conf").err()
         } else {
             None
         };
@@ -320,7 +352,12 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>, Ve
         }
     }
     sys::close(dir.fd);
-    (rules, classes, alerts)
+    Configuration {
+        rules,
+        classes,
+        alerts,
+        events,
+    }
 }
 
 impl Service {
@@ -334,6 +371,20 @@ impl Service {
             // The seat's owner first: a session it announced is open before
             // the lines its programs wrote after the announcement are read.
             self.seat.serve(now, &mut batch);
+            // The sockets before init's lines and the kernel log: an echoed
+            // stream line waits there for its copy as a unit's line.
+            let mut heard = Vec::new();
+            self.front.serve(now, &mut heard);
+            for mut record in heard {
+                self.seat.stamp(&mut record);
+                if record.get("FERRIX_ECHOED").is_some() {
+                    let mut out = Vec::new();
+                    self.echoes.echoed(record, now.monotonic_us, &mut out);
+                    self.admit_all(out, now, &mut batch);
+                } else {
+                    self.admit(record, now, &mut batch);
+                }
+            }
             // init's lines before the kernel log, so a console copy finds
             // the trusted line it copies waiting.
             let mut trusted = Vec::new();
@@ -346,13 +397,8 @@ impl Service {
             if drained {
                 let mut expired = Vec::new();
                 self.units.pairing.expire(now.monotonic_us, &mut expired);
+                self.echoes.expire(now.monotonic_us, &mut expired);
                 self.admit_all(expired, now, &mut batch);
-            }
-            let mut heard = Vec::new();
-            self.front.serve(now, &mut heard);
-            for mut record in heard {
-                self.seat.stamp(&mut record);
-                self.admit(record, now, &mut batch);
             }
             if rotate {
                 self.limiter.flush(now.monotonic_us, &mut batch);
@@ -368,7 +414,7 @@ impl Service {
             let wanted: Vec<(usize, String)> = batch
                 .iter()
                 .enumerate()
-                .filter(|(_, record)| self.capture.wants(record))
+                .filter(|(_, record)| self.events.on("capture") && self.capture.wants(record))
                 .map(|(index, record)| {
                     let text = String::from_utf8_lossy(record.message());
                     (index, text.chars().take(160).collect())
@@ -442,6 +488,10 @@ impl Service {
                     Ok(())
                 }
                 Request::Flush => self.store.flush(),
+                Request::Reload => {
+                    self.reload(now);
+                    Ok(())
+                }
             };
             control::answer(fd, result);
         }
@@ -452,6 +502,23 @@ impl Service {
     /// a flood it holds back is still seen; then the limiter's. An alert
     /// that fires is said in a record of its own and carried out.
     fn admit(&mut self, record: Record, now: Now, batch: &mut Vec<Record>) {
+        // A unit's line a program also sent on its own stream is kept once,
+        // as the stream's.
+        let mut record = self.echoes.unit_line(record);
+        // Every record that names a process names it: its `_COMM`, `_EXE`
+        // and `_CMDLINE` (`events.conf`'s process-names).
+        if self.events.on("process-names")
+            && let Some(pid) = record
+                .get_str("_PID")
+                .and_then(|pid| pid.parse::<u32>().ok())
+        {
+            self.front.name(&mut record, pid, now, false);
+            if record.get("_EXE").is_none()
+                && let Some(path) = self.units.program(pid)
+            {
+                record.push("_EXE", path);
+            }
+        }
         if !self.alerts.is_empty() {
             let mut fired = Vec::new();
             self.alerts.observe(&record, now.monotonic_us, &mut fired);
@@ -461,6 +528,25 @@ impl Service {
             }
         }
         self.limiter.admit(record, now.monotonic_us, batch);
+    }
+
+    /// `lode reload`: the rules, the alerts and the events read again; what
+    /// the old rules held is said first. Retention classes take a restart,
+    /// since segments are being written per class.
+    fn reload(&mut self, now: Now) {
+        let mut said = Vec::new();
+        self.limiter.flush(now.monotonic_us, &mut said);
+        let configuration = configuration(&mut said, now);
+        self.limiter = Limiter::new(configuration.rules);
+        self.alerts = Alerts::new(configuration.alerts);
+        self.events = configuration.events;
+        said.push(ingest::own(
+            5,
+            ingest::MESSAGE_ID_STARTED,
+            "lode reloaded its rules, alerts and events",
+            now,
+        ));
+        let _ = self.store.append(said, &self.zone);
     }
 
     /// Keep the kernel's identity line in `text`, if it is one, for the
@@ -565,7 +651,9 @@ impl Service {
                     if record.get("_TRANSPORT") == Some(b"kernel")
                         && record.get("CRASH_PID").is_some()
                     {
-                        let known = self.identity_of(&record);
+                        let known = self
+                            .identity_of(&record)
+                            .filter(|_| self.events.on("crash-names"));
                         batch.push(with_program(record, known));
                     } else {
                         self.admit(record, now, batch);

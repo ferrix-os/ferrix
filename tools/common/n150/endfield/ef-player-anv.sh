@@ -131,5 +131,8 @@ export LIBGL_ALWAYS_SOFTWARE=1
 mkdir -p "$MESA_SHADER_CACHE_DIR"
 cd /data/GRYPHLINK || exit 1
 echo "start $mode $(date +%T)" > $plog/status
-/data/dwproton/proton waitforexitandrun /data/GRYPHLINK/Launcher.exe > $plog/proton.out 2>&1
-echo "exit $? $(date +%T)" >> $plog/status
+# Proton's and Wine's output into the log under `proton` (Wine's err:
+# lines say what an error dialog does not), and to proton.out as before.
+{ /data/dwproton/proton waitforexitandrun /data/GRYPHLINK/Launcher.exe 2>&1; echo $? > $plog/.proton-exit; } \
+    | /bin/lode cat -t proton --tee $plog/proton.out
+echo "exit $(cat $plog/.proton-exit 2>/dev/null) $(date +%T)" >> $plog/status

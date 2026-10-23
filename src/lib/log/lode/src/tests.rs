@@ -915,7 +915,8 @@ mod protocols {
                 unit: "my.service".into(),
                 // Info is every stream's default: it says nothing.
                 priority: crate::record::UNSPECIFIED,
-                level_prefix: true
+                level_prefix: true,
+                echoed: false,
             }
         );
         let broke = protocols::stream_line(&header, b"<3>broke", 1, 2);
@@ -2180,4 +2181,79 @@ fn the_kernels_identity_line_names_a_crashed_process() {
     );
     // Neither is it a crash line.
     assert!(console::crash(b"  signal   pid 9 is a.out exe ? at ? cmdline ").is_none());
+}
+
+#[test]
+fn events_conf_switches_kinds_and_a_person_overrides_them() {
+    use crate::events::Events;
+    let mut events = Events::default();
+    assert!(!events.on("window-opened"));
+    assert!(events.on("app-error"));
+    assert_eq!(events.level("app-error"), 4);
+    events
+        .apply(
+            "# system\nwindow-opened on info\napp-error on err\n",
+            "/etc/ferrix/lode.d/events.conf",
+        )
+        .unwrap();
+    assert!(events.on("window-opened"));
+    assert_eq!(events.level("app-error"), 3);
+    events
+        .apply("window-opened off\n", "~/.config/ferrix/lode/events.conf")
+        .unwrap();
+    assert!(!events.on("window-opened"));
+    assert!(
+        events
+            .table()
+            .contains("window-opened    off  info     hyprix   ~/.config")
+    );
+    // A file with one bad line changes nothing.
+    let before = events.clone();
+    assert_eq!(
+        events
+            .apply("app-error off\nwindows on\n", "x")
+            .unwrap_err()
+            .line,
+        2
+    );
+    assert_eq!(events, before);
+    assert!(events.apply("app-error maybe\n", "x").is_err());
+    assert!(events.apply("app-error on loud\n", "x").is_err());
+}
+
+#[test]
+fn an_echoed_stream_line_is_kept_once_as_the_streams() {
+    use crate::units::{self, Echoes, Stream};
+    let header = crate::protocols::stream_header(b"waybar\n\n6\n1\n0\n0\n1\n")
+        .unwrap()
+        .0;
+    assert!(header.echoed);
+    let echoed = crate::protocols::stream_line(&header, b"bar ready", 1, 2);
+    assert_eq!(echoed.get("FERRIX_ECHOED"), Some(&b"1"[..]));
+    let mut echoes = Echoes::default();
+    let mut out = Vec::new();
+    echoes.echoed(echoed, 10, &mut out);
+    let now = Now {
+        realtime_us: 1_700_000_010_000_000,
+        monotonic_us: 10_000_000,
+    };
+    let mut line = units::record(&unit_line("bar ready", Stream::Out), now);
+    line.push("_KERNEL_SEQNUM", b"40");
+    let kept = echoes.unit_line(line);
+    assert_eq!(kept.get("SYSLOG_IDENTIFIER"), Some(&b"waybar"[..]));
+    assert_eq!(kept.get("_KERNEL_SEQNUM"), Some(&b"40"[..]));
+    // Another unit line passes as it is; an echo that never came back is
+    // kept after its wait.
+    let other = units::record(&unit_line("something else", Stream::Out), now);
+    assert_eq!(
+        echoes.unit_line(other).get("SYSLOG_IDENTIFIER"),
+        Some(&b"web"[..])
+    );
+    echoes.echoed(
+        crate::protocols::stream_line(&header, b"lonely", 1, 2),
+        10,
+        &mut out,
+    );
+    echoes.expire(10 + units::PAIR_US, &mut out);
+    assert_eq!(out.len(), 1);
 }

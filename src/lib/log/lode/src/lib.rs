@@ -28,6 +28,7 @@
 //! * [`session`]: what a seat's owner tells lode of sessions.
 //! * [`upload`]: store-and-forward to a collector.
 //! * [`alert`]: rules with an action: a notification, a unit started.
+//! * [`events`]: which kinds of event the log takes, `events.conf`.
 //! * [`regex`]: `-g`'s regular expressions, in linear time.
 //! * [`units`]: units' output as init hands it over, paired with its
 //!   console copy.
@@ -45,6 +46,7 @@ pub mod compress;
 pub mod console;
 pub mod crc;
 pub mod cursor;
+pub mod events;
 pub mod fields;
 pub mod filter;
 pub mod format;

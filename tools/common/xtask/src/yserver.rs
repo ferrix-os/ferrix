@@ -112,8 +112,10 @@ for need in /data/usr/lib64/ld-linux-x86-64.so.2 /data/yserver/yserver; do
         exit 1
     fi
 done
-exec /data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu \
-    /data/yserver/yserver :0 -nolisten tcp > /tmp/yserver.log 2>&1
+# Into the log under `yserver`, and to /tmp/yserver.log, which the box's
+# script reads back when no X server came up (docs/LOGGING.md §18).
+/data/usr/lib64/ld-linux-x86-64.so.2 --library-path /data/usr/lib/x86_64-linux-gnu \
+    /data/yserver/yserver :0 -nolisten tcp 2>&1 | /bin/lode cat -t yserver --tee /tmp/yserver.log
 "#;
 
 /// What the `--everything` desktop's configuration gains for yserver: the

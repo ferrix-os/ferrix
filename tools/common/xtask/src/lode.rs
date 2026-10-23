@@ -56,6 +56,42 @@ pub(crate) fn enabled() -> File {
     }
 }
 
+/// What a desktop image says to lode: crash and app-error screenshots on,
+/// within lode's own spacing and retention (§19), and `events.conf` with
+/// every kind at its default, so a person sees what can be switched.
+pub(crate) fn desktop_settings() -> Vec<File> {
+    [
+        (
+            "etc/ferrix/lode.d/capture.conf",
+            "# Crash and app-error screenshots (docs/LOGGING.md §19): at most one\n\
+             # each 10 s, kept 7 days and 256 MiB, readable as the journal is.\n\
+             Capture=yes\n",
+        ),
+        ("etc/ferrix/lode.d/events.conf", EVENTS_CONF),
+    ]
+    .into_iter()
+    .map(|(path, text)| File {
+        path: path.to_owned(),
+        mode: 0o644,
+        content: Content::Bytes(text.as_bytes().to_vec()),
+    })
+    .collect()
+}
+
+/// `events.conf` as a desktop image ships it: the defaults, said.
+const EVENTS_CONF: &str = "\
+# Which kinds of event the log takes (docs/LOGGING.md §18, `lode events`).
+# KIND on|off [LEVEL]; ~/.config/ferrix/lode/events.conf overrides the
+# kinds made in a person's session. Which records of a kind are kept is the
+# rules' (*.rules): `drop where event = window-opened and id = waybar`.
+window-opened   off
+app-error       on   warning
+session-streams off
+crash-names     on
+process-names   on
+capture         on
+";
+
 /// The uploader's unit, shipped beside [`UNIT`].
 pub(crate) const UPLOAD_UNIT: &str = "lode-upload.service";
 
@@ -312,6 +348,15 @@ say "kernel records: $(/bin/lode -b -k -o cat | $bb wc -l)"
 # on a generated store and on this one.
 say "bench: $(/bin/lode bench 200000 /tmp/lode-bench)"
 say "newest: $(/bin/lode -b -u lode-test -n 3 -o cat | $bb wc -l)"
+# Session programs (the customer's gap items): `lode cat --tee` keeps a
+# script's log file and gives the log its lines under a name; `--echo`
+# also writes them on, and the copy that comes back through init is kept
+# once, as the stream's. `lode events` lists the kinds; `lode reload`.
+( echo "teed line"; $bb sleep 1 ) | /bin/lode cat -t teey --tee /tmp/teey.log
+echo "echoed line" | /bin/lode cat -t echoey --echo
+$bb sleep 2
+say "streams: $($bb cat /tmp/teey.log) $(/bin/lode -b -t teey -o cat | $bb wc -l) $(/bin/lode -b -g '^echoed line$' -o cat | $bb wc -l) $(/bin/lode -b -t echoey -o json | $bb grep -c '"_KERNEL_SEQNUM"') $(/bin/lode events | $bb grep -c '^app-error  *on ') $(/bin/lode reload && echo reloaded)"
+say "names: $(/bin/lode -b -t teey -o json | $bb grep -c '"_CMDLINE":"/bin/lode cat -t teey --tee /tmp/teey.log"') $(/bin/lode -b -u lode-test -g 'to stderr once' -o json | $bb grep -c '"_EXE":"/bin/busybox"')"
 # A crash names its process (the kernel's identity line): its name, the
 # path it was started from, where its pc was, its command line.
 /bin/lode fault-stub > /dev/null 2>&1
@@ -615,6 +660,19 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
             "--sync, --flush, --rotate or --disk-usage did not answer as journalctl does",
         ),
         (
+            "lode-test: streams:",
+            "teed line 1 1 1 1 reloaded",
+            "lode cat --tee did not keep the file and the record, an echoed line was not kept \
+             once with its kernel sequence number, lode events did not list app-error on, or \
+             lode reload failed",
+        ),
+        (
+            "lode-test: names:",
+            "1 1",
+            "a stream's record did not carry its writer's _CMDLINE, or a unit's line its \
+             program's _EXE",
+        ),
+        (
             "lode-test: crash:",
             "1",
             "a crash record did not name its process: CRASH_EXE, CRASH_MODULE and CRASH_CMDLINE \
@@ -810,6 +868,8 @@ lode-test: jctl: 1 1 2 0 2 2 1 1
 lode-test: jctl admin: synced flushed rotated 1
 lode-test: vacuum: 3 2 1
 lode-test: flush: kept 0 moved before after
+lode-test: streams: teed line 1 1 1 1 reloaded
+lode-test: names: 1 1
 lode-test: crash: 1
 lode-test: alerts: 1 1 1 1
 lode-test: top: SOURCE RECORDS BYTES SHARE 1

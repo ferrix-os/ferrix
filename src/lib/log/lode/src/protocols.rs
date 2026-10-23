@@ -235,6 +235,10 @@ pub struct StreamHeader {
     pub priority: u8,
     /// Whether a line's `<N>` prefix sets its level.
     pub level_prefix: bool,
+    /// The seventh line, journald's "forward to console": on Ferrix, the
+    /// writer says each line also goes to its own standard output, which is
+    /// a unit's, so lode keeps one of the two (`crate::units::Echoes`).
+    pub echoed: bool,
 }
 
 /// Read a stream's header from the first seven lines of `bytes`: it, and
@@ -263,6 +267,7 @@ pub fn stream_header(bytes: &[u8]) -> Option<(StreamHeader, usize)> {
                 .filter(|&level| level <= 7 && level != 6)
                 .unwrap_or(UNSPECIFIED),
             level_prefix: number(3) == Some(1),
+            echoed: number(6) == Some(1),
         },
         at,
     ))
@@ -295,5 +300,10 @@ pub fn stream_line(
         record.push_untrusted("UNIT", header.unit.as_bytes());
     }
     record.push("_TRANSPORT", b"stdout");
+    if header.echoed {
+        // Also written to the program's standard output, whose copy comes
+        // back as a unit's line (`crate::units::Echoes`).
+        record.push("FERRIX_ECHOED", b"1");
+    }
     record
 }

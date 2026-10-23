@@ -31,8 +31,9 @@ lode verify [--kernel] [-b ...]      check the store
 lode rotate                          seal every class's segment, begin new ones
 lode session begin ID seat=S uid=U pid=P scope=SCOPE unit=UNIT token=HEX
 lode session end ID                  what a seat's owner tells lode (root's)
-COMMAND | lode cat [-t ID] [-p PRIO] [--journal]
-                                     its lines into the log, as systemd-cat's
+COMMAND | lode cat [-t ID] [-p PRIO] [--journal] [--tee FILE] [--echo]
+                                     its lines into the log, as systemd-cat's; --tee also
+                                     to FILE, --echo also to standard output
 lode bench RECORDS [DIR]             time a unit's last 50 lines with and without summaries
 lode upload-stub PORT FILE           a collector on 127.0.0.1:PORT that keeps what it is sent (a test peer)
 lode provide-stub TOKEN [SEAT]       a screenshot provider that sends a 2x2 picture (a test peer)
@@ -43,6 +44,8 @@ lode top [-b ...] [-n ROWS] [filters]
                                      who wrote most this boot: records, bytes, share per source
 lode top --live [SECONDS]            who writes most now, per second, every SECONDS (2)
 lode alerts                          follow the alerts lode says (`alert` rules)
+lode events                          the kinds of event and whether each is on (events.conf)
+lode reload                          read the rules, alerts and events again (root's)
 
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
       --list-boots       the boots the store holds
@@ -188,6 +191,13 @@ pub(crate) fn run() -> i32 {
         Some("bench") => return bench(rest.get(1..).unwrap_or_default()),
         Some("top") => return crate::top::top(rest.get(1..).unwrap_or_default()),
         Some("alerts") => return crate::top::alerts(),
+        Some("events") => return events(),
+        Some("reload") => {
+            return crate::admin::ask(&Options {
+                ask: Some(crate::control::Request::Reload),
+                ..Options::default()
+            });
+        }
         Some("fault-stub") => sys::fault_now(),
         Some("provide-stub") => return provide_stub(rest.get(1..).unwrap_or_default()),
         Some("upload-stub") => return crate::upload::stub(rest.get(1..).unwrap_or_default()),
@@ -1552,6 +1562,42 @@ fn announce(words: &[String]) -> i32 {
     }
 }
 
+/// `lode events`: each kind of event, on or off, its level and where that
+/// was set -- the defaults, `/etc/ferrix/lode.d/events.conf`, then the
+/// reader's own `~/.config/ferrix/lode/events.conf`, which overrides the
+/// kinds made in their session.
+fn events() -> i32 {
+    let mut events = ferrix_lode_core::events::Events::default();
+    let system = "/etc/ferrix/lode.d/events.conf";
+    let mut files = alloc::vec![String::from(system)];
+    if let Some(home) = environment("HOME") {
+        files.push(alloc::format!("{home}/.config/ferrix/lode/events.conf"));
+    }
+    for path in files {
+        let Some(bytes) = sys::read_small(path.as_bytes()) else {
+            continue;
+        };
+        if let Err(error) = events.apply(&String::from_utf8_lossy(&bytes), &path) {
+            complain(&alloc::format!(
+                "lode: {path}:{}: {}",
+                error.line,
+                error.why
+            ));
+        }
+    }
+    out(events.table().as_bytes());
+    0
+}
+
+/// A variable of this process's environment.
+fn environment(name: &str) -> Option<String> {
+    let environ = sys::read_small(b"/proc/self/environ")?;
+    environ.split(|&byte| byte == 0).find_map(|entry| {
+        let value = entry.strip_prefix(name.as_bytes())?.strip_prefix(b"=")?;
+        Some(String::from_utf8_lossy(value).into_owned())
+    })
+}
+
 /// Connect to a stream socket at `path`, blocking: the descriptor.
 pub(crate) fn connect(path: &[u8]) -> Result<usize, sys::Errno> {
     connect_kind(path, ferrix_rt::linux::SOCK_STREAM)
@@ -1668,14 +1714,22 @@ fn provide_stub(words: &[String]) -> i32 {
     0
 }
 
-/// `COMMAND | lode cat [-t ID] [-p PRIO] [--journal]`: standard input into
-/// the log, a line a record -- through a stdout stream, as `systemd-cat`
-/// sends it, or with `--journal` a native-protocol datagram a line.
+/// `COMMAND | lode cat [-t ID] [-p PRIO] [--journal] [--tee FILE] [--echo]`:
+/// standard input into the log, a line a record -- through a stdout stream,
+/// as `systemd-cat` sends it, or with `--journal` a native-protocol
+/// datagram a line. `--tee FILE` also writes everything to FILE (made
+/// afresh, as `>` makes it), so a script that kept a log file keeps it;
+/// `--echo` also to standard output. Nothing waits for lode and nothing is
+/// lost without it: a lode that is not there, or goes away, sends what
+/// follows to standard output instead, and the command's output keeps
+/// being read.
 fn cat(words: &[String]) -> i32 {
     let mut identifier = String::from("lode-cat");
     // No `-p`: no level, which the log shows as unspecified.
     let mut priority: Option<u8> = None;
     let mut journal = false;
+    let mut tee: Option<usize> = None;
+    let mut echo = false;
     let mut at = 0;
     while let Some(word) = words.get(at) {
         at += 1;
@@ -1695,6 +1749,22 @@ fn cat(words: &[String]) -> i32 {
                 _ => return usage("cat -p needs a priority"),
             },
             "--journal" => journal = true,
+            "--echo" => echo = true,
+            "--tee" => match words.get(at) {
+                Some(path) => {
+                    at += 1;
+                    match sys::open(
+                        path.as_bytes(),
+                        sys::O_WRONLY | sys::O_CREAT | sys::O_TRUNC | sys::O_CLOEXEC,
+                    ) {
+                        Ok(fd) => tee = Some(fd),
+                        Err(error) => {
+                            complain(&alloc::format!("lode: cat: {path}: errno {}", error.0));
+                        }
+                    }
+                }
+                None => return usage("cat --tee needs a file"),
+            },
             other => {
                 return usage(&alloc::format!(
                     "cat: {other}: pipe a command's output into `lode cat`"
@@ -1702,35 +1772,7 @@ fn cat(words: &[String]) -> i32 {
             }
         }
     }
-    let path: &[u8] = if journal {
-        b"/run/systemd/journal/socket"
-    } else {
-        b"/run/systemd/journal/stdout"
-    };
-    let connected = if journal {
-        connect_datagram(path)
-    } else {
-        connect(path)
-    };
-    let fd = match connected {
-        Ok(fd) => fd,
-        Err(error) => {
-            complain(&alloc::format!(
-                "lode: cat: {}: errno {}",
-                String::from_utf8_lossy(path),
-                error.0
-            ));
-            return 1;
-        }
-    };
-    if !journal {
-        // A stream's info is every unit's default and reads as no level,
-        // so `-p info` is said on each line instead (`<6>`).
-        let header = alloc::format!("{identifier}\n\n{}\n1\n0\n0\n0\n", priority.unwrap_or(6));
-        if sys::write_all(fd, header.as_bytes()).is_err() {
-            return 1;
-        }
-    }
+    let mut lode = open_cat(journal, &identifier, priority, echo);
     let mut held: Vec<u8> = Vec::new();
     let mut chunk = [0_u8; 8192];
     loop {
@@ -1738,41 +1780,84 @@ fn cat(words: &[String]) -> i32 {
             Ok(0) | Err(_) => 0,
             Ok(got) => got,
         };
-        held.extend_from_slice(chunk.get(..got).unwrap_or_default());
+        let piece = chunk.get(..got).unwrap_or_default();
+        if let Some(fd) = tee {
+            let _ = sys::write_all(fd, piece);
+        }
+        if echo || lode.is_none() {
+            let _ = sys::write_all(1, piece);
+        }
+        held.extend_from_slice(piece);
         let finished = got == 0;
-        if !journal {
-            let take = if finished {
-                held.len()
-            } else {
-                held.iter()
-                    .rposition(|&byte| byte == b'\n')
-                    .map_or(0, |end| end + 1)
-            };
-            let send = info_said(priority, held.drain(..take).collect());
-            if !send.is_empty() && sys::write_all(fd, &send).is_err() {
-                return 1;
-            }
+        let take = if finished {
+            held.len()
         } else {
-            while let Some(end) = held.iter().position(|&byte| byte == b'\n') {
-                let line: Vec<u8> = held.drain(..=end).collect();
-                send_native(
-                    fd,
-                    &identifier,
-                    priority,
-                    line.strip_suffix(b"\n").unwrap_or(&line),
-                );
-            }
-            if finished && !held.is_empty() {
-                let line = core::mem::take(&mut held);
-                send_native(fd, &identifier, priority, &line);
-            }
+            held.iter()
+                .rposition(|&byte| byte == b'\n')
+                .map_or(0, |end| end + 1)
+        };
+        let lines: Vec<u8> = held.drain(..take).collect();
+        if let Some(fd) = lode
+            && !send_lines(fd, journal, &identifier, priority, lines)
+        {
+            // lode went away: what follows goes to standard output.
+            sys::close(fd);
+            lode = None;
         }
         if finished {
             break;
         }
     }
-    sys::close(fd);
+    if let Some(fd) = lode {
+        sys::close(fd);
+    }
     0
+}
+
+/// The connection `lode cat` sends on: a stream with its header, or a
+/// datagram socket; `None` when lode is not there to take it.
+fn open_cat(journal: bool, identifier: &str, priority: Option<u8>, echo: bool) -> Option<usize> {
+    if journal {
+        return connect_datagram(b"/run/systemd/journal/socket").ok();
+    }
+    let fd = connect(b"/run/systemd/journal/stdout").ok()?;
+    // A stream's info is every unit's default and reads as no level, so
+    // `-p info` is said on each line instead (`<6>`).
+    // The seventh line, journald's "forward to console", says the lines
+    // also go to standard output (`--echo`), whose copy lode keeps once.
+    let header = alloc::format!(
+        "{identifier}\n\n{}\n1\n0\n0\n{}\n",
+        priority.unwrap_or(6),
+        u8::from(echo)
+    );
+    if sys::write_all(fd, header.as_bytes()).is_err() {
+        sys::close(fd);
+        return None;
+    }
+    Some(fd)
+}
+
+/// Whole `lines` to lode on `fd`; whether it took them.
+fn send_lines(
+    fd: usize,
+    journal: bool,
+    identifier: &str,
+    priority: Option<u8>,
+    lines: Vec<u8>,
+) -> bool {
+    if lines.is_empty() {
+        return true;
+    }
+    if !journal {
+        return sys::send_all(fd, &info_said(priority, lines)).is_ok();
+    }
+    for line in lines
+        .split(|&byte| byte == b'\n')
+        .filter(|line| !line.is_empty())
+    {
+        send_native(fd, identifier, priority, line);
+    }
+    true
 }
 
 /// A stream's `chunk` of whole lines, each begun `<6>` when `-p info` was

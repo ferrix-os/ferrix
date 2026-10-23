@@ -152,6 +152,9 @@ impl Capture {
     pub(crate) fn wants(&self, record: &Record) -> bool {
         self.on
             && (record.get_str("MESSAGE_ID") == Some(ingest::MESSAGE_ID_CRASH)
+                // An error dialog nothing crashed behind (hyprix's
+                // app-error event): the picture is the only copy of its text.
+                || record.get("FERRIX_EVENT") == Some(b"app-error")
                 || (record.get("FERRIX_SUBSYSTEM") == Some(b"devmgr")
                     && filter::contains(b"died", record.message()))
                 || self.rules.iter().any(|rule| rule.matches(record)))

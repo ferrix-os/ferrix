@@ -87,6 +87,18 @@ pub(crate) fn encode(said: &Said, unit: &str, monotonic_us: u64) -> Vec<u8> {
     line
 }
 
+/// The line that tells lode which program `pid` runs: `P <pid> <path>`.
+pub(crate) fn program(pid: u32, path: &std::ffi::CStr) -> Vec<u8> {
+    let mut line = format!("P {pid} ").into_bytes();
+    line.extend(
+        path.to_bytes()
+            .iter()
+            .map(|&byte| if byte == b'\n' { b' ' } else { byte }),
+    );
+    line.push(b'\n');
+    line
+}
+
 impl Lode {
     /// Hand `line`, already encoded, to lode, if lode is there to take it.
     pub(crate) fn send(&mut self, line: &[u8]) {
