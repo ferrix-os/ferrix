@@ -272,6 +272,11 @@ file works on Ferrix and what cannot):
   **`hyprlang`** reads the language `hyprlock.conf` and `hypridle.conf` are
   written in, as the hyprlang library does, against a schema each program
   gives it.
+* **`tole`** is Ferrix's UI framework, after Qt Quick and QML
+  (`docs/UI-FRAMEWORK.md`): a retained item tree with typed properties and
+  bindings, positioners and anchors, and a CPU renderer over `tiny-skia` and
+  `text`. Its markup compiler and the controls follow in steps; the lode
+  viewer and Settings are its first programs.
 * **`waybar`** draws the bar from the user's `config` and `style.css`, and
   `--render` draws the picture a boot of the same files must show.
   **`fuzzel`** is the launcher: `fuzzel.ini`, the `.desktop` entries, fuzzel's

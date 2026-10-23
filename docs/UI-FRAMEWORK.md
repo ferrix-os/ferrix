@@ -1,4 +1,4 @@
-# The UI framework
+# tole, the UI framework
 
 Ferrix's own framework for the windows its apps draw: a declarative tree of
 items with typed properties and bindings, written in a QML-like markup and
@@ -6,17 +6,15 @@ compiled into Rust when the app is built. It is modelled on Qt Quick and QML
 and draws through the desktop's own client libraries, `compositor-toolkit`
 and `compositor-text`, on tiny-skia, on the CPU.
 
-Its name is not chosen yet (§6). Until it is, it is built under the working
-name **fxui**: the crates are `fxui` and `fxui-compiler`, the markup files
-end in `.fxui`, and renaming it is one `sed` over those three strings and
-two directory names.
+It is called **tole** (customer, 2026-10-23; §6): the crates are `tole`
+and `tole-compiler`, and the markup files end in `.tole`.
 
 Outside the certified item: everything here is ring 3, in the compositor's
 workspace, and reaches the kernel only through the Linux ABI.
 
-Status: designed 2026-10-23; the customer said to build it on the
-recommended compile model without waiting for a review of this document.
-§8 says where it stands.
+Status: designed 2026-10-23, and being built on the recommended compile
+model; the customer answered the design's open questions the same day
+(§8). §8 says where it stands.
 
 ---
 
@@ -114,13 +112,16 @@ the two faces (`Theme.sans(px, weight)`, `Theme.mono(px, weight)`). An app
 gives its own token values -- the viewer's `theme.rs` palette becomes its
 `Theme` -- and switches between light and dark by setting one property,
 `Theme.dark`, whose change re-evaluates every binding that read a token and
-repaints only what changed colour.
+repaints only what changed colour. There is one style (customer,
+2026-10-23): the viewer, Settings and the desktop clients all take
+`Fx.Controls`' look, and differ only by their tokens -- light or dark, and
+an accent colour.
 
 ## 3. The language
 
 ### 3.1 Files and shape
 
-A file ends in `.fxui` and holds one exported component and any number of
+A file ends in `.tole` and holds one exported component and any number of
 `struct`, `enum` and inline `component` declarations. It reads as QML:
 
 ```qml
@@ -192,11 +193,11 @@ up and checked against the property they are bound to; `int` widens to
 ### 3.3 How it is compiled
 
 **Recommended, and what is built: at build time, into Rust.** An app's
-`build.rs` calls `fxui_compiler::build("ui")`, which reads every `.fxui`
+`build.rs` calls `tole_compiler::build("ui")`, which reads every `.tole`
 file under that directory, resolves imports (the framework's own `Fx` and
-`Fx.Controls` modules are `.fxui` files inside the compiler crate, compiled
+`Fx.Controls` modules are `.tole` files inside the compiler crate, compiled
 the same way), type-checks the whole set and writes one Rust file to
-`OUT_DIR`. The app includes it with `fxui::include_ui!()`. The result:
+`OUT_DIR`. The app includes it with `tole::include_ui!()`. The result:
 
 * **No interpreter in the binary.** A component becomes a Rust struct with
   a `new` that builds its subtree, each binding a closure, each handler a
@@ -214,7 +215,7 @@ hand-written lexer and recursive-descent parser, a type checker, a code
 generator printing Rust source), host-tested with golden outputs; it adds
 nothing to the app's binary, being a build dependency.
 
-**For development: a run-time loader, later.** `fxui-live`, a host-only
+**For development: a run-time loader, later.** `tole-live`, a host-only
 crate behind a cargo feature, parses and checks the same files with the
 same compiler front end and evaluates the tree directly over the same
 runtime, watching the files with inotify and rebuilding the tree on save,
@@ -242,10 +243,10 @@ the compiler generates:
 ```rust
 pub struct LogsPage { /* the item tree's handle */ }
 impl LogsPage {
-    pub fn new(ui: &mut fxui::Ui<S>) -> Self;
+    pub fn new(ui: &mut tole::Ui<S>) -> Self;
     pub fn set_query(&self, value: String);
     pub fn query(&self) -> String;
-    pub fn set_lines(&self, model: fxui::ModelRc<LogLine>);
+    pub fn set_lines(&self, model: tole::ModelRc<LogLine>);
     pub fn set_selected(&self, value: i32);
     pub fn on_line_activated(&self, f: impl Fn(&mut S, i32) + 'static);
 }
@@ -258,7 +259,7 @@ when the event loop runs them, so the program's state needs no `RefCell`
 and no channel, which keeps the toolkit's "pull, not callbacks" shape on
 the program's side: the loop owns the state and lends it.
 
-**Models** are Rust types implementing `fxui::Model`:
+**Models** are Rust types implementing `tole::Model`:
 
 ```rust
 pub trait Model {
@@ -268,11 +269,11 @@ pub trait Model {
     /// A row's height when the view needs it without making the row:
     /// variable-height rows in a long list (the viewer's folds and notes).
     fn row_height(&self, index: usize) -> Option<f32> { None }
-    fn tracker(&self) -> &fxui::ModelTracker; // says rows changed, came, went, or all of them
+    fn tracker(&self) -> &tole::ModelTracker; // says rows changed, came, went, or all of them
 }
 ```
 
-`fxui::VecModel<T>` covers the small cases; the viewer's lines are a model
+`tole::VecModel<T>` covers the small cases; the viewer's lines are a model
 over its own `Vec<Line>` and the log, producing a `LogLine` only for rows in
 view, so a million records cost nothing until scrolled to.
 
@@ -298,7 +299,7 @@ The page as `ui/logs.rs` draws it (§1), in the markup. `PageHeading`,
 files beside it; the Overview reuses `PageHeading` and `Track`.
 
 ```qml
-// logs.fxui: the query, its chips and count, the facets, the table, the
+// logs.tole: the query, its chips and count, the facets, the table, the
 // strip showing where the problems are, and a record's every field.
 import Fx
 import Fx.Controls
@@ -530,7 +531,7 @@ and the Rust side, replacing `ui/logs.rs`'s 616 lines with what the page
 cannot know:
 
 ```rust
-fxui::include_ui!();                       // LogsPage, LogLine, LineKind, ...
+tole::include_ui!();                       // LogsPage, LogLine, LineKind, ...
 
 let page = LogsPage::new(&mut ui);
 page.set_lines(ModelRc::new(LinesModel::new(&app)));     // impl Model<Row = LogLine>
@@ -548,10 +549,10 @@ unchanged and still host-tested.
 ## 4. Architecture
 
 ```
-  .fxui files ──fxui-compiler (build.rs)──▶ generated Rust: components, structs, bindings
+  .tole files ──tole-compiler (build.rs)──▶ generated Rust: components, structs, bindings
                                                 │
   app state S ◀── callbacks (&mut S) ──┐        ▼
-                                       │   fxui runtime
+                                       │   tole runtime
                                        │   ├ properties + bindings (dirty propagation)
                                        │   ├ item tree (arena of items)
                                        │   ├ layout pass ──▶ geometry
@@ -716,7 +717,7 @@ The viewer is 2.6 MB stripped, most of it tiny-skia, `compositor-text`,
 rustybuzz and std, which the framework already uses. The runtime adds the
 arena, bindings, layout, input and the controls' generated code; the
 target is under 400 KB on x86-64 for a program like the viewer, measured at
-each step (§7) with an `fxui-size` example whose stripped size the host
+each step (§7) with a `tole-size` example whose stripped size the host
 test records. The compiler is a build dependency and costs the binary
 nothing.
 
@@ -728,8 +729,8 @@ compositor's workspace. No crate is added.
 
 ### 4.13 Where it lives
 
-`src/user/system/linux/compositor/fxui/` (runtime) and
-`src/user/system/linux/compositor/fxui-compiler/` (compiler and the `Fx`
+`src/user/system/linux/compositor/tole/` (runtime) and
+`src/user/system/linux/compositor/tole-compiler/` (compiler and the `Fx`
 and `Fx.Controls` modules), members of the compositor's workspace, beside
 `toolkit` and `text`: same lints, same tiny-skia pin, and `cargo xtask
 check` already runs that workspace's formatting, clippy and tests. Apps
@@ -747,8 +748,10 @@ reach them by relative path, as they reach the toolkit.
   across x86-64 and AArch64 with tiny-skia's integer pipeline; where it is
   not, the test says why and allows a stated per-channel difference).
 * **The ports:** the viewer's `--render` at three sizes, both palettes and
-  both pages, before and after its port, compared pixel for pixel; Settings
-  the same.
+  both pages, before and after its port: the same layout and colours, with
+  a small stated antialiasing tolerance (customer, 2026-10-23) -- each
+  channel within a few levels, and only on pixels that an edge or a glyph
+  partly covers. Settings the same.
 * **On Ferrix:** the viewer's existing `test-compositor` row starts it
   under hyprix and screenshots it; after the port that row runs the
   framework's Wayland host end to end.
@@ -777,8 +780,8 @@ framework and Slate.js), *ember* (Ember.js), *quill* (the Quill editor),
 *etch*, *glint* (an AUR package), *temper* (AUR packages), *anvil* and
 *cast* (Foundry's commands).
 
-Recommended: **tole**: free everywhere checked, four letters, typed with
-one hand's reach, and in the family of lode, ferrous and zinc.
+Recommended and chosen (customer, 2026-10-23): **tole**: free everywhere
+checked, four letters, and in the family of lode, ferrous and zinc.
 
 ## 7. Plan
 
@@ -797,27 +800,28 @@ more.
 | **U7** | `Shape`, `Canvas` with Rust painters. | 3 | pixel tests |
 | **U8** | The lode viewer ported: its pages in markup, its painters in Rust, `--render` identical before and after. | 8 | the screenshot comparison; the viewer's `test-compositor` row |
 | **U9** | Settings ported. | 5 | Settings' screenshots compared the same way |
-| **U10** | `fxui-live`: the run-time loader for hot reload on the host. | 5 | host test: a file edited, the tree rebuilt, the state kept |
+| **U10** | `tole-live`: the run-time loader for hot reload on the host. | 5 | host test: a file edited, the tree rebuilt, the state kept |
 | later | GPU renderer; fractional scale; accessibility export; input methods; the desktop clients (notifyd, caption) where they gain from it. | | |
 
 ## 8. Where it stands
 
 * 2026-10-23: designed. The customer said to build on the recommended
-  model without waiting for a review, under a working name until the name
-  is chosen. The lode viewer, the first consumer, is being landed by
-  another session; its port (U8) starts once it is on `develop`.
-
-### Open questions for the customer
-
-1. **The name**: tole, vein or sinter (§6), or another.
-2. **`struct` and `enum` in the markup**: the one real departure from
-   QML's syntax, needed for typed models. Accept, or prefer the types to be
-   declared in Rust with a derive the compiler reads?
-3. **Identical screenshots**: exactly identical pixels for the ports, or
-   identical within a stated antialiasing tolerance where a box's edge now
-   falls on a different subpixel because the layout computes it rather
-   than the code adding constants?
-4. **One look or the app's own**: `Fx.Controls` ships one Ferrix style,
-   with the viewer's palette as the default tokens. Should Settings and the
-   desktop clients take that style, or keep their own look through their
-   own `Theme` values?
+  model without waiting for a review, and answered the open questions:
+  1. **The name is tole**, the markup's extension `.tole`.
+  2. **`struct` and `enum` are declared in the markup** for typed models.
+  3. **"Identical screenshots"** means the same layout and colours, within a
+     small stated antialiasing tolerance (§5).
+  4. **One style:** Settings and the desktop clients take tole's
+     `Fx.Controls` look; theme tokens give light and dark and the accents.
+* **U1 built** (2026-10-23): `src/user/system/linux/compositor/tole`. The
+  property cells and bindings with dependency tracking (lazy: a change
+  marks, a read evaluates; dropped dependencies forgotten; loops found and
+  said once), the item arena with generations, `Item`, `Rectangle`,
+  `Text`, `Row` and `Column` as bindings, anchors as bindings, the scene
+  as drawing operations, the `Renderer` trait, the CPU renderer with
+  clips (a mask only when a shape crosses one) and opacity groups, and a
+  PNG writer. `compositor-text` gained `Fonts::draw_run_clipped`, so text
+  stops at a clip without a layer. 15 host tests.
+* The lode viewer, the first consumer, is being landed by another session;
+  its port (U8) starts once it is on `develop`.
+* Next: U2, the compiler.
