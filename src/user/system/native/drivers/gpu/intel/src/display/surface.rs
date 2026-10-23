@@ -1,8 +1,11 @@
 //! The second pipe's own surface (`docs/DESKTOP.md` §3.5): memory the
 //! driver pins into 00:02.0's domain, entered into the GGTT just past what
-//! the firmware mapped, and written through BAR 2's aperture at the same
-//! GGTT offset -- write-combining, as the lit window is -- so the plane
-//! reads what the copy wrote with no cache to flush between them.
+//! the firmware mapped, and written through the driver's own mapping of it.
+//! BAR 2's aperture is not lent to the driver (the box lends BAR 0 alone),
+//! and the display engine does not read through the processor's caches,
+//! so each line the copy writes is flushed to memory after it
+//! ([`crate::arch::flush_range`]), as i915 flushes a scanout buffer the
+//! processor drew into (`drm_clflush_virt_range`).
 //!
 //! [`light::SURFACE_BYTES`] at [`light::SURFACE_PITCH`], whatever the mode:
 //! a monitor plugged in later, or a smaller mode, is shown from the same
@@ -16,7 +19,8 @@ use ferrix_intel_xelp::display::light::{self, SURFACE_BYTES};
 use ferrix_intel_xelp::gtt::{GTT_PAGE_SIZE, GTTADR_OFFSET, gen8_ggtt_pte_encode};
 use ferrix_native_abi::types::IoMappingSpec;
 use ferrix_rt::Kernel;
-use ferrix_rt::native::device::{Device, IoMapping};
+use ferrix_rt::native::device::Device;
+use ferrix_rt::native::pending::Protection;
 use ferrix_rt::native::pin::{DeviceAddress, Pin, PinAccess, device_address};
 use ferrix_rt::native::vmo::{self, Vmo};
 
@@ -31,8 +35,8 @@ const CHUNKS: usize = 8;
 pub(crate) struct Surface {
     _vmo: Vmo<Kernel>,
     _pins: [Option<Pin<Kernel>>; CHUNKS],
-    _window: IoMapping<Kernel>,
-    /// Where it is mapped, write-combining, in this process.
+    /// Where it is mapped, cached, in this process: every write is
+    /// flushed.
     pub(crate) base: usize,
     /// Its bytes.
     pub(crate) len: usize,
@@ -50,16 +54,16 @@ impl Surface {
                 .filter_map(|index| device.aperture(index).ok())
                 .find(|aperture| aperture.bar == bar && aperture.offset == 0)
         };
-        let (Some(bar0), Some(bar2)) = (find(0), find(2)) else {
+        let Some(bar0) = find(0) else {
             say(format_args!(
-                "intel: card0: no second surface: BAR 0 or BAR 2 is not lent"
+                "intel: card0: no second surface: BAR 0 is not lent"
             ));
             return None;
         };
-        let Some(at) = light::surface_place(firmware_end, bar2.len) else {
+        let Some(at) = light::surface_place(firmware_end, light::SURFACE_GGTT_LIMIT) else {
             say(format_args!(
-                "intel: card0: no second surface: {SURFACE_BYTES:#x} bytes past {firmware_end:#x} do not fit BAR 2's {:#x}",
-                bar2.len
+                "intel: card0: no second surface: {SURFACE_BYTES:#x} bytes past {firmware_end:#x} do not fit below {:#x}",
+                light::SURFACE_GGTT_LIMIT
             ));
             return None;
         };
@@ -123,26 +127,19 @@ impl Surface {
         }
         drop(entries);
         let ggtt = u32::try_from(at).ok()?;
-        let window = device
-            .io_mapping(IoMappingSpec {
-                phys: bar2.phys + at,
-                len: SURFACE_BYTES,
-            })
-            .ok()?;
-        let base = window.map_combining(None).ok()?;
-        // Black, written through the aperture.
+        let base = memory.map(None, len, Protection::ReadWrite, 0).ok()?;
+        // Black, flushed to memory.
         for word in 0..len / 8 {
-            // SAFETY: inside the window just mapped, eight-byte aligned.
+            // SAFETY: inside the VMO's mapping just made, eight-byte aligned.
             unsafe { ptr::write_volatile((base + word * 8) as *mut u64, 0) };
         }
-        ferrix_rt::device_barrier();
+        crate::arch::flush_range(base, len);
         say(format_args!(
             "intel: card0: a second surface, {len:#x} bytes at GGTT {ggtt:#x} ({pages} pages pinned)"
         ));
         Some(Self {
             _vmo: memory,
             _pins: pins,
-            _window: window,
             base,
             len,
             ggtt,

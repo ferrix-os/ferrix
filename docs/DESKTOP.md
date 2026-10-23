@@ -160,20 +160,27 @@ monitors, not mirroring). Under `ferrix.intelgpu.modeset=on`, `card0`
 says HELLO with two scanouts:
 
 * pipe B gets a surface of its own: 1920x1200 at a 7680-byte stride,
-  pages pinned into 00:02.0's domain, entered into the GGTT on the first
+  pages pinned into 00:02.0's domain and entered into the GGTT on the first
   2 MiB boundary past the firmware's framebuffer (refused if an entry there
-  is present or it would leave BAR 2's aperture), and written through BAR 2
-  write-combining as the lit window is (`intel/src/display/surface.rs`);
-* port B is lit onto it at boot where a monitor is there (h2's steps), or
-  when one is plugged in later; where the firmware cloned one surface onto
-  both pipes, the running pipe B is pointed at the new surface instead
-  (`light::running`, `light::repoint`);
+  is present or it would reach the driver's own window at 256 MiB). BAR 2
+  is not lent on the box, so the driver writes the surface through its own
+  cached mapping and flushes every line it writes (`clflush`, as i915's
+  `drm_clflush_virt_range`) (`intel/src/display/surface.rs`);
+* the port the firmware left dark is lit onto it -- port B where it lit A,
+  port A where it lit B (the box's boot of 2026-10-23: the 1024x600 monitor
+  on B lit, the TV on A dark) -- at boot where a monitor is there (h2's
+  steps, on pipe B with the free PLL), or when one is plugged in later;
+  where the firmware cloned one surface onto both pipes, the running pipe B
+  is pointed at the new surface instead (`light::running`,
+  `light::repoint`). A port whose combo PHY the firmware never initialised
+  is refused, said;
 * both combo ports are watched for hotplug, each telling its own scanout's
   `MODES`, mode list and EDID; SCANOUT, FLUSH and SET_MODE act per
   scanout, so hyprix places two screens side by side.
 
-Host tests place the surface and repoint a cloned pipe against the dump's
-values; the rest runs on the box only.
+Host tests place the surface, repoint a cloned pipe, and light the TV on
+port A when the firmware lit B -- the dump's own layout, every value
+Linux's; the rest runs on the box only.
 
 Next: the box run of h2 and the second scanout; 3e on the 3060.
 

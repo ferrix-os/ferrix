@@ -36,7 +36,8 @@
 //! Under `ferrix.intelgpu.modeset=on` the card has a second scanout
 //! (`docs/DESKTOP.md` §3.5): pipe B on the other combo port, showing a
 //! surface of its own ([`surface`]) -- lit by the driver
-//! ([`modeset::light_port_b`]), or, where the firmware cloned its surface
+//! ([`modeset::light_port`]) on whichever combo port the firmware left
+//! dark, or, where the firmware cloned its surface
 //! onto both pipes, the running pipe B pointed at the new one. Both ports
 //! are watched for hotplug, and a monitor plugged into the second port
 //! later is lit then. Each scanout is copied into on its own, so a
@@ -114,6 +115,10 @@ struct Output {
     /// How a mode smaller than the plane is shown on it, since `SET_MODE`
     /// chose one; `None` at the plane's own.
     scaler: Option<Scaler>,
+    /// Whether what is written is flushed from the caches after it: the
+    /// second surface, mapped cached, which the display engine reads past
+    /// them. The lent window is write-combining and needs only the barrier.
+    flush: bool,
 }
 
 impl Output {
@@ -127,6 +132,27 @@ impl Output {
             shown: None,
             owed_whole: false,
             scaler: None,
+            flush: false,
+        }
+    }
+
+    /// The second surface lit at `size`.
+    fn surface(surface: &surface::Surface, size: (u32, u32)) -> Self {
+        Self {
+            flush: true,
+            ..Self::new(
+                surface.base,
+                surface.len,
+                (size.0 as usize, size.1 as usize),
+                light::SURFACE_PITCH as usize,
+            )
+        }
+    }
+
+    /// Flush `[at, at + len)` of the plane's memory where it needs it.
+    fn written(&self, at: usize, len: usize) {
+        if self.flush {
+            crate::arch::flush_range(self.base + at, len);
         }
     }
 
@@ -212,7 +238,11 @@ impl Display {
         let mut second = None;
         if let Some(regs) = regs.as_mut() {
             match modeset::asked() {
-                modeset::Asked::Dry => modeset::dry(regs),
+                modeset::Asked::Dry => {
+                    if let Some(port) = dark_port(regs) {
+                        modeset::dry(regs, port);
+                    }
+                }
                 modeset::Asked::On => {
                     let firmware_end = u64::from(plane.ggtt) + first.len as u64;
                     second = prepare_second(device, apertures, firmware_end, regs);
@@ -263,12 +293,7 @@ impl Display {
         };
         if let Some(second) = second {
             if let Some(size) = second.size {
-                card.outputs[1] = Some(Output::new(
-                    second.surface.base,
-                    second.surface.len,
-                    (size.0 as usize, size.1 as usize),
-                    light::SURFACE_PITCH as usize,
-                ));
+                card.outputs[1] = Some(Output::surface(&second.surface, size));
             }
             card.surface = Some(second.surface);
             card.watches[1] = second.watch;
@@ -347,6 +372,22 @@ fn hello_parts(
     (2, modes, connectors)
 }
 
+/// The combo port the firmware left dark: B where pipe A drives A, A where
+/// it drives B. `None`, said, where pipe A drives neither.
+fn dark_port(regs: &mut regs::Regs) -> Option<PortOf> {
+    let lit = PortOf::of_ddi_func_ctl(regs.read32(ferrix_intel_xelp::plane::TRANS_DDI_FUNC_CTL_A));
+    match lit {
+        Some(PortOf::Combo(0)) => Some(PortOf::Combo(1)),
+        Some(PortOf::Combo(1)) => Some(PortOf::Combo(0)),
+        _ => {
+            say(format_args!(
+                "intel: card0: no second port: pipe A drives no combo port"
+            ));
+            None
+        }
+    }
+}
+
 /// The second scanout under `ferrix.intelgpu.modeset=on`: the other combo
 /// port, its surface made past `firmware_end`, and pipe B lit on it now
 /// where a monitor is there -- or, where the firmware runs pipe B already
@@ -388,7 +429,7 @@ fn prepare_second(
         .live_bit()
         .is_some_and(|bit| regs.read32(ferrix_intel_xelp::display::hotplug::SDEISR) & bit != 0)
     {
-        size = modeset::light_port_b(regs, surface.ggtt).map(|mode| (mode.h[0], mode.v[0]));
+        size = modeset::light_port(regs, port, surface.ggtt).map(|mode| (mode.h[0], mode.v[0]));
     }
     let function = regs.read32(ferrix_intel_xelp::plane::TRANS_DDI_FUNC_CTL_A + 0x1000);
     let connector = match (ferrix_intel_xelp::plane::Output {
@@ -577,15 +618,10 @@ impl Display {
         let Some(surface) = self.surface.as_ref() else {
             return false;
         };
-        let Some(mode) = modeset::light_port_b(regs, surface.ggtt) else {
+        let Some(mode) = modeset::light_port(regs, watch.port(), surface.ggtt) else {
             return false;
         };
-        let lit = Output::new(
-            surface.base,
-            surface.len,
-            (mode.h[0] as usize, mode.v[0] as usize),
-            light::SURFACE_PITCH as usize,
-        );
+        let lit = Output::surface(surface, (mode.h[0], mode.v[0]));
         if let Some(slot) = self.outputs.get_mut(scanout) {
             *slot = Some(lit);
         }
@@ -817,6 +853,7 @@ fn clear(screen: &Output) {
             // against it), and is four-byte aligned.
             unsafe { ptr::write_volatile(target.wrapping_add(column), 0) };
         }
+        screen.written(row * screen.pitch, screen.width * PIXEL);
     }
     ferrix_rt::device_barrier();
 }
@@ -854,6 +891,10 @@ fn copy_scaled(screen: &Output, scaler: &Scaler, buffer: &Buffer, shown: Rect, c
             // SAFETY: as above.
             unsafe { ptr::write_volatile((screen.base + to) as *mut u32, pixel) };
         }
+        screen.written(
+            line + (area.x as usize) * PIXEL,
+            (area.width as usize) * PIXEL,
+        );
     }
 }
 
@@ -890,6 +931,7 @@ fn copy(screen: &Output, buffer: &Buffer, changed: Rect) {
             // both bounds-checked for the whole row above, and the two
             // mappings are different memory, so they do not overlap.
             unsafe { ptr::copy_nonoverlapping(source, target, bytes) };
+            screen.written(to, bytes);
         }
     }
     ferrix_rt::device_barrier();

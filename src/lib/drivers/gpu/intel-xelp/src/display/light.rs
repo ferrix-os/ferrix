@@ -13,7 +13,8 @@
 // Under the MIT notice in this crate's i915/NOTICE.
 
 //! Lighting a combo port the firmware did not light, written (`docs/DESKTOP.md`
-//! §3.5, h2): HDMI or DVI on port B, transcoder and pipe B, a universal plane
+//! §3.5, h2): HDMI or DVI on port A or B -- whichever the firmware left
+//! dark -- on transcoder and pipe B, a universal plane
 //! scanning out a surface that is already in the GGTT -- the lit pipe's own,
 //! so the new monitor mirrors the top-left of the first until `card0` has a
 //! second scanout of its own.
@@ -94,7 +95,7 @@ pub enum Step {
 /// What lighting needs to know.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Light {
-    /// The combo port lit: `Port::Combo(1)` for B.
+    /// The combo port lit, A or B: whichever the firmware left dark.
     pub port: Port,
     /// The transcoder and pipe: 1, B.
     pub pipe: Pipe,
@@ -119,8 +120,8 @@ pub struct Light {
 /// Why a port is not lit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal {
-    /// Not a combo port, or not B on pipe B: the DBUF share and the
-    /// signal level are known for those alone.
+    /// Not a combo port, or not pipe B: the DBUF share is known for pipe B
+    /// alone, and the signal level for the combo PHYs.
     Unsupported,
     /// The pipe's transcoder is on already.
     PipeOn,
@@ -136,6 +137,10 @@ pub enum Refusal {
     /// A clock above 148.5 MHz, whose watermarks the ground truth does
     /// not give, or one no PLL divider reaches.
     Clock,
+    /// The port's combo PHY was never initialised (`icl_combo_phy_enabled`:
+    /// its compensation powered down or not run), which i915 does at load
+    /// and this driver does not yet.
+    PhyNotReady,
 }
 
 /// `HSW_PWR_WELL_CTL2`, the driver's power-well requests.
@@ -187,6 +192,8 @@ const PLANE_STRIDE_1_A: u32 = 0x7_0188;
 const PLANE_POS_1_A: u32 = 0x7_018C;
 const PLANE_SIZE_1_A: u32 = 0x7_0190;
 const PLANE_SURF_1_A: u32 = 0x7_019C;
+/// `_ICL_PHY_MISC_A`; B 4 on.
+const PHY_MISC_A: u32 = 0x6_4C00;
 /// The combo PHYs (`_ICL_COMBOPHY_A`, `_B`).
 const COMBOPHY: [u32; 2] = [0x16_2000, 0x6_C000];
 
@@ -225,7 +232,10 @@ const MBUS_DBOX: u32 = (16 << 20) | (1 << 17) | (1 << 16) | (2 << 14) | (8 << 8)
 ///
 /// The [`Refusal`] that stops it.
 pub fn preflight<M: Mmio + ?Sized>(mmio: &mut M, light: &Light) -> Result<(), Refusal> {
-    if light.port != Port::Combo(1) || light.pipe != 1 || light.pll > 1 {
+    let Port::Combo(phy @ 0..=1) = light.port else {
+        return Err(Refusal::Unsupported);
+    };
+    if light.pipe != 1 || light.pll > 1 {
         return Err(Refusal::Unsupported);
     }
     if light.mode.clock_khz > MAX_CLOCK_KHZ
@@ -236,8 +246,16 @@ pub fn preflight<M: Mmio + ?Sized>(mmio: &mut M, light: &Light) -> Result<(), Re
     if mmio.read32(TRANSCONF_A + light.pipe * 0x1000) & (1 << 31) != 0 {
         return Err(Refusal::PipeOn);
     }
-    if mmio.read32(DDI_BUF_CTL_A + 0x100) & (1 << 31) != 0 {
+    if mmio.read32(DDI_BUF_CTL_A + u32::from(phy) * 0x100) & (1 << 31) != 0 {
         return Err(Refusal::PortOn);
+    }
+    // `ICL_PHY_MISC(phy)`'s `DE_IO_COMP_PWR_DOWN` (bit 23) clear and
+    // `ICL_PORT_COMP_DW0(phy)`'s `COMP_INIT` (bit 31) set.
+    let base = COMBOPHY.get(usize::from(phy)).copied().unwrap_or(0);
+    if mmio.read32(PHY_MISC_A + u32::from(phy) * 4) & (1 << 23) != 0
+        || mmio.read32(base + 0x100) & (1 << 31) == 0
+    {
+        return Err(Refusal::PhyNotReady);
     }
     if mmio.read32(MBUS_CTL) & (1 << 31) != 0 {
         return Err(Refusal::MbusJoined);
@@ -692,13 +710,16 @@ fn port_on(phy: u32, base: u32, push: &mut dyn FnMut(Step)) {
 /// The second pipe's own surface (`docs/DESKTOP.md` §3.5): the largest a
 /// monitor lit here can take -- 1920x1200, every mode up to
 /// [`MAX_CLOCK_KHZ`] -- at one stride, in the GGTT just past what the
-/// firmware mapped, inside BAR 2's aperture so the driver writes it as the
-/// lit window is written.
+/// firmware mapped and below the driver's own GGTT window.
 pub const SURFACE_SIZE: (u32, u32) = (1920, 1200);
 /// Its stride in bytes: a 64-byte multiple, as a linear plane takes.
 pub const SURFACE_PITCH: u32 = SURFACE_SIZE.0 * 4;
 /// Its bytes.
 pub const SURFACE_BYTES: u64 = SURFACE_PITCH as u64 * SURFACE_SIZE.1 as u64;
+/// Where the second surface must end: below the GGTT window the driver's
+/// M2 self-test and the serving back end bind from (256 MiB and above).
+pub const SURFACE_GGTT_LIMIT: u64 = 256 << 20;
+
 /// Where in the GGTT it may start: a 2 MiB boundary, which a linear plane's
 /// alignment needs a fraction of and which keeps its GGTT entries a whole
 /// number of pages.
@@ -706,12 +727,12 @@ pub const SURFACE_ALIGN: u64 = 2 << 20;
 
 /// Where the second surface goes: the first [`SURFACE_ALIGN`] boundary at or
 /// past `firmware_end` (the end of what the firmware mapped) whose
-/// [`SURFACE_BYTES`] end inside `aperture` (BAR 2's length). `None` when
-/// it does not fit.
+/// [`SURFACE_BYTES`] end below `limit` ([`SURFACE_GGTT_LIMIT`]). `None`
+/// when it does not fit.
 #[must_use]
-pub const fn surface_place(firmware_end: u64, aperture: u64) -> Option<u64> {
+pub const fn surface_place(firmware_end: u64, limit: u64) -> Option<u64> {
     let at = firmware_end.next_multiple_of(SURFACE_ALIGN);
-    if at + SURFACE_BYTES <= aperture {
+    if at + SURFACE_BYTES <= limit {
         Some(at)
     } else {
         None
