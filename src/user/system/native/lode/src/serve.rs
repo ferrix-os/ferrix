@@ -32,6 +32,7 @@ use ferrix_rt::Kernel;
 use ferrix_rt::native::channel::Channel;
 use ferrix_rt::native::{Deadline, Object, Signals};
 
+use crate::seat::Seat;
 use crate::store::{self, Dir};
 use crate::{sys, zone};
 
@@ -115,6 +116,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         sys::close(fd);
     }
     let (boot_id, restarted) = boot_id();
+    let seat = Seat::open();
     let dropped = sys::become_ids(UID, GID).is_ok();
     let zone = zone::local();
     let now = clocks();
@@ -129,7 +131,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         header: new_header(boot_id),
         synced_at: 0,
     };
-    let mut sequence = store.take_up(&mut said);
+    let sequence = store.take_up(&mut said);
     let text = if restarted {
         alloc::format!(
             "lode restarted: an earlier instance of this boot ended; last stored kernel seq {}",
@@ -159,16 +161,32 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     }
     store.append(said, &zone).map_err(|()| Step::Segment)?;
     say_ready(channel)?;
-    let mut limiter = Limiter::new(rules);
-    serve(
-        channel,
+    let limiter = Limiter::new(rules);
+    let mut service = Service {
         kmsg,
-        &mut store,
-        &mut sequence,
-        &mut limiter,
-        &zone,
-        restarted,
-    )
+        store,
+        sequence,
+        limiter,
+        seat,
+        zone,
+    };
+    service.serve(channel, restarted)
+}
+
+/// What the loop works with.
+struct Service {
+    /// `/dev/kmsg`, open.
+    kmsg: usize,
+    /// The store.
+    store: Store,
+    /// Where the kernel's sequence stands.
+    sequence: KernelSequence,
+    /// The rules, folding and limiter.
+    limiter: Limiter,
+    /// The seat's owner's socket and the sessions.
+    seat: Seat,
+    /// The local zone, for the offsets records carry.
+    zone: Zone,
 }
 
 /// The rules and the retention classes, with a record for each file that
@@ -214,48 +232,81 @@ fn configuration(said: &mut Vec<Record>, now: Now) -> (Vec<Rule>, Vec<Class>) {
     (rules, classes)
 }
 
-/// The loop: read the kernel log, store it, until init lets go.
-fn serve(
-    channel: &Channel<Kernel>,
-    kmsg: usize,
-    store: &mut Store,
-    sequence: &mut KernelSequence,
-    limiter: &mut Limiter,
-    zone: &Zone,
-    restarted: bool,
-) -> Result<(), Step> {
-    let mut first_start = !restarted && sequence.last.is_none();
-    let mut buf = alloc::vec![0_u8; 8192];
-    loop {
-        let mut batch: Vec<Record> = Vec::new();
-        let now = clocks();
-        let mut read = 0;
+impl Service {
+    /// The loop: read the kernel log and the seat's owner, store what they
+    /// say, until init lets go.
+    fn serve(&mut self, channel: &Channel<Kernel>, restarted: bool) -> Result<(), Step> {
+        let mut first_start = !restarted && self.sequence.last.is_none();
+        loop {
+            let mut batch: Vec<Record> = Vec::new();
+            let now = clocks();
+            let rotate = self.read_kmsg(now, &mut first_start, &mut batch);
+            self.seat.serve(now, &mut batch);
+            if rotate {
+                self.limiter.flush(now.monotonic_us, &mut batch);
+            }
+            self.limiter.tick(now.monotonic_us, &mut batch);
+            let urgent = batch.iter().any(|record| record.priority <= 2);
+            let idle = batch.is_empty();
+            for record in &mut batch {
+                if record.realtime_us == 0 {
+                    record.realtime_us = now.realtime_of(record.monotonic_us);
+                }
+            }
+            self.store
+                .append(batch, &self.zone)
+                .map_err(|()| Step::Segment)?;
+            if rotate {
+                self.store.rotate_all();
+            }
+            self.store.sync_if(urgent, now.monotonic_us);
+            if closed(channel) {
+                self.store.sync_if(true, now.monotonic_us);
+                return Ok(());
+            }
+            if idle {
+                let mut fds = alloc::vec![self.kmsg];
+                fds.extend(self.seat.fds());
+                sys::wait_any(&fds, WAIT_MS);
+            }
+        }
+    }
+
+    /// Read what the kernel log has, up to 512 records, into `batch`.
+    /// Answers whether one of them asked for a rotation.
+    fn read_kmsg(&mut self, now: Now, first_start: &mut bool, batch: &mut Vec<Record>) -> bool {
+        let mut buf = alloc::vec![0_u8; 8192];
         let mut rotate = false;
-        while read < 512 {
-            match sys::read(kmsg, &mut buf) {
+        for _ in 0..512 {
+            match sys::read(self.kmsg, &mut buf) {
                 Ok(0) => break,
                 Ok(got) => {
-                    read += 1;
                     let Some(kernel) = kmsg::parse(buf.get(..got).unwrap_or_default()) else {
                         continue;
                     };
-                    let record = ingest::from_kernel(&kernel, now);
-                    match sequence.take(kernel.seq) {
+                    let mut record = ingest::from_kernel(&kernel, now);
+                    match self.sequence.take(kernel.seq) {
                         Taken::Seen => continue,
                         Taken::Next => {}
                         Taken::After { lost } => {
-                            batch.push(ingest::lost_record(lost, kernel.seq, first_start, &record));
+                            batch.push(ingest::lost_record(
+                                lost,
+                                kernel.seq,
+                                *first_start,
+                                &record,
+                            ));
                         }
                     }
-                    first_start = false;
+                    *first_start = false;
                     rotate |= record.get("SYSLOG_IDENTIFIER") == Some(ROTATE)
                         && record.get("_TRANSPORT") == Some(b"console");
+                    self.seat.stamp(&mut record);
                     if record.get("_TRANSPORT") == Some(b"kernel")
                         && record.get("CRASH_PID").is_some()
                     {
                         batch.push(with_program(record));
                     } else {
-                        limiter.admit(record, now.monotonic_us, &mut batch);
+                        self.limiter.admit(record, now.monotonic_us, batch);
                     }
                 }
                 // Records went past this reader; the next read goes on from
@@ -266,29 +317,7 @@ fn serve(
                 Err(_) => break,
             }
         }
-        if rotate {
-            limiter.flush(now.monotonic_us, &mut batch);
-        }
-        limiter.tick(now.monotonic_us, &mut batch);
-        let urgent = batch.iter().any(|record| record.priority <= 2);
-        let idle = batch.is_empty();
-        for record in &mut batch {
-            if record.realtime_us == 0 {
-                record.realtime_us = now.realtime_of(record.monotonic_us);
-            }
-        }
-        store.append(batch, zone).map_err(|()| Step::Segment)?;
-        if rotate {
-            store.rotate_all();
-        }
-        store.sync_if(urgent, now.monotonic_us);
-        if closed(channel) {
-            store.sync_if(true, now.monotonic_us);
-            return Ok(());
-        }
-        if idle {
-            let _ = sys::wait_readable(kmsg, WAIT_MS);
-        }
+        rotate
     }
 }
 

@@ -25,6 +25,8 @@ pub(crate) const O_WRONLY: usize = 1;
 pub(crate) const O_CREAT: usize = 0o100;
 /// `O_EXCL`.
 pub(crate) const O_EXCL: usize = 0o200;
+/// `O_TRUNC`.
+pub(crate) const O_TRUNC: usize = 0o1000;
 /// `O_APPEND`.
 pub(crate) const O_APPEND: usize = 0o2000;
 /// `O_NONBLOCK`.
@@ -229,38 +231,6 @@ pub(crate) fn sleep_ms(millis: u64) {
     let _ = unsafe { call(numbers::NANOSLEEP, [spec.as_ptr() as usize, 0, 0, 0, 0, 0]) };
 }
 
-/// Wait up to `millis` for `fd` to be readable. Answers whether it is.
-pub(crate) fn wait_readable(fd: usize, millis: u64) -> bool {
-    // struct pollfd { int fd; short events; short revents; }
-    let mut pollfd = [0_u8; 8];
-    if let Some(slot) = pollfd.get_mut(0..4) {
-        slot.copy_from_slice(&i32::try_from(fd).unwrap_or(-1).to_ne_bytes());
-    }
-    if let Some(slot) = pollfd.get_mut(4..6) {
-        slot.copy_from_slice(&POLLIN.to_ne_bytes());
-    }
-    let spec = [
-        isize::try_from(millis / 1000).unwrap_or(0),
-        isize::try_from((millis % 1000) * 1_000_000).unwrap_or(0),
-    ];
-    // SAFETY: `pollfd` is one `struct pollfd`, writable for the call, and
-    // `spec` a `timespec` read for it; no signal mask.
-    let ready = unsafe {
-        call(
-            numbers::PPOLL,
-            [
-                pollfd.as_mut_ptr() as usize,
-                1,
-                spec.as_ptr() as usize,
-                0,
-                0,
-                0,
-            ],
-        )
-    };
-    matches!(ready, Ok(count) if count > 0)
-}
-
 /// `getrandom(buf, 0)`, all of it.
 pub(crate) fn random(buf: &mut [u8]) -> Result<(), Errno> {
     let mut done = 0;
@@ -397,4 +367,102 @@ pub(crate) fn unmap(address: *mut u8, length: usize) {
 pub(crate) fn getuid() -> u32 {
     // SAFETY: no pointer arguments.
     unsafe { call(arch::GETUID, [0; 6]) }.map_or(u32::MAX, |uid| uid as u32)
+}
+
+/// `fchmodat(AT_FDCWD, path, mode, 0)`.
+pub(crate) fn chmod(path: &[u8], mode: usize) -> Result<(), Errno> {
+    let path = c_path(path);
+    // SAFETY: `path` is a NUL-terminated buffer that lives for the call.
+    unsafe {
+        call(
+            numbers::FCHMODAT,
+            [AT_FDCWD, path.as_ptr() as usize, mode, 0, 0, 0],
+        )
+    }
+    .map(|_| ())
+}
+
+/// A listening stream socket at `path`, made afresh, non-blocking.
+pub(crate) fn listen_at(path: &[u8]) -> Result<usize, Errno> {
+    use ferrix_rt::linux as rt;
+    let _ = unlinkat(AT_FDCWD, path);
+    let fd = rt::socket(
+        rt::AF_UNIX,
+        rt::SOCK_STREAM | rt::SOCK_NONBLOCK | O_CLOEXEC,
+        0,
+    )?;
+    let Some((address, length)) = rt::sockaddr_un(path) else {
+        close(fd);
+        return Err(Errno(22));
+    };
+    let bound = rt::bind(fd, &address, length).and_then(|_| rt::listen(fd, 16));
+    if let Err(error) = bound {
+        close(fd);
+        return Err(error);
+    }
+    Ok(fd)
+}
+
+/// A connection waiting on `listener`, non-blocking, if there is one.
+pub(crate) fn accept(listener: usize) -> Option<usize> {
+    ferrix_rt::linux::accept4(listener, ferrix_rt::linux::SOCK_NONBLOCK | O_CLOEXEC).ok()
+}
+
+/// The uid at the other end of a connected socket.
+pub(crate) fn peer_uid(fd: usize) -> Option<u32> {
+    ferrix_rt::linux::peer_uid(fd).ok()
+}
+
+/// Wait up to `millis` for any of `fds` to be readable.
+pub(crate) fn wait_any(fds: &[usize], millis: u64) {
+    // struct pollfd { int fd; short events; short revents; }, each 8 bytes.
+    let mut table = alloc::vec![0_u8; fds.len() * 8];
+    for (index, &fd) in fds.iter().enumerate() {
+        if let Some(slot) = table.get_mut(index * 8..index * 8 + 4) {
+            slot.copy_from_slice(&i32::try_from(fd).unwrap_or(-1).to_ne_bytes());
+        }
+        if let Some(slot) = table.get_mut(index * 8 + 4..index * 8 + 6) {
+            slot.copy_from_slice(&POLLIN.to_ne_bytes());
+        }
+    }
+    let spec = [
+        isize::try_from(millis / 1000).unwrap_or(0),
+        isize::try_from((millis % 1000) * 1_000_000).unwrap_or(0),
+    ];
+    // SAFETY: `table` is `fds.len()` `struct pollfd`s, writable for the
+    // call, and `spec` a `timespec` read for it; no signal mask.
+    let _ = unsafe {
+        call(
+            numbers::PPOLL,
+            [
+                table.as_mut_ptr() as usize,
+                fds.len(),
+                spec.as_ptr() as usize,
+                0,
+                0,
+                0,
+            ],
+        )
+    };
+}
+
+/// `renameat` from the working directory.
+pub(crate) fn rename(from: &[u8], to: &[u8]) -> Result<(), Errno> {
+    let from = c_path(from);
+    let to = c_path(to);
+    // SAFETY: both are NUL-terminated buffers that live for the call.
+    unsafe {
+        call(
+            numbers::RENAMEAT,
+            [
+                AT_FDCWD,
+                from.as_ptr() as usize,
+                AT_FDCWD,
+                to.as_ptr() as usize,
+                0,
+                0,
+            ],
+        )
+    }
+    .map(|_| ())
 }

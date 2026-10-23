@@ -107,6 +107,9 @@ say "dropped: $(/bin/lode -b -t dropme -o cat | $bb wc -l) $(/bin/lode -b --wher
 say "classes: $($bb ls /var/log/journal | $bb grep -c '^errors@') $(/bin/lode -b -t erring -o cat | $bb wc -l)"
 say "delete: $(/bin/lode delete --where 'id = deleteme')"
 say "deleted: $(/bin/lode -b -t deleteme -o cat | $bb wc -l) $(/bin/lode -b -t lode-delete -o cat | $bb grep -c 'removed 2 record')"
+# Sessions (step 2a): what a seat's owner tells lode, kept across lode's restart.
+/bin/lode session begin 7 seat=seat0 uid=0 pid=$$ scope=session-7.scope unit=lode-test.service token=00112233445566778899aabbccddeeff || say "FAIL lode session begin"
+say "in session"
 first=$($bb pidof lode)
 /bin/lode mark "flood begins" || say "FAIL lode mark"
 n=0
@@ -122,6 +125,13 @@ until /bin/lode -b -g "lode flood 2999" -o cat | $bb grep -q "lode flood 2999"; 
   $bb usleep 100000
 done
 say "restarted as $($bb pidof -s lode)"
+say "still in session"
+$bb sleep 1
+/bin/lode session end 7
+$bb usleep 500000
+say "out of session"
+$bb sleep 1
+say "session: $(/bin/lode -s 7 -o cat | $bb grep -c 'in session$') $(/bin/lode -s 7 -o cat | $bb grep -c 'out of session') $(/bin/lode -b -t lode -o cat | $bb grep -c '^session 7 began on seat0')"
 /bin/lode rotate
 say "verify: $(/bin/lode verify --kernel -b | $bb tail -n 1)"
 /bin/lode -b --since-mark "flood begins" --until-mark "flood ends" -o cat > /tmp/window
@@ -279,6 +289,11 @@ fn held(lines: &[String]) -> std::result::Result<(), String> {
     }
     for (what, want, why) in [
         (
+            "lode-test: session:",
+            "2 0 1",
+            "a session's lines were not stamped with its id, across lode's restart, and only while it lasted",
+        ),
+        (
             "lode-test: folded:",
             "1 1",
             "50 repeats were not one line and one `repeated 49` record",
@@ -351,7 +366,8 @@ lode-test: folded: 1 1
 lode-test: limited: 100 200
 lode-test: dropped: 0 1
 lode-test: classes: 1 1
-lode-test: deleted: 0 1";
+lode-test: deleted: 0 1
+lode-test: session: 2 0 1";
 
     /// [`CLEAN`] with the line beginning `what` replaced by `with`.
     fn run(what: &str, with: &str) -> Vec<String> {

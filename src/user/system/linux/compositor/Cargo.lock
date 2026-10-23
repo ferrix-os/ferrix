@@ -310,6 +310,7 @@ dependencies = [
  "compositor-socket",
  "compositor-wire",
  "ferrix-auth-proto",
+ "ferrix-lode-core",
  "ferrix-native",
  "ferrix-native-abi",
  "ferrix-svc-proto",
@@ -491,6 +492,10 @@ version = "0.1.0"
 
 [[package]]
 name = "ferrix-linux-abi"
+version = "0.1.0"
+
+[[package]]
+name = "ferrix-lode-core"
 version = "0.1.0"
 
 [[package]]

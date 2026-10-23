@@ -25,6 +25,8 @@ lode [OPTIONS...] [FIELD=VALUE...]   read the log (also as journalctl)
 lode mark TEXT...                    write a mark into the log
 lode verify [--kernel] [-b ...]      check the store
 lode rotate                          seal every class's segment, begin new ones
+lode session begin ID seat=S uid=U pid=P scope=SCOPE unit=UNIT token=HEX
+lode session end ID                  what a seat's owner tells lode (root's)
 lode delete --where EXPR [-b ...]    remove the matching records (root's)
 
   -b, --boot[=ID|N]      a boot: 0 or none this one, -1 the one before, or its id
@@ -32,6 +34,7 @@ lode delete --where EXPR [-b ...]    remove the matching records (root's)
   -k, --dmesg            the kernel's own records
   -u, --unit UNIT        a unit's records (globs; 'name' is name.service)
   -t, --identifier ID    a program's records;  -T ID leaves one out
+  -s, --session ID       a session's records
   -p, --priority P[..Q]  at most P (a level's name or number), or P to Q
   -g, --grep TEXT        records whose message has TEXT (globs; any case if lower case)
   -S, --since TIME       -U, --until TIME (now, today, -5min, 2026-10-23 14:01, @EPOCH)
@@ -97,6 +100,7 @@ pub(crate) fn run() -> i32 {
     match rest.first().map(String::as_str) {
         Some("mark") => return mark(rest.get(1..).unwrap_or_default()),
         Some("rotate") => return rotate(),
+        Some("session") => return announce(rest.get(1..).unwrap_or_default()),
         Some("delete") => {
             return match parse(rest.get(1..).unwrap_or_default()) {
                 Ok(options) => delete(&options),
@@ -272,6 +276,13 @@ fn selection(
             add(
                 &mut options.expr,
                 Expr::Test(Test::field("id", Op::Ne, id.as_bytes())),
+            );
+        }
+        "-s" | "--session" => {
+            let id = value(flag, inline, words, "a session id")?;
+            add(
+                &mut options.expr,
+                Expr::Test(Test::field("session", Op::Eq, id.as_bytes())),
             );
         }
         "-p" | "--priority" => add(
@@ -1022,4 +1033,53 @@ fn replace(segment: &Segment, bytes: &[u8]) -> Result<(), String> {
     written.map_err(|error| alloc::format!("writing its replacement: errno {}", error.0))?;
     sys::renameat(segment.dir, temporary.as_bytes(), segment.name.as_bytes())
         .map_err(|error| alloc::format!("putting its replacement in place: errno {}", error.0))
+}
+
+/// `lode session begin|end ...`: what a seat's owner other than `sessiond`
+/// (a kiosk's starter, a test) tells lode, on its root-only socket.
+fn announce(words: &[String]) -> i32 {
+    let line = match words.split_first() {
+        Some((verb, rest)) if verb == "begin" && !rest.is_empty() => {
+            alloc::format!("SESSION {}\n", rest.join(" "))
+        }
+        Some((verb, [id])) if verb == "end" => alloc::format!("END {id}\n"),
+        _ => {
+            return usage(
+                "session begin ID seat=S uid=U pid=P scope=SCOPE unit=UNIT token=HEX, or session end ID",
+            );
+        }
+    };
+    if ferrix_lode_core::session::parse(line.trim_end()).is_none() {
+        return usage("that is not a session line lode takes");
+    }
+    use ferrix_rt::linux as rt;
+    let sent = rt::socket(rt::AF_UNIX, rt::SOCK_STREAM, 0).and_then(|fd| {
+        let result = match rt::sockaddr_un(crate::seat::SOCKET) {
+            Some((address, length)) => {
+                // SAFETY: `address` is a `sockaddr_un` of `length` bytes, read
+                // for the call.
+                let connected = unsafe {
+                    rt::call(
+                        rt::numbers::CONNECT,
+                        [fd, address.as_ptr() as usize, length, 0, 0, 0],
+                    )
+                };
+                connected.and_then(|_| sys::write_all(fd, line.as_bytes()).map(|()| 0))
+            }
+            None => Err(sys::Errno(22)),
+        };
+        sys::close(fd);
+        result
+    });
+    match sent {
+        Ok(_) => 0,
+        Err(error) => {
+            complain(&alloc::format!(
+                "lode: telling lode on {}: errno {} (root's, and lode must be running)",
+                String::from_utf8_lossy(crate::seat::SOCKET),
+                error.0
+            ));
+            1
+        }
+    }
 }

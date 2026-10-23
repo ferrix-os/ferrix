@@ -22,6 +22,7 @@
 //! * [`ingest`]: records made from what the service reads, and about itself.
 //! * [`limit`]: floods held -- the rules, the folding of repeats, the limiter.
 //! * [`retention`]: which records are kept how long.
+//! * [`session`]: what a seat's owner tells lode of sessions.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -39,6 +40,7 @@ pub mod limit;
 pub mod record;
 pub mod retention;
 pub mod segment;
+pub mod session;
 pub mod time;
 
 #[cfg(test)]

@@ -752,3 +752,61 @@ mod held_back {
         assert_eq!(seqs, [1, 2, 4, 5]);
     }
 }
+
+mod sessions {
+    use crate::record::Record;
+    use crate::session::{self, Said, Session, Sessions};
+
+    fn session() -> Session {
+        Session {
+            id: 3,
+            seat: alloc::string::String::from("seat0"),
+            uid: 1000,
+            pid: 812,
+            scope: alloc::string::String::from("session-3.scope"),
+            unit: alloc::string::String::from("hyprix.service"),
+            token: [7; 16],
+        }
+    }
+
+    #[test]
+    fn a_session_line_round_trips() {
+        let line = session::line(&session());
+        assert!(line.starts_with("SESSION 3 seat=seat0 uid=1000 pid=812 "));
+        assert_eq!(session::parse(&line), Some(Said::Began(session())));
+        assert_eq!(session::parse("END 3"), Some(Said::Ended(3)));
+        assert_eq!(session::parse("SESSION x"), None);
+        assert_eq!(
+            session::parse("SESSION 3 seat=seat0 uid=1000 scope=a;b unit=u"),
+            None
+        );
+        assert_eq!(session::parse("HELLO"), None);
+    }
+
+    #[test]
+    fn records_of_the_sessions_unit_are_stamped_while_it_lasts() {
+        let mut sessions = Sessions::default();
+        let mut said = Record::new(5, 0, 0);
+        sessions.take(Said::Began(session()), &mut said);
+        assert_eq!(said.get_str("SESSION_ID"), Some("3"));
+        assert!(
+            !said.message().windows(4).any(|w| w == b"0707"),
+            "the token is never shown"
+        );
+        let mut line = Record::new(6, 0, 0);
+        line.push("UNIT", b"hyprix.service");
+        sessions.stamp(&mut line);
+        assert_eq!(line.get_str("SESSION_ID"), Some("3"));
+        let mut other = Record::new(6, 0, 0);
+        other.push("UNIT", b"sshd.service");
+        sessions.stamp(&mut other);
+        assert_eq!(other.get("SESSION_ID"), None);
+        assert!(sessions.on_seat("seat0").is_some());
+        sessions.take(Said::Ended(3), &mut Record::new(5, 0, 0));
+        let mut after = Record::new(6, 0, 0);
+        after.push("UNIT", b"hyprix.service");
+        sessions.stamp(&mut after);
+        assert_eq!(after.get("SESSION_ID"), None);
+        assert!(sessions.on_seat("seat0").is_none());
+    }
+}

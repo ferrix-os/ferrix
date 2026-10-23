@@ -19,6 +19,7 @@ extern crate alloc;
 mod arch;
 mod cli;
 mod heap;
+mod seat;
 mod serve;
 mod store;
 mod sys;

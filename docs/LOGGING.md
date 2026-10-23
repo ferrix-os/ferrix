@@ -1355,6 +1355,33 @@ N150's needs 3a and 5):
   dropped source is absent and its drop said; an error lands in the
   `errors` class; `lode delete` removes two records and says so.
 
+### Step 2a, as built
+
+Session ids (§19.1). What already existed is reused, not doubled:
+`sessiond` owns seat0 and numbers its sessions from the count `login`
+keeps (`/run/ferrix/login/next`, `session-<n>.scope`), so the session id is
+that `n`, the one its scope already has.
+
+* `sessiond` draws a 16-byte token per session from `/dev/urandom`, gives
+  it to the compositor in `FERRIX_SESSION_TOKEN` beside the card's channel,
+  and once the scope exists writes `SESSION <n> seat=seat0 uid=U pid=P
+  scope=session-<n>.scope unit=<its own unit> token=<hex>` to lode's
+  `/run/lode/seat`; `END <n>` when the session is gone. A lode that is not
+  there costs one line on `sessiond`'s output; the session goes on.
+* lode makes `/run/lode/seat` while it is still root, leaves it root's
+  0600, and refuses a peer whose uid is not 0. It keeps the open sessions
+  in `/run/lode/sessions`, so a restarted lode takes them up; says each
+  begin and end in a record (`SESSION_ID`, `SESSION_SEAT`, `SESSION_UID`,
+  `SESSION_SCOPE`, `SESSION_UNIT`; never the token); and stamps
+  `SESSION_ID` on every record of the session's unit while it lasts.
+* `lode -s ID` (`--where 'session = ID'`) is a session's lines; `lode
+  session begin|end` is the same line for a seat owner other than
+  `sessiond` (a kiosk's starter, the row).
+* `test-log`: a session begun before the kill keeps stamping the unit's
+  lines after lode's restart, and stops at its end.
+* Kernel lines: 0; ring-3 programs only (`sessiond`, lode), none in the
+  item.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`
