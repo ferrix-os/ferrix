@@ -18,6 +18,12 @@
 //!        end  u32 length again
 //! ```
 //!
+//! A field name in [`NAMES`] is written as its index with the top bit set
+//! (`0x8000 | index`) and no name bytes: the names every record carries
+//! cost two bytes, not twenty (the write budget, `docs/LOGGING.md` §8.3).
+//! A real name is at most 64 bytes, so the two never meet. The list only
+//! grows: an index once given keeps its name.
+//!
 //! Every number is little-endian. The trailing length lets a reader walk a
 //! segment backwards. A reader stops at the first entry whose length runs
 //! past the file, whose trailer or checksum does not match, or whose
@@ -112,6 +118,54 @@ impl Header {
     }
 }
 
+/// Field names written as an index (see the module's documentation).
+/// Append only: an index once given keeps its name.
+pub const NAMES: [&str; 40] = [
+    "MESSAGE",
+    "SYSLOG_IDENTIFIER",
+    "SYSLOG_PID",
+    "SYSLOG_FACILITY",
+    "_TRANSPORT",
+    "_KERNEL_SEQNUM",
+    "_SOURCE_MONOTONIC_TIMESTAMP",
+    "_SOURCE_REALTIME_TIMESTAMP",
+    "FERRIX_SUBSYSTEM",
+    "FERRIX_PRIORITY_SOURCE",
+    "FERRIX_PRIORITY_WORD",
+    "UNIT",
+    "_SYSTEMD_UNIT",
+    "_SYSTEMD_SLICE",
+    "_SYSTEMD_CGROUP",
+    "_SYSTEMD_INVOCATION_ID",
+    "_PID",
+    "_UID",
+    "_GID",
+    "_COMM",
+    "_EXE",
+    "_CMDLINE",
+    "_HOSTNAME",
+    "_MACHINE_ID",
+    "_STREAM",
+    "_SESSION_ID",
+    "MESSAGE_ID",
+    "CODE_FILE",
+    "CODE_LINE",
+    "CODE_FUNC",
+    "ERRNO",
+    "MARK",
+    "REPEATED",
+    "N_SUPPRESSED",
+    "N_DROPPED",
+    "SYSLOG_TIMESTAMP",
+    "_FERRIX_DRIVER",
+    "_FERRIX_DEVICE",
+    "TRACE_ID",
+    "SPAN_ID",
+];
+
+/// The top bit of a name length that is an index into [`NAMES`].
+const NAME_INDEX: u16 = 0x8000;
+
 /// `record` as one entry's bytes, appended to `out`.
 pub fn encode_record(record: &Record, out: &mut Vec<u8>) {
     let start = out.len();
@@ -131,9 +185,17 @@ pub fn encode_record(record: &Record, out: &mut Vec<u8>) {
     out.extend_from_slice(&record.utc_offset_s.to_le_bytes());
     out.extend_from_slice(&[0; 4]);
     for field in fields {
-        let name = field.name.as_bytes();
-        out.extend_from_slice(&u16::try_from(name.len()).unwrap_or(0).to_le_bytes());
-        out.extend_from_slice(name);
+        if let Some(index) = NAMES
+            .iter()
+            .position(|known| *known == field.name)
+            .and_then(|index| u16::try_from(index).ok())
+        {
+            out.extend_from_slice(&(NAME_INDEX | index).to_le_bytes());
+        } else {
+            let name = field.name.as_bytes();
+            out.extend_from_slice(&u16::try_from(name.len()).unwrap_or(0).to_le_bytes());
+            out.extend_from_slice(name);
+        }
         out.extend_from_slice(&u32::try_from(field.value.len()).unwrap_or(0).to_le_bytes());
         out.extend_from_slice(&field.value);
     }
@@ -237,9 +299,16 @@ pub fn entry_at(bytes: &[u8], at: usize) -> Option<(Record, usize)> {
     let mut place = 48;
     let end = length - 4;
     for _ in 0..count {
-        let name_len = usize::from(u16::from_le_bytes(array(entry, place)?));
-        let name = core::str::from_utf8(entry.get(place + 2..place + 2 + name_len)?).ok()?;
-        place += 2 + name_len;
+        let word = u16::from_le_bytes(array(entry, place)?);
+        let name = if word & NAME_INDEX == 0 {
+            let name_len = usize::from(word);
+            let name = core::str::from_utf8(entry.get(place + 2..place + 2 + name_len)?).ok()?;
+            place += 2 + name_len;
+            name
+        } else {
+            place += 2;
+            NAMES.get(usize::from(word & !NAME_INDEX))?
+        };
         let value_len = usize::try_from(u32_at(entry, place)?).ok()?;
         let value = entry.get(place + 4..(place + 4).checked_add(value_len)?)?;
         place += 4 + value_len;

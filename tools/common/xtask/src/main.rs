@@ -147,6 +147,7 @@ mod jobs;
 mod kaslr;
 mod keyboard;
 mod lode;
+mod lode_budget;
 mod machine_check;
 mod n150;
 mod native;
@@ -562,6 +563,7 @@ const TASKS: &[&[Task]] = &[
     ipc::TASKS,
     jobs::TASKS,
     lode::TASKS,
+    lode_budget::TASKS,
     machine_check::TASKS,
     powerctl::TASKS,
     n150::TASKS,

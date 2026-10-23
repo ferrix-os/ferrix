@@ -1480,7 +1480,7 @@ mod compressed {
         let packed = compress::compress(raw.clone()).unwrap();
         assert!(compress::is_compressed(&packed));
         assert!(
-            packed.len() * 4 < raw.len(),
+            packed.len() * 3 < raw.len(),
             "{} of {}",
             packed.len(),
             raw.len()
@@ -1542,5 +1542,48 @@ mod compressed {
             compress::unpack(&compress::compress(empty.clone()).unwrap()).unwrap(),
             empty
         );
+    }
+}
+
+/// Field names as indexes (`docs/LOGGING.md` §8.3's write budget).
+mod field_names {
+    use alloc::vec::Vec;
+
+    use crate::crc::crc32c;
+    use crate::record::Record;
+    use crate::segment;
+
+    #[test]
+    fn known_names_cost_two_bytes_and_read_back_in_order() {
+        let mut record = Record::new(6, 1, 2);
+        record.seqnum = 7;
+        record.push("MESSAGE", b"hi");
+        record.push("MY_OWN", b"x");
+        record.push("SYSLOG_IDENTIFIER", b"app");
+        let mut out = Vec::new();
+        segment::encode_record(&record, &mut out);
+        // 48 fixed, 4 trailing; MESSAGE and SYSLOG_IDENTIFIER by index.
+        assert_eq!(
+            out.len(),
+            48 + (2 + 4 + 2) + (2 + 6 + 4 + 1) + (2 + 4 + 3) + 4
+        );
+        let (back, length) = segment::entry_at(&out, 0).unwrap();
+        assert_eq!(length, out.len());
+        assert_eq!(back.fields, record.fields);
+    }
+
+    #[test]
+    fn a_name_index_past_the_list_is_no_entry() {
+        let mut record = Record::new(6, 1, 2);
+        record.push("MESSAGE", b"hi");
+        let mut out = Vec::new();
+        segment::encode_record(&record, &mut out);
+        // MESSAGE is index 0 at byte 48: make it one past the list, and
+        // mend the checksum so only the index is wrong.
+        let past = u16::try_from(segment::NAMES.len()).unwrap() | 0x8000;
+        out[48..50].copy_from_slice(&past.to_le_bytes());
+        let crc = crc32c(&out[8..]);
+        out[4..8].copy_from_slice(&crc.to_le_bytes());
+        assert!(segment::entry_at(&out, 0).is_none());
     }
 }

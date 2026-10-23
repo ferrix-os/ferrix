@@ -617,7 +617,9 @@ top item 1):
 Measured by QEMU's block statistics for the disk (`query-blockstats`
 before and after, through the run's QMP socket), with nothing else writing;
 the first figure is dominated by btrfs's commit of each `fdatasync`, which
-is why the sync interval is a setting.
+is why the sync interval is a setting. (Built: §18 "The write budget, as
+built" -- the fast load is within its budget, the slow one over it by
+btrfs's commit.)
 
 ### 8.4 Finding records fast
 
@@ -1142,8 +1144,9 @@ address for `recvfrom`. It adds no `unsafe`. Nothing here waits for it.
 **Where it stands (2026-10-23).** Landed: the design and steps 1, 2,
 2a, 2b, 3, 4 and 5, and the field-quality fixes from the N150's first
 records, and store-and-forward to a collector (§10.2's first part);
-compression of sealed segments as below. Next: the write-budget row
-(§8.3). The viewer is a separate agent's, a Rust desktop app built from
+compression of sealed segments, and the write-budget row (§8.3) as
+below. Next, the customer's order: TLS forwarding and `lode-receive` on a
+Linux host (§10.2, §10.3), for the viewer on nazuna. The viewer is a separate agent's, a Rust desktop app built from
 the customer's design. A follow-up row: the uploader as a native service
 in a sealed job (today a plain Linux service, §18).
 
@@ -1706,6 +1709,37 @@ run time, which a static Ferrix program cannot.
   DIR` makes such a store from an export.
 * Not yet: the design's Timeline, Sources, Crashes, Boots and Rules pages,
   and dragging the brush's edges.
+
+### The write budget, as built (§8.3)
+
+`cargo xtask test-log-budget` (x86-64 by default, KVM): init with lode's
+store on a btrfs volume at `/data`, `/var/log/journal` a link there; a
+unit writes two loads to the kernel log with nothing else writing; xtask
+reads the volume's `wr_bytes` from QEMU (`query-blockstats` on the boot's
+QMP socket) around each and divides by the `MESSAGE` bytes. It also
+requires every line stored and none lost (`verify --kernel`).
+
+| Load | Measured (2026-10-23) | Budget | The row requires |
+|---|---:|---:|---:|
+| 2 lines a second of 100 bytes, a minute (the hour's ratio: each 5 s sync is the same) | 45.4 | 40 | 50 |
+| 20,000 lines of 100 bytes, about 2,000 a second | 2.61 | 3 | 3 |
+
+* **Field names as indexes.** An entry wrote every field's name in full
+  -- `_SOURCE_MONOTONIC_TIMESTAMP`, `FERRIX_PRIORITY_SOURCE` and five more
+  on every kernel record, 128 bytes of a 380-byte record for a 100-byte
+  message. The 40 names records carry most (`segment::NAMES`, append only)
+  are now written as a two-byte index (a name length with its top bit set,
+  which no real name has); everything else, order included, is as before,
+  and older segments read as they did. The fast load went from 3.96 to
+  2.61, within its budget.
+* **The slow load is btrfs's.** A minute with lode running and no load
+  writes 60 KiB to the volume; with the load, 532 KiB for 12 KiB of
+  messages: about 40 KiB for each of the twelve five-second `fdatasync`s,
+  whatever lode wrote (2.6 KiB). That is the commit Ferrix's btrfs makes
+  for an `fsync`; lode can only sync less often (`SyncIntervalSec=`). The
+  row holds the slow load to 50, so it cannot grow, and says it is over
+  the design's 40. Meeting 40 is the file system's: an `fsync` through a
+  log tree, as Linux's btrfs does, rather than a whole commit.
 
 ### Known issues
 
