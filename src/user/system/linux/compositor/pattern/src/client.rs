@@ -679,7 +679,7 @@ pub fn run_shaped_on(
     title: &str,
     shape: Shape,
 ) -> Result<String, String> {
-    run_with(path, pattern, title, shape, Shown::Pattern, None)
+    run_with(path, pattern, title, shape, Shown::Pattern, None, None)
 }
 
 /// The same, making `drawn` once the compositor has drawn a frame with the
@@ -699,7 +699,44 @@ pub fn run_announced_on(
     shape: Shape,
     drawn: std::path::PathBuf,
 ) -> Result<String, String> {
-    run_with(path, pattern, title, shape, Shown::Pattern, Some(drawn))
+    run_with(
+        path,
+        pattern,
+        title,
+        shape,
+        Shown::Pattern,
+        Some(drawn),
+        None,
+    )
+}
+
+/// A [`Shape::Twin`] client, as [`run_announced_on`] makes one, whose extra
+/// window goes once `close` exists rather than after two seconds.
+///
+/// What a test that has to see both windows asks for: it makes `close`
+/// once it has, so the extra window is up for as long as looking takes,
+/// however slow the host is, rather than for a time a starved host's look
+/// did not fit in.
+///
+/// # Errors
+///
+/// A sentence saying what could not be done.
+pub fn run_twin_on(
+    path: &std::path::Path,
+    pattern: Pattern,
+    title: &str,
+    drawn: std::path::PathBuf,
+    close: std::path::PathBuf,
+) -> Result<String, String> {
+    run_with(
+        path,
+        pattern,
+        title,
+        Shape::Twin,
+        Shown::Pattern,
+        Some(drawn),
+        Some(close),
+    )
 }
 
 /// Connect to the compositor the environment names and be its wallpaper:
@@ -737,6 +774,7 @@ fn be_wallpaper(shown: Shown) -> Result<String, String> {
         "wallpaper",
         Shape::Wallpaper,
         shown,
+        None,
         None,
     )
 }
@@ -779,6 +817,7 @@ fn run_with(
     shape: Shape,
     shown: Shown,
     announce: Option<std::path::PathBuf>,
+    twin_close: Option<std::path::PathBuf>,
 ) -> Result<String, String> {
     let stream = UnixStream::connect(path)
         .map_err(|error| format!("connecting to {}: {error}", path.display()))?;
@@ -848,6 +887,7 @@ fn run_with(
         twin_drawn: None,
         announce: announce.or_else(|| DRAWN.get().cloned()),
         twin_closed: false,
+        twin_close,
         scaled: Vec::new(),
         stale: [Vec::new(), Vec::new()],
         gpu: match DMABUF.get() {
@@ -900,14 +940,16 @@ fn run_with(
                 due = Instant::now();
             }
         }
-        // The extra window goes once it has been up for a moment. This is
-        // in the loop rather than in the handler that drew it because a
-        // client that destroyed a window in the same breath as it committed
-        // one would never have had two on the screen.
+        // The extra window goes once it has been up for a moment, or once
+        // the test that started this client says so. This is in the loop
+        // rather than in the handler that drew it because a client that
+        // destroyed a window in the same breath as it committed one would
+        // never have had two on the screen.
         if state.shape == Shape::Twin
-            && state
-                .twin_drawn
-                .is_some_and(|at| at.elapsed() >= TWIN_LINGER)
+            && state.twin_drawn.is_some_and(|at| match &state.twin_close {
+                Some(close) => close.exists(),
+                None => at.elapsed() >= TWIN_LINGER,
+            })
         {
             state.close_twin(&mut out);
         }
@@ -1014,6 +1056,9 @@ struct Client {
     /// the program's (`announce_when_drawn`), or nowhere.
     announce: Option<std::path::PathBuf>,
     twin_closed: bool,
+    /// Where a test says the extra window may go ([`run_twin_on`]); without
+    /// one it goes after [`TWIN_LINGER`].
+    twin_close: Option<std::path::PathBuf>,
     /// A moving wallpaper's frame, scaled to the buffer's size and kept
     /// between frames, so that a frame scales only the rows the video
     /// changed rather than the screen: the rest are what they were.
@@ -1975,7 +2020,12 @@ impl Client {
             );
             request(out, id::TWIN_POOL, wl_shm_pool::request::DESTROY, &[], &[]);
         }
-        self.twin = None;
+        // The memory itself is kept until the client ends: the pool that
+        // carries its descriptor may have been made in this same turn and
+        // still be queued, and closing the descriptor under it made the
+        // send fail with `EBADF` and took the whole client down -- both of
+        // its windows -- when a test closed the second window the moment it
+        // was drawn.
         say(&format!(
             "pattern: {} destroyed its second window",
             self.title

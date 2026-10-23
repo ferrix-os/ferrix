@@ -37,8 +37,8 @@ impl Compositor<'_> {
     ) -> Result<bool, String> {
         // The loop's `now` is milliseconds as a `u32`, which is what
         // `wl_keyboard.key` and `wl_pointer.motion` carry; an animation's is
-        // the same clock, widened.
-        let millis = u64::from(now);
+        // the same clock, widened, unless a test steps it (`animation_clock`).
+        let millis = self.animation_clock(now);
         let animating = self.animations.busy(millis);
         // `settling` is the one pass after the last moving one: the frame
         // that is drawn while a window is still moving is a frame short of
@@ -107,6 +107,17 @@ impl Compositor<'_> {
         Ok(animating)
     }
 
+    /// The animations' clock at the loop's `now`: `now` itself, widened,
+    /// or -- under `Options::animation_step` -- the frames drawn so far
+    /// times the step, so that every frame moves each animation on by the
+    /// same amount whatever the host's load.
+    fn animation_clock(&self, now: u32) -> u64 {
+        match self.options.animation_step {
+            Some(step) => u64::from(self.tally.drawn).saturating_mul(u64::from(step)),
+            None => u64::from(now),
+        }
+    }
+
     /// Draw the frame: every screen, then what the clients are owed for it
     /// and what the report says of it.
     fn draw(
@@ -116,6 +127,10 @@ impl Compositor<'_> {
         overlay_on: bool,
         popups: &[crate::frame::Placed],
     ) -> Result<(), String> {
+        // The animations' clock for this frame, read before the frame is
+        // counted: the frame is drawn at it, and whether a window is still
+        // moving after it is asked at it too.
+        let millis = self.animation_clock(now);
         self.owed = false;
         self.settling = animating;
         // A pass that moves the animations is one of their ticks:
@@ -182,7 +197,7 @@ impl Compositor<'_> {
         let began = Instant::now();
         let mut drew = Drew::default();
         let with = Drawing {
-            millis: u64::from(now),
+            millis,
             overlay_on,
             cursor_at,
             drawn_with: &drawn_with,
@@ -200,7 +215,7 @@ impl Compositor<'_> {
         // Wayland -- has the drawing's time too for its next frame, which at
         // 120 Hz's 8.3 ms it needs.
         self.say_bare_surfaces(&outputs);
-        let unseen = self.unseen_layers(&outputs, &drawn_with, u64::from(now));
+        let unseen = self.unseen_layers(&outputs, &drawn_with, millis);
         frames_done(
             &mut self.slots,
             &self.sources,
@@ -252,7 +267,7 @@ impl Compositor<'_> {
         // window drawn where it started until some other input wakes it: a
         // `hyprctl dispatch movewindow` with nothing else happening left
         // the swap undrawn for good.
-        if self.animations.busy(u64::from(now)) {
+        if self.animations.busy(millis) {
             self.settling = true;
         }
         // And only now each screen's flip, which waits for the host to show

@@ -92,134 +92,103 @@ fn undithered(work: &Path) -> PathBuf {
     path
 }
 
-/// Run the compositor with the clients in `patterns`, and give back the last
-/// frame it drew as `XRGB8888` rows.
-fn run(name: &str, patterns: &[(Pattern, &str)]) -> (Vec<u8>, String) {
-    let shaped: Vec<(Pattern, &str, Shape)> = patterns
-        .iter()
-        .map(|(pattern, title)| (*pattern, *title, Shape::Window))
-        .collect();
-    run_shaped(name, &shaped)
+/// The picture a run waits for before it ends.
+enum Settled {
+    /// This picture, pixel for pixel.
+    Picture(Vec<u8>),
+    /// This picture, every channel within this many steps of it: a GPU's.
+    Near(Vec<u8>, u8),
+    /// Only every client drawn: what a test that expects some other picture
+    /// waits for, since it cannot name the one it will get.
+    Drawn,
 }
 
-/// The same, with each client given the role it asks for: a window, or a bar
-/// through `zwlr_layer_shell_v1`.
-fn run_shaped(name: &str, patterns: &[(Pattern, &str, Shape)]) -> (Vec<u8>, String) {
-    run_drawn_by(name, patterns, Renderer::Software).expect("the compositor ran")
-}
-
-/// The same, with the frame drawn by `renderer`. `Err` is the compositor
-/// saying it could not run at all, which for a renderer that needs something
-/// of the host is how a test finds out the host has not got it.
-fn run_drawn_by(
-    name: &str,
-    patterns: &[(Pattern, &str, Shape)],
-    renderer: Renderer,
-) -> Result<(Vec<u8>, String), String> {
-    run_configured(name, patterns, renderer, "")
-}
-
-/// The same, with `lines` added to the configuration after the dither is
-/// turned off.
-fn run_configured(
-    name: &str,
-    patterns: &[(Pattern, &str, Shape)],
-    renderer: Renderer,
-    lines: &str,
-) -> Result<(Vec<u8>, String), String> {
-    run_refusing(name, patterns, renderer, lines, 0)
-}
-
-/// The same, on a screen that refuses its first `refused` frames as a card
-/// whose driver timed out does.
-fn run_refusing(
+/// Run the compositor drawing with `renderer`, with `lines` added to its
+/// configuration, on a screen that refuses its first `refused` frames as a
+/// card whose driver timed out does; start the clients in `patterns` in
+/// turn, each a window or a bar as its shape says; and end once the
+/// screen shows the picture `settled` names. Gives the last frame drawn,
+/// as `XRGB8888` rows, and what the compositor and the clients said.
+///
+/// `Err` is the compositor saying it could not run at all, which for a
+/// renderer that needs something of the host is how a test finds out the
+/// host has not got it.
+fn run_until(
     name: &str,
     patterns: &[(Pattern, &str, Shape)],
     renderer: Renderer,
     lines: &str,
     refused: u32,
+    settled: Settled,
 ) -> Result<(Vec<u8>, String), String> {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let frames = work.join("frames");
-    let config = undithered(&work);
-    if !lines.is_empty() {
-        let mut text = std::fs::read_to_string(&config).expect("the configuration");
-        text.push_str(lines);
-        std::fs::write(&config, text).expect("the configuration");
-    }
-
+    let desk = Desk::new(name, lines);
     let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        dump: Some(frames.clone()),
-        deadline: Some(8000),
-        config: Some(config),
         renderer,
         refuse_flips: refused,
-        ..Options::default()
+        ..desk.dumping()
     };
-
     let clients: Vec<_> = patterns
         .iter()
         .map(|(pattern, title, shape)| (*pattern, (*title).to_owned(), *shape))
         .collect();
-    let socket_for_clients = socket.clone();
-    let work_for_clients = work.to_path_buf();
-    let started = std::thread::spawn(move || {
-        // The clients wait for the socket rather than racing it: the
-        // compositor binds it before it accepts anything.
-        for _ in 0..400 {
-            if socket_for_clients.exists() {
-                break;
+    let (line, said) = running(&desk, &options, move |ends| {
+        // In order, so the dwindle tree is the one the expected image was
+        // built from: the first window takes the whole area and the second
+        // splits it.
+        let handles: Vec<_> = clients
+            .iter()
+            .map(|(pattern, title, shape)| ends.open(*pattern, title, *shape))
+            .collect();
+        match &settled {
+            Settled::Picture(want) => {
+                let _ = frame_until(ends, "the screen settled on the picture", is_picture(want));
             }
-            std::thread::sleep(Duration::from_millis(5));
+            Settled::Near(want, step) => {
+                let _ = frame_until(ends, "the screen settled near the picture", |frame| {
+                    let apart = frame
+                        .iter()
+                        .zip(want)
+                        .filter(|(mine, theirs)| mine.abs_diff(**theirs) > *step)
+                        .count();
+                    if apart == 0 {
+                        Ok(())
+                    } else {
+                        Err(format!("{apart} channels more than {step} apart"))
+                    }
+                });
+            }
+            Settled::Drawn => {}
         }
-        let mut handles = Vec::new();
-        for (number, (pattern, title, shape)) in clients.into_iter().enumerate() {
-            let path = socket_for_clients.clone();
-            let drawn = work_for_clients.join(format!("drawn-{number}"));
-            let marker = drawn.clone();
-            handles.push(std::thread::spawn(move || {
-                // Each client is told where to connect the way any client is.
-                connect_announced(&path, pattern, &title, shape, marker)
-            }));
-            // In order, so the dwindle tree is the one the expected image was
-            // built from: the first window takes the whole area and the
-            // second splits it. So the next client starts once this one has
-            // been drawn (`until_drawn`).
-            until_drawn(&drawn);
-        }
-        let mut lines = Vec::new();
-        for handle in handles {
-            lines.push(
+        ends.stop();
+        handles
+            .into_iter()
+            .map(|handle| {
                 handle
                     .join()
-                    .unwrap_or_else(|_| "a client panicked".to_owned()),
-            );
-        }
-        lines.join("; ")
-    });
-
-    let ran = hyprix::run(&options);
-    let clients = started.join().expect("the clients finished");
-    let line = ran?;
-
-    let last = last_frame(&frames);
-    Ok((last, format!("{line} | {clients}")))
+                    .unwrap_or_else(|_| "a client panicked".to_owned())
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    let last = last_frame(&desk.ends.frames);
+    Ok((last, format!("{line} | {said}")))
 }
 
-/// One client, connected to `socket`.
-fn connect(socket: &Path, pattern: Pattern, title: &str, shape: Shape) -> String {
-    // `WAYLAND_DISPLAY` is how every client is told, but the environment is
-    // one per process and these clients share it, so the path goes in
-    // directly. `socket_path` takes a name with a slash as an absolute path,
-    // which is what this is.
-    compositor_pattern::client::run_shaped_on(socket, pattern, title, shape)
-        .unwrap_or_else(|error| format!("pattern failed: {error}"))
+/// [`run_until`] with every client a window, drawn in software.
+fn run(name: &str, patterns: &[(Pattern, &str)], settled: Settled) -> (Vec<u8>, String) {
+    let shaped: Vec<(Pattern, &str, Shape)> = patterns
+        .iter()
+        .map(|(pattern, title)| (*pattern, *title, Shape::Window))
+        .collect();
+    run_until(name, &shaped, Renderer::Software, "", 0, settled).expect("the compositor ran")
 }
 
-/// The same, making `drawn` once its window has been drawn.
+/// One client, connected to `socket`, making `drawn` once its window has
+/// been drawn.
+///
+/// `WAYLAND_DISPLAY` is how every client is told, but the environment is
+/// one per process and these clients share it, so the path goes in
+/// directly.
 fn connect_announced(
     socket: &Path,
     pattern: Pattern,
@@ -231,33 +200,316 @@ fn connect_announced(
         .unwrap_or_else(|error| format!("pattern failed: {error}"))
 }
 
-/// Wait until a client has said its window was drawn, by making `drawn`,
-/// and then a quarter of a second more.
+// ---------------------------------------------------------------------------
+// Waiting on what happened, not on the clock
+//
+// Every test here is a compositor and some clients in threads of one process,
+// and every one used to be timed: clients started a quarter of a second
+// apart, a sleep "long enough" for a window to draw or a menu to be placed,
+// and a compositor deadline of a few seconds that ended the run whatever had
+// happened by then. On a host at a load of 15 to 40 each of those guesses
+// was wrong now and then -- a second window mapped first and the two swapped
+// sides, a screenshot caught a window unpainted, a dispatch arrived after
+// the deadline -- and a different test failed `cargo xtask check` each time
+// (docs/backlog/flakes.md, fl-061).
+//
+// So each step now waits on the thing it needs, read from the compositor or
+// a client: a window's first frame callback (`open`), the screen's newest
+// frame being the picture a check reads (`frame_until`), a line on the event
+// socket, a list a taskbar is given. Each wait is bounded by `PATIENCE` and
+// fails loudly with what it last saw. The compositor runs until the test
+// says `dispatch exit` (`running`); its own deadline is only a backstop
+// that a passing test never reaches.
+// ---------------------------------------------------------------------------
+
+/// The longest any one wait in these tests lasts before it fails the test.
 ///
-/// The wait is what orders the windows: the next client starts only once
-/// this one is placed. A fixed sleep alone was a guess at how long that
-/// takes, and on a loaded host a first client slower than the guess mapped
-/// second, so the two windows swapped sides and every channel of both was
-/// wrong (`the_same_frame_is_drawn_on_a_gpu`, 2087572 of them each time).
-///
-/// The quarter of a second after it is not ordering. Two windows mapped
-/// within a few milliseconds of each other leave hyprix drawing three or
-/// four frames of their opening animation and then no more, so the last
-/// frame is caught half-way (`docs/BACKLOG.md`, the hyprix row about
-/// windows mapped together). Until that is fixed, the tests keep the gap
-/// they were written with.
-///
-/// Bounded by the compositor's own deadline: a client that is never drawn
-/// is not waited for past it, and the frame the test compares then says
-/// what went wrong.
-fn until_drawn(drawn: &Path) {
-    for _ in 0..1600 {
-        if drawn.exists() {
-            break;
+/// Far longer than any step takes on a busy host -- they take milliseconds
+/// to a few seconds -- because a wait that runs out is a failure, not a
+/// retry: it is there so a broken compositor fails rather than hangs.
+const PATIENCE: Duration = Duration::from_secs(90);
+
+/// The compositor's own deadline, past every wait a test can make: reached
+/// only when a test never said `exit`, which `running` fails on.
+const BACKSTOP: Duration = Duration::from_secs(300);
+
+/// Ask `look` until it gives `Ok`, and give that; fail the test, with what
+/// it last said, if it has not within [`PATIENCE`].
+fn until<T>(what: &str, mut look: impl FnMut() -> Result<T, String>) -> T {
+    let started = std::time::Instant::now();
+    loop {
+        match look() {
+            Ok(value) => return value,
+            Err(why) if started.elapsed() > PATIENCE => {
+                panic!("{what}: not within {PATIENCE:?}; the last look said: {why}")
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(10)),
         }
-        std::thread::sleep(Duration::from_millis(5));
     }
-    std::thread::sleep(Duration::from_millis(250));
+}
+
+/// Where one test's compositor and its clients meet.
+#[derive(Clone)]
+struct Ends {
+    /// The test's own directory.
+    work: PathBuf,
+    /// The Wayland socket.
+    socket: PathBuf,
+    /// Where each frame is dumped, when the test asked for that.
+    frames: PathBuf,
+    /// `hyprctl`'s request socket.
+    control: PathBuf,
+    /// `hyprctl`'s event socket.
+    events: PathBuf,
+    /// Set once the test has asked the compositor to end.
+    stopped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Set once the compositor has ended.
+    over: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Ends {
+    /// Whether the compositor has ended.
+    fn is_over(&self) -> bool {
+        self.over.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Ask the compositor to end, as `hyprctl dispatch exit` does, and wait
+    /// until the request is taken or the compositor is gone. Once only.
+    ///
+    /// Every client here runs until the compositor goes, so this is what
+    /// ends them too: a test asks it once it has what it came for, before it
+    /// joins its clients.
+    fn stop(&self) {
+        if self.stopped.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let started = std::time::Instant::now();
+        while !self.is_over() && started.elapsed() < PATIENCE {
+            if compositor_ctl::ask(&self.control, "dispatch exit").is_ok() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// A client drawing `pattern` with the role `shape`, started once the
+    /// one before it has been drawn, and given back once it has been drawn
+    /// itself: the compositor has answered its first frame callback, so its
+    /// window is mapped, placed and in a frame.
+    ///
+    /// That wait is what orders the windows. They used to be started a
+    /// quarter of a second apart, and on a loaded host a first client slower
+    /// than that mapped second, the two windows swapped sides, and every
+    /// pixel of both was wrong (`the_same_frame_is_drawn_on_a_gpu`, 2087572
+    /// channels; `a_floating_workspace_floats_and_cascades_new_windows`,
+    /// `one` cascaded off `two`).
+    fn open(&self, pattern: Pattern, title: &str, shape: Shape) -> std::thread::JoinHandle<String> {
+        let drawn = self.work.join(format!("drawn-{title}"));
+        let socket = self.socket.clone();
+        let (marker, owned) = (drawn.clone(), title.to_owned());
+        let client =
+            std::thread::spawn(move || connect_announced(&socket, pattern, &owned, shape, marker));
+        until(&format!("`{title}` drawn"), || {
+            if drawn.exists() {
+                Ok(())
+            } else if client.is_finished() || self.is_over() {
+                // A client that has stopped will never be drawn: say so now
+                // rather than after the whole wait.
+                panic!("`{title}` stopped before it was drawn")
+            } else {
+                Err("no frame callback yet".to_owned())
+            }
+        });
+        client
+    }
+
+    /// Ask the control socket, failing the test if it cannot be asked.
+    fn ask(&self, request: &str) -> String {
+        ask_patiently(&self.control, request).unwrap_or_else(|why| panic!("`{request}`: {why}"))
+    }
+}
+
+/// `compositor_ctl::ask`, waiting [`PATIENCE`] for the answer rather than
+/// `hyprctl`'s five seconds: a compositor starved of the processor for
+/// longer than that still answers, and a test is not the place to give up
+/// on it -- a request that changes something cannot be asked twice.
+fn ask_patiently(control: &Path, request: &str) -> Result<String, String> {
+    use std::io::{Read as _, Write as _};
+    let mut stream = std::os::unix::net::UnixStream::connect(control)
+        .map_err(|error| format!("connecting to {}: {error}", control.display()))?;
+    stream
+        .set_read_timeout(Some(PATIENCE))
+        .map_err(|error| format!("a read timeout: {error}"))?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| format!("writing the request: {error}"))?;
+    stream
+        .shutdown(std::net::Shutdown::Write)
+        .map_err(|error| format!("finishing the request: {error}"))?;
+    let mut answer = String::new();
+    let _ = stream
+        .read_to_string(&mut answer)
+        .map_err(|error| format!("reading the answer: {error}"))?;
+    Ok(answer)
+}
+
+/// One test's compositor: its directory, its configuration and its sockets.
+struct Desk {
+    work: Workspace,
+    ends: Ends,
+    config: PathBuf,
+}
+
+impl Desk {
+    /// A compositor named `name`, with the dither off and `lines` added to
+    /// its configuration.
+    fn new(name: &str, lines: &str) -> Self {
+        let work = workspace(name);
+        let instance = work.join("runtime").join("hypr").join("ferrix-test");
+        std::fs::create_dir_all(&instance).expect("an instance directory");
+        let config = undithered(&work);
+        if !lines.is_empty() {
+            let mut text = std::fs::read_to_string(&config).expect("the configuration");
+            text.push_str(lines);
+            std::fs::write(&config, text).expect("the configuration");
+        }
+        let ends = Ends {
+            work: work.to_path_buf(),
+            socket: work.join("wayland"),
+            frames: work.join("frames"),
+            control: instance.join(compositor_ipc::REQUEST_SOCKET),
+            events: instance.join(compositor_ipc::EVENT_SOCKET),
+            stopped: std::sync::Arc::default(),
+            over: std::sync::Arc::default(),
+        };
+        Self { work, ends, config }
+    }
+
+    /// The compositor's options: headless on the 1024x768 screen, with the
+    /// control sockets, ending when asked.
+    fn options(&self) -> Options {
+        let instance = self
+            .ends
+            .control
+            .parent()
+            .expect("the instance directory")
+            .to_string_lossy()
+            .into_owned();
+        Options {
+            display: self.ends.socket.to_string_lossy().into_owned(),
+            headless: Some((WIDTH, HEIGHT)),
+            instance: Some(instance),
+            config: Some(self.config.clone()),
+            deadline: Some(u64::try_from(BACKSTOP.as_millis()).expect("milliseconds")),
+            ..Options::default()
+        }
+    }
+
+    /// The same, with every frame dumped where `frame_until` and
+    /// `last_frame` read them.
+    fn dumping(&self) -> Options {
+        Options {
+            dump: Some(self.ends.frames.clone()),
+            ..self.options()
+        }
+    }
+}
+
+/// Run the compositor with `options`, and `test` beside it once its sockets
+/// are bound; give back what the compositor said and what `test` gave.
+///
+/// `test` ends the compositor with [`Ends::stop`] when it has what it came
+/// for, and joins its clients after that. If it panics first the compositor
+/// is stopped all the same and the panic is the test's. `Err` is the
+/// compositor not running at all, which for a renderer that needs something
+/// of the host is how a test finds out the host has not got it.
+fn running<T: Send + 'static>(
+    desk: &Desk,
+    options: &Options,
+    test: impl FnOnce(&Ends) -> T + Send + 'static,
+) -> Result<(String, T), String> {
+    /// Stops the compositor however the test ends.
+    struct Stop(Ends);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.stop();
+        }
+    }
+
+    let ends = desk.ends.clone();
+    let tester = std::thread::spawn(move || {
+        let stop = Stop(ends.clone());
+        until("the compositor's sockets", || {
+            if ends.is_over() {
+                panic!("the compositor ended before it bound its sockets")
+            }
+            if ends.socket.exists() && ends.control.exists() && ends.events.exists() {
+                Ok(())
+            } else {
+                Err("not bound yet".to_owned())
+            }
+        });
+        let given = test(&stop.0);
+        drop(stop);
+        given
+    });
+    let started = std::time::Instant::now();
+    let ran = hyprix::run(options);
+    let took = started.elapsed();
+    desk.ends
+        .over
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let given = tester.join();
+    let line = ran?;
+    let given = given.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+    assert!(
+        took < BACKSTOP,
+        "the compositor ran to its backstop rather than being asked to end: {line}"
+    );
+    Ok((line, given))
+}
+
+/// The newest frame in `directory` that has been written whole, as the
+/// `(red, green, blue)` bytes a PPM holds; `None` while there is none.
+///
+/// The compositor writes a frame's file in place, so the newest one may be
+/// half written when it is read: a file shorter than a whole frame is not
+/// one yet.
+fn newest_frame(directory: &Path) -> Option<Vec<u8>> {
+    let mut names: Vec<PathBuf> = std::fs::read_dir(directory)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|kind| kind == "ppm"))
+        .collect();
+    names.sort();
+    let bytes = std::fs::read(names.last()?).ok()?;
+    let header = format!("P6\n{WIDTH} {HEIGHT}\n255\n");
+    let pixels = bytes.strip_prefix(header.as_bytes())?;
+    (pixels.len() == (WIDTH * HEIGHT * 3) as usize).then(|| pixels.to_vec())
+}
+
+/// Wait until the screen's newest frame is one `good` accepts, and give it.
+///
+/// This is the wait on the state a check reads: a frame is drawn when
+/// something changes, so once the windows have drawn at the sizes they were
+/// given and every animation has run out, the newest frame is the picture
+/// the screen keeps -- and it is reached on a busy host as surely as on an
+/// idle one, only later. `good` says why a frame is not yet the one, and a
+/// frame that never becomes it fails with that.
+fn frame_until(ends: &Ends, what: &str, good: impl Fn(&[u8]) -> Result<(), String>) -> Vec<u8> {
+    until(what, || {
+        let frame = newest_frame(&ends.frames).ok_or("no frame yet")?;
+        good(&frame)?;
+        Ok(frame)
+    })
+}
+
+/// A `good` for [`frame_until`]: the frame is `want`, pixel for pixel.
+fn is_picture(want: &[u8]) -> impl Fn(&[u8]) -> Result<(), String> + '_ {
+    move |frame| match compare(frame, want) {
+        (0, _) => Ok(()),
+        (differing, first) => Err(format!("{differing} pixels differ, the first {first:?}")),
+    }
 }
 
 /// The last PPM in `directory`, as `XRGB8888`-order bytes.
@@ -369,6 +621,7 @@ fn two_clients_are_tiled_and_drawn_exactly_as_the_renderer_says() {
     let (frame, report) = run(
         "tiled",
         &[(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")],
+        Settled::Picture(expected()),
     );
     assert!(
         report.contains("most 2"),
@@ -408,8 +661,15 @@ fn a_card_that_times_out_drops_frames_and_keeps_the_clients() {
         (Pattern::Checkerboard, "one", Shape::Window),
         (Pattern::Gradient, "two", Shape::Window),
     ];
-    let (frame, report) = run_refusing("refused", &patterns, Renderer::Software, "", 5)
-        .expect("the compositor rode the refused frames out");
+    let (frame, report) = run_until(
+        "refused",
+        &patterns,
+        Renderer::Software,
+        "",
+        5,
+        Settled::Picture(expected()),
+    )
+    .expect("the compositor rode the refused frames out");
     assert!(
         report.contains("most 2") && !report.contains("failed"),
         "both clients should have kept their windows: {report}"
@@ -427,7 +687,8 @@ fn the_same_frame_is_drawn_on_a_gpu() {
         (Pattern::Checkerboard, "one", Shape::Window),
         (Pattern::Gradient, "two", Shape::Window),
     ];
-    let (frame, report) = match run_drawn_by("tiled-gpu", &shaped, Renderer::Vtest) {
+    let settled = Settled::Near(expected(), 3);
+    let (frame, report) = match run_until("tiled-gpu", &shaped, Renderer::Vtest, "", 0, settled) {
         Ok(ran) => ran,
         // No test server on this host: nothing to run the GPU's frames on.
         Err(why) if why.contains("virgl_test_server") => return,
@@ -455,7 +716,11 @@ fn the_comparison_would_notice_a_different_frame() {
     // The check above is only worth having if it fails when the picture is
     // wrong. One client rather than two is a different picture, and the
     // comparison must say so.
-    let (frame, report) = run("one-client", &[(Pattern::Checkerboard, "only")]);
+    let (frame, report) = run(
+        "one-client",
+        &[(Pattern::Checkerboard, "only")],
+        Settled::Drawn,
+    );
     assert!(report.contains("most 1"), "{report}");
     let (differing, _) = compare(&frame, &expected());
     assert!(
@@ -482,21 +747,23 @@ fn a_turned_monitor_is_tiled_tall_and_drawn_turned() {
         (1, "dwindle-two-clients-transform-1.xrle"),
         (3, "dwindle-two-clients-transform-3.xrle"),
     ] {
-        let (frame, report) = run_configured(
+        let want = image(
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../render/tests/data")
+                .join(image_name),
+        );
+        let (frame, report) = run_until(
             &format!("turned-{transform}"),
             &shaped,
             Renderer::Software,
             &format!("monitor = , preferred, auto, 1, transform, {transform}\n"),
+            0,
+            Settled::Picture(want.clone()),
         )
         .expect("the compositor ran");
         assert!(
             report.contains("most 2") && !report.contains("failed"),
             "the compositor should have had two windows: {report}"
-        );
-        let want = image(
-            &Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../render/tests/data")
-                .join(image_name),
         );
         let (differing, first) = compare(&frame, &want);
         assert_eq!(
@@ -759,58 +1026,29 @@ fn answers_configured(name: &str, lines: &str, requests: &[&str]) -> Vec<String>
 /// The same, with the saved arrangements kept under the test's own
 /// directory when `saving`.
 fn answers_saving(name: &str, lines: &str, saving: bool, requests: &[&str]) -> Vec<String> {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let runtime = work.join("runtime");
-    let instance = runtime.join("hypr").join("ferrix-test");
-    std::fs::create_dir_all(&instance).expect("an instance directory");
-    let control = instance.join(compositor_ipc::REQUEST_SOCKET);
-    let config = undithered(&work);
-    if !lines.is_empty() {
-        let mut text = std::fs::read_to_string(&config).expect("the configuration");
-        text.push_str(lines);
-        std::fs::write(&config, text).expect("the configuration");
-    }
+    let desk = Desk::new(name, lines);
     let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        instance: Some(instance.to_string_lossy().into_owned()),
-        config: Some(config),
-        deadline: Some(4000),
-        state_dir: saving.then(|| work.join("state")),
-        ..Options::default()
+        state_dir: saving.then(|| desk.work.join("state")),
+        ..desk.options()
     };
     let requests: Vec<String> = requests.iter().map(|&request| request.to_owned()).collect();
-    let socket_for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if socket_for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut handles = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = socket_for_clients.clone();
-            handles.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        std::thread::sleep(Duration::from_millis(900));
+    let (_, answers) = running(&desk, &options, move |ends| {
+        // Both windows up, `one` first and `two` focused, before anything
+        // is asked: what every request below is about.
+        let one = ends.open(Pattern::Checkerboard, "one", Shape::Window);
+        let two = ends.open(Pattern::Gradient, "two", Shape::Window);
         let answers: Vec<String> = requests
             .iter()
             .map(|request| {
-                compositor_ctl::ask(&control, request).unwrap_or_else(|error| error.clone())
+                ask_patiently(&ends.control, request).unwrap_or_else(|error| error.clone())
             })
             .collect();
-        for handle in handles {
-            let _ = handle.join();
-        }
+        ends.stop();
+        let _ = (one.join(), two.join());
         answers
-    });
-    let _ = hyprix::run(&options).expect("the compositor ran");
-    clients.join().expect("the clients finished")
+    })
+    .expect("the compositor ran");
+    answers
 }
 
 /// `general:layout = floating` (`docs/DESKTOP.md` §1): both windows float
@@ -1010,44 +1248,32 @@ fn a_reload_reads_the_file_again() {
 /// now reads a request as it arrives, beside everything else it waits on.
 #[test]
 fn a_request_that_is_slow_to_arrive_is_still_answered() {
-    let work = workspace("slow-request");
-    let runtime = work.join("runtime");
-    let instance = runtime.join("hypr").join("ferrix-test");
-    std::fs::create_dir_all(&instance).expect("an instance directory");
-    let requests = instance.join(compositor_ipc::REQUEST_SOCKET);
-    let options = Options {
-        display: work.join("wayland").to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        instance: Some(instance.to_string_lossy().into_owned()),
-        deadline: Some(2500),
-        ..Options::default()
-    };
-    let asker = std::thread::spawn(move || {
+    let desk = Desk::new("slow-request", "");
+    let (_, answer) = running(&desk, &desk.options(), |ends| {
         use std::io::{Read as _, Write as _};
-        for _ in 0..400 {
-            if requests.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut stream = std::os::unix::net::UnixStream::connect(&requests)
-            .map_err(|error| format!("connecting: {error}"))?;
-        // Well past the quarter of a second the compositor used to wait.
-        std::thread::sleep(Duration::from_millis(600));
-        stream
-            .write_all(b"version\n")
-            .map_err(|error| format!("writing: {error}"))?;
-        stream
-            .shutdown(std::net::Shutdown::Write)
-            .map_err(|error| format!("finishing: {error}"))?;
-        let mut answer = String::new();
-        let _ = stream
-            .read_to_string(&mut answer)
-            .map_err(|error| format!("reading: {error}"))?;
-        Ok::<_, String>(answer)
-    });
-    let _ = hyprix::run(&options).expect("the compositor ran");
-    let answer = asker.join().expect("the asker finished").expect("asked");
+        let asked = (|| {
+            let mut stream = std::os::unix::net::UnixStream::connect(&ends.control)
+                .map_err(|error| format!("connecting: {error}"))?;
+            // Well past the quarter of a second the compositor used to
+            // wait: the delay is what is tested, not a guess at a wait.
+            std::thread::sleep(Duration::from_millis(600));
+            stream
+                .write_all(b"version\n")
+                .map_err(|error| format!("writing: {error}"))?;
+            stream
+                .shutdown(std::net::Shutdown::Write)
+                .map_err(|error| format!("finishing: {error}"))?;
+            let mut answer = String::new();
+            let _ = stream
+                .read_to_string(&mut answer)
+                .map_err(|error| format!("reading: {error}"))?;
+            Ok::<_, String>(answer)
+        })();
+        ends.stop();
+        asked
+    })
+    .expect("the compositor ran");
+    let answer = answer.expect("asked");
     assert!(
         !answer.contains("unknown request") && answer.contains("hyprix"),
         "the request was not heard: {answer:?}"
@@ -1066,78 +1292,78 @@ fn a_request_that_is_slow_to_arrive_is_still_answered() {
 /// Run the compositor with a subscriber on its event socket, and give back
 /// every line the subscriber read.
 fn subscribed(name: &str, kill: bool) -> Vec<String> {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let runtime = work.join("runtime");
-    std::fs::create_dir_all(&runtime).expect("a runtime directory");
-    // The instance is given as a directory rather than a name, so this test
-    // needs no `XDG_RUNTIME_DIR`: an environment variable is one per process
-    // and the tests run in threads of one.
-    let instance = runtime.join("hypr").join("ferrix-test");
-    let events = instance.join(compositor_ipc::EVENT_SOCKET);
-    let requests = instance.join(compositor_ipc::REQUEST_SOCKET);
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        instance: Some(instance.to_string_lossy().into_owned()),
-        deadline: Some(4000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let listening = events.clone();
-    let reader = std::thread::spawn(move || {
-        for _ in 0..800 {
-            if listening.exists() {
-                break;
+    let desk = Desk::new(name, "");
+    let read = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let reading = std::sync::Arc::clone(&read);
+    let watched = std::sync::Arc::clone(&read);
+    let (line, reader) = running(&desk, &desk.options(), move |ends| {
+        // What the subscriber has read so far.
+        let seen = || watched.lock().expect("the lines").clone();
+        let listening = ends.events.clone();
+        let reader = std::thread::spawn(move || {
+            let _ = compositor_ctl::subscribe(&listening, &mut |line| {
+                reading.lock().expect("the lines").push(line.to_owned());
+            });
+        });
+        // The subscriber has to be connected before the first window, or
+        // it is told the state instead of being told the window arrived.
+        // The compositor tells a new subscriber what already exists, so a
+        // first line read is the compositor having taken it on.
+        until("the subscriber taken on", || {
+            if seen().is_empty() {
+                Err("nothing read yet".to_owned())
+            } else {
+                Ok(())
             }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut lines = Vec::new();
-        let _ = compositor_ctl::subscribe(&listening, &mut |line| lines.push(line.to_owned()));
-        lines
-    });
-
-    let socket_for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if socket_for_clients.exists() {
-                break;
+        });
+        let one = ends.open(Pattern::Checkerboard, "one", Shape::Window);
+        let two = ends.open(Pattern::Gradient, "two", Shape::Window);
+        // Both windows' arrivals read, which is what the test is of.
+        until("both windows read", || {
+            let lines = seen();
+            let focused = lines
+                .iter()
+                .filter(|line| line.starts_with("activewindowv2>>"))
+                .count();
+            if lines
+                .iter()
+                .any(|line| line.starts_with("openwindow>>") && line.ends_with(",two"))
+                && focused >= 2
+            {
+                Ok(())
+            } else {
+                Err(format!("{lines:?}"))
             }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        // The subscriber has to be connected before the first window, or it
-        // is told the state instead of being told the window arrived.
-        std::thread::sleep(Duration::from_millis(400));
-        let mut handles = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = socket_for_clients.clone();
-            handles.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
+        });
         // `killactive` through the request socket, so the window really
         // closes and the socket really says so: the clients themselves run
         // until the compositor goes, as a window does.
         if kill {
-            std::thread::sleep(Duration::from_millis(500));
-            let _ = compositor_ctl::ask(&requests, "dispatch killactive");
+            let _ = ends.ask("dispatch killactive");
+            until("the close and the focus after it read", || {
+                let lines = seen();
+                let focused = lines
+                    .iter()
+                    .filter(|line| line.starts_with("activewindow>>"))
+                    .count();
+                if lines.iter().any(|line| line.starts_with("closewindow>>")) && focused >= 3 {
+                    Ok(())
+                } else {
+                    Err(format!("{lines:?}"))
+                }
+            });
         }
-        for handle in handles {
-            let _ = handle.join();
-        }
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    clients.join().expect("the clients finished");
-    let lines = reader.join().expect("the subscriber finished");
+        ends.stop();
+        let _ = (one.join(), two.join());
+        reader
+    })
+    .expect("the compositor ran");
+    let _ = reader.join();
     assert!(
         line.contains("subscribers 1"),
         "the compositor saw no subscriber: {line}"
     );
-    lines
+    read.lock().expect("the lines").clone()
 }
 
 #[test]
@@ -1225,21 +1451,26 @@ fn a_window_closing_reaches_the_socket_too() {
 /// under it.
 #[test]
 fn a_bar_takes_its_strip_and_the_windows_tile_under_it() {
-    let (frame, report) = run_shaped(
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(BAR_EXPECTED);
+    let (frame, report) = run_until(
         "bar",
         &[
             (Pattern::Checkerboard, "bar", Shape::Bar(30)),
             (Pattern::Checkerboard, "one", Shape::Window),
             (Pattern::Gradient, "two", Shape::Window),
         ],
-    );
+        Renderer::Software,
+        "",
+        0,
+        Settled::Picture(image(&path)),
+    )
+    .expect("the compositor ran");
     assert!(
         report.contains("most 2"),
         "the bar should not be a window: {report}"
     );
     assert!(!report.contains("failed"), "{report}");
 
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(BAR_EXPECTED);
     let (differing, first) = compare(&frame, &image(&path));
     assert_eq!(
         differing, 0,
@@ -1257,67 +1488,62 @@ fn a_bar_takes_its_strip_and_the_windows_tile_under_it() {
 // and that those places are on the curve rather than a straight line.
 // ---------------------------------------------------------------------------
 
+/// The row the animation tests measure the gradient window's edge on: the
+/// upper quarter, which is the gradient's opaque half.
+const MEASURED_ROW: usize = HEIGHT as usize / 4;
+
+/// How far a frame moves every animation on in the animation tests
+/// (`Options::animation_step`): a tenth of a second, so a two-second slide
+/// is twenty frames on any host.
+const ANIMATION_STEP: u32 = 100;
+
+/// What the animation tests ask for: the two windows swapped, the
+/// checkerboard moving right and the gradient left, ending in the picture
+/// `src/user/system/linux/compositor/render` blesses for them swapped --
+/// the plugin test's batch, through `hyprctl`.
+const SWAP: &[&str] = &["dispatch movefocus l", "dispatch movewindow r"];
+
 /// Run the compositor with two clients and a configuration, dispatching
-/// `after` through the control socket once both windows are up, and give
-/// back every frame it drew.
+/// `after` through the control socket once both windows are up and
+/// settled, and give back every frame it drew.
 ///
-/// The deadline is wall-clock and the dispatch is a second into the run, so
-/// it has to leave room for the whole animation after that: a run that ends
-/// mid-slide gives a test the first part of the curve and nothing else,
-/// which under a loaded machine is what a four-second deadline did.
-fn frames_after(name: &str, config: &str, after: &str) -> Vec<Vec<u8>> {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let frames = work.join("frames");
-    let runtime = work.join("runtime");
-    let instance = runtime.join("hypr").join("ferrix-test");
-    std::fs::create_dir_all(&instance).expect("an instance directory");
-    let requests = instance.join(compositor_ipc::REQUEST_SOCKET);
-    let config_path = work.join("hyprland.conf");
-    // The dither off, for the reason `undithered` gives; a test that
-    // wants it says so after this line and wins.
-    std::fs::write(&config_path, format!("decoration:blur:noise = 0\n{config}"))
-        .expect("a configuration");
-
+/// The animations run on a clock of frames, not of the wall
+/// (`Options::animation_step`). On the wall's clock a slide was as many
+/// frames as the host could draw in its time -- twenty on an idle host,
+/// three on a busy one -- and a test that counts the places on the way was
+/// a test of the load. And the run ends when the screen shows the windows
+/// swapped and still, not at a deadline, so a slow host's slide is not cut
+/// off half way.
+fn frames_after(name: &str, config: &str, after: &[&str]) -> Vec<Vec<u8>> {
+    let desk = Desk::new(name, config);
     let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        instance: Some(instance.to_string_lossy().into_owned()),
-        config: Some(config_path),
-        dump: Some(frames.clone()),
-        deadline: Some(4000),
-        ..Options::default()
+        animation_step: Some(ANIMATION_STEP),
+        ..desk.dumping()
     };
-
-    let socket_for_clients = socket.clone();
-    let after = after.to_owned();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if socket_for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
+    // The two windows before the swap and after it: the pictures
+    // `src/user/system/linux/compositor/render` blesses for them.
+    let swapped = image(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../render/tests/data/dwindle-two-clients-swapped.xrle"),
+    );
+    let after: Vec<String> = after.iter().map(|&request| request.to_owned()).collect();
+    let _ = running(&desk, &options, move |ends| {
+        let one = ends.open(Pattern::Checkerboard, "one", Shape::Window);
+        let two = ends.open(Pattern::Gradient, "two", Shape::Window);
+        // Both windows up and settled -- `one` redrawn at the half it was
+        // given when `two` came, which a stretched checkerboard is not --
+        // and now make them move.
+        let _ = frame_until(ends, "the two windows settled", is_picture(&expected()));
+        for request in after {
+            let _ = ends.ask(&request);
         }
-        let mut handles = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = socket_for_clients.clone();
-            handles.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        // Both windows are up and settled; now make them move.
-        std::thread::sleep(Duration::from_millis(900));
-        let _ = compositor_ctl::ask(&requests, &after);
-        for handle in handles {
-            let _ = handle.join();
-        }
-    });
+        let _ = frame_until(ends, "the windows swapped and still", is_picture(&swapped));
+        ends.stop();
+        let _ = (one.join(), two.join());
+    })
+    .expect("the compositor ran");
 
-    let _ = hyprix::run(&options).expect("the compositor ran");
-    clients.join().expect("the clients finished");
-
-    let mut names: Vec<PathBuf> = std::fs::read_dir(&frames)
+    let mut names: Vec<PathBuf> = std::fs::read_dir(&desk.ends.frames)
         .expect("the compositor wrote frames")
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|path| path.extension().is_some_and(|kind| kind == "ppm"))
@@ -1393,19 +1619,17 @@ fn once_settled(edges: &[usize]) -> &[usize] {
 fn a_window_moves_through_the_frames_between_two_layouts() {
     let frames = frames_after(
         "animated",
-        // Two seconds rather than Hyprland's default 0.8, and the blur off.
-        // What is measured here is where the window was in each frame that
-        // was drawn, and the compositor draws a handful of them a second in
-        // a debug build: a short slide is sampled two or three times, and
-        // the first sample is already most of the way there. A longer one
-        // is the same curve with more points on it.
-        "animation = windows, 1, 20, default\ndecoration:blur:enabled = 0\n",
-        "dispatch movewindow l",
+        // Two seconds rather than Hyprland's default 0.8: what is measured
+        // here is where the window was in each frame that was drawn, and a
+        // frame moves the animation on by `ANIMATION_STEP`, so a two-second
+        // slide is twenty frames -- the same curve as a short one with more
+        // points on it, on any host.
+        "animation = windows, 1, 20, default\n",
+        SWAP,
     );
     assert!(frames.len() > 10, "only {} frames", frames.len());
 
-    // The upper quarter, which is the gradient's opaque half.
-    let row = HEIGHT as usize / 4;
+    let row = MEASURED_ROW;
     let measured: Vec<usize> = frames
         .iter()
         .filter_map(|frame| gradient_edge(frame, row))
@@ -1466,12 +1690,8 @@ fn a_window_moves_through_the_frames_between_two_layouts() {
 /// two positions the two layouts give it and nothing between.
 #[test]
 fn animations_can_be_turned_off() {
-    let frames = frames_after(
-        "instant",
-        "animations:enabled = 0\ndecoration:blur:enabled = 0\n",
-        "dispatch movewindow l",
-    );
-    let row = HEIGHT as usize / 4;
+    let frames = frames_after("instant", "animations:enabled = 0\n", SWAP);
+    let row = MEASURED_ROW;
     let measured: Vec<usize> = frames
         .iter()
         .filter_map(|frame| gradient_edge(frame, row))
@@ -1499,44 +1719,21 @@ fn animations_can_be_turned_off() {
 /// Run the compositor with two clients and a plugin, and give back the last
 /// frame, the compositor's line, and what `hyprctl plugin list` said.
 fn with_a_plugin(name: &str) -> (Vec<u8>, String, String) {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let frames = work.join("frames");
-    let runtime = work.join("runtime");
-    let instance = runtime.join("hypr").join("ferrix-test");
-    std::fs::create_dir_all(&instance).expect("an instance directory");
-    let requests = instance.join(compositor_ipc::REQUEST_SOCKET);
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        instance: Some(instance.to_string_lossy().into_owned()),
-        dump: Some(frames.clone()),
-        deadline: Some(8000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let socket_for_clients = socket.clone();
-    let listed = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let said = std::sync::Arc::clone(&listed);
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if socket_for_clients.exists() && requests.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut handles = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = socket_for_clients.clone();
-            handles.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
+    let desk = Desk::new(name, "");
+    // What the plugin's dispatcher is to bring about: `movewindow r` with
+    // the focus on the gradient swaps the two, which is the picture the
+    // renderer's own tests bless for that state.
+    let swapped = image(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../render/tests/data/dwindle-two-clients-swapped.xrle"),
+    );
+    let (line, (clients, listed)) = running(&desk, &desk.dumping(), move |ends| {
+        let handles = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
         // The plugin: the protocol `src/user/system/linux/compositor/plug` speaks, from here.
-        let plugin = std::os::unix::net::UnixStream::connect(&requests)
+        let plugin = std::os::unix::net::UnixStream::connect(&ends.control)
             .expect("the plugin connects to the control socket");
         let mut reading = plugin.try_clone().expect("the plugin's connection");
         let mut writing = plugin;
@@ -1549,47 +1746,53 @@ fn with_a_plugin(name: &str) -> (Vec<u8>, String, String) {
         };
         say("[[PLUGIN]]swap,ferrix,1.0,swaps the focused window with its neighbour\n");
         say("handle swapthem\n");
-        std::thread::sleep(Duration::from_millis(500));
 
-        // `hyprctl plugin list` sees it, and `hyprctl dispatch swapthem`
-        // reaches it: a dispatcher the layout has never heard of.
-        if let Ok(text) = compositor_ctl::ask(&requests, "plugin list") {
-            said.lock().expect("the answer").push_str(&text);
-        }
-        let _ = compositor_ctl::ask(&requests, "dispatch swapthem");
+        // `hyprctl plugin list` sees it once the compositor has read the
+        // registration, and `hyprctl dispatch swapthem` reaches it: a
+        // dispatcher the layout has never heard of.
+        let listed = until("the plugin listed with its dispatcher", || {
+            let text = ask_patiently(&ends.control, "plugin list")?;
+            if text.contains("Dispatchers: swapthem") {
+                Ok(text)
+            } else {
+                Err(text)
+            }
+        });
+        let _ = ends.ask("dispatch swapthem");
 
         // The plugin answers `dispatch movewindow r`, which the compositor
         // runs on its next pass; this reads the line and sends it, as the
-        // program does.
-        let mut reply = String::new();
-        {
+        // program does. Until the dispatch arrives: the two `ok`s for the
+        // hello and the registration come first, and each may be a read of
+        // its own.
+        reading
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .expect("a read timeout");
+        let mut heard = String::new();
+        let reply = until("the dispatch handed to the plugin", || {
             use std::io::Read as _;
-            reading
-                .set_read_timeout(Some(Duration::from_millis(500)))
-                .expect("a read timeout");
-            // Until the dispatch arrives: the two `ok`s for the hello and
-            // the registration come first, and each may be a read of its
-            // own.
-            for _ in 0..8 {
-                let mut buffer = [0u8; 512];
-                match reading.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(read) => {
-                        reply.push_str(&String::from_utf8_lossy(buffer.get(..read).unwrap_or(&[])));
-                    }
-                    Err(_) => {}
+            let mut buffer = [0u8; 512];
+            match reading.read(&mut buffer) {
+                Ok(0) => panic!("the compositor closed the plugin's connection: {heard}"),
+                Ok(read) => {
+                    heard.push_str(&String::from_utf8_lossy(buffer.get(..read).unwrap_or(&[])));
                 }
-                if reply.contains("dispatch>>") {
-                    break;
-                }
+                // The read timeout: nothing more yet.
+                Err(_) => {}
             }
-        }
+            if heard.contains("dispatch>>") {
+                Ok(heard.clone())
+            } else {
+                Err(heard.clone())
+            }
+        });
+        // What `src/user/system/linux/compositor/plug` sends: the two
+        // dispatchers that exchange the windows, as one batch.
         if reply.contains("dispatch>>swapthem") {
-            // What `src/user/system/linux/compositor/plug` sends: the two dispatchers that
-            // exchange the windows, as one batch.
             say("[[BATCH]]dispatch movefocus l ; dispatch movewindow r\n");
+            let _ = frame_until(ends, "the windows swapped", is_picture(&swapped));
         }
-        std::thread::sleep(Duration::from_millis(500));
+        ends.stop();
 
         let mut lines = vec![format!("plugin heard {}", reply.trim())];
         for handle in handles {
@@ -1599,13 +1802,10 @@ fn with_a_plugin(name: &str) -> (Vec<u8>, String, String) {
                     .unwrap_or_else(|_| "a client panicked".to_owned()),
             );
         }
-        lines.join("; ")
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let clients = clients.join().expect("the clients finished");
-    let frame = last_frame(&frames);
-    let listed = listed.lock().expect("the answer").clone();
+        (lines.join("; "), listed)
+    })
+    .expect("the compositor ran");
+    let frame = last_frame(&desk.ends.frames);
     (frame, format!("{line} | {clients}"), listed)
 }
 
@@ -1667,42 +1867,20 @@ fn what_one_client_copies_another_pastes() {
 
 /// One selection, copied in one program and pasted in another.
 fn one_selection(which: compositor_clip::Which) {
-    let work = workspace("clipboard");
-    let socket = work.join("wayland");
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        deadline: Some(8000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+    let desk = Desk::new("clipboard", "");
+    let (line, (copied, pasted)) = running(&desk, &desk.options(), move |ends| {
         // The copy stays alive to answer, as every Wayland clipboard owner
-        // must; the paste runs beside it.
-        let copying = for_clients.clone();
-        let copier = std::thread::spawn(move || {
-            compositor_clip::copy(&copying, which, COPIED, Duration::from_secs(6))
-        });
-        // A moment for the selection to be set before anything asks for it:
-        // a paste that arrives first is told there is nothing, which is
-        // true.
-        std::thread::sleep(Duration::from_millis(400));
-        let pasted = compositor_clip::paste(&for_clients, which);
+        // must, until it has been asked; the paste runs beside it, and
+        // waits for the selection to be set before it asks.
+        let copying = ends.socket.clone();
+        let copier =
+            std::thread::spawn(move || compositor_clip::copy(&copying, which, COPIED, PATIENCE));
+        let pasted = compositor_clip::paste(&ends.socket, which);
         let copied = copier.join().unwrap_or_else(|_| Err("panicked".to_owned()));
+        ends.stop();
         (copied, pasted)
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let (copied, pasted) = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     // Both, before either is unwrapped: a failure in one usually explains
     // the other.
     assert!(
@@ -1735,53 +1913,29 @@ fn one_selection(which: compositor_clip::Which) {
 /// click on a taskbar entry does.
 #[test]
 fn a_bar_is_told_which_windows_there_are_and_can_close_one() {
-    let work = workspace("toplevels");
-    let socket = work.join("wayland");
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        deadline: Some(8000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut windows = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = for_clients.clone();
-            windows.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        // Both windows are up by now, which is what the list is of.
-        let listed = compositor_lswt::run(&for_clients, &compositor_lswt::Want::List);
+    let desk = Desk::new("toplevels", "");
+    let (line, (listed, closed, after)) = running(&desk, &desk.options(), |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
+        // Both windows are up, which is what the list is of.
+        let listed = Ok::<_, String>(titles_until(&ends.socket, 2));
         // And one of them is asked to close, from outside it.
         let closed = compositor_lswt::run(
-            &for_clients,
+            &ends.socket,
             &compositor_lswt::Want::Close("one".to_owned()),
         );
-        // A moment for the window to go, and then the list again: what the
-        // bar was told is only true if the window it named is the one that
-        // went.
-        std::thread::sleep(Duration::from_millis(500));
-        let after = compositor_lswt::run(&for_clients, &compositor_lswt::Want::List);
+        // Then the list again, once the window has gone: what the bar was
+        // told is only true if the window it named is the one that went.
+        let after = Ok::<_, String>(titles_until(&ends.socket, 1));
+        ends.stop();
         for window in windows {
             let _ = window.join();
         }
         (listed, closed, after)
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let (listed, closed, after) = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     let listed = listed.unwrap_or_else(|why| panic!("listing: {why}; the compositor said {line}"));
 
     assert_eq!(
@@ -1823,42 +1977,6 @@ fn a_bar_is_told_which_windows_there_are_and_can_close_one() {
         after[0].contains("\"two\""),
         "the wrong window was closed: {after:?}; before: {listed:?}; the compositor said {line}"
     );
-}
-
-/// The screen once it has stopped changing: shots until [`SAME`] of them in
-/// a row are equal, and that one.
-///
-/// This is what the 500 ms sleep it replaced was reaching for. It waits on
-/// the screen itself rather than on a clock, so a host that takes ten times
-/// as long to paint two windows gives the same picture rather than an
-/// earlier one. It never looks at what is *in* a shot, only at whether two
-/// are the same, so it cannot make a wrong frame pass.
-fn settled(socket: &Path) -> Result<compositor_shot::Shot, String> {
-    /// How many equal shots in a row mean the screen has stopped.
-    const SAME: usize = 4;
-    /// Between shots.
-    const APART: Duration = Duration::from_millis(100);
-    /// At most, which is well inside the compositor's own deadline.
-    const TRIES: usize = 60;
-
-    let mut last: Option<compositor_shot::Shot> = None;
-    let mut run = 0;
-    let mut latest = Err("no screenshot was ever taken".to_string());
-    for _ in 0..TRIES {
-        let taken = compositor_shot::take(socket, 0);
-        run = match (&taken, &last) {
-            (Ok(now), Some(before)) if now == before => run + 1,
-            (Ok(_), _) => 1,
-            (Err(_), _) => 0,
-        };
-        last = taken.as_ref().ok().cloned();
-        latest = taken;
-        if run >= SAME {
-            break;
-        }
-        std::thread::sleep(APART);
-    }
-    latest
 }
 
 /// A screenshot, through `zwlr_screencopy_v1`.
@@ -1980,67 +2098,31 @@ fn second_window() -> compositor_layout::Rect {
 /// The two pattern windows, settled, and a screenshot of them taken over
 /// the socket, with `lines` added to the configuration: the screenshot, the
 /// last frame the screen itself showed, and what the compositor said.
+///
+/// Settled is the screen showing the picture the renderer blesses for the
+/// two windows. A window is listed and laid out on its first commit, the
+/// one that carries no buffer, so the screen holds it as border and
+/// background alone for a while before its client paints; a sleep through
+/// that gap took the screenshot of one particular wrong picture whenever
+/// the host was busy. The screenshot is taken once the screen is the
+/// picture, so a compositor whose screenshot differs from its screen still
+/// fails below with the real difference.
 fn screenshot_of(name: &str, lines: &str) -> (compositor_shot::Shot, Vec<u8>, String) {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let frames = work.join("frames");
-    let config = undithered(&work);
-    if !lines.is_empty() {
-        let mut text = std::fs::read_to_string(&config).expect("the configuration");
-        text.push_str(lines);
-        std::fs::write(&config, text).expect("the configuration");
-    }
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        dump: Some(frames.clone()),
-        // Room for `settled` to wait out a busy host: it gives up long
-        // before this, and a run that reaches the deadline has gone wrong
-        // in some other way.
-        deadline: Some(30_000),
-        config: Some(config),
-        ..Options::default()
-    };
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut windows = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = for_clients.clone();
-            windows.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        // Both windows are drawn by now, which is what the picture is of --
-        // and *by now* is not a length of time. A window is listed and laid
-        // out on its first commit, the one that carries no buffer, so the
-        // screen holds it as border and background alone for a while before
-        // its client paints. Sleeping through that gap works until the host
-        // is busy, and then the screenshot is of one particular wrong
-        // picture: both windows placed, the second unpainted.
-        //
-        // So wait for the screen to stop changing instead. Shots are taken
-        // until several in a row are the same one, which is the frame both
-        // clients have finished with, however long the host took to get
-        // there. Nothing here compares against the expected image, so a
-        // compositor that settles on the wrong picture still fails below
-        // with the real difference.
-        let taken = settled(&for_clients);
+    let desk = Desk::new(name, lines);
+    let (line, taken) = running(&desk, &desk.dumping(), |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
+        let _ = frame_until(ends, "the two windows drawn", is_picture(&expected()));
+        let taken = compositor_shot::take(&ends.socket, 0);
+        ends.stop();
         for window in windows {
             let _ = window.join();
         }
         taken
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let taken = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     let taken =
         taken.unwrap_or_else(|why| panic!("the screenshot: {why}; the compositor said {line}"));
 
@@ -2049,7 +2131,7 @@ fn screenshot_of(name: &str, lines: &str) -> (compositor_shot::Shot, Vec<u8>, St
         (WIDTH, HEIGHT),
         "the screenshot is not the screen's size"
     );
-    (taken, last_frame(&frames), line)
+    (taken, last_frame(&desk.ends.frames), line)
 }
 
 /// What is left after a window is closed from outside it.
@@ -2061,55 +2143,35 @@ fn screenshot_of(name: &str, lines: &str) -> (compositor_shot::Shot, Vec<u8>, St
 /// it had just compacted would get the first right and the second wrong.
 #[test]
 fn the_window_left_after_a_close_is_drawn_from_its_own_buffer() {
-    let work = workspace("closed");
-    let socket = work.join("wayland");
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        deadline: Some(12000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut windows = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = for_clients.clone();
-            windows.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
+    let want = image(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data/one-client-alone.xrle"),
+    );
+    let desk = Desk::new("closed", "");
+    let alone = want.clone();
+    let (line, (closed, taken)) = running(&desk, &desk.dumping(), move |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
         let closed = compositor_lswt::run(
-            &for_clients,
+            &ends.socket,
             &compositor_lswt::Want::Close("one".to_owned()),
         );
-        // Long enough for the window that is left to be told its new size
-        // and to draw at it.
-        std::thread::sleep(Duration::from_millis(2500));
-        let taken = compositor_shot::take(&for_clients, 0);
+        // The window that is left told its new size and drawn at it: the
+        // screen is then the picture of it alone, and the screenshot is
+        // taken of that screen.
+        let _ = frame_until(ends, "the window left drawn alone", is_picture(&alone));
+        let taken = compositor_shot::take(&ends.socket, 0);
+        ends.stop();
         for window in windows {
             let _ = window.join();
         }
         (closed, taken)
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let (closed, taken) = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     let _ = closed.unwrap_or_else(|why| panic!("closing: {why}"));
     let taken = taken.unwrap_or_else(|why| panic!("the screenshot: {why}"));
 
-    let want = image(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data/one-client-alone.xrle"),
-    );
     let differing = taken
         .pixels
         .chunks_exact(3)
@@ -2144,44 +2206,43 @@ fn the_window_left_after_a_close_is_drawn_from_its_own_buffer() {
 /// workspace, which a compositor still tiling a ghost cannot produce.
 #[test]
 fn a_client_that_destroys_one_of_its_two_windows_leaves_the_other_alone() {
-    let work = workspace("twin");
-    let socket = work.join("wayland");
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        deadline: Some(16000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+    let want = image(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data/one-client-alone.xrle"),
+    );
+    let desk = Desk::new("twin", "");
+    let alone = want.clone();
+    let (line, (both, left, taken)) = running(&desk, &desk.dumping(), move |ends| {
         // One client, whose kept window is the gradient: that is the window
         // `src/user/system/linux/compositor/render` blesses alone, and the second window this
         // client opens draws the other pattern.
-        let path = for_clients.clone();
-        let client =
-            std::thread::spawn(move || connect(&path, Pattern::Gradient, "two", Shape::Twin));
-
-        let both = titles_until(&for_clients, 2);
-        let left = titles_until(&for_clients, 1);
-        // Long enough for the window that is left to be told its new size
-        // and to draw at it, as the close test beside this one waits.
-        std::thread::sleep(Duration::from_millis(2500));
-        let taken = compositor_shot::take(&for_clients, 0);
+        let socket = ends.socket.clone();
+        let drawn = ends.work.join("drawn-two");
+        let close = ends.work.join("close-two-second");
+        let closing = close.clone();
+        let client = std::thread::spawn(move || {
+            compositor_pattern::client::run_twin_on(
+                &socket,
+                Pattern::Gradient,
+                "two",
+                drawn,
+                closing,
+            )
+            .unwrap_or_else(|error| format!("pattern failed: {error}"))
+        });
+        // The second window goes once the list has been seen with both:
+        // up for as long as looking takes, not for a time.
+        let both = titles_until(&ends.socket, 2);
+        std::fs::write(&close, b"").expect("the word to close the second window");
+        let left = titles_until(&ends.socket, 1);
+        // The window that is left told its new size and drawn at it, as
+        // the close test beside this one waits.
+        let _ = frame_until(ends, "the window kept drawn alone", is_picture(&alone));
+        let taken = compositor_shot::take(&ends.socket, 0);
+        ends.stop();
         let _ = client.join();
         (both, left, taken)
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let (both, left, taken) = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     let taken = taken.unwrap_or_else(|why| panic!("the screenshot: {why}"));
 
     assert_eq!(
@@ -2204,9 +2265,6 @@ fn a_client_that_destroys_one_of_its_two_windows_leaves_the_other_alone() {
         "the window left should be the one the client kept, not {left:?}"
     );
 
-    let want = image(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data/one-client-alone.xrle"),
-    );
     let differing = taken
         .pixels
         .chunks_exact(3)
@@ -2223,22 +2281,19 @@ fn a_client_that_destroys_one_of_its_two_windows_leaves_the_other_alone() {
 /// The windows a taskbar can see, once there are `count` of them.
 ///
 /// Polled rather than slept for, because what this waits on is a client
-/// making a window and the compositor telling a third program about it --
-/// two round trips whose timing is the machine's, not the test's. Gives
-/// what the list held on the last look, so a caller that never saw `count`
-/// windows fails with the list it did see.
+/// making or closing a window and the compositor telling a third program
+/// about it -- two round trips whose timing is the machine's, not the
+/// test's. A list that never has `count` windows fails the test with the
+/// list it last saw.
 fn titles_until(socket: &Path, count: usize) -> Vec<String> {
-    let mut seen = Vec::new();
-    for _ in 0..100 {
-        if let Ok(lines) = compositor_lswt::run(socket, &compositor_lswt::Want::List) {
-            seen = lines;
-            if seen.len() == count {
-                return seen;
-            }
+    until(&format!("a taskbar's list of {count}"), || {
+        let lines = compositor_lswt::run(socket, &compositor_lswt::Want::List)?;
+        if lines.len() == count {
+            Ok(lines)
+        } else {
+            Err(format!("{lines:?}"))
         }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    seen
+    })
 }
 
 /// A locked screen shows the lock and nothing of what was under it.
@@ -2251,49 +2306,43 @@ fn titles_until(socket: &Path, count: usize) -> Vec<String> {
 /// strip of them at any edge.
 #[test]
 fn a_locked_screen_shows_the_lock_and_none_of_the_windows() {
-    let work = workspace("locked");
-    let socket = work.join("wayland");
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        deadline: Some(14000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
+    let want = image(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data/locked-screen.xrle"),
+    );
+    let desk = Desk::new("locked", "");
+    let lock_screen = want.clone();
+    let (line, (locked, taken)) = running(&desk, &desk.dumping(), move |ends| {
+        let windows = [
+            ends.open(Pattern::Checkerboard, "one", Shape::Window),
+            ends.open(Pattern::Gradient, "two", Shape::Window),
+        ];
+        // The lock is taken in a thread of its own and held until the
+        // screenshot below has been taken: the screen showing the lock is
+        // what the screenshot waits for, and the lock is let go after.
+        let release = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let released = std::sync::Arc::clone(&release);
+        let locking = ends.socket.clone();
+        let lock = std::thread::spawn(move || {
+            compositor_lock::lock_until(&locking, &|| {
+                released.load(std::sync::atomic::Ordering::SeqCst)
+            })
+        });
+        let _ = frame_until(ends, "the screen locked", |frame| {
+            if lock.is_finished() {
+                panic!("the lock ended before the screen showed it")
             }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut windows = Vec::new();
-        for (pattern, title) in [(Pattern::Checkerboard, "one"), (Pattern::Gradient, "two")] {
-            let path = for_clients.clone();
-            windows.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, Shape::Window)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        // The lock is taken in a thread of its own and held, so that the
-        // screenshot below is taken while it is up.
-        let locking = for_clients.clone();
-        let lock =
-            std::thread::spawn(move || compositor_lock::lock(&locking, Duration::from_secs(4)));
-        std::thread::sleep(Duration::from_millis(2500));
-        let taken = compositor_shot::take(&for_clients, 0);
+            is_picture(&lock_screen)(frame)
+        });
+        let taken = compositor_shot::take(&ends.socket, 0);
+        release.store(true, std::sync::atomic::Ordering::SeqCst);
         let locked = lock.join().unwrap_or_else(|_| Err("panicked".to_owned()));
+        ends.stop();
         for window in windows {
             let _ = window.join();
         }
         (locked, taken)
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let (locked, taken) = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     let locked = locked.unwrap_or_else(|why| panic!("locking: {why}; the compositor said {line}"));
     assert_eq!(
         locked.screens, 1,
@@ -2306,9 +2355,6 @@ fn a_locked_screen_shows_the_lock_and_none_of_the_windows() {
     );
 
     let taken = taken.unwrap_or_else(|why| panic!("the screenshot: {why}"));
-    let want = image(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../render/tests/data/locked-screen.xrle"),
-    );
     let differing = taken
         .pixels
         .chunks_exact(3)
@@ -2368,22 +2414,10 @@ fn a_bars_menu_is_blurred_when_its_layerrule_says_blur_popups() {
 /// windows, required to be `src/user/system/linux/compositor/render`'s `golden` image, with
 /// `lines` added to the configuration.
 fn menu_is(name: &str, shape: Shape, lines: &str, golden: &str) {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let config = undithered(&work);
-    if !lines.is_empty() {
-        let mut text = std::fs::read_to_string(&config).expect("the configuration");
-        text.push_str(lines);
-        std::fs::write(&config, text).expect("the configuration");
-    }
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        deadline: Some(12000),
-        config: Some(config),
-        ..Options::default()
-    };
+    let want = image(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../render/tests/data/{golden}.xrle")),
+    );
+    let desk = Desk::new(name, lines);
 
     // A bar is a third client, before the windows, so they tile under it.
     let mut clients = Vec::new();
@@ -2395,39 +2429,27 @@ fn menu_is(name: &str, shape: Shape, lines: &str, golden: &str) {
     }
     clients.push((Pattern::Gradient, "two", Shape::Window));
 
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let mut windows = Vec::new();
-        for (pattern, title, shape) in clients {
-            let path = for_clients.clone();
-            windows.push(std::thread::spawn(move || {
-                connect(&path, pattern, title, shape)
-            }));
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        // Long enough for the popup to be placed, configured and drawn.
-        std::thread::sleep(Duration::from_millis(3000));
-        let taken = compositor_shot::take(&for_clients, 0);
+    let menu = want.clone();
+    let what = format!("the screen settled on {golden}");
+    let (line, taken) = running(&desk, &desk.dumping(), move |ends| {
+        let windows: Vec<_> = clients
+            .into_iter()
+            .map(|(pattern, title, shape)| ends.open(pattern, title, shape))
+            .collect();
+        // The popup placed, configured and drawn, over windows drawn at
+        // the sizes they were given: the picture the renderer blesses.
+        let _ = frame_until(ends, &what, is_picture(&menu));
+        let taken = compositor_shot::take(&ends.socket, 0);
+        ends.stop();
         for window in windows {
             let _ = window.join();
         }
         taken
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let taken = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     let taken =
         taken.unwrap_or_else(|why| panic!("the screenshot: {why}; the compositor said {line}"));
 
-    let want = image(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../render/tests/data/{golden}.xrle")),
-    );
     let differing = taken
         .pixels
         .chunks_exact(3)
@@ -2471,6 +2493,20 @@ mod patch {
     pub(super) const TOPLEVEL: ObjectId = ObjectId(9);
     pub(super) const POOL: ObjectId = ObjectId(10);
     pub(super) const BUFFER: ObjectId = ObjectId(11);
+    /// The `wl_surface.frame` asked for with the last commit, whose `done`
+    /// says the compositor drew it.
+    pub(super) const FRAME: ObjectId = ObjectId(12);
+    /// The `wl_display.sync` after the last commit, for a commit that has
+    /// nothing to draw: its `done` says the compositor has read it.
+    pub(super) const READ: ObjectId = ObjectId(13);
+    /// The `wl_surface.frame` asked for with the commit that acks the first
+    /// configure and carries no buffer: its `done` says a frame has been
+    /// drawn with the window placed and still bare.
+    pub(super) const BARE: ObjectId = ObjectId(14);
+    /// The first of the `wl_surface.frame`s a square asks for, one id a
+    /// square, so that no id is used again before the compositor has let
+    /// it go.
+    pub(super) const PACED: u32 = 100;
 
     /// The side of the square it repaints, and where it is in the buffer.
     /// Away from the corners, so no rounding cuts it.
@@ -2500,7 +2536,19 @@ struct Patcher {
     shared: Option<compositor_shm::Shared>,
     drawn: u32,
     marked: u32,
+    /// How many squares it repaints.
+    marks: u32,
     throw: Throw,
+    /// Whether the compositor has said it drew the last commit -- or, for
+    /// a commit with nothing to draw, that it has read it.
+    finished: bool,
+    /// Whether the window has been placed and drawn bare, and its buffer
+    /// may be drawn.
+    placed: bool,
+    /// Whether the bare frame has been asked for.
+    bare_asked: bool,
+    /// Whether the last square's frame is still to be drawn.
+    awaiting: bool,
 }
 
 /// What the patching client does with its pool and its buffer once it has
@@ -2545,6 +2593,8 @@ fn interface_of(id: ObjectId) -> Option<&'static Interface> {
         patch::SHELL => &xdg_shell::XDG_WM_BASE,
         patch::POOL => &WL_SHM_POOL,
         patch::BUFFER => &WL_BUFFER,
+        patch::FRAME | patch::READ | patch::BARE => &WL_CALLBACK,
+        ObjectId(paced) if paced >= patch::PACED => &WL_CALLBACK,
         _ => return None,
     })
 }
@@ -2692,6 +2742,20 @@ impl Patcher {
             }
         }
         self.marked = self.marked.saturating_add(1);
+        // Each square but the last waits for the frame that drew it before
+        // the next is made, as a toolkit paces itself: a host too busy to
+        // draw for a while got the squares in one heap, one frame drew them
+        // all, and no frame of the run was small.
+        if self.marked < self.marks {
+            self.awaiting = true;
+            send(
+                out,
+                patch::SURFACE,
+                wl_surface::request::FRAME,
+                &[ArgType::NewId],
+                &[Arg::NewId(ObjectId(patch::PACED + self.marked))],
+            );
+        }
         self.attach(out, (left, top, patch::SIDE, patch::SIDE));
     }
 
@@ -2723,9 +2787,32 @@ impl Patcher {
         if self.throw == Throw::BeforeCommit {
             send(out, patch::BUFFER, wl_buffer::request::DESTROY, &[], &[]);
         }
+        // The last commit this client makes asks to hear when it was drawn:
+        // the end of the run is that frame, not a time.
+        let last = self.marked >= self.marks;
+        if last && self.throw != Throw::BeforeCommit {
+            send(
+                out,
+                patch::SURFACE,
+                wl_surface::request::FRAME,
+                &[ArgType::NewId],
+                &[Arg::NewId(patch::FRAME)],
+            );
+        }
         send(out, patch::SURFACE, wl_surface::request::COMMIT, &[], &[]);
         if self.throw == Throw::Both {
             send(out, patch::BUFFER, wl_buffer::request::DESTROY, &[], &[]);
+        }
+        // A commit with no buffer is never drawn, so no frame is ever done
+        // for it: the compositor having read it is the end instead.
+        if last && self.throw == Throw::BeforeCommit {
+            send(
+                out,
+                patch::DISPLAY,
+                wl_display::request::SYNC,
+                &[ArgType::NewId],
+                &[Arg::NewId(patch::READ)],
+            );
         }
         self.drawn = self.drawn.saturating_add(1);
     }
@@ -2756,6 +2843,19 @@ impl Patcher {
             }
             patch::SYNC if opcode == wl_callback::event::DONE => {
                 self.bind(title, out)?;
+            }
+            patch::FRAME | patch::READ if opcode == wl_callback::event::DONE => {
+                self.finished = true;
+            }
+            ObjectId(paced) if paced >= patch::PACED && opcode == wl_callback::event::DONE => {
+                self.awaiting = false;
+            }
+            // A frame has been drawn with the window placed and bare: its
+            // whole first buffer goes now, so the compositor's next frame
+            // has a window it last drew bare to draw the buffer into.
+            patch::BARE if opcode == wl_callback::event::DONE => {
+                self.placed = true;
+                self.draw(out)?;
             }
             patch::SHELL if opcode == xdg_wm_base::event::PING => {
                 let serial = args.first().and_then(Arg::as_uint).unwrap_or(0);
@@ -2788,7 +2888,21 @@ impl Patcher {
                     &[ArgType::Uint],
                     &[Arg::Uint(serial)],
                 );
-                self.draw(out)?;
+                if self.placed {
+                    self.draw(out)?;
+                } else if !self.bare_asked {
+                    // The ack committed with no buffer, and a frame callback
+                    // to say when the compositor has drawn the window so.
+                    self.bare_asked = true;
+                    send(
+                        out,
+                        patch::SURFACE,
+                        wl_surface::request::FRAME,
+                        &[ArgType::NewId],
+                        &[Arg::NewId(patch::BARE)],
+                    );
+                    send(out, patch::SURFACE, wl_surface::request::COMMIT, &[], &[]);
+                }
             }
             _ => {}
         }
@@ -2797,18 +2911,26 @@ impl Patcher {
 }
 
 /// A client that draws its window one colour and then repaints one small
-/// square of it `marks` times, damaging only that square.
+/// square of it `marks` times, damaging only that square; it says on
+/// `drawn` when the compositor has drawn its last commit, and stays until
+/// the compositor goes, as a window does.
 ///
 /// The requests are every toolkit's, in the order the protocol requires: a
 /// surface, an `xdg_surface` over it, a toplevel, a commit with no buffer
 /// that asks to be configured, and then a buffer attached and committed for
 /// each frame. What is unusual is only the damage.
-fn patching(socket: &Path, title: &str, marks: u32) -> String {
-    patching_with(socket, title, marks, Throw::Keep)
+fn patching(socket: &Path, title: &str, marks: u32, drawn: &std::sync::mpsc::Sender<()>) -> String {
+    patching_with(socket, title, marks, Throw::Keep, drawn)
 }
 
 /// [`patching`], doing `throw` with its pool and buffer.
-fn patching_with(socket: &Path, title: &str, marks: u32, throw: Throw) -> String {
+fn patching_with(
+    socket: &Path,
+    title: &str,
+    marks: u32,
+    throw: Throw,
+    drawn: &std::sync::mpsc::Sender<()>,
+) -> String {
     let stream = std::os::unix::net::UnixStream::connect(socket)
         .unwrap_or_else(|error| panic!("connecting to {}: {error}", socket.display()));
     let mut connection = Connection::new(stream).expect("a connection");
@@ -2833,11 +2955,20 @@ fn patching_with(socket: &Path, title: &str, marks: u32, throw: Throw) -> String
         shared: None,
         drawn: 0,
         marked: 0,
+        marks,
         throw,
+        finished: false,
+        placed: false,
+        bare_asked: false,
+        awaiting: false,
     };
     let started = std::time::Instant::now();
-    let mut last = started;
-    while started.elapsed() < Duration::from_secs(30) {
+    let mut said = false;
+    while started.elapsed() < BACKSTOP {
+        if state.finished && !said {
+            said = true;
+            let _ = drawn.send(());
+        }
         match connection.receive() {
             Ok(_) => {}
             Err(RecvError::WouldBlock) => std::thread::sleep(Duration::from_millis(2)),
@@ -2870,13 +3001,14 @@ fn patching_with(socket: &Path, title: &str, marks: u32, throw: Throw) -> String
         if consumed > 0 {
             connection.consume(consumed, 0);
         }
-        // One square every so often, which is what this client is for: far
-        // enough apart that each of them is a frame of its own.
-        if state.shared.is_some()
-            && state.marked < marks
-            && last.elapsed() > Duration::from_millis(200)
-        {
-            last = std::time::Instant::now();
+        // One square a frame, which is what this client is for: each waits
+        // for the frame that drew the one before, so each is a frame of its
+        // own -- except the first, which goes in the same write as the
+        // commit of the whole window, so the compositor reads both commits
+        // at once. The second's damage is all the surface says by then,
+        // and a compositor that took it for both drew the window only where
+        // the square is (it did, on a starved host, until 2026-10-23).
+        if state.shared.is_some() && state.marked < marks && !state.awaiting {
             state.mark(&mut out);
         }
         if !out.is_empty() {
@@ -2887,8 +3019,16 @@ fn patching_with(socket: &Path, title: &str, marks: u32, throw: Throw) -> String
         }
     }
     format!(
-        "patch: {title} {}x{} drew {} marked {}",
-        state.size.0, state.size.1, state.drawn, state.marked
+        "patch: {title} {}x{} drew {} marked {}{}",
+        state.size.0,
+        state.size.1,
+        state.drawn,
+        state.marked,
+        if state.finished {
+            ""
+        } else {
+            ", the last never drawn"
+        }
     )
 }
 
@@ -2923,48 +3063,31 @@ fn how_many(frame: &[u8], colour: [u8; 4]) -> usize {
 /// was worked out.
 #[test]
 fn a_small_commit_redraws_a_small_part_of_the_screen() {
-    let work = workspace("damage");
-    let socket = work.join("wayland");
-    let frames = work.join("frames");
-
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        dump: Some(frames.clone()),
-        deadline: Some(8000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-
-    let for_clients = socket.clone();
-    let clients = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_clients.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+    // Animations off: a window sliding redraws its whole path every frame,
+    // and squares paced by frames as these are would all fall inside the
+    // first window's slide to its half when the second opens. What is
+    // tested is the damage a commit makes, not how a slide is drawn.
+    let desk = Desk::new("damage", "animations:enabled = 0\n");
+    let (line, said) = running(&desk, &desk.dumping(), |ends| {
         // The pattern client first, so the dwindle tree is the one every
         // other test here builds: the first window takes the whole area
         // and the second splits it.
-        let first = for_clients.clone();
-        let one = std::thread::spawn(move || {
-            connect(&first, Pattern::Checkerboard, "one", Shape::Window)
-        });
-        std::thread::sleep(Duration::from_millis(250));
-        let second = for_clients.clone();
-        let two = std::thread::spawn(move || patching(&second, "two", 12));
+        let one = ends.open(Pattern::Checkerboard, "one", Shape::Window);
+        let second = ends.socket.clone();
+        let (drawn, last_drawn) = std::sync::mpsc::channel();
+        let two = std::thread::spawn(move || patching(&second, "two", 12, &drawn));
+        // Until the compositor has drawn the twelfth square, and no longer.
+        let _ = last_drawn.recv_timeout(PATIENCE);
+        ends.stop();
         let lines = [
             one.join().unwrap_or_else(|_| "one panicked".to_owned()),
             two.join().unwrap_or_else(|_| "two panicked".to_owned()),
         ];
         lines.join("; ")
-    });
-
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let said = clients.join().expect("the clients finished");
+    })
+    .expect("the compositor ran");
     let report = format!("{line} | {said}");
-    let frame = last_frame(&frames);
+    let frame = last_frame(&desk.ends.frames);
 
     assert!(
         said.contains("marked 12"),
@@ -3000,33 +3123,22 @@ fn a_small_commit_redraws_a_small_part_of_the_screen() {
 /// The window a client drew with `throw`, alone on the screen: how many of
 /// the last frame's pixels are its colour, and what was said.
 fn thrown(name: &str, throw: Throw) -> (usize, String) {
-    let work = workspace(name);
-    let socket = work.join("wayland");
-    let frames = work.join("frames");
-    let options = Options {
-        display: socket.to_string_lossy().into_owned(),
-        headless: Some((WIDTH, HEIGHT)),
-        dump: Some(frames.clone()),
-        deadline: Some(3000),
-        config: Some(undithered(&work)),
-        ..Options::default()
-    };
-    let for_client = socket.clone();
-    let client = std::thread::spawn(move || {
-        for _ in 0..400 {
-            if for_client.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        patching_with(&for_client, "thrown", 0, throw)
-    });
-    let line = hyprix::run(&options).expect("the compositor ran");
-    let said = client
-        .join()
-        .unwrap_or_else(|_| "the client panicked".to_owned());
+    let desk = Desk::new(name, "");
+    let (line, said) = running(&desk, &desk.dumping(), move |ends| {
+        let socket = ends.socket.clone();
+        let (drawn, last_drawn) = std::sync::mpsc::channel();
+        let client = std::thread::spawn(move || patching_with(&socket, "thrown", 0, throw, &drawn));
+        // Until the compositor has drawn the commit, or for the control,
+        // whose commit has nothing to draw, read it.
+        let _ = last_drawn.recv_timeout(PATIENCE);
+        ends.stop();
+        client
+            .join()
+            .unwrap_or_else(|_| "the client panicked".to_owned())
+    })
+    .expect("the compositor ran");
     (
-        how_many(&last_frame(&frames), patch::BASE),
+        how_many(&last_frame(&desk.ends.frames), patch::BASE),
         format!("{line} | {said}"),
     )
 }

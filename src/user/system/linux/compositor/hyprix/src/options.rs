@@ -31,6 +31,15 @@ pub struct Options {
     /// a card whose driver timed out does: what a test of the compositor
     /// riding a stalled driver out asks for. Not a command-line option.
     pub refuse_flips: u32,
+    /// Move every animation on by this many milliseconds a drawn frame
+    /// rather than by the wall clock's: what a test of an animation's
+    /// frames asks for, so that a slide is the same frames however busy
+    /// the host is. A two-second slide drawn by a starved compositor was
+    /// three frames on one run and twenty on the next, and a test that
+    /// counts the places between was a test of the host's load. `None` is
+    /// the wall clock, which is what a screen wants. Not a command-line
+    /// option.
+    pub animation_step: Option<u32>,
     /// Where the arrangement of each set of monitors is saved
     /// (`crate::layouts`): `$XDG_STATE_HOME/hyprix` when started from the
     /// command line, nowhere for a compositor made in a test.
@@ -67,6 +76,7 @@ impl Default for Options {
             instance: None,
             renderer: Renderer::Auto,
             refuse_flips: 0,
+            animation_step: None,
             state_dir: None,
         }
     }

@@ -56,16 +56,35 @@ pub struct Locked {
 /// A sentence saying what could not be done, including the compositor not
 /// offering the protocol and never saying the screen was covered.
 pub fn lock(socket: &std::path::Path, held: Duration) -> Result<Locked, String> {
+    // From the moment the screen is covered, which is when `release` is
+    // first asked.
+    let until = std::cell::Cell::new(None::<Instant>);
+    lock_until(socket, &|| {
+        let at = until.get().unwrap_or_else(|| Instant::now() + held);
+        until.set(Some(at));
+        Instant::now() >= at
+    })
+}
+
+/// Lock the screen, hold it until `release` says so, and unlock.
+///
+/// What a test that takes a picture of the locked screen asks for: the
+/// lock is held for as long as the picture takes, rather than for a time
+/// that a busy host may not take the picture inside. `release` is asked
+/// between turns, about every ten milliseconds.
+///
+/// # Errors
+///
+/// As [`lock`].
+pub fn lock_until(socket: &std::path::Path, release: &dyn Fn() -> bool) -> Result<Locked, String> {
     let mut session = Session::connect(socket)?;
     session.run(PATIENCE)?;
     if !session.told {
         return Err("the compositor never said the screen was covered".to_owned());
     }
-    // Held for a moment so that a test can take a picture of a locked
-    // screen, which is the only way to see that the windows have stopped
-    // being drawn.
-    let until = Instant::now() + held;
-    while Instant::now() < until {
+    // Held so that a test can take a picture of a locked screen, which is
+    // the only way to see that the windows have stopped being drawn.
+    while !release() {
         session.turn()?;
         std::thread::sleep(Duration::from_millis(10));
     }
