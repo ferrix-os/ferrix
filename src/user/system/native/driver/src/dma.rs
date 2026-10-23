@@ -155,6 +155,40 @@ impl Dma {
         u16::from_le(unsafe { ptr::read_volatile(address as *const u16) })
     }
 
+    /// Copy `len` bytes of `from` at `at` here, at `offset`: a read one
+    /// buffer holds handed over in another, at memory speed rather than a
+    /// byte a call.
+    ///
+    /// Only between commands: no device may be writing `from`'s bytes or
+    /// reading or writing these while the copy runs, so a plain copy is
+    /// what is meant.
+    ///
+    /// # Panics
+    ///
+    /// If either range is not inside its memory.
+    pub fn copy_from(&mut self, offset: usize, from: &Dma, at: usize, len: usize) {
+        assert!(
+            offset.checked_add(len).is_some_and(|end| end <= self.len),
+            "a copy inside the mapping"
+        );
+        assert!(
+            at.checked_add(len).is_some_and(|end| end <= from.len),
+            "a copy from inside the mapping"
+        );
+        // SAFETY: two mappings the kernel made for this process, each living
+        // as long as its VMO handle, which only `free` closes; both ranges
+        // were checked; they are two VMOs' mappings, so they do not overlap;
+        // and no device touches either while the caller copies, as the
+        // caller promises.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                (from.base + at) as *const u8,
+                (self.base + offset) as *mut u8,
+                len,
+            );
+        }
+    }
+
     /// Write the little-endian `u16` at `offset`, in one access: the other
     /// side may read it at any moment, and must never see one byte changed.
     ///

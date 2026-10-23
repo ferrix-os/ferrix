@@ -368,3 +368,97 @@ fn shutdown_flushes_and_stops() {
         0
     );
 }
+
+#[test]
+fn a_command_past_its_first_millisecond_is_seen_within_a_poll() {
+    let (model, clock, ahci) = start(Model::new(100, 512));
+    let mut ahci = ahci.unwrap();
+    // A drive that takes 1.5 ms for the read. Polled every millisecond
+    // after the first, as every other wait is, the read was seen done at
+    // 2 ms: half a millisecond lost to every command that ran long.
+    model.borrow_mut().slow = Some((clock.clone(), 1_500_000));
+    let seg = [Segment {
+        addr: 0x10_0000,
+        len: 512,
+    }];
+    let issued = clock.get();
+    ahci.transfer(Op::Read, 1, 1, &seg).unwrap();
+    let took = clock.get() - issued;
+    assert!(took >= 1_500_000, "seen done before it was: {took} ns");
+    assert!(
+        took <= 1_500_000 + crate::driver::COMMAND_POLL,
+        "seen done {took} ns after it was issued"
+    );
+}
+
+#[test]
+fn a_read_started_is_finished_and_its_sectors_are_there() {
+    let (model, clock, ahci) = start(Model::new(100, 512));
+    let mut ahci = ahci.unwrap();
+    let disk = pattern(100 * 512, 5);
+    model.borrow_mut().disk.copy_from_slice(&disk);
+    model.borrow_mut().slow = Some((clock.clone(), 300_000));
+    let seg = [Segment {
+        addr: 0x30_0000,
+        len: 8 * 512,
+    }];
+    let before = clock.get();
+    assert_eq!(ahci.start_read(20, 8, &seg), Ok(8));
+    // Launched and not waited for: no time passed, and nothing is there.
+    assert_eq!(clock.get(), before);
+    assert_eq!(model.borrow().seen.last().unwrap().lba, 20);
+    ahci.finish().unwrap();
+    assert!(clock.get() - before >= 300_000);
+    assert_eq!(
+        model.borrow_mut().read_bytes(0x30_0000, 8 * 512),
+        &disk[20 * 512..28 * 512]
+    );
+    // Nothing is outstanding now.
+    assert_eq!(ahci.finish(), Ok(()));
+}
+
+#[test]
+fn a_transfer_waits_for_a_read_started_first() {
+    let (model, clock, ahci) = start(Model::new(100, 512));
+    let mut ahci = ahci.unwrap();
+    model.borrow_mut().slow = Some((clock, 300_000));
+    let ahead = [Segment {
+        addr: 0x30_0000,
+        len: 4096,
+    }];
+    assert_eq!(ahci.start_read(40, 8, &ahead), Ok(8));
+    let data = pattern(512, 1);
+    model.borrow_mut().write_bytes(0x10_0000, &data);
+    let seg = [Segment {
+        addr: 0x10_0000,
+        len: 512,
+    }];
+    // The model runs one command at a time and refuses a second while the
+    // first runs; the write is issued only after the read ended.
+    ahci.transfer(Op::Write, 3, 1, &seg).unwrap();
+    assert_eq!(&model.borrow().disk[3 * 512..4 * 512], &data[..]);
+    let m = model.borrow();
+    let n = m.seen.len();
+    assert_eq!((m.seen[n - 2].opcode, m.seen[n - 2].lba), (0x25, 40));
+    assert_eq!((m.seen[n - 1].opcode, m.seen[n - 1].lba), (0x35, 3));
+}
+
+#[test]
+fn a_read_started_on_fragments_reads_what_one_table_holds() {
+    let (model, _, ahci) = start(Model::new(200, 512));
+    let mut ahci = ahci.unwrap();
+    let segs: Vec<_> = (0..130u64)
+        .map(|i| Segment {
+            addr: 0x100_0000 + i * 0x2000,
+            len: 512,
+        })
+        .collect();
+    assert_eq!(ahci.start_read(7, 130, &segs), Ok(120));
+    ahci.finish().unwrap();
+    assert_eq!(model.borrow().seen.last().unwrap().count, 120);
+    assert_eq!(
+        ahci.start_read(150, 51, &segs[..51]),
+        Err(Error::OutOfRange)
+    );
+    assert_eq!(ahci.start_read(0, 2, &segs[..1]), Err(Error::BadBuffer));
+}
