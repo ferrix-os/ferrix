@@ -91,13 +91,13 @@ why = "`max`: IEC 61508-3 SC 4 / ISO 26262 ASIL D (MICROKERNEL.md §6.5); DAL A'
 why = "where the Linux ABI runs: as linuxd in user space, built into ring 0 through the shim (MICROKERNEL.md §4), or nowhere, with linux_abi=off (LINUX-ABI-SEPARATION.md §11.7: the Linux ABI's placement flag)"
 values.user = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
 values.kernel = { allows = ["none"], lands = "today", built = "yes" }
-values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["linux_abi=off"] }
+values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["linux_abi=off"] }
 
 [flags.fs]
 why = "btrfs as btrfsd, the btrfs crates in ring 0 with today's glue, or no filesystem in a kernel without the Linux ABI, whose VFS it is"
 values.server = { allows = ["sc4", "present", "sc2", "none"], lands = "M5", built = "no" }
 values.kernel = { allows = ["none"], lands = "today", built = "yes", requires = ["personality=kernel"] }
-values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
+values.none = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
 [flags.mitigations]
 why = "F-31's speculation defences and KASLR (docs/certification/SPECULATION.md); Zenbleed's and GDS's fixes leave it with DF6"
@@ -158,9 +158,9 @@ values.none = { allows = ["sc4", "present", "sc2", "none"], lands = "today", bui
 values.game_mode = { allows = ["none"], lands = "game mode's design", built = "stand-in", stands_in = "none" }
 
 [flags.linux_abi]
-why = "whether the kernel offers the Linux ABI beside its native ABI (LINUX-ABI-SEPARATION.md §11.6-11.8); its levels are its placement's, `personality`. `off` is build-only today: it type-checks on every architecture and carries no claim, and boots nothing useful until §7's rows land (§11.11)"
+why = "whether the kernel offers the Linux ABI beside its native ABI (LINUX-ABI-SEPARATION.md §11.6-11.8); its levels are its placement's, `personality`. `off` is build-only today: it type-checks on every architecture and carries no claim, and boots nothing useful until §7's rows land (§11.11); it, personality=none and fs=none allow `none` alone until a profile carries them with its own evidence (ledger 3257 (1), 3208 (6)(g)), since the board glue stays in ring 0 with them"
 values.on = { allows = ["sc4", "present", "sc2", "none"], lands = "today", built = "yes" }
-values.off = { allows = ["sc4", "present", "sc2", "none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
+values.off = { allows = ["none"], lands = "LINUX-ABI-SEPARATION.md §11.11", built = "yes", requires = ["personality=none"] }
 
 # ---------------------------------------------------------------------------
 # The boot options that stay boot options (BF4): the registry. A read of any

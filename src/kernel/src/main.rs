@@ -189,17 +189,20 @@ impl syscall::Personality for NoLinux {
 /// The core's T2 hook, bound when the kernel is linked: the personality's
 /// quiet predicate, called directly (`trap::filter_quiet`, which decides
 /// whether to ask).
-#[cfg(ferrix_linux_abi = "on")]
 #[unsafe(no_mangle)]
 fn ferrix_filter_quiet() -> bool {
-    syscall::seccomp::quiet()
+    filter_quiet_of_personality()
 }
 
+/// The predicate [`ferrix_filter_quiet`] forwards to: the Linux personality's
+/// seccomp filter's.
+#[cfg(ferrix_linux_abi = "on")]
+use syscall::seccomp::quiet as filter_quiet_of_personality;
+
 /// Without the Linux ABI no filter is registered, so [`trap::filter_quiet`]
-/// never asks this.
+/// never asks this (`docs/LINUX-ABI-SEPARATION.md` §11.11).
 #[cfg(ferrix_linux_abi = "off")]
-#[unsafe(no_mangle)]
-fn ferrix_filter_quiet() -> bool {
+const fn filter_quiet_of_personality() -> bool {
     false
 }
 

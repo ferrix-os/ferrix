@@ -197,7 +197,9 @@ them, at about 3.5 ns each above a direct call on the reference machine
 (`docs/OPAQUE-KERNEL.md` §9.7, "as built", 2 and 3). The core now declares
 the two in one `unsafe extern "Rust"` block in `trap.rs`, and `main.rs`
 defines each under `#[unsafe(no_mangle)]` as one call of the function above
-(`syscall::native::fast_write_read`, `syscall::seccomp::quiet`). Whether the
+(`syscall::native::fast_write_read`; `filter_quiet_of_personality`, which is
+`syscall::seccomp::quiet` under `linux_abi=on` and `false` under `off`,
+where no filter is registered). Whether the
 core makes either call is still its own decision, at every call, by flags it
 keeps: the fast path's (raised by `fastpath::init` for
 `ferrix.fastpath=on` alone) and the filter's predicate's (raised by

@@ -90,8 +90,8 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
 
 | Flag | Values | What it selects | `max` | `fast` | `desktop` | `present` | Allows | Today | Lands |
 |---|---|---|---|---|---|---|---|---|---|
-| `personality` | `user`, `kernel`, `none` | where the Linux ABI runs (its placement flag, `LINUX-ABI-SEPARATION.md` §11.7): as `linuxd` in user space, built into ring 0, or nowhere. `none` requires `linux_abi=off`, and `off` requires `none` | `user` | `user` | `kernel` | `kernel` (dated exception, ends at M5's flip) | `user`: all; `kernel`: `none`; `none`: all | in ring 0, or `none` | M5 |
-| `fs` | `server`, `kernel`, `none` | btrfs as `btrfsd`, the btrfs crates in ring 0 with today's glue, or no filesystem (the VFS is the Linux ABI's). `kernel` requires `personality=kernel`, `none` requires `personality=none` | `server` | `server` | `kernel` | `kernel` (the same exception) | `server`: all; `kernel`: `none`; `none`: all | in ring 0, or `none` | M5 |
+| `personality` | `user`, `kernel`, `none` | where the Linux ABI runs (its placement flag, `LINUX-ABI-SEPARATION.md` §11.7): as `linuxd` in user space, built into ring 0, or nowhere. `none` requires `linux_abi=off`, and `off` requires `none` | `user` | `user` | `kernel` | `kernel` (dated exception, ends at M5's flip) | `user`: all; `kernel`: `none`; `none`: `none` (until a profile carries it, ledger 3257 (1)) | in ring 0, or `none` | M5 |
+| `fs` | `server`, `kernel`, `none` | btrfs as `btrfsd`, the btrfs crates in ring 0 with today's glue, or no filesystem (the VFS is the Linux ABI's). `kernel` requires `personality=kernel`, `none` requires `personality=none` | `server` | `server` | `kernel` | `kernel` (the same exception) | `server`: all; `kernel`: `none`; `none`: `none` (the same) | in ring 0, or `none` | M5 |
 | `mitigations` | `on`, `off` | F-31's speculation defences (Zenbleed's and GDS's fixes are outside it, below) | `on` | `on` | `on` | `on` | `on`: all; `off`: `none` | `--cfg ferrix_mitigations_off`, renamed | M0 |
 | `partition_speculation` | `exit`, `partition` | `exit`: an IBPB (with IBPB_BRTYPE's semantics) on every restricted exit, none on entry, the full IBPB at every switch between programs and partitions; on a processor reporting SRSO_NO, BTC_NO, no BHI (`speculation::bhi` answering not affected, never `BHI_NO` alone; F-85) and no ITS, with the return predictor cleared at the root switch, the exit IBPB may be skipped, decided at boot, printed, failing closed (`MICROKERNEL.md` §7, ledger 941; nazuna does not qualify); on AArch64 the Spectre-BHB clearing sequence on every exit. `partition`: barriers only at partition switches. Requires `personality=user` | `exit` (the customer: 1.5x seL4 for `max`, 660 ns) | `partition` | not applicable | not applicable | `exit`: all; `partition`: `sc2`, `none` | — | M3 |
 | `ipc_fastpath` | `off`, `on` | the fast path for `channel_write_read` (0x1013) | `off` until the 2026-10-02 rule is met, then `on` | `on` (the rule binds `max` only) | `on` | `off` (today's certified default) | `off`: all; `on`: `sc2`, `none`, and `sc4` and `present` once the rule is met | boot option `ferrix.fastpath` (L.x86_64.159) | M0 |
@@ -103,7 +103,7 @@ explicitly (§4: levels compare standard by standard, so `sc4` covers
 | `ssbd` | `always`, `on_request` | Speculative Store Bypass Disable for every program (today), or per thread for programs that ask (§3.1) | `always` | `always` | `on_request` | `always` | `always`: all; `on_request`: `none` | `always` | M0 |
 | `smt` | `off`, `stibp` | `off`: the kernel runs one hardware thread per core (§3.1); `stibp`: sibling threads run, with STIBP or eIBRS/AutoIBRS's own cover | `off` | `stibp` | `stibp` | `stibp` | `off`: all; `stibp`: `sc2`, `present`, `none` | `stibp` (SMT runs today; AoU-11 asks the integrator to disable it only on MDS-affected parts) | M0 |
 | `runtime_trades` | `none`, `game_mode` | whether the image contains game mode's privileged, per-application run-time trades (§3.1); with `none` their code is absent | `none` | `none` | `game_mode` | `none` | `none`: all; `game_mode`: `none` | not built | with game mode's design |
-| `linux_abi` | `on`, `off` | whether the kernel offers the Linux ABI beside the native one (`LINUX-ABI-SEPARATION.md` §11.6-11.8); its levels are its placement's, `personality`. `off` compiles the Linux layer (`syscall`'s personality modules, `fs`, `net`, `interfaces`), `stages_check` and the check modules that run a Linux program out; it is build-only and boots nothing useful until that document's §7 rows land (§11.11), and `xtask check` builds it on every architecture | `on` | `on` | `on` | `on` | `on`: all (by `personality`); `off`: all, no profile carries it yet | `on` | §11.11 (build-only) |
+| `linux_abi` | `on`, `off` | whether the kernel offers the Linux ABI beside the native one (`LINUX-ABI-SEPARATION.md` §11.6-11.8); its levels are its placement's, `personality`. `off` compiles the Linux layer (`syscall`'s personality modules, `fs`, `net`, `interfaces`), `stages_check` and the check modules that run a Linux program out; it is build-only and boots nothing useful until that document's §7 rows land (§11.11), and `xtask check` builds it on every architecture | `on` | `on` | `on` | `on` | `on`: all, its level carried by `personality`; `off`: `none`, until a profile carries it with its own evidence, the board glue then classified or cut (ledger 3257 (1), 3208 (6)(g)) | `on` | §11.11 (build-only) |
 
 ### 3.1 The speculation flags' mechanisms (ledger 931)
 
@@ -486,4 +486,10 @@ Design on branch `microkernel-plan`, 2026-10-13.
   order, `personality` and `fs` each gaining `none`, every profile `on`, and
   `off` build-only with no claim (that document's §11.11). The design's
   reviews are ledger lines 3208, 3218, 3219 and 3220; this step's code
-  review is that document's §11.11.
+  review is ledger line 3257, OK IF (1) to (7). `off`, `personality=none`
+  and `fs=none` allow `none` alone for now. Under `off` alone the kernel
+  crate allows dead code and unused dependencies: removing that allow is a
+  precondition of any profile carrying `linux_abi=off`, it shrinks as the
+  checks that run a Linux program are re-homed, and any allow not
+  predicated on `ferrix_linux_abi="off"`, or any widening of it, is a new
+  review.

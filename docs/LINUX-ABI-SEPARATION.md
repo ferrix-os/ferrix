@@ -891,7 +891,14 @@ requiring `linux_abi=off`; `fs` gains `none`, requiring `personality=none`;
 conflict with `personality=user` instead of requiring `kernel`, which is the
 same set plus `none`. Every profile sets `linux_abi = "on"` explicitly
 (3208 (2)); no profile carries `off`, so it has no claim and its `build`
-line says `no claim` (3208 (1)). `personality` keeps its name here; the
+line says `no claim` (3208 (1)). `on` allows every level, its level carried
+by `personality` (`kernel`: `none`, `present` under BF1's exception;
+`user`: all). `off`, `personality=none` and `fs=none` allow `none` alone
+(ledger 3257 (1), option (ii)): the board glue (`platform/st/stm32mp1*`,
+`platform/google/gs201/usb.rs`, load) stays in ring 0 with them, and the
+profile rule would not see it, so a higher level waits for a profile with
+its own evidence (3208 (6)(g)); "allows" there will mean only "does not
+forbid" (3208 (7)). `personality` keeps its name here; the
 rename to a per-ABI placement flag (§11.7) is left to the trait's landing,
 which changes the flag's meaning anyway.
 
@@ -915,7 +922,10 @@ a declaration or a statement:
   their two calls in `smp/check.rs`.
 
 `main.rs` composes `NoLinux` (every Linux number `ENOSYS`, the native range
-answered as always) and a `register_load` of its own that registers board
+answered as always). The link-time hook `ferrix_filter_quiet` stays one
+definition, one forwarding call, to `filter_quiet_of_personality`:
+`syscall::seccomp::quiet` imported under that name with `on`, `false` with
+`off`, where no filter is registered (`composition_root.hooks` says so) and a `register_load` of its own that registers board
 support alone and requires only its bindings and the boot mode (§7 rows 1,
 2, 5). An `off` kernel never prints the success marker: its boot ends with
 `FERRIX-BOOT-UNCHECKED ... the self-checks that run a Linux program not
@@ -923,7 +933,12 @@ built: linux_abi=off`. Under `off` alone the crate allows `dead_code`,
 `unused_imports`, `unused_variables`, `unfulfilled_lint_expectations` and
 `unused_crate_dependencies`, with a reason: about 750 items only the cut code
 used, and the 20 library crates only the Linux ABI reaches, which stay
-ordinary dependencies (3220 (14) option (a)).
+ordinary dependencies (3220 (14) option (a)). The allow is `off`-only and
+temporary (3257 (3)): removing it is a precondition of any profile carrying
+`linux_abi=off`, it shrinks as row 13 re-homes the checks, and any allow not
+predicated on `ferrix_linux_abi="off"`, or any widening of it, is a new
+review. It silences lints, not name resolution: a reference to a module
+`off` cuts is still an error, which the control below shows.
 
 **Evidence** (release builds, nazuna, 2026-10-23):
 
@@ -938,9 +953,12 @@ ordinary dependencies (3220 (14) option (a)).
   architectures; `cargo xtask check` now lints `linux_abi=off` beside
   `checks=off` and `mitigations=off`, so a new static coupling fails the
   check the day it lands (§9 recommendation 2).
-* The `present` x86-64 image against `main`'s: the same 7,618 symbols with
-  the same sizes, `.text` the same length; only `__data_start` moves, by the
-  flag table's growth in read-only data.
+* The `present` images against `main` d1e9e9c79's, release, all three
+  architectures: every named symbol present in both with the same size
+  (x86-64 7,625, AArch64 28,676 plus one `$d` mapping symbol, ARMv7-A
+  15,261); text grows by 112, 192 and 48 bytes, the flag table's and the
+  boot strings' read-only data (ARMv7-A's anonymous constants differ in
+  size accordingly).
 * `xtask`'s resolver test: `off` without `personality=none`, and
   `personality=none` with `on`, are refused; with `personality=none` and
   `fs=none` it resolves as an ad-hoc build at level `none`.
@@ -949,6 +967,13 @@ ordinary dependencies (3220 (14) option (a)).
 process can be started (§7 rows 8 to 12), a user fault still ends in
 `trap.rs`'s fatal (3208 (5)), stage 1's and stage 3's checks in
 `stages_check` are not built until row 13 splits it, and no requirement
-counts as verified in it (3208 (8)). Kernel lines: +277 / -14 in
+counts as verified in it (3208 (8)). Stage 1's memory self-checks
+(`check_loader_allocations`, `check_layout`, `check_direct_map`,
+`check_no_early_window_wraps`) run no Linux program and are cut only because
+`stages_check` is cut whole; row 13 re-homes them first (3257 C1). Nothing
+yet keeps the `off` image linking: `check` lints without a link (C2).
+
+**Review.** Ledger line 3257: OK IF (1) to (7); (1) taken as option (ii),
+(3) and (7) written here and in `BUILD-FLAGS.md`. Kernel lines: +277 / -14 in
 `src/kernel` (almost all `cfg` attributes and the two `off` functions);
 nothing is added to the `on` image's code.

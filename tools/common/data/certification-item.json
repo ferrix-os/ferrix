@@ -580,8 +580,8 @@
       {
         "name": "ferrix_filter_quiet",
         "declared_in": "trap.rs",
-        "forwards_to": "syscall::seccomp::quiet",
-        "why": "T2's quiet predicate, asked by trap::filter_quiet only for a filter registered with it"
+        "forwards_to": "filter_quiet_of_personality",
+        "why": "T2's quiet predicate, asked by trap::filter_quiet only for a filter registered with it: main.rs's filter_quiet_of_personality, which is syscall::seccomp::quiet with linux_abi=on and false with off, where no filter is registered (LINUX-ABI-SEPARATION.md 11.11)"
       }
     ]
   },
