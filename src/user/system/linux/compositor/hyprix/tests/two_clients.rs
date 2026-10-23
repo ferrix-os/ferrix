@@ -3287,3 +3287,209 @@ fn answers_lode_with_the_screen() {
         other => panic!("not a picture: {other:?}"),
     }
 }
+
+/// Ask the compositor `requests` in turn, with no window open, and give
+/// the answers: for what a request changes in the seat or the
+/// configuration rather than in a window.
+fn asked_alone(desk: &Desk, requests: &[&str]) -> Vec<String> {
+    let requests: Vec<String> = requests.iter().map(|&request| request.to_owned()).collect();
+    let (_, answers) = running(desk, &desk.options(), move |ends| {
+        let answers = requests.iter().map(|request| ends.ask(request)).collect();
+        ends.stop();
+        answers
+    })
+    .expect("the compositor ran");
+    answers
+}
+
+/// What the Settings app's Keyboard page and a person's `hyprctl keyword`
+/// change takes at once (`docs/RUNTIME-SETTINGS.md` §3.3): key repeat is
+/// told to the keyboards, a new layout makes a new keymap, a bind added is
+/// a bind in force, and `reload` puts the file's binds back. Each says so
+/// in the log `rollinglog` reads.
+#[test]
+fn input_keywords_take_at_once() {
+    let desk = Desk::new("input-keywords", "bind = SUPER, Q, exit\n");
+    let answers = asked_alone(
+        &desk,
+        &[
+            "keyword input:repeat_rate 40",
+            "keyword input:repeat_delay 250",
+            "keyword input:kb_layout de",
+            "keyword bind SUPER, W, exec, true",
+            "rollinglog",
+            "reload",
+            "rollinglog",
+        ],
+    );
+    let [rate, delay, layout, bind, said, reloaded, said_again] = answers.as_slice() else {
+        panic!("seven answers: {answers:?}");
+    };
+    for answer in [rate, delay, layout, bind, reloaded] {
+        assert_eq!(answer.trim(), "ok", "{answers:?}");
+    }
+    assert!(
+        said.contains("hyprix: key repeat 40 a second after 600 ms")
+            && said.contains("hyprix: key repeat 40 a second after 250 ms"),
+        "repeat was not put in force: {said}"
+    );
+    assert!(said.contains("hyprix: keymap de"), "no new keymap: {said}");
+    assert!(
+        said.contains("hyprix: 2 binds"),
+        "the bind was not added: {said}"
+    );
+    let after = said_again
+        .split("hyprix: reloaded the configuration")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no reload in the log: {said_again}"));
+    assert!(
+        after.contains("hyprix: key repeat 25 a second after 600 ms")
+            && after.contains("hyprix: keymap us")
+            && after.contains("hyprix: 1 binds"),
+        "the reload left the keywords' seat: {after}"
+    );
+}
+
+/// `hyprctl keyword bezier` and `animation` change the curves at once, and
+/// `hyprctl animations` lists the new one: before, only `animations:*`
+/// names rebuilt them, and the two keywords waited for a reload.
+#[test]
+fn an_animation_keyword_takes_at_once() {
+    let desk = Desk::new("animation-keyword", "");
+    let answers = asked_alone(
+        &desk,
+        &[
+            "keyword bezier wobble, 0.1, 0.9, 0.1, 1.05",
+            "keyword animation windows, 1, 4, wobble",
+            "animations",
+        ],
+    );
+    let [bezier, animation, listed] = answers.as_slice() else {
+        panic!("three answers: {answers:?}");
+    };
+    assert_eq!(bezier.trim(), "ok", "{answers:?}");
+    assert_eq!(animation.trim(), "ok", "{answers:?}");
+    assert!(
+        listed.contains("wobble"),
+        "the curve is not listed: {listed}"
+    );
+}
+
+/// `exec =` runs at start and again on every reload, and `exec-shutdown =`
+/// as the compositor ends, which the compositor waits for: both were
+/// parsed and never run (`docs/RUNTIME-SETTINGS.md` §6, finding 8).
+#[test]
+fn exec_runs_at_start_and_reload_and_exec_shutdown_at_the_end() {
+    let desk = Desk::new("exec-lines", "");
+    let ran = desk.work.join("exec-ran");
+    let ended = desk.work.join("shutdown-ran");
+    let mut text = std::fs::read_to_string(&desk.config).expect("the configuration");
+    text.push_str(&format!(
+        "exec = /bin/sh -c \"echo ran >> {}\"\nexec-shutdown = /bin/sh -c \"sleep 0.2; echo ended > {}\"\n",
+        ran.display(),
+        ended.display()
+    ));
+    std::fs::write(&desk.config, text).expect("the configuration");
+    let counted = ran.clone();
+    let (_, lines) = running(&desk, &desk.options(), move |ends| {
+        let lines = |at_least: usize| {
+            until("exec's lines", || {
+                let read = std::fs::read_to_string(&counted).unwrap_or_default();
+                let count = read.lines().count();
+                if count >= at_least {
+                    Ok(count)
+                } else {
+                    Err(format!("{count} lines"))
+                }
+            })
+        };
+        let first = lines(1);
+        assert_eq!(ends.ask("reload").trim(), "ok");
+        let second = lines(2);
+        ends.stop();
+        (first, second)
+    })
+    .expect("the compositor ran");
+    assert_eq!(lines, (1, 2), "exec ran once at start and once on reload");
+    assert_eq!(
+        std::fs::read_to_string(&ended).expect("exec-shutdown ran and was waited for"),
+        "ended\n"
+    );
+}
+
+/// Ask a compositor reading the Settings app's file at `settings`
+/// `requests` in turn, with no window open.
+fn asked_with_settings(name: &str, settings: &Path, requests: &[&str]) -> Vec<String> {
+    let desk = Desk::new(name, "");
+    let options = Options {
+        settings: Some(settings.to_path_buf()),
+        ..desk.options()
+    };
+    let requests: Vec<String> = requests.iter().map(|&request| request.to_owned()).collect();
+    let (_, answers) = running(&desk, &options, move |ends| {
+        let answers = requests.iter().map(|request| ends.ask(request)).collect();
+        ends.stop();
+        answers
+    })
+    .expect("the compositor ran");
+    answers
+}
+
+/// `hyprctl setting` (`crate::settings`): a value is checked, written to
+/// the Settings app's file and put in force at once; a wrong one is
+/// refused and nothing changes; and a compositor started again reads the
+/// file, so the setting survives the restart. `setting reset` takes it
+/// away again, back to the default, at once.
+#[test]
+fn a_setting_is_kept_across_a_restart() {
+    let kept = workspace("settings-file");
+    let settings = kept.join("hypr").join("settings.conf");
+    let first = asked_with_settings(
+        "settings-first",
+        &settings,
+        &[
+            "setting general:gaps_in 12",
+            "setting input:repeat_rate 40",
+            "setting general:gaps_in ten",
+            "getoption general:gaps_in",
+            "settings",
+        ],
+    );
+    let [gaps, repeat, wrong, read, listed] = first.as_slice() else {
+        panic!("five answers: {first:?}");
+    };
+    assert_eq!(gaps.trim(), "ok", "{first:?}");
+    assert_eq!(repeat.trim(), "ok", "{first:?}");
+    assert!(
+        wrong.starts_with("setting general:gaps_in:"),
+        "a wrong value was taken: {wrong}"
+    );
+    assert!(read.contains("12"), "the setting is not in force: {read}");
+    assert_eq!(
+        listed, "general:gaps_in = 12\ninput:repeat_rate = 40\n",
+        "the file holds the two settings and not the refused one"
+    );
+
+    let second = asked_with_settings(
+        "settings-second",
+        &settings,
+        &[
+            "getoption general:gaps_in",
+            "getoption input:repeat_rate",
+            "setting reset general:gaps_in",
+            "getoption general:gaps_in",
+            "settings",
+        ],
+    );
+    let [read, repeat, reset, back, listed] = second.as_slice() else {
+        panic!("five answers: {second:?}");
+    };
+    assert!(read.contains("12"), "the restart lost the setting: {read}");
+    assert!(repeat.starts_with("int: 40\n"), "{repeat}");
+    assert_eq!(reset.trim(), "ok", "{second:?}");
+    assert!(
+        back.contains('5') && !back.contains("12"),
+        "reset did not bring the default back: {back}"
+    );
+    assert_eq!(listed, "input:repeat_rate = 40\n");
+}

@@ -17,8 +17,16 @@ pub(crate) const MAX_VALUE_LEN: usize = 64 * 1024;
 
 /// Parse `text`, the file called `name`, over the defaults.
 pub fn parse(name: &str, text: &str, sources: &mut dyn Sources) -> Parsed {
+    parse_over(Config::default(), name, text, sources)
+}
+
+/// Parse `text`, the file called `name`, over `config`: what a file read
+/// after another adds to it, its variables included, as a `source` line at
+/// the end of the first would. The compositor reads the Settings app's
+/// `settings.conf` so when the configuration did not source it itself.
+pub fn parse_over(config: Config, name: &str, text: &str, sources: &mut dyn Sources) -> Parsed {
     let mut parser = Parser {
-        config: Config::default(),
+        config,
         diagnostics: Vec::new(),
         sources,
         submap: None,
@@ -244,6 +252,7 @@ fn is_keyword(key: &str) -> bool {
             | "unbind"
             | "source"
             | "submap"
+            | "wallpaper"
     ) || (key.starts_with("bind") && !key.contains(':'))
 }
 
@@ -283,6 +292,11 @@ pub(crate) fn apply(
         "exec-once" => config.exec_once.push(value.to_owned()),
         "exec" => config.exec.push(value.to_owned()),
         "exec-shutdown" => config.exec_shutdown.push(value.to_owned()),
+        "wallpaper" => {
+            let (output, line) = crate::Wallpaper::parse(value)?;
+            config.wallpapers.retain(|known| known.output != output);
+            config.wallpapers.extend(line);
+        }
         "env" => {
             let fields = bind::split_fields(value, 2);
             let (Some(&variable), Some(&text)) = (fields.first(), fields.get(1)) else {

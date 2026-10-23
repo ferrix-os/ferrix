@@ -27,6 +27,7 @@ mod options;
 mod parse;
 mod rule;
 mod value;
+mod wallpaper;
 mod workspace;
 
 #[cfg(test)]
@@ -40,12 +41,13 @@ pub use bind::{Bind, BindFlags, Key, Mods};
 pub use layer::{LayerEffect, LayerRule, Layered};
 pub use monitor::{AddedReserved, Mode, MonitorRule, Position, Scale, Transform};
 pub use options::{OptionValue, default_of};
-pub use parse::parse;
+pub use parse::{parse, parse_over};
 pub use rule::{Decoration, Effect, GroupRules, Length, Matcher, Window, WindowRule, is_prop};
 pub use value::{
     Color, Gaps, Gradient, MAX_GRADIENT_COLORS, parse_color, parse_float, parse_gaps,
     parse_gradient, parse_int,
 };
+pub use wallpaper::{SLIDESHOW_EVERY, WALLPAPER_COLOUR, Wallpaper, WallpaperFit, WallpaperSource};
 pub use workspace::{Which, WorkspaceRule, rules_for};
 
 /// A keyword line kept as written, for the parts of the compositor that
@@ -87,6 +89,9 @@ pub struct Config {
     pub exec_shutdown: Vec<String>,
     /// `env = NAME, value` pairs, in order.
     pub env: Vec<(String, String)>,
+    /// `wallpaper` lines, Ferrix's: at most one for each output, the last
+    /// written, and `off` taking one away ([`Wallpaper`]).
+    pub wallpapers: Vec<Wallpaper>,
 }
 
 impl Default for Config {
@@ -108,6 +113,7 @@ impl Default for Config {
             exec: Vec::new(),
             exec_shutdown: Vec::new(),
             env: Vec::new(),
+            wallpapers: Vec::new(),
         }
     }
 }

@@ -2059,6 +2059,48 @@ fn a_fresh_seat_says_what_it_has_and_refuses_what_it_does_not() {
     assert!(seated.is_finished());
 }
 
+/// `hyprctl keyword input:repeat_rate` and a new layout reach a keyboard
+/// a client already holds: `repeat_info` and `keymap` again, on that
+/// keyboard, with the new numbers.
+#[test]
+fn a_held_keyboard_hears_new_repeat_and_keymap() {
+    let mut seated = full_client(core::wl_seat::capability::KEYBOARD);
+    let _ = sent(&mut seated);
+    let bytes = request(
+        7,
+        core::wl_seat::request::GET_KEYBOARD,
+        &[ArgType::NewId],
+        &[Arg::NewId(ObjectId(10))],
+    );
+    assert_eq!(seated.read(&bytes, &[]), bytes.len());
+    assert_eq!(sent(&mut seated).len(), 2, "the keymap and repeat_info");
+
+    seated.change_repeat_info(40, 250);
+    let events = sent(&mut seated);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].sender, ObjectId(10));
+    assert_eq!(events[0].opcode, core::wl_keyboard::event::REPEAT_INFO);
+    assert_eq!(events[0].args, ["Int(40)", "Int(250)"]);
+
+    seated.change_keymap(None);
+    let events = sent(&mut seated);
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].sender, ObjectId(10));
+    assert_eq!(events[0].opcode, core::wl_keyboard::event::KEYMAP);
+
+    // A keyboard made after the change is given the new numbers.
+    let bytes = request(
+        7,
+        core::wl_seat::request::GET_KEYBOARD,
+        &[ArgType::NewId],
+        &[Arg::NewId(ObjectId(11))],
+    );
+    assert_eq!(seated.read(&bytes, &[]), bytes.len());
+    let events = sent(&mut seated);
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(events[1].args, ["Int(40)", "Int(250)"]);
+}
+
 #[test]
 fn a_subsurface_is_a_surface_placed_against_another() {
     let mut client = full_client(0);

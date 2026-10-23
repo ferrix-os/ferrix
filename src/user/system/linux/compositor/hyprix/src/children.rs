@@ -35,6 +35,27 @@ pub(crate) fn started(pid: u32) {
     }
 }
 
+/// Whether started program `pid` has ended, reaping it if it has: what the
+/// compositor waits on for its `exec-shutdown` programs once the loop,
+/// which reaps the rest, has stopped.
+pub(crate) fn ended(pid: u32) -> bool {
+    let Ok(raw) = libc::pid_t::try_from(pid) else {
+        return true;
+    };
+    let mut status = 0;
+    // SAFETY: `status` is writable.
+    let got = unsafe { libc::waitpid(raw, &raw mut status, libc::WNOHANG) };
+    // 0 is still running; the pid is reaped now, and anything else
+    // (ECHILD) was reaped already or is not this process's.
+    if got == 0 {
+        return false;
+    }
+    if let Ok(mut started) = STARTED.lock() {
+        started.retain(|&known| known != pid);
+    }
+    true
+}
+
 /// What the event loop polls and reaps with.
 pub(crate) struct Children {
     /// Whether this process is pid 1, and so every orphan's parent.

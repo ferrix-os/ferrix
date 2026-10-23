@@ -204,6 +204,7 @@ pub fn serve(
     pending: Pending,
     snapshot: &Snapshot,
     plugins: &mut crate::plugins::Plugins,
+    settings: Option<&Path>,
 ) -> std::io::Result<Vec<compositor_ipc::Reply>> {
     let Pending {
         mut stream, line, ..
@@ -224,6 +225,13 @@ pub fn serve(
     let mut todo = Vec::new();
     let mut answer = String::new();
     for request in Request::parse_batch(&line) {
+        // `setting` and `settings`: the Settings app's file, which only
+        // the compositor knows the place of.
+        if let Some(answered) = crate::settings::answer(&request, settings) {
+            answer.push_str(&answered.answer);
+            todo.extend(answered.then);
+            continue;
+        }
         match compositor_ipc::answer(&request, snapshot, compositor_ipc::Version::default()) {
             compositor_ipc::Reply::Text(text) => answer.push_str(&text),
             other => {

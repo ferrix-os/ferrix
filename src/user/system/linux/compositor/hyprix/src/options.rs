@@ -48,6 +48,11 @@ pub struct Options {
     /// (`crate::layouts`): `$XDG_STATE_HOME/hyprix` when started from the
     /// command line, nowhere for a compositor made in a test.
     pub state_dir: Option<PathBuf>,
+    /// The Settings app's `settings.conf` (`crate::settings`): read after
+    /// the configuration and written by `hyprctl setting`.
+    /// `$XDG_CONFIG_HOME/hypr/settings.conf` when started from the command
+    /// line, nowhere for a compositor made in a test unless it says.
+    pub settings: Option<PathBuf>,
 }
 
 /// What draws the frame: `--renderer`.
@@ -83,6 +88,7 @@ impl Default for Options {
             refuse_flips: 0,
             animation_step: None,
             state_dir: None,
+            settings: None,
         }
     }
 }
@@ -100,7 +106,8 @@ usage: hyprix [options]
   --exec <command>    start this once the socket is listening, repeatable
   --deadline <ms>     give up after this long
   --instance <name>   bind hyprctl's socket under $XDG_RUNTIME_DIR/hypr/<name>
-  --renderer <which>  auto, software, gpu or vtest (default auto)";
+  --renderer <which>  auto, software, gpu or vtest (default auto)
+  --settings <path>   the Settings app's file (default ~/.config/hypr/settings.conf)";
 
     /// Read the arguments.
     ///
@@ -110,6 +117,7 @@ usage: hyprix [options]
     pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Self, String> {
         let mut options = Self {
             state_dir: crate::layouts::default_dir(),
+            settings: crate::settings::default_path(),
             ..Self::default()
         };
         let mut args = compositor_evecho::init::unshell(args.into_iter().collect()).into_iter();
@@ -130,6 +138,7 @@ usage: hyprix [options]
                     );
                 }
                 "--dump" => options.dump = Some(PathBuf::from(value()?)),
+                "--settings" => options.settings = Some(PathBuf::from(value()?)),
                 "--instance" => options.instance = Some(value()?),
                 "--exec" => options.exec.push(value()?),
                 "--deadline" => {
@@ -256,6 +265,7 @@ mod tests {
             parse(&["-i"]).expect("valid"),
             Options {
                 state_dir: crate::layouts::default_dir(),
+                settings: crate::settings::default_path(),
                 ..Options::default()
             }
         );

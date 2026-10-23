@@ -4,8 +4,8 @@ use crate::options::OPTIONS;
 use crate::parse::{MAX_SOURCE_DEPTH, MAX_SOURCED_FILES, MAX_VALUE_LEN};
 use crate::{
     Bind, BindFlags, Color, Config, Diagnostic, FsSources, Gaps, Gradient, Key, Mods, NoSources,
-    OptionValue, Parsed, SourceFile, Sources, parse, parse_color, parse_float, parse_gaps,
-    parse_gradient, parse_int,
+    OptionValue, Parsed, SourceFile, Sources, Wallpaper, WallpaperSource, parse, parse_color,
+    parse_float, parse_gaps, parse_gradient, parse_int, parse_over,
 };
 
 /// Sources from memory, by exact name.
@@ -1889,4 +1889,86 @@ fn a_monitor_named_by_a_rule_is_not_the_catch_alls_even_above_it() {
     let taken = MonitorRule::for_monitor(&named, "Virtual-1", "").unwrap();
     assert_eq!(taken.position, Position::At(100, 0));
     assert_eq!(MonitorRule::for_monitor(&[], "Virtual-1", ""), None);
+}
+
+/// `wallpaper =` lines: one for each output, the last written, `off`
+/// taking one away, a keyword after the file replacing the file's, and
+/// what each says read back as the wallpaper client is handed it.
+#[test]
+fn wallpaper_lines_keep_one_for_each_output() {
+    let text = "\
+wallpaper = , picture /usr/share/ferrix/wallpapers/ferrix.png, fit centre, colour 102030
+wallpaper = DP-1, slideshow ~/Pictures/Wallpapers, every 30m, shuffle 0
+wallpaper = HDMI-A-1, colour rgb(203040)
+wallpaper = HDMI-A-1, off
+";
+    let parsed = parse("hyprland.conf", text, &mut NoSources);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let mut config = parsed.config;
+    let lines: Vec<String> = config.wallpapers.iter().map(Wallpaper::line).collect();
+    assert_eq!(
+        lines,
+        [
+            ", picture /usr/share/ferrix/wallpapers/ferrix.png, fit centre, colour ff102030",
+            "DP-1, slideshow ~/Pictures/Wallpapers, every 1800, shuffle 0, fit fill, \
+             colour ff1d2027, pause_covered 1, pause_battery 1",
+        ]
+    );
+    // Read back, a line is the same line.
+    for wallpaper in &config.wallpapers {
+        let (_, again) = Wallpaper::parse(&wallpaper.line()).expect("its own line");
+        assert_eq!(again.as_ref(), Some(wallpaper));
+    }
+    // A keyword for the same output replaces the file's line.
+    config
+        .keyword("wallpaper", ", colour #000000")
+        .expect("a colour as a colour picker writes it");
+    assert_eq!(config.wallpapers.len(), 2);
+    assert_eq!(
+        config.wallpapers.last().map(|line| &line.source),
+        Some(&WallpaperSource::Colour)
+    );
+    // A line that is wrong is refused and changes nothing.
+    for wrong in [
+        ", fit fill",
+        ", picture a.png, video b.ivf",
+        ", picture a.png, fit squash",
+        ", slideshow dir, every 0",
+        "DP-1, colour 000000, span 1",
+        "two words, colour 000000",
+        ", picture a.png, wobble 1",
+    ] {
+        assert!(
+            config.keyword("wallpaper", wrong).is_err(),
+            "{wrong} was taken"
+        );
+    }
+    assert_eq!(config.wallpapers.len(), 2);
+}
+
+/// `parse_over` reads a second file on top of the first, with its
+/// variables, as the compositor reads the Settings app's file.
+#[test]
+fn a_file_read_over_another_keeps_and_overrides() {
+    let first = parse(
+        "hyprland.conf",
+        "$gap = 7\ngeneral:gaps_in = 3\ngeneral:gaps_out = 9\n",
+        &mut NoSources,
+    );
+    let over = parse_over(
+        first.config,
+        "settings.conf",
+        "general:gaps_in = $gap\n",
+        &mut NoSources,
+    );
+    assert!(over.diagnostics.is_empty(), "{:?}", over.diagnostics);
+    let alone = |line: &str, name: &str| parse("x", line, &mut NoSources).config.gaps(name);
+    assert_eq!(
+        over.config.gaps("general:gaps_in"),
+        alone("general:gaps_in = 7\n", "general:gaps_in")
+    );
+    assert_eq!(
+        over.config.gaps("general:gaps_out"),
+        alone("general:gaps_out = 9\n", "general:gaps_out")
+    );
 }

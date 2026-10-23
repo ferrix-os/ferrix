@@ -27,9 +27,10 @@ flags (§5); 18 findings (§6).
   No Ferrix program watches a configuration file (no inotify, no SIGHUP
   reload) except authd, which re-reads its service policy on every
   conversation, and the launchers, which re-read `game-mode.conf` at every
-  launch. hyprix re-reads only part of `hyprland.conf`, and only on
-  `hyprctl reload` (§3.3). A Settings app must either restart the program
-  that owns a setting or drive its live control (§4).
+  launch. hyprix re-reads `hyprland.conf` only on `hyprctl reload`, and
+  takes `hyprctl keyword` and `hyprctl setting` at once (§3.3). A
+  Settings app must either restart the program that owns a setting or
+  drive its live control (§4).
 * **Boot words persist in `\FERRIX\CMDLINE.TXT`** on the EFI system
   partition (owner's, first word wins) and `DEFAULTS.TXT` (the image's);
   on an A/B install, in the slot's header (`bootctl try --cmdline`). There
@@ -233,39 +234,68 @@ per-device input settings). Any of Hyprland 0.56's ~330 option names is
 accepted, typed and returned by `hyprctl getoption`; about 95 of them do
 something.
 
-**When each part is read.** Live on `hyprctl reload` and `hyprctl
-keyword`: the options in the table below marked live, `monitor`, `env`
-(reload only), `animations:*` and, on reload only, `animation`/`bezier`.
-**Start only**: `bind*`/`unbind`, the keymap (`input:kb_*`),
-`windowrule`, `layerrule`, `workspace`, `plugin`, `exec-once`,
-`input:repeat_*`, `input:follow_mouse`, `cursor:no_hardware_cursors`,
-`misc:focus_on_activate`, `misc:lock_grace`. There is no autoreload on a
+**When each part is read.** Live on `hyprctl reload`, `hyprctl keyword`
+and `hyprctl setting` (since 2026-10-24): the options in the table below
+marked live, `monitor`, `env` (reload only), `animations:*`, `animation`
+and `bezier`, `bind*`/`unbind` and the keymap (`input:kb_layout`,
+`kb_variant`: the windows already open are sent the new keymap), key
+repeat (`input:repeat_rate`, `repeat_delay`, sent to every keyboard at
+once), `input:follow_mouse`, `misc:focus_on_activate` and
+`misc:lock_grace`. `exec =` lines run at start and again on every
+reload, `exec-shutdown =` lines as hyprix ends (it waits up to 5 s for
+them). **Start only**: `windowrule`, `layerrule`, `workspace`, `plugin`,
+`exec-once`, `cursor:no_hardware_cursors`. There is no autoreload on a
 file change, unlike Hyprland.
+
+**The Settings app's file** (`hyprix/src/settings.rs`, 2026-10-24):
+`$XDG_CONFIG_HOME/hypr/settings.conf`, else `~/.config/hypr/settings.conf`
+(`--settings PATH` names another). hyprix reads it after `hyprland.conf`,
+as if a `source =` line ended that file, so a choice made in Settings wins;
+a `source = ~/.config/hypr/settings.conf` line in `hyprland.conf` reads it
+there instead, and it is not read twice. A missing file is no error. The
+app never writes it itself: `hyprctl setting KEY VALUE` checks the value
+as `keyword` reads it, writes `KEY = VALUE` in place of the key's earlier
+line (written whole and renamed, comments and other lines kept), and puts
+it in force at once; any answer but `ok` names what was wrong, and nothing
+was written or changed. `hyprctl setting reset KEY` takes the line out and
+reloads, so the key is back to `hyprland.conf`'s value or the default.
+`hyprctl settings` (`-j`: `[{"key","name","value"}]`) lists the file. A
+key is any option of the table below, or a `wallpaper` line, one for each
+output (key `wallpaper` for every screen, `wallpaper DP-1` for one);
+monitors stay in `monitors.conf`. The Settings pages' keys:
+
+| Page | Keys (`hyprctl setting …`) |
+|---|---|
+| Appearance | `general:gaps_in`, `general:gaps_out`, `general:border_size`, `general:col.active_border`, `general:col.inactive_border`, `decoration:rounding`, `decoration:inactive_opacity`, `decoration:blur:enabled`, `decoration:shadow:enabled`, `decoration:shadow:color`, `animations:enabled` |
+| Windows | `general:layout`, `hyprix:titlebars`, `input:follow_mouse` |
+| Keyboard | `input:kb_layout` (comma list, the first the default), `input:kb_variant`, `input:repeat_rate` (keys a second), `input:repeat_delay` (ms) |
+| Idle and lock | `misc:lock_grace` (s); the lock and screen-off timeouts stay `hypridle.conf`'s listeners (§3.4) |
+| Wallpaper | `wallpaper` lines (`compositor/config/src/wallpaper.rs`: `wallpaper = OUTPUT, picture PATH, fit fill, colour 1d2027`, …) and `hyprix:wallpaper_lock`; kept and checked now, hyprix starting the wallpaper client from them is the next landing |
 
 | Option or keyword | Values | Default | Live? | Class |
 |---|---|---|---|---|
 | `monitor` | `name, preferred\|WxH[@Hz], auto\|XxY, auto\|scale[, transform, N]`, `disable`, `addreserved`; `mirror`, `bitdepth`, `vrr` reported not done | preferred | live; `keyword monitor` is also saved | **user-facing** (Displays) |
-| `input:kb_layout`, `input:kb_variant` | comma lists; shipped layouts us, gb, fr, de, de(nodeadkeys) | `us`, "" | start; `hyprctl switchxkblayout` cycles live | **user-facing** (Keyboard) |
+| `input:kb_layout`, `input:kb_variant` | comma lists; shipped layouts us, gb, fr, de, de(nodeadkeys) | `us`, "" | live (a new keymap to every window); `hyprctl switchxkblayout` cycles live | **user-facing** (Keyboard) |
 | `input:kb_rules`, `kb_model`, `kb_options` | — | evdev, pc105, "" | reported by `hyprctl devices`, **no effect** | — |
-| `input:repeat_rate`, `repeat_delay` | int | 25, 600 | start | **user-facing** (Keyboard) |
-| `input:follow_mouse` | 0, non-zero | 1 | start | user-facing |
+| `input:repeat_rate`, `repeat_delay` | int | 25, 600 | live | **user-facing** (Keyboard) |
+| `input:follow_mouse` | 0, non-zero | 1 | live | user-facing |
 | `general:layout` | dwindle, master, monocle, scrolling, floating | dwindle | live | **user-facing** (Windows) |
 | `general:gaps_in`, `gaps_out`, `float_gaps`, `border_size`, `col.active_border`, `col.inactive_border`, `resize_on_border`, `extend_border_grab_area`, `no_focus_fallback`, `snap:*` | int / colour | 5, 20, 0, 1, ffffffff, ff444444, 0, 15, 0, … | live | **user-facing** (Appearance) |
 | `decoration:rounding`, `rounding_power`, `active_opacity`, `inactive_opacity`, `fullscreen_opacity`, `dim_inactive`, `dim_strength`, `dim_around`, `shadow:{enabled,range,render_power,color,offset}`, `blur:{enabled,size,passes,noise,contrast,brightness,vibrancy,vibrancy_darkness,xray,popups}` | — | Hyprland's | live | **user-facing** (Appearance) |
-| `animations:enabled`, `animation`, `bezier` | — | 1 | `animations:*` live; the other two on reload only | user-facing ("reduce motion") |
+| `animations:enabled`, `animation`, `bezier` | — | 1 | live | user-facing ("reduce motion") |
 | `misc:background_color`, `misc:close_special_on_empty` | — | ff111111, 1 | live | user-facing / admin |
 | `binds:workspace_back_and_forth`, `hide_special_on_workspace_change`, `allow_pin_fullscreen`, `movefocus_cycles_fullscreen`, `window_direction_monitor_fallback` | bool | 0,0,0,0,1 | live | admin |
 | `dwindle:*` (10 keys), `master:*` (11), `scrolling:*` (7) | Hyprland's | Hyprland's | live | admin |
 | `cursor:no_hardware_cursors` | 1 disables the plane | 2 | start | admin |
-| `misc:focus_on_activate` | bool | 0 | start | admin |
-| `misc:lock_grace` (Ferrix's) | seconds, capped at 10 | 0 | start | user-facing (lock screen) |
+| `misc:focus_on_activate` | bool | 0 | live | admin |
+| `misc:lock_grace` (Ferrix's) | seconds, capped at 10 | 0 | live | user-facing (lock screen) |
 | `hyprix:titlebars`, `hyprix:own_frames` (Ferrix's) | bool | 0 | live | user-facing (title bars) / developer |
 | `debug:overlay` | 1 | 0 | live | developer |
-| `bind[flags]`, `unbind`, `submap` | flags `l r o e n m t i s d p c g u`, mods SHIFT CAPS CTRL ALT MOD2 MOD3 SUPER MOD5 | the config's | start | user-facing (Shortcuts, needs a restart today) |
+| `bind[flags]`, `unbind`, `submap` | flags `l r o e n m t i s d p c g u`, mods SHIFT CAPS CTRL ALT MOD2 MOD3 SUPER MOD5 | the config's | live (a keyword adds or removes one; a reload reads the file's again and leaves any submap) | user-facing (Shortcuts) |
 | `windowrule`, `layerrule`, `workspace` | 0.56 `match:` grammar | — | start | admin |
 | `exec-once`, `plugin` | commands | — | start | admin (autostart) |
 | `env = NAME, value` | — | — | reload | admin |
-| `exec`, `exec-shutdown` | parsed, **never run** | — | — | — |
+| `exec`, `exec-shutdown` | commands | — | `exec` at start and every reload; `exec-shutdown` at the end, waited for up to 5 s | admin |
 | Inert (accepted, no effect) | all other `cursor:*`, `general:allow_tearing`, `render:*`, `misc:vrr`, `misc:font_family`, `misc:disable_autoreload`, `input:sensitivity`, `accel_profile`, `natural_scroll`, `touchpad:*`, `group:*`, `gestures:*`, `xwayland:*`, … | — | — | not to be offered |
 
 Other hyprix files: `$XDG_STATE_HOME/hyprix/monitors.conf`
@@ -342,7 +372,8 @@ and were not audited here. Class: admin.
 | Tool | What it changes | Code | Class |
 |---|---|---|---|
 | `hyprctl keyword K V` | any live option of §3.3 at once; `keyword monitor` also saved to `monitors.conf` | `compositor/hyprix/src/state.rs:4108` | **the Settings app's main lever for the desktop** |
-| `hyprctl reload` | re-reads options, style, animations, monitors, `env`; drops earlier keywords | `state.rs:1586` | user-facing |
+| `hyprctl reload` | re-reads options, style, animations, monitors, `env`, binds, the keymap, repeat, `settings.conf`; runs `exec`; drops earlier keywords | `state.rs` `Compositor::reload` | user-facing |
+| `hyprctl setting K V`, `setting reset K`, `settings` | as `keyword`, and kept in `settings.conf` (§3.3) | `hyprix/src/settings.rs` | **the Settings app's lever for what must survive a restart** |
 | `hyprctl switchxkblayout <dev\|all\|main\|current> next\|prev\|N` | keyboard layout group | `compositor/ipc/src/reply.rs` | user-facing |
 | `hyprctl dispatch NAME ARG` | windows, workspaces, `dpms`, `exit`, `exec`, `overview`, `submap`, … (`hyprix/src/act.rs:166`, `layout/src/dispatch.rs:513`); `toggleswallow`, `releaseinputcapture` only log | | user-facing (as actions, not settings) |
 | `hyprctl output create headless [NAME]` / `remove` | virtual outputs | | developer |
@@ -456,8 +487,8 @@ Other build-time inputs, also not settings: `FERRIX_PIXEL7_CMDLINE_EXTRA`,
 | 5 | `docs/LOGGING.md` l. 1633: upload "TLS is not built yet"; same in `src/lib/log/lode/src/upload.rs:26` and the lode viewer's `remote.rs:18` | `https://` with `ca=`/`cert=`/`key=` is built (l. 1751 of the same doc says so) |
 | 6 | `docs/INIT.md` l. 667: `svc set-property` writes a drop-in only with `--persistent` | it always writes one: `/run/ferrix/units` without, `/etc/ferrix/units` with (`admin.rs:199`); INIT.md l. 1536 agrees with the code |
 | 7 | `docs/INIT.md` §10 (l. 1035): "There is no journal", svc verbs without `audit` | `svc audit` exists; lode is the journal |
-| 8 | `compositor/config/src/lib.rs:84`: `exec =` runs "at startup and on every reload", `exec-shutdown =` "on exit" | both are parsed and never run |
-| 9 | `hyprix/src/state.rs:1680` comment: a keyword rebuilds "the animations and the curves"; `seat.rs:309`: "a reload may have changed the keymap" | `keyword animation` / `keyword bezier` change nothing live (only names starting `animations` rebuild); binds and the keymap are set once, in `Seat::new` |
+| 8 | `compositor/config/src/lib.rs:84`: `exec =` runs "at startup and on every reload", `exec-shutdown =` "on exit" | **fixed 2026-10-24**: both are run (`exec_runs_at_start_and_reload_and_exec_shutdown_at_the_end`) |
+| 9 | `hyprix/src/state.rs:1680` comment: a keyword rebuilds "the animations and the curves"; `seat.rs:309`: "a reload may have changed the keymap" | **fixed 2026-10-24**: `keyword animation`/`bezier` rebuild the curves, and a reload or a keyword sets the binds and the keymap again (`input_keywords_take_at_once`, `an_animation_keyword_takes_at_once`) |
 | 10 | Hyprland's documented behaviour, which a user's `hyprland.conf` assumes | no autoreload on file change; `misc:disable_autoreload` and about 235 other option names are accepted and inert (§3.3) |
 | 11 | `src/user/system/linux/adbd/src/main.rs:24` doc: `--usb PATH` | `--usb` takes no value; the socket is fixed at `/tmp/adbd-usb` |
 | 12 | `build-flags.toml` `[boot_options.nosmp]`: "start the boot processor alone" (no architecture) | only AArch64 and ARMv7-A read it; x86-64 ignores it |
@@ -477,15 +508,15 @@ can be applied without a reboot:
    transform), live through `hyprctl keyword monitor`, saved in
    `monitors.conf`.
 2. **Keyboard layout**: `input:kb_layout`/`kb_variant`
-   (us, gb, fr, de, de-nodeadkeys); `switchxkblayout` live, the file at
-   next start.
-3. **Keyboard repeat**: `input:repeat_rate`, `repeat_delay` (start only
-   today).
+   (us, gb, fr, de, de-nodeadkeys); live and kept through `hyprctl
+   setting`, `switchxkblayout` to switch.
+3. **Keyboard repeat**: `input:repeat_rate`, `repeat_delay`, live and
+   kept through `hyprctl setting`.
 4. **Wallpaper**: `wallpaper FILE`; to survive a restart it has to be
    written as an `exec-once` line, since the command keeps nothing.
 5. **Appearance**: gaps, borders and their colours, rounding, opacity,
    blur, shadow, animations on/off, title bars (`hyprix:titlebars`), all
-   live through `hyprctl keyword`.
+   live and kept through `hyprctl setting` (§3.3).
 6. **Window layout**: `general:layout` (dwindle, master, monocle,
    scrolling, floating), live.
 7. **Idle and lock**: `hypridle.conf` listeners (lock after N minutes,
