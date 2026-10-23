@@ -390,6 +390,8 @@ struct Compositor<'r> {
     drag: Option<crate::act::Drag>,
     /// The activities overview (`docs/DESKTOP.md` §1.2).
     overview: crate::overview::Overview,
+    /// The title bars the compositor draws (`docs/DESKTOP.md` §2.2).
+    bars: crate::titlebar::Bars,
     /// The drag a client started with `wl_data_device.start_drag`, while one
     /// is going on. Two clients that cannot see each other, joined by the
     /// compositor.
@@ -663,6 +665,7 @@ impl<'r> Compositor<'r> {
             urgent: Vec::new(),
             drag: None,
             overview: crate::overview::Overview::default(),
+            bars: crate::titlebar::Bars::default(),
             carried: None,
             quit: false,
             swallow: false,
@@ -1233,6 +1236,10 @@ impl<'r> Compositor<'r> {
         // press it never saw the end of would think the button is still
         // held. Hyprland's `processMouseDownNormal` returns before
         // `sendPointerButton` for the same reason.
+        // A press on a title bar the compositor drew is the compositor's
+        // (`crate::titlebar`): before the border's ring, which reaches up
+        // into the bar.
+        let (actions, barred) = self.press_title_bars(actions);
         let actions = crate::act::grab_border(actions, &mut self.state, &self.seat, &mut self.drag);
         // While the overview is up the pointer and the keys are its own:
         // nothing reaches a client, and binds still run.
@@ -1243,9 +1250,9 @@ impl<'r> Compositor<'r> {
             self.seat.pointer(),
         );
         if actions.is_empty() {
-            return looked;
+            return looked || barred;
         }
-        let mut changed = looked;
+        let mut changed = looked || barred;
         // A pointer drawn into the frame makes moving it a change to the
         // screen even when nothing else moved: without this the arrow
         // would stay where the last redraw left it and catch up only
@@ -1730,7 +1737,139 @@ impl<'r> Compositor<'r> {
             &self.fixed.layer_rules,
             &added,
         );
+        self.sync_title_bars();
         reconfigure(&mut self.slots, &self.state);
+    }
+
+    /// The windows that get a title bar from the compositor: with
+    /// `hyprix:titlebars` on, each floating window, not fullscreen, whose
+    /// client asked for the compositor's frame.
+    pub(crate) fn title_bars_wanted(&self) -> Vec<crate::titlebar::Wanted> {
+        if self.config.int("hyprix:titlebars").unwrap_or(0) == 0 {
+            return Vec::new();
+        }
+        let mut wanted = Vec::new();
+        for slot in &self.slots {
+            for &(toplevel, window) in &slot.windows {
+                let fullscreen = self
+                    .state
+                    .workspace_of(window)
+                    .and_then(|workspace| self.state.fullscreen(workspace))
+                    .is_some_and(|(full, _)| full == window);
+                if !self.state.is_floating(window)
+                    || fullscreen
+                    || !slot.client.wants_server_frame(toplevel)
+                {
+                    continue;
+                }
+                let title = slot
+                    .client
+                    .toplevel(toplevel)
+                    .map(|top| top.title.clone())
+                    .unwrap_or_default();
+                wanted.push(crate::titlebar::Wanted { window, title });
+            }
+        }
+        wanted
+    }
+
+    /// Take the presses on title bars: a button does what it says, the bar
+    /// starts a move -- or, the second press of a double click, maximizes
+    /// or restores. Neither the press nor its release reaches a client.
+    /// Gives the actions left and whether the layout changed.
+    fn press_title_bars(
+        &mut self,
+        actions: Vec<crate::seat::Action>,
+    ) -> (Vec<crate::seat::Action>, bool) {
+        use crate::seat::Action;
+        use crate::titlebar::Hit;
+        const LEFT: u32 = 0x110;
+        let mut kept = Vec::with_capacity(actions.len());
+        let mut changed = false;
+        for action in actions {
+            match action {
+                Action::Button {
+                    button: LEFT,
+                    pressed: false,
+                } if self.bars.swallow_release => {
+                    self.bars.swallow_release = false;
+                }
+                Action::Button {
+                    button: LEFT,
+                    pressed: true,
+                } if self.drag.is_none() && !self.overview.on => {
+                    let at = self.seat.pointer();
+                    let layout = self.state.layout();
+                    let Some((window, hit)) = self.bars.uncovered_hit(at, &layout) else {
+                        kept.push(action);
+                        continue;
+                    };
+                    let _ = self.state.focus_window(window);
+                    changed = true;
+                    match hit {
+                        Hit::Close => {
+                            close(window, &mut self.slots, &self.sources);
+                            self.bars.swallow_release = true;
+                        }
+                        Hit::Maximize => {
+                            let _ = self
+                                .state
+                                .snap_window(window, compositor_layout::SnapTarget::Toggle);
+                            self.bars.swallow_release = true;
+                        }
+                        Hit::Minimize => {
+                            let _ = self.state.minimize(window);
+                            self.bars.swallow_release = true;
+                        }
+                        Hit::Bar if self.bars.double_click(window) => {
+                            let _ = self
+                                .state
+                                .snap_window(window, compositor_layout::SnapTarget::Toggle);
+                            self.bars.swallow_release = true;
+                        }
+                        Hit::Bar => {
+                            #[expect(
+                                clippy::cast_possible_truncation,
+                                reason = "the pointer is held inside the screen, which is far inside i64"
+                            )]
+                            let from = (at.0 as i64, at.1 as i64);
+                            // A border drag ends with the left button's
+                            // release, which it swallows.
+                            self.drag = Some(crate::act::Drag {
+                                window,
+                                resizing: false,
+                                corner: compositor_layout::Corner::NONE,
+                                began: crate::act::Began::Border,
+                                from,
+                                lifted: false,
+                                edge: None,
+                            });
+                        }
+                    }
+                }
+                other => kept.push(other),
+            }
+        }
+        (kept, changed)
+    }
+
+    /// Tell the layout which windows have a title bar above them, so that
+    /// it keeps the bar inside the work area.
+    fn sync_title_bars(&mut self) {
+        let wanted = self.title_bars_wanted();
+        let all: Vec<WindowId> = self
+            .slots
+            .iter()
+            .flat_map(|slot| slot.windows.iter().map(|(_, window)| *window))
+            .collect();
+        for window in all {
+            let height = if wanted.iter().any(|want| want.window == window) {
+                crate::titlebar::HEIGHT
+            } else {
+                0
+            };
+            let _ = self.state.set_title_bar(window, height);
+        }
     }
 
     /// The keyboard follows the layout's focus, and a window that has just

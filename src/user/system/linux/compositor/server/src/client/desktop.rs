@@ -125,6 +125,9 @@ impl Client {
             Role::KdeDecoration => {
                 let _ = self.kde_decorations.remove(&id);
             }
+            Role::ToplevelDecoration => {
+                let _ = self.xdg_decorations.remove(&id);
+            }
             _ => {}
         }
     }

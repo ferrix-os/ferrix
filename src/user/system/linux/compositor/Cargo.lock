@@ -558,6 +558,7 @@ dependencies = [
  "compositor-shm",
  "compositor-shot",
  "compositor-socket",
+ "compositor-text",
  "compositor-virgl",
  "compositor-wire",
  "compositor-xkb",

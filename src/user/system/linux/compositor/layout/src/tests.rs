@@ -4604,3 +4604,34 @@ fn a_new_window_on_a_floating_workspace_never_tiles() {
     let _opened = tiled.open_new_window(WindowId(1)).unwrap();
     assert!(!tiled.is_floating(WindowId(1)));
 }
+
+/// A window with a title bar is placed and snapped with the bar inside the
+/// work area: a maximized one starts the bar's height down.
+#[test]
+fn a_title_bar_is_kept_inside_the_work_area() {
+    let mut state = setup(&format!("{BARE}general:layout = floating\n"));
+    open(&mut state, &[1]);
+    let _floated = state
+        .float_window(WindowId(1), r(100, 100, 640, 480))
+        .unwrap();
+    focus(&mut state, 1);
+    let _snapped = dispatch(&mut state, "snapwindow", "max");
+    assert_eq!(rects(&state), [(1, r(0, 0, 1920, 1080))]);
+    let _barred = state.set_title_bar(WindowId(1), 38);
+    assert_eq!(
+        rects(&state),
+        [(1, r(0, 38, 1920, 1042))],
+        "snapped again under the bar"
+    );
+    assert_eq!(state.snap_of(WindowId(1)), Some(Snap::Maximized));
+    let _snapped = dispatch(&mut state, "snapwindow", "restore");
+    assert_eq!(
+        rects(&state),
+        [(1, r(100, 100, 640, 480))],
+        "and back where it was"
+    );
+    let top = state
+        .new_floating_place(WindowId(1), (1920, 1080), None)
+        .expect("a place");
+    assert_eq!(top, r(0, 38, 1920, 1042));
+}

@@ -51,6 +51,7 @@ pub mod scope;
 pub mod seat;
 pub mod select;
 pub mod state;
+pub mod titlebar;
 pub(crate) mod wait;
 
 pub use options::{Options, Renderer};

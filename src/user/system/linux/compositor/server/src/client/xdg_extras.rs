@@ -63,7 +63,23 @@ impl Client {
         ) {
             return;
         }
+        let _ = self.xdg_decorations.insert(id, toplevel);
         self.configure_decoration(id);
+    }
+
+    /// Whether `toplevel` asked for the compositor's frame -- through
+    /// `xdg-decoration` or KDE's server decoration -- and so draws no title
+    /// bar of its own: what a compositor that draws title bars draws one
+    /// for (`docs/DESKTOP.md` §2.2).
+    #[must_use]
+    pub fn wants_server_frame(&self, toplevel: ObjectId) -> bool {
+        if self.xdg_decorations.values().any(|top| *top == toplevel) {
+            return true;
+        }
+        let Some(surface) = self.toplevels.get(&toplevel).map(|top| top.surface) else {
+            return false;
+        };
+        self.kde_decorations.values().any(|on| *on == surface)
     }
 
     /// `zxdg_toplevel_decoration_v1`: `set_mode` and `unset_mode`.

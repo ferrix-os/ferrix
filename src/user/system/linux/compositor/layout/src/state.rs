@@ -475,6 +475,10 @@ pub struct State {
     /// Minimized windows, each on the special workspace
     /// [`MINIMIZED`], with the workspace it goes back to.
     minimized: BTreeMap<WindowId, WorkspaceId>,
+    /// Each window's title bar, drawn by the compositor above its
+    /// rectangle: its height, which the floating area leaves out above the
+    /// window so that the bar stays on the screen (`docs/DESKTOP.md` §2.2).
+    title_bars: BTreeMap<WindowId, i64>,
     /// Each window the focus went to since [`State::take_focus_trail`] was
     /// last asked, in order: `None` where nothing was focused.
     focus_trail: Vec<Option<WindowId>>,
@@ -575,6 +579,7 @@ impl State {
             over_fullscreen: BTreeSet::new(),
             snapped: BTreeMap::new(),
             minimized: BTreeMap::new(),
+            title_bars: BTreeMap::new(),
             focus_trail: Vec::new(),
             names: BTreeMap::new(),
             groups: BTreeMap::new(),
@@ -851,9 +856,53 @@ impl State {
     /// coordinates.
     #[must_use]
     pub fn float_area(&self, window: WindowId) -> Option<Rect> {
+        let bar = self.title_bar(window);
         self.workspace_of(window)
             .map(|workspace| self.float_work_area_of(workspace))
+            .map(|area| {
+                Rect::new(
+                    area.x,
+                    area.y.saturating_add(bar),
+                    area.width,
+                    area.height.saturating_sub(bar),
+                )
+            })
             .filter(|area| area.width > 0 && area.height > 0)
+    }
+
+    /// Say that the compositor draws a title bar `height` high above
+    /// `window` (0 for none). A snapped window is snapped again, so that its
+    /// bar is inside the area.
+    pub fn set_title_bar(&mut self, window: WindowId, height: i64) -> Vec<Change> {
+        let height = height.max(0);
+        if self.title_bar(window) == height || !self.windows.contains_key(&window) {
+            return Vec::new();
+        }
+        if height == 0 {
+            let _gone = self.title_bars.remove(&window);
+        } else {
+            let _previous = self.title_bars.insert(window, height);
+        }
+        let Some(snap) = self.snap_of(window) else {
+            return Vec::new();
+        };
+        let Some(rect) = self.snap_rect(window, snap) else {
+            return Vec::new();
+        };
+        let back = self.snapped.get(&window).map(|(_, back)| *back);
+        self.run(|state| {
+            let changes = state.place_floating(window, rect);
+            if let Some(back) = back {
+                let _ = state.snapped.insert(window, (snap, back));
+            }
+            changes
+        })
+    }
+
+    /// The height of the title bar the compositor draws above `window`.
+    #[must_use]
+    pub fn title_bar(&self, window: WindowId) -> i64 {
+        self.title_bars.get(&window).copied().unwrap_or(0)
     }
 
     /// Where a new floating window of `size` goes on `window`'s workspace,
@@ -1532,6 +1581,7 @@ impl State {
             let _over = state.over_fullscreen.remove(&window);
             let _snapped = state.snapped.remove(&window);
             let _minimized = state.minimized.remove(&window);
+            let _bar = state.title_bars.remove(&window);
             // `master:focus_master_on_close`: the focus goes to the master
             // rather than to whatever the history has next, which is what
             // `getNextCandidate` does with the option on.

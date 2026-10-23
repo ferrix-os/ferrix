@@ -38,6 +38,9 @@ pub struct Output<'a> {
     pub style: &'a Style,
     /// What each window is drawn with where a rule said something else.
     pub styles: &'a BTreeMap<WindowId, compositor_render::WindowStyle>,
+    /// The title bars the compositor draws, by the ids they are placed as
+    /// (`crate::titlebar`).
+    pub decorations: &'a BTreeMap<WindowId, crate::titlebar::Rendered>,
     /// How many buffer pixels one logical pixel is: `monitor = ..., 2`.
     /// Everything above the renderer works in logical pixels, and this is
     /// where they become the screen's own.
@@ -353,6 +356,7 @@ struct Scene<'a> {
     scale: f64,
     style: &'a Style,
     styles: &'a BTreeMap<WindowId, compositor_render::WindowStyle>,
+    decorations: &'a BTreeMap<WindowId, crate::titlebar::Rendered>,
     cursor: Option<Cursor>,
     drag_icon: Option<Placed>,
     overlay: Option<&'a crate::overlay::Picture>,
@@ -391,6 +395,7 @@ fn draw_windows(
         scale: target.scale,
         style: target.style,
         styles: target.styles,
+        decorations: target.decorations,
         cursor: target.cursor,
         drag_icon: target.drag_icon,
         overlay: target.overlay,
@@ -450,6 +455,7 @@ fn direct(
         scale: target.scale,
         style: target.style,
         styles: target.styles,
+        decorations: target.decorations,
         cursor: target.cursor,
         drag_icon: target.drag_icon,
         overlay: target.overlay,
@@ -672,6 +678,19 @@ fn gathered<'a>(
     let (origin, scale, clients) = (scene.origin, scene.scale, scene.clients);
     let mut surfaces: BTreeMap<WindowId, Surface<'a>> = BTreeMap::new();
     for placed in &output.windows {
+        // A title bar the compositor drew: its own pixels.
+        if let Some(bar) = scene.decorations.get(&placed.window)
+            && let Ok(surface) = Surface::new(
+                &bar.bytes,
+                bar.width,
+                bar.height,
+                bar.width.saturating_mul(4),
+                Format::Argb8888,
+            )
+        {
+            let _ = surfaces.insert(placed.window, surface);
+            continue;
+        }
         let Some(source) = scene.sources.get(&placed.window) else {
             continue;
         };

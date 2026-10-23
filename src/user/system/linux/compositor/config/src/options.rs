@@ -297,6 +297,9 @@ pub(crate) static OPTIONS: &[(&str, Initial)] = &[
     // geometry inside its buffer -- is drawn with no border, shadow or
     // rounding of the compositor's, as a floating window manager leaves it.
     ("hyprix:own_frames", Int(0)),
+    // hyprix's own too (docs/DESKTOP.md §2.2): 1 draws a title bar above
+    // each floating window whose client asked for the compositor's frame.
+    ("hyprix:titlebars", Int(0)),
     ("input-capture:capture_modifiers", Int(0)),
     ("input-capture:enforce_barriers", Int(1)),
     ("input:accel_profile", Str("")),

@@ -154,6 +154,19 @@ impl Compositor<'_> {
             &self.state,
             self.drag.as_ref(),
         );
+        // The title bars the compositor draws, just under their windows;
+        // not in the overview, whose tiles are the windows alone. Taken out
+        // of `self` for the frame, since the screens are drawn through it.
+        let mut bars = std::mem::take(&mut self.bars);
+        if !self.overview.on {
+            let wanted = self.title_bars_wanted();
+            let scale = self
+                .screens
+                .iter()
+                .map(|screen| screen.scale)
+                .fold(1.0_f64, f64::max);
+            bars.decorate(&mut outputs, &mut drawn_with, &wanted, &self.state, scale);
+        }
         if self.overview.on {
             // The hovered tile is outlined whatever its frame.
             if let Some(hovered) = self.overview.hovered {
@@ -170,6 +183,7 @@ impl Compositor<'_> {
             cursor_at,
             drawn_with: &drawn_with,
             popups,
+            decorations: bars.rendered(),
         };
         // Every surface that goes into the frame is owed two things: a
         // `wl_callback.done` for the `wl_surface.frame` it asked for, and a
@@ -219,6 +233,7 @@ impl Compositor<'_> {
             };
             self.draw_screen(which, output, &with, &mut drew)?;
         }
+        self.bars = bars;
         self.owed |= drew.waiting;
         // The frame has been drawn from them, so the next one starts
         // from what happens next.
@@ -648,6 +663,7 @@ impl Compositor<'_> {
             origin,
             style: &self.style,
             styles: with.drawn_with,
+            decorations: with.decorations,
             scale,
             transform: screen.transform,
             drag_icon,
@@ -887,6 +903,8 @@ struct Drawing<'a> {
     drawn_with: &'a BTreeMap<WindowId, compositor_render::WindowStyle>,
     /// The popups, which are drawn over the windows.
     popups: &'a [crate::frame::Placed],
+    /// The title bars' pixels, by their ids.
+    decorations: &'a BTreeMap<WindowId, crate::titlebar::Rendered>,
 }
 
 /// What one screen's frame is drawn from, worked out before any of it is

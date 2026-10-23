@@ -305,6 +305,9 @@ pub struct Client {
     dialogs: BTreeMap<ObjectId, ObjectId>,
     /// Which surface each `org_kde_kwin_server_decoration` is on.
     kde_decorations: BTreeMap<ObjectId, ObjectId>,
+    /// Which toplevel each `zxdg_toplevel_decoration_v1` is for: a toplevel
+    /// with one has asked for the compositor's frame, and been told yes.
+    xdg_decorations: BTreeMap<ObjectId, ObjectId>,
     /// The `zwp_relative_pointer_v1`s this client has made.
     relative_pointers: Vec<ObjectId>,
     /// The pointer constraints it holds, by object.
@@ -450,6 +453,7 @@ impl Client {
             alphas: BTreeMap::new(),
             dialogs: BTreeMap::new(),
             kde_decorations: BTreeMap::new(),
+            xdg_decorations: BTreeMap::new(),
             relative_pointers: Vec::new(),
             constraints: BTreeMap::new(),
             shortcut_inhibitors: BTreeMap::new(),

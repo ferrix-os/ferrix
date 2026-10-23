@@ -29,6 +29,8 @@ compositor-ipc = { path = "../ipc" }
 compositor-layout = { path = "../layout" }
 compositor-protocol = { path = "../protocol" }
 compositor-render = { path = "../render" }
+# The title in a title bar the compositor draws (docs/DESKTOP.md §2.2).
+compositor-text = { path = "../text" }
 # The device a GPU frame's streams run on: the render node, or a host's
 # test server.
 compositor-virgl = { path = "../virgl" }
