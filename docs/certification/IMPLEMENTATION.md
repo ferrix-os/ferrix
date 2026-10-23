@@ -989,9 +989,11 @@ The 71 that need a check, as check-writing work:
   SMEP/SMAP/UMIP `cpu` line is printed for the boot processor and never
   asserted), UMIP from ring 3 (`.112`), a directed IPI and a refused APIC
   ID (`.22`, `.23`, `.93`), the paranoid entries' fatal cases and the
-  double fault's stack (`.27`, `.83`), vectors ring 3 may not raise (`.81`),
-  a program's int3, single step and #AC (`.82`; AArch64 and ARMv7-A have
-  this check and x86-64 does not).
+  double fault's stack (`.27`, `.83`), and a program's single step and #AC
+  (`.82`; AArch64 and ARMv7-A have this check and x86-64 does not). Since
+  2026-10-23 (F-94) the vectors ring 3 may raise are checked (`.81`, the
+  `gates` line) and so is `.82`'s int3, under `.209`; `.82` stays in the
+  baseline for its single step and #AC.
 * **Timers and interrupts.** The LAPIC timer's rate and one-shot (`.34`,
   `.35`), whose checks are `main.rs`'s `timer_check` and `check_one_shot`;
   the counter's rate against a reference it was not calibrated from

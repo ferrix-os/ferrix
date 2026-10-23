@@ -156,6 +156,113 @@ const SEGV_CONTEXT: &[u8] = &[
     0x00, 0x0f, 0x05,
 ];
 
+/// A program's own `int3`, under an `SA_SIGINFO` handler for `SIGTRAP`. The
+/// handler checks what Linux's `do_int3_user` gives -- `si_signo` 5,
+/// `si_code` `SI_KERNEL` (`0x80`), `trapno` 3 and the saved `rip` one past
+/// the `0xcc` -- then writes `0x77` into the saved `rbx` and returns, and the
+/// program must resume after the `int3` with it: Wine's handler reads the
+/// same fields, and a Windows program that catches its own breakpoint
+/// (`__try { __debugbreak(); }`) resumes the same way. Exits 0, or 1 to 4
+/// for the first field that is not, 8 if the handler did not resume it, 9 a
+/// failed `rt_sigaction`.
+///
+/// ```text
+///   subq $32, %rsp
+///   leaq handler(%rip), %rax ; movq %rax, (%rsp)
+///   movq $0x04000004, 8(%rsp)                  ; SA_SIGINFO | SA_RESTORER
+///   leaq restorer(%rip), %rax ; movq %rax, 16(%rsp)
+///   movq $0, 24(%rsp)
+///   movl $13, %eax ; movl $5, %edi ; movq %rsp, %rsi ; xorl %edx, %edx ; movl $8, %r10d
+///   syscall
+///   movl $9, %edi ; testq %rax, %rax ; jnz exit
+///   xorl %ebx, %ebx
+///   int3
+/// after:
+///   movl $8, %edi ; cmpq $0x77, %rbx ; jne exit
+///   xorl %edi, %edi ; jmp exit
+/// handler:
+///   movl $1, %edi ; cmpl $5, (%rsi) ; jne exit             ; si_signo
+///   movl $2, %edi ; cmpl $0x80, 8(%rsi) ; jne exit         ; si_code
+///   movl $3, %edi ; cmpq $3, 200(%rdx) ; jne exit          ; trapno
+///   movl $4, %edi ; leaq after(%rip), %rax ; cmpq %rax, 168(%rdx) ; jne exit
+///   movq $0x77, 128(%rdx) ; ret                            ; rbx
+/// exit: movl $231, %eax ; syscall
+/// restorer: movl $15, %eax ; syscall
+/// ```
+///
+/// Assembled by GNU `as` and read back out of the object file; on Linux
+/// 6.x the same program exits 0.
+const BREAKPOINT_64: &[u8] = &[
+    0x48, 0x83, 0xec, 0x20, 0x48, 0x8d, 0x05, 0x55, 0x00, 0x00, 0x00, 0x48, 0x89, 0x04, 0x24, 0x48,
+    0xc7, 0x44, 0x24, 0x08, 0x04, 0x00, 0x00, 0x04, 0x48, 0x8d, 0x05, 0x90, 0x00, 0x00, 0x00, 0x48,
+    0x89, 0x44, 0x24, 0x10, 0x48, 0xc7, 0x44, 0x24, 0x18, 0x00, 0x00, 0x00, 0x00, 0xb8, 0x0d, 0x00,
+    0x00, 0x00, 0xbf, 0x05, 0x00, 0x00, 0x00, 0x48, 0x89, 0xe6, 0x31, 0xd2, 0x41, 0xba, 0x08, 0x00,
+    0x00, 0x00, 0x0f, 0x05, 0xbf, 0x09, 0x00, 0x00, 0x00, 0x48, 0x85, 0xc0, 0x75, 0x5a, 0x31, 0xdb,
+    0xcc, 0xbf, 0x08, 0x00, 0x00, 0x00, 0x48, 0x83, 0xfb, 0x77, 0x75, 0x4c, 0x31, 0xff, 0xeb, 0x48,
+    0xbf, 0x01, 0x00, 0x00, 0x00, 0x83, 0x3e, 0x05, 0x75, 0x3e, 0xbf, 0x02, 0x00, 0x00, 0x00, 0x81,
+    0x7e, 0x08, 0x80, 0x00, 0x00, 0x00, 0x75, 0x30, 0xbf, 0x03, 0x00, 0x00, 0x00, 0x48, 0x83, 0xba,
+    0xc8, 0x00, 0x00, 0x00, 0x03, 0x75, 0x21, 0xbf, 0x04, 0x00, 0x00, 0x00, 0x48, 0x8d, 0x05, 0xbe,
+    0xff, 0xff, 0xff, 0x48, 0x39, 0x82, 0xa8, 0x00, 0x00, 0x00, 0x75, 0x0c, 0x48, 0xc7, 0x82, 0x80,
+    0x00, 0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0xc3, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xb8,
+    0x0f, 0x00, 0x00, 0x00, 0x0f, 0x05,
+];
+
+/// An i386 program's `into` with the overflow flag set, then its `int3`,
+/// under one `SA_SIGINFO` handler for `SIGSEGV` and `SIGTRAP`. Before each
+/// it puts the signal it expects in `ESI`, the trap in `EDI` and the address
+/// after the instruction in `EDX`; the handler compares the `siginfo`'s
+/// `si_signo` and `si_code` (`SI_KERNEL`) and the `sigcontext`'s `trapno`
+/// and `eip` with those saved registers, writes `0x77` into the saved `EAX`
+/// and returns. `into` must be `#OF`, `SIGSEGV` with trap 4, as Linux's
+/// `do_error_trap` gives; `int3` `#BP`, `SIGTRAP` with trap 3. Exits 42, or:
+/// 30 a failed `rt_sigaction`, 31 the `into` and 32 the `int3` not resumed,
+/// 33 the wrong signal, 34 the wrong `si_code`, 35 the wrong trap, 36 the
+/// wrong `eip`.
+///
+/// ```text
+///   call 1f
+/// 1: popl %ebp ; subl $32, %esp
+///   rt_sigaction(11, {handler, SA_SIGINFO|SA_RESTORER, restorer}, 0, 8)
+///   rt_sigaction(5, the same)                   ; 30 if either fails
+///   movl $11, %esi ; movl $4, %edi ; leal 2f-1b(%ebp), %edx
+///   movl $0x7fffffff, %eax ; addl $1, %eax ; into
+/// 2: movl $31, %ebx ; cmpl $0x77, %eax ; jne 9f
+///   movl $5, %esi ; movl $3, %edi ; leal 3f-1b(%ebp), %edx ; xorl %eax, %eax
+///   int3
+/// 3: movl $32, %ebx ; cmpl $0x77, %eax ; jne 9f
+///   movl $42, %ebx
+/// 9: movl $252, %eax ; int $0x80
+/// handler: movl 8(%esp), %ecx ; movl 12(%esp), %edx
+///   movl $33, %ebx ; movl (%ecx), %eax ; cmpl 40(%edx), %eax ; jne 9b    ; signo, esi
+///   movl $34, %ebx ; cmpl $0x80, 8(%ecx) ; jne 9b                        ; si_code
+///   movl $35, %ebx ; movl 68(%edx), %eax ; cmpl 36(%edx), %eax ; jne 9b  ; trapno, edi
+///   movl $36, %ebx ; movl 76(%edx), %eax ; cmpl 56(%edx), %eax ; jne 9b  ; eip, edx
+///   movl $0x77, 64(%edx) ; ret                                           ; eax
+/// restorer: movl $173, %eax ; int $0x80
+/// ```
+///
+/// Assembled by GNU `as --32` in `.code32`, and read back with `objdump -m
+/// i386`; on Linux 6.x the same program exits 42.
+const OVERFLOW_I386: &[u8] = &[
+    0xe8, 0x00, 0x00, 0x00, 0x00, 0x5d, 0x83, 0xec, 0x20, 0x8d, 0x85, 0xb7, 0x00, 0x00, 0x00, 0x89,
+    0x04, 0x24, 0xc7, 0x44, 0x24, 0x04, 0x04, 0x00, 0x00, 0x04, 0x8d, 0x85, 0xfb, 0x00, 0x00, 0x00,
+    0x89, 0x44, 0x24, 0x08, 0xc7, 0x44, 0x24, 0x0c, 0x00, 0x00, 0x00, 0x00, 0xc7, 0x44, 0x24, 0x10,
+    0x00, 0x00, 0x00, 0x00, 0xb8, 0xae, 0x00, 0x00, 0x00, 0xbb, 0x0b, 0x00, 0x00, 0x00, 0x89, 0xe1,
+    0x31, 0xd2, 0xbe, 0x08, 0x00, 0x00, 0x00, 0xcd, 0x80, 0xbb, 0x1e, 0x00, 0x00, 0x00, 0x85, 0xc0,
+    0x75, 0x63, 0xb8, 0xae, 0x00, 0x00, 0x00, 0xbb, 0x05, 0x00, 0x00, 0x00, 0x89, 0xe1, 0x31, 0xd2,
+    0xbe, 0x08, 0x00, 0x00, 0x00, 0xcd, 0x80, 0xbb, 0x1e, 0x00, 0x00, 0x00, 0x85, 0xc0, 0x75, 0x45,
+    0xbe, 0x0b, 0x00, 0x00, 0x00, 0xbf, 0x04, 0x00, 0x00, 0x00, 0x8d, 0x95, 0x84, 0x00, 0x00, 0x00,
+    0xb8, 0xff, 0xff, 0xff, 0x7f, 0x83, 0xc0, 0x01, 0xce, 0xbb, 0x1f, 0x00, 0x00, 0x00, 0x83, 0xf8,
+    0x77, 0x75, 0x22, 0xbe, 0x05, 0x00, 0x00, 0x00, 0xbf, 0x03, 0x00, 0x00, 0x00, 0x8d, 0x95, 0xa1,
+    0x00, 0x00, 0x00, 0x31, 0xc0, 0xcc, 0xbb, 0x20, 0x00, 0x00, 0x00, 0x83, 0xf8, 0x77, 0x75, 0x05,
+    0xbb, 0x2a, 0x00, 0x00, 0x00, 0xb8, 0xfc, 0x00, 0x00, 0x00, 0xcd, 0x80, 0x8b, 0x4c, 0x24, 0x08,
+    0x8b, 0x54, 0x24, 0x0c, 0xbb, 0x21, 0x00, 0x00, 0x00, 0x8b, 0x01, 0x3b, 0x42, 0x28, 0x75, 0xe5,
+    0xbb, 0x22, 0x00, 0x00, 0x00, 0x81, 0x79, 0x08, 0x80, 0x00, 0x00, 0x00, 0x75, 0xd7, 0xbb, 0x23,
+    0x00, 0x00, 0x00, 0x8b, 0x42, 0x44, 0x3b, 0x42, 0x24, 0x75, 0xca, 0xbb, 0x24, 0x00, 0x00, 0x00,
+    0x8b, 0x42, 0x4c, 0x3b, 0x42, 0x38, 0x75, 0xbd, 0xc7, 0x42, 0x40, 0x77, 0x00, 0x00, 0x00, 0xc3,
+    0xb8, 0xad, 0x00, 0x00, 0x00, 0xcd, 0x80,
+];
+
 /// What `arch_prctl` refuses. `ARCH_SET_FS` and `ARCH_SET_GS` with
 /// `0xffff800000000000` have to be `EPERM`, and `ARCH_SET_GS` with the
 /// non-canonical `0x800000000000` too; request `0x1000`, which is none,
@@ -691,9 +798,106 @@ pub(crate) fn run() -> Result<(), &'static str> {
     );
 
     check_bases_and_fault_context()?;
+    check_breakpoint()?;
     check_compat()?;
     check_forged_64_bit_frames()?;
-    check_wow64()
+    check_wow64()?;
+    check_user_gates()
+}
+
+/// A program's `int3` is `SIGTRAP` with the context Linux gives it.
+///
+/// Verifies: `L.x86_64.209`
+fn check_breakpoint() -> Result<(), &'static str> {
+    match run_program(b"/int3", BREAKPOINT_64)? {
+        0 => {}
+        1 => return Err("a program's int3 did not raise SIGTRAP"),
+        2 => return Err("a program's int3 raised SIGTRAP with a si_code other than SI_KERNEL"),
+        3 => return Err("a SIGTRAP handler's sigcontext did not say trap 3 for a program's int3"),
+        4 => return Err("a SIGTRAP handler's saved rip was not the address after the int3"),
+        8 => return Err("a program was not resumed after its int3 by its SIGTRAP handler"),
+        status if status == killed_by(SIGSEGV) => {
+            return Err("a program's int3 was a general protection fault, not a breakpoint");
+        }
+        _ => return Err("the int3 program ended some other way"),
+    }
+    println!(
+        "  int3     a program's int3 raised SIGTRAP, SI_KERNEL, trap 3 and rip past it to its \
+         handler, which resumed it"
+    );
+    Ok(())
+}
+
+/// Ring 3 may raise `#BP`, `#OF` and the legacy system call by a software
+/// interrupt, and no other vector: Linux's three system gates. Last, after
+/// the programs, so that a gate a program needs and lost fails by what the
+/// program saw, and only a vector opened beyond Linux's fails here.
+///
+/// Verifies: `L.x86_64.81`
+fn check_user_gates() -> Result<(), &'static str> {
+    // SAFETY: (SHARED) the table is written once by `init`, before any
+    // program runs, and only read from then on.
+    let table = unsafe { &*super::IDT.0.get() };
+    let mut user = 0;
+    for (vector, gate) in table.iter().enumerate() {
+        let dpl = (gate.flags >> 5) & 3;
+        let wanted = match vector {
+            super::BREAKPOINT | super::OVERFLOW | super::LEGACY_SYSCALL => 3,
+            _ => 0,
+        };
+        if dpl != wanted {
+            println!("  gates    vector {vector:#x}'s gate has DPL {dpl}, not {wanted}");
+            return Err("a gate's DPL is not as on Linux: ring 3 raises #BP, #OF, int $0x80 alone");
+        }
+        user += usize::from(dpl == 3);
+    }
+    println!(
+        "  gates    {user} of {} gates take a software interrupt from ring 3: #BP, #OF and \
+         int $0x80, as Linux's system gates",
+        table.len()
+    );
+    Ok(())
+}
+
+/// `into`: `#OF` in an i386 program, `SIGSEGV` with trap 4, and its `int3`
+/// `SIGTRAP` with trap 3, through the 32-bit frame.
+///
+/// Not `into` in 64-bit code, where the processor raises `#UD` whatever the
+/// gate says and the `invalid` case's `SIGILL` already covers the path:
+/// QEMU 10.2's TCG runs on past the instruction instead, so a case for it
+/// would fail the TCG boot on the emulator's behalf.
+///
+/// Verifies: `L.x86_64.210`
+fn check_overflow() -> Result<(), &'static str> {
+    let file = crate::syscall::image::build_with(
+        ferrix_elf::Class::Elf32,
+        EM_386,
+        crate::syscall::image::Shape::Good,
+        OVERFLOW_I386,
+    );
+    let status =
+        crate::syscall::exec::run(&file, &[b"/into"], &[], [0x7e; ferrix_ustack::RANDOM_BYTES])
+            .map_err(|_| "the i386 overflow program could not be started")?;
+    let failed = match status {
+        HELLO_I386_STATUS => None,
+        30 => Some("rt_sigaction refused the i386 overflow program's handlers"),
+        31 => Some("an i386 program was not resumed after its into by its SIGSEGV handler"),
+        32 => Some("an i386 program was not resumed after its int3 by its SIGTRAP handler"),
+        33 => Some("an i386 program's into or int3 raised the wrong signal"),
+        34 => Some("an i386 program's into or int3 raised a si_code other than SI_KERNEL"),
+        35 => Some("an i386 program's into was not trap 4, or its int3 not trap 3"),
+        36 => Some("an i386 handler's saved eip was not the address after into or int3"),
+        _ => Some("the i386 overflow program ended some other way"),
+    };
+    if let Some(problem) = failed {
+        println!("  into     the i386 overflow program ended with {status}");
+        return Err(problem);
+    }
+    println!(
+        "  into     an i386 program's into with OF set raised SIGSEGV, SI_KERNEL, trap 4 and its \
+         int3 SIGTRAP, trap 3, each with eip past it, and both resumed"
+    );
+    Ok(())
 }
 
 /// `arch_prctl`'s refusals and readers, and a `SIGSEGV` handler's view of
@@ -789,6 +993,7 @@ fn check_compat() -> Result<(), &'static str> {
 
     let tls = check_thread_areas()?;
     check_signals_and_fork()?;
+    check_overflow()?;
     check_socketcall()?;
     let forged = check_forged_frames()?;
 

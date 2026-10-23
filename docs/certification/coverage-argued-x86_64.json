@@ -138,14 +138,14 @@
     },
     {
       "file": "arch/x86_64/trap.rs",
-      "lines": "550, 574",
+      "lines": "564, 588",
       "category": "failure-path",
       "match": "pub(crate) const fn vector_name(vector: u64) -> &'static str {",
       "why": "`vector_name`'s standalone copy, called by `report_trap` and by the paranoid entry's fatal arms, both of which run only when the kernel is stopping. `classify` carries its own inlined copy, which the stage 3 fault check reaches with a program's `hlt`."
     },
     {
       "file": "arch/x86_64/trap.rs",
-      "lines": "673, 676-677, 692",
+      "lines": "688, 691-692, 707",
       "category": "failure-path",
       "match": "vector_name(frame.vector),",
       "why": "The register dump the trap path prints when the kernel stops on an exception it cannot handle (`trap::report`); a passing run never prints it."

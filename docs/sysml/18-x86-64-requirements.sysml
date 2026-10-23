@@ -2249,6 +2249,45 @@ package FerrixX8664Requirements {
                 "trap::user_fault_as",
                 "trap::return_path");
         }
+        requirement <'L.x86_64.209'> aProgramsInt3IsSigtrap : ItemLowLevel {
+            doc /* Linux's do_int3_user forces SIGTRAP with force_sig, so
+                SI_KERNEL and no address, and records trap 3; int3 pushes the
+                address after itself. Wine reads the trap number to tell a
+                breakpoint from an access violation. */
+            attribute :>> statement = "A 64-bit program's int3 shall raise #BP,
+                for which classify and fault_signal name SIGTRAP with si_code
+                SI_KERNEL, and put_cause shall write trap 3 and the address after
+                the int3 into its sigcontext, where a handler's return resumes.";
+            attribute :>> criterion = "A 64-bit program's SIGTRAP handler for its
+                int3 reads si_signo 5, si_code 0x80, trapno 3 and rip past the
+                0xcc, and is resumed after it (the `int3` line). With the #BP and
+                #OF gates at DPL 0 the program is ended by SIGSEGV and the check
+                fails by name.";
+            attribute :>> parent = ("H.TRAP.4", "H.TRAP.9");
+            attribute :>> unit = ("arch::x86_64::trap::classify",
+                "arch::x86_64::trap::fault_signal",
+                "arch::x86_64::signal::put_cause");
+        }
+        requirement <'L.x86_64.210'> anI386IntoIsOverflow : ItemLowLevel {
+            doc /* Linux's do_error_trap for X86_TRAP_OF forces SIGSEGV with
+                force_sig, so SI_KERNEL and no address, and records trap 4.
+                into exists only outside 64-bit code. */
+            attribute :>> statement = "An i386 program's into with OF set shall
+                raise #OF, for which fault_signal names SIGSEGV with si_code
+                SI_KERNEL, and its int3 #BP, SIGTRAP with SI_KERNEL; sigcontext_of
+                shall write trap 4 and trap 3 and the address after each
+                instruction into the i386 sigcontext, where a handler's return
+                resumes.";
+            attribute :>> criterion = "An i386 program's handler reads SIGSEGV,
+                0x80, trap 4 and eip past its into, then SIGTRAP, 0x80, trap 3 and
+                eip past its int3, and is resumed after each (the `into` line).
+                With the #OF gate alone at DPL 0 the handler reads trap 13 and the
+                check fails by name.";
+            attribute :>> parent = ("H.TRAP.4", "H.TRAP.9");
+            attribute :>> unit = ("arch::x86_64::trap::classify",
+                "arch::x86_64::trap::fault_signal",
+                "arch::x86_64::signal::compat::sigcontext_of");
+        }
         requirement <'L.x86_64.78'> aTouchPastAFileIsSigbus : ItemLowLevel {
             attribute :>> statement = "handle_page_fault shall answer with SIGBUS a
                 user fault the address space reports as past the end of a mapped
@@ -2294,10 +2333,24 @@ package FerrixX8664Requirements {
                 "arch::x86_64::trap::load_on_this_cpu");
         }
         requirement <'L.x86_64.81'> onlyInt80IsUserCallable : ItemLowLevel {
-            attribute :>> statement = "trap::init shall let ring 3 raise no vector
-                but int $0x80 and the breakpoint.";
-            attribute :>> criterion = "A program running int $0x81 and int $14 is
-                ended with SIGSEGV, 2 of 2.";
+            doc /* The processor checks the gate's DPL for int3, into and
+                int n alike. Until 2026-10-23 only the legacy system call's
+                gate had DPL 3, though this statement already named the
+                breakpoint, and no check read the table: a program's int3 was
+                #GP, SIGSEGV with no address where Linux sends SIGTRAP, and
+                Wine, reading trap 13, reported an access violation for a
+                breakpoint Windows code catches (two Endfield crash dumps on
+                the N150, both on a deliberate int3 in UnityPlayer.dll).
+                Linux gives #BP, #OF and int $0x80 system gates
+                (arch/x86/kernel/idt.c, SYSG) and no others. */
+            attribute :>> statement = "trap::init shall install the gates of #BP
+                (vector 3), #OF (vector 4) and int $0x80 with DPL 3 and every
+                other gate with DPL 0, so that ring 3 can raise those three
+                vectors by a software interrupt and no other.";
+            attribute :>> criterion = "After the fault programs have run, the boot
+                reads all 256 gates and finds DPL 3 on vectors 3, 4 and 0x80 alone
+                (the `gates` line); with a fourth vector given DPL 3 the check
+                fails by name.";
             attribute :>> parent = "H.TRAP.4";
             attribute :>> unit = "arch::x86_64::trap::init";
         }
