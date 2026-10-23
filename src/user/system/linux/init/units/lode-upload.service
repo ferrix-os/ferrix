@@ -4,7 +4,8 @@
 # (the store is its buffer; killed, it goes on from its cursor). It reads
 # the store as uid 92 in adm and sends what follows each destination's
 # cursor; with no /etc/ferrix/lode-upload.conf it says so and ends. Not
-# started unless an image enables it (tools/common/xtask/src/lode.rs).
+# started unless an image enables it (tools/common/xtask/src/lode.rs), or
+# `svc enable` does: lode-receive's pairing plan enables and restarts it.
 [Unit]
 Description=Send the log on to collectors
 After=lode.service
@@ -14,3 +15,6 @@ Type=simple
 ExecStart=/bin/lode-upload
 Restart=on-failure
 RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -16,7 +16,13 @@
 //!    was taken; a viewer that did not run the query, or ran it on other
 //!    records, says another.
 //!
-//! The screen after step 2 is kept in the build directory as
+//! 3. A query pasted over it: `clip copy id=usbhid` puts text on the
+//!    compositor's clipboard, `/`, Ctrl+A and Ctrl+V in the viewer select
+//!    the query and paste over it through `wl_data_device` (Ctrl never
+//!    types its letter), and Return runs it: the viewer says it pasted 9
+//!    characters and found usbhid's 14 lines.
+//!
+//! The screen after step 3 is kept in the build directory as
 //! `lode-viewer.ppm`.
 //!
 //! `lode-viewer-ssh` is the other side: the viewer on this machine following
@@ -51,12 +57,21 @@ const CONFIG: &str = "\
 # Carried into the initramfs by `cargo xtask test-compositor --boot lode-viewer`.
 exec-once = /bin/lode-viewer /usr/share/ferrix/lode-viewer-test.jsonl --page logs --zoom 0
 bind = , F1, exec, /bin/vkbd slash i d equal m s r Return
+bind = , F2, exec, /bin/clip copy id=usbhid
+bind = , F3, exec, /bin/vkbd slash
+bind = , F4, exec, /bin/vkbd CTRL A
+bind = , F5, exec, /bin/vkbd CTRL V
+bind = , F6, exec, /bin/vkbd Return
 ";
 
 /// The records the file holds, and how many of them `msr` wrote.
 const RECORDS_IN_FILE: usize = 801;
 /// The lines `id=msr` finds.
 const MSR_LINES: usize = 13;
+/// The query pasted, and the lines it finds.
+const PASTED: &str = "id=usbhid";
+/// The lines `id=usbhid` finds.
+const USBHID_LINES: usize = 14;
 
 /// How long one step may take under emulation on a busy host.
 const PATIENCE: Duration = Duration::from_secs(150);
@@ -298,7 +313,7 @@ pub(super) fn test_lode_viewer(arch: Arch, programs: &Programs, args: &Args) -> 
     judge(arch, &said)?;
     println!(
         "  {arch}: the log viewer read {RECORDS_IN_FILE} records, drew its window, and a query \
-         typed into it found the {MSR_LINES} lines msr wrote"
+         typed into it found the {MSR_LINES} lines msr wrote, and one pasted over it found usbhid's {USBHID_LINES}"
     );
     Ok(())
 }
@@ -351,9 +366,34 @@ fn drive(
         "lode-viewer: where `id=msr`",
         "the query typed into the log viewer was not run",
     )?;
+    println!("  {arch}: the typed query ran");
+    // The clipboard: clip offers the text, the viewer pastes it over the
+    // selected query.
+    press(&mut qmp, &["f2"])?;
+    std::thread::sleep(Duration::from_secs(2));
+    for key in ["f3", "f4", "f5"] {
+        press(&mut qmp, &[key])?;
+        std::thread::sleep(Duration::from_millis(800));
+    }
+    wait(
+        watching,
+        arch,
+        &format!("lode-viewer: pasted {} characters", PASTED.len()),
+        "Ctrl+V did not paste the clipboard into the query",
+    )?;
+    press(&mut qmp, &["f6"])?;
+    wait(
+        watching,
+        arch,
+        &format!("lode-viewer: where `{PASTED}`"),
+        "the pasted query was not run",
+    )?;
     std::thread::sleep(Duration::from_secs(2));
     qmp.screendump(Some(DEVICE_ID), dump)?;
-    println!("  {arch}: the query ran; the screen is {}", dump.display());
+    println!(
+        "  {arch}: the pasted query ran; the screen is {}",
+        dump.display()
+    );
     watching.read_what_was_said(Duration::from_secs(2))?;
     Ok(watching
         .lines()
@@ -384,6 +424,22 @@ fn judge(arch: Arch, said: &[String]) -> Result<()> {
             "the query typed into the log viewer did not find msr's {MSR_LINES} lines: it said {said_instead}"
         ));
     }
+    let pasted = format!("lode-viewer: pasted {} characters", PASTED.len());
+    if !has(&pasted) {
+        return refuse(format!("Ctrl+V never pasted the clipboard: no `{pasted}`"));
+    }
+    let found =
+        format!("lode-viewer: where `{PASTED}`: {USBHID_LINES} of {RECORDS_IN_FILE} records");
+    if !has(&found) {
+        let said_instead = said
+            .iter()
+            .rev()
+            .find(|line| line.contains("lode-viewer: where "))
+            .map_or("nothing", |line| line.trim());
+        return refuse(format!(
+            "the pasted query did not replace the typed one and find usbhid's {USBHID_LINES} lines: it said {said_instead}"
+        ));
+    }
     if let Some(line) = said.iter().find(|line| line.contains("lode-viewer: err: ")) {
         return refuse(format!("the log viewer complained: {}", line.trim()));
     }
@@ -402,6 +458,8 @@ mod tests {
             "lode-viewer: the window is up, 1264x704 at scale 1, 754 lines in the table, first frame in 80 ms",
             "vkbd: typed slash i d equal m s r Return",
             "lode-viewer: where `id=msr`: 13 of 801 records",
+            "lode-viewer: pasted 9 characters",
+            "lode-viewer: where `id=usbhid`: 14 of 801 records",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -450,6 +508,20 @@ mod tests {
             .chain(["lode-viewer: err: no font was found".to_owned()])
             .collect();
         assert!(refusal(&complained).contains("complained"));
+        let unpasted: Vec<String> = passed()
+            .into_iter()
+            .filter(|line| !line.contains("pasted"))
+            .collect();
+        assert!(refusal(&unpasted).contains("never pasted"));
+        let typed_v: Vec<String> = passed()
+            .into_iter()
+            .map(|line| line.replace("`id=usbhid`: 14", "`id=msrvid=usbhid`: 0"))
+            .collect();
+        assert!(
+            refusal(&typed_v).contains("did not replace"),
+            "{}",
+            refusal(&typed_v)
+        );
     }
 
     #[test]
