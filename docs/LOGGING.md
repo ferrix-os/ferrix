@@ -2257,7 +2257,7 @@ Ferrix image where something writes a log, and whether lode has it.
 | Test rigs' `/tmp/yserver.log` (`:1`) | `test-yserver`, `test-dxvk`, shader cache | no, by choice | gate rigs read their own file and run without lode |
 | A hung process's threads | -- | no | a hang snapshot, next |
 
-## 21. Tombstones (research, 2026-10-24; not built)
+## 21. Tombstones (researched 2026-10-24; the customer approved the three landings)
 
 The customer asked what Android records when a process crashes, how Linux
 does the same, and what Ferrix could keep: a "tombstone" record in lode
@@ -2346,3 +2346,94 @@ fields. Build it in three landings:
 Kernel lines for all three: about 60 (the hold) beyond what is built; 30
 more for the registers in the kernel line if the collector cannot read
 them. Points: about 9.
+
+### 21.4 Storage: lean records, a blob container beside them (the customer, 2026-10-24)
+
+The customer approved the three landings and set how they are stored:
+inside lode, one tool, and without the heavy parts slowing the log.
+
+* **Two containers.** The segments hold only lean records. A tombstone
+  record, a crash record and a screenshot record carry small references:
+  `BLOB_<PART>=<id> <size> <type>`, the id the SHA-256 of the bytes, beside
+  a few summary fields (signal, comm, module+offset, the top frame). The
+  heavy parts -- screenshots, per-thread backtraces, maps, descriptor
+  lists, memory bytes when they are on -- are blobs in a **blob container**
+  lode keeps beside the segments: `<store>/blobs/`, content-addressed,
+  append-only, compressed on its own, with its own retention, quota and
+  integrity check. A blob under about 4 KiB is not a blob: it is a field of
+  the record itself.
+* **Packs, not a file a blob** (Git's way): blobs are appended to a pack
+  file, `pack-<first id>.fxb`, with an index of ids to offsets written when
+  the pack is sealed (at 16 MiB or a day); each entry a header (id,
+  length, type, CRC-32C) and the bytes, zstd-compressed except for an
+  already compressed type (PNG, QOI stays raw: it is small). On Ferrix's
+  btrfs every `fdatasync` costs about 40 KiB whatever was written (§8.3), so
+  one pack synced once a batch costs what a record batch costs, where a
+  file a blob would cost a commit each.
+* **Blob first, then the record.** A blob is appended and synced before the
+  record that names it is written; a record whose blob is missing (a crash
+  between the two, or a pack damaged since) says so when it is read (`blob
+  missing`), never guesses. A blob no record names -- written, then lode
+  killed before the record -- is removed after a grace period (an hour) by
+  the sweep below. `lode verify` checks every reference against the packs.
+* **Garbage collection by mark and sweep**, at vacuum time: each sealed
+  segment's summary lists the blob ids its records name; the sweep marks
+  every id the remaining segments' summaries list and the segment being
+  written holds, and rewrites a pack whose live bytes fell below half
+  (a new pack, synced, renamed over the old) or removes one with none. No
+  reference counts across retention classes, which would break whenever
+  a class's segment is vacuumed alone. The container's quota is its own
+  (`BlobMaxUse=`, 256 MiB by default) and evicts the oldest pack first;
+  a record whose blob went is shown with `blob expired`.
+* **Lazy.** Queries, `-f`, summaries, `lode top`, the viewer's lists and
+  forwarding of records never read a blob. A blob is read when someone asks
+  for it by id: `lode blob ID`, `ferrix-lode-core`'s `blob(id)`, the viewer
+  opening a crash or a screenshot, `lode tombstone SEQ` printing a
+  tombstone whole.
+* **No stall.** Blobs have a writer path of their own in lode, after the
+  record batch, with a bounded queue (16 MiB): record ingest never waits for
+  a blob, and a blob that cannot be queued or written makes its record say
+  `blob dropped` with why. Sealing and compressing segments never touch
+  blobs.
+* **Crash storms.** Per crash signature -- program, module+offset of the
+  pc, signal -- a boot gets full tombstones for the first N (`events.conf`:
+  `tombstone on 5`), then only a count and the last time on the newest
+  one (`TOMBSTONE_REPEATS`, `TOMBSTONE_LAST`). On the night of
+  2026-10-23 steamwebhelper crashed every 2 s, 146 times: that is five
+  tombstones and a counter. Content addressing dedupes identical blobs
+  beyond that (the same maps, the same backtrace).
+* **Forwarding.** Records forward as today. Blobs follow on a second,
+  lower-priority stream per destination, so a screenshot never delays log
+  delivery: small blobs (backtraces, maps, descriptor lists) are pushed by
+  default, since the machine that crashed may be gone or power-cycled before
+  anyone asks; screenshots and memory bytes per destination (`blobs=small|
+  all|none` on its line), on demand where the receiver can ask back.
+  `lode-receive` keeps the same two containers per machine.
+* **Write budget.** Blobs count towards lode's write budget (§8.3); the
+  capture rate limit stays (one each 10 s); `test-log-budget` gains a blob
+  row: a crash storm of 100 identical crashes writes at most five
+  tombstones' worth of blobs.
+* **Screenshots move in too.** Today's QOI files under
+  `<journal>/captures/` become blobs; the record names them, and `lode blob`
+  serves them, so the viewer never handles a path.
+* **One tool.** The viewer and `lode tombstone SEQ` resolve references for
+  the person; JSON and export output carry the references, and `--blobs`
+  inlines them (base64 in JSON, the export format's binary fields).
+
+**Links.** The tombstone record carries the cursor of the crash record
+(`TOMBSTONE_OF`) and of the first and last record of its log tail
+(`TOMBSTONE_TAIL_FIRST`, `TOMBSTONE_TAIL_LAST`); every record of the
+crashed process from then on, and the crash record, carry nothing new: the
+viewer and `lode tombstone` find a record's tombstone through
+`TOMBSTONE_PID` and the boot, and `lode -o json` adds `TOMBSTONE` (the
+tombstone's cursor) to a crash record when one exists.
+
+**The fields** (step 1): `TOMBSTONE=1`, `MESSAGE_ID` (its own),
+`TOMBSTONE_PID`, `TOMBSTONE_COMM`, `TOMBSTONE_EXE`, `TOMBSTONE_CMDLINE`,
+`TOMBSTONE_SIGNAL`, `TOMBSTONE_ADDRESS`, `TOMBSTONE_PC`,
+`TOMBSTONE_MODULE`, `TOMBSTONE_TOP_FRAME`, `TOMBSTONE_UNIT`,
+`TOMBSTONE_SESSION`, `TOMBSTONE_BOOT_IMAGE`, `TOMBSTONE_OF`,
+`TOMBSTONE_TAIL_FIRST`, `TOMBSTONE_TAIL_LAST`, `TOMBSTONE_CAPTURE` (the
+screenshot record's cursor), `TOMBSTONE_REPEATS`, `TOMBSTONE_LAST`, and
+the blob references `BLOB_BACKTRACE`, `BLOB_MAPS`, `BLOB_FDS`,
+`BLOB_THREADS`, `BLOB_SCREENSHOT`, `BLOB_MEMORY` (step 2 fills these).
