@@ -1826,3 +1826,123 @@ std program against musl as dhcp is, with two programs:
   half-written console line -- was fixed in the core by 722824a8d; step
   2's `test-log` then stored 3,000 of 3,000 flood lines on all three
   architectures, and the row is strict again.
+
+## 20. Feature status (2026-10-23)
+
+The customer asked what lode still lacks against everything promised. Each
+row: **built**, **partly** or **missing**, the evidence, and what is left
+in the plan's points (§17; a point is about a day's work with its gate).
+"test-log" is `cargo xtask test-log`, which runs on all three
+architectures.
+
+### 20.1 The top ten wishes (§2)
+
+| # | Wish | Status | Evidence | Left |
+|---|---|---|---|---:|
+| 1 | Writes that cost about what the line costs | partly | append-only, no `mmap`, compressed when sealed (`compress.rs`), field names as indexes; `test-log-budget`: fast load 2.67 (budget 3), slow load 45.7 against 40 | 0 in lode (the slow load is btrfs's `fsync`, a kernel item); 2 for per-source metadata written once (§8.2's SOURCE entries) |
+| 2 | Queries fast as the store grows | partly | segment summaries skip whole segments, newest-first `-n` (`lode bench`, `test-log` part F) | 4: field indexes and a sparse time index inside sealed segments (§8.4); the 1 GB / 100 GB benchmark |
+| 3 | A real filter language | built | `--where` with and/or/not, globs, `~`; rules, retention, capture and upload use it (`filter.rs`, host tests) | 1: `~` is a substring, not a regular expression |
+| 4 | Noise controlled at ingest, never silent | partly | limiter, `drop`/`sample`/`level`/`fold`/`limit` rules each said; folding of lines alike but for numbers; `test-log` held/folded rows | 2: `lode top` (§7.4) |
+| 5 | Retention per service and priority; delete by match | built | retention classes (`retention.conf`), RAM-only classes, vacuum; `lode delete --where` (`test-log` delete row) | 1: journalctl's `--vacuum-size/-time/-files` and `--disk-usage` as commands |
+| 6 | Every entry attributed; stdout vs stderr | partly | sockets: `_PID/_UID/_GID` from `SO_PEERCRED`, `_COMM` and cgroup read from `/proc` when the sender connects; units' output arrives through init's console as `UNIT` (untrusted) | 4: init hands lode each unit's own stream (`_SYSTEMD_UNIT`, `_STREAM`, `_SYSTEMD_INVOCATION_ID` trusted), `_EXE`, a dying process's last lines (§4.2) |
+| 7 | Output usable without flags | partly | `-o human` with year, zone and level letter (`?` for none), never truncated; 11 journald formats | 2: `--format` templates; colour on a terminal; a pager |
+| 8 | A crash costs at most the unsynced tail | built | per-entry CRC and torn-tail cut, restart without loss (`test-log`: SIGKILL mid-flood, `verify --kernel` "unsaid gaps: none"), sealed segments immutable | 1: a full or failing disk degrading to RAM (§11.4) is untested |
+| 9 | Store-and-forward, syslog in and out | partly | `lode-upload` with cursor, back-off, TLS; `lode-receive` (`test-log-remote`); `/dev/log` in | 3: RFC 5424 out over TCP/TLS, OTLP out; 2: `lode-receive` on Ferrix and a merged view (§10.3, §10.4) |
+| 10 | The right slice by default | partly | `-b`, `--list-boots`, persistent by default, `-u` globs, `-s` sessions, marks | 3: `-u UNIT@last` (invocation ids), per-user segments so a user reads their own logs (§12) |
+
+### 20.2 The themes after the top ten (USER-WISHES.md)
+
+| Theme | Status | Evidence | Left |
+|---|---|---|---:|
+| 11 Previous boots, persistent by default | built | `/var/log/journal` when writable, `-b -1`, `--list-boots` | 0 |
+| 12 This run of a service | missing | no invocation ids in records | (in 10) |
+| 13 Full-text search | partly | `-g` (glob, any case when lower case), `--around`, marks | 1: regular expressions, `--case-sensitive` |
+| 14 Unprivileged access | missing | root and `adm` only (`cli.rs`, "permission denied") | 3: per-user segments and directories (§12.1) |
+| 15 Rate limiting that surprises | built | every hold is said (`N_SUPPRESSED`, `N_DROPPED`, `REPEATED`); the kernel's lines never held | 0 |
+| 16 Early boot and kernel messages | built | `/dev/kmsg` read from its first record, `_KERNEL_SEQNUM`, `verify --kernel` | 0 |
+| 17 Structured logging from programs | partly | native protocol, `lode cat --journal`; tracing lines read for crate and level | 1: JSON lines on stdout turned into fields (§5) |
+| 18 Logging never stalls the system | partly | `logger` returns at once with no lode (`test-log` "no lode"); compression a frame at a time | 1: a test that a stalled disk never blocks a writer |
+| 19 The collector's own security | built | lode in a sealed job, its own user (`test-log`: uid 91, cgroup, move refused); uploader uid 92 | 1: the uploader as a native service in a sealed job |
+| 20 A viewer | partly | `lode-viewer` (the viewer agent's), on Ferrix and on nazuna, over `lode-receive`'s stores | the viewer agent's |
+| 21 Runtime log levels per service | missing | no `INTEREST` or `lode level` | 3 (with drivers, plan step 7) |
+| 22 Alerts and actions | missing | no `alert` rules, no `notify`/`start` | 3 |
+| 23 Privacy and redaction | missing | no `redact` rule; `_CMDLINE` is not recorded | 1 |
+| 24 Multi-line messages | partly | a value with a newline is stored whole (native protocol, export) | 1: `LogMultiline=` for units' stdout (§5) |
+| 25 Containers and namespaces | missing | no `_NAMESPACE` | 1 |
+| 26 Trace and request correlation | partly | `TRACE_ID`/`SPAN_ID` kept as sent | 1: filters and the viewer joining on them |
+
+### 20.3 The design's sections
+
+| § | Promise | Status | Evidence | Left |
+|---|---|---|---|---:|
+| 5 | Sources: kmsg, `/dev/log`, native socket, stdout streams | built | `front.rs`; `test-log` "front: 1 1 1 1 0" | 0 |
+| 5 | Drivers' `logproto` with `INTEREST`; `devmgr` hands ends | missing | plan step 7 | 6 |
+| 5 | pstore: the last boot's panic | missing | plan step 9 | 3 |
+| 5 | File sources (ad-hoc logs moved over, §13.1) | missing | plan step 9 | 2 |
+| 6 | One filter language everywhere | built | §20.1 #3 | 0 |
+| 7.1-7.2 | Limiter and ingest rules | built | `limit.rs`, `test-log` | 0 |
+| 7.3 | Bounded memory | partly | per-source state is bounded by sources, not capped | 1 |
+| 7.4 | `lode top`, alerts | missing | | 5 |
+| 8.1 | RAM and disk tiers, `/var` taken when it comes | partly | both tiers; a lode started before `/var` is writable stays in `/run` until restarted and rotated (`test-log-budget` does so by hand) | 1: journald's `--flush`/relinquish |
+| 8.2 | Format, CRC, torn tail, sealing, compression | built | `segment.rs`, `compress.rs`, `test-log` | 2: SOURCE entries (§20.1 #1) |
+| 8.3 | Write budget row | built | `test-log-budget` | 0 (btrfs's part is the kernel's) |
+| 8.4 | Summaries, field indexes, time index | partly | summaries | 4 |
+| 8.5 | Retention classes, vacuum, delete | built | `retention.rs`, `test-log` | 0 |
+| 8.7 | Configuration: `WriteIntervalMs=`, `SyncIntervalSec=`, `SegmentMaxSize=` | missing | fixed in `serve.rs` | 1 |
+| 9.1-9.4 | The reader and its defaults | partly | §20.4 | see §20.4 |
+| 9.5 | `dmesg` | built | `dmesg` reads `/dev/kmsg` (`src/user/system/linux/dmesg`) | 0 |
+| 9.6 | `svc log`, `svc status` through lode | missing | `svc` does not read the log (`src/user/system/linux/init/svc`) | 2 |
+| 9.7 | Benchmark | partly | `lode bench` at 200,000 records | 1 |
+| 10.1 | `box-log` | built | `cargo xtask box-log` | 0 |
+| 10.2 | Continuous forwarding | partly | export and JSON over HTTP(S), TLS 1.3, client certificates (`test-log-remote`) | 3: RFC 5424, OTLP |
+| 10.3 | Receiving | partly | `lode-receive` on Linux | 2: on Ferrix, RFC 3164/5424 in |
+| 10.4 | A merged view | missing | `-m` accepted and ignored | 2 |
+| 11 | Isolation, restart without loss, start order | built | `test-log` | 0 |
+| 12.1 | Who may read what | partly | root and `adm` | 3 (theme 14) |
+| 12.2 | Sessions and authd | built | `_SESSION_ID`, `-s`, `/run/lode/seat` (`test-log`, `test-compositor`) | 0 |
+| 12.3 | Privacy | partly | `_CMDLINE` off | 1 (theme 23) |
+| 13.1 | Ad-hoc logs moved onto lode | missing | `/var/log/audit`, files of programs | 2 |
+| 13.2 | The console | partly | lode reads what the console carried; `MaxLevelConsole=` in init missing | 1 |
+| 14 | The kernel: zero lines beyond `/dev/kmsg` and the devfs link | built | every landing: 0 kernel lines | 0 |
+| 19 | Crash screenshots | built | provider protocol, hyprix provider, `test-log` capture row | 0 |
+
+### 20.4 What journalctl and journald users rely on
+
+| Feature | Status | Evidence or note | Left |
+|---|---|---|---:|
+| `-o short, short-iso, short-iso-precise, short-precise, short-monotonic, with-unit, cat, json, export, verbose` | built | `format.rs` | 0 |
+| `-o json-pretty, json-seq, json-sse, short-full, short-unix, short-delta` | missing | | 1 |
+| `--output-fields` | missing | | 0.5 |
+| `-u` (globs, `name` is `name.service`), `-t`, `-T`, `-k`, `-p` (ranges, `unspecified`), `-g`, `-S`/`-U`, `-n`, `-r`, `-f`, `-e`, `-b`, `--list-boots`, `FIELD=VALUE` with `+`, `--after-cursor`, `--show-cursor`, `-D`, `--utc` | built | `cli.rs`; `test-log` | 0 |
+| `--user-unit`, `--user`, `-M/--machine`, `--file`, `--root`, `--image` | missing | | 1 |
+| `--cursor-file`, `--since` from a cursor's time | missing | | 0.5 |
+| `-F/--field`, `-N/--fields` (a field's values) | missing | the summaries hold them for summarised fields | 1 |
+| `-x`, `--catalog`, `--list-catalog` | missing | no message catalog | 2 |
+| `-g` as a PCRE2 regular expression, `--case-sensitive` | partly | a glob | 1 |
+| `--facility` | missing | `--where 'SYSLOG_FACILITY = 4'` works | 0.5 |
+| `--disk-usage`, `--vacuum-size/-time/-files` | missing | retention classes do it continuously | 1 |
+| `--rotate`, `--verify` | built | `lode rotate`, `lode verify` | 0 |
+| `--flush`, `--relinquish-var`, `--sync` | missing | | 1 |
+| `--setup-keys`, `Seal=` (forward-secure sealing) | missing | the CRC catches damage, not tampering | 3 |
+| `--namespace`, `LogNamespace=`, `--list-namespaces` | missing | | 2 |
+| `--header`, `--new-id128` | missing | | 0.5 |
+| `--no-pager`, `-a`, `-l`, `-q`, `-m` | accepted, no effect | there is no pager, nothing is truncated; `-m` merges nothing yet | (in 10.4) |
+| journald.conf `Storage=`, `SystemMaxUse=`, `MaxRetentionSec=`, `Compress=` | partly | `retention.conf` classes say the same differently; compression always on | 0.5: read journald.conf's keys |
+| `RateLimitIntervalSec=`, `RateLimitBurst=` | partly | the limiter's bursts and rules (`limit`), not these keys | 0.5 |
+| `MaxLevelStore=`, `MaxLevelConsole=`, `ForwardToSyslog/KMsg/Console/Wall=` | missing | `level` rules do the first | 1 |
+| `SplitMode=uid` | missing | per-user segments (theme 14) | (in 14) |
+| `sd_journal_print`, `/dev/log`, stdout streams, `systemd-cat` | built | `test-log` front row; `lode cat` | 0 |
+| `sd-journal` / libsystemd reading the files | missing, by design | §8.6: the format is lode's; `-o export` is the bridge | 0 |
+| `systemd-journal-upload` / `-remote` interoperability | partly | `lode-upload` posts the same export; a real journal-remote is not tested (none on nazuna) | 1 |
+
+### 20.5 The customer's asks today
+
+| Ask | Status | Evidence |
+|---|---|---|
+| Every record has a level; unspecified is one of its own | built | §4.1; `test-log` "levels" row; `lode levels` |
+| Crash screenshots | built | §19; `test-log` capture row; hyprix provider |
+| Sessions | built | §19.1; `test-log` session row |
+| The viewer | built (the viewer agent's) | `lode-viewer`, on nazuna over `lode-receive` |
+| TLS forwarding to nazuna | built | `lode-upload`, `lode-receive`, `test-log-remote` on all three architectures |
+| The box's field quality | built | §18 "Field quality" |
+| Box run of TLS forwarding | waiting | the PO's box run |
