@@ -163,6 +163,7 @@ mod parallel;
 mod paths;
 mod pe;
 mod persistent;
+mod phone;
 mod pipe_bench;
 mod pkg;
 mod ports;
@@ -568,6 +569,7 @@ const TASKS: &[&[Task]] = &[
     nvidia::TASKS,
     nvme::TASKS,
     omz::TASKS,
+    phone::TASKS,
     pipe_bench::TASKS,
     pkg::TASKS,
     ports::TASKS,

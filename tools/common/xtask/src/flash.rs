@@ -179,7 +179,7 @@ fn card_initramfs(arch: Arch, archive: &[u8]) -> Result<Vec<u8>> {
 
 /// The toolchain's `llvm-objcopy`: in `lib/rustlib/<host>/bin` of the
 /// sysroot `rustc` reports, as rustup installs `llvm-tools`.
-fn llvm_objcopy() -> Option<PathBuf> {
+pub(crate) fn llvm_objcopy() -> Option<PathBuf> {
     let rustc = |arg: &str| {
         std::process::Command::new("rustc")
             .arg(arg)

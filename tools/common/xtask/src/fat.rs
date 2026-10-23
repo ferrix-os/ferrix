@@ -493,6 +493,22 @@ pub(crate) fn set_strip_kernel(strip: bool) {
     STRIP_KERNEL.store(strip, Ordering::Relaxed);
 }
 
+/// Whether this run's images also leave their kernel and initramfs as files.
+static KEEP_PARTS: AtomicBool = AtomicBool::new(false);
+
+/// Have every image this run writes also leave the kernel it carries and its
+/// initramfs, init inputs included, in [`parts_dir`]: what another loader
+/// wraps, as the Pixel 7's does for `phone-boot`.
+pub(crate) fn keep_parts(keep: bool) {
+    KEEP_PARTS.store(keep, Ordering::Relaxed);
+}
+
+/// Where [`keep_parts`] puts them: `KERNEL.ELF` and `INITRD.IMG`, the names
+/// they have in the image.
+pub(crate) fn parts_dir(arch: Arch) -> PathBuf {
+    paths::build_dir(arch).join("parts")
+}
+
 /// Assemble the bootable image for `arch` from a built loader and kernel, with
 /// the initramfs every image carries: the tree's native programs, and no
 /// `--init` program.
@@ -574,6 +590,12 @@ pub(crate) fn write_image_carrying(
         fs.add_file(DEFAULTS_PATH, defaults.as_bytes())?;
     }
 
+    if KEEP_PARTS.load(Ordering::Relaxed) {
+        let parts = parts_dir(arch);
+        std::fs::create_dir_all(&parts)?;
+        std::fs::write(parts.join("KERNEL.ELF"), &kernel_bytes)?;
+        std::fs::write(parts.join("INITRD.IMG"), initramfs)?;
+    }
     let directory = paths::build_dir(arch);
     std::fs::create_dir_all(&directory)?;
     let _ = crate::slot_image::write_if_wanted(arch, &kernel_bytes, initramfs, cmdline, defaults)?;
