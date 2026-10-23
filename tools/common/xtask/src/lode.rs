@@ -74,6 +74,9 @@ After=lode.service
 
 [Service]
 Type=oneshot
+# Its rows take most of two minutes on armv7a in a busy gate pool: well
+# past the 90 s a start may take by default.
+TimeoutStartSec=600
 ExecStart=/bin/busybox sh /lib/lode-test.sh
 ";
 
@@ -210,6 +213,12 @@ say "stream: $(/bin/lode -b -u lode-test -g 'to stderr once' -o json | $bb grep 
 $bb sleep 1
 inv=$(/bin/svc status twice.service | $bb sed -n 's/^ *Invocation: //p')
 say "runs: $(/bin/lode -b -u twice -o cat | $bb grep -c '^run ') $(/bin/lode -u twice@last -o cat | $bb grep -c "^run $inv\$") $(/bin/lode -u twice@-1 -o cat | $bb grep '^run ' | $bb grep -vc "$inv") $(/bin/lode -u twice@last -o json | $bb grep -c "\"_SYSTEMD_INVOCATION_ID\":\"$inv\"") $(/bin/svc log twice.service | $bb grep -c '^.*run ') $(/bin/svc status twice.service | $bb grep -c "run $inv")"
+# journalctl's options (step 2): a field's values and the field names, -g
+# as a regular expression with smart case, json-pretty and short-full, and
+# what root asks the service.
+tab=$(printf '\t')
+say "jctl: $(/bin/lode -b -F _STREAM | $bb grep -c '^stderr$') $(/bin/lode -b -N | $bb grep -c '^_SYSTEMD_INVOCATION_ID$') $(/bin/lode -b -g '^run [0-9a-f]{32}$' -o cat | $bb wc -l) $(/bin/lode -b -g 'RUN [0-9A-F]{32}' -o cat | $bb wc -l) $(/bin/lode -b -g 'RUN [0-9a-f]{32}' --case-sensitive=no -o cat | $bb wc -l) $(/bin/lode -b -g '(?=x)' -o cat > /dev/null 2>&1; echo $?) $(/bin/lode -u twice@last -o json-pretty | $bb grep -c "^$tab\"_SYSTEMD_UNIT\" : \"twice.service\",\$") $(/bin/lode -u twice@last -o short-full | $bb grep -c '^[A-Z][a-z][a-z] 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] UTC ')"
+say "jctl admin: $(/bin/lode --sync && echo synced) $(/bin/lode --flush && echo flushed) $(/bin/lode --rotate && echo rotated) $(/bin/lode --disk-usage | $bb grep -c '^Archived and active journals take up [0-9.]*[BKMG] in the file system\.$')"
 # A user's own records (§12.1): written to user-1000/, read by that user
 # through lode, and by root beside everything else.
 /bin/svc start lode-user.service > /dev/null 2>&1
@@ -286,6 +295,26 @@ say "kernel records: $(/bin/lode -b -k -o cat | $bb wc -l)"
 # on a generated store and on this one.
 say "bench: $(/bin/lode bench 200000 /tmp/lode-bench)"
 say "newest: $(/bin/lode -b -u lode-test -n 3 -o cat | $bb wc -l)"
+# Vacuuming (step 2), last: it removes what the rows above read.
+vac=$(/bin/lode --vacuum-time=1s 2>&1)
+$bb sleep 1
+say "vacuum: $(echo "$vac" | $bb grep -c '^Deleted archived journal /') $(echo "$vac" | $bb grep -c '^Vacuuming done, freed [0-9.]*[BKMG] of archived journals from /') $(/bin/lode -b -t lode-vacuum -o cat | $bb grep -c '^removed ')"
+# --flush (step 2): a lode that could not reach /var/log/journal when it
+# started keeps the log in /run; --flush gives it the directory, and it
+# moves what it kept there and writes there from then on.
+/bin/svc stop lode.service > /dev/null 2>&1
+$bb mv /var/log/journal /var/log/journal.kept
+$bb ln -s /var/log/later /var/log/journal
+/bin/svc start lode.service > /dev/null 2>&1
+$bb sleep 1
+echo "<14>flushme: before" > /dev/kmsg
+$bb sleep 1
+before=$($bb ls /run/log/journal | $bb grep -c 'fxj$')
+$bb mkdir /var/log/later
+/bin/lode --flush || say "FAIL lode --flush"
+echo "<14>flushme: after" > /dev/kmsg
+$bb sleep 1
+say "flush: $([ $before -gt 0 ] && echo kept) $($bb ls /run/log/journal | $bb grep -c 'fxj$') $([ $($bb ls /var/log/later | $bb grep -c 'fxj$') -gt 0 ] && echo moved) $(/bin/lode -b -t flushme -o cat | $bb tr '\n' ' ')"
 # Without lode, syslog() is refused at once, not left waiting.
 /bin/svc stop lode.service > /dev/null 2>&1
 $bb timeout 5 $bb logger -t gone "with no lode" ; said=$?
@@ -453,6 +482,7 @@ fn judge(lines: &[String]) -> std::result::Result<(), String> {
     }
     held(lines)?;
     attributed(lines)?;
+    vacuumed(lines)?;
     forwarded(lines)?;
     fast(lines)
 }
@@ -533,6 +563,23 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
             "a user did not read their own two records, with their stream, and none of the system's",
         ),
         (
+            "lode-test: jctl:",
+            "1 1 2 0 2 2 1 1",
+            "journalctl's -F, -N, -g as a regular expression with smart case and \
+             --case-sensitive, a refused pattern, json-pretty or short-full did not answer as \
+             journalctl does",
+        ),
+        (
+            "lode-test: jctl admin:",
+            "synced flushed rotated 1",
+            "--sync, --flush, --rotate or --disk-usage did not answer as journalctl does",
+        ),
+        (
+            "lode-test: flush:",
+            "kept 0 moved before after",
+            "--flush did not move the RAM tier to /var/log/journal and go on writing there",
+        ),
+        (
             "lode-test: users:",
             "1 2",
             "a user's records were not in user-1000/, or root could not read them",
@@ -544,6 +591,23 @@ fn attributed(lines: &[String]) -> std::result::Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// journalctl's `--vacuum-time`: sealed segments removed and each said,
+/// one closing line a store directory, and the removal in the log.
+fn vacuumed(lines: &[String]) -> std::result::Result<(), String> {
+    let counts: Vec<u32> = said(lines, "lode-test: vacuum:")
+        .unwrap_or_default()
+        .split_whitespace()
+        .filter_map(|count| count.parse().ok())
+        .collect();
+    match counts.as_slice() {
+        [deleted, done, 1] if *deleted > 0 && *done > 0 => Ok(()),
+        other => Err(format!(
+            "--vacuum-time removed no sealed segment, did not say so as journalctl does, or \
+             the log did not record it (deleted, done lines, records): {other:?}"
+        )),
+    }
 }
 
 /// Step 2: what the rules, the folding and the limiter held back, each
@@ -685,6 +749,10 @@ lode-test: stream: 1 1 1
 lode-test: runs: 2 1 1 1 1 1
 lode-test: user: own 2 system 0 stderr 1
 lode-test: users: 1 2
+lode-test: jctl: 1 1 2 0 2 2 1 1
+lode-test: jctl admin: synced flushed rotated 1
+lode-test: vacuum: 3 2 1
+lode-test: flush: kept 0 moved before after
 lode-test: devlog: /run/systemd/journal/dev-log
 lode-test: no lode: returned
 lode-test: bench: 200000 records, 3 segments; -u unit0 -n 50: 4 ms through summaries, 900 ms reading all; same answer: yes

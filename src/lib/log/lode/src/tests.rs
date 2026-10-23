@@ -1874,3 +1874,147 @@ fn a_summary_keeps_invocations_and_older_readers_ignore_them() {
     let read = Summary::decode(&later.encode()).unwrap();
     assert!(read.may_match(&wanted));
 }
+
+#[test]
+fn grep_finds_what_pcre2_finds_for_a_shells_patterns() {
+    use crate::regex::Regex;
+    let yes = |pattern: &str, text: &str| {
+        Regex::new(pattern, false)
+            .unwrap()
+            .is_match(text.as_bytes())
+    };
+    assert!(yes("fail", "port 2 failed to start"));
+    assert!(!yes("^fail", "port 2 failed to start"));
+    assert!(yes("^port \\d+ fail(ed|ure)", "port 2 failed to start"));
+    assert!(yes("start$", "port 2 failed to start"));
+    assert!(!yes("port$", "port 2 failed to start"));
+    assert!(yes("a.c", "xxabcxx"));
+    assert!(!yes("a.c", "a\nc"));
+    assert!(yes("colou?r", "color"));
+    assert!(yes("colou?r", "colour"));
+    assert!(yes("^a{2,3}$", "aaa"));
+    assert!(!yes("^a{2,3}$", "aaaa"));
+    assert!(yes("^a{2,}$", "aaaaa"));
+    assert!(yes("x{y", "x{y"));
+    assert!(yes("[[:digit:]]+ms", "took 120ms"));
+    assert!(yes("[^a-z ]", "abc 1"));
+    assert!(!yes("[^a-z ]", "abc def"));
+    assert!(yes("\\bfps\\b", "trace:fps 60"));
+    assert!(!yes("\\bfps\\b", "trace:fpsx 60"));
+    assert!(yes("a.b", "aéb"));
+    assert!(yes("\\x41", "A"));
+    assert!(yes("(?:ab)+c", "ababc"));
+    assert!(yes("1\\.5", "1.5"));
+    assert!(!yes("1\\.5", "135"));
+    assert!(yes("", "anything"));
+    assert!(yes("a|", "b"));
+    // Folded: journalctl's smart case is the caller's.
+    let fold = Regex::new("error", true).unwrap();
+    assert!(fold.is_match(b"An ERROR here"));
+    assert!(Regex::new("(?i)ERROR", false).unwrap().is_match(b"error"));
+    assert!(Regex::new("[A-Z]x", true).unwrap().is_match(b"ax"));
+    assert!(crate::regex::has_upper("Error"));
+    assert!(!crate::regex::has_upper("error 2"));
+    // Linear: what makes a backtracking matcher hang is quick here.
+    let nested = Regex::new("(a*)*b", false).unwrap();
+    assert!(!nested.is_match("a".repeat(5000).as_bytes()));
+    let many = Regex::new("(a|aa)+$", false).unwrap();
+    assert!(many.is_match("a".repeat(5000).as_bytes()));
+    // Not UTF-8: one character that only a negated class takes.
+    assert!(yes("a[^b]c", "a\u{fffd}c"));
+    assert!(Regex::new("a[^b]c", false).unwrap().is_match(b"a\xffc"));
+    // What PCRE2 has and lode does not is refused, never matched wrongly.
+    for pattern in [
+        "(a)\\1", "(?=x)", "a++", "(ab", "ab)", "[ab", "*a", "a{3,2}", "\\q", "a{2000}",
+    ] {
+        let error = Regex::new(pattern, false).unwrap_err();
+        assert!(error.at <= pattern.len(), "{pattern}: {error:?}");
+    }
+}
+
+#[test]
+fn a_zone_names_its_time() {
+    let zone = Zone::posix("CET-1CEST,M3.5.0,M10.5.0/3").unwrap();
+    // 2026-07-01 12:00 UTC: summer; 2026-01-15: winter.
+    assert_eq!(zone.abbreviation_at(1_782_907_200_000_000), "CEST");
+    assert_eq!(zone.abbreviation_at(1_768_478_400_000_000), "CET");
+    assert_eq!(Zone::utc().abbreviation_at(0), "UTC");
+    assert_eq!(Zone::posix("<+03>-3").unwrap().abbreviation_at(0), "+03");
+}
+
+#[test]
+fn json_pretty_short_full_and_the_rest_print_as_journalctl_does() {
+    let mut one = record(7, "hello \u{8}\u{c}\u{7f}");
+    one.boot_id = [0x11; 16];
+    one.host = alloc::rc::Rc::from("box");
+    one.push("SYSLOG_PID", b"42");
+    one.push("BLOB", &[0xff, 0x01]);
+    let mut out = Vec::new();
+    write(&one, Output::JsonPretty, &Zone::utc(), &mut out);
+    let text = String::from_utf8(out).unwrap();
+    let cursor = cursor::of(&one);
+    assert_eq!(
+        text,
+        alloc::format!(
+            "{{\n\t\"__CURSOR\" : \"{cursor}\",\n\t\"__REALTIME_TIMESTAMP\" : \"1700000000000007\",\n\t\"__MONOTONIC_TIMESTAMP\" : \"7\",\n\t\"__SEQNUM\" : \"7\",\n\t\"_BOOT_ID\" : \"11111111111111111111111111111111\",\n\t\"PRIORITY\" : \"6\",\n\t\"FERRIX_LEVEL\" : \"6\",\n\t\"_HOSTNAME\" : \"box\",\n\t\"MESSAGE\" : \"hello \\b\\f\u{7f}\",\n\t\"SYSLOG_IDENTIFIER\" : \"test\",\n\t\"SYSLOG_PID\" : \"42\",\n\t\"BLOB\" : [\n\t\t255,\n\t\t1\n\t]\n}}\n"
+        )
+    );
+    // The one-line forms carry the same object.
+    let mut compact = Vec::new();
+    write(&one, Output::Json, &Zone::utc(), &mut compact);
+    let mut seq = Vec::new();
+    write(&one, Output::JsonSeq, &Zone::utc(), &mut seq);
+    assert_eq!(seq.first(), Some(&0x1e));
+    assert_eq!(&seq[1..], compact.as_slice());
+    let mut sse = Vec::new();
+    write(&one, Output::JsonSse, &Zone::utc(), &mut sse);
+    assert!(sse.starts_with(b"data: {"));
+    assert!(sse.ends_with(b"}\n\n"));
+    // 2023-11-14 22:13:20 UTC was a Tuesday.
+    let zone = Zone::posix("CET-1CEST,M3.5.0,M10.5.0/3").unwrap();
+    let mut full = Vec::new();
+    write(&one, Output::ShortFull, &zone, &mut full);
+    assert_eq!(
+        String::from_utf8(full).unwrap(),
+        "Tue 2023-11-14 23:13:20 CET box test[42]: hello \\x08\\x0c\\x7f\n"
+    );
+    let mut unix = Vec::new();
+    write(&one, Output::ShortUnix, &Zone::utc(), &mut unix);
+    assert_eq!(
+        String::from_utf8(unix).unwrap(),
+        "1700000000.000007 box test[42]: hello \\x08\\x0c\\x7f\n"
+    );
+    for name in [
+        "json-pretty",
+        "json-seq",
+        "json-sse",
+        "short-full",
+        "short-unix",
+    ] {
+        assert!(Output::named(name).is_some(), "{name}");
+    }
+}
+
+#[test]
+fn sizes_and_spans_read_and_print_as_systemd_does() {
+    use crate::format::bytes_text;
+    use crate::retention::{size_bytes, span_seconds};
+    assert_eq!(size_bytes("500"), Some(500));
+    assert_eq!(size_bytes("1K"), Some(1024));
+    assert_eq!(size_bytes("100M"), Some(100 << 20));
+    assert_eq!(size_bytes("1.5G"), Some(3 << 29));
+    assert_eq!(size_bytes("2x"), None);
+    assert_eq!(span_seconds("2weeks"), Some(1_209_600));
+    assert_eq!(span_seconds("1d 12h"), Some(129_600));
+    assert_eq!(span_seconds("90min"), Some(5_400));
+    assert_eq!(span_seconds("30"), Some(30));
+    assert_eq!(span_seconds("1fortnight"), None);
+    assert_eq!(bytes_text(0), "0B");
+    assert_eq!(bytes_text(1023), "1023B");
+    assert_eq!(bytes_text(1024), "1.0K");
+    assert_eq!(bytes_text(1536), "1.5K");
+    assert_eq!(bytes_text(8 << 20), "8.0M");
+    // The tenth is cut, not rounded: 1.99 MiB is 1.9M, as systemd says.
+    assert_eq!(bytes_text((2 << 20) - 10_000), "1.9M");
+    assert_eq!(bytes_text(3 << 30), "3.0G");
+}

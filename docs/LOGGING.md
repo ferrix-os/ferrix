@@ -1156,8 +1156,9 @@ below, and the customer's order after them: TLS forwarding and
 `lode-receive` on a Linux host (§10.2, §10.3), for the viewer on nazuna;
 then the first of the three steps the customer approved after §20's audit:
 units' own streams with their runs, and users' own records (§18 "Users'
-own records and units' runs"). Next: the journalctl compatibility pack,
-then `lode top` and alerts.
+own records and units' runs"), then the second, the journalctl
+compatibility pack (§18 "journalctl's options"). Next: `lode top` and
+alerts.
 The viewer is a separate agent's, a Rust desktop app built from the
 customer's design. Follow-up rows: the uploader as a native service in a
 sealed job (today a plain Linux service, §18); a machine id written at
@@ -1893,6 +1894,62 @@ The first of the three steps the customer approved after §20's audit
 * Kernel lines: 0. init, `svc`, lode and `lode-upload` are ring-3
   programs outside the item.
 
+### journalctl's options, as built (2026-10-23)
+
+The second of the three steps the customer approved after §20's audit.
+
+* **`-F FIELD` and `-N`**: each value of a field, and each field name,
+  once, over the records the other options choose (`-b`, `-u`, ...), as
+  journalctl prints them, `PRIORITY`, `_BOOT_ID` and `_HOSTNAME` included.
+* **`-g` is a regular expression** (`ferrix-lode-core` `regex`, the tree's
+  own, no crate): PCRE2's syntax a person writes at a shell -- classes,
+  `\d \w \s \b`, `[:alpha:]`, `* + ? {n,m}` and their lazy forms,
+  groups, `|`, anchors, `(?i)` -- matched by a Pike VM, so no pattern can
+  make a read slow; back-references, look-around and possessive
+  quantifiers are refused with where and why (exit 2), never matched
+  wrongly. journalctl's smart case: a pattern with no upper-case letter
+  ignores case, `--case-sensitive[=yes|no]` says otherwise. `--around` and
+  the marks still take text.
+* **Output**: `json-pretty` as systemd's JSON printer lays it out (a tab,
+  `" : "`, a byte array's items two tabs in), `json-seq`, `json-sse`,
+  `short-full` (`Fri 2026-10-23 14:01:02 CEST`: the zone's name from the
+  POSIX rule, `UTC`, or the offset), `short-unix`. JSON strings are now
+  escaped as systemd escapes them: `\b` and `\f`, and DEL left as it is.
+* **`--user-unit UNIT`**: `_SYSTEMD_USER_UNIT`, `USER_UNIT` and the
+  coredump and object forms, `.service` when the name has no type.
+* **`--disk-usage`**: `Archived and active journals take up 8.0M in the
+  file system.`, over every segment and summary the caller may read, sizes
+  as systemd's `FORMAT_BYTES` writes them.
+* **`--vacuum-size`, `--vacuum-time`, `--vacuum-files`** (root's): the
+  oldest sealed segments first, never one being written, each said as
+  `Deleted archived journal PATH (SIZE).` and each store directory closed
+  with `Vacuuming done, freed SIZE of archived journals from DIR.`, on
+  standard error as journalctl's log lines; sizes and spans read as
+  systemd's `parse_size` and `parse_sec` read them. A vacuum is recorded in
+  the log (`lode-vacuum`), as a deletion is.
+* **`--sync`, `--flush`, `--rotate`** ask the service on
+  `/run/lode/control` (root's 0600, any peer but root refused) and return
+  once it is done; `lode rotate` and `lode delete` use it too, and the
+  kernel-log request is kept for an older lode. `--flush` makes
+  `/var/log/journal` for lode first when it is missing; lode then takes the
+  directory, seals what it was writing in `/run`, moves every sealed segment
+  of a class that is not RAM-only over -- compressed on the way, synced,
+  then removed from `/run` -- and writes there from then on.
+* `test-log` on all three architectures: `-F _STREAM`, `-N`, a regular
+  expression with smart case, refused and case-sensitive, `json-pretty`
+  and `short-full`; `--sync`, `--flush`, `--rotate` and `--disk-usage`
+  answering; `--vacuum-time` removing sealed segments with journalctl's
+  lines and its record; and a lode restarted with `/var/log/journal`
+  unreachable keeping the log in `/run` until `--flush` moves it. Host
+  tests: the regular expressions (a nested quantifier on 5,000 characters
+  included), the formats against goldens, sizes and spans.
+* `test-log-budget` still restarts lode to move its store: a store moved by
+  `--flush` just before the slow load measured 53.6 to 59.1 bytes a byte against
+  45.7 for the restart, a cost of btrfs's commits after the move that the
+  row does not set out to measure.
+* Not yet: `-o short-delta`, `--relinquish-var`, `--user`, `-M`, the
+  journald.conf keys. Kernel lines: 0.
+
 ### Known issues
 
 * **None open.** The kernel finding step 1 landed with -- `/dev/kmsg`
@@ -1917,7 +1974,7 @@ architectures.
 | 2 | Queries fast as the store grows | partly | segment summaries skip whole segments, newest-first `-n` (`lode bench`, `test-log` part F) | 4: field indexes and a sparse time index inside sealed segments (§8.4); the 1 GB / 100 GB benchmark |
 | 3 | A real filter language | built | `--where` with and/or/not, globs, `~`; rules, retention, capture and upload use it (`filter.rs`, host tests) | 1: `~` is a substring, not a regular expression |
 | 4 | Noise controlled at ingest, never silent | partly | limiter, `drop`/`sample`/`level`/`fold`/`limit` rules each said; folding of lines alike but for numbers; `test-log` held/folded rows | 2: `lode top` (§7.4) |
-| 5 | Retention per service and priority; delete by match | built | retention classes (`retention.conf`), RAM-only classes, vacuum; `lode delete --where` (`test-log` delete row) | 1: journalctl's `--vacuum-size/-time/-files` and `--disk-usage` as commands |
+| 5 | Retention per service and priority; delete by match | built | retention classes (`retention.conf`), RAM-only classes, vacuum; `lode delete --where` (`test-log` delete row); journalctl's `--vacuum-size/-time/-files` and `--disk-usage` (`test-log` "vacuum" row) | 0 |
 | 6 | Every entry attributed; stdout vs stderr | built | sockets: `_PID/_UID/_GID` from `SO_PEERCRED`, `_COMM` and cgroup read from `/proc` when the sender connects; units' lines handed over by init with `_SYSTEMD_UNIT`, `_SYSTEMD_INVOCATION_ID`, `_STREAM`, `_PID`, `_UID`, `_GID` (§18 "Users' own records and units' runs"; `test-log` "stream" row) | 0.5: `_EXE` |
 | 7 | Output usable without flags | partly | `-o human` with year, zone and level letter (`?` for none), never truncated; 11 journald formats | 2: `--format` templates; colour on a terminal; a pager |
 | 8 | A crash costs at most the unsynced tail | built | per-entry CRC and torn-tail cut, restart without loss (`test-log`: SIGKILL mid-flood, `verify --kernel` "unsaid gaps: none"), sealed segments immutable | 1: a full or failing disk degrading to RAM (§11.4) is untested |
@@ -1930,7 +1987,7 @@ architectures.
 |---|---|---|---:|
 | 11 Previous boots, persistent by default | built | `/var/log/journal` when writable, `-b -1`, `--list-boots` | 0 |
 | 12 This run of a service | built | `INVOCATION_ID` from init, `-u UNIT@last`, `svc status`/`svc log` show the run (`test-log` "runs" row) | 0 |
-| 13 Full-text search | partly | `-g` (glob, any case when lower case), `--around`, marks | 1: regular expressions, `--case-sensitive` |
+| 13 Full-text search | built | `-g` a regular expression in linear time with journalctl's smart case and `--case-sensitive` (`regex.rs`; `test-log` "jctl" row), `--around`, marks | 0 |
 | 14 Unprivileged access | built | users' segments in `user-<uid>/`, handed to their user by lode (`/run/lode/read`; `test-log` "user" row) | 0; the viewer asking for them is the viewer agent's |
 | 15 Rate limiting that surprises | built | every hold is said (`N_SUPPRESSED`, `N_DROPPED`, `REPEATED`); the kernel's lines never held | 0 |
 | 16 Early boot and kernel messages | built | `/dev/kmsg` read from its first record, `_KERNEL_SEQNUM`, `verify --kernel` | 0 |
@@ -1957,7 +2014,7 @@ architectures.
 | 7.1-7.2 | Limiter and ingest rules | built | `limit.rs`, `test-log` | 0 |
 | 7.3 | Bounded memory | partly | per-source state is bounded by sources, not capped | 1 |
 | 7.4 | `lode top`, alerts | missing | | 5 |
-| 8.1 | RAM and disk tiers, `/var` taken when it comes | partly | both tiers; a lode started before `/var` is writable stays in `/run` until restarted and rotated (`test-log-budget` does so by hand) | 1: journald's `--flush`/relinquish |
+| 8.1 | RAM and disk tiers, `/var` taken when it comes | partly | both tiers; `lode --flush` moves the RAM tier to `/var/log/journal` and writes there from then on (`test-log` "flush" row) | 0.5: `--relinquish-var`, and a `lode-flush.service` that asks at boot |
 | 8.2 | Format, CRC, torn tail, sealing, compression | built | `segment.rs`, `compress.rs`, `test-log` | 2: SOURCE entries (§20.1 #1) |
 | 8.3 | Write budget row | built | `test-log-budget` | 0 (btrfs's part is the kernel's) |
 | 8.4 | Summaries, field indexes, time index | partly | summaries | 4 |
@@ -1985,18 +2042,21 @@ architectures.
 | Feature | Status | Evidence or note | Left |
 |---|---|---|---:|
 | `-o short, short-iso, short-iso-precise, short-precise, short-monotonic, with-unit, cat, json, export, verbose` | built | `format.rs` | 0 |
-| `-o json-pretty, json-seq, json-sse, short-full, short-unix, short-delta` | missing | | 1 |
+| `-o json-pretty, json-seq, json-sse, short-full, short-unix` | built | `format.rs`, host goldens; `test-log` "jctl" row | 0 |
+| `-o short-delta` | missing | needs the record before | 0.25 |
 | `--output-fields` | missing | | 0.5 |
 | `-u` (globs, `name` is `name.service`), `-t`, `-T`, `-k`, `-p` (ranges, `unspecified`), `-g`, `-S`/`-U`, `-n`, `-r`, `-f`, `-e`, `-b`, `--list-boots`, `FIELD=VALUE` with `+`, `--after-cursor`, `--show-cursor`, `-D`, `--utc` | built | `cli.rs`; `test-log` | 0 |
-| `--user-unit`, `--user`, `-M/--machine`, `--file`, `--root`, `--image` | missing | | 1 |
+| `--user-unit` | built | `_SYSTEMD_USER_UNIT`, `USER_UNIT` and their coredump and object forms, as journalctl's | 0 |
+| `--user`, `-M/--machine`, `--file`, `--root`, `--image` | missing | | 1 |
 | `--cursor-file`, `--since` from a cursor's time | missing | | 0.5 |
-| `-F/--field`, `-N/--fields` (a field's values) | missing | the summaries hold them for summarised fields | 1 |
+| `-F/--field`, `-N/--fields` (a field's values) | built | over the records the other options choose (`test-log` "jctl" row) | 0 |
 | `-x`, `--catalog`, `--list-catalog` | missing | no message catalog | 2 |
-| `-g` as a PCRE2 regular expression, `--case-sensitive` | partly | a glob | 1 |
+| `-g` as a PCRE2 regular expression, `--case-sensitive` | built | PCRE2's syntax a person writes at a shell; back-references and look-around refused with the reason | 0 |
 | `--facility` | missing | `--where 'SYSLOG_FACILITY = 4'` works | 0.5 |
-| `--disk-usage`, `--vacuum-size/-time/-files` | missing | retention classes do it continuously | 1 |
+| `--disk-usage`, `--vacuum-size/-time/-files` | built | journalctl's sentences and sizes (`FORMAT_BYTES`); a vacuum is recorded in the log | 0 |
 | `--rotate`, `--verify` | built | `lode rotate`, `lode verify` | 0 |
-| `--flush`, `--relinquish-var`, `--sync` | missing | | 1 |
+| `--flush`, `--sync`, `--rotate` | built | the control socket `/run/lode/control` (`test-log` "jctl admin" and "flush" rows) | 0 |
+| `--relinquish-var` | missing | | 0.25 |
 | `--setup-keys`, `Seal=` (forward-secure sealing) | missing | the CRC catches damage, not tampering | 3 |
 | `--namespace`, `LogNamespace=`, `--list-namespaces` | missing | | 2 |
 | `--header`, `--new-id128` | missing | | 0.5 |

@@ -123,6 +123,9 @@ pub fn month_name(month: u32) -> &'static str {
 pub struct Zone {
     /// Standard time's offset, seconds east of UTC.
     std_offset: i32,
+    /// Standard time's name (`CET`), and daylight time's (`CEST`), as the
+    /// rule spells them; empty when it has none.
+    names: (String, String),
     /// Daylight time's offset, and when it begins and ends, if the zone has it.
     dst: Option<Dst>,
 }
@@ -159,7 +162,31 @@ impl Zone {
         Zone {
             std_offset: 0,
             dst: None,
+            names: (String::new(), String::new()),
         }
+    }
+
+    /// The zone's name for the time in force at `realtime_us` (`CEST`),
+    /// as `strftime`'s `%Z` gives it: `UTC` for UTC, and the offset
+    /// (`+02:00`) for a rule that names none.
+    #[must_use]
+    pub fn abbreviation_at(&self, realtime_us: u64) -> String {
+        let offset = self.offset_at(realtime_us);
+        let daylight = self
+            .dst
+            .is_some_and(|dst| offset == dst.offset && offset != self.std_offset);
+        let name = if daylight {
+            &self.names.1
+        } else {
+            &self.names.0
+        };
+        if !name.is_empty() {
+            return name.clone();
+        }
+        if self.std_offset == 0 && self.dst.is_none() {
+            return String::from("UTC");
+        }
+        Civil::at(realtime_us, offset).offset()
     }
 
     /// A POSIX `TZ` string: `std offset [dst [offset] [,rule,rule]]`. A
@@ -172,6 +199,7 @@ impl Zone {
         if rest.is_empty() || rest.starts_with(':') {
             return None;
         }
+        let std_name = name_of(rest);
         rest = skip_name(rest)?;
         let (std_west, after) = offset(rest)?;
         rest = after;
@@ -180,8 +208,10 @@ impl Zone {
             return Some(Zone {
                 std_offset,
                 dst: None,
+                names: (std_name, String::new()),
             });
         }
+        let dst_name = name_of(rest);
         rest = skip_name(rest)?;
         let mut dst_offset = std_offset + 3600;
         if !rest.is_empty()
@@ -200,6 +230,7 @@ impl Zone {
         };
         Some(Zone {
             std_offset,
+            names: (std_name, dst_name),
             dst: Some(Dst {
                 offset: dst_offset,
                 start,
@@ -253,6 +284,20 @@ fn month_length(year: i64, month: u32) -> u32 {
 }
 
 /// Past a zone name: three or more letters, or `<...>`.
+/// The zone name `text` begins with: `CET`, or `+03` from `<+03>`.
+fn name_of(text: &str) -> String {
+    if let Some(rest) = text.strip_prefix('<') {
+        return rest
+            .split_once('>')
+            .map_or_else(String::new, |(name, _)| String::from(name));
+    }
+    let end = text
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(text.len());
+    String::from(text.get(..end).unwrap_or_default())
+}
+
+/// `text` past the zone name it begins with.
 fn skip_name(text: &str) -> Option<&str> {
     if let Some(rest) = text.strip_prefix('<') {
         return rest.split_once('>').map(|(_, after)| after);

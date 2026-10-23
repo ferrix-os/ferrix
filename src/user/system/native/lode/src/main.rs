@@ -16,9 +16,11 @@
 
 extern crate alloc;
 
+mod admin;
 mod arch;
 mod capture;
 mod cli;
+mod control;
 mod front;
 mod handout;
 mod heap;

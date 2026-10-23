@@ -12,13 +12,16 @@ use ferrix_lode_core::filter::{self, Expr, Op, Test};
 use ferrix_lode_core::format::{self, Output};
 use ferrix_lode_core::ingest;
 use ferrix_lode_core::record::{Record, UNSPECIFIED, level};
+use ferrix_lode_core::regex::{self, Regex};
 use ferrix_lode_core::segment::{self, Header};
 use ferrix_lode_core::summary::Summary;
 use ferrix_lode_core::time::{self, Civil, Zone};
 use ferrix_lode_core::{console, cursor};
 
+use crate::admin::Vacuum;
 use crate::store::{self, Dir, Segment};
 use crate::{sys, zone};
+use ferrix_lode_core::retention::{size_bytes, span_seconds};
 
 /// What `lode --help` says.
 const HELP: &str = "\
@@ -46,15 +49,23 @@ lode levels [-b ...] [filters]       records with no level, and with a guessed o
   -s, --session ID       a session's records
   -p, --priority P[..Q]  at most P (a level's name or number), or P to Q; never a
                          record with no level unless asked: -p err,unspecified
-  -g, --grep TEXT        records whose message has TEXT (globs; any case if lower case)
+  -g, --grep REGEX       records whose message matches REGEX (any case if it is all lower
+                         case; --case-sensitive[=yes|no] says otherwise)
+      --user-unit UNIT   a user unit's records (_SYSTEMD_USER_UNIT, USER_UNIT)
   -S, --since TIME       -U, --until TIME (now, today, -5min, 2026-10-23 14:01, @EPOCH)
       --since-mark TEXT  --until-mark TEXT: between the latest `lode mark`s that match
       --around TEXT DUR  every record within DUR (30s, 2min) of one whose message has TEXT
       --where EXPR       the filter language: unit = \"hyprix*\" and not priority > warning
   -n, --lines N          the last N;  -r, --reverse newest first
   -f, --follow           go on printing what is stored after
-  -o, --output FORMAT    human short short-iso short-iso-precise short-precise
-                         short-monotonic with-unit cat json export verbose
+  -o, --output FORMAT    human short short-full short-iso short-iso-precise short-precise
+                         short-monotonic short-unix with-unit cat json json-pretty json-seq
+                         json-sse export verbose
+  -F, --field FIELD      every value FIELD has in the records chosen;  -N, --fields every field name
+      --disk-usage       what the store takes on disk
+      --vacuum-size=SIZE --vacuum-time=TIME --vacuum-files=N   remove the oldest sealed segments (root's)
+      --flush            move the RAM tier to /var/log/journal (root's);  --sync  write all now
+      --rotate           seal every segment and begin new ones (root's)
       --after-cursor C   after the record C names;  --show-cursor prints the last's
   -D, --directory DIR    read DIR instead of /var/log/journal and /run/log/journal
       --utc              times in UTC
@@ -62,51 +73,65 @@ lode levels [-b ...] [filters]       records with no level, and with a guessed o
 
 /// The options of a read.
 #[derive(Debug, Default)]
-struct Options {
+pub(crate) struct Options {
     /// `-b`: the boot asked for, as written; `Some("")` for this one.
-    boot: Option<String>,
+    pub(crate) boot: Option<String>,
     /// `--list-boots`.
-    list_boots: bool,
+    pub(crate) list_boots: bool,
     /// What every record must match.
-    expr: Option<Expr>,
+    pub(crate) expr: Option<Expr>,
     /// `FIELD=VALUE` arguments, grouped by `+`.
-    matches: Vec<Vec<(String, Vec<u8>)>>,
-    /// `-g`.
-    grep: Option<Vec<u8>>,
+    pub(crate) matches: Vec<Vec<(String, Vec<u8>)>>,
+    /// `-g`, as written.
+    pub(crate) grep_text: Option<String>,
+    /// `-g`, compiled once the case is known.
+    pub(crate) grep: Option<Regex>,
+    /// `--case-sensitive`: `None` for journalctl's smart case.
+    pub(crate) case_sensitive: Option<bool>,
+    /// `-F`.
+    pub(crate) field: Option<String>,
+    /// `-N`.
+    pub(crate) fields: bool,
+    /// `--disk-usage`.
+    pub(crate) disk_usage: bool,
+    /// `--vacuum-size`, `--vacuum-time` (seconds), `--vacuum-files`.
+    pub(crate) vacuum: Vacuum,
+    /// `--flush`, `--sync` or `--rotate`.
+    pub(crate) ask: Option<crate::control::Request>,
     /// `--since`, `--until`, as written.
-    since: Option<String>,
+    pub(crate) since: Option<String>,
     /// `--until`.
-    until: Option<String>,
+    pub(crate) until: Option<String>,
     /// `--since-mark`, `--until-mark`.
-    since_mark: Option<Vec<u8>>,
+    pub(crate) since_mark: Option<Vec<u8>>,
     /// `--until-mark`.
-    until_mark: Option<Vec<u8>>,
+    pub(crate) until_mark: Option<Vec<u8>>,
     /// `--around TEXT DURATION`.
-    around: Option<(Vec<u8>, u64)>,
+    pub(crate) around: Option<(Vec<u8>, u64)>,
     /// `-n`.
-    lines: Option<usize>,
+    pub(crate) lines: Option<usize>,
     /// `-r`.
-    reverse: bool,
+    pub(crate) reverse: bool,
     /// `-f`.
-    follow: bool,
+    pub(crate) follow: bool,
     /// `-o`.
-    output: Option<Output>,
+    pub(crate) output: Option<Output>,
     /// `--after-cursor`.
-    after: Option<u64>,
+    pub(crate) after: Option<u64>,
     /// `--show-cursor`.
-    show_cursor: bool,
+    pub(crate) show_cursor: bool,
     /// `-D`.
-    directory: Option<Vec<u8>>,
+    pub(crate) directory: Option<Vec<u8>>,
     /// `--utc`.
-    utc: bool,
+    pub(crate) utc: bool,
     /// `verify --kernel`.
-    kernel_gaps: bool,
+    pub(crate) kernel_gaps: bool,
     /// `lode levels`: the level table instead of the records.
-    levels: bool,
+    pub(crate) levels: bool,
     /// `-u UNIT@WHICH`, `--invocation WHICH`: a run of a unit, as written.
-    invocation: Option<(String, String)>,
+    pub(crate) invocation: Option<(String, String)>,
     /// The last `-u` given, for `--invocation`.
-    last_unit: Option<String>,
+    pub(crate) last_unit: Option<String>,
 }
 
 impl Options {
@@ -117,7 +142,14 @@ impl Options {
             list_boots: self.list_boots,
             expr: self.expr.clone(),
             matches: self.matches.clone(),
+            grep_text: self.grep_text.clone(),
             grep: self.grep.clone(),
+            case_sensitive: self.case_sensitive,
+            field: self.field.clone(),
+            fields: self.fields,
+            disk_usage: self.disk_usage,
+            vacuum: self.vacuum,
+            ask: self.ask,
             since: self.since.clone(),
             until: self.until.clone(),
             since_mark: self.since_mark.clone(),
@@ -186,6 +218,12 @@ pub(crate) fn run() -> i32 {
     }
     match parse(rest) {
         Ok(options) if options.list_boots => list_boots(&options),
+        Ok(options) if options.ask.is_some() => crate::admin::ask(&options),
+        Ok(options) if options.disk_usage => crate::admin::disk_usage(&options),
+        Ok(options) if options.vacuum.any() => crate::admin::vacuum(&options),
+        Ok(options) if options.field.is_some() || options.fields => {
+            crate::admin::field_values(&options)
+        }
         Ok(options) => show(&options),
         Err(why) if why.is_empty() => {
             out(HELP.as_bytes());
@@ -278,6 +316,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             _ => (arg.as_str(), None),
         };
         if selection(&mut options, flag, inline, &mut words)?
+            || narrowing(&mut options, flag, inline, &mut words)?
             || presentation(&mut options, flag, inline, &mut words)?
         {
             continue;
@@ -294,6 +333,17 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     if !group.is_empty() {
         options.matches.push(group);
+    }
+    if let Some(text) = &options.grep_text {
+        // journalctl's smart case: a pattern with no upper-case letter
+        // ignores case, unless --case-sensitive says.
+        let fold = options
+            .case_sensitive
+            .map_or_else(|| !regex::has_upper(text), |sensitive| !sensitive);
+        options.grep = Some(
+            Regex::new(text, fold)
+                .map_err(|error| alloc::format!("-g {}", regex::show_error(text, &error)))?,
+        );
     }
     Ok(options)
 }
@@ -330,18 +380,6 @@ fn selection(
             options.last_unit = Some(String::from(unit));
             add(&mut options.expr, unit_expr(unit));
         }
-        "-I" | "--invocation" => {
-            let which = match (flag, inline) {
-                ("-I", _) => String::from("0"),
-                (_, Some(which)) => String::from(which),
-                _ => value(flag, None, words, "an invocation")?,
-            };
-            let unit = options
-                .last_unit
-                .clone()
-                .ok_or_else(|| alloc::format!("{flag} needs -u UNIT before it"))?;
-            options.invocation = Some((unit, which));
-        }
         "-t" | "--identifier" => {
             let id = value(flag, inline, words, "an identifier")?;
             add(
@@ -367,9 +405,7 @@ fn selection(
             &mut options.expr,
             filter::priority_range(&value(flag, inline, words, "a priority")?)?,
         ),
-        "-g" | "--grep" => {
-            options.grep = Some(value(flag, inline, words, "a pattern")?.into_bytes());
-        }
+        "-g" | "--grep" => options.grep_text = Some(value(flag, inline, words, "a pattern")?),
         "-S" | "--since" => options.since = Some(value(flag, inline, words, "a time")?),
         "-U" | "--until" => options.until = Some(value(flag, inline, words, "a time")?),
         "--since-mark" => {
@@ -404,6 +440,43 @@ fn selection(
     Ok(true)
 }
 
+/// The options that narrow a selection further: a unit's run, the
+/// case of `-g`, a user unit. Answers whether `flag` was one.
+fn narrowing(
+    options: &mut Options,
+    flag: &str,
+    inline: Option<&str>,
+    words: &mut Words<'_>,
+) -> Result<bool, String> {
+    match flag {
+        "-I" | "--invocation" => {
+            let which = match (flag, inline) {
+                ("-I", _) => String::from("0"),
+                (_, Some(which)) => String::from(which),
+                _ => value(flag, None, words, "an invocation")?,
+            };
+            let unit = options
+                .last_unit
+                .clone()
+                .ok_or_else(|| alloc::format!("{flag} needs -u UNIT before it"))?;
+            options.invocation = Some((unit, which));
+        }
+        "--case-sensitive" => {
+            options.case_sensitive = Some(match inline {
+                None | Some("yes" | "true" | "1" | "on") => true,
+                Some("no" | "false" | "0" | "off") => false,
+                Some(other) => return Err(alloc::format!("--case-sensitive={other}: yes or no")),
+            });
+        }
+        "--user-unit" => {
+            let unit = value(flag, inline, words, "a unit")?;
+            add(&mut options.expr, user_unit_expr(&unit));
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
 /// The options that shape the output. Answers whether `flag` was one.
 fn presentation(
     options: &mut Options,
@@ -431,6 +504,29 @@ fn presentation(
                 Some(Output::named(&name).ok_or_else(|| alloc::format!("{name}: no such format"))?);
         }
         "--show-cursor" => options.show_cursor = true,
+        "-F" | "--field" => options.field = Some(value(flag, inline, words, "a field")?),
+        "-N" | "--fields" => options.fields = true,
+        "--disk-usage" => options.disk_usage = true,
+        "--vacuum-size" => {
+            let text = value(flag, inline, words, "a size")?;
+            options.vacuum.size =
+                Some(size_bytes(&text).ok_or_else(|| alloc::format!("{text}: not a size"))?);
+        }
+        "--vacuum-time" => {
+            let text = value(flag, inline, words, "a time")?;
+            options.vacuum.time =
+                Some(span_seconds(&text).ok_or_else(|| alloc::format!("{text}: not a time span"))?);
+        }
+        "--vacuum-files" => {
+            let text = value(flag, inline, words, "a number")?;
+            options.vacuum.files = Some(
+                text.parse()
+                    .map_err(|_| alloc::format!("{text}: not a number"))?,
+            );
+        }
+        "--flush" => options.ask = Some(crate::control::Request::Flush),
+        "--sync" => options.ask = Some(crate::control::Request::Sync),
+        "--rotate" => options.ask = Some(crate::control::Request::Rotate),
         "--utc" => options.utc = true,
         "--no-pager" | "-a" | "--all" | "-q" | "--quiet" | "-l" | "--full" | "--no-hostname"
         | "-m" | "--merge" => {}
@@ -541,6 +637,25 @@ fn narrowed(options: &Options, segments: &[Known]) -> Result<Option<Options>, St
     Ok(Some(resolved))
 }
 
+/// `--user-unit UNIT`: a user manager's unit, as journalctl matches it.
+fn user_unit_expr(unit: &str) -> Expr {
+    let name = if unit.contains('.') || unit.contains('*') {
+        String::from(unit)
+    } else {
+        alloc::format!("{unit}.service")
+    };
+    [
+        "_SYSTEMD_USER_UNIT",
+        "USER_UNIT",
+        "COREDUMP_USER_UNIT",
+        "OBJECT_SYSTEMD_USER_UNIT",
+    ]
+    .iter()
+    .map(|field| Expr::Test(Test::field(field, Op::Eq, name.as_bytes())))
+    .reduce(Expr::or)
+    .unwrap_or_else(|| Expr::Test(Test::field("_SYSTEMD_USER_UNIT", Op::Eq, name.as_bytes())))
+}
+
 /// `-u UNIT`: the unit, and `UNIT.service` for a name with no type.
 fn unit_expr(unit: &str) -> Expr {
     let exact = Expr::Test(Test::field("unit", Op::Eq, unit.as_bytes()));
@@ -566,21 +681,27 @@ fn duration(text: &str) -> Option<u64> {
 pub(crate) struct Source {
     /// The directories.
     pub(crate) dirs: Vec<Dir>,
+    /// Their paths, in the same order.
+    pub(crate) paths: Vec<Vec<u8>>,
     /// Whether to ask lode instead.
     pub(crate) passed: bool,
 }
 
 /// The store directories a read looks in.
-fn directories(options: &Options) -> Result<Source, String> {
+pub(crate) fn directories(options: &Options) -> Result<Source, String> {
     let paths: Vec<&[u8]> = match &options.directory {
         Some(path) => alloc::vec![path.as_slice()],
         None => alloc::vec![store::PERSISTENT, store::VOLATILE],
     };
     let mut dirs = Vec::new();
+    let mut opened = Vec::new();
     let mut refused = None;
     for path in paths {
         match Dir::open(path) {
-            Ok(dir) => dirs.push(dir),
+            Ok(dir) => {
+                dirs.push(dir);
+                opened.push(Vec::from(path));
+            }
             Err(error) if error.0 == sys::EACCES => refused = Some(path),
             Err(_) => {}
         }
@@ -588,7 +709,11 @@ fn directories(options: &Options) -> Result<Source, String> {
     if dirs.is_empty() {
         return match refused {
             // Not root, not adm: the user's own records, through lode.
-            Some(_) if options.directory.is_none() => Ok(Source { dirs, passed: true }),
+            Some(_) if options.directory.is_none() => Ok(Source {
+                dirs,
+                paths: opened,
+                passed: true,
+            }),
             Some(path) => Err(alloc::format!(
                 "{}: permission denied (root and members of adm read the log)",
                 String::from_utf8_lossy(path)
@@ -600,6 +725,7 @@ fn directories(options: &Options) -> Result<Source, String> {
     }
     Ok(Source {
         dirs,
+        paths: opened,
         passed: false,
     })
 }
@@ -652,7 +778,7 @@ pub(crate) fn known(source: &Source) -> Vec<Known> {
 }
 
 /// Close the files lode handed over for `segments`, if it did.
-fn release(segments: &[Known]) {
+pub(crate) fn release(segments: &[Known]) {
     for each in segments {
         if let Some((fd, summary)) = each.segment.passed {
             sys::close(fd);
@@ -665,7 +791,7 @@ fn release(segments: &[Known]) {
 
 /// The segments a read may find a match in: `boot`'s, and of those the
 /// ones whose summary does not rule the options out (step 5).
-fn candidates<'a>(
+pub(crate) fn candidates<'a>(
     segments: &'a [Known],
     boot: Option<[u8; 16]>,
     options: &Options,
@@ -735,7 +861,7 @@ fn newest(
 
 /// The boots, oldest first: each boot's id once, in the order of its first
 /// segment.
-fn boots(segments: &[Known]) -> Vec<[u8; 16]> {
+pub(crate) fn boots(segments: &[Known]) -> Vec<[u8; 16]> {
     let mut order: Vec<[u8; 16]> = Vec::new();
     for each in segments {
         if !order.contains(&each.header.boot_id) {
@@ -746,7 +872,7 @@ fn boots(segments: &[Known]) -> Vec<[u8; 16]> {
 }
 
 /// The boot `-b` names.
-fn chosen_boot(word: &str, boots: &[[u8; 16]]) -> Result<[u8; 16], String> {
+pub(crate) fn chosen_boot(word: &str, boots: &[[u8; 16]]) -> Result<[u8; 16], String> {
     if let Some(id) = segment::parse_id(word) {
         return Ok(id);
     }
@@ -770,7 +896,7 @@ fn chosen_boot(word: &str, boots: &[[u8; 16]]) -> Result<[u8; 16], String> {
 }
 
 /// Every record of `segments` that `boot` (if any) allows.
-fn load(segments: &[Known], boot: Option<[u8; 16]>) -> Vec<Record> {
+pub(crate) fn load(segments: &[Known], boot: Option<[u8; 16]>) -> Vec<Record> {
     let mut records = Vec::new();
     for each in segments {
         if boot.is_some_and(|boot| boot != each.header.boot_id) {
@@ -795,7 +921,12 @@ fn grep_matches(pattern: &[u8], message: &[u8]) -> bool {
 }
 
 /// Whether `record` passes every option but the marks, `--around` and `-n`.
-fn passes(options: &Options, record: &Record, since: Option<u64>, until: Option<u64>) -> bool {
+pub(crate) fn passes(
+    options: &Options,
+    record: &Record,
+    since: Option<u64>,
+    until: Option<u64>,
+) -> bool {
     if options.after.is_some_and(|after| record.seqnum <= after)
         || since.is_some_and(|since| record.realtime_us < since)
         || until.is_some_and(|until| record.realtime_us > until)
@@ -808,7 +939,7 @@ fn passes(options: &Options, record: &Record, since: Option<u64>, until: Option<
         return false;
     }
     if let Some(pattern) = &options.grep
-        && !grep_matches(pattern, record.message())
+        && !pattern.is_match(record.message())
     {
         return false;
     }
@@ -840,7 +971,7 @@ fn field_group(group: &[(String, Vec<u8>)], record: &Record) -> bool {
 }
 
 /// The times `--since` and `--until` say.
-fn window(options: &Options, zone: &Zone) -> Result<(Option<u64>, Option<u64>), String> {
+pub(crate) fn window(options: &Options, zone: &Zone) -> Result<(Option<u64>, Option<u64>), String> {
     let now = sys::clock_us(sys::CLOCK_REALTIME);
     let parse = |text: &Option<String>| -> Result<Option<u64>, String> {
         text.as_ref()
@@ -1236,8 +1367,12 @@ fn verify(options: &Options) -> i32 {
     status
 }
 
-/// Ask the service to seal every segment, through the kernel log it reads.
+/// Ask the service to seal every segment: on its control socket, or with
+/// an older lode through the kernel log it reads.
 fn ask_rotation() -> Result<(), String> {
+    if crate::admin::ask_lode(crate::control::Request::Rotate).is_ok() {
+        return Ok(());
+    }
     let mut line = Vec::from(&b"<13>"[..]);
     line.extend_from_slice(crate::serve::ROTATE);
     line.extend_from_slice(b": requested");
@@ -1410,7 +1545,7 @@ fn announce(words: &[String]) -> i32 {
 }
 
 /// Connect to a stream socket at `path`, blocking: the descriptor.
-fn connect(path: &[u8]) -> Result<usize, sys::Errno> {
+pub(crate) fn connect(path: &[u8]) -> Result<usize, sys::Errno> {
     connect_kind(path, ferrix_rt::linux::SOCK_STREAM)
 }
 
@@ -1753,6 +1888,7 @@ fn bench(words: &[String]) -> i32 {
     write(first, &bytes);
     let dirs = Source {
         dirs: alloc::vec![Dir { fd: dir.fd }],
+        paths: alloc::vec![path],
         passed: false,
     };
     let options = Options {

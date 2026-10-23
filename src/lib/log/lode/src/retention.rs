@@ -238,3 +238,71 @@ pub fn vacuum(classes: &[Class], segments: &[Kept], now_us: u64, store_max: u64)
     }
     removed
 }
+
+/// A size as journalctl takes one: bytes, or a number with `K`, `M`, `G`,
+/// `T`, `P` or `E`, each 1024 of the one before; a fraction is allowed.
+#[must_use]
+pub fn size_bytes(text: &str) -> Option<u64> {
+    let text = text.trim();
+    let split = text
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(text.len());
+    let (number, unit) = text.split_at(split);
+    let shift = match unit.trim().trim_end_matches(['B', 'b']) {
+        "" => 0,
+        "K" | "k" => 10,
+        "M" | "m" => 20,
+        "G" | "g" => 30,
+        "T" | "t" => 40,
+        "P" | "p" => 50,
+        "E" | "e" => 60,
+        _ => return None,
+    };
+    let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+    let whole: u64 = whole.parse().ok()?;
+    let mut bytes = whole.checked_shl(shift)?;
+    if !fraction.is_empty() {
+        let digits: u64 = fraction.parse().ok()?;
+        let scale = 10_u64.checked_pow(u32::try_from(fraction.len()).ok()?)?;
+        bytes = bytes.checked_add(digits.checked_shl(shift)? / scale)?;
+    }
+    Some(bytes)
+}
+
+/// A span as systemd's `parse_sec` takes one, in seconds: numbers each
+/// with a unit (`2weeks`, `1d 12h`, `90min`); a bare number is seconds.
+#[must_use]
+pub fn span_seconds(text: &str) -> Option<u64> {
+    let mut rest = text.trim();
+    let mut total: u64 = 0;
+    if rest.is_empty() {
+        return None;
+    }
+    while !rest.is_empty() {
+        let digits = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if digits == 0 {
+            return None;
+        }
+        let number: u64 = rest.get(..digits)?.parse().ok()?;
+        rest = rest.get(digits..)?.trim_start();
+        let letters = rest
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(rest.len());
+        let unit = rest.get(..letters)?;
+        rest = rest.get(letters..)?.trim_start();
+        let seconds: u64 = match unit {
+            "" | "s" | "sec" | "second" | "seconds" => 1,
+            "m" | "min" | "minute" | "minutes" => 60,
+            "h" | "hr" | "hour" | "hours" => 3_600,
+            "d" | "day" | "days" => 86_400,
+            "w" | "week" | "weeks" => 604_800,
+            "M" | "month" | "months" => 2_629_800,
+            "y" | "year" | "years" => 31_557_600,
+            _ => return None,
+        };
+        total = total.checked_add(number.checked_mul(seconds)?)?;
+    }
+    Some(total)
+}

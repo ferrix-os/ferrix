@@ -27,6 +27,7 @@
 //! * [`summary`]: what a sealed segment holds, for a reader to skip it.
 //! * [`session`]: what a seat's owner tells lode of sessions.
 //! * [`upload`]: store-and-forward to a collector.
+//! * [`regex`]: `-g`'s regular expressions, in linear time.
 //! * [`units`]: units' output as init hands it over, paired with its
 //!   console copy.
 //! * [`access`]: whose segments a record goes to, and how a user is handed
@@ -49,6 +50,7 @@ pub mod kmsg;
 pub mod limit;
 pub mod protocols;
 pub mod record;
+pub mod regex;
 pub mod retention;
 pub mod segment;
 pub mod session;

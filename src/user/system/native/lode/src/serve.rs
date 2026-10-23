@@ -20,7 +20,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use ferrix_lode_core::compress::Compressor;
+use ferrix_lode_core::compress::{self, Compressor};
 use ferrix_lode_core::ingest::{self, KernelSequence, Now, Taken};
 use ferrix_lode_core::kmsg;
 use ferrix_lode_core::limit::{self, Limiter, Rule};
@@ -35,6 +35,7 @@ use ferrix_rt::native::channel::Channel;
 use ferrix_rt::native::{Deadline, Object, Signals};
 
 use crate::capture::Capture;
+use crate::control::{self, Control, Request};
 use crate::front::Front;
 use crate::handout::Handout;
 use crate::seat::Seat;
@@ -100,6 +101,8 @@ struct Slot {
     class: usize,
     /// The user whose segments these are; `None` for the system's.
     owner: Option<u32>,
+    /// The store directory it is in.
+    dir: usize,
     /// The writer.
     writer: Writer,
 }
@@ -161,6 +164,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
     let front = Front::open();
     let units = Units::open();
     let handout = Handout::open();
+    let control = Control::open();
     let journal = if persistent.is_some() {
         store::PERSISTENT
     } else {
@@ -227,6 +231,7 @@ pub(crate) fn run(channel: &Channel<Kernel>) -> Result<(), Step> {
         zone,
         units,
         handout,
+        control,
     };
     service.serve(channel, restarted)
 }
@@ -253,6 +258,8 @@ struct Service {
     units: Units,
     /// Users' own segments, handed over.
     handout: Handout,
+    /// What root asks: sync, flush, rotate.
+    control: Control,
 }
 
 /// The rules and the retention classes, with a record for each file that
@@ -368,6 +375,7 @@ impl Service {
                 self.store.rotate_all();
             }
             self.store.sync_if(urgent, now.monotonic_us);
+            self.requests(now)?;
             let compressing = self.store.compress_some();
             if closed(channel) {
                 self.store.sync_if(true, now.monotonic_us);
@@ -381,11 +389,38 @@ impl Service {
                 fds.extend(self.seat.fds());
                 fds.extend(self.units.fds());
                 fds.extend(self.handout.fds());
+                fds.extend(self.control.fds());
                 fds.extend(self.front.fds());
                 fds.extend(self.capture.fds());
                 sys::wait_any(&fds, WAIT_MS);
             }
         }
+    }
+
+    /// Carry out what root asked on the control socket, each after what
+    /// was read before it is stored.
+    fn requests(&mut self, now: Now) -> Result<(), Step> {
+        for (fd, request) in self.control.poll(now.monotonic_us) {
+            let result = match request {
+                Request::Sync => {
+                    self.store.sync_if(true, now.monotonic_us);
+                    Ok(())
+                }
+                Request::Rotate => {
+                    let mut held = Vec::new();
+                    self.limiter.flush(now.monotonic_us, &mut held);
+                    let _ = self
+                        .store
+                        .append(held, &self.zone)
+                        .map_err(|()| Step::Segment)?;
+                    self.store.rotate_all();
+                    Ok(())
+                }
+                Request::Flush => self.store.flush(),
+            };
+            control::answer(fd, result);
+        }
+        Ok(())
     }
 
     /// Stamp and admit records that did not come from the kernel log.
@@ -671,6 +706,7 @@ impl Store {
                 self.writers.push(Slot {
                     class: index,
                     owner,
+                    dir: each.dir,
                     writer: Writer {
                         fd,
                         name: each.name.clone(),
@@ -846,6 +882,7 @@ impl Store {
         self.writers.push(Slot {
             class: index,
             owner,
+            dir,
             writer: Writer {
                 fd,
                 name,
@@ -865,7 +902,7 @@ impl Store {
             return;
         }
         let slot = self.writers.remove(at);
-        let dir = self.dir_of(slot.class);
+        let dir = slot.dir;
         let _ = sys::fdatasync(slot.writer.fd);
         sys::close(slot.writer.fd);
         store::write_summary(dir, &slot.writer.name);
@@ -938,6 +975,68 @@ impl Store {
             store::write_summary(each.dir, &each.name);
             done += 1;
         }
+    }
+
+    /// `journalctl --flush`: take `/var/log/journal` (made by the caller,
+    /// root, when it was missing) if lode is still in `/run`, seal what is
+    /// being written there, and move every sealed segment of a class that
+    /// is not RAM-only over, a copy synced before the original goes.
+    fn flush(&mut self) -> Result<(), String> {
+        let persistent = match self.persistent {
+            Some(fd) => fd,
+            None => {
+                let dir = Dir::open(store::PERSISTENT)
+                    .map_err(|error| alloc::format!("/var/log/journal: errno {}", error.0))?;
+                if !writable(dir.fd) {
+                    sys::close(dir.fd);
+                    return Err(String::from("/var/log/journal cannot be written by lode"));
+                }
+                self.persistent = Some(dir.fd);
+                dir.fd
+            }
+        };
+        let moving: Vec<usize> = (0..self.writers.len())
+            .rev()
+            .filter(|&at| {
+                self.writers.get(at).is_some_and(|slot| {
+                    slot.dir == self.volatile
+                        && !self
+                            .classes
+                            .get(slot.class)
+                            .is_some_and(|class| class.ram_only)
+                })
+            })
+            .collect();
+        for at in moving {
+            self.seal(at);
+        }
+        if self
+            .compressing
+            .as_ref()
+            .is_some_and(|job| job.dir == self.volatile)
+        {
+            self.compressing = None;
+        }
+        let active: Vec<String> = self
+            .writers
+            .iter()
+            .map(|slot| slot.writer.name.clone())
+            .collect();
+        for each in store::all_segments(&[Dir { fd: self.volatile }]) {
+            let class = segment::class_of_name(access::base_name(&each.name)).unwrap_or_default();
+            let ram_only = self
+                .classes
+                .iter()
+                .any(|known| known.name == class && known.ram_only);
+            if ram_only || active.contains(&each.name) {
+                continue;
+            }
+            move_segment(self.volatile, persistent, &each.name)?;
+            self.to_compress
+                .retain(|(dir, name)| !(*dir == self.volatile && *name == each.name));
+        }
+        self.vacuum();
+        Ok(())
     }
 
     /// Seal every class's segment and begin the next at once (`lode
@@ -1017,6 +1116,61 @@ impl Store {
             }
         }
     }
+}
+
+/// Whether lode can make a file in the directory `dir`.
+fn writable(dir: usize) -> bool {
+    let probe = b".lode-probe";
+    match sys::openat(
+        dir,
+        probe,
+        sys::O_WRONLY | sys::O_CREAT | sys::O_CLOEXEC,
+        0o600,
+    ) {
+        Ok(fd) => {
+            sys::close(fd);
+            let _ = sys::unlinkat(dir, probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Move the segment `name` and its summary from the store `from` to the
+/// store `to`: written there compressed and synced, then removed here. It
+/// is compressed on the way, at once, so the disk is written once: a RAM
+/// tier is at most 64 MiB, and `--flush` is asked for once a boot.
+fn move_segment(from: usize, to: usize, name: &str) -> Result<(), String> {
+    if let Some((user, _)) = name.split_once('/') {
+        let _ = sys::mkdirat(to, user.as_bytes(), 0o2750);
+    }
+    for each in [String::from(name), alloc::format!("{name}.sum")] {
+        let Ok(mut bytes) = sys::read_file_from(from, each.as_bytes(), 0) else {
+            continue;
+        };
+        if each == name && !compress::is_compressed(bytes.get(..8).unwrap_or_default()) {
+            let raw = bytes.len();
+            bytes = compress::compress(bytes.clone())
+                .filter(|packed| packed.len() < raw)
+                .unwrap_or(bytes);
+        }
+        let fresh = access::temporary(&each, ".move");
+        let fd = sys::openat(
+            to,
+            fresh.as_bytes(),
+            sys::O_WRONLY | sys::O_CREAT | sys::O_TRUNC | sys::O_CLOEXEC,
+            0o640,
+        )
+        .map_err(|error| alloc::format!("{each}: errno {}", error.0))?;
+        let written = sys::write_all(fd, &bytes).and_then(|()| sys::fdatasync(fd));
+        sys::close(fd);
+        written.map_err(|error| alloc::format!("{each}: errno {}", error.0))?;
+        sys::renameat(to, fresh.as_bytes(), each.as_bytes())
+            .map_err(|error| alloc::format!("{each}: errno {}", error.0))?;
+    }
+    let _ = sys::unlinkat(from, name.as_bytes());
+    let _ = sys::unlinkat(from, alloc::format!("{name}.sum").as_bytes());
+    Ok(())
 }
 
 /// Put a compressed segment in place of the sealed one it was made from:

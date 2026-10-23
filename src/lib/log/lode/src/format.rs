@@ -1,8 +1,9 @@
 //! The output formats (`docs/LOGGING.md` §9.3).
 //!
 //! journald's are kept as journalctl prints them, since scripts read them:
-//! `short`, `short-iso`, `short-precise`, `short-monotonic`, `with-unit`,
-//! `cat`, `json` and `export`. lode's own default, `human`, shows the year
+//! `short`, `short-full`, `short-iso`, `short-iso-precise`, `short-precise`,
+//! `short-monotonic`, `short-unix`, `with-unit`, `cat`, `json`,
+//! `json-pretty`, `json-seq`, `json-sse`, `export` and `verbose`. lode's own default, `human`, shows the year
 //! and the zone, the priority as a letter, and the message whole:
 //!
 //! ```text
@@ -43,6 +44,16 @@ pub enum Output {
     Export,
     /// journald's `verbose`: a time line, then every field on its own.
     Verbose,
+    /// `short-full`: `Fri 2026-10-23 14:01:02 CEST host ident[pid]: text`.
+    ShortFull,
+    /// `short-unix`: seconds since 1970 with microseconds.
+    ShortUnix,
+    /// `json-pretty`: one object over many lines, indented with tabs.
+    JsonPretty,
+    /// `json-seq`: RFC 7464, each object after an ASCII record separator.
+    JsonSeq,
+    /// `json-sse`: server-sent events, `data: ` and a blank line.
+    JsonSse,
 }
 
 impl Output {
@@ -61,6 +72,11 @@ impl Output {
             "json" => Output::Json,
             "export" => Output::Export,
             "verbose" => Output::Verbose,
+            "short-full" => Output::ShortFull,
+            "short-unix" => Output::ShortUnix,
+            "json-pretty" => Output::JsonPretty,
+            "json-seq" => Output::JsonSeq,
+            "json-sse" => Output::JsonSse,
             _ => return None,
         })
     }
@@ -153,10 +169,56 @@ pub fn write(record: &Record, output: Output, zone: &Zone, out: &mut Vec<u8>) {
             );
             host_and_who(record, false, out);
         }
+        Output::ShortFull | Output::ShortUnix => short_more(record, output, zone, &when, out),
         Output::Cat => message(record, out),
         Output::Json => json(record, out),
+        Output::JsonPretty => json_pretty(record, out),
+        Output::JsonSeq => {
+            out.push(0x1e);
+            json(record, out);
+        }
+        Output::JsonSse => {
+            push(out, "data: ");
+            json(record, out);
+            out.push(b'\n');
+        }
         Output::Export => export(record, out),
         Output::Verbose => verbose(record, &when, out),
+    }
+}
+
+/// `short-full` and `short-unix`: journald's other short lines.
+fn short_more(record: &Record, output: Output, zone: &Zone, when: &Civil, out: &mut Vec<u8>) {
+    match output {
+        Output::ShortFull => {
+            push(
+                out,
+                &alloc::format!(
+                    "{} {:04}-{:02}-{:02} {:02}:{:02}:{:02} {}",
+                    day_name(when),
+                    when.year,
+                    when.month,
+                    when.day,
+                    when.hour,
+                    when.minute,
+                    when.second,
+                    zone.abbreviation_at(record.realtime_us)
+                ),
+            );
+            host_and_who(record, false, out);
+        }
+        Output::ShortUnix => {
+            push(
+                out,
+                &alloc::format!(
+                    "{:10}.{:06}",
+                    record.realtime_us / 1_000_000,
+                    record.realtime_us % 1_000_000
+                ),
+            );
+            host_and_who(record, false, out);
+        }
+        _ => {}
     }
 }
 
@@ -164,11 +226,7 @@ pub fn write(record: &Record, output: Output, zone: &Zone, out: &mut Vec<u8>) {
 /// [i=..;b=..]`, then each field indented on its own line, a value that is
 /// not UTF-8 shown as its length.
 fn verbose(record: &Record, when: &Civil, out: &mut Vec<u8>) {
-    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    let day = DAYS
-        .get(weekday(days(when.year, when.month, when.day)) as usize)
-        .copied()
-        .unwrap_or("???");
+    let day = day_name(when);
     push(
         out,
         &alloc::format!(
@@ -204,6 +262,14 @@ fn verbose(record: &Record, when: &Civil, out: &mut Vec<u8>) {
     for each in &record.fields {
         field(out, &each.name, &each.value);
     }
+}
+
+/// The day's short name, `Fri`.
+fn day_name(when: &Civil) -> &'static str {
+    const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    DAYS.get(weekday(days(when.year, when.month, when.day)) as usize)
+        .copied()
+        .unwrap_or("???")
 }
 
 /// ` host who: message\n`, journald's tail of a short line.
@@ -297,54 +363,106 @@ fn own_fields(record: &Record) -> Vec<(&'static str, String)> {
     fields
 }
 
+/// Every field `json` writes, in order: the store's own, the host, then
+/// the record's.
+fn json_fields(record: &Record) -> Vec<(String, Vec<u8>)> {
+    let mut fields: Vec<(String, Vec<u8>)> = own_fields(record)
+        .into_iter()
+        .map(|(name, value)| (String::from(name), value.into_bytes()))
+        .collect();
+    if record.get("_HOSTNAME").is_none() && !record.host.is_empty() {
+        fields.push((String::from("_HOSTNAME"), Vec::from(record.host.as_bytes())));
+    }
+    for field in &record.fields {
+        fields.push((field.name.clone(), field.value.clone()));
+    }
+    fields
+}
+
+/// The fields `-N` names and `-F` reads: what `json` shows but the
+/// store's `__` ones.
+#[must_use]
+pub fn shown_fields(record: &Record) -> Vec<(String, Vec<u8>)> {
+    json_fields(record)
+        .into_iter()
+        .filter(|(name, _)| !name.starts_with("__"))
+        .collect()
+}
+
 /// One JSON object, journald's: every value a string, a value that is not
 /// UTF-8 an array of its bytes.
 fn json(record: &Record, out: &mut Vec<u8>) {
     out.push(b'{');
-    let mut first = true;
-    let mut pair = |out: &mut Vec<u8>, name: &str, value: &[u8]| {
-        if !first {
+    for (index, (name, value)) in json_fields(record).iter().enumerate() {
+        if index > 0 {
             out.push(b',');
         }
-        first = false;
         json_string(name.as_bytes(), out);
         out.push(b':');
-        if core::str::from_utf8(value).is_ok() {
-            json_string(value, out);
-        } else {
-            out.push(b'[');
-            for (index, byte) in value.iter().enumerate() {
-                if index > 0 {
-                    out.push(b',');
-                }
-                push(out, &alloc::format!("{byte}"));
-            }
-            out.push(b']');
-        }
-    };
-    for (name, value) in own_fields(record) {
-        pair(out, name, value.as_bytes());
-    }
-    if record.get("_HOSTNAME").is_none() && !record.host.is_empty() {
-        pair(out, "_HOSTNAME", record.host.as_bytes());
-    }
-    for field in &record.fields {
-        pair(out, &field.name, &field.value);
+        json_value(value, None, out);
     }
     out.extend_from_slice(b"}\n");
 }
 
-/// `bytes`, which are UTF-8, as a JSON string.
+/// `json-pretty`, as systemd's JSON printer lays an object out: `{`, each
+/// member on its own line after a tab with ` : ` between name and value,
+/// `,` and a newline between members, then `}`; a byte array's items each
+/// on a line of their own two tabs in.
+fn json_pretty(record: &Record, out: &mut Vec<u8>) {
+    out.extend_from_slice(b"{\n");
+    for (index, (name, value)) in json_fields(record).iter().enumerate() {
+        if index > 0 {
+            out.extend_from_slice(b",\n");
+        }
+        out.push(b'\t');
+        json_string(name.as_bytes(), out);
+        out.extend_from_slice(b" : ");
+        json_value(value, Some("\t"), out);
+    }
+    out.extend_from_slice(b"\n}\n");
+}
+
+/// A value: a string when it is UTF-8, else an array of its bytes; with
+/// `pretty`, the array laid out after the indent its member had.
+fn json_value(value: &[u8], pretty: Option<&str>, out: &mut Vec<u8>) {
+    if core::str::from_utf8(value).is_ok() {
+        json_string(value, out);
+        return;
+    }
+    out.push(b'[');
+    for (index, byte) in value.iter().enumerate() {
+        if index > 0 {
+            out.push(b',');
+        }
+        if let Some(indent) = pretty {
+            out.push(b'\n');
+            push(out, indent);
+            out.push(b'\t');
+        }
+        push(out, &alloc::format!("{byte}"));
+    }
+    if let Some(indent) = pretty {
+        out.push(b'\n');
+        push(out, indent);
+    }
+    out.push(b']');
+}
+
+/// `bytes`, which are UTF-8, as a JSON string, escaped as systemd's JSON
+/// printer escapes: `"` and `\\`, `\b \f \n \r \t`, every other byte below
+/// 0x20 as `\u00XX`, and nothing else.
 fn json_string(bytes: &[u8], out: &mut Vec<u8>) {
     out.push(b'"');
     for &byte in bytes {
         match byte {
             b'"' => out.extend_from_slice(b"\\\""),
             b'\\' => out.extend_from_slice(b"\\\\"),
+            0x08 => out.extend_from_slice(b"\\b"),
+            0x0c => out.extend_from_slice(b"\\f"),
             b'\n' => out.extend_from_slice(b"\\n"),
             b'\r' => out.extend_from_slice(b"\\r"),
             b'\t' => out.extend_from_slice(b"\\t"),
-            0..0x20 | 0x7f => push(out, &alloc::format!("\\u{byte:04x}")),
+            0..0x20 => push(out, &alloc::format!("\\u{byte:04x}")),
             _ => out.push(byte),
         }
     }
@@ -428,4 +546,29 @@ pub fn level_table(records: &[Record]) -> Vec<u8> {
         );
     }
     out
+}
+
+/// Bytes as systemd's `FORMAT_BYTES` writes them: `512B`, `8.0M`, `1.2G`,
+/// powers of 1024 with one decimal, the digit cut, not rounded.
+#[must_use]
+pub fn bytes_text(bytes: u64) -> String {
+    const UNITS: [(&str, u32); 6] = [
+        ("E", 60),
+        ("P", 50),
+        ("T", 40),
+        ("G", 30),
+        ("M", 20),
+        ("K", 10),
+    ];
+    for (index, (suffix, shift)) in UNITS.iter().enumerate() {
+        let factor = 1_u64 << shift;
+        if bytes >= factor {
+            let tenth = match UNITS.get(index + 1) {
+                Some((_, below)) => (bytes >> below) * 10 / 1024 % 10,
+                None => bytes * 10 / factor % 10,
+            };
+            return alloc::format!("{}.{tenth}{suffix}", bytes / factor);
+        }
+    }
+    alloc::format!("{bytes}B")
 }
